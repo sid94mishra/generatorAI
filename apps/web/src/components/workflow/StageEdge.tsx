@@ -14,31 +14,24 @@ import {
 import { X, Check, Flag, Repeat, ChevronDown } from 'lucide-react';
 import type { StageEdgeData } from '@/stores/workflowBuilderStore.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
+import type { EdgeOn } from '@generatorai/workflow-spec';
 import {
   edgeTypeColor,
   edgeTypeLabel,
   EDGE_TYPE_ORDER,
   EDGE_TYPE_COLORS,
+  EDGE_TYPE_HINTS,
   EDGE_TYPE_LABELS,
-  type StageEdgeType,
 } from './edgeTypeStyles.js';
 import { useCanvasReadonly } from './canvasContext.js';
 import { Button } from '@/components/ui/index.js';
 
-/** Edge type → icon (makes the condition legible even at low zoom) */
+/** Edge `on` → icon (makes the condition legible even at low zoom) */
 const edgeTypeIcons: Record<string, React.ReactNode> = {
-  on_success: <Check className="h-3 w-3" />,
-  on_failure: <X className="h-3 w-3" />,
-  on_completion: <Flag className="h-3 w-3" />,
+  success: <Check className="h-3 w-3" />,
+  failure: <X className="h-3 w-3" />,
+  completion: <Flag className="h-3 w-3" />,
   always: <Repeat className="h-3 w-3" />,
-};
-
-/** When each edge type fires — shown in the picker so the choice is obvious. */
-const edgeTypeHints: Record<StageEdgeType, string> = {
-  on_success: 'Source stage completed',
-  on_failure: 'Source stage failed',
-  on_completion: 'Completed or failed',
-  always: 'Any terminal status, including skipped',
 };
 
 function StageEdgeComponent({
@@ -55,12 +48,13 @@ function StageEdgeComponent({
 }: EdgeProps<Edge<StageEdgeData>>) {
   const removeEdge = useWorkflowBuilderStore((s) => s.removeEdge);
   const selectEdge = useWorkflowBuilderStore((s) => s.selectEdge);
-  const updateEdgeType = useWorkflowBuilderStore((s) => s.updateEdgeType);
+  const updateEdge = useWorkflowBuilderStore((s) => s.updateEdge);
   const readonly = useCanvasReadonly();
   const [pickerOpen, setPickerOpen] = useState(false);
   const wrapRef = useRef<HTMLDivElement | null>(null);
 
-  const edgeType = data?.edgeType ?? 'on_success';
+  const edgeType: EdgeOn = data?.edge.on ?? 'success';
+  const when = data?.edge.when;
   const color = edgeTypeColor(edgeType);
   const label = edgeTypeLabel(edgeType);
 
@@ -110,12 +104,12 @@ function StageEdgeComponent({
   );
 
   const pick = useCallback(
-    (e: React.MouseEvent, type: StageEdgeType) => {
+    (e: React.MouseEvent, type: EdgeOn) => {
       e.stopPropagation();
-      updateEdgeType(id, type);
+      updateEdge(id, { on: type });
       setPickerOpen(false);
     },
-    [id, updateEdgeType],
+    [id, updateEdge],
   );
 
   return (
@@ -147,7 +141,7 @@ function StageEdgeComponent({
             aria-haspopup={readonly ? undefined : 'menu'}
             aria-expanded={readonly ? undefined : pickerOpen}
             aria-label={readonly ? undefined : `Edge condition: ${label}. Change condition`}
-            title={readonly ? label : `Runs when: ${edgeTypeHints[edgeType as StageEdgeType] ?? label}`}
+            title={`${readonly ? label : `Runs when: ${EDGE_TYPE_HINTS[edgeType] ?? label}`}${when ? ` · when ${when}` : ''}`}
             variant="ghost"
             size="sm"
             className="h-auto inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-semibold text-white shadow-sm ring-1 ring-black/10 transition-all hover:opacity-90"
@@ -155,6 +149,8 @@ function StageEdgeComponent({
           >
             {edgeTypeIcons[edgeType]}
             {label}
+            {/* A `when` expression narrows the edge; the full text is in the title and the edge panel. */}
+            {when && <span className="font-mono opacity-90">· if</span>}
             {!readonly && <ChevronDown className="h-2.5 w-2.5 opacity-80" />}
           </Button>
 
@@ -198,7 +194,7 @@ function StageEdgeComponent({
                       {EDGE_TYPE_LABELS[type]}
                     </span>
                     <span className="block text-[10.5px] leading-snug text-[var(--color-muted-foreground)]">
-                      {edgeTypeHints[type]}
+                      {EDGE_TYPE_HINTS[type]}
                     </span>
                   </span>
                   {type === edgeType && (

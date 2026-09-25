@@ -20,7 +20,7 @@ function getEdgeStyle(sourceStatus: string, targetStatus: string, edgeType: stri
   // Both complete → solid green
   if (sourceStatus === 'completed' && (targetStatus === 'completed' || targetStatus === 'running')) {
     return {
-      stroke: EDGE_TYPE_COLORS.on_success,
+      stroke: EDGE_TYPE_COLORS.success,
       strokeWidth: 2.5,
       opacity: 1,
       animated: false,
@@ -77,7 +77,7 @@ function RuntimeStageEdgeComponent({
   data,
   markerEnd,
 }: EdgeProps<Edge<RuntimeStageEdgeData>>) {
-  const edgeType = data?.edgeType ?? 'on_success';
+  const edgeType = data?.edgeType ?? 'success';
   const sourceStatus = data?.sourceStatus ?? 'pending';
   const targetStatus = data?.targetStatus ?? 'pending';
 

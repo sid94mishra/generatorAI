@@ -1,24 +1,20 @@
 // ────────────────────────────────────────────────────────────────
-// TanStack Query hooks — Workflow Definitions, Stages, Edges, Runs
+// TanStack Query hooks — Workflow Definitions and Runs
 // All mutations invalidate relevant query caches automatically
 // ────────────────────────────────────────────────────────────────
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
-import type {
-  CreateWorkflowDefinitionParams,
-  CreateWorkflowRunParams,
-  CreateStageParams,
-  CreateEdgeParams,
-  StageEdgeType,
-  ImportWorkflowJson,
-} from '@generatorai/shared';
+import type { CreateWorkflowRunParams } from '@generatorai/shared';
+import type { WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
+import type { StageOverrideWire } from '@generatorai/client-core';
 
 // ── Query Keys ──
 export const workflowKeys = {
   definitions: ['workflow-definitions'] as const,
   definition: (id: string) => ['workflow-definition', id] as const,
+  definitionVersion: (id: string, versionId: string) => ['workflow-definition', id, 'version', versionId] as const,
   runs: ['workflow-runs'] as const,
   runsByDefinition: (defId: string) => ['workflow-runs', 'by-definition', defId] as const,
   run: (id: string) => ['workflow-run', id] as const,
@@ -30,7 +26,7 @@ export const workflowKeys = {
 // Definition Queries & Mutations
 // ════════════════════════════════════════════════════════════════
 
-/** List all workflow definitions */
+/** List workflow definitions (summaries) */
 export function useWorkflowDefinitions() {
   const platform = usePlatform();
   return useQuery({
@@ -40,7 +36,7 @@ export function useWorkflowDefinitions() {
   });
 }
 
-/** Get a single workflow definition with stages and edges */
+/** Get a single workflow definition record (its working graph plus bookkeeping) */
 export function useWorkflowDefinition(id: string | undefined) {
   const platform = usePlatform();
   return useQuery({
@@ -50,37 +46,74 @@ export function useWorkflowDefinition(id: string | undefined) {
   });
 }
 
-/** Create a new workflow definition */
+/** The immutable version a run pinned: the graph the run actually executes. */
+export function useWorkflowDefinitionVersion(id: string | undefined, versionId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: workflowKeys.definitionVersion(id ?? '', versionId ?? ''),
+    queryFn: () => platform.getDefinitionVersion(id!, versionId!),
+    enabled: !!id && !!versionId,
+    // Versions never change.
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * A mutation that returns a definition record: the detail cache is set from
+ * the response (so the builder never refetches its own save) and the list is
+ * invalidated.
+ */
+function useRecordMutation<A>(fn: (args: A) => Promise<WorkflowDefinitionRecord>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (record) => {
+      queryClient.setQueryData(workflowKeys.definition(record.id), record);
+      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
+    },
+  });
+}
+
+/** Create a draft definition from a graph */
 export function useCreateWorkflowDefinition() {
   const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: CreateWorkflowDefinitionParams) => platform.createDefinition(params),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-    },
-  });
+  return useRecordMutation((graph: WorkflowGraphInput) => platform.createDefinition(graph));
 }
 
-/** Update a workflow definition */
-export function useUpdateWorkflowDefinition() {
+/** Replace a definition graph (optimistic concurrency on `expectedRevision`) */
+export function useSaveDefinitionGraph() {
   const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { id: string; params: Partial<CreateWorkflowDefinitionParams> }) =>
-      platform.updateDefinition(args.id, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.id) });
-    },
-  });
+  return useRecordMutation((args: { id: string; graph: WorkflowGraphInput; expectedRevision: number }) =>
+    platform.saveDefinitionGraph(args.id, args.graph, args.expectedRevision),
+  );
 }
 
-/** Delete a workflow definition */
+/** Publish the working graph as the version runs use */
+export function usePublishDefinition() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useRecordMutation((id: string) => platform.publishDefinition(id));
+}
+
+/** Import a canonical workflow document as a new draft */
+export function useImportDefinition() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useRecordMutation((document: unknown) => platform.importDefinition(document));
+}
+
+/** Create a workflow definition from a template (`POST /workflow-definitions/import`) */
+export function useCreateFromTemplate() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useRecordMutation((args: { templateId: string; name?: string }) =>
+    platform.importTemplate(args.templateId, args.name),
+  );
+}
+
+/**
+ * Delete a workflow definition. The server archives it instead when runs
+ * pinned it; the outcome says which happened.
+ */
 export function useDeleteWorkflowDefinition() {
-  const platform = usePlatform();
+  const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -92,23 +125,22 @@ export function useDeleteWorkflowDefinition() {
 }
 
 /**
- * Bulk-delete multiple workflow definitions in parallel.
- * Calls the single-delete endpoint for each ID and invalidates the
- * definitions cache once after all deletions complete.
+ * Bulk-delete multiple workflow definitions in parallel. Resolves with how
+ * many were deleted and how many archived (they had runs).
  */
 export function useBulkDeleteWorkflowDefinitions() {
-  const platform = usePlatform();
+  const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (ids: string[]) => {
-      const results = await Promise.allSettled(
-        ids.map((id) => platform.deleteDefinition(id)),
-      );
+      const results = await Promise.allSettled(ids.map((id) => platform.deleteDefinition(id)));
       const failed = results.filter((r) => r.status === 'rejected');
       if (failed.length > 0) {
         throw new Error(`Failed to delete ${failed.length} of ${ids.length} workflows`);
       }
+      const archived = results.filter((r) => r.status === 'fulfilled' && 'archived' in r.value).length;
+      return { deleted: ids.length - archived, archived };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
@@ -116,102 +148,6 @@ export function useBulkDeleteWorkflowDefinitions() {
     onError: () => {
       // Still refresh the list — some deletions may have succeeded
       queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-    },
-  });
-}
-
-/** Import a full workflow from a JSON configuration */
-export function useImportFromJSON() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (data: ImportWorkflowJson) => platform.importFromJSON(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-    },
-  });
-}
-
-// ════════════════════════════════════════════════════════════════
-// Stage Mutations
-// ════════════════════════════════════════════════════════════════
-
-/** Add a stage to a workflow definition */
-export function useAddStage() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { definitionId: string; params: Omit<CreateStageParams, 'workflowDefinitionId'> }) =>
-      platform.addStage(args.definitionId, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
-    },
-  });
-}
-
-/** Update a stage */
-export function useUpdateStage() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: {
-      definitionId: string;
-      stageId: string;
-      params: Partial<Omit<CreateStageParams, 'workflowDefinitionId'>>;
-    }) => platform.updateStage(args.definitionId, args.stageId, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
-    },
-  });
-}
-
-/** Delete a stage */
-export function useDeleteStage() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { definitionId: string; stageId: string }) =>
-      platform.deleteStage(args.definitionId, args.stageId),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
-    },
-  });
-}
-
-// ════════════════════════════════════════════════════════════════
-// Edge Mutations
-// ════════════════════════════════════════════════════════════════
-
-/** Add an edge between stages */
-export function useAddEdge() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: {
-      definitionId: string;
-      params: { fromStageId: string; toStageId: string; edgeType?: StageEdgeType };
-    }) => platform.addEdge(args.definitionId, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
-    },
-  });
-}
-
-/** Delete an edge */
-export function useDeleteEdge() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { definitionId: string; edgeId: string }) =>
-      platform.deleteEdge(args.definitionId, args.edgeId),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
     },
   });
 }
@@ -366,20 +302,6 @@ export function useRetryStageRun() {
 // Orchestrator Queries & Mutations
 // ════════════════════════════════════════════════════════════════
 
-/** Create a workflow definition from a template (`POST /workflow-definitions/import`) */
-export function useCreateFromTemplate() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { templateId: string; name?: string }) =>
-      platform.importFromTemplate(args.templateId, args.name),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-    },
-  });
-}
-
 /** Start an orchestrated workflow run (with project codebases + preprocessing) */
 export function useStartOrchestratedRun() {
   const platform = usePlatform() as HttpPlatformClient;
@@ -392,7 +314,8 @@ export function useStartOrchestratedRun() {
       projectId?: string;
       selectedCodebases?: string[];
       uploads?: { prompts: File[]; skills: File[]; agents: File[] };
-      stageOverrides?: Array<{ stageName?: string; stageIndex?: number; variables?: Record<string, unknown>; skip?: boolean }>;
+      stageOverrides?: StageOverrideWire[];
+      testRun?: boolean;
     }) => platform.startOrchestratedRun(params),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
@@ -463,5 +386,3 @@ export function useUploadRunFiles() {
     },
   });
 }
-
-// ── Workflow-Level File Management ──

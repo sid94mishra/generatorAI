@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
-// deriveRunView — Convert the workflow run store data + workflow
-// definition + per-stage stream state into the RunView our redesigned
-// UI consumes.
+// deriveRunView — Convert the workflow run store data + the run's
+// pinned graph (stage specs and edges, keyed by stage key) + per-stage
+// stream state into the RunView our redesigned UI consumes.
 //
 // This module is pure: no queries/subscriptions. All inputs are
 // passed in. Called from a page-level useMemo.
@@ -9,8 +9,9 @@
 
 import type {
   WorkflowRunWithStages, StageRun, StageRunStatus, WorkflowRunStatus,
-  StageDefinition, StageEdge, WorkflowRunPermissionMode,
+  WorkflowRunPermissionMode,
 } from '@generatorai/shared';
+import type { EdgeSpec, StageSpec } from '@generatorai/workflow-spec';
 import { interpolateVariables } from '@generatorai/shared';
 import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
@@ -50,28 +51,28 @@ const RUN_STATUS_MAP: Record<WorkflowRunStatus, RunStatus> = {
  * etc. Depth is used purely for a visual indent in the spine.
  */
 function computeDepths(
-  stages: StageDefinition[],
-  edges: StageEdge[],
+  stages: StageSpec[],
+  edges: EdgeSpec[],
 ): Map<string, number> {
-  const stageById = new Map(stages.map((s) => [s.id, s]));
+  const stageByKey = new Map(stages.map((s) => [s.key, s]));
   const inbound = new Map<string, string[]>();
   const outbound = new Map<string, string[]>();
   for (const s of stages) {
-    inbound.set(s.id, []);
-    outbound.set(s.id, []);
+    inbound.set(s.key, []);
+    outbound.set(s.key, []);
   }
   for (const e of edges) {
-    if (!stageById.has(e.fromStageId) || !stageById.has(e.toStageId)) continue;
-    inbound.get(e.toStageId)!.push(e.fromStageId);
-    outbound.get(e.fromStageId)!.push(e.toStageId);
+    if (!stageByKey.has(e.from) || !stageByKey.has(e.to)) continue;
+    inbound.get(e.to)!.push(e.from);
+    outbound.get(e.from)!.push(e.to);
   }
   const depth = new Map<string, number>();
   // Frontier: stages with no inbound edges.
   const queue: string[] = [];
   for (const s of stages) {
-    if ((inbound.get(s.id) ?? []).length === 0) {
-      depth.set(s.id, 0);
-      queue.push(s.id);
+    if ((inbound.get(s.key) ?? []).length === 0) {
+      depth.set(s.key, 0);
+      queue.push(s.key);
     }
   }
   while (queue.length > 0) {
@@ -87,7 +88,7 @@ function computeDepths(
   }
   // Anything not reached (defensive) → depth 0
   for (const s of stages) {
-    if (!depth.has(s.id)) depth.set(s.id, 0);
+    if (!depth.has(s.key)) depth.set(s.key, 0);
   }
   return depth;
 }
@@ -126,16 +127,16 @@ function computeParallelPeers(stageRuns: StageRun[]): Map<string, string[]> {
 // ── Predecessor names per stage (for pending "Waiting for X" text) ──
 
 function computeDependsOn(
-  stages: StageDefinition[],
-  edges: StageEdge[],
+  stages: StageSpec[],
+  edges: EdgeSpec[],
 ): Map<string, string[]> {
-  const stageById = new Map(stages.map((s) => [s.id, s.name]));
+  const nameByKey = new Map(stages.map((s) => [s.key, s.name]));
   const map = new Map<string, string[]>();
-  for (const s of stages) map.set(s.id, []);
+  for (const s of stages) map.set(s.key, []);
   for (const e of edges) {
-    const from = stageById.get(e.fromStageId);
+    const from = nameByKey.get(e.from);
     if (!from) continue;
-    map.get(e.toStageId)?.push(from);
+    map.get(e.to)?.push(from);
   }
   return map;
 }
@@ -210,11 +211,11 @@ function usageFrom(stream: StreamState | undefined): UsageInfo | undefined {
 
 export interface DeriveRunViewInput {
   run: WorkflowRunWithStages;
-  /** Ordered list of stage definitions for this workflow (may be empty
-   *  while the definition is still loading; degrades gracefully). */
-  stageDefs: StageDefinition[];
-  /** Ordered list of stage edges. */
-  edges: StageEdge[];
+  /** Stages of the run's pinned graph, in graph order (may be empty while
+   *  the version is still loading; degrades gracefully). */
+  stageDefs: StageSpec[];
+  /** Edges of the run's pinned graph. */
+  edges: EdgeSpec[];
   /** Live elapsed ms for the run (from workflowRunStore). */
   elapsedMs: number;
   /** streamStore state keyed by "stageRun:<id>" (subset selector). */
@@ -226,20 +227,18 @@ export interface DeriveRunViewInput {
 export function deriveRunView(input: DeriveRunViewInput): RunView {
   const { run, stageDefs, edges, elapsedMs, streams, permissionMode } = input;
 
-  const stageDefById = new Map(stageDefs.map((s) => [s.id, s]));
+  const stageDefByKey = new Map(stageDefs.map((s) => [s.key, s]));
+  const orderByKey = new Map(stageDefs.map((s, i) => [s.key, i]));
   const depths = computeDepths(stageDefs, edges);
   const parallelPeers = computeParallelPeers(run.stageRuns);
-  const dependsOnByDefId = computeDependsOn(stageDefs, edges);
+  const dependsOnByKey = computeDependsOn(stageDefs, edges);
 
-  // Sort stage runs by (definition order, startedAt). Definition order
-  // gives us a stable spine that matches the DAG; startedAt is a tie-
-  // breaker for parallel siblings so they render in the order they
-  // fired.
+  // Sort stage runs by (graph order, startedAt). Graph order gives us a
+  // stable spine that matches the DAG; startedAt is a tie-breaker for
+  // parallel siblings so they render in the order they fired.
   const sorted = [...run.stageRuns].sort((a, b) => {
-    const defA = stageDefById.get(a.stageDefinitionId);
-    const defB = stageDefById.get(b.stageDefinitionId);
-    const orderA = defA?.order ?? Infinity;
-    const orderB = defB?.order ?? Infinity;
+    const orderA = orderByKey.get(a.stageKey) ?? Infinity;
+    const orderB = orderByKey.get(b.stageKey) ?? Infinity;
     if (orderA !== orderB) return orderA - orderB;
     if (a.startedAt && b.startedAt) {
       return new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
@@ -260,7 +259,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
   }
 
   const stages: StageView[] = sorted.map((sr, idx) => {
-    const def = stageDefById.get(sr.stageDefinitionId);
+    const def = stageDefByKey.get(sr.stageKey);
     const stream = streams[`stageRun:${sr.id}`];
     const status = STAGE_STATUS_MAP[sr.status] ?? 'pending';
     const isTerminal = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'skipped';
@@ -331,8 +330,8 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
       id: sr.id,
       // Definition order is a zero-based sorting key, not a user-facing number.
       order: idx + 1,
-      depth: depths.get(sr.stageDefinitionId) ?? 0,
-      dependsOn: dependsOnByDefId.get(sr.stageDefinitionId) ?? [],
+      depth: depths.get(sr.stageKey) ?? 0,
+      dependsOn: dependsOnByKey.get(sr.stageKey) ?? [],
       name: sr.name,
       status,
       prompt,

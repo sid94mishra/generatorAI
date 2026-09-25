@@ -14,6 +14,7 @@ import {
   Cpu,
 } from 'lucide-react';
 
+import type { ScriptRunProfile, WorkflowGraph } from '@generatorai/workflow-spec';
 import { useScript, useScriptProfiles, useMaterializeScript, useRunScript } from '@/hooks/scriptQueries.js';
 import { CardGridSkeleton } from '@/components/Skeleton.js';
 import { Button, Badge, PageHeader } from '@/components/ui/index.js';
@@ -43,9 +44,11 @@ export function ScriptDetailPage() {
     );
   }
 
+  // `GET /workflow-scripts/:id` → `{ metadata, graph }` (the script's v2 document).
   const metadata = script.metadata ?? script;
-  const stages = script.stages ?? [];
-  const edges = script.edges ?? [];
+  const graph = script.graph as WorkflowGraph | undefined;
+  const stages = graph?.stages ?? [];
+  const edges = graph?.edges ?? [];
 
   const handleRun = () => {
     runScript.mutate(
@@ -132,7 +135,7 @@ export function ScriptDetailPage() {
             Run Profiles
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {profiles.map((profile: { name: string; description?: string; sessionMode?: string }) => (
+            {(profiles as ScriptRunProfile[]).map((profile) => (
               <Button variant="unstyled"
                 key={profile.name}
                 onClick={() => setSelectedProfile(profile.name === selectedProfile ? undefined : profile.name)}
@@ -147,8 +150,8 @@ export function ScriptDetailPage() {
                 {profile.description && (
                   <div className="text-xs text-muted-foreground mt-1">{profile.description}</div>
                 )}
-                {profile.sessionMode && (
-                  <div className="text-xs text-muted-foreground mt-1">Mode: {profile.sessionMode}</div>
+                {profile.permissionMode && (
+                  <div className="text-xs text-muted-foreground mt-1">Permissions: {profile.permissionMode}</div>
                 )}
               </Button>
             ))}
@@ -168,18 +171,18 @@ export function ScriptDetailPage() {
           Stages ({stages.length})
         </h2>
         <div className="space-y-2">
-          {stages.map((stage: { localId?: string; config?: { name?: string; prompt?: { content?: string } } }, idx: number) => (
-            <div key={stage.localId ?? idx} className="flex items-center gap-3 p-3 bg-subtle rounded-lg border border-border">
+          {stages.map((stage, idx) => (
+            <div key={stage.key} className="flex items-center gap-3 p-3 bg-subtle rounded-lg border border-border">
               <span className="flex items-center justify-center w-6 h-6 rounded-full bg-emphasis text-xs text-foreground font-mono">
                 {idx + 1}
               </span>
               <div className="flex-1 min-w-0">
                 <div className="text-sm font-medium text-foreground truncate">
-                  {stage.config?.name ?? stage.localId}
+                  {stage.name} <span className="font-mono text-xs text-muted-foreground">{stage.key}</span>
                 </div>
-                {stage.config?.prompt?.content && (
+                {stage.prompts[0]?.text && (
                   <div className="text-xs text-muted-foreground truncate mt-0.5">
-                    {stage.config.prompt.content.slice(0, 80)}…
+                    {stage.prompts[0].text.slice(0, 80)}…
                   </div>
                 )}
               </div>
@@ -193,12 +196,12 @@ export function ScriptDetailPage() {
         <div className="rounded-lg border border-border bg-card p-5">
           <h2 className="text-lg font-semibold text-foreground mb-3">Edges ({edges.length})</h2>
           <div className="space-y-1.5">
-            {edges.map((edge: { from: string; to: string; edgeType?: string }, idx: number) => (
+            {edges.map((edge, idx) => (
               <div key={idx} className="flex items-center gap-2 text-sm text-muted-foreground">
                 <span className="font-mono text-foreground">{edge.from}</span>
                 <ArrowRight className="w-3 h-3" />
                 <span className="font-mono text-foreground">{edge.to}</span>
-                <span className="text-xs text-muted-foreground ml-2">({edge.edgeType ?? 'on_success'})</span>
+                <span className="text-xs text-muted-foreground ml-2">({edge.on})</span>
               </div>
             ))}
           </div>

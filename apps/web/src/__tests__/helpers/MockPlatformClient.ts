@@ -7,17 +7,21 @@ import type {
   ChatMessage,
   Artifact,
   PersistedEvent,
-  WorkflowTemplateSummary,
   EventSubscriptionOptions,
   Chat,
   CreateChatParams,
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  CreateWorkflowDefinitionParams,
   WorkflowRun,
   WorkflowRunWithStages,
   CreateWorkflowRunParams,
 } from '@generatorai/shared';
+import type {
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowGraph,
+  WorkflowGraphInput,
+  WorkflowTemplate,
+} from '@generatorai/workflow-spec';
+import { LifecycleSchema } from '@generatorai/workflow-spec';
 import { vi } from 'vitest';
 
 export function createMockChatMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
@@ -45,29 +49,41 @@ export function createMockArtifact(overrides: Partial<Artifact> = {}): Artifact 
   };
 }
 
-export function createMockTemplate(overrides: Partial<WorkflowTemplateSummary> = {}): WorkflowTemplateSummary {
+/** A minimal valid graph (parsed form). */
+export function createMockGraph(name = 'Definition A', overrides: Partial<WorkflowGraph> = {}): WorkflowGraph {
+  return {
+    formatVersion: 2,
+    workflow: { name, session: {}, variables: [], hooks: [], lifecycle: LifecycleSchema.parse({}), tags: [] },
+    stages: [],
+    edges: [],
+    ...overrides,
+  };
+}
+
+export function createMockDefinition(
+  overrides: Partial<WorkflowDefinitionRecord> = {},
+  name = 'Definition A',
+): WorkflowDefinitionRecord {
+  return {
+    id: 'def-a',
+    status: 'draft',
+    revision: 1,
+    currentVersionId: null,
+    hasUnpublishedChanges: false,
+    archivedAt: null,
+    needsAttention: [],
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    graph: createMockGraph(name),
+    ...overrides,
+  };
+}
+
+export function createMockTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTemplate {
   return {
     id: 'code-generation',
-    name: 'Code Generation',
-    description: 'Generate code from a description',
-    category: 'generation',
-    version: '1.0.0',
-    requiresCodebase: false,
-    variables: [
-      {
-        name: 'language',
-        label: 'Language',
-        type: 'select',
-        required: true,
-        options: ['typescript', 'python', 'go'],
-      },
-      {
-        name: 'description',
-        label: 'Description',
-        type: 'text',
-        required: true,
-      },
-    ],
+    category: 'code-generation',
+    graph: createMockGraph('Code Generation'),
     ...overrides,
   };
 }
@@ -77,7 +93,7 @@ export class MockPlatformClient implements IPlatformClient {
 
   messages: ChatMessage[] = [];
   artifacts: Artifact[] = [];
-  templates: WorkflowTemplateSummary[] = [createMockTemplate()];
+  templates: WorkflowTemplate[] = [createMockTemplate()];
 
   initialize = vi.fn(async () => {});
   shutdown = vi.fn(async () => {});
@@ -88,7 +104,7 @@ export class MockPlatformClient implements IPlatformClient {
     return this.messages.filter((m) => m.sessionId === sessionId);
   });
 
-  getWorkflowTemplates = vi.fn(async (): Promise<WorkflowTemplateSummary[]> => {
+  getWorkflowTemplates = vi.fn(async (): Promise<WorkflowTemplate[]> => {
     return [...this.templates];
   });
 
@@ -146,27 +162,29 @@ export class MockPlatformClient implements IPlatformClient {
     return [];
   });
 
-  // ── v2: Workflow Definition Operations ──
+  // ── Workflow definitions (v2 documents) ──
 
-  createDefinition = vi.fn(async (_params: CreateWorkflowDefinitionParams): Promise<WorkflowDefinition> => {
+  createDefinition = vi.fn(async (_graph: WorkflowGraphInput): Promise<WorkflowDefinitionRecord> => {
     throw new Error('Not implemented in mock');
   });
 
-  listDefinitions = vi.fn(async (): Promise<WorkflowDefinition[]> => {
+  listDefinitions = vi.fn(async (): Promise<WorkflowDefinitionSummary[]> => {
     return [];
   });
 
-  getDefinition = vi.fn(async (_id: string): Promise<WorkflowDefinitionWithStages> => {
+  getDefinition = vi.fn(async (_id: string): Promise<WorkflowDefinitionRecord> => {
     throw new Error('Not implemented in mock');
   });
 
-  updateDefinition = vi.fn(
-    async (_id: string, _params: Partial<CreateWorkflowDefinitionParams>): Promise<WorkflowDefinition> => {
+  saveDefinitionGraph = vi.fn(
+    async (_id: string, _graph: WorkflowGraphInput, _expectedRevision: number): Promise<WorkflowDefinitionRecord> => {
       throw new Error('Not implemented in mock');
     },
   );
 
-  deleteDefinition = vi.fn(async (_id: string): Promise<void> => {});
+  deleteDefinition = vi.fn(async (_id: string): Promise<{ deleted: true } | { archived: true; runs: number }> => ({
+    deleted: true,
+  }));
 
   // ── v2: Workflow Run Operations ──
 

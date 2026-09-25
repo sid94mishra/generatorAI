@@ -5,7 +5,7 @@
 
 import React, { useState, useCallback } from 'react';
 import { Plus, Trash2, Eye, Edit3, ChevronUp, ChevronDown } from 'lucide-react';
-import type { PromptDefinition } from '@generatorai/shared';
+import type { PromptDefinition } from '@generatorai/workflow-spec';
 import { cn } from '@/lib/utils.js';
 import { Button, Input, Textarea } from '@/components/ui/index.js';
 

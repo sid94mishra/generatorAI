@@ -20,7 +20,7 @@ import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useShallow } from 'zustand/react/shallow';
 import {
-  useWorkflowRun, useWorkflowDefinition,
+  useWorkflowRun, useWorkflowDefinition, useWorkflowDefinitionVersion,
   usePauseWorkflowRun, useResumeWorkflowRun, useCancelWorkflowRun, useRetryWorkflowRun,
   useRetryStageRun,
   useRunWorkspace,
@@ -63,6 +63,11 @@ export function WorkflowRunPage() {
 
   const { data: runData, isLoading: runLoading, error: runError } = useWorkflowRun(runId);
   const { data: definition } = useWorkflowDefinition(definitionId);
+  // The graph this run executes: the version it pinned, not the live
+  // definition (which may have been edited since the run started).
+  const { data: pinnedVersion } = useWorkflowDefinitionVersion(definitionId, runData?.definitionVersionId);
+  const pinnedGraph = pinnedVersion?.graph;
+  const definitionName = definition?.graph.workflow.name;
   const { data: workspace } = useRunWorkspace(runId);
   // Per-run scratchpad — full stage output text lives here (the DB StageRun
   // only stores `summary` and `outputData`). Poll while the run is active.
@@ -262,13 +267,13 @@ export function WorkflowRunPage() {
     if (!storeRun) return null;
     return deriveRunView({
       run: storeRun,
-      stageDefs: definition?.stages ?? [],
-      edges: definition?.edges ?? [],
+      stageDefs: pinnedGraph?.stages ?? [],
+      edges: pinnedGraph?.edges ?? [],
       elapsedMs,
       streams,
       permissionMode,
     });
-  }, [storeRun, definition?.stages, definition?.edges, elapsedMs, streams, permissionMode]);
+  }, [storeRun, pinnedGraph, elapsedMs, streams, permissionMode]);
 
   // Breadcrumb label for this run. Once the epoch suffix is stripped a run is
   // usually named exactly like its definition, which would render the trail as
@@ -277,14 +282,14 @@ export function WorkflowRunPage() {
   // siblings.
   const runCrumb = useMemo(() => {
     const title = runTitle(runView?.name);
-    if (definition?.name && title === definition.name) {
+    if (definitionName && title === definitionName) {
       const started = runView?.startedAt;
       return started
         ? `Run · ${new Date(started).toLocaleString(undefined, { dateStyle: 'short', timeStyle: 'short' })}`
         : 'Run';
     }
     return title;
-  }, [runView?.name, runView?.startedAt, definition?.name]);
+  }, [runView?.name, runView?.startedAt, definitionName]);
 
   // Focused stage — auto-select awaiting > running > first
   useEffect(() => {
@@ -465,7 +470,7 @@ export function WorkflowRunPage() {
         <Breadcrumb
           items={[
             { label: 'Workflows', href: '/workflows' },
-            { label: definition?.name ?? 'Workflow', href: definitionId ? `/workflows/${definitionId}` : undefined },
+            { label: definitionName ?? 'Workflow', href: definitionId ? `/workflows/${definitionId}` : undefined },
             { label: runCrumb },
           ]}
         />
@@ -490,7 +495,7 @@ export function WorkflowRunPage() {
       {graphOpen && (
         <div className="h-[320px] shrink-0 border-b border-[var(--color-border)] bg-[var(--color-background)]">
           <ReactFlowProvider>
-            <RuntimeDAGCanvas definitionEdges={definition?.edges} />
+            <RuntimeDAGCanvas definitionEdges={pinnedGraph?.edges} />
           </ReactFlowProvider>
         </div>
       )}
@@ -727,7 +732,7 @@ export function WorkflowRunPage() {
       )}
 
       {/* Run settings dialog removed — permission mode is always
-          bypassPermissions and the per-stage `approvalRequired` flag drives
+          bypassPermissions and the per-stage `approval` setting drives
           the only HITL flow that remains. */}
     </div>
   );

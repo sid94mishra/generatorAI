@@ -1,6 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // SkillSelector — Enable/disable skills per stage
-// Explicit stage additions, resolved and staged through AgentResolver.
+// Explicit stage additions (`session.agentOverrides.addSkillIds`), resolved
+// and staged through AgentResolver.
 // Includes Select All / Deselect All controls
 // ────────────────────────────────────────────────────────────────
 
@@ -10,16 +11,17 @@ import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useAvailableArtifacts } from '@/hooks/projectQueries.js';
 import { cn } from '@/lib/utils.js';
 import { Badge, Button } from '@/components/ui/index.js';
-import type { StageDefinition, HarnessConfig } from '@generatorai/shared';
+import type { AgentStage, SessionSpec } from '@generatorai/workflow-spec';
+import { patchSession } from './sessionPatch.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 interface SkillSelectorProps {
-  stage: StageDefinition;
-  onUpdate: (updates: Partial<StageDefinition>) => void;
+  stage: AgentStage;
+  onUpdate: (updates: Partial<AgentStage>) => void;
 }
 
 export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
-  const projectId = useWorkflowBuilderStore((s) => s.projectId);
+  const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? null);
   const { data: systemSkills, isLoading: systemLoading } = useAvailableArtifacts(undefined, 'skill');
   const { data: projectSkills, isLoading: projectLoading } = useAvailableArtifacts(
     projectId ?? undefined,
@@ -43,28 +45,32 @@ export function SkillSelector({ stage, onUpdate }: SkillSelectorProps) {
     return [...byName.values()];
   }, [systemSkills, projectSkills]);
 
-  const currentOverrides = stage.harnessConfigOverrides as Partial<HarnessConfig> | undefined;
+  const session = stage.session;
 
   // Stage additions are explicit. Merely listing a catalog entry must not
   // claim that its files have been staged into the provider's workspace.
   const selectedIds = useMemo(
-    () => new Set(currentOverrides?.agentOverrides?.addSkillIds ?? []),
-    [currentOverrides],
+    () => new Set(session?.agentOverrides?.addSkillIds ?? []),
+    [session],
   );
 
   const updateSelected = (next: Set<string>) => {
     const selectedNames = new Set(allSkills.filter((skill) => next.has(skill.id)).map((skill) => skill.name));
-    onUpdate({
-      harnessConfigOverrides: {
-        ...currentOverrides,
-        disabledSkills: currentOverrides?.disabledSkills?.filter((name) => !selectedNames.has(name)),
-        agentOverrides: {
-          ...currentOverrides?.agentOverrides,
-          addSkillIds: [...next],
-          removeSkillIds: currentOverrides?.agentOverrides?.removeSkillIds?.filter((id) => !next.has(id)),
-        },
-      },
-    });
+    const overrides: NonNullable<SessionSpec['agentOverrides']> = { ...session?.agentOverrides };
+    if (next.size > 0) overrides.addSkillIds = [...next];
+    else delete overrides.addSkillIds;
+    const removed = session?.agentOverrides?.removeSkillIds?.filter((id) => !next.has(id));
+    if (removed?.length) overrides.removeSkillIds = removed;
+    else delete overrides.removeSkillIds;
+    const disabled = session?.skills?.disabled?.filter((name) => !selectedNames.has(name));
+    const skills = session?.skills ? { ...session.skills, disabled: disabled?.length ? disabled : undefined } : undefined;
+    if (skills && skills.disabled === undefined) delete skills.disabled;
+    onUpdate(
+      patchSession(stage, {
+        agentOverrides: Object.keys(overrides).length > 0 ? overrides : undefined,
+        skills: skills && Object.keys(skills).length > 0 ? skills : undefined,
+      }),
+    );
   };
 
   const toggleSkill = (id: string) => {

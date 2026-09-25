@@ -7,6 +7,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useBlocker } from 'react-router-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { ReactFlowProvider } from '@xyflow/react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Save,
   Play,
@@ -14,118 +15,108 @@ import {
   Redo2,
   AlertTriangle,
   CheckCircle2,
-  Plus,
   Settings2,
   ChevronRight,
   PanelRightClose,
   PanelRight,
   ArrowLeft,
+  Download,
+  Upload,
 } from 'lucide-react';
+import type { ValidationIssue, WorkflowDefinitionRecord, WorkflowGraph } from '@generatorai/workflow-spec';
 
 import { DAGCanvas } from '@/components/workflow/DAGCanvas.js';
 import { StagePropertiesPanel } from '@/components/workflow/StagePropertiesPanel.js';
 import { WorkflowConfigPanel } from '@/components/workflow/WorkflowConfigPanel.js';
 import { VariableInputModal } from '@/components/workflow/VariableInputModal.js';
-import type { UploadedFileSet, LinkedCodebaseInfo, StageOverrideEntry } from '@/components/workflow/VariableInputModal.js';
+import type { UploadedFileSet, LinkedCodebaseInfo } from '@/components/workflow/VariableInputModal.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import {
   useWorkflowDefinition,
   useCreateWorkflowDefinition,
-  useUpdateWorkflowDefinition,
-  useAddStage,
-  useUpdateStage,
-  useDeleteStage,
-  useAddEdge,
-  useDeleteEdge,
+  useSaveDefinitionGraph,
+  usePublishDefinition,
   useCreateWorkflowRun,
   useStartWorkflowRun,
   useStartOrchestratedRun,
   useUploadRunFiles,
+  workflowKeys,
 } from '@/hooks/workflowQueries.js';
 import { cn } from '@/lib/utils.js';
-import { Button, Spinner } from '@/components/ui/index.js';
+import { Badge, Button, Modal, Spinner } from '@/components/ui/index.js';
 import { useResizable } from '@/hooks/useResizable.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 import { usePageTitle } from '@/hooks/usePageTitle.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
-import type { StageDefinition, VariableDefinition, CreateWorkflowRunParams } from '@generatorai/shared';
-import { encodeStageOverrides } from '@generatorai/client-core';
+import { usePlatform } from '@/providers/PlatformProvider.js';
+import { ApiError } from '@/platform/apiFetch.js';
+import { downloadBlobAsFile } from '@/utils/downloadBlobAsFile.js';
+import { exportFileName } from '@/utils/workflowExport.js';
+import type { CreateWorkflowRunParams } from '@generatorai/shared';
+import { encodeStageOverrides, needsOrchestratedStart, type StageOverrideDraft } from '@generatorai/client-core';
 
 /**
- * The stage payload sent to the server, from the builder's own stage object.
- *
- * Both save paths — creating a definition for the first time, and updating an
- * existing one — go through this. They used to carry two hand-written copies
- * of the mapping, and they had drifted: the create path silently dropped
- * `resultValidation`, `contextFilter` and `approvalRequired`, so a validation
- * rule or an approval gate configured before the very first Save vanished
- * while the same edit on a saved workflow persisted fine. Anything the
- * properties panel can edit belongs here, once.
+ * What the Run button does for the current definition state:
+ * - `test`: a draft (or an unsaved new workflow) runs only as a test run;
+ * - `save-run`: a published workflow with unsaved edits is saved, published, then run (D-17);
+ * - `publish-run`: saved but unpublished changes are published, then run;
+ * - `run`: the published version runs as is.
  */
-function toStageParams(stage: StageDefinition) {
-  return {
-    name: stage.name,
-    description: stage.description,
-    order: stage.order,
-    prompts: stage.prompts,
-    harnessConfigOverrides: stage.harnessConfigOverrides,
-    // Nullable, not optional: clearing the picker must actually unbind the
-    // agent rather than leave the previous ref in place.
-    agentRef: stage.agentRef ?? null,
-    hooks: stage.hooks,
-    retryPolicy: stage.retryPolicy,
-    timeoutMs: stage.timeoutMs,
-    condition: stage.condition,
-    resultValidation: stage.resultValidation,
-    contextFilter: stage.contextFilter,
-    approvalRequired: stage.approvalRequired ?? false,
-  };
-}
+type RunMode = 'test' | 'save-run' | 'publish-run' | 'run';
+
+const RUN_LABELS: Record<RunMode, string> = {
+  test: 'Test run',
+  'save-run': 'Save and run',
+  'publish-run': 'Publish and run',
+  run: 'Run',
+};
 
 export function WorkflowBuilderPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const queryClient = useQueryClient();
+  const platform = usePlatform();
   const isNew = !id;
 
   // ── Zustand store ──
   //
-  // W-render — this used to be `useWorkflowBuilderStore()` with no selector,
-  // subscribing to the entire ~700-line store: every field, so every drag of
-  // a node and every keystroke in the properties panel (which edits
-  // `nodes`) re-rendered the whole toolbar, banners and modals along with
-  // it. Below, DISPLAY-only fields the page's own JSX actually reads are
-  // selected individually (or via `useShallow` for grouped/derived values);
-  // everything the save/run handlers need is read from a fresh
-  // `getState()` snapshot INSIDE those handlers instead, so editing the
-  // canvas does not re-render this page at all just because a future Save
-  // would need that data.
-  const name = useWorkflowBuilderStore((s) => s.name);
+  // DISPLAY-only fields the page's own JSX reads are selected individually
+  // (or via `useShallow` for grouped/derived values); everything the
+  // save/run handlers need is read from a fresh `getState()` snapshot INSIDE
+  // those handlers, so editing the canvas does not re-render this page just
+  // because a future Save would need that data.
+  const name = useWorkflowBuilderStore((s) => s.workflow.name);
   const isDirty = useWorkflowBuilderStore((s) => s.isDirty);
   const isSaving = useWorkflowBuilderStore((s) => s.isSaving);
   const definitionId = useWorkflowBuilderStore((s) => s.definitionId);
-  const projectId = useWorkflowBuilderStore((s) => s.projectId);
-  const selectedCodebases = useWorkflowBuilderStore(useShallow((s) => s.selectedCodebases));
-  const variables = useWorkflowBuilderStore((s) => s.variables);
-  const validationErrors = useWorkflowBuilderStore((s) => s.validationErrors);
+  const status = useWorkflowBuilderStore((s) => s.status);
+  const hasUnpublishedChanges = useWorkflowBuilderStore((s) => s.hasUnpublishedChanges);
+  const needsAttention = useWorkflowBuilderStore((s) => s.needsAttention);
+  const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? null);
+  const codebaseAliases = useWorkflowBuilderStore(useShallow((s) => s.workflow.lifecycle.codebaseAliases));
+  const variables = useWorkflowBuilderStore((s) => s.workflow.variables);
+  const issues = useWorkflowBuilderStore((s) => s.issues);
   const canUndo = useWorkflowBuilderStore((s) => s.canUndo());
   const canRedo = useWorkflowBuilderStore((s) => s.canRedo());
-  // Only the stage NAMES, shallow-compared — so dragging a node (which only
-  // changes `position`) does not re-render the Run dialog's stage list.
+  // Only the stage keys and NAMES, shallow-compared — so dragging a node
+  // (which only changes `position`) does not re-render the Run dialog.
+  const stageKeys = useWorkflowBuilderStore(useShallow((s) => s.nodes.map((n) => n.id)));
   const stageNames = useWorkflowBuilderStore(useShallow((s) => s.nodes.map((n) => n.data.stage.name)));
+  const stages = useMemo(
+    () => stageKeys.map((key, i) => ({ key, name: stageNames[i] ?? key })),
+    [stageKeys, stageNames],
+  );
   // Actions are referentially stable for the store's lifetime, so grouping
   // them in one `useShallow` selector never itself causes a re-render.
   const actions = useWorkflowBuilderStore(
     useShallow((s) => ({
-      loadDefinition: s.loadDefinition,
       resetBuilder: s.resetBuilder,
       addStage: s.addStage,
       selectNode: s.selectNode,
       setName: s.setName,
       undo: s.undo,
       redo: s.redo,
-      markSaving: s.markSaving,
-      markSaved: s.markSaved,
       validate: s.validate,
     })),
   );
@@ -133,12 +124,8 @@ export function WorkflowBuilderPage() {
   // ── Server queries ──
   const { data: definition, isLoading: isLoadingDef, error: definitionError, refetch: refetchDefinition } = useWorkflowDefinition(id);
   const createDefinition = useCreateWorkflowDefinition();
-  const updateDefinition = useUpdateWorkflowDefinition();
-  const addStageMutation = useAddStage();
-  const updateStageMutation = useUpdateStage();
-  const deleteStageMutation = useDeleteStage();
-  const addEdgeMutation = useAddEdge();
-  const deleteEdgeMutation = useDeleteEdge();
+  const saveDefinition = useSaveDefinitionGraph();
+  const publishDefinition = usePublishDefinition();
   const createRun = useCreateWorkflowRun();
   const startRun = useStartWorkflowRun();
   const startOrchestratedRun = useStartOrchestratedRun();
@@ -149,27 +136,36 @@ export function WorkflowBuilderPage() {
   const [configPanelOpen, setConfigPanelOpen] = useState(false);
   const [variableModalOpen, setVariableModalOpen] = useState(false);
   const [isRunning, setIsRunning] = useState(false);
+  const [isPublishing, setIsPublishing] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  // The issue banner appears once the user asked for validation (Validate,
+  // Save, Run); inline node and field markers are live all the time.
+  const [showIssues, setShowIssues] = useState(false);
   // A passing validation used to render nothing at all, so the button was
-  // indistinguishable from a broken one. Errors already surface in their own
-  // banner; this is the "it passed" half.
+  // indistinguishable from a broken one.
   const [validateOk, setValidateOk] = useState(false);
   const [showLeaveDialog, setShowLeaveDialog] = useState(false);
+  /** The record a save lost to (409): offered as "Reload theirs" or "Overwrite". */
+  const [conflict, setConflict] = useState<WorkflowDefinitionRecord | null>(null);
+
+  const runMode: RunMode =
+    status !== 'published' ? 'test' : isDirty ? 'save-run' : hasUnpublishedChanges ? 'publish-run' : 'run';
+  const errorIssues = useMemo(() => issues.filter((i) => i.severity === 'error'), [issues]);
 
   // ── Project codebases (for auto-filling git variables in run dialog) ──
   const { data: projectCodebases } = useProjectCodebases(projectId ?? undefined);
 
   const linkedCodebases = useMemo((): LinkedCodebaseInfo[] | undefined => {
-    if (!projectId || selectedCodebases.length === 0 || !projectCodebases) return undefined;
-    return selectedCodebases
+    if (!projectId || codebaseAliases.length === 0 || !projectCodebases) return undefined;
+    return codebaseAliases
       .map((alias) => {
         const cb = projectCodebases.find((c) => c.alias === alias);
         if (!cb) return null;
         return { alias: cb.alias, url: cb.url ?? cb.localPath ?? '', branch: cb.defaultBranch ?? 'main' };
       })
       .filter((x): x is LinkedCodebaseInfo => x !== null);
-  }, [projectId, selectedCodebases, projectCodebases]);
+  }, [projectId, codebaseAliases, projectCodebases]);
 
   // ── Resizable properties panel ──
   const { width: propertiesPanelWidth, isDragging: isResizingProps, handleProps: propsHandleProps } = useResizable({
@@ -181,25 +177,50 @@ export function WorkflowBuilderPage() {
 
   // ── Load definition into builder store ──
   //
-  // Reset on EVERY `id` change (not only for a new workflow) — otherwise
-  // navigating from workflow A to workflow B, when B fails to load, left A's
-  // content in the store: `definition` stays `undefined` while loading AND
-  // on error, so neither branch of the old `if (definition) load() else if
-  // (isNew) reset()` ever fired, and the canvas kept showing A under B's URL.
-  // Resetting immediately on every id change means the canvas is blank while
-  // B loads, then `loadDefinition` (below) fills it in once B's data
-  // arrives — or the error view further down renders instead.
+  // Reset whenever the URL names a different definition than the store holds
+  // — navigating from workflow A to workflow B must never leave A's content
+  // under B's URL, even when B fails to load. The first save of a new
+  // workflow navigates to its own id; the store already holds it then, so
+  // the canvas, selection and undo history survive.
   useEffect(() => {
-    actions.resetBuilder();
-    // `actions` is a stable, referentially unchanging selector result (see
-    // the grouped selector above), so this effectively only re-runs on `id`.
+    if (useWorkflowBuilderStore.getState().definitionId !== (id ?? null)) actions.resetBuilder();
   }, [id, actions]);
 
+  // Query data is loaded on first arrival, and afterwards only when it is a
+  // newer revision AND there is nothing local to lose: never while a save is
+  // in flight or while there are unsaved edits (D-3). Our own saves write
+  // the response into the cache with the revision the store already holds,
+  // so they never reload the canvas either.
   useEffect(() => {
-    if (definition) {
-      actions.loadDefinition(definition);
+    if (!definition) return;
+    const s = useWorkflowBuilderStore.getState();
+    const load = () => {
+      s.loadRecord(definition);
+      // Mark what a loaded (e.g. migrated) definition needs fixing right away.
+      useWorkflowBuilderStore.getState().validate();
+    };
+    if (s.definitionId !== definition.id) {
+      load();
+      return;
     }
-  }, [definition, actions]);
+    if (s.isSaving || s.isDirty) return;
+    if (s.revision !== definition.revision) load();
+  }, [definition]);
+
+  // Live validation: re-run the spec validator shortly after any document
+  // change, so nodes and fields show their issues inline (D-25).
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const unsubscribe = useWorkflowBuilderStore.subscribe((s, prev) => {
+      if (s.nodes === prev.nodes && s.edges === prev.edges && s.workflow === prev.workflow) return;
+      clearTimeout(timer);
+      timer = setTimeout(() => useWorkflowBuilderStore.getState().validate(), 300);
+    });
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+    };
+  }, []);
 
   usePageTitle(name || 'Untitled Workflow');
 
@@ -212,7 +233,7 @@ export function WorkflowBuilderPage() {
 
   // ── Unsaved changes blocker ──
   // Read isDirty directly from Zustand getState() to avoid stale closure
-  // values — the save handler calls markSaved() + navigate() in the same
+  // values — the save handler updates the store and navigates in the same
   // tick, so the blocker callback must see the latest store state.
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
@@ -227,302 +248,212 @@ export function WorkflowBuilderPage() {
 
   // ── Add new stage ──
   const handleAddStage = useCallback(() => {
-    // Fresh snapshot rather than a reactive dependency — this only needs the
-    // CURRENT node count/definitionId at the moment of the click.
-    const { nodes, definitionId: defId } = useWorkflowBuilderStore.getState();
-    const stageId = `stage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const newStage: StageDefinition = {
-      id: stageId,
-      workflowDefinitionId: defId ?? '',
-      name: `Stage ${nodes.length + 1}`,
-      order: nodes.length,
-      prompts: [],
-      hooks: [],
-      createdAt: new Date(),
-    };
-    actions.addStage(newStage);
-    actions.selectNode(stageId);
+    const key = actions.addStage();
+    actions.selectNode(key);
   }, [actions]);
 
   // ── Validate ──
+  /** Validate the current graph; true when there is no error-severity issue. */
   const handleValidate = useCallback((announce = false) => {
-    const errors = actions.validate();
-    if (errors.length === 0) {
-      setSaveSuccess(false);
-      if (announce) {
-        setValidateOk(true);
-        setTimeout(() => setValidateOk(false), 3000);
-      }
-    } else if (announce) {
-      setValidateOk(false);
+    const found = actions.validate();
+    const ok = !found.some((i) => i.severity === 'error');
+    setShowIssues(!ok);
+    if (announce) {
+      setValidateOk(ok);
+      if (ok) setTimeout(() => setValidateOk(false), 3000);
     }
-    return errors;
+    return ok;
   }, [actions]);
 
-  // ── Save ──
-  const buildOrchestratorConfig = useCallback(() => {
-    // Fresh snapshot — these are only needed at Save/Run time, not reactively.
-    const { selectedCodebases: codebases, autoCommit, autoPush, autoCreatePR } = useWorkflowBuilderStore.getState();
-    if (codebases.length === 0) return undefined;
-    return {
-      category: 'custom' as const,
-      // The project codebases the run checks out as worktrees.
-      codebaseAliases: codebases,
-      // No preprocessingSteps needed — worktree creation is handled by the orchestrator
-      // when projectId + selectedCodebases are present
-      preprocessingSteps: [] as Array<{ type: 'clone_repo'; name: string; config: { type: 'clone_repo'; repoAlias: string }; failOnError: boolean; order: number }>,
-      postProcessingSteps: [],
-      resultValidations: [],
-      requiresCodebase: true,
-      autoCommit,
-      autoPush,
-      autoCreatePR,
-    };
+  const flashSaved = useCallback(() => {
+    setSaveSuccess(true);
+    setSaveError(null);
+    setTimeout(() => setSaveSuccess(false), 3000);
   }, []);
 
-  const handleSave = useCallback(async () => {
-    const errors = handleValidate();
-    if (errors.length > 0) return;
+  const showError = useCallback((message: string) => {
+    setSaveError(message);
+    setTimeout(() => setSaveError(null), 6000);
+  }, []);
 
-    // Fresh snapshot for the whole save — an imperative action, not display
-    // state, so it reads the CURRENT store rather than depending on it
-    // reactively (which would rebuild this callback on every keystroke).
+  // ── Save ──
+  /**
+   * Save the whole graph: `POST` for a workflow that does not exist yet,
+   * then `PUT /:id/graph` with the revision the canvas was loaded from.
+   * Resolves with the saved record, or null when nothing was saved (errors
+   * are shown; a 409 opens the conflict dialog).
+   */
+  const saveGraph = useCallback(async (expectedRevision?: number): Promise<WorkflowDefinitionRecord | null> => {
     const store = useWorkflowBuilderStore.getState();
+    if (!store.workflow.name.trim()) store.setName('Untitled Workflow');
+    if (!handleValidate()) {
+      showError('Fix the errors below before saving.');
+      return null;
+    }
+    const graph: WorkflowGraph = useWorkflowBuilderStore.getState().toGraph();
+    const existingId = store.definitionId;
     store.markSaving(true);
     try {
-      if (isNew || !store.definitionId) {
-        // Create new definition
-        const created = await createDefinition.mutateAsync({
-          name: store.name || 'Untitled Workflow',
-          description: store.description || undefined,
-          sessionMode: store.sessionMode,
-          harnessConfig: store.harnessConfig,
-          variables: store.variables,
-          tags: store.tags,
-          projectId: store.projectId ?? undefined,
-          orchestratorConfig: buildOrchestratorConfig(),
-          // Workflow-level hooks must be sent on create too — otherwise hooks
-          // configured in the builder before the first save are silently
-          // dropped (they only persisted via the later update path).
-          hooks: store.hooks.length > 0 ? store.hooks : undefined,
-        });
-
-        store.setDefinitionId(created.id);
-
-        // Persist stages — track local→server ID mapping for edges
-        const localToServerId = new Map<string, string>();
-        for (const node of store.nodes) {
-          const stage = node.data.stage;
-          const serverStage = await addStageMutation.mutateAsync({
-            definitionId: created.id,
-            params: toStageParams(stage),
-          });
-          localToServerId.set(node.id, serverStage.id);
-        }
-
-        // Persist edges — remap local stage IDs to server-generated IDs
-        for (const edge of store.edges) {
-          if (edge.data) {
-            const fromId = localToServerId.get(edge.source) ?? edge.source;
-            const toId = localToServerId.get(edge.target) ?? edge.target;
-            await addEdgeMutation.mutateAsync({
-              definitionId: created.id,
-              params: {
-                fromStageId: fromId,
-                toStageId: toId,
-                edgeType: edge.data.edgeType,
-              },
-            });
-          }
-        }
-
-        store.markSaved();
-        setSaveSuccess(true);
-        setSaveError(null);
-        setTimeout(() => setSaveSuccess(false), 3000);
-        navigate(`/workflows/${created.id}/edit`, { replace: true });
-      } else {
-        // Update existing definition — metadata + diff stages & edges
-        await updateDefinition.mutateAsync({
-          id: store.definitionId,
-          params: {
-            name: store.name,
-            description: store.description || undefined,
-            sessionMode: store.sessionMode,
-            harnessConfig: store.harnessConfig,
-            variables: store.variables,
-            tags: store.tags,
-            projectId: store.projectId ?? undefined,
-            orchestratorConfig: buildOrchestratorConfig(),
-            hooks: store.hooks.length > 0 ? store.hooks : undefined,
-          },
-        });
-
-        // Diff stages & edges against server state
-        if (definition) {
-          const serverStageIds = new Set(definition.stages.map((s) => s.id));
-          const localStageIds = new Set(store.nodes.map((n) => n.id));
-
-          // Delete removed stages
-          for (const sid of serverStageIds) {
-            if (!localStageIds.has(sid)) {
-              await deleteStageMutation.mutateAsync({ definitionId: store.definitionId!, stageId: sid });
-            }
-          }
-
-          // Add new stages / update existing
-          for (const node of store.nodes) {
-            const stage = node.data.stage;
-            const stageParams = toStageParams(stage);
-            if (serverStageIds.has(node.id)) {
-              await updateStageMutation.mutateAsync({
-                definitionId: store.definitionId!,
-                stageId: node.id,
-                params: stageParams,
-              });
-            } else {
-              await addStageMutation.mutateAsync({
-                definitionId: store.definitionId!,
-                params: stageParams,
-              });
-            }
-          }
-
-          // Diff edges
-          const serverEdges = new Map(definition.edges.map((e) => [e.id, e]));
-          const localEdgeIds = new Set(store.edges.map((e) => e.id));
-
-          // An edge whose condition changed has to be re-created: the API
-          // exposes add/delete only, and edge identity is not user-visible.
-          const retypedEdgeIds = new Set(
-            store.edges
-              .filter((e) => {
-                const server = serverEdges.get(e.id);
-                return Boolean(server && e.data && server.edgeType !== e.data.edgeType);
-              })
-              .map((e) => e.id),
-          );
-
-          // Delete removed edges — and the ones being re-typed.
-          for (const eid of serverEdges.keys()) {
-            if (!localEdgeIds.has(eid) || retypedEdgeIds.has(eid)) {
-              await deleteEdgeMutation.mutateAsync({ definitionId: store.definitionId!, edgeId: eid });
-            }
-          }
-
-          // Add new edges — and re-add the re-typed ones.
-          for (const edge of store.edges) {
-            if ((!serverEdges.has(edge.id) || retypedEdgeIds.has(edge.id)) && edge.data) {
-              await addEdgeMutation.mutateAsync({
-                definitionId: store.definitionId!,
-                params: {
-                  fromStageId: edge.source,
-                  toStageId: edge.target,
-                  edgeType: edge.data.edgeType,
-                },
-              });
-            }
-          }
-        }
-
-        store.markSaved();
-        setSaveSuccess(true);
-        setSaveError(null);
-        setTimeout(() => setSaveSuccess(false), 3000);
-      }
+      const record = existingId
+        ? await saveDefinition.mutateAsync({
+            id: existingId,
+            graph,
+            expectedRevision: expectedRevision ?? store.revision ?? 1,
+          })
+        : await createDefinition.mutateAsync(graph);
+      useWorkflowBuilderStore.getState().applySaved(record, graph);
+      flashSaved();
+      // The first save switches to update mode: the URL now names the new
+      // definition, and the next save is a PUT rather than a second POST (D-5).
+      if (!existingId) navigate(`/workflows/${record.id}/edit`, { replace: true });
+      return record;
     } catch (err) {
-      console.error('Save failed:', err);
-      setSaveError(err instanceof Error ? err.message : 'Save failed');
-      setTimeout(() => setSaveError(null), 5000);
-      store.markSaving(false);
+      useWorkflowBuilderStore.getState().markSaving(false);
+      const details = err instanceof ApiError
+        ? (err.details as { current?: WorkflowDefinitionRecord; issues?: ValidationIssue[] } | undefined)
+        : undefined;
+      if (err instanceof ApiError && err.status === 409 && details?.current) {
+        setConflict(details.current);
+        return null;
+      }
+      if (err instanceof ApiError && err.status === 422 && details?.issues) {
+        useWorkflowBuilderStore.getState().setIssues(details.issues, graph);
+        setShowIssues(true);
+      }
+      showError(err instanceof Error ? err.message : 'Save failed');
+      return null;
     }
-  }, [
-    handleValidate,
-    isNew,
-    definition,
-    createDefinition,
-    updateDefinition,
-    addStageMutation,
-    updateStageMutation,
-    deleteStageMutation,
-    addEdgeMutation,
-    deleteEdgeMutation,
-    buildOrchestratorConfig,
-    navigate,
-  ]);
+  }, [handleValidate, saveDefinition, createDefinition, flashSaved, showError, navigate]);
+
+  const handleSave = useCallback(() => {
+    void saveGraph();
+  }, [saveGraph]);
+
+  /** Publish the saved graph (saving first when needed). Resolves with the published record. */
+  const publish = useCallback(async (): Promise<WorkflowDefinitionRecord | null> => {
+    const store = useWorkflowBuilderStore.getState();
+    if (store.isDirty || !store.definitionId) {
+      const saved = await saveGraph();
+      if (!saved) return null;
+    }
+    const defId = useWorkflowBuilderStore.getState().definitionId;
+    if (!defId) return null;
+    setIsPublishing(true);
+    try {
+      const graph = useWorkflowBuilderStore.getState().toGraph();
+      const record = await publishDefinition.mutateAsync(defId);
+      useWorkflowBuilderStore.getState().applySaved(record, graph);
+      return record;
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Publish failed');
+      return null;
+    } finally {
+      setIsPublishing(false);
+    }
+  }, [saveGraph, publishDefinition, showError]);
+
+  const handlePublish = useCallback(() => {
+    void publish().then((record) => {
+      if (record) flashSaved();
+    });
+  }, [publish, flashSaved]);
+
+  // ── Conflict (409) ──
+  const reloadTheirs = useCallback(() => {
+    if (!conflict) return;
+    queryClient.setQueryData(workflowKeys.definition(conflict.id), conflict);
+    useWorkflowBuilderStore.getState().loadRecord(conflict);
+    setConflict(null);
+  }, [conflict, queryClient]);
+
+  const overwrite = useCallback(() => {
+    if (!conflict) return;
+    const revision = conflict.revision;
+    setConflict(null);
+    void saveGraph(revision);
+  }, [conflict, saveGraph]);
+
+  // ── Export ──
+  const handleExport = useCallback(async () => {
+    const defId = useWorkflowBuilderStore.getState().definitionId;
+    if (!defId) return;
+    try {
+      const text = await platform.exportDefinition(defId);
+      await downloadBlobAsFile(new Blob([text], { type: 'application/json' }), exportFileName(name));
+    } catch (err) {
+      showError(err instanceof Error ? err.message : 'Export failed');
+    }
+  }, [platform, name, showError]);
 
   // ── Run workflow ──
   const handleRun = useCallback(() => {
-    const errors = handleValidate();
-    if (errors.length > 0) return;
-
-    if (!useWorkflowBuilderStore.getState().definitionId) {
-      setSaveError('Please save the workflow before running it.');
-      return;
-    }
-
+    if (!handleValidate()) return;
     setVariableModalOpen(true);
   }, [handleValidate]);
 
   const executeRun = useCallback(
     async (
-      variables: Record<string, unknown>,
+      runVariables: Record<string, unknown>,
       uploads?: UploadedFileSet,
-      stageOverrides?: StageOverrideEntry[],
+      stageOverrides?: StageOverrideDraft[],
     ) => {
-      // Fresh snapshot — imperative action, not display state.
-      const store = useWorkflowBuilderStore.getState();
-      if (!store.definitionId) return;
       setIsRunning(true);
-
-      const isOrchestrated = !!store.projectId;
-
-      // Helper to upload files for each category
-      const uploadAllFiles = async (runId: string) => {
-        if (!uploads) return;
-        for (const category of ['prompts', 'skills', 'agents'] as const) {
-          if (uploads[category].length > 0) {
-            await uploadRunFiles.mutateAsync({ runId, category, files: uploads[category] });
+      try {
+        // Bring the server up to what the canvas shows before running it.
+        const mode = runMode;
+        if (mode === 'save-run' || mode === 'publish-run') {
+          if (!(await publish())) return;
+        } else {
+          const current = useWorkflowBuilderStore.getState();
+          if (current.isDirty || !current.definitionId) {
+            if (!(await saveGraph())) return;
           }
         }
-      };
+        // Fresh snapshot — the save above may have created the definition.
+        const store = useWorkflowBuilderStore.getState();
+        const defId = store.definitionId;
+        if (!defId) return;
+        const testRun = mode === 'test';
+        const projectForRun = store.workflow.projectId ?? undefined;
 
-      try {
-        if (isOrchestrated) {
-          const encoded = encodeStageOverrides(variables, stageOverrides, { orchestrated: true });
+        if (needsOrchestratedStart(store.workflow)) {
+          const encoded = encodeStageOverrides(runVariables, stageOverrides, { orchestrated: true });
+          const aliases = store.workflow.lifecycle.codebaseAliases;
           const context = await startOrchestratedRun.mutateAsync({
-            workflowDefinitionId: store.definitionId,
+            workflowDefinitionId: defId,
             ...encoded,
             uploads,
-            projectId: store.projectId ?? undefined,
-            selectedCodebases: store.selectedCodebases.length > 0 ? store.selectedCodebases : undefined,
+            projectId: projectForRun,
+            selectedCodebases: aliases.length > 0 ? aliases : undefined,
+            ...(testRun ? { testRun: true } : {}),
           });
-
           setVariableModalOpen(false);
-          navigate(`/workflows/${store.definitionId}/runs/${context.workflowRunId}`);
+          navigate(`/workflows/${defId}/runs/${context.workflowRunId}`);
         } else {
           const params: CreateWorkflowRunParams = {
-            workflowDefinitionId: store.definitionId,
-            variables: encodeStageOverrides(variables, stageOverrides, { orchestrated: false }).variables,
+            workflowDefinitionId: defId,
+            variables: encodeStageOverrides(runVariables, stageOverrides, { orchestrated: false }).variables,
+            ...(testRun ? { testRun: true } : {}),
           };
           const run = await createRun.mutateAsync(params);
-
-          await uploadAllFiles(run.id);
-
+          if (uploads) {
+            for (const category of ['prompts', 'skills', 'agents'] as const) {
+              if (uploads[category].length > 0) {
+                await uploadRunFiles.mutateAsync({ runId: run.id, category, files: uploads[category] });
+              }
+            }
+          }
           await startRun.mutateAsync(run.id);
           setVariableModalOpen(false);
-          // Land on the run that was just started, the way every other run
-          // entry point does — this used to drop the user on the definition
-          // page with no indication that anything had begun.
-          navigate(`/workflows/${store.definitionId}/runs/${run.id}`);
+          navigate(`/workflows/${defId}/runs/${run.id}`);
         }
       } catch (err) {
-        console.error('Run failed:', err);
+        showError(err instanceof Error ? `Run failed: ${err.message}` : 'Run failed');
       } finally {
         setIsRunning(false);
       }
     },
-    [createRun, startRun, startOrchestratedRun, uploadRunFiles, navigate],
+    [runMode, publish, saveGraph, createRun, startRun, startOrchestratedRun, uploadRunFiles, navigate, showError],
   );
 
   // ── Keyboard shortcuts ──
@@ -594,6 +525,31 @@ export function WorkflowBuilderPage() {
         }}
       />
 
+      {/* Revision conflict (409): someone saved this workflow after it was loaded here */}
+      <Modal
+        open={conflict !== null}
+        onClose={() => setConflict(null)}
+        title="This workflow changed elsewhere"
+        description={
+          conflict
+            ? `It was saved again (revision ${conflict.revision}, ${new Date(conflict.updatedAt).toLocaleString()}) after you opened it.`
+            : undefined
+        }
+        size="sm"
+        footer={
+          <>
+            <Button variant="secondary" onClick={() => setConflict(null)}>Cancel</Button>
+            <Button variant="secondary" onClick={reloadTheirs}>Reload theirs</Button>
+            <Button variant="danger" onClick={overwrite}>Overwrite</Button>
+          </>
+        }
+      >
+        <p className="text-sm text-muted-foreground">
+          <strong className="text-foreground">Reload theirs</strong> discards your unsaved edits and loads the saved
+          version. <strong className="text-foreground">Overwrite</strong> replaces it with what you see here.
+        </p>
+      </Modal>
+
       {/* ── Toolbar ── */}
       <div className="bg-background border-b border-border flex flex-wrap items-center justify-between gap-y-1 px-4 py-2.5">
         <div className="flex items-center gap-3">
@@ -615,8 +571,25 @@ export function WorkflowBuilderPage() {
             value={name}
             onChange={(e) => actions.setName(e.target.value)}
             placeholder="Untitled Workflow"
+            aria-label="Workflow name"
             className="bg-transparent text-sm font-semibold text-foreground outline-none placeholder:text-muted-foreground border-b border-transparent focus:border-primary transition-colors duration-200 max-w-[300px]"
           />
+
+          {status && (
+            <Badge
+              tone={status === 'published' ? 'success' : 'warning'}
+              size="sm"
+              title={
+                status === 'published'
+                  ? hasUnpublishedChanges
+                    ? 'Runs use the published version; saved changes are not published yet'
+                    : 'Runs use this version'
+                  : 'A draft runs only as a test run'
+              }
+            >
+              {status === 'published' ? (hasUnpublishedChanges ? 'Published · changes' : 'Published') : 'Draft'}
+            </Badge>
+          )}
 
           {isDirty && (
             <span className="text-xs text-muted-foreground">(unsaved)</span>
@@ -632,7 +605,7 @@ export function WorkflowBuilderPage() {
             </span>
           )}
           {saveError && (
-            <span className="flex items-center gap-1 text-xs text-danger">
+            <span role="alert" className="flex items-center gap-1 text-xs text-danger">
               <AlertTriangle className="h-3.5 w-3.5" /> {saveError}
             </span>
           )}
@@ -675,10 +648,22 @@ export function WorkflowBuilderPage() {
           <Button
             variant="ghost"
             onClick={() => handleValidate(true)}
-            title="Validate DAG"
+            title="Validate the workflow"
             leftIcon={<AlertTriangle className="h-4 w-4" />}
           >
             Validate
+          </Button>
+
+          {/* Export — the canonical document of the SAVED graph */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => void handleExport()}
+            disabled={!definitionId}
+            title={isDirty ? 'Export the saved version (unsaved edits are not included)' : 'Export as JSON'}
+            aria-label="Export workflow"
+          >
+            <Download className="h-4 w-4" />
           </Button>
 
           <div className="h-5 w-px bg-border" />
@@ -708,35 +693,78 @@ export function WorkflowBuilderPage() {
             Save
           </Button>
 
-          {/* Run */}
+          {/* Publish — makes the saved graph the version runs use */}
+          <Button
+            variant="secondary"
+            onClick={handlePublish}
+            disabled={isSaving || isPublishing || (!isNew && !definition) || (status === 'published' && !isDirty && !hasUnpublishedChanges)}
+            loading={isPublishing}
+            leftIcon={<Upload className="h-4 w-4" />}
+            title="Publish: runs use the published version"
+          >
+            Publish
+          </Button>
+
+          {/* Run — a draft runs as a test run; a dirty published workflow saves, publishes and runs */}
           <Button
             variant="primary"
             onClick={handleRun}
-            disabled={isRunning || !definitionId}
+            disabled={isRunning || isSaving || (!isNew && !definition)}
             loading={isRunning}
             leftIcon={<Play className="h-4 w-4" />}
           >
-            Run
+            {RUN_LABELS[runMode]}
           </Button>
         </div>
       </div>
 
+      {/* ── Migration notes: left on the definition by the upgrade, cleared by the next save ── */}
+      {needsAttention.length > 0 && (
+        <div className="border-b border-info/30 bg-info-muted px-4 py-2 text-sm text-info">
+          <ul className="space-y-0.5">
+            {needsAttention.map((note, i) => (
+              <li key={i} className="flex items-center gap-1.5">
+                <ChevronRight className="h-3 w-3" />
+                {note}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+
       {/* ── Validation Errors Banner ── */}
-      {validationErrors.length > 0 && (
+      {showIssues && errorIssues.length > 0 && (
         <div className="border-b border-warning/30 bg-warning-muted px-4 py-2">
           <div className="flex items-start gap-2">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
             <div className="text-sm">
               <span className="font-medium text-warning">
-                {validationErrors.length} validation {validationErrors.length === 1 ? 'error' : 'errors'}
+                {errorIssues.length} validation {errorIssues.length === 1 ? 'error' : 'errors'}
               </span>
-              <ul className="mt-1 space-y-0.5 text-warning">
-                {validationErrors.map((err, i) => (
-                  <li key={i} className="flex items-center gap-1.5">
-                    <ChevronRight className="h-3 w-3" />
-                    {err.message}
-                  </li>
-                ))}
+              <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto text-warning">
+                {errorIssues.map((issue, i) => {
+                  const stageName = issue.stageKey ? stages.find((s) => s.key === issue.stageKey)?.name : undefined;
+                  return (
+                    <li key={i} className="flex items-center gap-1.5">
+                      <ChevronRight className="h-3 w-3 shrink-0" />
+                      {issue.stageKey ? (
+                        <Button
+                          variant="unstyled"
+                          className="text-left underline-offset-2 hover:underline"
+                          onClick={() => {
+                            actions.selectNode(issue.stageKey!);
+                            setPropertiesPanelOpen(true);
+                          }}
+                        >
+                          {stageName ?? issue.stageKey}: {issue.message}
+                        </Button>
+                      ) : (
+                        <span>{issue.message}</span>
+                      )}
+                      {issue.hint && <span className="text-xs opacity-80">— {issue.hint}</span>}
+                    </li>
+                  );
+                })}
               </ul>
             </div>
           </div>
@@ -823,7 +851,8 @@ export function WorkflowBuilderPage() {
         workflowName={name || 'Untitled Workflow'}
         isSubmitting={isRunning}
         linkedCodebases={linkedCodebases}
-        stageNames={stageNames}
+        stages={stages}
+        submitLabel={RUN_LABELS[runMode]}
       />
     </div>
   );

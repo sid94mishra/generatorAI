@@ -4,8 +4,9 @@
 // Replaces the old AgentSelector, which built a throwaway `customAgents`
 // entry with an EMPTY instructions string: the harness then received an
 // agent that had a name and a description but no instructions at all. Here the
-// stage stores the portable `scope:slug` ref and an additive override delta;
-// `AgentResolver` performs the union server-side at execution time.
+// stage session stores the portable `scope:slug` ref (`session.agentRef`)
+// and an additive override delta (`session.agentOverrides`); `AgentResolver`
+// performs the union server-side at execution time.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useState } from 'react';
@@ -16,41 +17,34 @@ import { useResolveAgentPreview, useSelectableAgents } from '@/hooks/agentQuerie
 import { AgentPicker } from '@/components/agents/AgentPicker.js';
 import { AgentOverridesEditor } from '@/components/agents/AgentOverridesEditor.js';
 import { EffectiveCapabilitiesPanel } from '@/components/agents/EffectiveCapabilitiesPanel.js';
-import type {
-  StageDefinition,
-  HarnessConfig,
-  AgentOverrides,
-  ResolvedAgentProjection,
-} from '@generatorai/shared';
+import type { AgentOverrides, ResolvedAgentProjection } from '@generatorai/shared';
+import type { AgentStage, SessionSpec } from '@generatorai/workflow-spec';
+import { patchSession } from './sessionPatch.js';
 
 interface AgentBindingSectionProps {
-  stage: StageDefinition;
-  onUpdate: (updates: Partial<StageDefinition>) => void;
+  stage: AgentStage;
+  onUpdate: (updates: Partial<AgentStage>) => void;
 }
 
 export function AgentBindingSection({ stage, onUpdate }: AgentBindingSectionProps) {
-  const projectId = useWorkflowBuilderStore((s) => s.projectId) ?? undefined;
+  const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? null) ?? undefined;
   const { data: agents } = useSelectableAgents(projectId);
   const resolvePreview = useResolveAgentPreview();
 
-  const overridesFromStage =
-    (stage.harnessConfigOverrides as Partial<HarnessConfig> | undefined)?.agentOverrides ?? {};
+  const overridesFromStage = (stage.session?.agentOverrides ?? {}) as AgentOverrides;
 
   const [showCapabilities, setShowCapabilities] = useState(false);
   const [projection, setProjection] = useState<ResolvedAgentProjection | undefined>(undefined);
 
-  const agentRef = stage.agentRef ?? undefined;
+  const agentRef = stage.session?.agentRef;
   const selectedAgent = (agents ?? []).find((a) => a.ref === agentRef);
 
   const setOverrides = (next: AgentOverrides) => {
-    const rest = { ...(stage.harnessConfigOverrides as Partial<HarnessConfig> | undefined) };
-    if (Object.keys(next).length === 0) delete rest.agentOverrides;
-    else rest.agentOverrides = next;
-    onUpdate({
-      harnessConfigOverrides: (Object.keys(rest).length > 0 ? rest : undefined) as
-        | Partial<HarnessConfig>
-        | undefined,
-    });
+    onUpdate(
+      patchSession(stage, {
+        agentOverrides: Object.keys(next).length > 0 ? (next as SessionSpec['agentOverrides']) : undefined,
+      }),
+    );
   };
 
   const overridesKey = JSON.stringify(overridesFromStage);
@@ -84,7 +78,7 @@ export function AgentBindingSection({ stage, onUpdate }: AgentBindingSectionProp
           value={agentRef}
           {...(projectId ? { projectId } : {})}
           data-testid="stage-agent-picker"
-          onChange={(ref) => onUpdate({ agentRef: ref ?? null } as Partial<StageDefinition>)}
+          onChange={(ref) => onUpdate(patchSession(stage, { agentRef: ref }))}
         />
         <p className="mt-1.5 text-[10px] leading-snug text-muted-foreground">
           Skills and MCP servers chosen below are ADDED to the agent&apos;s own — an agent with 5

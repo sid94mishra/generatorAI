@@ -1,39 +1,56 @@
 // ────────────────────────────────────────────────────────────────
-// Workflow Builder Store — Zustand design-time DAG state management
-// Manages stages, edges, selection, validation, undo/redo
+// Workflow Builder Store — Zustand design-time state for one
+// `WorkflowGraph` (the v2 document).
+//
+// Stages are identified by their key: a node's id IS the stage key and an
+// edge's id is `<from>-><to>` (the document allows one edge per pair), so
+// nothing the builder holds is a local id that has to be remapped on save.
+// Save replaces the whole graph (`PUT /workflow-definitions/:id/graph`),
+// which is why clearing a field here (setting it to `undefined`) deletes the
+// key rather than leaving the stored value in place.
 // ────────────────────────────────────────────────────────────────
 
 import { create } from 'zustand';
 import type { Node, Edge, Connection } from '@xyflow/react';
 import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import type { NodeChange, EdgeChange } from '@xyflow/react';
+import {
+  ENGINE_LEVEL,
+  LifecycleSchema,
+  STAGE_KEY_PATTERN,
+  WORKFLOW_FORMAT_VERSION,
+  validateWorkflow,
+  type AgentStage,
+  type DefinitionStatus,
+  type EdgeSpec,
+  type ValidationIssue,
+  type WorkflowDefinitionRecord,
+  type WorkflowGraph,
+  type WorkflowSpec,
+} from '@generatorai/workflow-spec';
 import { getLayoutedElements } from '@/utils/dagLayout.js';
-import type {
-  StageDefinition,
-  StageEdge,
-  StageEdgeType,
-  PromptDefinition,
-  RetryPolicy,
-  StageCondition,
-  WorkflowDefinitionWithStages,
-  VariableDefinition,
-  WorkflowSessionMode,
-  HarnessConfig,
-  OrchestratorConfig,
-  WorkflowHookDefinition,
-} from '@generatorai/shared';
 import { globalSingleton } from '../lib/globalSingleton.js';
 
 // ── Types ──
 
 export interface StageNodeData extends Record<string, unknown> {
-  stage: StageDefinition;
+  stage: AgentStage;
   label: string;
 }
 
 export interface StageEdgeData extends Record<string, unknown> {
-  edge: StageEdge;
-  edgeType: StageEdgeType;
+  edge: EdgeSpec;
+}
+
+/**
+ * A validation issue located in the builder: `stageKey`/`edgeId` name the
+ * node or edge it belongs to and `field` is the JSON pointer relative to that
+ * stage or edge (`/prompts/0/text`), so the stage panel can show it next to
+ * the control that edits the field.
+ */
+export interface BuilderIssue extends ValidationIssue {
+  edgeId?: string;
+  field?: string;
 }
 
 interface HistoryEntry {
@@ -41,43 +58,27 @@ interface HistoryEntry {
   edges: Edge<StageEdgeData>[];
 }
 
-interface ValidationError {
-  type:
-    | 'cycle'
-    | 'orphan'
-    | 'self_edge'
-    | 'duplicate_edge'
-    | 'no_stages'
-    | 'missing_prompts'
-    | 'undefined_variable';
-  message: string;
-  stageIds?: string[];
-}
+/** What a save produced, as far as the store cares. */
+type DefinitionMeta = Pick<
+  WorkflowDefinitionRecord,
+  'id' | 'revision' | 'status' | 'currentVersionId' | 'hasUnpublishedChanges' | 'needsAttention'
+>;
 
 interface WorkflowBuilderState {
-  // ── Definition state ──
+  // ── Definition bookkeeping ──
   definitionId: string | null;
-  name: string;
-  description: string;
-  sessionMode: WorkflowSessionMode;
-  harnessConfig: Partial<HarnessConfig> | undefined;
-  variables: VariableDefinition[];
-  tags: string[];
-  /** Connected git repositories (max 3) */
-  /** Whether to auto-commit changes after workflow completes */
-  autoCommit: boolean;
-  /** Whether to push the work branch after committing */
-  autoPush: boolean;
-  /** Whether to auto-create PR after workflow completes */
-  autoCreatePR: boolean;
-  /** Selected project ID for project-scoped workflows */
-  projectId: string | null;
-  /** Selected codebase aliases from the project (max 3) */
-  selectedCodebases: string[];
-  /** Workflow-level hooks */
-  hooks: WorkflowHookDefinition[];
+  /** The revision the local graph was loaded from; `saveGraph` needs it. */
+  revision: number | null;
+  status: DefinitionStatus | null;
+  currentVersionId: string | null;
+  hasUnpublishedChanges: boolean;
+  needsAttention: string[];
 
-  // ── Canvas state ──
+  // ── Document ──
+  /** `graph.workflow`: every workflow-level setting. */
+  workflow: WorkflowSpec;
+
+  // ── Canvas state (graph.stages / graph.edges) ──
   nodes: Node<StageNodeData>[];
   edges: Edge<StageEdgeData>[];
   selectedNodeId: string | null;
@@ -86,7 +87,7 @@ interface WorkflowBuilderState {
   // ── State tracking ──
   isDirty: boolean;
   isSaving: boolean;
-  validationErrors: ValidationError[];
+  issues: BuilderIssue[];
   lastSavedAt: Date | null;
 
   // ── Undo/Redo ──
@@ -94,51 +95,50 @@ interface WorkflowBuilderState {
   historyIndex: number;
 
   // ── Actions: Initialize ──
-  loadDefinition: (definition: WorkflowDefinitionWithStages) => void;
+  loadRecord: (record: WorkflowDefinitionRecord) => void;
   resetBuilder: () => void;
-  setDefinitionId: (id: string | null) => void;
+  /** Adopt a save/publish result. Stays dirty when the graph changed since `savedGraph` was taken. */
+  applySaved: (record: DefinitionMeta, savedGraph?: WorkflowGraph) => void;
+
+  // ── Actions: Document ──
+  toGraph: () => WorkflowGraph;
 
   // ── Actions: Canvas ──
-  setNodes: (nodes: Node<StageNodeData>[]) => void;
-  setEdges: (edges: Edge<StageEdgeData>[]) => void;
   onNodesChange: (changes: NodeChange<Node<StageNodeData>>[]) => void;
   onEdgesChange: (changes: EdgeChange<Edge<StageEdgeData>>[]) => void;
   onConnect: (connection: Connection) => void;
+  /** Dagre layout of the whole graph, recorded as one undo step. */
+  autoLayout: () => void;
 
   // ── Actions: Stages ──
-  addStage: (stage: StageDefinition) => void;
-  updateStage: (stageId: string, updates: Partial<StageDefinition>) => void;
-  removeStage: (stageId: string) => void;
-  duplicateStage: (stageId: string) => void;
+  /** Add a stage with a generated name and key; returns the key. */
+  addStage: (name?: string) => string;
+  updateStage: (key: string, updates: Partial<AgentStage>) => void;
+  /** Rename a stage key, updating its edges and context sources. Returns an error message or null. */
+  renameStageKey: (key: string, nextKey: string) => string | null;
+  removeStage: (key: string) => void;
+  duplicateStage: (key: string) => void;
 
   // ── Actions: Edges ──
-  addEdge: (edge: StageEdge) => void;
   removeEdge: (edgeId: string) => void;
-  updateEdgeType: (edgeId: string, edgeType: StageEdgeType) => void;
+  updateEdge: (edgeId: string, updates: Partial<EdgeSpec>) => void;
 
   // ── Actions: Selection ──
   selectNode: (nodeId: string | null) => void;
   selectEdge: (edgeId: string | null) => void;
 
-  // ── Actions: Definition props ──
+  // ── Actions: Workflow settings ──
+  updateWorkflow: (updates: Partial<WorkflowSpec>) => void;
   setName: (name: string) => void;
-  setDescription: (description: string) => void;
-  setSessionMode: (mode: WorkflowSessionMode) => void;
-  setHarnessConfig: (config: Partial<HarnessConfig> | undefined) => void;
-  setVariables: (variables: VariableDefinition[]) => void;
-  setTags: (tags: string[]) => void;
-  setAutoCommit: (autoCommit: boolean) => void;
-  setAutoPush: (autoPush: boolean) => void;
-  setAutoCreatePR: (autoCreatePR: boolean) => void;
   setProjectId: (projectId: string | null) => void;
-  setSelectedCodebases: (codebases: string[]) => void;
-  setHooks: (hooks: WorkflowHookDefinition[]) => void;
+  setCodebaseAliases: (aliases: string[]) => void;
+  setPostProcessing: (flag: 'autoCommit' | 'autoPush' | 'autoCreatePR', value: boolean) => void;
 
   // ── Actions: State ──
   markDirty: () => void;
   markSaving: (saving: boolean) => void;
-  markSaved: () => void;
-  setValidationErrors: (errors: ValidationError[]) => void;
+  /** Locate issues (from the client validator or a 422) against `graph`, the document they describe. */
+  setIssues: (issues: ValidationIssue[], graph: WorkflowGraph) => void;
 
   // ── Actions: Undo/Redo ──
   undo: () => void;
@@ -156,30 +156,91 @@ interface WorkflowBuilderState {
   pushHistory: (coalesceKey?: string) => void;
 
   // ── Actions: Validation ──
-  validate: () => ValidationError[];
+  /** Run `validateWorkflow` on the current graph and store the located issues. */
+  validate: () => BuilderIssue[];
 
   // ── Selectors ──
-  getSelectedStage: () => StageDefinition | null;
+  getSelectedStage: () => AgentStage | null;
 }
 
-// ── Helper: Convert StageDefinition + position to Node ──
-function stageToNode(stage: StageDefinition, position?: { x: number; y: number }): Node<StageNodeData> {
+// ── Helpers ──
+
+export function edgeId(from: string, to: string): string {
+  return `${from}->${to}`;
+}
+
+/** A blank workflow document (`WorkflowSpec` with its defaults). */
+export function emptyWorkflow(): WorkflowSpec {
   return {
-    id: stage.id,
+    name: '',
+    session: {},
+    variables: [],
+    hooks: [],
+    lifecycle: LifecycleSchema.parse({}),
+    tags: [],
+  };
+}
+
+/** A new agent stage in parsed form (every zod default present). */
+export function newAgentStage(key: string, name: string): AgentStage {
+  return {
+    kind: 'agent',
+    key,
+    name,
+    join: { mode: 'all' },
+    prompts: [],
+    sessionReuse: 'fresh',
+    context: { mode: 'summary' },
+    output: { format: 'text', extraction: 'auto', rules: [] },
+    hooks: [],
+  };
+}
+
+/**
+ * The stage key for a display name: lower snake case, starting with a
+ * letter, at most 48 characters, deduplicated against `taken` with `_2`,
+ * `_3`, … (the suffix is kept inside the length limit).
+ */
+export function stageKeyFor(name: string, taken: ReadonlySet<string>): string {
+  let base = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+  if (!/^[a-z]/.test(base)) base = `stage${base ? `_${base}` : ''}`;
+  base = base.slice(0, 48).replace(/_+$/, '');
+  if (!taken.has(base)) return base;
+  for (let n = 2; ; n++) {
+    const suffix = `_${n}`;
+    const candidate = `${base.slice(0, 48 - suffix.length).replace(/_+$/, '')}${suffix}`;
+    if (!taken.has(candidate)) return candidate;
+  }
+}
+
+/** Assign `updates` onto `target`, deleting every key whose new value is `undefined`. */
+function patch<T extends object>(target: T, updates: Partial<T>): T {
+  const next = { ...target, ...updates } as Record<string, unknown>;
+  for (const [k, v] of Object.entries(updates)) {
+    if (v === undefined) delete next[k];
+  }
+  return next as T;
+}
+
+function stageToNode(stage: AgentStage, position: { x: number; y: number }): Node<StageNodeData> {
+  return {
+    id: stage.key,
     type: 'stageNode',
-    position: position ?? { x: stage.order * 320, y: 100 },
+    position,
     data: { stage, label: stage.name },
   };
 }
 
-// ── Helper: Convert StageEdge to React Flow Edge ──
-function stageEdgeToFlowEdge(edge: StageEdge): Edge<StageEdgeData> {
+function edgeToFlowEdge(edge: EdgeSpec): Edge<StageEdgeData> {
   return {
-    id: edge.id,
-    source: edge.fromStageId,
-    target: edge.toStageId,
+    id: edgeId(edge.from, edge.to),
+    source: edge.from,
+    target: edge.to,
     type: 'stageEdge',
-    data: { edge, edgeType: edge.edgeType },
+    data: { edge },
     animated: true,
   };
 }
@@ -217,6 +278,32 @@ function detectCycles(nodes: Node[], edges: Edge[]): boolean {
   return visited !== nodes.length;
 }
 
+/** Nodes and edges for a graph: stored positions when every stage has one, dagre otherwise. */
+function canvasFromGraph(graph: WorkflowGraph): { nodes: Node<StageNodeData>[]; edges: Edge<StageEdgeData>[] } {
+  const rawNodes = graph.stages.map((stage, i) => stageToNode(stage, stage.position ?? { x: i * 320, y: 100 }));
+  const rawEdges = graph.edges.map(edgeToFlowEdge);
+  const allPositioned = graph.stages.every((s) => s.position !== undefined);
+  if (allPositioned || rawNodes.length === 0) return { nodes: rawNodes, edges: rawEdges };
+  return getLayoutedElements(rawNodes, rawEdges, 'LR');
+}
+
+/** Locate raw issues against the graph they were computed for. */
+function locateIssues(issues: ValidationIssue[], graph: WorkflowGraph): BuilderIssue[] {
+  return issues.map((issue) => {
+    const stage = /^\/stages\/(\d+)(\/.*)?$/.exec(issue.path);
+    if (stage) {
+      const key = issue.stageKey ?? graph.stages[Number(stage[1])]?.key;
+      return { ...issue, ...(key ? { stageKey: key } : {}), field: stage[2] ?? '' };
+    }
+    const edge = /^\/edges\/(\d+)(\/.*)?$/.exec(issue.path);
+    if (edge) {
+      const e = graph.edges[Number(edge[1])];
+      return { ...issue, ...(e ? { edgeId: edgeId(e.from, e.to) } : {}), field: edge[2] ?? '' };
+    }
+    return { ...issue };
+  });
+}
+
 const MAX_HISTORY = 50;
 
 /**
@@ -229,67 +316,53 @@ const COALESCE_WINDOW_MS = 700;
 let coalesceKey: string | null = null;
 let coalesceAt = 0;
 
+function blankState() {
+  return {
+    definitionId: null,
+    revision: null,
+    status: null,
+    currentVersionId: null,
+    hasUnpublishedChanges: false,
+    needsAttention: [] as string[],
+    workflow: emptyWorkflow(),
+    nodes: [] as Node<StageNodeData>[],
+    edges: [] as Edge<StageEdgeData>[],
+    selectedNodeId: null,
+    selectedEdgeId: null,
+    isDirty: false,
+    isSaving: false,
+    issues: [] as BuilderIssue[],
+    lastSavedAt: null,
+    // Seed the empty canvas as entry 0. Without it `historyIndex` starts at
+    // -1, the first add lands at index 0, and `canUndo()` (index > 0) stays
+    // false — so the very first stage you add to a NEW workflow could never
+    // be undone.
+    history: [{ nodes: [], edges: [] }] as HistoryEntry[],
+    historyIndex: 0,
+  };
+}
+
 const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => ({
-  // ── Initial State ──
-  definitionId: null,
-  name: '',
-  description: '',
-  sessionMode: 'auto',
-  harnessConfig: undefined,
-  variables: [],
-  tags: [],
-  autoCommit: true,
-  autoPush: false,
-  autoCreatePR: false,
-  projectId: null,
-  selectedCodebases: [],
-  hooks: [],
-  nodes: [],
-  edges: [],
-  selectedNodeId: null,
-  selectedEdgeId: null,
-  isDirty: false,
-  isSaving: false,
-  validationErrors: [],
-  lastSavedAt: null,
-  history: [],
-  historyIndex: -1,
+  ...blankState(),
 
   // ── Initialize ──
-  loadDefinition: (definition) => {
-    const rawNodes = definition.stages.map((stage, i) =>
-      stageToNode(stage, { x: (stage.order ?? i) * 320, y: 100 }),
-    );
-    const rawEdges = definition.edges.map(stageEdgeToFlowEdge);
-
-    // Apply dagre auto-layout so parallel stages are spread out
-    // instead of stacking on top of each other
-    const { nodes, edges } = rawNodes.length > 0
-      ? getLayoutedElements(rawNodes, rawEdges, 'LR')
-      : { nodes: rawNodes, edges: rawEdges };
-
+  loadRecord: (record) => {
+    const { nodes, edges } = canvasFromGraph(record.graph);
     set({
-      definitionId: definition.id,
-      name: definition.name,
-      description: definition.description ?? '',
-      sessionMode: definition.sessionMode,
-      harnessConfig: definition.harnessConfig,
-      variables: definition.variables ?? [],
-      tags: definition.tags ?? [],
-      autoCommit: definition.orchestratorConfig?.autoCommit ?? true,
-      autoPush:
-        (definition.orchestratorConfig as { autoPush?: boolean } | undefined)?.autoPush ?? false,
-      autoCreatePR: definition.orchestratorConfig?.autoCreatePR ?? false,
-      projectId: definition.projectId ?? null,
-      selectedCodebases: definition.orchestratorConfig?.codebaseAliases ?? [],
-      hooks: (definition as unknown as { hooks?: WorkflowHookDefinition[] }).hooks ?? [],
+      definitionId: record.id,
+      revision: record.revision,
+      status: record.status,
+      currentVersionId: record.currentVersionId,
+      hasUnpublishedChanges: record.hasUnpublishedChanges,
+      needsAttention: record.needsAttention,
+      workflow: record.graph.workflow,
       nodes,
       edges,
       selectedNodeId: null,
       selectedEdgeId: null,
       isDirty: false,
       isSaving: false,
-      validationErrors: [],
+      issues: [],
       lastSavedAt: null,
       history: [{ nodes: [...nodes], edges: [...edges] }],
       historyIndex: 0,
@@ -298,44 +371,39 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   },
 
   resetBuilder: () => {
-    set({
-      definitionId: null,
-      name: '',
-      description: '',
-      sessionMode: 'auto',
-      harnessConfig: undefined,
-      variables: [],
-      tags: [],
-          autoCommit: true,
-      autoPush: false,
-      autoCreatePR: false,
-          projectId: null,
-      selectedCodebases: [],
-      hooks: [],
-      nodes: [],
-      edges: [],
-      selectedNodeId: null,
-      selectedEdgeId: null,
-      isDirty: false,
-      isSaving: false,
-      validationErrors: [],
-      lastSavedAt: null,
-      // Seed the empty canvas as entry 0. Without it `historyIndex` starts at
-      // -1, the first add lands at index 0, and `canUndo()` (index > 0) stays
-      // false — so the very first stage you add to a NEW workflow could never
-      // be undone.
-      history: [{ nodes: [], edges: [] }],
-      historyIndex: 0,
-    });
+    set(blankState());
     coalesceKey = null;
   },
 
-  setDefinitionId: (id) => set({ definitionId: id }),
+  applySaved: (record, savedGraph) => {
+    const unchanged = savedGraph === undefined || JSON.stringify(get().toGraph()) === JSON.stringify(savedGraph);
+    set({
+      definitionId: record.id,
+      revision: record.revision,
+      status: record.status,
+      currentVersionId: record.currentVersionId,
+      hasUnpublishedChanges: record.hasUnpublishedChanges,
+      needsAttention: record.needsAttention,
+      isSaving: false,
+      ...(unchanged ? { isDirty: false, lastSavedAt: new Date() } : {}),
+    });
+  },
+
+  // ── Document ──
+  toGraph: () => {
+    const { workflow, nodes, edges } = get();
+    return {
+      formatVersion: WORKFLOW_FORMAT_VERSION,
+      workflow,
+      stages: nodes.map((n) => ({
+        ...n.data.stage,
+        position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
+      })),
+      edges: edges.flatMap((e) => (e.data ? [e.data.edge] : [])),
+    };
+  },
 
   // ── Canvas ──
-  setNodes: (nodes) => set({ nodes, isDirty: true }),
-  setEdges: (edges) => set({ edges, isDirty: true }),
-
   onNodesChange: (changes) => {
     // Only mark dirty for meaningful changes — ignore React Flow's
     // internal dimension measurements and selection changes which fire
@@ -357,9 +425,9 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   },
 
   onEdgesChange: (changes) => {
-    const hasMeaningfulChange = changes.some(
-      (c) => c.type !== 'select',
-    );
+    // Removals go through `removeEdge` (it records history); React Flow's own
+    // delete key is disabled on the canvas.
+    const hasMeaningfulChange = changes.some((c) => c.type !== 'select');
     set((state) => ({
       edges: applyEdgeChanges(changes, state.edges),
       ...(hasMeaningfulChange ? { isDirty: true } : {}),
@@ -371,92 +439,125 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     if (connection.source === connection.target) return;
 
     const state = get();
-    // Prevent duplicate edges
-    const exists = state.edges.some(
-      (e) => e.source === connection.source && e.target === connection.target,
-    );
-    if (exists) return;
+    const id = edgeId(connection.source, connection.target);
+    if (state.edges.some((e) => e.id === id)) return;
+    // Both ends must be stages that still exist: a stale handle from a
+    // deleted node must never produce an edge to nowhere.
+    const keys = new Set(state.nodes.map((n) => n.id));
+    if (!keys.has(connection.source) || !keys.has(connection.target)) return;
 
-    const tempId = `edge-${connection.source}-${connection.target}`;
-    const newEdge: Edge<StageEdgeData> = {
-      id: tempId,
-      source: connection.source,
-      target: connection.target,
-      type: 'stageEdge',
-      data: {
-        edge: {
-          id: tempId,
-          workflowDefinitionId: state.definitionId ?? '',
-          fromStageId: connection.source,
-          toStageId: connection.target,
-          edgeType: 'on_success',
-        },
-        edgeType: 'on_success',
-      },
-      animated: true,
-    };
-
-    // Check for cycles with the new edge
-    const testEdges = [...state.edges, newEdge];
-    if (detectCycles(state.nodes, testEdges)) return;
+    const newEdge = edgeToFlowEdge({ from: connection.source, to: connection.target, on: 'success' });
+    if (detectCycles(state.nodes, [...state.edges, newEdge])) return;
 
     set((s) => ({ edges: [...s.edges, newEdge], isDirty: true }));
     get().pushHistory();
   },
 
+  autoLayout: () => {
+    const { nodes, edges } = get();
+    if (nodes.length === 0) return;
+    const layouted = getLayoutedElements(nodes, edges, 'LR');
+    set({ nodes: layouted.nodes, edges: layouted.edges, isDirty: true });
+    get().pushHistory();
+  },
+
   // ── Stages ──
-  addStage: (stage) => {
+  addStage: (name) => {
     const state = get();
-    const node = stageToNode(stage, {
+    const names = new Set(state.nodes.map((n) => n.data.stage.name));
+    let stageName = name;
+    if (!stageName) {
+      // Next unused "Stage N": after a delete, `Stage ${count + 1}` repeated an existing name.
+      let n = state.nodes.length + 1;
+      while (names.has(`Stage ${n}`)) n++;
+      stageName = `Stage ${n}`;
+    }
+    const key = stageKeyFor(stageName, new Set(state.nodes.map((n) => n.id)));
+    const node = stageToNode(newAgentStage(key, stageName), {
       x: (state.nodes.length % 4) * 320 + 50,
       y: Math.floor(state.nodes.length / 4) * 150 + 50,
     });
     set((s) => ({ nodes: [...s.nodes, node], isDirty: true }));
     get().pushHistory();
+    return key;
   },
 
-  updateStage: (stageId, updates) => {
+  updateStage: (key, updates) => {
     set((state) => ({
       nodes: state.nodes.map((node) => {
-        if (node.id !== stageId) return node;
-        const updatedStage = { ...node.data.stage, ...updates };
-        return {
-          ...node,
-          data: { ...node.data, stage: updatedStage, label: updatedStage.name },
-        };
+        if (node.id !== key) return node;
+        const stage = patch(node.data.stage, updates);
+        return { ...node, data: { ...node.data, stage, label: stage.name } };
       }),
       isDirty: true,
     }));
     // Property edits are part of the canvas state, so they must be recorded:
     // without this a redo replayed a snapshot taken *before* the edit and
-    // silently threw away every prompt, condition and validation rule typed
-    // since the last structural change. Keyed per stage+field so that holding
-    // down a key is one undo step but editing a different field is a new one.
-    get().pushHistory(`stage:${stageId}:${Object.keys(updates).join(',')}`);
+    // silently threw away every prompt and rule typed since the last
+    // structural change. Keyed per stage+field so that holding down a key is
+    // one undo step but editing a different field is a new one.
+    get().pushHistory(`stage:${key}:${Object.keys(updates).join(',')}`);
   },
 
-  removeStage: (stageId) => {
+  renameStageKey: (key, nextKey) => {
+    if (key === nextKey) return null;
+    const state = get();
+    if (!STAGE_KEY_PATTERN.test(nextKey)) {
+      return 'Keys are lower snake case: a letter, then letters, digits or _ (at most 48)';
+    }
+    if (state.nodes.some((n) => n.id === nextKey)) return `Another stage already has the key '${nextKey}'`;
+    const rename = (k: string) => (k === key ? nextKey : k);
+    set((s) => ({
+      nodes: s.nodes.map((node) => {
+        const stage = node.data.stage;
+        const from = stage.context.from;
+        const renamed: AgentStage = {
+          ...stage,
+          key: rename(stage.key),
+          ...(from ? { context: { ...stage.context, from: from.map(rename) } } : {}),
+        };
+        return { ...node, id: rename(node.id), data: { ...node.data, stage: renamed } };
+      }),
+      edges: s.edges.map((e) => {
+        if (!e.data || (e.source !== key && e.target !== key)) return e;
+        return edgeToFlowEdge({ ...e.data.edge, from: rename(e.source), to: rename(e.target) });
+      }),
+      selectedNodeId: s.selectedNodeId === key ? nextKey : s.selectedNodeId,
+      isDirty: true,
+    }));
+    get().pushHistory();
+    return null;
+  },
+
+  removeStage: (key) => {
     set((state) => ({
-      nodes: state.nodes.filter((n) => n.id !== stageId),
-      edges: state.edges.filter((e) => e.source !== stageId && e.target !== stageId),
-      selectedNodeId: state.selectedNodeId === stageId ? null : state.selectedNodeId,
+      nodes: state.nodes
+        .filter((n) => n.id !== key)
+        .map((n) => {
+          // A context source naming the deleted stage would fail validation;
+          // drop it with the stage.
+          const from = n.data.stage.context.from;
+          if (!from?.includes(key)) return n;
+          const context = { ...n.data.stage.context, from: from.filter((k) => k !== key) };
+          return { ...n, data: { ...n.data, stage: { ...n.data.stage, context } } };
+        }),
+      edges: state.edges.filter((e) => e.source !== key && e.target !== key),
+      selectedNodeId: state.selectedNodeId === key ? null : state.selectedNodeId,
       isDirty: true,
     }));
     get().pushHistory();
   },
 
-  duplicateStage: (stageId) => {
+  duplicateStage: (key) => {
     const state = get();
-    const sourceNode = state.nodes.find((n) => n.id === stageId);
+    const sourceNode = state.nodes.find((n) => n.id === key);
     if (!sourceNode) return;
 
-    const newId = `stage-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    const newStage: StageDefinition = {
-      ...sourceNode.data.stage,
-      id: newId,
-      name: `${sourceNode.data.stage.name} (copy)`,
-      order: state.nodes.length,
-    };
+    const name = `${sourceNode.data.stage.name} (copy)`;
+    const newKey = stageKeyFor(`${sourceNode.data.stage.key}_copy`, new Set(state.nodes.map((n) => n.id)));
+    // The whole stage is copied, every field included: the graph is saved
+    // as a document, so nothing the panel cannot edit is lost on the copy.
+    const newStage: AgentStage = { ...structuredClone(sourceNode.data.stage), key: newKey, name };
     const newNode = stageToNode(newStage, {
       x: sourceNode.position.x + (sourceNode.measured?.width ?? 320) + 40,
       y: sourceNode.position.y,
@@ -465,7 +566,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     // made edits silently change it, while the overlapping copy was obscured.
     set((s) => ({
       nodes: [...s.nodes.map((node) => ({ ...node, selected: false })), { ...newNode, selected: true }],
-      selectedNodeId: newId,
+      selectedNodeId: newKey,
       selectedEdgeId: null,
       isDirty: true,
     }));
@@ -473,67 +574,74 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   },
 
   // ── Edges ──
-  addEdge: (edge) => {
-    const flowEdge = stageEdgeToFlowEdge(edge);
-    const state = get();
-    const testEdges = [...state.edges, flowEdge];
-    if (detectCycles(state.nodes, testEdges)) return;
-    set((s) => ({ edges: [...s.edges, flowEdge], isDirty: true }));
-    get().pushHistory();
-  },
-
-  removeEdge: (edgeId) => {
+  removeEdge: (id) => {
     set((state) => ({
-      edges: state.edges.filter((e) => e.id !== edgeId),
-      selectedEdgeId: state.selectedEdgeId === edgeId ? null : state.selectedEdgeId,
+      edges: state.edges.filter((e) => e.id !== id),
+      selectedEdgeId: state.selectedEdgeId === id ? null : state.selectedEdgeId,
       isDirty: true,
     }));
     get().pushHistory();
   },
 
-  updateEdgeType: (edgeId, edgeType) => {
+  updateEdge: (id, updates) => {
     set((state) => ({
       edges: state.edges.map((e) => {
-        if (e.id !== edgeId) return e;
-        return {
-          ...e,
-          data: e.data ? { ...e.data, edgeType, edge: { ...e.data.edge, edgeType } } : e.data,
-        };
+        if (e.id !== id || !e.data) return e;
+        // The endpoints are the edge's identity; changing them is a new edge.
+        const edge = patch(e.data.edge, updates);
+        return { ...e, data: { ...e.data, edge: { ...edge, from: e.source, to: e.target } } };
       }),
       isDirty: true,
     }));
-    get().pushHistory();
+    get().pushHistory(`edge:${id}:${Object.keys(updates).join(',')}`);
   },
 
   // ── Selection ──
   selectNode: (nodeId) => set({ selectedNodeId: nodeId, selectedEdgeId: null }),
-  selectEdge: (edgeId) => set({ selectedEdgeId: edgeId, selectedNodeId: null }),
+  selectEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
 
-  // ── Definition props ──
-  setName: (name) => set({ name, isDirty: true }),
-  setDescription: (description) => set({ description, isDirty: true }),
-  setSessionMode: (sessionMode) => set({ sessionMode, isDirty: true }),
-  setHarnessConfig: (harnessConfig) => set({ harnessConfig, isDirty: true }),
-  setVariables: (variables) => set({ variables, isDirty: true }),
-  setTags: (tags) => set({ tags, isDirty: true }),
+  // ── Workflow settings ──
+  updateWorkflow: (updates) => set((s) => ({ workflow: patch(s.workflow, updates), isDirty: true })),
+  setName: (name) => get().updateWorkflow({ name }),
+  setProjectId: (projectId) =>
+    set((s) => ({
+      // Codebase aliases belong to the project, so they go with it.
+      workflow: patch(s.workflow, {
+        projectId: projectId ?? undefined,
+        lifecycle: { ...s.workflow.lifecycle, codebaseAliases: [] },
+      }),
+      isDirty: true,
+    })),
+  setCodebaseAliases: (codebaseAliases) =>
+    set((s) => ({ workflow: { ...s.workflow, lifecycle: { ...s.workflow.lifecycle, codebaseAliases } }, isDirty: true })),
   // A PR needs a pushed branch and a push needs a commit, so turning one off
   // turns off everything downstream of it — the same rule the chat options and
   // the server's own flow follow.
-  setAutoCommit: (autoCommit) =>
-    set(autoCommit ? { autoCommit, isDirty: true } : { autoCommit, autoPush: false, autoCreatePR: false, isDirty: true }),
-  setAutoPush: (autoPush) =>
-    set(autoPush ? { autoPush, autoCommit: true, isDirty: true } : { autoPush, autoCreatePR: false, isDirty: true }),
-  setAutoCreatePR: (autoCreatePR) =>
-    set(autoCreatePR ? { autoCreatePR, autoPush: true, autoCommit: true, isDirty: true } : { autoCreatePR, isDirty: true }),
-  setProjectId: (projectId) => set({ projectId, isDirty: true, selectedCodebases: [] }),
-  setSelectedCodebases: (selectedCodebases) => set({ selectedCodebases, isDirty: true }),
-  setHooks: (hooks) => set({ hooks, isDirty: true }),
+  setPostProcessing: (flag, value) =>
+    set((s) => {
+      const pp = s.workflow.lifecycle.postProcessing;
+      const next =
+        flag === 'autoCommit'
+          ? value
+            ? { ...pp, autoCommit: true }
+            : { ...pp, autoCommit: false, autoPush: false, autoCreatePR: false }
+          : flag === 'autoPush'
+            ? value
+              ? { ...pp, autoPush: true, autoCommit: true }
+              : { ...pp, autoPush: false, autoCreatePR: false }
+            : value
+              ? { ...pp, autoCreatePR: true, autoPush: true, autoCommit: true }
+              : { ...pp, autoCreatePR: false };
+      return {
+        workflow: { ...s.workflow, lifecycle: { ...s.workflow.lifecycle, postProcessing: next } },
+        isDirty: true,
+      };
+    }),
 
   // ── State tracking ──
   markDirty: () => set({ isDirty: true }),
   markSaving: (saving) => set({ isSaving: saving }),
-  markSaved: () => set({ isDirty: false, isSaving: false, lastSavedAt: new Date() }),
-  setValidationErrors: (errors) => set({ validationErrors: errors }),
+  setIssues: (issues, graph) => set({ issues: locateIssues(issues, graph) }),
 
   // ── Undo/Redo ──
   pushHistory: (key) => {
@@ -601,94 +709,11 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
 
   // ── Validation ──
   validate: () => {
-    const state = get();
-    const errors: ValidationError[] = [];
-
-    if (state.nodes.length === 0) {
-      errors.push({ type: 'no_stages', message: 'Workflow must have at least one stage' });
-    }
-
-    // Check for cycles
-    if (detectCycles(state.nodes, state.edges)) {
-      errors.push({ type: 'cycle', message: 'DAG contains cycles — stages cannot have circular dependencies' });
-    }
-
-    // Check for self-edges
-    for (const edge of state.edges) {
-      if (edge.source === edge.target) {
-        errors.push({
-          type: 'self_edge',
-          message: `Stage "${edge.source}" has a self-referencing edge`,
-          stageIds: [edge.source],
-        });
-      }
-    }
-
-    // Check for duplicate edges
-    const edgeKeys = new Set<string>();
-    for (const edge of state.edges) {
-      const key = `${edge.source}->${edge.target}`;
-      if (edgeKeys.has(key)) {
-        errors.push({
-          type: 'duplicate_edge',
-          message: `Duplicate edge from "${edge.source}" to "${edge.target}"`,
-        });
-      }
-      edgeKeys.add(key);
-    }
-
-    // A stage needs SOMETHING to drive it: prompts, or a bound agent whose
-    // instructions are the instruction. `StageBuilder._build` uses the same rule, so
-    // rejecting an agent-only stage here would make the builder stricter than
-    // the scripts it is supposed to be equivalent to.
-    for (const node of state.nodes) {
-      const stage = node.data.stage;
-      const hasAgent = !!stage.agentRef;
-      if ((!stage.prompts || stage.prompts.length === 0) && !hasAgent) {
-        errors.push({
-          type: 'missing_prompts',
-          message: `Stage "${stage.name}" has no prompts or agent configured`,
-          stageIds: [stage.id],
-        });
-      }
-    }
-
-    // Check {{variable}} references in prompts resolve to a declared variable.
-    // Unresolved placeholders leak literally into the prompt sent to the model
-    // (see interpolateVariables in packages/shared), so surface them at build time.
-    const declared = new Set(state.variables.map((v) => v.name));
-    // System-injected variables (workspace path, run id, repo paths, etc.) are
-    // provided at runtime and must not be flagged as undefined here.
-    const isSystemVar = (key: string) =>
-      key.startsWith('__') || key.startsWith('repo_path_') || key.startsWith('repo_branch_');
-    // Tolerate optional surrounding whitespace; key may be a dotted path — only
-    // the first segment must resolve to a declared/system variable.
-    const placeholderPattern = /\{\{\s*([\w.\-]+)\s*\}\}/g;
-    for (const node of state.nodes) {
-      const stage = node.data.stage;
-      const referenced = new Set<string>();
-      for (const prompt of stage.prompts ?? []) {
-        const text = prompt.text;
-        if (!text) continue;
-        for (const match of text.matchAll(placeholderPattern)) {
-          const root = match[1]!.split('.')[0]!.trim();
-          if (root && !declared.has(root) && !isSystemVar(root)) {
-            referenced.add(root);
-          }
-        }
-      }
-      if (referenced.size > 0) {
-        const names = [...referenced].map((n) => `{{${n}}}`).join(', ');
-        errors.push({
-          type: 'undefined_variable',
-          message: `Stage "${stage.name}" references undefined variable(s): ${names}. Declare them in workflow Variables or remove the placeholder.`,
-          stageIds: [stage.id],
-        });
-      }
-    }
-
-    set({ validationErrors: errors });
-    return errors;
+    const graph = get().toGraph();
+    const { issues } = validateWorkflow(graph, { engine: ENGINE_LEVEL });
+    const located = locateIssues(issues, graph);
+    set({ issues: located });
+    return located;
   },
 
   // ── Selectors ──
@@ -699,7 +724,6 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     return node?.data.stage ?? null;
   },
 }));
-
 
 // HMR-split-proof: every module instance shares the first-created store.
 // See lib/globalSingleton.ts for why this is load-bearing in dev.

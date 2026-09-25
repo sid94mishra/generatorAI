@@ -18,6 +18,7 @@
     "@generatorai/client-runtime": "workspace:*",
     "@generatorai/design-tokens": "workspace:*",
     "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*",
     "@pierre/diffs": "^1.2.12",
     "@pierre/trees": "1.0.0-beta.6",
     "@radix-ui/react-alert-dialog": "^1.1.19",

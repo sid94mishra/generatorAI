@@ -2,13 +2,44 @@
 // VariablesTab — Compact variable editor with table-like layout
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Plus, Trash2, ChevronDown, ChevronRight, Info } from 'lucide-react';
-import type { VariableDefinition } from '@generatorai/shared';
+import {
+  FORBIDDEN_VARIABLE_NAME_PATTERN,
+  RESERVED_ROOTS,
+  VARIABLE_NAME_PATTERN,
+  type VariableDefinition,
+} from '@generatorai/workflow-spec';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { Button, Input, Select } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
+import { FieldIssues } from '../engineGate.js';
+
+/**
+ * Why `name` cannot be a variable name, or null. Mirrors the spec schema so
+ * the problem shows while typing rather than as a failed save: identifiers
+ * only, not an expression root (`variables`, `stages`, `run`, …) and not a
+ * reserved system prefix (`__`, `repo_path_`, `repo_branch_`).
+ */
+export function variableNameError(name: string, otherNames: readonly string[]): string | null {
+  if (!name) return 'A name is required';
+  if (!VARIABLE_NAME_PATTERN.test(name)) return 'Use letters, digits and _ (not starting with a digit)';
+  if ((RESERVED_ROOTS as readonly string[]).includes(name)) return `'${name}' is a reserved expression root`;
+  if (FORBIDDEN_VARIABLE_NAME_PATTERN.test(name)) {
+    return 'Names starting with __, repo_path_ or repo_branch_ are reserved (use run.codebases.<alias>)';
+  }
+  if (otherNames.includes(name)) return `Another variable is already called '${name}'`;
+  return null;
+}
+
+/** Choice options typed as one comma-separated string (parsed on blur, D-11). */
+export function parseOptions(raw: string): string[] {
+  return [...new Set(raw.split(',').map((s) => s.trim()).filter(Boolean))];
+}
+
+let rowIdCounter = 0;
+const nextRowId = () => `var-row-${++rowIdCounter}`;
 
 const TYPE_LABELS: Record<string, { label: string; color: string }> = {
   string: { label: 'String', color: 'bg-info-muted text-info' },
@@ -56,9 +87,23 @@ export function isAutoLabel(label: string | undefined, name: string): boolean {
 }
 
 export function VariablesTab() {
-  const variables = useWorkflowBuilderStore((s) => s.variables);
-  const setVariables = useWorkflowBuilderStore((s) => s.setVariables);
+  const variables = useWorkflowBuilderStore((s) => s.workflow.variables);
+  const issues = useWorkflowBuilderStore((s) => s.issues);
+  const updateWorkflow = useWorkflowBuilderStore((s) => s.updateWorkflow);
+  const setVariables = useCallback(
+    (next: VariableDefinition[]) => updateWorkflow({ variables: next }),
+    [updateWorkflow],
+  );
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
+
+  // Stable row identities (D-10). Keyed by name, a row remounted on every
+  // keystroke of a rename and the input lost focus. Rows added or removed
+  // here keep their ids; a list replaced from outside (undo, reload) gets
+  // fresh ones.
+  const rowIds = useRef<string[]>([]);
+  if (rowIds.current.length !== variables.length) {
+    rowIds.current = variables.map((_, i) => rowIds.current[i] ?? nextRowId());
+  }
 
   const addVariable = useCallback(() => {
     const baseName = 'variable';
@@ -71,6 +116,7 @@ export function VariablesTab() {
       label: `Variable ${counter}`,
       required: false,
     };
+    rowIds.current = [...rowIds.current, nextRowId()];
     setVariables([...variables, newVar]);
     setExpandedIndex(variables.length);
   }, [variables, setVariables]);
@@ -97,6 +143,7 @@ export function VariablesTab() {
 
   const removeVariable = useCallback(
     (index: number) => {
+      rowIds.current = rowIds.current.filter((_, i) => i !== index);
       setVariables(variables.filter((_, i) => i !== index));
       if (expandedIndex === index) setExpandedIndex(null);
       else if (expandedIndex !== null && expandedIndex > index) setExpandedIndex(expandedIndex - 1);
@@ -148,9 +195,14 @@ export function VariablesTab() {
           {variables.map((variable, index) => {
             const isExpanded = expandedIndex === index;
             const typeInfo = TYPE_LABELS[variable.type] ?? TYPE_LABELS['string']!;
+            const nameError = variableNameError(
+              variable.name,
+              variables.filter((_, i) => i !== index).map((v) => v.name),
+            );
+            const rowIssues = issues.filter((i) => i.path.startsWith(`/workflow/variables/${index}/`) || i.path === `/workflow/variables/${index}`);
             return (
               <div
-                key={variable.name}
+                key={rowIds.current[index]}
                 className={cn(
                   'group rounded-lg border transition-all',
                   isExpanded
@@ -168,8 +220,8 @@ export function VariablesTab() {
                   ) : (
                     <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
                   )}
-                  <code className="text-xs font-mono text-foreground min-w-[80px]">
-                    {variable.name}
+                  <code className={cn('text-xs font-mono min-w-[80px]', nameError ? 'text-danger' : 'text-foreground')}>
+                    {variable.name || '(unnamed)'}
                   </code>
                   <span className="text-xs text-muted-foreground flex-1 truncate">
                     {variable.label}
@@ -208,7 +260,10 @@ export function VariablesTab() {
                           onChange={(e) => updateVariable(index, { name: e.target.value })}
                           className="h-auto px-2.5 py-1.5 text-xs font-mono"
                           placeholder="variableName"
+                          aria-invalid={nameError ? true : undefined}
+                          aria-label="Variable name"
                         />
+                        {nameError && <p className="mt-1 text-[11px] text-danger">{nameError}</p>}
                       </div>
                       <div>
                         <label className="block text-[11px] font-medium text-muted-foreground mb-1">Label</label>
@@ -218,7 +273,9 @@ export function VariablesTab() {
                           onChange={(e) => updateVariable(index, { label: e.target.value })}
                           className="h-auto px-2.5 py-1.5 text-xs"
                           placeholder="Display label"
+                          aria-label="Variable label"
                         />
+                        {!variable.label.trim() && <p className="mt-1 text-[11px] text-danger">A label is required</p>}
                       </div>
                     </div>
                     <div className="grid grid-cols-2 gap-3">
@@ -266,19 +323,9 @@ export function VariablesTab() {
                         <label className="block text-[11px] font-medium text-muted-foreground mb-1">
                           Options (comma-separated)
                         </label>
-                        <Input
-                          type="text"
-                          value={variable.options?.join(', ') ?? ''}
-                          onChange={(e) =>
-                            updateVariable(index, {
-                              options: e.target.value
-                                .split(',')
-                                .map((s) => s.trim())
-                                .filter(Boolean),
-                            })
-                          }
-                          className="h-auto px-2.5 py-1.5 text-xs"
-                          placeholder="option1, option2, option3"
+                        <OptionsInput
+                          options={variable.options}
+                          onCommit={(options) => updateVariable(index, { options: options.length > 0 ? options : undefined })}
                         />
                       </div>
                     )}
@@ -296,6 +343,7 @@ export function VariablesTab() {
                         placeholder="Optional default"
                       />
                     </div>
+                    <FieldIssues issues={rowIssues} />
                     <div className="flex justify-end">
                       <Button
                         onClick={() => removeVariable(index)}
@@ -315,5 +363,33 @@ export function VariablesTab() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * Choice options edited as the raw text the user types and parsed on blur.
+ * Parsing on every keystroke turned "a," back into "a", so the comma
+ * vanished and a second option could only be pasted (D-11).
+ */
+function OptionsInput({
+  options,
+  onCommit,
+}: {
+  options: string[] | undefined;
+  onCommit: (options: string[]) => void;
+}) {
+  const joined = (options ?? []).join(', ');
+  const [draft, setDraft] = useState(joined);
+  useEffect(() => setDraft(joined), [joined]);
+  return (
+    <Input
+      type="text"
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => onCommit(parseOptions(draft))}
+      className="h-auto px-2.5 py-1.5 text-xs"
+      placeholder="option1, option2, option3"
+      aria-label="Choice options"
+    />
   );
 }

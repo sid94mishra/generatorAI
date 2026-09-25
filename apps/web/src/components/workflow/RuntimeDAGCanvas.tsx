@@ -25,7 +25,8 @@ import { getLayoutedElements } from '@/utils/dagLayout.js';
 import { cn } from '@/lib/utils.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import type { Node, Edge } from '@xyflow/react';
-import type { StageRun, StageRunStatus, StageEdge } from '@generatorai/shared';
+import type { StageRun, StageRunStatus } from '@generatorai/shared';
+import type { EdgeSpec } from '@generatorai/workflow-spec';
 
 // ── Node/Edge data types ──
 
@@ -75,8 +76,8 @@ function stageRunToNode(
 // ── Main Component ──
 
 interface RuntimeDAGCanvasProps {
-  /** Definition-time edges for DAG structure */
-  definitionEdges?: StageEdge[];
+  /** Edges of the run's pinned graph (DAG structure) */
+  definitionEdges?: EdgeSpec[];
   className?: string;
 }
 
@@ -101,12 +102,12 @@ function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCan
       );
     });
 
-    // Build a stageDefinitionId → stageRunId map for edge creation
+    // Build a stageKey → stageRunId map for edge creation
     const defToRunId = new Map<string, string>();
     const stageRunByDefId = new Map<string, StageRun>();
     for (const sr of run.stageRuns) {
-      defToRunId.set(sr.stageDefinitionId, sr.id);
-      stageRunByDefId.set(sr.stageDefinitionId, sr);
+      defToRunId.set(sr.stageKey, sr.id);
+      stageRunByDefId.set(sr.stageKey, sr);
     }
 
     // Build edges from definition edges (mapping definition IDs → runtime IDs)
@@ -115,18 +116,18 @@ function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCan
     if (definitionEdges && definitionEdges.length > 0) {
       // Use the actual DAG structure from the workflow definition
       for (const defEdge of definitionEdges) {
-        const sourceRunId = defToRunId.get(defEdge.fromStageId);
-        const targetRunId = defToRunId.get(defEdge.toStageId);
+        const sourceRunId = defToRunId.get(defEdge.from);
+        const targetRunId = defToRunId.get(defEdge.to);
         if (sourceRunId && targetRunId) {
-          const sourceStage = stageRunByDefId.get(defEdge.fromStageId);
-          const targetStage = stageRunByDefId.get(defEdge.toStageId);
+          const sourceStage = stageRunByDefId.get(defEdge.from);
+          const targetStage = stageRunByDefId.get(defEdge.to);
           rawEdges.push({
             id: `e-${sourceRunId}-${targetRunId}`,
             source: sourceRunId,
             target: targetRunId,
             type: 'runtimeStageEdge',
             data: {
-              edgeType: defEdge.edgeType,
+              edgeType: defEdge.on,
               sourceStatus: sourceStage?.status ?? 'pending',
               targetStatus: targetStage?.status ?? 'pending',
             },

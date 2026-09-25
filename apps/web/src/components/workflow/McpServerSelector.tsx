@@ -10,16 +10,17 @@ import { useSystemMcpServers, useProjectMcpServers } from '@/hooks/projectQuerie
 import { useCatalogPrefsStore } from '@/stores/catalogPrefsStore.js';
 import { cn } from '@/lib/utils.js';
 import { Badge, Button } from '@/components/ui/index.js';
-import type { StageDefinition, HarnessConfig } from '@generatorai/shared';
+import type { AgentStage } from '@generatorai/workflow-spec';
+import { patchSession } from './sessionPatch.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 
 interface McpServerSelectorProps {
-  stage: StageDefinition;
-  onUpdate: (updates: Partial<StageDefinition>) => void;
+  stage: AgentStage;
+  onUpdate: (updates: Partial<AgentStage>) => void;
 }
 
 export function McpServerSelector({ stage, onUpdate }: McpServerSelectorProps) {
-  const projectId = useWorkflowBuilderStore((s) => s.projectId);
+  const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? null);
   const { data: systemServers, isLoading: systemLoading } = useSystemMcpServers();
   const { data: projectServers, isLoading: projectLoading } = useProjectMcpServers(projectId ?? undefined);
 
@@ -32,26 +33,21 @@ export function McpServerSelector({ stage, onUpdate }: McpServerSelectorProps) {
     ...(projectServers ?? []),
   ], [systemServers, projectServers, disabledMcp]);
 
-  // Exclusions live on `excludedMcpServerIds`.
+  // Exclusions live on `session.mcp.excludedIds`.
   //
   // They used to be written into `excludedTools`, which is a list of TOOL
   // names the harness must not expose — putting server names there excluded
   // nothing (no tool is called `github`) while silently corrupting the tool
   // deny-list. Keyed by ID, not name, because two registries can each define
   // a server called "github".
-  const currentOverrides = stage.harnessConfigOverrides as Partial<HarnessConfig> | undefined;
-  const excludedServers = useMemo(
-    () => new Set(currentOverrides?.excludedMcpServerIds ?? []),
-    [currentOverrides],
-  );
+  const mcp = stage.session?.mcp;
+  const excludedServers = useMemo(() => new Set(mcp?.excludedIds ?? []), [mcp]);
 
   const writeExcluded = (ids: string[]) => {
-    onUpdate({
-      harnessConfigOverrides: {
-        ...currentOverrides,
-        excludedMcpServerIds: ids.length > 0 ? ids : undefined,
-      } as Partial<HarnessConfig>,
-    });
+    const next = { ...mcp };
+    if (ids.length > 0) next.excludedIds = ids;
+    else delete next.excludedIds;
+    onUpdate(patchSession(stage, { mcp: Object.keys(next).length > 0 ? next : undefined }));
   };
 
   const toggleServer = (serverId: string) => {

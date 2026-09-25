@@ -1,28 +1,45 @@
 // ────────────────────────────────────────────────────────────────
-// StagePropertiesPanel — Modern right sidebar for editing a stage
-// Collapsible accordion sections, sub-tabs for prompts/files/agent,
-// MCP server selector, tabbed header
+// StagePropertiesPanel — right sidebar editing one stage (or one edge)
+// of the v2 `WorkflowGraph`. Collapsible accordion sections, a
+// Properties / Execution tab bar, validator issues shown next to the
+// field they point at. Controls the current engine cannot execute are
+// rendered disabled with the upgrade tooltip (`EngineGated`).
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useState } from 'react';
-import { X, Settings2, FileText, Layers, Cpu, Zap, Shield, Bot, Server, Wand2, Webhook, Link2, Plus, Trash2, Brain, CheckCircle2 } from 'lucide-react';
-import type {
-  StageDefinition,
-  StageCondition,
-  PromptDefinition,
-  HarnessConfig,
-  ContextFilter,
-  HookDefinition,
-  ResultValidationRule,
-} from '@generatorai/shared';
-import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import {
+  X, Settings2, FileText, Layers, Cpu, Zap, Shield, Bot, Server, Wand2, Webhook, Plus, Trash2,
+  CheckCircle2, Clock, Braces, UserCheck, GitMerge, AlertCircle,
+} from 'lucide-react';
+import {
+  AGENT_MODES,
+  ApprovalSpecSchema,
+  EDGE_ON_VALUES,
+  REASONING_EFFORTS,
+  RepairPolicySchema,
+  RetryPolicySchema,
+  STAGE_HOOK_PHASES,
+  HOOK_PHASE_INFO,
+  type AgentStage,
+  type EdgeOn,
+  type EdgeSpec,
+  type HookDefinition,
+  type PromptDefinition,
+  type ResultValidationRule,
+  type SessionSpec,
+} from '@generatorai/workflow-spec';
+import { useWorkflowBuilderStore, type BuilderIssue } from '@/stores/workflowBuilderStore.js';
 import { PromptEditor } from './PromptEditor.js';
 import { McpServerSelector } from './McpServerSelector.js';
 import { SkillSelector } from './SkillSelector.js';
 import { AgentBindingSection } from './AgentBindingSection.js';
 import { NumberStepper } from './NumberStepper.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
+import { patchSession } from './sessionPatch.js';
+import { EDGE_TYPE_LABELS, EDGE_TYPE_HINTS } from './edgeTypeStyles.js';
+import { EngineGated, ENGINE_SUPPORTS_V2, ENGINE_UPGRADE_HINT, ExpressionField, FieldIssues, issuesAt } from './engineGate.js';
 import { Button, Input, Select, Textarea, ToggleSwitch } from '@/components/ui/index.js';
+import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
 import { cn } from '@/lib/utils.js';
 
@@ -32,22 +49,40 @@ interface StagePropertiesPanelProps {
 
 type PanelTab = 'properties' | 'execution';
 
+/** Props every section receives. */
+interface SectionProps {
+  stage: AgentStage;
+  onUpdate: (updates: Partial<AgentStage>) => void;
+  issues: readonly BuilderIssue[];
+}
+
 export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
   const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
+  const selectedEdgeId = useWorkflowBuilderStore((s) => s.selectedEdgeId);
   const stage = useWorkflowBuilderStore((s) => {
     const node = s.nodes.find((n) => n.id === s.selectedNodeId);
-    return node?.data?.stage as StageDefinition | undefined;
+    return node?.data?.stage;
   });
+  const allIssues = useWorkflowBuilderStore((s) => s.issues);
   const updateStage = useWorkflowBuilderStore((s) => s.updateStage);
   const [activeTab, setActiveTab] = useState<PanelTab>('properties');
 
+  const stageIssues = useMemo(
+    () => (stage ? allIssues.filter((i) => i.stageKey === stage.key) : []),
+    [allIssues, stage],
+  );
+
   const handleUpdate = useCallback(
-    (updates: Partial<StageDefinition>) => {
+    (updates: Partial<AgentStage>) => {
       if (!selectedNodeId) return;
       updateStage(selectedNodeId, updates);
     },
     [selectedNodeId, updateStage],
   );
+
+  if (!stage && selectedEdgeId) {
+    return <EdgePropertiesPanel edgeId={selectedEdgeId} onClose={onClose} />;
+  }
 
   // Empty state
   if (!stage) {
@@ -64,12 +99,7 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
     );
   }
 
-  const conditionOptions = [
-    { value: 'always', label: 'Always run' },
-    { value: 'on_success', label: 'On upstream success' },
-    { value: 'on_failure', label: 'On upstream failure' },
-    { value: 'expression', label: 'Custom expression' },
-  ];
+  const errorCount = stageIssues.filter((i) => i.severity === 'error').length;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -85,8 +115,9 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
               <h3 className="truncate text-sm font-semibold text-foreground">
                 {stage.name || 'Untitled Stage'}
               </h3>
-              <p className="truncate text-[11px] text-muted-foreground">
-                {stage.agentRef ?? 'Custom stage'}
+              <p className="truncate font-mono text-[11px] text-muted-foreground">
+                {stage.key}
+                {stage.session?.agentRef ? ` · ${stage.session.agentRef}` : ''}
               </p>
             </div>
           </div>
@@ -100,6 +131,13 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
             <X className="h-4 w-4" />
           </Button>
         </div>
+
+        {errorCount > 0 && (
+          <p className="mx-4 mb-2 flex items-center gap-1.5 rounded-md bg-danger-muted px-2 py-1 text-[11px] text-danger">
+            <AlertCircle className="h-3 w-3 shrink-0" />
+            {errorCount} {errorCount === 1 ? 'issue' : 'issues'} in this stage (shown next to each field)
+          </p>
+        )}
 
         {/* Tab bar */}
         <div className="flex px-4 gap-1" role="tablist">
@@ -128,28 +166,23 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
         </div>
       </div>
 
-      {/* Scrollable form body */}
-      <div className="flex-1 overflow-y-auto" role="tabpanel" id={`tabpanel-${activeTab}`}>
+      {/* Scrollable form body. Keyed by stage so local drafts reset on selection. */}
+      <div className="flex-1 overflow-y-auto" role="tabpanel" id={`tabpanel-${activeTab}`} key={stage.key}>
         {activeTab === 'properties' ? (
-          <PropertiesTab stage={stage} onUpdate={handleUpdate} />
+          <PropertiesTab stage={stage} onUpdate={handleUpdate} issues={stageIssues} />
         ) : (
-          <ExecutionTab stage={stage} onUpdate={handleUpdate} conditionOptions={conditionOptions} />
+          <ExecutionTab stage={stage} onUpdate={handleUpdate} issues={stageIssues} />
         )}
       </div>
     </div>
   );
 }
 
-// ── Prompt/Context sub-tab type ──
+// ── Properties Tab ──
+
 type PromptSubTab = 'inline' | 'agent';
 
-function PropertiesTab({
-  stage,
-  onUpdate,
-}: {
-  stage: StageDefinition;
-  onUpdate: (updates: Partial<StageDefinition>) => void;
-}) {
+function PropertiesTab({ stage, onUpdate, issues }: SectionProps) {
   const [promptSubTab, setPromptSubTab] = useState<PromptSubTab>('inline');
 
   return (
@@ -164,7 +197,9 @@ function PropertiesTab({
             onChange={(e) => onUpdate({ name: e.target.value })}
             placeholder="Stage name"
           />
+          <FieldIssues issues={issuesAt(issues, '/name')} />
         </div>
+        <StageKeyField stage={stage} issues={issuesAt(issues, '/key')} />
         <div>
           <label htmlFor="stage-description" className="mb-1.5 block text-xs font-medium text-foreground">Description</label>
           <Textarea
@@ -178,25 +213,13 @@ function PropertiesTab({
         </div>
       </CollapsibleSection>
 
-      {/* Model */}
+      {/* Model: the stage session over the workflow session */}
       <CollapsibleSection title="Model" icon={<Cpu className="h-3.5 w-3.5" />} defaultOpen>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Model Override</label>
           <ModelPicker
-            value={stage.harnessConfigOverrides?.model ?? ''}
-            onChange={(v) => {
-              const model = v || undefined;
-              onUpdate({
-                harnessConfigOverrides: model
-                  ? { ...stage.harnessConfigOverrides, model }
-                  : stage.harnessConfigOverrides
-                    ? (() => {
-                        const { model: _m, ...rest } = stage.harnessConfigOverrides as HarnessConfig;
-                        return Object.keys(rest).length ? rest : undefined;
-                      })()
-                    : undefined,
-              });
-            }}
+            value={stage.session?.model ?? ''}
+            onChange={(v) => onUpdate(patchSession(stage, { model: v || undefined }))}
             allowEmpty
             emptyLabel="Workflow default"
             emptyDescription="Inherit from workflow settings"
@@ -208,33 +231,39 @@ function PropertiesTab({
           <label className="mb-1.5 block text-xs font-medium text-foreground">Reasoning Effort</label>
           <Select
             aria-label="Reasoning Effort"
-            value={stage.harnessConfigOverrides?.reasoningEffort ?? ''}
-            onChange={(v) => {
-              const effort = v || undefined;
-              onUpdate({
-                harnessConfigOverrides: {
-                  ...stage.harnessConfigOverrides,
-                  reasoningEffort: effort as HarnessConfig['reasoningEffort'],
-                },
-              });
-            }}
+            value={stage.session?.reasoningEffort ?? ''}
+            onChange={(v) =>
+              onUpdate(patchSession(stage, { reasoningEffort: (v || undefined) as SessionSpec['reasoningEffort'] }))
+            }
             options={[
               { value: '', label: 'Default' },
-              { value: 'low', label: 'Low', description: 'Faster, less thorough' },
-              { value: 'medium', label: 'Medium', description: 'Balanced' },
-              { value: 'high', label: 'High', description: 'More thorough reasoning' },
-              { value: 'xhigh', label: 'Extra High', description: 'Maximum reasoning depth' },
+              ...REASONING_EFFORTS.map((e) => ({ value: e, label: e[0]!.toUpperCase() + e.slice(1) })),
             ]}
             placeholder="Default"
           />
         </div>
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-foreground">Agent Mode</label>
+          <Select
+            aria-label="Agent Mode"
+            value={stage.session?.defaultAgentMode ?? ''}
+            onChange={(v) =>
+              onUpdate(patchSession(stage, { defaultAgentMode: (v || undefined) as SessionSpec['defaultAgentMode'] }))
+            }
+            options={[
+              { value: '', label: 'Workflow default' },
+              ...AGENT_MODES.map((m) => ({ value: m, label: m === 'plan' ? 'Plan' : 'Auto' })),
+            ]}
+          />
+        </div>
+        <FieldIssues issues={issuesAt(issues, '/session')} />
       </CollapsibleSection>
 
-      {/* Prompts & Context - with sub-tabs */}
+      {/* Prompts & Agent - with sub-tabs */}
       <CollapsibleSection
         title="Prompts & Context"
         icon={<FileText className="h-3.5 w-3.5" />}
-        badge={String(stage.prompts?.length ?? 0)}
+        badge={String(stage.prompts.length)}
         defaultOpen
       >
         {/* Sub-tab bar */}
@@ -265,11 +294,14 @@ function PropertiesTab({
 
         {/* Sub-tab content */}
         {promptSubTab === 'inline' && (
-          <PromptEditor
-            prompts={stage.prompts ?? []}
-            onChange={(prompts: PromptDefinition[]) => onUpdate({ prompts })}
-            contentLabel="Prompt"
-          />
+          <>
+            <PromptEditor
+              prompts={stage.prompts}
+              onChange={(prompts: PromptDefinition[]) => onUpdate({ prompts })}
+              contentLabel="Prompt"
+            />
+            <FieldIssues issues={issuesAt(issues, '/prompts')} />
+          </>
         )}
         {promptSubTab === 'agent' && (
           <AgentBindingSection stage={stage} onUpdate={onUpdate} />
@@ -285,165 +317,506 @@ function PropertiesTab({
       <CollapsibleSection title="MCP Servers" icon={<Server className="h-3.5 w-3.5" />} defaultOpen={false}>
         <McpServerSelector stage={stage} onUpdate={onUpdate} />
       </CollapsibleSection>
+    </div>
+  );
+}
 
+/**
+ * The stage key: the stable identity edges, context sources and
+ * `stages.<key>` expressions refer to. Edited as a draft and renamed on
+ * blur, so a half-typed key never renames anything.
+ */
+function StageKeyField({ stage, issues }: { stage: AgentStage; issues: readonly BuilderIssue[] }) {
+  const renameStageKey = useWorkflowBuilderStore((s) => s.renameStageKey);
+  const [draft, setDraft] = useState(stage.key);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setDraft(stage.key);
+    setError(null);
+  }, [stage.key]);
+
+  const commit = () => {
+    const next = draft.trim();
+    if (next === stage.key) return;
+    const failure = renameStageKey(stage.key, next);
+    setError(failure);
+    if (failure) setDraft(stage.key);
+  };
+
+  return (
+    <div>
+      <label htmlFor="stage-key" className="mb-1.5 block text-xs font-medium text-foreground">Key</label>
+      <Input
+        id="stage-key"
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') commit();
+        }}
+        className="font-mono text-xs"
+        placeholder="stage_key"
+        spellCheck={false}
+      />
+      <p className="mt-1 text-[10px] text-muted-foreground">
+        Edges, context sources and <code>stages.{stage.key}</code> expressions refer to the stage by key.
+      </p>
+      {error && <p className="mt-1 text-[11px] text-danger">{error}</p>}
+      <FieldIssues issues={issues} />
     </div>
   );
 }
 
 // ── Execution Tab ──
 
-function ExecutionTab({
-  stage,
-  onUpdate,
-  conditionOptions,
-}: {
-  stage: StageDefinition;
-  onUpdate: (updates: Partial<StageDefinition>) => void;
-  conditionOptions: { value: string; label: string }[];
-}) {
+function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
   return (
     <div>
       <CollapsibleSection title="Execution" icon={<Zap className="h-3.5 w-3.5" />} defaultOpen>
         <div>
-          <label className="mb-1.5 block text-xs font-medium text-foreground">Run Condition</label>
-          <Select
-            aria-label="Run Condition"
-            value={stage.condition?.type ?? 'always'}
-            onChange={(v) => {
-              const type = v as StageCondition['type'];
-              onUpdate({
-                condition: type === 'expression'
-                  ? { type, expression: stage.condition?.expression ?? '' }
-                  : { type },
-              });
-            }}
-            options={conditionOptions}
+          <label htmlFor="stage-guard" className="mb-1.5 block text-xs font-medium text-foreground">Guard</label>
+          <ExpressionField
+            id="stage-guard"
+            value={stage.guard ?? ''}
+            onChange={(v) => onUpdate({ guard: v.trim() ? v : undefined })}
+            // Expression v2: `variables.<path>`, `stages.<key>.status`,
+            // `== != < <= > >=`, `in`, `and / or / not`, and functions such
+            // as len() and exists(). False skips the stage (guard_false).
+            placeholder="e.g. variables.env == 'prod' and stages.review.status == 'completed'"
+            issues={issuesAt(issues, '/guard')}
+            ariaLabel="Guard expression"
           />
-          {stage.condition?.type === 'expression' && (
-            <Input
-              value={stage.condition.expression ?? ''}
-              onChange={(e) =>
-                onUpdate({ condition: { type: 'expression', expression: e.target.value } })
-              }
-              className="mt-2 font-mono"
-              // Expression v2 (@generatorai/workflow-spec): `variables.<path>`,
-              // `parent.status` (the activating predecessor), `== != < <= > >=`,
-              // `in`, lower-case `and / or / not`, and functions such as
-              // len() and exists(). Equality is strict by type, and an
-              // unparseable expression never holds.
-              placeholder="e.g. parent.status == 'completed' and variables.env == 'prod'"
-            />
-          )}
+          <p className="mt-1 text-[10px] text-muted-foreground">
+            Evaluated once the stage is ready; false skips it. Leave empty to always run.
+          </p>
         </div>
+
+        <EngineGated>
+          <label className="mb-1.5 block text-xs font-medium text-foreground">Join</label>
+          <Select
+            aria-label="Join mode"
+            value={stage.join.mode}
+            disabled={!ENGINE_SUPPORTS_V2}
+            onChange={(v) =>
+              onUpdate({
+                join: v === 'all' ? { mode: 'all' } : v === 'any' ? { mode: 'any', cancelRemaining: false } : { mode: 'n_of_m', n: 1, cancelRemaining: false },
+              })
+            }
+            options={[
+              { value: 'all', label: 'All predecessors' },
+              { value: 'any', label: 'Any predecessor' },
+              { value: 'n_of_m', label: 'N of M predecessors' },
+            ]}
+          />
+        </EngineGated>
+        <FieldIssues issues={issuesAt(issues, '/join')} />
+
+        <ContextEditor stage={stage} onUpdate={onUpdate} issues={issues} />
+
+        <EngineGated>
+          <ToggleSwitch
+            checked={stage.sessionReuse === 'continue'}
+            disabled={!ENGINE_SUPPORTS_V2}
+            onChange={(checked) => onUpdate({ sessionReuse: checked ? 'continue' : 'fresh' })}
+            label="Continue the conversation across loop iterations"
+          />
+        </EngineGated>
+        <FieldIssues issues={issuesAt(issues, '/sessionReuse', '/sessionGroup')} />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Approval" icon={<UserCheck className="h-3.5 w-3.5" />} defaultOpen={!!stage.approval}>
+        <ToggleSwitch
+          checked={!!stage.approval}
+          onChange={(checked) => onUpdate({ approval: checked ? ApprovalSpecSchema.parse({}) : undefined })}
+          label="Approval required"
+          description="Pause after this stage completes and wait for a human to approve or request changes before the next stage runs."
+        />
+        {stage.approval && (
+          <div className="mt-3 space-y-3">
+            <div>
+              <label htmlFor="stage-approval-prompt" className="mb-1.5 block text-xs font-medium text-foreground">Reviewer prompt</label>
+              <Textarea
+                id="stage-approval-prompt"
+                value={stage.approval.prompt ?? ''}
+                onChange={(e) => onUpdate({ approval: { ...stage.approval!, prompt: e.target.value || undefined } })}
+                rows={2}
+                className="resize-none"
+                placeholder="What should the reviewer check?"
+              />
+            </div>
+            <ToggleSwitch
+              checked={stage.approval.allowChanges}
+              onChange={(checked) => onUpdate({ approval: { ...stage.approval!, allowChanges: checked } })}
+              label="Allow change requests"
+              description="The reviewer may send feedback, which runs another turn."
+            />
+            {stage.approval.allowChanges && (
+              <NumberStepper
+                label="Change-request rounds"
+                value={stage.approval.maxRounds}
+                onChange={(v) => onUpdate({ approval: { ...stage.approval!, maxRounds: v } })}
+                min={1}
+                max={10}
+                step={1}
+              />
+            )}
+          </div>
+        )}
+        <FieldIssues issues={issuesAt(issues, '/approval')} />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Timeouts" icon={<Clock className="h-3.5 w-3.5" />} defaultOpen={false}>
         <NumberStepper
-          label="Timeout (seconds)"
-          value={stage.timeoutMs ? stage.timeoutMs / 1000 : 0}
-          onChange={(v) => onUpdate({ timeoutMs: v > 0 ? v * 1000 : undefined })}
+          label="Attempt timeout (seconds, 0 = none)"
+          value={stage.timeouts?.attemptMs ? stage.timeouts.attemptMs / 1000 : 0}
+          onChange={(v) => {
+            const rest = { ...(stage.timeouts ?? {}) };
+            if (v > 0) rest.attemptMs = v * 1000;
+            else delete rest.attemptMs;
+            onUpdate({ timeouts: Object.keys(rest).length > 0 ? rest : undefined });
+          }}
           min={0}
-          max={3600}
+          max={86_400}
           step={30}
           unit="sec"
         />
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-foreground">Context from Predecessors</label>
-          <Select
-            aria-label="Context from Predecessors"
-            value={stage.contextFilter ?? 'summary-only'}
-            onChange={(v) => onUpdate({ contextFilter: (v || 'summary-only') as ContextFilter })}
-            options={[
-              { value: 'summary-only', label: 'Summary only (default)', description: 'Inject predecessor summaries as context' },
-              { value: 'full', label: 'Full context', description: 'Send complete predecessor output' },
-              { value: 'none', label: 'No context', description: 'Stage starts with a clean slate' },
-            ]}
-          />
-        </div>
-        <div className="pt-1">
-          <ToggleSwitch
-            checked={stage.approvalRequired === true}
-            onChange={(checked) => onUpdate({ approvalRequired: checked })}
-            label="Approval required"
-            description="Pause after this stage completes and wait for a human to approve or send feedback before the next stage runs."
-          />
-        </div>
+        {(['queueMs', 'idleMs', 'totalMs'] as const).map((field) => (
+          <EngineGated key={field}>
+            <NumberStepper
+              label={`${field === 'queueMs' ? 'Queue' : field === 'idleMs' ? 'Idle' : 'Total'} timeout (seconds)`}
+              value={stage.timeouts?.[field] ? stage.timeouts[field]! / 1000 : 0}
+              onChange={() => undefined}
+              min={0}
+              step={30}
+              unit="sec"
+            />
+          </EngineGated>
+        ))}
+        <FieldIssues issues={issuesAt(issues, '/timeouts')} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Retry Policy" icon={<Shield className="h-3.5 w-3.5" />} defaultOpen={false}>
         <ToggleSwitch
-          checked={!!stage.retryPolicy}
-          onChange={(checked) =>
-            onUpdate({
-              retryPolicy: checked
-                ? { maxRetries: 3, backoffMs: 1000, backoffMultiplier: 2 }
-                : undefined,
-            })
-          }
+          checked={!!stage.retry}
+          onChange={(checked) => onUpdate({ retry: checked ? RetryPolicySchema.parse({}) : undefined })}
           label="Retry on failure"
-          description="Automatically retry this stage if it fails"
+          description="Automatically retry this stage if an attempt fails"
         />
-        {stage.retryPolicy && (
+        {stage.retry && (
           <div className="mt-3 space-y-3">
             <NumberStepper
-              label="Max Retries"
-              value={stage.retryPolicy.maxRetries}
-              onChange={(v) =>
-                onUpdate({ retryPolicy: { ...stage.retryPolicy!, maxRetries: v } })
-              }
+              label="Max attempts (including the first)"
+              value={stage.retry.maxAttempts}
+              onChange={(v) => onUpdate({ retry: { ...stage.retry!, maxAttempts: v } })}
               min={1}
               max={10}
               step={1}
             />
             <NumberStepper
-              label="Backoff (ms)"
-              value={stage.retryPolicy.backoffMs}
-              onChange={(v) =>
-                onUpdate({ retryPolicy: { ...stage.retryPolicy!, backoffMs: v } })
-              }
-              min={100}
-              max={60000}
-              step={100}
+              label="Initial delay (ms)"
+              value={stage.retry.initialDelayMs}
+              onChange={(v) => onUpdate({ retry: { ...stage.retry!, initialDelayMs: v } })}
+              min={0}
+              max={3_600_000}
+              step={500}
               unit="ms"
             />
             <NumberStepper
-              label="Multiplier"
-              value={stage.retryPolicy.backoffMultiplier}
-              onChange={(v) =>
-                onUpdate({ retryPolicy: { ...stage.retryPolicy!, backoffMultiplier: v } })
-              }
+              label="Backoff multiplier"
+              value={stage.retry.backoffMultiplier}
+              onChange={(v) => onUpdate({ retry: { ...stage.retry!, backoffMultiplier: v } })}
               min={1}
               max={10}
               step={0.5}
               unit="x"
             />
+            <NumberStepper
+              label="Max delay (ms)"
+              value={stage.retry.maxDelayMs}
+              onChange={(v) => onUpdate({ retry: { ...stage.retry!, maxDelayMs: v } })}
+              min={0}
+              max={3_600_000}
+              step={1000}
+              unit="ms"
+            />
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-foreground">Jitter</label>
+              <Select
+                aria-label="Retry jitter"
+                value={stage.retry.jitter}
+                onChange={(v) => onUpdate({ retry: { ...stage.retry!, jitter: v as 'full' | 'equal' | 'none' } })}
+                options={[
+                  { value: 'full', label: 'Full', description: 'Random 0..delay' },
+                  { value: 'equal', label: 'Equal', description: 'Half the delay plus a random half' },
+                  { value: 'none', label: 'None', description: 'Exact delay' },
+                ]}
+              />
+            </div>
           </div>
         )}
+        <FieldIssues issues={issuesAt(issues, '/retry')} />
+
+        <div className="mt-3">
+          <label className="mb-1.5 block text-xs font-medium text-foreground">When retries are exhausted</label>
+          <Select
+            aria-label="When retries are exhausted"
+            value={stage.onExhausted ?? ''}
+            onChange={(v) => onUpdate({ onExhausted: (v || undefined) as AgentStage['onExhausted'] })}
+            options={[
+              { value: '', label: 'Engine default' },
+              { value: 'fail', label: 'Fail the stage' },
+              { value: 'pause', label: 'Pause for an operator', disabled: !ENGINE_SUPPORTS_V2, description: ENGINE_SUPPORTS_V2 ? undefined : ENGINE_UPGRADE_HINT },
+            ]}
+          />
+          <FieldIssues issues={issuesAt(issues, '/onExhausted')} />
+        </div>
+
+        <div className="mt-3">
+          <EngineGated>
+            <ToggleSwitch
+              checked={!!stage.repair}
+              disabled={!ENGINE_SUPPORTS_V2}
+              onChange={(checked) => onUpdate({ repair: checked ? RepairPolicySchema.parse({}) : undefined })}
+              label="Repair turns"
+              description="Ask the agent to fix output that fails its contract before retrying."
+            />
+          </EngineGated>
+          <FieldIssues issues={issuesAt(issues, '/repair')} />
+        </div>
       </CollapsibleSection>
 
-      {/* Result Validation */}
-      <CollapsibleSection title="Result Validation" icon={<CheckCircle2 className="h-3.5 w-3.5" />} defaultOpen={false} badge={stage.resultValidation?.length ? String(stage.resultValidation.length) : undefined}>
-        <ValidationRuleEditor
-          rules={stage.resultValidation ?? []}
-          onChange={(rules) => onUpdate({ resultValidation: rules.length > 0 ? rules : undefined })}
-        />
+      <OutputSection stage={stage} onUpdate={onUpdate} issues={issues} />
+
+      <CollapsibleSection title="Limits" icon={<GitMerge className="h-3.5 w-3.5" />} defaultOpen={false}>
+        <EngineGated>
+          <NumberStepper
+            label="Budget: max turns (0 = none)"
+            value={stage.budget?.maxTurns ?? 0}
+            onChange={() => undefined}
+            min={0}
+          />
+        </EngineGated>
+        <EngineGated>
+          <ToggleSwitch
+            checked={!!stage.compensate}
+            disabled={!ENGINE_SUPPORTS_V2}
+            onChange={() => undefined}
+            label="Compensation actions"
+            description="Undo actions run when the run fails or is cancelled."
+          />
+        </EngineGated>
+        <FieldIssues issues={issuesAt(issues, '/budget', '/compensate')} />
       </CollapsibleSection>
 
       {/* Hooks */}
       <CollapsibleSection title="Hooks" icon={<Webhook className="h-3.5 w-3.5" />} defaultOpen={false}>
-        <HookEditor hooks={stage.hooks ?? []} onChange={(hooks) => onUpdate({ hooks })} />
+        <HookEditor hooks={stage.hooks} onChange={(hooks) => onUpdate({ hooks })} />
+        <FieldIssues issues={issuesAt(issues, '/hooks')} />
       </CollapsibleSection>
     </div>
   );
 }
 
-// ── Inline Hook Editor ──
+// ── Context ──
 
-const AVAILABLE_PHASES = [
-  { value: 'pre_run', label: 'Pre Run', description: 'Before stage execution' },
-  { value: 'post_run', label: 'Post Run', description: 'After stage execution' },
-  { value: 'on_error', label: 'On Error', description: 'When stage fails' },
-  { value: 'on_cancel', label: 'On Cancel', description: 'When stage is cancelled' },
-  { value: 'pre_prompt', label: 'Pre Prompt', description: 'Before each prompt turn' },
-  { value: 'post_prompt', label: 'Post Prompt', description: 'After each prompt turn' },
-] as const;
+function ContextEditor({ stage, onUpdate, issues }: SectionProps) {
+  const otherStages = useWorkflowBuilderStore(
+    (s) => s.nodes,
+  ).filter((n) => n.id !== stage.key);
+  const from = stage.context.from;
+  const explicit = from !== undefined;
+
+  const toggleSource = (key: string) => {
+    const current = from ?? [];
+    const next = current.includes(key) ? current.filter((k) => k !== key) : [...current, key];
+    onUpdate({ context: { ...stage.context, from: next } });
+  };
+
+  return (
+    <div>
+      <label className="mb-1.5 block text-xs font-medium text-foreground">Context from Predecessors</label>
+      <Select
+        aria-label="Context mode"
+        value={stage.context.mode}
+        onChange={(v) => onUpdate({ context: { ...stage.context, mode: v as AgentStage['context']['mode'] } })}
+        options={[
+          { value: 'summary', label: 'Summary (default)', description: 'Each source stage summary' },
+          { value: 'output', label: 'Full output', description: 'The complete output text' },
+          { value: 'structured', label: 'Structured', description: 'The JSON output' },
+          { value: 'none', label: 'No context', description: 'The stage starts with a clean slate' },
+        ]}
+      />
+      {stage.context.mode !== 'none' && otherStages.length > 0 && (
+        <div className="mt-2 space-y-1">
+          <ToggleSwitch
+            checked={explicit}
+            onChange={(checked) => {
+              const context = { ...stage.context };
+              if (checked) context.from = [];
+              else delete context.from;
+              onUpdate({ context });
+            }}
+            label="Choose source stages"
+            description="Off: the direct predecessors."
+          />
+          {explicit && (
+            <div className="max-h-40 space-y-1 overflow-y-auto pt-1">
+              {otherStages.map((n) => (
+                <label key={n.id} className="flex items-center gap-2 text-xs text-foreground">
+                  <Checkbox
+                    checked={from!.includes(n.id)}
+                    onCheckedChange={() => toggleSource(n.id)}
+                    className="h-3.5 w-3.5"
+                  />
+                  <span className="truncate">{n.data.stage.name}</span>
+                  <code className="ml-auto shrink-0 text-[10px] text-muted-foreground">{n.id}</code>
+                </label>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      <FieldIssues issues={issuesAt(issues, '/context')} />
+    </div>
+  );
+}
+
+// ── Output contract ──
+
+function OutputSection({ stage, onUpdate, issues }: SectionProps) {
+  const output = stage.output;
+  const setOutput = (updates: Partial<AgentStage['output']>) => {
+    const next: Record<string, unknown> = { ...output, ...updates };
+    for (const [k, v] of Object.entries(updates)) if (v === undefined) delete next[k];
+    onUpdate({ output: next as AgentStage['output'] });
+  };
+
+  return (
+    <CollapsibleSection
+      title="Output"
+      icon={<CheckCircle2 className="h-3.5 w-3.5" />}
+      defaultOpen={false}
+      badge={output.rules.length ? String(output.rules.length) : undefined}
+    >
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-foreground">Format</label>
+        <Select
+          aria-label="Output format"
+          value={output.format}
+          onChange={(v) => setOutput({ format: v as 'text' | 'json' })}
+          options={[
+            { value: 'text', label: 'Text', description: 'Free text' },
+            { value: 'json', label: 'JSON', description: 'A JSON value, validated against the schema' },
+          ]}
+        />
+      </div>
+      <EngineGated>
+        <label className="mb-1.5 block text-xs font-medium text-foreground">Extraction</label>
+        <Select
+          aria-label="Output extraction"
+          value={output.extraction}
+          disabled={!ENGINE_SUPPORTS_V2}
+          onChange={(v) => setOutput({ extraction: v as AgentStage['output']['extraction'] })}
+          options={[
+            { value: 'auto', label: 'Automatic' },
+            { value: 'native', label: 'Native' },
+            { value: 'tool', label: 'submit_output tool' },
+            { value: 'final_json_block', label: 'Final JSON block' },
+          ]}
+        />
+      </EngineGated>
+      <div>
+        <label className="mb-1.5 flex items-center gap-1.5 text-xs font-medium text-foreground">
+          <Braces className="h-3.5 w-3.5" /> JSON Schema
+        </label>
+        <JsonObjectEditor
+          value={output.schema}
+          onChange={(schema) => setOutput({ schema })}
+          placeholder={'{\n  "type": "object",\n  "properties": { "verdict": { "type": "string" } }\n}'}
+          ariaLabel="Output JSON Schema"
+        />
+        <FieldIssues issues={issuesAt(issues, '/output/schema', '/output/format')} />
+      </div>
+      <div>
+        <label htmlFor="stage-output-instructions" className="mb-1.5 block text-xs font-medium text-foreground">Instructions</label>
+        <Textarea
+          id="stage-output-instructions"
+          value={output.instructions ?? ''}
+          onChange={(e) => setOutput({ instructions: e.target.value || undefined })}
+          rows={2}
+          className="resize-none"
+          placeholder="Describe the expected output; appended to the final prompt"
+        />
+        <FieldIssues issues={issuesAt(issues, '/output/instructions')} />
+      </div>
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-foreground">Rules</label>
+        <ValidationRuleEditor rules={output.rules} onChange={(rules) => setOutput({ rules })} issues={issues} />
+      </div>
+    </CollapsibleSection>
+  );
+}
+
+/**
+ * A JSON object edited as text: the draft is parsed on blur. Blank clears
+ * the value; text that is not a JSON object is reported and not applied.
+ */
+function JsonObjectEditor({
+  value,
+  onChange,
+  placeholder,
+  ariaLabel,
+}: {
+  value: Record<string, unknown> | undefined;
+  onChange: (value: Record<string, unknown> | undefined) => void;
+  placeholder?: string;
+  ariaLabel: string;
+}) {
+  const serialized = value === undefined ? '' : JSON.stringify(value, null, 2);
+  const [draft, setDraft] = useState(serialized);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    setDraft(serialized);
+    setError(null);
+  }, [serialized]);
+
+  const commit = () => {
+    if (!draft.trim()) {
+      setError(null);
+      if (value !== undefined) onChange(undefined);
+      return;
+    }
+    try {
+      const parsed: unknown = JSON.parse(draft);
+      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+        setError('Must be a JSON object');
+        return;
+      }
+      setError(null);
+      if (JSON.stringify(parsed) !== JSON.stringify(value)) onChange(parsed as Record<string, unknown>);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid JSON');
+    }
+  };
+
+  return (
+    <div>
+      <Textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        rows={5}
+        aria-label={ariaLabel}
+        className="resize-y font-mono text-xs"
+        placeholder={placeholder}
+        spellCheck={false}
+      />
+      {error && <p className="mt-1 text-[11px] text-danger">{error}</p>}
+    </div>
+  );
+}
+
+// ── Inline Hook Editor ──
 
 const HOOK_TYPES = [
   { value: 'script', label: 'Script' },
@@ -456,6 +829,10 @@ const FAILURE_POLICIES = [
   { value: 'continue', label: 'Continue' },
   { value: 'skip', label: 'Skip hook' },
 ] as const;
+
+function phaseLabel(phase: string): string {
+  return phase.split('_').map((w) => w[0]!.toUpperCase() + w.slice(1)).join(' ');
+}
 
 function HookEditor({
   hooks,
@@ -521,7 +898,9 @@ function HookEditor({
           <Plus className="h-3 w-3" /> Add
         </Button>
       </div>
-      {hooks.map((hook, idx) => (
+      {hooks.map((hook, idx) => {
+        const cfg = hook.config;
+        return (
         <div key={hook.id} className="rounded-lg border border-border p-2.5 space-y-2">
           <div className="flex items-center justify-between">
             <Input
@@ -553,56 +932,60 @@ function HookEditor({
             <Select
               value={hook.phase}
               onChange={(v) => updateHook(idx, { phase: v as HookDefinition['phase'] })}
-              options={AVAILABLE_PHASES.map((p) => ({ value: p.value, label: p.label }))}
+              options={STAGE_HOOK_PHASES.map((p) => ({
+                value: p,
+                label: phaseLabel(p),
+                description: HOOK_PHASE_INFO[p].description,
+              }))}
             />
             <Select
               value={hook.type}
               onChange={(v) => {
-                const type = v as 'script' | 'http' | 'function';
-                const config = type === 'script'
-                  ? { type: 'script' as const, command: '' }
+                const type = v as HookDefinition['type'];
+                const config: HookDefinition['config'] = type === 'script'
+                  ? { type: 'script', command: '' }
                   : type === 'http'
-                    ? { type: 'http' as const, url: '', method: 'POST' as const }
-                    : { type: 'function' as const, handlerName: '', args: {} };
+                    ? { type: 'http', url: '', method: 'POST' }
+                    : { type: 'function', handlerName: '', args: {} };
                 updateHook(idx, { type, config });
               }}
               options={HOOK_TYPES.map((t) => ({ value: t.value, label: t.label }))}
             />
           </div>
-          {hook.config.type === 'script' && (
+          {cfg.type === 'script' && (
             <Input
               type="text"
-              value={(hook.config as { command: string }).command}
-              onChange={(e) => updateHook(idx, { config: { type: 'script', command: e.target.value } })}
+              value={cfg.command}
+              onChange={(e) => updateHook(idx, { config: { ...cfg, command: e.target.value } })}
               className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
               placeholder="Command to run (e.g., ./scripts/lint.sh)"
             />
           )}
-          {hook.config.type === 'http' && (
+          {cfg.type === 'http' && (
             <Input
               type="text"
-              value={(hook.config as { url: string }).url}
-              onChange={(e) => updateHook(idx, { config: { type: 'http', url: e.target.value, method: 'POST' } })}
+              value={cfg.url}
+              onChange={(e) => updateHook(idx, { config: { ...cfg, url: e.target.value } })}
               className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
               placeholder="Webhook URL (e.g., https://hooks.example.com/notify)"
             />
           )}
-          {hook.config.type === 'function' && (
+          {cfg.type === 'function' && (
             <div className="space-y-1.5">
               <Input
                 type="text"
-                value={(hook.config as { handlerName?: string }).handlerName ?? ''}
-                onChange={(e) => updateHook(idx, { config: { type: 'function', handlerName: e.target.value, args: (hook.config as { args?: Record<string, unknown> }).args } })}
+                value={cfg.handlerName ?? ''}
+                onChange={(e) => updateHook(idx, { config: { ...cfg, handlerName: e.target.value } })}
                 className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
                 placeholder="Handler name (e.g., enrichContext, injectRequirements)"
               />
               <Input
                 type="text"
-                value={JSON.stringify((hook.config as { args?: Record<string, unknown> }).args ?? {})}
+                value={JSON.stringify(cfg.args ?? {})}
                 onChange={(e) => {
                   try {
-                    const args = JSON.parse(e.target.value);
-                    updateHook(idx, { config: { type: 'function', handlerName: (hook.config as { handlerName?: string }).handlerName, args } });
+                    const args = JSON.parse(e.target.value) as Record<string, unknown>;
+                    updateHook(idx, { config: { ...cfg, args } });
                   } catch { /* ignore invalid JSON while typing */ }
                 }}
                 className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
@@ -616,7 +999,8 @@ function HookEditor({
             options={FAILURE_POLICIES.map((p) => ({ value: p.value, label: p.label }))}
           />
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -628,33 +1012,63 @@ const VALIDATION_RULE_TYPES = [
   { value: 'not_contains', label: 'Not Contains', description: 'Output must not contain this text' },
   { value: 'min_length', label: 'Min Length', description: 'Output must be at least N characters' },
   { value: 'max_length', label: 'Max Length', description: 'Output must be at most N characters' },
-  { value: 'regex', label: 'Regex Match', description: 'Output must match this regex pattern' },
-  { value: 'custom_script', label: 'Custom Script', description: 'Run a script to validate output' },
+  { value: 'regex', label: 'Regex Match', description: 'Output must match this pattern' },
+  { value: 'json_schema', label: 'JSON Schema', description: 'Output must be JSON matching this schema' },
+  { value: 'custom_script', label: 'Custom Script', description: 'A command validates the output (exit 0 passes)' },
 ] as const;
+
+/** A fresh rule of `type`, keeping the failure message. */
+function blankRule(type: ResultValidationRule['type'], message?: string): ResultValidationRule {
+  const m = message ? { message } : {};
+  switch (type) {
+    case 'contains':
+    case 'not_contains':
+      return { type, value: '', ...m };
+    case 'min_length':
+    case 'max_length':
+      return { type, value: 100, ...m };
+    case 'regex':
+      return { type, pattern: '', ...m };
+    case 'json_schema':
+      return { type, schema: { type: 'object' }, ...m };
+    case 'custom_script':
+      return { type, command: '', args: [], timeoutMs: 60_000, ...m };
+  }
+}
+
+/**
+ * Arguments edited one per line and parsed on blur, so typing a newline
+ * never swallows the next argument before it exists.
+ */
+function ArgsEditor({ args, onChange }: { args: string[]; onChange: (args: string[]) => void }) {
+  const [draft, setDraft] = useState(args.join('\n'));
+  useEffect(() => setDraft(args.join('\n')), [args]);
+  return (
+    <Textarea
+      value={draft}
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={() => onChange(draft.split('\n').map((a) => a.trim()).filter(Boolean))}
+      rows={2}
+      className="resize-y font-mono text-xs"
+      placeholder={'Arguments, one per line\nvalidate.js'}
+      aria-label="Script arguments"
+    />
+  );
+}
 
 function ValidationRuleEditor({
   rules,
   onChange,
+  issues,
 }: {
   rules: ResultValidationRule[];
   onChange: (rules: ResultValidationRule[]) => void;
+  issues: readonly BuilderIssue[];
 }) {
-  const addRule = () => {
-    const newRule: ResultValidationRule = {
-      type: 'contains',
-      value: '',
-      message: `Validation rule ${rules.length + 1}`,
-    };
-    onChange([...rules, newRule]);
-  };
-
-  const removeRule = (idx: number) => {
-    onChange(rules.filter((_, i) => i !== idx));
-  };
-
-  const updateRule = (idx: number, updates: Partial<ResultValidationRule>) => {
-    onChange(rules.map((r, i) => (i === idx ? { ...r, ...updates } : r)));
-  };
+  const addRule = () => onChange([...rules, blankRule('contains', `Validation rule ${rules.length + 1}`)]);
+  const removeRule = (idx: number) => onChange(rules.filter((_, i) => i !== idx));
+  const replaceRule = (idx: number, rule: ResultValidationRule) =>
+    onChange(rules.map((r, i) => (i === idx ? rule : r)));
 
   if (rules.length === 0) {
     return (
@@ -706,49 +1120,78 @@ function ValidationRuleEditor({
           </div>
           <Select
             value={rule.type}
-            onChange={(v) => {
-              const type = v as ResultValidationRule['type'];
-              // Reset value for different types
-              const defaultValue = type === 'min_length' || type === 'max_length' ? 100 : '';
-              updateRule(idx, { type, value: defaultValue });
-            }}
+            onChange={(v) => replaceRule(idx, blankRule(v as ResultValidationRule['type'], rule.message))}
             options={VALIDATION_RULE_TYPES.map((t) => ({ value: t.value, label: t.label, description: t.description }))}
           />
-          {(rule.type === 'contains' || rule.type === 'not_contains' || rule.type === 'regex') && (
+          {(rule.type === 'contains' || rule.type === 'not_contains') && (
             <Input
               type="text"
-              value={String(rule.value ?? '')}
-              onChange={(e) => updateRule(idx, { value: e.target.value })}
+              value={rule.value}
+              onChange={(e) => replaceRule(idx, { ...rule, value: e.target.value })}
               className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
-              placeholder={rule.type === 'regex' ? 'e.g., /export\\s+default/' : 'Text to check for...'}
+              placeholder="Text to check for..."
             />
+          )}
+          {rule.type === 'regex' && (
+            <div className="grid grid-cols-[1fr_4rem] gap-2">
+              <Input
+                type="text"
+                value={rule.pattern}
+                onChange={(e) => replaceRule(idx, { ...rule, pattern: e.target.value })}
+                className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
+                // No slashes: the pattern is the regex body (D-26).
+                placeholder="e.g., export\s+default"
+                aria-label={`Rule ${idx + 1} pattern`}
+              />
+              <Input
+                type="text"
+                value={rule.flags ?? ''}
+                onChange={(e) => replaceRule(idx, { ...rule, flags: e.target.value || undefined })}
+                className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
+                placeholder="flags"
+                aria-label={`Rule ${idx + 1} flags (i, m, s)`}
+              />
+            </div>
           )}
           {(rule.type === 'min_length' || rule.type === 'max_length') && (
             <Input
               type="number"
-              value={Number(rule.value ?? 0)}
-              onChange={(e) => updateRule(idx, { value: parseInt(e.target.value) || 0 })}
+              value={rule.value}
+              onChange={(e) => replaceRule(idx, { ...rule, value: parseInt(e.target.value) || 0 })}
               className="h-auto rounded-lg px-2 py-1.5 text-xs"
               placeholder="Character count"
               min={0}
             />
           )}
-          {rule.type === 'custom_script' && (
-            <Input
-              type="text"
-              value={String(rule.value ?? '')}
-              onChange={(e) => updateRule(idx, { value: e.target.value })}
-              className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
-              placeholder="Command to run (e.g., npm test, node validate.js)"
+          {rule.type === 'json_schema' && (
+            <JsonObjectEditor
+              value={rule.schema}
+              onChange={(schema) => replaceRule(idx, { ...rule, schema: schema ?? {} })}
+              ariaLabel={`Rule ${idx + 1} JSON Schema`}
             />
+          )}
+          {rule.type === 'custom_script' && (
+            <div className="space-y-1.5">
+              <Input
+                type="text"
+                value={rule.command}
+                onChange={(e) => replaceRule(idx, { ...rule, command: e.target.value })}
+                className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
+                placeholder="Executable (e.g., node)"
+                aria-label={`Rule ${idx + 1} command`}
+              />
+              <ArgsEditor args={rule.args} onChange={(args) => replaceRule(idx, { ...rule, args })} />
+              <p className="text-[10px] text-muted-foreground">The output arrives in the STAGE_OUTPUT environment variable.</p>
+            </div>
           )}
           <Input
             type="text"
-            value={rule.message}
-            onChange={(e) => updateRule(idx, { message: e.target.value })}
+            value={rule.message ?? ''}
+            onChange={(e) => replaceRule(idx, { ...rule, message: e.target.value || undefined })}
             className="h-auto rounded-lg px-2 py-1.5 text-xs"
             placeholder="Failure message shown on validation failure"
           />
+          <FieldIssues issues={issuesAt(issues, `/output/rules/${idx}`)} />
         </div>
       ))}
       <p className="text-[10px] text-muted-foreground">
@@ -758,3 +1201,70 @@ function ValidationRuleEditor({
   );
 }
 
+// ── Edge editor ──
+
+function EdgePropertiesPanel({ edgeId, onClose }: { edgeId: string; onClose: () => void }) {
+  const edge = useWorkflowBuilderStore((s) => s.edges.find((e) => e.id === edgeId)?.data?.edge);
+  const names = useWorkflowBuilderStore((s) => s.nodes);
+  const allIssues = useWorkflowBuilderStore((s) => s.issues);
+  const updateEdge = useWorkflowBuilderStore((s) => s.updateEdge);
+  const issues = useMemo(() => allIssues.filter((i) => i.edgeId === edgeId), [allIssues, edgeId]);
+  if (!edge) return null;
+  const nameOf = (key: string) => names.find((n) => n.id === key)?.data.stage.name ?? key;
+  const update = (updates: Partial<EdgeSpec>) => updateEdge(edgeId, updates);
+
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex items-center justify-between border-b border-border px-4 py-3">
+        <div className="min-w-0">
+          <h3 className="truncate text-sm font-semibold text-foreground">
+            {nameOf(edge.from)} → {nameOf(edge.to)}
+          </h3>
+          <p className="truncate font-mono text-[11px] text-muted-foreground">{edge.from} → {edge.to}</p>
+        </div>
+        <Button
+          onClick={onClose}
+          aria-label="Close properties panel"
+          variant="ghost"
+          size="icon-sm"
+          className="rounded-lg p-1.5 text-muted-foreground hover:bg-subtle hover:text-foreground"
+        >
+          <X className="h-4 w-4" />
+        </Button>
+      </div>
+      <div className="flex-1 space-y-4 overflow-y-auto p-4">
+        <div>
+          <label className="mb-1.5 block text-xs font-medium text-foreground">Runs when the source</label>
+          <Select
+            aria-label="Edge condition"
+            value={edge.on}
+            onChange={(v) => update({ on: v as EdgeOn })}
+            options={EDGE_ON_VALUES.map((on) => ({ value: on, label: EDGE_TYPE_LABELS[on], description: EDGE_TYPE_HINTS[on] }))}
+          />
+        </div>
+        <div>
+          <label htmlFor="edge-when" className="mb-1.5 block text-xs font-medium text-foreground">When</label>
+          <ExpressionField
+            id="edge-when"
+            value={edge.when ?? ''}
+            onChange={(v) => update({ when: v.trim() ? v : undefined })}
+            placeholder="e.g. parent.status == 'completed' and variables.env == 'prod'"
+            issues={issuesAt(issues, '/when')}
+            ariaLabel="Edge when expression"
+          />
+          <p className="mt-1 text-[10px] text-muted-foreground">Optional. False makes the edge inactive.</p>
+        </div>
+        <EngineGated>
+          <ToggleSwitch
+            checked={edge.handlesFailure === true}
+            disabled={!ENGINE_SUPPORTS_V2}
+            onChange={(checked) => update({ handlesFailure: checked || undefined })}
+            label="Handles failure"
+            description="A completion or always edge counts as handling a failure of the source."
+          />
+        </EngineGated>
+        <FieldIssues issues={issues.filter((i) => !(i.field ?? '').startsWith('/when'))} />
+      </div>
+    </div>
+  );
+}

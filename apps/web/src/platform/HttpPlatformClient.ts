@@ -7,9 +7,16 @@ import type { HarnessProviderId } from '@generatorai/shared';
 import type {
   IPlatformClient,
   PlatformType,
-  WorkflowTemplateSummary,
   EventSubscriptionOptions,
 } from '@generatorai/shared';
+import type {
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowDefinitionVersionRecord,
+  WorkflowGraphInput,
+  WorkflowTemplate,
+} from '@generatorai/workflow-spec';
+import type { DefinitionDeleteOutcome, StageOverrideWire } from '@generatorai/client-core';
 import type { ChatMessage } from '@generatorai/shared';
 // PLN-01 — plan mode
 import type {
@@ -260,18 +267,10 @@ import type { PersistedEvent, AgentEventKind } from '@generatorai/shared';
 import type {
   Chat,
   CreateChatParams,
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  CreateWorkflowDefinitionParams,
   WorkflowRun,
   WorkflowRunWithStages,
   CreateWorkflowRunParams,
-  StageDefinition,
-  StageEdge,
   StageRun,
-  CreateStageParams,
-  CreateEdgeParams,
-  ImportWorkflowJson,
   OrchestratorContext,
   RunWorkspaceInfo,
   RunUploadResult,
@@ -485,8 +484,8 @@ export class HttpPlatformClient implements IPlatformClient {
 
   // ── Templates ──
 
-  async getWorkflowTemplates(): Promise<WorkflowTemplateSummary[]> {
-    return apiFetch<WorkflowTemplateSummary[]>(`${this.baseUrl}/api/templates`);
+  async getWorkflowTemplates(): Promise<WorkflowTemplate[]> {
+    return apiFetch<WorkflowTemplate[]>(`${this.baseUrl}/api/templates`);
   }
 
   // ── Artifacts ──
@@ -974,57 +973,81 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  // ── v2: Workflow Definition Operations ──
+  // ── Workflow definitions (v2 documents) ──
 
-  async createDefinition(params: CreateWorkflowDefinitionParams): Promise<WorkflowDefinition> {
-    return apiFetch<WorkflowDefinition>(`${this.baseUrl}/api/workflow-definitions`, {
+  async createDefinition(graph: WorkflowGraphInput): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify(graph),
     });
   }
 
-  async listDefinitions(): Promise<WorkflowDefinition[]> {
-    return apiFetch<WorkflowDefinition[]>(`${this.baseUrl}/api/workflow-definitions`);
+  async listDefinitions(): Promise<WorkflowDefinitionSummary[]> {
+    const page = await apiFetch<{ items: WorkflowDefinitionSummary[]; nextCursor?: string }>(
+      `${this.baseUrl}/api/workflow-definitions?limit=500`,
+    );
+    return page.items;
   }
 
-  async getDefinition(id: string): Promise<WorkflowDefinitionWithStages> {
-    return apiFetch<WorkflowDefinitionWithStages>(`${this.baseUrl}/api/workflow-definitions/${id}`);
+  async getDefinition(id: string): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/${id}`);
   }
 
-  async updateDefinition(id: string, params: Partial<CreateWorkflowDefinitionParams>): Promise<WorkflowDefinition> {
-    return apiFetch<WorkflowDefinition>(`${this.baseUrl}/api/workflow-definitions/${id}`, {
-      method: 'PATCH',
+  /** Replace the whole graph. A stale `expectedRevision` is a 409 `REVISION_CONFLICT` carrying the current record. */
+  async saveDefinitionGraph(
+    id: string,
+    graph: WorkflowGraphInput,
+    expectedRevision: number,
+  ): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/${id}/graph`, {
+      method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
+      body: JSON.stringify({ graph, expectedRevision }),
     });
   }
 
-  async deleteDefinition(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-definitions/${id}`, { method: 'DELETE' });
+  async publishDefinition(id: string): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/${id}/publish`, {
+      method: 'POST',
+    });
   }
 
-  async validateDefinition(id: string): Promise<{ valid: boolean; errors: string[] }> {
-    return apiFetch<{ valid: boolean; errors: string[] }>(
-      `${this.baseUrl}/api/workflow-definitions/${id}/validate`,
-      { method: 'POST' },
+  /** The immutable version a run pinned (`run.definitionVersionId`). */
+  async getDefinitionVersion(id: string, versionId: string): Promise<WorkflowDefinitionVersionRecord> {
+    return apiFetch<WorkflowDefinitionVersionRecord>(
+      `${this.baseUrl}/api/workflow-definitions/${id}/versions/${versionId}`,
     );
   }
 
-  async importFromTemplate(templateId: string, name?: string): Promise<WorkflowDefinition> {
-    return apiFetch<WorkflowDefinition>(`${this.baseUrl}/api/workflow-definitions/import`, {
+  /** Hard delete, or archive when runs exist (their history stays readable). */
+  async deleteDefinition(id: string): Promise<DefinitionDeleteOutcome> {
+    return apiFetch<DefinitionDeleteOutcome>(`${this.baseUrl}/api/workflow-definitions/${id}`, { method: 'DELETE' });
+  }
+
+  /** Create a draft from a registered template. */
+  async importTemplate(templateId: string, name?: string): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ templateId, ...(name ? { name } : {}) }),
     });
   }
 
-  async importFromJSON(data: ImportWorkflowJson): Promise<WorkflowDefinitionWithStages> {
-    return apiFetch<WorkflowDefinitionWithStages>(`${this.baseUrl}/api/workflow-definitions/import-json`, {
+  /** Create a draft from a canonical workflow document (the export format). */
+  async importDefinition(document: unknown): Promise<WorkflowDefinitionRecord> {
+    return apiFetch<WorkflowDefinitionRecord>(`${this.baseUrl}/api/workflow-definitions/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data),
+      body: JSON.stringify(document),
     });
+  }
+
+  /** The canonical document text (`GET /:id/export`), exactly as the server wrote it. */
+  async exportDefinition(id: string): Promise<string> {
+    const resp = await getAuthRuntime().fetch(`${this.baseUrl}/api/workflow-definitions/${id}/export`);
+    if (!resp.ok) throw new ApiError(resp.status, 'EXPORT_FAILED', `Export failed: ${resp.statusText}`);
+    return resp.text();
   }
 
   // ── v2: Workflow Run Operations ──
@@ -1172,42 +1195,6 @@ export class HttpPlatformClient implements IPlatformClient {
     }
   }
 
-  // ── v2: Stage CRUD (nested under workflow definitions) ──
-
-  async addStage(definitionId: string, params: Omit<CreateStageParams, 'workflowDefinitionId'>): Promise<StageDefinition> {
-    return apiFetch<StageDefinition>(`${this.baseUrl}/api/workflow-definitions/${definitionId}/stages`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-  }
-
-  async updateStage(definitionId: string, stageId: string, params: Partial<Omit<CreateStageParams, 'workflowDefinitionId'>>): Promise<StageDefinition> {
-    return apiFetch<StageDefinition>(`${this.baseUrl}/api/workflow-definitions/${definitionId}/stages/${stageId}`, {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-  }
-
-  async deleteStage(definitionId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-definitions/${definitionId}/stages/${stageId}`, { method: 'DELETE' });
-  }
-
-  // ── v2: Edge CRUD (nested under workflow definitions) ──
-
-  async addEdge(definitionId: string, params: Omit<CreateEdgeParams, 'workflowDefinitionId'>): Promise<StageEdge> {
-    return apiFetch<StageEdge>(`${this.baseUrl}/api/workflow-definitions/${definitionId}/edges`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
-  }
-
-  async deleteEdge(definitionId: string, edgeId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-definitions/${definitionId}/edges/${edgeId}`, { method: 'DELETE' });
-  }
-
   // ── Copilot-specific API calls (not in IPlatformClient but useful for web) ──
 
   async getModels(): Promise<ChatModel[]> {
@@ -1239,7 +1226,9 @@ export class HttpPlatformClient implements IPlatformClient {
     projectId?: string;
     selectedCodebases?: string[];
     uploads?: { prompts: File[]; skills: File[]; agents: File[] };
-    stageOverrides?: Array<{ stageName?: string; stageIndex?: number; variables?: Record<string, unknown>; skip?: boolean }>;
+    stageOverrides?: StageOverrideWire[];
+    /** Run the working graph as a test version (the only way to run a draft). */
+    testRun?: boolean;
   }): Promise<OrchestratorContext> {
     const { uploads, ...config } = params;
     if (uploads && Object.values(uploads).some((files) => files.length > 0)) {
@@ -1896,40 +1885,6 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  // ── Workflow-Level File Management ──
-
-  async getWorkflowFiles(definitionId: string): Promise<{ definitionId: string; uploadsDir: string; files: string[] }> {
-    return apiFetch(`${this.baseUrl}/api/orchestrator/workflows/${definitionId}/files`);
-  }
-
-  async uploadWorkflowFiles(definitionId: string, category: 'skills' | 'agents' | 'prompts', files: File[]): Promise<void> {
-    const formData = new FormData();
-    formData.append('category', category);
-    for (const file of files) {
-      formData.append('files', file);
-    }
-    await apiFetch(`${this.baseUrl}/api/orchestrator/workflows/${definitionId}/uploads`, {
-      method: 'POST',
-      body: formData,
-    });
-  }
-
-  async deleteWorkflowFile(definitionId: string, filePath: string): Promise<void> {
-    const params = new URLSearchParams({ path: filePath });
-    await apiFetch(`${this.baseUrl}/api/orchestrator/workflows/${definitionId}/files?${params}`, {
-      method: 'DELETE',
-    });
-  }
-
-  async downloadWorkflowFile(definitionId: string, filePath: string): Promise<void> {
-    const params = new URLSearchParams({ path: filePath });
-    const url = `${this.baseUrl}/api/orchestrator/workflows/${definitionId}/files/download?${params}`;
-    const resp = await getAuthRuntime().fetch(url);
-    if (!resp.ok) throw new ApiError(resp.status, 'DOWNLOAD_FAILED', `Download failed: ${resp.statusText}`);
-    const blob = await resp.blob();
-    await downloadBlobAsFile(blob, filePath.split(/[/\\]/).pop() ?? 'download');
-  }
-
   // ── Automation API ──
 
   async createAutomation(params: CreateAutomationParams): Promise<Automation> {
@@ -2503,12 +2458,6 @@ export class HttpPlatformClient implements IPlatformClient {
   // previously CLI-only. Typed loosely (consistent with the script helpers
   // above) so the web client has feature parity at the client layer.
   // ════════════════════════════════════════════════════════════════
-
-  // PARITY-12: export a definition as portable JSON (web could re-derive, but
-  // the dedicated endpoint preserves the canonical export shape).
-  async exportDefinition(id: string): Promise<Record<string, unknown>> {
-    return apiFetch<Record<string, unknown>>(`${this.baseUrl}/api/workflow-definitions/${id}/export`);
-  }
 
   // PARITY-3: workspace lifecycle management (archive / commit / delete / cleanup).
   async listWorkspaces(filters?: Record<string, string>): Promise<any[]> {

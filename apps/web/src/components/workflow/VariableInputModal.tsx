@@ -5,7 +5,8 @@
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
 import { Play, AlertCircle, Upload, FileText, Trash2, FolderGit2, ChevronDown, ChevronRight, Settings2 } from 'lucide-react';
-import type { VariableDefinition } from '@generatorai/shared';
+import type { VariableDefinition } from '@generatorai/workflow-spec';
+import { activeStageOverrides, blankStageOverrides, type StageOverrideDraft } from '@generatorai/client-core';
 import { Select, Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
@@ -18,14 +19,6 @@ export interface UploadedFileSet {
   agents: File[];
 }
 
-/** Stage override entry for runtime per-stage configuration */
-export interface StageOverrideEntry {
-  stageName: string;
-  stageIndex: number;
-  skip: boolean;
-  variables: Record<string, string>;
-}
-
 /** Codebase info for auto-filling git variables */
 export interface LinkedCodebaseInfo {
   alias: string;
@@ -36,14 +29,16 @@ export interface LinkedCodebaseInfo {
 interface VariableInputModalProps {
   open: boolean;
   onClose: () => void;
-  onSubmit: (variables: Record<string, unknown>, uploads?: UploadedFileSet, stageOverrides?: StageOverrideEntry[]) => void;
+  onSubmit: (variables: Record<string, unknown>, uploads?: UploadedFileSet, stageOverrides?: StageOverrideDraft[]) => void;
   variables: VariableDefinition[];
   workflowName: string;
   isSubmitting?: boolean;
   /** When set, git_url/branch variables are auto-filled from linked project codebases */
   linkedCodebases?: LinkedCodebaseInfo[];
-  /** Stage names for the override section */
-  stageNames?: string[];
+  /** Stages (key and display name) for the override section; overrides match stages by key */
+  stages?: ReadonlyArray<{ key: string; name: string }>;
+  /** Label of the submit button (the builder says "Test run" for a draft) */
+  submitLabel?: string;
 }
 
 export function VariableInputModal({
@@ -54,7 +49,8 @@ export function VariableInputModal({
   workflowName,
   isSubmitting,
   linkedCodebases,
-  stageNames,
+  stages,
+  submitLabel = 'Start Run',
 }: VariableInputModalProps) {
   // Determine which variables are auto-filled from linked project codebases
   const hasLinkedCodebases = linkedCodebases && linkedCodebases.length > 0;
@@ -113,17 +109,10 @@ export function VariableInputModal({
       for (const v of variables) fresh[v.name] = seedValue(v);
       setValues(fresh);
       setErrors({});
-      setStageOverrides(
-        (stageNames ?? []).map((name, index) => ({
-          stageName: name,
-          stageIndex: index,
-          skip: false,
-          variables: {},
-        })),
-      );
+      setStageOverrides(blankStageOverrides(stages ?? []));
     }
     wasOpen.current = open;
-  }, [open, variables, stageNames, seedValue]);
+  }, [open, variables, stages, seedValue]);
 
   // Update git variable values when linkedCodebases loads asynchronously
   React.useEffect(() => {
@@ -151,16 +140,10 @@ export function VariableInputModal({
 
   // Stage override state
   const [showStageOverrides, setShowStageOverrides] = useState(false);
-  const [stageOverrides, setStageOverrides] = useState<StageOverrideEntry[]>(() =>
-    (stageNames ?? []).map((name, index) => ({
-      stageName: name,
-      stageIndex: index,
-      skip: false,
-      variables: {},
-    })),
-  );
+  const [stageOverrides, setStageOverrides] = useState<StageOverrideDraft[]>(() => blankStageOverrides(stages ?? []));
 
-  const hasActiveOverrides = stageOverrides.some((o) => o.skip || Object.keys(o.variables).length > 0);
+  const hasActiveOverrides = activeStageOverrides(stageOverrides).length > 0;
+  const submittedOverrides = hasActiveOverrides ? stageOverrides : undefined;
 
   const toggleStageSkip = useCallback((index: number) => {
     setStageOverrides((prev) =>
@@ -247,9 +230,9 @@ export function VariableInputModal({
         converted[v.name] = val;
       }
 
-      onSubmit(converted, hasUploads ? uploadedFiles : undefined, hasActiveOverrides ? stageOverrides.filter(o => o.skip || Object.keys(o.variables).length > 0) : undefined);
+      onSubmit(converted, hasUploads ? uploadedFiles : undefined, submittedOverrides);
     },
-    [validate, variables, values, onSubmit, hasUploads, uploadedFiles, hasActiveOverrides, stageOverrides],
+    [validate, variables, values, onSubmit, hasUploads, uploadedFiles, submittedOverrides],
   );
 
   const updateValue = useCallback((name: string, value: unknown) => {
@@ -259,6 +242,65 @@ export function VariableInputModal({
       return rest;
     });
   }, []);
+
+  // Rendered in both layouts: the no-variables dialog used to drop every
+  // override (D-15).
+  const stageOverridesSection = stages && stages.length > 0 ? (
+    <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
+      <Button
+        type="button"
+        onClick={() => setShowStageOverrides(!showStageOverrides)}
+        variant="ghost"
+        size="sm"
+        className="h-auto flex w-full items-center gap-2 bg-transparent p-0 text-sm font-medium text-foreground hover:bg-transparent"
+      >
+        {showStageOverrides ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
+        <Settings2 className="h-4 w-4 text-primary" />
+        Stage Overrides
+        {hasActiveOverrides && (
+          <Badge tone="info" size="sm">
+            {stageOverrides.filter(o => o.skip).length} skipped
+          </Badge>
+        )}
+      </Button>
+
+      {showStageOverrides && (
+        <div className="space-y-2 pt-1">
+          <p className="text-xs text-muted-foreground">
+            Toggle stages to skip or configure per-stage overrides.
+          </p>
+          {stageOverrides.map((override, index) => (
+            <div
+              key={override.stageKey}
+              className={cn(
+                'flex items-center gap-3 rounded-md border px-3 py-2 text-sm',
+                override.skip
+                  ? 'border-warning/40 bg-warning-muted'
+                  : 'border-border bg-background',
+              )}
+            >
+              <Checkbox
+                checked={!override.skip}
+                aria-label={`Run stage ${index + 1}: ${override.stageName}`}
+                onCheckedChange={() => toggleStageSkip(index)}
+                className="h-4 w-4"
+                title={override.skip ? 'Enable this stage' : 'Skip this stage'}
+              />
+              <span className={cn(
+                'flex-1 text-sm',
+                override.skip ? 'text-muted-foreground line-through' : 'text-foreground',
+              )}>
+                {index + 1}. {override.stageName}
+              </span>
+              {override.skip && (
+                <span className="text-[10px] font-medium text-warning">SKIP</span>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  ) : null;
 
   if (!open) return null;
 
@@ -278,9 +320,9 @@ export function VariableInputModal({
               variant="primary"
               leftIcon={<Play className="h-4 w-4" />}
               loading={isSubmitting}
-              onClick={() => onSubmit({}, hasUploads ? uploadedFiles : undefined)}
+              onClick={() => onSubmit({}, hasUploads ? uploadedFiles : undefined, submittedOverrides)}
             >
-              Start Run
+              {submitLabel}
             </Button>
           </>
         }
@@ -310,6 +352,8 @@ export function VariableInputModal({
               </p>
             </div>
           )}
+
+          {stageOverridesSection}
 
           {/* Upload section for no-variables case */}
           <UploadSection
@@ -341,7 +385,7 @@ export function VariableInputModal({
             loading={isSubmitting}
             onClick={handleSubmit as unknown as React.MouseEventHandler}
           >
-            Start Run
+            {submitLabel}
           </Button>
         </>
       }
@@ -447,63 +491,7 @@ export function VariableInputModal({
             </div>
           ))}
 
-          {/* Stage Overrides section */}
-          {stageNames && stageNames.length > 0 && (
-            <div className="rounded-lg border border-dashed border-border p-3 space-y-2">
-              <Button
-                type="button"
-                onClick={() => setShowStageOverrides(!showStageOverrides)}
-                variant="ghost"
-                size="sm"
-                className="h-auto flex w-full items-center gap-2 bg-transparent p-0 text-sm font-medium text-foreground hover:bg-transparent"
-              >
-                {showStageOverrides ? <ChevronDown className="h-4 w-4" /> : <ChevronRight className="h-4 w-4" />}
-                <Settings2 className="h-4 w-4 text-primary" />
-                Stage Overrides
-                {hasActiveOverrides && (
-                  <Badge tone="info" size="sm">
-                    {stageOverrides.filter(o => o.skip).length} skipped
-                  </Badge>
-                )}
-              </Button>
-
-              {showStageOverrides && (
-                <div className="space-y-2 pt-1">
-                  <p className="text-xs text-muted-foreground">
-                    Toggle stages to skip or configure per-stage overrides.
-                  </p>
-                  {stageOverrides.map((override, index) => (
-                    <div
-                      key={override.stageName}
-                      className={cn(
-                        'flex items-center gap-3 rounded-md border px-3 py-2 text-sm',
-                        override.skip
-                          ? 'border-warning/40 bg-warning-muted'
-                          : 'border-border bg-background',
-                      )}
-                    >
-                      <Checkbox
-                        checked={!override.skip}
-                        aria-label={`Run stage ${index + 1}: ${override.stageName}`}
-                        onCheckedChange={() => toggleStageSkip(index)}
-                        className="h-4 w-4"
-                        title={override.skip ? 'Enable this stage' : 'Skip this stage'}
-                      />
-                      <span className={cn(
-                        'flex-1 text-sm',
-                        override.skip ? 'text-muted-foreground line-through' : 'text-foreground',
-                      )}>
-                        {index + 1}. {override.stageName}
-                      </span>
-                      {override.skip && (
-                        <span className="text-[10px] font-medium text-warning">SKIP</span>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
+          {stageOverridesSection}
 
           {/* Upload section inside the form */}
           <UploadSection

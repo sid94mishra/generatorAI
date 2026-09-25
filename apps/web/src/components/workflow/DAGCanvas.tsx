@@ -21,16 +21,16 @@ import '@xyflow/react/dist/style.css';
 
 import { StageNode } from './StageNode.js';
 import { StageEdge } from './StageEdge.js';
-import { EDGE_TYPE_ORDER, EDGE_TYPE_COLORS, EDGE_TYPE_LABELS, DEFAULT_EDGE_TYPE, type StageEdgeType } from './edgeTypeStyles.js';
+import type { EdgeOn } from '@generatorai/workflow-spec';
+import { EDGE_TYPE_ORDER, EDGE_TYPE_COLORS, EDGE_TYPE_LABELS, DEFAULT_EDGE_TYPE } from './edgeTypeStyles.js';
 import { CanvasReadonlyContext } from './canvasContext.js';
-import { useWorkflowBuilderStore, type StageNodeData, type StageEdgeData } from '@/stores/workflowBuilderStore.js';
-import { getLayoutedElements } from '@/utils/dagLayout.js';
+import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { AlignHorizontalDistributeCenter, Plus, GitBranch } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip.js';
 import { Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
-import type { Node, Edge } from '@xyflow/react';
+import type { Node } from '@xyflow/react';
 
 const nodeTypes = {
   stageNode: StageNode,
@@ -64,8 +64,7 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
   const removeEdge = useWorkflowBuilderStore((s) => s.removeEdge);
   const undo = useWorkflowBuilderStore((s) => s.undo);
   const redo = useWorkflowBuilderStore((s) => s.redo);
-  const setNodes = useWorkflowBuilderStore((s) => s.setNodes);
-  const setEdges = useWorkflowBuilderStore((s) => s.setEdges);
+  const autoLayout = useWorkflowBuilderStore((s) => s.autoLayout);
   const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
 
   const reactFlowInstance = useReactFlow();
@@ -88,19 +87,13 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
     [selectNode, selectEdge],
   );
 
-  // Auto-layout handler
+  // Auto-layout handler — one undo step (D-28); positions are saved with the graph.
   const handleAutoLayout = useCallback(() => {
-    const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(
-      nodes,
-      edges,
-      'LR',
-    );
-    setNodes(layoutedNodes as typeof nodes);
-    setEdges(layoutedEdges as typeof edges);
+    autoLayout();
     setTimeout(() => {
       reactFlowInstance.fitView({ padding: 0.18, maxZoom: 1.3, duration: 300 });
     }, 50);
-  }, [nodes, edges, setNodes, setEdges, reactFlowInstance]);
+  }, [autoLayout, reactFlowInstance]);
 
   // Keyboard shortcuts
   useEffect(() => {
@@ -162,9 +155,9 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
   // Legend entries — derived from the edge types this graph actually uses so
   // the swatches never advertise a condition that isn't on the canvas.
   const legendEntries = useMemo(() => {
-    const present = new Set<StageEdgeType>();
+    const present = new Set<EdgeOn>();
     for (const edge of edges) {
-      const type = (edge.data?.edgeType as StageEdgeType | undefined) ?? DEFAULT_EDGE_TYPE;
+      const type = (edge.data?.edge.on as EdgeOn | undefined) ?? DEFAULT_EDGE_TYPE;
       if (type in EDGE_TYPE_COLORS) present.add(type);
     }
     return EDGE_TYPE_ORDER.filter((t) => present.has(t)).map((type) => ({

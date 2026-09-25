@@ -1,428 +1,240 @@
 // ────────────────────────────────────────────────────────────────
-// Workflow Builder Store tests — Stage/edge CRUD, validation,
-// undo/redo, load/reset, selection
+// Workflow Builder Store tests — the v2 graph keyed by stage key:
+// key generation, key-based edges (D-1), delete-then-connect (D-2),
+// wholesale graph (clearing clears, D-4), positions and auto-layout in
+// undo (D-28), validation located on nodes and fields (D-25).
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
-import type {
-  StageDefinition,
-  StageEdge,
-  WorkflowDefinitionWithStages,
-} from '@generatorai/shared';
+import type { WorkflowDefinitionRecord, WorkflowGraph } from '@generatorai/workflow-spec';
+import {
+  newAgentStage,
+  stageKeyFor,
+  useWorkflowBuilderStore,
+  emptyWorkflow,
+} from '@/stores/workflowBuilderStore.js';
 
-function makeStage(overrides: Partial<StageDefinition> = {}): StageDefinition {
+const store = () => useWorkflowBuilderStore.getState();
+
+function makeRecord(graph: Partial<WorkflowGraph> = {}, overrides: Partial<WorkflowDefinitionRecord> = {}): WorkflowDefinitionRecord {
+  const a = { ...newAgentStage('analyze', 'Analyze'), prompts: [{ label: 'p', text: 'Analyze it' }], position: { x: 10, y: 20 } };
+  const b = { ...newAgentStage('build', 'Build'), prompts: [{ label: 'p', text: 'Build it' }], position: { x: 400, y: 20 } };
   return {
-    id: `stage-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-    workflowDefinitionId: 'def-1',
-    name: 'Test Stage',
-    order: 0,
-    prompts: [{ label: 'p1', text: 'Do something' }],
-    hooks: [],
-    createdAt: new Date(),
+    id: 'def-1',
+    status: 'draft',
+    revision: 3,
+    currentVersionId: null,
+    hasUnpublishedChanges: false,
+    archivedAt: null,
+    needsAttention: [],
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    graph: {
+      formatVersion: 2,
+      workflow: { ...emptyWorkflow(), name: 'Test Workflow', tags: ['a'] },
+      stages: [a, b],
+      edges: [{ from: 'analyze', to: 'build', on: 'success' }],
+      ...graph,
+    },
     ...overrides,
   };
 }
 
-function makeDefinition(
-  overrides: Partial<WorkflowDefinitionWithStages> = {},
-): WorkflowDefinitionWithStages {
-  return {
-    id: 'def-1',
-    name: 'Test Workflow',
-    description: 'A test',
-    sessionMode: 'auto',
-    variables: [],
-    tags: ['test'],
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    stages: [],
-    edges: [],
-    ...overrides,
-  } as WorkflowDefinitionWithStages;
-}
-
 describe('workflowBuilderStore', () => {
   beforeEach(() => {
-    useWorkflowBuilderStore.getState().resetBuilder();
+    store().resetBuilder();
   });
 
-  // ── Load & Reset ──
+  // ── Keys ──
 
-  it('loadDefinition populates store from definition', () => {
-    const s1 = makeStage({ id: 's1', name: 'Stage 1', order: 0 });
-    const s2 = makeStage({ id: 's2', name: 'Stage 2', order: 1 });
-    const edge: StageEdge = {
-      id: 'e1',
-      workflowDefinitionId: 'def-1',
-      fromStageId: 's1',
-      toStageId: 's2',
-      edgeType: 'on_success',
+  it('stageKeyFor slugs the name and deduplicates with _2, _3', () => {
+    expect(stageKeyFor('Code Review!', new Set())).toBe('code_review');
+    expect(stageKeyFor('Code Review', new Set(['code_review']))).toBe('code_review_2');
+    expect(stageKeyFor('Code Review', new Set(['code_review', 'code_review_2']))).toBe('code_review_3');
+    expect(stageKeyFor('42 things', new Set())).toBe('stage_42_things');
+    const long = stageKeyFor('x'.repeat(80), new Set(['x'.repeat(48)]));
+    expect(long).toMatch(/^[a-z][a-z0-9_]{0,47}$/);
+    expect(long.endsWith('_2')).toBe(true);
+  });
+
+  it('addStage generates unique names and keys, and the node id is the key', () => {
+    const k1 = store().addStage();
+    const k2 = store().addStage();
+    expect(k1).toBe('stage_1');
+    expect(k2).toBe('stage_2');
+    store().removeStage(k1);
+    // "Stage 2" still exists, so the next generated name must not repeat it.
+    const k3 = store().addStage();
+    expect(store().nodes.map((n) => n.data.stage.name)).toEqual(['Stage 2', 'Stage 3']);
+    expect(k3).toBe('stage_3');
+    expect(store().nodes.map((n) => n.id)).toEqual(['stage_2', 'stage_3']);
+  });
+
+  // ── D-1: edges reference keys, including edges to a stage added after load ──
+
+  it('an edge to a newly added stage is saved with both keys (D-1)', () => {
+    store().loadRecord(makeRecord());
+    const key = store().addStage('Deploy');
+    store().onConnect({ source: 'build', target: key, sourceHandle: null, targetHandle: null });
+    const graph = store().toGraph();
+    expect(graph.edges).toEqual([
+      { from: 'analyze', to: 'build', on: 'success' },
+      { from: 'build', to: 'deploy', on: 'success' },
+    ]);
+    expect(graph.stages.map((s) => s.key)).toEqual(['analyze', 'build', 'deploy']);
+  });
+
+  it('onConnect rejects self-edges, duplicates and cycles', () => {
+    store().loadRecord(makeRecord());
+    store().onConnect({ source: 'build', target: 'build', sourceHandle: null, targetHandle: null });
+    store().onConnect({ source: 'analyze', target: 'build', sourceHandle: null, targetHandle: null });
+    store().onConnect({ source: 'build', target: 'analyze', sourceHandle: null, targetHandle: null });
+    expect(store().toGraph().edges).toHaveLength(1);
+  });
+
+  // ── D-2: delete a stage, then connect across it ──
+
+  it('deleting the middle stage drops its edges and context sources; connecting across it saves one edge (D-2)', () => {
+    const c = {
+      ...newAgentStage('check', 'Check'),
+      prompts: [{ label: 'p', text: 'Check it' }],
+      context: { mode: 'summary' as const, from: ['build', 'analyze'] },
+      position: { x: 800, y: 20 },
     };
-
-    const def = makeDefinition({ stages: [s1, s2], edges: [edge], tags: ['a', 'b'] });
-    useWorkflowBuilderStore.getState().loadDefinition(def);
-
-    const state = useWorkflowBuilderStore.getState();
-    expect(state.definitionId).toBe('def-1');
-    expect(state.name).toBe('Test Workflow');
-    expect(state.nodes).toHaveLength(2);
-    expect(state.edges).toHaveLength(1);
-    expect(state.tags).toEqual(['a', 'b']);
-    expect(state.isDirty).toBe(false);
-  });
-
-  it('resetBuilder clears all state', () => {
-    const s1 = makeStage({ id: 's1' });
-    useWorkflowBuilderStore.getState().loadDefinition(makeDefinition({ stages: [s1] }));
-    useWorkflowBuilderStore.getState().resetBuilder();
-
-    const state = useWorkflowBuilderStore.getState();
-    expect(state.definitionId).toBeNull();
-    expect(state.nodes).toHaveLength(0);
-    expect(state.edges).toHaveLength(0);
-  });
-
-  // ── Stage CRUD ──
-
-  it('addStage creates a node', () => {
-    const stage = makeStage({ id: 's1', name: 'New' });
-    useWorkflowBuilderStore.getState().addStage(stage);
-
-    const state = useWorkflowBuilderStore.getState();
-    expect(state.nodes).toHaveLength(1);
-    expect(state.nodes[0]!.data.stage.name).toBe('New');
-    expect(state.isDirty).toBe(true);
-  });
-
-  it('updateStage modifies node data', () => {
-    const stage = makeStage({ id: 's1', name: 'Old' });
-    useWorkflowBuilderStore.getState().addStage(stage);
-    useWorkflowBuilderStore.getState().updateStage('s1', { name: 'Updated' });
-
-    const node = useWorkflowBuilderStore.getState().nodes[0]!;
-    expect(node.data.stage.name).toBe('Updated');
-    expect(node.data.label).toBe('Updated');
-  });
-
-  it('removeStage removes node and connected edges', () => {
-    const s1 = makeStage({ id: 's1' });
-    const s2 = makeStage({ id: 's2' });
-    useWorkflowBuilderStore.getState().addStage(s1);
-    useWorkflowBuilderStore.getState().addStage(s2);
-    useWorkflowBuilderStore.getState().addEdge({
-      id: 'e1',
-      workflowDefinitionId: 'def-1',
-      fromStageId: 's1',
-      toStageId: 's2',
-      edgeType: 'on_success',
-    });
-
-    expect(useWorkflowBuilderStore.getState().edges).toHaveLength(1);
-    useWorkflowBuilderStore.getState().removeStage('s1');
-
-    const state = useWorkflowBuilderStore.getState();
-    expect(state.nodes).toHaveLength(1);
-    expect(state.edges).toHaveLength(0); // edge removed with stage
-  });
-
-  it('duplicateStage creates a copy of the stage', () => {
-    const stage = makeStage({ id: 's1', name: 'Original' });
-    useWorkflowBuilderStore.getState().addStage(stage);
-    useWorkflowBuilderStore.getState().duplicateStage('s1');
-
-    const state = useWorkflowBuilderStore.getState();
-    expect(state.nodes).toHaveLength(2);
-    expect(state.nodes[1]!.data.stage.name).toBe('Original (copy)');
-    expect(state.nodes[1]!.id).not.toBe('s1');
-    expect(state.selectedNodeId).toBe(state.nodes[1]!.id);
-    expect(state.nodes[1]!.selected).toBe(true);
-    expect(state.nodes[0]!.selected).toBe(false);
-    expect(state.nodes[1]!.position.x).toBeGreaterThan(state.nodes[0]!.position.x + 320);
-    // Typing immediately after duplication must edit the copy.
-    state.updateStage(state.selectedNodeId!, { name: 'Edited copy' });
-    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('Original');
-    expect(useWorkflowBuilderStore.getState().nodes[1]!.data.stage.name).toBe('Edited copy');
-  });
-
-  // ── Edge CRUD ──
-
-  it('addEdge creates a flow edge', () => {
-    const s1 = makeStage({ id: 's1' });
-    const s2 = makeStage({ id: 's2' });
-    useWorkflowBuilderStore.getState().addStage(s1);
-    useWorkflowBuilderStore.getState().addStage(s2);
-    useWorkflowBuilderStore.getState().addEdge({
-      id: 'e1',
-      workflowDefinitionId: 'def-1',
-      fromStageId: 's1',
-      toStageId: 's2',
-      edgeType: 'on_success',
-    });
-
-    const state = useWorkflowBuilderStore.getState();
-    expect(state.edges).toHaveLength(1);
-    expect(state.edges[0]!.source).toBe('s1');
-    expect(state.edges[0]!.target).toBe('s2');
-  });
-
-  it('addEdge prevents cycles', () => {
-    const s1 = makeStage({ id: 's1' });
-    const s2 = makeStage({ id: 's2' });
-    useWorkflowBuilderStore.getState().addStage(s1);
-    useWorkflowBuilderStore.getState().addStage(s2);
-
-    useWorkflowBuilderStore.getState().addEdge({
-      id: 'e1',
-      workflowDefinitionId: 'def-1',
-      fromStageId: 's1',
-      toStageId: 's2',
-      edgeType: 'on_success',
-    });
-
-    // Try to create a back-edge (cycle)
-    useWorkflowBuilderStore.getState().addEdge({
-      id: 'e2',
-      workflowDefinitionId: 'def-1',
-      fromStageId: 's2',
-      toStageId: 's1',
-      edgeType: 'on_success',
-    });
-
-    // Should still be only 1 edge
-    expect(useWorkflowBuilderStore.getState().edges).toHaveLength(1);
-  });
-
-  it('removeEdge removes the edge', () => {
-    const s1 = makeStage({ id: 's1' });
-    const s2 = makeStage({ id: 's2' });
-    useWorkflowBuilderStore.getState().addStage(s1);
-    useWorkflowBuilderStore.getState().addStage(s2);
-    useWorkflowBuilderStore.getState().addEdge({
-      id: 'e1',
-      workflowDefinitionId: 'def-1',
-      fromStageId: 's1',
-      toStageId: 's2',
-      edgeType: 'on_success',
-    });
-
-    useWorkflowBuilderStore.getState().removeEdge('e1');
-    expect(useWorkflowBuilderStore.getState().edges).toHaveLength(0);
-  });
-
-  it('updateEdgeType changes the edge type', () => {
-    const s1 = makeStage({ id: 's1' });
-    const s2 = makeStage({ id: 's2' });
-    useWorkflowBuilderStore.getState().addStage(s1);
-    useWorkflowBuilderStore.getState().addStage(s2);
-    useWorkflowBuilderStore.getState().addEdge({
-      id: 'e1',
-      workflowDefinitionId: 'def-1',
-      fromStageId: 's1',
-      toStageId: 's2',
-      edgeType: 'on_success',
-    });
-
-    useWorkflowBuilderStore.getState().updateEdgeType('e1', 'on_failure');
-    const edge = useWorkflowBuilderStore.getState().edges[0]!;
-    expect(edge.data?.edgeType).toBe('on_failure');
-  });
-
-  // ── Selection ──
-
-  it('selectNode sets selectedNodeId and clears selectedEdgeId', () => {
-    const s1 = makeStage({ id: 's1' });
-    useWorkflowBuilderStore.getState().addStage(s1);
-
-    useWorkflowBuilderStore.getState().selectNode('s1');
-    const state = useWorkflowBuilderStore.getState();
-    expect(state.selectedNodeId).toBe('s1');
-    expect(state.selectedEdgeId).toBeNull();
-  });
-
-  it('getSelectedStage returns the selected stage', () => {
-    const stage = makeStage({ id: 's1', name: 'Target' });
-    useWorkflowBuilderStore.getState().addStage(stage);
-    useWorkflowBuilderStore.getState().selectNode('s1');
-
-    const selected = useWorkflowBuilderStore.getState().getSelectedStage();
-    expect(selected?.name).toBe('Target');
-  });
-
-  // ── Definition props ──
-
-  it('setName / setDescription / setTags mark dirty', () => {
-    useWorkflowBuilderStore.getState().loadDefinition(makeDefinition());
-    expect(useWorkflowBuilderStore.getState().isDirty).toBe(false);
-
-    useWorkflowBuilderStore.getState().setName('New Name');
-    expect(useWorkflowBuilderStore.getState().isDirty).toBe(true);
-    expect(useWorkflowBuilderStore.getState().name).toBe('New Name');
-
-    useWorkflowBuilderStore.getState().setDescription('New desc');
-    expect(useWorkflowBuilderStore.getState().description).toBe('New desc');
-
-    useWorkflowBuilderStore.getState().setTags(['x', 'y']);
-    expect(useWorkflowBuilderStore.getState().tags).toEqual(['x', 'y']);
-  });
-
-  // ── Validation ──
-
-  it('validate detects no-stages error', () => {
-    const errors = useWorkflowBuilderStore.getState().validate();
-    expect(errors.some((e) => e.type === 'no_stages')).toBe(true);
-  });
-
-  it('validate detects missing-prompts error', () => {
-    const stage = makeStage({ id: 's1', prompts: [] });
-    useWorkflowBuilderStore.getState().addStage(stage);
-
-    const errors = useWorkflowBuilderStore.getState().validate();
-    expect(errors.some((e) => e.type === 'missing_prompts')).toBe(true);
-  });
-
-  it('validate passes for a valid graph', () => {
-    const s1 = makeStage({ id: 's1', prompts: [{ label: 'p', text: 'x' }] });
-    const s2 = makeStage({ id: 's2', prompts: [{ label: 'p', text: 'y' }] });
-    useWorkflowBuilderStore.getState().addStage(s1);
-    useWorkflowBuilderStore.getState().addStage(s2);
-    useWorkflowBuilderStore.getState().addEdge({
-      id: 'e1',
-      workflowDefinitionId: 'def-1',
-      fromStageId: 's1',
-      toStageId: 's2',
-      edgeType: 'on_success',
-    });
-
-    const errors = useWorkflowBuilderStore.getState().validate();
-    expect(errors).toHaveLength(0);
-  });
-
-  // ── Undo / Redo ──
-
-  it('undo reverts to previous state after loadDefinition', () => {
-    // loadDefinition seeds history[0], so we can undo back to it
-    useWorkflowBuilderStore.getState().loadDefinition(makeDefinition());
-    expect(useWorkflowBuilderStore.getState().nodes).toHaveLength(0);
-
-    const s1 = makeStage({ id: 's1' });
-    useWorkflowBuilderStore.getState().addStage(s1);
-    expect(useWorkflowBuilderStore.getState().nodes).toHaveLength(1);
-
-    useWorkflowBuilderStore.getState().undo();
-    expect(useWorkflowBuilderStore.getState().nodes).toHaveLength(0);
-  });
-
-  it('redo re-applies undone change', () => {
-    useWorkflowBuilderStore.getState().loadDefinition(makeDefinition());
-
-    const s1 = makeStage({ id: 's1' });
-    useWorkflowBuilderStore.getState().addStage(s1);
-
-    useWorkflowBuilderStore.getState().undo();
-    expect(useWorkflowBuilderStore.getState().nodes).toHaveLength(0);
-
-    useWorkflowBuilderStore.getState().redo();
-    expect(useWorkflowBuilderStore.getState().nodes).toHaveLength(1);
-  });
-
-  it('canUndo / canRedo reflect state correctly', () => {
-    // After loadDefinition, historyIndex=0 — can't undo yet
-    useWorkflowBuilderStore.getState().loadDefinition(makeDefinition());
-    expect(useWorkflowBuilderStore.getState().canUndo()).toBe(false);
-    expect(useWorkflowBuilderStore.getState().canRedo()).toBe(false);
-
-    const s1 = makeStage({ id: 's1' });
-    useWorkflowBuilderStore.getState().addStage(s1);
-    expect(useWorkflowBuilderStore.getState().canUndo()).toBe(true);
-    expect(useWorkflowBuilderStore.getState().canRedo()).toBe(false);
-
-    useWorkflowBuilderStore.getState().undo();
-    expect(useWorkflowBuilderStore.getState().canUndo()).toBe(false);
-    expect(useWorkflowBuilderStore.getState().canRedo()).toBe(true);
-  });
-
-  it('the first stage added to a NEW (unsaved) workflow is undoable', () => {
-    // resetBuilder must seed the empty canvas as history[0]; when it left
-    // history empty the first addStage landed at index 0 and canUndo()
-    // (index > 0) stayed false — the stage could never be undone.
-    useWorkflowBuilderStore.getState().resetBuilder();
-    expect(useWorkflowBuilderStore.getState().canUndo()).toBe(false);
-
-    useWorkflowBuilderStore.getState().addStage(makeStage({ id: 's1' }));
-    expect(useWorkflowBuilderStore.getState().canUndo()).toBe(true);
-
-    useWorkflowBuilderStore.getState().undo();
-    expect(useWorkflowBuilderStore.getState().nodes).toHaveLength(0);
-  });
-
-  it('a stage property edit survives an undo/redo round trip', () => {
-    // updateStage used not to record history, so redo replayed a snapshot
-    // taken before the edit and silently discarded it.
-    useWorkflowBuilderStore.getState().loadDefinition(makeDefinition());
-    useWorkflowBuilderStore.getState().addStage(makeStage({ id: 's1', name: 'Original' }));
-    useWorkflowBuilderStore.getState().updateStage('s1', { name: 'Renamed' });
-    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('Renamed');
-
-    useWorkflowBuilderStore.getState().undo();
-    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('Original');
-
-    useWorkflowBuilderStore.getState().redo();
-    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('Renamed');
-  });
-
-  it('coalesces a burst of edits to one field into a single undo step', () => {
-    useWorkflowBuilderStore.getState().loadDefinition(makeDefinition());
-    useWorkflowBuilderStore.getState().addStage(makeStage({ id: 's1', name: '' }));
-    const before = useWorkflowBuilderStore.getState().history.length;
-
-    // Simulates typing — one updateStage per keystroke.
-    for (const name of ['R', 'Re', 'Ren', 'Rena', 'Renam', 'Rename']) {
-      useWorkflowBuilderStore.getState().updateStage('s1', { name });
-    }
-    expect(useWorkflowBuilderStore.getState().history.length).toBe(before + 1);
-
-    // ...and one undo takes the whole burst back out.
-    useWorkflowBuilderStore.getState().undo();
-    expect(useWorkflowBuilderStore.getState().nodes[0]!.data.stage.name).toBe('');
-  });
-
-  it('an edge type change is undoable', () => {
-    const s1 = makeStage({ id: 's1' });
-    const s2 = makeStage({ id: 's2', order: 1 });
-    useWorkflowBuilderStore.getState().loadDefinition(
-      makeDefinition({
-        stages: [s1, s2],
+    store().loadRecord(
+      makeRecord({
+        stages: [...makeRecord().graph.stages, c],
         edges: [
-          {
-            id: 'e1',
-            workflowDefinitionId: 'def-1',
-            fromStageId: 's1',
-            toStageId: 's2',
-            edgeType: 'on_success',
-          } as StageEdge,
+          { from: 'analyze', to: 'build', on: 'success' },
+          { from: 'build', to: 'check', on: 'success' },
         ],
       }),
     );
-    useWorkflowBuilderStore.getState().updateEdgeType('e1', 'on_failure');
-    expect(useWorkflowBuilderStore.getState().edges[0]!.data!.edgeType).toBe('on_failure');
+    store().removeStage('build');
+    store().onConnect({ source: 'analyze', target: 'check', sourceHandle: null, targetHandle: null });
 
-    useWorkflowBuilderStore.getState().undo();
-    expect(useWorkflowBuilderStore.getState().edges[0]!.data!.edgeType).toBe('on_success');
+    const graph = store().toGraph();
+    expect(graph.stages.map((s) => s.key)).toEqual(['analyze', 'check']);
+    expect(graph.edges).toEqual([{ from: 'analyze', to: 'check', on: 'success' }]);
+    expect(graph.stages[1]!.context.from).toEqual(['analyze']);
+    expect(store().validate().filter((i) => i.severity === 'error')).toEqual([]);
   });
 
-  // ── State tracking ──
+  it('renameStageKey rewrites edges and context sources, and rejects bad or taken keys', () => {
+    store().loadRecord(makeRecord());
+    store().updateStage('build', { context: { mode: 'summary', from: ['analyze'] } });
+    expect(store().renameStageKey('analyze', 'Bad Key')).toMatch(/lower snake case/);
+    expect(store().renameStageKey('analyze', 'build')).toMatch(/already has the key/);
+    expect(store().renameStageKey('analyze', 'research')).toBeNull();
+    const graph = store().toGraph();
+    expect(graph.edges[0]).toMatchObject({ from: 'research', to: 'build' });
+    expect(graph.stages[1]!.context.from).toEqual(['research']);
+  });
 
-  it('markSaving / markSaved cycle', () => {
-    useWorkflowBuilderStore.getState().markDirty();
-    expect(useWorkflowBuilderStore.getState().isDirty).toBe(true);
+  // ── Wholesale graph: clearing a field removes it (D-4) ──
 
-    useWorkflowBuilderStore.getState().markSaving(true);
-    expect(useWorkflowBuilderStore.getState().isSaving).toBe(true);
+  it('setting a field to undefined removes it from the saved graph', () => {
+    store().loadRecord(makeRecord());
+    store().updateStage('analyze', { retry: { maxAttempts: 3, initialDelayMs: 0, backoffMultiplier: 2, maxDelayMs: 1000, jitter: 'none', mode: 'resume', restoreCheckpointOnRestart: true } });
+    store().updateStage('analyze', { retry: undefined, description: undefined });
+    const stage = store().toGraph().stages[0]!;
+    expect('retry' in stage).toBe(false);
+    expect('description' in stage).toBe(false);
 
-    useWorkflowBuilderStore.getState().markSaved();
-    expect(useWorkflowBuilderStore.getState().isSaving).toBe(false);
-    expect(useWorkflowBuilderStore.getState().isDirty).toBe(false);
-    expect(useWorkflowBuilderStore.getState().lastSavedAt).toBeInstanceOf(Date);
+    store().updateWorkflow({ description: 'x' });
+    store().updateWorkflow({ description: undefined });
+    expect('description' in store().toGraph().workflow).toBe(false);
+  });
+
+  it('duplicateStage copies every field under a new key', () => {
+    store().loadRecord(makeRecord());
+    store().updateStage('analyze', { output: { format: 'json', extraction: 'auto', rules: [], schema: { type: 'object' } } });
+    store().duplicateStage('analyze');
+    const copy = store().toGraph().stages[2]!;
+    expect(copy.key).toBe('analyze_copy');
+    expect(copy.name).toBe('Analyze (copy)');
+    expect(copy.output.schema).toEqual({ type: 'object' });
+    expect(store().selectedNodeId).toBe('analyze_copy');
+  });
+
+  // ── Positions (D-28) ──
+
+  it('loads stored positions and saves node positions into stage.position', () => {
+    store().loadRecord(makeRecord());
+    expect(store().nodes[0]!.position).toEqual({ x: 10, y: 20 });
+    store().onNodesChange([{ id: 'analyze', type: 'position', position: { x: 55.4, y: 66.6 }, dragging: false }]);
+    expect(store().toGraph().stages[0]!.position).toEqual({ x: 55, y: 67 });
+    expect(store().isDirty).toBe(true);
+  });
+
+  it('auto-layout is one undo step', () => {
+    store().loadRecord(makeRecord());
+    const before = store().nodes.map((n) => n.position);
+    store().autoLayout();
+    expect(store().nodes.map((n) => n.position)).not.toEqual(before);
+    expect(store().canUndo()).toBe(true);
+    store().undo();
+    expect(store().nodes.map((n) => n.position)).toEqual(before);
+  });
+
+  // ── Undo/redo ──
+
+  it('undo/redo of a stage property edit', () => {
+    store().loadRecord(makeRecord());
+    store().updateStage('analyze', { name: 'Renamed' });
+    store().undo();
+    expect(store().nodes[0]!.data.stage.name).toBe('Analyze');
+    store().redo();
+    expect(store().nodes[0]!.data.stage.name).toBe('Renamed');
+  });
+
+  it('an edge condition change is undoable', () => {
+    store().loadRecord(makeRecord());
+    store().updateEdge('analyze->build', { on: 'failure', when: "variables.x == 'y'" });
+    expect(store().toGraph().edges[0]).toEqual({ from: 'analyze', to: 'build', on: 'failure', when: "variables.x == 'y'" });
+    store().undo();
+    expect(store().toGraph().edges[0]).toEqual({ from: 'analyze', to: 'build', on: 'success' });
+  });
+
+  // ── Validation located on nodes and fields (D-25) ──
+
+  it('validate locates issues on the stage and field', () => {
+    store().loadRecord(makeRecord());
+    store().updateStage('build', { prompts: [{ label: 'p', text: '' }] });
+    const issues = store().validate();
+    const promptIssue = issues.find((i) => i.stageKey === 'build');
+    expect(promptIssue?.field).toBe('/prompts/0/text');
+    expect(promptIssue?.severity).toBe('error');
+  });
+
+  it('validate reports engine-gated fields', () => {
+    store().loadRecord(makeRecord());
+    store().updateStage('build', { join: { mode: 'any', cancelRemaining: false } });
+    const issue = store().validate().find((i) => i.code === 'engine-unsupported');
+    expect(issue).toMatchObject({ stageKey: 'build', field: '/join/mode' });
+  });
+
+  // ── Save bookkeeping ──
+
+  it('applySaved stays dirty when the graph changed while the save was in flight', () => {
+    store().loadRecord(makeRecord());
+    store().setName('Edited');
+    const saved = store().toGraph();
+    store().markSaving(true);
+    store().setName('Edited again');
+    store().applySaved({ ...makeRecord(), revision: 4 }, saved);
+    expect(store().revision).toBe(4);
+    expect(store().isSaving).toBe(false);
+    expect(store().isDirty).toBe(true);
+
+    store().applySaved({ ...makeRecord(), revision: 5 }, store().toGraph());
+    expect(store().isDirty).toBe(false);
+  });
+
+  it('setPostProcessing keeps commit → push → PR consistent', () => {
+    store().setPostProcessing('autoCreatePR', true);
+    expect(store().workflow.lifecycle.postProcessing).toMatchObject({ autoCommit: true, autoPush: true, autoCreatePR: true });
+    store().setPostProcessing('autoCommit', false);
+    expect(store().workflow.lifecycle.postProcessing).toMatchObject({ autoCommit: false, autoPush: false, autoCreatePR: false });
   });
 });

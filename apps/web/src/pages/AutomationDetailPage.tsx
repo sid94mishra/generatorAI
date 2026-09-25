@@ -528,7 +528,8 @@ function IterationRow({
 }) {
   const [showChanges, setShowChanges] = useState(false);
   // Only fetch once the user asks — an execution can hold many iterations.
-  const { data: runData } = useWorkflowRun(showChanges ? run.workflowRunId : undefined);
+  const runId = run.workflowRunId;
+  const { data: runData } = useWorkflowRun(showChanges && runId ? runId : undefined);
 
   return (
     <div className="rounded-lg">
@@ -548,12 +549,14 @@ function IterationRow({
           <FileCode className="h-3 w-3" />
           {showChanges ? 'Hide changes' : 'Changes'}
         </Button>
-        <Button variant="unstyled"
-          onClick={() => onViewRun(run.workflowRunId, run.workflowDefinitionId)}
-          className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
-        >
-          Run: {run.workflowRunId.slice(0, 8)}…
-        </Button>
+        {runId && (
+          <Button variant="unstyled"
+            onClick={() => onViewRun(runId, run.workflowDefinitionId)}
+            className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
+          >
+            Run: {runId.slice(0, 8)}…
+          </Button>
+        )}
       </div>
 
       {showChanges && (

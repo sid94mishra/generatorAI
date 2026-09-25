@@ -18,7 +18,7 @@ function makeStageRun(overrides: Partial<StageRun> = {}): StageRun {
   return {
     id: `sr-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
     workflowRunId: 'run-1',
-    stageDefinitionId: 'sd-1',
+    stageKey: 'stage_1',
     name: 'Stage 1',
     status: 'pending',
     currentStep: 0,
@@ -33,6 +33,7 @@ function makeRun(overrides: Partial<WorkflowRunWithStages> = {}): WorkflowRunWit
   return {
     id: 'run-1',
     workflowDefinitionId: 'def-1',
+    definitionVersionId: 'ver-1',
     name: 'Test Run',
     status: 'created',
     sessionMode: 'auto',

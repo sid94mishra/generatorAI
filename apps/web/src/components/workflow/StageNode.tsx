@@ -6,12 +6,13 @@
 import React, { memo, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { Node } from '@xyflow/react';
-import { Box, Play, Pause, Check, X, AlertTriangle, SkipForward, Clock, Copy, Trash2, Cpu, Sparkles, Server, ShieldCheck, Bot } from 'lucide-react';
+import { Box, Play, Pause, Check, X, AlertTriangle, AlertCircle, SkipForward, Clock, Copy, Trash2, Cpu, Sparkles, Server, ShieldCheck, Bot, Filter, UserCheck } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { Button } from '@/components/ui/index.js';
 import type { StageNodeData } from '@/stores/workflowBuilderStore.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
+import { useShallow } from 'zustand/react/shallow';
 import { useCanvasReadonly } from './canvasContext.js';
 
 /** Color mapping for stage run statuses (used in runtime mode) */
@@ -64,6 +65,10 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
   const selectNode = useWorkflowBuilderStore((s) => s.selectNode);
   const removeStage = useWorkflowBuilderStore((s) => s.removeStage);
   const duplicateStage = useWorkflowBuilderStore((s) => s.duplicateStage);
+  // Error-severity validator issues located on this stage (D-25).
+  const issueMessages = useWorkflowBuilderStore(
+    useShallow((s) => s.issues.filter((i) => i.stageKey === id && i.severity === 'error').map((i) => i.message)),
+  );
 
   // Determine status styling (runtime status if available, else design-time default)
   const runtimeStatus = (stage as StageNodeData['stage'] & { runtimeStatus?: string }).runtimeStatus;
@@ -91,18 +96,16 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
     selectNode(id);
   }, [id, selectNode]);
 
-  const promptCount = stage.prompts?.length ?? 0;
+  const promptCount = stage.prompts.length;
 
-  // Capability summary — surface what matters while building, not just the name
-  const model = stage.harnessConfigOverrides?.model;
-  const reasoningEffort = stage.harnessConfigOverrides?.reasoningEffort;
-  const skillCount = stage.skills?.length ?? 0;
-  const mcpCount = stage.harnessConfigOverrides?.mcpServers
-    ? Object.keys(stage.harnessConfigOverrides.mcpServers).length
-    : 0;
-  const validationCount = stage.resultValidation?.length ?? 0;
-  const agentRef = stage.agentRef;
-  const isStructured = stage.outputFormat === 'json';
+  // Capability summary, read from the fields the panel writes (D-30).
+  const model = stage.session?.model;
+  const reasoningEffort = stage.session?.reasoningEffort;
+  const skillCount = stage.session?.agentOverrides?.addSkillIds?.length ?? 0;
+  const excludedMcpCount = stage.session?.mcp?.excludedIds?.length ?? 0;
+  const validationCount = stage.output.rules.length;
+  const agentRef = stage.session?.agentRef;
+  const isStructured = stage.output.format === 'json';
 
   return (
     <div
@@ -124,6 +127,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
           : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/60 hover:shadow-sm hover:shadow-black/5',
         statusStyle?.bg,
         statusStyle?.border,
+        issueMessages.length > 0 && !statusStyle && 'border-danger',
       )}
     >
       {/* Input Handle (left) — glows on hover */}
@@ -166,6 +170,17 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             )}
           </div>
           <span className="truncate text-sm font-semibold leading-tight">{label}</span>
+          {issueMessages.length > 0 && (
+            <Tooltip content={issueMessages.join(' · ')} side="top">
+              <span
+                className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-danger-muted px-1 py-0.5 text-[10px] font-semibold text-danger"
+                aria-label={`${issueMessages.length} validation ${issueMessages.length === 1 ? 'issue' : 'issues'}`}
+              >
+                <AlertCircle className="h-3 w-3" />
+                {issueMessages.length}
+              </span>
+            </Tooltip>
+          )}
         </div>
 
         {/* Action buttons (visible on hover) */}
@@ -222,10 +237,24 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             </span>
           </Tooltip>
         )}
-        {mcpCount > 0 && (
-          <Tooltip content={`${mcpCount} MCP server${mcpCount !== 1 ? 's' : ''}`} side="top">
+        {excludedMcpCount > 0 && (
+          <Tooltip content={`${excludedMcpCount} MCP server${excludedMcpCount !== 1 ? 's' : ''} excluded`} side="top">
             <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
-              <Server className="h-3 w-3" />{mcpCount}
+              <Server className="h-3 w-3" />−{excludedMcpCount}
+            </span>
+          </Tooltip>
+        )}
+        {stage.guard && (
+          <Tooltip content={`Guard: ${stage.guard}`} side="top">
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <Filter className="h-3 w-3" />if
+            </span>
+          </Tooltip>
+        )}
+        {stage.approval && (
+          <Tooltip content="Waits for approval before successors start" side="top">
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <UserCheck className="h-3 w-3" />
             </span>
           </Tooltip>
         )}
@@ -243,11 +272,11 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             </span>
           </Tooltip>
         )}
-        {stage.retryPolicy && (
-          <Tooltip content={`Retry policy: up to ${stage.retryPolicy.maxRetries} retries on failure`} side="top">
+        {stage.retry && (
+          <Tooltip content={`Retry policy: up to ${stage.retry.maxAttempts} attempts`} side="top">
             <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-help">
               <AlertTriangle className="h-3 w-3" />
-              ×{stage.retryPolicy.maxRetries}
+              ×{stage.retry.maxAttempts}
             </span>
           </Tooltip>
         )}

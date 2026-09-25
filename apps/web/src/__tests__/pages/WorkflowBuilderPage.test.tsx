@@ -32,9 +32,11 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PlatformContext } from '@/providers/PlatformProvider.js';
 import { ThemeProvider } from '@/providers/ThemeProvider.js';
-import { MockPlatformClient } from '../helpers/MockPlatformClient.js';
-import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
-import type { WorkflowDefinitionWithStages } from '@generatorai/shared';
+import { MockPlatformClient, createMockDefinition, createMockGraph } from '../helpers/MockPlatformClient.js';
+import { newAgentStage, useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
+import { workflowKeys } from '@/hooks/workflowQueries.js';
+import { ApiError } from '@/platform/apiFetch.js';
+import type { WorkflowDefinitionRecord } from '@generatorai/workflow-spec';
 
 vi.mock('@/components/workflow/DAGCanvas.js', () => ({
   DAGCanvas: () => <div data-testid="dag-canvas" />,
@@ -42,21 +44,13 @@ vi.mock('@/components/workflow/DAGCanvas.js', () => ({
 
 import { WorkflowBuilderPage } from '@/pages/WorkflowBuilderPage.js';
 
-function makeDefinition(overrides: Partial<WorkflowDefinitionWithStages> = {}): WorkflowDefinitionWithStages {
-  return {
-    id: 'def-a',
-    name: 'Definition A',
-    description: '',
-    sessionMode: 'auto',
-    variables: [],
-    tags: [],
-    createdAt: new Date(),
-    updatedAt: new Date(),
-    stages: [],
-    edges: [],
-    ...overrides,
-  } as WorkflowDefinitionWithStages;
+/** A definition with one valid stage, so the builder's client validation passes. */
+function makeDefinition(overrides: Partial<WorkflowDefinitionRecord> = {}, name = 'Definition A'): WorkflowDefinitionRecord {
+  const stage = { ...newAgentStage('analyze', 'Analyze'), prompts: [{ label: 'p', text: 'Analyze it' }], position: { x: 0, y: 0 } };
+  return createMockDefinition({ graph: createMockGraph(name, { stages: [stage] }), ...overrides }, name);
 }
+
+const storeName = () => useWorkflowBuilderStore.getState().workflow.name;
 
 function renderBuilderRouter(platform: MockPlatformClient, initialPath: string) {
   const queryClient = new QueryClient({
@@ -66,7 +60,7 @@ function renderBuilderRouter(platform: MockPlatformClient, initialPath: string) 
     [{ path: '/workflows/:id/edit', element: <WorkflowBuilderPage /> }],
     { initialEntries: [initialPath] },
   );
-  render(
+  const view = render(
     <ThemeProvider>
       <QueryClientProvider client={queryClient}>
         <PlatformContext.Provider value={platform as unknown as never}>
@@ -75,7 +69,8 @@ function renderBuilderRouter(platform: MockPlatformClient, initialPath: string) 
       </QueryClientProvider>
     </ThemeProvider>,
   );
-  return router;
+  void view;
+  return { router, queryClient };
 }
 
 describe('WorkflowBuilderPage — failed load renders an error, not an editable canvas', () => {
@@ -123,14 +118,14 @@ describe('WorkflowBuilderPage — navigating between two ids resets the store', 
   it('clears workflow A\'s content before workflow B (which fails) loads', async () => {
     const platform = new MockPlatformClient();
     platform.getDefinition.mockImplementation(async (id: string) => {
-      if (id === 'def-a') return makeDefinition({ id: 'def-a', name: 'Definition A' });
+      if (id === 'def-a') return makeDefinition({ id: 'def-a' }, 'Definition A');
       throw new Error('def-b failed to load');
     });
 
-    const router = renderBuilderRouter(platform, '/workflows/def-a/edit');
+    const { router } = renderBuilderRouter(platform, '/workflows/def-a/edit');
 
     await waitFor(() => expect(screen.getByTestId('dag-canvas')).toBeTruthy());
-    await waitFor(() => expect(useWorkflowBuilderStore.getState().name).toBe('Definition A'));
+    await waitFor(() => expect(storeName()).toBe('Definition A'));
     expect(useWorkflowBuilderStore.getState().definitionId).toBe('def-a');
 
     await act(async () => {
@@ -142,25 +137,72 @@ describe('WorkflowBuilderPage — navigating between two ids resets the store', 
     await waitFor(() => expect(screen.getByText(/failed to load this workflow/i)).toBeTruthy());
     expect(screen.queryByTestId('dag-canvas')).toBeNull();
     // The store itself was reset — not left holding A's name/id.
-    expect(useWorkflowBuilderStore.getState().name).toBe('');
+    expect(storeName()).toBe('');
     expect(useWorkflowBuilderStore.getState().definitionId).toBeNull();
   });
 
   it('loads workflow B fresh when both A and B succeed', async () => {
     const platform = new MockPlatformClient();
     platform.getDefinition.mockImplementation(async (id: string) => {
-      if (id === 'def-a') return makeDefinition({ id: 'def-a', name: 'Definition A' });
-      return makeDefinition({ id: 'def-b', name: 'Definition B' });
+      if (id === 'def-a') return makeDefinition({ id: 'def-a' }, 'Definition A');
+      return makeDefinition({ id: 'def-b' }, 'Definition B');
     });
 
-    const router = renderBuilderRouter(platform, '/workflows/def-a/edit');
-    await waitFor(() => expect(useWorkflowBuilderStore.getState().name).toBe('Definition A'));
+    const { router } = renderBuilderRouter(platform, '/workflows/def-a/edit');
+    await waitFor(() => expect(storeName()).toBe('Definition A'));
 
     await act(async () => {
       router.navigate('/workflows/def-b/edit');
     });
 
-    await waitFor(() => expect(useWorkflowBuilderStore.getState().name).toBe('Definition B'));
+    await waitFor(() => expect(storeName()).toBe('Definition B'));
     expect(useWorkflowBuilderStore.getState().definitionId).toBe('def-b');
+  });
+});
+
+describe('WorkflowBuilderPage — saving the graph', () => {
+  beforeEach(() => {
+    useWorkflowBuilderStore.getState().resetBuilder();
+  });
+
+  it('never reloads the canvas from query data while there are unsaved edits (D-3)', async () => {
+    const platform = new MockPlatformClient();
+    platform.getDefinition.mockResolvedValue(makeDefinition());
+    const { queryClient } = renderBuilderRouter(platform, '/workflows/def-a/edit');
+    await waitFor(() => expect(storeName()).toBe('Definition A'));
+
+    act(() => useWorkflowBuilderStore.getState().setName('Local edit'));
+    await act(async () => {
+      queryClient.setQueryData(workflowKeys.definition('def-a'), makeDefinition({ revision: 2 }, 'Theirs'));
+    });
+    expect(storeName()).toBe('Local edit');
+    expect(useWorkflowBuilderStore.getState().revision).toBe(1);
+  });
+
+  it('saves with expectedRevision; a 409 offers "Reload theirs"', async () => {
+    const platform = new MockPlatformClient();
+    platform.getDefinition.mockResolvedValue(makeDefinition());
+    const theirs = makeDefinition({ revision: 2 }, 'Theirs');
+    platform.saveDefinitionGraph.mockRejectedValue(
+      new ApiError(409, 'REVISION_CONFLICT', 'The definition changed', { current: theirs }),
+    );
+    renderBuilderRouter(platform, '/workflows/def-a/edit');
+    await waitFor(() => expect(storeName()).toBe('Definition A'));
+
+    act(() => useWorkflowBuilderStore.getState().setName('Mine'));
+    await act(async () => {
+      screen.getByRole('button', { name: /^save$/i }).click();
+    });
+
+    expect(platform.saveDefinitionGraph).toHaveBeenCalledWith('def-a', expect.objectContaining({ formatVersion: 2 }), 1);
+    await waitFor(() => expect(screen.getByText(/this workflow changed elsewhere/i)).toBeTruthy());
+    expect(useWorkflowBuilderStore.getState().isSaving).toBe(false);
+
+    await act(async () => {
+      screen.getByRole('button', { name: /reload theirs/i }).click();
+    });
+    expect(storeName()).toBe('Theirs');
+    expect(useWorkflowBuilderStore.getState().revision).toBe(2);
+    expect(useWorkflowBuilderStore.getState().isDirty).toBe(false);
   });
 });

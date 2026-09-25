@@ -71,8 +71,10 @@ export function CreateAutomationPage() {
   // Filter workflows by selected project (if any)
   const filteredWorkflows = useMemo(() => {
     if (!workflows) return [];
-    if (!selectedProjectId) return workflows;
-    return workflows.filter((w) => w.projectId === selectedProjectId || !w.projectId);
+    // Automations start normal runs, which need a published version.
+    const runnable = workflows.filter((w) => w.status === 'published' && !w.archivedAt);
+    if (!selectedProjectId) return runnable;
+    return runnable.filter((w) => w.projectId === selectedProjectId || !w.projectId);
   }, [workflows, selectedProjectId]);
 
   const handleAddWorkflow = (id: string) => {

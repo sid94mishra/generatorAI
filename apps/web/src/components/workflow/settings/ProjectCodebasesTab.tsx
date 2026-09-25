@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import { Info, GitBranch } from 'lucide-react';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useProjects, useProjectCodebases } from '@/hooks/projectQueries.js';
@@ -13,16 +14,18 @@ import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 const MAX_CODEBASES = 3;
 
 export function ProjectCodebasesTab() {
-  const projectId = useWorkflowBuilderStore((s) => s.projectId);
+  // `graph.workflow.projectId` and `graph.workflow.lifecycle` (codebases, post-processing).
+  const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? null);
   const setProjectId = useWorkflowBuilderStore((s) => s.setProjectId);
-  const selectedCodebases = useWorkflowBuilderStore((s) => s.selectedCodebases);
-  const setSelectedCodebases = useWorkflowBuilderStore((s) => s.setSelectedCodebases);
-  const autoCommit = useWorkflowBuilderStore((s) => s.autoCommit);
-  const setAutoCommit = useWorkflowBuilderStore((s) => s.setAutoCommit);
-  const autoPush = useWorkflowBuilderStore((s) => s.autoPush);
-  const setAutoPush = useWorkflowBuilderStore((s) => s.setAutoPush);
-  const autoCreatePR = useWorkflowBuilderStore((s) => s.autoCreatePR);
-  const setAutoCreatePR = useWorkflowBuilderStore((s) => s.setAutoCreatePR);
+  const selectedCodebases = useWorkflowBuilderStore((s) => s.workflow.lifecycle.codebaseAliases);
+  const setSelectedCodebases = useWorkflowBuilderStore((s) => s.setCodebaseAliases);
+  const { autoCommit, autoPush, autoCreatePR } = useWorkflowBuilderStore(
+    useShallow((s) => s.workflow.lifecycle.postProcessing),
+  );
+  const setPostProcessing = useWorkflowBuilderStore((s) => s.setPostProcessing);
+  const setAutoCommit = (v: boolean) => setPostProcessing('autoCommit', v);
+  const setAutoPush = (v: boolean) => setPostProcessing('autoPush', v);
+  const setAutoCreatePR = (v: boolean) => setPostProcessing('autoCreatePR', v);
 
   const { data: projects, isLoading: projectsLoading } = useProjects();
   const { data: codebases, isLoading: codebasesLoading } = useProjectCodebases(projectId ?? undefined);
@@ -75,7 +78,7 @@ export function ProjectCodebasesTab() {
         <div>
           <div className="mb-3 flex items-center gap-1 rounded-md bg-info-muted px-3 py-2 text-xs text-info">
             <Info className="h-3.5 w-3.5 shrink-0" />
-            <span>Select up to {MAX_CODEBASES} codebases. Worktrees are created per run. Use {'{{alias}}/path'} in prompts.</span>
+            <span>Select up to {MAX_CODEBASES} codebases. Worktrees are created per run. Use {'{{run.codebases.<alias>.path}}'} in prompts.</span>
           </div>
 
           <label className="mb-2 block text-sm font-medium text-foreground">

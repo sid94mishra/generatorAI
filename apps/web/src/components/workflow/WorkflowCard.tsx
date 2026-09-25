@@ -13,7 +13,7 @@ import {
   Play,
   Trash2,
   Calendar,
-  Clock,
+  Layers,
   CheckSquare,
   Square,
 } from 'lucide-react';
@@ -22,12 +22,21 @@ import { Link } from 'react-router-dom';
 import { Card, Badge, Button } from '@/components/ui/index.js';
 import { EntityListRow } from '@/components/data/index.js';
 import { cn } from '@/lib/utils.js';
-import type { WorkflowDefinition } from '@generatorai/shared';
+import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
+
+/** Draft / Published badge: a draft runs only as a test run. */
+export function DefinitionStatusBadge({ status }: { status: WorkflowDefinitionSummary['status'] }) {
+  return (
+    <Badge tone={status === 'published' ? 'success' : 'warning'} size="sm" className="shrink-0">
+      {status === 'published' ? 'Published' : 'Draft'}
+    </Badge>
+  );
+}
 
 // ── WorkflowCard (grid) ──
 
 export interface WorkflowCardProps {
-  definition: WorkflowDefinition;
+  definition: WorkflowDefinitionSummary;
   onClick: () => void;
   /** When provided, the corresponding hover action button is shown */
   onEdit?: () => void;
@@ -157,7 +166,10 @@ export function WorkflowCard({
 
       {showFooter && (
         <div className="mt-auto flex items-center justify-between pt-3 text-[10px] text-muted-foreground">
-          <span className="flex items-center gap-1"><Clock className="h-3 w-3" />{definition.sessionMode}</span>
+          <span className="flex items-center gap-1.5">
+            <DefinitionStatusBadge status={definition.status} />
+            <span className="flex items-center gap-1"><Layers className="h-3 w-3" />{definition.stageCount} {definition.stageCount === 1 ? 'stage' : 'stages'}</span>
+          </span>
           <span className="flex items-center gap-1"><Calendar className="h-3 w-3" />{new Date(definition.createdAt).toLocaleDateString()}</span>
         </div>
       )}
@@ -168,7 +180,7 @@ export function WorkflowCard({
 // ── WorkflowListRow (list view) ──
 
 export interface WorkflowListRowProps {
-  definition: WorkflowDefinition;
+  definition: WorkflowDefinitionSummary;
   onClick: () => void;
   onEdit?: () => void;
   onDelete?: (e: React.MouseEvent) => void;
@@ -226,7 +238,7 @@ export function WorkflowListRow({
       }
       trailing={
         <>
-          <span className="text-xs text-muted-foreground">{definition.sessionMode}</span>
+          <DefinitionStatusBadge status={definition.status} />
           <span className="text-xs text-muted-foreground">{new Date(definition.createdAt).toLocaleDateString()}</span>
         </>
       }

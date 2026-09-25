@@ -7,7 +7,7 @@ describe('workflow file selection', () => {
   it('retains selected files after clearing the live native file picker', () => {
     const submit = vi.fn();
     render(<VariableInputModal open onClose={() => {}} onSubmit={submit}
-      variables={[]} workflowName="Upload audit" stageNames={['Review']} />);
+      variables={[]} workflowName="Upload audit" stages={[{ key: 'review', name: 'Review' }]} />);
     fireEvent.click(screen.getByRole('button', { name: 'skills' }));
     const input = document.querySelector('input[type=file]') as HTMLInputElement;
     const liveFiles = [new File(['skill'], 'review.md', { type: 'text/markdown' })];

@@ -27,7 +27,7 @@ import {
   useWorkflowDefinitions,
   useDeleteWorkflowDefinition,
   useBulkDeleteWorkflowDefinitions,
-  useImportFromJSON,
+  useImportDefinition,
 } from '@/hooks/workflowQueries.js';
 import { useTemplates } from '@/hooks/queries.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
@@ -39,7 +39,9 @@ import { Toolbar } from '@/components/layout/Toolbar.js';
 import { cn } from '@/lib/utils.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useMediaQuery } from '@/hooks/useMediaQuery.js';
-import type { ImportWorkflowJson } from '@generatorai/shared';
+import { exportGraph, parseGraph, WORKFLOW_FORMAT_VERSION, type ValidationIssue } from '@generatorai/workflow-spec';
+import { ApiError } from '@/platform/apiFetch.js';
+import { downloadBlobAsFile } from '@/utils/downloadBlobAsFile.js';
 
 type ViewMode = 'grid' | 'list';
 
@@ -65,13 +67,15 @@ export function WorkflowListPage() {
   const { data: systemWorkflows } = useTemplates();
   const deleteDefinition = useDeleteWorkflowDefinition();
   const bulkDelete = useBulkDeleteWorkflowDefinitions();
-  const importFromJSON = useImportFromJSON();
+  const importDefinition = useImportDefinition();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<ViewMode>('grid');
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  /** Informational result of the last action (a delete that archived). */
+  const [notice, setNotice] = useState<string | null>(null);
 
   // ── Bulk selection state ──
   const [selectionMode, setSelectionMode] = useState(false);
@@ -224,23 +228,18 @@ export function WorkflowListPage() {
 
     try {
       const text = await file.text();
-      const raw = JSON.parse(text);
-
-      // Basic client-side validation — full Zod validation happens on server
-      if (!raw.name || typeof raw.name !== 'string') {
-        setUploadError('Invalid workflow JSON: "name" field is required and must be a string');
-        return;
-      }
-      if (!Array.isArray(raw.stages) || raw.stages.length === 0) {
-        setUploadError('Invalid workflow JSON: "stages" array is required with at least one stage');
-        return;
-      }
-
-      const result = await importFromJSON.mutateAsync(raw as ImportWorkflowJson);
+      // The canonical document (what Export writes); the server validates it
+      // and answers 422 with located issues when it is not a valid workflow.
+      const result = await importDefinition.mutateAsync(JSON.parse(text) as unknown);
       navigate(`/workflows/${result.id}/edit`);
     } catch (err) {
       if (err instanceof SyntaxError) {
         setUploadError('File contains invalid JSON');
+      } else if (err instanceof ApiError && err.status === 422) {
+        const issues = (err.details as { issues?: ValidationIssue[] } | undefined)?.issues ?? [];
+        setUploadError(
+          [err.message, ...issues.map((i) => `${i.path || '/'}: ${i.message}${i.hint ? ` (${i.hint})` : ''}`)].join('\n'),
+        );
       } else {
         setUploadError(err instanceof Error ? err.message : 'Failed to import workflow');
       }
@@ -248,74 +247,79 @@ export function WorkflowListPage() {
   };
 
   const handleDownloadTemplate = () => {
-    const template = {
-      name: 'My Workflow',
-      description: 'Describe what this workflow does',
-      sessionMode: 'auto',
-      tags: ['custom'],
-      variables: [
-        {
-          name: 'example_variable',
-          type: 'string',
-          label: 'Example Variable',
-          description: 'An example variable referenced in prompts as {{example_variable}}',
-          required: false,
-          defaultValue: '',
-        },
-      ],
-      harnessConfig: undefined,
-      stages: [
-        {
-          name: 'Stage 1 - Analyze',
-          description: 'First stage of the workflow',
-          order: 0,
-          prompts: [
+    // A sample in the canonical document format: what Export writes and
+    // Upload JSON reads.
+    const sample = exportGraph(
+      parseGraph({
+        formatVersion: WORKFLOW_FORMAT_VERSION,
+        workflow: {
+          name: 'My Workflow',
+          description: 'Describe what this workflow does',
+          tags: ['custom'],
+          variables: [
             {
-              label: 'Analyze Requirements',
-              text: 'Analyze the following requirements: {{example_variable}}',
+              name: 'example_variable',
+              type: 'string',
+              label: 'Example Variable',
+              description: 'Referenced in prompts as {{variables.example_variable}}',
             },
           ],
-          hooks: [],
         },
-        {
-          name: 'Stage 2 - Generate',
-          description: 'Second stage that depends on Stage 1',
-          order: 1,
-          prompts: [
-            {
-              label: 'Generate Output',
-              text: 'Based on the analysis, generate the output.',
-            },
-          ],
-          hooks: [],
-        },
-      ],
-      edges: [
-        { fromStageIndex: 0, toStageIndex: 1, edgeType: 'on_success' },
-      ],
-    };
-    const blob = new Blob([JSON.stringify(template, null, 2)], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'workflow-template.json';
-    a.click();
-    URL.revokeObjectURL(url);
+        stages: [
+          {
+            kind: 'agent',
+            key: 'analyze',
+            name: 'Analyze',
+            description: 'First stage of the workflow',
+            prompts: [{ label: 'Analyze Requirements', text: 'Analyze the following requirements: {{variables.example_variable}}' }],
+          },
+          {
+            kind: 'agent',
+            key: 'generate',
+            name: 'Generate',
+            description: 'Runs after Analyze succeeds',
+            prompts: [{ label: 'Generate Output', text: 'Based on the analysis, generate the output.' }],
+          },
+        ],
+        edges: [{ from: 'analyze', to: 'generate', on: 'success' }],
+      }),
+    );
+    void downloadBlobAsFile(new Blob([sample], { type: 'application/json' }), 'workflow-template.workflow.json');
   };
 
-  /** Confirm and execute single workflow deletion */
+  /** Confirm and execute single workflow deletion (archived instead when it has runs, D-6). */
   const confirmDelete = async () => {
     if (!deleteTarget) return;
-    await deleteDefinition.mutateAsync(deleteTarget);
-    setDeleteTarget(null);
+    try {
+      const outcome = await deleteDefinition.mutateAsync(deleteTarget);
+      setNotice(
+        'archived' in outcome
+          ? `The workflow has ${outcome.runs} ${outcome.runs === 1 ? 'run' : 'runs'}, so it was archived instead of deleted; its run history stays readable.`
+          : null,
+      );
+    } catch (err) {
+      setUploadError(err instanceof Error ? `Delete failed: ${err.message}` : 'Delete failed');
+    } finally {
+      setDeleteTarget(null);
+    }
   };
 
   /** Confirm and execute bulk workflow deletion */
   const confirmBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    await bulkDelete.mutateAsync(Array.from(selectedIds));
-    setBulkDeleteOpen(false);
-    exitSelectionMode();
+    try {
+      const { archived } = await bulkDelete.mutateAsync(Array.from(selectedIds));
+      setNotice(
+        archived > 0
+          ? `${archived} ${archived === 1 ? 'workflow has' : 'workflows have'} runs and ${archived === 1 ? 'was' : 'were'} archived instead of deleted.`
+          : null,
+      );
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Delete failed');
+    } finally {
+      setBulkDeleteOpen(false);
+      exitSelectionMode();
+    }
   };
 
   if (isLoading) {
@@ -342,7 +346,7 @@ export function WorkflowListPage() {
         open={!!deleteTarget}
         onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}
         title="Delete Workflow"
-        description="Delete this workflow? This cannot be undone."
+        description="Delete this workflow? A workflow that has runs is archived instead, so its run history stays readable."
         confirmLabel="Delete"
         variant="destructive"
         onConfirm={confirmDelete}
@@ -353,7 +357,7 @@ export function WorkflowListPage() {
         open={bulkDeleteOpen}
         onOpenChange={(open) => { if (!open) setBulkDeleteOpen(false); }}
         title={`Delete ${selectedIds.size} Workflow${selectedIds.size === 1 ? '' : 's'}`}
-        description={`Are you sure you want to delete ${selectedIds.size} selected workflow${selectedIds.size === 1 ? '' : 's'}? This cannot be undone.`}
+        description={`Delete ${selectedIds.size} selected workflow${selectedIds.size === 1 ? '' : 's'}? Workflows that have runs are archived instead.`}
         confirmLabel={`Delete ${selectedIds.size}`}
         variant="destructive"
         loading={bulkDelete.isPending}
@@ -397,9 +401,9 @@ export function WorkflowListPage() {
             <Button
               variant="secondary"
               onClick={handleUploadClick}
-              disabled={importFromJSON.isPending}
-              loading={importFromJSON.isPending}
-              title="Upload a workflow JSON file"
+              disabled={importDefinition.isPending}
+              loading={importDefinition.isPending}
+              title="Import a workflow document (the JSON Export writes)"
               leftIcon={<Upload className="h-4 w-4" />}
             >
               Upload JSON
@@ -429,6 +433,21 @@ export function WorkflowListPage() {
             onClick={() => setUploadError(null)}
             className="text-danger/70 hover:text-danger"
             aria-label="Dismiss upload error"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+      )}
+
+      {notice && (
+        <div role="status" className="mb-4 flex items-start gap-2 rounded-lg border border-info/30 bg-info-muted p-3">
+          <p className="flex-1 text-sm text-info">{notice}</p>
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setNotice(null)}
+            className="text-info/70 hover:text-info"
+            aria-label="Dismiss"
           >
             <X className="h-4 w-4" />
           </Button>
