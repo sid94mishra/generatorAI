@@ -227,8 +227,7 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
       "prompts": [
         {
           "label": "Task",
-          "text": "Inspect the codebase for {{feature}}. Write a plan with compatibility risks and acceptance tests. Do not implement yet.",
-          "waitForCompletion": true
+          "text": "Inspect the codebase for {{feature}}. Write a plan with compatibility risks and acceptance tests. Do not implement yet."
         }
       ],
       "approvalRequired": true,
@@ -242,8 +241,7 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
       "prompts": [
         {
           "label": "Task",
-          "text": "Implement the approved plan for {{feature}}. Preserve current behavior and keep changes scoped.",
-          "waitForCompletion": true
+          "text": "Implement the approved plan for {{feature}}. Preserve current behavior and keep changes scoped."
         }
       ],
       "agentMode": "auto",
@@ -261,8 +259,7 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
       "prompts": [
         {
           "label": "Task",
-          "text": "Run the relevant tests. Inspect the diff. Report commands, results, and unresolved defects. Do not commit or push.",
-          "waitForCompletion": true
+          "text": "Run the relevant tests. Inspect the diff. Report commands, results, and unresolved defects. Do not commit or push."
         }
       ],
       "contextFilter": "summary-only",
@@ -281,8 +278,7 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
       "prompts": [
         {
           "label": "Task",
-          "text": "Explain the failed verification, identify the likely cause, and propose the smallest follow-up. Do not hide failures.",
-          "waitForCompletion": true
+          "text": "Explain the failed verification, identify the likely cause, and propose the smallest follow-up. Do not hide failures."
         }
       ],
       "contextFilter": "full",

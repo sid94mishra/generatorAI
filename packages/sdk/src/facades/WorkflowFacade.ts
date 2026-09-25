@@ -98,7 +98,6 @@ export class WorkflowFacade {
         prompts: [{
           label: stageInput.name,
           text: stageInput.prompt,
-          waitForCompletion: true,
           ...(stageInput.systemPrompt ? { systemPrompt: stageInput.systemPrompt } : {}),
         }],
         hooks: stageInput.hooks as never,

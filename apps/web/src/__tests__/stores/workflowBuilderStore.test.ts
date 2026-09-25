@@ -17,7 +17,7 @@ function makeStage(overrides: Partial<StageDefinition> = {}): StageDefinition {
     workflowDefinitionId: 'def-1',
     name: 'Test Stage',
     order: 0,
-    prompts: [{ label: 'p1', text: 'Do something', waitForCompletion: true }],
+    prompts: [{ label: 'p1', text: 'Do something' }],
     hooks: [],
     createdAt: new Date(),
     ...overrides,
@@ -282,8 +282,8 @@ describe('workflowBuilderStore', () => {
   });
 
   it('validate passes for a valid graph', () => {
-    const s1 = makeStage({ id: 's1', prompts: [{ label: 'p', text: 'x', waitForCompletion: true }] });
-    const s2 = makeStage({ id: 's2', prompts: [{ label: 'p', text: 'y', waitForCompletion: true }] });
+    const s1 = makeStage({ id: 's1', prompts: [{ label: 'p', text: 'x' }] });
+    const s2 = makeStage({ id: 's2', prompts: [{ label: 'p', text: 'y' }] });
     useWorkflowBuilderStore.getState().addStage(s1);
     useWorkflowBuilderStore.getState().addStage(s2);
     useWorkflowBuilderStore.getState().addEdge({

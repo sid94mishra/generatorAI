@@ -64,7 +64,6 @@ export class StageBuilder {
     this._prompts = [{
       label: this._name || 'Prompt',
       text,
-      waitForCompletion: true,
     }];
     return this;
   }

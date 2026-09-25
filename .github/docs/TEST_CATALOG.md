@@ -115,7 +115,7 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | E22 | Stage Properties — Prompts (inline) | Multi-prompt | Saved | ✅ |
 | E23 | Stage Properties — Prompts (file source) | `source='file'` | Saved | ✅ (session 69 — `source:file, filePath:prompts/x.md` persisted) |
 | E24 | Stage Properties — Prompts (agent source) | `source='agent'` | Saved | ⚠️ (session 69) — schema only allows `'inline' | 'file'`; agent invocation is via stage `agentName` or `harnessConfigOverrides.customAgents`, not a prompt `source` |
-| E25 | Stage Properties — Wait flag per prompt | Saved | ✅ (session 69 — `waitForCompletion:true` persisted) |
+| E25 | Stage Properties — Wait flag per prompt | Removed | — (P01 WP-1.4: every prompt turn is awaited; the flag is gone) |
 | E26 | Stage Properties — Skills toggles | disabledSkills array | Persists | ✅ (session 69 — `disabledSkills:['bash']`) |
 | E27 | Stage Properties — MCP toggles (8 system servers) | excludedTools array | Persists | ✅ (session 69 — `excludedTools:[shell.exec, mcp__github__create_issue]`) |
 | E28 | Stage Properties — Agent selector | agentName + customAgents | Both fields written | ✅ (session 69 — `agentName:'custom-agent'` + 1 customAgent) |

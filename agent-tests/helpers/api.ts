@@ -132,7 +132,7 @@ export async function seedWorkflowDefinition(
     const body: Record<string, unknown> = {
       name: s.name,
       order: i,
-      prompts: [{ label: 'P', text: s.prompt, waitForCompletion: true }],
+      prompts: [{ label: 'P', text: s.prompt }],
     };
     if (s.runCondition && s.runCondition !== 'always') {
       body.condition = { type: s.runCondition };

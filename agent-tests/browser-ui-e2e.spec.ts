@@ -156,7 +156,7 @@ test.describe('3. Workflow Builder', () => {
     await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'First Stage',
       order: 0,
-      prompts: [{ label: 'Test', text: 'Say hello', waitForCompletion: true }],
+      prompts: [{ label: 'Test', text: 'Say hello' }],
     });
   });
 
@@ -212,7 +212,7 @@ test.describe('4. Workflow Run Page', () => {
     await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'Streamed Stage',
       order: 0,
-      prompts: [{ label: 'Test', text: 'Say "Hello World" exactly and nothing else.', waitForCompletion: true }],
+      prompts: [{ label: 'Test', text: 'Say "Hello World" exactly and nothing else.' }],
     });
 
     // Create and start run
@@ -434,7 +434,7 @@ test.describe('10. Full Workflow Lifecycle (Browser)', () => {
     await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'Lifecycle Stage',
       order: 0,
-      prompts: [{ label: 'LC', text: 'Say "lifecycle complete" and nothing else.', waitForCompletion: true }],
+      prompts: [{ label: 'LC', text: 'Say "lifecycle complete" and nothing else.' }],
     });
 
     // 2. Create and start run

@@ -37,8 +37,7 @@
       "prompts": [
         {
           "label": "Analyze Architecture",
-          "text": "Analyze the architecture of the codebase at {{repo_path_target}}. Focus on: {{review_focus}}. Examine the directory structure, module organization, dependency patterns, and design patterns used. Provide a detailed analysis.",
-          "waitForCompletion": true
+          "text": "Analyze the architecture of the codebase at {{repo_path_target}}. Focus on: {{review_focus}}. Examine the directory structure, module organization, dependency patterns, and design patterns used. Provide a detailed analysis."
         }
       ],
       "isLocked": true
@@ -50,8 +49,7 @@
       "prompts": [
         {
           "label": "Review Code Quality",
-          "text": "Review the code quality of the codebase at {{repo_path_target}}. Focus on {{review_focus}}. Check for: code duplication, naming conventions, error handling, testing coverage, documentation, and adherence to best practices. Language: {{language}}.",
-          "waitForCompletion": true
+          "text": "Review the code quality of the codebase at {{repo_path_target}}. Focus on {{review_focus}}. Check for: code duplication, naming conventions, error handling, testing coverage, documentation, and adherence to best practices. Language: {{language}}."
         }
       ],
       "isLocked": true
@@ -63,8 +61,7 @@
       "prompts": [
         {
           "label": "Security Analysis",
-          "text": "Perform a security review of the codebase at {{repo_path_target}}. Check for common vulnerabilities (OWASP Top 10), insecure configurations, dependency vulnerabilities, authentication/authorization issues, and data handling concerns.",
-          "waitForCompletion": true
+          "text": "Perform a security review of the codebase at {{repo_path_target}}. Check for common vulnerabilities (OWASP Top 10), insecure configurations, dependency vulnerabilities, authentication/authorization issues, and data handling concerns."
         }
       ],
       "isLocked": true
@@ -76,8 +73,7 @@
       "prompts": [
         {
           "label": "Generate Report",
-          "text": "Based on the architecture analysis, code quality review, and security review conducted above, generate a comprehensive code review report. Include:\n1. Executive Summary\n2. Architecture Assessment\n3. Code Quality Findings\n4. Security Findings\n5. Prioritized Recommendations\n6. Action Items\n\nFormat the report in markdown.",
-          "waitForCompletion": true
+          "text": "Based on the architecture analysis, code quality review, and security review conducted above, generate a comprehensive code review report. Include:\n1. Executive Summary\n2. Architecture Assessment\n3. Code Quality Findings\n4. Security Findings\n5. Prioritized Recommendations\n6. Action Items\n\nFormat the report in markdown."
         }
       ],
       "isLocked": true

@@ -144,7 +144,7 @@ function makeStageDef(prompts: string[], opts?: Partial<StageDefinition>): Stage
     workflowDefinitionId: 'def-1',
     name: 'Stage One',
     order: 0,
-    prompts: prompts.map((text, i) => ({ text, label: `p${i}`, waitForCompletion: true })),
+    prompts: prompts.map((text, i) => ({ text, label: `p${i}` })),
     variables: {},
     hooks: [],
     // Default is 1 in-process retry with a 3 s backoff; tests that want a

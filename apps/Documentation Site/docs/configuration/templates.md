@@ -186,7 +186,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | --- | --- | --- | --- |
 | label | string | `required` | min 1 |
 | text | string | `required` | min 1 |
-| waitForCompletion | boolean | `default true` | — |
 
 ## WorkflowTemplateStageSchema
 
@@ -199,7 +198,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | prompts[] | object | `required` | unknown keys: strip |
 | prompts[].label | string | `required` | min 1 |
 | prompts[].text | string | `required` | min 1 |
-| prompts[].waitForCompletion | boolean | `default true` | — |
 | harnessConfigOverrides | object | `optional` | unknown keys: strip |
 | harnessConfigOverrides.model | string | `default "claude-sonnet-4.6"` | — |
 | harnessConfigOverrides.systemMessage | object | `optional` | unknown keys: strip |
@@ -344,7 +342,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | stages[].prompts[] | object | `required` | unknown keys: strip |
 | stages[].prompts[].label | string | `required` | min 1 |
 | stages[].prompts[].text | string | `required` | min 1 |
-| stages[].prompts[].waitForCompletion | boolean | `default true` | — |
 | stages[].harnessConfigOverrides | object | `optional` | unknown keys: strip |
 | stages[].harnessConfigOverrides.model | string | `default "claude-sonnet-4.6"` | — |
 | stages[].harnessConfigOverrides.systemMessage | object | `optional` | unknown keys: strip |
@@ -731,7 +728,6 @@ export const ResultValidationSchema = z.object({
 export const StageTemplatePromptSchema = z.object({
   label: z.string().min(1),
   text: z.string().min(1),
-  waitForCompletion: z.boolean().default(true),
 });
 
 // ── Workflow Template Stage ────────────────────────────────────

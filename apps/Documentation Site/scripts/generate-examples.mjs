@@ -26,7 +26,7 @@ add('create-agent','Create a reusable implementation agent','AgentSchemas.ts','C
 add('agent-overrides','Add a skill while narrowing tools','AgentSchemas.ts','AgentOverridesSchema',{
  addSkillIds:['REPLACE_WITH_CATALOG_SKILL_ID'],removeMcpServerIds:[],tools:{browser:false,shell:false},appendInstructions:'For this review, inspect files and propose changes without executing commands.',
 },'Place this object in a chat or stage agentOverrides field, or use the effective-capability preview. Replace the skill ID with a real selectable catalogue ID.','Confirm the effective capabilities rather than assuming an override grants capabilities forbidden by the host, device, or provider.');
-const prompt=text=>[{label:'Task',text,waitForCompletion:true}];
+const prompt=text=>[{label:'Task',text}];
 add('review-workflow','Import a multi-stage brownfield workflow','WorkflowDefinitionSchemas.ts','ImportWorkflowJsonSchema',{
  name:'Priority filter — reviewed delivery',sessionMode:'per-stage',harnessConfig:{harnessType:'codex',reasoningEffort:'high',permissionMode:'default'},variables:[{name:'feature',type:'text',label:'Requested feature',required:true,defaultValue:'Add a priority filter without breaking saved URLs.'}],tags:['reviewed-change'],orchestratorConfig:{requiresCodebase:true,autoCommit:false,autoPush:false,autoCreatePR:false},
  stages:[

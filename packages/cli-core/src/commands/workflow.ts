@@ -491,7 +491,7 @@ export function workflowCommands(): CommandSpec[] {
                 agentRef: flags.agent,
                 order: flags.order,
                 prompts: prompt
-                  ? [{ label: 'prompt', text: prompt, waitForCompletion: true }]
+                  ? [{ label: 'prompt', text: prompt }]
                   : undefined,
                 harnessConfigOverrides: flags.model ? { model: flags.model } : undefined,
                 timeoutMs: flags.timeout !== undefined ? flags.timeout * 1000 : undefined,
@@ -561,7 +561,7 @@ export function workflowCommands(): CommandSpec[] {
             name: flags.name,
             agentRef: flags.agent,
             prompts: prompt
-              ? [{ label: 'prompt', text: prompt, waitForCompletion: true }]
+              ? [{ label: 'prompt', text: prompt }]
               : undefined,
             harnessConfigOverrides: flags.model ? { model: flags.model } : undefined,
             timeoutMs: flags.timeout !== undefined ? flags.timeout * 1000 : undefined,

@@ -196,7 +196,7 @@ describe('validateDAG issues', () => {
     // to B or C from it.
     const stages = [makeStage('A'), makeStage('B'), makeStage('C')].map((s) => ({
       ...s,
-      prompts: [{ label: 'p', text: 'hello', waitForCompletion: true }],
+      prompts: [{ label: 'p', text: 'hello' }],
     }));
     const edges = [makeEdge('B', 'C'), makeEdge('C', 'B')];
     const result = validateDAG(stages, edges);

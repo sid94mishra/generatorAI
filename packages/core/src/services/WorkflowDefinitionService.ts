@@ -497,7 +497,6 @@ export class WorkflowDefinitionService {
         prompts: stage.prompts.map((p) => ({
           label: p.label,
           text: p.text,
-          waitForCompletion: p.waitForCompletion,
         })),
         hooks: (stage.hooks ?? []) as WorkflowTemplate['hooks'],
         harnessConfigOverrides: stage.harnessConfigOverrides as WorkflowTemplate['harnessConfig'],

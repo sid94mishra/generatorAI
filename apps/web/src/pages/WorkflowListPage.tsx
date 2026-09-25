@@ -273,7 +273,6 @@ export function WorkflowListPage() {
             {
               label: 'Analyze Requirements',
               text: 'Analyze the following requirements: {{example_variable}}',
-              waitForCompletion: true,
             },
           ],
           hooks: [],
@@ -286,7 +285,6 @@ export function WorkflowListPage() {
             {
               label: 'Generate Output',
               text: 'Based on the analysis, generate the output.',
-              waitForCompletion: true,
             },
           ],
           hooks: [],

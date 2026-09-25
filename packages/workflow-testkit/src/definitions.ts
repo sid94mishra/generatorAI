@@ -5,7 +5,7 @@
 // edges as `[from, to, type]` — and `toImportJson` turns it into the
 // canonical import document today's `POST /workflow-definitions/import-json`
 // accepts, parsed through the SAME zod schema the route validates with (so
-// defaults like `waitForCompletion: true` apply exactly as they do live).
+// defaults apply exactly as they do live).
 // A document that already uses index edges passes through unchanged.
 // ────────────────────────────────────────────────────────────────
 
@@ -17,7 +17,7 @@ export interface StageSpec {
   name: string;
   /** Shorthand for one prompt labelled with the stage name. */
   prompt?: string;
-  prompts?: Array<{ label?: string; text: string; waitForCompletion?: boolean }>;
+  prompts?: Array<{ label?: string; text: string }>;
   order?: number;
   /** Any other import-schema stage field (retryPolicy, condition, …). */
   [field: string]: unknown;

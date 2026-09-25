@@ -242,9 +242,8 @@ const MIN_TIMEOUT_MS = 1_000;
 
 /**
  * WS-D1 — default step timeout applied when a stage definition sets no
- * explicit `timeoutMs`. Previously that case (`else if (prompt.waitForCompletion)`)
- * awaited the harness call with NO timeout at all — the docs claimed a
- * "default if unset: 300s" that was never true. A module constant: nothing
+ * explicit `timeoutMs`. Every prompt turn is awaited under a deadline. A
+ * module constant: nothing
  * configures it. `setDefaultStageTimeoutMs` exists only so the testkit can
  * compress time.
  */
@@ -1959,37 +1958,25 @@ export class StageExecutionService {
             // through the shared registry so a new mode needs no change here.
             const stageTurnOptions = this.resolveStageTurnOptions(stageDef);
             const conversationId = session.conversationId;
-            // FEAT-3 / WS-D1 — every waited turn now runs under a real
-            // deadline: an explicit `stageDef.timeoutMs` is honoured
-            // (floored at MIN_TIMEOUT_MS, same as before), and a stage with
-            // none gets the documented default instead of running
-            // unbounded. `withStageTimeout` clears its timer on the common
-            // path and actually aborts the harness call on the timeout path
-            // — see its own doc comment.
-            if (stageDef.timeoutMs || prompt.waitForCompletion) {
-              const effectiveTimeout = stageDef.timeoutMs
-                ? Math.max(stageDef.timeoutMs, MIN_TIMEOUT_MS)
-                : this.defaultStageTimeoutMs;
-              promptResponse = await this.withStageTimeout(
-                effectiveTimeout,
-                stageRun.id,
-                (signal) =>
-                  this.harness.sendPromptAndWait(
-                    conversationId,
-                    promptText,
-                    promptAttachments.length ? promptAttachments : undefined,
-                    signal,
-                    stageTurnOptions,
-                  ),
-              );
-            } else {
-              await this.harness.sendPrompt(
-                conversationId,
-                promptText,
-                promptAttachments.length ? promptAttachments : undefined,
-                stageTurnOptions,
-              );
-            }
+            // Every prompt turn is awaited under a real deadline: an explicit
+            // `stageDef.timeoutMs` is honoured (floored at MIN_TIMEOUT_MS), and a
+            // stage with none gets the default. `withStageTimeout` clears its
+            // timer on the common path and aborts the harness call on timeout.
+            const effectiveTimeout = stageDef.timeoutMs
+              ? Math.max(stageDef.timeoutMs, MIN_TIMEOUT_MS)
+              : this.defaultStageTimeoutMs;
+            promptResponse = await this.withStageTimeout(
+              effectiveTimeout,
+              stageRun.id,
+              (signal) =>
+                this.harness.sendPromptAndWait(
+                  conversationId,
+                  promptText,
+                  promptAttachments.length ? promptAttachments : undefined,
+                  signal,
+                  stageTurnOptions,
+                ),
+            );
           }
 
           // Persist assistant response if the idle handler didn't already

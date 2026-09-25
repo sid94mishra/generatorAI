@@ -139,7 +139,7 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
     service.setDefaultStageTimeoutMs(50);
 
     const sDef = makeStageDef('sd-default', [
-      { label: 'P1', text: 'Go', waitForCompletion: true },
+      { label: 'P1', text: 'Go' },
     ], {
       // No retry so the failure is immediate and terminal — isolates the
       // assertion to "did the default timeout fire" rather than retry timing.
@@ -169,7 +169,7 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
     // (a separate, pre-existing fire-and-forget 10s race) so the pending
     // timer count reflects only what withStageTimeout/startHeartbeat set.
     const sDef = makeStageDef('sd-clear', [
-      { label: 'P1', text: 'Go', waitForCompletion: true },
+      { label: 'P1', text: 'Go' },
     ], { timeoutMs: 5_000 });
     await stageDefRepo.create(sDef);
     const sr = makeStageRun('sr-clear', 'sd-clear');
@@ -195,7 +195,7 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
     // fast path.
     service.setDefaultStageTimeoutMs(50);
     const sDef = makeStageDef('sd-abort', [
-      { label: 'P1', text: 'Go', waitForCompletion: true },
+      { label: 'P1', text: 'Go' },
     ], {
       retryPolicy: { maxRetries: 0, backoffMs: 0, backoffMultiplier: 1 },
     });
@@ -240,7 +240,7 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
     service.setHeartbeatIntervalMs(10);
 
     const sDef = makeStageDef('sd-hb', [
-      { label: 'P1', text: 'Go', waitForCompletion: true },
+      { label: 'P1', text: 'Go' },
     ]);
     await stageDefRepo.create(sDef);
     const sr = makeStageRun('sr-hb', 'sd-hb');
@@ -288,7 +288,7 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
 
   it('abortStage cancels the tracked AbortController for a stuck stage', async () => {
     const sDef = makeStageDef('sd-reap', [
-      { label: 'P1', text: 'Go', waitForCompletion: true },
+      { label: 'P1', text: 'Go' },
     ], {
       timeoutMs: 60_000, // long enough that only abortStage() ends the call
       retryPolicy: { maxRetries: 0, backoffMs: 0, backoffMultiplier: 1 },

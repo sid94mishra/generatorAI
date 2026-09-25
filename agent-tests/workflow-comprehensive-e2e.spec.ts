@@ -92,7 +92,6 @@ async function createCodeGenWorkflow(name: string) {
       {
         label: 'Generate Code',
         text: 'Write a simple {{feature}} function in {{language}}. Output only the code block.',
-        waitForCompletion: true,
       },
     ],
   });
@@ -106,7 +105,6 @@ async function createCodeGenWorkflow(name: string) {
       {
         label: 'Review Code',
         text: 'Review the code from the previous stage. Provide a brief quality assessment in one paragraph.',
-        waitForCompletion: true,
       },
     ],
   });
@@ -120,7 +118,6 @@ async function createCodeGenWorkflow(name: string) {
       {
         label: 'Generate Tests',
         text: 'Write unit tests for the code reviewed in the previous stage. Output only the test code.',
-        waitForCompletion: true,
       },
     ],
   });
@@ -1174,8 +1171,8 @@ test.describe('11. Workflow Definition CRUD', () => {
       name: 'Stage A',
       order: 0,
       prompts: [
-        { label: 'First Prompt', text: 'Do task A for {{projectName}}.', waitForCompletion: true },
-        { label: 'Second Prompt', text: 'Continue task A.', waitForCompletion: true },
+        { label: 'First Prompt', text: 'Do task A for {{projectName}}.' },
+        { label: 'Second Prompt', text: 'Continue task A.' },
       ],
     });
     expect(s1).toBe(201);
@@ -1184,7 +1181,7 @@ test.describe('11. Workflow Definition CRUD', () => {
       name: 'Stage B',
       order: 1,
       prompts: [
-        { label: 'Task B', text: 'Do task B.', waitForCompletion: true },
+        { label: 'Task B', text: 'Do task B.' },
       ],
     });
     expect(s2).toBe(201);
@@ -1477,7 +1474,7 @@ test.describe('15. Variable Interpolation', () => {
     await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'Test',
       order: 0,
-      prompts: [{ label: 'Test', text: 'Hello {{lang}}', waitForCompletion: true }],
+      prompts: [{ label: 'Test', text: 'Hello {{lang}}' }],
     });
 
     const { data: runData } = await api('POST', '/api/workflow-runs', {

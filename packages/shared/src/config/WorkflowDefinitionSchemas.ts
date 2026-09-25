@@ -13,7 +13,6 @@ import { AgentModeSchema } from './ChatSchemas.js';
 export const PromptDefinitionSchema = z.object({
   label: z.string().min(1),
   text: z.string().min(1),
-  waitForCompletion: z.boolean().default(true),
 });
 
 /** Zod schema for Skill reference (independent of prompts) */

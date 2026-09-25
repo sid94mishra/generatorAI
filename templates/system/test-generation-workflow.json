@@ -24,8 +24,7 @@
       "prompts": [
         {
           "label": "Analyze for Testing",
-          "text": "Analyze the codebase at {{repo_path_target}} to identify testable units. Focus on {{test_focus}}.\n\nIdentify:\n1. Functions/methods to test\n2. Classes with business logic\n3. API endpoints\n4. Data transformations\n5. Edge cases and error scenarios\n6. Current test coverage gaps",
-          "waitForCompletion": true
+          "text": "Analyze the codebase at {{repo_path_target}} to identify testable units. Focus on {{test_focus}}.\n\nIdentify:\n1. Functions/methods to test\n2. Classes with business logic\n3. API endpoints\n4. Data transformations\n5. Edge cases and error scenarios\n6. Current test coverage gaps"
         }
       ],
       "isLocked": true
@@ -37,8 +36,7 @@
       "prompts": [
         {
           "label": "Generate Unit Tests",
-          "text": "Generate comprehensive unit tests using {{test_framework}}. For each testable unit identified:\n1. Happy path tests\n2. Error/edge case tests\n3. Boundary value tests\n4. Mock external dependencies\n\nFollow {{language}} testing best practices. Use descriptive test names.",
-          "waitForCompletion": true
+          "text": "Generate comprehensive unit tests using {{test_framework}}. For each testable unit identified:\n1. Happy path tests\n2. Error/edge case tests\n3. Boundary value tests\n4. Mock external dependencies\n\nFollow {{language}} testing best practices. Use descriptive test names."
         }
       ],
       "isLocked": true
@@ -50,8 +48,7 @@
       "prompts": [
         {
           "label": "Generate Integration Tests",
-          "text": "Generate integration tests for the key interaction points between modules. Test:\n1. API endpoint flows\n2. Database operations\n3. Service layer interactions\n4. Event/message flows\n\nUse {{test_framework}} with appropriate setup/teardown.",
-          "waitForCompletion": true
+          "text": "Generate integration tests for the key interaction points between modules. Test:\n1. API endpoint flows\n2. Database operations\n3. Service layer interactions\n4. Event/message flows\n\nUse {{test_framework}} with appropriate setup/teardown."
         }
       ],
       "isLocked": true
@@ -63,8 +60,7 @@
       "prompts": [
         {
           "label": "Generate Test Report",
-          "text": "Generate a comprehensive test report including:\n1. Test inventory (all tests generated)\n2. Coverage analysis\n3. Critical paths covered\n4. Remaining gaps\n5. Recommendations for additional testing\n6. Setup instructions for running the tests",
-          "waitForCompletion": true
+          "text": "Generate a comprehensive test report including:\n1. Test inventory (all tests generated)\n2. Coverage analysis\n3. Critical paths covered\n4. Remaining gaps\n5. Recommendations for additional testing\n6. Setup instructions for running the tests"
         }
       ],
       "isLocked": true

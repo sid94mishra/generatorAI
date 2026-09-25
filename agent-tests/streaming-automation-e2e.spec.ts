@@ -69,7 +69,6 @@ test.describe('1. SSE Streaming & Event Persistence', () => {
       prompts: [{
         label: 'Test',
         text: 'Say "Hello Streaming" exactly, nothing else.',
-        waitForCompletion: true,
       }],
     });
     expect(s2).toBe(201);
@@ -203,7 +202,6 @@ test.describe('2. Automation CRUD & Triggers', () => {
       prompts: [{
         label: 'Auto',
         text: 'Say "automated" and nothing else.',
-        waitForCompletion: true,
       }],
     });
   });
@@ -313,7 +311,7 @@ test.describe('3. Webhook Automation', () => {
     await api('POST', `/api/workflow-definitions/${workflowDefId}/stages`, {
       name: 'Webhook Stage',
       order: 0,
-      prompts: [{ label: 'WH', text: 'Say "webhook" exactly.', waitForCompletion: true }],
+      prompts: [{ label: 'WH', text: 'Say "webhook" exactly.' }],
     });
 
     const { status, data } = await api('POST', '/api/automations', {
@@ -384,7 +382,7 @@ test.describe('4. Schedule Automation', () => {
     await api('POST', `/api/workflow-definitions/${workflowDefId}/stages`, {
       name: 'Sched Stage',
       order: 0,
-      prompts: [{ label: 'S', text: 'Say "scheduled".', waitForCompletion: true }],
+      prompts: [{ label: 'S', text: 'Say "scheduled".' }],
     });
 
     const { status, data } = await api('POST', '/api/automations', {
@@ -439,7 +437,7 @@ test.describe('5. Loop Input Mode', () => {
     await api('POST', `/api/workflow-definitions/${workflowDefId}/stages`, {
       name: 'Loop Stage',
       order: 0,
-      prompts: [{ label: 'L', text: 'Process item: {{item}}', waitForCompletion: true }],
+      prompts: [{ label: 'L', text: 'Process item: {{item}}' }],
     });
 
     const { status, data } = await api('POST', '/api/automations', {
@@ -555,13 +553,13 @@ test.describe('7. Multi-Stage Workflow with Streaming', () => {
     const { data: s1 } = await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'Analysis',
       order: 0,
-      prompts: [{ label: 'Analyze', text: 'Say "analysis done" exactly.', waitForCompletion: true }],
+      prompts: [{ label: 'Analyze', text: 'Say "analysis done" exactly.' }],
     });
     // Stage 2
     const { data: s2 } = await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'Summary',
       order: 1,
-      prompts: [{ label: 'Summarize', text: 'Say "summary done" exactly.', waitForCompletion: true }],
+      prompts: [{ label: 'Summarize', text: 'Say "summary done" exactly.' }],
     });
 
     const { data: fullDef } = await api('GET', `/api/workflow-definitions/${defId}`);
@@ -780,7 +778,7 @@ test.describe('10. Error Handling', () => {
     await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'Quick',
       order: 0,
-      prompts: [{ label: 'Q', text: 'Say "done".', waitForCompletion: true }],
+      prompts: [{ label: 'Q', text: 'Say "done".' }],
     });
 
     const { data: run } = await api('POST', '/api/workflow-runs', {
@@ -825,7 +823,7 @@ test.describe('11. Workflow Variables', () => {
     await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'Var Stage',
       order: 0,
-      prompts: [{ label: 'V', text: 'Language is {{lang}}, count is {{count}}.', waitForCompletion: true }],
+      prompts: [{ label: 'V', text: 'Language is {{lang}}, count is {{count}}.' }],
     });
   });
 
@@ -878,7 +876,7 @@ test.describe('12. Workflow Definition CRUD', () => {
     const { status: s1, data: d1 } = await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'Stage A',
       order: 0,
-      prompts: [{ label: 'A', text: 'Stage A prompt', waitForCompletion: true }],
+      prompts: [{ label: 'A', text: 'Stage A prompt' }],
     });
     expect(s1).toBe(201);
     stageId1 = (d1 as { id: string }).id;
@@ -886,7 +884,7 @@ test.describe('12. Workflow Definition CRUD', () => {
     const { status: s2, data: d2 } = await api('POST', `/api/workflow-definitions/${defId}/stages`, {
       name: 'Stage B',
       order: 1,
-      prompts: [{ label: 'B', text: 'Stage B prompt', waitForCompletion: true }],
+      prompts: [{ label: 'B', text: 'Stage B prompt' }],
     });
     expect(s2).toBe(201);
     stageId2 = (d2 as { id: string }).id;
@@ -914,7 +912,7 @@ test.describe('12. Workflow Definition CRUD', () => {
     const { status, data } = await api('PUT', `/api/workflow-definitions/${defId}/stages/${stageId1}`, {
       name: 'Stage A Updated',
       order: 0,
-      prompts: [{ label: 'A', text: 'Stage A prompt updated', waitForCompletion: true }],
+      prompts: [{ label: 'A', text: 'Stage A prompt updated' }],
     });
     expect(status).toBe(200);
     expect((data as { name: string }).name).toBe('Stage A Updated');

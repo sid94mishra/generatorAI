@@ -125,7 +125,6 @@ test.describe('Workflow Definition CRUD', () => {
         {
           label: 'Generate Code',
           text: 'Write a simple hello world function in {{language}}. Just output the code.',
-          waitForCompletion: true,
         },
       ],
     });
@@ -144,7 +143,6 @@ test.describe('Workflow Definition CRUD', () => {
         {
           label: 'Review Code',
           text: 'Review the code generated in the previous stage. Provide a brief, one-paragraph review.',
-          waitForCompletion: true,
         },
       ],
     });
@@ -232,7 +230,6 @@ test.describe('Workflow Run Lifecycle', () => {
         {
           label: 'Hello',
           text: 'Say "Hello World" and nothing else.',
-          waitForCompletion: true,
         },
       ],
     });
@@ -298,7 +295,6 @@ test.describe('Orchestrated Run (E2E)', () => {
         {
           label: 'Generate',
           text: 'Output exactly: "Generated OK"',
-          waitForCompletion: true,
         },
       ],
     });
@@ -389,7 +385,7 @@ test.describe('Upload Custom Content', () => {
     await api('POST', `/api/workflow-definitions/${definitionId}/stages`, {
       name: 'Test Stage',
       order: 0,
-      prompts: [{ label: 'Test', text: 'Say hello.', waitForCompletion: true }],
+      prompts: [{ label: 'Test', text: 'Say hello.' }],
     });
 
     const { data: runData } = await api('POST', '/api/workflow-runs', {

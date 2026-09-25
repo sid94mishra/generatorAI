@@ -30,7 +30,7 @@ function makeStageDef(
     workflowDefinitionId,
     name: `Stage ${id}`,
     order,
-    prompts: [{ label: 'P', text: 'do it', waitForCompletion: true }],
+    prompts: [{ label: 'P', text: 'do it' }],
     variables: {},
     hooks: [],
     createdAt: new Date(),

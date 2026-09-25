@@ -83,7 +83,7 @@ describe('toImportJson', () => {
   it('maps named edges to indices and applies the route schema defaults', () => {
     const doc = toImportJson({ stages: [{ name: 'A', prompt: 'a' }, { name: 'B', prompt: 'b' }], edges: [['A', 'B', 'always']] });
     expect(doc.edges).toEqual([{ fromStageIndex: 0, toStageIndex: 1, edgeType: 'always' }]);
-    expect(doc.stages[0]!.prompts[0]!.waitForCompletion).toBe(true);
+    expect(doc.stages[0]!.prompts[0]).toEqual({ label: 'A', text: 'a' });
     expect(doc.sessionMode).toBe('auto');
     expect(() => toImportJson({ stages: [{ name: 'A' }], edges: [['A', 'Z']] })).toThrow(/unknown stage "Z"/);
   });

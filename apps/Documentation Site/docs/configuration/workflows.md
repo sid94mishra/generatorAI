@@ -14,7 +14,6 @@ Zod schema for PromptDefinition
 | --- | --- | --- | --- |
 | label | string | `required` | min 1 |
 | text | string | `required` | min 1 |
-| waitForCompletion | boolean | `default true` | — |
 
 ## SkillDefinitionSchema
 
@@ -515,7 +514,6 @@ Zod schema for creating a StageDefinition
 | prompts[] | object | `required` | unknown keys: strip |
 | prompts[].label | string | `required` | min 1 |
 | prompts[].text | string | `required` | min 1 |
-| prompts[].waitForCompletion | boolean | `default true` | — |
 | harnessConfigOverrides | object | `optional` | unknown keys: strip |
 | harnessConfigOverrides.model | string | `optional` | — |
 | harnessConfigOverrides.harnessType | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `optional` | — |
@@ -869,7 +867,6 @@ Zod schema for importing a full workflow from a JSON file upload
 | stages[].prompts[] | object | `required` | unknown keys: strip |
 | stages[].prompts[].label | string | `required` | min 1 |
 | stages[].prompts[].text | string | `required` | min 1 |
-| stages[].prompts[].waitForCompletion | boolean | `default true` | — |
 | stages[].harnessConfigOverrides | object | `optional` | unknown keys: strip |
 | stages[].harnessConfigOverrides.model | string | `optional` | — |
 | stages[].harnessConfigOverrides.harnessType | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `optional` | — |
@@ -1237,7 +1234,6 @@ import { AgentModeSchema } from './ChatSchemas.js';
 export const PromptDefinitionSchema = z.object({
   label: z.string().min(1),
   text: z.string().min(1),
-  waitForCompletion: z.boolean().default(true),
 });
 
 /** Zod schema for Skill reference (independent of prompts) */

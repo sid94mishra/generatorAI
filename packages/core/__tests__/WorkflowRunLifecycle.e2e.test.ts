@@ -40,7 +40,7 @@ function makeStageDef(id: string, order: number): StageDefinition {
     workflowDefinitionId: DEF_ID,
     name: id,
     order,
-    prompts: [{ label: 'P', text: 'go', waitForCompletion: true }],
+    prompts: [{ label: 'P', text: 'go' }],
     variables: {},
     hooks: [],
     createdAt: new Date(),

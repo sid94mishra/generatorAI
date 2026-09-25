@@ -90,7 +90,7 @@ describe('E2E: Workflow Definition API Flow', () => {
     it('POST /api/workflow-definitions/:id/stages — Add Stage', async () => {
       const res = await request(app)
         .post('/api/workflow-definitions/def-1/stages')
-        .send({ name: 'Stage A', prompts: [{ label: 'step1', text: 'Do something', waitForCompletion: true }] });
+        .send({ name: 'Stage A', prompts: [{ label: 'step1', text: 'Do something' }] });
 
       expect([200, 201]).toContain(res.status);
       expect(container.workflowDefinitionService.addStage).toHaveBeenCalled();

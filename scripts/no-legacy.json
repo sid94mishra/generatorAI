@@ -561,6 +561,11 @@
         "apps/cli/src/"
       ],
       "reason": "WP-1.4 / PD-7: the sleeping stage status and wake_at are gone (columns dropped in v55)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\bwaitForCompletion\b",
+      "reason": "WP-1.4: every prompt turn is awaited; the fire-and-forget branch and the Wait checkbox are gone"
     }
   ],
   "comments": {

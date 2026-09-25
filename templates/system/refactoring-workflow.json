@@ -24,8 +24,7 @@
       "prompts": [
         {
           "label": "Analyze Code",
-          "text": "Analyze the codebase at {{repo_path_target}} focusing on {{refactoring_focus}}. Identify:\n1. Code smells and anti-patterns\n2. Duplicated code\n3. Complex/long methods\n4. Tight coupling\n5. Missing abstractions\n6. Performance bottlenecks\n\nProvide a prioritized list of refactoring opportunities.",
-          "waitForCompletion": true
+          "text": "Analyze the codebase at {{repo_path_target}} focusing on {{refactoring_focus}}. Identify:\n1. Code smells and anti-patterns\n2. Duplicated code\n3. Complex/long methods\n4. Tight coupling\n5. Missing abstractions\n6. Performance bottlenecks\n\nProvide a prioritized list of refactoring opportunities."
         }
       ],
       "isLocked": true
@@ -37,8 +36,7 @@
       "prompts": [
         {
           "label": "Create Plan",
-          "text": "Based on the analysis, create a detailed refactoring plan. For each refactoring:\n1. What to refactor\n2. Which pattern/technique to apply\n3. Files affected\n4. Risk assessment\n5. Testing strategy\n\nPrioritize by impact and risk. Target approach: {{refactoring_approach}}.",
-          "waitForCompletion": true
+          "text": "Based on the analysis, create a detailed refactoring plan. For each refactoring:\n1. What to refactor\n2. Which pattern/technique to apply\n3. Files affected\n4. Risk assessment\n5. Testing strategy\n\nPrioritize by impact and risk. Target approach: {{refactoring_approach}}."
         }
       ],
       "isLocked": true
@@ -50,8 +48,7 @@
       "prompts": [
         {
           "label": "Refactor Code",
-          "text": "Execute the refactoring plan from the previous stage. Generate the refactored code with:\n1. Clear before/after comparisons\n2. Explanation of each change\n3. Updated imports and dependencies\n4. Backward compatibility notes\n\nEnsure all refactorings maintain existing functionality.",
-          "waitForCompletion": true
+          "text": "Execute the refactoring plan from the previous stage. Generate the refactored code with:\n1. Clear before/after comparisons\n2. Explanation of each change\n3. Updated imports and dependencies\n4. Backward compatibility notes\n\nEnsure all refactorings maintain existing functionality."
         }
       ],
       "isLocked": true
@@ -63,8 +60,7 @@
       "prompts": [
         {
           "label": "Verify Refactoring",
-          "text": "Review all the refactored code and verify:\n1. No functionality was lost\n2. All interfaces are preserved\n3. Tests still pass conceptually\n4. Edge cases are handled\n5. Performance characteristics are maintained or improved\n\nGenerate a verification report.",
-          "waitForCompletion": true
+          "text": "Review all the refactored code and verify:\n1. No functionality was lost\n2. All interfaces are preserved\n3. Tests still pass conceptually\n4. Edge cases are handled\n5. Performance characteristics are maintained or improved\n\nGenerate a verification report."
         }
       ],
       "isLocked": true

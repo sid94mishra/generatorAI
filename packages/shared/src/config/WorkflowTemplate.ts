@@ -236,7 +236,6 @@ export const ResultValidationSchema = z.object({
 export const StageTemplatePromptSchema = z.object({
   label: z.string().min(1),
   text: z.string().min(1),
-  waitForCompletion: z.boolean().default(true),
 });
 
 // ── Workflow Template Stage ────────────────────────────────────

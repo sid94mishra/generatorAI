@@ -93,7 +93,7 @@ describe('WorkflowDefinitionService', () => {
       const s1 = await service.addStage({
         workflowDefinitionId: def.id,
         name: 'Stage 1',
-        prompts: [{ label: 'P1', text: 'Do stuff', waitForCompletion: true }],
+        prompts: [{ label: 'P1', text: 'Do stuff' }],
       });
       const s2 = await service.addStage({
         workflowDefinitionId: def.id,
@@ -380,10 +380,10 @@ describe('WorkflowDefinitionService', () => {
         requiresCodebase: false,
         stages: [
           {
-            name: 'Step 1', order: 0, prompts: [{ label: 'Step 1', text: 'Do step 1', waitForCompletion: true }],
+            name: 'Step 1', order: 0, prompts: [{ label: 'Step 1', text: 'Do step 1' }],
           },
           {
-            name: 'Step 2', order: 1, prompts: [{ label: 'Step 2', text: 'Do step 2', waitForCompletion: true }],
+            name: 'Step 2', order: 1, prompts: [{ label: 'Step 2', text: 'Do step 2' }],
           },
         ],
         edges: [{ fromStageIndex: 0, toStageIndex: 1, edgeType: 'on_success' }],
@@ -419,7 +419,7 @@ describe('WorkflowDefinitionService', () => {
           {
             name: 'Risky step',
             order: 0,
-            prompts: [{ label: 'Risky step', text: 'Do the risky thing', waitForCompletion: true }],
+            prompts: [{ label: 'Risky step', text: 'Do the risky thing' }],
             approvalRequired: true,
             retryPolicy: { maxRetries: 3, backoffMs: 1000, backoffMultiplier: 2 },
             timeoutMs: 45_000,
@@ -462,7 +462,7 @@ describe('WorkflowDefinitionService', () => {
       await service.addStage({
         workflowDefinitionId: def.id,
         name: 'S1',
-        prompts: [{ label: 'P1', text: 'Hello', waitForCompletion: true }],
+        prompts: [{ label: 'P1', text: 'Hello' }],
       });
 
       const template = await service.exportAsTemplate(def.id);
@@ -488,7 +488,7 @@ describe('WorkflowDefinitionService', () => {
           {
             name: 'Gate',
             order: 0,
-            prompts: [{ label: 'Gate', text: 'Do it', waitForCompletion: true }],
+            prompts: [{ label: 'Gate', text: 'Do it' }],
             approvalRequired: true,
             retryPolicy: { maxRetries: 2, backoffMs: 500, backoffMultiplier: 2 },
             timeoutMs: 30_000,

@@ -36,8 +36,7 @@
       "prompts": [
         {
           "label": "Analyze Requirements",
-          "text": "Analyze the following requirements and create a detailed technical specification:\n\nRequirements: {{requirements}}\nLanguage: {{language}}\nFramework: {{framework}}\n\nProvide:\n1. Functional requirements breakdown\n2. Technical approach\n3. Data models needed\n4. API endpoints (if applicable)\n5. File structure",
-          "waitForCompletion": true
+          "text": "Analyze the following requirements and create a detailed technical specification:\n\nRequirements: {{requirements}}\nLanguage: {{language}}\nFramework: {{framework}}\n\nProvide:\n1. Functional requirements breakdown\n2. Technical approach\n3. Data models needed\n4. API endpoints (if applicable)\n5. File structure"
         }
       ],
       "isLocked": true
@@ -49,8 +48,7 @@
       "prompts": [
         {
           "label": "Generate Code",
-          "text": "Based on the requirements analysis above, generate the complete implementation code.\n\nLanguage: {{language}}\nFramework: {{framework}}\nStyle: {{coding_style}}\n\nGenerate clean, well-documented, production-ready code. Include error handling and follow best practices for {{language}}.",
-          "waitForCompletion": true
+          "text": "Based on the requirements analysis above, generate the complete implementation code.\n\nLanguage: {{language}}\nFramework: {{framework}}\nStyle: {{coding_style}}\n\nGenerate clean, well-documented, production-ready code. Include error handling and follow best practices for {{language}}."
         }
       ],
       "isLocked": true
@@ -62,8 +60,7 @@
       "prompts": [
         {
           "label": "Generate Tests",
-          "text": "Generate comprehensive tests for the code generated in the previous stage. Include:\n1. Unit tests for all functions/methods\n2. Integration tests for key flows\n3. Edge case tests\n\nUse {{test_framework}} as the testing framework.",
-          "waitForCompletion": true
+          "text": "Generate comprehensive tests for the code generated in the previous stage. Include:\n1. Unit tests for all functions/methods\n2. Integration tests for key flows\n3. Edge case tests\n\nUse {{test_framework}} as the testing framework."
         }
       ],
       "isLocked": true
@@ -75,8 +72,7 @@
       "prompts": [
         {
           "label": "Generate Documentation",
-          "text": "Generate comprehensive documentation for the code generated above. Include:\n1. README with setup instructions\n2. API documentation (if applicable)\n3. Architecture overview\n4. Usage examples",
-          "waitForCompletion": true
+          "text": "Generate comprehensive documentation for the code generated above. Include:\n1. README with setup instructions\n2. API documentation (if applicable)\n3. Architecture overview\n4. Usage examples"
         }
       ],
       "isLocked": true

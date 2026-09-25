@@ -3908,12 +3908,6 @@
         "type": "string",
         "presence": "required",
         "constraints": "min 1"
-      },
-      {
-        "field": "waitForCompletion",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
       }
     ]
   },
@@ -6671,12 +6665,6 @@
         "constraints": "min 1"
       },
       {
-        "field": "prompts[].waitForCompletion",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
-      },
-      {
         "field": "harnessConfigOverrides",
         "type": "object",
         "presence": "optional",
@@ -8653,12 +8641,6 @@
         "type": "string",
         "presence": "required",
         "constraints": "min 1"
-      },
-      {
-        "field": "stages[].prompts[].waitForCompletion",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
       },
       {
         "field": "stages[].harnessConfigOverrides",
@@ -12709,12 +12691,6 @@
         "constraints": "—"
       },
       {
-        "field": "stages[].config.prompts[].waitForCompletion",
-        "type": "boolean",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
         "field": "stages[].config.hooks",
         "type": "array of object",
         "presence": "optional",
@@ -14007,12 +13983,6 @@
         "type": "string",
         "presence": "required",
         "constraints": "min 1"
-      },
-      {
-        "field": "waitForCompletion",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
       }
     ]
   },
@@ -14062,12 +14032,6 @@
         "type": "string",
         "presence": "required",
         "constraints": "min 1"
-      },
-      {
-        "field": "prompts[].waitForCompletion",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
       },
       {
         "field": "harnessConfigOverrides",
@@ -14886,12 +14850,6 @@
         "type": "string",
         "presence": "required",
         "constraints": "min 1"
-      },
-      {
-        "field": "stages[].prompts[].waitForCompletion",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
       },
       {
         "field": "stages[].harnessConfigOverrides",

@@ -309,7 +309,7 @@ async function runWorkflows() {
   const stageRes = await apiRequest('POST', `/workflow-definitions/${defId}/stages`, {
     name: 'only-stage',
     order: 0,
-    prompts: [{ label: 'P', text: 'do the thing', waitForCompletion: true }],
+    prompts: [{ label: 'P', text: 'do the thing' }],
   });
   if (!stageRes.ok) throw new Error(`workflow stage create failed (${stageRes.status})`);
 

@@ -44,7 +44,6 @@ const HookDefinitionOutputSchema = z.object({
 const PromptDefinitionOutputSchema = z.object({
   label: z.string().optional(),
   text: z.string(),
-  waitForCompletion: z.boolean().optional(),
 });
 
 const RetryPolicyOutputSchema = z.object({

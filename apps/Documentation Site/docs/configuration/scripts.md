@@ -72,7 +72,6 @@ since functions can't be serialized — it's validated separately at runtime.
 | stages[].config.prompts[] | object | `required` | unknown keys: strip |
 | stages[].config.prompts[].label | string | `optional` | — |
 | stages[].config.prompts[].text | string | `required` | — |
-| stages[].config.prompts[].waitForCompletion | boolean | `optional` | — |
 | stages[].config.hooks | array of object | `optional` | — |
 | stages[].config.hooks[] | object | `required` | unknown keys: strip |
 | stages[].config.hooks[].id | string | `required` | — |
@@ -203,7 +202,6 @@ const HookDefinitionOutputSchema = z.object({
 const PromptDefinitionOutputSchema = z.object({
   label: z.string().optional(),
   text: z.string(),
-  waitForCompletion: z.boolean().optional(),
 });
 
 const RetryPolicyOutputSchema = z.object({
