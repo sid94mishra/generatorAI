@@ -423,8 +423,8 @@ One tool and one container cover both surfaces: **Playwright Test `toHaveScreens
 ### 4.2 Routes: seeded isolated server, not a MockPlatformClient
 
 **Decision: seeded test server.** The app renders against the real bundled server (`apps/server/dist-bundle/server.mjs`), configured as follows:
-- a fresh temp DB (`GENERATORAI_DB_PATH`) and artifacts dir under `os.tmpdir()/generatorai-vrt-*`;
-- `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1`, `NODE_ENV=test`, `PORT=3197`;
+- a fresh temp DB (`DB_PATH`), artifacts dir (`ARTIFACTS_DIR`) and workspaces dir (`WORKSPACES_DIR`) under `os.tmpdir()/generatorai-vrt-*` — the server reads these **bare** names (`apps/server/src/index.ts`); `GENERATORAI_DB_PATH` is ignored and silently opens the developer's default DB;
+- `GENERATORAI_BIND_HOST=127.0.0.1`, `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1`, `NODE_ENV=test`, `PORT=3197`;
 - `GENERATORAI_LOAD_TEST_FAUX_HARNESS=true`, so every conversation runs on the deterministic `FauxProvider`.
 
 This is already proven by `concurrent-load-1q.mjs` and the CI `e2e` job.

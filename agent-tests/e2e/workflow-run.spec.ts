@@ -28,7 +28,8 @@ test.describe('Run controls', () => {
     await expect(page.getByText('Pending', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('0/1', { exact: true })).toBeVisible();
     // The single stage is listed and itself Pending.
-    await expect(page.getByRole('button', { name: /^#0 Only Pending/ })).toBeVisible();
+    // Stage numbers are 1-based and user-facing (deriveRunView.ts: `order: idx + 1`).
+    await expect(page.getByRole('button', { name: /^#1 Only Pending/ })).toBeVisible();
 
     // A not-yet-started run offers no lifecycle controls — those are gated on
     // running/paused/terminal states.
@@ -84,25 +85,27 @@ test.describe('Run lifecycle + streaming render', () => {
     await expect(page.getByText('First', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Second', { exact: true }).first()).toBeVisible();
 
-    // Expand the first stage and confirm the prompt replays, and that the
-    // stage's output is reachable.
+    // Stage #1 must show its prompt, and its output must be reachable.
     //
-    // The old `getByText('Response')` assertion named a label the run page has
-    // never rendered. StageTimelineItem's expanded body is: a "Stage prompt"
-    // bubble, the StreamPanel, then a chips row whose "Details" chip opens the
-    // right-pane Inspector (tabs: Files / Output / Hooks / Tools). "Output" is
-    // where a completed stage's result lives; there is no "Response" heading.
+    // Finished runs now open every stage on load (StageTimelineItem's
+    // `openWhenFinished`), so clicking the header would TOGGLE the stage shut;
+    // expand only if it is collapsed, and scope every assertion to stage #1 —
+    // both stages carry a "Stage prompt" bubble with the same prompt text.
     //
-    // FINDING (app, not fixed here): on RELOAD of a completed run the
-    // StreamPanel renders nothing — the assistant answer does not replay
-    // inline, only the prompt does. Reproduced on this run and independently
-    // on a pre-existing completed run (load-1q-workflow). That is why this
-    // test asserts the Inspector's Output tab rather than inline answer text.
-    await page.getByRole('button', { name: /^#0 First/ }).click();
-    await expect(page.getByText('Stage prompt', { exact: true })).toBeVisible({ timeout: 10_000 });
-    await expect(page.getByText('Reply with the word DONE.', { exact: true }).first()).toBeVisible();
+    // StageTimelineItem's expanded body is: a "Stage prompt" bubble, the
+    // StreamPanel, then a chips row whose "Details" chip opens the right-pane
+    // Inspector (tabs: Files / Output / Hooks / Tools). There is no "Response"
+    // heading. (An earlier finding — the StreamPanel rendering nothing on
+    // reload of a completed run — no longer reproduces: the answer replays
+    // inline. It is still not asserted, as generated text is never asserted.)
+    const firstHeader = page.getByRole('button', { name: /^#1 First/ });
+    const firstStage = page.locator('[data-stage-id]').filter({ has: firstHeader });
+    if ((await firstHeader.getAttribute('aria-expanded')) !== 'true') await firstHeader.click();
+    await expect(firstHeader).toHaveAttribute('aria-expanded', 'true');
+    await expect(firstStage.getByText('Stage prompt', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(firstStage.getByText('Reply with the word DONE.', { exact: true })).toBeVisible();
 
-    await page.getByRole('button', { name: 'Details', exact: true }).first().click();
+    await firstStage.getByRole('button', { name: 'Details', exact: true }).click();
     await expect(page.getByRole('tab', { name: 'Inspector' })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByRole('tab', { name: 'Output' })).toBeVisible();
     // Note: a cleanly-completed run shows no Retry control (Retry is for

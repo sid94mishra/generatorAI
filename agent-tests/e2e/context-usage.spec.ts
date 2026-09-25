@@ -9,8 +9,11 @@
 // ────────────────────────────────────────────────────────────────
 
 import { test, expect } from '@playwright/test';
-
-const API_URL = process.env.API_URL || 'http://localhost:3100';
+// Same API_URL convention as every other spec (helpers/api.ts): API_URL
+// already ends in `/api` (CI passes http://localhost:3100/api). This file used
+// to default to the bare origin and append `/api` itself, so under CI's value
+// it requested `/api/api/...` and 404'd.
+import { API_BASE } from '../helpers/api';
 
 interface CatalogModel {
   id: string;
@@ -27,7 +30,7 @@ interface CatalogModel {
 }
 
 async function catalog(): Promise<CatalogModel[]> {
-  const res = await fetch(`${API_URL}/api/harness/models`);
+  const res = await fetch(`${API_BASE}/harness/models`);
   expect(res.ok).toBeTruthy();
   return (await res.json()) as CatalogModel[];
 }
@@ -92,7 +95,7 @@ test.describe('model catalog contract', () => {
     const all = await catalog();
     const providers = [...new Set(all.map((m) => m.provider))].filter(Boolean) as string[];
     for (const p of providers) {
-      const res = await fetch(`${API_URL}/api/harness/models?provider=${p}`);
+      const res = await fetch(`${API_BASE}/harness/models?provider=${p}`);
       const rows = (await res.json()) as CatalogModel[];
       expect(rows.length).toBeGreaterThan(0);
       expect(rows.every((m) => m.provider === p)).toBeTruthy();
@@ -100,7 +103,7 @@ test.describe('model catalog contract', () => {
   });
 
   test('the deprecated /copilot/models alias still answers', async () => {
-    const res = await fetch(`${API_URL}/api/copilot/models`);
+    const res = await fetch(`${API_BASE}/copilot/models`);
     expect(res.ok).toBeTruthy();
     expect(res.headers.get('deprecation')).toBe('true');
   });

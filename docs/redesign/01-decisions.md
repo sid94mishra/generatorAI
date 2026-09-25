@@ -211,6 +211,20 @@ Kept unchanged: React 19.2, TanStack Query 5, zustand 5, @xyflow/react 12, @dagr
 ### D-39 Out of scope for this pass — Final
 Internationalisation (no i18n exists; do not start it), device-scoped appearance for desktop remote mode (`06-desktop-and-shell.md` §6.5; appearance stays per server origin), mobile UI implementation (next pass, D-40), Workflow Overhaul Plan backend work (its own plan), relay end-to-end encryption (`packages/relay-protocol/src/e2ee.ts` has no importers — flagged separately), React Compiler and Vite 8 (D-37).
 
+### D-43 P0 guardrail implementation details — Final
+Decided while building P0-04 where `09-verification.md` was silent or wrong:
+- `check:design` is **one** script: `check-design-system.mjs` runs `check-stories.mjs` itself, because with `a.mjs && b.mjs` pnpm forwards `--strict` only to the last command.
+- `legacyTokenUtility` leaves out the `chart-N` and `canvas-*` tokens (they survive P7 per `02` §2.3), so the rule can reach 0.
+- `lucideDirectImport` counts every file outside `ui/icons` (148 at P0), not only files outside `components/ui` (135): D-17 bans direct imports everywhere else.
+- Raw-element rules (`rawButtonElement`, `rawInputElement` …) exempt `src/ui/primitives/**`, where the kit's own Button/Input/Dialog must render the raw element.
+- `eslint-plugin-boundaries` v7 (`boundaries/dependencies` policies); loose `src/*.tsx` files are `root` elements and may import each other. The only legacy edges from the `data` layer at P0 (`hooks/queries.ts`, `providers/QueryProvider.tsx` → `components/Toast.tsx`; `hooks/composerQueries.ts` → `components/chat/composer/{builtins,types}.ts`) are allowed **for those target files only**, as migration scaffolding removed by P7.
+- ESLint import resolution uses `apps/web/tsconfig.eslint.json` (the web tsconfig without `references`): eslint-import-resolver-typescript v4 ignores `paths` in a tsconfig that has references, so every `@/` import escaped the layer rules.
+- better-tailwindcss needs `cwd: apps/web` (from the root `tailwindcss` resolves to the docs site's 3.x) and keeps its default callee matchers (setting `callees` replaces them).
+- Vitest: `apps/web/vitest.config.ts` exports its `unit` project and the root config reuses it with `extends`; Vitest ignores a `projects` list nested inside a referenced config.
+
+### D-44 Isolated test servers use the server's bare env names — Final
+The server reads `DB_PATH`, `ARTIFACTS_DIR`, `WORKSPACES_DIR`, `TEMPLATES_DIR` and `PORT` (`apps/server/src/index.ts`); the `GENERATORAI_`-prefixed names in the old CI e2e job, `AGENTS.md` and an earlier draft of `09` §4.2 were silently ignored, so "isolated" servers opened the default database. Every isolated server (CI e2e, sandbox, VRT, smokes) sets the bare names plus `GENERATORAI_BIND_HOST=127.0.0.1` (required for `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK`), and scripts assert the `dbPath` in the startup log before running tests. Renaming the server's variables to a prefixed form is out of scope (it would touch every deployment doc); if it is ever done, it is a clean rename with no aliases (D-02).
+
 ### D-41 Z-index scale — Final
 Named layers replace ad hoc values (`z-[1000]`, `z-[1100]`, `z-[1200]`, `z-50` …): `base 0 < sticky 10 < dock 20 < rail/sidebar 30 < dialog 1000 < dropdown/popover 1100 < toast 1150 < tooltip 1200`. Dropdowns and popovers sit **above** dialogs because selects, menus and comboboxes open from inside dialogs. Values in `02-design-system-spec.md` §6.
 

@@ -204,12 +204,12 @@ Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 
 | Var | Default | Purpose |
 |---|---|---|
-| `GENERATORAI_PORT` | `3100` | API server port |
+| `PORT` | `3100` | API server port |
 | `GENERATORAI_WEB_PORT` | `5173` | Vite dev port |
-| `GENERATORAI_DB_PATH` | `~/.generatorai/data.db` | SQLite path |
-| `GENERATORAI_WORKSPACES_DIR` | `~/.generatorai/workspaces` | Worktree + workspace root |
-| `GENERATORAI_ARTIFACTS_DIR` | `~/.generatorai/artifacts` | Project + artifact root |
-| `GENERATORAI_TEMPLATES_DIR` | `~/.generatorai/templates` | System templates + system MCP / artifacts |
+| `DB_PATH` | `~/.generatorai/data.db` (dev: `packages/db/data/generatorai.db`) | SQLite path |
+| `WORKSPACES_DIR` | `~/.generatorai/workspaces` | Worktree + workspace root |
+| `ARTIFACTS_DIR` | `~/.generatorai/artifacts` | Project + artifact root |
+| `TEMPLATES_DIR` | `~/.generatorai/templates` | System templates + system MCP / artifacts |
 | `HARNESS_TYPE` | `copilot` | Default provider: `copilot`, `claude-agent` or `codex` |
 | `CODEX_CLI_PATH` | auto-resolved | Codex CLI location (unset: PATH, then the ChatGPT desktop app's bundled CLI) |
 | `COPILOT_GH_HOST` | (none) | Set for GHEC tenants (`https://<tenant>.ghe.com/`) |

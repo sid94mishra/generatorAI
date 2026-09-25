@@ -6,8 +6,10 @@ import { findAutomationIdByName, apiRequest } from '../helpers/api';
 test.describe('Automations list', () => {
   test('renders header and New Automation action', async ({ page, gotoApp }) => {
     await gotoApp('/automations');
-    await expect(page.getByRole('heading', { name: 'Automations' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /New Automation/i })).toBeVisible();
+    // Exact + level: on an empty DB the list's empty state adds an h3
+    // "No automations yet", which a substring match also hits.
+    await expect(page.getByRole('heading', { name: 'Automations', exact: true, level: 1 })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New Automation', exact: true })).toBeVisible();
   });
 
   test('seeded automation appears in the list', async ({ page, gotoApp, seed }) => {
@@ -56,17 +58,20 @@ test.describe('Create automation form', () => {
     const name = `W3 Created ${Date.now()}`;
 
     await gotoApp('/automations/new');
-    await page.getByRole('textbox', { name: /My Automation/i }).fill(name);
+    // The name input is now properly labelled ("Name *"); "My Automation" is
+    // only its placeholder, which is not part of the accessible name.
+    await page.getByRole('textbox', { name: 'Name *', exact: true }).fill(name);
 
     // Manual is the default trigger. The workflow picker is NOT a `<select>`:
-    // it is an "+ Add a workflow…" button that opens a `role="listbox"`. This
+    // it is the Radix-based ui/Select — a `combobox` named "Add a workflow"
+    // that opens a `role="listbox"` of `role="option"`s. This
     // test previously drove `page.locator('select').nth(1)` with
     // `selectOption({label: RegExp})` — a `<select>` that is not the workflow
     // picker, and an option shape `selectOption` does not accept (label must
     // be a string). Both failures were swallowed by a `.catch()`, so the form
     // submitted with nothing selected and failed its own "Select at least one
     // workflow" validation.
-    await page.getByRole('button', { name: /Add a workflow/i }).click();
+    await page.getByRole('combobox', { name: 'Add a workflow', exact: true }).click();
     const listbox = page.getByRole('listbox');
     await expect(listbox).toBeVisible();
     await listbox.getByRole('option', { name: new RegExp(wfName) }).first().click();

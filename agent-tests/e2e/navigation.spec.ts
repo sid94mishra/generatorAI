@@ -12,14 +12,16 @@ import { test, expect } from '../helpers/test';
 //     a tab inside the Settings modal, covered by
 //     settings-dashboard-templates.spec.ts.
 //   • 'Settings' sits in the aside *outside* the <nav> and calls
-//     openSettings() — it opens a modal and never changes the URL, so it
-//     cannot belong to a URL walk. It gets its own test below.
+//     openSettings(), which navigates to the routed Settings page
+//     (`/settings/<section>`, SettingsPage.tsx). It gets its own test below.
+//   • The nav entries are React Router <Link>s (role=link with
+//     aria-current="page"), not buttons.
 //   • Page titles are the <h1> inside <main>. The header renders a
 //     plain-text breadcrumb <span>, not a heading, so there is nothing in
 //     the banner to assert against on a routed page.
 const PAGES: Array<{ nav: string; urlRe: RegExp; heading: string }> = [
   { nav: 'Dashboard', urlRe: /\/$/, heading: 'Mission Control' },
-  { nav: 'Projects', urlRe: /\/projects$/, heading: 'Manage Projects' },
+  { nav: 'Projects', urlRe: /\/projects$/, heading: 'Projects' },
   { nav: 'Chats', urlRe: /\/chats$/, heading: 'Chats' },
   { nav: 'Agents', urlRe: /\/agents$/, heading: 'Agents' },
   { nav: 'Workflows', urlRe: /\/workflows$/, heading: 'Workflows' },
@@ -39,40 +41,41 @@ test.describe('Navigation & layout', () => {
     // The nav roster itself is the contract: a route silently dropped from
     // the sidebar would otherwise still pass the per-page walk below via
     // direct URL entry.
-    await expect(nav.getByRole('button')).toHaveText(PAGES.map((p) => p.nav));
+    await expect(nav.getByRole('link')).toHaveText(PAGES.map((p) => p.nav));
 
     for (const p of PAGES) {
-      await nav.getByRole('button', { name: p.nav, exact: true }).click();
+      const link = nav.getByRole('link', { name: p.nav, exact: true });
+      await link.click();
       await expect(page).toHaveURL(p.urlRe);
+      await expect(link).toHaveAttribute('aria-current', 'page');
       await expect(
         page.getByRole('main').getByRole('heading', { name: p.heading, exact: true, level: 1 }),
       ).toBeVisible();
     }
   });
 
-  // Retargeted from the old PAGES entry: 'Settings' is a modal surface, not a
-  // route. Asserting it against /\/settings/ was asserting a URL the app has
-  // not produced since SettingsRoute became a redirect.
-  test('Settings opens the settings modal without leaving the page', async ({ page, gotoApp }) => {
+  // Settings used to be a modal that left the URL untouched. It is now a
+  // routed page (router.tsx: `settings`, `settings/:section`; SettingsPage.tsx)
+  // so the URL changes on purpose, and its Back control returns to wherever
+  // the user came from. The button still lives outside the routed <nav>.
+  test('Settings opens the settings page and Back returns to the previous page', async ({ page, gotoApp }) => {
     await gotoApp('/chats');
     const aside = page.getByRole('complementary');
     // It is deliberately outside the routed <nav>.
     await expect(
       aside.getByRole('navigation').getByRole('button', { name: 'Settings', exact: true }),
     ).toHaveCount(0);
+    await expect(aside.getByRole('navigation').getByRole('link', { name: 'Settings', exact: true })).toHaveCount(0);
 
     await aside.getByRole('button', { name: 'Settings', exact: true }).click();
 
-    const dialog = page.getByRole('dialog');
-    await expect(dialog).toBeVisible();
-    // Two elements carry the name "Settings" (Radix's sr-only dialog title and
-    // the visible banner heading), so pin the visible one.
-    await expect(dialog.getByRole('banner').getByRole('heading', { name: 'Settings' })).toBeVisible();
-    // A modal, not a navigation: the underlying route is untouched.
-    await expect(page).toHaveURL(/\/chats$/);
+    await expect(page).toHaveURL(/\/settings\/general$/);
+    const settings = page.getByTestId('settings-page');
+    await expect(settings.getByRole('heading', { name: 'Settings', exact: true, level: 2 })).toBeVisible();
+    await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
 
-    await dialog.getByRole('button', { name: 'Close' }).click();
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await settings.getByRole('button', { name: 'Back', exact: true }).click();
+    await expect(page.getByTestId('settings-page')).toHaveCount(0);
     await expect(page).toHaveURL(/\/chats$/);
   });
 
@@ -108,7 +111,7 @@ test.describe('Navigation & layout', () => {
     await expect.poll(width, { message: 'sidebar should reopen' }).toBeGreaterThan(100);
     await expect(page.getByTestId('header-toggle-sidebar')).toHaveCount(0);
     await expect(
-      page.getByRole('complementary').getByRole('navigation').getByRole('button', { name: 'Dashboard', exact: true }),
+      page.getByRole('complementary').getByRole('navigation').getByRole('link', { name: 'Dashboard', exact: true }),
     ).toBeVisible();
   });
 });

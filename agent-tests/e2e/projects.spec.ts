@@ -5,7 +5,8 @@ import { test, expect } from '../helpers/test';
 test.describe('Projects list', () => {
   test('renders header, search and New Project action', async ({ page, gotoApp }) => {
     await gotoApp('/projects');
-    await expect(page.getByRole('heading', { name: 'Projects' })).toBeVisible();
+    // Exact + level: on an empty DB the empty state adds an h3 "No projects yet".
+    await expect(page.getByRole('heading', { name: 'Projects', exact: true, level: 1 })).toBeVisible();
     await expect(page.getByRole('button', { name: /New Project/i }).first()).toBeVisible();
     await expect(page.getByPlaceholder(/Search/i).first()).toBeVisible();
   });
@@ -58,6 +59,21 @@ test.describe('Project detail', () => {
       },
     },
     {
+      // Added with the SCM work (ProjectDetailPage → ProjectPullRequestsTab).
+      // A seeded project has no codebases, so the panel must render its
+      // Open/Closed/All filter and settle on the empty (or "unavailable")
+      // state rather than spin forever.
+      tab: 'Pull requests',
+      assert: async (page) => {
+        const panel = page.getByTestId('project-pull-requests');
+        await expect(panel).toBeVisible();
+        await expect(panel.getByRole('tab', { name: 'Open', exact: true })).toHaveAttribute('aria-selected', 'true');
+        await expect(panel.getByTestId('pr-empty').or(panel.getByTestId('pr-unavailable'))).toBeVisible({
+          timeout: 15_000,
+        });
+      },
+    },
+    {
       tab: 'Settings',
       assert: async (page) => {
         await expect(page.getByRole('heading', { name: 'Project Settings', exact: true })).toBeVisible();
@@ -66,11 +82,15 @@ test.describe('Project detail', () => {
     },
   ];
 
-  test('switches between Codebases, Project Customization and Settings tabs', async ({ page, gotoApp, seed }) => {
+  test('switches between Codebases, Project Customization, Pull requests and Settings tabs', async ({ page, gotoApp, seed }) => {
     const id = await seed.project({ name: `W4 Detail ${Date.now()}` });
     await gotoApp(`/projects/${id}`);
 
-    const tablist = page.getByRole('tablist');
+    // The Pull requests panel renders its own (nested) state tablist, so pin
+    // the page-level one by its first tab.
+    const tablist = page
+      .getByRole('tablist')
+      .filter({ has: page.getByRole('tab', { name: 'Codebases', exact: true }) });
     await expect(tablist.getByRole('tab')).toHaveText(PANELS.map((p) => p.tab));
 
     for (const { tab, assert } of PANELS) {

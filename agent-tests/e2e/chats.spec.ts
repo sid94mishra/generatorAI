@@ -7,8 +7,11 @@ import { apiRequest } from '../helpers/api';
 test.describe('Chats list', () => {
   test('renders header, search, select and status filters', async ({ page, gotoApp }) => {
     await gotoApp('/chats');
-    await expect(page.getByRole('heading', { name: 'Chats' })).toBeVisible();
-    await expect(page.getByRole('button', { name: /New Chat/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Chats', exact: true, level: 1 })).toBeVisible();
+    // The page-header action comes first in DOM order. When the list is empty
+    // (fresh DB) the empty state adds a second "New Chat" call-to-action —
+    // an intentional duplicate, so the first one is the header's.
+    await expect(page.getByRole('button', { name: 'New Chat', exact: true }).first()).toBeVisible();
     await expect(page.getByPlaceholder(/Search chats/i)).toBeVisible();
     // The status filter is a `role="tablist"` of `role="tab"` buttons
     // (`components/data/FilterTabs.tsx`). An explicit `role` overrides the

@@ -67,6 +67,8 @@ Then: old files deleted, README progress table updated.
   apps/web/src/lib/desktop.ts; scripts are Node (.mjs) using path/os.tmpdir(), not bash.
 - Verify in the running app like a user: ./node_modules/.bin/playwright-cli --browser=chrome --headed
   (Windows: .\node_modules\.bin\playwright-cli.cmd). Unit tests alone are not enough.
+- Isolated test servers: the server reads bare DB_PATH / ARTIFACTS_DIR / WORKSPACES_DIR (GENERATORAI_DB_PATH is ignored and
+  opens the developer's real DB) plus GENERATORAI_BIND_HOST=127.0.0.1; check the startup log's dbPath before any test.
 - Git/SCM features: test against a throwaway dummy repo (node scripts/redesign/make-dummy-repo.mjs), never this checkout.
 - No backward compatibility (pre-release, one developer): replace shapes and delete old code in the same task; no shims,
   aliases or migrations beyond D-02's scaffolding (legacy tokens, LegacyHeader, legacy components/ui).

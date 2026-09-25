@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, dev]
+    branches: [main, dev, desktop_redesign, arch-redesign, 'redesign/**']
     # Editing prose that no gate reads should not start a three-system build.
     # Deliberately a short list rather than `**.md`: the doc-drift, CLI-docs
     # and surface-snapshot gates all compare generated markdown against the
@@ -16,7 +16,7 @@ on:
       - '.github/ISSUE_TEMPLATE/**'
       - '.github/PULL_REQUEST_TEMPLATE.md'
   pull_request:
-    branches: [main, dev]
+    branches: [main, dev, desktop_redesign, arch-redesign, 'redesign/**']
     paths-ignore:
       - 'README.md'
       - 'CONTRIBUTING.md'
@@ -347,7 +347,7 @@ jobs:
         run: |
           set -euo pipefail
           state="$RUNNER_TEMP/e2e-state"
-          mkdir -p "$state/artifacts" "$state/logs"
+          mkdir -p "$state/artifacts" "$state/workspaces" "$state/logs"
           echo "E2E_STATE=$state" >> "$GITHUB_ENV"
 
           # Server: same env shape as agent-tests/concurrent-load-1q.mjs.
@@ -355,8 +355,13 @@ jobs:
             cd apps/server
             PORT="$SERVER_PORT" \
             WIDGET_PORT="$((SERVER_PORT + 1))" \
-            GENERATORAI_DB_PATH="$state/e2e.db" \
-            GENERATORAI_ARTIFACTS_DIR="$state/artifacts" \
+            # The server reads the BARE names (apps/server/src/index.ts); the
+            # GENERATORAI_-prefixed ones used here before were ignored, so e2e
+            # ran against the default database instead of this temp one.
+            DB_PATH="$state/e2e.db" \
+            ARTIFACTS_DIR="$state/artifacts" \
+            WORKSPACES_DIR="$state/workspaces" \
+            GENERATORAI_BIND_HOST=127.0.0.1 \
             GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1 \
             NODE_ENV=test \
             nohup node dist-bundle/server.mjs > "$state/logs/server.log" 2>&1 &

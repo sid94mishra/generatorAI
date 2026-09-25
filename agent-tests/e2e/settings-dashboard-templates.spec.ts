@@ -1,46 +1,64 @@
 import { test, expect } from '../helpers/test';
+import { apiRequest } from '../helpers/api';
 
 // Phase W1 — Settings, Dashboard, Templates.
 // Authored from a playwright-cli exploration session (codegen + trace).
 // Fully deterministic: no AI runs, no seeded data required.
 
+// Settings is a routed page (`/settings/:section`, SettingsPage.tsx), no
+// longer a modal: the section nav is `nav[aria-label="Settings sections"]`
+// and the page title is an h2 inside `data-testid="settings-page"`.
+function settingsNav(page: import('@playwright/test').Page) {
+  return page.getByRole('navigation', { name: 'Settings sections' });
+}
+
+async function openSection(page: import('@playwright/test').Page, label: string) {
+  const entry = settingsNav(page).getByRole('button', { name: label, exact: true });
+  await entry.click();
+  await expect(entry).toHaveAttribute('aria-current', 'page');
+}
+
 test.describe('Settings', () => {
-  // These tab names come from SettingsModal's own section list. The spec used
-  // to iterate ['General', 'Provider', 'Copilot', 'Advanced'] — of which only
-  // 'General' has ever existed — so three quarters of it asserted against a UI
-  // that was never shipped.
+  // These section names and ids come from components/settings/sectionRegistry.tsx
+  // (SETTINGS_NAV). The spec used to iterate ['General', 'Provider', 'Copilot',
+  // 'Advanced'] — of which only 'General' has ever existed.
   test('switches between every settings tab', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    // Two elements render the text "Settings" (the dialog's sr-only title and
-    // the visible banner heading), so an unqualified name match is a strict
-    // mode violation. Pin the visible one.
-    await expect(page.getByRole('banner').getByRole('heading', { name: 'Settings' })).toBeVisible();
+    await expect(
+      page.getByTestId('settings-page').getByRole('heading', { name: 'Settings', exact: true, level: 2 }),
+    ).toBeVisible();
 
-    for (const tab of [
-      'General',
-      'Appearance',
-      'Model Providers',
-      'Agents',
-      'Skills',
-      'MCP Servers',
-      'Templates',
-      'Source Control',
-      'Browser & Terminal',
-      'Computer Use',
-      'Extensions',
-      'Security & Devices',
-      'Diagnostics',
+    for (const [tab, id] of [
+      ['General', 'general'],
+      ['Appearance', 'appearance'],
+      ['Model Providers', 'providers'],
+      ['Agents', 'agents'],
+      ['Skills', 'skills'],
+      ['MCP Servers', 'mcp'],
+      ['Templates', 'templates'],
+      ['Source Control', 'source-control'],
+      ['Browser & Terminal', 'browser-terminal'],
+      ['Computer Use', 'computer-use'],
+      ['Audio', 'audio'],
+      ['Extensions', 'extensions'],
+      ['Security & Devices', 'security'],
+      ['Storage', 'storage'],
+      ['Diagnostics', 'diagnostics'],
     ]) {
-      await page.getByRole('button', { name: tab, exact: true }).click();
-      // Each tab keeps the tab bar; assert the clicked tab is present/active.
-      await expect(page.getByRole('button', { name: tab, exact: true })).toBeVisible();
+      // The clicked entry becomes the current one and the URL addresses it.
+      // Bare `/settings` already IS General (router.tsx), so clicking the
+      // current entry is a no-op and the URL may stay bare.
+      await openSection(page, tab);
+      await expect(page).toHaveURL(new RegExp(id === 'general' ? '/settings(/general)?$' : `/settings/${id}$`));
     }
+    // Exactly one section is current at a time.
+    await expect(settingsNav(page).locator('[aria-current="page"]')).toHaveCount(1);
   });
 
   test('Appearance tab: mode, theme and accent all apply and persist', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Appearance', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Appearance' })).toBeVisible();
+    await openSection(page, 'Appearance');
+    await expect(page.getByRole('heading', { name: 'Appearance', exact: true, level: 2 })).toBeVisible();
 
     // ── Mode ──
     await page.getByRole('radio', { name: 'Dark', exact: true }).click();
@@ -80,12 +98,16 @@ test.describe('Settings', () => {
 
   test('Appearance tab: every registered theme is reachable and readable', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Appearance', exact: true }).click();
+    await openSection(page, 'Appearance');
 
     // The picker renders from the registry, so this count is the contract:
     // adding a theme without it appearing here means the group metadata is
     // wrong and the theme is invisible to users.
-    const cards = page.locator('[role="radiogroup"][aria-label="Theme"] [role="radio"]');
+    // Wait for the picker before counting: `count()` does not auto-wait, and
+    // the routed section can still be mounting right after the click.
+    const themeGroup = page.getByRole('radiogroup', { name: 'Theme', exact: true });
+    await expect(themeGroup).toBeVisible();
+    const cards = themeGroup.getByRole('radio');
     expect(await cards.count()).toBeGreaterThanOrEqual(17);
     for (const group of ['Product', 'Editor', 'Low glare']) {
       await expect(page.getByText(group, { exact: true })).toBeVisible();
@@ -156,19 +178,38 @@ test.describe('Settings', () => {
   // 'Advanced' either), so it was asserting against an imagined UI.
   test('Diagnostics tab shows server health info', async ({ page, gotoApp }) => {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Diagnostics', exact: true }).click();
+    await openSection(page, 'Diagnostics');
     await expect(page.getByText(/Server Health|Database|Uptime|Sandbox/i).first()).toBeVisible({ timeout: 10_000 });
   });
 
-  test('Model Providers tab shows the active provider', async ({ page, gotoApp }) => {
+  // The section no longer says "Active": every connected provider is usable at
+  // once, and the server's primary is marked with a "Default" badge next to a
+  // live connection pill. Asserted against the registry the page renders from,
+  // so it holds whichever provider is primary and whichever ones this machine
+  // has signed in to.
+  test('Model Providers tab marks the default provider and the connected count', async ({ page, gotoApp }) => {
+    const reg = await apiRequest<{ primary: string; providers: Array<{ type: string; label: string; ready: boolean }> }>(
+      'GET',
+      '/harness/providers',
+    );
+    expect(reg.ok).toBe(true);
+    const primary = reg.data.providers.find((p) => p.type === reg.data.primary);
+    expect(primary, 'the primary provider must be listed in the registry').toBeTruthy();
+    const readyCount = reg.data.providers.filter((p) => p.ready).length;
+
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Model Providers', exact: true }).click();
-    await expect(page.getByRole('heading', { name: 'Model Providers' })).toBeVisible();
-    // Both providers this build knows are listed here regardless of which one
-    // is primary, so asserting on Copilot's presence is safe under
-    // HARNESS_TYPE=claude-agent too.
-    await expect(page.getByText(/GitHub Copilot/i).first()).toBeVisible();
-    await expect(page.getByText('Active', { exact: true }).first()).toBeVisible();
+    await openSection(page, 'Model Providers');
+    await expect(page.getByRole('heading', { name: 'Model Providers', exact: true, level: 2 })).toBeVisible();
+
+    const main = page.getByRole('main');
+    for (const p of reg.data.providers) {
+      await expect(main.getByText(p.label, { exact: true })).toBeVisible();
+    }
+    await expect(main.getByText(`${readyCount} of ${reg.data.providers.length} connected`, { exact: true })).toBeVisible();
+    // Exactly one "Default" badge, on the primary provider's row.
+    await expect(main.getByText('Default', { exact: true })).toHaveCount(1);
+    const esc = primary!.label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    await expect(main.getByRole('button', { name: new RegExp(`^${esc} Default `) })).toBeVisible();
   });
 });
 
@@ -227,15 +268,17 @@ test.describe('Dashboard', () => {
 
 // ── Templates ──
 // /templates is a 404: that route does not exist and never did (see
-// apps/web/src/router.tsx). Templates ship as a tab inside the Settings modal
-// (Catalogs.tsx -> TemplatesSection). Every test below is retargeted at that
+// apps/web/src/router.tsx). Templates ship as a section of the routed Settings
+// page, `/settings/templates` (Catalogs.tsx -> TemplatesSection). Every test below is retargeted at that
 // real surface, which preserves the original intent — list, search, and
 // create-from-template — instead of skipping it.
 test.describe('Templates (Settings → Templates tab)', () => {
   async function openTemplatesTab(page: import('@playwright/test').Page, gotoApp: (p: string) => Promise<void>) {
     await gotoApp('/settings');
-    await page.getByRole('button', { name: 'Templates', exact: true }).click();
-    const dialog = page.getByRole('dialog');
+    await openSection(page, 'Templates');
+    await expect(page).toHaveURL(/\/settings\/templates$/);
+    // Kept as `dialog` so the tests below read the same; it is the page now.
+    const dialog = page.getByTestId('settings-page');
     await expect(dialog.getByRole('heading', { name: 'Templates', exact: true, level: 2 })).toBeVisible();
     // Wait for the list itself, not just the section header. The list header
     // reads "Workflow templates" while `useTemplates()` has no data and only
@@ -284,13 +327,13 @@ test.describe('Templates (Settings → Templates tab)', () => {
     const dialog = await openTemplatesTab(page, gotoApp);
     await dialog.getByRole('button', { name: 'Use', exact: true }).first().click();
 
-    // from-template creates a definition, closes settings and navigates to the
+    // from-template creates a definition, leaves Settings and navigates to the
     // new definition's detail page.
     await expect(page).toHaveURL(/\/workflows\/[0-9a-f-]{36}$/, { timeout: 15_000 });
     const id = page.url().split('/workflows/')[1];
     if (id) tracker.track('definition', id);
 
-    await expect(page.getByRole('dialog')).toHaveCount(0);
+    await expect(page.getByTestId('settings-page')).toHaveCount(0);
     await expect(page.getByTestId('rf__wrapper')).toBeVisible({ timeout: 10_000 });
   });
 });

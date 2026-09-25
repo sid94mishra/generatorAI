@@ -100,13 +100,28 @@ async function main() {
     `got ${JSON.stringify(topLabels)}`,
   );
   check(
-    'the bespoke Go and Server menus are gone',
-    !topLabels.includes('Go') && !topLabels.includes('Server'),
+    'the bespoke Go menu is gone',
+    !topLabels.includes('Go'),
     `got ${JSON.stringify(topLabels)}`,
   );
 
   const find = (tree, label) =>
     (tree ?? []).find((i) => (i.label ?? '').replace(/&/g, '') === label);
+
+  // A top-level "Server" menu came back ON PURPOSE (apps/desktop/src/main/menu.ts):
+  // it is now the connection switcher (This Computer / remote servers / Add
+  // Server…), native so it survives an unreachable backend. The old
+  // developer tools must not return with it — they live under Help.
+  const server = find(menuTree, 'Server');
+  check(
+    'Server menu is the connection switcher, not the old dev tools',
+    Boolean(server) &&
+      Boolean(find(server?.submenu, 'This Computer')) &&
+      Boolean(find(server?.submenu, 'Add Server…')) &&
+      !find(server?.submenu, 'Restart Server') &&
+      !find(server?.submenu, 'Server Health'),
+    JSON.stringify((server?.submenu ?? []).map((i) => i.label)),
+  );
   const view = find(menuTree, 'View');
   const file = find(menuTree, 'File');
   const help = find(menuTree, 'Help');

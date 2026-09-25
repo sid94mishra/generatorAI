@@ -116,8 +116,12 @@ try {
   const chat = await findFirst('chat', '/api/chats');
   if (!chat) throw new Error('no chat available');
   await navigateSpa(`/chats/${chat.id}`);
-  await page.waitForSelector('[data-testid="chat-toggle-right-pane"], [data-testid="chat-toggle-right-pane-banner"]', { timeout: 15_000 });
-  const toggle = await page.$('[data-testid="chat-toggle-right-pane"]') ?? await page.$('[data-testid="chat-toggle-right-pane-banner"]');
+  // The per-page "chat-toggle-right-pane*" testids were replaced by a single
+  // global toggle in the app header (components/layout/Header.tsx), shown
+  // whenever the current page registers a right-pane controller. It keeps
+  // the accessible name "Show side pane" / "Hide side pane".
+  await page.waitForSelector('[data-testid="header-toggle-right-pane"]', { timeout: 15_000 });
+  const toggle = await page.$('[data-testid="header-toggle-right-pane"]');
   await toggle.click();
   await page.waitForSelector('[data-testid="right-pane"]', { timeout: 5_000 });
   record('chat: right pane opens', true);
@@ -146,10 +150,12 @@ try {
   const run = await findFirst('run', '/api/workflow-runs?limit=1');
   if (!run) throw new Error('no run available');
   await navigateSpa(`/workflows/${run.workflowDefinitionId}/runs/${run.id}`);
-  // Wait for the run page's breadcrumb / header before clicking Side pane
+  // Wait for the run page's breadcrumb / header before toggling the side pane.
+  // Same shared header toggle as the chat page (see above) — the workflow
+  // run page registers its own controller into the same rightPaneStore.
   await page.waitForSelector('nav[aria-label="Breadcrumb"]', { timeout: 15_000 });
-  await page.waitForSelector('button:has-text("Side pane")', { timeout: 15_000 });
-  await page.click('button:has-text("Side pane")');
+  await page.waitForSelector('[data-testid="header-toggle-right-pane"]', { timeout: 15_000 });
+  await page.click('[data-testid="header-toggle-right-pane"]');
   await page.waitForSelector('[data-testid="right-pane"]', { timeout: 10_000 });
   record('workflow: right pane opens', true);
 

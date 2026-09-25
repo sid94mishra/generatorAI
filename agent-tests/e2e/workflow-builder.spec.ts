@@ -32,11 +32,19 @@ test.describe('Workflow Builder — authoring', () => {
     await page.getByRole('button', { name: /Add (First )?Stage/ }).first().click();
     await expect(page.getByRole('textbox', { name: 'Stage Name' })).toBeVisible();
     await page.getByRole('tab', { name: 'Execution' }).click();
-    await page.getByRole('button', { name: 'Always run' }).click();
+    // Run Condition is the Radix-based ui/Select: a `combobox` labelled by its
+    // field (showing "Always run"), not a button named after its value.
+    const runCondition = page.getByRole('combobox', { name: 'Run Condition', exact: true });
+    await expect(runCondition).toHaveText('Always run');
+    await runCondition.click();
     await expect(page.getByRole('option', { name: 'On upstream success' })).toBeVisible();
     await expect(page.getByRole('option', { name: 'On upstream failure' })).toBeVisible();
     await page.getByRole('option', { name: 'Custom expression' }).click();
-    await expect(page.getByRole('textbox', { name: /stages\.build\.status/ })).toBeVisible();
+    await expect(runCondition).toHaveText('Custom expression');
+    // The expression field is named by its placeholder. It used to advertise
+    // `stages.build.status === …`, syntax the evaluator never supported
+    // (StagePropertiesPanel.tsx); it now shows the real grammar.
+    await expect(page.getByRole('textbox', { name: /status == 'completed'/ })).toBeVisible();
   });
 
   test('retry policy expands and toggles on (collapsed section must be opened first)', async ({ page, gotoApp }) => {
