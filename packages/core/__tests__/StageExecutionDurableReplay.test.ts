@@ -139,6 +139,7 @@ function createSessionAllocator(boot: { n: number }): SessionAllocator {
       },
     ),
     releaseSession: vi.fn(async () => {}),
+    rememberProviderSession: vi.fn(async () => {}),
     releaseAll: vi.fn(async () => {}),
     getSessionById: vi.fn(async () => null),
   } as unknown as SessionAllocator;

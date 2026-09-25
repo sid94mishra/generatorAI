@@ -12,7 +12,7 @@ import { createHash } from 'node:crypto';
 import type Database from 'better-sqlite3';
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { closeDB, createDB, type AppDatabase } from '../index.js';
+import { closeDB, createDB, DrizzleChatMessageRepository, type AppDatabase } from '../index.js';
 import { migrateDB } from '../migrations/index.js';
 
 const open: AppDatabase[] = [];
@@ -86,5 +86,20 @@ describe('migration v56 session_parity', () => {
       { id: 'a2', permission_mode: 'acceptEdits' },
     ]);
     expect(s.pragma('foreign_key_check')).toEqual([]);
+  });
+
+  it('the message repository writes and reads `complete` for assistant rows (WP-2.9)', async () => {
+    const db = createDB(':memory:');
+    open.push(db);
+    migrateDB(db);
+    raw(db).prepare(`INSERT INTO sessions (id, name, status, created_at, updated_at) VALUES ('s', 's', 'active', ?, ?)`).run(T, T);
+    const repo = new DrizzleChatMessageRepository(db);
+    const at = new Date(T * 1000);
+    await repo.create({ id: 'u', sessionId: 's', role: 'user', content: 'q', timestamp: at });
+    await repo.create({ id: 'a1', sessionId: 's', role: 'assistant', content: 'a', complete: true, timestamp: at });
+    await repo.create({ id: 'a2', sessionId: 's', role: 'assistant', content: 'half', complete: false, timestamp: at });
+    await repo.create({ id: 'a3', sessionId: 's', role: 'assistant', content: 'old', metadata: { partial: true }, timestamp: at });
+    const rows = await repo.getBySessionId('s');
+    expect(Object.fromEntries(rows.map((m) => [m.id, m.complete]))).toEqual({ u: undefined, a1: true, a2: false, a3: false });
   });
 });

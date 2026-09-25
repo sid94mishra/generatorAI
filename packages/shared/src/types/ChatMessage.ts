@@ -123,5 +123,11 @@ export interface ChatMessage {
   toolResult?: unknown;
   /** Rich metadata for assistant messages (thinking, tool calls, system msgs) */
   metadata?: ChatMessageMetadata;
+  /**
+   * RV-10 — assistant messages: true when written on the provider's final
+   * turn event, false for a turn cut short (stop, pause, abort). Stored as
+   * `chat_messages.complete` (v56); absent on other roles.
+   */
+  complete?: boolean;
   timestamp: Date;
 }

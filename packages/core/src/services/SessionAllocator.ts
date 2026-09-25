@@ -12,6 +12,7 @@ import type {
   SessionAllocationRow,
 } from '../domain/ports/ISessionAllocationRepository.js';
 import type { EventBus } from '../events/EventBus.js';
+import { rememberProviderSession } from './session/providerSession.js';
 
 /**
  * The session a stage speaks through, as the allocator decided it. `op` says
@@ -159,6 +160,16 @@ export class SessionAllocator {
       default:
         throw new SessionAllocationError(`Unknown session mode: ${mode as string}`);
     }
+  }
+
+  /**
+   * F-3b — record the provider's own session handle after a stage turn, as a
+   * chat does, so a restart resumes the model's history instead of starting
+   * a fresh provider session. Updates `session` in place.
+   */
+  async rememberProviderSession(session: Session): Promise<void> {
+    const id = await rememberProviderSession(this.harness, this.sessionRepo, session);
+    if (id) session.providerSessionId = id;
   }
 
   /**

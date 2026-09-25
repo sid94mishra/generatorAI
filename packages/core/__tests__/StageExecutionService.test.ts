@@ -55,6 +55,7 @@ function createMockSessionAllocator(): SessionAllocator {
       return fakeSession;
     }),
     releaseSession: vi.fn(async () => {}),
+    rememberProviderSession: vi.fn(async () => {}),
     releaseAll: vi.fn(async () => {}),
   } as unknown as SessionAllocator;
 }
@@ -191,6 +192,34 @@ describe('StageExecutionService', () => {
       expect(assistantMessages.length).toBeGreaterThan(0);
       expect(assistantMessages.every(m => m.content === final)).toBe(true);
       expect((await stageRunRepo.getById(sr.id)).status).toBe('completed');
+    });
+
+    it('records a stage turn the way a chat turn is recorded (P02 WP-2.9)', async () => {
+      await copilot.createConversation({ conversationId: 'conv-1' });
+      vi.spyOn(copilot, 'sendPromptAndWait').mockImplementation(async () => {
+        const emit = (kind: string, data: Record<string, unknown>) =>
+          copilot.simulateConversationEvent('conv-1', { kind, data } as never);
+        emit('harness.message_complete', { content: 'Editing the file.' });
+        emit('harness.tool_start', { callId: 'c1', tool: 'edit', args: {} });
+        emit('harness.tool_start', { callId: 'c1', tool: 'edit', args: { path: 'a.ts' } });
+        emit('harness.tool_complete', { callId: 'c1', tool: 'edit', result: 'no', success: false, fileOp: { added: 1, removed: 0 } });
+        emit('harness.message_complete', { content: 'Done.' });
+        emit('harness.idle', {});
+        return { content: 'Done.' };
+      });
+      await seedStage('sd_rec', [{ label: 'Edit', text: 'Edit a.ts' }]);
+      const sr = makeStageRun('sr-rec', 'sd_rec');
+      await stageRunRepo.create(sr);
+      await service.executeStage(sr, 'run-1', 'per-stage');
+      const [first] = vi.mocked(messageRepo.create).mock.calls.map(([m]) => m).filter((m) => m.role === 'assistant');
+      expect(first).toMatchObject({ content: 'Done.', complete: true, metadata: { stageRunId: 'sr-rec' } });
+      expect(first!.metadata!.turnId).toEqual(expect.any(String));
+      expect(first!.metadata!.textSegments!.map((t) => t.content)).toEqual(['Editing the file.', 'Done.']);
+      expect(first!.metadata!.toolCalls).toEqual([
+        expect.objectContaining({ id: 'c1', args: { path: 'a.ts' }, success: false, fileOp: { added: 1, removed: 0 }, sequence: expect.any(Number) }),
+      ]);
+      // F-3b: the provider session handle is remembered for stages too.
+      expect(sessionAllocator.rememberProviderSession).toHaveBeenCalled();
     });
 
     it('delivers uploaded prompt files to the harness without following symlinks', async () => {

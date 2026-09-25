@@ -53,6 +53,7 @@ function createMockSessionAllocator(): SessionAllocator {
       return fakeSession;
     }),
     releaseSession: vi.fn(async () => {}),
+    rememberProviderSession: vi.fn(async () => {}),
     releaseAll: vi.fn(async () => {}),
     getSessionById: vi.fn(async () => fakeSession),
   } as unknown as SessionAllocator;

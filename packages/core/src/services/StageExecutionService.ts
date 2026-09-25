@@ -6,7 +6,8 @@
 import type {
   StageRun,
   AgentEvent,
-  ChatMessage,
+  ChatMessageMetadata,
+  Session,
   ResolvedAgentProjection,
 } from '@generatorai/shared';
 import {
@@ -70,6 +71,7 @@ import { resolverLayer } from './session/agentProjection.js';
 import { runPermissionSource, turnOptionsFrom } from './session/permissionSource.js';
 import { runWorkspace, workspaceExposure } from './session/workspaceExposure.js';
 import { ComposeError, type SessionOwner } from './session/types.js';
+import { TurnRecorder, type RecordedToolCall, type RecordedTurn } from './session/TurnRecorder.js';
 import { StageRunStateMachine } from '../domain/state-machines/StageRunStateMachine.js';
 import type { DurableContext, DurableExecutionEngine } from './DurableExecutionEngine.js';
 import { isSyntheticEffectResult, replayPolicyForToolGroups } from './DurableExecutionEngine.js';
@@ -94,7 +96,7 @@ interface DurableTurnRecord {
    */
   content: string;
   /**
-   * What the `turnContent` accumulator actually held. Restored VERBATIM on
+   * What the recorder's content (the last completed message) actually held. Restored VERBATIM on
    * replay, separately from `content`, so a replayed turn leaves the method's
    * local state byte-identical to a live one — including the case where the
    * provider emits no message events and the accumulator legitimately stays
@@ -104,7 +106,7 @@ interface DurableTurnRecord {
   accumulated?: string;
   conversationId?: string;
   thinkingText?: string;
-  toolCalls?: Array<{ id: string; tool: string; args: unknown; result?: unknown; status: 'running' | 'complete' }>;
+  toolCalls?: RecordedToolCall[];
   systemMessages?: string[];
 }
 
@@ -368,7 +370,7 @@ export class StageExecutionService {
   private async stageTurn(
     stageRun: StageRun,
     session: { id: string; conversationId?: string },
-  ): Promise<{ options: SendPromptOptions; prepare: (text: string) => string }> {
+  ): Promise<{ options: SendPromptOptions; prepare: (text: string) => string; turnId: string; workspaceId?: string }> {
     const run = await this.workflowRunRepo.getById(stageRun.workflowRunId);
     const graph = await this.definitions.get(run.definitionVersionId);
     const stage = graph.stages.find((st) => st.key === stageRun.stageKey) as AgentStage | undefined;
@@ -385,9 +387,12 @@ export class StageExecutionService {
       agentMode,
       runPermissionSource(() => this.workflowRunRepo.getById(stageRun.workflowRunId), stage?.session, graph.workflow.session),
     );
-    this.composer.beginTurn(owner, session.conversationId ?? '', options);
+    const turnId = this.composer.beginTurn(owner, session.conversationId ?? '', options);
+    const workspaceId = await runWorkspace(this.workspaceManager, run).then((ws) => ws.id, () => undefined);
     return {
       options,
+      turnId,
+      ...(workspaceId ? { workspaceId } : {}),
       prepare: (text) => this.composer.preparePrompt(owner, session.conversationId ?? '', spec.harnessType, text, agentMode),
     };
   }
@@ -1088,14 +1093,20 @@ export class StageExecutionService {
      * filed against THIS stage), and — for the stage's own prompts — the
      * widget digest and plan prefix.
      */
+    // What each stage turn produced — the chat's recorder (P02 WP-2.9).
+    const recorder = new TurnRecorder({
+      takeSequence: () => (session.conversationId ? this.composer.turns.takeSequence(session.conversationId) : undefined),
+    });
     const sendTurn = async (
       text: string,
       opts: { attachments?: AttachmentRef[]; signal?: AbortSignal; prepare?: boolean } = {},
     ): Promise<{ content: string }> => {
       const options = await stageSession.turnOptions(stageAgentMode);
-      this.composer.beginTurn(stageOwner(session.id), session.conversationId!, options, {
+      const turnId = this.composer.beginTurn(stageOwner(session.id), session.conversationId!, options, {
         ...(semaphoreCallbacks ? { semaphore: semaphoreCallbacks } : {}),
       });
+      // A new turn on the same listener: the recorder starts over.
+      recorder.begin({ turnId, agentMode: options.agentMode ?? stageAgentMode });
       const prompt = opts.prepare ? stageSession.preparePrompt(text, stageAgentMode) : text;
       return this.harness.sendPromptAndWait(session.conversationId!, prompt, opts.attachments, opts.signal, options);
     };
@@ -1144,112 +1155,21 @@ export class StageExecutionService {
     // as long as — and only as long as — this stage is doing work.
     this.startHeartbeat(stageRun.id);
 
-    // Subscribe to conversation events
-    let unsubscribe: (() => void) | undefined;
-    // Idempotency guard: prevents double-persistence per turn.
-    let assistantPersisted = false;
-
-    // Accumulators for rich metadata — reset each turn
-    let turnThinkingText = '';
-    const turnToolCalls: Array<{ id: string; tool: string; args: unknown; result?: unknown; status: 'running' | 'complete' }> = [];
-    const turnSystemMessages: string[] = [];
-    // Accumulate assistant content across multiple message_complete events
-    // in an agentic loop (tool calls interleave message_complete events).
-    let turnContent = '';
-
     // Phase tracking: marks events during context/summary turns so the
     // client can avoid resetting stream blocks for internal turns.
     let isInternalTurn = false;
 
+    // Subscribe to conversation events
+    let unsubscribe: (() => void) | undefined;
     if (session.conversationId) {
-      unsubscribe = this.harness.onConversationEvent(
-        session.conversationId,
-        async (event: AgentEvent) => {
-          // Inject stageRunId into copilot events so the frontend can
-          // route per-stage streams in single-session mode.
-          // Also inject __isInternalTurn flag for context/summary turns so
-          // the client preserves the main prompt's stream blocks.
-          await this.eventBus.emit(
-            session.id,
-            createEnrichedAgentEvent(event, { stageRunId: stageRun.id, workflowRunId, isInternalTurn }),
-          );
-
-          // Accumulate thinking text
-          if (event.kind === 'harness.reasoning_delta') {
-            const data = event.data as { text?: string };
-            if (data.text) turnThinkingText += data.text;
-          }
-
-          // Accumulate tool calls. Some providers (Claude Agent SDK) emit
-          // tool_start twice per callId — first with empty args when the
-          // tool_use block opens, then again with the fully materialized
-          // args. Dedup by callId so persisted metadata + downstream UI
-          // don't show duplicate rows (one of which never completes).
-          if (event.kind === 'harness.tool_start') {
-            const data = event.data as { callId?: string; tool?: string; args?: unknown };
-            const id = data.callId ?? `tc_${turnToolCalls.length}`;
-            const existing = data.callId
-              ? turnToolCalls.find((tc) => tc.id === data.callId)
-              : undefined;
-            const hasIncomingArgs =
-              data.args != null &&
-              (typeof data.args !== 'object' ||
-                Object.keys(data.args as Record<string, unknown>).length > 0);
-            if (existing) {
-              if (hasIncomingArgs) existing.args = data.args;
-              if (!existing.tool && data.tool) existing.tool = data.tool;
-            } else {
-              turnToolCalls.push({
-                id,
-                tool: data.tool ?? 'unknown',
-                args: data.args,
-                status: 'running',
-              });
-            }
-          }
-          if (event.kind === 'harness.tool_complete') {
-            const data = event.data as { callId?: string; tool?: string; result?: unknown };
-            const match = turnToolCalls.find(
-              (tc) => tc.id === data.callId || (data.tool && tc.tool === data.tool && tc.status === 'running'),
-            );
-            if (match) {
-              match.result = data.result;
-              match.status = 'complete';
-            }
-          }
-
-          // Accumulate content on message_complete — don't persist yet.
-          // In an agentic loop, message_complete fires BEFORE tool events,
-          // so deferring persistence to harness.idle captures all tool calls.
-          if (event.kind === 'harness.message_complete') {
-            const data = event.data as { content?: string };
-            if (data.content) {
-              // Completion is authoritative even when the final answer is
-              // shorter than commentary. Codex emits discrete segments;
-              // choosing by length can persist "I'll check" over the result.
-              turnContent = data.content;
-            }
-          }
-
-          // Persist assistant message on idle — all tool calls have completed
-          if (event.kind === 'harness.idle' && !assistantPersisted && turnContent.trim().length > 0) {
-            assistantPersisted = true;
-            await this.messageRepo.create({
-              id: generateId(),
-              sessionId: session.id,
-              role: 'assistant',
-              content: turnContent,
-              metadata: {
-                stageRunId: stageRun.id,
-                thinkingText: turnThinkingText || undefined,
-                toolCalls: turnToolCalls.length > 0 ? [...turnToolCalls] : undefined,
-                systemMessages: turnSystemMessages.length > 0 ? [...turnSystemMessages] : undefined,
-              },
-              timestamp: new Date(),
-            });
-          }
-        },
-      );
+      unsubscribe = this.listenStageTurns({
+        stageRun,
+        session,
+        workflowRunId,
+        recorder,
+        workspaceId: workspace.id,
+        isInternalTurn: () => isInternalTurn,
+      });
     }
 
     // ── W22 — the effect sandwich, on the real turn path ──────────
@@ -1328,12 +1248,6 @@ export class StageExecutionService {
         timestamp: new Date(),
       });
 
-      assistantPersisted = false;
-      turnThinkingText = '';
-      turnToolCalls.length = 0;
-      turnSystemMessages.length = 0;
-      turnContent = '';
-
       isInternalTurn = true;
       // durability-ok: the recap exists ONLY because turns were replayed.
       // Journalling it would memoise a message whose whole purpose is to
@@ -1379,13 +1293,14 @@ export class StageExecutionService {
               meta: { stageRunId: stageRun.id, workflowRunId, stageName: stageRun.name },
             });
           }
+          const turn = recorder.snapshot();
           return {
             content,
-            accumulated: turnContent,
+            accumulated: turn.content,
             ...(session.conversationId ? { conversationId: session.conversationId } : {}),
-            ...(turnThinkingText ? { thinkingText: turnThinkingText } : {}),
-            ...(turnToolCalls.length > 0 ? { toolCalls: [...turnToolCalls] } : {}),
-            ...(turnSystemMessages.length > 0 ? { systemMessages: [...turnSystemMessages] } : {}),
+            ...(turn.thinkingText ? { thinkingText: turn.thinkingText } : {}),
+            ...(turn.toolCalls ? { toolCalls: turn.toolCalls } : {}),
+            ...(turn.systemMessages ? { systemMessages: turn.systemMessages } : {}),
           } satisfies DurableTurnRecord;
         },
       });
@@ -1405,7 +1320,7 @@ export class StageExecutionService {
           `policy is 'never' (this stage can write files or run commands), so it ` +
           `was not re-run. Any work it had already done is preserved; anything it ` +
           `had not finished was not attempted.`;
-        turnSystemMessages.push(notice);
+        recorder.addSystemMessage(notice);
         await this.eventBus.emit(session.id, {
           kind: 'harness.session_info',
           data: {
@@ -1421,15 +1336,14 @@ export class StageExecutionService {
       // A settled turn — restore the accumulators so every downstream reader
       // (`stageOutputContent`, the validation loop, the summary) sees exactly
       // what it would have seen had the turn just run.
-      turnContent = outcome.accumulated ?? outcome.content;
-      turnThinkingText = outcome.thinkingText ?? '';
-      turnToolCalls.length = 0;
-      if (outcome.toolCalls) turnToolCalls.push(...outcome.toolCalls);
-      turnSystemMessages.length = 0;
-      if (outcome.systemMessages) turnSystemMessages.push(...outcome.systemMessages);
-      // The settled turn already wrote its assistant message; re-persisting
-      // would duplicate the row in the chat history on every restart.
-      assistantPersisted = true;
+      // The settled turn already wrote its assistant message; `restore` marks
+      // it persisted so a restart does not duplicate the row.
+      recorder.restore({
+        content: outcome.accumulated ?? outcome.content,
+        ...(outcome.thinkingText ? { thinkingText: outcome.thinkingText } : {}),
+        ...(outcome.toolCalls ? { toolCalls: outcome.toolCalls } : {}),
+        ...(outcome.systemMessages ? { systemMessages: outcome.systemMessages } : {}),
+      });
 
       if (outcome.conversationId !== session.conversationId && outcome.content) {
         replayedTurns.push({ prompt: promptForReplay, content: outcome.content });
@@ -1492,18 +1406,11 @@ export class StageExecutionService {
             timestamp: new Date(),
           });
 
-          // Reset accumulators before this context turn
-          assistantPersisted = false;
-          turnThinkingText = '';
-          turnToolCalls.length = 0;
-          turnSystemMessages.length = 0;
-          turnContent = '';
-
           // Mark as internal turn so the client doesn't reset stream blocks
           isInternalTurn = true;
           await sendTurn(contextMessage);
           isInternalTurn = false;
-          return turnContent;
+          return recorder.content;
         });
       }
 
@@ -1529,16 +1436,10 @@ export class StageExecutionService {
             timestamp: new Date(),
           });
 
-          assistantPersisted = false;
-          turnThinkingText = '';
-          turnToolCalls.length = 0;
-          turnSystemMessages.length = 0;
-          turnContent = '';
-
           isInternalTurn = true;
           await sendTurn(feedbackMessage);
           isInternalTurn = false;
-          return turnContent;
+          return recorder.content;
         });
       }
 
@@ -1556,16 +1457,10 @@ export class StageExecutionService {
               timestamp: new Date(),
             });
 
-            assistantPersisted = false;
-            turnThinkingText = '';
-            turnToolCalls.length = 0;
-            turnSystemMessages.length = 0;
-            turnContent = '';
-
             isInternalTurn = true;
             await sendTurn(msg.content);
             isInternalTurn = false;
-            return turnContent;
+            return recorder.content;
           });
         }
       }
@@ -1734,17 +1629,10 @@ export class StageExecutionService {
             timestamp: new Date(),
           });
 
-          // Reset idempotency guard and accumulators so this turn's data gets persisted
-          assistantPersisted = false;
-          turnThinkingText = '';
-          turnToolCalls.length = 0;
-          turnSystemMessages.length = 0;
-          turnContent = '';
-
           // Send prompt with optional timeout
           // Send prompt and capture response for persistence.
           // The event-based idle handler may also persist the assistant message
-          // (via harness.message_complete → turnContent → harness.idle), but some
+          // (via harness.message_complete → the recorder → harness.idle), but some
           // SDK versions don't emit assistant.message events. Capturing the return
           // value here ensures the message is always persisted reliably.
           let promptResponse: { content: string } | undefined;
@@ -1769,29 +1657,19 @@ export class StageExecutionService {
             );
           }
 
-          // Persist assistant response if the idle handler didn't already
-          if (promptResponse?.content && !assistantPersisted) {
-            assistantPersisted = true;
-            // Use the captured content if turnContent wasn't populated by events
-            const content = turnContent.trim().length > 0 ? turnContent : promptResponse.content;
-            await this.messageRepo.create({
-              id: generateId(),
-              sessionId: session.id,
-              role: 'assistant',
-              content,
-              metadata: {
-                stageRunId: stageRun.id,
-                thinkingText: turnThinkingText || undefined,
-                toolCalls: turnToolCalls.length > 0 ? [...turnToolCalls] : undefined,
-                systemMessages: turnSystemMessages.length > 0 ? [...turnSystemMessages] : undefined,
-              },
-              timestamp: new Date(),
-            });
+          // Persist the assistant response if the idle handler did not (a
+          // provider that emits no message events: the call's return value).
+          if (promptResponse?.content) {
+            await this.persistStageTurn(
+              session.id,
+              stageRun.id,
+              recorder.take({ fallbackContent: promptResponse.content }),
+            );
           }
           // Prefer the accumulator, falling back to what the call returned —
           // the same precedence the persistence block above uses. This is the
           // record's `content`; `accumulated` keeps the raw accumulator.
-          return turnContent.trim().length > 0 ? turnContent : (promptResponse?.content ?? '');
+          return recorder.content.trim().length > 0 ? recorder.content : (promptResponse?.content ?? '');
         }, { contributesOutput: true });
 
         // ── POST_PROMPT hook — fire after each prompt turn completes ──
@@ -1817,7 +1695,7 @@ export class StageExecutionService {
 
       // Save the stage output content BEFORE the summary turn resets accumulators.
       // This is the content produced by the main prompt(s) that may contain output.json.
-      let stageOutputContent = turnContent;
+      let stageOutputContent = recorder.content;
 
       // ── OUTPUT VALIDATION + RETRY ──
       // After all prompts complete, validate the output based on outputFormat.
@@ -1867,22 +1745,15 @@ export class StageExecutionService {
               timestamp: new Date(),
             });
 
-            // Reset accumulators for the retry turn
-            assistantPersisted = false;
-            turnThinkingText = '';
-            turnToolCalls.length = 0;
-            turnSystemMessages.length = 0;
-            turnContent = '';
-
             isInternalTurn = true;
             await sendTurn(retryPrompt);
             isInternalTurn = false;
-            return turnContent;
+            return recorder.content;
           }, { contributesOutput: true });
 
           // Update stageOutputContent with accumulated retry response
-          if (turnContent.length > 0) {
-            stageOutputContent = stageOutputContent + '\n' + turnContent;
+          if (recorder.content.length > 0) {
+            stageOutputContent = stageOutputContent + '\n' + recorder.content;
           }
         }
       }
@@ -1922,13 +1793,6 @@ export class StageExecutionService {
               metadata: { stageRunId: stageRun.id, isSummaryPrompt: true },
               timestamp: new Date(),
             });
-
-            // Reset accumulators for the summary turn
-            assistantPersisted = false;
-            turnThinkingText = '';
-            turnToolCalls.length = 0;
-            turnSystemMessages.length = 0;
-            turnContent = '';
 
             // Mark as internal turn so the client doesn't reset stream blocks
             isInternalTurn = true;
@@ -2234,16 +2098,8 @@ export class StageExecutionService {
                   data: { stageRunId: stageRun.id, workflowRunId, sessionId: session.id, name: stageRun.name },
                 });
 
-                // Reset per-turn accumulators so the existing subscription can
-                // capture the follow-up's assistant message.
-                assistantPersisted = false;
-                turnThinkingText = '';
-                turnToolCalls.length = 0;
-                turnSystemMessages.length = 0;
-                turnContent = '';
-
                 await sendTurn(feedbackText, { prepare: true });
-                return turnContent;
+                return recorder.content;
               },
               { contributesOutput: true },
             );
@@ -2251,9 +2107,9 @@ export class StageExecutionService {
             // Merge the follow-up turn into the stage output so the next
             // interrupt-payload / persisted `outputText` reflects the
             // updated result.
-            if (turnContent.trim().length > 0) {
-              stageOutputContent = `${stageOutputContent ?? ''}\n\n---\n\n${turnContent}`;
-              const nextSummary = turnContent.slice(0, 400).trim();
+            if (recorder.content.trim().length > 0) {
+              stageOutputContent = `${stageOutputContent ?? ''}\n\n---\n\n${recorder.content}`;
+              const nextSummary = recorder.content.slice(0, 400).trim();
               if (nextSummary.length > 0) stageSummary = nextSummary;
               await this.stageRunRepo.update(stageRun.id, {
                 summary: stageSummary,
@@ -2365,20 +2221,8 @@ export class StageExecutionService {
       if (freshStage && (freshStage.status === 'paused' || freshStage.status === 'cancelled')) {
         // Persist any partial assistant content accumulated before the abort
         // so it survives in chat history and is visible after resume/refresh.
-        if (turnContent.trim().length > 0 && !assistantPersisted) {
-          await this.messageRepo.create({
-            id: generateId(),
-            sessionId: session.id,
-            role: 'assistant',
-            content: turnContent,
-            metadata: {
-              stageRunId: stageRun.id,
-              partial: true,
-              thinkingText: turnThinkingText || undefined,
-              toolCalls: turnToolCalls.length > 0 ? [...turnToolCalls] : undefined,
-            },
-            timestamp: new Date(),
-          });
+        if (recorder.hasText) {
+          await this.persistStageTurn(session.id, stageRun.id, recorder.take({ partial: true }));
         }
         return;
       }
@@ -2523,71 +2367,9 @@ export class StageExecutionService {
       timestamp: new Date(),
     });
 
-    // Subscribe to conversation events (like main executeStage flow)
-    let assistantPersisted = false;
-    let turnContent = '';
-    let turnThinkingText = '';
-    const turnToolCalls: Array<{ id: string; tool: string; args: unknown; result?: unknown; status: 'running' | 'complete' }> = [];
-
-    const unsubscribe = this.harness.onConversationEvent(
-      session.conversationId,
-      async (event: AgentEvent) => {
-        // Emit events to SSE stream (NOT internal turn — user should see retry)
-        await this.eventBus.emit(
-          session.id,
-          createEnrichedAgentEvent(event, { stageRunId: stageRun.id, workflowRunId, isInternalTurn: false }),
-        );
-
-        if (event.kind === 'harness.reasoning_delta') {
-          const data = event.data as { text?: string };
-          if (data.text) turnThinkingText += data.text;
-        }
-        if (event.kind === 'harness.tool_start') {
-          const data = event.data as { callId?: string; tool?: string; args?: unknown };
-          const id = data.callId ?? `tc_${turnToolCalls.length}`;
-          const existing = data.callId
-            ? turnToolCalls.find((tc) => tc.id === data.callId)
-            : undefined;
-          const hasIncomingArgs =
-            data.args != null &&
-            (typeof data.args !== 'object' ||
-              Object.keys(data.args as Record<string, unknown>).length > 0);
-          if (existing) {
-            if (hasIncomingArgs) existing.args = data.args;
-            if (!existing.tool && data.tool) existing.tool = data.tool;
-          } else {
-            turnToolCalls.push({ id, tool: data.tool ?? 'unknown', args: data.args, status: 'running' });
-          }
-        }
-        if (event.kind === 'harness.tool_complete') {
-          const data = event.data as { callId?: string; tool?: string; result?: unknown };
-          const match = turnToolCalls.find((tc) => tc.id === data.callId || (data.tool && tc.tool === data.tool && tc.status === 'running'));
-          if (match) { match.result = data.result; match.status = 'complete'; }
-        }
-        if (event.kind === 'harness.message_complete') {
-          const data = event.data as { content?: string };
-          if (data.content) {
-            turnContent = data.content;
-          }
-        }
-        if (event.kind === 'harness.idle' && !assistantPersisted && turnContent.trim().length > 0) {
-          assistantPersisted = true;
-          await this.messageRepo.create({
-            id: generateId(),
-            sessionId: session.id,
-            role: 'assistant',
-            content: turnContent,
-            metadata: {
-              stageRunId: stageRun.id,
-              thinkingText: turnThinkingText || undefined,
-              toolCalls: turnToolCalls.length > 0 ? [...turnToolCalls] : undefined,
-              isValidationRetry: true,
-            },
-            timestamp: new Date(),
-          });
-        }
-      },
-    );
+    // Stream and record the retry turn (like the main executeStage flow).
+    const recorder = new TurnRecorder({ takeSequence: () => this.composer.turns.takeSequence(session.conversationId!) });
+    let unsubscribe: (() => void) | undefined;
 
     try {
       // Send the follow-up prompt in the existing conversation
@@ -2596,6 +2378,15 @@ export class StageExecutionService {
       // sequence to be part of, and a restart mid-way must NOT silently replay
       // it — the operator re-issues the retry.
       const turn = await this.stageTurn(stageRun, session);
+      recorder.begin({ turnId: turn.turnId, ...(turn.options.agentMode ? { agentMode: turn.options.agentMode } : {}) });
+      unsubscribe = this.listenStageTurns({
+        stageRun,
+        session,
+        workflowRunId,
+        recorder,
+        flags: { isValidationRetry: true },
+        ...(turn.workspaceId ? { workspaceId: turn.workspaceId } : {}),
+      });
       await this.harness.sendPromptAndWait(session.conversationId, turn.prepare(feedbackMessage), undefined, undefined, turn.options); // durability-ok: see above
 
       unsubscribe?.();
@@ -2759,67 +2550,9 @@ export class StageExecutionService {
       timestamp: new Date(),
     });
 
-    // Stream the response turn (mirrors the in-session retry plumbing).
-    let assistantPersisted = false;
-    let turnContent = '';
-    let turnThinkingText = '';
-    const turnToolCalls: Array<{ id: string; tool: string; args: unknown; result?: unknown; status: 'running' | 'complete' }> = [];
-
-    const unsubscribe = this.harness.onConversationEvent(
-      session.conversationId,
-      async (event: AgentEvent) => {
-        await this.eventBus.emit(
-          session.id,
-          createEnrichedAgentEvent(event, { stageRunId: stageRun.id, workflowRunId, isInternalTurn: false }),
-        );
-        if (event.kind === 'harness.reasoning_delta') {
-          const data = event.data as { text?: string };
-          if (data.text) turnThinkingText += data.text;
-        }
-        if (event.kind === 'harness.tool_start') {
-          const data = event.data as { callId?: string; tool?: string; args?: unknown };
-          const id = data.callId ?? `tc_${turnToolCalls.length}`;
-          const existing = data.callId
-            ? turnToolCalls.find((tc) => tc.id === data.callId)
-            : undefined;
-          const hasIncomingArgs =
-            data.args != null &&
-            (typeof data.args !== 'object' ||
-              Object.keys(data.args as Record<string, unknown>).length > 0);
-          if (existing) {
-            if (hasIncomingArgs) existing.args = data.args;
-            if (!existing.tool && data.tool) existing.tool = data.tool;
-          } else {
-            turnToolCalls.push({ id, tool: data.tool ?? 'unknown', args: data.args, status: 'running' });
-          }
-        }
-        if (event.kind === 'harness.tool_complete') {
-          const data = event.data as { callId?: string; tool?: string; result?: unknown };
-          const match = turnToolCalls.find((tc) => tc.id === data.callId || (data.tool && tc.tool === data.tool && tc.status === 'running'));
-          if (match) { match.result = data.result; match.status = 'complete'; }
-        }
-        if (event.kind === 'harness.message_complete') {
-          const data = event.data as { content?: string };
-          if (data.content) turnContent = data.content;
-        }
-        if (event.kind === 'harness.idle' && !assistantPersisted && turnContent.trim().length > 0) {
-          assistantPersisted = true;
-          await this.messageRepo.create({
-            id: generateId(),
-            sessionId: session.id,
-            role: 'assistant',
-            content: turnContent,
-            metadata: {
-              stageRunId: stageRun.id,
-              thinkingText: turnThinkingText || undefined,
-              toolCalls: turnToolCalls.length > 0 ? [...turnToolCalls] : undefined,
-              isFollowUpResponse: true,
-            },
-            timestamp: new Date(),
-          });
-        }
-      },
-    );
+    // Stream and record the response turn (the in-session retry plumbing).
+    const recorder = new TurnRecorder({ takeSequence: () => this.composer.turns.takeSequence(session.conversationId!) });
+    let unsubscribe: (() => void) | undefined;
 
     try {
       // durability-ok: `sendStageFollowUp` is an operator-initiated turn on a
@@ -2828,6 +2561,15 @@ export class StageExecutionService {
       // operator's follow-up without them asking is worse than not replaying.
       // Follow-ups get the stage's turn options too (they used to send none).
       const turn = await this.stageTurn(stageRun, session);
+      recorder.begin({ turnId: turn.turnId, ...(turn.options.agentMode ? { agentMode: turn.options.agentMode } : {}) });
+      unsubscribe = this.listenStageTurns({
+        stageRun,
+        session,
+        workflowRunId,
+        recorder,
+        flags: { isFollowUpResponse: true },
+        ...(turn.workspaceId ? { workspaceId: turn.workspaceId } : {}),
+      });
       await this.harness.sendPromptAndWait(session.conversationId, turn.prepare(prompt), undefined, undefined, turn.options); // durability-ok: see above
       unsubscribe?.();
       await this.stageRunRepo.update(stageRunId, { status: 'completed', completedAt: new Date() });
@@ -3061,6 +2803,73 @@ export class StageExecutionService {
       variables,
       predecessorSummaries,
     );
+  }
+
+  /**
+   * P02 WP-2.9 — stream a stage's turns to its stream and record them with
+   * the chat's TurnRecorder: each assistant message gets the turn id, text
+   * segments, per-call success/file stats, the sequence shared with the gate
+   * cards and `complete`; tools that finish schedule a live checkpoint; the
+   * provider session handle is remembered after every turn (F-3b).
+   */
+  private listenStageTurns(params: {
+    stageRun: StageRun;
+    session: Session;
+    workflowRunId: string;
+    recorder: TurnRecorder;
+    /** Flags every assistant message of this listener carries. */
+    flags?: ChatMessageMetadata;
+    workspaceId?: string;
+    isInternalTurn?: () => boolean;
+  }): () => void {
+    const { stageRun, session, workflowRunId, recorder } = params;
+    return this.harness.onConversationEvent(session.conversationId!, async (event: AgentEvent) => {
+      // Recorded before anything is awaited, so the turn's record is complete
+      // by the time the provider call returns.
+      recorder.observe(event);
+      // Inject stageRunId so the frontend can route per-stage streams in
+      // single-session mode, and the internal-turn flag for context/summary
+      // turns so the client preserves the main prompt's stream blocks.
+      await this.eventBus.emit(
+        session.id,
+        createEnrichedAgentEvent(event, {
+          stageRunId: stageRun.id,
+          workflowRunId,
+          isInternalTurn: params.isInternalTurn?.() ?? false,
+        }),
+      );
+      if (event.kind === 'harness.tool_complete' && params.workspaceId) {
+        this.workspaceCheckpointService?.scheduleLiveCapture?.(params.workspaceId, {
+          sessionId: session.id,
+          workflowRunId,
+          stageRunId: stageRun.id,
+          ...(recorder.turnId ? { turnId: recorder.turnId } : {}),
+        });
+      }
+      // Persist on idle — all tool calls have completed by now.
+      if (event.kind === 'harness.idle') {
+        await this.persistStageTurn(session.id, stageRun.id, recorder.take(), params.flags);
+        void this.sessionAllocator.rememberProviderSession(session);
+      }
+    });
+  }
+
+  private async persistStageTurn(
+    sessionId: string,
+    stageRunId: string,
+    recorded: RecordedTurn | undefined,
+    flags: ChatMessageMetadata = {},
+  ): Promise<void> {
+    if (!recorded) return;
+    await this.messageRepo.create({
+      id: generateId(),
+      sessionId,
+      role: 'assistant',
+      content: recorded.content,
+      metadata: { stageRunId, ...recorded.metadata, ...flags },
+      complete: recorded.complete,
+      timestamp: new Date(),
+    });
   }
 
   /**

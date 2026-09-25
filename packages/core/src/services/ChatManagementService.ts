@@ -7,7 +7,6 @@ import type {
   ChatStatus,
   CreateChatParams,
   ChatMessage,
-  ChatMessageMetadata,
   Session,
   AgentEvent,
   AgentMode,
@@ -63,6 +62,8 @@ import type { ComposeWarning, SessionComposerDeps, TurnContext } from './session
 import { stampCardSequence, TurnContextRegistry, type GatePort } from './session/gates.js';
 import { SessionComposer, type ComposeInput } from './session/SessionComposer.js';
 import { chatSessionSpec } from './session/chatSpec.js';
+import { TurnRecorder } from './session/TurnRecorder.js';
+import { rememberProviderSession } from './session/providerSession.js';
 import {
   groupTurns,
   lastAnchor,
@@ -1980,22 +1981,9 @@ export class ChatManagementService {
     const prevUnsub = this.activeSubscriptions.get(chatId);
     if (prevUnsub) prevUnsub();
 
-    // Collect metadata during this turn for rich assistant message persistence
-    const turnMetadata: ChatMessageMetadata = {
-      thinkingText: '',
-      toolCalls: [],
-      systemMessages: [],
-      textSegments: [],
-    };
-    // Accumulate assistant content across message_complete events in agentic loop
-    let turnContent = '';
-    // Live token buffer. `message_complete` only fires when a message ENDS, so
-    // without this a turn stopped mid-sentence has no server-side record of
-    // anything the user already watched stream in.
-    let streamedText = '';
-
-    // Idempotency guard: prevent double-persistence per turn.
-    let assistantPersisted = false;
+    // What this turn produced (P02 WP-2.9: one recorder for chats and stages).
+    const recorder = new TurnRecorder({ takeSequence: () => this.takeTurnSequence(session.conversationId!) });
+    recorder.begin({ turnId, agentMode });
 
     /**
      * Write whatever this turn produced into the transcript.
@@ -2006,7 +1994,7 @@ export class ChatManagementService {
      * partial answer was streamed to the screen and then lost forever.
      */
     const finalizeTurn = async (opts: { partial?: boolean } = {}): Promise<void> => {
-      if (assistantPersisted) return;
+      if (recorder.persisted) return;
       // Whether this turn was CANCELLED is a fact about the chat, not about
       // who happened to call this function.
       //
@@ -2023,51 +2011,13 @@ export class ChatManagementService {
       //
       // Reading the flag here makes every route agree, whichever wins.
       const partial = opts.partial === true || this.cancelledTurns.has(chatId);
-      // A cancel keeps whichever record is richer: the last completed message,
-      // or the tokens streamed since it.
-      const content =
-        partial && streamedText.trim().length > turnContent.trim().length
-          ? streamedText
-          : turnContent;
-      const hasText = content.trim().length > 0;
-      const hasActivity =
-        !!turnMetadata.thinkingText?.trim() || (turnMetadata.toolCalls?.length ?? 0) > 0;
-      // A completed turn still requires text. A cancelled one is always
-      // recorded — even one stopped before the model produced anything, as an
-      // empty `partial` row the transcript renders as just its "stopped" note.
-      // Skipping it made that note vanish on reload, leaving the question with
-      // no trace of what happened to it.
-      if (!partial && !hasText) return;
-      assistantPersisted = true;
-
-      // A cancelled turn cannot have a call still in flight: whatever had not
-      // reported back was stopped. The provider's own "stopped" completion
-      // races this write — the listener awaits the event bus before it records
-      // the result, and cancel persists as soon as the abort returns — so
-      // without this the call is stored as `running` and history renders a
-      // stopped command as though it had succeeded.
-      if (partial) {
-        for (const tc of turnMetadata.toolCalls!) {
-          if (tc.status !== 'running') continue;
-          tc.status = 'complete';
-          tc.success = false;
-          tc.result ??= 'Stopped before it finished.';
-        }
-      }
-
-      const metadata: ChatMessageMetadata = {};
-      if (turnMetadata.thinkingText) metadata.thinkingText = turnMetadata.thinkingText;
-      if (turnMetadata.toolCalls!.length > 0) metadata.toolCalls = turnMetadata.toolCalls;
-      if (turnMetadata.systemMessages!.length > 0) metadata.systemMessages = turnMetadata.systemMessages;
-      // Only worth persisting when the turn said more than the one line that
-      // already lives in `content`.
-      if (turnMetadata.textSegments!.length > 1) metadata.textSegments = turnMetadata.textSegments;
-
-      // WEB-02: tag assistant with the same turnId as the user msg.
-      metadata.turnId = turnId;
-      metadata.agentMode = agentMode;
-      if (partial) metadata.partial = true;
-      if (turnMetadata.providerAnchor) metadata.providerAnchor = turnMetadata.providerAnchor;
+      // A cancel keeps whichever record is richer (the last completed message
+      // or the tokens streamed since it), settles calls still in flight as
+      // stopped, and is recorded even when empty — the transcript renders it as
+      // its "stopped" note. A completed turn still requires text.
+      const recorded = recorder.take({ partial });
+      if (!recorded) return;
+      const { content, metadata, complete } = recorded;
 
       // PLN-01 — persist plan/question cards into the transcript.
       // Event replay is SKIPPED for completed chats (replayEvents fast
@@ -2084,6 +2034,7 @@ export class ChatManagementService {
         role: 'assistant',
         content,
         metadata,
+        complete,
         timestamp: new Date(),
       });
 
@@ -2128,149 +2079,26 @@ export class ChatManagementService {
         // Enrich with chatId so bridgeEvent also fans out to chat:{chatId} scope.
         // Without this, copilot events go to session scope only and the web
         // client subscribed to scope=chat never receives them (pending forever).
+        // Recorded before anything is awaited, so the turn's record is
+        // complete by the time the provider call returns.
+        recorder.observe(event);
         await this.eventBus.emit(chat.sessionId, this.enrichWithChatId(event, chatId));
 
-        // Collect metadata from events for rich persistence
-        const data = event.data as Record<string, unknown> | undefined;
-        switch (event.kind) {
-          case 'harness.token':
-            streamedText += (data?.['text'] as string) ?? '';
-            break;
-          case 'harness.reasoning_delta':
-            turnMetadata.thinkingText = (turnMetadata.thinkingText ?? '') + ((data?.['text'] as string) ?? '');
-            break;
-          case 'harness.reasoning_complete': {
-            // Providers that emit only the finished block never send deltas.
-            const full = (data?.['content'] as string) ?? '';
-            if (full.length > (turnMetadata.thinkingText ?? '').length) {
-              turnMetadata.thinkingText = full;
-            }
-            break;
-          }
-          case 'harness.tool_start': {
-            const callId = data?.['callId'] as string | undefined;
-            const args = data?.['args'];
-            // A tool call can be ANNOUNCED before its arguments have finished
-            // streaming. The Claude Agent SDK does exactly that: `tool_start`
-            // fires twice for one call — once from `content_block_start` with
-            // `args: {}`, then again from the assistant message's `tool_use`
-            // block with the materialized args — both carrying the same
-            // `callId`. Pushing both persisted the same call twice: the first
-            // copy kept `args: {}` and collected the result, while the second
-            // kept the args and stayed `running` forever. The transcript then
-            // showed every tool twice, and the copy holding the result was the
-            // one that could not say what the tool was called with.
-            //
-            // Merge on `callId` instead. (`@generatorai/client-core`'s stream
-            // reducer already de-dupes the live view this same way — see
-            // `addToolCall`; this is the persistence side of that contract.)
-            const existing = callId
-              ? turnMetadata.toolCalls!.find((t) => t.id === callId)
-              : undefined;
-            if (existing) {
-              // Only overwrite args when this event actually carries some: the
-              // announcement arrives empty and must not erase what a prior
-              // event already materialized (order between the two is the
-              // provider's business, not ours).
-              const hasArgs =
-                args != null &&
-                (typeof args !== 'object' || Object.keys(args as Record<string, unknown>).length > 0);
-              if (hasArgs) existing.args = args;
-              if (!existing.tool || existing.tool === 'unknown') {
-                existing.tool = (data?.['tool'] as string) ?? existing.tool;
-              }
-              // Status is NOT touched: a `tool_complete` may already have
-              // landed between the two announcements, and reviving it to
-              // 'running' would strand the call mid-flight forever.
-              break;
-            }
-            const sequence = this.takeTurnSequence(session.conversationId!);
-            const parentId = data?.['parentToolCallId'];
-            turnMetadata.toolCalls!.push({
-              id: callId ?? `tc_${turnMetadata.toolCalls!.length}`,
-              tool: (data?.['tool'] as string) ?? 'unknown',
-              args,
-              status: 'running',
-              ...(sequence === undefined ? {} : { sequence }),
-              // SDK-subagent nesting: replayed history must group this call
-              // under its Agent step the same way the live timeline does.
-              ...(typeof parentId === 'string' && parentId ? { parentId } : {}),
-            });
-            break;
-          }
-          case 'harness.tool_complete': {
-            // Any finished tool may have changed files — an edit tool, but just
-            // as often a shell command. Ask for a (debounced) live snapshot so
-            // the Changes tab follows the turn. `scheduleLiveCapture` had been
-            // written for exactly this and was never called from anywhere: the
-            // tab sat on "0 changes" for the whole of a two-minute turn and
-            // jumped to "6 changes" when it ended.
-            if (chat.workspaceId) {
-              this.extensions.workspaceCheckpointService?.scheduleLiveCapture?.(chat.workspaceId, {
-                chatId,
-                sessionId: chat.sessionId,
-                turnId,
-              });
-            }
-            const matchKey = (data?.['callId'] as string) ?? (data?.['tool'] as string);
-            const tc = turnMetadata.toolCalls!.find(
-              (t) => t.status === 'running' && (t.id === matchKey || t.tool === matchKey),
-            );
-            if (tc) {
-              tc.result = data?.['result'];
-              tc.status = 'complete';
-              // A failed call renders with a red cross instead of a tick, in
-              // history as well as live.
-              const success = data?.['success'];
-              if (typeof success === 'boolean') tc.success = success;
-              // Per-op +/− line stats (see FileOpStat) — derived once by the
-              // provider from structured tool output, persisted so history
-              // renders the same chips as the live stream.
-              const fileOp = data?.['fileOp'];
-              if (fileOp && typeof fileOp === 'object') {
-                tc.fileOp = fileOp as NonNullable<typeof tc.fileOp>;
-              }
-            }
-            break;
-          }
-          case 'harness.error':
-            turnMetadata.systemMessages!.push(`Error: ${data?.['message']}`);
-            break;
-        }
-
-        // The provider's coordinate for this turn — the Claude message uuid
-        // or the Codex turn id — is what a later fork/rewind branches at.
-        // Last one wins: a turn ends on its final assistant message.
-        if (event.kind === 'harness.message_complete' && typeof data?.['providerMessageId'] === 'string') {
-          turnMetadata.providerAnchor = { kind: 'message', id: data['providerMessageId'] as string };
-        }
-        if (event.kind === 'harness.turn_end' && typeof data?.['providerTurnId'] === 'string') {
-          turnMetadata.providerAnchor = { kind: 'turn', id: data['providerTurnId'] as string };
-        }
-
-        // Accumulate content — don't persist yet. In agentic loops,
-        // message_complete fires before tool events complete.
-        if (event.kind === 'harness.message_complete') {
-          const content = (data?.['content'] as string) ?? '';
-          // Segments are DISCRETE, not cumulative: an agentic turn narrates
-          // between tool waves and each narration is its own event. Keep them
-          // all, ordered, so the transcript can be rebuilt as it streamed.
-          if (content.trim().length > 0) {
-            const sequence = this.takeTurnSequence(session.conversationId!);
-            turnMetadata.textSegments!.push({
-              content,
-              ...(sequence === undefined ? {} : { sequence }),
-            });
-            turnContent = content;
-          }
-          // The completed message supersedes the tokens that built it.
-          streamedText = '';
+        if (event.kind === 'harness.tool_complete' && chat.workspaceId) {
+          // Any finished tool may have changed files — an edit tool, but just
+          // as often a shell command. Ask for a (debounced) live snapshot so
+          // the Changes tab follows the turn.
+          this.extensions.workspaceCheckpointService?.scheduleLiveCapture?.(chat.workspaceId, {
+            chatId,
+            sessionId: chat.sessionId,
+            turnId,
+          });
         }
 
         // Persist on idle — all tool calls have completed by now
         if (event.kind === 'harness.idle') {
           await finalizeTurn();
-          void this.rememberProviderSession(session.id, session.conversationId!, session.providerSessionId);
+          void rememberProviderSession(this.harness, this.sessionRepo, session);
 
           // Checkpoint the workspace AFTER the agent has finished. The
           // pre-turn snapshot alone is not enough: without an "after" the
@@ -2313,7 +2141,7 @@ export class ChatManagementService {
             chat,
             turnId,
             prompt,
-            assistantText: turnContent,
+            assistantText: recorder.content,
             afterCheckpoint,
           });
 
@@ -2444,26 +2272,6 @@ export class ChatManagementService {
    *   fresh runtime with the persisted history rather than queueing behind a
    *   turn the old one never settled.
    */
-  /**
-   * Record the provider's own session handle so a fork or rewind after a
-   * restart still has something to branch from. Best-effort and cheap: the
-   * value only changes on the first turn and after a rewind.
-   */
-  private async rememberProviderSession(
-    sessionId: string,
-    conversationId: string,
-    known: string | undefined,
-  ): Promise<void> {
-    try {
-      const current = this.harness.getProviderSessionId?.(conversationId);
-      if (current && current !== known) {
-        await this.sessionRepo.update(sessionId, { providerSessionId: current });
-      }
-    } catch {
-      // Never let bookkeeping break a turn.
-    }
-  }
-
   /** Bring a conversation back into the harness's memory (best effort). */
   private async ensureLiveConversation(conversationId: string, cfg: CreateConversationParams): Promise<void> {
     if (this.harness.hasLiveConversation(conversationId)) return;
