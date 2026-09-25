@@ -28,6 +28,9 @@
 // state-machine tables, `agentModeDescriptor`, default constants — are pure).
 export * from './types/index.js';
 
+// D-18 status map: pure tables and helpers.
+export * from './status/index.js';
+
 // Error classes are plain `Error` subclasses.
 export * from './errors/index.js';
 

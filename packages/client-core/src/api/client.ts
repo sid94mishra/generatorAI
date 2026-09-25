@@ -6,6 +6,8 @@
 // no transport, no retries live here — those belong to the layers below.
 // ────────────────────────────────────────────────────────────────
 
+import type { RunStatus, StageRunStatus } from '@generatorai/shared';
+
 export interface ApiFetch {
   (path: string, init?: RequestInit): Promise<Response>;
 }
@@ -423,15 +425,9 @@ export interface WorkflowSummary {
   tags?: string[];
 }
 
-export type RunStatus =
-  | 'created'
-  | 'pending'
-  | 'starting'
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+// Shared with the status map (D-18): a server status added there is a type
+// error until it is mapped, so client-core must not redeclare these unions.
+export type { RunStatus, StageRunStatus };
 
 export interface WorkflowRunSummary {
   id: string;
@@ -449,18 +445,6 @@ export interface WorkflowRunSummary {
   /** Set on a retry: the failed or cancelled run it replaced. */
   ancestorRunId?: string | null;
 }
-
-export type StageRunStatus =
-  | 'pending'
-  | 'queued'
-  | 'running'
-  | 'paused'
-  | 'sleeping'
-  | 'awaiting_input'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'skipped';
 
 export interface StageRunSummary {
   id: string;

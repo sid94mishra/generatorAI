@@ -2,17 +2,14 @@
 // Review API types + hooks (web mirror of @generatorai/review)
 // ────────────────────────────────────────────────────────────────
 
+import type { ReviewThreadStatus } from '@generatorai/shared';
+
 export type ReviewScope = 'chat' | 'run' | 'automation';
 export type ReviewSide = 'additions' | 'deletions';
 export type ReviewIntent = 'fix' | 'question' | 'note' | 'refactor' | 'test';
 export type ReviewAuthor = 'user' | 'agent';
-export type ReviewThreadStatus =
-  | 'draft'
-  | 'pending'
-  | 'submitted'
-  | 'addressed'
-  | 'resolved'
-  | 'outdated';
+// Shared with the server and the status map (D-18).
+export type { ReviewThreadStatus };
 
 export interface ReviewComment {
   id: string;

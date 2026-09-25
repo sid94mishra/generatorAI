@@ -9,11 +9,21 @@
 // Every client (web, desktop, mobile) renders exactly this model.
 // ────────────────────────────────────────────────────────────────
 
-import type { PlanStatus, ScmFlowResult } from '@generatorai/shared';
+import type {
+  HookInvocationStatus,
+  PermissionStatus,
+  PlanStatus,
+  QuestionStatus,
+  ScmFlowResult,
+  StreamStatus,
+  ToolCallStatus,
+  WidgetBlockStatus,
+} from '@generatorai/shared';
 
 import type { ContextUsageSnapshot } from './contextUsage.js';
 
-export type StreamStatus = 'idle' | 'pending' | 'streaming' | 'thinking' | 'complete' | 'error';
+// Status unions live in shared next to the status map (D-18).
+export type { StreamStatus };
 
 export interface ThinkingBlock {
   type: 'thinking';
@@ -55,7 +65,7 @@ export interface ToolCallBlock {
   tool: string;
   args: unknown;
   result?: unknown;
-  status: 'running' | 'complete';
+  status: ToolCallStatus;
   /** +/− line stats for file write/edit tools, set on completion. */
   fileOp?: ToolFileOp;
   /** callId of the Agent tool call this ran inside (SDK subagent nesting). */
@@ -109,7 +119,7 @@ export interface WidgetBlock {
   props: unknown;
   /** Latest state received from a `harness.widget.state` event. */
   state?: unknown;
-  status: 'active' | 'closed' | 'error';
+  status: WidgetBlockStatus;
   /** Optional error message when status='error'. */
   error?: string;
 }
@@ -161,7 +171,7 @@ export interface QuestionBlock {
     multiSelect: boolean;
     allowFreeform: boolean;
   }>;
-  status: 'pending' | 'answered' | 'expired';
+  status: QuestionStatus;
   answers?: Record<string, string[]>;
   freeformResponse?: string;
   /** See {@link PlanBlock.openedAt}. */
@@ -191,7 +201,7 @@ export interface PermissionBlock {
   inputSummary: string;
   /** Effective permission mode of the turn that raised the prompt. */
   permissionMode: string;
-  status: 'pending' | 'allowed' | 'denied' | 'expired';
+  status: PermissionStatus;
   /** Optional reason the user gave when denying. */
   message?: string;
   /** See {@link PlanBlock.openedAt}. */
@@ -290,7 +300,7 @@ export interface StreamToolCall {
   tool: string;
   args: unknown;
   result?: unknown;
-  status: 'running' | 'complete';
+  status: ToolCallStatus;
   fileOp?: ToolFileOp;
   parentCallId?: string;
   error?: boolean;
@@ -310,7 +320,7 @@ export interface StreamHookInvocation {
   /** Present when the event carried one — lets consumers attribute the
    *  invocation to a stage rather than the run as a whole. */
   stageRunId?: string;
-  status: 'running' | 'ok' | 'failed';
+  status: HookInvocationStatus;
   durationMs?: number;
 }
 
