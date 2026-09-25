@@ -229,6 +229,9 @@ const RULES = {
     patterns: [/data-radix-popper-content-wrapper|--radix-/g],
     description: 'Radix overlay coupling — use data-gai-overlay (D-19).',
     scope: 'new',
+    // LEGACY_OVERLAY_SELECTOR (06 §4.1) keeps legacy Radix menus hiding the
+    // native browser view until components/ui goes; both are deleted in P7-01.
+    exempt: [/^src\/ui\/lib\/overlay\.ts$/],
   },
 };
 

@@ -14,9 +14,10 @@
 //      placeholder so the transitions (start/stop, tab switch, overlay
 //      obscure) are seamless — the same trick VSCode's integrated
 //      browser uses.
-//   4. Runs an overlay hit-test loop (Radix portals, dialogs, menus,
-//      toasts) and calls `setVisible(false)` when any workbench chrome
-//      overlaps the WCV rect, so DOM overlays always paint on top.
+//   4. Runs an overlay hit-test loop (D-19: `data-gai-overlay` layers,
+//      toasts, legacy Radix layers; see nativeBrowserOcclusion.ts) and calls
+//      `setVisible(false)` when any of them overlaps the WCV rect, so DOM
+//      overlays always paint on top.
 //   5. Subscribes to `onDidNavigate` / `onTitleUpdated` so the parent
 //      URL bar and status pill reflect page state without polling.
 //
@@ -28,6 +29,8 @@
 import { useEffect, useRef, useState } from 'react';
 
 import { isRestorableBrowserUrl as isRestorable } from '@/lib/browserTabUrls.js';
+
+import { domOcclusionDeps, isObscured } from './nativeBrowserOcclusion.js';
 
 export interface NativeBrowserViewProps {
   /** Globally-unique browser tab id (the primary key for this WCV). */
@@ -53,42 +56,6 @@ export interface NativeBrowserViewProps {
    * under the user.
    */
   restoreUrl?: string | null;
-}
-
-/** CSS classes we consider workbench overlays that MUST paint on top. */
-const OVERLAY_SELECTORS: readonly string[] = [
-  // Radix UI primitives — dropdowns, popovers, dialogs, tooltips.
-  '[data-radix-popper-content-wrapper]',
-  '[role="dialog"]',
-  '[role="menu"]',
-  '[role="listbox"]',
-  // Common toast / notification containers.
-  '.sonner-toast',
-  '[data-sonner-toaster]',
-  // Modal backdrop patterns (tailwind, our own conventions).
-  '[data-modal-open="true"]',
-];
-
-/**
- * Detect whether any tracked overlay overlaps the given rect (in
- * client coordinates). O(n) over the overlays; typical count is
- * 0 in idle state and 1–2 with a popover open, so it's cheap.
- */
-function hasOverlayOverlap(rect: DOMRect): boolean {
-  const overlays = document.querySelectorAll<HTMLElement>(OVERLAY_SELECTORS.join(','));
-  for (const el of Array.from(overlays)) {
-    // Skip zero-size / hidden overlays.
-    const r = el.getBoundingClientRect();
-    if (r.width < 4 || r.height < 4) continue;
-    if (window.getComputedStyle(el).visibility === 'hidden') continue;
-    if (
-      r.right > rect.left &&
-      r.left < rect.right &&
-      r.bottom > rect.top &&
-      r.top < rect.bottom
-    ) return true;
-  }
-  return false;
 }
 
 /**
@@ -250,11 +217,10 @@ export function NativeBrowserView({ tabId, workspaceId, onUrlChange, onTitleChan
     let lastHidden: boolean | null = null;
     const tick = (): void => {
       if (cancelled) return;
-      const rect = el.getBoundingClientRect();
       // This RightPane browser tab is hidden when its tabpanel is inactive
-      // (`visibility:hidden`, which preserves layout) or a workbench overlay
+      // (`visibility:hidden`, which preserves layout) or a floating layer
       // overlaps it. Only the visible tab paints its WCV.
-      const nowHidden = isContainerHidden(el) || hasOverlayOverlap(rect);
+      const nowHidden = isContainerHidden(el) || isObscured(el, domOcclusionDeps);
       if (nowHidden !== lastHidden) {
         const wasHidden = lastHidden;
         lastHidden = nowHidden;
@@ -347,8 +313,8 @@ export function NativeBrowserView({ tabId, workspaceId, onUrlChange, onTitleChan
       aria-label="Native browser view"
     >
       {obscured && (
-        <div className="pointer-events-none absolute inset-0 flex items-end justify-end p-2 text-[10px] text-white/60">
-          <span className="rounded bg-black/40 px-1.5 py-0.5">Paused (overlay open)</span>
+        <div className="pointer-events-none absolute inset-0 flex items-end justify-end p-2">
+          <span className="rounded-badge bg-scrim px-1.5 py-0.5 text-micro text-fg-2">Paused (overlay open)</span>
         </div>
       )}
     </div>
