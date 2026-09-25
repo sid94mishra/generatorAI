@@ -1,4 +1,4 @@
-import { resolve } from 'node:path';
+import { relative, resolve } from 'node:path';
 import { defineConfig } from 'vitest/config';
 import { unitProject as webUnitProject } from './apps/web/vitest.config.ts';
 
@@ -48,6 +48,8 @@ const EXCLUDE = [
  *   - It must be declared PER PROJECT: an option sitting beside `projects` is
  *     ignored.
  */
+const REPO_ROOT = resolve(import.meta.dirname);
+
 const GLOBAL_SETUP = [resolve(import.meta.dirname, 'scripts/vitest-temp-teardown.mjs')];
 
 export default defineConfig({
@@ -58,7 +60,17 @@ export default defineConfig({
       // apps/web/vitest.setup.ts all live there. Listing the file itself does
       // not work — Vitest ignores the `projects` inside it — so this extends it
       // for the alias and reuses its `unit` project.
-      { extends: './apps/web/vitest.config.ts', test: webUnitProject },
+      //
+      // Packages without a vitest config of their own (auth, client-core, …)
+      // run `vitest run` from their directory and pick up THIS file with
+      // their directory as the root. A relative `extends` then resolves
+      // against that package and fails to load, and the web project (whose
+      // root is absolute) would re-run the whole web suite inside every such
+      // package. So the path is absolute and the web project is only listed
+      // when the run starts at the repo root.
+      ...(relative(REPO_ROOT, process.cwd()) === ''
+        ? [{ extends: resolve(REPO_ROOT, 'apps/web/vitest.config.ts'), test: webUnitProject }]
+        : []),
       {
         test: {
           name: 'node',
