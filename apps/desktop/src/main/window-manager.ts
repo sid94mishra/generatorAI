@@ -6,6 +6,7 @@
 
 import { BrowserWindow, dialog, shell, nativeTheme, screen, type MessageBoxOptions } from 'electron';
 import * as path from 'node:path';
+import { CHROME } from '@generatorai/design-tokens/chrome';
 import { log } from './logger';
 import { loadSettings, saveSettings } from './config';
 import {
@@ -110,11 +111,11 @@ export class WindowManager {
       height: bounds.height,
       x: bounds.x,
       y: bounds.y,
-      // 860 keeps the app usable side-by-side on a 13" laptop. The web layout
-      // collapses the sidebar below this, so a smaller floor would only
-      // produce a broken-looking window rather than a useful one.
-      minWidth: 860,
-      minHeight: 560,
+      // CHROME.minWindow (860×560) keeps the app usable side-by-side on a 13"
+      // laptop. The web layout collapses the sidebar below this, so a smaller
+      // floor would only produce a broken-looking window rather than a useful one.
+      minWidth: CHROME.minWindow.width,
+      minHeight: CHROME.minWindow.height,
       show: false,
       backgroundColor: this.backgroundColor(),
       title: 'GeneratorAI',
@@ -501,7 +502,14 @@ export class WindowManager {
         y = undefined;
       }
     }
-    return { width: Math.max(940, width), height: Math.max(600, height), x, y };
+    // Clamp to the same floor the window enforces, so a restored window is
+    // never smaller than one the user could have resized to.
+    return {
+      width: Math.max(CHROME.minWindow.width, width),
+      height: Math.max(CHROME.minWindow.height, height),
+      x,
+      y,
+    };
   }
 }
 

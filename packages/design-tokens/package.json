@@ -10,6 +10,10 @@
       "import": "./src/index.ts",
       "types": "./src/index.ts"
     },
+    "./chrome": {
+      "import": "./src/chrome.ts",
+      "types": "./src/chrome.ts"
+    },
     "./emit": {
       "import": "./src/emit/index.ts",
       "types": "./src/emit/index.ts"
@@ -24,6 +28,10 @@
       ".": {
         "types": "./dist/index.d.ts",
         "import": "./dist/index.js"
+      },
+      "./chrome": {
+        "types": "./dist/chrome.d.ts",
+        "import": "./dist/chrome.js"
       },
       "./emit": {
         "types": "./dist/emit/index.d.ts",

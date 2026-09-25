@@ -278,6 +278,9 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      '@generatorai/design-tokens':
+        specifier: workspace:*
+        version: link:../../packages/design-tokens
       '@types/better-sqlite3':
         specifier: ^7.6.11
         version: 7.6.13
