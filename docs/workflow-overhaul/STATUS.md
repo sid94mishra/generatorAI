@@ -7,7 +7,7 @@ The coding agent updates this file in every phase PR.
 | 00 Baseline | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | Baseline section below | gate pass with the recorded baseline exceptions |
 | 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass ; part B gate 2026-09-25: typecheck 52/52; workflow-spec 359/359; lint green; no-legacy 72 bans, 0 hits; generate:workflow-spec --check clean; **phase gate 2026-09-25 (part C): see "Phase 01 gate" below** | WP-1.6–1.9 done (1d67d0f, 28f9c5e, 9c61ec6, ebb4e82); v55 applied to the dev-DB copy |
 | 02 SessionComposer | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-25: see "Phase 02 gate" below** | WP-2.0–2.11 (0c02b1c..a220bb3), bans/docs c35f905, gate fixes f14cf5a; v56 applied to the dev-DB copy |
-| 03 Engine v2 | wf/overhaul (see DEVIATIONS) | in progress: part 1 done (WP-3.1–3.4) | local only | **part 1 gate 2026-09-25: see "Phase 03 part 1 gate" below** | v57 applied to the dev-DB copy; parts 2 (WP-3.5/3.6) and 3 (WP-3.7–3.9 cutover) remain |
+| 03 Engine v2 | wf/overhaul (see DEVIATIONS) | in progress: parts 1–2 done (WP-3.1–3.6) | local only | **part 1 and part 2 gates 2026-09-25: see below** | v57 applied to the dev-DB copy; part 3 (WP-3.7–3.9 cutover) remains; handoff in notes/P03-part2-handoff.md |
 | 03b Stage conversation | wf/phase-03b-stage-conversation | not started | | | |
 | 04 Lifecycle and invocation | wf/phase-04-invocation | not started | | | |
 | 05 Control flow (5A, 5B) | wf/phase-05-control-flow | not started | | | |
@@ -232,6 +232,18 @@ Run at `wf/overhaul` @ 527f41c plus the HarnessError barrel fix (Windows 11, Nod
 - **`pnpm workflow:dbcopy-upgrade`** (`C:/gaiwf/dbcopy/generatorai.db`; the real DB was not opened): v52 → v57 via the legacy route in 7.3 s. Chat rows **UNCHANGED** (362 chats, 392 chat sessions, 841 messages); sessions 2323 → 392 and messages 8178 → 841 (stage history purged); 343 definitions, 19 invalid, all with notes; drift 0.
 - **Testkit (hard gate):** 45/45 on the v1 engine over the v57 tables.
 - **Not in part 1 (by the plan):** WP-3.5+ (executor, actor, supervisor, commands API, cutover), `ENGINE_LEVEL` stays `v1`. Model-based and replay tests deferred (DEVIATIONS). Live E2E not run (advisory).
+
+## Phase 03 part 2 gate (2026-09-25: WP-3.5/3.6, additive)
+
+Run at `wf/overhaul` @ 08c1206 (Windows 11, Node 26.8.2, pnpm 10.29.2). Commits: 9732b79 (WP-3.5), 08c1206 (WP-3.6).
+
+- **`pnpm turbo typecheck`:** pass, 52/52.
+- **Affected package tests** (the speed rule: no full-monorepo run for this part): core 1880 pass / 1 fail (the recorded symlink EPERM baseline) / 9 skipped; db 156 (+ `EngineStores` 5); agent-harness-providers 741/741; workflow-testkit 64/64 (45 v1 characterisation + 19 v2).
+- **Lint:** turbo lint for core, db, shared, agent-harness-providers, workflow-testkit (0 errors; no warnings in the new files); `check:security`, `check:durability` (5 hold), `check:docs`, `check:syncio` (25, no growth), `check:workflow-invariants` (24 = baseline), `check:migrations-lock` (57), `check:db-baseline` (v57) and `check:workflow-spec` all pass.
+- **`check-no-legacy`:** 90 banned patterns, 0 hits; 11 legacy comments (baseline 11).
+- **Fresh DB:** no migration in part 2; `BaselineFreshDb` passes in the db suite.
+- **Testkit (hard gate) on v2:** T1 fan-out/fan-in, T3 failure edges + retry + precedence, T5 approve/reject/changes/pause/cancel, T8 crash/restart (+ a second engine refused), output-contract repair/restart/rules, replay fixtures: all green. The v1 characterisation suite is untouched (it flips at the cutover).
+- **Not in part 2 (by the brief):** `ENGINE_LEVEL` stays `v1`; nothing in the server runs v2; the commands route, fork, deletions and the invariant flip are WP-3.7–3.9. Live E2E not run (advisory).
 
 ## Migration versions (authoritative, RV-17)
 
