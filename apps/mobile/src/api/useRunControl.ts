@@ -74,7 +74,6 @@ export function useRunMutations(runId: string) {
     mutationFn: (input: { stageRunId: string; outcome: ApprovalOutcome; feedback?: string }) =>
       api.runs.approve(runId, input.stageRunId, {
         outcome: input.outcome,
-        approved: input.outcome === 'approved',
         ...(input.feedback
           ? input.outcome === 'rejected'
             ? { reason: input.feedback }

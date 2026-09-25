@@ -5,18 +5,14 @@
 // input, resume with approval/rejection.
 // ────────────────────────────────────────────────────────────────
 
-import type { CoreServices, HitlService } from '@generatorai/core';
+import type { CoreServices, HitlService, InterruptResolution } from '@generatorai/core';
 
 export interface InterruptOptions {
   /** Prompt to display to the human reviewer */
   prompt?: string;
 }
 
-export interface InterruptResolution {
-  approved: boolean;
-  value?: unknown;
-  reason?: string;
-}
+export type { InterruptResolution };
 
 export class HitlFacade {
   private hitlService: HitlService;

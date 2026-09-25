@@ -99,7 +99,6 @@ export interface RunSnapshot {
 }
 
 export interface ApproveBody {
-  approved?: boolean;
   outcome?: StageReviewOutcome;
   value?: unknown;
   reason?: string;

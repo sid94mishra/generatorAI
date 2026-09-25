@@ -64,6 +64,16 @@ describe('E2E: Workflow Run API Flow', () => {
     });
   });
 
+  describe('POST /api/workflow-runs/:id/stages/:stageId/approve — HITL verdict', () => {
+    it('requires an explicit outcome; the boolean approved field is gone', async () => {
+      const res = await request(app)
+        .post('/api/workflow-runs/run-1/stages/sr-1/approve')
+        .send({ approved: true });
+      expect(res.status).toBe(400);
+      expect(res.body.error.message).toMatch(/outcome is required/);
+    });
+  });
+
   describe('POST /api/workflow-runs/:id/start — Start Run', () => {
     it('should start the run', async () => {
       const res = await request(app)

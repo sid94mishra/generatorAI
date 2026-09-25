@@ -137,11 +137,11 @@ describe('HitlService — W22 durable Awakeable path', () => {
     const pending = svc.interrupt('s1', 'wr1', { toolCall: 'shell.exec' });
     expect(svc.activeWaiterCount).toBe(1);
 
-    const result = await svc.resume('s1', 'wr1', { approved: true, value: { choice: 'go' } });
+    const result = await svc.resume('s1', 'wr1', { outcome: 'approved', value: { choice: 'go' } });
     expect(result.ok).toBe(true);
 
     const resolution = await pending;
-    expect(resolution.approved).toBe(true);
+    expect(resolution.outcome).toBe('approved');
     expect(resolution.value).toEqual({ choice: 'go' });
     expect(svc.activeWaiterCount).toBe(0);
   });
@@ -160,7 +160,7 @@ describe('HitlService — W22 durable Awakeable path', () => {
     expect(stored['toolCall']).toBe('shell.exec');
     expect(Object.keys(stored)).toContain('__hitlAwakeableToken');
 
-    await svc.resume('s1', 'wr1', { approved: true });
+    await svc.resume('s1', 'wr1', { outcome: 'approved' });
     await pending;
   });
 
@@ -184,11 +184,11 @@ describe('HitlService — W22 durable Awakeable path', () => {
 
     // The human approves via the normal API path in the NEW process.
     const svcAfterRestart = new HitlService(repo, new EventBus(), engineAfterRestart);
-    const result = await svcAfterRestart.resume('s1', 'wr1', { approved: true, value: 'approved-after-restart' });
+    const result = await svcAfterRestart.resume('s1', 'wr1', { outcome: 'approved', value: 'approved-after-restart' });
     expect(result.ok).toBe(true);
 
     // The promise recovery re-armed BEFORE the approval now settles with it.
-    await expect(recoveredPromise).resolves.toEqual({ approved: true, value: 'approved-after-restart' });
+    await expect(recoveredPromise).resolves.toEqual({ outcome: 'approved', value: 'approved-after-restart' });
     // P0-a: `pending`, NOT `running`. The stage frame that called interrupt()
     // died with process 1, so there is nothing for `running` to mean — and
     // `pending` is the only status `DAGScheduler.reconcileRun` will relaunch.
@@ -206,7 +206,7 @@ describe('HitlService — W22 durable Awakeable path', () => {
     svc.cancelWaiter('s1', 'parent run cancelled');
 
     const res = await pending;
-    expect(res.approved).toBe(false);
+    expect(res.outcome).toBe('rejected');
     expect(res.reason).toBe('parent run cancelled');
     expect(svc.activeWaiterCount).toBe(0);
   });
@@ -220,12 +220,12 @@ describe('HitlService — W22 durable Awakeable path', () => {
     const second = svc.interrupt('s1', 'wr1', { round: 2 });
 
     const firstResult = await first;
-    expect(firstResult.approved).toBe(false);
+    expect(firstResult.outcome).toBe('rejected');
     expect(firstResult.reason).toBe('superseded by new interrupt');
 
-    await svc.resume('s1', 'wr1', { approved: true });
+    await svc.resume('s1', 'wr1', { outcome: 'approved' });
     const secondResult = await second;
-    expect(secondResult.approved).toBe(true);
+    expect(secondResult.outcome).toBe('approved');
   });
 
   it('LINT-HAZ-4 — a durable-backed interrupt() times out instead of hanging forever when never resumed', async () => {

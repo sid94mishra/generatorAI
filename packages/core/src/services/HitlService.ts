@@ -8,7 +8,7 @@
 //     // stage body now has the approver-supplied value and continues
 //
 //   Route / UI / CLI (approver):
-//     await hitl.resume(stageRunId, workflowRunId, { approved: true });
+//     await hitl.resume(stageRunId, workflowRunId, { outcome: 'approved' });
 //     // the interrupt() awaiter resolves with that value;
 //     // the stage row flips awaiting_input → running
 //
@@ -102,27 +102,13 @@ const POST_RESTART_VERDICT_TTL_MS = 60 * 60 * 1000;
 /** Value delivered back to an awaiting `interrupt()` caller on resume. */
 export interface InterruptResolution {
   /**
-   * Legacy two-state verdict. Kept as the primary field so every existing
-   * caller and API client keeps working unchanged.
+   * The verdict. `rejected` terminates the stage and blocks every downstream
+   * stage; `changes_requested` sends feedback and re-parks; a cancelled or
+   * superseded wait resolves as `rejected` with a reason.
    */
-  approved: boolean;
-  /**
-   * Tri-state verdict. When absent it is derived from {@link approved}
-   * (`true` → `approved`, `false` → `changes_requested`).
-   *
-   * `rejected` is deliberately NOT reachable from the boolean: rejecting
-   * terminates the stage and blocks every downstream stage, so it must be an
-   * explicit choice rather than the fallback meaning of "not approved".
-   */
-  outcome?: StageReviewOutcome;
+  outcome: StageReviewOutcome;
   value?: unknown;
   reason?: string;
-}
-
-/** Normalises a resolution to its tri-state verdict. */
-export function resolutionOutcome(resolution: InterruptResolution): StageReviewOutcome {
-  if (resolution.outcome) return resolution.outcome;
-  return resolution.approved ? 'approved' : 'changes_requested';
 }
 
 export interface HitlLogger {
@@ -237,7 +223,7 @@ export class HitlService {
     this.postRestartVerdicts.delete(stageRunId);
     this.logger?.info?.('[HITL] applying a verdict approved before the stage was relaunched', {
       stageRunId,
-      approved: parked.resolution.approved,
+      outcome: parked.resolution.outcome,
     });
     return parked.resolution;
   }
@@ -276,7 +262,7 @@ export class HitlService {
     // awakeable.
     const staleToken = this.stageAwakeableTokens.get(stageRunId);
     if (staleToken) {
-      this.durableEngine.resolveAwakeable(staleToken, { approved: false, reason: 'superseded by new interrupt' });
+      this.durableEngine.resolveAwakeable(staleToken, { outcome: 'rejected', reason: 'superseded by new interrupt' });
       this.stageAwakeableTokens.delete(stageRunId);
     }
 
@@ -369,7 +355,7 @@ export class HitlService {
     await this.stageRunRepo.update(stageRunId, {
       interruptData: {
         result: resolution.value,
-        approved: resolution.approved,
+        outcome: resolution.outcome,
         reason: resolution.reason,
         resumedAt,
       },
@@ -406,7 +392,7 @@ export class HitlService {
     }
     this.logger?.info?.('[HITL] stage resumed from awaiting_input', {
       stageRunId,
-      approved: resolution.approved,
+      outcome: resolution.outcome,
       relaunched: !hasLiveWaiter,
     });
 
@@ -439,7 +425,7 @@ export class HitlService {
     this.postRestartVerdicts.delete(stageRunId);
     const token = this.stageAwakeableTokens.get(stageRunId);
     if (!token) return;
-    this.durableEngine.resolveAwakeable(token, { approved: false, reason });
+    this.durableEngine.resolveAwakeable(token, { outcome: 'rejected', reason });
     this.stageAwakeableTokens.delete(stageRunId);
   }
 

@@ -201,5 +201,5 @@ export class MockPlatformClient implements IPlatformClient {
   }));
   setPermissionMode = vi.fn(async (_runId: string, _mode: string): Promise<void> => {});
   listPendingInterrupts = vi.fn(async (_runId: string) => []);
-  resumeStage = vi.fn(async (_runId: string, _stageId: string, _resolution: { approved: boolean; value?: unknown; reason?: string }) => ({ ok: true }));
+  resumeStage = vi.fn(async (_runId: string, _stageId: string, _resolution: { outcome: 'approved' | 'changes_requested' | 'rejected'; value?: unknown; reason?: string }) => ({ ok: true }));
 }

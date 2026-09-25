@@ -122,7 +122,7 @@ describe('HitlService (HITL-01..05)', () => {
     expect((evt!.data as { prompt?: string }).prompt).toBe('Allow ls?');
 
     // Resolve the awaiter so the promise above doesn't leak.
-    await svc.resume('s1', 'wr1', { approved: true });
+    await svc.resume('s1', 'wr1', { outcome: 'approved' });
     await pending; // ensure it resolves
   });
 
@@ -136,14 +136,14 @@ describe('HitlService (HITL-01..05)', () => {
     const pending = svc.interrupt('s1', 'wr1', {});
 
     const result = await svc.resume('s1', 'wr1', {
-      approved: true,
+      outcome: 'approved',
       value: { choice: 'proceed' },
     });
     expect(result.ok).toBe(true);
     expect(repo.rows.get('s1')!.status).toBe('running');
     // Wait for global emit + resolved promise.
     const resolution = await pending;
-    expect(resolution.approved).toBe(true);
+    expect(resolution.outcome).toBe('approved');
     expect(resolution.value).toEqual({ choice: 'proceed' });
 
     // Event visible.
@@ -155,7 +155,7 @@ describe('HitlService (HITL-01..05)', () => {
   it('resume() on a non-awaiting stage returns {ok:false}', async () => {
     const repo = createMemoryRepo([stubStageRun({ status: 'running' })]);
     const svc = new HitlService(repo, new EventBus(), makeEngine());
-    const result = await svc.resume('s1', 'wr1', { approved: true });
+    const result = await svc.resume('s1', 'wr1', { outcome: 'approved' });
     expect(result.ok).toBe(false);
     expect(result.reason).toContain('not awaiting_input');
   });
@@ -164,8 +164,8 @@ describe('HitlService (HITL-01..05)', () => {
     const repo = createMemoryRepo([stubStageRun()]);
     const svc = new HitlService(repo, new EventBus(), makeEngine());
     const pending = svc.interrupt('s1', 'wr1', {});
-    const first = await svc.resume('s1', 'wr1', { approved: true });
-    const second = await svc.resume('s1', 'wr1', { approved: false });
+    const first = await svc.resume('s1', 'wr1', { outcome: 'approved' });
+    const second = await svc.resume('s1', 'wr1', { outcome: 'changes_requested' });
     expect(first.ok).toBe(true);
     expect(second.ok).toBe(false);
     await pending; // resolved by first
@@ -177,7 +177,7 @@ describe('HitlService (HITL-01..05)', () => {
     const pending = svc.interrupt('s1', 'wr1', {});
     svc.cancelWaiter('s1', 'parent run cancelled');
     const res = await pending;
-    expect(res.approved).toBe(false);
+    expect(res.outcome).toBe('rejected');
     expect(res.reason).toBe('parent run cancelled');
     expect(svc.activeWaiterCount).toBe(0);
   });

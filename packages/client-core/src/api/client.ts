@@ -1292,14 +1292,13 @@ export function createApiClient(fetchImpl: ApiFetch) {
         runId: string,
         stageId: string,
         body: {
-          outcome?: ApprovalOutcome;
-          approved?: boolean;
+          outcome: ApprovalOutcome;
           reason?: string;
           followUpPrompt?: string;
           value?: unknown;
         },
       ) =>
-        request<{ message: string; outcome: string; approved: boolean }>(
+        request<{ message: string; outcome: ApprovalOutcome; followUp: boolean }>(
           fetchImpl,
           `/api/workflow-runs/${runId}/stages/${stageId}/approve`,
           json(body),

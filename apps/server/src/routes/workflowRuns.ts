@@ -470,7 +470,7 @@ export function createWorkflowRunRoutes(container: Container): Router {
   // first matching route). The /approve verb also reads more naturally
   // for HITL approval flows.
   //
-  // Body: { approved: boolean, value?: unknown, reason?: string }
+  // Body: { outcome: approved|changes_requested|rejected, value?, reason?, followUpPrompt? }
   // Response: 202 on success, 409 if the stage wasn't awaiting_input
   // (already resumed by another approver / cancelled / never interrupted).
   router.post('/:runId/stages/:stageId/approve', async (req, res, next) => {
@@ -478,21 +478,23 @@ export function createWorkflowRunRoutes(container: Container): Router {
       const runId = String(req.params['runId']);
       const stageId = String(req.params['stageId']);
       const body = (req.body ?? {}) as {
-        approved?: unknown;
         outcome?: unknown;
         value?: unknown;
         reason?: unknown;
         followUpPrompt?: unknown;
       };
-      // Tri-state verdict. `outcome` wins when present; otherwise the legacy
-      // boolean is mapped (true → approved, false → changes_requested).
-      // `rejected` is only reachable via `outcome` because it terminates the
-      // run — it must never be the fallback meaning of "not approved".
-      const outcome: StageReviewOutcome = isStageReviewOutcome(body.outcome)
-        ? body.outcome
-        : body.approved === false
-          ? 'changes_requested'
-          : 'approved';
+      // The verdict is explicit: `rejected` terminates the run, so there is
+      // no default meaning of "not approved".
+      if (!isStageReviewOutcome(body.outcome)) {
+        res.status(400).json({
+          error: {
+            code: 'VALIDATION_ERROR',
+            message: 'outcome is required: approved | changes_requested | rejected',
+          },
+        });
+        return;
+      }
+      const outcome: StageReviewOutcome = body.outcome;
       const approved = outcome === 'approved';
       // Optional free-text follow-up the operator wants the stage to act on as
       // the HITL response (e.g. "also handle the empty-input case"). Stored as
@@ -525,7 +527,6 @@ export function createWorkflowRunRoutes(container: Container): Router {
         stageExecutionService.markFollowUpPending(stageId);
       }
       const result = await hitlService.resume(stageId, runId, {
-        approved,
         outcome,
         value: followUpPrompt ? { followUpPrompt } : body.value,
         reason: typeof body.reason === 'string' ? body.reason : undefined,
@@ -555,7 +556,7 @@ export function createWorkflowRunRoutes(container: Container): Router {
       logger.info(`[WorkflowRunRoutes] Resumed stage ${stageId} (outcome=${outcome}, followUp=${!!followUpPrompt})`, {
         requestId: req.requestId,
       });
-      res.status(202).json({ message: 'Stage resumed', stageId, outcome, approved, followUp: !!followUpPrompt });
+      res.status(202).json({ message: 'Stage resumed', stageId, outcome, followUp: !!followUpPrompt });
     } catch (err) {
       next(err);
     }

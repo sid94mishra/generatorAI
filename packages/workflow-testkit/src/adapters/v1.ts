@@ -333,11 +333,10 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
   /** `POST /:runId/stages/:stageId/approve`, as the route does it today. */
   const approve = async (runId: string, stageRunId: string, body: ApproveBody = {}): Promise<CommandResult> => {
     const { hitlService, stageExecutionService } = current.services;
-    const outcome: StageReviewOutcome = isStageReviewOutcome(body.outcome)
-      ? body.outcome
-      : body.approved === false
-        ? 'changes_requested'
-        : 'approved';
+    if (!isStageReviewOutcome(body.outcome)) {
+      return { status: 400, body: { error: { code: 'VALIDATION_ERROR', message: 'outcome is required' } } };
+    }
+    const outcome: StageReviewOutcome = body.outcome;
     const approved = outcome === 'approved';
     const followUpPrompt =
       typeof body.followUpPrompt === 'string' && body.followUpPrompt.trim().length > 0 ? body.followUpPrompt.trim() : undefined;
@@ -350,7 +349,6 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
     }
     if (!isCompletionReview && approved && followUpPrompt) stageExecutionService.markFollowUpPending(stageRunId);
     const result = await hitlService.resume(stageRunId, runId, {
-      approved,
       outcome,
       value: followUpPrompt ? { followUpPrompt } : body.value,
       ...(typeof body.reason === 'string' ? { reason: body.reason } : {}),
@@ -364,7 +362,7 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
     if (!isCompletionReview && approved && followUpPrompt) {
       void stageExecutionService.sendStageFollowUp(stageRunId, runId, followUpPrompt).catch(() => undefined);
     }
-    return { status: 202, body: { stageId: stageRunId, outcome, approved, followUp: !!followUpPrompt } };
+    return { status: 202, body: { stageId: stageRunId, outcome, followUp: !!followUpPrompt } };
   };
 
   const startFireAndForget = (runId: string): void => {

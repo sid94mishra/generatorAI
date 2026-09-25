@@ -155,7 +155,7 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
       undefined,
       async (runId) => { redriven.push(runId); },
     );
-    const result = await svc2.resume('s1', 'wr1', { approved: true });
+    const result = await svc2.resume('s1', 'wr1', { outcome: 'approved' });
 
     expect(result.ok).toBe(true);
     // `running` here is the zombie: no scheduler path relaunches it.
@@ -176,13 +176,13 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
     );
 
     const pending = svc.interrupt('s1', 'wr1', REVIEW_GATE);
-    const result = await svc.resume('s1', 'wr1', { approved: true });
+    const result = await svc.resume('s1', 'wr1', { outcome: 'approved' });
 
     expect(result.ok).toBe(true);
     expect(repo.rows.get('s1')!.status).toBe('running');
     // Re-driving here would race the live frame into a duplicate launch.
     expect(redriven).toEqual([]);
-    await expect(pending).resolves.toMatchObject({ approved: true });
+    await expect(pending).resolves.toMatchObject({ outcome: 'approved' });
   });
 
 
@@ -198,7 +198,7 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
       undefined,
       async () => { throw new Error('definition was deleted'); },
     );
-    const result = await svc2.resume('s1', 'wr1', { approved: true });
+    const result = await svc2.resume('s1', 'wr1', { outcome: 'approved' });
 
     expect(result.ok).toBe(false);
     expect(result.reason).toMatch(/definition was deleted/);
@@ -211,11 +211,11 @@ describe('HitlService — P0-a: a post-restart approval must relaunch the stage'
     const repo = createMemoryRepo([stubStageRun()]);
     const svc = new HitlService(repo, new EventBus(), makeEngine(), mockLogger());
     const pending = svc.interrupt('s1', 'wr1', REVIEW_GATE);
-    await svc.resume('s1', 'wr1', { approved: true, reason: 'looks good' });
+    await svc.resume('s1', 'wr1', { outcome: 'approved', reason: 'looks good' });
     await pending;
 
     expect(repo.rows.get('s1')!.interruptData).toMatchObject({
-      approved: true,
+      outcome: 'approved',
       reason: 'looks good',
     });
   });
@@ -227,7 +227,7 @@ describe('HitlService — P0-a: the relaunched stage does not re-ask the human',
     void new HitlService(repo, new EventBus(), makeEngine(), mockLogger()).interrupt('s1', 'wr1', REVIEW_GATE);
 
     const svc2 = new HitlService(repo, new EventBus(), makeEngine(), mockLogger());
-    await svc2.resume('s1', 'wr1', { approved: true, value: { choice: 'go' } });
+    await svc2.resume('s1', 'wr1', { outcome: 'approved', value: { choice: 'go' } });
     expect(repo.rows.get('s1')!.status).toBe('pending');
 
     // The scheduler relaunches the stage; it re-runs its work and reaches the
@@ -235,7 +235,7 @@ describe('HitlService — P0-a: the relaunched stage does not re-ask the human',
     repo.rows.get('s1')!.status = 'running';
     const resolution = await svc2.interrupt('s1', 'wr1', REVIEW_GATE);
 
-    expect(resolution).toMatchObject({ approved: true, value: { choice: 'go' } });
+    expect(resolution).toMatchObject({ outcome: 'approved', value: { choice: 'go' } });
     expect(repo.rows.get('s1')!.status).toBe('running'); // never re-parked
 
     // One-shot: a genuine second review round parks for real.
@@ -251,7 +251,7 @@ describe('HitlService — P0-a: the relaunched stage does not re-ask the human',
       .interrupt('s1', 'wr1', REVIEW_GATE);
 
     const svc2 = new HitlService(repo, new EventBus(), makeEngine(), mockLogger());
-    await svc2.resume('s1', 'wr1', { approved: true });
+    await svc2.resume('s1', 'wr1', { outcome: 'approved' });
 
     // The relaunched stage hits a tool-permission prompt on its way back to
     // the approval gate. Answering that with the stage approval would grant a
@@ -268,7 +268,7 @@ describe('HitlService — P0-a: the relaunched stage does not re-ask the human',
     void new HitlService(repo, new EventBus(), makeEngine(), mockLogger()).interrupt('s1', 'wr1', REVIEW_GATE);
 
     const svc2 = new HitlService(repo, new EventBus(), makeEngine(), mockLogger());
-    await svc2.resume('s1', 'wr1', { approved: true });
+    await svc2.resume('s1', 'wr1', { outcome: 'approved' });
     svc2.cancelWaiter('s1', 'parent run cancelled');
 
     // A later gate on the same row must park, not inherit the dead verdict.

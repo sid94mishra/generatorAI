@@ -1142,11 +1142,10 @@ export class HttpPlatformClient implements IPlatformClient {
     stageId: string,
     resolution: {
       /**
-       * Tri-state verdict. `rejected` is terminal — it fails the stage and
-       * blocks every downstream stage. Omit to fall back to `approved`.
+       * The verdict. `rejected` is terminal — it fails the stage and blocks
+       * every downstream stage.
        */
-      outcome?: 'approved' | 'changes_requested' | 'rejected';
-      approved: boolean;
+      outcome: 'approved' | 'changes_requested' | 'rejected';
       value?: unknown;
       reason?: string;
       followUpPrompt?: string;

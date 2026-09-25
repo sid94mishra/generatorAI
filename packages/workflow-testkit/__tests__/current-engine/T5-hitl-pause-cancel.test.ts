@@ -44,11 +44,11 @@ describe('T5 human in the loop (current engine)', () => {
     expect(snap.stages['P2']!.status).toBe('pending');
 
     // P2 is not parked.
-    expect((await engine.commands.approve(run.runId, run.stageRunId('P2'))).status).toBe(409);
+    expect((await engine.commands.approve(run.runId, run.stageRunId('P2'), { outcome: 'approved' })).status).toBe(409);
 
     const p1 = run.stageRunId('P1');
-    expect((await engine.commands.approve(run.runId, p1, { approved: true })).status).toBe(202);
-    expect((await engine.commands.approve(run.runId, p1, { approved: true })).status).toBe(409);
+    expect((await engine.commands.approve(run.runId, p1, { outcome: 'approved' })).status).toBe(202);
+    expect((await engine.commands.approve(run.runId, p1, { outcome: 'approved' })).status).toBe(409);
 
     snap = await run.waitForTerminal();
     expect(snap.run.status).toBe('completed');
@@ -78,7 +78,7 @@ describe('T5 human in the loop (current engine)', () => {
     await run.waitForStage('P1', 'awaiting_input');
     const p1 = run.stageRunId('P1');
     const res = await engine.commands.approve(run.runId, p1, {
-      approved: false,
+      outcome: 'changes_requested',
       followUpPrompt: 'Append the word REVISED to your line.',
     });
     expect(res.status).toBe(202);
@@ -100,7 +100,7 @@ describe('T5 human in the loop (current engine)', () => {
     const feedback = snap.stages['P1']!.messages.find((m) => m.metadata?.['isApprovalFeedback'] === true);
     expect(feedback?.content).toBe('Append the word REVISED to your line.');
 
-    expect((await engine.commands.approve(run.runId, p1, { approved: true })).status).toBe(202);
+    expect((await engine.commands.approve(run.runId, p1, { outcome: 'approved' })).status).toBe(202);
     snap = await run.waitForTerminal();
     expect(snap.run.status).toBe('completed');
     // P2 was handed the pre-revision output.

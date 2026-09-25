@@ -355,7 +355,7 @@ export function WorkflowRunPage() {
     if (!runId) return;
     try {
       await platform.resumeStage(runId, stageId, {
-        approved: true,
+        outcome: 'approved',
         reason: followUp ? 'approved with follow-up' : 'approved via UI',
         followUpPrompt: followUp,
       });
@@ -369,7 +369,6 @@ export function WorkflowRunPage() {
     try {
       await platform.resumeStage(runId, stageId, {
         outcome: 'changes_requested',
-        approved: false,
         reason: feedback ?? 'changes requested via UI',
         followUpPrompt: feedback,
       });
@@ -387,7 +386,6 @@ export function WorkflowRunPage() {
     try {
       await platform.resumeStage(runId, stageId, {
         outcome: 'rejected',
-        approved: false,
         reason: reason ?? 'rejected via UI',
       });
     } catch (e) {

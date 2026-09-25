@@ -480,12 +480,28 @@
         "apps/mobile/app/"
       ],
       "reason": "WP-1.4: script permission vocabulary deleted; WorkflowRunPermissionMode"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bresolutionOutcome\\b|body\\.approved\\b|resolution\\.approved\\b|approved: input\\.outcome",
+      "reason": "WP-1.4: HITL boolean approved deleted; the verdict is an explicit outcome"
+    },
+    {
+      "phase": "01",
+      "pattern": "approved\\??: boolean",
+      "paths": [
+        "packages/core/src/services/HitlService.ts",
+        "packages/sdk/src/facades/HitlFacade.ts",
+        "packages/workflow-testkit/src/types.ts",
+        "packages/shared/src/types/IPlatformClient.ts"
+      ],
+      "reason": "WP-1.4: HITL boolean approved deleted"
     }
   ],
   "comments": {
     "phase": "01",
     "failFromPhase": null,
-    "baseline": 29,
+    "baseline": 27,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

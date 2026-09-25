@@ -150,6 +150,11 @@ export interface IPlatformClient {
   resumeStage(
     runId: string,
     stageId: string,
-    resolution: { approved: boolean; value?: unknown; reason?: string },
+    resolution: {
+      outcome: 'approved' | 'changes_requested' | 'rejected';
+      value?: unknown;
+      reason?: string;
+      followUpPrompt?: string;
+    },
   ): Promise<{ ok: boolean; reason?: string }>;
 }

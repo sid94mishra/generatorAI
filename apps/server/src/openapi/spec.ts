@@ -631,11 +631,12 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       ResumeStageRequest: {
         type: 'object',
         properties: {
-          approved: { type: 'boolean' },
+          outcome: { type: 'string', enum: ['approved', 'changes_requested', 'rejected'] },
           value: {},
           reason: { type: 'string' },
+          followUpPrompt: { type: 'string' },
         },
-        required: ['approved'],
+        required: ['outcome'],
       },
       Agent: {
         type: 'object',

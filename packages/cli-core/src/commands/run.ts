@@ -617,10 +617,8 @@ export function runCommands(): CommandSpec[] {
       },
     }),
 
-    // Three verdicts, not two. The server only reaches `rejected` — which
-    // terminates the run — through an explicit `outcome`; sending the legacy
-    // `approved: false` silently means "changes requested" instead, so a user
-    // who typed `reject` would watch the run carry on.
+    // Three verdicts, one per command. `rejected` terminates the run;
+    // `changes_requested` sends feedback and re-parks the stage.
     ...(
       [
         { verb: 'approve', outcome: 'approved', past: 'approved' },

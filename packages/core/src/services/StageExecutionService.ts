@@ -56,7 +56,6 @@ import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js
 import type { IWorkflowDefinitionRepository } from '../domain/ports/IWorkflowDefinitionRepository.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import type { HitlService } from './HitlService.js';
-import { resolutionOutcome } from './HitlService.js';
 import {
   instructionsForMode,
   resolveModeDescriptor,
@@ -753,7 +752,7 @@ export class StageExecutionService {
         await semaphoreCallbacks?.resume();
       }
       return {
-        granted: resolution.approved === true,
+        granted: resolution.outcome === 'approved',
         reason: resolution.reason,
       };
     };
@@ -2366,7 +2365,7 @@ export class StageExecutionService {
               await semaphoreCallbacks?.resume();
             }
 
-            const outcome = resolutionOutcome(resolution);
+            const outcome = resolution.outcome;
 
             // Mirror the verdict onto the plan so its card stops showing
             // review actions the gate no longer accepts.
