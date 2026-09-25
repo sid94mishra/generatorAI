@@ -317,6 +317,12 @@ export const TINT = {
   sidebar: { dark: 13, light: 8 },
   /** `--*-muted` — status washes behind badges and banners. */
   status: { dark: 15, light: 12.5 },
+  /** `--gai-hover` — foreground wash under a hovered row or control (design layer). */
+  hover: { dark: 4, light: 4 },
+  /** `--gai-selected` — foreground wash under a selected row or tab (design layer). */
+  selected: { dark: 8, light: 8 },
+  /** `--gai-add-bg` / `--gai-del-bg` — diff line washes (design layer). */
+  diff: { dark: 10, light: 8 },
 } as const;
 
 const AA_TEXT = 4.5;
