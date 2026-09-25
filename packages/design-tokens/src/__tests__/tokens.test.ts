@@ -527,8 +527,8 @@ describe('the high-contrast theme actually is one', () => {
   });
 });
 
-describe('the default theme is unchanged', () => {
-  // GitHub is what every existing user is already looking at. These are the
+describe('the GitHub theme reproduces its original values', () => {
+  // GitHub was the default before Instrument (D-11). These are the
   // exact values from the hand-authored token table that preceded the theme
   // system, asserted so a refactor of the derivation cannot quietly restyle
   // the whole app.

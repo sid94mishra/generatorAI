@@ -31,6 +31,17 @@ export const HUMANIST_SANS =
 export const ROUNDED_SANS =
   '"Nunito Sans", "Rubik", "Segoe UI Variable", "Segoe UI", -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif';
 
+/**
+ * The design's families (D-16), named first so they are used where installed.
+ * P1-T7 bundles them via Fontsource; until then the stack falls back to the
+ * platform UI and mono fonts.
+ */
+export const INSTRUMENT_SANS =
+  '"Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+
+export const BUNDLED_MONO =
+  '"JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+
 export const CODE_MONO =
   '"JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
 

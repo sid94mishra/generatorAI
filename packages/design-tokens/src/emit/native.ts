@@ -20,6 +20,7 @@
 
 import {
   ACCENT_IDS,
+  DEFAULT_ACCENT,
   DEFAULT_THEME,
   FILE_ICON_COLORS,
   FONT_SIZE,
@@ -93,7 +94,7 @@ export function resolveTokenSet(
 
 /** Colour names exposed as Tailwind utilities on mobile. */
 export function tailwindColorNames(): string[] {
-  const sample = resolveTokenSet(DEFAULT_THEME, 'dark', 'blue');
+  const sample = resolveTokenSet(DEFAULT_THEME, 'dark', DEFAULT_ACCENT);
   return Object.keys(sample).map((v) => v.slice(2));
 }
 

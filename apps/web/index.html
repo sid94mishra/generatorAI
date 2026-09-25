@@ -19,12 +19,12 @@
         var mode, theme, accent;
         try {
           mode = localStorage.getItem('generatorai-theme') || 'dark';
-          theme = localStorage.getItem('generatorai-theme-palette') || 'github';
-          accent = localStorage.getItem('generatorai-accent') || 'blue';
+          theme = localStorage.getItem('generatorai-theme-palette') || 'instrument';
+          accent = localStorage.getItem('generatorai-accent');
         } catch (e) {
           mode = 'dark';
-          theme = 'github';
-          accent = 'blue';
+          theme = 'instrument';
+          accent = null;
         }
         var resolved = mode === 'system'
           ? (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
@@ -33,7 +33,7 @@
         root.classList.add(resolved);
         root.setAttribute('data-mode', mode);
         root.setAttribute('data-theme', theme);
-        root.setAttribute('data-accent', accent);
+        if (accent) root.setAttribute('data-accent', accent);
       })();
     </script>
     <div id="root"></div>

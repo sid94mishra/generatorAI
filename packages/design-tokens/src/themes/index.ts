@@ -11,9 +11,10 @@
 // from THEMES, so a new theme is covered by the accessibility tests before it
 // is ever rendered.
 //
-// Order within a group is the order in the picker. `github` stays first
-// because it is the default and the one users are already looking at;
-// everything after it is ordered by how likely it is to be recognised.
+// Order within a group is the order in the picker. `instrument` comes first
+// because it is the default (D-11) and the palette the design is drawn in;
+// `github` follows as the long-standing previous default, and everything
+// after it is ordered by how likely it is to be recognised.
 // ────────────────────────────────────────────────────────────────
 
 import { ayu } from './ayu.js';
@@ -27,6 +28,7 @@ import { flexoki } from './flexoki.js';
 import { github } from './github.js';
 import { graphite } from './graphite.js';
 import { gruvbox } from './gruvbox.js';
+import { instrument } from './instrument.js';
 import { nightOwl } from './night-owl.js';
 import { nord } from './nord.js';
 import { one } from './one.js';
@@ -41,6 +43,7 @@ export * from './fonts.js';
 
 export const THEMES: ThemeDef[] = [
   // Product — interface-first palettes.
+  instrument,
   github,
   graphite,
   carbon,
@@ -65,7 +68,7 @@ export const THEMES: ThemeDef[] = [
 ];
 
 /** The theme every user starts on — and the one `:root` is emitted from. */
-export const DEFAULT_THEME = 'github';
+export const DEFAULT_THEME = 'instrument';
 
 export const VISIBLE_THEMES = THEMES.filter((t) => !t.hidden);
 

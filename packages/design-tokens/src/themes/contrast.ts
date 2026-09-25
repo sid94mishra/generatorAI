@@ -34,6 +34,7 @@ export const contrast: ThemeDef = {
   defaultAccent: 'blue',
   fonts: { sans: HUMANIST_SANS, mono: PLEX_MONO },
   radius: { DEFAULT: 4, lg: 6, xl: 8 },
+  textContrast: 7,
 
   dark: {
     background: '#000000',

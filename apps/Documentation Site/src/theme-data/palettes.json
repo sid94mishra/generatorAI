@@ -1,6 +1,12 @@
 {
-  "defaultTheme": "github",
+  "defaultTheme": "instrument",
   "themes": [
+    {
+      "id": "instrument",
+      "label": "Instrument",
+      "group": "product",
+      "description": "The default. Neutral surfaces, Instrument Sans and JetBrains Mono; colour means status, nothing else."
+    },
     {
       "id": "github",
       "label": "GitHub",

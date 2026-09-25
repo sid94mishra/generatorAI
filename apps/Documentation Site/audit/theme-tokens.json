@@ -1,5 +1,131 @@
 [
   {
+    "theme": "instrument",
+    "mode": "light",
+    "accent": "ink",
+    "background": "#ffffff",
+    "foreground": "#18181b",
+    "primary": "#18181b",
+    "fill": "#18181b"
+  },
+  {
+    "theme": "instrument",
+    "mode": "light",
+    "accent": "blue",
+    "background": "#ffffff",
+    "foreground": "#18181b",
+    "primary": "#1d6ae5",
+    "fill": "#2f6fed"
+  },
+  {
+    "theme": "instrument",
+    "mode": "light",
+    "accent": "violet",
+    "background": "#ffffff",
+    "foreground": "#18181b",
+    "primary": "#7152e0",
+    "fill": "#7152e0"
+  },
+  {
+    "theme": "instrument",
+    "mode": "light",
+    "accent": "green",
+    "background": "#ffffff",
+    "foreground": "#18181b",
+    "primary": "#16804c",
+    "fill": "#16804c"
+  },
+  {
+    "theme": "instrument",
+    "mode": "light",
+    "accent": "orange",
+    "background": "#ffffff",
+    "foreground": "#18181b",
+    "primary": "#c2410c",
+    "fill": "#c2410c"
+  },
+  {
+    "theme": "instrument",
+    "mode": "light",
+    "accent": "rose",
+    "background": "#ffffff",
+    "foreground": "#18181b",
+    "primary": "#c8325f",
+    "fill": "#c8325f"
+  },
+  {
+    "theme": "instrument",
+    "mode": "light",
+    "accent": "teal",
+    "background": "#ffffff",
+    "foreground": "#18181b",
+    "primary": "#0f7f7a",
+    "fill": "#0f7f7a"
+  },
+  {
+    "theme": "instrument",
+    "mode": "dark",
+    "accent": "ink",
+    "background": "#0b0b0c",
+    "foreground": "#ededef",
+    "primary": "#ededef",
+    "fill": "#ededef"
+  },
+  {
+    "theme": "instrument",
+    "mode": "dark",
+    "accent": "blue",
+    "background": "#0b0b0c",
+    "foreground": "#ededef",
+    "primary": "#6aa6ff",
+    "fill": "#2f6fed"
+  },
+  {
+    "theme": "instrument",
+    "mode": "dark",
+    "accent": "violet",
+    "background": "#0b0b0c",
+    "foreground": "#ededef",
+    "primary": "#a48cff",
+    "fill": "#7152e0"
+  },
+  {
+    "theme": "instrument",
+    "mode": "dark",
+    "accent": "green",
+    "background": "#0b0b0c",
+    "foreground": "#ededef",
+    "primary": "#4cc38a",
+    "fill": "#34855e"
+  },
+  {
+    "theme": "instrument",
+    "mode": "dark",
+    "accent": "orange",
+    "background": "#0b0b0c",
+    "foreground": "#ededef",
+    "primary": "#ff8f4d",
+    "fill": "#ad6134"
+  },
+  {
+    "theme": "instrument",
+    "mode": "dark",
+    "accent": "rose",
+    "background": "#0b0b0c",
+    "foreground": "#ededef",
+    "primary": "#f27aae",
+    "fill": "#c8325f"
+  },
+  {
+    "theme": "instrument",
+    "mode": "dark",
+    "accent": "teal",
+    "background": "#0b0b0c",
+    "foreground": "#ededef",
+    "primary": "#2cc2b5",
+    "fill": "#0f7f7a"
+  },
+  {
     "theme": "github",
     "mode": "light",
     "accent": "ink",

@@ -98,6 +98,8 @@ export interface ThemeAppearanceSpec {
   subtle: string;
   /** Strongest non-text fill: dividers that need to read as a shape. */
   emphasis: string;
+  /** Inset wells (inputs, code blocks) on the design layer. Defaults to the darker of background/card. */
+  sunken?: string;
 
   /** Body text. Must clear 4.5:1 on every surface above. */
   foreground: string;
@@ -178,6 +180,11 @@ export interface ThemeDef {
   light: ThemeAppearanceSpec;
   /** Hide from the picker (work-in-progress themes). */
   hidden?: boolean;
+  /**
+   * Minimum text contrast the design layer derives `fg-2`/`fg-3`/status text
+   * to (02 §2.1). 4.5 (AA) unless the theme promises more: High Contrast is 7.
+   */
+  textContrast?: 4.5 | 7;
 }
 
 // ── Derived shapes ──────────────────────────────────────────────

@@ -85,6 +85,6 @@ Sources: `packages/design-tokens/src/{tokens,registry}.ts`, `packages/design-tok
 
 ## Documentation-site parity
 
-The documentation site now generates its palette snapshot directly from this package. It offers the same 17 visible palettes, both appearances, and six accents. GitHub dark/blue is the default, matching the renderer baseline. The appearance menu in the navbar controls palette/accent; the mode toggle selects light or dark. The docs use a compact navigation rail, layered neutral panels, semantic borders, shared font stacks and the active palette's radii. Article text remains 15px with a relaxed reading line height.
+The documentation site now generates its palette snapshot directly from this package. It offers the same 18 visible palettes, both appearances, and seven accents. Instrument dark/ink is the default, matching the renderer baseline. The appearance menu in the navbar controls palette/accent; the mode toggle selects light or dark. The docs use a compact navigation rail, layered neutral panels, semantic borders, shared font stacks and the active palette's radii. Article text remains 15px with a relaxed reading line height.
 
 Documentation preferences use their own local keys (`generatorai:docs:palette`, `generatorai:docs:accent`, plus Docusaurus mode storage) and do not change the connected application's settings. `npm run theme:generate` reads the shared source and writes only the documentation site's snapshot, so publishing the static docs does not require product packages at runtime.

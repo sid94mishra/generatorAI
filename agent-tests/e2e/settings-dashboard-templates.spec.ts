@@ -147,7 +147,7 @@ test.describe('Settings', () => {
       const failures: string[] = [];
       for (const theme of themes) {
         for (const mode of ['dark', 'light']) {
-          for (const accent of ['blue', 'violet', 'green', 'orange', 'rose', 'teal']) {
+          for (const accent of ['ink', 'blue', 'violet', 'green', 'orange', 'rose', 'teal']) {
             root.className = mode;
             root.setAttribute('data-theme', theme);
             root.setAttribute('data-accent', accent);
