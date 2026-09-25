@@ -25,9 +25,9 @@ export const DIFF_THEMES = { dark: 'pierre-dark', light: 'pierre-light' } as con
  * Colours are NOT set here — see `DIFF_UNSAFE_CSS` for why.
  */
 export const diffHostStyle: CSSProperties = {
-  // Code font — falls back through the same stack the editor/terminal uses.
-  '--diffs-font-family':
-    "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
+  // Code font — the active theme's mono stack (its own fonts, then the bundled
+  // JetBrains Mono, D-16), the same one every `font-mono` element uses.
+  '--diffs-font-family': 'var(--font-mono)',
   '--diffs-font-size': '12px',
   '--diffs-line-height': '1.55',
   '--diffs-tab-size': '2',
