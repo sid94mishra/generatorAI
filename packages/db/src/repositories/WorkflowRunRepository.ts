@@ -48,7 +48,6 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
         name: run.name,
         status: run.status,
         sessionMode: run.sessionMode,
-        masterSessionId: run.masterSessionId ?? null,
         variables: run.variables,
         error: run.error ?? null,
         // HITL — persist chosen mode; NULL reads as 'bypassPermissions'.
@@ -127,7 +126,6 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
     if (updates.name !== undefined) values['name'] = updates.name;
     if (updates.status !== undefined) values['status'] = updates.status;
     if (updates.sessionMode !== undefined) values['sessionMode'] = updates.sessionMode;
-    if (updates.masterSessionId !== undefined) values['masterSessionId'] = updates.masterSessionId;
     if (updates.variables !== undefined) values['variables'] = updates.variables;
     if (updates.error !== undefined) values['error'] = updates.error;
     if (updates.permissionMode !== undefined) values['permissionMode'] = updates.permissionMode;
@@ -170,7 +168,6 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
       name: row.name,
       status: row.status as WorkflowRunStatus,
       sessionMode: row.sessionMode as WorkflowSessionMode,
-      masterSessionId: row.masterSessionId ?? undefined,
       variables: safeJsonColumn(row.variables, jsonRecord, { fallback: {} }) ?? {},
       error: row.error ?? undefined,
       permissionMode: (row.permissionMode as WorkflowRunPermissionMode | null) ?? undefined,

@@ -453,8 +453,6 @@ export class WorkflowRunService {
       }
     }
 
-    // Create workflow run with master session ID
-    const masterSessionId = `master_${generateId()}`;
     const runVars: Record<string, unknown> = { ...(params.variables ?? {}) };
     // Merge in `defaultValue` for any workflow-defined variable the caller
     // didn't provide. Without this pass, prompts like `Hello {{name}}` reach
@@ -503,7 +501,6 @@ export class WorkflowRunService {
       name: `${definition.name} - Run ${Date.now()}`,
       status: 'created',
       sessionMode: definition.sessionMode,
-      masterSessionId,
       variables: runVars,
       // W23: carry the ancestor reference if this run was created by retry.
       ...(params.ancestorRunId ? { ancestorRunId: params.ancestorRunId } : {}),

@@ -199,8 +199,10 @@ export class WorkflowFacade {
   /**
    * Stream events from a running workflow (AsyncIterable).
    *
-   * Replays historical events first, then subscribes for live events.
-   * Completes when the run reaches a terminal state.
+   * Subscribes for live events and completes when the run reaches a
+   * terminal state. A run that is already terminal completes immediately:
+   * history is read through the run stream scope (`/api/stream?scope=run`)
+   * on the server.
    */
   async *stream(runId: string, options?: StreamOptions): AsyncGenerator<PersistedEvent> {
     const fromSeq = options?.fromSequence ?? 0;
@@ -209,16 +211,8 @@ export class WorkflowFacade {
     const run = await this.runRepo.getById(runId);
     if (!run) throw new Error(`Workflow run not found: ${runId}`);
 
-    // If already terminal, replay historical events and return
-    if (['completed', 'failed', 'cancelled'].includes(run.status)) {
-      if (run.masterSessionId) {
-        const events = await this.services.eventBus.getSessionEvents(run.masterSessionId, fromSeq > 0 ? fromSeq - 1 : undefined);
-        for (const event of events) {
-          if (event.sequenceId >= fromSeq) yield event;
-        }
-      }
-      return;
-    }
+    // Already terminal: nothing more will be emitted for it.
+    if (['completed', 'failed', 'cancelled'].includes(run.status)) return;
 
     // Subscribe for live events
     const queue: PersistedEvent[] = [];

@@ -87,8 +87,6 @@ export interface WorkflowRun {
   name: string;
   status: WorkflowRunStatus;
   sessionMode: WorkflowSessionMode;
-  /** Master session ID — coordinator session that owns all stage sessions */
-  masterSessionId?: string;
   variables: Record<string, unknown>;
   error?: string;
   /**
