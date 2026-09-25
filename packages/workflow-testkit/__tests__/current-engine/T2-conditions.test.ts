@@ -27,11 +27,11 @@ const T2 = {
   ],
   stages: [
     { name: 'R', prompt: 'Write one line containing the token ROOT.' },
-    { name: 'C_and', prompt: 'C_AND', condition: expr("variables.env == 'prod' AND variables.count > 3") },
-    { name: 'C_or_false', prompt: 'C_OR', condition: expr("variables.env == 'dev' OR variables.count < 2") },
-    { name: 'C_not', prompt: 'C_NOT', condition: expr('NOT variables.flag') },
+    { name: 'C_and', prompt: 'C_AND', condition: expr("variables.env == 'prod' and variables.count > 3") },
+    { name: 'C_or_false', prompt: 'C_OR', condition: expr("variables.env == 'dev' or variables.count < 2") },
+    { name: 'C_not', prompt: 'C_NOT', condition: expr('not variables.flag') },
     { name: 'C_bang_str', prompt: 'C_BANG', condition: expr('!variables.sflag') },
-    { name: 'C_amp', prompt: 'C_AMP', condition: expr("status == 'completed' && variables.count >= 5") },
+    { name: 'C_amp', prompt: 'C_AMP', condition: expr("parent.status == 'completed' && variables.count >= 5") },
     {
       name: 'C_paren',
       prompt: 'C_PAREN',
@@ -60,7 +60,7 @@ const T2 = {
 };
 
 describe('T2 conditional routing (current engine)', () => {
-  it('evaluates AND/OR/NOT/&&/||/!/parens/lower-case and cascades skips', async () => {
+  it('evaluates Expression v2 and/or/not/&&/||/!/parens/parent.status and cascades skips', async () => {
     engine = await createTestEngine();
     const run = await engine.runWorkflow(T2, { env: 'prod', count: 5, flag: false, sflag: 'false' });
     const snap = await run.waitForTerminal();
@@ -83,7 +83,7 @@ describe('T2 conditional routing (current engine)', () => {
     for (const n of ['C_or_false', 'C_paren', 'D_after_skip']) expect(called.has(n)).toBe(false);
   });
 
-  it('cannot see stage state and treats the string "false" as truthy', async () => {
+  it('cannot see stage state, and a non-boolean operand never holds', async () => {
     engine = await createTestEngine();
     const run = await engine.runWorkflow(T2, { env: 'prod', count: 5, flag: false, sflag: 'false' });
     const snap = await run.waitForTerminal();
@@ -98,8 +98,10 @@ describe('T2 conditional routing (current engine)', () => {
     expect(validation.valid).toBe(true);
     expect([...validation.errors, ...validation.warnings].filter((m) => m.includes('stages.R'))).toEqual([]); // KNOWN-BUG W-31 (validator accepts `stages.X…`)
 
-    // `!variables.sflag` with sflag = 'false' (a string) → truthy → skipped.
-    expect(snap.stages['C_bang_str']!.status).toBe('skipped'); // KNOWN-BUG W-31 (string 'false' is truthy; O-7)
+    // `!variables.sflag` with sflag = 'false' (a string): `not` of a non-boolean
+    // is null, which never holds → skipped. The v2 validator rejects the
+    // expression at save time; the v1 save path is wired to it in WP-1.7.
+    expect(snap.stages['C_bang_str']!.status).toBe('skipped'); // KNOWN-BUG W-31 (no save-time type check on the v1 path)
   });
 
   it('an unparseable condition is accepted and silently always skips', async () => {

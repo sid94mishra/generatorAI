@@ -1,11 +1,13 @@
 // ────────────────────────────────────────────────────────────────
-// DAGValidator — Validates and analyzes directed acyclic graphs
-// Implements cycle detection (Kahn's algorithm), reachability,
-// topological sort, and execution layer computation.
+// DAGValidator — Validates and analyzes directed acyclic graphs of the
+// id-keyed stage definitions the v1 engine runs. Ordering, layering and
+// cycle detection are the workflow-spec graph analysis (Kahn), the same
+// algorithm `validateWorkflow` runs over stage keys.
 // ────────────────────────────────────────────────────────────────
 
 import type { StageDefinition, StageEdge } from '@generatorai/shared';
 import { DAGValidationError } from '@generatorai/shared';
+import { analyzeGraph, type GraphAnalysis } from '@generatorai/workflow-spec';
 import type { DAG, DAGValidationIssue, DAGValidationResult, StageNode } from './types.js';
 
 /**
@@ -121,41 +123,9 @@ export function validateDAG(
   }
 
   // ── Cycle detection via Kahn's algorithm ──
-  const inDegree = new Map<string, number>();
-  const adjacency = new Map<string, string[]>();
-
-  for (const id of stageIds) {
-    inDegree.set(id, 0);
-    adjacency.set(id, []);
-  }
-
-  for (const edge of edges) {
-    adjacency.get(edge.fromStageId)!.push(edge.toStageId);
-    inDegree.set(edge.toStageId, (inDegree.get(edge.toStageId) ?? 0) + 1);
-  }
-
-  const queue: string[] = [];
-  for (const [id, degree] of inDegree) {
-    if (degree === 0) {
-      queue.push(id);
-    }
-  }
-
-  const sorted: string[] = [];
-  while (queue.length > 0) {
-    const node = queue.shift()!;
-    sorted.push(node);
-    for (const neighbor of adjacency.get(node) ?? []) {
-      const newDegree = (inDegree.get(neighbor) ?? 0) - 1;
-      inDegree.set(neighbor, newDegree);
-      if (newDegree === 0) {
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  if (sorted.length !== stageIds.size) {
-    const cycleNodes = [...stageIds].filter((id) => !sorted.includes(id));
+  const analysis = analyze(stages, edges);
+  if (analysis.unordered.length > 0) {
+    const cycleNodes = analysis.unordered;
     fail({
       code: 'cycle',
       message: `Cycle detected involving stages: ${cycleNodes.join(', ')}`,
@@ -166,7 +136,7 @@ export function validateDAG(
 
   // ── Disconnected node check ──
   // All nodes should be reachable from roots OR have a path to a leaf
-  const roots = [...stageIds].filter((id) => (inDegree.get(id) ?? 0) === 0 || !edges.some((e) => e.toStageId === id));
+  const roots = analysis.roots;
   if (roots.length === 0 && stages.length > 0) {
     fail({
       code: 'no-root-stages',
@@ -183,7 +153,7 @@ export function validateDAG(
     const node = bfsQueue.shift()!;
     if (reachable.has(node)) continue;
     reachable.add(node);
-    for (const neighbor of adjacency.get(node) ?? []) {
+    for (const neighbor of analysis.successors.get(node) ?? []) {
       if (!reachable.has(neighbor)) {
         bfsQueue.push(neighbor);
       }
@@ -211,6 +181,14 @@ function edgeRef(edge: StageEdge): NonNullable<DAGValidationIssue['edge']> {
   };
 }
 
+/** Graph analysis over stage ids (edges to unknown stages are ignored). */
+function analyze(stages: StageDefinition[], edges: StageEdge[]): GraphAnalysis {
+  return analyzeGraph(
+    stages.map((s) => s.id),
+    edges.map((e) => ({ from: e.fromStageId, to: e.toStageId })),
+  );
+}
+
 /**
  * Compute topological ordering of stages using Kahn's algorithm.
  * @throws DAGValidationError if the graph contains a cycle
@@ -219,45 +197,11 @@ export function topologicalSort(
   stages: StageDefinition[],
   edges: StageEdge[],
 ): string[] {
-  const stageIds = new Set(stages.map((s) => s.id));
-  const inDegree = new Map<string, number>();
-  const adjacency = new Map<string, string[]>();
-
-  for (const id of stageIds) {
-    inDegree.set(id, 0);
-    adjacency.set(id, []);
-  }
-
-  for (const edge of edges) {
-    adjacency.get(edge.fromStageId)!.push(edge.toStageId);
-    inDegree.set(edge.toStageId, (inDegree.get(edge.toStageId) ?? 0) + 1);
-  }
-
-  const queue: string[] = [];
-  for (const [id, degree] of inDegree) {
-    if (degree === 0) {
-      queue.push(id);
-    }
-  }
-
-  const sorted: string[] = [];
-  while (queue.length > 0) {
-    const node = queue.shift()!;
-    sorted.push(node);
-    for (const neighbor of adjacency.get(node) ?? []) {
-      const newDegree = (inDegree.get(neighbor) ?? 0) - 1;
-      inDegree.set(neighbor, newDegree);
-      if (newDegree === 0) {
-        queue.push(neighbor);
-      }
-    }
-  }
-
-  if (sorted.length !== stageIds.size) {
+  const analysis = analyze(stages, edges);
+  if (analysis.unordered.length > 0) {
     throw new DAGValidationError('Cannot topologically sort: graph contains a cycle');
   }
-
-  return sorted;
+  return analysis.order;
 }
 
 /**
@@ -269,42 +213,7 @@ export function getExecutionLayers(
   edges: StageEdge[],
 ): string[][] {
   if (stages.length === 0) return [];
-
-  const stageIds = new Set(stages.map((s) => s.id));
-  const inDegree = new Map<string, number>();
-  const adjacency = new Map<string, string[]>();
-
-  for (const id of stageIds) {
-    inDegree.set(id, 0);
-    adjacency.set(id, []);
-  }
-
-  for (const edge of edges) {
-    adjacency.get(edge.fromStageId)!.push(edge.toStageId);
-    inDegree.set(edge.toStageId, (inDegree.get(edge.toStageId) ?? 0) + 1);
-  }
-
-  const layers: string[][] = [];
-  let currentLayer = [...stageIds].filter((id) => (inDegree.get(id) ?? 0) === 0);
-
-  while (currentLayer.length > 0) {
-    layers.push(currentLayer);
-
-    const nextLayer: string[] = [];
-    for (const node of currentLayer) {
-      for (const neighbor of adjacency.get(node) ?? []) {
-        const newDegree = (inDegree.get(neighbor) ?? 0) - 1;
-        inDegree.set(neighbor, newDegree);
-        if (newDegree === 0) {
-          nextLayer.push(neighbor);
-        }
-      }
-    }
-
-    currentLayer = nextLayer;
-  }
-
-  return layers;
+  return analyze(stages, edges).layers;
 }
 
 /**

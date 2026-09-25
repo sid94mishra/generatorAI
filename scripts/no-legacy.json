@@ -591,6 +591,19 @@
         "packages/core/src/services/PlanService.ts"
       ],
       "reason": "WP-1.4: plan records carry the resolved harness (IAgentHarness.conversationHarness), never a guessed copilot"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(ConditionEvaluator|evaluateCondition|ConditionContext|evaluateSimpleCondition)\\b",
+      "reason": "WP-1.5: the v1 condition grammar and the preprocessor grammar are replaced by Expression v2 (@generatorai/workflow-spec conditionHolds / evaluateSource)"
+    },
+    {
+      "phase": "01",
+      "pattern": "new RegExp\\(rule\\.value",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.5 / RV-21: regex rules run on the linear-time engine (compileSafeRegex)"
     }
   ],
   "comments": {

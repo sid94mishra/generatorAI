@@ -44,7 +44,7 @@
       "prompt": "Write one line containing the token C_AND.",
       "condition": {
         "type": "expression",
-        "expression": "variables.env == 'prod' AND variables.count > 3"
+        "expression": "variables.env == 'prod' and variables.count > 3"
       }
     },
     {
@@ -52,7 +52,7 @@
       "prompt": "Write one line containing the token C_OR.",
       "condition": {
         "type": "expression",
-        "expression": "variables.env == 'dev' OR variables.count < 2"
+        "expression": "variables.env == 'dev' or variables.count < 2"
       }
     },
     {
@@ -60,7 +60,7 @@
       "prompt": "Write one line containing the token C_NOT.",
       "condition": {
         "type": "expression",
-        "expression": "NOT variables.flag"
+        "expression": "not variables.flag"
       }
     },
     {
@@ -76,7 +76,7 @@
       "prompt": "Write one line containing the token C_AMP.",
       "condition": {
         "type": "expression",
-        "expression": "status == 'completed' && variables.count >= 5"
+        "expression": "parent.status == 'completed' && variables.count >= 5"
       }
     },
     {

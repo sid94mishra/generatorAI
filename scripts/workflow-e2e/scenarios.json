@@ -38,7 +38,7 @@
       },
       "knownBugs": [
         "W-31 C_stageref skipped: `stages.R.status` cannot resolve and silently evaluates false",
-        "W-31 C_bang_str skipped: the string 'false' is truthy (O-7)"
+        "W-31 C_bang_str skipped: `!variables.sflag` on the string 'false' is not a boolean (null); the v2 validator rejects it at save time (WP-1.7)"
       ]
     },
     "T3": {

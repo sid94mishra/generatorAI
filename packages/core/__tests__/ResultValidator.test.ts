@@ -127,3 +127,29 @@ describe('ResultValidator — shared-session scoping', () => {
     expect(result.failures).toEqual(['needs REQUIRED_MARKER']);
   });
 });
+
+describe('ResultValidator — regex rules run on the linear-time engine (RV-21)', () => {
+  async function check(pattern: string, output: string) {
+    const stage = makeStageRun('sr-r', 'Regex', 'ses-r');
+    const messageRepo = createScopedMessageRepo([makeMessage('ses-r', 'sr-r', output)]);
+    const stageRunRepo = new MockStageRunRepository();
+    await stageRunRepo.create(stage);
+    const validator = new ResultValidator(messageRepo, stageRunRepo, new EventBus(), noopLogger);
+    return validator.validateStageResult('run-1', 'sr-r', { stageIndex: 0, rules: [{ type: 'regex', value: pattern, message: 'no match' }] });
+  }
+
+  it('matches like a regular expression', async () => {
+    expect((await check('^DONE: \\d+ files$', 'DONE: 12 files')).passed).toBe(true);
+    expect((await check('^DONE: \\d+ files$', 'done')).passed).toBe(false);
+  });
+
+  it('cannot be stalled by a catastrophic pattern', async () => {
+    const start = Date.now();
+    expect((await check('^(a+)+$', `${'a'.repeat(5000)}!`)).passed).toBe(false);
+    expect(Date.now() - start).toBeLessThan(2000);
+  });
+
+  it('fails a rule whose pattern the engine cannot run', async () => {
+    expect((await check('(a)\\1', 'aa')).passed).toBe(false);
+  });
+});

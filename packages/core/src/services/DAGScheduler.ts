@@ -15,6 +15,7 @@
 
 import type {
   ILogger,
+  StageCondition,
   StageDefinition,
   StageEdge,
   StageRunStatus,
@@ -25,8 +26,8 @@ import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitio
 import type { IStageEdgeRepository } from '../domain/ports/IStageEdgeRepository.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
+import { conditionHolds } from '@generatorai/workflow-spec';
 import { buildDAG } from '../domain/dag/DAGValidator.js';
-import { evaluateCondition } from '../domain/dag/ConditionEvaluator.js';
 import type { DAG } from '../domain/dag/types.js';
 import { createHash } from 'node:crypto';
 
@@ -152,13 +153,38 @@ export function resolveStageReadiness(
   if (condition) {
     const parents: StageRunStatus[] =
       activatingParents.length > 0 ? activatingParents : ['completed'];
-    const met = parents.some((parentStatus) =>
-      evaluateCondition(condition, { parentStatus, variables }),
-    );
+    const met = parents.some((parentStatus) => conditionMet(condition, parentStatus, variables));
     if (!met) return 'skip';
   }
 
   return 'ready';
+}
+
+/**
+ * Whether a stage condition holds for one activating parent.
+ *
+ * `expression` conditions are Expression v2 (`@generatorai/workflow-spec`),
+ * the same evaluator the v2 scheduler runs for guards and edge `when`:
+ * scope `variables.*` and `parent.status`, strict equality, and a missing
+ * path, a type mismatch or a parse error never counts as true.
+ */
+function conditionMet(
+  condition: StageCondition,
+  parentStatus: StageRunStatus,
+  variables: Record<string, unknown> | undefined,
+): boolean {
+  switch (condition.type) {
+    case 'always':
+      return true;
+    case 'on_success':
+      return parentStatus === 'completed';
+    case 'on_failure':
+      return parentStatus === 'failed';
+    case 'expression':
+      return conditionHolds(condition.expression ?? '', { variables: variables ?? {}, parent: { status: parentStatus } });
+    default:
+      return false;
+  }
 }
 
 /**

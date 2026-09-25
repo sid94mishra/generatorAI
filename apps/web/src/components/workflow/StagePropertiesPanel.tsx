@@ -326,12 +326,12 @@ function ExecutionTab({
                 onUpdate({ condition: { type: 'expression', expression: e.target.value } })
               }
               className="mt-2 font-mono"
-              // The evaluator understands `status`/`parentStatus`,
-              // `variables.<path>`, `== != < <= > >=` and AND/OR/NOT — it has
-              // no `stages.` scope and no `===`. An unparseable expression
-              // fails safe to false, so advertising unsupported syntax here
-              // produced stages that silently never ran.
-              placeholder="e.g. status == 'completed' AND variables.env == 'prod'"
+              // Expression v2 (@generatorai/workflow-spec): `variables.<path>`,
+              // `parent.status` (the activating predecessor), `== != < <= > >=`,
+              // `in`, lower-case `and / or / not`, and functions such as
+              // len() and exists(). Equality is strict by type, and an
+              // unparseable expression never holds.
+              placeholder="e.g. parent.status == 'completed' and variables.env == 'prod'"
             />
           )}
         </div>

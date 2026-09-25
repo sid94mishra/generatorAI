@@ -28,7 +28,7 @@ The top-level product modules exclude the separate `agent-tests` workspace and t
 | `packages/client-core` | `@generatorai/client-core` | `client-transport`, `shared` | [Architecture](/architecture/modules.md) |
 | `packages/client-runtime` | `@generatorai/client-runtime` | `relay-protocol`, `shared` | [Architecture](/architecture/modules.md) |
 | `packages/client-transport` | `@generatorai/client-transport` | `relay-protocol` | [Architecture](/architecture/modules.md) |
-| `packages/core` | `@generatorai/core` | `changes`, `checkpoints`, `git`, `review`, `secrets`, `shared`, `source-control` | [Architecture](/architecture/modules.md) |
+| `packages/core` | `@generatorai/core` | `changes`, `checkpoints`, `git`, `review`, `secrets`, `shared`, `source-control`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `packages/db` | `@generatorai/db` | `auth`, `core`, `checkpoints`, `review`, `shared` | [Architecture](/architecture/modules.md) |
 | `packages/design-tokens` | `@generatorai/design-tokens` | — | [Architecture](/architecture/modules.md) |
 | `packages/git` | `@generatorai/git` | `shared` | [Architecture](/architecture/modules.md) |
@@ -40,6 +40,7 @@ The top-level product modules exclude the separate `agent-tests` workspace and t
 | `packages/shared` | `@generatorai/shared` | — | [Architecture](/architecture/modules.md) |
 | `packages/source-control` | `@generatorai/source-control` | `shared` | [Architecture](/architecture/modules.md) |
 | `packages/tui-kit` | `@generatorai/tui-kit` | `cli-core`, `design-tokens`, `shared` | [Architecture](/architecture/modules.md) |
+| `packages/workflow-spec` | `@generatorai/workflow-spec` | `shared` | [Architecture](/architecture/modules.md) |
 | `packages/workflow-testkit` | `@generatorai/workflow-testkit` | `agent-harness-providers`, `core`, `db`, `shared` | [Architecture](/architecture/modules.md) |
 
 ## Web page components

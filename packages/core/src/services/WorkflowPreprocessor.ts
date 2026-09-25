@@ -21,6 +21,7 @@ import type {
   ScmFlowResult,
 } from '@generatorai/shared';
 import { interpolateVariables } from '@generatorai/shared';
+import { compileSafeRegex, evaluateSource } from '@generatorai/workflow-spec';
 import type { GitManager } from '../infrastructure/GitManager.js';
 import type { IScriptRunner } from '../domain/ports/IScriptRunner.js';
 import type { EventBus } from '../events/EventBus.js';
@@ -596,8 +597,10 @@ export class WorkflowPreprocessor {
           }
           break;
         case 'regex': {
-          const regex = new RegExp(rule.value as string);
-          if (!regex.test(String(value))) {
+          // Linear-time engine: a pathological pattern cannot stall the event loop (RV-21).
+          const compiled = compileSafeRegex(String(rule.value ?? ''));
+          if (!compiled.ok) throw new Error(`Invalid pattern for ${config.variableName}: ${compiled.error.message}`);
+          if (!compiled.regex.test(String(value))) {
             throw new Error(rule.message);
           }
           break;
@@ -637,7 +640,7 @@ export class WorkflowPreprocessor {
     config: ConditionalStepConfig,
     context: PreprocessorContext,
   ): Promise<string> {
-    const conditionResult = this.evaluateSimpleCondition(config.condition, context.variables);
+    const conditionResult = this.conditionHolds(config.condition, context.variables);
 
     if (conditionResult) {
       const results = await this.execute(config.thenSteps, context);
@@ -654,37 +657,17 @@ export class WorkflowPreprocessor {
 
   // interpolateVariables is now imported from @generatorai/shared
 
-  private evaluateSimpleCondition(
-    condition: string,
-    variables: Record<string, unknown>,
-  ): boolean {
-    // Safe, limited condition evaluation
-    // Supports: variable == 'value', variable != 'value', variable (truthy check)
-    const trimmed = condition.trim();
-
-    // Equality check: var == 'value' or var == "value" or var == value
-    const eqMatch = trimmed.match(/^(\w+)\s*==\s*(?:'([^']*)'|"([^"]*)"|(\S+))$/);
-    if (eqMatch) {
-      const varName = eqMatch[1]!;
-      const expected = eqMatch[2] ?? eqMatch[3] ?? eqMatch[4] ?? '';
-      return String(variables[varName] ?? '') === expected;
+  /**
+   * Evaluate a conditional step's Expression v2 condition over `variables.*`.
+   * A condition that does not parse fails the step (its failOnError decides
+   * whether the run fails) instead of silently taking the else branch.
+   */
+  private conditionHolds(condition: string, variables: Record<string, unknown>): boolean {
+    const result = evaluateSource(condition, { variables });
+    if (!result.ok) {
+      throw new Error(`Invalid condition "${condition}": ${result.error.message}`);
     }
-
-    // Inequality check: var != 'value' or var != "value" or var != value
-    const neqMatch = trimmed.match(/^(\w+)\s*!=\s*(?:'([^']*)'|"([^"]*)"|(\S+))$/);
-    if (neqMatch) {
-      const varName = neqMatch[1]!;
-      const expected = neqMatch[2] ?? neqMatch[3] ?? neqMatch[4] ?? '';
-      return String(variables[varName] ?? '') !== expected;
-    }
-
-    // Truthy check: just variable name
-    if (/^\w+$/.test(trimmed)) {
-      return Boolean(variables[trimmed]);
-    }
-
-    this.logger.warn(`[Preprocessor] Could not evaluate condition: "${condition}", defaulting to false`);
-    return false;
+    return result.value === true;
   }
 }
 

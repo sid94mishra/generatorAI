@@ -529,6 +529,33 @@ describe('DAGScheduler', () => {
       const next = (await scheduler.reconcileRun(RUN_ID, DEF_ID)).toLaunch;
       expect(next).not.toContain(B);
     });
+
+    // Expression v2 (workflow-spec): parent.status, strict equality, lower-case
+    // keywords; anything that does not parse or type-match never holds.
+    it.each<[string, 'completed' | 'failed', boolean]>([
+      ["parent.status == 'completed' and variables.env == 'prod'", 'completed', true],
+      ["parent.status == 'failed'", 'completed', false],
+      ['variables.count == 5', 'completed', true],
+      ["variables.count == '5'", 'completed', false],
+      ["variables.env == 'prod' AND variables.count > 3", 'completed', false],
+      ["status == 'completed'", 'completed', false],
+      ['((( variables.x ==', 'completed', false],
+    ])('evaluates %s with Expression v2 → %s', async (expression, predStatus, launches) => {
+      const A = stageId(); const B = stageId();
+      await stageDefRepo.create(makeStageDef(A, DEF_ID, 0));
+      await stageDefRepo.create(withCondition(makeStageDef(B, DEF_ID, 1), expression));
+      await edgeRepo.create(makeEdge(DEF_ID, A, B, 'on_completion'));
+      await stageRunRepo.create(makeStageRun('sr-a', RUN_ID, A, predStatus));
+      await stageRunRepo.create(makeStageRun('sr-b', RUN_ID, B, 'pending'));
+
+      const runRepo = new MockWorkflowRunRepository();
+      await runRepo.create(makeRun({ env: 'prod', count: 5 }));
+      const sched = new DAGScheduler(stageDefRepo, edgeRepo, stageRunRepo, runRepo);
+
+      const { toLaunch, toSkip } = await sched.reconcileRun(RUN_ID, DEF_ID);
+      expect(toLaunch.includes(B)).toBe(launches);
+      expect(toSkip.includes(B)).toBe(!launches);
+    });
   });
 
   // ── Two-tier definition cache validation (P1-19) ──

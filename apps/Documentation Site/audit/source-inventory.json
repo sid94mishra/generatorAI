@@ -365,7 +365,8 @@
         "@generatorai/review",
         "@generatorai/secrets",
         "@generatorai/shared",
-        "@generatorai/source-control"
+        "@generatorai/source-control",
+        "@generatorai/workflow-spec"
       ]
     },
     {
@@ -542,6 +543,21 @@
       "dependencies": [
         "@generatorai/cli-core",
         "@generatorai/design-tokens",
+        "@generatorai/shared"
+      ]
+    },
+    {
+      "path": "packages/workflow-spec",
+      "name": "@generatorai/workflow-spec",
+      "version": "0.1.0",
+      "private": true,
+      "scripts": {
+        "build": "tsc -p tsconfig.json",
+        "typecheck": "tsc --build --force",
+        "test": "vitest run",
+        "lint": "eslint src/"
+      },
+      "dependencies": [
         "@generatorai/shared"
       ]
     },
@@ -4158,7 +4174,6 @@
     "packages/client-transport/src/index.ts",
     "packages/client-transport/src/TransportAdapter.ts",
     "packages/core/src/bootstrap/createCoreServices.ts",
-    "packages/core/src/domain/dag/ConditionEvaluator.ts",
     "packages/core/src/domain/dag/DAGValidator.ts",
     "packages/core/src/domain/dag/index.ts",
     "packages/core/src/domain/dag/types.ts",
@@ -4600,6 +4615,47 @@
     "packages/tui-kit/src/input.tsx",
     "packages/tui-kit/src/layout.tsx",
     "packages/tui-kit/src/theme.tsx",
+    "packages/workflow-spec/src/builders/index.ts",
+    "packages/workflow-spec/src/commandBearing.ts",
+    "packages/workflow-spec/src/constants.ts",
+    "packages/workflow-spec/src/document.ts",
+    "packages/workflow-spec/src/expr/ast.ts",
+    "packages/workflow-spec/src/expr/evaluate.ts",
+    "packages/workflow-spec/src/expr/filters.ts",
+    "packages/workflow-spec/src/expr/functions.ts",
+    "packages/workflow-spec/src/expr/grammar.ts",
+    "packages/workflow-spec/src/expr/index.ts",
+    "packages/workflow-spec/src/expr/parse.ts",
+    "packages/workflow-spec/src/expr/template.ts",
+    "packages/workflow-spec/src/expr/typecheck.ts",
+    "packages/workflow-spec/src/expr/types.ts",
+    "packages/workflow-spec/src/expr/values.ts",
+    "packages/workflow-spec/src/index.ts",
+    "packages/workflow-spec/src/jsonschema.ts",
+    "packages/workflow-spec/src/regex/safeRegex.ts",
+    "packages/workflow-spec/src/schemas/commands.ts",
+    "packages/workflow-spec/src/schemas/common.ts",
+    "packages/workflow-spec/src/schemas/edge.ts",
+    "packages/workflow-spec/src/schemas/errors.ts",
+    "packages/workflow-spec/src/schemas/graph.ts",
+    "packages/workflow-spec/src/schemas/invocation.ts",
+    "packages/workflow-spec/src/schemas/session.ts",
+    "packages/workflow-spec/src/schemas/stage.ts",
+    "packages/workflow-spec/src/schemas/workflow.ts",
+    "packages/workflow-spec/src/session/resolveSessionSpec.ts",
+    "packages/workflow-spec/src/state/index.ts",
+    "packages/workflow-spec/src/state/stageRun.ts",
+    "packages/workflow-spec/src/state/workflowRun.ts",
+    "packages/workflow-spec/src/util/text.ts",
+    "packages/workflow-spec/src/util/zodWalk.ts",
+    "packages/workflow-spec/src/validate/capability.ts",
+    "packages/workflow-spec/src/validate/dag.ts",
+    "packages/workflow-spec/src/validate/hints.ts",
+    "packages/workflow-spec/src/validate/index.ts",
+    "packages/workflow-spec/src/validate/issues.ts",
+    "packages/workflow-spec/src/validate/scope.ts",
+    "packages/workflow-spec/src/validate/security.ts",
+    "packages/workflow-spec/src/validate/validateWorkflow.ts",
     "packages/workflow-testkit/src/adapters/v1.ts",
     "packages/workflow-testkit/src/clock.ts",
     "packages/workflow-testkit/src/definitions.ts",

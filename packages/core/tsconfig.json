@@ -13,6 +13,7 @@
     { "path": "../checkpoints" },
     { "path": "../review" },
     { "path": "../secrets" },
-    { "path": "../source-control" }
+    { "path": "../source-control" },
+    { "path": "../workflow-spec" }
   ]
 }

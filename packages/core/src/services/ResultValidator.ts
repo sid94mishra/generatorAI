@@ -9,6 +9,7 @@ import type {
   StageValidationResult,
   ILogger,
 } from '@generatorai/shared';
+import { compileSafeRegex } from '@generatorai/workflow-spec';
 import type { IChatMessageRepository } from '../domain/ports/IRepositories.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import type { IScriptRunner } from '../domain/ports/IScriptRunner.js';
@@ -139,8 +140,13 @@ export class ResultValidator {
         return output.length <= (rule.value as number);
 
       case 'regex': {
-        const regex = new RegExp(rule.value as string);
-        return regex.test(output);
+        // Linear-time engine: model output cannot trigger catastrophic backtracking (RV-21).
+        const compiled = compileSafeRegex(String(rule.value ?? ''));
+        if (!compiled.ok) {
+          this.logger.warn(`[ResultValidator] regex rule has an unsupported pattern (${compiled.error.message}); rule marked as failed`);
+          return false;
+        }
+        return compiled.regex.test(output);
       }
 
       case 'custom_script': {
