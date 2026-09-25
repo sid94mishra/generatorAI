@@ -167,7 +167,6 @@ Any hot-loaded extension can register skills, prompts, custom agents, tools, and
 - `harnessConfigOverrides.disabledSkills` (names to exclude).
 - `harnessConfigOverrides.mcpServers` (Record<name, McpServerConfig> to *add* or *override*).
 - `harnessConfigOverrides.excludedTools` (blacklist; supports `mcp__<server>__<tool>` to exclude MCP tools).
-- `harnessConfigOverrides.agentName` — convenience field; tells `StageExecutionService` to use that custom agent as the stage's "main" agent.
 
 ---
 
@@ -254,7 +253,6 @@ type McpServerEntry = {
 In the workflow builder, Stage Properties panel → Properties tab:
 
 - **`SkillSelector`** ([apps/web/src/components/workflow/SkillSelector.tsx](../../apps/web/src/components/workflow/SkillSelector.tsx)) — toggles checkboxes; writes to `harnessConfigOverrides.disabledSkills` (so checked = enabled by exclusion).
-- **`AgentSelector`** ([apps/web/src/components/workflow/AgentSelector.tsx](../../apps/web/src/components/workflow/AgentSelector.tsx)) — single-select dropdown; writes `stage.agentName` AND `harnessConfigOverrides.customAgents = [theAgent]`.
 - **`McpServerSelector`** ([apps/web/src/components/workflow/McpServerSelector.tsx](../../apps/web/src/components/workflow/McpServerSelector.tsx)) — toggles each server; merges into `harnessConfigOverrides.excludedTools` (TODO: dedicated `excludedMcpServers` field).
 
 Settings → MCP Servers (**`apps/web/src/components/settings/sections/Catalogs.tsx`**'s `McpSection`) is the global surface: it lists bundled + custom servers together (one `GET /api/system/mcp-servers` call), shows an inline "Needs setup" form for any server with `needsConfiguration` (fills `{{input}}` values and credentials, `PUT .../system/:id`), and the "Add server" sub-page creates a custom server server-side.

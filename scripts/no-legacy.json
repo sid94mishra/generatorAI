@@ -571,6 +571,11 @@
       "phase": "01",
       "pattern": "\\b(RunLogger|RunLoggerDispatcher|RUN_LOG_FILENAME|closeRunLogger|runLoggers)\\b|StreamLogger|stream-log",
       "reason": "WP-1.4: the per-run JSONL logger is deleted; run history comes from stream replay"
+    },
+    {
+      "phase": "01",
+      "pattern": "stageOverrides\\??:[^\\n]*\\b(agentName|timeoutMs|contextFilter)\\b",
+      "reason": "WP-1.4: the unused stage-override fields agentName/timeoutMs/contextFilter are deleted; P04 adds real stage overrides"
     }
   ],
   "comments": {

@@ -209,9 +209,6 @@ export interface RunProfileConfig {
   stageOverrides?: Array<{
     stageName?: string;
     stageIndex?: number;
-    agentName?: string;
-    contextFilter?: ContextFilter;
-    timeoutMs?: number;
     variables?: Record<string, unknown>;
     skip?: boolean;
   }>;

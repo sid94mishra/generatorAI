@@ -177,7 +177,7 @@ webhook_registrations   incoming webhook triggers
 webhook_deliveries      delivery audit log (unique idx for dedup)
 chats                   v2 top-level chat entities (codebaseIds, gitRepositories, projectId, workspaceId, useWorktree)
 workflow_definitions    v2 DAG templates (sessionMode, harnessConfig, variables, hooks, orchestratorConfig, scope, projectId, useWorktree)
-stage_definitions       v2 stage nodes (prompts, condition, retryPolicy, contextFilter, agentName, resultValidation, hooks, harnessConfigOverrides, outputFormat, outputSchema, contextSources)
+stage_definitions       v2 stage nodes (prompts, condition, retryPolicy, contextFilter, resultValidation, hooks, harnessConfigOverrides, outputFormat, outputSchema, contextSources)
 stage_edges             v2 DAG edges
 workflow_runs           v2 run instances (status, sessionMode, masterSessionId, variables, permissionMode, projectId, workspaceId)
 stage_runs              v2 stage executions (status, retryCount, version (optimistic lock), wakeAt + sleptSince (DUR-05), interruptData (HITL-02), summary)

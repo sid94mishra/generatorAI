@@ -1156,9 +1156,6 @@ Per-stage override schema
 | --- | --- | --- | --- |
 | stageName | string | `optional` | — |
 | stageIndex | number | `optional` | int; min 0 |
-| agentName | string | `optional` | — |
-| contextFilter | "full" / "summary-only" / "none" / "structured" | `optional` | — |
-| timeoutMs | number | `optional` | int; min 1000 |
 | variables | map of unknown | `optional` | — |
 | skip | boolean | `optional` | — |
 
@@ -1182,9 +1179,6 @@ RunProfile Zod schema for validation
 | stageOverrides[] | object | `required` | unknown keys: strip; refinement |
 | stageOverrides[].stageName | string | `optional` | — |
 | stageOverrides[].stageIndex | number | `optional` | int; min 0 |
-| stageOverrides[].agentName | string | `optional` | — |
-| stageOverrides[].contextFilter | "full" / "summary-only" / "none" / "structured" | `optional` | — |
-| stageOverrides[].timeoutMs | number | `optional` | int; min 1000 |
 | stageOverrides[].variables | map of unknown | `optional` | — |
 | stageOverrides[].skip | boolean | `optional` | — |
 | promptFiles | array of string | `optional` | — |
@@ -1571,11 +1565,6 @@ export type ImportWorkflowJson = z.infer<typeof ImportWorkflowJsonSchema>;
 export const StageRunOverrideSchema = z.object({
   stageName: z.string().optional(),
   stageIndex: z.number().int().min(0).optional(),
-  agentName: z.string().optional(),
-  // SCHEMA-2: include 'structured' so runtime/profile overrides can set it,
-  // matching StageDefinition.contextFilter and the script-profile override enum.
-  contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
-  timeoutMs: z.number().int().min(1000).optional(),
   variables: z.record(z.unknown()).optional(),
   skip: z.boolean().optional(),
 }).refine(

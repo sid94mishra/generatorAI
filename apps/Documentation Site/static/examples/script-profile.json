@@ -9,8 +9,7 @@
   "stageOverrides": [
     {
       "stageIndex": 0,
-      "timeoutMs": 300000,
-      "contextFilter": "none"
+      "skip": true
     }
   ]
 }

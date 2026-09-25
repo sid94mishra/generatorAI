@@ -187,9 +187,9 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | F26 | Cascading skip | Unreachable stages marked `skipped` | ✅ |
 | F27 | Run with stage overrides — skip | `__stageOverrides.skip=true` → stage skipped | ✅ (`quick-surface` profile) |
 | F28 | Run with stage overrides — variables | Override stage-local vars | ✅ (session 70 — `POST /api/orchestrator/runs` with `stageOverrides:[{stageName, variables:{vk:'vv'}}]` accepted; stored in `context.resolvedVariables.__stageOverrides` per `WorkflowOrchestrator.ts:397`) |
-| F29 | Run with stage overrides — timeout | Override `timeoutMs` | ✅ (session 70 — same orchestrator endpoint accepts `timeoutMs` per StageRunOverrideSchema) |
-| F30 | Run with stage overrides — agentName | Override agent | ✅ (session 70 — `agentName` accepted in StageRunOverrideSchema) |
-| F31 | Run with stage overrides — contextFilter | Override per-run | ✅ (session 70 — `contextFilter:'structured'` accepted; enum extended to include `'structured'` per SCHEMA-2 fix) |
+| F29 | Run with stage overrides — timeout | Override `timeoutMs` | Removed (P01 WP-1.4: the field was never applied; P04 adds real stage overrides) |
+| F30 | Run with stage overrides — agentName | Override agent | Removed (P01 WP-1.4) |
+| F31 | Run with stage overrides — contextFilter | Override per-run | Removed (P01 WP-1.4) |
 | F32 | Custom content upload — prompts | RunProfile.promptFiles | ✅ (session 70 — `POST /api/orchestrator/workflows/:id/uploads` with `category:prompts` returned 201 with `files:[{path:'.../uploads/prompts/F32-prompt.md', name:'F32-prompt.md'}]`) |
 | F33 | Custom content upload — skills | RunProfile.skillFiles | ✅ (session 70 — same endpoint with `category:skills` writes to `uploads/skills/`) |
 | F34 | Custom content upload — agents | RunProfile.agentFiles | ✅ (session 70 — same endpoint with `category:agents`) |

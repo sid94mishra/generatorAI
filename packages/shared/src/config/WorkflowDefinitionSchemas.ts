@@ -350,11 +350,6 @@ export type ImportWorkflowJson = z.infer<typeof ImportWorkflowJsonSchema>;
 export const StageRunOverrideSchema = z.object({
   stageName: z.string().optional(),
   stageIndex: z.number().int().min(0).optional(),
-  agentName: z.string().optional(),
-  // SCHEMA-2: include 'structured' so runtime/profile overrides can set it,
-  // matching StageDefinition.contextFilter and the script-profile override enum.
-  contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
-  timeoutMs: z.number().int().min(1000).optional(),
   variables: z.record(z.unknown()).optional(),
   skip: z.boolean().optional(),
 }).refine(

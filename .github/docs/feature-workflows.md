@@ -386,7 +386,7 @@ const def = await ai.workflows.create(workflow(b => b
   .profile({
     name: 'thorough',
     sessionMode: 'per-stage',
-    stageOverrides: [{ stageName: 'Summarize', timeoutMs: 60000 }],
+    stageOverrides: [{ stageName: 'Summarize', skip: true }],
   })
 ));
 

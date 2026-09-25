@@ -10342,24 +10342,6 @@
         "constraints": "int; min 0"
       },
       {
-        "field": "agentName",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "contextFilter",
-        "type": "\"full\" / \"summary-only\" / \"none\" / \"structured\"",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "timeoutMs",
-        "type": "number",
-        "presence": "optional",
-        "constraints": "int; min 1000"
-      },
-      {
         "field": "variables",
         "type": "map of unknown",
         "presence": "optional",
@@ -10461,24 +10443,6 @@
         "type": "number",
         "presence": "optional",
         "constraints": "int; min 0"
-      },
-      {
-        "field": "stageOverrides[].agentName",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stageOverrides[].contextFilter",
-        "type": "\"full\" / \"summary-only\" / \"none\" / \"structured\"",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stageOverrides[].timeoutMs",
-        "type": "number",
-        "presence": "optional",
-        "constraints": "int; min 1000"
       },
       {
         "field": "stageOverrides[].variables",
@@ -13074,24 +13038,6 @@
         "type": "number",
         "presence": "optional",
         "constraints": "int; min 0"
-      },
-      {
-        "field": "stageOverrides[].agentName",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stageOverrides[].contextFilter",
-        "type": "\"full\" / \"summary-only\" / \"none\" / \"structured\"",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stageOverrides[].timeoutMs",
-        "type": "number",
-        "presence": "optional",
-        "constraints": "int; min 0 (exclusive)"
       },
       {
         "field": "stageOverrides[].variables",

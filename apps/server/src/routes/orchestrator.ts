@@ -122,7 +122,7 @@ export function createOrchestratorRoutes(container: Container): Router {
         variables?: Record<string, unknown>;
         projectId?: string;
         selectedCodebases?: string[];
-        stageOverrides?: Array<{ stageName?: string; stageIndex?: number; agentName?: string; contextFilter?: 'full' | 'summary-only' | 'none'; timeoutMs?: number; variables?: Record<string, unknown>; skip?: boolean }>;
+        stageOverrides?: Array<{ stageName?: string; stageIndex?: number; variables?: Record<string, unknown>; skip?: boolean }>;
       };
 
       if (!workflowDefinitionId) {

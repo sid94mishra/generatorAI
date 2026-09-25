@@ -1778,14 +1778,12 @@ export class WorkflowRunService {
     variables: Record<string, unknown> | undefined,
     stageName: string,
     stageIndex: number,
-  ): { skip?: boolean; variables?: Record<string, unknown>; agentName?: string; timeoutMs?: number } | undefined {
+  ): { skip?: boolean; variables?: Record<string, unknown> } | undefined {
     const overrides = variables?.['__stageOverrides'] as Array<{
       stageName?: string;
       stageIndex?: number;
       skip?: boolean;
       variables?: Record<string, unknown>;
-      agentName?: string;
-      timeoutMs?: number;
     }> | undefined;
 
     if (!overrides || !Array.isArray(overrides)) return undefined;

@@ -1239,7 +1239,7 @@ export class HttpPlatformClient implements IPlatformClient {
     projectId?: string;
     selectedCodebases?: string[];
     uploads?: { prompts: File[]; skills: File[]; agents: File[] };
-    stageOverrides?: Array<{ stageName?: string; stageIndex?: number; agentName?: string; contextFilter?: string; timeoutMs?: number; variables?: Record<string, unknown>; skip?: boolean }>;
+    stageOverrides?: Array<{ stageName?: string; stageIndex?: number; variables?: Record<string, unknown>; skip?: boolean }>;
   }): Promise<OrchestratorContext> {
     const { uploads, ...config } = params;
     if (uploads && Object.values(uploads).some((files) => files.length > 0)) {

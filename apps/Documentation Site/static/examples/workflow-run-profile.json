@@ -10,8 +10,9 @@
   "stageOverrides": [
     {
       "stageName": "Verify",
-      "timeoutMs": 900000,
-      "contextFilter": "full"
+      "variables": {
+        "strict": true
+      }
     }
   ]
 }

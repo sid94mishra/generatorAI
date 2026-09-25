@@ -21,12 +21,6 @@ export interface StageRunOverride {
   /** Stage name or index to target. Name is preferred; index is fallback. */
   stageName?: string;
   stageIndex?: number;
-  /** Override the agent name used for this stage */
-  agentName?: string;
-  /** Override context filter for this stage */
-  contextFilter?: 'full' | 'summary-only' | 'none';
-  /** Override timeout for this stage (ms) */
-  timeoutMs?: number;
   /** Additional variables scoped to this stage only */
   variables?: Record<string, unknown>;
   /** Whether to skip this stage entirely */

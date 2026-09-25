@@ -328,8 +328,9 @@ Contract: `RunProfileSchema` in `packages/shared/src/config/WorkflowDefinitionSc
   "stageOverrides": [
     {
       "stageName": "Verify",
-      "timeoutMs": 900000,
-      "contextFilter": "full"
+      "variables": {
+        "strict": true
+      }
     }
   ]
 }
@@ -696,8 +697,7 @@ Contract: `ScriptRunProfileSchema` in `packages/shared/src/config/WorkflowScript
   "stageOverrides": [
     {
       "stageIndex": 0,
-      "timeoutMs": 300000,
-      "contextFilter": "none"
+      "skip": true
     }
   ]
 }

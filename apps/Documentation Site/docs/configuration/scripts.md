@@ -142,9 +142,6 @@ Schema for RunProfileConfig as exported by scripts.
 | stageOverrides[] | object | `required` | unknown keys: strip |
 | stageOverrides[].stageName | string | `optional` | — |
 | stageOverrides[].stageIndex | number | `optional` | int; min 0 |
-| stageOverrides[].agentName | string | `optional` | — |
-| stageOverrides[].contextFilter | "full" / "summary-only" / "none" / "structured" | `optional` | — |
-| stageOverrides[].timeoutMs | number | `optional` | int; min 0 (exclusive) |
 | stageOverrides[].variables | map of unknown | `optional` | — |
 | stageOverrides[].skip | boolean | `optional` | — |
 
@@ -325,9 +322,6 @@ export const ScriptRunProfileSchema = z.object({
   stageOverrides: z.array(z.object({
     stageName: z.string().optional(),
     stageIndex: z.number().int().min(0).optional(),
-    agentName: z.string().optional(),
-    contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
-    timeoutMs: z.number().int().positive().optional(),
     variables: z.record(z.unknown()).optional(),
     skip: z.boolean().optional(),
   })).optional(),
