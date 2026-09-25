@@ -450,6 +450,13 @@ export interface CreateConversationParams {
    */
   skills?: string[];
   /**
+   * Local plugin roots (claude-agent `Options.plugins`). The composer stages a
+   * session's skills into one plugin root for providers whose skills level is
+   * `plugin` (RV-7): no SDK option takes skill directories, and loading them
+   * as a project setting source would also load the repository's hooks.
+   */
+  plugins?: Array<{ type: 'local'; path: string }>;
+  /**
    * Tool names hidden from the DEFAULT agent while staying available to
    * sub-agents that name them. Copilot `defaultAgent.excludedTools`.
    */
@@ -563,6 +570,13 @@ export interface IHarnessClientLifecycle {
    * other does not). Optional: single-provider adapters need not implement it.
    */
   capabilitiesFor?(conversationId: string): ProviderCapabilities;
+  /**
+   * The provider id that WOULD run a conversation with these params (an
+   * existing conversation's owner, an explicit `harnessType`, or the model's
+   * catalog owner), without creating anything. `undefined` when it cannot be
+   * told. The session composer plans capability levels with it.
+   */
+  resolveProvider?(params: { conversationId?: string; harnessType?: string; model?: string }): Promise<string | undefined>;
 }
 
 /** Model discovery. */

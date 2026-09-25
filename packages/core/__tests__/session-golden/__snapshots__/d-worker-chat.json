@@ -7,6 +7,7 @@
     "mode": "append",
     "content": "USER-SYSTEM-MESSAGE"
   },
+  "systemPromptAppend": "USER-APPEND",
   "availableTools": [
     "Read",
     "Edit"
@@ -15,5 +16,6 @@
     "my_custom_tool"
   ],
   "reasoningEffort": "high",
+  "maxTurns": 7,
   "mcpServers": {}
 }

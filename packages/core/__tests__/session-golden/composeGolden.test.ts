@@ -13,10 +13,11 @@
 // DB migrated with `migrateDB`); only the provider is a spy, plus fakes for
 // the agent resolver, browser service and workspace manager.
 //
-// Known drifts between the builders are asserted explicitly and marked
-// `// KNOWN-DRIFT W-5x`. PHASE-02 WP-2.4 flips those assertions and
-// regenerates the stage/resume snapshots deliberately; the chat CREATE
-// snapshots (a, c, d, e) must not change.
+// Known drifts between the builders were asserted explicitly and marked
+// `// KNOWN-DRIFT W-5x`. PHASE-02 flipped them deliberately: W-50 (WP-2.4)
+// added `systemPromptAppend` / `maxTurns` to the chat create snapshots
+// (a, c, d, e — nothing else in them changed) and made resume equal create;
+// W-51 / W-52 (WP-2.8) regenerated the stage snapshots (f, g).
 // ────────────────────────────────────────────────────────────────
 
 import { afterEach, describe, expect, it } from 'vitest';
@@ -354,14 +355,21 @@ describe('session composition golden snapshots', () => {
     expect(resumed).toBeDefined();
     await expect(golden(resumed.params, first.workDir)).toMatchFileSnapshot('__snapshots__/b-chat-resume.json');
 
-    // W-50 — create and resume have drifted: these fields reach the provider
-    // only on resume.
+    // W-50 (fixed in P02 WP-2.4) — one precedence rule for create and
+    // resume: both reach the provider on create too.
     const c = created as unknown as Record<string, unknown>;
     const r = resumed.params as unknown as Record<string, unknown>;
-    expect(c['systemPromptAppend']).toBeUndefined(); // KNOWN-DRIFT W-50 (systemPromptAppend forwarded on resume only)
-    expect(r['systemPromptAppend']).toBe('USER-APPEND'); // KNOWN-DRIFT W-50
-    expect(c['maxTurns']).toBeUndefined(); // KNOWN-DRIFT W-50 (maxTurns forwarded on resume only)
-    expect(r['maxTurns']).toBe(7); // KNOWN-DRIFT W-50
+    expect(c['systemPromptAppend']).toBe('USER-APPEND');
+    expect(r['systemPromptAppend']).toBe('USER-APPEND');
+    expect(c['maxTurns']).toBe(7);
+    expect(r['maxTurns']).toBe(7);
+    // …and the resumed conversation is the created one, key for key, apart
+    // from the provider-session handle a resume carries.
+    const strip = (p: Record<string, unknown>) => {
+      const { resumeProviderSessionId: _r, ...rest } = p;
+      return golden(rest, first.workDir);
+    };
+    expect(strip(r)).toBe(strip(c));
   });
 
   it('(c) orchestrator chat', async () => {

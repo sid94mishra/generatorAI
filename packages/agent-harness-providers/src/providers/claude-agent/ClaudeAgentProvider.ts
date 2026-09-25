@@ -358,6 +358,7 @@ export function sessionFingerprint(options: ClaudeOptions): string {
     allowedTools: o['allowedTools'],
     disallowedTools: o['disallowedTools'],
     skills: o['skills'],
+    plugins: o['plugins'],
     agent: o['agent'],
     agents: o['agents'],
     effort: o['effort'],
@@ -1417,6 +1418,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         mcpServers: Object.keys(mergedMcpServers).length > 0 ? mergedMcpServers : undefined,
         agents: Object.keys(agents).length > 0 ? agents : undefined,
         ...(params.skills?.length ? { skills: params.skills } : {}),
+        ...(params.plugins?.length ? { plugins: params.plugins } : {}),
         ...(params.defaultAgent && params.agentProjection === 'native' && agents[params.defaultAgent]
           ? { agent: params.defaultAgent }
           : {}),
@@ -2634,6 +2636,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // Skills — the only place Claude turns skills on. Exact names only.
     if (config.skills && config.skills.length > 0) {
       options.skills = config.skills;
+    }
+
+    // RV-7 — the session's skills, staged by the composer as ONE local plugin
+    // root. `settingSources` stays `[]`: a plugin loads its own skills only,
+    // never the repository's `.claude/settings.json` (hooks included).
+    if (config.plugins && config.plugins.length > 0) {
+      (options as Record<string, unknown>)['plugins'] = config.plugins;
     }
 
     // Main-thread agent. Replaces the base system prompt, so callers opt in

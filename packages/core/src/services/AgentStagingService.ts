@@ -12,7 +12,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { createHash } from 'node:crypto';
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, readdir, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { ILogger, ResolutionWarning, ResolvedAgentProjection } from '@generatorai/shared';
 
@@ -30,6 +30,9 @@ interface StagingManifest {
 /** Guards against a runaway skill tree filling the workspace. */
 const MAX_TOTAL_BYTES = 5 * 1024 * 1024;
 const MAX_FILES = 200;
+
+/** Name of the plugin the platform's skills are staged into (RV-7). */
+const PLUGIN_NAME = 'generatorai';
 
 export class AgentStagingService {
   constructor(private logger: ILogger) {}
@@ -144,6 +147,63 @@ export class AgentStagingService {
     const existing = await readFile(target, 'utf-8').catch(() => null);
     if (existing !== skill.content) await writeFile(target, skill.content, 'utf-8');
     return dir;
+  }
+
+  /**
+   * RV-7 — stage skills as ONE local plugin root for providers whose skills
+   * load from plugins (claude-agent `Options.plugins`):
+   * `<root>/.generatorai/plugin/{.claude-plugin/plugin.json, skills/<name>/…}`.
+   *
+   * `dirs` are skill directories (each holding `<name>/SKILL.md` folders):
+   * the agent's staged skills, platform skills, explicit ones. Every skill
+   * folder is copied in whole; a skill no longer in `dirs` is removed. Returns
+   * the plugin root and the plugin-qualified skill names (`generatorai:<name>`)
+   * the provider's skill filter expects. Idempotent.
+   */
+  async ensurePlugin(
+    workspaceRoot: string,
+    dirs: readonly string[],
+  ): Promise<{ path: string; skills: string[] }> {
+    const pluginRoot = path.join(this.stagingRoot(workspaceRoot), 'plugin');
+    const skillsDir = path.join(pluginRoot, 'skills');
+    await mkdir(path.join(pluginRoot, '.claude-plugin'), { recursive: true });
+    await mkdir(skillsDir, { recursive: true });
+    const manifest = {
+      name: PLUGIN_NAME,
+      version: '1.0.0',
+      description: 'Skills the GeneratorAI platform provides to this session',
+    };
+    const manifestPath = path.join(pluginRoot, '.claude-plugin', 'plugin.json');
+    const manifestText = `${JSON.stringify(manifest, null, 2)}
+`;
+    if ((await readFile(manifestPath, 'utf-8').catch(() => null)) !== manifestText) {
+      await writeFile(manifestPath, manifestText, 'utf-8');
+    }
+
+    const names = new Set<string>();
+    for (const dir of dirs) {
+      let entries: string[];
+      try {
+        entries = await readdir(dir);
+      } catch {
+        continue;
+      }
+      for (const name of entries) {
+        const source = path.join(dir, name);
+        const skillFile = path.join(source, 'SKILL.md');
+        if (!(await stat(skillFile).then((st) => st.isFile()).catch(() => false))) continue;
+        const safeName = name.replace(/[^a-zA-Z0-9._-]/g, '-').slice(0, 100);
+        if (!safeName || names.has(safeName)) continue;
+        names.add(safeName);
+        const target = path.join(skillsDir, safeName);
+        await rm(target, { recursive: true, force: true });
+        await cp(source, target, { recursive: true });
+      }
+    }
+    for (const existing of await readdir(skillsDir).catch(() => [] as string[])) {
+      if (!names.has(existing)) await rm(path.join(skillsDir, existing), { recursive: true, force: true });
+    }
+    return { path: pluginRoot, skills: [...names].map((n) => `${PLUGIN_NAME}:${n}`) };
   }
 
   private async readManifest(manifestPath: string): Promise<StagingManifest | null> {

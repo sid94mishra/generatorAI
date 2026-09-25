@@ -972,6 +972,22 @@ export class MultiHarness implements IAgentHarness {
    * Falls back to `capabilities()` if the conversation has no owner yet
    * (e.g. during construction before `createConversation` is called).
    */
+  /** The provider a conversation with these params routes to; never throws. */
+  async resolveProvider(params: { conversationId?: string; harnessType?: string; model?: string }): Promise<string | undefined> {
+    try {
+      return await this.resolveTarget(
+        {
+          conversationId: params.conversationId ?? '',
+          ...(params.harnessType ? { harnessType: params.harnessType } : {}),
+          ...(params.model ? { model: params.model } : {}),
+        } as CreateConversationParams,
+        this.existingOwnerFor(params.conversationId),
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
   capabilitiesFor(conversationId: string): ProviderCapabilities {
     const harnessType = this.owners.get(conversationId);
     if (!harnessType) return this.capabilities();
