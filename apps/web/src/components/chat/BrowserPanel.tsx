@@ -30,7 +30,7 @@ import {
   X, ArrowLeft, ArrowRight, RotateCw, Play, Square,
   MousePointerClick, AlertTriangle,
   Share2, Link2Off, Crop, MoreVertical, Wrench, Activity, Terminal,
-  Smartphone, RotateCcw, MessageSquare, Trash2, Send, Globe,
+  Smartphone, RotateCcw, MessageSquare, Trash, Send, Globe,
 } from 'lucide-react';
 import { Button, Input, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
@@ -1678,7 +1678,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
                       onClick={() => void clearAnnotations()}
                       className="h-6 gap-1 px-1.5 text-[11px] font-normal"
                     >
-                      <Trash2 className="h-3 w-3" /> Clear
+                      <Trash className="h-3 w-3" /> Clear
                     </Button>
                   )}
                 </div>
@@ -1722,7 +1722,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
                             aria-label="Delete this comment"
                             className="h-5 w-5 hover:text-[var(--color-danger)]"
                           >
-                            <Trash2 className="h-3 w-3" />
+                            <Trash className="h-3 w-3" />
                           </Button>
                         </div>
                       </div>

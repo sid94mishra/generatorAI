@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback } from 'react';
-import { Plus, Trash2, Eye, Edit3, ChevronUp, ChevronDown } from 'lucide-react';
+import { Plus, Trash, Eye, Edit3, ChevronUp, ChevronDown } from 'lucide-react';
 import type { PromptDefinition } from '@generatorai/shared';
 import { cn } from '@/lib/utils.js';
 import { Button, Input, Textarea } from '@/components/ui/index.js';
@@ -204,7 +204,7 @@ export function PromptEditor({ prompts, onChange, readonly, contentLabel = 'Prom
                     className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger"
                     title="Delete prompt"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               )}

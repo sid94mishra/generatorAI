@@ -7,20 +7,16 @@
 // `apps/web/src/ui/icons` maps concepts to lucide components; direct
 // `lucide-react` imports anywhere else are lint errors.
 //
-// `lucide` holds the name in the lucide-react version apps/web has INSTALLED
-// (0.460 until P1-U5). `lucide1` is set only where lucide-react 1.x renamed or
-// removed that icon, so P1-U5 can switch without re-deriving the mapping:
-// after the upgrade, `lucide1 ?? lucide` is the name (1.x keeps the old names
-// only as deprecated aliases). Checked file by file against
-// lucide-react 1.48.0 (apps/web/src/__tests__/lib/iconConcepts.test.ts checks
-// the installed version).
+// `lucide` is the lucide-react 1.x name (apps/web has 1.48; P1-U5). 1.x keeps
+// some 0.x names only as deprecated aliases (trash-2, history, file-code-2,
+// loader-2 …); the registry always names the canonical glyph, which
+// apps/web/src/__tests__/ui/iconRegistry.test.ts enforces through each
+// component's displayName.
 // ────────────────────────────────────────────────────────────────
 
 export interface IconConceptDef {
-  /** lucide icon name (kebab-case) in the installed lucide-react. */
+  /** Canonical lucide 1.x icon name (kebab-case). */
   lucide: string;
-  /** lucide 1.x name, only when it differs from `lucide`. */
-  lucide1?: string;
   /** SF Symbol name (iOS) — mobile pass. */
   sfSymbol?: string;
   /** Material Symbol name (Android) — mobile pass. */
@@ -39,7 +35,7 @@ const FOUNDATION_CONCEPTS = {
   agents: { lucide: 'bot' },
   workflows: { lucide: 'workflow' },
   automations: { lucide: 'calendar-clock' },
-  scripts: { lucide: 'file-code-2', lucide1: 'file-code-corner' },
+  scripts: { lucide: 'file-code-corner' },
   settings: { lucide: 'settings' },
   search: { lucide: 'search' },
   plus: { lucide: 'plus' },
@@ -47,7 +43,7 @@ const FOUNDATION_CONCEPTS = {
   x: { lucide: 'x' },
   check: { lucide: 'check' },
   edit: { lucide: 'pencil' },
-  trash: { lucide: 'trash-2', lucide1: 'trash' },
+  trash: { lucide: 'trash' },
   copy: { lucide: 'copy' },
   changes: { lucide: 'git-compare' },
   files: { lucide: 'files' },
@@ -61,7 +57,7 @@ const FOUNDATION_CONCEPTS = {
   commit: { lucide: 'git-commit-horizontal' },
   pr: { lucide: 'git-pull-request' },
   diff: { lucide: 'file-diff' },
-  history: { lucide: 'history', lucide1: 'rotate-ccw-clock' },
+  history: { lucide: 'rotate-ccw-clock' },
   play: { lucide: 'play' },
   stop: { lucide: 'square' },
   retry: { lucide: 'rotate-ccw' },
@@ -149,6 +145,8 @@ const UI_CONCEPTS = {
   minus: { lucide: 'minus' },
   mention: { lucide: 'at-sign' },
   pin: { lucide: 'pin' },
+  /** The Spinner glyph (P-12): the same drawing as status-running, but not a status. */
+  loader: { lucide: 'loader-circle' },
 } as const satisfies Record<string, IconConceptDef>;
 
 export const ICON_CONCEPTS = {
@@ -168,7 +166,7 @@ export function isIconConcept(value: unknown): value is IconConcept {
   return typeof value === 'string' && Object.prototype.hasOwnProperty.call(ICON_CONCEPTS, value);
 }
 
-/** The lucide name for the installed lucide-react. */
+/** The lucide 1.x name of a concept. */
 export function lucideName(concept: IconConcept): string {
   return ICON_CONCEPTS[concept].lucide;
 }

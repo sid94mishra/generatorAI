@@ -26,7 +26,7 @@ import {
   FolderTree,
   ListTree,
   RefreshCw,
-  WrapText,
+  TextWrap,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button, Select, Spinner } from '@/components/ui/index.js';
@@ -292,7 +292,7 @@ export function FilesSurface({
               onClick={() => setWrapLines((w) => !w)}
               active={wrapLines}
             >
-              <WrapText className="h-3.5 w-3.5" />
+              <TextWrap className="h-3.5 w-3.5" />
             </IconButton>
           )}
           <IconButton

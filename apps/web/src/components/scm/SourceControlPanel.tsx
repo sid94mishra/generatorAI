@@ -15,8 +15,9 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link } from 'react-router';
 import {
-  AlertTriangle, Check, ExternalLink, GitBranch, GitCommit, GitPullRequest, Github, Sparkles, X,
+  AlertTriangle, Check, ExternalLink, GitBranch, GitCommit, GitPullRequest, Sparkles, X,
 } from 'lucide-react';
+import { GitHubMark } from '@/ui/icons/vendor/VendorIcons.js';
 import {
   Button,
   Input,
@@ -281,7 +282,7 @@ export function SourceControlPanel({
               data-testid="scm-connect-github"
               className="inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border bg-card px-2 text-[10.5px] font-medium text-foreground hover:bg-subtle"
             >
-              <Github className="h-3 w-3" /> Connect GitHub
+              <GitHubMark className="h-3 w-3" /> Connect GitHub
             </Link>
           )}
         </div>
@@ -351,7 +352,7 @@ export function SourceControlPanel({
                 data-testid="scm-connect-github"
                 className="ml-auto inline-flex h-6 shrink-0 items-center gap-1 rounded-md border border-border bg-card px-2 text-[10.5px] font-medium text-foreground hover:bg-subtle"
               >
-                <Github className="h-3 w-3" /> Connect to open pull requests
+                <GitHubMark className="h-3 w-3" /> Connect to open pull requests
               </Link>
             )}
           </div>

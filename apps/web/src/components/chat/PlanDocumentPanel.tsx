@@ -13,7 +13,7 @@ import {
   Pencil,
   Save,
   X,
-  History,
+  RotateCcwClock,
   Download,
   CircleSlash,
   FileText,
@@ -255,7 +255,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
         {/* Revision switcher */}
         {plan.revisions.length > 1 && (
           <div className="mt-2 flex items-center gap-1.5">
-            <History className="h-3 w-3 flex-shrink-0 text-[var(--color-muted-foreground)]" />
+            <RotateCcwClock className="h-3 w-3 flex-shrink-0 text-[var(--color-muted-foreground)]" />
             <div className="flex flex-wrap gap-1">
               {plan.revisions.map((r) => (
                 <Button

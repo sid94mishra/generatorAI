@@ -12,7 +12,7 @@
 // answer to the question the inline cards cannot answer: "what have I got
 // outstanding, across files I may have collapsed or scrolled past?"
 
-import { MessageSquare, Send, Trash2 } from 'lucide-react';
+import { MessageSquare, Send, Trash } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button, Popover, PopoverTrigger, PopoverContent } from '@/components/ui/index.js';
 import type { ReviewThread } from '@/types/review.js';
@@ -141,7 +141,7 @@ export function ReviewCommentsPopover({
                       aria-label="Delete this comment"
                       className="hover:text-danger"
                     >
-                      <Trash2 className="h-3 w-3" />
+                      <Trash className="h-3 w-3" />
                     </Button>
                   </div>
                 </div>

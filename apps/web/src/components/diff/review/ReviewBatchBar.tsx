@@ -7,7 +7,7 @@
 // comment separately would make the agent re-plan N times.
 
 import { useState } from 'react';
-import { Eye, Send, Trash2 } from 'lucide-react';
+import { Eye, Send, Trash } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button, Textarea } from '@/components/ui/index.js';
 
@@ -88,7 +88,7 @@ export function ReviewBatchBar({
                   title="Discard all pending comments"
                   aria-label="Discard all pending comments"
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <Trash className="h-3 w-3" />
                 </Button>
               )}
               <Button

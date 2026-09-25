@@ -8,7 +8,7 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router';
 
-import { Settings, Zap, MessageSquare, GitBranch, LayoutDashboard, RefreshCw, FolderKanban, FileCode2, PanelLeftClose, Bot } from 'lucide-react';
+import { Settings, Zap, MessageSquare, GitBranch, LayoutDashboard, RefreshCw, FolderKanban, FileCodeCorner, PanelLeftClose, Bot } from 'lucide-react';
 import { Kbd, Button } from '@/components/ui/index.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
@@ -92,7 +92,7 @@ export function Sidebar() {
         {navItem('/chats', 'Chats', MessageSquare, isChatRoute)}
         {navItem('/agents', 'Agents', Bot, isAgentRoute)}
         {navItem('/workflows', 'Workflows', GitBranch, isWorkflowRoute)}
-        {navItem('/scripts', 'Scripts', FileCode2, isScriptRoute)}
+        {navItem('/scripts', 'Scripts', FileCodeCorner, isScriptRoute)}
         {navItem('/automations', 'Automations', RefreshCw, isAutomationRoute)}
       </nav>
 

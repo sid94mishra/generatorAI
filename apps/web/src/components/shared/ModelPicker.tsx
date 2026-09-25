@@ -22,7 +22,7 @@ import { ChevronDown, Check, Search, X, Lock, Info, Cpu, Eye, Globe, Gauge, Arro
 
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/index.js';
-import { ProviderBrandIcon } from './VendorIcons.js';
+import { ProviderBrandIcon } from '@/ui/icons/vendor/VendorIcons.js';
 import { useHarnessProviders } from '@/hooks/queries.js';
 import { resolveModelLimit } from '@generatorai/client-core';
 import type { ChatModel } from '@/platform/HttpPlatformClient.js';

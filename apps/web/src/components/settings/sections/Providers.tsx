@@ -20,7 +20,7 @@ import { useHarnessProviders, type HarnessProviderInfo } from '@/hooks/queries.j
 import { Button, Badge, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { SectionHeader, CatalogAccordionRow } from '../shared.js';
-import { ProviderBrandIcon } from '../BrandIcons.js';
+import { ProviderBrandIcon } from '@/ui/icons/vendor/VendorIcons.js';
 
 const PROVIDER_DESCRIPTIONS: Record<string, string> = {
   copilot: 'GitHub Copilot SDK — GPT, Claude, and Gemini models via your GitHub account.',

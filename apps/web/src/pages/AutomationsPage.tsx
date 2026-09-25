@@ -15,7 +15,7 @@ import {
   Plus,
   Play,
   Pause,
-  Trash2,
+  Trash,
   Clock,
   Webhook,
   Hand,
@@ -231,7 +231,7 @@ export function AutomationsPage() {
                     className="hover:text-danger"
                     title="Delete"
                   >
-                    <Trash2 className="h-4 w-4" />
+                    <Trash className="h-4 w-4" />
                   </Button>
                 </>
               }

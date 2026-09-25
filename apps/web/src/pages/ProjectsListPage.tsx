@@ -12,7 +12,7 @@ import {
   Search,
   FolderKanban,
   Calendar,
-  Trash2,
+  Trash,
   AlertCircle,
   LayoutGrid,
   List as ListIcon,
@@ -220,7 +220,7 @@ export function ProjectsListPage() {
                       className="hidden hover:bg-danger-muted hover:text-danger group-hover:inline-flex group-focus-within:inline-flex"
                       aria-label="Delete project"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -286,7 +286,7 @@ export function ProjectsListPage() {
                       className="hover:bg-danger-muted hover:text-danger"
                       aria-label="Delete project"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>

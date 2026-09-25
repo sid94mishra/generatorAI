@@ -12,7 +12,7 @@
 // get back?") is answered by the timeline itself.
 
 import { useMemo, useState } from 'react';
-import { History, Layers, RotateCcw, X, AlertTriangle, Check } from 'lucide-react';
+import { RotateCcwClock, Layers, RotateCcw, X, AlertTriangle, Check } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button, Spinner } from '@/components/ui/index.js';
 import {
@@ -124,7 +124,7 @@ export function CheckpointTimeline({
   return (
     <div className="flex h-full flex-col border-l border-border bg-card text-xs">
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-        <History className="h-3.5 w-3.5 text-muted-foreground" />
+        <RotateCcwClock className="h-3.5 w-3.5 text-muted-foreground" />
         <span className="font-medium text-foreground">Checkpoints</span>
         <Button
           type="button"

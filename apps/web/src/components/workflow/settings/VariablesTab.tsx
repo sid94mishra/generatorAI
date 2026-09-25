@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useState } from 'react';
-import { Plus, Trash2, ChevronDown, ChevronRight, Info } from 'lucide-react';
+import { Plus, Trash, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import type { VariableDefinition } from '@generatorai/shared';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { Button, Input, Select } from '@/components/ui/index.js';
@@ -192,7 +192,7 @@ export function VariablesTab() {
                     size="icon-sm"
                     className="h-auto w-auto rounded p-1 text-muted-foreground opacity-0 group-hover:opacity-100 hover:bg-danger-muted hover:text-danger transition-colors"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash className="h-3.5 w-3.5" />
                   </Button>
                 </div>
 
@@ -303,7 +303,7 @@ export function VariablesTab() {
                         size="sm"
                         className="h-auto flex items-center gap-1 rounded-md px-2 py-1 text-xs text-danger hover:bg-danger-muted transition-colors"
                       >
-                        <Trash2 className="h-3 w-3" />
+                        <Trash className="h-3 w-3" />
                         Delete
                       </Button>
                     </div>

@@ -23,7 +23,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle, Ban, Check, Circle, Eye, Hand, Image, KeyRound, Keyboard, MonitorCog,
-  Pause, Play, ShieldQuestion, Square, Video,
+  Pause, Play, ShieldQuestionMark, Square, Video,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/index.js';
@@ -147,7 +147,7 @@ function safeParse(raw: string): Record<string, unknown> | null {
 
 function iconFor(entry: TimelineEntry): React.ReactNode {
   if (entry.kind === 'refusal') return <Ban className="h-3.5 w-3.5 text-destructive" />;
-  if (entry.kind === 'consent') return <ShieldQuestion className="h-3.5 w-3.5 text-warning" />;
+  if (entry.kind === 'consent') return <ShieldQuestionMark className="h-3.5 w-3.5 text-warning" />;
   if (entry.action === 'snapshot') return <Eye className="h-3.5 w-3.5 text-muted-foreground" />;
   if (tookScreen(entry.path)) return <Keyboard className="h-3.5 w-3.5 text-warning" />;
   return <Hand className="h-3.5 w-3.5 text-muted-foreground" />;
@@ -906,7 +906,7 @@ export function ComputerPanel({ workspaceId, embedded, active = true }: Props): 
         {consent && (
           <div className="shrink-0 border-b border-warning/40 bg-warning/10 p-3">
             <div className="flex items-start gap-2">
-              <ShieldQuestion className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
+              <ShieldQuestionMark className="mt-0.5 h-4 w-4 shrink-0 text-warning" />
               <div className="min-w-0 flex-1">
                 <p className="text-xs font-medium text-foreground">
                   Allow <span className="font-semibold">{consent.action}</span> on{' '}

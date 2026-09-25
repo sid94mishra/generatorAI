@@ -5,7 +5,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { X, Settings2, FileText, Layers, Cpu, Zap, Variable, Shield, Bot, Server, Paperclip, Wand2, Webhook, Link2, Plus, Trash2, Brain, CheckCircle2 } from 'lucide-react';
+import { X, Settings2, FileText, Layers, Cpu, Zap, Variable, Shield, Bot, Server, Paperclip, Wand2, Webhook, Link2, Plus, Trash, Brain, CheckCircle2 } from 'lucide-react';
 import type {
   StageDefinition,
   StageCondition,
@@ -583,7 +583,7 @@ function HookEditor({
                 aria-label={`Remove ${hook.name || `hook ${idx + 1}`}`}
                 className="h-auto w-auto p-0.5 text-muted-foreground hover:bg-transparent hover:text-danger"
               >
-                <Trash2 className="h-3 w-3" />
+                <Trash className="h-3 w-3" />
               </Button>
             </div>
           </div>
@@ -739,7 +739,7 @@ function ValidationRuleEditor({
               aria-label={`Remove rule ${idx + 1}`}
               className="h-auto w-auto p-0.5 text-muted-foreground hover:bg-transparent hover:text-danger"
             >
-              <Trash2 className="h-3 w-3" />
+              <Trash className="h-3 w-3" />
             </Button>
           </div>
           <StyledSelect

@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useEffect, useMemo, useRef } from 'react';
-import { Play, AlertCircle, Upload, FileText, Trash2, FolderGit2, ChevronDown, ChevronRight, Settings2 } from 'lucide-react';
+import { Play, AlertCircle, Upload, FileText, Trash, FolderGit2, ChevronDown, ChevronRight, Settings2 } from 'lucide-react';
 import type { VariableDefinition } from '@generatorai/shared';
 import { Select, Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
@@ -614,7 +614,7 @@ function UploadSection({
               <FileText className="h-3.5 w-3.5 text-muted-foreground" />
               <span className="flex-1 truncate text-foreground">{file.name}</span>
               <Button type="button" onClick={() => removeFile(uploadCategory, i)} variant="ghost" size="icon-sm" aria-label={`Remove ${file.name}`} className="h-auto w-auto p-0 text-muted-foreground hover:bg-transparent hover:text-danger">
-                <Trash2 className="h-3 w-3" />
+                <Trash className="h-3 w-3" />
               </Button>
             </li>
           ))}

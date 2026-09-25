@@ -15,7 +15,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AlertTriangle, Download, Mic, Trash2, Volume2 } from 'lucide-react';
+import { AlertTriangle, Download, Mic, Trash, Volume2 } from 'lucide-react';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { Button, Select, Spinner, ToggleSwitch } from '@/components/ui/index.js';
 import type { AudioSettings, SpeechModelStatus } from '@/platform/HttpPlatformClient.js';
@@ -189,7 +189,7 @@ export function AudioSection() {
                 variant="secondary"
                 onClick={() => void removeModel()}
                 disabled={busy}
-                leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+                leftIcon={<Trash className="h-3.5 w-3.5" />}
               >
                 Remove model
               </Button>

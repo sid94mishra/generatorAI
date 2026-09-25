@@ -1,17 +1,16 @@
 // ────────────────────────────────────────────────────────────────
-// VendorIcons — the single source of truth for AI vendor / provider brand
-// marks across the whole app (model picker, settings, chat, anywhere else).
+// Vendor / brand marks (D-17) — the single source of truth for AI vendor,
+// provider and GitHub marks across the whole app (model picker, settings,
+// source control). lucide-react 1.x removed its brand icons, so the GitHub
+// mark lives here too.
 //
-// Before this module the same glyphs were duplicated in
-// `components/settings/BrandIcons.tsx` and `components/shared/ModelPicker.tsx`,
-// and the two had drifted apart — settings showed the Anthropic corporate "A"
-// while the picker showed a hand-rolled sunburst. We ship the Claude Code
-// mark now, because the agent provider is the Claude Agent SDK (Claude Code),
-// not the Anthropic API.
+// We ship the Claude Code mark for Claude, because the agent provider is the
+// Claude Agent SDK (Claude Code), not the Anthropic API.
 //
 // All marks are single-path, `viewBox="0 0 24 24"`, `fill="currentColor"`, so
-// they inherit text colour and can be sized with Tailwind height/width
-// classes exactly like a lucide icon.
+// they inherit text colour and size like an Icon. Brand colours are the one
+// sanctioned literal colour in TS (check-design-system hexOrRgbInTs exempts
+// this folder).
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
@@ -64,8 +63,8 @@ export function AnthropicMark({ className }: VendorIconProps): React.JSX.Element
   );
 }
 
-/** GitHub — used for the `copilot` harness provider. */
-export function GitHubCopilotMark({ className }: VendorIconProps): React.JSX.Element {
+/** GitHub's mark — "Connect GitHub" affordances and the `copilot` harness provider. */
+export function GitHubMark({ className }: VendorIconProps): React.JSX.Element {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
       <path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.52 2.87 8.35 6.84 9.71.5.1.68-.22.68-.49 0-.24-.01-.87-.01-1.71-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.63.07-.63 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.05 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.34 9.34 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.92-2.34 4.78-4.57 5.04.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z" />
@@ -111,7 +110,7 @@ export function GenericProviderMark({ className }: VendorIconProps): React.JSX.E
 export const VENDOR_ICONS = {
   'claude-code': ClaudeCodeMark,
   anthropic: AnthropicMark,
-  copilot: GitHubCopilotMark,
+  copilot: GitHubMark,
   openai: OpenAIMark,
   gemini: GeminiMark,
 } as const;
@@ -133,7 +132,7 @@ export function ProviderBrandIcon({ provider, className }: { provider: string; c
     return <ClaudeCodeMark className={className} />;
   }
   if (provider === 'anthropic') return <AnthropicMark className={className} />;
-  if (provider === 'copilot') return <GitHubCopilotMark className={className} />;
+  if (provider === 'copilot') return <GitHubMark className={className} />;
   // Codex is OpenAI's own agent, so its maker's mark is the honest one — the
   // same mapping the mobile client uses.
   if (provider === 'openai' || provider === 'codex') return <OpenAIMark className={className} />;

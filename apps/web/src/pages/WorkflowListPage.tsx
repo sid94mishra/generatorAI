@@ -10,7 +10,7 @@ import { useVirtualizer } from '@tanstack/react-virtual';
 import {
   Plus,
   GitBranch,
-  Trash2,
+  Trash,
   AlertCircle,
   LayoutGrid,
   List,
@@ -469,7 +469,7 @@ export function WorkflowListPage() {
             onClick={() => setBulkDeleteOpen(true)}
             disabled={selectedIds.size === 0 || bulkDelete.isPending}
             loading={bulkDelete.isPending}
-            leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+            leftIcon={<Trash className="h-3.5 w-3.5" />}
           >
             Delete Selected
           </Button>

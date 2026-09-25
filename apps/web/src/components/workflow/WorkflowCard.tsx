@@ -11,7 +11,7 @@ import {
   GitBranch,
   Edit3,
   Play,
-  Trash2,
+  Trash,
   Calendar,
   Clock,
   CheckSquare,
@@ -136,7 +136,7 @@ export function WorkflowCard({
               <Button onClick={onDelete} title="Delete"
                 variant="ghost" size="icon-sm"
                 className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger">
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash className="h-3.5 w-3.5" />
               </Button>
             )}
           </div>
@@ -244,7 +244,7 @@ export function WorkflowListRow({
               <Button onClick={onDelete} title="Delete"
                 variant="ghost" size="icon-sm"
                 className="h-auto w-auto rounded p-1 text-muted-foreground hover:bg-danger-muted hover:text-danger">
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash className="h-3.5 w-3.5" />
               </Button>
             )}
           </>

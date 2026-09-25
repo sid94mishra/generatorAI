@@ -16,7 +16,7 @@ import {
   Plus,
   Upload,
   Download,
-  Trash2,
+  Trash,
   AlertCircle,
   Eye,
   FileText,
@@ -292,7 +292,7 @@ export function AgentsListPage() {
                         title="Delete agent"
                         aria-label={`Delete ${agent.name}`}
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash className="h-4 w-4" />
                       </Button>
                     )}
                   </>

@@ -5,7 +5,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useEffect } from 'react';
-import { Blocks, RefreshCw, Trash2, Package } from 'lucide-react';
+import { Blocks, RefreshCw, Trash, Package } from 'lucide-react';
 import { Button, Input, Select, Badge, Switch, Spinner, ConfirmDialog } from '@/components/ui/index.js';
 import { SectionHeader, SettingsCard, SectionListHeader } from '../shared.js';
 
@@ -216,7 +216,7 @@ export function ExtensionsSection() {
                           aria-label="Uninstall extension"
                           className={isSystem ? 'invisible' : undefined}
                         >
-                          <Trash2 className="h-3.5 w-3.5 text-danger" />
+                          <Trash className="h-3.5 w-3.5 text-danger" />
                         </Button>
                       </div>
                     </div>

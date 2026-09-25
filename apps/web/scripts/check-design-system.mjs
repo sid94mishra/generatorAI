@@ -198,7 +198,7 @@ const RULES = {
     ],
     description: 'Literal colour in TS — use a design token.',
     files: TS_ONLY,
-    exempt: [/^src\/components\/shared\/VendorIcons\.tsx$/],
+    exempt: [/^src\/ui\/icons\/vendor\//], // brand colours (D-17)
   },
   lucideDirectImport: {
     patterns: [/from\s+['"]lucide-react['"]/g],

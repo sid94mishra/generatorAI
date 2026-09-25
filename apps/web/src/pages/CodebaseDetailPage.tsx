@@ -10,7 +10,7 @@ import {
   HardDrive,
   FolderOpen,
   AlertCircle,
-  Trash2,
+  Trash,
   RefreshCw,
   Globe,
   FileCode,
@@ -336,7 +336,7 @@ export function CodebaseDetailPage() {
                     className="shrink-0 hover:bg-danger-muted hover:text-danger"
                     title="Remove worktree"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               ))}

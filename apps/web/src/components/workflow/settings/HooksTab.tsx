@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { Plus, Trash2 } from 'lucide-react';
+import { Plus, Trash } from 'lucide-react';
 import type { WorkflowHookDefinition } from '@generatorai/shared';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { cn } from '@/lib/utils.js';
@@ -131,7 +131,7 @@ export function HooksTab() {
                     aria-label={`Remove ${hook.name || `hook ${idx + 1}`}`}
                     className="h-auto w-auto p-1 text-muted-foreground hover:bg-transparent hover:text-danger"
                   >
-                    <Trash2 className="h-3.5 w-3.5" />
+                    <Trash className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               </div>

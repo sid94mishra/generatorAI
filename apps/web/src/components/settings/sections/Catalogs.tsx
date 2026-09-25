@@ -13,7 +13,7 @@ import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Server, LayoutTemplate, Globe, Terminal, ChevronRight, Loader2,
-  FileText, Plus, Trash2, ArrowLeft, X, Eye, AlertTriangle,
+  FileText, Plus, Trash, ArrowLeft, X, Eye, AlertTriangle,
 } from 'lucide-react';
 import {
   useSystemArtifacts, useSystemMcpServers, useArtifactContent,
@@ -380,7 +380,7 @@ function McpRow({
 
       {onRemove && (
         <div className="pt-1.5">
-          <Button variant="ghost" size="sm" leftIcon={<Trash2 className="h-3.5 w-3.5 text-danger" />} onClick={onRemove}>
+          <Button variant="ghost" size="sm" leftIcon={<Trash className="h-3.5 w-3.5 text-danger" />} onClick={onRemove}>
             <span className="text-danger">Remove</span>
           </Button>
         </div>

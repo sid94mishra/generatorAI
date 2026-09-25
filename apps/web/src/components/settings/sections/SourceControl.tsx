@@ -13,8 +13,9 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  Github, Plus, Star, Trash2, Copy, ExternalLink, Terminal, KeyRound, CheckCircle2, AlertTriangle,
+  Plus, Star, Trash, Copy, ExternalLink, Terminal, KeyRound, CheckCircle2, AlertTriangle,
 } from 'lucide-react';
+import { GitHubMark } from '@/ui/icons/vendor/VendorIcons.js';
 import {
   useSourceControlSettings,
   useUpdateSourceControlSettings,
@@ -37,7 +38,7 @@ import type {
 
 /** How each sign-in method presents itself in the "Connect account" row. */
 const METHOD_META: Record<SourceControlAuthMethod, { label: string; icon: React.ElementType }> = {
-  device: { label: 'Sign in with GitHub', icon: Github },
+  device: { label: 'Sign in with GitHub', icon: GitHubMark },
   token: { label: 'Paste a token', icon: KeyRound },
   'gh-cli': { label: 'Use GitHub CLI', icon: Terminal },
 };
@@ -178,7 +179,7 @@ export function SourceControlSection() {
                         />
                       ) : (
                         <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-subtle">
-                          <Github className="h-4 w-4" />
+                          <GitHubMark className="h-4 w-4" />
                         </span>
                       )}
                       <div className="min-w-0 flex-1">
@@ -209,7 +210,7 @@ export function SourceControlSection() {
                         size="sm"
                         onClick={() => void handleDisconnect(account)}
                         aria-label={`Disconnect ${account.label}`}
-                        leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+                        leftIcon={<Trash className="h-3.5 w-3.5" />}
                         className="shrink-0 text-xs text-danger hover:bg-danger-muted"
                       >
                         Disconnect
@@ -406,7 +407,7 @@ function DeviceLoginPanel({ onDone }: { onDone: () => void }) {
           variant="primary"
           size="sm"
           loading={start.isPending}
-          leftIcon={<Github className="h-3.5 w-3.5" />}
+          leftIcon={<GitHubMark className="h-3.5 w-3.5" />}
           data-testid="scm-device-start"
           onClick={() => {
             start.mutate(

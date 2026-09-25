@@ -9,7 +9,7 @@ import { ReactFlowProvider } from '@xyflow/react';
 import {
   Edit3,
   Play,
-  Trash2,
+  Trash,
   Calendar,
   GitBranch,
   Clock,
@@ -317,7 +317,7 @@ export function WorkflowDefinitionPage() {
                 title="Delete workflow"
                 aria-label="Delete workflow"
               >
-                <Trash2 className="h-3.5 w-3.5" />
+                <Trash className="h-3.5 w-3.5" />
               </Button>
             </div>
 
@@ -336,7 +336,7 @@ export function WorkflowDefinitionPage() {
                     onClick={() => navigate(`/workflows/${id}/edit`)}
                   />
                   <MenuItem
-                    icon={<Trash2 className="h-3.5 w-3.5" />}
+                    icon={<Trash className="h-3.5 w-3.5" />}
                     label="Delete workflow"
                     onClick={handleDelete}
                     destructive

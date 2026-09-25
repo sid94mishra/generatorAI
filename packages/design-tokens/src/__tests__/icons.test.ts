@@ -47,15 +47,19 @@ describe('ICON_CONCEPTS (D-17, 02 §9)', () => {
     expect(Object.keys(ICON_CONCEPTS).length).toBeGreaterThanOrEqual(48 + 8 + 50);
   });
 
-  it('uses kebab-case lucide names, empty mobile slots, and only real 1.x renames', () => {
+  it('uses kebab-case lucide 1.x names and empty mobile slots', () => {
     for (const [concept, def] of Object.entries(ICON_CONCEPTS) as Array<[IconConcept, (typeof ICON_CONCEPTS)[IconConcept]]>) {
       expect(def.lucide, concept).toMatch(KEBAB);
-      if ('lucide1' in def) {
-        expect(def.lucide1, concept).toMatch(KEBAB);
-        expect(def.lucide1, concept).not.toBe(def.lucide);
-      }
-      expect('sfSymbol' in def || 'material' in def, concept).toBe(false);
+      expect(Object.keys(def), concept).toEqual(['lucide']);
     }
+    // The three lucide 1.x renames (canonical names, not the deprecated aliases).
+    expect(lucideName('scripts')).toBe('file-code-corner');
+    expect(lucideName('trash')).toBe('trash');
+    expect(lucideName('history')).toBe('rotate-ccw-clock');
+  });
+
+  it('has the Spinner loader concept', () => {
+    expect(lucideName('loader')).toBe('loader-circle');
   });
 
   it('isIconConcept rejects non-concepts', () => {

@@ -90,7 +90,7 @@ New rules. Regexes are JavaScript. Today's counts were measured with these exact
 | `varInClassString` | `/\[(?:[\w-]+:)?var\(--\|-\(--[\w-]+\)/g` (v3 `-[var(--x)]` and v4 `-(--x)` forms) | `ui/lib/**` (D-43) | 1,419 |
 | `legacyColorVar` | `/var\(--color-[\w-]+\)/g` (in `.ts/.tsx`; the `.css` layer is exempt) | — | 1,487 |
 | `legacyTokenUtility` | built at runtime: `(?<![\w-])(?:bg\|text\|border\|ring\|fill\|stroke\|outline\|divide\|from\|to\|via\|shadow\|accent\|caret\|decoration\|placeholder)-(?:<legacy names>)(?:\/\d+)?(?![\w-])`. `<legacy names>` is read from `packages/design-tokens` (P1 exports `LEGACY_UTILITY_NAMES`; until then, parse the `--color-*` keys of the legacy `@theme inline` block in `globals.css` and subtract the D-08 design names). | — | measure in P1 |
-| `hexOrRgbInTs` | `/(?<![&\w])#(?:[0-9a-fA-F]{8}\|[0-9a-fA-F]{6}\|[0-9a-fA-F]{3,4})(?![\w-])/g` plus `/\b(?:rgba?\|hsla?\|oklch\|oklab)\(/g`, `.ts/.tsx` only | `components/shared/VendorIcons.tsx` (brand colours) | 30 |
+| `hexOrRgbInTs` | `/(?<![&\w])#(?:[0-9a-fA-F]{8}\|[0-9a-fA-F]{6}\|[0-9a-fA-F]{3,4})(?![\w-])/g` plus `/\b(?:rgba?\|hsla?\|oklch\|oklab)\(/g`, `.ts/.tsx` only | `src/ui/icons/vendor/**` (brand colours) | 30 |
 | `lucideDirectImport` | `/from\s+['"]lucide-react['"]/g` | `src/ui/icons/**` | 135 |
 | `rawHeadlessImport` | `/from\s+['"](?:@radix-ui\/[\w-]+\|radix-ui\|@base-ui(?:-components)?\/react[\w/-]*\|cmdk)['"]/g` | `src/ui/**`, legacy `src/components/ui/**` | 2 |
 | `unstyledVariant` | `/variant=["']unstyled["']\|variant:\s*['"]unstyled['"]/g` | — | 42 |

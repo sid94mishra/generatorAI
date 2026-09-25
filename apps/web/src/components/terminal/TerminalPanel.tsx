@@ -29,7 +29,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Terminal as TerminalIcon,
-  Trash2,
+  Trash,
   Eraser,
   Search,
   Send,
@@ -740,7 +740,7 @@ export function TerminalPanel({
           title="Kill the terminal process"
           aria-label="Kill the terminal process"
         >
-          <Trash2 className="h-3 w-3" />
+          <Trash className="h-3 w-3" />
         </Button>
       </div>
 

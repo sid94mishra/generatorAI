@@ -20,7 +20,7 @@ import {
   MessageSquare,
   Pencil,
   Send,
-  Trash2,
+  Trash,
   X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
@@ -194,7 +194,7 @@ export function ReviewThreadCard({
                   onClick={() => onDelete(thread.id)}
                   className="h-5 w-5 rounded hover:bg-accent-tint hover:text-danger"
                 >
-                  <Trash2 className="h-3 w-3" />
+                  <Trash className="h-3 w-3" />
                 </Button>
               )}
             </div>

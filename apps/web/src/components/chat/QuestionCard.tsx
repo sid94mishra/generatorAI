@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo, useState } from 'react';
-import { HelpCircle, Check, AlertTriangle, Send, ChevronLeft, ChevronRight } from 'lucide-react';
+import { CircleQuestionMark, Check, AlertTriangle, Send, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button, Input } from '@/components/ui/index.js';
 import { MarkdownRenderer } from './MarkdownRenderer.js';
@@ -116,7 +116,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
     >
       <div className="flex items-center gap-2 border-b border-[var(--color-border)]/60 px-3 py-2">
         <span className="flex h-6 w-6 items-center justify-center rounded-md bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
-          <HelpCircle className="h-3.5 w-3.5" />
+          <CircleQuestionMark className="h-3.5 w-3.5" />
         </span>
         <span className="text-xs font-medium text-[var(--color-foreground)]">
           {isAnswerable

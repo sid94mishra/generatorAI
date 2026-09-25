@@ -14,7 +14,7 @@ import {
   FileText,
   AlertCircle,
   Plus,
-  Trash2,
+  Trash,
   RefreshCw,
   Upload,
   X,
@@ -449,7 +449,7 @@ export function ProjectDetailPage() {
             variant="danger"
             size="sm"
             onClick={() => setShowDeleteProject(true)}
-            leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+            leftIcon={<Trash className="h-3.5 w-3.5" />}
           >
             Delete
           </Button>
@@ -678,7 +678,7 @@ export function ProjectDetailPage() {
                       className="hover:bg-danger-muted hover:text-danger"
                       title="Delete codebase"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -942,7 +942,7 @@ function ProjectArtifactCatalog({
                 </div>
                 <div className="mt-2.5 flex items-center justify-end gap-2">
                   {a.source === 'project' && (
-                    <Button variant="ghost" size="sm" leftIcon={<Trash2 className="h-3.5 w-3.5 text-danger" />} onClick={() => onDelete(a)}>
+                    <Button variant="ghost" size="sm" leftIcon={<Trash className="h-3.5 w-3.5 text-danger" />} onClick={() => onDelete(a)}>
                       <span className="text-danger">Delete</span>
                     </Button>
                   )}
@@ -1107,7 +1107,7 @@ function ProjectMcpCatalog({
                   <div className="flex gap-2"><span className="w-20 shrink-0 text-muted-foreground">Source</span><span className="text-foreground">{src}</span></div>
                   {src === 'project' && (
                     <div className="pt-1">
-                      <Button variant="ghost" size="sm" leftIcon={<Trash2 className="h-3.5 w-3.5 text-danger" />} onClick={() => setDeleteId(srv.id)}>
+                      <Button variant="ghost" size="sm" leftIcon={<Trash className="h-3.5 w-3.5 text-danger" />} onClick={() => setDeleteId(srv.id)}>
                         <span className="text-danger">Remove</span>
                       </Button>
                     </div>

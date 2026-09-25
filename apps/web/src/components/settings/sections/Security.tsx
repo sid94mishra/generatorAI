@@ -14,7 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ShieldCheck, ShieldAlert, Smartphone, Monitor, Terminal as TerminalIcon,
-  Globe, Trash2, RefreshCw, Copy, Check, QrCode, KeyRound, AlertTriangle,
+  Globe, Trash, RefreshCw, Copy, Check, QrCode, KeyRound, AlertTriangle,
 } from 'lucide-react';
 import { SectionHeader, SettingsCard, InfoRow } from '../shared.js';
 import { ToggleSwitch, useConfirm, Button, Input, Spinner } from '@/components/ui/index.js';
@@ -735,7 +735,7 @@ export function SecuritySection() {
                       }}
                       className="rounded-md border border-border text-muted-foreground hover:border-destructive/50 hover:bg-transparent hover:text-destructive"
                     >
-                      <Trash2 className="h-3.5 w-3.5" />
+                      <Trash className="h-3.5 w-3.5" />
                     </Button>
                   </div>
                 </div>
@@ -1344,7 +1344,7 @@ export function SecuritySection() {
                     onClick={() => void revokeDevice(d.deviceId, d.name)}
                     title="Revoke this device"
                     className="shrink-0 hover:border-destructive/50 hover:bg-destructive/5 hover:text-destructive"
-                    leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+                    leftIcon={<Trash className="h-3.5 w-3.5" />}
                   >
                     Revoke
                   </Button>

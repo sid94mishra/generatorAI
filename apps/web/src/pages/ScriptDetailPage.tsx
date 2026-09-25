@@ -5,7 +5,7 @@
 import React, { useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
 import {
-  FileCode2,
+  FileCodeCorner,
   Play,
   Layers,
   ArrowLeft,
@@ -84,7 +84,7 @@ export function ScriptDetailPage() {
             >
               <ArrowLeft className="w-5 h-5" />
             </Button>
-            <FileCode2 className="w-6 h-6 text-primary" />
+            <FileCodeCorner className="w-6 h-6 text-primary" />
           </div>
         }
         title={metadata.name}

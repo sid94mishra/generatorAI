@@ -540,7 +540,7 @@ export const ICON_CONCEPTS = { home: { lucide: 'house' }, /* … */ } as const s
 export type IconConcept = keyof typeof ICON_CONCEPTS;
 ```
 
-`sfSymbol` / `material` stay empty (filled in the mobile pass). `apps/web/src/ui/icons/registry.ts` maps each concept to an imported lucide component with `satisfies Record<IconConcept, LucideIcon>`. A test asserts `kebab(Component.displayName) === ICON_CONCEPTS[c].lucide` for every concept, which fails if a lucide 1.x rename was missed. Names below were resolved by matching the boards' SVG path data against lucide-react 0.460's icon nodes (the only lucide installed); the React component is the PascalCase form.
+`sfSymbol` / `material` stay empty (filled in the mobile pass). `apps/web/src/ui/icons/registry.ts` maps each concept to an imported lucide component with `satisfies Record<IconConcept, LucideIcon>`. A test asserts `kebab(Component.displayName) === ICON_CONCEPTS[c].lucide` for every concept, which fails if a lucide 1.x rename was missed. Names below were resolved by matching the boards' SVG path data against lucide-react 0.460's icon nodes, then switched to the canonical lucide-react 1.x names in P1-U5 (1.48; the 0.x names survive only as aliases, which the displayName test rejects); the React component is the PascalCase form.
 
 **Foundations registry (48 concepts; D-17 says 49, the board draws 48):**
 
@@ -548,14 +548,14 @@ export type IconConcept = keyof typeof ICON_CONCEPTS;
 |---|---|---|---|---|---|
 | home | `house` | chats | `message-square` | projects | `folder` |
 | agents | `bot` | workflows | `workflow` | automations | `calendar-clock` |
-| scripts | `file-code-2` ⚠ | settings | `settings` | search | `search` |
+| scripts | `file-code-corner` | settings | `settings` | search | `search` |
 | plus | `plus` | more | `ellipsis` | x | `x` |
-| check | `check` | edit | `pencil` | trash | `trash-2` |
+| check | `check` | edit | `pencil` | trash | `trash` |
 | copy | `copy` | changes | `git-compare` | files | `files` |
 | terminal | `square-terminal` | browser | `globe` | tasks | `list-tree` |
 | computer | `monitor` | plan | `list-checks` | widgets | `layout-grid` (same paths as `layout-dashboard` in 0.460; use `layout-grid`) |
 | branch | `git-branch` | commit | `git-commit-horizontal` | pr | `git-pull-request` |
-| diff | `file-diff` ⚠ | history | `history` | play | `play` |
+| diff | `file-diff` | history | `rotate-ccw-clock` | play | `play` |
 | stop | `square` | retry | `rotate-ccw` | send | `arrow-up` |
 | attach | `paperclip` | mic | `mic` | skills | `book-open` |
 | mcp | `plug` | hook | `anchor` | variable | `variable` |
@@ -567,7 +567,7 @@ export type IconConcept = keyof typeof ICON_CONCEPTS;
 
 **UI concepts used on the boards but missing from the Foundations list** (count = uses across the 60 boards): `chevron-down` (302), `chevron-right` (67), `chevron-up` (12), `chevron-left` (8), `sidebar` → `panel-left` (56), `dock` → `panel-right` (28), `maximize` → `maximize-2` (37), `shield` → `shield-check` (39), `file` (38), `folder-open` (27), `file-text` (19), `refresh` → `refresh-cw` (23), `forward` → `arrow-right` (23), `back` → `arrow-left` (10), `undo` → `undo-2` (16), `redo` → `redo-2` (9), `restart` → `rotate-cw` (11), `view` → `eye` (14), `upload` (14), `download` (4), `save` (11), `tool` → `wrench` (11), `scan` (11), `external-link` (10), `model` → `cpu` (10), `message` → `message-square-text` (10), `pointer` → `mouse-pointer-2` (9), `zoom-in` (9), `zoom-out` (9), `layers` (8), `archive` (7), `users` (7), `calendar` (7), `sort` → `arrow-up-down` (6), `link` (6), `camera` (6), `list` (5), `database` (5), `activity` (5), `zap` (5), `pause` (4), `tag` (4), `user` (4), `device` → `smartphone` (4), `mode-light` → `sun`, `mode-dark` → `moon`, `mode-system` → `monitor` (replaces `ModeDef.icon` in `registry.ts:24`), `power` (3), `more-vertical` → `ellipsis-vertical` (2), `minus` (1), `mention` → `at-sign` (1), `pin` (1).
 
-⚠ = rename risk in lucide 1.x (`file-code-2` and `file-diff` are the names most likely renamed upstream; if the 1.x package lacks them, pick the 1.x name whose path data matches the board SVG and update this table). The `Github` brand icon is removed in lucide 1.x; its ~9 uses move to `components/shared/VendorIcons.tsx` (D-17).
+lucide 1.x renamed three registry glyphs (0.460 `file-code-2` → `file-code-corner`, `trash-2` → `trash`, `history` → `rotate-ccw-clock`; same drawings). The `Github` brand icon is removed in lucide 1.x; its uses render `GitHubMark` from `apps/web/src/ui/icons/vendor/VendorIcons.tsx`, the home of every brand mark (D-17). The Spinner (P-12) draws the `loader` concept (`loader-circle`, the same glyph as `status-running`).
 
 ---
 

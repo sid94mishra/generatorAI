@@ -11,7 +11,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useState } from 'react';
-import { AlertTriangle, Trash2 } from 'lucide-react';
+import { AlertTriangle, Trash } from 'lucide-react';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { Button, Spinner, ToggleSwitch } from '@/components/ui/index.js';
 import type { WorkspaceRetentionSettings } from '@/platform/HttpPlatformClient.js';
@@ -151,7 +151,7 @@ export function WorkspaceRetentionSection() {
                   onClick={() => void runNow()}
                   disabled={saving}
                   loading={saving}
-                  leftIcon={<Trash2 className="h-3.5 w-3.5" />}
+                  leftIcon={<Trash className="h-3.5 w-3.5" />}
                 >
                   Clean up now
                 </Button>

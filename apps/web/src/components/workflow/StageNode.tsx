@@ -6,7 +6,7 @@
 import React, { memo, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { Node } from '@xyflow/react';
-import { Box, Play, Pause, Check, X, AlertTriangle, SkipForward, Clock, Copy, Trash2, Cpu, Sparkles, Server, ShieldCheck, Bot } from 'lucide-react';
+import { Box, Play, Pause, Check, X, AlertTriangle, SkipForward, Clock, Copy, Trash, Cpu, Sparkles, Server, ShieldCheck, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { Button } from '@/components/ui/index.js';
@@ -191,7 +191,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
               aria-label="Delete stage"
               className="h-auto w-auto rounded-lg p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-red-100 hover:text-red-600 dark:hover:bg-red-900/30"
             >
-              <Trash2 className="h-3.5 w-3.5" />
+              <Trash className="h-3.5 w-3.5" />
             </Button>
           </Tooltip>
         </div>}

@@ -13,7 +13,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useState } from 'react';
-import { History, Loader2 } from 'lucide-react';
+import { RotateCcwClock, Loader2 } from 'lucide-react';
 import { Popover, PopoverContent, PopoverTrigger, Tooltip, Button } from '@/components/ui/index.js';
 import { toast } from '@/components/Toast.js';
 import { useRewindChat } from '@/hooks/queries.js';
@@ -134,7 +134,7 @@ export function RewindMenu({ chatId, turnId, workspaceId, canRewind, className }
       {rewind.isPending ? (
         <Loader2 className="h-3.5 w-3.5 animate-spin" />
       ) : (
-        <History className="h-3.5 w-3.5" />
+        <RotateCcwClock className="h-3.5 w-3.5" />
       )}
     </Button>
   );

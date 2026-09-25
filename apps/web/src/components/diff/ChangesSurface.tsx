@@ -26,7 +26,7 @@ import {
   GitBranch,
   GitCommit,
   GitPullRequest,
-  History,
+  RotateCcwClock,
   ListTree,
   MessageSquare,
   RefreshCw,
@@ -1500,7 +1500,7 @@ export function ChangesSurface({
             onClick={onOpenCheckpoints ?? (() => setShowCheckpoints((v) => !v))}
             active={showCheckpoints}
           >
-            <History className="h-3.5 w-3.5" />
+            <RotateCcwClock className="h-3.5 w-3.5" />
           </IconButton>
           <IconButton
             title="Refresh"

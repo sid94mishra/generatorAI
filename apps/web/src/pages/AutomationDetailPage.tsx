@@ -17,7 +17,7 @@ import {
 import {
   ArrowLeft,
   Play,
-  Trash2,
+  Trash,
   Clock,
   Webhook,
   Hand,
@@ -177,7 +177,7 @@ export function AutomationDetailPage() {
                 aria-label="Delete automation"
                 onClick={() => setDeleteOpen(true)}
               >
-                <Trash2 className="h-4 w-4" />
+                <Trash className="h-4 w-4" />
               </Button>
             </>
           }

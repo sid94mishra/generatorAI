@@ -11,7 +11,7 @@ import {
   FolderKanban,
   MessageSquare,
   GitBranch,
-  FileCode2,
+  FileCodeCorner,
   RefreshCw,
   Settings,
   Plus,
@@ -37,7 +37,7 @@ const NAV_ITEMS: { label: string; path: string; icon: React.ElementType }[] = [
   { label: 'Chats', path: '/chats', icon: MessageSquare },
   { label: 'Agents', path: '/agents', icon: Bot },
   { label: 'Workflows', path: '/workflows', icon: GitBranch },
-  { label: 'Scripts', path: '/scripts', icon: FileCode2 },
+  { label: 'Scripts', path: '/scripts', icon: FileCodeCorner },
   { label: 'Automations', path: '/automations', icon: RefreshCw },
 ];
 

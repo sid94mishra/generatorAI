@@ -10,7 +10,8 @@
 
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { AlertTriangle, GitPullRequest, Github } from 'lucide-react';
+import { AlertTriangle, GitPullRequest } from 'lucide-react';
+import { GitHubMark } from '@/ui/icons/vendor/VendorIcons.js';
 import { useProjectPullRequests } from '@/hooks/queries.js';
 import { Badge, Spinner, Tabs, type BadgeTone, Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
@@ -122,7 +123,7 @@ export function ProjectPullRequestsTab({ projectId }: { projectId: string | unde
                       className="inline-flex shrink-0 items-center gap-1 rounded-md border border-border px-2 py-0.5 text-[11px] font-medium text-foreground hover:bg-subtle"
                       data-testid="pr-connect-github"
                     >
-                      <Github className="h-3 w-3" /> Connect GitHub
+                      <GitHubMark className="h-3 w-3" /> Connect GitHub
                     </Link>
                   )}
                 </li>

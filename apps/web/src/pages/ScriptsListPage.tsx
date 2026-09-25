@@ -5,7 +5,7 @@
 import React, { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
-  FileCode2,
+  FileCodeCorner,
   Play,
   RefreshCw,
   AlertCircle,
@@ -98,7 +98,7 @@ export function ScriptsListPage() {
       {/* Grid */}
       {filtered.length === 0 ? (
         <EmptyState
-          icon={<FileCode2 className="h-12 w-12" />}
+          icon={<FileCodeCorner className="h-12 w-12" />}
           title={search ? 'No scripts match your search' : 'No workflow scripts found'}
           hint="Place .workflow.mjs files in templates/scripts/ to define programmatic workflows"
         />
@@ -107,7 +107,7 @@ export function ScriptsListPage() {
           {filtered.map((script: ScriptListItem) => (
             <EntityCard
               key={script.id}
-              icon={<FileCode2 className="w-5 h-5" />}
+              icon={<FileCodeCorner className="w-5 h-5" />}
               title={script.name}
               description={script.description}
               onClick={() => navigate(`/scripts/${script.id}`)}

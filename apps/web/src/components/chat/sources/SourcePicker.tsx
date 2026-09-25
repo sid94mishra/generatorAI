@@ -22,7 +22,7 @@ import {
   FolderPlus,
   GitBranch,
   Home,
-  Trash2,
+  Trash,
   TriangleAlert,
 } from 'lucide-react';
 import { Badge, Button, Checkbox, Input, Select, Spinner, Tooltip } from '@/components/ui/index.js';
@@ -477,7 +477,7 @@ function SourceRow({
             title="Remove this source"
             aria-label={`Remove ${draft.alias}`}
           >
-            <Trash2 className="h-3 w-3" />
+            <Trash className="h-3 w-3" />
           </Button>
         </div>
       </div>

@@ -6,7 +6,7 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { ArrowLeft, FolderKanban, FolderOpen, Plus, Trash2, GitBranch } from 'lucide-react';
+import { ArrowLeft, FolderKanban, FolderOpen, Plus, Trash, GitBranch } from 'lucide-react';
 import { useCreateProject, useLinkCodebase } from '@/hooks/projectQueries.js';
 import { toast } from '@/components/Toast.js';
 import { Select, Button, Input, Textarea, PageHeader } from '@/components/ui/index.js';
@@ -212,7 +212,7 @@ export function CreateProjectPage() {
                       onClick={() => setRepos((cur) => cur.filter((x) => x.id !== r.id))}
                       aria-label="Remove repository"
                     >
-                      <Trash2 className="h-3.5 w-3.5 text-danger" />
+                      <Trash className="h-3.5 w-3.5 text-danger" />
                     </Button>
                   </div>
                   <div className="grid grid-cols-2 gap-3">
