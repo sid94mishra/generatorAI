@@ -156,3 +156,91 @@ Landed in one commit, `redesign(P0-fix): address P0 review round 1`.
 | **P0-R15** | `desktop-diff-review-smoke.mjs` records `renderer paired with its embedded server` as a check, so a pairing failure makes the smoke exit 1. `desktop-diff-render-check.mjs` prints FAIL and exits 1 when pairing fails. The smokes were not run (as instructed) and pass `node --check`. The catalog-test skip was already surfaced in BASELINE's End-of-P0 section. `07-phases.md` P2-00 now requires the fake provider to report `ready` in `/harness/providers` and the CI e2e server to enable it, so the catalog test runs in CI (plan note only). |
 
 **Verification after the fixes:** web typecheck; `pnpm turbo lint --force` plus check:security/durability/docs/syncio/tokens; `check:design --strict` (OK, literalInlineStyle info 39); web tests; the rails tests (33/33 with copySecretsDir); web build, `check:bundle` and `check:css` (OK); `render-boards --only=Home` (2 rendered, 0 failed); `side-by-side` on Home (fresh PNG reused, compare written). I did not run the e2e suite or the desktop smokes. After the run, `git status` showed only the intended files, and no probe or fixture files remained in the tree.
+
+---
+
+## Round 2 review
+
+- **Range:** `91448cf..HEAD` (fix commit `5386d18`) on `desktop_redesign`.
+- **Date:** 2026-09-25 · macOS arm64 · reviewer: fresh independent adversarial pass (read-only apart from this section).
+
+### Commands
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @generatorai/web typecheck` | green |
+| `pnpm turbo lint --force` | 26/26 tasks, **0 cached**, 0 errors (web 311 warnings, unchanged) |
+| `pnpm --filter @generatorai/web check:design --strict` | OK; `literalInlineStyle` info 39, `radixOverlaySelector` info 3, storiesPresent ok |
+| `pnpm --filter @generatorai/web test` | 69 files / 650 tests passed |
+| `pnpm exec vitest run --project node scripts/__tests__` | 2 files / 33 tests passed (rails 28, about 1.5 s); no `rails-*` dirs left in `$TMPDIR` |
+| `pnpm --filter @generatorai/web build && check:bundle && check:css` | build ok; 309.5 KB gzip / 800 KB OK; check-css 3 stylesheets, 51 vars, OK |
+
+### Round-1 fixes re-verified
+
+- **R1:** I extracted the "Start server and web dev server" step from `ci.yml` with a YAML parser (`bash -n` OK) and ran it with the web part removed, using `RUNNER_TEMP` in a temp dir and `SERVER_PORT=3377`. The server listened on 3377, `WIDGET_PORT` on 3378 (the env reaches the server), and the D-44 grep matched `"dbPath":"<state>/e2e.db"`. The server was then stopped. **Fixed.**
+- **R2:** real-tree `lintText` probes. `src/services/api.ts` and `src/assets/logo.ts` fail `boundaries/no-unknown-files`. `vite-env.d.ts`, `test-env.d.ts`, `main.tsx`, `router.tsx` and `src/__tests__` lint without errors, and `App.tsx` → `../package.json` (outside `include`) passes. **Fixed**, with no false positives on today's files.
+- **R3:** the shadcn `function Button` … `export { Button, buttonVariants }` shape is detected (a rails test covers it). **Fixed.**
+- **R5:** features → `@tanstack/react-query` (including `useQueryClient`), `@/providers/PlatformProvider` and `../../providers/PlatformProvider` fail. `import { type QueryClient }` passes. `no-restricted-imports` matches the literal specifier, so the relative bans are not affected by Windows path separators. New issues in R16 and R17.
+- **R7:** in a temp git copy of `apps/web`, one added `text-xs` in `ChatInput.tsx` (11 hits) printed the summary line and then only `ChatInput.tsx:40` under "hits on lines changed since HEAD". **Fixed.**
+- **R8:** in a temp copy of `dist/assets` with every real `--font-sans` definition removed (only `--font-sans:var(--font-sans)` left), check-css now fails with `--font-sans is not defined`. **Fixed.**
+- **R9:** `node <symlink-to-repo>/apps/web/scripts/check-stories.mjs` prints OK, and `render-boards.mjs --only=NoSuchBoard` through the symlink fails as it should. **Fixed.**
+- **R11:** the turbo dry run lists `../../eslint.config.mjs` in the web lint inputs. The inputs are set at task level, so every package's lint gets them. **Fixed.**
+- **R12:** the new-folder messages point at `@/ui/primitives` / `@/ui/icons`; `ui/primitives/**` and stories are exempt; `blocks/` → `Loader2` fails with the D-17 message. **Fixed.**
+- **R4:** the rails step runs in `build-and-test` on all three OSes (Ubuntu only on PRs). Fixtures live under `os.tmpdir()`, the tests use no shell and take about 1.5 s. Gaps in R20 and R21.
+- **R13/R14/R15, docs:** D-41…D-45 are in order at the end of §E; README table fixed and "D-01…D-45"; `09` supersession notes present; CLAUDE.md is 82 lines; the COORDINATION row was rewritten; the smokes now fail on pairing. The remaining drift is in R22.
+
+### Critical
+
+None.
+
+### Major
+
+#### P0-R16 — The features ban on `@generatorai/client-*` values blocks the shared pure logic that CLAUDE.md sends to client-core
+- **Where:** `eslint.config.mjs:85-89` (`FEATURES_DATA`, the `@generatorai/client-*` group); conflicts with `.claude/CLAUDE.md:20` ("Shared concepts … → packages/shared or client-core first") and D-40 ("share … logic").
+- **Evidence:** `packages/client-core/src/index.ts` describes the package as "platform-agnostic client logic". Its value exports are pure: `runTitle`, `parseUnifiedDiff`, `formatTranscriptMarkdown`, `parseInlineToolCalls`, `encodeStageOverrides`, `resolveModelLimit`, `STOP_ARMING_MS`, `StopController`, `toEpochMs`, and `ApiError` (needed for `instanceof`). Today 13 legacy files in `components/`/`pages/` import these values. When P3/P4 move chat, runs and diff into `features/`, each of those imports becomes a lint **error**. Sessions will then write re-export shims in `hooks/`, which D-02 forbids, or move logic out of the package CLAUDE.md tells them to use. Without the platform client or react-query, client-core cannot fetch anything, so the ban adds no data-layer protection. (Round 1's R5 fix suggested this group, and the fix applied it as written.)
+- **Fix:** drop `@generatorai/client-core` from the group and keep `@generatorai/client-runtime` / `@generatorai/client-transport`. If the raw request helpers must stay out of features, restrict only them: `{ group: ['@generatorai/client-core'], importNames: ['request', 'requestAllowing', 'requestText'], … }`. Add a rails case: features → `import { runTitle } from '@generatorai/client-core'` passes. Update D-43 and CLAUDE.md "Layers".
+
+### Minor
+
+#### P0-R17 — Features can still get the query client from `@/providers/QueryProvider`
+- **Where:** `eslint.config.mjs:79-95`; `apps/web/src/providers/QueryProvider.tsx:190` (`export { queryClient }`).
+- **Evidence:** the probe `features/alpha/X.tsx`: `import { queryClient } from '@/providers/QueryProvider'; queryClient.invalidateQueries()` produces **no error**. That bypasses the react-query ban that D-43 and CLAUDE.md call lint-enforced. The PlatformProvider ban also matches specifier spellings only, so `@/providers/PlatformProvider.js` (which TS bundler resolution and Vite resolve to the `.tsx`) is not caught.
+- **Fix:** add `{ group: ['@/providers/QueryProvider', '**/providers/QueryProvider'], importNames: ['queryClient'], message: … }`. Better, express both bans as resolver-based `boundaries/dependencies` policies on the target files (`file.path: apps/web/src/providers/{PlatformProvider,QueryProvider}.tsx`, value imports only), so every spelling of the specifier is caught. Add rails cases for both.
+
+#### P0-R18 — The sanctioned `ui/lib` arbitrary-value exemption cannot be used: `varInClassString` hard-zeros it
+- **Where:** `apps/web/scripts/check-design-system.mjs:191-194` (no `exempt`); `09-verification.md` §2.1 table (`varInClassString` exempt "—"); `eslint.config.mjs:235-248`. This predates the fix commit, which re-edited this exemption without catching it.
+- **Evidence:** Base UI passthroughs are CSS-variable classes by nature. The probe `src/ui/lib/overlay.ts`: `'origin-[var(--transform-origin)] max-h-(--available-height)'` (with a comment) passes ESLint but fails the ratchet twice (`varInClassString: 2 in src/{ui,blocks,features,app} (must be 0)`). The shadcn Base UI templates for Menu, Select, Popover and Tooltip, which P1 seeds, use exactly these classes. The tools contradict each other again (the class of problem R6/D-45 was meant to close), and the ratchet's message ("use the design utility that maps the token") names a utility that does not exist.
+- **Fix:** exempt `^src/ui/lib/` from `varInClassString` as well (matching the 09 wording "for Radix/Base UI CSS-variable passthroughs"). Or decide that passthroughs are `@utility` rules in `src/styles` and drop the `ui/lib` exemption from both tools. Record the choice in D-43 and add a rails case.
+
+#### P0-R19 — Tests under `ui/` are not exempt, although D-45 says "Tests stay exempt from everything"
+- **Where:** `eslint.config.mjs:364-378` (the `ui/**` and `ui/icons/**` `no-restricted-imports` blocks have no `WEB_TEST_FILES` ignore).
+- **Evidence:** the probe `ui/__tests__/X.test.tsx` importing `lucide-react` and `@/stores/sseManager` produces 2 errors. The same imports in `features/alpha/__tests__/X.test.tsx` pass.
+- **Fix:** add `ignores: WEB_TEST_FILES` to the ui block (keeping `ui/icons/**`) and to the icons block, or narrow the D-45 sentence.
+
+#### P0-R20 — The rails ESLint tests override the settings most likely to regress
+- **Where:** `scripts/__tests__/redesign-rails.test.mjs:209-218`.
+- **Evidence:** every layer probe replaces `boundaries/root-path` and `import/resolver.typescript.project`. A regression in the real config's own values would not be caught: for example, pointing the resolver back at `tsconfig.json` (the references bug D-43 records, where every `@/` import escaped the layer rules) or a wrong `REPO_ROOT`. Real `pnpm lint` stays green in that case too, because nothing then fails.
+- **Fix:** add one probe with no overrides: `new ESLint({ cwd: REPO })`, `lintText` a virtual `apps/web/src/ui/X.tsx` that imports the real `@/stores/sseManager`, and expect `boundaries/dependencies`. This takes under a second.
+
+#### P0-R21 — Windows risk (unverified): the fixture root uses the JS `realpathSync`, which keeps 8.3 short names
+- **Where:** `scripts/__tests__/redesign-rails.test.mjs:23-28`.
+- **Evidence:** on GitHub Windows runners, `os.tmpdir()` is `C:\Users\RUNNER~1\AppData\Local\Temp`. `fs.realpathSync` (the JS implementation) does not expand short names; `fs.realpathSync.native` does. The comment on that line says the resolver returns canonical paths (that is why the realpath call exists for macOS `/var`). If unrs-resolver canonicalizes to the long `runneradmin` form on Windows, resolved targets fall outside `root-path`, and every "fails" case in the ESLint suite fails on the push-only Windows leg. The step has never run on Windows.
+- **Fix:** use `fs.realpathSync.native(fs.mkdtempSync(…))`. It is the same on macOS and Linux and expands 8.3 names on Windows. Or confirm with one Windows run before relying on the step.
+
+#### P0-R22 — Doc drift after the fixes
+- `docs/redesign/09-verification.md:52` (§1.3 CI steps) and `:259-271` (§2.7 CI placement table) do not list the new "Root script tests (redesign rails)" step (`build-and-test`, all OSes). They also omit `check:css` from §1.3. Add both.
+- D-44 (`01-decisions.md:234-235`) lists `DB_PATH`, `ARTIFACTS_DIR`, `WORKSPACES_DIR`, `TEMPLATES_DIR` and `PORT`, but the server also defaults `GENERATORAI_EXTENSIONS_DIR` to `~/.generatorai/extensions` and creates it at startup (`apps/server/src/index.ts:239-250`). The CI e2e job and local isolated servers (sandbox, VRT, smokes) therefore still share the user's real extensions root. Add it to D-44's list and to the CI env.
+
+Critical: 0, Major: 1, Minor: 6
+
+## Round 2 fixes
+
+| Finding | Status |
+|---|---|
+| P0-R16 (Major) | Fixed: the features ban covers `@generatorai/client-runtime`/`client-transport` only; `client-core` (pure helpers, read models) stays importable. D-43 and CLAUDE.md updated |
+| P0-R17 | Fixed: `providers/QueryProvider` banned in `features/`; `.js` spellings of both provider paths added |
+| P0-R18 | Fixed: `varInClassString` exempts `src/ui/lib/**`, matching ESLint |
+| P0-R19 | Fixed: the `ui/` no-restricted-imports block ignores test files (D-45) |
+| P0-R20 | Deferred, reason: the rails tests must point the resolver at a temp tree to lint virtual files against real targets; the real config values are exercised on every `pnpm lint` (26 tasks, `--force` in review), and any drift in `root-path`/resolver would fail every web import there. Revisit if a config value regresses unnoticed |
+| P0-R21 | Fixed: `fs.realpathSync.native` in the two main-module guards and the rails test temp dir (expands Windows 8.3 short names) |
+| P0-R22 | Fixed: 09 §1.3/§2.7 list the rails step and `check:css`; D-44, CLAUDE.md and the CI e2e server set `EXTENSIONS_DIR` |

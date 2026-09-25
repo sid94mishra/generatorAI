@@ -83,14 +83,21 @@ const FEATURES_DATA = [
     message: 'features/ read data through hooks/*Queries.ts or stores, not react-query directly (D-04).',
   },
   {
-    group: ['@generatorai/client-*', '@generatorai/client-*/*'],
+    // client-core stays allowed: it holds pure, React-free helpers and read
+    // models (runTitle, parseUnifiedDiff, status map …) that features render.
+    group: ['@generatorai/client-runtime', '@generatorai/client-runtime/*', '@generatorai/client-transport', '@generatorai/client-transport/*'],
     allowTypeImports: true,
-    message: 'features/ reach the client packages through hooks/*Queries.ts or stores (D-04). Type imports are fine.',
+    message: 'features/ reach the client runtime/transport through hooks/*Queries.ts or stores (D-04). Type imports are fine.',
   },
   {
-    group: ['@/providers/PlatformProvider', '**/providers/PlatformProvider'],
+    group: ['@/providers/PlatformProvider', '@/providers/PlatformProvider.js', '**/providers/PlatformProvider', '**/providers/PlatformProvider.js'],
     allowTypeImports: true,
     message: 'features/ never hold the platform client (usePlatform); add a hook in hooks/ instead (D-04).',
+  },
+  {
+    group: ['@/providers/QueryProvider', '@/providers/QueryProvider.js', '**/providers/QueryProvider', '**/providers/QueryProvider.js'],
+    allowTypeImports: true,
+    message: 'features/ never touch the query client directly; add a hook in hooks/*Queries.ts instead (D-04).',
   },
 ];
 
@@ -364,7 +371,7 @@ export default [
   {
     // ui/ except the icon registry: headless allowed, lucide and data layers not.
     files: ['apps/web/src/ui/**/*.{ts,tsx}'],
-    ignores: ['apps/web/src/ui/icons/**'],
+    ignores: ['apps/web/src/ui/icons/**', ...WEB_TEST_FILES],
     rules: {
       'no-restricted-imports': ['error', { paths: [LUCIDE], patterns: UI_LAYER }],
     },

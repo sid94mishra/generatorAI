@@ -364,7 +364,7 @@ jobs:
         run: |
           set -euo pipefail
           state="$RUNNER_TEMP/e2e-state"
-          mkdir -p "$state/artifacts" "$state/workspaces" "$state/logs"
+          mkdir -p "$state/artifacts" "$state/workspaces" "$state/extensions" "$state/logs"
           echo "E2E_STATE=$state" >> "$GITHUB_ENV"
 
           # Server: same env shape as agent-tests/concurrent-load-1q.mjs.
@@ -381,6 +381,7 @@ jobs:
             DB_PATH="$state/e2e.db" \
             ARTIFACTS_DIR="$state/artifacts" \
             WORKSPACES_DIR="$state/workspaces" \
+            EXTENSIONS_DIR="$state/extensions" \
             GENERATORAI_BIND_HOST=127.0.0.1 \
             GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1 \
             NODE_ENV=test \

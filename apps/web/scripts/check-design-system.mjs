@@ -190,7 +190,8 @@ const RULES = {
   },
   varInClassString: {
     patterns: [/\[(?:[\w-]+:)?var\(--|-\(--[\w-]+\)/g],
-    description: 'var(--…) inside a class — use the design utility that maps the token.',
+    description: 'var(--…) inside a class — use the design utility that maps the token (ui/lib is the one sanctioned place, with a comment).',
+    exempt: [/^src\/ui\/lib\//],
   },
   legacyColorVar: {
     patterns: [/var\(--color-[\w-]+\)/g],

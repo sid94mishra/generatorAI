@@ -49,7 +49,7 @@ Helpers: `src/__tests__/helpers/renderWithProviders.tsx` (ThemeProvider + QueryC
 
 ### 1.3 What CI runs (`.github/workflows/ci.yml`)
 
-- `build-and-test`: Ubuntu on PRs; Ubuntu + Windows + `macos-26` on push. Steps: `pnpm turbo build` → `pnpm lint` (turbo lint + security, durability, docs, syncio and `check:tokens`) → **`check:design`** (Ubuntu) → `turbo typecheck` → `turbo test` → **`check:bundle`** (Ubuntu) → CLI docs, schema drift, coverage and the packaged-CLI smoke.
+- `build-and-test`: Ubuntu on PRs; Ubuntu + Windows + `macos-26` on push. Steps: `pnpm turbo build` → `pnpm lint` (turbo lint + security, durability, docs, syncio and `check:tokens`) → **`check:design`** (Ubuntu) → `turbo typecheck` → `turbo test` → root script tests incl. the redesign rails (`vitest run --project node scripts/__tests__`, all OSes; P0) → **`check:bundle`** (Ubuntu) → **`check:css`** (Ubuntu; P0) → CLI docs, schema drift, coverage and the packaged-CLI smoke.
 - `e2e`: Ubuntu, a real gate. It runs the bundled server with `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK=1` and a temp DB, Vite dev on :5173, and then `test:e2e`.
 - `concurrent-load-test` and `benchmarks` (both reporting-only), `mobile-bundle`, `container`.
 - **Trigger gap:** `on.push/pull_request.branches` is `[main, dev]`. PRs into `arch-redesign` (the default branch) or `desktop_redesign` run **no CI**. P0 adds both branches, or switches to `branches-ignore: []`.
@@ -265,6 +265,7 @@ Add a generated case: for every token in `REQUIRED_UTILITIES`, `cn(x)` returns `
 | `check:tokens` + WCAG suite | build-and-test (`pnpm lint`, `turbo test`) | all | exists; extended P1 |
 | `check:bundle` (+ font budget §8.1) | build-and-test | Ubuntu | exists; extended P1 |
 | `check:css` | build-and-test | Ubuntu | P0 skeleton, P1 active |
+| redesign rails tests (`scripts/__tests__/redesign-rails.test.mjs`) | build-and-test | all | P0 |
 | `test:stories` (Storybook + a11y) | new `storybook` job | Ubuntu | P1 |
 | VRT (`vrt` stories + routes) | new `vrt` job (Docker) | Ubuntu | P1 (stories), P3 (routes) |
 | e2e | `e2e` | Ubuntu | exists |

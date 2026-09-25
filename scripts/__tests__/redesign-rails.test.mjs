@@ -22,7 +22,7 @@ const RATCHET = path.join(REPO, 'apps', 'web', 'scripts', 'check-design-system.m
 const tempDirs = [];
 function tempDir(prefix) {
   // realpath: macOS hands out /var/… which is a symlink to /private/var/….
-  const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
+  const dir = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), prefix)));
   tempDirs.push(dir);
   return dir;
 }
