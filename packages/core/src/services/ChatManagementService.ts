@@ -95,6 +95,7 @@ import { isExtensionAuthorToolName } from '../tools/extensionAuthorTools.js';
 import { mergeMcpServers } from '../mcp/mergeMcpServers.js';
 import type { McpServerConfig } from '@generatorai/shared';
 import { withDeadline } from '../utils/withDeadline.js';
+import { appendSystemBlock, appendTools, unionList } from './session/cfg.js';
 import {
   groupTurns,
   lastAnchor,
@@ -828,13 +829,7 @@ export class ChatManagementService {
     //    scoped to "when you are NOT in plan mode" so it stays correct.
     conversationConfig['planModeInstructions'] = PLAN_MODE_INSTRUCTIONS;
 
-    const existingSys = conversationConfig['systemMessage'] as
-      | { mode?: string; content?: string }
-      | undefined;
-    conversationConfig['systemMessage'] = {
-      mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
-      content: `${existingSys?.content ?? ''}\n\n${AUTO_MODE_PLAN_INSTRUCTIONS}`,
-    };
+    appendSystemBlock(conversationConfig, `\n\n${AUTO_MODE_PLAN_INSTRUCTIONS}`);
 
     // `record_plan` gives autonomous turns a way to file a plan without a
     // gate. Registered whenever any mode this chat can enter declares it, so
@@ -843,10 +838,7 @@ export class ChatManagementService {
       ? (conversationConfig['tools'] as ToolDefinition[])
       : [];
     if (!existingTools.some((t) => t.name === RECORD_PLAN_TOOL_NAME)) {
-      conversationConfig['tools'] = [
-        ...existingTools,
-        createRecordPlanTool((args) => this.recordPlan(chat.id, args)),
-      ];
+      appendTools(conversationConfig, [createRecordPlanTool((args) => this.recordPlan(chat.id, args))]);
     }
 
     // Only attach the permission handler when the chat actually asked for
@@ -1247,14 +1239,8 @@ export class ChatManagementService {
       content,
     });
 
-    const names = Array.isArray(conversationConfig['skills'])
-      ? (conversationConfig['skills'] as string[])
-      : [];
-    conversationConfig['skills'] = [...new Set([...names, COMPUTER_USE_SKILL_NAME])];
-    const dirs = Array.isArray(conversationConfig['skillDirectories'])
-      ? (conversationConfig['skillDirectories'] as string[])
-      : [];
-    conversationConfig['skillDirectories'] = [...new Set([...dirs, dir])];
+    unionList(conversationConfig, 'skills', [COMPUTER_USE_SKILL_NAME]);
+    unionList(conversationConfig, 'skillDirectories', [dir]);
   }
 
   /**
@@ -1415,12 +1401,7 @@ export class ChatManagementService {
     // `excludedTools` only filters custom/MCP tools, so sending them there
     // enforced nothing: an agent with `fileWrite: false` still wrote files.
     if (projection.toolPolicy.deny.length > 0) {
-      const existing = Array.isArray(conversationConfig['excludedBuiltinTools'])
-        ? (conversationConfig['excludedBuiltinTools'] as string[])
-        : [];
-      conversationConfig['excludedBuiltinTools'] = [
-        ...new Set([...existing, ...projection.toolPolicy.deny]),
-      ];
+      unionList(conversationConfig, 'excludedBuiltinTools', projection.toolPolicy.deny);
     }
 
     // Team agents are delegatable sub-agents; the DRIVING agent's instructions go
@@ -1537,12 +1518,7 @@ export class ChatManagementService {
   }
 
   private appendWorkspaceHint(conversationConfig: Record<string, unknown>, hint: string | undefined): void {
-    if (!hint) return;
-    const existing = conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined;
-    conversationConfig['systemMessage'] = {
-      mode: (existing?.mode as 'append' | 'replace' | undefined) ?? 'append',
-      content: (existing?.content ?? '') + hint,
-    };
+    appendSystemBlock(conversationConfig, hint);
   }
 
   /**
@@ -1856,20 +1832,12 @@ export class ChatManagementService {
         // the browser set so there's no collision here; a downstream
         // user tool with the same name would collide — but that's true
         // of any two ToolDefinitions sharing a name.
-        const existingTools = Array.isArray(conversationConfig['tools'])
-          ? (conversationConfig['tools'] as unknown[])
-          : [];
-        conversationConfig['tools'] = [...browserTools, ...existingTools];
+        appendTools(conversationConfig, browserTools, 'start');
 
         // One-sentence system-prompt hint, VSCode-style. Kept short to
         // preserve context budget; the tool descriptions themselves carry
         // the detail the model needs.
-        const hint = BROWSER_SYSTEM_HINT;
-        const existing = (conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined);
-        conversationConfig['systemMessage'] = {
-          mode: (existing?.mode as 'append' | 'replace' | undefined) ?? 'append',
-          content: (existing?.content ?? '') + hint,
-        };
+        appendSystemBlock(conversationConfig, BROWSER_SYSTEM_HINT);
       } catch (err) {
         console.warn(`[ChatManagement] Browser tool registration failed for chat ${chatId}:`, err);
       }
@@ -1889,17 +1857,8 @@ export class ChatManagementService {
             chatId,
             owner: `chat:${chatId}`,
           });
-          const existingTools = Array.isArray(conversationConfig['tools'])
-            ? (conversationConfig['tools'] as unknown[])
-            : [];
-          conversationConfig['tools'] = [...existingTools, ...computerTools];
-          const existingSys = conversationConfig['systemMessage'] as
-            | { mode?: string; content?: string }
-            | undefined;
-          conversationConfig['systemMessage'] = {
-            mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
-            content: (existingSys?.content ?? '') + COMPUTER_USE_SYSTEM_HINT,
-          };
+          appendTools(conversationConfig, computerTools);
+          appendSystemBlock(conversationConfig, COMPUTER_USE_SYSTEM_HINT);
           await this.registerComputerUseSkill(conversationConfig, workspaceRoot);
         }
       } catch (err) {
@@ -1922,10 +1881,7 @@ export class ChatManagementService {
           assetsBase: this.extensions.widgetAssetsBase ?? '',
         },
       );
-      const existingTools = Array.isArray(conversationConfig['tools'])
-        ? (conversationConfig['tools'] as unknown[])
-        : [];
-      conversationConfig['tools'] = [...existingTools, ...widgetTools];
+      appendTools(conversationConfig, widgetTools);
 
       // System-prompt hint — kept short. The tool descriptions carry the
       // detail the model needs.
@@ -1935,11 +1891,7 @@ export class ChatManagementService {
       const uiHint = agentProjection.toolPolicy.groups.extensionAuthoring
         ? WIDGET_SYSTEM_HINT + EXTENSION_AUTHORING_HINT
         : WIDGET_SYSTEM_HINT;
-      const existingSys = (conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined);
-      conversationConfig['systemMessage'] = {
-        mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
-        content: (existingSys?.content ?? '') + uiHint,
-      };
+      appendSystemBlock(conversationConfig, uiHint);
     }
 
     // Agent-native source control (doc §5) — tell the agent the platform
@@ -1947,14 +1899,7 @@ export class ChatManagementService {
     // Appended on BOTH the create and the resume path so the prompt prefix
     // stays byte-identical across a restart.
     if (params.sourceControl?.autoCommit) {
-      const scmHint = buildAutoCommitHint(params.sourceControl);
-      const existingSys = conversationConfig['systemMessage'] as
-        | { mode?: string; content?: string }
-        | undefined;
-      conversationConfig['systemMessage'] = {
-        mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
-        content: (existingSys?.content ?? '') + scmHint,
-      };
+      appendSystemBlock(conversationConfig, buildAutoCommitHint(params.sourceControl));
     }
 
     // TOL-06 — resolve MCP server config through the hub so run-level
@@ -1989,13 +1934,7 @@ export class ChatManagementService {
     // Merge with any tools already staged above (e.g. the built-in
     // browser tool set) rather than clobbering them.
     if (this.extensions.customToolRegistry && this.extensions.customToolRegistry.size > 0) {
-      const existingTools = Array.isArray(conversationConfig['tools'])
-        ? (conversationConfig['tools'] as unknown[])
-        : [];
-      conversationConfig['tools'] = [
-        ...existingTools,
-        ...this.selectCustomTools(agentProjection.toolPolicy.groups.extensionAuthoring),
-      ];
+      appendTools(conversationConfig, this.selectCustomTools(agentProjection.toolPolicy.groups.extensionAuthoring));
     }
 
     // Orchestrator mode — inject the background-agent tool set + orchestrator
@@ -2011,16 +1950,8 @@ export class ChatManagementService {
         // cost a one-time full prompt-cache miss on upgrade.
         includeAgentDiscovery: !!agentProjection.driving,
       });
-      const existingTools = Array.isArray(conversationConfig['tools'])
-        ? (conversationConfig['tools'] as unknown[])
-        : [];
-      conversationConfig['tools'] = [...existingTools, ...orchestratorTools];
-
-      const existingSys = (conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined);
-      conversationConfig['systemMessage'] = {
-        mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
-        content: (existingSys?.content ?? '') + `\n\n${ORCHESTRATOR_SYSTEM_PROMPT}`,
-      };
+      appendTools(conversationConfig, orchestratorTools);
+      appendSystemBlock(conversationConfig, `\n\n${ORCHESTRATOR_SYSTEM_PROMPT}`);
 
       // The harness's NATIVE delegation tools must go. Observed live
       // (2026-09-01): given both, Sonnet picked the SDK's own `Agent` tool —
@@ -2031,14 +1962,7 @@ export class ChatManagementService {
       // spawn_background_agent, so the in-process lookalikes are removed
       // (claude-agent maps these into the SDK's disallowedTools; harnesses
       // without such tools ignore unknown names).
-      {
-        const existingExcluded = Array.isArray(conversationConfig['excludedBuiltinTools'])
-          ? (conversationConfig['excludedBuiltinTools'] as string[])
-          : [];
-        conversationConfig['excludedBuiltinTools'] = [
-          ...new Set([...existingExcluded, 'Agent', 'Task']),
-        ];
-      }
+      unionList(conversationConfig, 'excludedBuiltinTools', ['Agent', 'Task']);
     }
 
     // HKS-01 + TOL-04 — synchronous hook bridge (plan-mode + user hooks).
@@ -2369,14 +2293,8 @@ export class ChatManagementService {
           workspaceId: chat.workspaceId,
           owner: `chat:${chat.id}`,
         });
-        const existing = Array.isArray(conversationConfig['tools']) ? (conversationConfig['tools'] as unknown[]) : [];
-        conversationConfig['tools'] = [...browserTools, ...existing];
-
-        const existingMsg = (conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined);
-        conversationConfig['systemMessage'] = {
-          mode: (existingMsg?.mode as 'append' | 'replace' | undefined) ?? 'append',
-          content: (existingMsg?.content ?? '') + BROWSER_SYSTEM_HINT,
-        };
+        appendTools(conversationConfig, browserTools, 'start');
+        appendSystemBlock(conversationConfig, BROWSER_SYSTEM_HINT);
       } catch {
         // Non-fatal.
       }
@@ -2398,18 +2316,8 @@ export class ChatManagementService {
             chatId: chat.id,
             owner: `chat:${chat.id}`,
           });
-          const existing = Array.isArray(conversationConfig['tools'])
-            ? (conversationConfig['tools'] as unknown[])
-            : [];
-          conversationConfig['tools'] = [...existing, ...computerTools];
-
-          const existingMsg = conversationConfig['systemMessage'] as
-            | { mode?: string; content?: string }
-            | undefined;
-          conversationConfig['systemMessage'] = {
-            mode: (existingMsg?.mode as 'append' | 'replace' | undefined) ?? 'append',
-            content: (existingMsg?.content ?? '') + COMPUTER_USE_SYSTEM_HINT,
-          };
+          appendTools(conversationConfig, computerTools);
+          appendSystemBlock(conversationConfig, COMPUTER_USE_SYSTEM_HINT);
           await this.registerComputerUseSkill(conversationConfig, workspaceRoot);
         }
       } catch {
@@ -2428,18 +2336,13 @@ export class ChatManagementService {
           },
           { sessionId: chat.sessionId, chatId: chat.id, assetsBase: this.extensions.widgetAssetsBase ?? '' },
         );
-        const existing = Array.isArray(conversationConfig['tools']) ? (conversationConfig['tools'] as unknown[]) : [];
-        conversationConfig['tools'] = [...existing, ...widgetTools];
-
-        const existingSys = (conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined);
-        conversationConfig['systemMessage'] = {
-          mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
-          content:
-            (existingSys?.content ?? '') +
-            (agentProjection.toolPolicy.groups.extensionAuthoring
-              ? WIDGET_SYSTEM_HINT + EXTENSION_AUTHORING_HINT
-              : WIDGET_SYSTEM_HINT),
-        };
+        appendTools(conversationConfig, widgetTools);
+        appendSystemBlock(
+          conversationConfig,
+          agentProjection.toolPolicy.groups.extensionAuthoring
+            ? WIDGET_SYSTEM_HINT + EXTENSION_AUTHORING_HINT
+            : WIDGET_SYSTEM_HINT,
+        );
       } catch {
         // Non-fatal.
       }
@@ -2447,23 +2350,12 @@ export class ChatManagementService {
 
     // Agent-native source control — same block, same place in the order.
     if (chat.sourceControl?.autoCommit) {
-      const scmHint = buildAutoCommitHint(chat.sourceControl);
-      const existingSys = conversationConfig['systemMessage'] as
-        | { mode?: string; content?: string }
-        | undefined;
-      conversationConfig['systemMessage'] = {
-        mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
-        content: (existingSys?.content ?? '') + scmHint,
-      };
+      appendSystemBlock(conversationConfig, buildAutoCommitHint(chat.sourceControl));
     }
 
     // Surface registered custom tools.
     if (this.extensions.customToolRegistry && this.extensions.customToolRegistry.size > 0) {
-      const existing = Array.isArray(conversationConfig['tools']) ? (conversationConfig['tools'] as unknown[]) : [];
-      conversationConfig['tools'] = [
-        ...existing,
-        ...this.selectCustomTools(agentProjection.toolPolicy.groups.extensionAuthoring),
-      ];
+      appendTools(conversationConfig, this.selectCustomTools(agentProjection.toolPolicy.groups.extensionAuthoring));
     }
 
     // Orchestrator mode — re-inject the identical background-agent tool set +
@@ -2476,21 +2368,12 @@ export class ChatManagementService {
         owner: `orchestrator:${chat.id}`,
         includeAgentDiscovery: !!agentProjection.driving,
       });
-      const existing = Array.isArray(conversationConfig['tools']) ? (conversationConfig['tools'] as unknown[]) : [];
-      conversationConfig['tools'] = [...existing, ...orchestratorTools];
-
-      const existingSys = (conversationConfig['systemMessage'] as { mode?: string; content?: string } | undefined);
-      conversationConfig['systemMessage'] = {
-        mode: (existingSys?.mode as 'append' | 'replace' | undefined) ?? 'append',
-        content: (existingSys?.content ?? '') + `\n\n${ORCHESTRATOR_SYSTEM_PROMPT}`,
-      };
+      appendTools(conversationConfig, orchestratorTools);
+      appendSystemBlock(conversationConfig, `\n\n${ORCHESTRATOR_SYSTEM_PROMPT}`);
 
       // Same as the create path: a resumed orchestrator must not regain the
       // harness's native delegation, or it bypasses spawn_background_agent.
-      const existingExcluded = Array.isArray(conversationConfig['excludedBuiltinTools'])
-        ? (conversationConfig['excludedBuiltinTools'] as string[])
-        : [];
-      conversationConfig['excludedBuiltinTools'] = [...new Set([...existingExcluded, 'Agent', 'Task'])];
+      unionList(conversationConfig, 'excludedBuiltinTools', ['Agent', 'Task']);
     }
 
     // PLN-01 — the resume path MUST reinstall the gates. The SDK cannot

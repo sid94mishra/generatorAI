@@ -75,6 +75,7 @@ import { AgentResolver } from './AgentResolver.js';
 import type { AgentStagingService } from './AgentStagingService.js';
 import type { PermissionRequest, PermissionResponse } from '../domain/ports/IAgentHarness.js';
 import { buildBrowserToolSet } from '../tools/browser/index.js';
+import { appendSystemBlock, appendTools, unionList } from './session/cfg.js';
 import { StageRunStateMachine } from '../domain/state-machines/StageRunStateMachine.js';
 import type { DurableContext, DurableExecutionEngine } from './DurableExecutionEngine.js';
 import { isSyntheticEffectResult, replayPolicyForToolGroups } from './DurableExecutionEngine.js';
@@ -416,10 +417,7 @@ export class StageExecutionService {
       if (workingDirectory && this.agentStaging) {
         const staged = await this.agentStaging.ensureStaged(workingDirectory, projection);
         if (staged.skillDirectories.length > 0) {
-          const existing = Array.isArray(sessionConfig['skillDirectories'])
-            ? (sessionConfig['skillDirectories'] as string[])
-            : [];
-          sessionConfig['skillDirectories'] = [...new Set([...existing, ...staged.skillDirectories])];
+          unionList(sessionConfig, 'skillDirectories', staged.skillDirectories);
         }
       }
     }
@@ -434,12 +432,7 @@ export class StageExecutionService {
     // Built-in tool names go to `excludedBuiltinTools`, not `excludedTools` —
     // the latter only filters custom/MCP tools. See ChatManagementService.
     if (projection.toolPolicy.deny.length > 0) {
-      const existing = Array.isArray(sessionConfig['excludedBuiltinTools'])
-        ? (sessionConfig['excludedBuiltinTools'] as string[])
-        : [];
-      sessionConfig['excludedBuiltinTools'] = [
-        ...new Set([...existing, ...projection.toolPolicy.deny]),
-      ];
+      unionList(sessionConfig, 'excludedBuiltinTools', projection.toolPolicy.deny);
     }
 
     if (projection.team.length > 0) {
@@ -1218,19 +1211,15 @@ export class StageExecutionService {
           workspaceId: stageWorkspaceId,
           owner: `stage:${stageRun.id}`,
         });
-        const existingTools = Array.isArray(sessionConfig['tools']) ? sessionConfig['tools'] as unknown[] : [];
-        sessionConfig['tools'] = [...browserTools, ...existingTools];
-        const hint =
+        appendTools(sessionConfig, browserTools, 'start');
+        appendSystemBlock(
+          sessionConfig,
           `\n\n[Integrated Browser]\nUse the browser tools (open_browser_page, ` +
-          `read_page, click_element, type_in_page, screenshot_page, ` +
-          `run_playwright_code, etc.) when the stage needs to test or interact ` +
-          `with web pages. Prefer these tools over shell commands or spawning ` +
-          `your own browser.`;
-        const existingMsg = sessionConfig['systemMessage'] as { mode?: string; content?: string } | undefined;
-        sessionConfig['systemMessage'] = {
-          mode: (existingMsg?.mode as 'append' | 'replace' | undefined) ?? 'append',
-          content: (existingMsg?.content ?? '') + hint,
-        };
+            `read_page, click_element, type_in_page, screenshot_page, ` +
+            `run_playwright_code, etc.) when the stage needs to test or interact ` +
+            `with web pages. Prefer these tools over shell commands or spawning ` +
+            `your own browser.`,
+        );
       } catch (err) {
         // eslint-disable-next-line no-console
         console.warn(`[StageExecution] Browser tool registration failed for stage ${stageRun.id}:`, err);
