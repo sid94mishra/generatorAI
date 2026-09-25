@@ -251,6 +251,19 @@ Decided while building P1-S3, P1-T10, P1-T11, P1-S1 and P1-S2 where the plan was
 - **ShortcutsSheet** is temporary scaffolding on the legacy `components/ui` Modal + Kbd (design class names only) until the kit exists; rebuilt on `ui/` in P3.
 - **Router.** `app/router.tsx` keeps `<AppLayout/>` as the shell element until P3-04; the 404, route-error and page-loader markup moved into legacy `components/{NotFoundPage,RouteErrorFallback,PageLoader}.tsx` so `app/**` carries no Tailwind classes; `GaiRouteHandle.nav` is typed as `NavDestinationId`.
 
+### D-47 P1 token-engine details — Final
+Decided while building P1-T1…T6 where `02` was silent:
+- CLI `accent` setting defaults to `'auto'` (the theme's own default accent), matching how `theme`/`appearance` work in the CLI settings editor.
+- Node tools (ratchet, `check:css`, ESLint) read the vocabulary from the generated `packages/design-tokens/generated/vocabulary.json` (`./vocabulary.json` export; covered by `tokens:check`) because they cannot import TypeScript.
+- `REQUIRED_UTILITIES` are safelisted with a generated `@source inline(...)` so `check:css` verifies them before any page uses them (built CSS 253 → 334 KB uncompressed while both layers coexist; P7 recovers it). Extras beyond `09` §2.4: `outline-focus`, `bg-run`, `size-control`, `z-dialog`, `z-tooltip`, `w-sidebar`, `max-w-dialog`, `ease-standard`.
+- The legacy bridge list lives in `vocabulary.ts` (no imports) to avoid a cycle; `--color-chart-*`/`--color-canvas-*` aliases stay in Layer 3 because hand-written React Flow rules read them.
+- Per-theme radius is emitted in the Layer 1b theme blocks (not the legacy chrome block) so P7 can delete Layer 1 wholesale.
+- Z-index goes through `--gai-z-*` so `vocabulary.css` stays value-free; `rail`/`sidebar` = 30 per D-41; toasts use `var(--gai-z-toast)`.
+- Type steps set weight/tracking only where the step defines them (title/heading/display); `text-ui`/`text-body` inherit.
+- `INSTRUMENT_SANS`/`BUNDLED_MONO` stacks exist from T4 (system fallback until T7 bundles the fonts); a temporary pre-paint defaults to `instrument` and sets `data-accent` only when stored (replaced by the generated pre-paint in T8; both CSP pins updated).
+- P1-T1 raised `legacyTokenUtility` 2568 → 2622 (+54): the renamed `bg-accent-tint` sites were always legacy but uncountable while named `accent` — a sanctioned ratchet increase (D-02 scaffolding).
+- `SHELL_WIDTHS` (T6, `design.ts`) and `SHELL` (S1, `chrome.ts`) are unified into one source in the next P1 task (fonts/theme batch).
+
 ### D-40 Web and mobile share a design contract and logic, not UI components — Final
 - **Evidence:** Bluesky (the flagship react-native-web app) still uses Radix and floating-ui on web; Discord shares logic, not UI; Linear's mobile apps are native; react-native-web's last release was October 2025; GeneratorAI's densest web surfaces (xterm, @xyflow, @pierre/diffs, the Electron WebContentsView) are DOM-only.
 - **Shared now (this pass):** tokens and the generated class vocabulary (D-08), per-platform geometry schema, `CHROME` constants, icon concept registry (D-17), 8-state status map + labels (D-18), nav destinations (D-22), shortcut/command registry (D-24), attention feed and other new read models in `client-core` (D-36), component *contract* types for shared concepts (status badge, tool block, gate cards, composer states, pane tab set) in `packages/shared/src/ui-contract/` — types only.

@@ -35,7 +35,7 @@ Any mode × any theme × any accent is valid — 17 themes × 2 variants × 6 ac
 
 | Group | Utilities (examples) |
 |---|---|
-| Surfaces | `bg-background`, `bg-card`, `bg-popover`, `bg-subtle`, `bg-emphasis`, `bg-raised`, `bg-overlay` |
+| Surfaces | `bg-background`, `bg-card`, `bg-popover`, `bg-subtle`, `bg-emphasis` (legacy layer; the design layer’s `bg-surface`, `bg-raised`, `bg-overlay` … are documented in docs/redesign/02-design-system-spec.md) |
 | Text | `text-foreground`, `text-muted-foreground`, `text-card-foreground` |
 | Interactive | `bg-primary` (links/icons), `bg-primary-emphasis` (filled buttons — AA-safe), `text-primary-foreground`, `bg-accent`, `ring-ring` |
 | Borders | `border-border`, `border-border-muted`, `border-input` |
