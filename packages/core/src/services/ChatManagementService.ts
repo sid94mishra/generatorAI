@@ -70,6 +70,7 @@ import type { ComposeWarning, SessionComposerDeps } from './session/types.js';
 import { resolveMcp } from './session/resolveMcp.js';
 import { applyAgentProjection, applyExplicitSpec, appendAgentInstructions, deliverSkills } from './session/agentProjection.js';
 import { chatSessionSpec } from './session/chatSpec.js';
+import { applyWorkspaceExposure, workspaceExposure } from './session/workspaceExposure.js';
 import { systemContent } from './session/cfg.js';
 import {
   groupTurns,
@@ -1224,32 +1225,18 @@ export class ChatManagementService {
   }
 
   /**
-   * Put the workspace's exposure on a conversation config: cwd, the other
-   * mounts + managed root as additional directories, and the env the agent
-   * process gets. The `[Workspace]` hint is appended separately (see
-   * `appendWorkspaceHint`) because it must land AFTER the caller's own
-   * system message, which is applied later in both build paths.
+   * Put the workspace's exposure on a conversation config (cwd, the other
+   * mounts + managed root as additional directories, env). The `[Workspace]`
+   * hint is appended separately because it must land AFTER the caller's own
+   * system message.
    */
-  private async applyWorkspaceExposure(
+  private async exposeWorkspace(
     conversationConfig: Record<string, unknown>,
     workspace: ExecutionWorkspace,
   ): Promise<string | undefined> {
     const manager = this.extensions.workspaceManager;
     if (!manager) return undefined;
-    const exposure = await manager.getExposure(workspace);
-    conversationConfig['workingDirectory'] = exposure.workingDirectory;
-    if (exposure.additionalDirectories.length > 0) {
-      conversationConfig['additionalDirectories'] = exposure.additionalDirectories;
-    }
-    conversationConfig['env'] = {
-      ...((conversationConfig['env'] as Record<string, string> | undefined) ?? {}),
-      ...exposure.env,
-    };
-    return exposure.hint;
-  }
-
-  private appendWorkspaceHint(conversationConfig: Record<string, unknown>, hint: string | undefined): void {
-    appendSystemBlock(conversationConfig, hint);
+    return applyWorkspaceExposure(conversationConfig, await workspaceExposure(manager, workspace));
   }
 
   /**
@@ -1437,7 +1424,7 @@ export class ChatManagementService {
     if (sharedWorkspace) {
       workspaceId = sharedWorkspace.id;
       workspaceRootPath = sharedWorkspace.rootPath;
-      workspaceHint = await this.applyWorkspaceExposure(conversationConfig, sharedWorkspace);
+      workspaceHint = await this.exposeWorkspace(conversationConfig, sharedWorkspace);
     } else if (this.extensions.workspaceManager) {
       // Not swallowed any more: a chat whose workspace could not be created
       // would run the agent in the shared artifacts directory.
@@ -1466,7 +1453,7 @@ export class ChatManagementService {
       if (planned && this.extensions.mountService) {
         await this.extensions.mountService.stage(workspace.id, planned);
       }
-      workspaceHint = await this.applyWorkspaceExposure(conversationConfig, workspace);
+      workspaceHint = await this.exposeWorkspace(conversationConfig, workspace);
     }
 
     // Skills are staged into the MANAGED root, never the user's repository.
@@ -1503,7 +1490,7 @@ export class ChatManagementService {
     // Everything appended to `systemMessage` below this line is a PLATFORM block.
     const baseSystemMessage =
       (conversationConfig['systemMessage'] as { content?: string } | undefined)?.content ?? '';
-    this.appendWorkspaceHint(conversationConfig, workspaceHint);
+    appendSystemBlock(conversationConfig, workspaceHint);
 
     // Platform tool surface, in the canonical order (R-10): browser →
     // computer → widgets → SCM hint → MCP → custom → orchestrator → hooks.
@@ -1786,7 +1773,7 @@ export class ChatManagementService {
         const workspace = await this.extensions.workspaceManager.getExecutionWorkspace(chat.workspaceId);
         if (workspace) {
           workspaceRootPath = workspace.rootPath;
-          workspaceHint = await this.applyWorkspaceExposure(conversationConfig, workspace);
+          workspaceHint = await this.exposeWorkspace(conversationConfig, workspace);
         }
       } catch {
         // Non-fatal — fall back to no explicit working directory.
@@ -1816,7 +1803,7 @@ export class ChatManagementService {
 
     // Everything appended to `systemMessage` below this line is a PLATFORM block.
     const baseSystemMessage = systemContent(conversationConfig);
-    this.appendWorkspaceHint(conversationConfig, workspaceHint);
+    appendSystemBlock(conversationConfig, workspaceHint);
 
     // The same platform tool surface as the create path (tool handlers are
     // in-memory and must be rebound on every resume). No auto-start here: a
