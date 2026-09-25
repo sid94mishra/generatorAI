@@ -42,7 +42,8 @@ export {
 } from './facades/index.js';
 
 export type {
-  CreateWorkflowInput,
+  CreateWorkflowOptions,
+  GraphSource,
   RunOptions,
   OrchestrateOptions,
   StreamOptions,
@@ -64,18 +65,27 @@ export type {
   WorkspaceFilters,
 } from './facades/index.js';
 
-// ── Builders (re-export from shared) ──
-export { WorkflowBuilder, StageBuilder } from '@generatorai/shared';
+// ── Workflow documents: builders, validation, canonical import/export ──
+export { workflow, WorkflowBuilder, StageBuilder, WorkflowBuildError } from '@generatorai/workflow-spec/builders';
+export { validateWorkflow, exportGraph, importGraph, parseGraph } from '@generatorai/workflow-spec';
+export type {
+  WorkflowGraph,
+  WorkflowGraphInput,
+  StageSpec,
+  EdgeSpec,
+  WorkflowSpec,
+  ValidationIssue,
+  ValidationResult,
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowDefinitionVersionSummary,
+} from '@generatorai/workflow-spec';
 
 // ── Types (selective re-export from shared) ──
 export type {
   AgentEvent,
   AgentEventKind,
   PersistedEvent,
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  StageDefinition,
-  StageEdge,
   WorkflowRun,
   StageRun,
   Chat,

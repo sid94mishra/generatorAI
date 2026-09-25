@@ -1,10 +1,13 @@
 // ────────────────────────────────────────────────────────────────
-// T2 — conditional routing (F_live_tests §1 T2, §5 `t2.json`).
-//
-// CHARACTERISATION of today's engine. `// KNOWN-BUG W-xx` marks the
-// assertions PHASE-03 flips.
+// T2 — conditional routing (F_live_tests §1 T2, §5 `t2.json`), on v2
+// documents: stage `guard`s and edge `when`s in Expression v2, evaluated
+// by the v1 engine (P01 WP-1.7). The W-31 / W-30 KNOWN-BUGs of the v1
+// grammar flipped: guards can read upstream stages, and a broken or
+// mistyped expression is rejected when the definition is saved instead of
+// silently skipping at run time.
 // ────────────────────────────────────────────────────────────────
 
+import { WorkflowValidationError } from '@generatorai/shared';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../src/index.js';
 
@@ -14,31 +17,21 @@ afterEach(async () => {
   engine = undefined;
 });
 
-const expr = (expression: string) => ({ type: 'expression', expression });
-
 const T2 = {
   name: 't2-conditions',
-  sessionMode: 'auto',
   variables: [
-    { name: 'env', type: 'string', label: 'env' },
-    { name: 'count', type: 'number', label: 'count' },
-    { name: 'flag', type: 'boolean', label: 'flag' },
-    { name: 'sflag', type: 'string', label: 'sflag' },
+    { name: 'env', type: 'string', label: 'env', required: true },
+    { name: 'count', type: 'number', label: 'count', required: true },
+    { name: 'flag', type: 'boolean', label: 'flag', required: true },
   ],
   stages: [
     { name: 'R', prompt: 'Write one line containing the token ROOT.' },
-    { name: 'C_and', prompt: 'C_AND', condition: expr("variables.env == 'prod' and variables.count > 3") },
-    { name: 'C_or_false', prompt: 'C_OR', condition: expr("variables.env == 'dev' or variables.count < 2") },
-    { name: 'C_not', prompt: 'C_NOT', condition: expr('not variables.flag') },
-    { name: 'C_bang_str', prompt: 'C_BANG', condition: expr('!variables.sflag') },
-    { name: 'C_amp', prompt: 'C_AMP', condition: expr("parent.status == 'completed' && variables.count >= 5") },
-    {
-      name: 'C_paren',
-      prompt: 'C_PAREN',
-      condition: expr("(variables.env == 'prod' || variables.env == 'staging') && !(variables.count == 5)"),
-    },
-    { name: 'C_lower', prompt: 'C_LOWER', condition: expr("variables.env == 'prod' and variables.count > 3") },
-    { name: 'C_stageref', prompt: 'C_STAGEREF', condition: expr("stages.R.status == 'completed'") },
+    { name: 'C_and', prompt: 'C_AND', guard: "variables.env == 'prod' and variables.count > 3" },
+    { name: 'C_or_false', prompt: 'C_OR', guard: "variables.env == 'dev' or variables.count < 2" },
+    { name: 'C_not', prompt: 'C_NOT', guard: 'not variables.flag' },
+    { name: 'C_amp', prompt: 'C_AMP' },
+    { name: 'C_paren', prompt: 'C_PAREN', guard: "(variables.env == 'prod' || variables.env == 'staging') && !(variables.count == 5)" },
+    { name: 'C_stageref', prompt: 'C_STAGEREF', guard: "stages.r.status == 'completed'" },
     { name: 'D_after_skip', prompt: 'D' },
     { name: 'J', prompt: 'JOIN' },
     { name: 'J_always', prompt: 'JALWAYS' },
@@ -47,10 +40,10 @@ const T2 = {
     ['R', 'C_and'],
     ['R', 'C_or_false'],
     ['R', 'C_not'],
-    ['R', 'C_bang_str'],
-    ['R', 'C_amp'],
+    // `parent.status` belongs to an edge: this edge carries control only
+    // when R completed AND the count is high enough.
+    { from: 'R', to: 'C_amp', when: "parent.status == 'completed' && variables.count >= 5" },
     ['R', 'C_paren'],
-    ['R', 'C_lower'],
     ['R', 'C_stageref'],
     ['C_or_false', 'D_after_skip'],
     ['C_and', 'J'],
@@ -59,19 +52,19 @@ const T2 = {
   ] as const,
 };
 
-describe('T2 conditional routing (current engine)', () => {
-  it('evaluates Expression v2 and/or/not/&&/||/!/parens/parent.status and cascades skips', async () => {
+describe('T2 conditional routing (v2 guards and edge when on the v1 engine)', () => {
+  it('evaluates guards and edge `when`, reads upstream stages, and cascades skips', async () => {
     engine = await createTestEngine();
-    const run = await engine.runWorkflow(T2, { env: 'prod', count: 5, flag: false, sflag: 'false' });
+    const run = await engine.runWorkflow(T2, { env: 'prod', count: 5, flag: false });
     const snap = await run.waitForTerminal();
 
     expect(snap.run.status).toBe('completed');
     const status = (n: string) => snap.stages[n]!.status;
 
-    for (const ran of ['R', 'C_and', 'C_not', 'C_amp', 'C_lower']) expect(status(ran)).toBe('completed');
+    for (const ran of ['R', 'C_and', 'C_not', 'C_amp', 'C_stageref']) expect(status(ran)).toBe('completed');
     for (const skipped of ['C_or_false', 'C_paren']) expect(status(skipped)).toBe('skipped');
 
-    // A skipped predecessor cascades on on_success edges...
+    // A skipped predecessor cascades on success edges...
     expect(status('D_after_skip')).toBe('skipped');
     // ...a join with one completed and one skipped predecessor still runs...
     expect(status('J')).toBe('completed');
@@ -83,38 +76,33 @@ describe('T2 conditional routing (current engine)', () => {
     for (const n of ['C_or_false', 'C_paren', 'D_after_skip']) expect(called.has(n)).toBe(false);
   });
 
-  it('cannot see stage state, and a non-boolean operand never holds', async () => {
+  it('a false edge `when` skips its target like an unmet guard', async () => {
     engine = await createTestEngine();
-    const run = await engine.runWorkflow(T2, { env: 'prod', count: 5, flag: false, sflag: 'false' });
+    const run = await engine.runWorkflow(T2, { env: 'prod', count: 4, flag: true });
     const snap = await run.waitForTerminal();
-
-    // `stages.R.status` does not resolve; the unknown identifier evaluates to
-    // false and the stage is skipped with no warning anywhere.
-    expect(snap.stages['C_stageref']!.status).toBe('skipped'); // KNOWN-BUG W-31 (conditions cannot reference stages/outputs)
-    // The skip is recorded as the generic "unreachable" reason, and the
-    // definition validator raises nothing about the unknown identifier.
-    expect(snap.stages['C_stageref']!.error).toBe('Skipped — no incoming edge or run condition was satisfied'); // KNOWN-BUG W-31 (no diagnostic for an unknown identifier)
-    const validation = await engine.services.workflowDefinitionService.validateDefinition(snap.run.workflowDefinitionId);
-    expect(validation.valid).toBe(true);
-    expect([...validation.errors, ...validation.warnings].filter((m) => m.includes('stages.R'))).toEqual([]); // KNOWN-BUG W-31 (validator accepts `stages.X…`)
-
-    // `!variables.sflag` with sflag = 'false' (a string): `not` of a non-boolean
-    // is null, which never holds → skipped. The v2 validator rejects the
-    // expression at save time; the v1 save path is wired to it in WP-1.7.
-    expect(snap.stages['C_bang_str']!.status).toBe('skipped'); // KNOWN-BUG W-31 (no save-time type check on the v1 path)
+    expect(snap.stages['C_amp']!.status).toBe('skipped');
+    expect(snap.stages['C_not']!.status).toBe('skipped');
+    expect(snap.run.status).toBe('completed');
   });
 
-  it('an unparseable condition is accepted and silently always skips', async () => {
+  it('rejects an unparseable or mistyped condition when the definition is saved', async () => {
     engine = await createTestEngine();
-    const run = await engine.runWorkflow({
+    const broken = {
       stages: [
         { name: 'A', prompt: 'A' },
-        { name: 'B', prompt: 'B', condition: expr('((( variables.x ==') },
+        { name: 'B', prompt: 'B', guard: '((( variables.x ==' },
       ],
-      edges: [['A', 'B']],
-    });
-    const snap = await run.waitForTerminal();
-    expect(snap.stages['B']!.status).toBe('skipped'); // KNOWN-BUG W-31 (evaluator is not fail-safe: parse error → false)
-    expect(snap.run.status).toBe('completed'); // KNOWN-BUG W-30 (broken definition accepted and "succeeds")
+      edges: [['A', 'B']] as const,
+    };
+    await expect(engine.importDefinition(broken)).rejects.toBeInstanceOf(WorkflowValidationError);
+
+    // `not` of a string variable is a save-time type error, not a silent skip.
+    const mistyped = {
+      variables: [{ name: 'sflag', type: 'string', label: 'sflag' }],
+      stages: [{ name: 'A', prompt: 'A', guard: 'not variables.sflag' }],
+    };
+    const err = await engine.importDefinition(mistyped).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(WorkflowValidationError);
+    expect((err as WorkflowValidationError).issues.some((i) => i.path === '/stages/0/guard')).toBe(true);
   });
 });

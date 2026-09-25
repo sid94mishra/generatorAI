@@ -24,6 +24,7 @@
     "@generatorai/client-transport": "workspace:*",
     "@generatorai/secrets": "workspace:*",
     "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*",
     "zod": "^3.24.0"
   },
   "devDependencies": {

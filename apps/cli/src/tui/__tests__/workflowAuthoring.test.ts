@@ -105,62 +105,55 @@ describe('paneListRows', () => {
 });
 
 describe('workflowPaneContent', () => {
-  const definition = {
-    name: 'ship it',
-    variables: { env: 'staging' },
-    stages: [
-      { id: 's1', name: 'plan' },
-      { id: 's2', name: 'build' },
-    ],
-    edges: [{ id: 'e1', fromStageId: 's1', toStageId: 's2', edgeType: 'on_success' }],
-  };
+  const stages = [
+    { kind: 'agent', key: 'plan', name: 'plan', prompts: [], hooks: [] },
+    { kind: 'agent', key: 'build', name: 'build', prompts: [], hooks: [] },
+  ];
+  const edges = [{ from: 'plan', to: 'build', on: 'success' }];
+  const variables = [{ name: 'env', type: 'string', label: 'Env', required: false }];
 
-  const apiWith = (stages: Array<{ id: string; name: string }>): Api =>
-    ({ definitions: { get: vi.fn(async () => ({ ...definition, stages })) } }) as unknown as Api;
+  const apiWith = (withStages: Array<Record<string, unknown>>, name = 'ship it'): Api =>
+    ({
+      definitions: {
+        get: vi.fn(async () => ({
+          id: 'wf-1',
+          status: 'draft',
+          revision: 3,
+          graph: { formatVersion: 2, workflow: { name, variables }, stages: withStages, edges },
+        })),
+      },
+    }) as unknown as Api;
 
-  it('carries stages, edges and definition variables into pane state', async () => {
-    const content = await workflowPaneContent('wf-1', 'fallback', apiWith(definition.stages));
+  const selectedKey = (content: PaneContent) =>
+    (content.state as { selectedStageKey?: string | null }).selectedStageKey;
+
+  it('carries the graph stages, edges and workflow variables into pane state', async () => {
+    const content = await workflowPaneContent('wf-1', 'fallback', apiWith(stages));
 
     expect(content.kind).toBe('workflow');
     expect(content.title).toBe('ship it');
-    expect(content.state).toMatchObject({
-      stages: definition.stages,
-      edges: definition.edges,
-      variables: { env: 'staging' },
-    });
+    expect(content.state).toMatchObject({ stages, edges, variables, status: 'draft', revision: 3 });
   });
 
   it('selects the first stage when nothing was selected before', async () => {
-    const content = await workflowPaneContent('wf-1', 'fallback', apiWith(definition.stages));
-    expect((content.state as { selectedStageId?: string }).selectedStageId).toBe('s1');
+    expect(selectedKey(await workflowPaneContent('wf-1', 'fallback', apiWith(stages)))).toBe('plan');
   });
 
-  it('keeps the cursor on the same stage across a reload', async () => {
+  it('keeps the cursor on the same stage key across a reload', async () => {
     // Every authoring action ends in a reload; a cursor that reset would
     // make editing two stages in a row unusable.
-    const content = await workflowPaneContent('wf-1', 'fallback', apiWith(definition.stages), 's2');
-    expect((content.state as { selectedStageId?: string }).selectedStageId).toBe('s2');
+    expect(selectedKey(await workflowPaneContent('wf-1', 'fallback', apiWith(stages), 'build'))).toBe('build');
   });
 
-  it('falls back to the first stage when the kept one was just deleted', async () => {
-    const content = await workflowPaneContent(
-      'wf-1',
-      'fallback',
-      apiWith([{ id: 's2', name: 'build' }]),
-      's1',
-    );
-    expect((content.state as { selectedStageId?: string }).selectedStageId).toBe('s2');
+  it('falls back to the first stage when the kept one was just removed', async () => {
+    expect(selectedKey(await workflowPaneContent('wf-1', 'fallback', apiWith([stages[1]!]), 'plan'))).toBe('build');
   });
 
-  it('selects nothing for an empty workflow rather than an id that does not exist', async () => {
-    const content = await workflowPaneContent('wf-1', 'fallback', apiWith([]), 's1');
-    expect((content.state as { selectedStageId?: string | null }).selectedStageId).toBeNull();
+  it('selects nothing for an empty workflow rather than a key that does not exist', async () => {
+    expect(selectedKey(await workflowPaneContent('wf-1', 'fallback', apiWith([]), 'plan'))).toBeNull();
   });
 
-  it('falls back to the given title when the definition has no name', async () => {
-    const api = {
-      definitions: { get: vi.fn(async () => ({ stages: [], edges: [] })) },
-    } as unknown as Api;
-    expect((await workflowPaneContent('wf-1', 'wf-1 fallback', api)).title).toBe('wf-1 fallback');
+  it('falls back to the given title when the workflow has no name', async () => {
+    expect((await workflowPaneContent('wf-1', 'wf-1 fallback', apiWith([], ''))).title).toBe('wf-1 fallback');
   });
 });

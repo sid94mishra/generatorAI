@@ -21,6 +21,7 @@
     "@generatorai/core": "workspace:*",
     "@generatorai/sdk": "workspace:*",
     "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0"
   }
 }

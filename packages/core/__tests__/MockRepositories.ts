@@ -1,20 +1,32 @@
 // ────────────────────────────────────────────────────────────────
-// MockRepositories — In-memory mock implementations of all 6 new
-// repository interfaces for service-level testing
+// MockRepositories — in-memory implementations of the chat, definition
+// store, run and stage-run ports for service-level tests
 // ────────────────────────────────────────────────────────────────
 
 import type {
   Chat, ChatStatus, BackgroundTaskStatus,
-  WorkflowDefinition,
-  StageDefinition,
-  StageEdge,
   WorkflowRun, WorkflowRunStatus,
   StageRun, StageRunStatus,
 } from '@generatorai/shared';
+import { NotFoundError } from '@generatorai/shared';
+import {
+  validateWorkflow,
+  type VersionKind,
+  type WorkflowDefinitionRecord,
+  type WorkflowDefinitionSummary,
+  type WorkflowDefinitionVersionRecord,
+  type WorkflowDefinitionVersionSummary,
+  type WorkflowGraph,
+} from '@generatorai/workflow-spec';
 import type { IChatRepository } from '../src/domain/ports/IChatRepository.js';
-import type { IWorkflowDefinitionRepository } from '../src/domain/ports/IWorkflowDefinitionRepository.js';
-import type { IStageDefinitionRepository } from '../src/domain/ports/IStageDefinitionRepository.js';
-import type { IStageEdgeRepository } from '../src/domain/ports/IStageEdgeRepository.js';
+import type {
+  DefinitionListFilter,
+  DefinitionListPage,
+  IWorkflowDefinitionStore,
+  NewDefinition,
+  NewVersion,
+  ReplaceGraphResult,
+} from '../src/domain/ports/IWorkflowDefinitionStore.js';
 import type { IWorkflowRunRepository } from '../src/domain/ports/IWorkflowRunRepository.js';
 import type { IStageRunRepository } from '../src/domain/ports/IStageRunRepository.js';
 
@@ -101,149 +113,208 @@ export class MockChatRepository implements IChatRepository {
   }
 }
 
-// ── MockWorkflowDefinitionRepository ──
+// ── MockWorkflowDefinitionStore ──
+//
+// In-memory `IWorkflowDefinitionStore` (P01 WP-1.7): definitions are whole
+// v2 graphs, versions are immutable copies. `seedDefinition` is the quick
+// way for a service test to get a definition plus a pinned version.
 
-export class MockWorkflowDefinitionRepository implements IWorkflowDefinitionRepository {
-  private store = new Map<string, WorkflowDefinition>();
+export class MockWorkflowDefinitionStore implements IWorkflowDefinitionStore {
+  private readonly defs = new Map<string, WorkflowDefinitionRecord>();
+  private readonly versions = new Map<string, WorkflowDefinitionVersionRecord>();
+  /** Run counts by definition, for `countRuns` (tests set it directly). */
+  readonly runCounts = new Map<string, number>();
+  private seq = 0;
 
-  async create(definition: WorkflowDefinition): Promise<WorkflowDefinition> {
-    this.store.set(definition.id, { ...definition });
-    return { ...definition };
+  private now(): string {
+    return new Date(Date.now() + this.seq++).toISOString();
   }
 
-  async getById(id: string): Promise<WorkflowDefinition> {
-    const def = this.store.get(id);
-    if (!def) throw new Error(`WorkflowDefinition ${id} not found`);
-    return { ...def };
+  private copy(r: WorkflowDefinitionRecord): WorkflowDefinitionRecord {
+    return structuredClone(r);
   }
 
-  async getAll(): Promise<WorkflowDefinition[]> {
-    return [...this.store.values()].map((d) => ({ ...d }));
+  private must(id: string): WorkflowDefinitionRecord {
+    const r = this.defs.get(id);
+    if (!r) throw new NotFoundError('Workflow definition', id);
+    return r;
   }
 
-  async update(id: string, updates: Partial<WorkflowDefinition>): Promise<WorkflowDefinition> {
-    const existing = this.store.get(id);
-    if (!existing) throw new Error(`WorkflowDefinition ${id} not found`);
-    const updated = { ...existing, ...updates, updatedAt: new Date() };
-    this.store.set(id, updated);
-    return { ...updated };
+  async list(filter: DefinitionListFilter = {}): Promise<DefinitionListPage> {
+    const items: WorkflowDefinitionSummary[] = [...this.defs.values()]
+      .filter((r) => filter.includeArchived || !r.archivedAt)
+      .filter((r) => !filter.status || r.status === filter.status)
+      .filter((r) => filter.projectId === undefined || (r.graph.workflow.projectId ?? null) === filter.projectId)
+      .filter((r) => !filter.q || r.graph.workflow.name.toLowerCase().includes(filter.q.toLowerCase()))
+      .map((r) => ({
+        id: r.id,
+        name: r.graph.workflow.name,
+        ...(r.graph.workflow.description ? { description: r.graph.workflow.description } : {}),
+        projectId: r.graph.workflow.projectId ?? null,
+        status: r.status,
+        revision: r.revision,
+        currentVersionId: r.currentVersionId,
+        tags: r.graph.workflow.tags,
+        stageCount: r.graph.stages.length,
+        needsAttention: r.needsAttention.length > 0,
+        archivedAt: r.archivedAt,
+        createdAt: r.createdAt,
+        updatedAt: r.updatedAt,
+      }));
+    return { items };
   }
 
-  async delete(id: string): Promise<void> {
-    this.store.delete(id);
+  async getGraph(id: string): Promise<WorkflowDefinitionRecord> {
+    return this.copy(this.must(id));
+  }
+
+  async insert(def: NewDefinition): Promise<WorkflowDefinitionRecord> {
+    const at = this.now();
+    const record: WorkflowDefinitionRecord = {
+      id: def.id,
+      status: def.status,
+      revision: 1,
+      currentVersionId: null,
+      hasUnpublishedChanges: true,
+      archivedAt: null,
+      needsAttention: [],
+      createdAt: at,
+      updatedAt: at,
+      graph: structuredClone(def.graph),
+    };
+    this.defs.set(def.id, record);
+    return this.copy(record);
+  }
+
+  async replaceGraph(id: string, graph: WorkflowGraph, expectedRevision: number): Promise<ReplaceGraphResult> {
+    const r = this.must(id);
+    if (r.revision !== expectedRevision) return { ok: false, current: this.copy(r) };
+    r.graph = structuredClone(graph);
+    r.revision += 1;
+    r.needsAttention = [];
+    r.updatedAt = this.now();
+    r.hasUnpublishedChanges = true;
+    return { ok: true, record: this.copy(r) };
+  }
+
+  async insertVersion(v: NewVersion): Promise<WorkflowDefinitionVersionRecord> {
+    const version = [...this.versions.values()].filter((x) => x.workflowDefinitionId === v.workflowDefinitionId).length + 1;
+    const record: WorkflowDefinitionVersionRecord = {
+      id: `ver-${v.workflowDefinitionId}-${version}`,
+      workflowDefinitionId: v.workflowDefinitionId,
+      version,
+      kind: v.kind,
+      contentHash: v.contentHash,
+      createdAt: this.now(),
+      graph: structuredClone(v.graph),
+    };
+    this.versions.set(record.id, record);
+    return structuredClone(record);
+  }
+
+  async findVersionByHash(workflowDefinitionId: string, kind: VersionKind, contentHash: string) {
+    const hit = [...this.versions.values()].find(
+      (v) => v.workflowDefinitionId === workflowDefinitionId && v.kind === kind && v.contentHash === contentHash,
+    );
+    if (!hit) return undefined;
+    const { graph: _graph, ...summary } = hit;
+    return summary;
+  }
+
+  async getVersion(versionId: string): Promise<WorkflowDefinitionVersionRecord> {
+    const v = this.versions.get(versionId);
+    if (!v) throw new NotFoundError('Definition version', versionId);
+    return structuredClone(v);
+  }
+
+  async listVersions(workflowDefinitionId: string): Promise<WorkflowDefinitionVersionSummary[]> {
+    return [...this.versions.values()]
+      .filter((v) => v.workflowDefinitionId === workflowDefinitionId)
+      .map(({ graph: _graph, ...summary }) => summary)
+      .reverse();
+  }
+
+  async markPublished(workflowDefinitionId: string, versionId: string): Promise<WorkflowDefinitionRecord> {
+    const r = this.must(workflowDefinitionId);
+    r.status = 'published';
+    r.currentVersionId = versionId;
+    r.hasUnpublishedChanges = false;
+    r.updatedAt = this.now();
+    return this.copy(r);
+  }
+
+  async setArchived(workflowDefinitionId: string, archived: boolean): Promise<WorkflowDefinitionRecord> {
+    const r = this.must(workflowDefinitionId);
+    r.archivedAt = archived ? this.now() : null;
+    return this.copy(r);
+  }
+
+  async delete(workflowDefinitionId: string): Promise<void> {
+    this.defs.delete(workflowDefinitionId);
+    for (const [id, v] of this.versions) if (v.workflowDefinitionId === workflowDefinitionId) this.versions.delete(id);
+  }
+
+  async countRuns(workflowDefinitionId: string): Promise<number> {
+    return this.runCounts.get(workflowDefinitionId) ?? 0;
   }
 
   clear(): void {
-    this.store.clear();
+    this.defs.clear();
+    this.versions.clear();
+    this.runCounts.clear();
   }
 }
 
-// ── MockStageDefinitionRepository ──
+/** A shorthand stage for `seedDefinition`: `[key, extra?]` or a full stage input. */
+export type SeedStage = string | ({ key: string } & Record<string, unknown>);
+export type SeedEdge = [from: string, to: string, on?: 'success' | 'failure' | 'completion' | 'always', when?: string];
 
-export class MockStageDefinitionRepository implements IStageDefinitionRepository {
-  private store = new Map<string, StageDefinition>();
-
-  async create(stage: StageDefinition): Promise<StageDefinition> {
-    this.store.set(stage.id, { ...stage });
-    return { ...stage };
+/** Build a valid v2 graph from shorthand stages and edges. */
+export function testGraph(
+  stages: SeedStage[],
+  edges: SeedEdge[] = [],
+  workflow: Record<string, unknown> = {},
+): WorkflowGraph {
+  const result = validateWorkflow({
+    formatVersion: 2,
+    workflow: { name: 'test workflow', ...workflow },
+    stages: stages.map((s) => {
+      const base = typeof s === 'string' ? { key: s } : s;
+      return { kind: 'agent', name: base.key, prompts: [{ label: base.key, text: `Do ${base.key}` }], ...base };
+    }),
+    edges: edges.map(([from, to, on = 'success', when]) => ({ from, to, on, ...(when ? { when } : {}) })),
+  });
+  if (!result.valid || !result.graph) {
+    throw new Error(`testGraph is invalid: ${result.issues.map((i) => `${i.path}: ${i.message}`).join('; ')}`);
   }
-
-  async getById(id: string): Promise<StageDefinition> {
-    const stage = this.store.get(id);
-    if (!stage) throw new Error(`StageDefinition ${id} not found`);
-    return { ...stage };
-  }
-
-  async getByDefinitionId(workflowDefinitionId: string): Promise<StageDefinition[]> {
-    return [...this.store.values()]
-      .filter((s) => s.workflowDefinitionId === workflowDefinitionId)
-      .sort((a, b) => a.order - b.order)
-      .map((s) => ({ ...s }));
-  }
-
-  async update(id: string, updates: Partial<StageDefinition>): Promise<StageDefinition> {
-    const existing = this.store.get(id);
-    if (!existing) throw new Error(`StageDefinition ${id} not found`);
-    const updated = { ...existing, ...updates };
-    this.store.set(id, updated);
-    return { ...updated };
-  }
-
-  async reorder(workflowDefinitionId: string, orderedIds: string[]): Promise<void> {
-    orderedIds.forEach((id, index) => {
-      const stage = this.store.get(id);
-      if (stage && stage.workflowDefinitionId === workflowDefinitionId) {
-        stage.order = index;
-      }
-    });
-  }
-
-  async delete(id: string): Promise<void> {
-    this.store.delete(id);
-  }
-
-  async deleteByDefinitionId(workflowDefinitionId: string): Promise<void> {
-    for (const [id, stage] of this.store) {
-      if (stage.workflowDefinitionId === workflowDefinitionId) {
-        this.store.delete(id);
-      }
-    }
-  }
-
-  clear(): void {
-    this.store.clear();
-  }
+  return result.graph;
 }
 
-// ── MockStageEdgeRepository ──
-
-export class MockStageEdgeRepository implements IStageEdgeRepository {
-  private store = new Map<string, StageEdge>();
-
-  async create(edge: StageEdge): Promise<StageEdge> {
-    this.store.set(edge.id, { ...edge });
-    return { ...edge };
-  }
-
-  async getById(id: string): Promise<StageEdge> {
-    const edge = this.store.get(id);
-    if (!edge) throw new Error(`StageEdge ${id} not found`);
-    return { ...edge };
-  }
-
-  async getByDefinitionId(workflowDefinitionId: string): Promise<StageEdge[]> {
-    return [...this.store.values()]
-      .filter((e) => e.workflowDefinitionId === workflowDefinitionId)
-      .map((e) => ({ ...e }));
-  }
-
-  async getByStageId(stageId: string): Promise<StageEdge[]> {
-    return [...this.store.values()]
-      .filter((e) => e.fromStageId === stageId || e.toStageId === stageId)
-      .map((e) => ({ ...e }));
-  }
-
-  async delete(id: string): Promise<void> {
-    this.store.delete(id);
-  }
-
-  async deleteByDefinitionId(workflowDefinitionId: string): Promise<void> {
-    for (const [id, edge] of this.store) {
-      if (edge.workflowDefinitionId === workflowDefinitionId) {
-        this.store.delete(id);
-      }
-    }
-  }
-
-  clear(): void {
-    this.store.clear();
-  }
+/** Insert a published definition and its version 1. */
+export async function seedDefinition(
+  store: MockWorkflowDefinitionStore,
+  graph: WorkflowGraph,
+  id = `def-${Math.random().toString(36).slice(2, 10)}`,
+): Promise<{ definitionId: string; versionId: string; graph: WorkflowGraph }> {
+  await store.insert({ id, status: 'draft', graph });
+  const version = await store.insertVersion({ workflowDefinitionId: id, kind: 'published', graph, contentHash: `hash-${id}`, canonical: '' });
+  await store.markPublished(id, version.id);
+  return { definitionId: id, versionId: version.id, graph };
 }
 
 // ── MockWorkflowRunRepository ──
 
 export class MockWorkflowRunRepository implements IWorkflowRunRepository {
   private store = new Map<string, WorkflowRun>();
+
+  /** `createWithStages` writes its stage rows here. */
+  constructor(private readonly stageRuns?: IStageRunRepository) {}
+
+  async createWithStages(run: WorkflowRun, stageRuns: StageRun[]): Promise<void> {
+    if (!this.stageRuns) throw new Error('MockWorkflowRunRepository: pass the stage-run repository to the constructor');
+    this.store.set(run.id, { ...run });
+    for (const sr of stageRuns) await this.stageRuns.create(sr);
+  }
 
   async create(run: WorkflowRun): Promise<WorkflowRun> {
     this.store.set(run.id, { ...run });
@@ -380,11 +451,10 @@ export class MockStageRunRepository implements IStageRunRepository {
    * has something real to assert against in tests instead of silently
    * hitting a missing method.
    */
-  async heartbeat(id: string, leaseOwner?: string): Promise<boolean> {
+  async heartbeat(id: string): Promise<boolean> {
     const existing = this.store.get(id);
     if (!existing || (existing.status !== 'queued' && existing.status !== 'running')) return false;
     existing.heartbeatAt = new Date();
-    if (leaseOwner !== undefined) existing.leaseOwner = leaseOwner;
     return true;
   }
 

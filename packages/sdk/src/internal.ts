@@ -23,9 +23,7 @@ export type {
   IChatMessageRepository,
   IArtifactRepository,
   IChatRepository,
-  IWorkflowDefinitionRepository,
-  IStageDefinitionRepository,
-  IStageEdgeRepository,
+  IWorkflowDefinitionStore,
   IWorkflowRunRepository,
   IStageRunRepository,
   IScriptRunner,
@@ -58,9 +56,7 @@ export type {
 } from '@generatorai/core';
 
 // ── DAG utilities ──
-export {
-  buildDAG,
-  validateDAG,
-  topologicalSort,
-  getExecutionLayers,
-} from '@generatorai/core';
+// Validation, ordering and layers of a workflow document are
+// `validateWorkflow` / `analyzeGraph` in @generatorai/workflow-spec; this is
+// the engine's DAG over a validated graph.
+export { buildDAG } from '@generatorai/core';

@@ -4,7 +4,7 @@ export { HookExecutor } from './HookExecutor.js';
 export type { HookContext, HookDryRunPlan, HookDryRunEntry } from './HookExecutor.js';
 export { HookInterceptor } from './HookInterceptor.js';
 export type { SDKHookContext, StageHookContext } from './HookInterceptor.js';
-export { TemplateRegistry } from './TemplateRegistry.js';
+export { TemplateRegistry, TemplateLoadError, TEMPLATE_FILE_SUFFIX } from './TemplateRegistry.js';
 export { StartupRecoveryService } from './StartupRecoveryService.js';
 export { InterruptedTurnRecoveryService, INTERRUPTED_BY_RESTART_CODE } from './InterruptedTurnRecoveryService.js';
 export { OrphanProcessReaper, selectOrphans } from './OrphanProcessReaper.js';
@@ -21,7 +21,13 @@ export type {
   ForkChatResult,
   InternalCreateChatExtras,
 } from './ChatManagementService.js';
-export { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
+export { WorkflowDefinitionService, assertValidGraph, COMMAND_EDIT_SCOPE } from './WorkflowDefinitionService.js';
+export type { DefinitionWriteOptions, CreateDefinitionOptions, DeleteOutcome } from './WorkflowDefinitionService.js';
+export { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
+export { canonicalGraph } from './definitions/canonical.js';
+export { sessionSpecToHarnessConfig } from './definitions/sessionSpec.js';
+export { userVariables, codebasesOf, runScope, stagesScope, templateScope } from './definitions/runScope.js';
+export type { RunScope, StageScope, CodebaseScope } from './definitions/runScope.js';
 export { DAGScheduler } from './DAGScheduler.js';
 export { StageExecutionService } from './StageExecutionService.js';
 export { WorkflowRunService } from './WorkflowRunService.js';
@@ -51,7 +57,6 @@ export type { RunSandboxOptions } from './createRunSandbox.js';
 export { WorkflowPreprocessor } from './WorkflowPreprocessor.js';
 export type { WorkflowScmFlowPort } from './WorkflowPreprocessor.js';
 export { ResultValidator } from './ResultValidator.js';
-export { resolveStageHooks } from './resolveStageHooks.js';
 
 // Phase 4 streaming rewrite (additive — coexists with legacy transports)
 export { StreamBroker } from './StreamBroker.js';
@@ -165,7 +170,7 @@ export * from './scm/index.js';
 export { PathResolver, PathEscapeError, SymlinkEscapeError } from './PathResolver.js';
 
 // Workflow Script services
-export { WorkflowScriptLoader, WORKFLOW_SCRIPTS_DISABLED_MESSAGE, ScriptSecurityError } from './WorkflowScriptLoader.js';
+export { WorkflowScriptLoader, WORKFLOW_SCRIPTS_DISABLED_MESSAGE, ScriptSecurityError, ScriptValidationError, scriptIdOf } from './WorkflowScriptLoader.js';
 export type { ScriptMetadata, LoadedScript, WorkflowScriptLoaderOptions } from './WorkflowScriptLoader.js';
 
 // Integrated Browser service (v13)

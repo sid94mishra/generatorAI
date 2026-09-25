@@ -7,6 +7,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { HookDefinition } from '@generatorai/shared';
+import type { ScriptRunProfile } from '@generatorai/workflow-spec';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError, EXIT_CODES } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
@@ -307,11 +308,24 @@ export function scriptCommands(): CommandSpec[] {
       schema: inputSchema({ script: z.string() }, {}),
       output: {
         kind: 'list',
-        columns: [nameColumn, { key: 'description', header: 'Description', priority: 1 }],
+        columns: [
+          nameColumn,
+          { key: 'description', header: 'Description', priority: 1 },
+          { key: 'permissionMode', header: 'Mode', priority: 2 },
+          { key: 'stageOverrides', header: 'Overrides (stage keys)', priority: 3 },
+        ],
       },
       async handler(ctx, { args }) {
         const target = await find(ctx, args.script);
-        return list(await ctx.api.scripts.profiles(target.id));
+        const profiles = (await ctx.api.scripts.profiles(target.id)) as unknown as ScriptRunProfile[];
+        return list(
+          profiles.map((profile) => ({
+            ...profile,
+            stageOverrides: (profile.stageOverrides ?? [])
+              .map((o) => `${o.stageKey}${o.skip ? ' (skip)' : ''}`)
+              .join(', '),
+          })),
+        );
       },
     }),
 
@@ -323,15 +337,19 @@ export function scriptCommands(): CommandSpec[] {
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [{ name: 'script', description: 'Script reference', required: true, completes: 'script' }],
-      flags: [{ name: 'profile', description: 'Profile name', type: 'string' }],
-      schema: inputSchema({ script: z.string() }, { profile: z.string().optional() }),
-      output: { kind: 'record', successMessage: 'Materialized workflow {id}' },
+      flags: [
+        { name: 'name', description: 'Name of the new draft (defaults to the script name)', type: 'string' },
+        { name: 'project', description: 'Project id or name', type: 'string', completes: 'project' },
+      ],
+      schema: inputSchema({ script: z.string() }, { name: z.string().optional(), project: z.string().optional() }),
+      output: { kind: 'record' },
       async handler(ctx, { args, flags }) {
         const target = await find(ctx, args.script);
-        return record(
-          await ctx.api.scripts.materialize(target.id, // The route reads `profileName`; `profile` was silently ignored.
-          compact({ profileName: flags.profile })),
-        );
+        const projectId = flags.project
+          ? resolveRef(flags.project, { kind: 'project', candidates: await ctx.api.projects.list() }).id
+          : undefined;
+        const result = await ctx.api.scripts.materialize(target.id, compact({ name: flags.name, projectId }));
+        return record(result.definition, `Materialized ${target.name} as draft ${result.definitionId}.`);
       },
     }),
 
@@ -352,18 +370,21 @@ export function scriptCommands(): CommandSpec[] {
           verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal'),
         },
       ),
-      output: { kind: 'record', successMessage: 'Started run {id}' },
-      async handler(ctx, { args, flags }) {
+      output: { kind: 'record', successMessage: 'Started run {runId}' },
+      async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
         const target = await find(ctx, args.script);
-        const run = await ctx.api.scripts.run(target.id, compact({ profile: flags.profile }));
+        // The route answers `{ definitionId, runId, status }`, not a run.
+        const started = (await ctx.api.scripts.run(
+          target.id,
+          compact({ profileName: flags.profile }),
+        )) as unknown as { definitionId: string; runId: string; status: string };
         if (!flags.watch) {
-          return record(run, `Started run ${run.id} — \`generatorai run watch ${run.id}\``);
+          return record(started, `Started run ${started.runId} — \`generatorai run watch ${started.runId}\``);
         }
         // Reuses `run start`'s watcher so there is one implementation of
-        // "follow a run" — previously this printed a suggestion to watch
-        // instead of actually doing it.
-        await watchRun(ctx, run.id, flags.verbosity);
-        return record(await ctx.api.runs.get(run.id));
+        // "follow a run".
+        await watchRun(ctx, started.runId, flags.verbosity);
+        return record(await ctx.api.runs.get(started.runId));
       },
     }),
 
@@ -374,13 +395,14 @@ export function scriptCommands(): CommandSpec[] {
       summary: 'Validate a script file without registering it',
       requiresServer: true,
       sinceVersion: '0.2.0',
-      args: [{ name: 'file', description: '.workflow.mjs file', required: true, completes: 'file' }],
+      args: [{ name: 'file', description: '.workflow.mjs file inside a server script directory', required: true, completes: 'file' }],
       flags: [],
       schema: inputSchema({ file: z.string() }, {}),
       output: { kind: 'record' },
       async handler(ctx, { args }) {
-        const source = await readTextFile(path.resolve(args.file), 'script file');
-        const result = await ctx.api.scripts.validate({ source, name: path.basename(args.file) });
+        // The route loads the file itself (`{ path }`), so the path must be one
+        // the server can read, inside its script directories.
+        const result = await ctx.api.scripts.validate({ path: path.resolve(args.file) });
         if (!result.valid) {
           throw new CliError('VALIDATION', `Script is not valid:\n${(result.errors ?? []).map((e) => `  ${e}`).join('\n')}`);
         }
@@ -423,10 +445,24 @@ export function templateCommands(): CommandSpec[] {
       schema: inputSchema({}, {}),
       output: {
         kind: 'list',
-        columns: [idColumn, nameColumn, { key: 'description', header: 'Description', priority: 2 }],
+        columns: [
+          idColumn,
+          nameColumn,
+          { key: 'category', header: 'Category', priority: 1 },
+          { key: 'stageCount', header: 'Stages', format: 'number', priority: 3 },
+          { key: 'description', header: 'Description', priority: 2 },
+        ],
       },
       async handler(ctx) {
-        return list(await ctx.api.templates.list());
+        return list(
+          (await ctx.api.templates.list()).map((template) => ({
+            id: template.id,
+            name: template.graph.workflow.name,
+            category: template.category,
+            stageCount: template.graph.stages.length,
+            description: template.graph.workflow.description,
+          })),
+        );
       },
     }),
 

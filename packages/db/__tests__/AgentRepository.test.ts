@@ -8,8 +8,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import { createDB, migrateDB, DrizzleAgentRepository, DrizzleWorkflowDefinitionRepository } from '../src/index.js';
+import { createDB, migrateDB, DrizzleAgentRepository, SqliteWorkflowDefinitionStore } from '../src/index.js';
 import type { Agent } from '@generatorai/shared';
+import { WorkflowGraphSchema } from '@generatorai/workflow-spec';
 
 function makeAgent(over: Partial<Agent> = {}): Agent {
   const now = new Date();
@@ -72,8 +73,6 @@ describe('migration v26', () => {
       expect.arrayContaining(['agent_ref', 'agent_id', 'agent_version', 'agent_overrides', 'agent_snapshot']),
     );
     expect(cols('chat_messages')).toEqual(expect.arrayContaining(['agent_ref', 'agent_version']));
-    expect(cols('stage_definitions')).toEqual(expect.arrayContaining(['agent_ref']));
-    expect(cols('workflow_definitions')).toEqual(expect.arrayContaining(['default_agent_ref']));
     expect(cols('workflow_runs')).toEqual(expect.arrayContaining(['agent_snapshot']));
   });
 });
@@ -151,22 +150,23 @@ describe('DrizzleAgentRepository', () => {
     expect(usage).toEqual({ chats: [], stages: [], workflows: [] });
   });
 
-  it("counts a workflow whose harnessConfig binds the agent (the workflow's default agent)", async () => {
+  it("counts a workflow whose session binds the agent, and a stage whose session does", async () => {
     await repo.create(makeAgent());
-    const now = new Date();
-    await new DrizzleWorkflowDefinitionRepository(db).create({
+    await new SqliteWorkflowDefinitionStore(db).insert({
       id: 'wf-1',
-      name: 'Bound',
-      version: 1,
-      sessionMode: 'auto',
-      harnessConfig: { agentRef: 'global:reviewer' },
-      variables: [],
-      tags: [],
-      createdAt: now,
-      updatedAt: now,
+      status: 'draft',
+      graph: WorkflowGraphSchema.parse({
+        formatVersion: 2,
+        workflow: { name: 'Bound', session: { agentRef: 'global:reviewer' } },
+        stages: [
+          { kind: 'agent', key: 'review', name: 'Review', session: { agentRef: 'global:reviewer' } },
+          { kind: 'agent', key: 'other', name: 'Other' },
+        ],
+      }),
     });
     const usage = await repo.countUsage('global:reviewer');
     expect(usage.workflows).toEqual([{ id: 'wf-1', name: 'Bound' }]);
+    expect(usage.stages.map((s) => s.name)).toEqual(['Review']);
     expect((await repo.countUsage('global:other')).workflows).toEqual([]);
   });
 });

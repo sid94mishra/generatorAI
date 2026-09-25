@@ -95,6 +95,7 @@ const BUILTIN_TOOLS: McpAdvertisedTool[] = [
         definitionId: { type: 'string' },
         variables: { type: 'object' },
         projectId: { type: 'string' },
+        testRun: { type: 'boolean', description: 'Run the working graph as a test run (the only way to run a draft)' },
       },
       required: ['definitionId'],
     },
@@ -178,6 +179,7 @@ export class GeneratorAiMcpServer {
         return this.opts.ai.workflows.run(definitionId, {
           variables: (args['variables'] as Record<string, unknown> | undefined) ?? undefined,
           projectId: typeof args['projectId'] === 'string' ? args['projectId'] : undefined,
+          ...(args['testRun'] === true ? { testRun: true } : {}),
         });
       }
 

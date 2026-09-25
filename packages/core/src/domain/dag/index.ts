@@ -1,3 +1,3 @@
 // DAG module barrel
-export type { DAG, DAGValidationIssue, DAGValidationResult, StageNode, ExecutionLayer } from './types.js';
-export { validateDAG, topologicalSort, getExecutionLayers, buildDAG } from './DAGValidator.js';
+export type { DAG, StageNode } from './types.js';
+export { buildDAG } from './buildDAG.js';

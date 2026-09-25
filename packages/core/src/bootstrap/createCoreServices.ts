@@ -23,9 +23,7 @@ import type {
   IChatMessageRepository,
   IArtifactRepository,
   IChatRepository,
-  IWorkflowDefinitionRepository,
-  IStageDefinitionRepository,
-  IStageEdgeRepository,
+  IWorkflowDefinitionStore,
   IWorkflowRunRepository,
   IStageRunRepository,
   IAgentHarness,
@@ -54,6 +52,7 @@ import { OrchestratorService, DEFAULT_ORCHESTRATOR_CONFIG } from '../services/or
 import type { OrchestratorConfig } from '../services/orchestrator/OrchestratorService.js';
 import { DAGScheduler } from '../services/DAGScheduler.js';
 import { WorkflowDefinitionService } from '../services/WorkflowDefinitionService.js';
+import { RunDefinitionReader } from '../services/definitions/RunDefinitionReader.js';
 import { StageExecutionService } from '../services/StageExecutionService.js';
 import { WorkflowRunService } from '../services/WorkflowRunService.js';
 import { AutomationService } from '../services/AutomationService.js';
@@ -96,9 +95,8 @@ export interface CoreServicesInputs {
 
   // DAG/run repositories
   chatEntityRepo: IChatRepository;
-  workflowDefinitionRepo: IWorkflowDefinitionRepository;
-  stageDefinitionRepo: IStageDefinitionRepository;
-  stageEdgeRepo: IStageEdgeRepository;
+  /** Workflow definitions as v2 documents (P01 WP-1.7). */
+  workflowDefinitionStore: IWorkflowDefinitionStore;
   workflowRunRepo: IWorkflowRunRepository;
   stageRunRepo: IStageRunRepository;
 
@@ -143,9 +141,6 @@ export interface CoreServicesInputs {
   /** W22 / W47 — durable execution engine repositories. */
   registerRepo: RegisterRepository;
   entryRepo: EntryRepository;
-
-  /** Optional transactional wrapper for multi-row writes. */
-  withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>;
 
   /**
    * Section 8 — optional harness-agnostic extensions for ChatManagementService.
@@ -194,6 +189,8 @@ export interface CoreServices {
   orchestratorService: OrchestratorService;
   dagScheduler: DAGScheduler;
   workflowDefinitionService: WorkflowDefinitionService;
+  /** The graph of each run's pinned definition version. */
+  runDefinitionReader: RunDefinitionReader;
   stageExecutionService: StageExecutionService;
   workflowRunService: WorkflowRunService;
 
@@ -230,9 +227,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     chatMessageRepo,
     artifactRepo,
     chatEntityRepo,
-    workflowDefinitionRepo,
-    stageDefinitionRepo,
-    stageEdgeRepo,
+    workflowDefinitionStore,
     workflowRunRepo,
     stageRunRepo,
     automationRepo,
@@ -245,7 +240,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     admissionController,
     scmFlow,
     config,
-    withTransaction,
     registerRepo,
     entryRepo,
   } = inputs;
@@ -389,22 +383,10 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     inputs.chatExtensions.orchestratorService = orchestratorService;
   }
 
-  const dagScheduler = new DAGScheduler(
-    stageDefinitionRepo,
-    stageEdgeRepo,
-    stageRunRepo,
-    workflowRunRepo, // SCHEMA-3: enables variables.* in edge conditions
-  );
-
-  const workflowDefinitionService = new WorkflowDefinitionService(
-    workflowDefinitionRepo,
-    stageDefinitionRepo,
-    stageEdgeRepo,
-    templateRegistry,
-    dagScheduler,
-    withTransaction, // P0#4 — atomic template/JSON import
-    workflowRunRepo, // Item 9 — refuse (409) / force-delete a definition with runs
-  );
+  // Runs read their pinned definition version through one reader (W-13).
+  const runDefinitionReader = new RunDefinitionReader(workflowDefinitionStore);
+  const dagScheduler = new DAGScheduler(runDefinitionReader, stageRunRepo, workflowRunRepo, logger);
+  const workflowDefinitionService = new WorkflowDefinitionService(workflowDefinitionStore, templateRegistry);
 
   // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix). Built before
   // HitlService, which takes it as its durable Awakeable backend.
@@ -418,14 +400,13 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
 
   const stageExecutionService = new StageExecutionService(
     stageRunRepo,
-    stageDefinitionRepo,
+    runDefinitionReader,
     chatMessageRepo,
     harness,
     eventBus,
     sessionAllocator,
     hookExecutor,
     workspaceManager,
-    workflowDefinitionRepo, // HOOK-2: enables hooksFile per-stage/wildcard merge
     workflowRunRepo,        // HITL-06: read run's permissionMode per request
     hitlService,            // HITL-06: bridge harness prompts to HITL waiter
   );
@@ -461,8 +442,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   const workflowRunService = new WorkflowRunService(
     workflowRunRepo,
     stageRunRepo,
-    stageDefinitionRepo,
-    workflowDefinitionRepo,
+    runDefinitionReader,
+    workflowDefinitionService,
     eventBus,
     dagScheduler,
     stageExecutionService,
@@ -470,7 +451,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     workspaceManager,
     admissionController,
     logger,
-    withTransaction,
     stageSemaphore,
   );
 
@@ -497,7 +477,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     // W22: durable iteration claiming (P0-41 fix).
     durableExecutionEngine,
     config.artifactsDir,
-    withTransaction,
   );
 
   // Track A1 — boot-time reconciler + idempotency sweeper. Only wired
@@ -556,6 +535,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     orchestratorService,
     dagScheduler,
     workflowDefinitionService,
+    runDefinitionReader,
     stageExecutionService,
     workflowRunService,
     automationService,

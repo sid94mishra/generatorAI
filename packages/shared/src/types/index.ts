@@ -43,7 +43,6 @@ export type {
   FunctionHookConfig,
   WorkflowHookPhase,
   WorkflowHookDefinition,
-  HooksFileConfig,
   HookResult,
   HookPhaseResult,
 } from './HookDefinition.js';
@@ -150,27 +149,6 @@ export {
   isStageReviewOutcome,
 } from './AgentMode.js';
 export type {
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  WorkflowSessionMode,
-  VariableDefinition,
-  CreateWorkflowDefinitionParams,
-  UpdateWorkflowDefinitionParams,
-} from './WorkflowDefinition.js';
-export type {
-  StageDefinition,
-  StageEdge,
-  StageEdgeType,
-  PromptDefinition,
-  RetryPolicy,
-  StageCondition,
-  CreateStageParams,
-  CreateEdgeParams,
-  ContextFilter,
-  StageSkillReference,
-  ArtifactManifestEntry,
-} from './StageDefinition.js';
-export type {
   WorkflowRun,
   WorkflowRunStatus,
   StageRun,
@@ -178,7 +156,8 @@ export type {
   WorkflowRunWithStages,
   CreateWorkflowRunParams,
   WorkflowRunPermissionMode,
-  WorkflowDefinitionSnapshot,
+  WorkflowSessionMode,
+  ArtifactManifestEntry,
   RunScratchpad,
   RunScratchpadEntry,
 } from './WorkflowRun.js';
@@ -190,7 +169,6 @@ export type {
   PlatformType,
   PaginatedResult,
   EventSubscriptionOptions,
-  WorkflowTemplateSummary,
 } from './IPlatformClient.js';
 
 // ── Automation Types ──
@@ -284,25 +262,6 @@ export {
 
 // ── Orchestrator Types ──
 export type {
-  PreprocessingStep,
-  PreprocessingStepType,
-  PreprocessingStepConfig,
-  CloneRepoStepConfig,
-  RunScriptStepConfig,
-  ValidateInputStepConfig,
-  SetVariableStepConfig,
-  ConditionalStepConfig,
-  ValidationRule,
-  StageResultValidation,
-  ResultValidationRule,
-  WorkflowCategory,
-  PostProcessingStep,
-  PostProcessingStepType,
-  PostProcessingStepConfig,
-  CommitAndPushStepConfig,
-  CreatePRStepConfig,
-  PostRunScriptStepConfig,
-  OrchestratorConfig,
   OrchestratedRunParams,
   OrchestratorContext,
   PreprocessingResult,

@@ -188,7 +188,8 @@ export interface AutomationExecution {
 export interface AutomationExecutionRun {
   id: string;
   executionId: string;
-  workflowRunId: string;
+  /** Null once the run itself was deleted (the iteration record stays). */
+  workflowRunId: string | null;
   workflowDefinitionId: string;
   iterationIndex: number;
   /** Snapshot of variables used for this specific iteration (for debugging/auditing) */

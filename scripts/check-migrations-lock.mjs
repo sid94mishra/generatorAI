@@ -35,7 +35,15 @@ export const LOCK_FILE = resolve(repoRoot, 'packages', 'db', 'src', 'migrations'
  */
 export function hashMigration(m) {
   const sql = m.sql.map((stmt) => stmt.replace(/\r\n/g, '\n'));
-  const payload = JSON.stringify({ name: m.name, sql, disableForeignKeys: m.disableForeignKeys === true });
+  const base = { name: m.name, sql, disableForeignKeys: m.disableForeignKeys === true };
+  // A migration with a JS step (v55+) also pins the content of its frozen
+  // module files, so editing the conversion code is caught like editing SQL.
+  const payload = m.lockFiles
+    ? JSON.stringify({
+        ...base,
+        files: m.lockFiles.map((f) => [f, readFileSync(resolve(dirname(LOCK_FILE), f), 'utf8').replace(/\r\n/g, '\n')]),
+      })
+    : JSON.stringify(base);
   return createHash('sha256').update(payload).digest('hex');
 }
 

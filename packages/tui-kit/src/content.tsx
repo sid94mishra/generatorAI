@@ -482,7 +482,7 @@ export function Dag({ stages, edges, height, selectedId }: DagProps): React.JSX.
             isLast: line.isLast,
             status: line.status ?? null,
             repeat: line.repeat,
-            ...(line.edgeType && line.edgeType !== 'on_success' ? { detail: line.edgeType } : {}),
+            ...(line.on && line.on !== 'success' ? { detail: line.on } : {}),
           }))}
           height={height}
           selectedIndex={Math.max(0, tree.findIndex((l) => l.id === selectedId))}
@@ -507,7 +507,7 @@ export function Dag({ stages, edges, height, selectedId }: DagProps): React.JSX.
             {layerIds.map((id) => {
               const node = layout.nodes.find((n) => n.id === id)!;
               const selected = id === selectedId;
-              const outgoing = edges.filter((e) => e.fromStageId === id);
+              const outgoing = edges.filter((e) => e.from === id);
               return (
                 <Box key={id} flexDirection="column" marginBottom={1}>
                   <Box

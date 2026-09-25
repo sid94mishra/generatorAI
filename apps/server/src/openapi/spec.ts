@@ -44,11 +44,22 @@ const errorResponseSchema = {
         code: { type: 'string' },
         message: { type: 'string' },
         details: {},
+        issues: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/ValidationIssue' },
+          description: 'WORKFLOW_INVALID (422): every problem, each pointing at a field',
+        },
+        current: {
+          $ref: '#/components/schemas/WorkflowDefinition',
+          description: 'REVISION_CONFLICT (409): the record the save lost to',
+        },
       },
       required: ['code', 'message'],
     },
   },
 };
+
+const errorContent = { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } };
 
 const idParam = {
   in: 'path',
@@ -552,26 +563,111 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
         required: ['id', 'sessionId', 'role', 'content', 'timestamp'],
       },
+      WorkflowGraph: {
+        type: 'object',
+        description:
+          'A v2 workflow document (`formatVersion: 2`): `workflow` settings, `stages` identified by `key`, ' +
+          'and `edges` between stage keys. The full JSON Schema ships as ' +
+          '`@generatorai/workflow-spec/workflow.schema.json`.',
+        properties: {
+          formatVersion: { type: 'integer', enum: [2] },
+          workflow: { type: 'object', additionalProperties: true },
+          stages: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          edges: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                from: { type: 'string' },
+                to: { type: 'string' },
+                on: { type: 'string', enum: ['success', 'failure', 'completion', 'always'] },
+                when: { type: 'string' },
+              },
+              required: ['from', 'to', 'on'],
+            },
+          },
+        },
+        required: ['formatVersion', 'workflow', 'stages'],
+      },
+      ValidationIssue: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          severity: { type: 'string', enum: ['error', 'warning', 'info'] },
+          path: { type: 'string', description: 'JSON pointer into the graph, e.g. `/stages/2/prompts/0/text`' },
+          stageKey: { type: 'string' },
+          message: { type: 'string' },
+          hint: { type: 'string' },
+        },
+        required: ['code', 'severity', 'path', 'message'],
+      },
+      ValidationResult: {
+        type: 'object',
+        properties: {
+          valid: { type: 'boolean' },
+          issues: { type: 'array', items: { $ref: '#/components/schemas/ValidationIssue' } },
+        },
+        required: ['valid', 'issues'],
+      },
       WorkflowDefinition: {
+        type: 'object',
+        description: 'A definition record: the working graph plus its draft/published state.',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string', enum: ['draft', 'published'] },
+          revision: {
+            type: 'integer',
+            description: 'Bumped on every save; `PUT /graph` sends it back as `expectedRevision`',
+          },
+          currentVersionId: { type: ['string', 'null'], description: 'The published version new runs execute' },
+          hasUnpublishedChanges: { type: 'boolean' },
+          archivedAt: { type: ['string', 'null'], format: 'date-time' },
+          needsAttention: { type: 'array', items: { type: 'string' } },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          graph: { $ref: '#/components/schemas/WorkflowGraph' },
+        },
+        required: ['id', 'status', 'revision', 'currentVersionId', 'graph'],
+      },
+      WorkflowDefinitionSummary: {
         type: 'object',
         properties: {
           id: { type: 'string' },
           name: { type: 'string' },
           description: { type: 'string' },
-          version: { type: 'integer' },
-          sessionMode: { type: 'string', enum: ['auto', 'single', 'per-stage'] },
-          variables: { type: 'array' },
+          projectId: { type: ['string', 'null'] },
+          status: { type: 'string', enum: ['draft', 'published'] },
+          revision: { type: 'integer' },
+          currentVersionId: { type: ['string', 'null'] },
           tags: { type: 'array', items: { type: 'string' } },
+          stageCount: { type: 'integer' },
+          needsAttention: { type: 'boolean' },
+          archivedAt: { type: ['string', 'null'], format: 'date-time' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
-        required: ['id', 'name', 'version'],
+        required: ['id', 'name', 'status', 'revision', 'stageCount'],
+      },
+      WorkflowDefinitionVersion: {
+        type: 'object',
+        description: 'An immutable snapshot of a graph; every run pins one.',
+        properties: {
+          id: { type: 'string' },
+          workflowDefinitionId: { type: 'string' },
+          version: { type: 'integer' },
+          kind: { type: 'string', enum: ['published', 'test'] },
+          contentHash: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          graph: { $ref: '#/components/schemas/WorkflowGraph', description: 'Only on the single-version read' },
+        },
+        required: ['id', 'workflowDefinitionId', 'version', 'kind'],
       },
       WorkflowRun: {
         type: 'object',
         properties: {
           id: { type: 'string' },
           workflowDefinitionId: { type: 'string' },
+          definitionVersionId: { type: 'string', description: 'The immutable definition version this run executes' },
           status: {
             type: 'string',
             enum: [
@@ -591,14 +687,14 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           startedAt: { type: 'string', format: 'date-time', nullable: true },
           completedAt: { type: 'string', format: 'date-time', nullable: true },
         },
-        required: ['id', 'workflowDefinitionId', 'status'],
+        required: ['id', 'workflowDefinitionId', 'definitionVersionId', 'status'],
       },
       StageRun: {
         type: 'object',
         properties: {
           id: { type: 'string' },
           workflowRunId: { type: 'string' },
-          stageDefinitionId: { type: 'string' },
+          stageKey: { type: 'string', description: "The stage's key in the run's pinned graph" },
           name: { type: 'string' },
           status: {
             type: 'string',
@@ -611,7 +707,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           retryCount: { type: 'integer' },
           version: { type: 'integer' },
         },
-        required: ['id', 'workflowRunId', 'stageDefinitionId', 'status'],
+        required: ['id', 'workflowRunId', 'stageKey', 'status'],
       },
       Automation: {
         type: 'object',
@@ -1250,15 +1346,27 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     '/api/workflow-definitions': {
       get: {
         tags: ['Workflows'],
-        summary: 'List workflow definitions',
+        summary: 'List workflow definitions (summaries, newest first)',
+        parameters: [
+          { in: 'query', name: 'projectId', schema: { type: 'string' }, description: '`global` lists definitions without a project' },
+          { in: 'query', name: 'status', schema: { type: 'string', enum: ['draft', 'published'] } },
+          { in: 'query', name: 'q', schema: { type: 'string' }, description: 'Name contains' },
+          { in: 'query', name: 'cursor', schema: { type: 'string' } },
+          { in: 'query', name: 'limit', schema: { type: 'integer' } },
+          { in: 'query', name: 'includeArchived', schema: { type: 'boolean' } },
+        ],
         responses: {
           '200': {
-            description: 'Definitions',
+            description: 'A page of definitions',
             content: {
               'application/json': {
                 schema: {
-                  type: 'array',
-                  items: { $ref: '#/components/schemas/WorkflowDefinition' },
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { $ref: '#/components/schemas/WorkflowDefinitionSummary' } },
+                    nextCursor: { type: 'string' },
+                  },
+                  required: ['items'],
                 },
               },
             },
@@ -1267,37 +1375,185 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
       post: {
         tags: ['Workflows'],
-        summary: 'Create workflow definition',
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+        summary: 'Create a draft definition from a graph',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowGraph' } } } },
         responses: {
-          '201': {
-            description: 'Created',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } },
+          '201': { description: 'Created (draft)', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '403': { description: 'INSUFFICIENT_SCOPE: a command-bearing field needs `admin:settings`', content: errorContent },
+          '422': { description: 'WORKFLOW_INVALID: `error.issues` lists every problem', content: errorContent },
+        },
+      },
+    },
+    '/api/workflow-definitions/validate': {
+      post: {
+        tags: ['Workflows'],
+        summary: 'Validate a graph without saving it',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowGraph' } } } },
+        responses: {
+          '200': {
+            description: 'The validation result, valid or not',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ValidationResult' } } },
+          },
+        },
+      },
+    },
+    '/api/workflow-definitions/import': {
+      post: {
+        tags: ['Workflows'],
+        summary: 'Import a canonical document, or create a draft from a template',
+        parameters: [
+          {
+            in: 'query',
+            name: 'publish',
+            schema: { type: 'boolean' },
+            description: 'Publish at once (people only; integrations import drafts)',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                oneOf: [
+                  { $ref: '#/components/schemas/WorkflowGraph' },
+                  {
+                    type: 'object',
+                    properties: {
+                      templateId: { type: 'string' },
+                      name: { type: 'string' },
+                      projectId: { type: ['string', 'null'] },
+                    },
+                    required: ['templateId'],
+                  },
+                ],
+              },
             },
           },
+        },
+        responses: {
+          '201': { description: 'Imported', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '403': { description: 'PUBLISH_NOT_ALLOWED or INSUFFICIENT_SCOPE', content: errorContent },
+          '422': { description: 'WORKFLOW_INVALID', content: errorContent },
         },
       },
     },
     '/api/workflow-definitions/{id}': {
       get: {
         tags: ['Workflows'],
-        summary: 'Get definition (with stages + edges)',
+        summary: 'Get a definition with its working graph',
         parameters: [idParam],
         responses: {
-          '200': {
-            description: 'Definition',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } },
-            },
-          },
+          '200': { description: 'Definition', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '404': { description: 'Not found', content: errorContent },
         },
       },
       delete: {
         tags: ['Workflows'],
-        summary: 'Delete definition + all runs',
+        summary: 'Delete a definition, or archive it when runs pin its versions',
         parameters: [idParam],
-        responses: { '204': { description: 'Deleted' } },
+        responses: {
+          '200': {
+            description: '`{deleted: true}`, or `{archived: true, runs}` when the definition has runs',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    { type: 'object', properties: { deleted: { type: 'boolean', enum: [true] } }, required: ['deleted'] },
+                    {
+                      type: 'object',
+                      properties: { archived: { type: 'boolean', enum: [true] }, runs: { type: 'integer' } },
+                      required: ['archived', 'runs'],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/workflow-definitions/{id}/graph': {
+      put: {
+        tags: ['Workflows'],
+        summary: 'Replace the working graph (optimistic concurrency on revision)',
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  graph: { $ref: '#/components/schemas/WorkflowGraph' },
+                  expectedRevision: { type: 'integer' },
+                },
+                required: ['graph', 'expectedRevision'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'Saved; the revision is bumped', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '400': { description: 'The body is not `{graph, expectedRevision}`', content: errorContent },
+          '403': { description: 'INSUFFICIENT_SCOPE: adding or changing a command needs `admin:settings`', content: errorContent },
+          '409': { description: 'REVISION_CONFLICT: `error.current` is the record the save lost to', content: errorContent },
+          '422': { description: 'WORKFLOW_INVALID: `error.issues` lists every problem', content: errorContent },
+        },
+      },
+    },
+    '/api/workflow-definitions/{id}/publish': {
+      post: {
+        tags: ['Workflows'],
+        summary: 'Publish the working graph as the version new runs execute',
+        parameters: [idParam],
+        responses: {
+          '200': { description: 'Published', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '422': { description: 'WORKFLOW_INVALID', content: errorContent },
+        },
+      },
+    },
+    '/api/workflow-definitions/{id}/versions': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'List the published and test versions',
+        parameters: [idParam],
+        responses: {
+          '200': {
+            description: 'Versions, without their graphs',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/WorkflowDefinitionVersion' } },
+              },
+            },
+          },
+        },
+      },
+    },
+    '/api/workflow-definitions/{id}/versions/{versionId}': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'Get one version with its graph',
+        parameters: [idParam, { in: 'path', name: 'versionId', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Version',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinitionVersion' } } },
+          },
+          '404': { description: 'Not found', content: errorContent },
+        },
+      },
+    },
+    '/api/workflow-definitions/{id}/export': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'The canonical document text: importing it gives back the same graph',
+        parameters: [idParam],
+        responses: {
+          '200': {
+            description: 'Canonical JSON',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowGraph' } } },
+          },
+        },
       },
     },
 
@@ -1314,6 +1570,11 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
                 properties: {
                   workflowDefinitionId: { type: 'string' },
                   variables: { type: 'object', additionalProperties: true },
+                  projectId: { type: 'string' },
+                  testRun: {
+                    type: 'boolean',
+                    description: 'Run the working graph as a test version; the only way to run a draft',
+                  },
                   permissionMode: {
                     type: 'string',
                     enum: ['bypassPermissions', 'default', 'acceptEdits', 'plan'],

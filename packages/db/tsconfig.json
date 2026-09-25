@@ -5,12 +5,27 @@
     "rootDir": "./src",
     "composite": true
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts"
+  ],
   "references": [
-    { "path": "../core" },
-    { "path": "../checkpoints" },
-    { "path": "../review" },
-    { "path": "../shared" },
-    { "path": "../auth" }
+    {
+      "path": "../core"
+    },
+    {
+      "path": "../checkpoints"
+    },
+    {
+      "path": "../review"
+    },
+    {
+      "path": "../shared"
+    },
+    {
+      "path": "../auth"
+    },
+    {
+      "path": "../workflow-spec"
+    }
   ]
 }

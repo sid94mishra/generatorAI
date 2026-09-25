@@ -1,235 +1,145 @@
+// `workflow stage|edge …` edit the whole v2 graph: read the record, change
+// the graph, save it with the revision that was read. A 409 re-applies the
+// change to a fresh read once, then fails.
+
 import { describe, expect, it, vi } from 'vitest';
+import type { WorkflowDefinitionRecord, WorkflowGraph } from '@generatorai/workflow-spec';
 import { workflowCommands } from '../workflow.js';
+import { CliError } from '../../errors/CliError.js';
 import type { CliContext } from '../../context/CliContext.js';
 
-const WORKFLOW = { id: 'wf_1', name: 'e2e', status: 'active', createdAt: 0 };
+const ID = '00000000-0000-0000-0000-000000000001';
+const command = (id: string) => workflowCommands().find((c) => c.id === id)!;
 
-const stageAdd = workflowCommands().find((c) => c.id === 'workflow.stage.add')!;
-const stageUpdate = workflowCommands().find((c) => c.id === 'workflow.stage.update')!;
-const hookAdd = workflowCommands().find((c) => c.id === 'workflow.stage.hook.add')!;
-const hookRemove = workflowCommands().find((c) => c.id === 'workflow.stage.hook.remove')!;
-const edgeAdd = workflowCommands().find((c) => c.id === 'workflow.edge.add')!;
+function graph(stageKeys: string[], edges: WorkflowGraph['edges'] = []): WorkflowGraph {
+  return {
+    formatVersion: 2,
+    workflow: { name: 'e2e' },
+    stages: stageKeys.map((key) => ({ kind: 'agent', key, name: key, prompts: [{ label: 'p', text: `do ${key}` }] })),
+    edges,
+  } as unknown as WorkflowGraph;
+}
 
-const HOOK = {
-  id: 'pre_run-lint',
-  name: 'lint',
-  phase: 'pre_run',
-  type: 'script',
-  priority: 0,
-  enabled: true,
-  failurePolicy: 'abort',
-  timeoutMs: 30000,
-  retries: 0,
-  config: { type: 'script', command: 'pnpm lint' },
-};
+function recordOf(g: WorkflowGraph, revision: number): WorkflowDefinitionRecord {
+  return { id: ID, status: 'draft', revision, graph: g } as unknown as WorkflowDefinitionRecord;
+}
 
-function fakeContext(overrides: {
-  addStage?: ReturnType<typeof vi.fn>;
-  addEdge?: ReturnType<typeof vi.fn>;
-  updateStage?: ReturnType<typeof vi.fn>;
-  stages?: Array<Record<string, unknown>>;
-}): CliContext {
+const conflict = () => Object.assign(new Error('Revision conflict'), { status: 409, path: `/api/workflow-definitions/${ID}/graph` });
+
+function fakeContext(records: WorkflowDefinitionRecord[], saveGraph: ReturnType<typeof vi.fn>): CliContext {
+  const get = vi.fn();
+  for (const r of records) get.mockResolvedValueOnce(r);
   return {
     api: {
       definitions: {
-        list: vi.fn(async () => [WORKFLOW]),
-        get: vi.fn(async () => ({
-          ...WORKFLOW,
-          stages: overrides.stages ?? [
-            { id: 's1', name: 'plan' },
-            { id: 's2', name: 'build' },
-          ],
-        })),
-        addStage: overrides.addStage ?? vi.fn(async () => ({ id: 'stage_1' })),
-        addEdge: overrides.addEdge ?? vi.fn(async () => ({ id: 'edge_1' })),
-        updateStage: overrides.updateStage ?? vi.fn(async () => ({ id: 's1' })),
+        list: vi.fn(async () => ({ items: [{ id: ID, name: 'e2e', status: 'draft', createdAt: '' }] })),
+        get,
+        saveGraph,
       },
     },
   } as unknown as CliContext;
 }
 
 describe('workflow stage add', () => {
-  it("caps --retries at the server's limit of 10 via the command schema", () => {
-    const result = stageAdd.schema!.safeParse({
+  it('saves the whole graph with the new v2 stage and the revision it read', async () => {
+    const saveGraph = vi.fn(async (_id: string, g: WorkflowGraph) => recordOf(g, 4));
+    await command('workflow.stage.add').handler(fakeContext([recordOf(graph(['plan']), 3)], saveGraph), {
       args: { workflow: 'e2e' },
-      flags: { name: 'plan', retries: '20' },
-    });
-    expect(result.success).toBe(false);
-  });
-
-  it('sends prompts/harnessConfigOverrides/timeoutMs/retryPolicy, not prompt/model/timeoutSeconds/maxRetries', async () => {
-    const addStage = vi.fn(async () => ({ id: 'stage_1' }));
-    const ctx = fakeContext({ addStage });
-
-    await stageAdd.handler(ctx, {
-      args: { workflow: 'e2e' },
-      flags: { name: 'plan', prompt: 'do the thing', model: 'gpt-5', timeout: 60, retries: 2 },
+      flags: { name: 'Write tests', prompt: 'add tests', model: 'gpt-5', agent: 'user:tester', timeoutMs: 60_000, retryAttempts: 3, guard: 'true' },
     } as never);
 
-    expect(addStage).toHaveBeenCalledWith('wf_1', {
-      name: 'plan',
-      prompts: [{ label: 'prompt', text: 'do the thing' }],
-      harnessConfigOverrides: { model: 'gpt-5' },
-      timeoutMs: 60_000,
-      retryPolicy: { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 },
+    expect(saveGraph).toHaveBeenCalledTimes(1);
+    const [id, saved, revision] = saveGraph.mock.calls[0]! as [string, WorkflowGraph, number];
+    expect(id).toBe(ID);
+    expect(revision).toBe(3);
+    expect(saved.stages.map((s) => s.key)).toEqual(['plan', 'write_tests']);
+    expect(saved.stages[1]).toMatchObject({
+      kind: 'agent',
+      key: 'write_tests',
+      name: 'Write tests',
+      prompts: [{ label: 'prompt', text: 'add tests' }],
+      guard: 'true',
+      retry: { maxAttempts: 3 },
+      timeouts: { attemptMs: 60_000 },
+      session: { model: 'gpt-5', agentRef: 'user:tester' },
     });
   });
-});
 
-// ── Stage condition / hooks (Phase 7 item 4) ──────────────────────
-//
-// `CreateStageSchema` has always accepted `condition` and
-// `hooks`; no CLI surface set any of them, so a terminal user could not give
-// a stage a run condition at all.
+  it('re-applies the change to a fresh read after one 409, then saves with the new revision', async () => {
+    const saveGraph = vi
+      .fn()
+      .mockRejectedValueOnce(conflict())
+      .mockImplementation(async (_id: string, g: WorkflowGraph) => recordOf(g, 6));
+    // Someone added `review` between the two reads; the retry must keep it.
+    const ctx = fakeContext([recordOf(graph(['plan']), 3), recordOf(graph(['plan', 'review']), 5)], saveGraph);
 
-describe('workflow stage condition', () => {
-  it('sends a StageCondition, and refuses an expression condition with no expression', async () => {
-    const addStage = vi.fn(async () => ({ id: 'stage_1' }));
-    await stageAdd.handler(fakeContext({ addStage }), {
+    await command('workflow.stage.add').handler(ctx, {
       args: { workflow: 'e2e' },
-      flags: { name: 'plan', condition: 'expression', conditionExpression: 'vars.ok == true' },
+      flags: { name: 'build', prompt: 'build it' },
     } as never);
-    expect(addStage.mock.calls[0]?.[1]).toMatchObject({
-      condition: { type: 'expression', expression: 'vars.ok == true' },
-    });
+
+    expect(saveGraph).toHaveBeenCalledTimes(2);
+    const [, saved, revision] = saveGraph.mock.calls[1]! as [string, WorkflowGraph, number];
+    expect(revision).toBe(5);
+    expect(saved.stages.map((s) => s.key)).toEqual(['plan', 'review', 'build']);
+  });
+
+  it('fails with CONFLICT after a second 409 instead of retrying forever', async () => {
+    const saveGraph = vi.fn().mockRejectedValue(conflict());
+    const ctx = fakeContext([recordOf(graph(['plan']), 3), recordOf(graph(['plan']), 4)], saveGraph);
+
+    const failure = command('workflow.stage.add').handler(ctx, {
+      args: { workflow: 'e2e' },
+      flags: { name: 'build', prompt: 'build it' },
+    } as never);
+
+    await expect(failure).rejects.toBeInstanceOf(CliError);
+    await expect(failure).rejects.toMatchObject({ code: 'CONFLICT' });
+    expect(saveGraph).toHaveBeenCalledTimes(2);
+  });
+
+  it('refuses a graph the validator rejects without sending it', async () => {
+    const saveGraph = vi.fn();
+    const ctx = fakeContext([recordOf(graph(['plan']), 1)], saveGraph);
 
     await expect(
-      stageAdd.handler(fakeContext({}), {
+      command('workflow.stage.add').handler(ctx, {
         args: { workflow: 'e2e' },
-        flags: { name: 'plan', condition: 'expression' },
+        flags: { name: 'build', prompt: 'x', guard: 'variables.nope ==' },
       } as never),
-    ).rejects.toThrow('--condition-expression');
+    ).rejects.toMatchObject({ code: 'VALIDATION' });
+    expect(saveGraph).not.toHaveBeenCalled();
   });
-
-
 });
 
-describe('workflow stage hooks', () => {
-  it('appends to the existing hook array rather than replacing it', async () => {
-    // `updateStage` PUTs `hooks` whole; sending only the new one would
-    // silently detach every hook the stage already had.
-    const stages = [{ id: 's1', name: 'plan', hooks: [HOOK] }];
-    const updateStage = vi.fn(async () => ({ id: 's1' }));
+describe('workflow stage remove / edge add', () => {
+  it('removing a stage drops its edges and its use as a context source', async () => {
+    const start = graph(['plan', 'build', 'ship'], [
+      { from: 'plan', to: 'build', on: 'success' },
+      { from: 'build', to: 'ship', on: 'success' },
+      { from: 'plan', to: 'ship', on: 'success' },
+    ] as WorkflowGraph['edges']);
+    (start.stages[2] as { context: unknown }).context = { from: ['build', 'plan'], mode: 'summary' };
+    const saveGraph = vi.fn(async (_id: string, g: WorkflowGraph) => recordOf(g, 2));
 
-    await hookAdd.handler(fakeContext({ updateStage, stages }), {
-      args: { workflow: 'e2e', stage: 'plan' },
-      flags: {
-        name: 'notify',
-        phase: 'post_run',
-        type: 'http',
-        config: '{"url":"https://example.test/hook","method":"POST"}',
-        priority: 0,
-        timeout: 30000,
-        retries: 0,
-        failurePolicy: 'continue',
-      },
-    } as never);
-
-    const sent = updateStage.mock.calls[0]?.[2] as { hooks: Array<Record<string, unknown>> };
-    expect(sent.hooks).toHaveLength(2);
-    expect(sent.hooks[0]).toEqual(HOOK);
-    expect(sent.hooks[1]).toMatchObject({
-      id: 'post_run-notify',
-      name: 'notify',
-      phase: 'post_run',
-      enabled: true,
-      failurePolicy: 'continue',
-      config: { type: 'http', url: 'https://example.test/hook', method: 'POST' },
-    });
-  });
-
-  it('rejects a config the route schema would reject, naming the missing field', async () => {
-    // An `http` hook config without `method` is a 400 from the route with a
-    // zod path the user cannot map back to the flag they typed. Checking
-    // against the same schema here turns it into a sentence.
-    await expect(
-      hookAdd.handler(fakeContext({}), {
-        args: { workflow: 'e2e', stage: 'plan' },
-        flags: {
-          name: 'notify',
-          phase: 'post_run',
-          type: 'http',
-          config: '{"url":"https://example.test/hook"}',
-          priority: 0,
-          timeout: 30000,
-          retries: 0,
-          failurePolicy: 'abort',
-        },
-      } as never),
-    ).rejects.toThrow('not a valid http hook config');
-  });
-
-  it('refuses a --config whose "type" disagrees with --type', async () => {
-    await expect(
-      hookAdd.handler(fakeContext({}), {
-        args: { workflow: 'e2e', stage: 'plan' },
-        flags: {
-          name: 'x',
-          phase: 'pre_run',
-          type: 'script',
-          config: '{"type":"http","url":"u"}',
-          priority: 0,
-          timeout: 1,
-          retries: 0,
-          failurePolicy: 'abort',
-        },
-      } as never),
-    ).rejects.toThrow('does not match --type');
-  });
-
-  it('refuses a duplicate hook name on the same stage', async () => {
-    const stages = [{ id: 's1', name: 'plan', hooks: [HOOK] }];
-    await expect(
-      hookAdd.handler(fakeContext({ stages }), {
-        args: { workflow: 'e2e', stage: 'plan' },
-        flags: {
-          name: 'lint',
-          phase: 'pre_run',
-          type: 'script',
-          config: '{"command":"x"}',
-          priority: 0,
-          timeout: 1,
-          retries: 0,
-          failurePolicy: 'abort',
-        },
-      } as never),
-    ).rejects.toThrow('already has a hook named');
-  });
-
-  it('removes one hook by name and keeps the rest', async () => {
-    const other = { ...HOOK, id: 'post_run-notify', name: 'notify', phase: 'post_run' };
-    const stages = [{ id: 's1', name: 'plan', hooks: [HOOK, other] }];
-    const updateStage = vi.fn(async () => ({ id: 's1' }));
-
-    await hookRemove.handler(fakeContext({ updateStage, stages }), {
-      args: { workflow: 'e2e', stage: 'plan', hook: 'lint' },
+    await command('workflow.stage.remove').handler(fakeContext([recordOf(start, 1)], saveGraph), {
+      args: { workflow: 'e2e', stage: 'build' },
       flags: {},
     } as never);
 
-    expect(updateStage.mock.calls[0]?.[2]).toEqual({ hooks: [other] });
+    const saved = saveGraph.mock.calls[0]![1] as WorkflowGraph;
+    expect(saved.stages.map((s) => s.key)).toEqual(['plan', 'ship']);
+    expect(saved.edges).toEqual([{ from: 'plan', to: 'ship', on: 'success' }]);
+    expect(saved.stages[1]!.context.from).toEqual(['plan']);
   });
 
-  it('offers every phase the server schema accepts, not a hand-written subset', () => {
-    // A phase this CLI does not offer is one no terminal user can attach a
-    // hook to — so the list is read off the schema, never retyped.
-    const choices = hookAdd.flags.find((f) => f.name === 'phase')?.choices ?? [];
-    expect(choices).toContain('pre_run');
-    expect(choices).toContain('on_session_cancelled');
-    expect(choices.length).toBeGreaterThan(20);
-  });
-});
-
-describe('workflow edge add', () => {
-  it('sends only fromStageId/toStageId/edgeType — there is no --condition flag any more', async () => {
-    const addEdge = vi.fn(async () => ({ id: 'edge_1' }));
-    const ctx = fakeContext({ addEdge });
-
-    await edgeAdd.handler(ctx, {
+  it('connects stages by key (or name) with the v2 outcome vocabulary', async () => {
+    const saveGraph = vi.fn(async (_id: string, g: WorkflowGraph) => recordOf(g, 2));
+    await command('workflow.edge.add').handler(fakeContext([recordOf(graph(['plan', 'build']), 1)], saveGraph), {
       args: { workflow: 'e2e' },
-      flags: { from: 'plan', to: 'build', on: 'on_success' },
+      flags: { from: 'plan', to: 'build', on: 'failure' },
     } as never);
 
-    expect(addEdge).toHaveBeenCalledWith('wf_1', { fromStageId: 's1', toStageId: 's2', edgeType: 'on_success' });
-    expect(edgeAdd.flags.some((f) => f.name === 'condition')).toBe(false);
+    expect((saveGraph.mock.calls[0]![1] as WorkflowGraph).edges).toEqual([{ from: 'plan', to: 'build', on: 'failure' }]);
   });
 });

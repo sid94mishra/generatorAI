@@ -34,15 +34,18 @@ function seedParents(): void {
   const now = Date.now();
   const client = rawClient(db);
   client
-    .prepare(`INSERT INTO workflow_definitions (id, name, created_at, updated_at) VALUES (?, ?, ?, ?)`)
+    .prepare(`INSERT INTO workflow_definitions (id, name, spec, created_at, updated_at) VALUES (?, ?, '{}', ?, ?)`)
     .run('def-1', 'def', now, now);
   client
-    .prepare(`INSERT INTO stage_definitions (id, workflow_definition_id, name, created_at) VALUES (?, ?, ?, ?)`)
-    .run('sd-1', 'def-1', 'stage', now);
+    .prepare(
+      `INSERT INTO workflow_definition_versions (id, workflow_definition_id, version, content_hash, kind, spec, created_at)
+         VALUES ('v-1', 'def-1', 1, 'h', 'published', '{}', ?)`,
+    )
+    .run(now);
   client
     .prepare(
-      `INSERT INTO workflow_runs (id, workflow_definition_id, name, status, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO workflow_runs (id, workflow_definition_id, definition_version_id, name, status, created_at, updated_at)
+         VALUES (?, ?, 'v-1', ?, ?, ?, ?)`,
     )
     .run('wr-1', 'def-1', 'run', 'running', now, now);
 }
@@ -51,7 +54,7 @@ async function createParkedStage(id: string): Promise<void> {
   await repo.create({
     id,
     workflowRunId: 'wr-1',
-    stageDefinitionId: 'sd-1',
+    stageKey: 'stage',
     name: 'stage',
     status: 'running',
     currentStep: 0,
@@ -119,7 +122,7 @@ describe('resumeFromInterrupt — destination status (P0-a)', () => {
     await repo.create({
       id: 's4',
       workflowRunId: 'wr-1',
-      stageDefinitionId: 'sd-1',
+      stageKey: 'stage',
       name: 'stage',
       status: 'running',
       currentStep: 0,

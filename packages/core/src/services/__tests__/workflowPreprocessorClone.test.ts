@@ -1,13 +1,12 @@
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
 import { WorkflowPreprocessor, repositoryFromInputs, type PreprocessorContext } from '../WorkflowPreprocessor.js';
 
 const cloneStep = {
-  type: 'clone_repo',
   name: 'Clone repository',
   config: { type: 'clone_repo', repoAlias: 'target' },
   failOnError: true,
-  order: 0,
 } as const;
 
 function harness() {
@@ -37,8 +36,8 @@ describe('clone_repo from the run inputs', () => {
     const [result] = await preprocessor.execute([cloneStep as never], ctx);
 
     expect(result?.success).toBe(true);
-    expect(cloneToDirectory).toHaveBeenCalledWith('https://example.com/shop.git', '/runs/run-1/target', 'dev');
-    expect(ctx.variables['repo_path_target']).toBe('/runs/run-1/target');
+    expect(cloneToDirectory).toHaveBeenCalledWith('https://example.com/shop.git', join('/runs/run-1', 'target'), 'dev');
+    expect(ctx.variables['repo_path_target']).toBe(join('/runs/run-1', 'target'));
   });
 
   it('reuses a checkout the run already has for the alias', async () => {

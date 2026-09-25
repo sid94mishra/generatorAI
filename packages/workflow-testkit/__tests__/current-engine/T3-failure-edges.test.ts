@@ -17,13 +17,12 @@ afterEach(async () => {
 const fail = (message = 'provider exploded'): Turn => ({ error: { message, code: 'PROVIDER_ERROR' } });
 
 describe('T3 failure paths and edge types (current engine)', () => {
-  it('retries with backoff on fresh sessions, then routes on_failure / on_completion / always', async () => {
+  it('retries with backoff on fresh sessions, then routes failure / completion / always', async () => {
     engine = await createTestEngine({ script: { F: [fail('boom-1'), fail('boom-2'), fail('boom-3')] } });
     const run = await engine.runWorkflow({
       name: 't3-failure-edges',
-      sessionMode: 'auto',
       stages: [
-        { name: 'F', prompt: 'F', retryPolicy: { maxRetries: 2, backoffMs: 100, backoffMultiplier: 2 } },
+        { name: 'F', prompt: 'F', retry: { maxAttempts: 3, initialDelayMs: 100, backoffMultiplier: 2 } },
         { name: 'S', prompt: 'S' },
         { name: 'Rec', prompt: 'REC' },
         { name: 'OC', prompt: 'OC' },
@@ -31,9 +30,9 @@ describe('T3 failure paths and edge types (current engine)', () => {
         { name: 'Z', prompt: 'Z' },
       ],
       edges: [
-        ['F', 'S', 'on_success'],
-        ['F', 'Rec', 'on_failure'],
-        ['F', 'OC', 'on_completion'],
+        ['F', 'S', 'success'],
+        ['F', 'Rec', 'failure'],
+        ['F', 'OC', 'completion'],
         ['F', 'AL', 'always'],
         ['Rec', 'Z'],
       ],
@@ -45,7 +44,7 @@ describe('T3 failure paths and edge types (current engine)', () => {
     expect(snap.stages['F']!.error).toBe('boom-3');
     expect(snap.stages['S']!.status).toBe('skipped');
     for (const n of ['Rec', 'OC', 'AL', 'Z']) expect(snap.stages[n]!.status).toBe('completed');
-    // The failure was handled by an on_failure branch → the run completes.
+    // The failure was handled by a failure branch → the run completes.
     expect(snap.run.status).toBe('completed');
 
     // Three attempts, each on a fresh conversation, backoff 100 ms then 200 ms.
@@ -67,7 +66,7 @@ describe('T3 failure paths and edge types (current engine)', () => {
     engine = await createTestEngine({ script: { F: [fail()] } });
     const run = await engine.runWorkflow({
       stages: [
-        { name: 'F', prompt: 'F', retryPolicy: { maxRetries: 0, backoffMs: 100, backoffMultiplier: 1 } },
+        { name: 'F', prompt: 'F', retry: { maxAttempts: 1, initialDelayMs: 100, backoffMultiplier: 1 } },
         { name: 'cleanup', prompt: 'cleanup' },
       ],
       edges: [['F', 'cleanup', 'always']],
@@ -75,7 +74,7 @@ describe('T3 failure paths and edge types (current engine)', () => {
     const snap = await run.waitForTerminal();
     expect(snap.stages['F']!.status).toBe('failed');
     expect(snap.stages['cleanup']!.status).toBe('completed');
-    expect(snap.run.status).toBe('completed'); // KNOWN-BUG W-29 (failure masking by always/on_completion)
+    expect(snap.run.status).toBe('completed'); // KNOWN-BUG W-29 (failure masking by always/completion)
   });
 
   it('an unhandled failure retries once by default and fails the run', async () => {
@@ -94,7 +93,7 @@ describe('T3 failure paths and edge types (current engine)', () => {
     });
     const snap = await run.waitForTerminal();
     expect(snap.stages['FF']!.status).toBe('failed');
-    // No retryPolicy → DEFAULT_RETRY_POLICY: one retry after 3 s. Validation
+    // No retry → DEFAULT_RETRY_POLICY: one retry after 3 s. Validation
     // failures with no policy never retry (O-8).
     expect(snap.stages['FF']!.retryCount).toBe(1); // KNOWN-BUG W-39 (execution vs validation retry defaults differ)
     expect(snap.stages['G']!.status).toBe('skipped');
@@ -102,7 +101,7 @@ describe('T3 failure paths and edge types (current engine)', () => {
     expect(snap.run.error).toContain('FF (boom 2)');
   });
 
-  it('`timeoutMs` bounds only the prompt turn, not the context turn before it', async () => {
+  it('`timeouts.attemptMs` bounds only the prompt turn, not the context turn before it', async () => {
     engine = await createTestEngine({
       script: { FF: [{ on: 'context', text: 'Context received.', delayMs: 1500 }, { hang: true }] },
     });
@@ -112,8 +111,8 @@ describe('T3 failure paths and edge types (current engine)', () => {
         {
           name: 'FF',
           prompt: 'FF',
-          timeoutMs: 1000,
-          retryPolicy: { maxRetries: 0, backoffMs: 100, backoffMultiplier: 1 },
+          timeouts: { attemptMs: 1000 },
+          retry: { maxAttempts: 1, initialDelayMs: 100, backoffMultiplier: 1 },
         },
       ],
       edges: [['A', 'FF']],

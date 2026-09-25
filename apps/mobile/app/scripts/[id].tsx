@@ -261,7 +261,7 @@ export default function ScriptScreen(): React.ReactElement {
             <Card className="px-4 py-1">
               {data.stages.map((stage, index) => (
                 <View
-                  key={`${stage.id}:${index}`}
+                  key={stage.key}
                   className={`flex-row gap-3 py-3 ${index > 0 ? 'border-t border-border-muted' : ''}`}
                 >
                   <View className="h-7 w-7 items-center justify-center rounded-full bg-control">

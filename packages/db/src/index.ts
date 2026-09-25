@@ -52,9 +52,7 @@ export { DrizzleWorkspaceFileReviewRepository } from './repositories/WorkspaceFi
 // v2 repositories
 export { DrizzleChatRepository } from './repositories/ChatRepository.js';
 export { DrizzleAgentRepository } from './repositories/AgentRepository.js';
-export { DrizzleWorkflowDefinitionRepository } from './repositories/WorkflowDefinitionRepository.js';
-export { DrizzleStageDefinitionRepository } from './repositories/StageDefinitionRepository.js';
-export { DrizzleStageEdgeRepository } from './repositories/StageEdgeRepository.js';
+export { SqliteWorkflowDefinitionStore } from './repositories/WorkflowDefinitionStore.js';
 export { DrizzleWorkflowRunRepository } from './repositories/WorkflowRunRepository.js';
 export { DrizzleStageRunRepository } from './repositories/StageRunRepository.js';
 
@@ -156,140 +154,9 @@ export function resolveDatabaseConfig(input: string | DatabaseConfig): DatabaseC
   return { driver: 'sqlite', url: input };
 }
 
-/**
- * Default deadline for a transaction. Past this the transaction is rolled
- * back so a runaway `fn` cannot indefinitely hold the SQLite write lock.
- * Tune via `DB_TRANSACTION_TIMEOUT_MS` env var.
- */
-const DEFAULT_TX_TIMEOUT_MS = 10_000;
-
-/**
- * Per-database serialization queue for `withTransaction`. better-sqlite3
- * exposes a single connection, so two concurrent `BEGIN`s collide with
- * "cannot start a transaction within a transaction". Every caller queues
- * behind the previous tail here, guaranteeing at most one open transaction
- * per DB handle at a time. Non-transactional reads/writes are unaffected.
- */
-const txQueues = new WeakMap<AppDatabase, Promise<unknown>>();
-
-/**
- * Thrown when a transaction exceeds its deadline.
- *
- * A distinct type because the caller's correct response differs from an
- * ordinary failure: the work may be partially applied outside the transaction,
- * so retrying blindly can double-write.
- */
-export class TransactionTimeoutError extends Error {
-  constructor(timeoutMs: number) {
-    super(
-      `withTransaction: fn exceeded ${timeoutMs}ms deadline and was rolled back. ` +
-        'Do not await network or filesystem I/O inside a transaction.',
-    );
-    this.name = 'TransactionTimeoutError';
-  }
-}
-
 /** True when the handle currently has an open transaction or savepoint. */
 export function isInTransaction(db: AppDatabase): boolean {
   return (db as unknown as { session: { client: Database.Database } }).session.client.inTransaction;
-}
-
-/**
- * Run `fn` inside a SQLite transaction. All DB writes `fn` performs are
- * committed atomically on success and rolled back on any throw.
- *
- * **Important constraint.** better-sqlite3 is synchronous, but Drizzle's
- * API is promise-returning. `fn` may be async, but anything it awaits must
- * only be DB work on the same `db` handle. Do NOT await network or
- * filesystem I/O inside — the transaction stays open until the promise
- * resolves, holding the SQLite write lock against every other writer.
- *
- * To backstop the "oops I awaited a fetch" footgun, the wrapper enforces
- * an overall deadline (default 10 s, override via `DB_TRANSACTION_TIMEOUT_MS`).
- * If `fn` hasn't resolved in time, the transaction is rolled back and the
- * caller sees a `TransactionTimeoutError`. `fn` itself is not aborted — no
- * AbortSignal is plumbed through most call sites today — so see P1-5 below for
- * what the queue does about that.
- *
- * Concurrent callers are serialized behind an in-process queue keyed by
- * the `db` handle — nested `BEGIN`s aren't legal on a single sqlite
- * connection.
- */
-export async function withTransaction<T>(
-  db: AppDatabase,
-  fn: () => Promise<T>,
-  options?: { timeoutMs?: number },
-): Promise<T> {
-  const sqlite = (db as unknown as { session: { client: Database.Database } }).session.client;
-  const timeoutMs =
-    options?.timeoutMs ??
-    (process.env['DB_TRANSACTION_TIMEOUT_MS']
-      ? Number(process.env['DB_TRANSACTION_TIMEOUT_MS'])
-      : DEFAULT_TX_TIMEOUT_MS);
-
-  /**
-   * Resolves when `fn` has genuinely settled, whether or not we timed out.
-   *
-   * P1-5 — this is the whole fix. Previously a timeout rejected the caller and
-   * released the queue slot immediately, while `fn` kept running and kept
-   * issuing statements on the same connection. The next queued transaction then
-   * opened its `BEGIN` underneath the zombie, and every statement the zombie
-   * still had to run was silently absorbed into a stranger's transaction —
-   * committed or rolled back with work it knew nothing about. Holding the slot
-   * until `fn` settles costs a slow caller its own latency and nobody else's
-   * correctness.
-   */
-  let settled: Promise<unknown> = Promise.resolve();
-
-  const runTx = async (): Promise<T> => {
-    let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeoutPromise = new Promise<never>((_resolve, reject) => {
-      timer = setTimeout(() => {
-        reject(new TransactionTimeoutError(timeoutMs));
-      }, timeoutMs);
-    });
-
-    sqlite.exec('BEGIN');
-    try {
-      const work = fn();
-      settled = work.catch(() => undefined);
-      const result = await Promise.race([work, timeoutPromise]);
-      sqlite.exec('COMMIT');
-      return result;
-    } catch (err) {
-      try {
-        sqlite.exec('ROLLBACK');
-      } catch {
-        /* already rolled back */
-      }
-      // Deliberately NOT awaiting `settled` here. The caller learns about the
-      // timeout immediately — making it wait for the very function that already
-      // blew its deadline would turn a bounded failure into an unbounded one.
-      // It is the QUEUE that must wait, and it does: the tail below chains on
-      // `settled`, so the next transaction cannot begin underneath the zombie.
-      // Statements the zombie still issues auto-commit individually, which is
-      // bad but bounded, and far better than landing in a stranger's
-      // transaction.
-      throw err;
-    } finally {
-      if (timer) clearTimeout(timer);
-    }
-  };
-
-  // Chain onto any in-flight transaction on the same handle. We keep the
-  // queue by mapping the current tail to the next; failures don't poison
-  // the chain (the `.catch(() => {})` swallows so callers still get their
-  // real error via the returned promise).
-  const prev = txQueues.get(db) ?? Promise.resolve();
-  const next = prev.then(runTx, runTx);
-  txQueues.set(
-    db,
-    next.then(
-      () => settled,
-      () => settled,
-    ).catch(() => {}),
-  );
-  return next;
 }
 
 /**
@@ -458,9 +325,7 @@ import { DrizzleChatMessageRepository } from './repositories/ChatMessageReposito
 import { DrizzleArtifactRepository } from './repositories/ArtifactRepository.js';
 import { DrizzleChatRepository } from './repositories/ChatRepository.js';
 import { DrizzleAgentRepository } from './repositories/AgentRepository.js';
-import { DrizzleWorkflowDefinitionRepository } from './repositories/WorkflowDefinitionRepository.js';
-import { DrizzleStageDefinitionRepository } from './repositories/StageDefinitionRepository.js';
-import { DrizzleStageEdgeRepository } from './repositories/StageEdgeRepository.js';
+import { SqliteWorkflowDefinitionStore } from './repositories/WorkflowDefinitionStore.js';
 import { DrizzleWorkflowRunRepository } from './repositories/WorkflowRunRepository.js';
 import { DrizzleStageRunRepository } from './repositories/StageRunRepository.js';
 import { DrizzleAutomationRepository } from './repositories/AutomationRepository.js';
@@ -489,9 +354,7 @@ export function createAllRepositories(db: AppDatabase) {
     artifactRepo: new DrizzleArtifactRepository(db),
     chatEntityRepo: new DrizzleChatRepository(db),
     agentRepo: new DrizzleAgentRepository(db),
-    workflowDefinitionRepo: new DrizzleWorkflowDefinitionRepository(db),
-    stageDefinitionRepo: new DrizzleStageDefinitionRepository(db),
-    stageEdgeRepo: new DrizzleStageEdgeRepository(db),
+    workflowDefinitionStore: new SqliteWorkflowDefinitionStore(db),
     workflowRunRepo: new DrizzleWorkflowRunRepository(db),
     stageRunRepo: new DrizzleStageRunRepository(db),
     automationRepo: new DrizzleAutomationRepository(db),

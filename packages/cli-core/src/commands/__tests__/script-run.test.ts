@@ -10,7 +10,7 @@ function fakeContext(overrides: { runsGet?: ReturnType<typeof vi.fn>; subscribed
     api: {
       scripts: {
         list: vi.fn(async () => [{ id: 'my-script', name: 'my-script', status: 'active', createdAt: 0 }]),
-        run: vi.fn(async () => ({ id: 'run_1', status: 'running' })),
+        run: vi.fn(async () => ({ definitionId: 'def_1', runId: 'run_1', status: 'running' })),
       },
       runs: { get: overrides.runsGet ?? vi.fn(async () => ({ id: 'run_1', status: 'completed' })) },
     },
@@ -61,6 +61,6 @@ describe('script run --watch', () => {
     } as never);
 
     expect(subscribed.count).toBe(0);
-    expect(result.data).toEqual({ id: 'run_1', status: 'running' });
+    expect(result.data).toEqual({ definitionId: 'def_1', runId: 'run_1', status: 'running' });
   });
 });

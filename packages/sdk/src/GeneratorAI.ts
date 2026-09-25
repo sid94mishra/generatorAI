@@ -40,7 +40,6 @@ import {
   createDB,
   closeDB,
   migrateDB,
-  withTransaction,
   createAllRepositories,
   EventRetentionService,
   type AppDatabase,
@@ -441,9 +440,7 @@ export class GeneratorAI {
       chatMessageRepo: repos.chatMessageRepo,
       artifactRepo: repos.artifactRepo,
       chatEntityRepo: repos.chatEntityRepo,
-      workflowDefinitionRepo: repos.workflowDefinitionRepo,
-      stageDefinitionRepo: repos.stageDefinitionRepo,
-      stageEdgeRepo: repos.stageEdgeRepo,
+      workflowDefinitionStore: repos.workflowDefinitionStore,
       workflowRunRepo: repos.workflowRunRepo,
       stageRunRepo: repos.stageRunRepo,
       automationRepo: repos.automationRepo,
@@ -460,7 +457,6 @@ export class GeneratorAI {
         artifactsDir: resolved.artifactsDir,
         maxConcurrentStages: resolved.maxConcurrentStages,
       },
-      withTransaction: <T>(fn: () => Promise<T>) => withTransaction(db, fn),
       chatExtensions: { customToolRegistry, mcpHub },
     });
 
@@ -516,6 +512,7 @@ export class GeneratorAI {
     const workflowOrchestrator = new WorkflowOrchestrator(
       services.workflowRunService,
       services.workflowDefinitionService,
+      services.runDefinitionReader,
       services.workflowPreprocessor,
       repos.workflowRunRepo,
       services.eventBus,

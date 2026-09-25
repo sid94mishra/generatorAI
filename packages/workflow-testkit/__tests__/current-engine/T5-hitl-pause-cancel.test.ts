@@ -20,7 +20,7 @@ const P1_ANSWER = 'P1 alpha bravo charlie delta echo foxtrot golf hotel india.';
 const HITL = {
   name: 't5-hitl',
   stages: [
-    { name: 'P1', prompt: 'Write one line containing the token P1.', approvalRequired: true },
+    { name: 'P1', prompt: 'Write one line containing the token P1.', approval: {} },
     { name: 'P2', prompt: 'Write one line containing the token P2.' },
   ],
   edges: [['P1', 'P2']] as const,
@@ -128,13 +128,16 @@ describe('T5 plan-mode stage records its harness (WP-1.4)', () => {
     engine = await createTestEngine({ script: { PL: [{ text: '# Plan\n1. Do the thing.' }] } });
     const { definitionId } = await engine.importDefinition({
       name: 't5-plan-harness',
-      stages: [{ name: 'PL', prompt: 'Plan it.', approvalRequired: true, harnessConfigOverrides: { harnessType: 'claude-agent' } }],
+      stages: [
+        {
+          name: 'PL',
+          prompt: 'Plan it.',
+          approval: {},
+          session: { harnessType: 'claude-agent', defaultAgentMode: 'plan' },
+        },
+      ],
       edges: [],
     });
-    // Import drops agentMode today (T6 W-25), so set it the way the builder does.
-    const svc = engine.services.workflowDefinitionService;
-    const [stage] = (await svc.getDefinitionWithStages(definitionId)).stages;
-    await svc.updateStage(stage!.id, { agentMode: 'plan' });
     const run = await engine.runWorkflow({ definitionId });
     await run.waitForStage('PL', 'awaiting_input');
     const rows = engine.sqlite.prepare('SELECT harness_type FROM plan_documents WHERE stage_run_id = ?').all(run.stageRunId('PL')) as Array<{ harness_type: string }>;
@@ -225,7 +228,7 @@ describe('T5 retries (current engine)', () => {
       name: 't5-retry',
       stages: [
         { name: 'A', prompt: 'A' },
-        { name: 'FF', prompt: 'FF', retryPolicy: { maxRetries: 0, backoffMs: 100, backoffMultiplier: 1 } },
+        { name: 'FF', prompt: 'FF', retry: { maxAttempts: 1, initialDelayMs: 100, backoffMultiplier: 1 } },
       ],
       edges: [['A', 'FF']],
     });
@@ -274,7 +277,7 @@ describe('T5 retries (current engine)', () => {
         {
           name: 'V',
           prompt: 'V',
-          resultValidation: [{ type: 'contains', value: 'PURPLE-0000', message: 'purple' }],
+          output: { rules: [{ type: 'contains', value: 'PURPLE-0000', message: 'purple' }] },
         },
       ],
     });

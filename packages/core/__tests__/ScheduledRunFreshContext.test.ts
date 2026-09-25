@@ -18,68 +18,46 @@ import { WorkflowRunService } from '../src/services/WorkflowRunService.js';
 import {
   MockWorkflowRunRepository,
   MockStageRunRepository,
-  MockStageDefinitionRepository,
-  MockStageEdgeRepository,
-  MockWorkflowDefinitionRepository,
+  MockWorkflowDefinitionStore,
   createFakeWorkspaceManager,
+  seedDefinition,
+  testGraph,
 } from './MockRepositories.js';
 import { EventBus } from '../src/events/EventBus.js';
 import { AdmissionController } from '../src/services/AdmissionController.js';
 import { DAGScheduler } from '../src/services/DAGScheduler.js';
+import { RunDefinitionReader } from '../src/services/definitions/RunDefinitionReader.js';
+import { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
+import type { TemplateRegistry } from '../src/services/TemplateRegistry.js';
 import type { StageExecutionService } from '../src/services/StageExecutionService.js';
 import type { SessionAllocator } from '../src/services/SessionAllocator.js';
-import type { StageDefinition } from '@generatorai/shared';
 
 const DEF_ID = 'def-1';
-
-function makeStageDef(id: string, order: number): StageDefinition {
-  return {
-    id,
-    workflowDefinitionId: DEF_ID,
-    name: `Stage ${id}`,
-    order,
-    prompts: [{ label: 'P', text: 'go' }],
-    variables: {},
-    hooks: [],
-    createdAt: new Date(),
-  };
-}
 
 describe('X-21 — a scheduled run starts from a clean execution context', () => {
   let service: WorkflowRunService;
   let runRepo: MockWorkflowRunRepository;
 
   beforeEach(async () => {
-    runRepo = new MockWorkflowRunRepository();
     const stageRunRepo = new MockStageRunRepository();
-    const stageDefRepo = new MockStageDefinitionRepository();
-    const defRepo = new MockWorkflowDefinitionRepository();
-    const edgeRepo = new MockStageEdgeRepository();
+    runRepo = new MockWorkflowRunRepository(stageRunRepo);
+    const store = new MockWorkflowDefinitionStore();
+    const definitions = new RunDefinitionReader(store);
 
     service = new WorkflowRunService(
       runRepo,
       stageRunRepo,
-      stageDefRepo,
-      defRepo,
+      definitions,
+      new WorkflowDefinitionService(store, {} as TemplateRegistry),
       new EventBus(),
-      new DAGScheduler(stageDefRepo, edgeRepo, stageRunRepo),
+      new DAGScheduler(definitions, stageRunRepo, runRepo),
       { executeStage: vi.fn(async () => {}) } as unknown as StageExecutionService,
       { releaseAll: vi.fn(async () => {}) } as unknown as SessionAllocator,
       createFakeWorkspaceManager(),
       new AdmissionController(),
     );
 
-    await defRepo.create({
-      id: DEF_ID,
-      name: 'Nightly',
-      version: 1,
-      sessionMode: 'per-stage',
-      variables: [],
-      tags: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    await stageDefRepo.create(makeStageDef('s-a', 0));
+    await seedDefinition(store, testGraph(['a'], [], { name: 'Nightly' }), DEF_ID);
   });
 
   /** The execution context an earlier run of the same automation left behind. */

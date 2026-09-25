@@ -9,26 +9,42 @@ import { NotFoundError, StorageError } from '@generatorai/shared';
 import { stageRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 
+/** Column values of a new stage run (shared with the run repository's atomic insert). */
+export function stageRunInsertValues(stageRun: StageRun): typeof stageRuns.$inferInsert {
+  return {
+    id: stageRun.id,
+    workflowRunId: stageRun.workflowRunId,
+    stageKey: stageRun.stageKey,
+    sessionId: stageRun.sessionId ?? null,
+    name: stageRun.name,
+    status: stageRun.status,
+    currentStep: stageRun.currentStep,
+    totalSteps: stageRun.totalSteps,
+    retryCount: stageRun.retryCount,
+    error: stageRun.error ?? null,
+    createdAt: stageRun.createdAt,
+    startedAt: stageRun.startedAt ?? null,
+    completedAt: stageRun.completedAt ?? null,
+  };
+}
+
+/** A drizzle `json` column arrives parsed; a hand-written row may hold the text. */
+function jsonValue<T>(v: unknown): T | undefined {
+  if (v === null || v === undefined) return undefined;
+  if (typeof v !== 'string') return v as T;
+  try {
+    return JSON.parse(v) as T;
+  } catch {
+    return undefined;
+  }
+}
+
 export class DrizzleStageRunRepository implements IStageRunRepository {
   constructor(private db: AppDatabase) {}
 
   async create(stageRun: StageRun): Promise<StageRun> {
     try {
-      await this.db.insert(stageRuns).values({
-        id: stageRun.id,
-        workflowRunId: stageRun.workflowRunId,
-        stageDefinitionId: stageRun.stageDefinitionId,
-        sessionId: stageRun.sessionId ?? null,
-        name: stageRun.name,
-        status: stageRun.status,
-        currentStep: stageRun.currentStep,
-        totalSteps: stageRun.totalSteps,
-        retryCount: stageRun.retryCount,
-        error: stageRun.error ?? null,
-        createdAt: stageRun.createdAt,
-        startedAt: stageRun.startedAt ?? null,
-        completedAt: stageRun.completedAt ?? null,
-      });
+      await this.db.insert(stageRuns).values(stageRunInsertValues(stageRun));
       return stageRun;
     } catch (err) {
       throw new StorageError(
@@ -89,7 +105,6 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     // WS-D1 — heartbeat/lease are normally written by `heartbeat()`; allow
     // explicit clears/sets here for tests and recovery paths.
     if (updates.heartbeatAt !== undefined) values['heartbeatAt'] = updates.heartbeatAt;
-    if (updates.leaseOwner !== undefined) values['leaseOwner'] = updates.leaseOwner;
 
     // WS-D1 — `version` is documented as "bumped on every mutation" and the
     // optimistic-lock readers (`incrementRetryCount`, `updateStatus`,
@@ -215,12 +230,11 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
    * conditional writer cares about, and bumping every 10 s would make every
    * optimistic lock held across a prompt spuriously fail.
    */
-  async heartbeat(id: string, leaseOwner?: string): Promise<boolean> {
+  async heartbeat(id: string): Promise<boolean> {
     const result = await this.db
       .update(stageRuns)
       .set({
         heartbeatAt: new Date(),
-        ...(leaseOwner !== undefined ? { leaseOwner } : {}),
       })
       .where(and(eq(stageRuns.id, id), inArray(stageRuns.status, ['queued', 'running'])))
       .returning({ id: stageRuns.id });
@@ -273,7 +287,6 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
         // WS-D1 — a reset row has no live executor; a stale beat left over
         // from the interrupted attempt must not be mistaken for one.
         heartbeatAt: null,
-        leaseOwner: null,
         version: sql`${stageRuns.version} + 1`,
       })
       .where(where)
@@ -303,7 +316,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     return {
       id: row.id,
       workflowRunId: row.workflowRunId,
-      stageDefinitionId: row.stageDefinitionId,
+      stageKey: row.stageKey,
       sessionId: row.sessionId ?? undefined,
       name: row.name,
       status: row.status as StageRunStatus,
@@ -313,12 +326,11 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       version: row.version,
       error: row.error ?? undefined,
       summary: row.summary ?? undefined,
-      outputText: (row as Record<string, unknown>).outputText as string | undefined ?? undefined,
-      outputData: (() => { const v = (row as Record<string, unknown>).outputData; return typeof v === 'string' ? JSON.parse(v) as Record<string, unknown> : undefined; })(),
-      artifactManifest: (() => { const v = (row as Record<string, unknown>).artifactManifest; return typeof v === 'string' ? JSON.parse(v) as Array<{ path: string; language: string; action: string; sizeBytes: number }> : undefined; })(),
+      outputText: row.outputText ?? undefined,
+      outputData: jsonValue<Record<string, unknown>>(row.outputData),
+      artifactManifest: jsonValue<Array<{ path: string; language: string; action: string; sizeBytes: number }>>(row.artifactManifest),
       interruptData: row.interruptData ?? undefined,
       heartbeatAt: row.heartbeatAt ?? undefined,
-      leaseOwner: row.leaseOwner ?? undefined,
       createdAt: row.createdAt,
       startedAt: row.startedAt ?? undefined,
       completedAt: row.completedAt ?? undefined,

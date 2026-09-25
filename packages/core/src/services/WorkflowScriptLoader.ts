@@ -1,32 +1,37 @@
 // ────────────────────────────────────────────────────────────────
 // WorkflowScriptLoader — Loads and validates .workflow.mjs scripts
 //
+// A script is an authoring-time builder (PD-16): its default export (or
+// named `workflow` export) is a `WorkflowBuilder` from
+// `@generatorai/workflow-spec/builders` or a plain `WorkflowGraph`
+// document, and an optional `profiles` export holds run profiles. The
+// loader builds it with `buildWithHandlers()` (validating the graph with
+// the one validator), registers the inline hook handlers with the
+// HookExecutor, and caches the graph; `WorkflowDefinitionService.createFromSpec`
+// materializes it like any other document.
+//
 // Responsibilities:
 //   - Discover scripts from configured directories
 //   - Dynamically import .workflow.mjs files via ESM import()
-//   - Validate script output against Zod schemas
+//   - Build and validate the graph, validate the profiles
 //   - Register inline hook functions in HookExecutor
 //   - Cache loaded scripts for fast access
 //   - Support hot-reload via cache-busting imports
 // ────────────────────────────────────────────────────────────────
 
 import { existsSync, realpathSync } from 'node:fs';
-import { readdir, stat as fsStat, writeFile, mkdir } from 'node:fs/promises';
+import { readdir, rm, stat as fsStat, writeFile, mkdir } from 'node:fs/promises';
 import { join, resolve, relative, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  WorkflowScriptOutputSchema,
+  ENGINE_LEVEL,
   ScriptRunProfileSchema,
-} from '@generatorai/shared';
-import type {
-  WorkflowScriptOutput,
-  WorkflowScriptExports,
-  RunProfileConfig,
-  IterationResolverContext,
-  WorkflowHookHandler,
-  StageHookHandler,
-} from '@generatorai/shared';
+  validateWorkflow,
+  type ScriptRunProfile,
+  type WorkflowGraph,
+} from '@generatorai/workflow-spec';
 import type { ILogger } from '@generatorai/shared';
+import { writeFileAtomicRestricted } from '@generatorai/shared/node';
 import type { HookExecutor } from './HookExecutor.js';
 import type { FunctionHookHandler } from './HookExecutor.js';
 
@@ -82,9 +87,24 @@ export interface ScriptMetadata {
 
 export interface LoadedScript {
   metadata: ScriptMetadata;
-  output: WorkflowScriptOutput;
-  profiles: RunProfileConfig[];
-  resolveIterations?: (ctx: IterationResolverContext) => Promise<Record<string, unknown>[]>;
+  /** The validated graph the script builds. */
+  graph: WorkflowGraph;
+  profiles: ScriptRunProfile[];
+  /** Names of the inline hook handlers this script registered. */
+  handlerNames: string[];
+}
+
+/** A builder from `@generatorai/workflow-spec/builders` (duck-typed: a script may import its own copy). */
+interface GraphBuilder {
+  buildWithHandlers(opts?: { engine?: 'v1' | 'v2' }): { graph: WorkflowGraph; handlers: Map<string, (ctx: never) => unknown> };
+}
+
+const isBuilder = (v: unknown): v is GraphBuilder =>
+  !!v && typeof (v as { buildWithHandlers?: unknown }).buildWithHandlers === 'function';
+
+/** Script id: the file name without `.workflow.mjs`. */
+export function scriptIdOf(scriptPath: string): string {
+  return basename(scriptPath).replace(/\.workflow\.mjs$/, '');
 }
 
 // ── Main Service ──
@@ -142,6 +162,7 @@ export class WorkflowScriptLoader {
    */
   async discoverScripts(): Promise<ScriptMetadata[]> {
     const metadata: ScriptMetadata[] = [];
+    await this.shippedScriptNames();
     if (!this.enabled) {
       // Count what WOULD have loaded so the operator can tell "no scripts
       // present" from "scripts present but refused".
@@ -216,124 +237,104 @@ export class WorkflowScriptLoader {
       timeout.cancel();
     }
 
-    // 3. Resolve exports (handle default export pattern)
-    const defaultExport = moduleExports['default'] as Record<string, unknown> | undefined;
-    const workflow = (moduleExports['workflow'] ?? defaultExport?.['workflow']) as WorkflowScriptOutput | undefined;
-    const profiles = (moduleExports['profiles'] ?? defaultExport?.['profiles'] ?? []) as RunProfileConfig[];
-    const resolveIterations = (moduleExports['resolveIterations'] ?? defaultExport?.['resolveIterations']) as
-      | ((ctx: IterationResolverContext) => Promise<Record<string, unknown>[]>)
-      | undefined;
+    // 3. Build the graph: the default (or named `workflow`) export.
+    const { graph, handlers } = this.buildScriptGraph(moduleExports, resolvedPath);
+    const id = scriptIdOf(resolvedPath);
 
-    if (!workflow) {
-      throw new ScriptValidationError(
-        'Script must export a "workflow" object (use WorkflowBuilder.build())',
-        { scriptPath: resolvedPath },
-      );
-    }
-
-    // 4. Validate workflow output against Zod schema (excluding inlineHooks which are functions)
-    const dataForValidation = {
-      id: workflow.id,
-      definition: workflow.definition,
-      stages: workflow.stages.map((s: { localId: string; config: unknown }) => ({
-        localId: s.localId,
-        config: s.config,
-      })),
-      edges: workflow.edges,
-    };
-
-    const parsed = WorkflowScriptOutputSchema.safeParse(dataForValidation);
-    if (!parsed.success) {
-      throw new ScriptValidationError(
-        `Script output validation failed: ${parsed.error.issues.map((i: { path: (string | number)[]; message: string }) => `${i.path.join('.')}: ${i.message}`).join('; ')}`,
-        { scriptPath: resolvedPath, zodError: parsed.error },
-      );
-    }
-
-    // 5. Validate profiles
-    const validatedProfiles: RunProfileConfig[] = [];
-    for (const profile of profiles) {
+    // 4. Validate profiles
+    const rawProfiles = moduleExports['profiles'];
+    const validatedProfiles: ScriptRunProfile[] = [];
+    for (const profile of Array.isArray(rawProfiles) ? rawProfiles : []) {
       const profileParsed = ScriptRunProfileSchema.safeParse(profile);
       if (!profileParsed.success) {
         this.logger.warn(
-          `[ScriptLoader] Invalid profile '${profile?.name ?? 'unknown'}', skipping`,
+          `[ScriptLoader] Invalid profile '${(profile as { name?: string })?.name ?? 'unknown'}', skipping`,
           { scriptPath: resolvedPath, error: profileParsed.error.message },
         );
       } else {
-        validatedProfiles.push(profileParsed.data as RunProfileConfig);
+        validatedProfiles.push(profileParsed.data);
       }
     }
 
-    // 6. Register inline hook functions
-    if (workflow.inlineHooks) {
-      for (const [hookId, handler] of workflow.inlineHooks) {
-        const key = `script:${workflow.id}:${hookId}`;
-        try {
-          const unregister = this.hookExecutor.registerFunctionHandler(
-            key,
-              handler as unknown as FunctionHookHandler,
-          );
-          this.hookUnregisters.set(key, unregister);
-          this.logger.debug(`[ScriptLoader] Registered inline hook: ${key}`);
-        } catch {
-          // Handler already registered (from a previous load) — skip
-          this.logger.debug(`[ScriptLoader] Hook handler already registered, skipping: ${key}`);
-        }
-      }
-
-      // Update hook configs with actual handler names
-      for (const stage of workflow.stages) {
-        if (stage.inlineHooks && stage.config.hooks) {
-          for (const [hookId] of stage.inlineHooks) {
-            const hookDef = stage.config.hooks.find((h: { id: string }) => h.id === hookId);
-            if (hookDef && hookDef.config.type === 'function') {
-              (hookDef.config as { handlerName?: string }).handlerName = `script:${workflow.id}:${hookId}`;
-            }
-          }
-        }
-      }
-      // Update workflow-level hook configs
-      if (workflow.definition.hooks) {
-        for (const [hookId] of workflow.inlineHooks) {
-          const hookDef = workflow.definition.hooks.find((h: { id: string }) => h.id === hookId);
-          if (hookDef && hookDef.config.type === 'function') {
-            (hookDef.config as { handlerName?: string }).handlerName = `script:${workflow.id}:${hookId}`;
-          }
-        }
+    // 5. Register inline hook functions under the names the builder generated.
+    this.unregisterScriptHooks(id);
+    for (const [name, handler] of handlers) {
+      try {
+        const unregister = this.hookExecutor.registerFunctionHandler(name, handler as unknown as FunctionHookHandler);
+        this.hookUnregisters.set(name, unregister);
+        this.logger.debug(`[ScriptLoader] Registered inline hook: ${name}`);
+      } catch {
+        this.logger.debug(`[ScriptLoader] Hook handler already registered, skipping: ${name}`);
       }
     }
 
-    // 7. Build metadata and cache
+    // 6. Build metadata and cache
     const fileStat = await fsStat(resolvedPath);
     const loaded: LoadedScript = {
       metadata: {
-        id: workflow.id,
-        name: workflow.definition.name,
-        description: workflow.definition.description,
+        id,
+        name: graph.workflow.name,
+        description: graph.workflow.description,
         filePath: resolvedPath,
         lastModified: fileStat.mtime,
-        variables: workflow.definition.variables.map((v: { name: string; type: string; label: string; required: boolean }) => ({
+        variables: graph.workflow.variables.map((v) => ({
           name: v.name,
           type: v.type,
           label: v.label,
           required: v.required,
         })),
-        stageCount: workflow.stages.length,
+        stageCount: graph.stages.length,
         profileCount: validatedProfiles.length,
-        tags: workflow.definition.tags,
+        tags: graph.workflow.tags,
       },
-      output: workflow,
+      graph,
       profiles: validatedProfiles,
-      resolveIterations,
+      handlerNames: [...handlers.keys()],
     };
 
-    this.loadedScripts.set(workflow.id, loaded);
-    this.logger.info(
-      `[ScriptLoader] Loaded workflow script: ${workflow.id}`,
-      { stages: workflow.stages.length, profiles: validatedProfiles.length },
-    );
+    this.loadedScripts.set(id, loaded);
+    this.logger.info(`[ScriptLoader] Loaded workflow script: ${id}`, {
+      stages: graph.stages.length,
+      profiles: validatedProfiles.length,
+    });
 
     return loaded;
+  }
+
+  /**
+   * The graph a script's module builds: a builder's `buildWithHandlers()`,
+   * or a plain document through the validator. Throws ScriptValidationError
+   * with the validator's issues.
+   */
+  private buildScriptGraph(
+    moduleExports: Record<string, unknown>,
+    scriptPath: string,
+  ): { graph: WorkflowGraph; handlers: Map<string, (ctx: never) => unknown> } {
+    const exported = moduleExports['default'] ?? moduleExports['workflow'];
+    if (!exported) {
+      throw new ScriptValidationError(
+        'Script must export a workflow builder (or a WorkflowGraph) as its default or `workflow` export',
+        { scriptPath },
+      );
+    }
+    if (isBuilder(exported)) {
+      try {
+        return exported.buildWithHandlers({ engine: ENGINE_LEVEL });
+      } catch (err) {
+        throw new ScriptValidationError(`Script workflow is invalid: ${(err as Error).message}`, { scriptPath, zodError: err });
+      }
+    }
+    const result = validateWorkflow(exported, { engine: ENGINE_LEVEL });
+    if (!result.valid || !result.graph) {
+      throw new ScriptValidationError(
+        `Script workflow is invalid: ${result.issues
+          .filter((i) => i.severity === 'error')
+          .map((i) => `${i.path || '/'}: ${i.message}`)
+          .join('; ')}`,
+        { scriptPath, zodError: result.issues },
+      );
+    }
+    return { graph: result.graph, handlers: new Map() };
   }
 
   /** Get a previously loaded script by ID */
@@ -370,8 +371,7 @@ export class WorkflowScriptLoader {
       );
     }
 
-    // Success — now swap: unregister old hooks (new ones already registered by loadScript)
-    this.unregisterScriptHooks(id);
+    // Success — loadScript already swapped the old hooks for the new ones.
     if (id !== loaded.metadata.id) {
       this.loadedScripts.delete(id);
     }
@@ -414,11 +414,41 @@ export class WorkflowScriptLoader {
     // Defense-in-depth: ensure the final path is contained (also catches
     // symlinked script dirs pointing elsewhere).
     this.validateScriptPath(targetPath);
-    await writeFile(targetPath, source, 'utf-8');
+    // A shipped script is part of the install, never replaced by an upload (A-19).
+    if ((await this.shippedScriptNames()).has(safeName)) {
+      throw new ScriptSecurityError(`'${safeName}' is a shipped script and cannot be replaced by an upload`);
+    }
+    // Validate BEFORE the script takes its name: write it under a staging name
+    // (not `*.workflow.mjs`, so discovery never sees it), import and build it,
+    // and only then move it into place atomically. An invalid upload never
+    // replaces a working script, not even for a moment.
+    const stagingPath = join(resolvedDir, `.upload-${process.pid}-${Date.now()}.mjs`);
+    await writeFile(stagingPath, source, 'utf-8');
+    try {
+      const check = await this.validateScriptFile(stagingPath);
+      if (!check.valid) {
+        throw new ScriptValidationError(`Uploaded script is invalid: ${check.errors.join('; ')}`, { scriptPath: safeName });
+      }
+      writeFileAtomicRestricted(targetPath, source);
+    } finally {
+      await rm(stagingPath, { force: true });
+    }
     this.logger.warn(
       `[ScriptLoader] Saved uploaded workflow script '${safeName}' to ${resolvedDir} (executes with server privileges)`,
     );
     return this.loadScript(targetPath);
+  }
+
+  /** `*.workflow.mjs` names present in the first script directory when the loader first looked (the shipped set). */
+  private shippedNames?: Set<string>;
+
+  private async shippedScriptNames(): Promise<Set<string>> {
+    if (!this.shippedNames) {
+      const dir = this.scriptDirs[0] ? resolve(this.scriptDirs[0]) : undefined;
+      const files = dir && existsSync(dir) ? await readdir(dir) : [];
+      this.shippedNames = new Set(files.filter((f) => f.endsWith('.workflow.mjs')));
+    }
+    return this.shippedNames;
   }
 
   /** Reload all scripts — safe: preserves old state on failure */
@@ -457,28 +487,7 @@ export class WorkflowScriptLoader {
       }
       const moduleExports = imported;
 
-      // Handle both export patterns: named export and default export
-      const defaultExport = moduleExports['default'] as Record<string, unknown> | undefined;
-      const workflow = (moduleExports['workflow'] ?? defaultExport?.['workflow']) as WorkflowScriptOutput | undefined;
-      if (!workflow) {
-        return { valid: false, errors: ['Script must export a "workflow" object (named export or default.workflow)'] };
-      }
-
-      const dataForValidation = {
-        id: workflow.id,
-        definition: workflow.definition,
-        stages: workflow.stages.map((s: { localId: string; config: unknown }) => ({ localId: s.localId, config: s.config })),
-        edges: workflow.edges,
-      };
-
-      const parsed = WorkflowScriptOutputSchema.safeParse(dataForValidation);
-      if (!parsed.success) {
-        return {
-          valid: false,
-          errors: parsed.error.issues.map((i: { path: (string | number)[]; message: string }) => `${i.path.join('.')}: ${i.message}`),
-        };
-      }
-
+      this.buildScriptGraph(moduleExports, resolvedPath);
       return { valid: true, errors: [] };
     } catch (err) {
       return {
@@ -533,14 +542,11 @@ export class WorkflowScriptLoader {
 
   private unregisterScriptHooks(scriptId: string): void {
     const script = this.loadedScripts.get(scriptId);
-    if (!script?.output.inlineHooks) return;
-
-    for (const [hookId] of script.output.inlineHooks) {
-      const key = `script:${scriptId}:${hookId}`;
-      const unregister = this.hookUnregisters.get(key);
+    for (const name of script?.handlerNames ?? []) {
+      const unregister = this.hookUnregisters.get(name);
       if (unregister) {
         unregister();
-        this.hookUnregisters.delete(key);
+        this.hookUnregisters.delete(name);
       }
     }
   }

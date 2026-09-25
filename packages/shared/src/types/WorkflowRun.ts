@@ -2,21 +2,20 @@
 // WorkflowRun + StageRun — Runtime execution instances (v2)
 // ────────────────────────────────────────────────────────────────
 
-import type { WorkflowSessionMode } from './WorkflowDefinition.js';
-import type { StageDefinition, StageEdge } from './StageDefinition.js';
-
 /**
- * WS-D1 — the stage definitions + edges a run was started against, frozen
- * at `startRun`. The scheduler builds an in-flight run's DAG from this, so
- * editing the definition mid-run cannot change the part of the run that has
- * not executed yet. Absent on runs that started before the column landed
- * (the scheduler falls back to the live definition for those).
+ * How the v1 engine allocates sessions across a run's stages. A run starts
+ * `auto` and resolves it from the graph shape (linear → `single`, any
+ * parallelism → `per-stage`); stage session groups replace this in the
+ * engine upgrade.
  */
-export interface WorkflowDefinitionSnapshot {
-  stages: StageDefinition[];
-  edges: StageEdge[];
-  /** ISO timestamp of when the snapshot was taken. */
-  capturedAt: string;
+export type WorkflowSessionMode = 'single' | 'per-stage' | 'auto';
+
+/** Artifact manifest entry — a file a stage created or modified. */
+export interface ArtifactManifestEntry {
+  path: string;
+  language: string;
+  action: 'created' | 'modified';
+  sizeBytes: number;
 }
 
 /** WorkflowRun lifecycle statuses */
@@ -76,6 +75,12 @@ export const DEFAULT_WORKFLOW_RUN_PERMISSION_MODE: WorkflowRunPermissionMode = '
 export interface WorkflowRun {
   id: string;
   workflowDefinitionId: string;
+  /**
+   * The immutable definition version this run executes (W-13). The engine
+   * reads the version's `WorkflowGraph`; nothing it does reads the live
+   * definition, so editing a definition never changes a run in flight.
+   */
+  definitionVersionId: string;
   name: string;
   status: WorkflowRunStatus;
   sessionMode: WorkflowSessionMode;
@@ -110,8 +115,6 @@ export interface WorkflowRun {
    * Absent on first-attempt runs (undefined).
    */
   ancestorRunId?: string;
-  /** WS-D1 — frozen topology this run executes against (see type doc). */
-  definitionSnapshot?: WorkflowDefinitionSnapshot;
   createdAt: Date;
   updatedAt: Date;
   startedAt?: Date;
@@ -122,7 +125,8 @@ export interface WorkflowRun {
 export interface StageRun {
   id: string;
   workflowRunId: string;
-  stageDefinitionId: string;
+  /** Key of the stage in the run's pinned definition version. */
+  stageKey: string;
   sessionId?: string;
   name: string;
   status: StageRunStatus;
@@ -140,7 +144,7 @@ export interface StageRun {
   summary?: string;
   /**
    * Full raw output text produced by the stage's main prompt(s), captured before
-   * the summary turn. Persisted so a successor stage with `contextFilter='full'`
+   * the summary turn. Persisted so a successor stage with `context.mode: 'output'`
    * can receive the predecessor's complete output (not just the condensed
    * summary). May be large; only injected when a downstream stage opts into it.
    */
@@ -164,8 +168,6 @@ export interface StageRun {
    * works when the process that was running the stage is gone.
    */
   heartbeatAt?: Date;
-  /** WS-D1 — identity of the process/executor that last claimed the stage. */
-  leaseOwner?: string;
   createdAt: Date;
   startedAt?: Date;
   completedAt?: Date;
@@ -187,10 +189,13 @@ export interface CreateWorkflowRunParams {
    */
   ancestorRunId?: string;
   /**
-   * WS-D1 — when retrying a run, the ancestor's frozen topology is carried
-   * over so the copied stage results line up with the DAG they came from.
+   * The version to run. Omitted: the definition's current published version
+   * (or, with `testRun`, a test version of its working graph). A retry
+   * passes its ancestor's version so copied stage results line up.
    */
-  definitionSnapshot?: WorkflowDefinitionSnapshot;
+  definitionVersionId?: string;
+  /** Run the working graph as a `test` version (the only way to run a draft). */
+  testRun?: boolean;
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -201,7 +206,7 @@ export interface CreateWorkflowRunParams {
 /** A single stage's output entry in the scratchpad */
 export interface RunScratchpadEntry {
   stageName: string;
-  stageDefinitionId: string;
+  stageKey: string;
   stageRunId: string;
   status: 'pending' | 'completed' | 'failed' | 'skipped';
   outputFormat: 'text' | 'json';

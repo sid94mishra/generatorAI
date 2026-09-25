@@ -12,9 +12,18 @@
 import { orderStageRuns } from './workflowRunOrder.js';
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
+import { z } from 'zod';
 import { validate } from '../middleware/validate.js';
-import { CreateWorkflowRunSchema, isStageReviewOutcome } from '@generatorai/shared';
+import { isStageReviewOutcome } from '@generatorai/shared';
 import type { StageReviewOutcome } from '@generatorai/shared';
+
+/** `POST /workflow-runs`. A draft can only start as a test run. */
+const CreateWorkflowRunSchema = z.object({
+  workflowDefinitionId: z.string().uuid(),
+  variables: z.record(z.unknown()).default({}),
+  projectId: z.string().uuid().optional(),
+  testRun: z.boolean().optional(),
+});
 
 export function createWorkflowRunRoutes(container: Container): Router {
   const router = Router();
@@ -23,6 +32,7 @@ export function createWorkflowRunRoutes(container: Container): Router {
     stageExecutionService,
     stageRunRepo,
     workflowRunRepo,
+    runDefinitionReader,
     hitlService,
     logger,
   } = container;
@@ -82,7 +92,8 @@ export function createWorkflowRunRoutes(container: Container): Router {
       const runId = String(req.params['id']);
       const run = await workflowRunRepo.getById(runId);
       const stageRuns = await stageRunRepo.getByRunId(runId);
-      res.json({ ...run, stageRuns: orderStageRuns(stageRuns, run.definitionSnapshot?.stages) });
+      const graph = await runDefinitionReader.get(run.definitionVersionId);
+      res.json({ ...run, stageRuns: orderStageRuns(stageRuns, graph.stages.map((s) => s.key)) });
     } catch (err) {
       next(err);
     }

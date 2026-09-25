@@ -1,7 +1,7 @@
 // Unit tests for the testkit's own building blocks.
 import { describe, expect, it } from 'vitest';
 import fc from 'fast-check';
-import { ScriptBook, VirtualClock, classifyPrompt, defaultReply, toImportJson, type StageKey } from '../src/index.js';
+import { ScriptBook, VirtualClock, classifyPrompt, defaultReply, toGraph, type StageKey } from '../src/index.js';
 
 const key = (stageName: string, stageRunId = stageName): StageKey => ({
   stageName,
@@ -79,12 +79,12 @@ describe('VirtualClock', () => {
   });
 });
 
-describe('toImportJson', () => {
-  it('maps named edges to indices and applies the route schema defaults', () => {
-    const doc = toImportJson({ stages: [{ name: 'A', prompt: 'a' }, { name: 'B', prompt: 'b' }], edges: [['A', 'B', 'always']] });
-    expect(doc.edges).toEqual([{ fromStageIndex: 0, toStageIndex: 1, edgeType: 'always' }]);
-    expect(doc.stages[0]!.prompts[0]).toEqual({ label: 'A', text: 'a' });
-    expect(doc.sessionMode).toBe('auto');
-    expect(() => toImportJson({ stages: [{ name: 'A' }], edges: [['A', 'Z']] })).toThrow(/unknown stage "Z"/);
+describe('toGraph', () => {
+  it('derives stage keys from names and maps named edges to keys', () => {
+    const doc = toGraph({ stages: [{ name: 'A', prompt: 'a' }, { name: 'Build it', prompt: 'b' }], edges: [['A', 'Build it', 'always']] });
+    expect(doc.formatVersion).toBe(2);
+    expect(doc.stages.map((s) => s.key)).toEqual(['a', 'build_it']);
+    expect(doc.edges).toEqual([{ from: 'a', to: 'build_it', on: 'always' }]);
+    expect(doc.stages[0]!.prompts![0]).toEqual({ label: 'A', text: 'a' });
   });
 });

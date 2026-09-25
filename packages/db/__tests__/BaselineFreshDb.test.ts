@@ -10,9 +10,10 @@
 //      dumped from a copy of the developer DB by
 //      `scripts/workflow-dbcopy-upgrade.mjs --dump-schema`: DDL and migration
 //      names only, no user rows) plus synthetic chats/sessions/messages
-//      reaches head through the historic path with those rows unchanged, and
-//      converges on the fresh schema up to an explicit drift allowlist that
-//      P01's v55 must empty.
+//      reaches head through the historic path with the chat rows unchanged
+//      (v55 purges the stage session: workflow run history is dropped), and
+//      converges on the fresh schema exactly (v55 emptied the P00 drift
+//      allowlist).
 //   3. A v52 database BUILT by the migrations converges exactly, and the
 //      baseline's DDL equals the historic path's.
 //   4. Two connections opening the same empty file cannot both apply the
@@ -112,31 +113,34 @@ function seedChats(s: Database.Database): void {
   msg.run('m3', 's-stage', 'assistant', 'stage transcript', now + 2, null, '{"stageRunId":"sr1"}');
 }
 
+/** Chat-owned rows only: run history (the stage session and its messages) is purged by v55. */
 function chatSnapshot(db: Db) {
   return {
-    sessions: raw(db).prepare(`SELECT id, owner_type, owner_id, status, conversation_id FROM sessions ORDER BY id`).all(),
+    sessions: raw(db).prepare(`SELECT id, owner_type, owner_id, status, conversation_id FROM sessions WHERE owner_type = 'chat' ORDER BY id`).all(),
     chats: raw(db).prepare(`SELECT id, name, session_id, status FROM chats ORDER BY id`).all(),
-    messages: raw(db).prepare(`SELECT id, session_id, role, content, timestamp, chat_id, metadata FROM chat_messages ORDER BY id`).all(),
+    messages: raw(db)
+      .prepare(
+        `SELECT id, session_id, role, content, timestamp, chat_id, metadata FROM chat_messages
+          WHERE session_id IN (SELECT id FROM sessions WHERE owner_type = 'chat') ORDER BY id`,
+      )
+      .all(),
   };
+}
+
+/** The stage session and its transcript are run history, dropped at v55. */
+function expectStageHistoryPurged(db: Db): void {
+  expect(raw(db).prepare(`SELECT COUNT(*) AS n FROM sessions WHERE id = 's-stage'`).get()).toEqual({ n: 0 });
+  expect(raw(db).prepare(`SELECT COUNT(*) AS n FROM chat_messages WHERE session_id = 's-stage'`).get()).toEqual({ n: 0 });
 }
 
 // ── Allowlists (each entry is a known, accepted difference; emptying them is P01's job) ──
 
 /**
  * Real developer schema (v52, upgraded over many releases) vs a fresh
- * database at head. P01's v55 (`workflow_definitions_v2`) rebuilds these
- * tables and must reconcile every entry, then delete it here.
+ * database at head. P00 recorded 8 entries here; v55
+ * (`workflow_definitions_v2`) rebuilt the drifting tables and emptied it.
  */
-const DEV_SCHEMA_DRIFT = [
-  'column chats.selected_artifacts: only in upgraded', // bootstrap column dropped from schema.ts, never physically dropped
-  'column conversation_instance_ownership.binding_origin: dflt upgraded=\'explicit\' fresh=\'migrated-ambiguous\'', // migration default edited in place before the lock existed
-  'column stage_definitions.selected_artifacts: only in upgraded', // same as chats.selected_artifacts
-  'column-order chats', // ADD COLUMN order differs between install paths
-  'column-order stage_definitions',
-  'column-order stage_runs',
-  'index idx_idempotency_keys_expires: only in fresh', // index renamed in migration source after it shipped
-  'index idx_idempotency_keys_scope_expires: only in upgraded',
-].sort();
+const DEV_SCHEMA_DRIFT: string[] = [];
 
 /**
  * Physical → declared (fresh DB vs schema.ts), for tables schema.ts
@@ -144,31 +148,17 @@ const DEV_SCHEMA_DRIFT = [
  * FKs by design; each is listed so a NEW undeclared one fails.
  */
 const REVERSE_SCHEMA_ALLOWLIST: string[] = [
-  // Legacy `copilot_config*` columns kept physically after the harness rename
-  // (Phase 13 note in migrations/index.ts); P01's v55 drops them.
-  'extra column chats.copilot_config',
-  'extra column stage_definitions.copilot_config_overrides',
-  'extra column workflow_definitions.copilot_config',
-  'extra column workflows.copilot_config_overrides',
-  // Defaults that disagree with schema.ts. The repositories always write the
-  // column, so neither default is observed today.
-  "default chats.default_agent_mode: physical='interactive' schema='auto'",
+  // A default that disagrees with schema.ts. The repository always writes
+  // the column, so it is never observed.
   "default system_configs.metadata: physical=(none) schema='{}'",
-  // Physical FK / indexes created by raw-SQL migrations and never declared.
-  'fk workflow_runs ancestor_run_id->workflow_runs.id: not declared',
+  // Physical indexes created by raw-SQL migrations and never declared.
   'index idx_agent_interactions_pending on agent_interactions: not declared',
   'index idx_chat_messages_chat_time on chat_messages: not declared',
   'index idx_chats_forked_from on chats: not declared',
-  'index idx_stage_runs_parent on stage_runs: not declared',
-  'index idx_stage_runs_run_status on stage_runs: not declared',
   'index idx_stream_cursors_kind_ts on stream_cursors: not declared',
-  'index idx_workflow_runs_ancestor on workflow_runs: not declared',
   'index idx_workspace_artifacts_type on workspace_artifacts: not declared',
   // Declared in schema.ts but never created by any migration (drizzle-kit
   // would create them; migrateDB does not).
-  'index idx_automations_scope on automations: declared, missing',
-  'index idx_workflow_defs_scope on workflow_definitions: declared, missing',
-  'index idx_workflow_runs_project on workflow_runs: declared, missing',
   'index pk_idempotency_keys on idempotency_keys: declared, missing',
   'index pk_stream_sequences on stream_sequences: declared, missing',
 ];
@@ -327,6 +317,7 @@ describe('fresh-DB baseline (P00 WP-0.6b)', () => {
     migrateDB(seed);
     expect((raw(seed).prepare(`SELECT MAX(version) AS v FROM _schema_versions`).get() as { v: number }).v).toBe(HEAD);
     expect(chatSnapshot(seed)).toEqual(before);
+    expectStageHistoryPurged(seed);
 
     const fresh = memory();
     migrateDB(fresh);
@@ -347,6 +338,7 @@ describe('fresh-DB baseline (P00 WP-0.6b)', () => {
     migrateDB(db);
     expect((raw(db).prepare(`SELECT MAX(version) AS v FROM _schema_versions`).get() as { v: number }).v).toBe(HEAD);
     expect(chatSnapshot(db)).toEqual(before);
+    expectStageHistoryPurged(db);
     const fresh = memory();
     migrateDB(fresh);
     expect(ddl(db)).toEqual(ddl(fresh));

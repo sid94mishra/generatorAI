@@ -31,7 +31,6 @@ import {
   createDB,
   migrateDB,
   closeDB,
-  withTransaction,
   setInvalidJsonColumnReporter,
   EventRetentionService,
   PushTokenRepository,
@@ -47,9 +46,7 @@ import {
   DrizzleArtifactRepository,
   // v2 repositories
   DrizzleChatRepository,
-  DrizzleWorkflowDefinitionRepository,
-  DrizzleStageDefinitionRepository,
-  DrizzleStageEdgeRepository,
+  SqliteWorkflowDefinitionStore,
   DrizzleWorkflowRunRepository,
   DrizzleStageRunRepository,
   // Automation repositories
@@ -192,6 +189,7 @@ import type {
   ChatManagementService,
   OrchestratorService,
   WorkflowDefinitionService,
+  RunDefinitionReader,
   DAGScheduler,
   StageExecutionService,
   WorkflowRunService,
@@ -672,9 +670,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
   // ── Repositories (v2) ──
   const chatEntityRepo = new DrizzleChatRepository(db);
-  const workflowDefinitionRepo = new DrizzleWorkflowDefinitionRepository(db);
-  const stageDefinitionRepo = new DrizzleStageDefinitionRepository(db);
-  const stageEdgeRepo = new DrizzleStageEdgeRepository(db);
+  const workflowDefinitionStore = new SqliteWorkflowDefinitionStore(db);
   const workflowRunRepo = new DrizzleWorkflowRunRepository(db);
   const stageRunRepo = new DrizzleStageRunRepository(db);
 
@@ -809,9 +805,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     chatMessageRepo,
     artifactRepo,
     chatEntityRepo,
-    workflowDefinitionRepo,
-    stageDefinitionRepo,
-    stageEdgeRepo,
+    workflowDefinitionStore,
     workflowRunRepo,
     stageRunRepo,
     automationRepo,
@@ -848,9 +842,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
           })
         : undefined,
     },
-    // Atomically commit multi-row writes (run + stage_rows, automation open);
-    // a mid-sequence failure rolls back.
-    withTransaction: (fn) => withTransaction(db, fn),
     // Section 8 — thread harness-agnostic extensions into ChatManagementService.
     // Until a module registers tools / overrides MCP / installs a HookBridge
     // factory, every handler here is a no-op at runtime.
@@ -877,6 +868,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     orchestratorService,
     dagScheduler,
     workflowDefinitionService,
+    runDefinitionReader,
     stageExecutionService,
     workflowRunService,
     automationService,
@@ -1465,6 +1457,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const workflowOrchestrator = new WorkflowOrchestrator(
     workflowRunService,
     workflowDefinitionService,
+    runDefinitionReader,
     workflowPreprocessor,
     workflowRunRepo,
     eventBus,
@@ -2135,6 +2128,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     chatManagementService,
     orchestratorService,
     workflowDefinitionService,
+    runDefinitionReader,
     workflowRunService,
     dagScheduler,
     stageExecutionService,
@@ -2581,6 +2575,8 @@ export interface Container {
   chatManagementService: ChatManagementService;
   orchestratorService: OrchestratorService;
   workflowDefinitionService: WorkflowDefinitionService;
+  /** The graph of each run's pinned definition version. */
+  runDefinitionReader: RunDefinitionReader;
   workflowRunService: WorkflowRunService;
   dagScheduler: DAGScheduler;
   stageExecutionService: StageExecutionService;

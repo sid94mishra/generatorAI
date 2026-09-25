@@ -3,14 +3,22 @@ import { mkdtemp, mkdir, writeFile, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { WorkflowOrchestrator } from '../src/services/WorkflowOrchestrator.js';
-import { MockWorkflowRunRepository } from './MockRepositories.js';
+import { RunDefinitionReader } from '../src/services/definitions/RunDefinitionReader.js';
+import {
+  MockWorkflowDefinitionStore,
+  MockWorkflowRunRepository,
+  seedDefinition,
+  testGraph,
+} from './MockRepositories.js';
 
 describe('WorkflowOrchestrator upload ordering', () => {
   it('awaits uploads in the final workspace before skill discovery and DAG start', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'gai-orchestration-'));
     try {
+      const store = new MockWorkflowDefinitionStore();
+      const { versionId } = await seedDefinition(store, testGraph(['a', 'b']), 'def');
       const repo = new MockWorkflowRunRepository();
-      const run = await repo.create({ id: 'run-upload', workflowDefinitionId: 'def', name: 'Audit', status: 'pending', sessionMode: 'auto', variables: {}, createdAt: new Date(), updatedAt: new Date() });
+      const run = await repo.create({ id: 'run-upload', workflowDefinitionId: 'def', definitionVersionId: versionId, name: 'Audit', status: 'created', sessionMode: 'auto', variables: {}, createdAt: new Date(), updatedAt: new Date() });
       let finishUpload!: () => void;
       const uploaded = new Promise<void>((resolve) => { finishUpload = resolve; });
       const startRun = vi.fn(async (id: string) => {
@@ -22,7 +30,8 @@ describe('WorkflowOrchestrator upload ordering', () => {
       const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() };
       const orchestrator = new WorkflowOrchestrator(
         { createRun: async () => run, startRun } as never,
-        { getDefinition: async () => ({ id: 'def', variables: [], hooks: [] }) } as never,
+        { resolveVersionForRun: async () => versionId } as never,
+        new RunDefinitionReader(store),
         {} as never,
         repo,
         { emitGlobal: async () => {}, subscribeGlobal: () => () => {} } as never,
@@ -42,12 +51,12 @@ describe('WorkflowOrchestrator upload ordering', () => {
         await mkdir(join(dir, 'config/prompts'), { recursive: true });
         await writeFile(join(dir, 'config/prompts/audit.md'), 'uploaded prompt');
       });
-      await orchestrator.startOrchestratedRun({ workflowDefinitionId: 'def', stageOverrides: [{ stageIndex: 1, skip: true }] }, initialize);
+      await orchestrator.startOrchestratedRun({ workflowDefinitionId: 'def', stageOverrides: [{ stageKey: 'b', skip: true }] }, initialize);
       await vi.waitFor(() => expect(initialize).toHaveBeenCalledWith('run-upload'));
       expect(startRun).not.toHaveBeenCalled();
       finishUpload();
       await vi.waitFor(() => expect(startRun).toHaveBeenCalledWith('run-upload'));
-      expect((await repo.getById(run.id)).variables?.['__stageOverrides']).toEqual([{ stageIndex: 1, skip: true }]);
+      expect((await repo.getById(run.id)).variables?.['__stageOverrides']).toEqual([{ stageKey: 'b', skip: true }]);
       expect(log.error).not.toHaveBeenCalled();
     } finally { await rm(dir, { recursive: true, force: true }); }
   });

@@ -5,12 +5,14 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { StageExecutionService } from '../src/services/StageExecutionService.js';
+import { RunDefinitionReader } from '../src/services/definitions/RunDefinitionReader.js';
 import {
   MockStageRunRepository,
-  MockStageDefinitionRepository,
-  MockWorkflowDefinitionRepository,
+  MockWorkflowDefinitionStore,
   MockWorkflowRunRepository,
   createFakeWorkspaceManager,
+  seedDefinition,
+  testGraph,
 } from './MockRepositories.js';
 import type { HitlService } from '../src/services/HitlService.js';
 import { MockCopilotPort } from './MockAgentHarness.js';
@@ -18,7 +20,7 @@ import { EventBus } from '../src/events/EventBus.js';
 import type { IChatMessageRepository } from '../src/domain/ports/IRepositories.js';
 import type { SessionAllocator } from '../src/services/SessionAllocator.js';
 import type { HookExecutor } from '../src/services/HookExecutor.js';
-import type { StageRun, StageDefinition, ChatMessage, Session } from '@generatorai/shared';
+import type { StageRun, ChatMessage, Session } from '@generatorai/shared';
 
 // ── Helpers (mirrors StageExecutionService.test.ts) ──
 
@@ -58,46 +60,33 @@ function createMockHookExecutor(): HookExecutor {
   } as unknown as HookExecutor;
 }
 
-function makeStageDef(
-  id: string,
-  prompts: StageDefinition['prompts'],
-  opts?: Partial<StageDefinition>,
-): StageDefinition {
-  return {
-    id,
-    workflowDefinitionId: 'def-1',
-    name: `Stage ${id}`,
-    order: 0,
-    prompts,
-    variables: {},
-    hooks: [],
-    createdAt: new Date(),
-    ...opts,
-  };
-}
-
 function makeStageRun(
   id: string,
-  stageDefId: string,
+  stageKey: string,
   status: StageRun['status'] = 'pending',
 ): StageRun {
   return {
     id,
     workflowRunId: 'run-1',
-    stageDefinitionId: stageDefId,
-    name: `SR ${stageDefId}`,
+    stageKey,
+    name: `SR ${stageKey}`,
     status,
     currentStep: 0,
     totalSteps: 1,
     retryCount: 0,
+    version: 0,
     createdAt: new Date(),
   };
 }
 
+/** A retry policy with no retries: a failure is immediate and terminal. */
+const NO_RETRY = { maxAttempts: 1, initialDelayMs: 0, backoffMultiplier: 1 };
+
 describe('StageExecutionService — step timeouts, abort signal, and heartbeat', () => {
   let service: StageExecutionService;
   let stageRunRepo: MockStageRunRepository;
-  let stageDefRepo: MockStageDefinitionRepository;
+  let definitionStore: MockWorkflowDefinitionStore;
+  let runRepo: MockWorkflowRunRepository;
   let messageRepo: ReturnType<typeof createMockMessageRepo>;
   let copilot: MockCopilotPort;
   let eventBus: EventBus;
@@ -106,7 +95,8 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
 
   beforeEach(() => {
     stageRunRepo = new MockStageRunRepository();
-    stageDefRepo = new MockStageDefinitionRepository();
+    definitionStore = new MockWorkflowDefinitionStore();
+    runRepo = new MockWorkflowRunRepository(stageRunRepo);
     messageRepo = createMockMessageRepo();
     copilot = new MockCopilotPort();
     eventBus = new EventBus();
@@ -115,18 +105,28 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
 
     service = new StageExecutionService(
       stageRunRepo,
-      stageDefRepo,
+      new RunDefinitionReader(definitionStore),
       messageRepo,
       copilot,
       eventBus,
       sessionAllocator,
       hookExecutor,
       createFakeWorkspaceManager(),
-      new MockWorkflowDefinitionRepository(),
-      new MockWorkflowRunRepository(),
+      runRepo,
       {} as HitlService,
     );
   });
+
+  /** Publish a one-stage definition and pin run 'run-1' to it. */
+  async function seedStage(key: string, extra: Record<string, unknown> = {}): Promise<void> {
+    const graph = testGraph([{ key, prompts: [{ label: 'P1', text: 'Go' }], ...extra }]);
+    const { definitionId, versionId } = await seedDefinition(definitionStore, graph);
+    const now = new Date();
+    await runRepo.create({
+      id: 'run-1', workflowDefinitionId: definitionId, definitionVersionId: versionId, name: 'Run',
+      status: 'running', sessionMode: 'single', variables: {}, createdAt: now, updatedAt: now,
+    });
+  }
 
   afterEach(() => {
     vi.useRealTimers();
@@ -138,15 +138,10 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
     vi.useFakeTimers();
     service.setDefaultStageTimeoutMs(50);
 
-    const sDef = makeStageDef('sd-default', [
-      { label: 'P1', text: 'Go' },
-    ], {
-      // No retry so the failure is immediate and terminal — isolates the
-      // assertion to "did the default timeout fire" rather than retry timing.
-      retryPolicy: { maxRetries: 0, backoffMs: 0, backoffMultiplier: 1 },
-    });
-    await stageDefRepo.create(sDef);
-    const sr = makeStageRun('sr-default', 'sd-default');
+    // No retry so the failure is immediate and terminal — isolates the
+    // assertion to "did the default timeout fire" rather than retry timing.
+    await seedStage('sd_default', { retry: NO_RETRY });
+    const sr = makeStageRun('sr-default', 'sd_default');
     await stageRunRepo.create(sr);
 
     // Never resolves on its own — only a timeout (or an abort) settles it.
@@ -168,11 +163,8 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
     // single session mode: skips the unrelated releaseSessionSafe() timer
     // (a separate, pre-existing fire-and-forget 10s race) so the pending
     // timer count reflects only what withStageTimeout/startHeartbeat set.
-    const sDef = makeStageDef('sd-clear', [
-      { label: 'P1', text: 'Go' },
-    ], { timeoutMs: 5_000 });
-    await stageDefRepo.create(sDef);
-    const sr = makeStageRun('sr-clear', 'sd-clear');
+    await seedStage('sd_clear', { timeouts: { attemptMs: 5_000 } });
+    const sr = makeStageRun('sr-clear', 'sd_clear');
     await stageRunRepo.create(sr);
 
     await service.executeStage(sr, 'run-1', 'single');
@@ -188,19 +180,14 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
 
   it('aborts the underlying harness call when the deadline fires', async () => {
     vi.useFakeTimers();
-    // Use the DEFAULT timeout path (no explicit `timeoutMs`) rather than an
-    // explicit one: an explicit `timeoutMs` is floored at MIN_TIMEOUT_MS
+    // Use the DEFAULT timeout path (no explicit `timeouts.attemptMs`) rather
+    // than an explicit one: an explicit `attemptMs` is floored at MIN_TIMEOUT_MS
     // (1000ms), so a small explicit value here would silently become 1000ms
     // and this test would need to advance ~1s instead of exercising the
     // fast path.
     service.setDefaultStageTimeoutMs(50);
-    const sDef = makeStageDef('sd-abort', [
-      { label: 'P1', text: 'Go' },
-    ], {
-      retryPolicy: { maxRetries: 0, backoffMs: 0, backoffMultiplier: 1 },
-    });
-    await stageDefRepo.create(sDef);
-    const sr = makeStageRun('sr-abort', 'sd-abort');
+    await seedStage('sd_abort', { retry: NO_RETRY });
+    const sr = makeStageRun('sr-abort', 'sd_abort');
     await stageRunRepo.create(sr);
 
     let capturedSignal: AbortSignal | undefined;
@@ -239,11 +226,8 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
     vi.useFakeTimers();
     service.setHeartbeatIntervalMs(10);
 
-    const sDef = makeStageDef('sd-hb', [
-      { label: 'P1', text: 'Go' },
-    ]);
-    await stageDefRepo.create(sDef);
-    const sr = makeStageRun('sr-hb', 'sd-hb');
+    await seedStage('sd_hb');
+    const sr = makeStageRun('sr-hb', 'sd_hb');
     await stageRunRepo.create(sr);
 
     const heartbeatSpy = vi.spyOn(stageRunRepo, 'heartbeat');
@@ -287,14 +271,11 @@ describe('StageExecutionService — step timeouts, abort signal, and heartbeat',
   // ── task 4 (write side): abortStage cancels the tracked in-flight turn ──
 
   it('abortStage cancels the tracked AbortController for a stuck stage', async () => {
-    const sDef = makeStageDef('sd-reap', [
-      { label: 'P1', text: 'Go' },
-    ], {
-      timeoutMs: 60_000, // long enough that only abortStage() ends the call
-      retryPolicy: { maxRetries: 0, backoffMs: 0, backoffMultiplier: 1 },
+    await seedStage('sd_reap', {
+      timeouts: { attemptMs: 60_000 }, // long enough that only abortStage() ends the call
+      retry: NO_RETRY,
     });
-    await stageDefRepo.create(sDef);
-    const sr = makeStageRun('sr-reap', 'sd-reap');
+    const sr = makeStageRun('sr-reap', 'sd_reap');
     await stageRunRepo.create(sr);
 
     let capturedSignal: AbortSignal | undefined;

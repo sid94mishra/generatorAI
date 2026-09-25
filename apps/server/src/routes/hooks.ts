@@ -68,7 +68,7 @@ export function createHooksRoutes(container: Container): Router {
 
       // Fill the optional scheduling fields with the same defaults a stored
       // hook gets, so a partial body from the UI plans like a real hook.
-      const hook: HookDefinition = {
+      const hook = {
         id: body.id ?? '__test__',
         name: body.name ?? `${body.phase}:${body.type}`,
         phase: body.phase,
@@ -79,7 +79,7 @@ export function createHooksRoutes(container: Container): Router {
         timeoutMs: body.timeoutMs ?? 30_000,
         retries: body.retries ?? 0,
         config: body.config as HookDefinition['config'],
-      };
+      } as HookDefinition;
 
       // Caller-supplied variables let the UI preview `{{var}}` interpolation
       // against realistic values; everything is stringified the way the run

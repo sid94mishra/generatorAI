@@ -117,12 +117,15 @@ export function createOrchestratorRoutes(container: Container): Router {
           return;
         }
       }
-      const { workflowDefinitionId, variables, projectId, selectedCodebases, stageOverrides } = config as {
+      const { workflowDefinitionId, variables, projectId, selectedCodebases, stageOverrides, testRun } = config as {
         workflowDefinitionId: string;
         variables?: Record<string, unknown>;
         projectId?: string;
         selectedCodebases?: string[];
-        stageOverrides?: Array<{ stageName?: string; stageIndex?: number; variables?: Record<string, unknown>; skip?: boolean }>;
+        /** By stage key. */
+        stageOverrides?: Array<{ stageKey: string; variables?: Record<string, unknown>; skip?: boolean }>;
+        /** Run the working graph as a test version (the only way to run a draft). */
+        testRun?: boolean;
       };
 
       if (!workflowDefinitionId) {
@@ -138,6 +141,7 @@ export function createOrchestratorRoutes(container: Container): Router {
         projectId,
         selectedCodebases,
         stageOverrides,
+        ...(testRun === true ? { testRun: true } : {}),
       }, files.length ? async (runId) => {
         const uploadsDir = await workflowOrchestrator.getRunUploadsDir(runId);
         for (const file of files) {

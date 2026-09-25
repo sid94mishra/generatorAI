@@ -37,12 +37,11 @@ export interface IStageRunRepository {
   /** Bulk status write. WS-D1 — bumps `version` on every affected row. */
   batchUpdateStatus(ids: string[], status: StageRunStatus): Promise<void>;
   /**
-   * WS-D1 — liveness beat. Writes `heartbeat_at = now` (and `lease_owner`
-   * when given) ONLY while the row is `queued` or `running`, so a beat that
-   * races a terminal write can never resurrect a finished stage. Returns
-   * `true` iff a row was updated.
+   * WS-D1 — liveness beat. Writes `heartbeat_at = now` ONLY while the row is
+   * `queued` or `running`, so a beat that races a terminal write can never
+   * resurrect a finished stage. Returns `true` iff a row was updated.
    */
-  heartbeat(id: string, leaseOwner?: string): Promise<boolean>;
+  heartbeat(id: string): Promise<boolean>;
   delete(id: string): Promise<void>;
   deleteByRunId(workflowRunId: string): Promise<void>;
 

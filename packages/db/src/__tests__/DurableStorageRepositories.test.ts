@@ -96,7 +96,12 @@ describe('EntryRepository — one settlement per operationId (migration 42)', ()
   it('migration 42 dedups an existing database before adding the unique index', () => {
     // Roll the schema back to pre-42 and plant a duplicate, then re-run the
     // migration: `CREATE UNIQUE INDEX` would fail outright without the dedup.
-    const client = rawClient(db);
+    // Replaying an old migration needs the schema it was written against:
+    // v55 reshapes tables that migrations before it touch, so this database
+    // stops at v54.
+    const old = createDB(':memory:');
+    migrateDB(old, { targetVersion: 54 });
+    const client = rawClient(old);
     client.exec(`DROP INDEX idx_entries_tool_result_key;`);
     // △ `>= 42`, not `= 42`. The runner resumes from MAX(version), so deleting
     // only row 42 while later migrations remain leaves the maximum unchanged
@@ -104,11 +109,11 @@ describe('EntryRepository — one settlement per operationId (migration 42)', ()
     // nothing. Every migration after 42 must be idempotent for this rollback
     // to be safe, which they are (DROP … IF EXISTS / CREATE … IF NOT EXISTS).
     client.exec(`DELETE FROM _schema_versions WHERE version >= 42;`);
-    const repo = new EntryRepository(db);
+    const repo = new EntryRepository(old);
     repo.create({ scope: 'stage_run', scopeId: 'stage-1', kind: 'tool_result', key: 'op-1', payload: 'older' });
     repo.create({ scope: 'stage_run', scopeId: 'stage-1', kind: 'tool_result', key: 'op-1', payload: 'newer' });
 
-    expect(() => migrateDB(db)).not.toThrow();
+    expect(() => migrateDB(old, { targetVersion: 54 })).not.toThrow();
 
     const rows = client
       .prepare(`SELECT payload FROM entries WHERE kind = 'tool_result' AND key = 'op-1'`)

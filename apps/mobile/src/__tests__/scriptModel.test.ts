@@ -27,19 +27,27 @@ describe('script rows', () => {
 });
 
 describe('script detail', () => {
-  it('reads the nested shape the server returns', () => {
+  it('reads metadata and the WorkflowGraph the server returns', () => {
     const detail = parseScriptDetail(
       {
         metadata: { id: 's1', name: 'Nightly', stageCount: 0 },
-        definition: { variables: [{ name: 'repo' }] },
-        stages: [{ localId: 'plan', config: { name: 'Plan', description: 'Think' } }, { localId: 'build', config: {} }],
+        graph: {
+          formatVersion: 2,
+          workflow: { name: 'Nightly', description: 'Every night', variables: [{ name: 'repo' }] },
+          stages: [
+            { kind: 'agent', key: 'plan', name: 'Plan', description: 'Think' },
+            { kind: 'agent', key: 'build', name: '' },
+          ],
+          edges: [{ from: 'plan', to: 'build', on: 'success' }],
+        },
       },
       's1',
     );
     expect(detail?.stageCount).toBe(2);
+    expect(detail?.description).toBe('Every night');
     expect(detail?.stages).toEqual([
-      { id: 'plan', name: 'Plan', description: 'Think' },
-      { id: 'build', name: 'build', description: null },
+      { key: 'plan', name: 'Plan', description: 'Think' },
+      { key: 'build', name: 'build', description: null },
     ]);
     expect(detail?.variables).toEqual([{ name: 'repo' }]);
     expect(parseScriptDetail(null, 's1')).toBeNull();
@@ -48,7 +56,7 @@ describe('script detail', () => {
 
 describe('profiles', () => {
   const profiles = parseScriptProfiles([
-    { name: 'fast', variables: { depth: 1 }, stageOverrides: [{ stageName: 'a', skip: true }], permissionMode: 'acceptEdits' },
+    { name: 'fast', variables: { depth: 1 }, stageOverrides: [{ stageKey: 'a', skip: true }], permissionMode: 'acceptEdits' },
     { name: 'plain' },
     { description: 'nameless' },
   ]);

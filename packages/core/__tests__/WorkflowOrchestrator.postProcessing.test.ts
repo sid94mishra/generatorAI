@@ -4,11 +4,17 @@
 // re-arms after a restart via the persisted intent.
 // ────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type MockInstance } from 'vitest';
 import { WorkflowOrchestrator } from '../src/services/WorkflowOrchestrator.js';
-import { MockWorkflowRunRepository } from './MockRepositories.js';
+import { RunDefinitionReader } from '../src/services/definitions/RunDefinitionReader.js';
+import {
+  MockWorkflowDefinitionStore,
+  MockWorkflowRunRepository,
+  seedDefinition,
+  testGraph,
+} from './MockRepositories.js';
+import type { WorkflowGraph } from '@generatorai/workflow-spec';
 import type {
-  WorkflowDefinition,
   OrchestratorContext,
   PreprocessingResult,
   AgentEvent,
@@ -47,26 +53,16 @@ function makeLogger(): ILogger {
   } as unknown as ILogger;
 }
 
-function makeDefinition(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
-  return {
-    id: 'def-1',
-    name: 'Test def',
-    version: 1,
-    sessionMode: 'auto',
-    variables: [],
-    tags: [],
-    hooks: [],
-    orchestratorConfig: {
-      category: 'custom',
-      preprocessingSteps: [],
-      postProcessingSteps: [],
-      resultValidations: [],
-      requiresCodebase: false,
-      autoCommit: true,
-      autoCreatePR: false,
-    },
-    ...overrides,
-  };
+/** A graph whose lifecycle asks for an auto-commit. */
+function autoCommitGraph(): WorkflowGraph {
+  return testGraph(['a'], [], { lifecycle: { postProcessing: { autoCommit: true } } });
+}
+
+/** The orchestrator's in-memory definition shape: the pinned graph's workflow section plus the definition id. */
+type RunDefinition = { id: string } & WorkflowGraph['workflow'];
+
+function makeDefinition(): RunDefinition {
+  return { id: 'def-1', ...autoCommitGraph().workflow };
 }
 
 function makeContext(overrides: Partial<OrchestratorContext> = {}): OrchestratorContext {
@@ -87,28 +83,31 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
   let eventBus: FakeEventBus;
   let executePostProcessing: ReturnType<typeof vi.fn>;
   let orchestrator: WorkflowOrchestrator;
-  let getDefinition: ReturnType<typeof vi.fn>;
+  let getVersion: MockInstance<MockWorkflowDefinitionStore['getVersion']>;
+  let versionId: string;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     runRepo = new MockWorkflowRunRepository();
+    const store = new MockWorkflowDefinitionStore();
+    ({ versionId } = await seedDefinition(store, autoCommitGraph(), 'def-1'));
+    getVersion = vi.spyOn(store, 'getVersion');
     eventBus = new FakeEventBus();
     executePostProcessing = vi.fn(
       async (): Promise<PreprocessingResult[]> => [
         { stepName: 'Auto-commit changes', success: true, durationMs: 5 },
       ],
     );
-    getDefinition = vi.fn(async (id: string) => makeDefinition({ id }));
-
     const workflowRunServiceStub = {} as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[0];
-    const definitionServiceStub = { getDefinition } as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[1];
-    const preprocessorStub = { executePostProcessing } as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[2];
+    const definitionServiceStub = {} as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[1];
+    const preprocessorStub = { executePostProcessing } as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[3];
 
     orchestrator = new WorkflowOrchestrator(
       workflowRunServiceStub,
       definitionServiceStub,
+      new RunDefinitionReader(store),
       preprocessorStub,
       runRepo,
-      eventBus as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[4],
+      eventBus as unknown as ConstructorParameters<typeof WorkflowOrchestrator>[5],
       makeLogger(),
       "/tmp/gai-art",
       {} as never,
@@ -128,6 +127,7 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
     const run = await runRepo.create({
       id: 'run-fast',
       workflowDefinitionId: 'def-1',
+      definitionVersionId: versionId,
       name: 'fast run',
       status: 'completed',
       sessionMode: 'auto',
@@ -144,11 +144,10 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
       setupCompletionCleanup: (
         runId: string,
         context: OrchestratorContext,
-        definition: WorkflowDefinition,
-        gitRepos: never[],
+        definition: RunDefinition,
         runWorkspaceDir: string,
       ) => Promise<void>;
-    }).setupCompletionCleanup(run.id, context, definition, [], '/tmp/ws');
+    }).setupCompletionCleanup(run.id, context, definition, '/tmp/ws');
 
     expect(executePostProcessing).toHaveBeenCalledOnce();
     expect(eventBus.emitted.some((e) => e.kind === 'workflow_run.postprocessing_completed')).toBe(true);
@@ -159,6 +158,7 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
     const run = await runRepo.create({
       id: 'run-slow',
       workflowDefinitionId: 'def-1',
+      definitionVersionId: versionId,
       name: 'slow run',
       status: 'running',
       sessionMode: 'auto',
@@ -174,11 +174,10 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
       setupCompletionCleanup: (
         runId: string,
         context: OrchestratorContext,
-        definition: WorkflowDefinition,
-        gitRepos: never[],
+        definition: RunDefinition,
         runWorkspaceDir: string,
       ) => Promise<void>;
-    }).setupCompletionCleanup(run.id, context, definition, [], '/tmp/ws');
+    }).setupCompletionCleanup(run.id, context, definition, '/tmp/ws');
 
     expect(executePostProcessing).not.toHaveBeenCalled();
 
@@ -195,6 +194,7 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
       await runRepo.create({
         id: 'run-restart',
         workflowDefinitionId: 'def-1',
+        definitionVersionId: versionId,
         name: 'restarted run',
         status: 'completed',
         sessionMode: 'auto',
@@ -212,7 +212,8 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
 
       await orchestrator.reArmPendingPostProcessing();
 
-      expect(getDefinition).toHaveBeenCalledWith('def-1');
+      // The definition comes from the run's pinned version.
+      expect(getVersion).toHaveBeenCalledWith(versionId);
       expect(executePostProcessing).toHaveBeenCalledOnce();
 
       // The intent is cleared once handled, so a second boot doesn't redo it.
@@ -224,6 +225,7 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
       await runRepo.create({
         id: 'run-normal',
         workflowDefinitionId: 'def-1',
+        definitionVersionId: versionId,
         name: 'normal run',
         status: 'completed',
         sessionMode: 'auto',
@@ -241,6 +243,7 @@ describe('WorkflowOrchestrator — post-processing durability (Item 10)', () => 
       await runRepo.create({
         id: 'run-twice',
         workflowDefinitionId: 'def-1',
+        definitionVersionId: versionId,
         name: 'twice run',
         status: 'completed',
         sessionMode: 'auto',

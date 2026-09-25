@@ -18,8 +18,7 @@ import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.j
 import { EventBus } from '../src/events/EventBus.js';
 import type { WorkflowRunService } from '../src/services/WorkflowRunService.js';
 import type { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
-import type { IAutomationRepository } from '../src/domain/ports/IAutomationRepository.js';
-import type { IAutomationExecutionRepository } from '../src/domain/ports/IAutomationExecutionRepository.js';
+import type { IAutomationRepository, IAutomationExecutionRepository } from '../src/services/AutomationService.js';
 import type { IWorkflowRunRepository } from '../src/domain/ports/IWorkflowRunRepository.js';
 import type {
   Automation,
@@ -84,6 +83,7 @@ describe('X-21 — the trigger reaches the workflow run', () => {
 
     const executionRepo = {
       createExecution: async (e: AutomationExecution) => { executions.set(e.id, e); return e; },
+      openExecution: async (e: AutomationExecution) => { executions.set(e.id, e); },
       getExecutionById: async (id: string) => executions.get(id)!,
       updateExecution: async (id: string, u: Partial<AutomationExecution>) => {
         const next = { ...executions.get(id)!, ...u } as AutomationExecution;

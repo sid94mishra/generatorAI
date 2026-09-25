@@ -3,7 +3,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { CoreServices, WorkflowScriptLoader, ScriptMetadata, LoadedScript } from '@generatorai/core';
-import type { StageEdgeType, WorkflowDefinition, WorkflowRun } from '@generatorai/shared';
+import type { WorkflowRun } from '@generatorai/shared';
+import type { WorkflowDefinitionRecord } from '@generatorai/workflow-spec';
 import type { ResolvedConfig } from '../config.js';
 
 export type { ScriptMetadata };
@@ -67,65 +68,28 @@ export class ScriptFacade {
   }
 
   /**
-   * SDK-5: Materialize a loaded `.workflow.mjs` into a persisted
-   * WorkflowDefinition (createDefinition → addStage×N → addEdge×M), mirroring
-   * the server's POST /workflow-scripts/:id/materialize. Returns the created
-   * definition. Was previously absent (the doc-comment advertised it but the
-   * facade only had list/get/validate/reload).
+   * SDK-5: Materialize a loaded `.workflow.mjs` into a persisted definition
+   * through the one materializer (`createFromSpec`), mirroring the server's
+   * POST /workflow-scripts/:id/materialize. The definition is published so it
+   * can run.
    */
-  async materialize(scriptId: string, options?: MaterializeScriptOptions): Promise<WorkflowDefinition> {
+  async materialize(scriptId: string, options?: MaterializeScriptOptions): Promise<WorkflowDefinitionRecord> {
     if (!this.scriptLoader) throw new Error('Script loader not initialized');
     const script = this.scriptLoader.getScript(scriptId);
     if (!script) throw new Error(`Script not found: ${scriptId}`);
-
-    const out = script.output;
-    const definition = await this.services.workflowDefinitionService.createDefinition({
-      name: options?.name ?? out.definition.name,
-      description: out.definition.description,
-      sessionMode: out.definition.sessionMode,
-      harnessConfig: out.definition.harnessConfig,
-      variables: out.definition.variables,
-      tags: [...(out.definition.tags ?? []), `script:${scriptId}`],
-      projectId: options?.projectId,
-      hooks: out.definition.hooks,
-    });
-
-    const stageIdMap = new Map<string, string>();
-    for (const stage of out.stages) {
-      const created = await this.services.workflowDefinitionService.addStage({
-        workflowDefinitionId: definition.id,
-        name: stage.config.name,
-        description: stage.config.description,
-        order: stage.config.order,
-        prompts: stage.config.prompts,
-        hooks: stage.config.hooks,
-        harnessConfigOverrides: stage.config.harnessConfigOverrides,
-        agentRef: stage.config.agentRef,
-        contextFilter: stage.config.contextFilter,
-        contextSources: stage.config.contextSources, // SCRIPT-2 parity
-        outputFormat: stage.config.outputFormat,
-        retryPolicy: stage.config.retryPolicy,
-        timeoutMs: stage.config.timeoutMs,
-        condition: stage.config.condition,
-        skills: stage.config.skills,
-      });
-      stageIdMap.set(stage.localId, created.id);
-    }
-
-    for (const edge of out.edges) {
-      const fromStageId = stageIdMap.get(edge.from);
-      const toStageId = stageIdMap.get(edge.to);
-      if (fromStageId && toStageId) {
-        await this.services.workflowDefinitionService.addEdge({
-          workflowDefinitionId: definition.id,
-          fromStageId,
-          toStageId,
-          edgeType: edge.edgeType as StageEdgeType,
-        });
-      }
-    }
-
-    return definition;
+    const workflow = script.graph.workflow;
+    return this.services.workflowDefinitionService.createFromSpec(
+      {
+        ...script.graph,
+        workflow: {
+          ...workflow,
+          ...(options?.name ? { name: options.name } : {}),
+          ...(options?.projectId ? { projectId: options.projectId } : {}),
+          tags: [...new Set([...workflow.tags, `script:${scriptId}`])].slice(0, 20),
+        },
+      },
+      { canEditCommands: true, status: 'published' },
+    );
   }
 
   /**

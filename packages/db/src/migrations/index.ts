@@ -5,6 +5,7 @@
 import type Database from 'better-sqlite3';
 import type { AppDatabase } from '../index.js';
 import { BASELINE_SQL, BASELINE_VERSION } from './baseline.generated.js';
+import { runV55, V55_LOCK_FILES } from './v55_workflow_definitions_v2.js';
 
 export { BASELINE_VERSION };
 
@@ -26,6 +27,18 @@ export interface Migration {
   name: string;
   sql: string[];
   disableForeignKeys?: boolean;
+  /**
+   * A JS step (v55+), run inside the same transaction after `sql`, for a
+   * migration that converts data SQL alone cannot (JSON documents, derived
+   * keys). Its code lives in its own frozen module (RV-33).
+   */
+  run?: (sqlite: Database.Database) => void;
+  /**
+   * Files (relative to this folder) whose content `migrations.lock.json`
+   * pins, for a migration with a `run` step: the lock then covers the code,
+   * not only the name.
+   */
+  lockFiles?: readonly string[];
 }
 
 export interface MigrateOptions {
@@ -2579,6 +2592,17 @@ export const MIGRATIONS: readonly Migration[] = [
       name: 'chat_source_control_options',
       sql: [`ALTER TABLE chats ADD COLUMN source_control TEXT;`],
     },
+    // v55 — workflow overhaul P01 WP-1.6: legacy drops, definitions → v2
+    // documents, run history purge, definition versions. The conversion is a
+    // JS step in its own frozen module (see its header).
+    {
+      version: 55,
+      name: 'workflow_definitions_v2',
+      sql: [],
+      disableForeignKeys: true,
+      run: runV55,
+      lockFiles: V55_LOCK_FILES,
+    },
   ];
 
 
@@ -2659,6 +2683,7 @@ function applyVersionedMigrations(
           if (!(additive && msg.includes('duplicate column'))) throw err;
         }
       }
+      m.run?.(sqlite);
       if (before) {
         const introduced = [...foreignKeyViolations(sqlite)].filter((v) => !before!.has(v));
         if (introduced.length > 0) {

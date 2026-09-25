@@ -9,11 +9,14 @@
 //    folder. --db defaults to $WORKFLOW_DBCOPY or C:/gaiwf/dbcopy/generatorai.db.
 //    When --db is the live developer DB (`defaultDbPath()`), refuses while
 //    :3100 is listening. The source is never opened.
-// 2. Records, on the COPY: schema version, sessions by owner_type, chat,
-//    session and chat-message counts, and a sha256 over every row of `chats`,
-//    `sessions` and `chat_messages` (the columns that existed BEFORE the
-//    upgrade, in primary-key order).
-// 3. Runs the real `migrateDB` on the copy, then records the same again.
+// 2. Records, on the COPY: schema version, sessions by owner_type, and the
+//    count and sha256 of the CHAT-OWNED rows (every `chats` row, the chats'
+//    sessions and those sessions' `chat_messages`) in primary-key order,
+//    over the columns that survive the upgrade (found by migrating a
+//    schema-only copy first). Workflow run history is not chat data: v55
+//    drops it (README R-3), and the totals show how much went.
+// 3. Runs the real `migrateDB` on the copy, then records the same again. The
+//    copy is a throwaway, so v55's run-cleanup precondition is skipped for it.
 // 4. Compares the upgraded schema with a fresh database's (structural diff,
 //    `packages/db/scripts/schemaShape.ts`) and prints the drift.
 // 5. Exits 1 if any chat, session or message count or hash changed.
@@ -59,17 +62,28 @@ export function dumpSchemaOnly(sqlite) {
   );
 }
 
-/** Counts + content hashes of the chat tables, over `columns` (or all current ones). */
+/** The chat-owned rows of each chat table. */
+const CHAT_OWNED = {
+  chats: '1 = 1',
+  sessions: `id IN (SELECT session_id FROM chats) OR owner_type = 'chat'`,
+  chat_messages: `session_id IN (SELECT session_id FROM chats) OR session_id IN (SELECT id FROM sessions WHERE owner_type = 'chat')`,
+};
+
+/**
+ * Counts + content hashes of the chat-owned rows of the chat tables, over
+ * `columns` (or all current ones); `totals` counts every row.
+ */
 export function chatFingerprint(sqlite, columns) {
-  const out = { columns: {}, counts: {}, hashes: {} };
+  const out = { columns: {}, counts: {}, hashes: {}, totals: {} };
   const exists = (t) => !!sqlite.prepare(`SELECT 1 FROM sqlite_master WHERE type='table' AND name=?`).get(t);
   for (const t of CHAT_TABLES) {
     if (!exists(t)) continue;
     const cols = columns?.[t] ?? sqlite.pragma(`table_info(${t})`).map((c) => c.name);
     out.columns[t] = cols;
+    out.totals[t] = sqlite.prepare(`SELECT COUNT(*) AS n FROM "${t}"`).get().n;
     const h = createHash('sha256');
     let n = 0;
-    for (const row of sqlite.prepare(`SELECT ${cols.map((c) => `"${c}"`).join(', ')} FROM "${t}" ORDER BY rowid`).iterate()) {
+    for (const row of sqlite.prepare(`SELECT ${cols.map((c) => `"${c}"`).join(', ')} FROM "${t}" WHERE ${CHAT_OWNED[t]} ORDER BY id`).iterate()) {
       h.update(JSON.stringify(row, (_k, v) => (Buffer.isBuffer(v) ? v.toString('base64') : typeof v === 'bigint' ? String(v) : v)));
       h.update('\n');
       n++;
@@ -113,9 +127,28 @@ export async function runUpgradeCheck({ dbPath, dumpSchema, keep = false, log = 
     const { chooseMigrationRoute } = await tsImport('packages/db/src/migrations/index.ts');
     const { schemaShape, diffShapes } = await tsImport('packages/db/scripts/schemaShape.ts');
 
+    // The chat-table columns that survive the upgrade: migrate a schema-only
+    // in-memory copy and read them back.
+    process.env.GENERATORAI_V55_SKIP_RUN_CLEANUP = '1';
+    const ro = new Database(copy, { readonly: true });
+    const schemaSql = dumpSchemaOnly(ro);
+    const columnsBefore = Object.fromEntries(CHAT_TABLES.map((t) => [t, ro.pragma(`table_info(${t})`).map((c) => c.name)]));
+    ro.close();
+    const probe = createDB(':memory:');
+    probe.session.client.exec(schemaSql);
+    migrateDB(probe);
+    const surviving = Object.fromEntries(
+      CHAT_TABLES.map((t) => {
+        const after = probe.session.client.pragma(`table_info(${t})`).map((c) => c.name);
+        return [t, columnsBefore[t].filter((c) => after.includes(c))];
+      }),
+    );
+    const droppedColumns = Object.fromEntries(CHAT_TABLES.map((t) => [t, columnsBefore[t].filter((c) => !surviving[t].includes(c))]));
+    closeDB(probe);
+
     const db = createDB(copy);
     const sqlite = db.session.client;
-    const before = chatFingerprint(sqlite);
+    const before = chatFingerprint(sqlite, surviving);
     const route = chooseMigrationRoute(sqlite);
     const t0 = Date.now();
     migrateDB(db);
@@ -130,7 +163,8 @@ export async function runUpgradeCheck({ dbPath, dumpSchema, keep = false, log = 
     const changed = CHAT_TABLES.filter(
       (t) => before.counts[t] !== after.counts[t] || before.hashes[t] !== after.hashes[t],
     );
-    const sameOwners = JSON.stringify(before.sessionsByOwnerType) === JSON.stringify(after.sessionsByOwnerType);
+    // Only chat sessions must survive; run-owned sessions are run history.
+    const sameOwners = before.sessionsByOwnerType.chat === after.sessionsByOwnerType.chat;
     const result = {
       source: src,
       route: route.kind,
@@ -138,6 +172,9 @@ export async function runUpgradeCheck({ dbPath, dumpSchema, keep = false, log = 
       versionAfter: after.version,
       ms,
       counts: before.counts,
+      totalsBefore: before.totals,
+      totalsAfter: after.totals,
+      droppedColumns,
       sessionsByOwnerType: before.sessionsByOwnerType,
       chatRowsPreserved: changed.length === 0 && sameOwners,
       changed,
@@ -146,7 +183,8 @@ export async function runUpgradeCheck({ dbPath, dumpSchema, keep = false, log = 
     log(
       `[dbcopy-upgrade] ${src}: v${before.version} → v${after.version} via ${route.kind} in ${ms} ms; ` +
         `chats ${before.counts.chats}, sessions ${before.counts.sessions} ${JSON.stringify(before.sessionsByOwnerType)}, ` +
-        `messages ${before.counts.chat_messages}; chat rows ${result.chatRowsPreserved ? 'UNCHANGED (hashes match)' : `CHANGED: ${changed.join(', ')}`}`,
+        `messages ${before.counts.chat_messages}; chat rows ${result.chatRowsPreserved ? 'UNCHANGED (hashes match)' : `CHANGED: ${changed.join(', ')}`}; ` +
+        `all rows before/after: sessions ${before.totals.sessions}→${after.totals.sessions}, messages ${before.totals.chat_messages}→${after.totals.chat_messages}`,
     );
     log(`[dbcopy-upgrade] schema drift vs a fresh database (${drift.length}):`);
     for (const d of drift) log(`  ${d}`);

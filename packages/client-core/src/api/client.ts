@@ -6,6 +6,8 @@
 // no transport, no retries live here — those belong to the layers below.
 // ────────────────────────────────────────────────────────────────
 
+import type { WorkflowDefinitionRecord } from '@generatorai/workflow-spec';
+
 export interface ApiFetch {
   (path: string, init?: RequestInit): Promise<Response>;
 }
@@ -15,6 +17,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly path: string,
     message: string,
+    /** The parsed JSON error body, when there was one (e.g. `error.issues` on a 422, `error.current` on a 409). */
+    readonly body?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -56,12 +60,14 @@ export async function requestAllowing<T>(
   const res = await fetchImpl(path, init);
   if (!res.ok && !allowedStatuses.includes(res.status)) {
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      detail = describeErrorBody(await res.json()) ?? detail;
+      body = await res.json();
+      detail = describeErrorBody(body) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
-    throw new ApiError(res.status, path, detail);
+    throw new ApiError(res.status, path, detail, body);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -84,12 +90,14 @@ export async function requestText(
   const res = await fetchImpl(path, init);
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      detail = describeErrorBody(await res.json()) ?? detail;
+      body = await res.json();
+      detail = describeErrorBody(body) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
-    throw new ApiError(res.status, path, detail);
+    throw new ApiError(res.status, path, detail, body);
   }
   if (res.status === 204) return '';
   return res.text();
@@ -101,12 +109,14 @@ export async function request<T>(fetchImpl: ApiFetch, path: string, init?: Reque
     // Prefer the server's message: it distinguishes "missing scope" from
     // "not found", which the status code alone does not.
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      detail = describeErrorBody(await res.json()) ?? detail;
+      body = await res.json();
+      detail = describeErrorBody(body) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
-    throw new ApiError(res.status, path, detail);
+    throw new ApiError(res.status, path, detail, body);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -413,11 +423,14 @@ export interface SendMessageInput {
 
 // ── Runs ────────────────────────────────────────────────────────
 
+/** One row of the definition list (`WorkflowDefinitionSummary` of @generatorai/workflow-spec). */
 export interface WorkflowSummary {
   id: string;
   name: string;
   description?: string;
   projectId?: string | null;
+  status?: 'draft' | 'published';
+  stageCount?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   tags?: string[];
@@ -464,7 +477,8 @@ export type StageRunStatus =
 export interface StageRunSummary {
   id: string;
   workflowRunId: string;
-  stageDefinitionId: string;
+  /** The stage key in the run's pinned graph. */
+  stageKey: string;
   name?: string;
   status: StageRunStatus;
   sessionId?: string | null;
@@ -497,7 +511,8 @@ export interface StageRunSummary {
 export interface PendingInterrupt {
   id: string;
   workflowRunId: string;
-  stageDefinitionId: string;
+  /** The stage key in the run's pinned graph. */
+  stageKey: string;
   name?: string;
   status: StageRunStatus;
   sessionId?: string | null;
@@ -1244,17 +1259,16 @@ export function createApiClient(fetchImpl: ApiFetch) {
     models: () => request<ModelInfo[]>(fetchImpl, '/api/harness/models'),
 
     workflows: {
-      list: (projectId?: string) =>
-        request<WorkflowSummary[]>(
-          fetchImpl,
-          `/api/workflow-definitions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
-        ),
+      /** The first page of definitions (up to 200), newest first. */
+      list: async (projectId?: string): Promise<WorkflowSummary[]> =>
+        (
+          await request<{ items: WorkflowSummary[] }>(
+            fetchImpl,
+            `/api/workflow-definitions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
+          )
+        ).items,
 
-      get: (id: string) =>
-        request<WorkflowSummary & { stages: unknown[]; edges: unknown[] }>(
-          fetchImpl,
-          `/api/workflow-definitions/${id}`,
-        ),
+      get: (id: string) => request<WorkflowDefinitionRecord>(fetchImpl, `/api/workflow-definitions/${id}`),
     },
 
     runs: {

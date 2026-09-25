@@ -5,37 +5,30 @@
 // WS-D1 / review §5.5 — there is exactly ONE readiness predicate
 // (`resolveStageReadiness`) and exactly ONE reconcile (`reconcileDAG`) here.
 // The one public entry point, `reconcileRun` — used by the run service's
-// reconciler tick, stage completions and crash re-drive — goes through them. The previous
-// version had four answers to "is this stage ready?" (a router that looked
-// only at the just-finished predecessor, a skipper that asked whether ANY
-// inbound edge was active, an edge-blind restart path, and a terminal-status
-// computation that ignored `cancelled`), and the most common branching shape
-// — a diamond with one failed branch — hung forever in the gap between them.
+// reconciler tick, stage completions and crash re-drive — goes through them.
+//
+// P01 WP-1.7 — the graph is the run's pinned definition version (a v2
+// `WorkflowGraph`, read through `RunDefinitionReader`), nodes are keyed by
+// stage KEY, and stage guards and edge `when` are Expression v2
+// (`@generatorai/workflow-spec`).
 // ────────────────────────────────────────────────────────────────
 
-import type {
-  ILogger,
-  StageCondition,
-  StageDefinition,
-  StageEdge,
-  StageRunStatus,
-  WorkflowDefinitionSnapshot,
-  WorkflowRun,
-} from '@generatorai/shared';
-import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitionRepository.js';
-import type { IStageEdgeRepository } from '../domain/ports/IStageEdgeRepository.js';
+import type { EdgeSpec, EdgeOn } from '@generatorai/workflow-spec';
+import { conditionHolds } from '@generatorai/workflow-spec';
+import type { ILogger, StageRunStatus, WorkflowRun } from '@generatorai/shared';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
-import { conditionHolds } from '@generatorai/workflow-spec';
-import { buildDAG } from '../domain/dag/DAGValidator.js';
+import { buildDAG } from '../domain/dag/buildDAG.js';
 import type { DAG } from '../domain/dag/types.js';
-import { createHash } from 'node:crypto';
+import type { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
+import { runScope, stagesScope, userVariables, type RunScope, type StageScope } from './definitions/runScope.js';
 
 // ── Pure scheduling semantics ──────────────────────────────────────
 //
 // Everything in this section is a pure function of (DAG, status map,
-// variables). Keeping it free of repositories is what lets the run service,
-// the tests and the scheduler class itself share one definition of "ready".
+// expression scope). Keeping it free of repositories is what lets the run
+// service, the tests and the scheduler class itself share one definition
+// of "ready".
 
 /** What a single pending stage should do right now. */
 export type StageReadiness = 'ready' | 'skip' | 'blocked';
@@ -43,15 +36,23 @@ export type StageReadiness = 'ready' | 'skip' | 'blocked';
 /** Terminal status of a run whose every stage is terminal. */
 export type TerminalRunStatus = 'completed' | 'failed' | 'cancelled';
 
+/** What guards and edge `when` expressions read. */
+export interface SchedulingScope {
+  variables: Record<string, unknown>;
+  run: RunScope;
+  /** Outputs and summaries by stage key; statuses come from the status map. */
+  stages: Record<string, StageScope>;
+}
+
 /** The full answer for one run after any change. */
 export interface RunReconciliation {
-  /** Stage definition ids that are `pending` and may be launched now. */
+  /** Stage keys that are `pending` and may be launched now. */
   toLaunch: string[];
   /**
-   * Stage definition ids that are `pending` and can never run — every
-   * predecessor is terminal but no inbound edge is active (or one vetoes,
-   * or the stage's own condition is false). Already cascaded: a stage whose
-   * only path runs through another entry here is included too.
+   * Stage keys that are `pending` and can never run — every predecessor is
+   * terminal but no inbound edge is active (or one vetoes, or the stage's
+   * guard is false). Already cascaded: a stage whose only path runs through
+   * another entry here is included too.
    */
   toSkip: string[];
   /**
@@ -71,33 +72,55 @@ const TERMINAL_STAGE_STATUSES: ReadonlySet<StageRunStatus> = new Set<StageRunSta
 
 /**
  * A predecessor stops blocking its successors once it is terminal. This is
- * the ONLY place that set is defined — `cancelled` used to be missing from
- * the readiness copy while present in the completion copy, which is the
- * second hang mode §5.5 describes.
+ * the ONLY place that set is defined.
  */
 export function isTerminalStageStatus(status: StageRunStatus | undefined): boolean {
   return status !== undefined && TERMINAL_STAGE_STATUSES.has(status);
 }
 
 /**
- * Whether an edge lets control flow through, given its source's status.
- *  - on_success    → only when the predecessor completed
- *  - on_failure    → only when it failed
- *  - on_completion → completed or failed
- *  - always        → any terminal status, including skipped and cancelled
- * Missing `edgeType` on legacy rows means on_success.
+ * Whether an edge's `on` lets control flow through, given its source's status.
+ *  - success    → only when the predecessor completed
+ *  - failure    → only when it failed
+ *  - completion → completed or failed
+ *  - always     → any terminal status, including skipped and cancelled
  */
-export function isEdgeActiveForStatus(
-  edgeType: string | undefined,
-  predStatus: StageRunStatus | undefined,
-): boolean {
+export function isEdgeActiveForStatus(on: EdgeOn, predStatus: StageRunStatus | undefined): boolean {
   if (!predStatus) return false;
-  const type = edgeType ?? 'on_success';
-  if (type === 'always') return isTerminalStageStatus(predStatus);
-  if (type === 'on_completion') return predStatus === 'completed' || predStatus === 'failed';
-  if (type === 'on_success') return predStatus === 'completed';
-  if (type === 'on_failure') return predStatus === 'failed';
+  if (on === 'always') return isTerminalStageStatus(predStatus);
+  if (on === 'completion') return predStatus === 'completed' || predStatus === 'failed';
+  if (on === 'success') return predStatus === 'completed';
+  if (on === 'failure') return predStatus === 'failed';
   return false;
+}
+
+/** The scope an expression sees, with every stage's CURRENT status. */
+function exprScope(
+  scope: SchedulingScope | undefined,
+  statusMap: ReadonlyMap<string, StageRunStatus>,
+  parentStatus?: StageRunStatus,
+): Record<string, unknown> {
+  const stages: Record<string, StageScope> = {};
+  for (const [key, status] of statusMap) {
+    stages[key] = { output: null, summary: null, ...scope?.stages[key], status };
+  }
+  return {
+    variables: scope?.variables ?? {},
+    run: scope?.run ?? { id: '', name: '', codebases: {} },
+    stages,
+    ...(parentStatus ? { parent: { status: parentStatus } } : {}),
+  };
+}
+
+/** An edge carries control: its `on` matches the source outcome and its `when` holds. */
+function edgeActive(
+  edge: EdgeSpec,
+  predStatus: StageRunStatus | undefined,
+  statusMap: ReadonlyMap<string, StageRunStatus>,
+  scope: SchedulingScope | undefined,
+): boolean {
+  if (!isEdgeActiveForStatus(edge.on, predStatus)) return false;
+  return edge.when === undefined || conditionHolds(edge.when, exprScope(scope, statusMap, predStatus));
 }
 
 /**
@@ -107,84 +130,51 @@ export function isEdgeActiveForStatus(
  *     `blocked` (it is running, or already decided).
  *  2. Every predecessor must be terminal, else `blocked`.
  *  3. Inbound edges are gates. An edge from a predecessor that reached a real
- *     outcome (completed / failed / cancelled) but is NOT active for that
- *     outcome vetoes the stage — an `on_success` edge from a failed branch is
- *     exactly "this stage required that branch to succeed, and it did not".
- *     An inactive edge from a *skipped* predecessor neither vetoes nor
- *     activates: that path simply never happened. At least one inbound edge
- *     must be active, otherwise the stage is unreachable. Both cases → `skip`.
- *  4. The stage's own `condition`, if any, is evaluated against the status of
- *     each activating predecessor (a root uses `completed`); false → `skip`.
+ *     outcome (completed / failed / cancelled) but is NOT active for it (its
+ *     `on` does not match, or its `when` is false) vetoes the stage — an
+ *     `on: success` edge from a failed branch is exactly "this stage required
+ *     that branch to succeed, and it did not". An inactive edge from a
+ *     *skipped* predecessor neither vetoes nor activates: that path simply
+ *     never happened. At least one inbound edge must be active, otherwise the
+ *     stage is unreachable. Both cases → `skip`.
+ *  4. The stage's `guard`, if any, must hold (Expression v2: only exactly
+ *     `true` holds; a missing path or a type mismatch never does), else `skip`.
  *
  * With A → (B, C) → D on default edges and C failed, step 3 skips D and the
- * run ends `failed` instead of hanging. With A → R on `on_failure` and A → B
- * on `on_success`, A failing skips B and runs R — the recovery shape.
+ * run ends `failed` instead of hanging. With A → R on `failure` and A → B on
+ * `success`, A failing skips B and runs R — the recovery shape.
  */
 export function resolveStageReadiness(
-  nodeId: string,
+  key: string,
   dag: DAG,
   statusMap: ReadonlyMap<string, StageRunStatus>,
-  variables?: Record<string, unknown>,
+  scope?: SchedulingScope,
 ): StageReadiness {
-  const node = dag.nodes.get(nodeId);
+  const node = dag.nodes.get(key);
   if (!node) return 'blocked';
-  if (statusMap.get(nodeId) !== 'pending') return 'blocked';
+  if (statusMap.get(key) !== 'pending') return 'blocked';
 
-  for (const predId of node.dependencyIds) {
-    if (!isTerminalStageStatus(statusMap.get(predId))) return 'blocked';
+  for (const pred of node.dependencyIds) {
+    if (!isTerminalStageStatus(statusMap.get(pred))) return 'blocked';
   }
 
-  const activatingParents: StageRunStatus[] = [];
   if (node.incomingEdges.length > 0) {
+    let activated = false;
     for (const edge of node.incomingEdges) {
-      const predStatus = statusMap.get(edge.fromStageId);
-      if (isEdgeActiveForStatus(edge.edgeType, predStatus)) {
-        activatingParents.push(predStatus!);
+      const predStatus = statusMap.get(edge.from);
+      if (edgeActive(edge, predStatus, statusMap, scope)) {
+        activated = true;
         continue;
       }
-      if (predStatus === 'completed' || predStatus === 'failed' || predStatus === 'cancelled') {
-        return 'skip';
-      }
+      if (predStatus === 'completed' || predStatus === 'failed' || predStatus === 'cancelled') return 'skip';
     }
-    if (activatingParents.length === 0) return 'skip';
+    if (!activated) return 'skip';
   }
 
-  const condition = node.stage.condition;
-  if (condition) {
-    const parents: StageRunStatus[] =
-      activatingParents.length > 0 ? activatingParents : ['completed'];
-    const met = parents.some((parentStatus) => conditionMet(condition, parentStatus, variables));
-    if (!met) return 'skip';
-  }
+  const guard = node.stage.guard;
+  if (guard !== undefined && !conditionHolds(guard, exprScope(scope, statusMap))) return 'skip';
 
   return 'ready';
-}
-
-/**
- * Whether a stage condition holds for one activating parent.
- *
- * `expression` conditions are Expression v2 (`@generatorai/workflow-spec`),
- * the same evaluator the v2 scheduler runs for guards and edge `when`:
- * scope `variables.*` and `parent.status`, strict equality, and a missing
- * path, a type mismatch or a parse error never counts as true.
- */
-function conditionMet(
-  condition: StageCondition,
-  parentStatus: StageRunStatus,
-  variables: Record<string, unknown> | undefined,
-): boolean {
-  switch (condition.type) {
-    case 'always':
-      return true;
-    case 'on_success':
-      return parentStatus === 'completed';
-    case 'on_failure':
-      return parentStatus === 'failed';
-    case 'expression':
-      return conditionHolds(condition.expression ?? '', { variables: variables ?? {}, parent: { status: parentStatus } });
-    default:
-      return false;
-  }
 }
 
 /**
@@ -193,19 +183,18 @@ function conditionMet(
  * A failed (or cancelled) stage is "handled" when one of its outgoing edges
  * that is active for that status leads to a stage that completed — or to
  * another failed stage that is itself, transitively, handled. Recovery DAGs
- * (the headline use of `on_failure`) therefore report `completed` when the
- * recovery branch succeeds. Any unhandled failure → `failed`; otherwise any
- * unhandled cancellation → `cancelled` (previously a cancelled leaf reported
- * `completed`); otherwise `completed`.
+ * therefore report `completed` when the recovery branch succeeds. Any
+ * unhandled failure → `failed`; otherwise any unhandled cancellation →
+ * `cancelled`; otherwise `completed`.
  */
 export function computeTerminalRunStatusFor(
   dag: DAG,
   statusMap: ReadonlyMap<string, StageRunStatus>,
 ): TerminalRunStatus {
   const unresolved = new Map<string, StageRunStatus>();
-  for (const nodeId of dag.nodes.keys()) {
-    const status = statusMap.get(nodeId);
-    if (status === 'failed' || status === 'cancelled') unresolved.set(nodeId, status);
+  for (const key of dag.nodes.keys()) {
+    const status = statusMap.get(key);
+    if (status === 'failed' || status === 'cancelled') unresolved.set(key, status);
   }
   if (unresolved.size === 0) return 'completed';
 
@@ -213,27 +202,24 @@ export function computeTerminalRunStatusFor(
   let changed = true;
   while (changed) {
     changed = false;
-    for (const [nodeId, status] of unresolved) {
-      if (resolved.has(nodeId)) continue;
-      const node = dag.nodes.get(nodeId);
+    for (const [key, status] of unresolved) {
+      if (resolved.has(key)) continue;
+      const node = dag.nodes.get(key);
       const handled = (node?.outgoingEdges ?? []).some((edge) => {
-        if (!isEdgeActiveForStatus(edge.edgeType, status)) return false;
-        const targetStatus = statusMap.get(edge.toStageId);
-        return (
-          targetStatus === 'completed' ||
-          (unresolved.has(edge.toStageId) && resolved.has(edge.toStageId))
-        );
+        if (!isEdgeActiveForStatus(edge.on, status)) return false;
+        const targetStatus = statusMap.get(edge.to);
+        return targetStatus === 'completed' || (unresolved.has(edge.to) && resolved.has(edge.to));
       });
       if (handled) {
-        resolved.add(nodeId);
+        resolved.add(key);
         changed = true;
       }
     }
   }
 
   let sawCancelled = false;
-  for (const [nodeId, status] of unresolved) {
-    if (resolved.has(nodeId)) continue;
+  for (const [key, status] of unresolved) {
+    if (resolved.has(key)) continue;
     if (status === 'failed') return 'failed';
     sawCancelled = true;
   }
@@ -252,7 +238,7 @@ export function computeTerminalRunStatusFor(
 export function reconcileDAG(
   dag: DAG,
   statusMap: ReadonlyMap<string, StageRunStatus>,
-  variables?: Record<string, unknown>,
+  scope?: SchedulingScope,
 ): RunReconciliation {
   const working = new Map(statusMap);
   const toLaunch: string[] = [];
@@ -261,18 +247,18 @@ export function reconcileDAG(
   let changed = true;
   while (changed) {
     changed = false;
-    for (const nodeId of dag.nodes.keys()) {
-      if (working.get(nodeId) !== 'pending') continue;
-      const readiness = resolveStageReadiness(nodeId, dag, working, variables);
+    for (const key of dag.nodes.keys()) {
+      if (working.get(key) !== 'pending') continue;
+      const readiness = resolveStageReadiness(key, dag, working, scope);
       if (readiness === 'skip') {
-        working.set(nodeId, 'skipped');
-        toSkip.push(nodeId);
+        working.set(key, 'skipped');
+        toSkip.push(key);
         changed = true;
       } else if (readiness === 'ready') {
-        toLaunch.push(nodeId);
+        toLaunch.push(key);
         // Mark it so this pass does not report it twice; `queued` is
         // non-terminal, so successors stay blocked as they should.
-        working.set(nodeId, 'queued');
+        working.set(key, 'queued');
       }
     }
   }
@@ -280,8 +266,8 @@ export function reconcileDAG(
   let runTerminal: TerminalRunStatus | undefined;
   if (toLaunch.length === 0) {
     let allTerminal = true;
-    for (const nodeId of dag.nodes.keys()) {
-      if (!isTerminalStageStatus(working.get(nodeId))) {
+    for (const key of dag.nodes.keys()) {
+      if (!isTerminalStageStatus(working.get(key))) {
         allTerminal = false;
         break;
       }
@@ -290,82 +276,6 @@ export function reconcileDAG(
   }
 
   return runTerminal ? { toLaunch, toSkip, runTerminal } : { toLaunch, toSkip };
-}
-
-// ── Definition cache validation (P1-19) ──
-//
-// △ The cache used to be validated by SHA-1'ing EVERY stage and EVERY edge on
-// every call. Validation is two-tier: tier 1 (`structuralSignature`) is an
-// integer fold — no allocation, no sort, no crypto — that catches everything
-// except an edit to the *body* of a stage condition; tier 2
-// (`conditionSignature`) digests only the stages that carry a condition and
-// is reached only when tier 1 already matched.
-
-const FNV_PRIME = 0x01000193;
-const FNV_OFFSET = 0x811c9dc5;
-
-/** Fold a string into a 32-bit FNV-1a accumulator without allocating. */
-function foldString(h: number, s: string): number {
-  for (let i = 0; i < s.length; i++) {
-    h = Math.imul(h ^ s.charCodeAt(i), FNV_PRIME);
-  }
-  return h;
-}
-
-// Scratch view used to fold a number by its exact IEEE-754 bits. Only ever
-// written and read back within one synchronous statement.
-const numberScratch = new Float64Array(1);
-const numberBits = new Uint32Array(numberScratch.buffer);
-
-/** Fold a number into a 32-bit FNV-1a accumulator without allocating. */
-function foldNumber(h: number, n: number): number {
-  numberScratch[0] = n;
-  h = Math.imul(h ^ numberBits[0]!, FNV_PRIME);
-  return Math.imul(h ^ numberBits[1]!, FNV_PRIME);
-}
-
-/**
- * Tier 1: cheap, order-independent signature of (stage ids + order +
- * condition presence) and (edge tuples). Counts are included so duplicate
- * rows, which xor cancels in pairs, still shift the signature.
- */
-function structuralSignature(
-  stages: Array<{ id: string; order: number; condition?: unknown }>,
-  edges: Array<{ fromStageId: string; toStageId: string; edgeType?: string }>,
-): string {
-  let stageSum = 0;
-  let stageXor = 0;
-  for (const s of stages) {
-    let h = foldString(FNV_OFFSET, s.id);
-    h = foldNumber(h, s.order);
-    h = Math.imul(h ^ (s.condition != null ? 1 : 0), FNV_PRIME);
-    stageSum = (stageSum + h) | 0;
-    stageXor ^= h;
-  }
-
-  let edgeSum = 0;
-  let edgeXor = 0;
-  for (const e of edges) {
-    let h = foldString(FNV_OFFSET, e.fromStageId);
-    h = foldString(Math.imul(h ^ 0x3e, FNV_PRIME), e.toStageId);
-    h = foldString(Math.imul(h ^ 0x3a, FNV_PRIME), e.edgeType ?? '');
-    edgeSum = (edgeSum + h) | 0;
-    edgeXor ^= h;
-  }
-
-  return `${stages.length}:${stageSum}:${stageXor}|${edges.length}:${edgeSum}:${edgeXor}`;
-}
-
-/** Tier 2: digest of the condition bodies only. */
-function conditionSignature(stages: Array<{ id: string; condition?: unknown }>): string {
-  const conditional = stages.filter((s) => s.condition != null);
-  if (conditional.length === 0) return '';
-  conditional.sort((a, b) => a.id.localeCompare(b.id));
-  const h = createHash('sha1');
-  for (const s of conditional) {
-    h.update(`${s.id}|${JSON.stringify(s.condition)}\n`);
-  }
-  return h.digest('hex');
 }
 
 /**
@@ -380,55 +290,31 @@ interface QueuedOp<T> {
 
 export class DAGScheduler {
   /**
-   * Cached DAG per workflow definition (keyed by definitionId), validated by
-   * the two signatures on every build so a mid-run edit of a definition is
-   * never served stale. Used for runs that have no snapshot (created before
-   * the column landed) and for definition-level questions.
+   * DAG per definition version. A version never changes, so an entry is
+   * valid forever; the map is capped so a long-lived scheduler does not grow
+   * by one entry per version it has ever seen.
    */
-  private dagCache = new Map<string, { signature: string; conditions: string; dag: DAG }>();
-
-  /**
-   * WS-D1 — DAG per in-flight run, built from the run's frozen
-   * `definitionSnapshot`. The snapshot never changes once written, so the
-   * entry is valid for the life of the run; `forgetRun` drops it when the
-   * run is finished and the map is capped so a long-lived scheduler does not
-   * grow by one entry per run it has ever seen.
-   */
-  private runDagCache = new Map<string, { capturedAt: string; dag: DAG }>();
-  private static readonly MAX_TRACKED_RUNS = 512;
+  private dagCache = new Map<string, DAG>();
+  private static readonly MAX_CACHED_DAGS = 512;
 
   // W33 / P1-19 — per-run FIFO lock queues as INSTANCE state.
   private runQueues = new Map<string, Array<QueuedOp<unknown>>>();
   private runQueueActive = new Set<string>();
 
-  /**
-   * △ Diagnostics counters. Nothing in
-   * production reads them. They let a test see whether the cache and the
-   * crypto digest were touched.
-   */
+  /** Diagnostics counters; nothing in production reads them. */
   readonly stats = {
-    /** DAGs built from scratch, i.e. cache misses (definition or snapshot). */
+    /** DAGs built from scratch (cache misses). */
     dagBuilds: 0,
-    /** Tier-2 digests actually computed with crypto. */
-    conditionDigests: 0,
     /** Reconciles performed. */
     reconciles: 0,
   };
 
   constructor(
-    private stageDefRepo: IStageDefinitionRepository,
-    private edgeRepo: IStageEdgeRepository,
-    private stageRunRepo: IStageRunRepository,
-    /**
-     * Optional run repository. When provided, the run's `variables` are passed
-     * into condition evaluation so `variables.*` expressions resolve to real
-     * values (SCHEMA-3), and the run's `definitionSnapshot` is used to build
-     * its DAG (WS-D1). Without it, `variables.*` resolve to undefined and the
-     * live definition is used.
-     */
-    private runRepo?: IWorkflowRunRepository,
+    private readonly definitions: RunDefinitionReader,
+    private readonly stageRunRepo: IStageRunRepository,
+    private readonly runRepo: IWorkflowRunRepository,
     /** Optional logger — a run that cannot be read is reported, not swallowed. */
-    private logger?: ILogger,
+    private readonly logger?: ILogger,
   ) {}
 
   // ── Per-run FIFO lock ──
@@ -467,119 +353,20 @@ export class DAGScheduler {
     });
   }
 
-  // ── Run access ──
-
-  /**
-   * Read the run for its variables and snapshot. Returns undefined when no
-   * run repo is wired or the run cannot be read — and in the latter case
-   * SAYS SO. This used to be a bare `catch { return undefined }`, so a
-   * transient DB error silently evaluated every `variables.*` condition as
-   * false and took the wrong branch with no trace anywhere.
-   */
-  private async loadRun(workflowRunId: string): Promise<WorkflowRun | undefined> {
-    if (!this.runRepo) return undefined;
-    try {
-      return await this.runRepo.getById(workflowRunId);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.logger?.warn(
-        `[DAGScheduler] Could not read run ${workflowRunId} for scheduling; ` +
-          `variables.* conditions evaluate as undefined and the live definition is used: ${message}`,
-      );
-      return undefined;
-    }
-  }
-
-  /** Tier-2 signature, counted so a test can see whether crypto ran. */
-  private conditionSignatureOf(stages: Array<{ id: string; condition?: unknown }>): string {
-    const signature = conditionSignature(stages);
-    if (signature !== '') this.stats.conditionDigests++;
-    return signature;
-  }
-
   // ── DAG construction ──
 
-  /**
-   * Build the DAG for a workflow definition from its LIVE stages and edges,
-   * reusing the cached value only when both signatures match.
-   */
-  async buildDAGForDefinition(workflowDefinitionId: string): Promise<DAG> {
-    const stages = await this.stageDefRepo.getByDefinitionId(workflowDefinitionId);
-    const edges = await this.edgeRepo.getByDefinitionId(workflowDefinitionId);
-    const signature = structuralSignature(stages, edges);
-
-    const cached = this.dagCache.get(workflowDefinitionId);
-    if (
-      cached &&
-      cached.signature === signature &&
-      cached.conditions === this.conditionSignatureOf(stages)
-    ) {
-      return cached.dag;
-    }
-
-    const dag = buildDAG(stages, edges);
+  /** The DAG of the run's pinned definition version. */
+  async buildDAGForRun(run: Pick<WorkflowRun, 'definitionVersionId'>): Promise<DAG> {
+    const cached = this.dagCache.get(run.definitionVersionId);
+    if (cached) return cached;
+    const dag = buildDAG(await this.definitions.get(run.definitionVersionId));
     this.stats.dagBuilds++;
-    this.dagCache.set(workflowDefinitionId, {
-      signature,
-      conditions: this.conditionSignatureOf(stages),
-      dag,
-    });
-    return dag;
-  }
-
-  /**
-   * WS-D1 — the topology a run executes against. A run carrying a
-   * `definitionSnapshot` gets a DAG built from that snapshot, so editing the
-   * definition while the run is in flight changes nothing about it. Runs
-   * without a snapshot fall back to the live definition.
-   */
-  async buildDAGForRun(run: WorkflowRun): Promise<DAG> {
-    const snapshot = run.definitionSnapshot;
-    if (!snapshot) return this.buildDAGForDefinition(run.workflowDefinitionId);
-
-    const cached = this.runDagCache.get(run.id);
-    if (cached && cached.capturedAt === snapshot.capturedAt) return cached.dag;
-
-    const dag = buildDAG(snapshot.stages, snapshot.edges);
-    this.stats.dagBuilds++;
-    if (!this.runDagCache.has(run.id) && this.runDagCache.size >= DAGScheduler.MAX_TRACKED_RUNS) {
-      const oldest = this.runDagCache.keys().next();
-      if (!oldest.done) this.runDagCache.delete(oldest.value);
+    if (this.dagCache.size >= DAGScheduler.MAX_CACHED_DAGS) {
+      const oldest = this.dagCache.keys().next();
+      if (!oldest.done) this.dagCache.delete(oldest.value);
     }
-    this.runDagCache.set(run.id, { capturedAt: snapshot.capturedAt, dag });
+    this.dagCache.set(run.definitionVersionId, dag);
     return dag;
-  }
-
-  /**
-   * WS-D1 — read the definition's current stages + edges as a snapshot to
-   * freeze onto a run at creation.
-   */
-  async captureDefinitionSnapshot(workflowDefinitionId: string): Promise<WorkflowDefinitionSnapshot> {
-    const [stages, edges]: [StageDefinition[], StageEdge[]] = await Promise.all([
-      this.stageDefRepo.getByDefinitionId(workflowDefinitionId),
-      this.edgeRepo.getByDefinitionId(workflowDefinitionId),
-    ]);
-    return { stages, edges, capturedAt: new Date().toISOString() };
-  }
-
-  /** DAG for a run id: snapshot when the run has one, live definition otherwise. */
-  private async dagForRun(
-    workflowRunId: string,
-    workflowDefinitionId: string,
-    run?: WorkflowRun,
-  ): Promise<DAG> {
-    if (run) return this.buildDAGForRun(run);
-    return this.buildDAGForDefinition(workflowDefinitionId);
-  }
-
-  /** Build status map: stageDefinitionId → status. */
-  private async loadStatusMap(workflowRunId: string): Promise<Map<string, StageRunStatus>> {
-    const stageRuns = await this.stageRunRepo.getByRunId(workflowRunId);
-    const statusMap = new Map<string, StageRunStatus>();
-    for (const sr of stageRuns) {
-      statusMap.set(sr.stageDefinitionId, sr.status);
-    }
-    return statusMap;
   }
 
   // ── The one reconcile ──
@@ -589,30 +376,26 @@ export class DAGScheduler {
    * callers (an event and the poll backstop) never interleave their reads.
    * See {@link reconcileDAG} for the semantics.
    */
-  async reconcileRun(workflowRunId: string, workflowDefinitionId: string): Promise<RunReconciliation> {
+  async reconcileRun(workflowRunId: string): Promise<RunReconciliation> {
     return this.withLock(workflowRunId, async () => {
-      const run = await this.loadRun(workflowRunId);
-      const dag = await this.dagForRun(workflowRunId, workflowDefinitionId, run);
-      const statusMap = await this.loadStatusMap(workflowRunId);
+      let run: WorkflowRun;
+      try {
+        run = await this.runRepo.getById(workflowRunId);
+      } catch (err) {
+        this.logger?.warn(
+          `[DAGScheduler] Could not read run ${workflowRunId} for scheduling: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        throw err;
+      }
+      const dag = await this.buildDAGForRun(run);
+      const stageRuns = await this.stageRunRepo.getByRunId(workflowRunId);
+      const statusMap = new Map<string, StageRunStatus>(stageRuns.map((sr) => [sr.stageKey, sr.status]));
       this.stats.reconciles++;
-      return reconcileDAG(dag, statusMap, run?.variables ?? undefined);
+      return reconcileDAG(dag, statusMap, {
+        variables: userVariables(run.variables),
+        run: runScope(run),
+        stages: stagesScope(stageRuns),
+      });
     });
-  }
-
-  // ── Cache management ──
-
-  /**
-   * Clear the cached live DAG for a definition. With signature-based
-   * validation the cache self-corrects on the next build; this remains useful
-   * for an explicit "the DB changed outside my process" reset. Run snapshots
-   * are unaffected — they are frozen by design.
-   */
-  clearCache(workflowDefinitionId: string): void {
-    this.dagCache.delete(workflowDefinitionId);
-  }
-
-  /** Drop the per-run DAG once the run is terminal. */
-  forgetRun(workflowRunId: string): void {
-    this.runDagCache.delete(workflowRunId);
   }
 }

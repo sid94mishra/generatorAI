@@ -2,79 +2,89 @@
 // Definition specs for tests.
 //
 // A test writes a workflow the way a person reads one — stages by name,
-// edges as `[from, to, type]` — and `toImportJson` turns it into the
-// canonical import document today's `POST /workflow-definitions/import-json`
-// accepts, parsed through the SAME zod schema the route validates with (so
-// defaults apply exactly as they do live).
-// A document that already uses index edges passes through unchanged.
+// edges as `[from, to, on]` — and `toGraph` turns it into the canonical v2
+// `WorkflowGraph` (`@generatorai/workflow-spec`) the definition service
+// materializes. Stage keys derive from the names (a name that already is a
+// key stays as it is); every other stage field is the v2 StageSpec field
+// (`guard`, `retry`, `output`, `context`, `approval`, `session`, …).
 // ────────────────────────────────────────────────────────────────
 
-import { ImportWorkflowJsonSchema, type ImportWorkflowJson } from '@generatorai/shared';
+import { STAGE_KEY_PATTERN, type EdgeOn, type WorkflowGraphInput } from '@generatorai/workflow-spec';
 
-export type EdgeType = 'on_success' | 'on_failure' | 'on_completion' | 'always';
+export type EdgeType = EdgeOn;
 
 export interface StageSpec {
   name: string;
+  /** Stage key; defaults to the name when it is a valid key, else a slug of it. */
+  key?: string;
   /** Shorthand for one prompt labelled with the stage name. */
   prompt?: string;
   prompts?: Array<{ label?: string; text: string }>;
-  order?: number;
-  /** Any other import-schema stage field (retryPolicy, condition, …). */
+  /** Any other v2 stage field (guard, retry, output, context, approval, session, …). */
   [field: string]: unknown;
 }
 
 export type EdgeSpec =
-  | readonly [from: string, to: string, type?: EdgeType]
-  | { from: string; to: string; edgeType?: EdgeType };
+  | readonly [from: string, to: string, on?: EdgeType]
+  | { from: string; to: string; on?: EdgeType; when?: string };
 
 export interface WorkflowSpecJson {
   name?: string;
   stages: StageSpec[];
-  edges?: EdgeSpec[] | ImportWorkflowJson['edges'];
-  /** Any other import-schema definition field (sessionMode, variables, …). */
+  edges?: EdgeSpec[];
+  /** Any other v2 workflow field (variables, session, lifecycle, hooks, …). */
   [field: string]: unknown;
 }
 
-function isIndexEdge(e: unknown): e is { fromStageIndex: number; toStageIndex: number } {
-  return !!e && typeof e === 'object' && 'fromStageIndex' in (e as Record<string, unknown>);
+/** The key a stage name maps to (unique within one spec). */
+export function stageKeyFor(name: string, taken: Set<string> = new Set()): string {
+  let key = STAGE_KEY_PATTERN.test(name)
+    ? name
+    : name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '_')
+        .replace(/^_+|_+$/g, '') || 'stage';
+  if (!/^[a-z]/.test(key)) key = `s_${key}`;
+  key = key.slice(0, 48);
+  let candidate = key;
+  for (let n = 2; taken.has(candidate); n++) candidate = `${key.slice(0, 44)}_${n}`;
+  taken.add(candidate);
+  return candidate;
 }
 
-/** Convert a name-based spec into a parsed `ImportWorkflowJson`. */
-export function toImportJson(spec: WorkflowSpecJson): ImportWorkflowJson {
-  const { stages, edges = [], name, ...rest } = spec;
-  const indexByName = new Map<string, number>();
-  stages.forEach((s, i) => indexByName.set(s.name, i));
-
-  const importStages = stages.map((s, i) => {
-    const { prompt, prompts, order, ...fields } = s;
+/** Convert a name-based spec into a v2 `WorkflowGraph` document. */
+export function toGraph(spec: WorkflowSpecJson): WorkflowGraphInput {
+  const { stages, edges = [], name, ...workflowFields } = spec;
+  const taken = new Set<string>();
+  const keyByName = new Map<string, string>();
+  const graphStages = stages.map((s) => {
+    const { prompt, prompts, name: stageName, key, ...fields } = s;
+    const stageKey = key ?? stageKeyFor(stageName, taken);
+    taken.add(stageKey);
+    keyByName.set(stageName, stageKey);
     return {
+      kind: 'agent' as const,
       ...fields,
-      name: s.name,
-      order: order ?? i,
+      key: stageKey,
+      name: stageName,
       prompts: prompts
-        ? prompts.map((p, j) => ({ label: p.label ?? `${s.name} ${j + 1}`, ...p }))
+        ? prompts.map((p, j) => ({ label: p.label ?? `${stageName} ${j + 1}`, text: p.text }))
         : prompt !== undefined
-          ? [{ label: s.name, text: prompt }]
+          ? [{ label: stageName, text: prompt }]
           : [],
     };
   });
-
-  const importEdges = (edges as unknown[]).map((e) => {
-    if (isIndexEdge(e)) return e;
-    const [from, to, edgeType] = Array.isArray(e)
-      ? (e as [string, string, EdgeType?])
-      : [(e as { from: string }).from, (e as { to: string }).to, (e as { edgeType?: EdgeType }).edgeType];
-    const fromStageIndex = indexByName.get(from);
-    const toStageIndex = indexByName.get(to);
-    if (fromStageIndex === undefined) throw new Error(`edge ${from} -> ${to}: unknown stage "${from}"`);
-    if (toStageIndex === undefined) throw new Error(`edge ${from} -> ${to}: unknown stage "${to}"`);
-    return { fromStageIndex, toStageIndex, edgeType: edgeType ?? 'on_success' };
+  const keyOf = (n: string) => keyByName.get(n) ?? n;
+  const graphEdges = edges.map((e) => {
+    const [from, to, on, when] = Array.isArray(e)
+      ? [(e as readonly [string, string, EdgeType?])[0], (e as readonly [string, string, EdgeType?])[1], (e as readonly [string, string, EdgeType?])[2], undefined]
+      : [(e as { from: string }).from, (e as { to: string }).to, (e as { on?: EdgeType }).on, (e as { when?: string }).when];
+    return { from: keyOf(from as string), to: keyOf(to as string), on: (on as EdgeType | undefined) ?? 'success', ...(when ? { when } : {}) };
   });
-
-  return ImportWorkflowJsonSchema.parse({
-    ...rest,
-    name: name ?? 'testkit workflow',
-    stages: importStages,
-    edges: importEdges,
-  });
+  return {
+    formatVersion: 2,
+    workflow: { name: name ?? 'testkit workflow', ...workflowFields } as WorkflowGraphInput['workflow'],
+    stages: graphStages as WorkflowGraphInput['stages'],
+    edges: graphEdges,
+  };
 }

@@ -81,6 +81,51 @@ export function createTestConfig(overrides?: Partial<AppConfig>): AppConfig {
   } as AppConfig;
 }
 
+/** A minimal valid v2 workflow document (one agent stage). */
+export function testGraph(name: string) {
+  return {
+    formatVersion: 2 as const,
+    workflow: { name, variables: [], hooks: [], tags: [] },
+    stages: [{ kind: 'agent' as const, key: 'build', name: 'Build', prompts: [{ label: 'main', text: 'Do the work' }] }],
+    edges: [],
+  };
+}
+
+/** A draft definition record as the service returns it. */
+export function testDefinitionRecord() {
+  const now = new Date().toISOString();
+  return {
+    id: 'def-1',
+    status: 'draft' as const,
+    revision: 1,
+    currentVersionId: null,
+    hasUnpublishedChanges: true,
+    archivedAt: null,
+    needsAttention: [],
+    createdAt: now,
+    updatedAt: now,
+    graph: testGraph('Test Workflow'),
+  };
+}
+
+function testDefinitionSummary() {
+  const r = testDefinitionRecord();
+  return {
+    id: r.id,
+    name: r.graph.workflow.name,
+    projectId: null,
+    status: r.status,
+    revision: r.revision,
+    currentVersionId: null,
+    tags: [],
+    stageCount: 1,
+    needsAttention: false,
+    archivedAt: null,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
 /**
  * Comprehensive mock for Container with all services stubbed.
  * Each service method returns a sensible default; use vi.fn() to spy or override.
@@ -133,11 +178,11 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
 
   const templateRegistry = {
     getAllWorkflowTemplates: vi.fn().mockReturnValue([
-      { id: 'code-gen', name: 'Code Generation', category: 'generation', stages: [], edges: [], variables: [] },
-      { id: 'code-review', name: 'Code Review', category: 'review', stages: [], edges: [], variables: [] },
+      { id: 'code-gen', category: 'generation', graph: testGraph('Code Generation') },
+      { id: 'code-review', category: 'review', graph: testGraph('Code Review') },
     ]),
     getWorkflowTemplate: vi.fn().mockImplementation((id: string) => {
-      if (id === 'code-gen') return { id: 'code-gen', name: 'Code Generation', category: 'generation', stages: [], edges: [], variables: [] };
+      if (id === 'code-gen') return { id: 'code-gen', category: 'generation', graph: testGraph('Code Generation') };
       return undefined;
     }),
     getTemplateCount: vi.fn().mockReturnValue(2),
@@ -161,10 +206,16 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     getScript: vi.fn().mockReturnValue(undefined),
     reloadAll: vi.fn().mockResolvedValue([]),
     reloadScript: vi.fn().mockResolvedValue({
-      metadata: { id: 'test-script', name: 'Test Script', filePath: '/tmp/test.workflow.mjs', lastModified: new Date(), variables: [], stageCount: 0, profileCount: 0, tags: [] },
+      metadata: { id: 'test-script', name: 'Test Script', filePath: '/tmp/test.workflow.mjs', lastModified: new Date(), variables: [], stageCount: 1, profileCount: 0, tags: [] },
+      graph: testGraph('Test Script'),
+      profiles: [],
+      handlerNames: [],
     }),
     saveScript: vi.fn().mockResolvedValue({
-      metadata: { id: 'test-script', name: 'Test Script', filePath: '/tmp/test.workflow.mjs', lastModified: new Date(), variables: [], stageCount: 0, profileCount: 0, tags: [] },
+      metadata: { id: 'test-script', name: 'Test Script', filePath: '/tmp/test.workflow.mjs', lastModified: new Date(), variables: [], stageCount: 1, profileCount: 0, tags: [] },
+      graph: testGraph('Test Script'),
+      profiles: [],
+      handlerNames: [],
     }),
     validateScriptFile: vi.fn().mockResolvedValue({ valid: true, errors: [] }),
   };
@@ -224,71 +275,35 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     }),
   };
 
+  // Definitions are whole v2 documents: routes read and write the graph.
   const workflowDefinitionService = {
-    createDefinition: vi.fn().mockResolvedValue({
-      id: 'def-1',
-      name: 'Test Workflow',
-      version: 1,
-      sessionMode: 'auto',
-      variables: [],
-      tags: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }),
-    listDefinitions: vi.fn().mockResolvedValue([
-      { id: 'def-1', name: 'Test Workflow', version: 1, sessionMode: 'auto', variables: [], tags: [], createdAt: new Date(), updatedAt: new Date() },
-    ]),
-    getDefinition: vi.fn().mockResolvedValue({
-      id: 'def-1',
-      name: 'Test Workflow',
-      version: 1,
-      sessionMode: 'auto',
-      variables: [],
-      tags: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }),
-    getDefinitionWithStages: vi.fn().mockResolvedValue({
-      id: 'def-1',
-      name: 'Test Workflow',
-      version: 1,
-      sessionMode: 'auto',
-      variables: [],
-      tags: [],
-      stages: [],
-      edges: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    }),
-    updateDefinition: vi.fn().mockResolvedValue({ id: 'def-1', name: 'Updated', version: 2, sessionMode: 'auto', variables: [], tags: [], createdAt: new Date(), updatedAt: new Date() }),
-    deleteDefinition: vi.fn().mockResolvedValue(undefined),
-    addStage: vi.fn().mockResolvedValue({
-      id: 'stage-1',
-      workflowDefinitionId: 'def-1',
-      name: 'Stage A',
-      order: 0,
-      prompts: [],
-      variables: {},
-      hooks: [],
-      createdAt: new Date(),
-    }),
-    updateStage: vi.fn().mockResolvedValue(undefined),
-    deleteStage: vi.fn().mockResolvedValue(undefined),
-    addEdge: vi.fn().mockResolvedValue({
-      id: 'edge-1',
-      workflowDefinitionId: 'def-1',
-      fromStageId: 'stage-1',
-      toStageId: 'stage-2',
-      edgeType: 'on_success',
-    }),
-    deleteEdge: vi.fn().mockResolvedValue(undefined),
-    validateDefinition: vi.fn().mockResolvedValue({ valid: true, errors: [] }),
+    list: vi.fn().mockResolvedValue({ items: [testDefinitionSummary()] }),
+    get: vi.fn().mockResolvedValue(testDefinitionRecord()),
+    create: vi.fn().mockResolvedValue(testDefinitionRecord()),
+    createFromSpec: vi.fn().mockResolvedValue(testDefinitionRecord()),
+    saveGraph: vi.fn().mockResolvedValue({ ...testDefinitionRecord(), revision: 2 }),
+    publish: vi.fn().mockResolvedValue({ ...testDefinitionRecord(), status: 'published', currentVersionId: 'ver-1' }),
+    listVersions: vi.fn().mockResolvedValue([]),
+    getVersion: vi.fn().mockResolvedValue(undefined),
+    validate: vi.fn().mockReturnValue({ valid: true, issues: [] }),
+    exportGraph: vi.fn().mockResolvedValue(JSON.stringify(testGraph('Test Workflow'))),
+    import: vi.fn().mockResolvedValue(testDefinitionRecord()),
+    importTemplate: vi.fn().mockResolvedValue(testDefinitionRecord()),
+    delete: vi.fn().mockResolvedValue({ deleted: true }),
+    resolveVersionForRun: vi.fn().mockResolvedValue('ver-1'),
+  };
+
+  // The pinned graph of each run's definition version.
+  const runDefinitionReader = {
+    get: vi.fn().mockResolvedValue(testGraph('Test Workflow')),
+    stage: vi.fn(),
   };
 
   const workflowRunService = {
     createRun: vi.fn().mockResolvedValue({
       id: 'run-1',
       workflowDefinitionId: 'def-1',
+      definitionVersionId: 'ver-1',
       name: 'Test Run',
       status: 'created',
       sessionMode: 'auto',
@@ -308,6 +323,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     retryRun: vi.fn().mockResolvedValue({
       id: 'run-retry-1',
       workflowDefinitionId: 'def-1',
+      definitionVersionId: 'ver-1',
       name: 'Test Run (retry)',
       status: 'created',
       sessionMode: 'auto',
@@ -319,12 +335,8 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
   };
 
   const dagScheduler = {
-    buildDAGForDefinition: vi.fn().mockResolvedValue(undefined),
-    getRootStages: vi.fn().mockResolvedValue([]),
-    onStageCompleted: vi.fn().mockResolvedValue([]),
-    onStageFailed: vi.fn().mockResolvedValue([]),
-    isDAGComplete: vi.fn().mockResolvedValue(false),
-    validateDAG: vi.fn().mockResolvedValue({ valid: true, errors: [] }),
+    buildDAGForRun: vi.fn().mockResolvedValue(undefined),
+    reconcileRun: vi.fn().mockResolvedValue(undefined),
   };
 
   const stageExecutionService = {
@@ -367,6 +379,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     getById: vi.fn().mockResolvedValue({
       id: 'run-1',
       workflowDefinitionId: 'def-1',
+      definitionVersionId: 'ver-1',
       name: 'Test Run',
       status: 'running',
       sessionMode: 'auto',
@@ -446,6 +459,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
       listComments: vi.fn().mockResolvedValue([]),
     },
     workflowDefinitionService,
+    runDefinitionReader,
     workflowRunService,
     dagScheduler,
     stageExecutionService,

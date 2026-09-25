@@ -117,6 +117,14 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
     read: ['read:workflows'],
     write: ['write:workflows', 'exec:agent'],
   },
+  // Uploading a script installs code that runs in-process with the server's
+  // privileges (A-19): admin only, on top of the operator opt-in flags.
+  {
+    prefix: '/workflow-scripts/upload',
+    read: ['read:workflows'],
+    write: ['admin:settings'],
+    riskLevel: 'high',
+  },
   { prefix: '/workflow-scripts', read: ['read:workflows'], write: ['write:workflows'] },
   // Webhook deliveries are the whole point of this trigger type: GitHub,
   // Stripe, a cron pinger — none of them hold `write:workflows` / `exec:agent`,

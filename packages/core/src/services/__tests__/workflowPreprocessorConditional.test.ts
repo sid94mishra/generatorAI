@@ -25,20 +25,16 @@ function harness() {
 }
 
 const setVar = (name: string, value: string) => ({
-  type: 'set_variable',
   name: `set ${name}`,
   config: { type: 'set_variable', variableName: name, value },
   failOnError: true,
-  order: 0,
 });
 
 const conditional = (condition: string) =>
   ({
-    type: 'conditional',
     name: 'branch',
     config: { type: 'conditional', condition, thenSteps: [setVar('picked', 'then')], elseSteps: [setVar('picked', 'else')] },
     failOnError: true,
-    order: 0,
   }) as never;
 
 describe('conditional steps (Expression v2)', () => {
@@ -68,11 +64,9 @@ describe('conditional steps (Expression v2)', () => {
 describe('validate_input regex rules', () => {
   const validate = (pattern: string) =>
     ({
-      type: 'validate_input',
       name: 'check',
-      config: { type: 'validate_input', variableName: 'ticket', rules: [{ type: 'regex', value: pattern, message: 'bad ticket' }] },
+      config: { type: 'validate_input', variableName: 'ticket', rules: [{ type: 'regex', pattern, message: 'bad ticket' }] },
       failOnError: true,
-      order: 0,
     }) as never;
 
   it('matches with the linear-time engine', async () => {

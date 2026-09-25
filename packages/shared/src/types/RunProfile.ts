@@ -18,9 +18,8 @@ import type { BrowserConfig } from './BrowserSession.js';
  * but operational parameters that vary per-run.
  */
 export interface StageRunOverride {
-  /** Stage name or index to target. Name is preferred; index is fallback. */
-  stageName?: string;
-  stageIndex?: number;
+  /** Key of the stage to target (keys are stable; names and positions are not). */
+  stageKey: string;
   /** Additional variables scoped to this stage only */
   variables?: Record<string, unknown>;
   /** Whether to skip this stage entirely */
@@ -48,8 +47,6 @@ export interface RunProfile {
   variables: Record<string, unknown>;
   /** HITL permission mode override */
   permissionMode?: WorkflowRunPermissionMode;
-  /** Session mode override (single, per-stage, auto) */
-  sessionMode?: 'single' | 'per-stage' | 'auto';
   /** Project ID to associate with this run */
   projectId?: string;
   /** Selected codebase aliases from the linked project */

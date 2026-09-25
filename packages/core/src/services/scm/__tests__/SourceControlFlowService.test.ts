@@ -79,6 +79,9 @@ async function identify(repoDir: string): Promise<void> {
   await git(repoDir, 'config', 'user.email', 'test@generatorai.local');
   await git(repoDir, 'config', 'user.name', 'GeneratorAI Test');
   await git(repoDir, 'config', 'commit.gpgsign', 'false');
+  // Byte-exact checkouts: Git for Windows defaults to core.autocrlf=true,
+  // which rewrites files restored by `merge --abort` with CRLF endings.
+  await git(repoDir, 'config', 'core.autocrlf', 'false');
 }
 
 async function write(dir: string, rel: string, content: string): Promise<void> {
@@ -158,7 +161,7 @@ describe('SourceControlFlowService (real git)', () => {
     await execFileAsync('git', ['symbolic-ref', 'HEAD', 'refs/heads/main'], { cwd: origin });
 
     seed = path.join(root, 'seed');
-    await execFileAsync('git', ['clone', origin, seed]);
+    await execFileAsync('git', ['clone', '-c', 'core.autocrlf=false', origin, seed]);
     await identify(seed);
     await write(seed, 'README.md', '# web\n');
     await write(seed, 'shared.txt', 'line one\nline two\n');
@@ -170,7 +173,7 @@ describe('SourceControlFlowService (real git)', () => {
     // A FULL clone — `--depth 1` implies `--single-branch`, which breaks
     // `@{upstream}` resolution for a freshly pushed branch.
     work = path.join(root, 'work');
-    await execFileAsync('git', ['clone', origin, work]);
+    await execFileAsync('git', ['clone', '-c', 'core.autocrlf=false', origin, work]);
     await identify(work);
 
     gitClient = new GitClient(new NodeGitRunner(), silentLogger, {

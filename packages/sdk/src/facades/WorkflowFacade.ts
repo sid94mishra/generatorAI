@@ -3,57 +3,42 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { CoreServices, WorkflowScriptLoader, IWorkflowRunRepository, WorkflowOrchestrator } from '@generatorai/core';
+import type { PersistedEvent, WorkflowRun } from '@generatorai/shared';
 import type {
-  PersistedEvent,
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  WorkflowRun,
-  StageDefinition,
-  StageEdge,
-} from '@generatorai/shared';
+  ValidationResult,
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowGraph,
+  WorkflowGraphInput,
+} from '@generatorai/workflow-spec';
 
-export interface CreateWorkflowInput {
-  name: string;
-  description?: string;
-  stages: Array<{
-    localId: string;
-    name: string;
-    prompt: string;
-    systemPrompt?: string;
-    condition?: string;
-    hooks?: Array<{
-      phase: string;
-      config: Record<string, unknown>;
-    }>;
-    harnessOverrides?: Record<string, unknown>;
-  }>;
-  // SDK-7: edges carry only an `edgeType` because the platform evaluates
-  // CONDITIONS on the TARGET STAGE, not on edges. To make an edge conditional,
-  // set the target stage's `condition` (an expression like
-  // `variables.env == 'prod'`) on its stage input above — it is evaluated for
-  // each inbound edge during routing. There is intentionally no per-edge
-  // condition field (the data model has none).
-  edges: Array<{
-    fromStageLocalId: string;
-    toStageLocalId: string;
-    edgeType: 'on_success' | 'on_failure' | 'on_completion' | 'always';
-  }>;
-  variables?: Record<string, unknown>;
-  sessionMode?: 'single' | 'per-stage' | 'auto';
-  tags?: string[];
-  projectId?: string;
+/** Anything with a `build()` that yields a graph — a `WorkflowBuilder` from `@generatorai/workflow-spec/builders`. */
+export interface GraphSource {
+  build(): WorkflowGraph;
+}
+
+export interface CreateWorkflowOptions {
+  /**
+   * Publish at once so it can run (default true). The SDK is an in-process
+   * embedder; a draft can still start a test run (`run(id, { testRun: true })`).
+   */
+  publish?: boolean;
 }
 
 export interface RunOptions {
   variables?: Record<string, unknown>;
   projectId?: string;
+  /** Run the working graph as a test version (the only way to run a draft). */
+  testRun?: boolean;
 }
 
 export interface OrchestrateOptions {
   variables?: Record<string, unknown>;
   projectId?: string;
   selectedCodebases?: string[];
-  stageOverrides?: Array<Record<string, unknown>>;
+  /** Per-stage overrides, by stage key. */
+  stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }>;
+  testRun?: boolean;
 }
 
 export interface StreamOptions {
@@ -66,6 +51,8 @@ const TERMINAL_KINDS = new Set([
   'workflow_run.cancelled',
 ]);
 
+const isGraphSource = (v: unknown): v is GraphSource => !!v && typeof (v as { build?: unknown }).build === 'function';
+
 export class WorkflowFacade {
   constructor(
     private services: CoreServices,
@@ -75,68 +62,40 @@ export class WorkflowFacade {
   ) {}
 
   /**
-   * Create a workflow definition with stages and edges in one call.
-   * Stages are connected by `localId` references in edges.
+   * Create a workflow definition from a whole graph (or a builder), through
+   * the one materializer. Invalid graphs throw `WorkflowValidationError`
+   * with the validator's issues.
    */
-  async create(input: CreateWorkflowInput): Promise<WorkflowDefinitionWithStages> {
-    // 1. Create definition (no stages/edges)
-    const definition = await this.services.workflowDefinitionService.createDefinition({
-      name: input.name,
-      description: input.description,
-      sessionMode: input.sessionMode,
-      tags: input.tags,
-      projectId: input.projectId,
+  async create(graph: WorkflowGraphInput | GraphSource, options: CreateWorkflowOptions = {}): Promise<WorkflowDefinitionRecord> {
+    return this.services.workflowDefinitionService.createFromSpec(isGraphSource(graph) ? graph.build() : graph, {
+      canEditCommands: true,
+      status: options.publish === false ? 'draft' : 'published',
     });
-
-    // 2. Create stages, building localId → realId map
-    const stageIdMap = new Map<string, string>();
-    const stages: StageDefinition[] = [];
-    for (const stageInput of input.stages) {
-      const stage = await this.services.workflowDefinitionService.addStage({
-        workflowDefinitionId: definition.id,
-        name: stageInput.name,
-        prompts: [{
-          label: stageInput.name,
-          text: stageInput.prompt,
-          ...(stageInput.systemPrompt ? { systemPrompt: stageInput.systemPrompt } : {}),
-        }],
-        hooks: stageInput.hooks as never,
-        condition: stageInput.condition
-          ? { type: 'expression' as const, expression: stageInput.condition }
-          : undefined,
-      });
-      stageIdMap.set(stageInput.localId, stage.id);
-      stages.push(stage);
-    }
-
-    // 3. Create edges using the real stage IDs
-    const edges: StageEdge[] = [];
-    for (const edgeInput of input.edges) {
-      const fromStageId = stageIdMap.get(edgeInput.fromStageLocalId);
-      const toStageId = stageIdMap.get(edgeInput.toStageLocalId);
-      if (!fromStageId) throw new Error(`Unknown stage localId: ${edgeInput.fromStageLocalId}`);
-      if (!toStageId) throw new Error(`Unknown stage localId: ${edgeInput.toStageLocalId}`);
-
-      const edge = await this.services.workflowDefinitionService.addEdge({
-        workflowDefinitionId: definition.id,
-        fromStageId,
-        toStageId,
-        edgeType: edgeInput.edgeType,
-      });
-      edges.push(edge);
-    }
-
-    return { ...definition, stages, edges };
   }
 
-  /** List all workflow definitions */
-  async list(): Promise<WorkflowDefinition[]> {
-    return this.services.workflowDefinitionService.listDefinitions();
+  /** Replace a definition's whole graph (409 `RevisionConflictError` on a stale revision). */
+  async save(definitionId: string, graph: WorkflowGraphInput, expectedRevision: number): Promise<WorkflowDefinitionRecord> {
+    return this.services.workflowDefinitionService.saveGraph(definitionId, graph, expectedRevision, { canEditCommands: true });
   }
 
-  /** Get a workflow definition by ID (with stages and edges) */
-  async get(definitionId: string): Promise<WorkflowDefinitionWithStages> {
-    return this.services.workflowDefinitionService.getDefinitionWithStages(definitionId);
+  /** Publish the working graph as the version runs use. */
+  async publish(definitionId: string): Promise<WorkflowDefinitionRecord> {
+    return this.services.workflowDefinitionService.publish(definitionId);
+  }
+
+  /** Validate a document without storing it. */
+  validate(graph: unknown): ValidationResult {
+    return this.services.workflowDefinitionService.validate(graph);
+  }
+
+  /** List workflow definitions (first page, up to 200). */
+  async list(): Promise<WorkflowDefinitionSummary[]> {
+    return (await this.services.workflowDefinitionService.list()).items;
+  }
+
+  /** Get a workflow definition (its whole graph). */
+  async get(definitionId: string): Promise<WorkflowDefinitionRecord> {
+    return this.services.workflowDefinitionService.get(definitionId);
   }
 
   /**
@@ -149,6 +108,7 @@ export class WorkflowFacade {
       workflowDefinitionId: definitionId,
       variables: options?.variables,
       projectId: options?.projectId,
+      ...(options?.testRun ? { testRun: true } : {}),
     });
   }
 
@@ -169,6 +129,7 @@ export class WorkflowFacade {
       workflowDefinitionId: definitionId,
       variables: options?.variables,
       projectId: options?.projectId,
+      ...(options?.testRun ? { testRun: true } : {}),
     });
     await this.services.workflowRunService.startRun(run.id);
     return run;
@@ -191,7 +152,8 @@ export class WorkflowFacade {
       projectId: options?.projectId,
       selectedCodebases: options?.selectedCodebases,
       stageOverrides: options?.stageOverrides,
-    } as never);
+      ...(options?.testRun ? { testRun: true } : {}),
+    });
     return { workflowRunId: result.workflowRunId };
   }
 

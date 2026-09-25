@@ -24,8 +24,6 @@ import type {
   AutomationExecutionWithRuns,
   CreateAgentParams,
   CreateAutomationParams,
-  CreateEdgeParams,
-  CreateStageParams,
   HookDefinition,
   HookFailurePolicy,
   HookType,
@@ -33,16 +31,24 @@ import type {
   Project,
   ProjectCodebase,
   ProjectConfig,
-  StageDefinition,
-  StageEdge,
   StageRun,
   TerminalSessionDescriptor,
   UpdateAgentParams,
   UpdateAutomationParams,
-  WorkflowDefinition,
   WorktreeDetail,
   WorktreeInfo,
 } from '@generatorai/shared';
+import type {
+  ValidationResult,
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowDefinitionVersionRecord,
+  WorkflowDefinitionVersionSummary,
+  WorkflowGraph,
+  WorkflowGraphInput,
+  ScriptRunProfile,
+  WorkflowTemplate,
+} from '@generatorai/workflow-spec';
 import {
   json,
   jsonWith,
@@ -54,29 +60,24 @@ import {
   type DeviceScopeRequest,
 } from './client.js';
 
-/**
- * One finding from `definitions.validate`, carrying the graph element it is
- * about — mirrors `DAGValidationIssue` in `@generatorai/core`'s DAG domain
- * (`packages/core/src/domain/dag/types.ts`), redeclared here rather than
- * imported because `client-core` must not depend on the server-side core
- * package. Optional on the wire: an older server sends only the flat
- * `errors`/`warnings` strings.
- */
-export interface WorkflowValidationIssue {
-  severity: 'error' | 'warning';
-  code: string;
-  message: string;
-  stageIds: string[];
-  edge?: { fromStageId: string; toStageId: string; edgeType?: string };
-  field?: string;
+/** A page of `GET /workflow-definitions`. */
+export interface DefinitionPage {
+  items: WorkflowDefinitionSummary[];
+  nextCursor?: string;
 }
 
-export interface WorkflowValidationResult {
-  valid: boolean;
-  errors?: string[];
-  warnings?: string[];
-  issues?: WorkflowValidationIssue[];
+/** `GET /workflow-definitions` filters. `projectId: 'global'` lists definitions without a project. */
+export interface DefinitionListParams {
+  projectId?: string;
+  status?: 'draft' | 'published';
+  q?: string;
+  cursor?: string;
+  limit?: number;
+  includeArchived?: boolean;
 }
+
+/** `DELETE /workflow-definitions/:id`: deleted, or archived because runs pin it. */
+export type DefinitionDeleteOutcome = { deleted: true } | { archived: true; runs: number };
 
 /** A workflow run as the run routes serialise it. */
 export interface RunSummary {
@@ -151,12 +152,23 @@ export interface FileEntryRecord {
   modifiedAt?: string | number;
 }
 
+/** A loaded workflow script (`GET /api/workflow-scripts`). */
 export interface ScriptSummary {
   id: string;
   name: string;
   description?: string;
-  path?: string;
-  profiles?: string[];
+  filePath: string;
+  lastModified: string;
+  variables: Array<{ name: string; type: string; label: string; required: boolean }>;
+  stageCount: number;
+  profileCount: number;
+  tags: string[];
+}
+
+/** `GET /api/workflow-scripts/:id`: the metadata and the graph the script builds. */
+export interface ScriptDetail {
+  metadata: ScriptSummary;
+  graph: WorkflowGraph;
 }
 
 export interface ExtensionSummary {
@@ -213,79 +225,56 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
   return {
     // ── workflowDefinitions.ts ──────────────────────────────────
+    // Definitions are whole v2 documents (P01 WP-1.7): read a graph, save the
+    // whole graph back with the revision you edited (409 on a stale one).
     definitions: {
-      list: (projectId?: string) =>
-        req<WorkflowDefinition[]>(`/api/workflow-definitions${qs({ projectId })}`),
-
-      get: (id: string) =>
-        req<WorkflowDefinition & { stages: StageDefinition[]; edges: StageEdge[] }>(
-          `/api/workflow-definitions/${id}`,
+      list: (params?: DefinitionListParams) =>
+        req<DefinitionPage>(
+          `/api/workflow-definitions${qs({
+            ...params,
+            limit: params?.limit !== undefined ? String(params.limit) : undefined,
+            includeArchived: params?.includeArchived ? 'true' : undefined,
+          })}`,
         ),
 
-      create: (body: Record<string, unknown>) =>
-        req<WorkflowDefinition>('/api/workflow-definitions', json(body)),
+      get: (id: string) => req<WorkflowDefinitionRecord>(`/api/workflow-definitions/${id}`),
 
-      update: (id: string, body: Record<string, unknown>) =>
-        req<WorkflowDefinition>(`/api/workflow-definitions/${id}`, jsonWith('PATCH', body)),
+      /** A new draft from a graph. */
+      create: (graph: WorkflowGraphInput) => req<WorkflowDefinitionRecord>('/api/workflow-definitions', json(graph)),
 
-      /**
-       * 409 when runs still reference the definition, unless `force` — which
-       * deletes those runs too.
-       */
-      remove: (id: string, force?: boolean) =>
-        req<void>(`/api/workflow-definitions/${id}${qs({ force: force ? 'true' : undefined })}`, {
-          method: 'DELETE',
-        }),
+      /** Replace the whole graph. A stale `expectedRevision` is a 409 whose body carries the current record. */
+      saveGraph: (id: string, graph: WorkflowGraphInput, expectedRevision: number) =>
+        req<WorkflowDefinitionRecord>(`/api/workflow-definitions/${id}/graph`, jsonWith('PUT', { graph, expectedRevision })),
 
-      // 422 is this route's way of saying "not valid", with the findings in
-      // the body — not a transport failure. Plain `request` threw it away
-      // (see `requestAllowing`'s doc comment), so an invalid definition
-      // surfaced as "422 Unprocessable Entity" with no errors at all.
-      validate: (id: string) =>
-        requestAllowing<WorkflowValidationResult>(
-          fetchImpl,
-          `/api/workflow-definitions/${id}/validate`,
-          [422],
-          json({}),
+      publish: (id: string) => req<WorkflowDefinitionRecord>(`/api/workflow-definitions/${id}/publish`, json({})),
+
+      versions: (id: string) => req<WorkflowDefinitionVersionSummary[]>(`/api/workflow-definitions/${id}/versions`),
+
+      version: (id: string, versionId: string) =>
+        req<WorkflowDefinitionVersionRecord>(`/api/workflow-definitions/${id}/versions/${versionId}`),
+
+      /** Stateless validation of a document (the same validator the server saves with). */
+      validate: (graph: unknown) => req<ValidationResult>('/api/workflow-definitions/validate', json(graph)),
+
+      /** Import a canonical document; `publish` (people only) publishes it at once. */
+      import: (graph: unknown, opts: { publish?: boolean } = {}) =>
+        req<WorkflowDefinitionRecord>(
+          `/api/workflow-definitions/import${qs({ publish: opts.publish ? 'true' : undefined })}`,
+          json(graph),
         ),
 
-      /** Instantiate a system template by id. */
-      importTemplate: (templateId: string, name?: string) =>
-        req<WorkflowDefinition>(
-          '/api/workflow-definitions/import',
-          json({ templateId, ...(name ? { name } : {}) }),
+      /** Instantiate a template by id. */
+      importTemplate: (templateId: string, opts: { name?: string; projectId?: string; publish?: boolean } = {}) =>
+        req<WorkflowDefinitionRecord>(
+          `/api/workflow-definitions/import${qs({ publish: opts.publish ? 'true' : undefined })}`,
+          json({ templateId, ...(opts.name ? { name: opts.name } : {}), ...(opts.projectId ? { projectId: opts.projectId } : {}) }),
         ),
 
-      importJson: (body: unknown) =>
-        req<WorkflowDefinition & { stages: StageDefinition[] }>(
-          '/api/workflow-definitions/import-json',
-          json(body),
-        ),
+      /** The canonical document text (`import(export(g))` gives back `g`). */
+      export: (id: string) => reqText(`/api/workflow-definitions/${id}/export`),
 
-      export: (id: string) =>
-        req<Record<string, unknown>>(`/api/workflow-definitions/${id}/export`),
-
-      addStage: (id: string, body: Omit<CreateStageParams, 'workflowDefinitionId'>) =>
-        req<StageDefinition>(`/api/workflow-definitions/${id}/stages`, json(body)),
-
-      // Same schema as `addStage`, partial — `Record<string, unknown>` here
-      // let every call site send client-shaped field names (`prompt`,
-      // `timeoutSeconds`, `maxRetries`) that the route's schema silently
-      // dropped instead of a type error at the call site.
-      updateStage: (id: string, stageId: string, body: Partial<Omit<CreateStageParams, 'workflowDefinitionId'>>) =>
-        req<StageDefinition>(
-          `/api/workflow-definitions/${id}/stages/${stageId}`,
-          jsonWith('PUT', body),
-        ),
-
-      deleteStage: (id: string, stageId: string) =>
-        req<void>(`/api/workflow-definitions/${id}/stages/${stageId}`, { method: 'DELETE' }),
-
-      addEdge: (id: string, body: Omit<CreateEdgeParams, 'workflowDefinitionId'>) =>
-        req<StageEdge>(`/api/workflow-definitions/${id}/edges`, json(body)),
-
-      deleteEdge: (id: string, edgeId: string) =>
-        req<void>(`/api/workflow-definitions/${id}/edges/${edgeId}`, { method: 'DELETE' }),
+      /** Hard delete when nothing ran it; otherwise the definition is archived. */
+      remove: (id: string) => req<DefinitionDeleteOutcome>(`/api/workflow-definitions/${id}`, { method: 'DELETE' }),
     },
 
     // ── workflowRuns.ts ─────────────────────────────────────────
@@ -778,15 +767,17 @@ export function createAdminApi(fetchImpl: ApiFetch) {
     // ── workflowScripts.ts ──────────────────────────────────────
     scripts: {
       list: () => req<ScriptSummary[]>('/api/workflow-scripts'),
-      get: (id: string) => req<ScriptSummary>(`/api/workflow-scripts/${id}`),
-      profiles: (id: string) =>
-        req<Array<Record<string, unknown>>>(`/api/workflow-scripts/${id}/profiles`),
-      materialize: (id: string, body?: Record<string, unknown>) =>
-        req<WorkflowDefinition>(`/api/workflow-scripts/${id}/materialize`, json(body ?? {})),
-      run: (id: string, body?: Record<string, unknown>) =>
-        req<RunSummary>(`/api/workflow-scripts/${id}/run`, json(body ?? {})),
-      validate: (body: Record<string, unknown>) =>
-        req<{ valid: boolean; errors?: string[] }>('/api/workflow-scripts/validate', json(body)),
+      get: (id: string) => req<ScriptDetail>(`/api/workflow-scripts/${id}`),
+      profiles: (id: string) => req<ScriptRunProfile[]>(`/api/workflow-scripts/${id}/profiles`),
+      materialize: (id: string, body?: { name?: string; projectId?: string }) =>
+        req<{ definitionId: string; definition: WorkflowDefinitionRecord; stageCount: number; edgeCount: number }>(
+          `/api/workflow-scripts/${id}/materialize`,
+          json(body ?? {}),
+        ),
+      run: (id: string, body?: { profileName?: string; variables?: Record<string, unknown>; projectId?: string }) =>
+        req<{ definitionId: string; runId: string; status: 'running' }>(`/api/workflow-scripts/${id}/run`, json(body ?? {})),
+      validate: (body: { path: string }) =>
+        req<{ valid: boolean; errors: string[] }>('/api/workflow-scripts/validate', json(body)),
       reloadAll: () => req<Record<string, unknown>>('/api/workflow-scripts/reload', json({})),
       reload: (id: string) =>
         req<Record<string, unknown>>(`/api/workflow-scripts/${id}/reload`, json({})),
@@ -841,8 +832,8 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── templates.ts ────────────────────────────────────────────
     templates: {
-      list: () => req<Array<Record<string, unknown>>>('/api/templates'),
-      get: (id: string) => req<Record<string, unknown>>(`/api/templates/${id}`),
+      list: () => req<WorkflowTemplate[]>('/api/templates'),
+      get: (id: string) => req<WorkflowTemplate>(`/api/templates/${id}`),
     },
 
     // ── hooks.ts ────────────────────────────────────────────────

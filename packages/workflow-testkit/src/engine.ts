@@ -87,17 +87,18 @@ export interface TestEngine {
   readonly services: CoreServices;
   readonly harness: ScriptedFauxHarness;
   readonly commands: RunCommands;
-  /** Create a definition through the import-json path. */
+  /** Create a published definition through the definition service materializer. */
   importDefinition(spec: WorkflowSpecJson): Promise<{ definitionId: string; stageIds: Record<string, string> }>;
   /**
    * Import `definition` (or reuse `{definitionId}`), create a run with
    * `variables` and start it the way `POST /:id/start` does (fire and
-   * forget). Pass `{start: false}` to only create it.
+   * forget). Pass `{start: false}` to only create it, `{testRun: true}` to
+   * run a definition's working (draft) graph.
    */
   runWorkflow(
     definition: WorkflowSpecJson | { definitionId: string },
     variables?: Record<string, unknown>,
-    opts?: { start?: boolean },
+    opts?: { start?: boolean; testRun?: boolean },
   ): Promise<RunHandle>;
   handle(runId: string): Promise<RunHandle>;
   snapshotRun(runId: string): Promise<RunSnapshot>;

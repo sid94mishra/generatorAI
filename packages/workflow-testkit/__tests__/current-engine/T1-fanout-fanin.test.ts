@@ -19,7 +19,6 @@ const BRANCHES = ['B1', 'B2', 'B3', 'B4', 'B5'];
 
 const T1 = {
   name: 't1-fanout',
-  sessionMode: 'auto',
   stages: [
     { name: 'start', prompt: 'Write one line containing the token START.' },
     ...BRANCHES.map((b) => ({ name: b, prompt: `Write one line containing the token ${b}.` })),

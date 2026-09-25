@@ -4,8 +4,8 @@
 // The admin client types these routes loosely (`ScriptSummary`,
 // `RunSummary`) but the server actually returns:
 //   GET  /workflow-scripts          ScriptMetadata[]
-//   GET  /workflow-scripts/:id      { metadata, definition, stages, edges }
-//   GET  /workflow-scripts/:id/profiles  RunProfileConfig[]
+//   GET  /workflow-scripts/:id      { metadata, graph }   (graph: WorkflowGraph)
+//   GET  /workflow-scripts/:id/profiles  ScriptRunProfile[] (stageOverrides by key)
 //   POST /workflow-scripts/:id/run  { definitionId, runId, status }
 // so every read here is defensive.
 //
@@ -33,11 +33,13 @@ export interface ScriptProfileView {
 export interface ScriptDetailView extends ScriptRowView {
   /** Raw declared variables, fed to `parseVariables`. */
   variables: unknown;
-  stages: Array<{ id: string; name: string; description: string | null }>;
+  stages: Array<{ key: string; name: string; description: string | null }>;
 }
 
 const str = (v: unknown): string | null => (typeof v === 'string' && v.length > 0 ? v : null);
 const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+const obj = (v: unknown): Record<string, unknown> =>
+  v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 const strings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
 export function parseScriptRow(raw: unknown): ScriptRowView | null {
@@ -71,22 +73,22 @@ export function scriptSubtitle(row: Pick<ScriptRowView, 'stageCount' | 'profileC
 export function parseScriptDetail(raw: unknown, fallbackId: string): ScriptDetailView | null {
   if (!raw || typeof raw !== 'object') return null;
   const r = raw as Record<string, unknown>;
-  // New shape nests metadata; an older/flat payload is the metadata itself.
-  const meta = (r['metadata'] && typeof r['metadata'] === 'object' ? r['metadata'] : r) as Record<string, unknown>;
-  const definition = (r['definition'] && typeof r['definition'] === 'object' ? r['definition'] : {}) as Record<string, unknown>;
+  const meta = obj(r['metadata']);
+  const graph = obj(r['graph']);
+  const workflow = obj(graph['workflow']);
   const row = parseScriptRow({ id: fallbackId, ...meta });
   if (!row) return null;
-  const rawStages = Array.isArray(r['stages']) ? r['stages'] : [];
+  const rawStages = Array.isArray(graph['stages']) ? graph['stages'] : [];
   const stages = rawStages.map((s, index) => {
-    const stage = (s && typeof s === 'object' ? s : {}) as Record<string, unknown>;
-    const config = (stage['config'] && typeof stage['config'] === 'object' ? stage['config'] : stage) as Record<string, unknown>;
-    const id = str(stage['localId']) ?? str(stage['id']) ?? `${index}`;
-    return { id, name: str(config['name']) ?? id, description: str(config['description']) };
+    const stage = obj(s);
+    const key = str(stage['key']) ?? `${index}`;
+    return { key, name: str(stage['name']) ?? key, description: str(stage['description']) };
   });
   return {
     ...row,
+    description: row.description ?? str(workflow['description']),
     stageCount: row.stageCount || stages.length,
-    variables: definition['variables'] ?? meta['variables'],
+    variables: workflow['variables'],
     stages,
   };
 }

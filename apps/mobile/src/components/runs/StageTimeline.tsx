@@ -77,7 +77,7 @@ export function StageTimeline({
 
               <View className={`flex-1 gap-1 pb-3.5 pt-3.5 ${last ? '' : 'border-b border-border-muted'}`}>
                 <Touchable
-                  accessibilityLabel={`Stage ${index + 1}, ${stage.name ?? stage.stageDefinitionId}, ${statusLabel(stage.status)}`}
+                  accessibilityLabel={`Stage ${index + 1}, ${stage.name ?? stage.stageKey}, ${statusLabel(stage.status)}`}
                   accessibilityHint={onToggle ? 'Shows what this stage is doing' : 'Opens the stage transcript and output'}
                   {...(onToggle ? { accessibilityState: { expanded: expandedId === stage.id } } : {})}
                   haptic="tap"
@@ -86,7 +86,7 @@ export function StageTimeline({
                 >
                   <View className="min-h-7 flex-row items-center gap-2">
                     <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
-                      {stage.name ?? stage.stageDefinitionId}
+                      {stage.name ?? stage.stageKey}
                     </Text>
                     {elapsed != null ? (
                       <Text className="text-sm text-muted-foreground">{formatDuration(elapsed)}</Text>

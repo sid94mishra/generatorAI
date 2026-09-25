@@ -121,7 +121,6 @@ export interface ChatMessage {
   toolName?: string;
   toolArgs?: unknown;
   toolResult?: unknown;
-  workflowId?: string;
   /** Rich metadata for assistant messages (thinking, tool calls, system msgs) */
   metadata?: ChatMessageMetadata;
   timestamp: Date;

@@ -612,6 +612,45 @@
         "packages/shared/"
       ],
       "reason": "WP-1.5: the hook-phase catalogue lives in @generatorai/workflow-spec (HOOK_PHASE_INFO, STAGE_HOOK_PHASES, WORKFLOW_HOOK_PHASES)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(stageDefinitionId|definitionSnapshot|leaseOwner)\\b",
+      "reason": "WP-1.6: stage runs carry stageKey; runs pin definitionVersionId (the snapshot column and stage lease owner are gone)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bwithTransaction\\b|\\bTransactionTimeoutError\\b",
+      "reason": "WP-1.6: the async transaction helper is deleted; writes that must be atomic are synchronous better-sqlite3 transactions"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bimportFromJSON\\b|import-json|ImportWorkflowJson|exportAsTemplate",
+      "reason": "WP-1.7: one canonical import/export (POST /workflow-definitions/import, GET /:id/export)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(DAGValidator|resolveStageHooks|WorkflowDefinitionWithStages|IWorkflowDefinitionRepository|IStageDefinitionRepository|IStageEdgeRepository|DrizzleWorkflowDefinitionRepository|DrizzleStageDefinitionRepository|DrizzleStageEdgeRepository|CreateStageParams|CreateEdgeParams|CreateWorkflowDefinitionParams|StageEdgeType|getDefinitionWithStages)\\b",
+      "reason": "WP-1.7: definitions are one v2 document behind IWorkflowDefinitionStore; the per-row definition/stage/edge repositories and types are gone"
+    },
+    {
+      "phase": "01",
+      "pattern": "repo_path_target",
+      "reason": "WP-1.7: codebase paths are run.codebases.<alias>.path (RV-16)"
+    },
+    {
+      "phase": "01",
+      "pattern": "'on_success'|'on_failure'|'on_completion'",
+      "paths": [
+        "apps/",
+        "packages/core/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/",
+        "packages/shared/",
+        "packages/workflow-spec/"
+      ],
+      "reason": "WP-1.7: edge `on` is success | failure | completion | always"
     }
   ],
   "comments": {

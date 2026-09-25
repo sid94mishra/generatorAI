@@ -42,15 +42,12 @@ import {
   type CoreServices,
 } from '@generatorai/core';
 import {
-  withTransaction,
   DrizzleSessionRepository,
   DrizzleEventRepository,
   DrizzleChatMessageRepository,
   DrizzleArtifactRepository,
   DrizzleChatRepository,
-  DrizzleWorkflowDefinitionRepository,
-  DrizzleStageDefinitionRepository,
-  DrizzleStageEdgeRepository,
+  SqliteWorkflowDefinitionStore,
   DrizzleWorkflowRunRepository,
   DrizzleStageRunRepository,
   DrizzleAutomationRepository,
@@ -69,7 +66,7 @@ import {
 } from '@generatorai/db';
 import { isStageReviewOutcome, type ChatMessage, type ILogger, type StageReviewOutcome } from '@generatorai/shared';
 import { ScriptedFauxHarness, classifyPrompt, type StageKey, type TurnKind } from '../harness.js';
-import { toImportJson } from '../definitions.js';
+import { toGraph } from '../definitions.js';
 import type {
   AdapterContext,
   ApproveBody,
@@ -182,9 +179,7 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
       chatMessageRepo,
       artifactRepo: new DrizzleArtifactRepository(db),
       chatEntityRepo: new DrizzleChatRepository(db),
-      workflowDefinitionRepo: new DrizzleWorkflowDefinitionRepository(db),
-      stageDefinitionRepo: new DrizzleStageDefinitionRepository(db),
-      stageEdgeRepo: new DrizzleStageEdgeRepository(db),
+      workflowDefinitionStore: new SqliteWorkflowDefinitionStore(db),
       workflowRunRepo: new DrizzleWorkflowRunRepository(db),
       stageRunRepo,
       automationRepo: new DrizzleAutomationRepository(db),
@@ -205,7 +200,6 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
         artifactsDir: join(workDir, 'art'),
         ...(ctx.maxConcurrentStages !== undefined ? { maxConcurrentStages: ctx.maxConcurrentStages } : {}),
       },
-      withTransaction: (fn) => withTransaction(db, fn),
       chatExtensions: {},
       planRepo: new DrizzlePlanRepository(db),
       agentInteractionRepo: new DrizzleAgentInteractionRepository(db),
@@ -263,18 +257,11 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
   const snapshot = async (runId: string): Promise<RunSnapshot> => {
     const run = await new DrizzleWorkflowRunRepository(db).getById(runId);
     const stageRows = await new DrizzleStageRunRepository(db).getByRunId(runId);
-    // Definition order (`stage_definitions.order`), not creation time: the
-    // rows of one run share a created_at second.
-    const orderOf = new Map(
-      (
-        sqlite
-          .prepare(`SELECT id, "order" AS o FROM stage_definitions WHERE workflow_definition_id = ?`)
-          .all(run.workflowDefinitionId) as Array<{ id: string; o: number }>
-      ).map((r) => [r.id, r.o]),
-    );
-    stageRows.sort(
-      (a, b) => (orderOf.get(a.stageDefinitionId) ?? 0) - (orderOf.get(b.stageDefinitionId) ?? 0) || a.name.localeCompare(b.name),
-    );
+    // The pinned graph's stage order, not creation time: the rows of one run
+    // share a created_at second.
+    const graph = await current.services.runDefinitionReader.get(run.definitionVersionId);
+    const orderOf = new Map(graph.stages.map((st, i) => [st.key, i]));
+    stageRows.sort((a, b) => (orderOf.get(a.stageKey) ?? 0) - (orderOf.get(b.stageKey) ?? 0) || a.name.localeCompare(b.name));
     const stageIdSet = new Set(stageRows.map((s) => s.id));
     const msgRows = sqlite
       .prepare(
@@ -434,13 +421,21 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
     resolveStage,
     classifyTurn,
     async importDefinition(spec) {
-      const def = await current.services.workflowDefinitionService.importFromJSON(toImportJson(spec));
+      // The one materializer; published so a plain run can start it.
+      const def = await current.services.workflowDefinitionService.createFromSpec(toGraph(spec), {
+        canEditCommands: true,
+        status: 'published',
+      });
       const stageIds: Record<string, string> = {};
-      for (const s of def.stages) stageIds[s.name] = s.id;
+      for (const s of def.graph.stages) stageIds[s.name] = s.key;
       return { definitionId: def.id, stageIds };
     },
     async startRun(definitionId, variables, opts = {}) {
-      const run = await current.services.workflowRunService.createRun({ workflowDefinitionId: definitionId, variables });
+      const run = await current.services.workflowRunService.createRun({
+        workflowDefinitionId: definitionId,
+        variables,
+        ...(opts.testRun ? { testRun: true } : {}),
+      });
       if (opts.start !== false) startFireAndForget(run.id);
       return run.id;
     },
@@ -450,7 +445,7 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
     async stageIds(runId) {
       const run = await new DrizzleWorkflowRunRepository(db).getById(runId);
       const ids: Record<string, string> = {};
-      for (const s of await new DrizzleStageDefinitionRepository(db).getByDefinitionId(run.workflowDefinitionId)) ids[s.name] = s.id;
+      for (const s of (await current.services.runDefinitionReader.get(run.definitionVersionId)).stages) ids[s.name] = s.key;
       return ids;
     },
     instanceId(runId, instancePath) {

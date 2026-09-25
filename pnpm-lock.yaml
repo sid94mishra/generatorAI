@@ -159,6 +159,9 @@ importers:
       '@generatorai/tui-kit':
         specifier: workspace:*
         version: link:../../packages/tui-kit
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../../packages/workflow-spec
       '@inquirer/prompts':
         specifier: ^7.2.0
         version: 7.10.1(@types/node@22.20.0)
@@ -332,6 +335,9 @@ importers:
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../../packages/workflow-spec
       '@gorhom/bottom-sheet':
         specifier: ^5.2.6
         version: 5.2.14(@types/react@19.2.14)(react-native-gesture-handler@2.32.0(react-native@0.86.2(@babel/core@7.29.0)(@react-native/metro-config@0.86.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native-reanimated@4.5.1(react-native-worklets@0.10.3(@babel/core@7.29.0)(@react-native/metro-config@0.86.2(@babel/core@7.29.0))(react-native@0.86.2(@babel/core@7.29.0)(@react-native/metro-config@0.86.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.2(@babel/core@7.29.0)(@react-native/metro-config@0.86.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3))(react-native@0.86.2(@babel/core@7.29.0)(@react-native/metro-config@0.86.2(@babel/core@7.29.0))(@types/react@19.2.14)(react@19.2.3))(react@19.2.3)
@@ -675,6 +681,9 @@ importers:
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../../packages/workflow-spec
       '@pierre/diffs':
         specifier: ^1.2.12
         version: 1.2.12(@shikijs/themes@4.3.1)(react-dom@19.2.4(react@19.2.4))(react@19.2.4)
@@ -912,6 +921,9 @@ importers:
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../shared
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../workflow-spec
       zod:
         specifier: ^3.24.0
         version: 3.25.76
@@ -928,6 +940,9 @@ importers:
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../shared
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../workflow-spec
 
   packages/client-runtime:
     dependencies:
@@ -1029,6 +1044,9 @@ importers:
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../shared
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../workflow-spec
       '@opentelemetry/api':
         specifier: ^1.9.0
         version: 1.9.1
@@ -1038,6 +1056,9 @@ importers:
       drizzle-orm:
         specifier: ^0.45.2
         version: 0.45.2(@opentelemetry/api@1.9.1)(@types/better-sqlite3@7.6.13)(better-sqlite3@12.11.1)
+      zod:
+        specifier: ^3.25.76
+        version: 3.25.76
     devDependencies:
       '@types/better-sqlite3':
         specifier: ^7.6.13
@@ -1072,6 +1093,9 @@ importers:
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../shared
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../workflow-spec
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
@@ -1115,6 +1139,9 @@ importers:
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../shared
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../workflow-spec
 
   packages/secrets:
     dependencies:
@@ -1127,6 +1154,9 @@ importers:
 
   packages/shared:
     dependencies:
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../workflow-spec
       '@opentelemetry/api':
         specifier: ^1.9.1
         version: 1.9.1
@@ -1190,9 +1220,6 @@ importers:
         specifier: ^3.25.76
         version: 3.25.76
     devDependencies:
-      '@generatorai/shared':
-        specifier: workspace:*
-        version: link:../shared
       ajv:
         specifier: ^8.20.0
         version: 8.20.0
@@ -1220,6 +1247,9 @@ importers:
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../shared
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../workflow-spec
     devDependencies:
       fast-check:
         specifier: ^4.10.2
@@ -18651,7 +18681,9 @@ snapshots:
       metro-runtime: 0.84.4
     transitivePeerDependencies:
       - '@babel/core'
+      - bufferutil
       - supports-color
+      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89': {}
 
@@ -19552,6 +19584,14 @@ snapshots:
       '@vitest/utils': 3.2.7
       chai: 5.3.3
       tinyrainbow: 2.0.0
+
+  '@vitest/mocker@3.2.7(vite@6.4.1(@types/node@22.20.0)(jiti@1.21.7)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))':
+    dependencies:
+      '@vitest/spy': 3.2.7
+      estree-walker: 3.0.3
+      magic-string: 0.30.21
+    optionalDependencies:
+      vite: 6.4.1(@types/node@22.20.0)(jiti@1.21.7)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3)
 
   '@vitest/mocker@3.2.7(vite@6.4.1(@types/node@22.20.0)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))':
     dependencies:
@@ -27553,7 +27593,7 @@ snapshots:
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.7
-      '@vitest/mocker': 3.2.7(vite@6.4.1(@types/node@22.20.0)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))
+      '@vitest/mocker': 3.2.7(vite@6.4.1(@types/node@22.20.0)(jiti@1.21.7)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))
       '@vitest/pretty-format': 3.2.7
       '@vitest/runner': 3.2.7
       '@vitest/snapshot': 3.2.7

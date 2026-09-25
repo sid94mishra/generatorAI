@@ -41,4 +41,4 @@ export {
   type StageKey,
 } from './harness.js';
 export { RealClock, VirtualClock, type TestClock } from './clock.js';
-export { toImportJson, type WorkflowSpecJson, type StageSpec, type EdgeSpec, type EdgeType } from './definitions.js';
+export { toGraph, stageKeyFor, type WorkflowSpecJson, type StageSpec, type EdgeSpec, type EdgeType } from './definitions.js';

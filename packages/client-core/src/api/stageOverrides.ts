@@ -11,7 +11,7 @@
 //   • Plain runs (`POST /workflow-runs`) and script runs
 //     (`POST /workflow-scripts/:id/run`) have no such field — the runner
 //     reads them from the run's own `__stageOverrides` variable
-//     (`WorkflowRunService.findStageOverride`, matched by name, then index).
+//     (`WorkflowRunService.findStageOverride`, matched by stage KEY).
 //
 // Web grew the split twice (definition page and builder) and mobile would
 // have been the third copy, so the rule lives here.
@@ -19,16 +19,17 @@
 
 /** What a start-run form edits for one stage. */
 export interface StageOverrideDraft {
+  /** Stable stage key: overrides match stages by key. */
+  stageKey: string;
+  /** Display name, for the form only. */
   stageName: string;
-  stageIndex: number;
   skip: boolean;
   variables: Record<string, unknown>;
 }
 
-/** The wire shape (`StageRunOverride` in @generatorai/shared), minus fields no form edits. */
+/** The wire shape (`StageRunOverride` in @generatorai/shared). */
 export interface StageOverrideWire {
-  stageName: string;
-  stageIndex: number;
+  stageKey: string;
   skip?: true;
   variables?: Record<string, unknown>;
 }
@@ -37,8 +38,8 @@ export interface StageOverrideWire {
 export const STAGE_OVERRIDES_VARIABLE = '__stageOverrides';
 
 /** One untouched draft per stage, in order. */
-export function blankStageOverrides(stageNames: readonly string[]): StageOverrideDraft[] {
-  return stageNames.map((stageName, stageIndex) => ({ stageName, stageIndex, skip: false, variables: {} }));
+export function blankStageOverrides(stages: ReadonlyArray<{ key: string; name: string }>): StageOverrideDraft[] {
+  return stages.map((s) => ({ stageKey: s.key, stageName: s.name, skip: false, variables: {} }));
 }
 
 /**
@@ -54,8 +55,7 @@ export function activeStageOverrides(
     const hasVars = Object.keys(d.variables ?? {}).length > 0;
     if (!d.skip && !hasVars) continue;
     out.push({
-      stageName: d.stageName,
-      stageIndex: d.stageIndex,
+      stageKey: d.stageKey,
       ...(d.skip ? { skip: true as const } : {}),
       ...(hasVars ? { variables: d.variables } : {}),
     });

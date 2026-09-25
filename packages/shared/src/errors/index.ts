@@ -2,6 +2,8 @@
 // Error Hierarchy — GeneratorAIError base + concrete subclasses
 // ────────────────────────────────────────────────────────────────
 
+import type { ValidationIssue, WorkflowDefinitionRecord } from '@generatorai/workflow-spec';
+
 export type ErrorCategory =
   | 'harness'
   | 'network'
@@ -227,6 +229,59 @@ export class NetworkError extends GeneratorAIError {
 }
 
 // ── v2 New Errors ──
+
+/**
+ * A workflow document failed `validateWorkflow` (P01 WP-1.7). The server
+ * answers 422 with the issues, each pointing at the field (JSON pointer)
+ * and stage it is about, so a client can show it in place.
+ */
+export class WorkflowValidationError extends GeneratorAIError {
+  readonly category = 'validation' as const;
+  readonly severity = 'info' as const;
+  readonly recoverable = false;
+  constructor(
+    message: string,
+    public readonly issues: ValidationIssue[],
+  ) {
+    super(message, 'WORKFLOW_INVALID');
+  }
+}
+
+/**
+ * The caller lacks a scope the operation needs (403). Workflow definitions
+ * raise it when a save adds or changes a command-bearing field (script and
+ * function hooks, stdio MCP servers, scripts, `custom_script` rules) without
+ * `admin:settings` (W-34).
+ */
+export class InsufficientScopeError extends GeneratorAIError {
+  readonly category = 'validation' as const;
+  readonly severity = 'warning' as const;
+  readonly recoverable = false;
+  readonly httpStatus = 403;
+  constructor(
+    message: string,
+    public readonly requiredScope: string,
+  ) {
+    super(message, 'INSUFFICIENT_SCOPE');
+  }
+}
+
+/**
+ * A graph save carried a stale `expectedRevision`: someone else saved first.
+ * The server answers 409 with the current record so the client can offer to
+ * reload or overwrite.
+ */
+export class RevisionConflictError extends GeneratorAIError {
+  readonly category = 'state' as const;
+  readonly severity = 'warning' as const;
+  readonly recoverable = true;
+  constructor(
+    message: string,
+    public readonly current: WorkflowDefinitionRecord,
+  ) {
+    super(message, 'REVISION_CONFLICT');
+  }
+}
 
 export class DAGValidationError extends GeneratorAIError {
   readonly category = 'validation' as const;

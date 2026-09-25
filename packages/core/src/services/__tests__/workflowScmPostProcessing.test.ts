@@ -5,9 +5,9 @@
 // conflict / blocked result does to the step (and to the steps after it).
 
 import { describe, it, expect, vi } from 'vitest';
+import type { PostProcessingStep } from '@generatorai/workflow-spec';
 import type {
   ILogger,
-  PostProcessingStep,
   RepoReadiness,
   ScmFlowRequest,
   ScmFlowResult,
@@ -69,23 +69,20 @@ function context(partial: Partial<PreprocessorContext> = {}): PreprocessorContex
 
 function commitStep(config: Record<string, unknown> = {}): PostProcessingStep {
   return {
-    type: 'commit_and_push',
     name: 'Auto-commit changes',
     config: {
       type: 'commit_and_push',
-      commitMessage: 'feat: workflow changes (run {{__workflowRunId}})',
+      commitMessage: 'feat: workflow changes (run {{run.id}})',
       generateMessage: true,
       push: true,
       ...config,
     },
     failOnError: true,
-    order: 100,
   } as PostProcessingStep;
 }
 
 function prStep(config: Record<string, unknown> = {}): PostProcessingStep {
   return {
-    type: 'create_pr',
     name: 'Auto-create Pull Request',
     config: {
       type: 'create_pr',
@@ -95,7 +92,6 @@ function prStep(config: Record<string, unknown> = {}): PostProcessingStep {
       ...config,
     },
     failOnError: true,
-    order: 200,
   } as PostProcessingStep;
 }
 

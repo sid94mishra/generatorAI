@@ -229,6 +229,7 @@ export class AutomationRecoveryService {
     run: AutomationExecutionRun,
   ): Promise<'completed' | 'failed' | 'cancelled' | 'pending' | 'running'> {
     try {
+      if (!run.workflowRunId) throw new Error('workflow run deleted');
       const wfr = await this.workflowRunRepo.getById(run.workflowRunId);
       switch (wfr.status) {
         case 'completed':

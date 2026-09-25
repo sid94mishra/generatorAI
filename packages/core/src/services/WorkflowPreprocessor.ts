@@ -5,23 +5,30 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
-  PreprocessingStep,
   PreprocessingResult,
-  CloneRepoStepConfig,
-  RunScriptStepConfig,
-  ValidateInputStepConfig,
-  SetVariableStepConfig,
-  ConditionalStepConfig,
-  PostProcessingStep,
-  CommitAndPushStepConfig,
-  CreatePRStepConfig,
-  PostRunScriptStepConfig,
   ILogger,
   ScmFlowRequest,
   ScmFlowResult,
 } from '@generatorai/shared';
-import { interpolateVariables } from '@generatorai/shared';
-import { compileSafeRegex, evaluateSource } from '@generatorai/workflow-spec';
+import {
+  compileSafeRegex,
+  evaluateSource,
+  renderTemplate,
+  type PostProcessingStep,
+  type PreprocessingStep,
+} from '@generatorai/workflow-spec';
+import { codebasesOf, userVariables } from './definitions/runScope.js';
+
+type PreConfig = PreprocessingStep['config'];
+type PostConfig = PostProcessingStep['config'];
+type CloneRepoStepConfig = Extract<PreConfig, { type: 'clone_repo' }>;
+type RunScriptStepConfig = Extract<PreConfig, { type: 'run_script' }>;
+type ValidateInputStepConfig = Extract<PreConfig, { type: 'validate_input' }>;
+type SetVariableStepConfig = Extract<PreConfig, { type: 'set_variable' }>;
+type ConditionalStepConfig = Extract<PreConfig, { type: 'conditional' }>;
+type CommitAndPushStepConfig = Extract<PostConfig, { type: 'commit_and_push' }>;
+type CreatePRStepConfig = Extract<PostConfig, { type: 'create_pr' }>;
+type PostRunScriptStepConfig = Extract<PostConfig, { type: 'run_script' }>;
 import type { GitManager } from '../infrastructure/GitManager.js';
 import type { IScriptRunner } from '../domain/ports/IScriptRunner.js';
 import type { EventBus } from '../events/EventBus.js';
@@ -57,6 +64,20 @@ export class ScmPostProcessingError extends Error {
     super(message);
     this.name = 'ScmPostProcessingError';
   }
+}
+
+/**
+ * Render a lifecycle template (commit message, PR text, set_variable value)
+ * with Expression v2: `variables.*` (bare `{{name}}` is sugar) and the
+ * read-only `run.codebases.<alias>`.
+ */
+function renderLifecycleTemplate(text: string, context: PreprocessorContext): string {
+  const result = renderTemplate(text, {
+    variables: userVariables(context.variables),
+    run: { id: context.workflowRunId, name: context.workflowName ?? '', codebases: codebasesOf(context.variables) },
+  });
+  if (!result.ok) throw new Error(`Template error (${result.error.code}): ${result.error.message}`);
+  return result.text;
 }
 
 /** One user-facing line explaining a flow result that did not succeed. */
@@ -149,13 +170,12 @@ export class WorkflowPreprocessor {
    * Clones repositories, runs scripts, validates inputs, sets variables.
    */
   async execute(
-    steps: PreprocessingStep[],
+    steps: readonly PreprocessingStep[],
     context: PreprocessorContext,
   ): Promise<PreprocessingResult[]> {
     const results: PreprocessingResult[] = [];
-    const sorted = [...steps].sort((a, b) => a.order - b.order);
 
-    for (const step of sorted) {
+    for (const step of steps) {
       const start = Date.now();
       try {
         await this.eventBus.emitGlobal({
@@ -163,7 +183,7 @@ export class WorkflowPreprocessor {
           data: {
             workflowRunId: context.workflowRunId,
             stepName: step.name,
-            stepType: step.type,
+            stepType: step.config.type,
           },
         });
 
@@ -221,13 +241,12 @@ export class WorkflowPreprocessor {
    * Execute post-processing steps after workflow stages complete.
    */
   async executePostProcessing(
-    steps: PostProcessingStep[],
+    steps: readonly PostProcessingStep[],
     context: PreprocessorContext,
   ): Promise<PreprocessingResult[]> {
     const results: PreprocessingResult[] = [];
-    const sorted = [...steps].sort((a, b) => a.order - b.order);
 
-    for (const step of sorted) {
+    for (const step of steps) {
       const start = Date.now();
       try {
         await this.eventBus.emitGlobal({
@@ -235,7 +254,7 @@ export class WorkflowPreprocessor {
           data: {
             workflowRunId: context.workflowRunId,
             stepName: step.name,
-            stepType: step.type,
+            stepType: step.config.type,
           },
         });
 
@@ -400,7 +419,7 @@ export class WorkflowPreprocessor {
     config: CommitAndPushStepConfig,
     context: PreprocessorContext,
   ): Promise<PostStepOutcome> {
-    const message = interpolateVariables(config.commitMessage, context.variables);
+    const message = renderLifecycleTemplate(config.commitMessage, context);
     const targets = this.scmTargets(config.repoAlias, context);
 
     if (!config.repoAlias && targets.length > 1) {
@@ -442,8 +461,8 @@ export class WorkflowPreprocessor {
     config: CreatePRStepConfig,
     context: PreprocessorContext,
   ): Promise<PostStepOutcome> {
-    const title = interpolateVariables(config.title, context.variables);
-    const body = interpolateVariables(config.body, context.variables);
+    const title = renderLifecycleTemplate(config.title, context);
+    const body = renderLifecycleTemplate(config.body, context);
     const targets = this.scmTargets(config.repoAlias, context);
 
     if (!config.repoAlias && targets.length > 1) {
@@ -481,11 +500,7 @@ export class WorkflowPreprocessor {
     context: PreprocessorContext,
   ): Promise<string> {
     const env = buildGenVarEnv(context.variables);
-
-    let cwd = config.cwd;
-    if (cwd) {
-      cwd = interpolateVariables(cwd, context.variables);
-    }
+    const cwd = config.cwd ? path.resolve(context.runWorkspaceDir, config.cwd) : undefined;
 
     const result = await this.scriptRunner.run('sh', ['-c', config.script], {
       cwd: cwd ?? context.runWorkspaceDir,
@@ -560,18 +575,12 @@ export class WorkflowPreprocessor {
     // This prevents command injection via user-supplied variable values.
     const env = buildGenVarEnv(context.variables);
 
-    // The script itself is from the template (trusted), but we still interpolate
-    // only known safe variable names (no shell metacharacters allowed in values via env).
-    const resolvedScript = config.script;
+    // The script is a literal (templates are rejected at save time);
+    // variables reach it only as GEN_VAR_* env values.
+    const cwd = config.cwd ? path.resolve(context.runWorkspaceDir, config.cwd) : undefined;
 
-    // Determine working directory
-    let cwd = config.cwd;
-    if (cwd) {
-      cwd = interpolateVariables(cwd, context.variables);
-    }
-
-    const result = await this.scriptRunner.run('sh', ['-c', resolvedScript], {
-      cwd: cwd ?? process.cwd(),
+    const result = await this.scriptRunner.run('sh', ['-c', config.script], {
+      cwd: cwd ?? context.runWorkspaceDir,
       timeout: config.timeoutMs ?? 60_000,
       env,
     });
@@ -598,7 +607,7 @@ export class WorkflowPreprocessor {
           break;
         case 'regex': {
           // Linear-time engine: a pathological pattern cannot stall the event loop (RV-21).
-          const compiled = compileSafeRegex(String(rule.value ?? ''));
+          const compiled = compileSafeRegex(rule.pattern, rule.flags ?? '');
           if (!compiled.ok) throw new Error(`Invalid pattern for ${config.variableName}: ${compiled.error.message}`);
           if (!compiled.regex.test(String(value))) {
             throw new Error(rule.message);
@@ -606,12 +615,12 @@ export class WorkflowPreprocessor {
           break;
         }
         case 'min_length':
-          if (String(value ?? '').length < (rule.value as number)) {
+          if (String(value ?? '').length < rule.value) {
             throw new Error(rule.message);
           }
           break;
         case 'max_length':
-          if (String(value ?? '').length > (rule.value as number)) {
+          if (String(value ?? '').length > rule.value) {
             throw new Error(rule.message);
           }
           break;
@@ -631,7 +640,7 @@ export class WorkflowPreprocessor {
     if (config.variableName.startsWith('__')) {
       throw new Error(`Variable name '${config.variableName}' uses reserved '__' prefix.`);
     }
-    const resolvedValue = interpolateVariables(config.value, context.variables);
+    const resolvedValue = renderLifecycleTemplate(config.value, context);
     context.variables[config.variableName] = resolvedValue;
     return `Set ${config.variableName} = ${resolvedValue}`;
   }
@@ -655,15 +664,13 @@ export class WorkflowPreprocessor {
 
   // ── Utilities ──
 
-  // interpolateVariables is now imported from @generatorai/shared
-
   /**
    * Evaluate a conditional step's Expression v2 condition over `variables.*`.
    * A condition that does not parse fails the step (its failOnError decides
    * whether the run fails) instead of silently taking the else branch.
    */
   private conditionHolds(condition: string, variables: Record<string, unknown>): boolean {
-    const result = evaluateSource(condition, { variables });
+    const result = evaluateSource(condition, { variables: userVariables(variables) });
     if (!result.ok) {
       throw new Error(`Invalid condition "${condition}": ${result.error.message}`);
     }

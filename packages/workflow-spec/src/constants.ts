@@ -4,7 +4,8 @@
 // The enums below mirror values that the rest of the monorepo also names
 // (provider ids, reasoning efforts, agent modes). The spec package depends
 // only on zod, so it cannot import them from `@generatorai/shared`; a drift
-// test (`__tests__/constants.test.ts`) keeps both lists identical.
+// test (`packages/shared/__tests__/workflowSpecConstants.test.ts`) keeps both
+// lists identical.
 // ────────────────────────────────────────────────────────────────
 
 /**

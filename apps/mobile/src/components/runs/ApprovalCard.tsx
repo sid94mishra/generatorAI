@@ -38,7 +38,7 @@ export function ApprovalCard({
   const view = interruptOf(interruptData ?? stage.interruptData);
   const [feedback, setFeedback] = useState<'changes' | 'approve' | null>(null);
   const [confirmReject, setConfirmReject] = useState(false);
-  const name = stage.name ?? stage.stageDefinitionId;
+  const name = stage.name ?? stage.stageKey;
 
   return (
     <Animated.View entering={entering} className="gap-3 rounded-3xl border border-warning bg-warning-muted p-4">

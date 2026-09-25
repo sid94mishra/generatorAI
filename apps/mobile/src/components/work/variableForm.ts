@@ -1,8 +1,8 @@
 // ────────────────────────────────────────────────────────────────
 // variableForm — the pure half of the Start-run sheet.
 //
-// A workflow declares typed inputs (`VariableDefinitionSchema` in
-// packages/shared/src/config/WorkflowDefinitionSchemas.ts): string, text,
+// A workflow declares typed inputs (`graph.workflow.variables`,
+// `VariableDefinitionSchema` of @generatorai/workflow-spec): string, text,
 // number, boolean, choice — each with a label, optional default, `required`
 // and `options`. The sheet edits every value as a STRING (or boolean) and
 // this module turns that draft into the `variables` object the create-run

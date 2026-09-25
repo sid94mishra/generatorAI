@@ -105,6 +105,8 @@ export interface IAutomationRepository {
 /** Interface for automation execution repository */
 export interface IAutomationExecutionRepository {
   createExecution(execution: AutomationExecution): Promise<AutomationExecution>;
+  /** Insert the execution and advance its automation's `lastRunAt` in ONE synchronous transaction. */
+  openExecution(execution: AutomationExecution, lastRunAt: Date): Promise<void>;
   getExecutionById(id: string): Promise<AutomationExecution>;
   getExecutionsByAutomationId(automationId: string): Promise<AutomationExecution[]>;
   updateExecution(id: string, updates: Partial<AutomationExecution>): Promise<AutomationExecution>;
@@ -164,14 +166,6 @@ export class AutomationService {
      */
     private durableEngine: DurableExecutionEngine,
     private artifactsDir?: string,
-    /**
-     * Optional transactional wrapper. When supplied, the initial burst of
-     * writes that open an execution (createExecution + update automation's
-     * lastRunAt) is atomic so a mid-sequence failure doesn't leave the
-     * automation's `lastRunAt` advanced with no corresponding execution row
-     * (or vice-versa).
-     */
-    private withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>,
     /**
      * Item 38 — due-row poller tuning. Optional so existing embedders (and
      * the composition-root call site, which constructs this positionally)
@@ -550,15 +544,7 @@ export class AutomationService {
     // Atomically: create the execution row + advance the automation's
     // lastRunAt. A failure between the two writes would previously leave
     // the automation looking "freshly run" with no execution row.
-    const openExecution = async (): Promise<void> => {
-      await this.executionRepo.createExecution(execution);
-      await this.automationRepo.update(automation.id, { lastRunAt: new Date() });
-    };
-    if (this.withTransaction) {
-      await this.withTransaction(openExecution);
-    } else {
-      await openExecution();
-    }
+    await this.executionRepo.openExecution(execution, new Date());
 
     // Schema-driven — the planner already produced the iteration list;
     // without a schema the workflows run once.
@@ -1413,7 +1399,7 @@ export class AutomationService {
     for (const run of runs) {
       if (run.status === 'running' || run.status === 'pending') {
         try {
-          await this.workflowRunService.cancelRun(run.workflowRunId);
+          if (run.workflowRunId) await this.workflowRunService.cancelRun(run.workflowRunId);
         } catch {
           // Run may already be in terminal state
         }

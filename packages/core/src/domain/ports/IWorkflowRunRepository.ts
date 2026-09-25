@@ -2,10 +2,12 @@
 // IWorkflowRunRepository — Port for WorkflowRun persistence
 // ────────────────────────────────────────────────────────────────
 
-import type { WorkflowRun, WorkflowRunStatus } from '@generatorai/shared';
+import type { StageRun, WorkflowRun, WorkflowRunStatus } from '@generatorai/shared';
 
 export interface IWorkflowRunRepository {
   create(run: WorkflowRun): Promise<WorkflowRun>;
+  /** Insert a run and its stage runs in ONE synchronous transaction. */
+  createWithStages(run: WorkflowRun, stageRuns: StageRun[]): Promise<void>;
   getById(id: string): Promise<WorkflowRun>;
   getAll(): Promise<WorkflowRun[]>;
   getByDefinitionId(definitionId: string): Promise<WorkflowRun[]>;

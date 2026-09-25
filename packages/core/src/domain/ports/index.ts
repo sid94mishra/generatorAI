@@ -61,9 +61,14 @@ export type {
   AddPlanRevisionParams,
   CreateInteractionParams,
 } from './IPlanRepository.js';
-export type { IWorkflowDefinitionRepository } from './IWorkflowDefinitionRepository.js';
-export type { IStageDefinitionRepository } from './IStageDefinitionRepository.js';
-export type { IStageEdgeRepository } from './IStageEdgeRepository.js';
+export type {
+  IWorkflowDefinitionStore,
+  DefinitionListFilter,
+  DefinitionListPage,
+  NewDefinition,
+  NewVersion,
+  ReplaceGraphResult,
+} from './IWorkflowDefinitionStore.js';
 export type { IWorkflowRunRepository } from './IWorkflowRunRepository.js';
 export type { IStageRunRepository } from './IStageRunRepository.js';
 export type { ISequenceAllocator } from './ISequenceAllocator.js';

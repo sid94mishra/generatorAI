@@ -10,6 +10,7 @@
     { "path": "../core" },
     { "path": "../db" },
     { "path": "../shared" },
+    { "path": "../workflow-spec" },
     { "path": "../agent-harness-providers" }
   ]
 }

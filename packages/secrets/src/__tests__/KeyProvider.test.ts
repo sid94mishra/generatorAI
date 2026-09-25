@@ -7,7 +7,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { LocalFileKeyProvider, renameWithRetry } from '../KeyProvider.js';
+import { renameWithRetry } from '@generatorai/shared/node';
+import { LocalFileKeyProvider } from '../KeyProvider.js';
 
 let dir: string;
 let keyPath: string;

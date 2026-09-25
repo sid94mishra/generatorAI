@@ -127,40 +127,15 @@ describe('automation wire contract (create/update)', () => {
   });
 });
 
-describe('workflow stage/edge wire contract', () => {
-  it('addStage sends prompts/harnessConfigOverrides/timeoutMs/retryPolicy, not prompt/model/timeoutSeconds/maxRetries', async () => {
+describe('workflow definition wire contract', () => {
+  it('saveGraph PUTs the whole graph with the revision it edited', async () => {
     const { calls, fetchImpl } = capture();
-    await createAdminApi(fetchImpl).definitions.addStage('wf1', {
-      name: 'build',
-      prompts: [{ label: 'prompt', text: 'build it' }],
-      harnessConfigOverrides: { model: 'gpt-5' },
-      timeoutMs: 60_000,
-      retryPolicy: { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 },
-    });
+    const graph = { formatVersion: 2 as const, workflow: { name: 'wf' }, stages: [{ kind: 'agent' as const, key: 'build', name: 'Build' }] };
+    await createAdminApi(fetchImpl).definitions.saveGraph('wf1', graph, 3);
 
-    expect(calls[0]?.path).toBe('/api/workflow-definitions/wf1/stages');
-    expect(calls[0]?.body).toMatchObject({
-      name: 'build',
-      prompts: [{ label: 'prompt', text: 'build it' }],
-      harnessConfigOverrides: { model: 'gpt-5' },
-      timeoutMs: 60_000,
-      retryPolicy: { maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 },
-    });
-    for (const legacyKey of ['prompt', 'model', 'timeoutSeconds', 'maxRetries']) {
-      expect(calls[0]?.body).not.toHaveProperty(legacyKey);
-    }
-  });
-
-  it('addEdge sends only fromStageId/toStageId/edgeType — there is no server-side "condition" on an edge', async () => {
-    const { calls, fetchImpl } = capture();
-    await createAdminApi(fetchImpl).definitions.addEdge('wf1', {
-      fromStageId: 's1',
-      toStageId: 's2',
-      edgeType: 'on_success',
-    });
-
-    expect(calls[0]?.path).toBe('/api/workflow-definitions/wf1/edges');
-    expect(calls[0]?.body).toEqual({ fromStageId: 's1', toStageId: 's2', edgeType: 'on_success' });
+    expect(calls[0]?.path).toBe('/api/workflow-definitions/wf1/graph');
+    expect(calls[0]?.method).toBe('PUT');
+    expect(calls[0]?.body).toEqual({ graph, expectedRevision: 3 });
   });
 });
 
@@ -435,54 +410,17 @@ describe('workflow validation wire contract', () => {
         headers: { 'content-type': 'application/json' },
       })) as unknown as typeof fetch;
 
-  it('returns the body of a 422 instead of throwing, so the findings survive', async () => {
+  it('validates a document statelessly and returns the issues', async () => {
     const body = {
       valid: false,
-      errors: ["Self-edge detected on stage 'A'"],
-      warnings: [],
-      issues: [
-        {
-          severity: 'error',
-          code: 'self-edge',
-          message: "Self-edge detected on stage 'A'",
-          stageIds: ['A'],
-          edge: { fromStageId: 'A', toStageId: 'A', edgeType: 'on_success' },
-        },
-      ],
+      issues: [{ code: 'edge-self', severity: 'error', path: '/edges/0', message: 'A stage cannot depend on itself' }],
     };
-
-    const result = await createAdminApi(respondWith(422, body)).definitions.validate('wf-1');
+    const result = await createAdminApi(respondWith(200, body)).definitions.validate({ formatVersion: 2 });
 
     expect(result.valid).toBe(false);
-    expect(result.errors).toEqual(["Self-edge detected on stage 'A'"]);
-    expect(result.issues?.[0]?.stageIds).toEqual(['A']);
-  });
-
-  it('still returns a 200 body unchanged', async () => {
-    const result = await createAdminApi(
-      respondWith(200, { valid: true, errors: [], warnings: ['DAG has no stages'], issues: [] }),
-    ).definitions.validate('wf-1');
-
-    expect(result.valid).toBe(true);
-    expect(result.warnings).toEqual(['DAG has no stages']);
-  });
-
-  it('still throws on a status that is NOT in the allow list', async () => {
-    // The tolerance is narrow on purpose: 422 means "here is the answer",
-    // 500 means the answer never got computed.
-    await expect(
-      createAdminApi(respondWith(500, { error: 'boom' })).definitions.validate('wf-1'),
-    ).rejects.toThrow('boom');
+    expect(result.issues[0]?.path).toBe('/edges/0');
   });
 });
-
-// ── Envelope unwrapping (Phase 8) ──────────────────────────────────
-//
-// Six routes in the browser/computer/widget namespaces answer an ENVELOPE
-// and were typed as bare arrays or bare objects. Types cannot catch it:
-// `request<T>()` casts with no runtime validation, so every one of these
-// rendered as permanently empty (or as an object with one key) against a
-// real server while looking correct in the source.
 
 describe('list-envelope wire contracts', () => {
   const respondWith = (body: unknown): typeof fetch =>

@@ -13,21 +13,19 @@
 import type {
   OrchestratedRunParams,
   OrchestratorContext,
-  OrchestratorConfig,
   PreprocessingResult,
-  PostProcessingStep,
   WorkflowRun,
-  WorkflowDefinition,
   ILogger,
-  HookDefinition,
   WorkflowHookDefinition,
   HookPhaseResult,
 } from '@generatorai/shared';
+import type { Lifecycle, PostProcessingStep, WorkflowSpec } from '@generatorai/workflow-spec';
 import { generateId, ValidationError } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { WorkflowRunService } from './WorkflowRunService.js';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
+import type { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
 import { repositoryFromInputs, type WorkflowPreprocessor } from './WorkflowPreprocessor.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import type { EventBus } from '../events/EventBus.js';
@@ -52,6 +50,9 @@ interface PersistedPostProcessingIntent {
   featureBranches: Record<string, string>;
 }
 
+/** The definition a run executes: the pinned version's workflow spec plus the definition id. */
+type RunDefinition = WorkflowSpec & { id: string };
+
 /**
  * The run sandbox. `null` when sandbox mode is off in the deployment
  * config — a configuration, not a missing dependency.
@@ -65,6 +66,8 @@ export class WorkflowOrchestrator {
   constructor(
     private readonly workflowRunService: WorkflowRunService,
     private readonly definitionService: WorkflowDefinitionService,
+    /** The graph of each run's pinned definition version. */
+    private readonly definitions: RunDefinitionReader,
     private readonly preprocessor: WorkflowPreprocessor,
     private readonly runRepo: IWorkflowRunRepository,
     private readonly eventBus: EventBus,
@@ -107,16 +110,12 @@ export class WorkflowOrchestrator {
    */
   private async executeWorkflowHooks(
     phase: WorkflowHookDefinition['phase'],
-    hooks: WorkflowHookDefinition[] | undefined,
+    hooks: readonly WorkflowHookDefinition[] | undefined,
     hookCtx: HookContext,
   ): Promise<HookPhaseResult> {
     if (!hooks || hooks.length === 0) return { shouldContinue: true, mergedResult: {} };
     try {
-      return await this.hookExecutor.executePhase(
-        phase,
-        hooks as unknown as HookDefinition[],
-        hookCtx,
-      );
+      return await this.hookExecutor.executePhase(phase, [...hooks], hookCtx);
     } catch (err) {
       this.logger.warn(`[Orchestrator] Workflow hook phase '${phase}' error (non-fatal): ${err}`);
       return { shouldContinue: true, mergedResult: {} };
@@ -237,14 +236,21 @@ export class WorkflowOrchestrator {
     params: OrchestratedRunParams,
     initializeUploads?: (runId: string) => Promise<void>,
   ): Promise<OrchestratorContext> {
-    const definition = await this.definitionService.getDefinition(params.workflowDefinitionId);
-    const orchestratorConfig = definition.orchestratorConfig;
+    // Pin the version first: everything below validates and runs against it.
+    const definitionVersionId = await this.definitionService.resolveVersionForRun(params.workflowDefinitionId, {
+      testRun: params.testRun === true,
+    });
+    const definition: RunDefinition = {
+      id: params.workflowDefinitionId,
+      ...(await this.definitions.get(definitionVersionId)).workflow,
+    };
+    const lifecycle = definition.lifecycle;
 
     // Validate required codebases
     // A repository URL typed into the run form counts: the template's clone
     // step clones it (see `repositoryFromInputs`).
     if (
-      orchestratorConfig?.requiresCodebase &&
+      lifecycle.requiresCodebase &&
       !params.projectId &&
       !repositoryFromInputs('target', params.variables ?? {})
     ) {
@@ -259,6 +265,7 @@ export class WorkflowOrchestrator {
     // Create workflow run (with optional projectId)
     const run = await this.workflowRunService.createRun({
       workflowDefinitionId: params.workflowDefinitionId,
+      definitionVersionId,
       variables: params.variables,
       // Tags the run with `__projectId`, which is how clients find a
       // project's runs; without it a run started for a project was listed
@@ -294,12 +301,12 @@ export class WorkflowOrchestrator {
       data: {
         workflowRunId: run.id,
         hasCodebases: (params.selectedCodebases?.length ?? 0) > 0,
-        hasPreprocessing: (orchestratorConfig?.preprocessingSteps?.length ?? 0) > 0,
+        hasPreprocessing: lifecycle.preprocessingSteps.length > 0,
       },
     });
 
     // Execute orchestration asynchronously
-    const effectiveProjectId = params.projectId ?? definition.projectId;
+    const effectiveProjectId = params.projectId ?? definition.projectId ?? undefined;
     this.executeOrchestration(run, definition, context, effectiveProjectId, params.selectedCodebases, initializeUploads)
       .catch((error) => {
         const errorMsg = error instanceof Error ? error.message : String(error);
@@ -352,13 +359,13 @@ export class WorkflowOrchestrator {
 
   private async executeOrchestration(
     run: WorkflowRun,
-    definition: WorkflowDefinition,
+    definition: RunDefinition,
     context: OrchestratorContext,
     projectId?: string,
     selectedCodebases?: string[],
     initializeUploads?: (runId: string) => Promise<void>,
   ): Promise<void> {
-    const orchestratorConfig = definition.orchestratorConfig;
+    const preprocessingSteps = definition.lifecycle.preprocessingSteps;
 
     try {
       // ── Phase 0: Set up per-run workspace directory ──
@@ -470,13 +477,6 @@ export class WorkflowOrchestrator {
           const primaryWorktree = worktreeInfos[0]!;
           context.resolvedVariables['__workingDirectory'] = primaryWorktree.worktreePath;
           this.logger.info(`[Orchestrator] Set workingDirectory to first worktree: ${primaryWorktree.worktreePath}`);
-
-          // The system templates name their repository `target`
-          // ({{repo_path_target}}); point it at the primary worktree. Goes away
-          // when the templates move to `run.codebases.<alias>.path` (P01 WP-1.7).
-          if (!context.resolvedVariables['repo_path_target']) {
-            context.resolvedVariables['repo_path_target'] = primaryWorktree.worktreePath;
-          }
         }
 
         this.logger.info(`[Orchestrator] Created ${worktreeInfos.length} worktrees for project run`);
@@ -497,17 +497,17 @@ export class WorkflowOrchestrator {
       }
 
       // ── Phase 2: Run preprocessing steps ──
-      if (orchestratorConfig?.preprocessingSteps && orchestratorConfig.preprocessingSteps.length > 0) {
+      if (preprocessingSteps.length > 0) {
         await this.eventBus.emitGlobal({
           kind: 'workflow_run.preprocessing_started',
           data: {
             workflowRunId: run.id,
-            stepCount: orchestratorConfig.preprocessingSteps.length,
+            stepCount: preprocessingSteps.length,
           },
         });
 
         context.preprocessingResults = await this.preprocessor.execute(
-          orchestratorConfig.preprocessingSteps,
+          preprocessingSteps,
           {
             workflowRunId: run.id,
             variables: context.resolvedVariables,
@@ -672,16 +672,14 @@ export class WorkflowOrchestrator {
     status: 'completed' | 'failed' | 'cancelled',
     runId: string,
     context: OrchestratorContext,
-    definition: WorkflowDefinition,
+    definition: RunDefinition,
     runWorkspaceDir: string,
   ): Promise<void> {
-    const orchestratorConfig = definition.orchestratorConfig;
-
     // ── Post-Processing Phase ──
     // Only run post-processing on successful completion
     if (status === 'completed') {
       const postSteps = this.buildPostProcessingSteps(
-        orchestratorConfig,
+        definition.lifecycle,
         context.clonedRepositories,
       );
 
@@ -804,7 +802,7 @@ export class WorkflowOrchestrator {
   private async setupCompletionCleanup(
     runId: string,
     context: OrchestratorContext,
-    definition: WorkflowDefinition,
+    definition: RunDefinition,
     runWorkspaceDir: string,
   ): Promise<void> {
     const MAX_LISTENER_TTL_MS = 24 * 60 * 60 * 1000; // 24 hours
@@ -908,7 +906,10 @@ export class WorkflowOrchestrator {
       if (!intent?.pending) continue;
 
       try {
-        const definition = await this.definitionService.getDefinition(run.workflowDefinitionId);
+        const definition: RunDefinition = {
+          id: run.workflowDefinitionId,
+          ...(await this.definitions.get(run.definitionVersionId)).workflow,
+        };
         const context: OrchestratorContext = {
           workflowRunId: run.id,
           workflowDefinitionId: run.workflowDefinitionId,
@@ -935,23 +936,18 @@ export class WorkflowOrchestrator {
   }
 
   /**
-   * Build the list of post-processing steps to execute.
-   * Combines explicit postProcessingSteps from config with auto-steps
-   * (autoCommit / autoCreatePR flags).
+   * Build the list of post-processing steps to execute: the explicit
+   * `lifecycle.postProcessing.steps` (in order), then the auto-steps its
+   * `autoCommit` / `autoCreatePR` flags ask for.
    */
   private buildPostProcessingSteps(
-    config: OrchestratorConfig | undefined,
+    lifecycle: Lifecycle,
     /** Repositories this run checked out, keyed by alias (worktrees or clone_repo clones). */
     clonedRepositories: Record<string, string> = {},
   ): PostProcessingStep[] {
-    const steps: PostProcessingStep[] = [];
+    const config = lifecycle.postProcessing;
+    const steps: PostProcessingStep[] = [...config.steps];
     // A run has something to commit only when it checked out a repository.
-    const hasGitRepos = Object.keys(clonedRepositories).length > 0;
-
-    // Explicit post-processing steps from config
-    if (config?.postProcessingSteps) {
-      steps.push(...config.postProcessingSteps);
-    }
 
     // Auto-commit step (from autoCommit flag) — skip if explicit commit step exists
     //
@@ -960,13 +956,13 @@ export class WorkflowOrchestrator {
     // `generateMessage` hands the message to the flow's text generator, which
     // writes it from the actual diff.
     const hasExplicitCommit = steps.some((s) => s.config.type === 'commit_and_push');
-    if (hasGitRepos && config?.autoCommit && !hasExplicitCommit) {
+    const hasGitRepos = Object.keys(clonedRepositories).length > 0;
+    if (hasGitRepos && config.autoCommit && !hasExplicitCommit) {
       steps.push({
-        type: 'commit_and_push',
         name: 'Auto-commit changes',
         config: {
           type: 'commit_and_push',
-          commitMessage: 'feat: GeneratorAI workflow changes (run {{__workflowRunId}})',
+          commitMessage: 'feat: GeneratorAI workflow changes (run {{run.id}})',
           generateMessage: true,
           push: config.autoPush === true || config.autoCreatePR === true,
         },
@@ -974,15 +970,13 @@ export class WorkflowOrchestrator {
         // conflict means the run's work is not on the branch it claims to be.
         // Either way the steps after this one must not run.
         failOnError: true,
-        order: 100,
       });
     }
 
     // Auto-create PR step (from autoCreatePR flag) — skip if explicit PR step exists
     const hasExplicitPR = steps.some((s) => s.config.type === 'create_pr');
-    if (hasGitRepos && config?.autoCreatePR && !hasExplicitPR) {
+    if (hasGitRepos && config.autoCreatePR && !hasExplicitPR) {
       steps.push({
-        type: 'create_pr',
         name: 'Auto-create Pull Request',
         config: {
           type: 'create_pr',
@@ -991,11 +985,10 @@ export class WorkflowOrchestrator {
           generateText: true,
         },
         failOnError: true,
-        order: 200,
       });
     }
 
-    return steps.sort((a, b) => a.order - b.order);
+    return steps;
   }
 
   // ════════════════════════════════════════════════════════════════
@@ -1082,7 +1075,7 @@ export class WorkflowOrchestrator {
   // ════════════════════════════════════════════════════════════════
 
   private validateRequiredVariables(
-    definition: WorkflowDefinition,
+    definition: RunDefinition,
     variables: Record<string, unknown>,
   ): void {
     const missing: string[] = [];

@@ -42,6 +42,7 @@ import {
 import { dashboardRows, NO_ROWS, useActions, useTui, type DataKey } from './store.js';
 import { TerminalScreen, useTerminalScreen, type TerminalLine } from './terminalRender.js';
 import { buildWorkspaceTree, type TreeRow } from './workspaceTree.js';
+import type { WorkflowPaneState } from './open.js';
 
 export interface PaneProps {
   paneId: string;
@@ -62,8 +63,9 @@ const COLUMNS: Partial<Record<DataKey, ColumnSpec[]>> = {
   ],
   workflows: [
     { key: 'name', header: 'Name', priority: 0 },
-    { key: 'version', header: 'Ver', format: 'number', priority: 3 },
-    { key: 'sessionMode', header: 'Session', priority: 2 },
+    { key: 'status', header: 'Status', format: 'status', priority: 1 },
+    { key: 'stageCount', header: 'Stages', format: 'number', priority: 2 },
+    { key: 'revision', header: 'Rev', format: 'number', priority: 3 },
     { key: 'updatedAt', header: 'Updated', format: 'relative', priority: 1 },
     { key: 'id', header: 'ID', format: 'id', priority: 4 },
   ],
@@ -842,14 +844,7 @@ function AutomationPane({ paneId, content, focused, height }: PaneProps): React.
 
 function WorkflowPane({ content, focused, height }: PaneProps): React.JSX.Element {
   const theme = useTheme();
-  const detail = (content.state ?? {}) as {
-    stages?: Array<
-      Record<string, unknown> & { id: string; name: string; status?: string | null }
-    >;
-    edges?: Array<{ id?: string; fromStageId: string; toStageId: string; edgeType?: string }>;
-    variables?: Record<string, unknown>;
-    selectedStageId?: string | null;
-  };
+  const detail = (content.state ?? {}) as WorkflowPaneState;
 
   if (!detail.stages) {
     return (
@@ -860,19 +855,13 @@ function WorkflowPane({ content, focused, height }: PaneProps): React.JSX.Elemen
   }
 
   const stages = detail.stages;
-  const selected = stages.find((stage) => stage.id === detail.selectedStageId) ?? stages[0];
-  // Phase 7 item 5 — the graph already had a wide/narrow split (`Dag` falls
-  // back to an indented dependency tree under 100 columns); what it never
-  // had was a CURSOR, so nothing could act on "the selected stage" and every
-  // authoring command was unreachable from here.
-  const edgesOnSelected = (detail.edges ?? []).filter(
-    (edge) => edge.fromStageId === selected?.id || edge.toStageId === selected?.id,
-  );
-  const variableCount = Object.keys(
-    (selected?.['variables'] as Record<string, unknown> | undefined) ?? {},
-  ).length;
-  const hookCount = ((selected?.['hooks'] as unknown[] | undefined) ?? []).length;
-  const condition = selected?.['condition'] as { type?: string; expression?: string } | undefined;
+  const edges = detail.edges ?? [];
+  const selected = stages.find((stage) => stage.key === detail.selectedStageKey) ?? stages[0];
+  // The graph has a wide/narrow split (`Dag` falls back to an indented
+  // dependency tree under 100 columns) and a cursor, so the authoring
+  // commands act on "the selected stage".
+  const edgesOnSelected = edges.filter((edge) => edge.from === selected?.key || edge.to === selected?.key);
+  const hookCount = selected?.hooks.length ?? 0;
 
   // The detail strip and the hint line are real rows — budgeting only the
   // graph overflows the panel and paints across the border, the same
@@ -882,27 +871,28 @@ function WorkflowPane({ content, focused, height }: PaneProps): React.JSX.Elemen
   return (
     <Panel
       title={content.title}
-      subtitle={`${stages.length} stages ${theme.glyphs.neutral} ${(detail.edges ?? []).length} edges`}
+      subtitle={`${detail.status ?? ''} r${detail.revision ?? 0} ${theme.glyphs.neutral} ${stages.length} stages ${theme.glyphs.neutral} ${edges.length} edges`}
       focused={focused}
       flexGrow={1}
     >
       <Dag
-        stages={stages}
-        edges={detail.edges ?? []}
+        stages={stages.map((stage) => ({ id: stage.key, name: stage.name }))}
+        edges={edges}
         height={Math.max(1, height - 5 - detailRows)}
-        {...(selected ? { selectedId: selected.id } : {})}
+        {...(selected ? { selectedId: selected.key } : {})}
       />
 
       {selected ? (
         <Box flexDirection="column" marginTop={1} flexShrink={0}>
           <Text bold color={theme.c('primary')} wrap="truncate-end">
             {selected.name}
-            <Text color={theme.c('muted')}>{`  ${shortId(selected.id)}`}</Text>
+            <Text color={theme.c('muted')}>{`  ${selected.key}`}</Text>
           </Text>
           <Text color={theme.c('muted')} wrap="truncate-end">
-            {`${edgesOnSelected.length} edge(s) ${theme.glyphs.neutral} ${variableCount} variable(s) ${theme.glyphs.neutral} ${hookCount} hook(s)`}
-            {condition?.type ? ` ${theme.glyphs.neutral} runs ${condition.type}` : ''}
-            {selected['agentRef'] ? ` ${theme.glyphs.neutral} agent ${String(selected['agentRef'])}` : ''}
+            {`${edgesOnSelected.length} edge(s) ${theme.glyphs.neutral} ${selected.prompts.length} prompt(s) ${theme.glyphs.neutral} ${hookCount} hook(s)`}
+            {selected.guard ? ` ${theme.glyphs.neutral} if ${selected.guard}` : ''}
+            {selected.session?.agentRef ? ` ${theme.glyphs.neutral} agent ${selected.session.agentRef}` : ''}
+            {selected.session?.model ? ` ${theme.glyphs.neutral} ${selected.session.model}` : ''}
           </Text>
         </Box>
       ) : (

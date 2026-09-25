@@ -10,8 +10,11 @@
 // route reads), and — for orchestrated runs only, where the server has an
 // uploads directory — custom prompt/skill/agent files.
 //
-// Orchestrated workflows start through `/orchestrator/runs`, which creates
-// and starts in one call — the same split web makes.
+// Workflows whose lifecycle mounts codebases or pre/post-processes
+// (`needsOrchestratedStart` from client-core) start through `/orchestrator/runs`, which creates
+// and starts in one call — the same split web makes. A draft definition has
+// no published version, so it can only start a TEST run (`testRun: true`):
+// the button says "Test run".
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
@@ -53,9 +56,12 @@ export interface StartRunWorkflow {
   name: string;
   projectId?: string | null;
   variables?: unknown;
-  orchestratorConfig?: unknown;
-  /** Stage names in order, for the Advanced per-stage overrides. */
-  stageNames?: string[];
+  /** The lifecycle needs the orchestrator route (see `needsOrchestratedStart`). */
+  orchestrated: boolean;
+  /** A draft definition: only a test run of the working graph can start. */
+  draft: boolean;
+  /** Stages in order (by key), for the Advanced per-stage overrides. */
+  stages?: ReadonlyArray<{ key: string; name: string }>;
 }
 
 type UploadCategory = 'prompts' | 'skills' | 'agents';
@@ -88,11 +94,11 @@ export function StartRunSheet({
   const [projectId, setProjectId] = useState<string | null>(workflow.projectId ?? null);
   const [serverError, setServerError] = useState<string | null>(null);
   const [advanced, setAdvanced] = useState(false);
-  const stageNames = workflow.stageNames;
-  const [overrides, setOverrides] = useState<StageOverrideDraft[]>(() => blankStageOverrides(stageNames ?? []));
-  /** Raw key=value text per stage index; parsed on submit. */
-  const [stageVarText, setStageVarText] = useState<Record<number, string>>({});
-  const [expandedStage, setExpandedStage] = useState<number | null>(null);
+  const stages = workflow.stages;
+  const [overrides, setOverrides] = useState<StageOverrideDraft[]>(() => blankStageOverrides(stages ?? []));
+  /** Raw key=value text per stage key; parsed on submit. */
+  const [stageVarText, setStageVarText] = useState<Record<string, string>>({});
+  const [expandedStage, setExpandedStage] = useState<string | null>(null);
   const [uploadCategory, setUploadCategory] = useState<UploadCategory>('prompts');
   const [uploads, setUploads] = useState<Uploads>(NO_UPLOADS);
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
@@ -108,14 +114,14 @@ export function StartRunSheet({
       setServerError(null);
       setProjectId(workflow.projectId ?? null);
       setAdvanced(false);
-      setOverrides(blankStageOverrides(stageNames ?? []));
+      setOverrides(blankStageOverrides(stages ?? []));
       setStageVarText({});
       setExpandedStage(null);
       setUploads(NO_UPLOADS);
       setUploadNotice(null);
     }
     opened.current = visible;
-  }, [visible, defs, workflow.projectId, stageNames]);
+  }, [visible, defs, workflow.projectId, stages]);
 
   const projects = useQuery({
     queryKey: queryKeys.projects(),
@@ -125,21 +131,21 @@ export function StartRunSheet({
   });
 
   const result = buildVariables(defs, draft);
-  const orchestrated = Boolean(workflow.orchestratorConfig);
+  const { orchestrated, draft: testRun } = workflow;
 
   // Per-stage variables: parse every stage's text; the first error blocks.
-  const stageVarErrors: Record<number, string> = {};
+  const stageVarErrors: Record<string, string> = {};
   const effectiveOverrides = overrides.map((o) => {
-    const text = stageVarText[o.stageIndex];
+    const text = stageVarText[o.stageKey];
     if (!text?.trim()) return { ...o, variables: {} };
     const parsed = parseStageVariables(text);
-    if (parsed.error) stageVarErrors[o.stageIndex] = parsed.error;
+    if (parsed.error) stageVarErrors[o.stageKey] = parsed.error;
     return { ...o, variables: parsed.variables };
   });
   const stageErrorCount = Object.keys(stageVarErrors).length;
   const skippedCount = overrides.filter((o) => o.skip).length;
   const uploadCount = uploads.prompts.length + uploads.skills.length + uploads.agents.length;
-  const hasStages = (stageNames?.length ?? 0) > 0;
+  const hasStages = (stages?.length ?? 0) > 0;
   const hasAdvanced = hasStages || orchestrated;
 
   const toast = useToast();
@@ -165,6 +171,7 @@ export function StartRunSheet({
           variables: encoded.variables,
           ...(encoded.stageOverrides ? { stageOverrides: encoded.stageOverrides } : {}),
           ...(projectId ? { projectId } : {}),
+          ...(testRun ? { testRun: true } : {}),
         });
         const runId = (context as { workflowRunId?: unknown }).workflowRunId;
         if (typeof runId !== 'string') throw new Error('The server did not return a run.');
@@ -188,6 +195,7 @@ export function StartRunSheet({
         workflowDefinitionId: workflow.id,
         variables: encodeStageOverrides(result.variables, effectiveOverrides, { orchestrated: false }).variables,
         ...(projectId ? { projectId } : {}),
+        ...(testRun ? { testRun: true } : {}),
       });
       // Open the run as soon as it exists and start it behind the navigation:
       // the run screen already shows "created → running" live, and a slow
@@ -231,8 +239,8 @@ export function StartRunSheet({
   const set = (name: string, value: string | boolean): void =>
     setDraft((prev) => ({ ...prev, [name]: value }));
 
-  const toggleSkip = (index: number): void =>
-    setOverrides((prev) => prev.map((o) => (o.stageIndex === index ? { ...o, skip: !o.skip } : o)));
+  const toggleSkip = (key: string): void =>
+    setOverrides((prev) => prev.map((o) => (o.stageKey === key ? { ...o, skip: !o.skip } : o)));
 
   const pickUploads = async (): Promise<void> => {
     setUploadNotice(null);
@@ -253,7 +261,7 @@ export function StartRunSheet({
     .join(' · ');
 
   return (
-    <Sheet visible={visible} onClose={onClose} title={`Run ${workflow.name}`} detents={[0.92]} footer={
+    <Sheet visible={visible} onClose={onClose} title={`${testRun ? 'Test run' : 'Run'} ${workflow.name}`} detents={[0.92]} footer={
         // A refusal from the server is pinned WITH the button. It used to be the
         // last line of the scrolling form, so a long form (or an open keyboard)
         // hid it and the button simply appeared to do nothing.
@@ -263,8 +271,13 @@ export function StartRunSheet({
               {serverError}
             </Text>
           ) : null}
+          {testRun ? (
+            <Text className="text-sm text-muted-foreground">
+              This workflow is a draft: the run tests its current graph. Publish it on desktop or web for regular runs.
+            </Text>
+          ) : null}
           <Button
-            label="Start run"
+            label={testRun ? 'Start test run' : 'Start run'}
             size="lg"
             full
             haptic="commit"
@@ -338,12 +351,12 @@ export function StartRunSheet({
                 <Text className="text-sm text-muted-foreground">
                   Turn a stage off to skip it for this run, or give it extra variables.
                 </Text>
-                {overrides.map((o) => {
-                  const expanded = expandedStage === o.stageIndex;
-                  const error = showErrors ? stageVarErrors[o.stageIndex] : undefined;
-                  const hasVars = Boolean(stageVarText[o.stageIndex]?.trim());
+                {overrides.map((o, index) => {
+                  const expanded = expandedStage === o.stageKey;
+                  const error = showErrors ? stageVarErrors[o.stageKey] : undefined;
+                  const hasVars = Boolean(stageVarText[o.stageKey]?.trim());
                   return (
-                    <View key={`${o.stageIndex}:${o.stageName}`} className="gap-2 border-b border-border-muted py-2">
+                    <View key={o.stageKey} className="gap-2 border-b border-border-muted py-2">
                       <View className="min-h-11 flex-row items-center gap-3">
                         <Touchable
                           accessibilityRole="button"
@@ -351,14 +364,14 @@ export function StartRunSheet({
                           accessibilityState={{ expanded }}
                           haptic="select"
                           scale="none"
-                          onPress={() => setExpandedStage(expanded ? null : o.stageIndex)}
+                          onPress={() => setExpandedStage(expanded ? null : o.stageKey)}
                           className="min-h-11 flex-1 justify-center"
                         >
                           <Text
                             numberOfLines={1}
                             className={`text-md ${o.skip ? 'text-muted-foreground line-through' : 'text-foreground'}`}
                           >
-                            {o.stageIndex + 1}. {o.stageName}
+                            {index + 1}. {o.stageName}
                           </Text>
                           <Text className={`text-sm ${error ? 'text-danger' : 'text-muted-foreground'}`}>
                             {o.skip ? 'Skipped' : error ? 'Check variables' : hasVars ? 'Has variables' : 'Add variables'}
@@ -366,14 +379,14 @@ export function StartRunSheet({
                         </Touchable>
                         <Switch
                           value={!o.skip}
-                          onValueChange={() => toggleSkip(o.stageIndex)}
+                          onValueChange={() => toggleSkip(o.stageKey)}
                           accessibilityLabel={`Run ${o.stageName}`}
                         />
                       </View>
                       {expanded && !o.skip ? (
                         <Field
-                          value={stageVarText[o.stageIndex] ?? ''}
-                          onChangeText={(text) => setStageVarText((prev) => ({ ...prev, [o.stageIndex]: text }))}
+                          value={stageVarText[o.stageKey] ?? ''}
+                          onChangeText={(text) => setStageVarText((prev) => ({ ...prev, [o.stageKey]: text }))}
                           placeholder={'key=value, one per line'}
                           hint="Only this stage sees these."
                           error={error ?? null}

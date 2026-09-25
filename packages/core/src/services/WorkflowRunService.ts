@@ -8,9 +8,9 @@ import type {
   WorkflowRunStatus,
   StageRun,
   CreateWorkflowRunParams,
-  HarnessConfig,
   ILogger,
 } from '@generatorai/shared';
+import type { AgentStage, SessionSpec, WorkflowGraph } from '@generatorai/workflow-spec';
 import type { TerminalRunStatus } from './DAGScheduler.js';
 import type { Semaphore } from '../utils/Semaphore.js';
 import type { AdmissionController, AdmissionTicket } from './AdmissionController.js';
@@ -31,8 +31,8 @@ const activeRuns = meter.createUpDownCounter('workflow.active_runs', {
 });
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
-import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitionRepository.js';
-import type { IWorkflowDefinitionRepository } from '../domain/ports/IWorkflowDefinitionRepository.js';
+import type { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
+import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { DAGScheduler } from './DAGScheduler.js';
 import type { StageExecutionService } from './StageExecutionService.js';
@@ -46,7 +46,7 @@ import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebas
 import type { DAG } from '../domain/dag/types.js';
 import { WorkflowRunStateMachine } from '../domain/state-machines/WorkflowRunStateMachine.js';
 import type { HookExecutor, HookContext } from './HookExecutor.js';
-import type { HookDefinition, WorkflowHookDefinition } from '@generatorai/shared';
+import type { WorkflowHookDefinition } from '@generatorai/shared';
 
 /**
  * WS-D1 — variables that describe WHERE a run executed rather than WHAT it
@@ -60,7 +60,17 @@ const EXECUTION_CONTEXT_KEYS = new Set([
   '__workspaceId',
   '__workflowRunId',
 ]);
+/** The engine's record of the run's codebase checkouts (`run.codebases`). */
 const WORKTREE_VARIABLE_PATTERN = /^repo_(path|branch)_/;
+
+/** v1 retry numbers from a v2 retry policy (attempts include the first). */
+function retryNumbers(stage: AgentStage): { maxRetries: number; backoffMs: number; backoffMultiplier: number } {
+  return {
+    maxRetries: Math.max(0, (stage.retry?.maxAttempts ?? 1) - 1),
+    backoffMs: stage.retry?.initialDelayMs ?? 3000,
+    backoffMultiplier: stage.retry?.backoffMultiplier ?? 1,
+  };
+}
 
 export function stripExecutionContext(
   variables: Record<string, unknown>,
@@ -131,8 +141,10 @@ export class WorkflowRunService {
   constructor(
     private runRepo: IWorkflowRunRepository,
     private stageRunRepo: IStageRunRepository,
-    private stageDefRepo: IStageDefinitionRepository,
-    private definitionRepo: IWorkflowDefinitionRepository,
+    /** The graph of each run's pinned definition version. */
+    private definitions: RunDefinitionReader,
+    /** Resolves which version a new run pins. */
+    private definitionService: WorkflowDefinitionService,
     private eventBus: EventBus,
     private dagScheduler: DAGScheduler,
     private stageExecutionService: StageExecutionService,
@@ -145,13 +157,6 @@ export class WorkflowRunService {
      */
     private admissionController: AdmissionController,
     private logger?: ILogger,
-    /**
-     * Optional transactional wrapper. When supplied, multi-row writes
-     * (create run + N stage runs) are wrapped atomically so a mid-loop
-     * failure rolls back the whole set. When omitted (tests), writes run
-     * as independent statements.
-     */
-    private withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>,
     /**
      * Optional concurrency limiter (P1#7). When supplied, every stage launch
      * acquires a permit before executing, bounding how many harness
@@ -177,8 +182,8 @@ export class WorkflowRunService {
     this.hookExecutor = he;
   }
 
-  /** Late-wire result validator (so per-stage resultValidation rules can run
-   *  in the v2 DAG flow without a hard dependency on WorkflowOrchestrator). */
+  /** Late-wire result validator (so each stage's `output.rules` run in the
+   *  DAG flow without a hard dependency on WorkflowOrchestrator). */
   setResultValidator(rv: ResultValidator): void {
     this.resultValidator = rv;
   }
@@ -202,7 +207,7 @@ export class WorkflowRunService {
    */
   private async executeWorkflowHooks(
     phase: WorkflowHookDefinition['phase'],
-    hooks: WorkflowHookDefinition[] | undefined,
+    hooks: readonly WorkflowHookDefinition[] | undefined,
     runId: string,
     definitionId: string,
   ): Promise<void> {
@@ -218,11 +223,7 @@ export class WorkflowRunService {
         // Stamp the run id so hook lifecycle events surface in scope='run'.
         workflowRunId: runId,
       };
-      await this.hookExecutor.executePhase(
-        phase,
-        hooks as unknown as HookDefinition[],
-        hookCtx,
-      );
+      await this.hookExecutor.executePhase(phase, [...hooks], hookCtx);
     } catch (err) {
       this.logger?.warn(`[WorkflowRunService] Workflow hook phase '${phase}' error (non-fatal): ${err}`);
     }
@@ -244,7 +245,7 @@ export class WorkflowRunService {
     stageRun: StageRun,
     runId: string,
     sessionMode: 'single' | 'per-stage' | 'auto',
-    harnessConfig?: Partial<HarnessConfig>,
+    workflowSession?: SessionSpec,
     variables?: Record<string, unknown>,
     predecessorSummaries?: Array<{ stageName: string; summary: string; outputData?: Record<string, unknown> }>,
   ): void {
@@ -293,7 +294,7 @@ export class WorkflowRunService {
           stageRun,
           runId,
           sessionMode,
-          harnessConfig,
+          workflowSession,
           variables,
           predecessorSummaries,
           undefined, // resumeContext — not used from launchStage
@@ -372,34 +373,29 @@ export class WorkflowRunService {
   }
 
   /**
-   * Create a workflow run — snapshot the definition and create stage run records.
+   * Create a workflow run pinned to an immutable definition version (W-13):
+   * the definition's current published version, a test version of its
+   * working graph (`testRun`), or — for a retry — the ancestor's version.
+   * One stage run per stage of that version, keyed by stage key.
    */
   async createRun(params: CreateWorkflowRunParams): Promise<WorkflowRun> {
     return withSpan('core.workflow', 'workflow.createRun', async (span) => {
       span.setAttribute('workflow.definition_id', params.workflowDefinitionId);
 
-    const definition = await this.definitionRepo.getById(params.workflowDefinitionId);
-    // WS-D1 — pin the run to the definition as it is right now. The stage
-    // runs below are created from the SAME snapshot the scheduler will build
-    // the run's DAG from, so a definition edited after this point (or between
-    // create and start) cannot add a stage the run has no row for, remove one
-    // it does, or rewire an edge under a fan-in that is already waiting. A
-    // retry hands in its ancestor's snapshot so copied results line up.
-    const definitionSnapshot =
-      params.definitionSnapshot ??
-      (await this.dagScheduler.captureDefinitionSnapshot(definition.id));
-    const stages = definitionSnapshot.stages;
+    const definitionVersionId =
+      params.definitionVersionId ??
+      (await this.definitionService.resolveVersionForRun(params.workflowDefinitionId, { testRun: params.testRun === true }));
+    const graph = await this.definitions.get(definitionVersionId);
+    const variables = graph.workflow.variables;
     const now = new Date();
 
-    // BUGFIX (variable type validation at run create) — enforce VariableDefinition
-    // type + required + choice options against the caller-supplied variables
-    // dict. Previously any payload was accepted (zod schema only required
-    // `Record<string, unknown>`), letting `topic: 12345` through when the
-    // definition says `topic: 'string'`. We now fail fast with a clear error.
-    if (definition.variables && definition.variables.length > 0) {
+    // BUGFIX (variable type validation at run create) — enforce the declared
+    // variable types, `required` and choice options against the caller's
+    // variables, failing fast with a clear error.
+    if (variables.length > 0) {
       const provided = params.variables ?? {};
       const issues: string[] = [];
-      for (const v of definition.variables) {
+      for (const v of variables) {
         const raw = (provided as Record<string, unknown>)[v.name];
         const missing = raw === undefined || raw === null || raw === '';
         if (missing) {
@@ -443,18 +439,13 @@ export class WorkflowRunService {
     }
 
     const runVars: Record<string, unknown> = { ...(params.variables ?? {}) };
-    // Merge in `defaultValue` for any workflow-defined variable the caller
-    // didn't provide. Without this pass, prompts like `Hello {{name}}` reach
-    // the harness with the placeholder unresolved even though the definition
-    // supplied a sensible default — `interpolateVariables` only substitutes
-    // keys that exist in the vars bag.
-    if (definition.variables && definition.variables.length > 0) {
-      for (const v of definition.variables) {
-        const current = runVars[v.name];
-        const missing = current === undefined || current === null || current === '';
-        if (missing && v.defaultValue !== undefined) {
-          runVars[v.name] = v.defaultValue;
-        }
+    // Fill in the declared `defaultValue` of every variable the caller did
+    // not provide, so templates reading it render the default.
+    for (const v of variables) {
+      const current = runVars[v.name];
+      const missing = current === undefined || current === null || current === '';
+      if (missing && v.defaultValue !== undefined) {
+        runVars[v.name] = v.defaultValue;
       }
     }
     if (params.projectId) {
@@ -468,10 +459,8 @@ export class WorkflowRunService {
     // EXECUTION CONTEXT: `startRun` skips workspace creation entirely when the
     // caller pre-seeds `__workingDirectory` + `__artifactsDirectory`, and an
     // automation whose `variables` carry those keys hands every nightly run
-    // the same directory — the same scratchpad, the same half-finished files,
-    // the same artifacts — which is precisely the history a scheduled run must
-    // not inherit. A manual run keeps the pinned directory, because a human
-    // who typed one meant it.
+    // the same directory. A manual run keeps the pinned directory, because a
+    // human who typed one meant it.
     if (runVars['__triggeredBy'] === 'schedule') {
       const inherited = ['__workingDirectory', '__artifactsDirectory', '__workspaceId'].filter(
         (k) => runVars[k] !== undefined,
@@ -479,51 +468,41 @@ export class WorkflowRunService {
       for (const key of inherited) delete runVars[key];
       if (inherited.length > 0) {
         this.logger?.info(
-          `[WorkflowRunService] Scheduled run of definition ${definition.id}: dropped ` +
+          `[WorkflowRunService] Scheduled run of definition ${params.workflowDefinitionId}: dropped ` +
           `inherited execution context (${inherited.join(', ')}) so it provisions a fresh workspace`,
         );
       }
     }
     const run: WorkflowRun = {
       id: generateId(),
-      workflowDefinitionId: definition.id,
-      name: `${definition.name} - Run ${Date.now()}`,
+      workflowDefinitionId: params.workflowDefinitionId,
+      definitionVersionId,
+      name: `${graph.workflow.name} - Run ${Date.now()}`,
       status: 'created',
-      sessionMode: definition.sessionMode,
+      // The v1 engine resolves the session mode from the graph shape at start.
+      sessionMode: 'auto',
       variables: runVars,
       // W23: carry the ancestor reference if this run was created by retry.
       ...(params.ancestorRunId ? { ancestorRunId: params.ancestorRunId } : {}),
-      definitionSnapshot,
       createdAt: now,
       updatedAt: now,
     };
 
-    // Atomically insert the run row + N stage_run rows. A mid-loop failure
-    // (e.g. UNIQUE violation on one stage) should not leave the run in a
-    // half-materialized state.
-    const insertRunAndStages = async (): Promise<void> => {
-      await this.runRepo.create(run);
-      for (const stage of stages) {
-        const stageRun: StageRun = {
-          id: generateId(),
-          workflowRunId: run.id,
-          stageDefinitionId: stage.id,
-          name: stage.name,
-          status: 'pending',
-          currentStep: 0,
-          totalSteps: stage.prompts.length,
-          retryCount: 0,
-          version: 0,
-          createdAt: now,
-        };
-        await this.stageRunRepo.create(stageRun);
-      }
-    };
-    if (this.withTransaction) {
-      await this.withTransaction(insertRunAndStages);
-    } else {
-      await insertRunAndStages();
-    }
+    // The run row and its N stage rows commit in ONE transaction: a failed
+    // stage insert never leaves a half-materialized run.
+    const stageRuns: StageRun[] = graph.stages.map((stage) => ({
+      id: generateId(),
+      workflowRunId: run.id,
+      stageKey: stage.key,
+      name: stage.name,
+      status: 'pending',
+      currentStep: 0,
+      totalSteps: stage.prompts.length,
+      retryCount: 0,
+      version: 0,
+      createdAt: now,
+    }));
+    await this.runRepo.createWithStages(run, stageRuns);
 
     // Event emission happens AFTER commit so that observers never see a
     // `workflow_run.created` event for a run whose row was rolled back.
@@ -532,13 +511,13 @@ export class WorkflowRunService {
       data: {
         workflowRunId: run.id,
         name: run.name,
-        workflowDefinitionId: definition.id,
+        workflowDefinitionId: run.workflowDefinitionId,
       },
     });
 
     runCounter.add(1, { definition_id: params.workflowDefinitionId });
     span.setAttribute('workflow.run_id', run.id);
-    span.setAttribute('workflow.stage_count', stages.length);
+    span.setAttribute('workflow.stage_count', stageRuns.length);
 
     return run;
     });
@@ -580,8 +559,8 @@ export class WorkflowRunService {
       // failed run's dirty directory, inside a worktree whose `ownerId` still
       // pointed at the terminal ancestor (which the worktree reaper then
       // judged orphaned while the retry was still using it). A retry gets a
-      // fresh workspace; the ancestor's frozen topology is carried so the
-      // copied stage results below refer to the DAG they were produced by.
+      // fresh workspace; the ancestor's pinned definition version is carried so
+      // the copied stage results below refer to the DAG they were produced by.
       const { variables: inheritedVars, dropped } = stripExecutionContext(ancestor.variables ?? {});
       if (dropped.length > 0) {
         this.logger?.info(
@@ -594,7 +573,7 @@ export class WorkflowRunService {
         variables: inheritedVars,
         projectId: undefined, // definition-scoped, not run-scoped
         ancestorRunId: runId,
-        definitionSnapshot: ancestor.definitionSnapshot,
+        definitionVersionId: ancestor.definitionVersionId,
       });
 
       // Copy completed/skipped stage runs from the ancestor into the new run so
@@ -605,14 +584,14 @@ export class WorkflowRunService {
       // all, which discarded the very work the retry was meant to preserve.
       const ancestorStageRuns = await this.stageRunRepo.getByRunId(runId);
       const newStageRuns = await this.stageRunRepo.getByRunId(newRun.id);
-      const newRunByDefId = new Map(newStageRuns.map((s) => [s.stageDefinitionId, s]));
+      const newRunByKey = new Map(newStageRuns.map((s) => [s.stageKey, s]));
       for (const sr of ancestorStageRuns) {
         if (sr.status !== 'completed' && sr.status !== 'skipped') continue;
         // An unreachable successor may become reachable after its predecessor
         // succeeds on retry. Re-evaluate it instead of freezing the old skip.
         // Explicit operator/runtime skips retain their existing behavior.
         if (sr.status === 'skipped' && sr.error === UNREACHABLE_STAGE_MESSAGE) continue;
-        const newSr = newRunByDefId.get(sr.stageDefinitionId);
+        const newSr = newRunByKey.get(sr.stageKey);
         if (!newSr) continue;
         await this.stageRunRepo.update(newSr.id, {
           status: sr.status,
@@ -646,23 +625,25 @@ export class WorkflowRunService {
     const run = await this.runRepo.getById(runId);
     const sm = new WorkflowRunStateMachine(run.status);
 
+    const graph = await this.definitions.get(run.definitionVersionId);
+    const workflow = graph.workflow;
+
     // Set up per-run workspace and artifacts directories if not already set
     if (!run.variables?.['__workingDirectory'] || !run.variables?.['__artifactsDirectory']) {
-      const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
-
+      const projectId = workflow.projectId ?? undefined;
       const workspace = await this.workspaceManager.createWorkspace({
         ownerType: 'workflow_run',
         ownerId: runId,
-        projectId: definition.projectId,
-        useWorktree: definition.useWorktree ?? true,
+        projectId,
+        useWorktree: workflow.lifecycle.useWorktree,
         gitEnabled: true,
         stageSystemArtifacts: true,
-        stageProjectArtifacts: !!definition.projectId,
-        // Propagate the workflow definition's browserConfig so the
-        // built-in browser tools honour visibility, evalAllowed, and
-        // allowedHosts on the first invocation.
-        ...(definition.browserConfig
-          ? { browserConfig: definition.browserConfig as Record<string, unknown> }
+        stageProjectArtifacts: !!projectId,
+        // The workflow session's browser config, so the built-in browser
+        // tools honour visibility, evalAllowed and allowedHosts on the first
+        // invocation.
+        ...(workflow.session.browser
+          ? { browserConfig: workflow.session.browser as Record<string, unknown> }
           : {}),
       });
       const workspaceId = workspace.id;
@@ -686,7 +667,7 @@ export class WorkflowRunService {
       // rather than duplicating the orchestrator's logic inline.
       updatedVars = await this.setupProjectWorktrees(
         run,
-        definition,
+        graph,
         runId,
         workspaceRootPath,
         updatedVars,
@@ -711,28 +692,10 @@ export class WorkflowRunService {
 
     // ── Workflow Hook: on_run_start ──
     // Fires once per run after workspace setup completes and before
-    // DAG build / root stage scheduling. Mirrors the v1 orchestrator
-    // hook point so workflow-level hooks defined on the definition
-    // execute in the v2 DAG runner as well.
-    {
-      const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
-      await this.executeWorkflowHooks(
-        'on_run_start',
-        definition.hooks,
-        runId,
-        definition.id,
-      );
-    }
+    // DAG build / root stage scheduling.
+    await this.executeWorkflowHooks('on_run_start', workflow.hooks, runId, run.workflowDefinitionId);
 
-    // WS-D1 — a run created before snapshots existed is pinned now, so from
-    // this point on nothing about its topology can move under it.
-    if (!run.definitionSnapshot) {
-      const snapshot = await this.dagScheduler.captureDefinitionSnapshot(run.workflowDefinitionId);
-      await this.runRepo.update(runId, { definitionSnapshot: snapshot });
-      run.definitionSnapshot = snapshot;
-    }
-
-    // Build DAG from the run's frozen snapshot.
+    // The DAG of the run's pinned definition version.
     const dag = await this.dagScheduler.buildDAGForRun(run);
 
     // FEAT-1: resolve `auto` session mode adaptively (was a silent alias for
@@ -796,8 +759,8 @@ export class WorkflowRunService {
     this.startPolling(runId);
 
     // Launch the roots. Same reconcile every later stage event takes: a root
-    // with a false `condition` is skipped rather than launched, and an
-    // operator skip override is honoured exactly as it is downstream.
+    // with a false `guard` is skipped rather than launched, and an operator
+    // skip override is honoured exactly as it is downstream.
     await this.advanceRun(runId);
     });
   }
@@ -805,23 +768,24 @@ export class WorkflowRunService {
   /**
    * Create git worktrees for a project-linked workflow run (direct PATH B
    * runs only — orchestrated runs set up worktrees in the orchestrator).
-   * Mutates and returns the variables map with repo_path_* / repo_branch_*
-   * entries and an overridden __workingDirectory. Non-fatal on error.
+   * Records each checkout in the run state (read back as
+   * `run.codebases.<alias>`) and points __workingDirectory at the first.
+   * Non-fatal on error.
    */
   private async setupProjectWorktrees(
     run: WorkflowRun,
-    definition: { projectId?: string; orchestratorConfig?: { codebaseAliases?: string[] } },
+    graph: WorkflowGraph,
     runId: string,
     workspaceRootPath: string | undefined,
     updatedVars: Record<string, unknown>,
   ): Promise<Record<string, unknown>> {
-    const projectId = (run.variables?.['__projectId'] as string | undefined) ?? definition.projectId;
+    const projectId = (run.variables?.['__projectId'] as string | undefined) ?? graph.workflow.projectId ?? undefined;
     if (!projectId || !this.worktreeService || !this.codebaseRepo) return updatedVars;
 
     try {
       // The definition's codebase selection, else every ready project codebase
       let selectedAliases: string[] = [];
-      const codebaseAliases = definition.orchestratorConfig?.codebaseAliases;
+      const codebaseAliases = graph.workflow.lifecycle.codebaseAliases;
       if (codebaseAliases?.length) {
         selectedAliases = codebaseAliases;
       } else {
@@ -850,11 +814,6 @@ export class WorkflowRunService {
         if (worktreeInfos.length > 0) {
           const primaryWorktree = worktreeInfos[0]!;
           updatedVars['__workingDirectory'] = primaryWorktree.worktreePath;
-          // The system templates name their repository `target`; goes away when
-          // they move to `run.codebases.<alias>.path` (P01 WP-1.7).
-          if (!updatedVars['repo_path_target']) {
-            updatedVars['repo_path_target'] = primaryWorktree.worktreePath;
-          }
           this.logger?.info(`[WorkflowRunService] Created ${worktreeInfos.length} worktrees, workingDir=${primaryWorktree.worktreePath}`);
         }
       }
@@ -1074,9 +1033,7 @@ export class WorkflowRunService {
     // summaries) through resumeStage so multi-prompt stages keep their
     // `{{var}}` interpolation across pause-resume cycles.
     const stageRuns = await this.stageRunRepo.getByStatus(runId, ['paused']);
-    const definition = stageRuns.length > 0
-      ? await this.definitionRepo.getById(run.workflowDefinitionId)
-      : null;
+    const graph = stageRuns.length > 0 ? await this.definitions.get(run.definitionVersionId) : null;
     const dag = stageRuns.length > 0
       ? await this.dagScheduler.buildDAGForRun(run)
       : null;
@@ -1085,14 +1042,14 @@ export class WorkflowRunService {
       : [];
     for (const sr of stageRuns) {
       const predecessorSummaries = dag
-        ? this.gatherPredecessorSummaries(sr.stageDefinitionId, dag, allStageRuns)
+        ? this.gatherPredecessorSummaries(sr.stageKey, dag, allStageRuns)
         : undefined;
       this.stageExecutionService
         .resumeStage(
           sr.id,
           runId,
           run.sessionMode,
-          definition?.harnessConfig,
+          graph?.workflow.session,
           run.variables,
           predecessorSummaries,
         )
@@ -1144,14 +1101,13 @@ export class WorkflowRunService {
 
     await this.runRepo.updateStatus(runId, 'cancelled');
     await this.runRepo.update(runId, { completedAt: new Date() });
-    this.dagScheduler.forgetRun(runId);
 
     // Mark workspace as completed on cancellation
     await this.completeWorkspaceForRun(runId);
 
     // ── Workflow Hook: on_run_cancelled ──
-    const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
-    await this.executeWorkflowHooks('on_run_cancelled', definition.hooks, runId, definition.id);
+    const graph = await this.definitions.get(run.definitionVersionId);
+    await this.executeWorkflowHooks('on_run_cancelled', graph.workflow.hooks, runId, run.workflowDefinitionId);
 
     await this.eventBus.emitGlobal({
       kind: 'workflow_run.cancelled',
@@ -1232,12 +1188,9 @@ export class WorkflowRunService {
     const stageRun = stageRunForKey;
 
     // ── Result validation (single owner) ──
-    // WorkflowRunService is the sole validator for BOTH per-stage rules
-    // (stageDef.resultValidation) and workflow-level rules
-    // (orchestratorConfig.resultValidations, matched by stage order). The
-    // WorkflowOrchestrator no longer runs validation itself (it only records
-    // results for reporting) — this removes the previous double-validation
-    // where an orchestrated run was validated by both services.
+    // WorkflowRunService is the sole validator of a stage's `output.rules`
+    // (workflow-level validations were folded into them by migration v55).
+    // The WorkflowOrchestrator does not validate.
     //
     // On failure: bridge to retry when retries remain, else escalate through
     // onStageFailed so on_failure / on_completion edges route correctly.
@@ -1252,12 +1205,8 @@ export class WorkflowRunService {
     // failed, the failure triggered a retry, and the retry EXECUTED the very
     // stage the operator had asked to skip — which then failed the run.
     if (this.resultValidator && stageRun.status !== 'skipped' && stageRun.status !== 'cancelled') {
-      const stageDef = await this.stageDefRepo.getById(stageRun.stageDefinitionId);
-      const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
-      const workflowRules = (definition.orchestratorConfig?.resultValidations ?? [])
-        .filter((v) => v.stageIndex === stageDef.order)
-        .flatMap((v) => v.rules ?? []);
-      const rules = [...workflowRules, ...(stageDef.resultValidation ?? [])];
+      const stage = await this.definitions.stage(run.definitionVersionId, stageRun.stageKey);
+      const rules = stage.output.rules;
       if (rules.length > 0) {
         try {
           const workspacePath =
@@ -1267,11 +1216,11 @@ export class WorkflowRunService {
           const validation = await this.resultValidator.validateStageResult(
             runId,
             stageRunId,
-            { stageIndex: stageDef.order, rules },
+            { stageKey: stage.key, rules },
             workspacePath,
           );
           if (!validation.passed) {
-            const maxRetries = stageDef.retryPolicy?.maxRetries ?? 0;
+            const { maxRetries } = retryNumbers(stage);
             const attempt = stageRun.retryCount + 1;
             const failureMsg = validation.failures.join('; ');
             if (stageRun.retryCount < maxRetries) {
@@ -1286,8 +1235,8 @@ export class WorkflowRunService {
               );
               return; // retry will re-emit stage_run.completed
             }
-            // Retries exhausted (or no retryPolicy) — escalate to failure so
-            // on_failure / on_completion edges route correctly.
+            // Retries exhausted (or no retry policy) — escalate to failure so
+            // failure / completion edges route correctly.
             this.logger?.error?.(
               `[WorkflowRunService] Validation failed for stage "${stageRun.name}" ` +
               `with no retries remaining. Marking failed and routing on_failure edges.`,
@@ -1323,8 +1272,8 @@ export class WorkflowRunService {
     // dormant phase with no firing site). Non-fatal; guarded so we only touch
     // the definition when a hook executor + hooks actually exist.
     if (this.hookExecutor) {
-      const def = await this.definitionRepo.getById(run.workflowDefinitionId);
-      await this.executeWorkflowHooks('on_stage_completed', def.hooks, runId, run.workflowDefinitionId);
+      const graph = await this.definitions.get(run.definitionVersionId);
+      await this.executeWorkflowHooks('on_stage_completed', graph.workflow.hooks, runId, run.workflowDefinitionId);
     }
 
     // Launch / skip / finalize — the one reconcile.
@@ -1369,8 +1318,8 @@ export class WorkflowRunService {
 
     // HOOK-1: fire workflow-level `on_stage_failed` hooks (previously dormant).
     if (this.hookExecutor) {
-      const def = await this.definitionRepo.getById(run.workflowDefinitionId);
-      await this.executeWorkflowHooks('on_stage_failed', def.hooks, runId, run.workflowDefinitionId);
+      const graph = await this.definitions.get(run.definitionVersionId);
+      await this.executeWorkflowHooks('on_stage_failed', graph.workflow.hooks, runId, run.workflowDefinitionId);
     }
 
     // Launch / skip / finalize — the SAME reconcile and the SAME dispatch loop
@@ -1395,18 +1344,15 @@ export class WorkflowRunService {
     const run = await this.runRepo.getById(runId);
     if (run.status !== 'running') return;
 
-    const { toLaunch, toSkip, runTerminal } = await this.dagScheduler.reconcileRun(
-      runId,
-      run.workflowDefinitionId,
-    );
+    const { toLaunch, toSkip, runTerminal } = await this.dagScheduler.reconcileRun(runId);
     if (toLaunch.length === 0 && toSkip.length === 0 && !runTerminal) return;
 
     const allStageRuns = await this.stageRunRepo.getByRunId(runId);
-    const byDefId = new Map(allStageRuns.map((s) => [s.stageDefinitionId, s]));
+    const byKey = new Map(allStageRuns.map((s) => [s.stageKey, s]));
 
     // Skips first, so a successor launched below sees final predecessor state.
-    for (const defId of toSkip) {
-      const sr = byDefId.get(defId);
+    for (const key of toSkip) {
+      const sr = byKey.get(key);
       if (!sr || sr.status !== 'pending') continue;
       await this.stageRunRepo.update(sr.id, {
         status: 'skipped',
@@ -1421,14 +1367,14 @@ export class WorkflowRunService {
     }
 
     if (toLaunch.length > 0) {
-      const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
+      const graph = await this.definitions.get(run.definitionVersionId);
       const dag = await this.dagScheduler.buildDAGForRun(run);
-      for (const defId of toLaunch) {
-        const sr = byDefId.get(defId);
+      for (const key of toLaunch) {
+        const sr = byKey.get(key);
         if (!sr || sr.status !== 'pending') continue;
 
         // Operator run-time overrides — one check for every branch type.
-        const override = this.findStageOverride(run.variables, sr.name, allStageRuns.indexOf(sr));
+        const override = this.findStageOverride(run.variables, sr.stageKey);
         if (override?.skip) {
           await this.skipStageByOverride(sr, runId);
           continue;
@@ -1440,14 +1386,14 @@ export class WorkflowRunService {
         // HOOK-1: a stage with more than one predecessor is a parallel fan-in
         // (join) point — fire the `on_parallel_join` phase.
         if (this.hookExecutor) {
-          const node = dag.nodes.get(defId);
+          const node = dag.nodes.get(key);
           if (node && node.dependencyIds.length > 1) {
-            await this.executeWorkflowHooks('on_parallel_join', definition.hooks, runId, run.workflowDefinitionId);
+            await this.executeWorkflowHooks('on_parallel_join', graph.workflow.hooks, runId, run.workflowDefinitionId);
           }
         }
 
-        const predecessorSummaries = this.gatherPredecessorSummaries(defId, dag, allStageRuns);
-        this.launchStage(sr, runId, run.sessionMode, definition.harnessConfig, effectiveVars, predecessorSummaries);
+        const predecessorSummaries = this.gatherPredecessorSummaries(key, dag, allStageRuns);
+        this.launchStage(sr, runId, run.sessionMode, graph.workflow.session, effectiveVars, predecessorSummaries);
       }
     }
 
@@ -1473,7 +1419,6 @@ export class WorkflowRunService {
 
     this.stopPolling(runId);
     this.unsubscribeRunEvents(runId);
-    this.dagScheduler.forgetRun(runId);
     activeRuns.add(-1);
 
     const stageRuns = await this.stageRunRepo.getByRunId(runId);
@@ -1492,15 +1437,15 @@ export class WorkflowRunService {
     await this.completeWorkspaceForRun(runId);
     await this.pruneProcessedForRun(runId);
 
-    const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
+    const { workflow } = await this.definitions.get(run.definitionVersionId);
     if (finalStatus === 'failed') {
-      await this.executeWorkflowHooks('on_run_failed', definition.hooks, runId, definition.id);
+      await this.executeWorkflowHooks('on_run_failed', workflow.hooks, runId, run.workflowDefinitionId);
       await this.eventBus.emitGlobal({
         kind: 'workflow_run.failed',
         data: { workflowRunId: runId, error: errorMsg },
       });
     } else {
-      await this.executeWorkflowHooks('on_run_cancelled', definition.hooks, runId, definition.id);
+      await this.executeWorkflowHooks('on_run_cancelled', workflow.hooks, runId, run.workflowDefinitionId);
       await this.eventBus.emitGlobal({
         kind: 'workflow_run.cancelled',
         data: { workflowRunId: runId },
@@ -1576,8 +1521,9 @@ export class WorkflowRunService {
     reason: string,
   ): Promise<void> {
     const stageRun = await this.stageRunRepo.getById(stageRunId);
-    const stageDef = await this.stageDefRepo.getById(stageRun.stageDefinitionId);
-    const retryPolicy = stageDef.retryPolicy ?? { maxRetries: 1, backoffMs: 3000, backoffMultiplier: 1 };
+    const run0 = await this.runRepo.getById(runId);
+    const stage = await this.definitions.stage(run0.definitionVersionId, stageRun.stageKey);
+    const retryPolicy = stage.retry ? retryNumbers(stage) : { maxRetries: 1, backoffMs: 3000, backoffMultiplier: 1 };
 
     // Determine retry strategy: in-session for first attempts, full restart for final
     // In-session threshold: use in-session retry for all but the last retry attempt
@@ -1620,7 +1566,7 @@ export class WorkflowRunService {
     });
 
     const run = await this.runRepo.getById(runId);
-    const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
+    const { workflow } = await this.definitions.get(run.definitionVersionId);
     const updated = await this.stageRunRepo.getById(stageRunId);
     // Enrich variables with validation feedback metadata so template
     // interpolation and downstream hooks can access retry context.
@@ -1635,7 +1581,7 @@ export class WorkflowRunService {
       // Keep the session alive, send validation feedback as follow-up prompt.
       // The agent sees its own previous output + what went wrong → can fix it.
       this.stageExecutionService
-        .retryInSession(updated, runId, reason, definition.harnessConfig, enrichedVars)
+        .retryInSession(updated, runId, reason, workflow.session, enrichedVars)
         .catch((err) => {
           this.onStageFailed(runId, stageRunId, err).catch(() => {/* swallow */});
         });
@@ -1645,7 +1591,7 @@ export class WorkflowRunService {
       // scratch with validation feedback injected into variables.
       await this.sessionAllocator.releaseSession(stageRunId);
       this.stageExecutionService
-        .executeStage(updated, runId, run.sessionMode, definition.harnessConfig, enrichedVars)
+        .executeStage(updated, runId, run.sessionMode, workflow.session, enrichedVars)
         .catch((err) => {
           this.onStageFailed(runId, stageRunId, err).catch(() => {/* swallow */});
         });
@@ -1658,7 +1604,6 @@ export class WorkflowRunService {
     this.stopPolling(runId);
     this.unsubscribeRunEvents(runId);
     await this.pruneProcessedForRun(runId);
-    this.dagScheduler.forgetRun(runId);
     activeRuns.add(-1);
 
     const run = await this.runRepo.getById(runId);
@@ -1675,8 +1620,8 @@ export class WorkflowRunService {
     await this.completeWorkspaceForRun(runId);
 
     // ── Workflow Hook: on_run_complete ──
-    const definition = await this.definitionRepo.getById(run.workflowDefinitionId);
-    await this.executeWorkflowHooks('on_run_complete', definition.hooks, runId, definition.id);
+    const { workflow } = await this.definitions.get(run.definitionVersionId);
+    await this.executeWorkflowHooks('on_run_complete', workflow.hooks, runId, run.workflowDefinitionId);
 
     await this.eventBus.emitGlobal({
       kind: 'workflow_run.completed',
@@ -1702,39 +1647,35 @@ export class WorkflowRunService {
   }
 
   /**
-   * Gather summaries from all predecessor stages of a given stage definition.
-   * Used to inject context into successor stages, especially at convergence points
-   * where multiple parallel branches merge.
-   *
-   * Context source resolution:
-   * 1. If `stageDef.contextSources` is defined → resolve by stage name (any stage in workflow)
-   * 2. If `stageDef.contextSources` is undefined → fallback to direct DAG predecessors
-   * 3. If `stageDef.contextSources` is empty array → no context injected
+   * Gather the context a stage receives from upstream stages (its
+   * `context`), especially at convergence points where parallel branches
+   * merge:
+   * 1. `context.mode: 'none'` → no context;
+   * 2. `context.from` → those stages, by key (completed ones only);
+   * 3. otherwise → the direct DAG predecessors.
    */
   private gatherPredecessorSummaries(
-    stageDefId: string,
+    stageKey: string,
     dag: DAG,
     allStageRuns: StageRun[],
   ): Array<{ stageName: string; summary: string; outputData?: Record<string, unknown>; fullOutput?: string }> {
-    const node = dag.nodes.get(stageDefId);
+    const node = dag.nodes.get(stageKey);
     if (!node) return [];
 
-    const stageDef = node.stage;
+    const context = node.stage.context;
     const summaries: Array<{ stageName: string; summary: string; outputData?: Record<string, unknown>; fullOutput?: string }> = [];
+    if (context.mode === 'none') return [];
 
     // Determine which stages to pull context from
     let sourceStageRuns: StageRun[];
 
-    if (stageDef.contextSources !== undefined) {
-      // Explicit context sources: resolve by stage name
-      if (stageDef.contextSources.length === 0) return []; // empty = no context
-      sourceStageRuns = stageDef.contextSources
-        .map((name) => allStageRuns.find((sr) => sr.name === name))
+    if (context.from !== undefined) {
+      sourceStageRuns = context.from
+        .map((key) => allStageRuns.find((sr) => sr.stageKey === key))
         .filter((sr): sr is StageRun => sr !== undefined && sr.status === 'completed');
     } else {
-      // Fallback: direct DAG predecessors (original behavior)
       sourceStageRuns = node.dependencyIds
-        .map((predId) => allStageRuns.find((sr) => sr.stageDefinitionId === predId))
+        .map((predKey) => allStageRuns.find((sr) => sr.stageKey === predKey))
         .filter((sr): sr is StageRun => sr !== undefined);
     }
 
@@ -1756,8 +1697,8 @@ export class WorkflowRunService {
         durableOutput && durableOutput.trim().length > 0 ? durableOutput : predRun.outputText;
 
       // Include a predecessor when it has EITHER a summary or captured full
-      // output (HANDOFF-1) — a contextFilter='full' successor needs the output
-      // even if summary generation produced nothing.
+      // output (HANDOFF-1) — a `context.mode: 'output'` successor needs the
+      // output even if summary generation produced nothing.
       if (predRun.summary || fullOutput) {
         summaries.push({
           stageName: predRun.name,
@@ -1771,27 +1712,22 @@ export class WorkflowRunService {
   }
 
   /**
-   * Find a runtime stage override matching by name or index.
-   * Overrides are stored in run variables as `__stageOverrides` (set by the orchestrator).
+   * The runtime override for a stage, matched by stage KEY (names and
+   * positions change; keys do not). Overrides ride in the run's
+   * `__stageOverrides` variable (set by the orchestrator and the run routes).
    */
   private findStageOverride(
     variables: Record<string, unknown> | undefined,
-    stageName: string,
-    stageIndex: number,
+    stageKey: string,
   ): { skip?: boolean; variables?: Record<string, unknown> } | undefined {
     const overrides = variables?.['__stageOverrides'] as Array<{
-      stageName?: string;
-      stageIndex?: number;
+      stageKey?: string;
       skip?: boolean;
       variables?: Record<string, unknown>;
     }> | undefined;
 
     if (!overrides || !Array.isArray(overrides)) return undefined;
-
-    // Match by name first, then by index
-    return overrides.find(
-      (o) => (o.stageName && o.stageName === stageName) || (o.stageIndex !== undefined && o.stageIndex === stageIndex),
-    );
+    return overrides.find((o) => o.stageKey === stageKey);
   }
 
   /**

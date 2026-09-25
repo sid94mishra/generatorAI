@@ -12,7 +12,7 @@ import type {
   AutomationDataset,
 } from '@generatorai/shared';
 import { NotFoundError, StorageError } from '@generatorai/shared';
-import { automationExecutions, automationExecutionRuns } from '../schema.js';
+import { automations, automationExecutions, automationExecutionRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
@@ -22,24 +22,47 @@ export class DrizzleAutomationExecutionRepository {
 
   // ── Executions ──
 
+  private executionValues(execution: AutomationExecution): typeof automationExecutions.$inferInsert {
+    return {
+      id: execution.id,
+      automationId: execution.automationId,
+      status: execution.status,
+      triggeredBy: execution.triggeredBy,
+      webhookPayload: execution.webhookPayload ?? null,
+      workspaceId: execution.workspaceId ?? null,
+      totalIterations: execution.totalIterations,
+      completedIterations: execution.completedIterations,
+      failedIterations: execution.failedIterations,
+      error: execution.error ?? null,
+      datasetSnapshot: execution.datasetSnapshot ?? null,
+      startedAt: execution.startedAt ?? null,
+      completedAt: execution.completedAt ?? null,
+      createdAt: execution.createdAt,
+    };
+  }
+
+  /**
+   * Open an execution: insert it and advance the automation's `lastRunAt` in
+   * ONE synchronous transaction, so the automation never looks freshly run
+   * without an execution row (or the reverse).
+   */
+  async openExecution(execution: AutomationExecution, lastRunAt: Date): Promise<void> {
+    try {
+      this.db.transaction((tx) => {
+        tx.insert(automationExecutions).values(this.executionValues(execution)).run();
+        tx.update(automations).set({ lastRunAt, updatedAt: new Date() }).where(eq(automations.id, execution.automationId)).run();
+      });
+    } catch (err) {
+      throw new StorageError(
+        `Failed to open automation execution: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err : undefined,
+      );
+    }
+  }
+
   async createExecution(execution: AutomationExecution): Promise<AutomationExecution> {
     try {
-      await this.db.insert(automationExecutions).values({
-        id: execution.id,
-        automationId: execution.automationId,
-        status: execution.status,
-        triggeredBy: execution.triggeredBy,
-        webhookPayload: execution.webhookPayload ?? null,
-        workspaceId: execution.workspaceId ?? null,
-        totalIterations: execution.totalIterations,
-        completedIterations: execution.completedIterations,
-        failedIterations: execution.failedIterations,
-        error: execution.error ?? null,
-        datasetSnapshot: execution.datasetSnapshot ?? null,
-        startedAt: execution.startedAt ?? null,
-        completedAt: execution.completedAt ?? null,
-        createdAt: execution.createdAt,
-      });
+      await this.db.insert(automationExecutions).values(this.executionValues(execution));
       return execution;
     } catch (err) {
       throw new StorageError(

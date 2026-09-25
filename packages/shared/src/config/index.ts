@@ -26,40 +26,6 @@ export { McpServerBodySchema, McpTransportSchema, SystemMcpPrefsBodySchema } fro
 export type { McpServerBody, SystemMcpPrefsBody } from './McpSchemas.js';
 export type { AppConfig } from './AppConfig.js';
 export {
-  WorkflowTemplateSchema,
-  HookDefinitionSchema,
-  WorkflowHookDefinitionSchema,
-  HooksFileConfigSchema,
-  TemplateCategorySchema,
-  TemplateHarnessConfigSchema,
-  ConfigurableVariableSchema,
-  PreprocessingStepSchema,
-  ResultValidationSchema,
-  WorkflowTemplateStageSchema,
-  WorkflowTemplateEdgeSchema,
-  templateStageToCreateParams,
-  StageTemplatePromptSchema,
-} from './WorkflowTemplate.js';
-export type { WorkflowTemplate, WorkflowTemplateStage } from './WorkflowTemplate.js';
-
-export {
-  CreateWorkflowDefinitionSchema,
-  UpdateWorkflowDefinitionSchema,
-  CreateStageSchema,
-  CreateEdgeSchema,
-  CreateWorkflowRunSchema,
-  WorkflowDefinitionSchema,
-  ImportWorkflowJsonSchema,
-  PromptDefinitionSchema,
-  RetryPolicySchema,
-  StageConditionSchema,
-  VariableDefinitionSchema,
-  SkillDefinitionSchema,
-} from './WorkflowDefinitionSchemas.js';
-export type { ImportWorkflowJson, RunProfileInput } from './WorkflowDefinitionSchemas.js';
-export { RunProfileSchema, StageRunOverrideSchema } from './WorkflowDefinitionSchemas.js';
-
-export {
   McpServerConfigSchema,
   AgentToolPolicySchema,
   AgentRuntimePolicySchema,
@@ -118,16 +84,6 @@ export {
   TriggerAutomationBodySchema,
   PreviewIterationsBodySchema,
 } from './AutomationSchemas.js';
-
-// Workflow Script schemas
-export {
-  WorkflowScriptOutputSchema,
-  ScriptRunProfileSchema,
-} from './WorkflowScriptSchema.js';
-export type {
-  WorkflowScriptOutputParsed,
-  ScriptRunProfileParsed,
-} from './WorkflowScriptSchema.js';
 
 // Extensions + Widgets
 export {

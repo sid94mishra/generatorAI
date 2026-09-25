@@ -18,46 +18,32 @@ import { WorkflowRunService } from '../src/services/WorkflowRunService.js';
 import {
   MockWorkflowRunRepository,
   MockStageRunRepository,
-  MockStageDefinitionRepository,
-  MockStageEdgeRepository,
-  MockWorkflowDefinitionRepository,
+  MockWorkflowDefinitionStore,
   createFakeWorkspaceManager,
+  seedDefinition,
+  testGraph,
+  type SeedEdge,
 } from './MockRepositories.js';
 import { EventBus } from '../src/events/EventBus.js';
 import { AdmissionController } from '../src/services/AdmissionController.js';
 import { DAGScheduler } from '../src/services/DAGScheduler.js';
+import { RunDefinitionReader } from '../src/services/definitions/RunDefinitionReader.js';
+import { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
+import type { TemplateRegistry } from '../src/services/TemplateRegistry.js';
 import type { StageExecutionService } from '../src/services/StageExecutionService.js';
 import type { SessionAllocator } from '../src/services/SessionAllocator.js';
-import type { StageDefinition, StageEdge, StageRun, WorkflowRun } from '@generatorai/shared';
+import type { StageRun, WorkflowRun } from '@generatorai/shared';
 
 const DEF_ID = 'def-e2e';
 
 type Outcome = 'completed' | 'failed';
 
-function makeStageDef(id: string, order: number): StageDefinition {
-  return {
-    id,
-    workflowDefinitionId: DEF_ID,
-    name: id,
-    order,
-    prompts: [{ label: 'P', text: 'go' }],
-    variables: {},
-    hooks: [],
-    createdAt: new Date(),
-  };
-}
-
-function makeEdge(from: string, to: string, edgeType: StageEdge['edgeType']): StageEdge {
-  return { id: `e-${from}-${to}`, workflowDefinitionId: DEF_ID, fromStageId: from, toStageId: to, edgeType };
-}
-
 describe('E2E: Workflow run lifecycle (event-driven)', () => {
   let service: WorkflowRunService;
   let runRepo: MockWorkflowRunRepository;
   let stageRunRepo: MockStageRunRepository;
-  let stageDefRepo: MockStageDefinitionRepository;
-  let defRepo: MockWorkflowDefinitionRepository;
-  let edgeRepo: MockStageEdgeRepository;
+  let store: MockWorkflowDefinitionStore;
+  let definitions: RunDefinitionReader;
   let eventBus: EventBus;
   let dagScheduler: DAGScheduler;
   let createdRunId: string | undefined;
@@ -71,7 +57,7 @@ describe('E2E: Workflow run lifecycle (event-driven)', () => {
   function makeDrivingExecutor(plan: Map<string, Outcome>): StageExecutionService {
     const run = async (stageRun: StageRun, runId: string): Promise<void> => {
       await new Promise((r) => setTimeout(r, 5)); // defer so the dispatching handler settles first
-      const outcome: Outcome = plan.get(stageRun.stageDefinitionId) ?? 'completed';
+      const outcome: Outcome = plan.get(stageRun.stageKey) ?? 'completed';
       if (outcome === 'completed') {
         await stageRunRepo.update(stageRun.id, {
           status: 'completed',
@@ -109,19 +95,8 @@ describe('E2E: Workflow run lifecycle (event-driven)', () => {
     releaseAll: async () => {},
   } as unknown as SessionAllocator;
 
-  async function seed(stages: StageDefinition[], edges: StageEdge[]): Promise<void> {
-    await defRepo.create({
-      id: DEF_ID,
-      name: 'E2E WF',
-      version: 1,
-      sessionMode: 'per-stage',
-      variables: [],
-      tags: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
-    });
-    for (const s of stages) await stageDefRepo.create(s);
-    for (const e of edges) await edgeRepo.create(e);
+  async function seed(stages: string[], edges: SeedEdge[]): Promise<void> {
+    await seedDefinition(store, testGraph(stages, edges), DEF_ID);
   }
 
   async function runToTerminal(plan: Map<string, Outcome>): Promise<WorkflowRun> {
@@ -129,8 +104,8 @@ describe('E2E: Workflow run lifecycle (event-driven)', () => {
     service = new WorkflowRunService(
       runRepo,
       stageRunRepo,
-      stageDefRepo,
-      defRepo,
+      definitions,
+      new WorkflowDefinitionService(store, {} as TemplateRegistry),
       eventBus,
       dagScheduler,
       stageExec,
@@ -153,13 +128,12 @@ describe('E2E: Workflow run lifecycle (event-driven)', () => {
   }
 
   beforeEach(() => {
-    runRepo = new MockWorkflowRunRepository();
     stageRunRepo = new MockStageRunRepository();
-    stageDefRepo = new MockStageDefinitionRepository();
-    defRepo = new MockWorkflowDefinitionRepository();
-    edgeRepo = new MockStageEdgeRepository();
+    runRepo = new MockWorkflowRunRepository(stageRunRepo);
+    store = new MockWorkflowDefinitionStore();
+    definitions = new RunDefinitionReader(store);
     eventBus = new EventBus();
-    dagScheduler = new DAGScheduler(stageDefRepo, edgeRepo, stageRunRepo);
+    dagScheduler = new DAGScheduler(definitions, stageRunRepo, runRepo);
     createdRunId = undefined;
   });
 
@@ -174,10 +148,7 @@ describe('E2E: Workflow run lifecycle (event-driven)', () => {
   });
 
   it('linear A→B drives to completion purely via events (EXEC-2)', async () => {
-    await seed(
-      [makeStageDef('A', 0), makeStageDef('B', 1)],
-      [makeEdge('A', 'B', 'on_success')],
-    );
+    await seed(['a', 'b'], [['a', 'b']]);
     const run = await runToTerminal(new Map());
     expect(run.status).toBe('completed');
 
@@ -186,47 +157,38 @@ describe('E2E: Workflow run lifecycle (event-driven)', () => {
   });
 
   it('unhandled failure (on_success successor) → run failed; successor skipped', async () => {
-    await seed(
-      [makeStageDef('A', 0), makeStageDef('B', 1)],
-      [makeEdge('A', 'B', 'on_success')],
-    );
-    const run = await runToTerminal(new Map([['A', 'failed']]));
+    await seed(['a', 'b'], [['a', 'b']]);
+    const run = await runToTerminal(new Map([['a', 'failed']]));
     expect(run.status).toBe('failed');
 
     const stageRuns = await stageRunRepo.getByRunId(run.id);
-    expect(stageRuns.find((s) => s.stageDefinitionId === 'A')!.status).toBe('failed');
-    expect(stageRuns.find((s) => s.stageDefinitionId === 'B')!.status).toBe('skipped');
+    expect(stageRuns.find((s) => s.stageKey === 'a')!.status).toBe('failed');
+    expect(stageRuns.find((s) => s.stageKey === 'b')!.status).toBe('skipped');
   });
 
   it('F1 recovery diamond: failure handled by on_failure branch → run COMPLETED (EXEC-5/6)', async () => {
-    // Setup → Fail (on_success); Fail → Recovery (on_failure); Fail → SkipBranch (on_success);
-    // Recovery → Final (on_completion); SkipBranch → Final (on_completion).
+    // setup → fail (success); fail → recovery (failure); fail → skip_branch (success);
+    // recovery → final (completion); skip_branch → final (completion).
     await seed(
+      ['setup', 'fail', 'recovery', 'skip_branch', 'final'],
       [
-        makeStageDef('Setup', 0),
-        makeStageDef('Fail', 1),
-        makeStageDef('Recovery', 2),
-        makeStageDef('SkipBranch', 2),
-        makeStageDef('Final', 3),
-      ],
-      [
-        makeEdge('Setup', 'Fail', 'on_success'),
-        makeEdge('Fail', 'Recovery', 'on_failure'),
-        makeEdge('Fail', 'SkipBranch', 'on_success'),
-        makeEdge('Recovery', 'Final', 'on_completion'),
-        makeEdge('SkipBranch', 'Final', 'on_completion'),
+        ['setup', 'fail'],
+        ['fail', 'recovery', 'failure'],
+        ['fail', 'skip_branch'],
+        ['recovery', 'final', 'completion'],
+        ['skip_branch', 'final', 'completion'],
       ],
     );
 
-    const run = await runToTerminal(new Map([['Fail', 'failed']]));
+    const run = await runToTerminal(new Map([['fail', 'failed']]));
     expect(run.status).toBe('completed'); // failure recovered
 
     const stageRuns = await stageRunRepo.getByRunId(run.id);
-    const byDef = (d: string) => stageRuns.find((s) => s.stageDefinitionId === d)!.status;
-    expect(byDef('Setup')).toBe('completed');
-    expect(byDef('Fail')).toBe('failed');
-    expect(byDef('Recovery')).toBe('completed');
-    expect(byDef('SkipBranch')).toBe('skipped'); // on_success edge from a failed stage → unreachable
-    expect(byDef('Final')).toBe('completed'); // reached via on_completion from Recovery
+    const byKey = (k: string) => stageRuns.find((s) => s.stageKey === k)!.status;
+    expect(byKey('setup')).toBe('completed');
+    expect(byKey('fail')).toBe('failed');
+    expect(byKey('recovery')).toBe('completed');
+    expect(byKey('skip_branch')).toBe('skipped'); // on_success edge from a failed stage → unreachable
+    expect(byKey('final')).toBe('completed'); // reached via on_completion from Recovery
   });
 });

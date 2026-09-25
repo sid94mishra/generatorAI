@@ -14,6 +14,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { applyLifecycleEvent } from './lifecycle.js';
 import { useSyncExternalStore } from 'react';
+import type { ValidationIssue } from '@generatorai/workflow-spec';
 import {
   addTab,
   allAttachments,
@@ -98,16 +99,10 @@ export type OverlayKind =
       kind: 'validation';
       title: string;
       valid: boolean;
-      issues: Array<{
-        severity: 'error' | 'warning';
-        code: string;
-        message: string;
-        stageIds: string[];
-        edge?: { fromStageId: string; toStageId: string; edgeType?: string };
-        field?: string;
-      }>;
-      /** Called with the first navigable stage id of the selected issue. */
-      onNavigate: (stageId: string) => void;
+      /** `validateWorkflow` issues: JSON pointer, optional stage key, message, hint. */
+      issues: ValidationIssue[];
+      /** Called with the stage key of the selected issue. */
+      onNavigate: (stageKey: string) => void;
     }
   /**
    * Phase 6 item 4 — a run's stages plus its variables, fetched once when
@@ -1190,7 +1185,7 @@ function buildDashboardRows(data: DataCache): DashboardRow[] {
 
 const LOADERS: Record<DataKey, (api: Api) => Promise<Array<Record<string, unknown>>>> = {
   chats: async (api) => (await api.chats.list({ limit: 200 })) as never,
-  workflows: async (api) => (await api.definitions.list()) as never,
+  workflows: async (api) => (await api.definitions.list({ limit: 200 })).items as never,
   runs: async (api) => (await api.runs.list({ limit: 200 })) as never,
   automations: async (api) => (await api.automations.list()) as never,
   projects: async (api) => (await api.projects.list()) as never,

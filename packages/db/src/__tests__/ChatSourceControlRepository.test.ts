@@ -64,13 +64,18 @@ afterEach(() => {
 
 describe('chats.source_control — migration 54', () => {
   it('adds the column and is re-runnable on an existing database', () => {
-    const client = rawClient(db);
+    // Replaying an old migration needs the schema it was written against:
+    // v55 reshapes tables that migrations before it touch, so this database
+    // stops at v54.
+    const old = createDB(':memory:');
+    migrateDB(old, { targetVersion: 54 });
+    const client = rawClient(old);
     // △ `>= 54`, not `= 54`: the runner resumes from MAX(version), so leaving
     // a later row behind would silently skip 54 and assert nothing.
     client.exec(`DELETE FROM _schema_versions WHERE version >= 54;`);
     // The ALTER cannot say `IF NOT EXISTS`; the runner tolerates exactly the
     // "duplicate column" error this re-run produces.
-    expect(() => migrateDB(db)).not.toThrow();
+    expect(() => migrateDB(old, { targetVersion: 54 })).not.toThrow();
 
     const cols = (client.prepare(`PRAGMA table_info(chats)`).all() as Array<{ name: string }>).map((c) => c.name);
     expect(cols).toContain('source_control');

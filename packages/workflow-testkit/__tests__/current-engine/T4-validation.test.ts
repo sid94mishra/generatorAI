@@ -26,32 +26,32 @@ const SUMMARY =
 
 const answerThenSummary: Turn[] = [{ text: ANSWER }, { on: 'summary', text: SUMMARY }];
 
-const rule = (type: string, value: unknown, message: string) => ({ type, value, message });
+type Rule = { type: string; message: string; [field: string]: unknown };
+const rule = (type: string, value: unknown, message: string): Rule => ({ type, value, message });
 
-const RULE_STAGES: Array<{ name: string; rule: ReturnType<typeof rule>; answer?: string }> = [
+const RULE_STAGES: Array<{ name: string; rule: Rule; answer?: string }> = [
   { name: 'V_contains_pass', rule: rule('contains', 'GREEN-7731', 'has the token') },
   { name: 'V_contains_fail', rule: rule('contains', 'PURPLE-0000', 'has the purple token') },
-  { name: 'V_regex', rule: rule('regex', 'GREEN-\\d{4}', 'regex token') },
-  { name: 'V_regex_anchored', rule: rule('regex', '^GREEN-7731 alpha bravo charlie delta echo foxtrot golf$', 'exact line') },
+  { name: 'V_regex', rule: { type: 'regex', pattern: 'GREEN-\\d{4}', message: 'regex token' } },
+  {
+    name: 'V_regex_anchored',
+    rule: { type: 'regex', pattern: '^GREEN-7731 alpha bravo charlie delta echo foxtrot golf$', message: 'exact line' },
+  },
   { name: 'V_max_length', rule: rule('max_length', 200, 'at most 200 chars') },
   { name: 'V_not_contains', rule: rule('not_contains', 'instruct', 'no "instruct"') },
   { name: 'V_min_length', rule: rule('min_length', 20, 'at least 20 chars') },
   {
     name: 'V_json_pass',
-    rule: rule(
-      'json_schema',
-      { type: 'object', required: ['name', 'age'], properties: { name: { type: 'string' }, age: { type: 'number' } } },
-      'valid person',
-    ),
+    rule: {
+      type: 'json_schema',
+      schema: { type: 'object', required: ['name', 'age'], properties: { name: { type: 'string' }, age: { type: 'number' } } },
+      message: 'valid person',
+    },
     answer: '```json\n{"name":"Bob","age":42}\n```\nThat is the person record for this stage.',
   },
   {
     name: 'V_custom_script',
-    rule: rule('custom_script', 'node -e "process.exit(0)"', 'script passes'),
-  },
-  {
-    name: 'V_llm_french',
-    rule: rule('llm_validation', 'must be written entirely in French and mention Paris', 'is French'),
+    rule: { type: 'custom_script', command: 'node', args: ['--version'], message: 'script passes' },
   },
 ];
 
@@ -69,7 +69,7 @@ describe('T4 result validation (current engine)', () => {
       RULE_STAGES.map(async (s) => {
         const run = await e.runWorkflow({
           name: `t4-${s.name}`,
-          stages: [{ name: s.name, prompt: `Write one line containing the token ${s.name}.`, resultValidation: [s.rule] }],
+          stages: [{ name: s.name, prompt: `Write one line containing the token ${s.name}.`, output: { rules: [s.rule] } }],
         });
         return run.waitForTerminal();
       }),
@@ -91,12 +91,11 @@ describe('T4 result validation (current engine)', () => {
     expect(status('V_max_length')).toBe('failed'); // KNOWN-BUG W-17 (summary counts toward length)
     expect(status('V_not_contains')).toBe('failed'); // KNOWN-BUG W-17 ("as instructed" is only in the summary)
 
-    // Three of the rule types cannot be used (F-7..F-9).
-    expect(status('V_json_pass')).toBe('failed'); // KNOWN-BUG W-47 (schema keywords treated as required keys)
-    expect(e.logs.some((l) => l.message.includes('missing keys: type, required, properties'))).toBe(true); // KNOWN-BUG W-47
-    expect(status('V_custom_script')).toBe('failed'); // KNOWN-BUG W-47 (whole value run as the executable, no args)
-    expect(e.logs.some((l) => l.message.includes('custom_script'))).toBe(true);
-    expect(status('V_llm_french')).toBe('completed'); // KNOWN-BUG W-47 (llm_validation is a ≥50-char stub)
+    // The v2 rule forms (P01): json_schema validates with a real JSON Schema
+    // validator, custom_script runs `command` with literal `args`, and the
+    // llm_validation stub is gone from the grammar (W-47 closed).
+    expect(status('V_json_pass')).toBe('completed');
+    expect(status('V_custom_script')).toBe('completed');
 
     for (const snap of snaps) {
       expect(snap.events.filter((ev) => ev.kind === 'workflow_run.stage_validation')).toHaveLength(1);
@@ -112,8 +111,8 @@ describe('T4 result validation (current engine)', () => {
     const run = await engine.runWorkflow({
       name: 't4-race',
       stages: [
-        { name: 'V_fail', prompt: 'fail', resultValidation: [rule('contains', 'NEVER-PRESENT-XYZ', 'cannot pass')] },
-        { name: 'V_race', prompt: 'race', resultValidation: [rule('contains', 'NEVER-PRESENT-XYZ', 'cannot pass')] },
+        { name: 'V_fail', prompt: 'fail', output: { rules: [rule('contains', 'NEVER-PRESENT-XYZ', 'cannot pass')] } },
+        { name: 'V_race', prompt: 'race', output: { rules: [rule('contains', 'NEVER-PRESENT-XYZ', 'cannot pass')] } },
       ],
     });
     const snap = await run.waitForTerminal();
@@ -135,8 +134,8 @@ describe('T4 result validation (current engine)', () => {
         {
           name: 'V_retry',
           prompt: 'Write one line containing the token V_RETRY.',
-          retryPolicy: { maxRetries: 2, backoffMs: 100, backoffMultiplier: 1 },
-          resultValidation: [rule('contains', 'NEVER-PRESENT-XYZ', 'never passes')],
+          retry: { maxAttempts: 3, initialDelayMs: 100, backoffMultiplier: 1 },
+          output: { rules: [rule('contains', 'NEVER-PRESENT-XYZ', 'never passes')] },
         },
       ],
     });

@@ -21,7 +21,8 @@
     "@generatorai/agent-harness-providers": "workspace:*",
     "@generatorai/core": "workspace:*",
     "@generatorai/db": "workspace:*",
-    "@generatorai/shared": "workspace:*"
+    "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*"
   },
   "devDependencies": {
     "fast-check": "^4.10.2"

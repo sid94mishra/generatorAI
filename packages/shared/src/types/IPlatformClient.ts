@@ -7,7 +7,12 @@ import type { ChatMessage } from './ChatMessage.js';
 import type { Artifact } from './Artifact.js';
 import type { AgentEvent, PersistedEvent } from './AgentEvent.js';
 import type { Chat, CreateChatParams } from './Chat.js';
-import type { WorkflowDefinition, WorkflowDefinitionWithStages, CreateWorkflowDefinitionParams } from './WorkflowDefinition.js';
+import type {
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowGraphInput,
+  WorkflowTemplate,
+} from '@generatorai/workflow-spec';
 import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams, StageRun } from './WorkflowRun.js';
 
 /** Platform type discriminator */
@@ -27,25 +32,6 @@ export interface EventSubscriptionOptions {
   afterSequence?: number;
   /** Filter events by kind prefix (e.g. ['harness.', 'workflow.']) */
   kindPrefixes?: string[];
-}
-
-/** Workflow template summary for listing */
-export interface WorkflowTemplateSummary {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  version: string;
-  requiresCodebase: boolean;
-  variables: Array<{
-    name: string;
-    label: string;
-    type: string;
-    required: boolean;
-    default?: unknown;
-    description?: string;
-    options?: string[];
-  }>;
 }
 
 /**
@@ -70,7 +56,7 @@ export interface IPlatformClient {
   getChatHistory(sessionId: string, limit?: number, offset?: number, stageRunId?: string): Promise<ChatMessage[]>;
 
   // ── Templates ──
-  getWorkflowTemplates(): Promise<WorkflowTemplateSummary[]>;
+  getWorkflowTemplates(): Promise<WorkflowTemplate[]>;
 
   // ── Artifacts ──
   getArtifacts(sessionId: string): Promise<Artifact[]>;
@@ -103,12 +89,15 @@ export interface IPlatformClient {
   sendChatPrompt(chatId: string, prompt: string, attachments?: Array<{ type: 'file'; path: string; displayName?: string }>): Promise<void>;
   getChatMessages(chatId: string, limit?: number, offset?: number): Promise<ChatMessage[]>;
 
-  // ── v2: Workflow Definition Operations ──
-  createDefinition(params: CreateWorkflowDefinitionParams): Promise<WorkflowDefinition>;
-  listDefinitions(): Promise<WorkflowDefinition[]>;
-  getDefinition(id: string): Promise<WorkflowDefinitionWithStages>;
-  updateDefinition(id: string, params: Partial<CreateWorkflowDefinitionParams>): Promise<WorkflowDefinition>;
-  deleteDefinition(id: string): Promise<void>;
+  // ── Workflow definitions (v2 documents, P01 WP-1.7) ──
+  /** Create a draft from a graph. */
+  createDefinition(graph: WorkflowGraphInput): Promise<WorkflowDefinitionRecord>;
+  listDefinitions(): Promise<WorkflowDefinitionSummary[]>;
+  getDefinition(id: string): Promise<WorkflowDefinitionRecord>;
+  /** Replace the whole graph; 409 REVISION_CONFLICT when `expectedRevision` is stale. */
+  saveDefinitionGraph(id: string, graph: WorkflowGraphInput, expectedRevision: number): Promise<WorkflowDefinitionRecord>;
+  /** Hard delete, or archive when runs pinned the definition. */
+  deleteDefinition(id: string): Promise<{ deleted: true } | { archived: true; runs: number }>;
 
   // ── v2: Workflow Run Operations ──
   createRun(params: CreateWorkflowRunParams): Promise<WorkflowRun>;

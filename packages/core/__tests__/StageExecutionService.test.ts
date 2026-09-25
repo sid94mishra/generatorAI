@@ -8,12 +8,14 @@ import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { AgentResolver } from '../src/services/AgentResolver.js';
 import { StageExecutionService } from '../src/services/StageExecutionService.js';
+import { RunDefinitionReader } from '../src/services/definitions/RunDefinitionReader.js';
 import {
   MockStageRunRepository,
-  MockStageDefinitionRepository,
-  MockWorkflowDefinitionRepository,
+  MockWorkflowDefinitionStore,
   MockWorkflowRunRepository,
   createFakeWorkspaceManager,
+  seedDefinition,
+  testGraph,
 } from './MockRepositories.js';
 import type { HitlService } from '../src/services/HitlService.js';
 import { MockCopilotPort } from './MockAgentHarness.js';
@@ -21,7 +23,7 @@ import { EventBus } from '../src/events/EventBus.js';
 import type { IChatMessageRepository } from '../src/domain/ports/IRepositories.js';
 import type { SessionAllocator } from '../src/services/SessionAllocator.js';
 import type { HookExecutor } from '../src/services/HookExecutor.js';
-import type { StageRun, StageDefinition, ChatMessage, Session } from '@generatorai/shared';
+import type { StageRun, WorkflowRun, ChatMessage, Session } from '@generatorai/shared';
 
 // ── Helpers ──
 
@@ -59,38 +61,37 @@ function createMockHookExecutor(): HookExecutor {
   } as unknown as HookExecutor;
 }
 
-function makeStageDef(
-  id: string,
-  prompts: StageDefinition['prompts'],
-  opts?: Partial<StageDefinition>,
-): StageDefinition {
+type Prompt = { label: string; text: string };
+
+function makeRun(id: string, definitionId: string, versionId: string): WorkflowRun {
   return {
     id,
-    workflowDefinitionId: 'def-1',
-    name: `Stage ${id}`,
-    order: 0,
-    prompts,
+    workflowDefinitionId: definitionId,
+    definitionVersionId: versionId,
+    name: 'Run',
+    status: 'running',
+    sessionMode: 'per-stage',
     variables: {},
-    hooks: [],
     createdAt: new Date(),
-    ...opts,
+    updatedAt: new Date(),
   };
 }
 
 function makeStageRun(
   id: string,
-  stageDefId: string,
+  stageKey: string,
   status: StageRun['status'] = 'pending',
 ): StageRun {
   return {
     id,
     workflowRunId: 'run-1',
-    stageDefinitionId: stageDefId,
-    name: `SR ${stageDefId}`,
+    stageKey,
+    name: `SR ${stageKey}`,
     status,
     currentStep: 0,
     totalSteps: 1,
     retryCount: 0,
+    version: 0,
     createdAt: new Date(),
   };
 }
@@ -98,7 +99,8 @@ function makeStageRun(
 describe('StageExecutionService', () => {
   let service: StageExecutionService;
   let stageRunRepo: MockStageRunRepository;
-  let stageDefRepo: MockStageDefinitionRepository;
+  let definitionStore: MockWorkflowDefinitionStore;
+  let runRepo: MockWorkflowRunRepository;
   let messageRepo: ReturnType<typeof createMockMessageRepo>;
   let copilot: MockCopilotPort;
   let eventBus: EventBus;
@@ -107,7 +109,8 @@ describe('StageExecutionService', () => {
 
   beforeEach(() => {
     stageRunRepo = new MockStageRunRepository();
-    stageDefRepo = new MockStageDefinitionRepository();
+    definitionStore = new MockWorkflowDefinitionStore();
+    runRepo = new MockWorkflowRunRepository(stageRunRepo);
     messageRepo = createMockMessageRepo();
     copilot = new MockCopilotPort();
     eventBus = new EventBus();
@@ -116,24 +119,29 @@ describe('StageExecutionService', () => {
 
     service = new StageExecutionService(
       stageRunRepo,
-      stageDefRepo,
+      new RunDefinitionReader(definitionStore),
       messageRepo,
       copilot,
       eventBus,
       sessionAllocator,
       hookExecutor,
       createFakeWorkspaceManager(),
-      new MockWorkflowDefinitionRepository(),
-      new MockWorkflowRunRepository(),
+      runRepo,
       {} as HitlService,
     );
   });
 
+  /** Publish a one-stage definition and pin run 'run-1' to it. */
+  async function seedStage(key: string, prompts: Prompt[], extra: Record<string, unknown> = {}): Promise<void> {
+    const { definitionId, versionId } = await seedDefinition(definitionStore, testGraph([{ key, prompts, ...extra }]));
+    await runRepo.create(makeRun('run-1', definitionId, versionId));
+  }
+
   it('resolves stage capability additions even without a bound reusable agent', async () => {
-    const stage = makeStageDef('skill-stage', [{ label: 'Review', text: 'Review' }]);
-    stage.harnessConfigOverrides = { agentOverrides: { addSkillIds: ['skill-a'] } };
-    await stageDefRepo.create(stage);
-    const run = makeStageRun('skill-run', stage.id);
+    await seedStage('skill_stage', [{ label: 'Review', text: 'Review' }], {
+      session: { agentOverrides: { addSkillIds: ['skill-a'] } },
+    });
+    const run = makeStageRun('skill-run', 'skill_stage');
     await stageRunRepo.create(run);
     const resolve = vi.fn(async () => AgentResolver.empty());
     service.setAgentServices({ resolve } as unknown as AgentResolver);
@@ -158,9 +166,8 @@ describe('StageExecutionService', () => {
         copilot.simulateConversationEvent('conv-1', { kind: 'harness.idle', data: {} });
         return { content: final };
       });
-      const sDef = makeStageDef('sd-final', [{ label: 'Read', text: 'Read the uploaded marker' }]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-final', sDef.id);
+      await seedStage('sd_final', [{ label: 'Read', text: 'Read the uploaded marker' }]);
+      const sr = makeStageRun('sr-final', 'sd_final');
       await stageRunRepo.create(sr);
       await service.executeStage(sr, 'run-1', 'per-stage');
       const assistantMessages = vi.mocked(messageRepo.create).mock.calls.map(([m]) => m).filter(m => m.role === 'assistant');
@@ -178,9 +185,8 @@ describe('StageExecutionService', () => {
         await writeFile(join(dir, 'outside.txt'), 'not uploaded');
         await symlink(join(dir, 'outside.txt'), join(prompts, 'linked.txt'));
         await symlink(prompts, join(dir, 'linked-dir'));
-        const sDef = makeStageDef('sd-upload', [{ label: 'Read', text: 'Read audit.md' }]);
-        await stageDefRepo.create(sDef);
-        const sr = makeStageRun('sr-upload', sDef.id);
+        await seedStage('sd_upload', [{ label: 'Read', text: 'Read audit.md' }]);
+        const sr = makeStageRun('sr-upload', 'sd_upload');
         await stageRunRepo.create(sr);
         const send = vi.spyOn(copilot, 'sendPromptAndWait');
         await service.executeStage(sr, 'run-1', 'per-stage', undefined, {
@@ -194,13 +200,12 @@ describe('StageExecutionService', () => {
     });
 
     it('should run all prompts and mark stage completed', async () => {
-      const sDef = makeStageDef('sd-1', [
+      await seedStage('sd_1', [
         { label: 'P1', text: 'First prompt' },
         { label: 'P2', text: 'Second prompt' },
       ]);
-      await stageDefRepo.create(sDef);
 
-      const sr = makeStageRun('sr-1', 'sd-1');
+      const sr = makeStageRun('sr-1', 'sd_1');
       await stageRunRepo.create(sr);
 
       await service.executeStage(sr, 'run-1', 'per-stage');
@@ -214,11 +219,10 @@ describe('StageExecutionService', () => {
     });
 
     it('should allocate and release sessions', async () => {
-      const sDef = makeStageDef('sd-2', [
+      await seedStage('sd_2', [
         { label: 'P1', text: 'Go' },
       ]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-2', 'sd-2');
+      const sr = makeStageRun('sr-2', 'sd_2');
       await stageRunRepo.create(sr);
 
       await service.executeStage(sr, 'run-1', 'per-stage');
@@ -228,11 +232,10 @@ describe('StageExecutionService', () => {
     });
 
     it('should persist user messages', async () => {
-      const sDef = makeStageDef('sd-3', [
+      await seedStage('sd_3', [
         { label: 'P1', text: 'Do it' },
       ]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-3', 'sd-3');
+      const sr = makeStageRun('sr-3', 'sd_3');
       await stageRunRepo.create(sr);
 
       await service.executeStage(sr, 'run-1', 'per-stage');
@@ -244,11 +247,10 @@ describe('StageExecutionService', () => {
 
     it.each(['SDK error', 'The Codex thread entered a system error state.'])(
       'marks provider failure as failed without emitting completion: %s', async (message) => {
-      const sDef = makeStageDef('sd-4', [
+      await seedStage('sd_4', [
         { label: 'Fail', text: 'crash' },
       ]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-4', 'sd-4');
+      const sr = makeStageRun('sr-4', 'sd_4');
       await stageRunRepo.create(sr);
 
       // Make sendPromptAndWait throw
@@ -275,11 +277,10 @@ describe('StageExecutionService', () => {
     // and skip resurrecting it if it already landed on a terminal status.
 
     it('should not resurrect a stage already failed elsewhere before the final completed write', async () => {
-      const sDef = makeStageDef('sd-race-1', [
+      await seedStage('sd_race_1', [
         { label: 'P1', text: 'Do work' },
       ]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-race-1', 'sd-race-1');
+      const sr = makeStageRun('sr-race-1', 'sd_race_1');
       await stageRunRepo.create(sr);
 
       // The mid-loop pause/cancel check (before the prompt runs) must still
@@ -313,11 +314,10 @@ describe('StageExecutionService', () => {
     });
 
     it('should still mark the stage completed when it is still running at the final check (control)', async () => {
-      const sDef = makeStageDef('sd-race-2', [
+      await seedStage('sd_race_2', [
         { label: 'P1', text: 'Do work' },
       ]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-race-2', 'sd-race-2');
+      const sr = makeStageRun('sr-race-2', 'sd_race_2');
       await stageRunRepo.create(sr);
 
       // Same plumbing as above, but the row is still 'running' at the final
@@ -349,9 +349,8 @@ describe('StageExecutionService', () => {
 
   describe('pauseStage', () => {
     it('should transition running stage to paused', async () => {
-      const sDef = makeStageDef('sd-p', [{ label: 'P', text: 'x' }]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-p', 'sd-p', 'running');
+      await seedStage('sd_p', [{ label: 'P', text: 'x' }]);
+      const sr = makeStageRun('sr-p', 'sd_p', 'running');
       sr.sessionId = 'ses-1';
       await stageRunRepo.create(sr);
 
@@ -361,9 +360,8 @@ describe('StageExecutionService', () => {
     });
 
     it('should no-op if stage is not running', async () => {
-      const sDef = makeStageDef('sd-p2', [{ label: 'P', text: 'x' }]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-p2', 'sd-p2', 'completed');
+      await seedStage('sd_p2', [{ label: 'P', text: 'x' }]);
+      const sr = makeStageRun('sr-p2', 'sd_p2', 'completed');
       await stageRunRepo.create(sr);
 
       await service.pauseStage('sr-p2');
@@ -376,9 +374,8 @@ describe('StageExecutionService', () => {
 
   describe('cancelStage', () => {
     it('should transition running stage to cancelled', async () => {
-      const sDef = makeStageDef('sd-c', [{ label: 'P', text: 'x' }]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-c', 'sd-c', 'running');
+      await seedStage('sd_c', [{ label: 'P', text: 'x' }]);
+      const sr = makeStageRun('sr-c', 'sd_c', 'running');
       sr.sessionId = 'ses-1';
       await stageRunRepo.create(sr);
 
@@ -388,9 +385,8 @@ describe('StageExecutionService', () => {
     });
 
     it('should no-op for already-terminal stages', async () => {
-      const sDef = makeStageDef('sd-c2', [{ label: 'P', text: 'x' }]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-c2', 'sd-c2', 'completed');
+      await seedStage('sd_c2', [{ label: 'P', text: 'x' }]);
+      const sr = makeStageRun('sr-c2', 'sd_c2', 'completed');
       await stageRunRepo.create(sr);
 
       await service.cancelStage('sr-c2');
@@ -399,9 +395,8 @@ describe('StageExecutionService', () => {
     });
 
     it('should release session on cancel', async () => {
-      const sDef = makeStageDef('sd-c3', [{ label: 'P', text: 'x' }]);
-      await stageDefRepo.create(sDef);
-      const sr = makeStageRun('sr-c3', 'sd-c3', 'running');
+      await seedStage('sd_c3', [{ label: 'P', text: 'x' }]);
+      const sr = makeStageRun('sr-c3', 'sd_c3', 'running');
       sr.sessionId = 'ses-1';
       await stageRunRepo.create(sr);
 

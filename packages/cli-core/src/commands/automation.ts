@@ -23,6 +23,7 @@ import {
   requireSomeUpdate,
   statusColumn,
 } from './_shared.js';
+import { listDefinitions } from './workflow.js';
 
 export const AUTOMATION_GROUP = {
   name: 'automation',
@@ -191,7 +192,7 @@ export function automationCommands(): CommandSpec[] {
             }
           : undefined;
 
-        const definitions = await ctx.api.definitions.list();
+        const definitions = await listDefinitions(ctx);
         const workflowIds = flags.workflow.map(
           (ref) => resolveRef(ref, { kind: 'workflow', candidates: definitions }).id,
         );

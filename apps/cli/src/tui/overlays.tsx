@@ -141,9 +141,9 @@ export function OverlayHost({ registry, keymap, implemented, onRunCommand }: Ove
       return (
         <ValidationOverlay
           overlay={overlay}
-          onNavigate={(stageId) => {
+          onNavigate={(stageKey) => {
             actions.closeOverlay();
-            overlay.onNavigate(stageId);
+            overlay.onNavigate(stageKey);
           }}
           onClose={actions.closeOverlay}
         />
@@ -325,11 +325,9 @@ function FormOverlay({
 
 // ── Validation findings (Phase 7 item 6) ───────────────────────────
 //
-// Before this the only validation surface was `workflow validate`'s prose
-// error list — and that list never even reached a client, because the
-// route answers 422 and the client threw the body away (see
-// `requestAllowing` in client-core). With `issues` carrying the responsible
-// stage ids, Enter can move the DAG cursor straight to the element at fault.
+// `POST /workflow-definitions/validate` answers every issue with its JSON
+// pointer and, when it belongs to one, the stage key — so Enter can move the
+// DAG cursor straight to the stage at fault.
 
 function ValidationOverlay({
   overlay,
@@ -337,7 +335,7 @@ function ValidationOverlay({
   onClose,
 }: {
   overlay: Extract<OverlayKind, { kind: 'validation' }>;
-  onNavigate: (stageId: string) => void;
+  onNavigate: (stageKey: string) => void;
   onClose: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
@@ -349,10 +347,9 @@ function ValidationOverlay({
     if (key.upArrow) return selection.move(-1);
     if (key.downArrow) return selection.move(1);
     if (key.return) {
-      const stageId = selected?.stageIds[0];
-      // An issue with no navigable stage (an empty graph, an edge whose
-      // both ends are missing) says so rather than silently doing nothing.
-      if (stageId) onNavigate(stageId);
+      // An issue not tied to a stage (a workflow setting, an empty graph)
+      // says so in the footer rather than moving the cursor anywhere.
+      if (selected?.stageKey) onNavigate(selected.stageKey);
     }
   });
 
@@ -393,8 +390,9 @@ function ValidationOverlay({
         <Box marginTop={1}>
           <Text color={theme.c('muted')} wrap="truncate-end">
             {selected.code}
-            {selected.stageIds.length > 0 ? `  ${theme.glyphs.neutral} stages: ${selected.stageIds.join(', ')}` : '  (not tied to a stage)'}
-            {selected.field ? `  ${theme.glyphs.neutral} field: ${selected.field}` : ''}
+            {selected.stageKey ? `  ${theme.glyphs.neutral} stage: ${selected.stageKey}` : '  (not tied to a stage)'}
+            {`  ${theme.glyphs.neutral} ${selected.path || '/'}`}
+            {selected.hint ? `  ${theme.glyphs.neutral} ${selected.hint}` : ''}
           </Text>
         </Box>
       ) : null}

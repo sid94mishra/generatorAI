@@ -7,6 +7,11 @@
 // desktop; STARTING a run is a phone action and gets the sticky bar.
 // Workflow-level hooks are listed read-only; deleting the definition lives
 // in the header menu behind a confirmation.
+//
+// The definition is a v2 record (`WorkflowDefinitionRecord`,
+// @generatorai/workflow-spec): everything shown comes from `record.graph`,
+// stages are identified by key. A draft (never published) only starts test
+// runs, so it wears a Draft badge and the action reads "Test run".
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
@@ -14,9 +19,11 @@ import { Alert, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { GitBranch, Lock, MoreHorizontal, Play, Trash2, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
-import { epochOr, queryKeys } from '@generatorai/client-core';
+import { epochOr, needsOrchestratedStart, queryKeys } from '@generatorai/client-core';
 
-import { incomingStages, type WorkflowEdge } from '../../src/components/work/workflowGraph';
+import type { AgentStage } from '@generatorai/workflow-spec';
+
+import { incomingStages } from '../../src/components/work/workflowGraph';
 import { Sheet, SheetSection } from '../../src/components/ui/Sheet';
 import { Touchable } from '../../src/components/ui/Touchable';
 import { useApi } from '../../src/api/useApi';
@@ -40,21 +47,6 @@ import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { PlainScroll } from '../../src/components/ui/Screen';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
-/** The stage shape as the definition endpoint serialises it. */
-interface StageNode {
-  id?: string;
-  name?: string;
-  type?: string;
-  description?: string;
-  dependsOn?: string[];
-  prompts?: { label?: string; text?: string }[];
-  harnessConfigOverrides?: { model?: string; reasoningEffort?: string };
-  approvalRequired?: boolean;
-  agentRef?: string;
-}
-
-type EdgeNode = WorkflowEdge;
-
 const RECENT_RUNS = 5;
 
 export default function WorkflowScreen(): React.ReactElement {
@@ -71,7 +63,7 @@ export default function WorkflowScreen(): React.ReactElement {
   const [menu, setMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAllRuns, setShowAllRuns] = useState(false);
-  const [selectedStage, setSelectedStage] = useState<StageNode | null>(null);
+  const [selectedStage, setSelectedStage] = useState<AgentStage | null>(null);
 
   const workflow = useQuery({
     queryKey: [...queryKeys.workflows(), 'detail', workflowId],
@@ -88,7 +80,7 @@ export default function WorkflowScreen(): React.ReactElement {
   const loaded = Boolean(workflow.data);
   React.useLayoutEffect(() => {
     navigation.setOptions({
-      title: workflow.data?.name ?? 'Workflow',
+      title: workflow.data?.graph.workflow.name ?? 'Workflow',
       headerRight: () =>
         loaded ? (
           <IconButton
@@ -98,12 +90,12 @@ export default function WorkflowScreen(): React.ReactElement {
           />
         ) : null,
     });
-  }, [navigation, workflow.data?.name, loaded, colors.foreground]);
+  }, [navigation, workflow.data?.graph.workflow.name, loaded, colors.foreground]);
 
   const remove = useMutation({
-    // Runs reference the definition (409 without force); the confirmation
-    // says they go too, so the delete is forced only when there are any.
-    mutationFn: () => admin.definitions.remove(workflowId, (runs.data?.length ?? 0) > 0),
+    // The server deletes an unused definition and archives one that runs
+    // pin (the runs are kept); the confirmation says which.
+    mutationFn: () => admin.definitions.remove(workflowId),
     onSuccess: () => {
       haptics.commit();
       queryClient.removeQueries({ queryKey: [...queryKeys.workflows(), 'detail', workflowId] });
@@ -118,23 +110,15 @@ export default function WorkflowScreen(): React.ReactElement {
     },
   });
 
-  const stages = (workflow.data?.stages ?? []) as StageNode[];
-  const edges = (workflow.data?.edges ?? []) as EdgeNode[];
-  const detail = workflow.data as (Record<string, unknown> & { variables?: unknown }) | undefined;
-  const inputs = useMemo(() => parseVariables(detail?.variables), [detail?.variables]);
-  const hooks = useMemo(() => parseWorkflowHooks(detail?.['hooks']), [detail]);
-  const stageNames = useMemo(
-    () => stages.map((stage, index) => stage.name ?? stage.id ?? `Stage ${index + 1}`),
-    [stages],
-  );
+  const graph = workflow.data?.graph;
+  const stages = useMemo(() => graph?.stages ?? [], [graph]);
+  const inputs = useMemo(() => parseVariables(graph?.workflow.variables), [graph]);
+  const hooks = useMemo(() => parseWorkflowHooks(graph?.workflow.hooks), [graph]);
+  const stageList = useMemo(() => stages.map((stage) => ({ key: stage.key, name: stage.name })), [stages]);
 
-  const incoming = useMemo(() => incomingStages(edges), [edges]);
+  const incoming = useMemo(() => incomingStages(graph?.edges ?? []), [graph]);
 
-  const nameOf = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const stage of stages) if (stage.id) map.set(stage.id, stage.name ?? stage.id);
-    return map;
-  }, [stages]);
+  const nameOf = useMemo(() => new Map(stages.map((stage) => [stage.key, stage.name])), [stages]);
 
   const sortedRuns = useMemo(
     () => [...(runs.data ?? [])].sort((a, b) => epochOr(b.updatedAt) - epochOr(a.updatedAt)),
@@ -153,6 +137,9 @@ export default function WorkflowScreen(): React.ReactElement {
     return <ErrorState message="Could not load this workflow." onRetry={() => void workflow.refetch()} />;
   }
 
+  const record = workflow.data;
+  const spec = record.graph.workflow;
+  const isDraft = record.status === 'draft';
   const latest = sortedRuns[0];
   const visibleRuns = showAllRuns ? sortedRuns : sortedRuns.slice(0, RECENT_RUNS);
 
@@ -165,9 +152,12 @@ export default function WorkflowScreen(): React.ReactElement {
               <WorkflowIcon size={18} color={colors['muted-foreground']} />
             </View>
             <View className="flex-1 gap-0.5">
-              <Text numberOfLines={2} className="text-lg font-semibold text-foreground">
-                {workflow.data.name}
-              </Text>
+              <View className="flex-row items-center gap-2">
+                <Text numberOfLines={2} className="shrink text-lg font-semibold text-foreground">
+                  {spec.name}
+                </Text>
+                {isDraft ? <Badge label="Draft" tone="neutral" /> : null}
+              </View>
               <Text className="text-sm text-muted-foreground">
                 {stages.length} stage{stages.length === 1 ? '' : 's'}
                 {inputs.length > 0 ? ` · ${inputs.length} input${inputs.length === 1 ? '' : 's'}` : ''}
@@ -176,8 +166,13 @@ export default function WorkflowScreen(): React.ReactElement {
             </View>
             {latest ? <StatusGlyph status={latest.status} size={28} /> : null}
           </View>
-          {workflow.data.description ? (
-            <Text className="text-sm leading-relaxed text-muted-foreground">{workflow.data.description}</Text>
+          {spec.description ? (
+            <Text className="text-sm leading-relaxed text-muted-foreground">{spec.description}</Text>
+          ) : null}
+          {isDraft ? (
+            <Text className="text-sm text-muted-foreground">
+              Not published yet: runs from here are test runs of the current graph.
+            </Text>
           ) : null}
         </Card>
 
@@ -219,11 +214,11 @@ export default function WorkflowScreen(): React.ReactElement {
         ) : (
           <Card className="px-4 py-1">
             {stages.map((stage, index) => {
-              const deps = (stage.id ? incoming.get(stage.id) : undefined) ?? stage.dependsOn ?? [];
+              const deps = incoming.get(stage.key) ?? [];
               return (
                 <Touchable
-                  key={stage.id ?? `${index}`}
-                  accessibilityLabel={`Inspect ${stage.name ?? `Stage ${index + 1}`}`}
+                  key={stage.key}
+                  accessibilityLabel={`Inspect ${stage.name}`}
                   accessibilityHint="Shows instructions, model and review requirements"
                   onPress={() => setSelectedStage(stage)}
                   scale="none"
@@ -243,9 +238,8 @@ export default function WorkflowScreen(): React.ReactElement {
                   >
                     <View className="min-h-7 flex-row items-center gap-2">
                       <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
-                        {stage.name ?? stage.id ?? `Stage ${index + 1}`}
+                        {stage.name}
                       </Text>
-                      {stage.type && stage.type !== 'agent' ? <Badge label={stage.type} tone="neutral" /> : null}
                     </View>
                     {stage.description ? (
                       <Text numberOfLines={3} className="text-sm leading-relaxed text-muted-foreground">
@@ -292,13 +286,13 @@ export default function WorkflowScreen(): React.ReactElement {
       <StickyActionBar>
         {runControl.available ? (
           <Button
-            label={inputs.length > 0 ? 'Run…' : 'Run workflow'}
+            label={isDraft ? (inputs.length > 0 ? 'Test run…' : 'Test run') : inputs.length > 0 ? 'Run…' : 'Run workflow'}
             size="lg"
             full
             haptic="commit"
             icon={<Play size={18} color={colors['primary-foreground']} />}
             onPress={() => setSheet(true)}
-            accessibilityHint="Choose inputs and start a new run"
+            accessibilityHint={isDraft ? 'Choose inputs and start a test run of this draft' : 'Choose inputs and start a new run'}
           />
         ) : (
           <View className="flex-row items-center gap-3">
@@ -316,18 +310,19 @@ export default function WorkflowScreen(): React.ReactElement {
         onClose={() => setSheet(false)}
         workflow={{
           id: workflowId,
-          name: workflow.data.name,
-          projectId: workflow.data.projectId ?? null,
-          variables: detail?.variables,
-          orchestratorConfig: detail?.['orchestratorConfig'],
-          stageNames,
+          name: spec.name,
+          projectId: spec.projectId ?? null,
+          variables: spec.variables,
+          orchestrated: needsOrchestratedStart(spec),
+          draft: isDraft,
+          stages: stageList,
         }}
       />
 
       <ActionSheet
         visible={menu}
         onClose={() => setMenu(false)}
-        title={workflow.data.name}
+        title={spec.name}
         actions={
           workflowEdit.available
             ? ([
@@ -356,19 +351,19 @@ export default function WorkflowScreen(): React.ReactElement {
           <Text className="text-sm text-muted-foreground">{selectedStage?.description ?? 'Workflow stage'}</Text>
           <SheetSection title="Execution" />
           <Text className="text-md text-foreground">
-            {selectedStage?.harnessConfigOverrides?.model ?? 'Workflow default model'}
-            {selectedStage?.harnessConfigOverrides?.reasoningEffort ? ` · ${selectedStage.harnessConfigOverrides.reasoningEffort}` : ''}
+            {selectedStage?.session?.model ?? 'Workflow default model'}
+            {selectedStage?.session?.reasoningEffort ? ` · ${selectedStage.session.reasoningEffort}` : ''}
           </Text>
-          {selectedStage?.agentRef ? <Text className="text-sm text-foreground">Agent: {selectedStage.agentRef}</Text> : null}
-          <Text className="text-sm text-muted-foreground">{selectedStage?.approvalRequired ? 'Pauses for your review before continuing.' : 'Continues when the stage finishes.'}</Text>
+          {selectedStage?.session?.agentRef ? <Text className="text-sm text-foreground">Agent: {selectedStage.session.agentRef}</Text> : null}
+          <Text className="text-sm text-muted-foreground">{selectedStage?.approval ? 'Pauses for your review before continuing.' : 'Continues when the stage finishes.'}</Text>
           <SheetSection title="Instructions" />
           {(selectedStage?.prompts ?? []).map((prompt, i) => (
             <View key={i} className="gap-1 rounded-xl border border-border p-3">
-              <Text className="text-sm font-semibold text-foreground">{prompt.label ?? `Prompt ${i + 1}`}</Text>
-              <Text selectable className="text-md leading-relaxed text-foreground">{prompt.text ?? 'File-based prompt'}</Text>
+              <Text className="text-sm font-semibold text-foreground">{prompt.label}</Text>
+              <Text selectable className="text-md leading-relaxed text-foreground">{prompt.text}</Text>
             </View>
           ))}
-          {selectedStage && !selectedStage.prompts?.length ? <Text className="text-sm text-muted-foreground">No inline instructions.</Text> : null}
+          {selectedStage && selectedStage.prompts.length === 0 ? <Text className="text-sm text-muted-foreground">No inline instructions.</Text> : null}
         </View>
       </Sheet>
       <ConfirmSheet
@@ -377,7 +372,7 @@ export default function WorkflowScreen(): React.ReactElement {
         title="Delete this workflow?"
         message={
           sortedRuns.length > 0
-            ? `The definition, its stages and its ${sortedRuns.length} run${sortedRuns.length === 1 ? '' : 's'} are removed for good. This cannot be undone.`
+            ? `It has ${sortedRuns.length} run${sortedRuns.length === 1 ? '' : 's'}, so it is archived rather than removed: the runs stay, and it can no longer be run.`
             : 'The definition and its stages are removed for good. This cannot be undone.'
         }
         confirmLabel="Delete workflow"

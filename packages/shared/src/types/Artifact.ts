@@ -5,7 +5,6 @@
 export interface Artifact {
   id: string;
   sessionId: string;
-  workflowId?: string;
   /** v2: Associated workflow run */
   workflowRunId?: string;
   /** v2: Associated stage run */

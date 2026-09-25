@@ -5,32 +5,39 @@
 import { count, eq, inArray } from 'drizzle-orm';
 import type { IWorkflowRunRepository } from '@generatorai/core';
 import type {
+  StageRun,
   WorkflowRun,
   WorkflowRunStatus,
   WorkflowSessionMode,
   WorkflowRunPermissionMode,
-  WorkflowDefinitionSnapshot,
 } from '@generatorai/shared';
 import { StorageError, NotFoundError } from '@generatorai/shared';
-import { workflowRuns } from '../schema.js';
+import { stageRuns, workflowRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
+import { stageRunInsertValues } from './StageRunRepository.js';
 
-/**
- * WS-D1 — drizzle's `mode: 'json'` already parses the column; this only
- * guards the shape so a hand-edited or truncated row degrades to "no
- * snapshot" instead of throwing inside `mapRow`.
- */
-function parseSnapshot(value: unknown): WorkflowDefinitionSnapshot | undefined {
-  if (!value || typeof value !== 'object') return undefined;
-  const v = value as Partial<WorkflowDefinitionSnapshot>;
-  if (!Array.isArray(v.stages) || !Array.isArray(v.edges)) return undefined;
+function runInsertValues(run: WorkflowRun): typeof workflowRuns.$inferInsert {
   return {
-    stages: v.stages,
-    edges: v.edges,
-    capturedAt: typeof v.capturedAt === 'string' ? v.capturedAt : new Date(0).toISOString(),
+    id: run.id,
+    workflowDefinitionId: run.workflowDefinitionId,
+    definitionVersionId: run.definitionVersionId,
+    name: run.name,
+    status: run.status,
+    sessionMode: run.sessionMode,
+    variables: run.variables,
+    error: run.error ?? null,
+    // HITL — persist chosen mode; NULL reads as 'bypassPermissions'.
+    permissionMode: run.permissionMode ?? null,
+    workspaceId: run.workspaceId ?? null,
+    // W23: persist the ancestor reference for the retry identity chain.
+    ...(run.ancestorRunId ? { ancestorRunId: run.ancestorRunId } : {}),
+    createdAt: run.createdAt,
+    updatedAt: run.updatedAt,
+    startedAt: run.startedAt ?? null,
+    completedAt: run.completedAt ?? null,
   };
 }
 
@@ -41,28 +48,28 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
     try {
       // DB-03 — validate variables (only JSON column on workflow_runs).
       validateJsonColumn(run.variables, jsonRecord, { column: 'variables', table: 'workflow_runs' });
-
-      await this.db.insert(workflowRuns).values({
-        id: run.id,
-        workflowDefinitionId: run.workflowDefinitionId,
-        name: run.name,
-        status: run.status,
-        sessionMode: run.sessionMode,
-        variables: run.variables,
-        error: run.error ?? null,
-        // HITL — persist chosen mode; NULL reads as 'bypassPermissions'.
-        permissionMode: run.permissionMode ?? null,
-        workspaceId: run.workspaceId ?? null,
-        // W23: persist the ancestor reference for the retry identity chain.
-        ...(run.ancestorRunId ? { ancestorRunId: run.ancestorRunId } : {}),
-        // WS-D1 — frozen topology, when the run was created from one.
-        definitionSnapshot: run.definitionSnapshot ?? null,
-        createdAt: run.createdAt,
-        updatedAt: run.updatedAt,
-        startedAt: run.startedAt ?? null,
-        completedAt: run.completedAt ?? null,
-      });
+      await this.db.insert(workflowRuns).values(runInsertValues(run));
       return run;
+    } catch (err) {
+      throw new StorageError(
+        `Failed to create workflow run: ${err instanceof Error ? err.message : String(err)}`,
+        err instanceof Error ? err : undefined,
+      );
+    }
+  }
+
+  /**
+   * The run and its stage runs in ONE synchronous transaction, so a failed
+   * stage insert never leaves a half-materialized run (A-34: no async
+   * transaction wrapper).
+   */
+  async createWithStages(run: WorkflowRun, stages: StageRun[]): Promise<void> {
+    validateJsonColumn(run.variables, jsonRecord, { column: 'variables', table: 'workflow_runs' });
+    try {
+      this.db.transaction((tx) => {
+        tx.insert(workflowRuns).values(runInsertValues(run)).run();
+        for (const sr of stages) tx.insert(stageRuns).values(stageRunInsertValues(sr)).run();
+      });
     } catch (err) {
       throw new StorageError(
         `Failed to create workflow run: ${err instanceof Error ? err.message : String(err)}`,
@@ -135,8 +142,6 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
     // silent no-op. ancestorRunId is normally immutable after create(), but
     // including it here prevents silent data loss in future callers.
     if (updates.ancestorRunId !== undefined) values['ancestorRunId'] = updates.ancestorRunId;
-    // WS-D1 — written once by startRun; nullable so pre-column runs read as undefined.
-    if (updates.definitionSnapshot !== undefined) values['definitionSnapshot'] = updates.definitionSnapshot;
     if (updates.startedAt !== undefined) values['startedAt'] = updates.startedAt;
     if (updates.completedAt !== undefined) values['completedAt'] = updates.completedAt;
     values['updatedAt'] = new Date();
@@ -165,6 +170,7 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
     return {
       id: row.id,
       workflowDefinitionId: row.workflowDefinitionId,
+      definitionVersionId: row.definitionVersionId,
       name: row.name,
       status: row.status as WorkflowRunStatus,
       sessionMode: row.sessionMode as WorkflowSessionMode,
@@ -173,10 +179,7 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
       permissionMode: (row.permissionMode as WorkflowRunPermissionMode | null) ?? undefined,
       workspaceId: row.workspaceId ?? undefined,
       // W23: ancestor run for the retry identity chain.
-      ancestorRunId: (row as typeof workflowRuns.$inferSelect & { ancestorRunId?: string | null }).ancestorRunId ?? undefined,
-      // WS-D1 — a malformed snapshot must not take the run down with it; the
-      // scheduler falls back to the live definition when this is undefined.
-      definitionSnapshot: parseSnapshot(row.definitionSnapshot),
+      ancestorRunId: row.ancestorRunId ?? undefined,
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
       startedAt: row.startedAt ?? undefined,

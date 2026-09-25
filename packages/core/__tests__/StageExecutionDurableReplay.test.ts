@@ -27,12 +27,14 @@ import {
 import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import { StartupRecoveryService } from '../src/services/StartupRecoveryService.js';
 import { AgentResolver } from '../src/services/AgentResolver.js';
+import { RunDefinitionReader } from '../src/services/definitions/RunDefinitionReader.js';
 import {
   MockStageRunRepository,
-  MockStageDefinitionRepository,
-  MockWorkflowDefinitionRepository,
+  MockWorkflowDefinitionStore,
   MockWorkflowRunRepository,
   createFakeWorkspaceManager,
+  seedDefinition,
+  testGraph,
 } from './MockRepositories.js';
 import type { HitlService } from '../src/services/HitlService.js';
 import { EventBus } from '../src/events/EventBus.js';
@@ -43,7 +45,6 @@ import type { HookExecutor } from '../src/services/HookExecutor.js';
 import type { IAgentHarness } from '../src/domain/ports/IAgentHarness.js';
 import type {
   StageRun,
-  StageDefinition,
   ChatMessage,
   Session,
   ILogger,
@@ -138,33 +139,30 @@ function createHookExecutor(): HookExecutor {
   } as unknown as HookExecutor;
 }
 
-function makeStageDef(prompts: string[], opts?: Partial<StageDefinition>): StageDefinition {
-  return {
-    id: 'sd-1',
-    workflowDefinitionId: 'def-1',
+/** The one stage every test runs, as a v2 stage input. */
+function stageGraph(prompts: string[], extra: Record<string, unknown> = {}) {
+  return testGraph([{
+    key: 'stage_one',
     name: 'Stage One',
-    order: 0,
     prompts: prompts.map((text, i) => ({ text, label: `p${i}` })),
-    variables: {},
-    hooks: [],
     // Default is 1 in-process retry with a 3 s backoff; tests that want a
     // retry ask for it explicitly, and the rest must not get one silently.
-    retryPolicy: { maxRetries: 0, backoffMs: 1, backoffMultiplier: 1 },
-    createdAt: new Date(),
-    ...opts,
-  } as StageDefinition;
+    retry: { maxAttempts: 1, initialDelayMs: 1, backoffMultiplier: 1 },
+    ...extra,
+  }]);
 }
 
 function makeStageRun(id = 'sr-1'): StageRun {
   return {
     id,
     workflowRunId: 'run-1',
-    stageDefinitionId: 'sd-1',
+    stageKey: 'stage_one',
     name: 'Stage One',
     status: 'pending',
     currentStep: 0,
     totalSteps: 1,
     retryCount: 0,
+    version: 0,
     createdAt: new Date(),
   };
 }
@@ -190,7 +188,8 @@ interface Fixture {
   service: StageExecutionService;
   harness: RecordingHarness;
   stageRunRepo: MockStageRunRepository;
-  stageDefRepo: MockStageDefinitionRepository;
+  /** Publish the stage's definition and pin run 'run-1' to it. */
+  seed: (prompts: string[], extra?: Record<string, unknown>) => Promise<void>;
   messageRepo: ReturnType<typeof createMessageRepo>;
   entryRepo: EntryRepository;
   boot: { n: number };
@@ -218,20 +217,28 @@ describe('W22 — effect sandwich on the stage turn path', () => {
     const boot = { n: 1 };
     const harness = new RecordingHarness();
     const stageRunRepo = new MockStageRunRepository();
-    const stageDefRepo = new MockStageDefinitionRepository();
+    const definitionStore = new MockWorkflowDefinitionStore();
+    const runRepo = new MockWorkflowRunRepository(stageRunRepo);
     const messageRepo = createMessageRepo();
+    const seed = async (prompts: string[], extra?: Record<string, unknown>): Promise<void> => {
+      const { definitionId, versionId } = await seedDefinition(definitionStore, stageGraph(prompts, extra));
+      const now = new Date();
+      await runRepo.create({
+        id: 'run-1', workflowDefinitionId: definitionId, definitionVersionId: versionId, name: 'Run',
+        status: 'running', sessionMode: 'per-stage', variables: {}, createdAt: now, updatedAt: now,
+      });
+    };
 
     const service = new StageExecutionService(
       stageRunRepo,
-      stageDefRepo,
+      new RunDefinitionReader(definitionStore),
       messageRepo,
       harnessPort(harness),
       new EventBus(),
       createSessionAllocator(boot),
       createHookExecutor(),
       createFakeWorkspaceManager(),
-      new MockWorkflowDefinitionRepository(),
-      new MockWorkflowRunRepository(),
+      runRepo,
       {} as HitlService,
     );
     if (opts.durable) service.setDurableEngine(engine);
@@ -248,7 +255,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
         toolPolicy: { ...empty.toolPolicy, groups: opts.toolGroups },
       });
     }
-    return { service, harness, stageRunRepo, stageDefRepo, messageRepo, entryRepo, boot };
+    return { service, harness, stageRunRepo, seed, messageRepo, entryRepo, boot };
   }
 
   /**
@@ -306,7 +313,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('does NOT re-send a settled prompt after a restart (the W22 exit criterion)', async () => {
     const f = fixture({ durable: true, toolGroups: READ_ONLY_GROUPS });
-    await f.stageDefRepo.create(makeStageDef(['step one', 'step two']));
+    await f.seed(['step one', 'step two']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -327,7 +334,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('CONTROL: without the durable engine the same restart re-sends prompt one', async () => {
     const f = fixture({ durable: false, toolGroups: READ_ONLY_GROUPS });
-    await f.stageDefRepo.create(makeStageDef(['step one', 'step two']));
+    await f.seed(['step one', 'step two']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -344,7 +351,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('re-seeds the fresh conversation with the replayed turns exactly once', async () => {
     const f = fixture({ durable: true, toolGroups: READ_ONLY_GROUPS });
-    await f.stageDefRepo.create(makeStageDef(['step one', 'step two']));
+    await f.seed(['step one', 'step two']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -365,7 +372,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('does not duplicate the chat history of a replayed turn', async () => {
     const f = fixture({ durable: true, toolGroups: READ_ONLY_GROUPS });
-    await f.stageDefRepo.create(makeStageDef(['step one', 'step two']));
+    await f.seed(['step one', 'step two']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -386,7 +393,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('replay:safe re-runs the turn that was in flight (read-only stage)', async () => {
     const f = fixture({ durable: true, toolGroups: READ_ONLY_GROUPS });
-    await f.stageDefRepo.create(makeStageDef(['only step']));
+    await f.seed(['only step']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -405,7 +412,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
   it('replay:never does NOT re-run the turn that was in flight (mutating stage)', async () => {
     // No toolGroups override → platform defaults include fileWrite + shell.
     const f = fixture({ durable: true });
-    await f.stageDefRepo.create(makeStageDef(['only step']));
+    await f.seed(['only step']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -425,11 +432,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('an in-process retry gets a fresh epoch and re-runs the work', async () => {
     const f = fixture({ durable: true });
-    await f.stageDefRepo.create(
-      makeStageDef(['only step'], {
-        retryPolicy: { maxRetries: 1, backoffMs: 1, backoffMultiplier: 1 },
-      } as Partial<StageDefinition>),
-    );
+    await f.seed(['only step'], { retry: { maxAttempts: 2, initialDelayMs: 1, backoffMultiplier: 1 } });
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -447,7 +450,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('writes the stage result to the durable artifact channel and seals it', async () => {
     const f = fixture({ durable: true });
-    await f.stageDefRepo.create(makeStageDef(['only step']));
+    await f.seed(['only step']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -463,7 +466,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('records one lineage link per session the stage speaks through', async () => {
     const f = fixture({ durable: true, toolGroups: READ_ONLY_GROUPS });
-    await f.stageDefRepo.create(makeStageDef(['step one', 'step two']));
+    await f.seed(['step one', 'step two']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -497,7 +500,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('StartupRecoveryService rewinds currentStep so the journal decides what replays', async () => {
     const f = fixture({ durable: true, toolGroups: READ_ONLY_GROUPS });
-    await f.stageDefRepo.create(makeStageDef(['step one', 'step two']));
+    await f.seed(['step one', 'step two']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -522,7 +525,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
     // so the turn's replay policy is `never`. That is exactly the stage class
     // where the journal used to answer the resume with a synthetic settlement.
     const f = fixture({ durable: true });
-    await f.stageDefRepo.create(makeStageDef(['only step']));
+    await f.seed(['only step']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -555,7 +558,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('pause→resume stays correct on the SECOND cycle (the skip was durable)', async () => {
     const f = fixture({ durable: true });
-    await f.stageDefRepo.create(makeStageDef(['only step']));
+    await f.seed(['only step']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -599,7 +602,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('a post-completion validation retry appends to the stage artifact instead of being swallowed', async () => {
     const f = fixture({ durable: true });
-    await f.stageDefRepo.create(makeStageDef(['only step']));
+    await f.seed(['only step']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -638,7 +641,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('releases the journal only AFTER the completed status is written', async () => {
     const f = fixture({ durable: true });
-    await f.stageDefRepo.create(makeStageDef(['only step']));
+    await f.seed(['only step']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -660,7 +663,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('releases the journal only AFTER the failed status is written', async () => {
     const f = fixture({ durable: true });
-    await f.stageDefRepo.create(makeStageDef(['only step']));
+    await f.seed(['only step']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 
@@ -680,7 +683,7 @@ describe('W22 — effect sandwich on the stage turn path', () => {
 
   it('reclaims the step journal at stage completion but keeps the artifact', async () => {
     const f = fixture({ durable: true });
-    await f.stageDefRepo.create(makeStageDef(['only step']));
+    await f.seed(['only step']);
     const sr = makeStageRun();
     await f.stageRunRepo.create(sr);
 

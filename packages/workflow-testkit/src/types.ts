@@ -168,11 +168,11 @@ export interface EngineAdapter {
   classifyTurn(conversationId: string, prompt: string): TurnKind;
   importDefinition(spec: WorkflowSpecJson): Promise<{ definitionId: string; stageIds: Record<string, string> }>;
   /** Create a run; start it unless `start: false`. Returns the run id. */
-  startRun(definitionId: string, variables: Record<string, unknown>, opts?: { start?: boolean }): Promise<string>;
+  startRun(definitionId: string, variables: Record<string, unknown>, opts?: { start?: boolean; testRun?: boolean }): Promise<string>;
   command(runId: string, cmd: RunCommand): Promise<CommandResult>;
   snapshot(runId: string): Promise<RunSnapshot>;
   isTerminal(snap: RunSnapshot): boolean;
-  /** Stage definition ids by name for the run's definition. */
+  /** Stage keys by name for the run's pinned definition version. */
   stageIds(runId: string): Promise<Record<string, string>>;
   /** The instance id (v1: stage run id) for an instance path. */
   instanceId(runId: string, instancePath: string): string;

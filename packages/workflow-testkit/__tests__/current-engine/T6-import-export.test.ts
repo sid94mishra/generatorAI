@@ -1,16 +1,19 @@
 // ────────────────────────────────────────────────────────────────
-// T6 — definition create, export → import round trip, malformed imports
-// (F_live_tests §1 T6, §2 F-12, F-13; `t6.mts`).
+// T6 — definition documents: create, export → import round trip,
+// malformed imports, and the draft / version lifecycle
+// (F_live_tests §1 T6, §2 F-12, F-13; PHASE-01 WP-1.7 tests).
 //
-// Drives the service methods behind the routes, after parsing each body
-// with the SAME zod schema the route validates with.
-//
-// CHARACTERISATION of today's engine. `// KNOWN-BUG W-xx` marks the
-// assertions PHASE-01 flips (the definition model is rewritten there).
+// Drives the definition service behind the routes. P01 rewrote the
+// definition model: a definition is one v2 `WorkflowGraph` document, so
+// the P00 KNOWN-BUGs W-20 / W-25 (fields dropped on create or export),
+// W-30 (broken definitions accepted) and W-64 (non-strict import) flipped
+// to PASS here, and W-13 (a run reads the live definition) is covered by
+// the pinned-version test below.
 // ────────────────────────────────────────────────────────────────
 
+import { ConflictError, RevisionConflictError, WorkflowValidationError } from '@generatorai/shared';
+import { validateWorkflow, type WorkflowGraph } from '@generatorai/workflow-spec';
 import { afterEach, describe, expect, it } from 'vitest';
-import { CreateStageSchema, CreateWorkflowDefinitionSchema, ImportWorkflowJsonSchema } from '@generatorai/shared';
 import { createTestEngine, type TestEngine } from '../../src/index.js';
 
 let engine: TestEngine | undefined;
@@ -32,152 +35,195 @@ const hook = (id: string, phase: string) => ({
   config: { type: 'script', command: 'echo', args: ['hi'] },
 });
 
-const FULL_DEF = {
-  name: 't6-roundtrip',
-  description: 'complex def for round trip',
-  sessionMode: 'per-stage',
-  harnessConfig: { model: 'haiku', reasoningEffort: 'low', maxTurns: 7 },
-  variables: [{ name: 'topic', type: 'string', label: 'Topic', required: true, defaultValue: 'cats' }],
-  orchestratorConfig: {
-    category: 'custom',
-    codebaseAliases: [],
-    requiresCodebase: false,
-    preprocessingSteps: [{ type: 'set_variable', name: 'pp', config: { k: 'v' }, failOnError: false, order: 0 }],
-    resultValidations: [{ stageIndex: 0, rules: [{ type: 'contains', value: 'WF-LEVEL', message: 'wf-level rule' }] }],
-    postProcessingSteps: [],
+const stage = (key: string, extra: Record<string, unknown> = {}) => ({
+  kind: 'agent',
+  key,
+  name: key.toUpperCase(),
+  description: `stage ${key}`,
+  position: { x: 10, y: 20 },
+  prompts: [{ label: 'p1', text: `Do {{variables.topic}} ${key}` }],
+  session: { defaultAgentMode: 'plan', model: 'haiku', browser: { visibility: 'visible' }, skills: { disabled: ['stageSkill'] } },
+  context: { mode: 'output' },
+  output: { format: 'text', rules: [{ type: 'contains', value: 'WF-LEVEL', message: 'wf-level rule' }] },
+  retry: { maxAttempts: 4, initialDelayMs: 1500, backoffMultiplier: 3 },
+  timeouts: { attemptMs: 120_000 },
+  approval: { prompt: 'Looks right?', allowChanges: true, maxRounds: 2 },
+  hooks: [hook(`${key}_h`, 'pre_run')],
+  ...extra,
+});
+
+/** Every field the v1 engine accepts, the ones P00 showed being dropped included. */
+const FULL: unknown = {
+  formatVersion: 2,
+  workflow: {
+    name: 't6-roundtrip',
+    description: 'complex def for round trip',
+    session: { model: 'haiku', reasoningEffort: 'low', maxTurns: 7, browser: { enabled: true, visibility: 'headless', allowedHosts: ['example.com'] } },
+    variables: [{ name: 'topic', type: 'string', label: 'Topic', required: true, defaultValue: 'cats' }],
+    hooks: [hook('wh1', 'on_run_start'), hook('hf1', 'on_run_complete')],
+    lifecycle: {
+      useWorktree: false,
+      requiresCodebase: false,
+      preprocessingSteps: [{ name: 'pp', failOnError: false, config: { type: 'set_variable', variableName: 'pp', value: 'v' } }],
+    },
+    tags: ['t6'],
   },
-  hooks: [hook('wh1', 'on_run_start')],
-  hooksFile: { version: 1, workflow: [hook('hf1', 'on_run_complete')], stages: { S0: [hook('hfs1', 'pre_run')] } },
-  useWorktree: false,
-  browserConfig: { enabled: true, visibility: 'headless', allowedHosts: ['example.com'] },
+  stages: [
+    stage('s0', { guard: "variables.topic != ''" }),
+    stage('s1', { context: { from: ['s0'], mode: 'summary' } }),
+    stage('s2'),
+    stage('s3', { output: { format: 'json', schema: { type: 'object' }, rules: [] } }),
+  ],
+  edges: [
+    { from: 's0', to: 's1', on: 'success' },
+    { from: 's0', to: 's2', on: 'failure' },
+    { from: 's1', to: 's3', on: 'completion', when: "stages.s1.status == 'completed'" },
+    { from: 's2', to: 's3', on: 'always' },
+  ],
 };
 
-const stageBody = (name: string, order: number) => ({
-  name,
-  order,
-  prompts: [{ label: 'p1', text: `Do {{topic}} ${name}` }],
-  retryPolicy: { maxRetries: 3, backoffMs: 1500, backoffMultiplier: 3 },
-  contextFilter: 'full',
-  approvalRequired: true,
-  agentMode: 'plan',
-  skills: [{ name: 'stageSkill' }],
-  browserConfig: { visibility: 'visible' },
-});
+const fullGraph = (): WorkflowGraph => {
+  const result = validateWorkflow(FULL);
+  expect(result.issues).toEqual([]);
+  return result.graph!;
+};
 
-describe('T6 definitions: create and export → import (current engine)', () => {
-  it('create drops fields it accepted, and the round trip loses more', async () => {
+describe('T6 definitions: create and export → import round trip', () => {
+  it('stores every field and round-trips with zero diffs', async () => {
     engine = await createTestEngine();
     const svc = engine.services.workflowDefinitionService;
-    // POST /workflow-definitions, /:id/stages, /:id/edges.
-    const created = await svc.createDefinition(CreateWorkflowDefinitionSchema.parse(FULL_DEF) as never);
-    const stageSchema = CreateStageSchema.omit({ workflowDefinitionId: true });
-    const ids: string[] = [];
-    for (const [i, n] of ['S0', 'S1', 'S2', 'S3'].entries()) {
-      const s = await svc.addStage({ ...(stageSchema.parse(stageBody(n, i)) as never), workflowDefinitionId: created.id });
-      ids.push(s.id);
-    }
-    const edgeTypes = [
-      [0, 1, 'on_success'],
-      [0, 2, 'on_failure'],
-      [1, 3, 'on_completion'],
-      [2, 3, 'always'],
-    ] as const;
-    for (const [f, t, edgeType] of edgeTypes) {
-      await svc.addEdge({ workflowDefinitionId: created.id, fromStageId: ids[f]!, toStageId: ids[t]!, edgeType });
-    }
-    const orig = await svc.getDefinitionWithStages(created.id);
+    const created = await svc.createFromSpec(FULL, { canEditCommands: true });
+    expect(created.status).toBe('draft');
+    expect(created.graph).toEqual(fullGraph());
 
-    // Create silently drops accepted fields (F-12).
-    // Definition-level skills/agents and defaultAgentRef were deleted in P01
-    // WP-1.4 (PD-11); the agent binds through harnessConfig.agentRef.
-    expect(orig.useWorktree).toBe(true); // KNOWN-BUG W-20 (useWorktree:false stored as true)
-    expect((orig as { browserConfig?: unknown }).browserConfig).toBeUndefined(); // KNOWN-BUG W-20 (no column)
-    expect((orig.stages[0] as { skills?: unknown }).skills).toBeUndefined(); // KNOWN-BUG W-20 (stage skills dropped)
-    expect((orig.stages[0] as { browserConfig?: unknown }).browserConfig).toBeUndefined(); // KNOWN-BUG W-20
-    // Stored correctly.
-    expect(orig.orchestratorConfig?.preprocessingSteps).toHaveLength(1);
-    expect(orig.hooksFile).toBeDefined();
-    expect(orig.stages[0]!.agentMode).toBe('plan');
-
-    // GET /:id/export → POST /import-json.
-    const exported = await svc.exportAsTemplate(created.id);
-    const imported = await svc.importFromJSON(ImportWorkflowJsonSchema.parse(exported));
-    const back = await svc.getDefinitionWithStages(imported.id);
-
-    expect(back.orchestratorConfig).toBeUndefined(); // KNOWN-BUG W-25 (preprocessing + workflow-level validations lost)
-    expect(back.hooksFile).toBeUndefined(); // KNOWN-BUG W-25 (hooksFile not exported)
-    expect(back.stages.every((s) => s.agentMode === undefined)).toBe(true); // KNOWN-BUG W-25 (agentMode not exported)
-    expect(back.tags).toEqual(['json-import']);
-
-    // Preserved.
-    expect(back.stages.map((s) => s.name)).toEqual(['S0', 'S1', 'S2', 'S3']);
-    expect(back.stages[1]!.retryPolicy).toEqual({ maxRetries: 3, backoffMs: 1500, backoffMultiplier: 3 });
-    expect(back.stages[1]!.approvalRequired).toBe(true);
-    expect(back.hooks).toHaveLength(1);
-    expect(back.variables).toEqual(orig.variables);
-    const edgeKey = (e: { fromStageId: string; toStageId: string; edgeType: string }, stages: Array<{ id: string }>) =>
-      `${stages.findIndex((s) => s.id === e.fromStageId)}->${stages.findIndex((s) => s.id === e.toStageId)}:${e.edgeType}`;
-    expect(back.edges.map((e) => edgeKey(e, back.stages)).sort()).toEqual(
-      orig.edges.map((e) => edgeKey(e, orig.stages)).sort(),
-    );
+    const exported = await svc.exportGraph(created.id);
+    const imported = await svc.import(JSON.parse(exported), { canEditCommands: true });
+    expect(imported.id).not.toBe(created.id);
+    expect(imported.graph).toEqual(created.graph);
+    expect(await svc.exportGraph(imported.id)).toBe(exported);
   });
 });
 
-describe('T6 malformed imports (current engine)', () => {
-  const base = {
-    name: 'bad',
-    stages: [
-      { name: 'a', order: 0, prompts: [{ label: 'a', text: 'a' }] },
-      { name: 'b', order: 1, prompts: [{ label: 'b', text: 'b' }] },
+describe('T6 malformed imports', () => {
+  const doc = (patch: { stages?: unknown[]; edges?: unknown[]; extra?: Record<string, unknown> }) => ({
+    formatVersion: 2,
+    workflow: { name: 'bad' },
+    stages: patch.stages ?? [
+      { kind: 'agent', key: 'a', name: 'a', prompts: [{ label: 'a', text: 'a' }] },
+      { kind: 'agent', key: 'b', name: 'b', prompts: [{ label: 'b', text: 'b' }] },
     ],
-    edges: [] as Array<Record<string, unknown>>,
-  };
+    edges: patch.edges ?? [],
+    ...patch.extra,
+  });
+  const a = { kind: 'agent', key: 'a', name: 'a', prompts: [{ label: 'a', text: 'a' }] };
+  const b = { kind: 'agent', key: 'b', name: 'b', prompts: [{ label: 'b', text: 'b' }] };
 
-  async function tryImport(e: TestEngine, doc: unknown): Promise<'accepted' | 'rejected'> {
-    const parsed = ImportWorkflowJsonSchema.safeParse(doc);
-    if (!parsed.success) return 'rejected';
-    try {
-      await e.services.workflowDefinitionService.importFromJSON(parsed.data);
-      return 'accepted';
-    } catch {
-      return 'rejected';
-    }
-  }
-
-  it('rejects structural errors', async () => {
+  it('rejects structural errors, broken expressions and unknown fields', async () => {
     engine = await createTestEngine();
+    const svc = engine.services.workflowDefinitionService;
     const cases: Record<string, unknown> = {
-      cycle: { ...base, edges: [{ fromStageIndex: 0, toStageIndex: 1 }, { fromStageIndex: 1, toStageIndex: 0 }] },
-      selfLoop: { ...base, edges: [{ fromStageIndex: 0, toStageIndex: 0 }] },
-      missingStage: { ...base, edges: [{ fromStageIndex: 0, toStageIndex: 5 }] },
-      duplicateEdge: { ...base, edges: [{ fromStageIndex: 0, toStageIndex: 1 }, { fromStageIndex: 0, toStageIndex: 1 }] },
-      zeroStages: { ...base, stages: [] },
-      negativeIndex: { ...base, edges: [{ fromStageIndex: -1, toStageIndex: 1 }] },
+      cycle: doc({ edges: [{ from: 'a', to: 'b', on: 'success' }, { from: 'b', to: 'a', on: 'success' }] }),
+      selfLoop: doc({ edges: [{ from: 'a', to: 'a', on: 'success' }] }),
+      missingStage: doc({ edges: [{ from: 'a', to: 'zz', on: 'success' }] }),
+      duplicateEdge: doc({ edges: [{ from: 'a', to: 'b', on: 'success' }, { from: 'a', to: 'b', on: 'failure' }] }),
+      duplicateKeys: doc({ stages: [a, { ...b, key: 'a' }] }),
+      badKey: doc({ stages: [a, { ...b, key: 'B-1' }] }),
+      unparseableGuard: doc({ stages: [a, { ...b, guard: '((( variables.x ==' }], edges: [{ from: 'a', to: 'b', on: 'success' }] }),
+      undeclaredVariable: doc({ stages: [a, { ...b, guard: 'variables.nope == 1' }] }),
+      unknownContextSource: doc({ stages: [a, { ...b, context: { from: ['nope'] } }] }),
+      unknownTopField: doc({ extra: { bogusTop: 1 } }),
+      unknownStageField: doc({ stages: [a, { ...b, bogusStage: true }] }),
+      v1Field: doc({ stages: [a, { ...b, retryPolicy: { maxRetries: 1 } }] }),
+      wrongFormat: { ...doc({}), formatVersion: 1 },
     };
-    for (const [label, doc] of Object.entries(cases)) {
-      expect({ label, result: await tryImport(engine, doc) }).toEqual({ label, result: 'rejected' });
+    for (const [label, input] of Object.entries(cases)) {
+      const err = await svc.import(input, { canEditCommands: true }).catch((e: unknown) => e);
+      expect({ label, rejected: err instanceof WorkflowValidationError }).toEqual({ label, rejected: true });
+      expect((err as WorkflowValidationError).issues.length).toBeGreaterThan(0);
     }
   });
+});
 
-  it('accepts definitions that can never run as written', async () => {
+describe('T6 draft, versions and runs', () => {
+  const LINEAR = {
+    name: 't6-lifecycle',
+    stages: [
+      { name: 'A', prompt: 'Write one line containing the token A-ORIGINAL.' },
+      { name: 'B', prompt: 'Write one line containing the token B-ORIGINAL.' },
+    ],
+    edges: [['A', 'B']] as const,
+  };
+
+  it('a draft runs only as a test run; publish makes it runnable', async () => {
     engine = await createTestEngine();
-    const [a, b] = base.stages as [Record<string, unknown>, Record<string, unknown>];
-    const cases: Record<string, unknown> = {
-      duplicateNames: { ...base, stages: [a, { ...b, name: 'a' }] },
-      duplicateOrder: { ...base, stages: [a, { ...b, order: 0 }] },
-      unparseableCondition: {
-        ...base,
-        stages: [a, { ...b, condition: { type: 'expression', expression: '((( variables.x ==' } }],
-        edges: [{ fromStageIndex: 0, toStageIndex: 1 }],
-      },
-      expressionWithoutText: { ...base, stages: [a, { ...b, condition: { type: 'expression' } }] },
-      unknownContextSource: { ...base, stages: [a, { ...b, contextSources: ['nope'] }] },
-    };
-    for (const [label, doc] of Object.entries(cases)) {
-      expect({ label, result: await tryImport(engine, doc) }).toEqual({ label, result: 'accepted' }); // KNOWN-BUG W-30 (validator accepts broken definitions)
-    }
-    // Unknown fields are stripped silently rather than rejected.
-    const unknown = { ...base, bogusTop: 1, stages: base.stages.map((s) => ({ ...s, bogusStage: true })) };
-    expect(await tryImport(engine, unknown)).toBe('accepted'); // KNOWN-BUG W-64 (import is non-strict)
+    const svc = engine.services.workflowDefinitionService;
+    const { definitionId } = await engine.importDefinition(LINEAR);
+    // importDefinition publishes; make a fresh draft from its graph.
+    const draft = await svc.createFromSpec((await svc.get(definitionId)).graph, { canEditCommands: true });
+    expect(draft.status).toBe('draft');
+
+    await expect(engine.runWorkflow({ definitionId: draft.id })).rejects.toBeInstanceOf(ConflictError);
+
+    const test = await (await engine.runWorkflow({ definitionId: draft.id }, {}, { testRun: true })).waitForTerminal();
+    expect(test.run.status).toBe('completed');
+    const kindOf = (versionId: string) =>
+      (engine!.sqlite.prepare('SELECT kind FROM workflow_definition_versions WHERE id = ?').get(versionId) as { kind: string }).kind;
+    expect(kindOf(test.run.definitionVersionId)).toBe('test');
+
+    const published = await svc.publish(draft.id);
+    expect(published.status).toBe('published');
+    expect(published.hasUnpublishedChanges).toBe(false);
+    const real = await (await engine.runWorkflow({ definitionId: draft.id })).waitForTerminal();
+    expect(real.run.status).toBe('completed');
+    expect(real.run.definitionVersionId).toBe(published.currentVersionId);
+    expect(kindOf(real.run.definitionVersionId)).toBe('published');
+  });
+
+  it('a run keeps its pinned version when the definition is edited and republished mid-run (W-13)', async () => {
+    engine = await createTestEngine({ script: { A: [{ text: 'A-ORIGINAL line that is long enough to be kept as is.', delayMs: 1500 }] } });
+    const svc = engine.services.workflowDefinitionService;
+    const { definitionId } = await engine.importDefinition(LINEAR);
+    const run = await engine.runWorkflow({ definitionId });
+    const before = await svc.get(definitionId);
+
+    const edited = structuredClone(before.graph);
+    edited.stages[1]!.prompts[0]!.text = 'Write one line containing the token B-EDITED.';
+    const saved = await svc.saveGraph(definitionId, edited, before.revision, { canEditCommands: false });
+    expect(saved.revision).toBe(before.revision + 1);
+    expect(saved.hasUnpublishedChanges).toBe(true);
+    const republished = await svc.publish(definitionId);
+    expect(republished.currentVersionId).not.toBe(before.currentVersionId);
+
+    const snap = await run.waitForTerminal();
+    expect(snap.run.status).toBe('completed');
+    expect(snap.run.definitionVersionId).toBe(before.currentVersionId);
+    const bPrompt = snap.calls.find((c) => c.stageName === 'B' && c.kind === 'prompt')!;
+    expect(bPrompt.prompt).toContain('B-ORIGINAL');
+    expect(bPrompt.prompt).not.toContain('B-EDITED');
+  });
+
+  it('a stale revision is a conflict, and deleting a definition with runs archives it', async () => {
+    engine = await createTestEngine();
+    const svc = engine.services.workflowDefinitionService;
+    const { definitionId } = await engine.importDefinition(LINEAR);
+    const record = await svc.get(definitionId);
+    await svc.saveGraph(definitionId, record.graph, record.revision, { canEditCommands: false });
+
+    const err = await svc.saveGraph(definitionId, record.graph, record.revision, { canEditCommands: false }).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(RevisionConflictError);
+    expect((err as RevisionConflictError).current.revision).toBe(record.revision + 1);
+
+    // Adding a command-bearing field needs the command-edit scope.
+    const withHook = structuredClone(record.graph);
+    withHook.stages[0]!.hooks = [hook('x', 'pre_run')] as never;
+    await expect(svc.saveGraph(definitionId, withHook, record.revision + 1, { canEditCommands: false })).rejects.toThrow(/admin:settings/);
+
+    await (await engine.runWorkflow({ definitionId })).waitForTerminal();
+    expect(await svc.delete(definitionId)).toEqual({ archived: true, runs: 1 });
+    expect((await svc.get(definitionId)).archivedAt).not.toBeNull();
+    await expect(engine.runWorkflow({ definitionId })).rejects.toBeInstanceOf(ConflictError);
+
+    const { definitionId: unused } = await engine.importDefinition({ ...LINEAR, name: 'unused' });
+    expect(await svc.delete(unused)).toEqual({ deleted: true });
   });
 });

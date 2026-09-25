@@ -1,259 +1,189 @@
 // ────────────────────────────────────────────────────────────────
-// WorkflowDefinition Routes (v2) — CRUD + stages + edges + validation
-// 13 endpoints for workflow definition management
+// Workflow definition routes (P01 WP-1.7) — definitions as versioned v2
+// documents. There are no per-stage or per-edge routes: a client reads
+// the whole `WorkflowGraph` and saves it back with `PUT /:id/graph`
+// (optimistic concurrency on `revision`); runs pin published versions.
+//
+//   GET    /workflow-definitions?projectId&status&q&cursor&limit&includeArchived
+//   POST   /workflow-definitions                 a draft from a graph
+//   POST   /workflow-definitions/validate        stateless validation
+//   POST   /workflow-definitions/import          graph | {templateId}; ?publish=true
+//   GET    /workflow-definitions/:id
+//   PUT    /workflow-definitions/:id/graph       {graph, expectedRevision}
+//   POST   /workflow-definitions/:id/publish
+//   GET    /workflow-definitions/:id/versions[/:versionId]
+//   GET    /workflow-definitions/:id/export      the canonical document
+//   DELETE /workflow-definitions/:id             hard delete, or archive when runs exist
 // ────────────────────────────────────────────────────────────────
 
-import { Router } from 'express';
-import type { Container } from '../composition-root.js';
-import { validate } from '../middleware/validate.js';
+import { Router, type Request } from 'express';
 import {
-  CreateWorkflowDefinitionSchema,
-  UpdateWorkflowDefinitionSchema,
-  CreateStageSchema,
-  CreateEdgeSchema,
-  ImportWorkflowJsonSchema,
-} from '@generatorai/shared';
+  ImportTemplateRequestSchema,
+  SaveGraphRequestSchema,
+  DEFINITION_STATUSES,
+  type DefinitionStatus,
+} from '@generatorai/workflow-spec';
+import { COMMAND_EDIT_SCOPE } from '@generatorai/core';
+import type { Container } from '../composition-root.js';
+
+/** Principals that may publish on import: humans, not integrations. */
+const HUMAN_PRINCIPALS = new Set(['local-desktop', 'paired-device', 'user-session']);
+
+/** Whether the caller may add or change command-bearing fields (W-34). */
+function canEditCommands(req: Request): boolean {
+  // No principal means authentication is not in play (tests, embedded).
+  return !req.principal || (req.principal.scopes as readonly string[]).includes(COMMAND_EDIT_SCOPE);
+}
+
+const first = (v: unknown): string | undefined => (typeof v === 'string' && v !== '' ? v : undefined);
 
 export function createWorkflowDefinitionRoutes(container: Container): Router {
   const router = Router();
   const { workflowDefinitionService, logger } = container;
 
-  // ═══════════════════════════════════════════════════════════
-  // Definition CRUD
-  // ═══════════════════════════════════════════════════════════
-
-  // POST /workflow-definitions — Create a new workflow definition
-  router.post('/', validate(CreateWorkflowDefinitionSchema), async (req, res, next) => {
-    try {
-      // Apply default harness config: all tools enabled, infinite session
-      const params = { ...req.body };
-      if (!params.harnessConfig) {
-        params.harnessConfig = {};
-      }
-      if (!params.harnessConfig.availableTools) {
-        params.harnessConfig.availableTools = ['*'];
-      }
-      if (params.harnessConfig.streaming === undefined) {
-        params.harnessConfig.streaming = true;
-      }
-
-      const definition = await workflowDefinitionService.createDefinition(params);
-      logger.info(`[WorkflowDefRoutes] Created definition ${definition.id}`, {
-        requestId: req.requestId,
-      });
-      res.status(201).json(definition);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // GET /workflow-definitions — List all definitions
   router.get('/', async (req, res, next) => {
     try {
-      const projectId = req.query['projectId'] as string | undefined;
-      const definitions = await workflowDefinitionService.listDefinitions(projectId);
-      res.json(definitions);
+      const projectId = first(req.query['projectId']);
+      const status = first(req.query['status']);
+      const limit = first(req.query['limit']);
+      const page = await workflowDefinitionService.list({
+        // `global` asks for definitions without a project.
+        ...(projectId !== undefined ? { projectId: projectId === 'global' ? null : projectId } : {}),
+        ...(status && (DEFINITION_STATUSES as readonly string[]).includes(status) ? { status: status as DefinitionStatus } : {}),
+        ...(first(req.query['q']) ? { q: first(req.query['q'])! } : {}),
+        ...(first(req.query['cursor']) ? { cursor: first(req.query['cursor'])! } : {}),
+        ...(limit && Number.isFinite(Number(limit)) ? { limit: Number(limit) } : {}),
+        includeArchived: req.query['includeArchived'] === 'true',
+      });
+      res.json(page);
     } catch (err) {
       next(err);
     }
   });
 
-  // GET /workflow-definitions/:id — Get definition with stages and edges
+  router.post('/', async (req, res, next) => {
+    try {
+      const record = await workflowDefinitionService.create(req.body, { canEditCommands: canEditCommands(req) });
+      logger.info(`[WorkflowDefRoutes] Created draft ${record.id}`, { requestId: req.requestId });
+      res.status(201).json(record);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // Stateless: returns the ValidationResult (200 whether or not it is valid).
+  router.post('/validate', (req, res, next) => {
+    try {
+      const { valid, issues } = workflowDefinitionService.validate(req.body);
+      res.json({ valid, issues });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/import', async (req, res, next) => {
+    try {
+      const wantsPublish = String(req.query['publish'] ?? '') === 'true';
+      if (wantsPublish && req.principal && !HUMAN_PRINCIPALS.has(req.principal.type)) {
+        res.status(403).json({
+          error: { code: 'PUBLISH_NOT_ALLOWED', message: 'Only a person can publish on import; import as a draft instead.' },
+        });
+        return;
+      }
+      const opts = { canEditCommands: canEditCommands(req), publish: wantsPublish };
+      const template = ImportTemplateRequestSchema.safeParse(req.body);
+      const record = template.success
+        ? await workflowDefinitionService.importTemplate(template.data.templateId, {
+            ...opts,
+            ...(template.data.name ? { name: template.data.name } : {}),
+            ...(template.data.projectId !== undefined ? { projectId: template.data.projectId } : {}),
+          })
+        : await workflowDefinitionService.import(req.body, opts);
+      logger.info(`[WorkflowDefRoutes] Imported definition ${record.id}`, { requestId: req.requestId });
+      res.status(201).json(record);
+    } catch (err) {
+      next(err);
+    }
+  });
+
   router.get('/:id', async (req, res, next) => {
     try {
-      const id = String(req.params['id']);
-      const definition = await workflowDefinitionService.getDefinitionWithStages(id);
-      res.json(definition);
+      res.json(await workflowDefinitionService.get(String(req.params['id'])));
     } catch (err) {
       next(err);
     }
   });
 
-  // PATCH /workflow-definitions/:id — Update a definition (partial update)
-  router.patch('/:id', validate(UpdateWorkflowDefinitionSchema), async (req, res, next) => {
+  router.put('/:id/graph', async (req, res, next) => {
+    try {
+      const parsed = SaveGraphRequestSchema.safeParse(req.body);
+      if (!parsed.success) {
+        res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: 'Body must be { graph, expectedRevision }', issues: parsed.error.issues },
+        });
+        return;
+      }
+      const id = String(req.params['id']);
+      const record = await workflowDefinitionService.saveGraph(id, parsed.data.graph, parsed.data.expectedRevision, {
+        canEditCommands: canEditCommands(req),
+      });
+      logger.info(`[WorkflowDefRoutes] Saved definition ${id} at revision ${record.revision}`, { requestId: req.requestId });
+      res.json(record);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.post('/:id/publish', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
-      const updated = await workflowDefinitionService.updateDefinition(id, req.body);
-      logger.info(`[WorkflowDefRoutes] Updated definition ${id}`, {
+      const record = await workflowDefinitionService.publish(id);
+      logger.info(`[WorkflowDefRoutes] Published definition ${id} as version ${record.currentVersionId}`, {
         requestId: req.requestId,
       });
-      res.json(updated);
+      res.json(record);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:id/versions', async (req, res, next) => {
+    try {
+      res.json(await workflowDefinitionService.listVersions(String(req.params['id'])));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:id/versions/:versionId', async (req, res, next) => {
+    try {
+      res.json(await workflowDefinitionService.getVersion(String(req.params['id']), String(req.params['versionId'])));
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  router.get('/:id/export', async (req, res, next) => {
+    try {
+      const text = await workflowDefinitionService.exportGraph(String(req.params['id']));
+      res.type('application/json').send(text);
     } catch (err) {
       next(err);
     }
   });
 
   /**
-   * DELETE /workflow-definitions/:id — Delete a definition (cascade).
-   *
-   * Item 9 — refuses with 409 when the definition still has runs, naming how
-   * many. `?force=true` deletes those runs too. Without `force`, the client
-   * error message names the exact blocker so the UI can offer "delete the
-   * N runs first" instead of a generic failure.
+   * DELETE — hard delete when nothing ran the definition; otherwise it is
+   * archived (runs pin its versions and their history stays readable).
    */
   router.delete('/:id', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
-      const force = String(req.query['force'] ?? '').toLowerCase() === 'true';
-      // `force` also deletes the definition's runs. Deleting a run directly
-      // needs `exec:agent` on top of `write:workflows`, so the cascade must
-      // not be a way around that.
-      if (force && req.principal && !req.principal.scopes.includes('exec:agent')) {
-        res.status(403).json({
-          error: { code: 'INSUFFICIENT_SCOPE', message: 'Deleting a workflow together with its runs requires exec:agent.' },
-        });
-        return;
-      }
-      await workflowDefinitionService.deleteDefinition(id, { force });
-      logger.info(`[WorkflowDefRoutes] Deleted definition ${id}`, {
-        requestId: req.requestId,
-        force,
-      });
-      res.status(204).send();
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // ═══════════════════════════════════════════════════════════
-  // Stage CRUD (nested under definition)
-  // ═══════════════════════════════════════════════════════════
-
-  // POST /workflow-definitions/:id/stages — Add a stage
-  router.post('/:id/stages', validate(CreateStageSchema.omit({ workflowDefinitionId: true })), async (req, res, next) => {
-    try {
-      const definitionId = String(req.params['id']);
-      const stage = await workflowDefinitionService.addStage({
-        ...req.body,
-        workflowDefinitionId: definitionId,
-      });
-      logger.info(`[WorkflowDefRoutes] Added stage ${stage.id} to definition ${definitionId}`, {
+      const outcome = await workflowDefinitionService.delete(id);
+      logger.info(`[WorkflowDefRoutes] ${'deleted' in outcome ? 'Deleted' : 'Archived'} definition ${id}`, {
         requestId: req.requestId,
       });
-      res.status(201).json(stage);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // PUT /workflow-definitions/:id/stages/:stageId — Update a stage
-  router.put('/:id/stages/:stageId', validate(CreateStageSchema.omit({ workflowDefinitionId: true }).partial()), async (req, res, next) => {
-    try {
-      const stageId = String(req.params['stageId']);
-      const updated = await workflowDefinitionService.updateStage(stageId, req.body);
-      logger.info(`[WorkflowDefRoutes] Updated stage ${stageId}`, {
-        requestId: req.requestId,
-      });
-      res.json(updated);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // DELETE /workflow-definitions/:id/stages/:stageId — Delete a stage
-  router.delete('/:id/stages/:stageId', async (req, res, next) => {
-    try {
-      const stageId = String(req.params['stageId']);
-      await workflowDefinitionService.deleteStage(stageId);
-      logger.info(`[WorkflowDefRoutes] Deleted stage ${stageId}`, {
-        requestId: req.requestId,
-      });
-      res.status(204).send();
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // ═══════════════════════════════════════════════════════════
-  // Edge CRUD (nested under definition)
-  // ═══════════════════════════════════════════════════════════
-
-  // POST /workflow-definitions/:id/edges — Add an edge
-  router.post('/:id/edges', validate(CreateEdgeSchema.omit({ workflowDefinitionId: true })), async (req, res, next) => {
-    try {
-      const definitionId = String(req.params['id']);
-      const edge = await workflowDefinitionService.addEdge({
-        ...req.body,
-        workflowDefinitionId: definitionId,
-      });
-      logger.info(`[WorkflowDefRoutes] Added edge ${edge.id} to definition ${definitionId}`, {
-        requestId: req.requestId,
-      });
-      res.status(201).json(edge);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // DELETE /workflow-definitions/:id/edges/:edgeId — Delete an edge
-  router.delete('/:id/edges/:edgeId', async (req, res, next) => {
-    try {
-      const edgeId = String(req.params['edgeId']);
-      await workflowDefinitionService.deleteEdge(edgeId);
-      logger.info(`[WorkflowDefRoutes] Deleted edge ${edgeId}`, {
-        requestId: req.requestId,
-      });
-      res.status(204).send();
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // ═══════════════════════════════════════════════════════════
-  // Validation + Import/Export
-  // ═══════════════════════════════════════════════════════════
-
-  // POST /workflow-definitions/:id/validate — Validate the DAG structure
-  router.post('/:id/validate', async (req, res, next) => {
-    try {
-      const id = String(req.params['id']);
-      const result = await workflowDefinitionService.validateDefinition(id);
-      const statusCode = result.valid ? 200 : 422;
-      res.status(statusCode).json(result);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-definitions/import — Import from a template
-  router.post('/import', async (req, res, next) => {
-    try {
-      const { templateId, name } = req.body as { templateId: string; name?: string };
-      if (!templateId) {
-        res.status(400).json({
-          error: { code: 'VALIDATION_ERROR', message: 'templateId is required' },
-        });
-        return;
-      }
-      const definition = await workflowDefinitionService.importFromTemplate(templateId, { name });
-      logger.info(`[WorkflowDefRoutes] Imported definition from template ${templateId}`, {
-        requestId: req.requestId,
-      });
-      res.status(201).json(definition);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-definitions/import-json — Import from a full JSON configuration
-  router.post('/import-json', validate(ImportWorkflowJsonSchema), async (req, res, next) => {
-    try {
-      const definition = await workflowDefinitionService.importFromJSON(req.body);
-      logger.info(`[WorkflowDefRoutes] Imported definition from JSON: ${definition.id}`, {
-        requestId: req.requestId,
-      });
-      res.status(201).json(definition);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // GET /workflow-definitions/:id/export — Export as a template
-  router.get('/:id/export', async (req, res, next) => {
-    try {
-      const id = String(req.params['id']);
-      const template = await workflowDefinitionService.exportAsTemplate(id);
-      res.json(template);
+      res.json(outcome);
     } catch (err) {
       next(err);
     }

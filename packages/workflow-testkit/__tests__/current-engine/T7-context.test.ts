@@ -19,15 +19,18 @@ const A_SUMMARY = 'A-SUMMARY: stage A chose a codeword.';
 
 const T7 = {
   name: 't7-context',
-  sessionMode: 'per-stage',
+  variables: [
+    { name: 'topic', type: 'string', label: 'topic', required: true },
+    { name: 'missing_var', type: 'string', label: 'missing' },
+  ],
   stages: [
     { name: 'A', prompt: 'Invent a codeword.' },
     { name: 'B_summary', prompt: 'Repeat the codeword.' },
-    { name: 'B_full', prompt: 'Repeat the codeword.', contextFilter: 'full' },
-    { name: 'B_none', prompt: 'Repeat the codeword.', contextFilter: 'none' },
-    { name: 'B_struct', prompt: 'Repeat the codeword.', contextFilter: 'structured' },
-    { name: 'B_srcs', prompt: 'Repeat the codeword.', contextSources: ['A'] },
-    { name: 'V_interp', prompt: 'TOPIC={{topic}} NESTED={{obj.inner}} MISSING={{missing_var}}' },
+    { name: 'B_full', prompt: 'Repeat the codeword.', context: { mode: 'output' } },
+    { name: 'B_none', prompt: 'Repeat the codeword.', context: { mode: 'none' } },
+    { name: 'B_struct', prompt: 'Repeat the codeword.', context: { mode: 'structured' } },
+    { name: 'B_srcs', prompt: 'Repeat the codeword.', context: { from: ['a'] } },
+    { name: 'V_interp', prompt: 'TOPIC={{topic}} FULL={{variables.topic}} RUN={{run.id}} MISSING={{missing_var}}' },
   ],
   edges: [
     ['A', 'B_summary'],
@@ -40,11 +43,11 @@ const T7 = {
 };
 
 describe('T7 context passing (current engine)', () => {
-  it('delivers predecessor context per contextFilter, as an extra model turn', async () => {
+  it('delivers predecessor context per context.mode / context.from, as an extra model turn', async () => {
     engine = await createTestEngine({
       script: { A: [{ text: A_OUTPUT }, { on: 'summary', text: A_SUMMARY }] },
     });
-    const run = await engine.runWorkflow(T7, { topic: 'otters', obj: { inner: 'deep' } });
+    const run = await engine.runWorkflow(T7, { topic: 'otters' });
     const snap = await run.waitForTerminal();
     expect(snap.run.status).toBe('completed');
 
@@ -53,13 +56,13 @@ describe('T7 context passing (current engine)', () => {
     // summary-only (default): the summary, not the output.
     expect(contextOf('B_summary')!.prompt).toContain(A_SUMMARY);
     expect(contextOf('B_summary')!.prompt).not.toContain('CODEWORD-PELICAN');
-    // full: the complete output.
+    // output: the complete output.
     expect(contextOf('B_full')!.prompt).toContain('CODEWORD-PELICAN');
     // none: no context turn at all.
     expect(contextOf('B_none')).toBeUndefined();
     // structured: summary (+ outputData when the stage produced JSON).
     expect(contextOf('B_struct')!.prompt).toContain(A_SUMMARY);
-    // contextSources pulls a stage that is not a predecessor.
+    // context.from pulls a stage that is not a predecessor.
     expect(contextOf('B_srcs')!.prompt).toContain('## Completed Stage: "A"');
     expect(contextOf('B_srcs')!.prompt).not.toContain('## Completed Stage: "B_none"');
 
@@ -70,16 +73,21 @@ describe('T7 context passing (current engine)', () => {
     expect(contextMsg?.role).toBe('user');
   });
 
-  it('interpolates {{var}} and {{a.b}}, and sends an unresolved placeholder raw with a warning', async () => {
+  it('interpolates {{name}}, {{variables.x}} and {{run.id}}, and warns about a declared variable with no value', async () => {
     engine = await createTestEngine();
-    const run = await engine.runWorkflow(T7, { topic: 'otters', obj: { inner: 'deep' } });
+    const run = await engine.runWorkflow(T7, { topic: 'otters' });
     const snap = await run.waitForTerminal();
     const prompt = snap.calls.find((c) => c.stageName === 'V_interp' && c.kind === 'prompt')!.prompt;
-    expect(prompt.startsWith('TOPIC=otters NESTED=deep MISSING={{missing_var}}')).toBe(true);
+    expect(prompt.startsWith(`TOPIC=otters FULL=otters RUN=${snap.run.id} MISSING=`)).toBe(true);
     const warn = snap.events.find(
       (e) => e.kind === 'harness.session_info' && e.data['infoType'] === 'unresolved_variables',
     );
     expect(warn?.data['unresolved']).toEqual(['missing_var']);
+    // An undeclared placeholder is rejected when the definition is saved.
+    const err = await engine
+      .importDefinition({ stages: [{ name: 'X', prompt: 'hi {{never_declared}}' }] })
+      .catch((e: unknown) => e);
+    expect((err as { issues?: Array<{ code: string }> }).issues?.map((i) => i.code)).toContain('template-unknown-variable');
     // Every prompt carries the file-writing boilerplate (O-6).
     expect(prompt).toContain('**IMPORTANT: How to create files**'); // KNOWN-BUG W-48 (boilerplate on every prompt provokes refusals)
   });
@@ -87,10 +95,9 @@ describe('T7 context passing (current engine)', () => {
   it('a linear auto-mode workflow shares one conversation and still re-sends context', async () => {
     engine = await createTestEngine();
     const run = await engine.runWorkflow({
-      sessionMode: 'auto',
       stages: [
-        { name: 'S1', prompt: 'one', harnessConfigOverrides: { model: 'model-one' } },
-        { name: 'S2', prompt: 'two', harnessConfigOverrides: { model: 'model-two' } },
+        { name: 'S1', prompt: 'one', session: { model: 'model-one' } },
+        { name: 'S2', prompt: 'two', session: { model: 'model-two' } },
       ],
       edges: [['S1', 'S2']],
     });

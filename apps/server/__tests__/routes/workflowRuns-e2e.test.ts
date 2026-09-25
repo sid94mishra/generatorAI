@@ -3,7 +3,7 @@
 // Tests the complete workflow run lifecycle and session allocation
 // ────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi } from 'vitest';
 import request from 'supertest';
 import { createTestApp } from '../helpers/testApp.js';
 import type { Express } from 'express';
@@ -24,12 +24,16 @@ describe('E2E: Workflow Run API Flow', () => {
         .send({
           workflowDefinitionId: '11111111-1111-1111-1111-111111111111',
           variables: { target: 'src/', language: 'typescript' },
+          // A draft only runs as a test run (pinning a test version).
+          testRun: true,
         });
 
       expect(res.status).toBe(201);
       expect(res.body).toHaveProperty('id');
       expect(res.body).toHaveProperty('status', 'created');
-      expect(container.workflowRunService.createRun).toHaveBeenCalled();
+      expect(container.workflowRunService.createRun).toHaveBeenCalledWith(
+        expect.objectContaining({ workflowDefinitionId: '11111111-1111-1111-1111-111111111111', testRun: true }),
+      );
     });
   });
 
@@ -55,12 +59,21 @@ describe('E2E: Workflow Run API Flow', () => {
   });
 
   describe('GET /api/workflow-runs/:id — Get Run', () => {
-    it('should return run with stage runs', async () => {
+    it('should return run with stage runs ordered by its pinned graph', async () => {
+      (container.runDefinitionReader.get as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+        stages: [{ key: 'plan' }, { key: 'build' }],
+      });
+      (container.stageRunRepo.getByRunId as ReturnType<typeof vi.fn>).mockResolvedValueOnce([
+        { id: 'sr-build', stageKey: 'build' },
+        { id: 'sr-plan', stageKey: 'plan' },
+      ]);
       const res = await request(app).get('/api/workflow-runs/run-1');
 
       expect(res.status).toBe(200);
       expect(res.body).toHaveProperty('id', 'run-1');
       expect(res.body).toHaveProperty('status');
+      expect(container.runDefinitionReader.get).toHaveBeenCalledWith('ver-1');
+      expect(res.body.stageRuns.map((s: { id: string }) => s.id)).toEqual(['sr-plan', 'sr-build']);
     });
   });
 

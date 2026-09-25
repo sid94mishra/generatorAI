@@ -10,7 +10,7 @@ function fakeContext(overrides: {
 }): CliContext {
   return {
     api: {
-      definitions: { list: vi.fn(async () => [WORKFLOW]) },
+      definitions: { list: vi.fn(async () => ({ items: [WORKFLOW] })) },
       projects: { list: vi.fn(async () => []) },
       automations: {
         create: overrides.create ?? vi.fn(async () => ({ id: 'auto_1', enabled: false })),

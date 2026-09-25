@@ -153,7 +153,7 @@ export default function StageScreen(): React.ReactElement {
           <StatusGlyph status={stage.status} />
           <View className="flex-1 gap-0.5">
             <Text className="text-lg font-semibold leading-snug text-foreground">
-              {stage.name ?? stage.stageDefinitionId}
+              {stage.name ?? stage.stageKey}
             </Text>
             <Text className="text-sm text-muted-foreground">
               {stageSubtitle(stage)}

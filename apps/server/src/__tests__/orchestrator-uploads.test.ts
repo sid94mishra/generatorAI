@@ -30,7 +30,7 @@ describe('orchestrated run uploads', () => {
   });
 
   it('passes overrides and stages categorized files into the final workspace before discovery', async () => {
-    const config = { workflowDefinitionId: 'def-1', stageOverrides: [{ stageIndex: 1, skip: true }] };
+    const config = { workflowDefinitionId: 'def-1', stageOverrides: [{ stageKey: 'review', skip: true }] };
     await request(app).post('/runs').field('config', JSON.stringify(config))
       .attach('skills', Buffer.from('---\nname: risk-review\ndescription: Review risk\n---\nCheck edges.'), 'risk-review.md')
       .attach('prompts', Buffer.from('Operator instructions'), 'review.md').expect(201);

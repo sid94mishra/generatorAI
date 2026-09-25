@@ -27,7 +27,6 @@ import {
   closeDB,
   createDB,
   migrateDB,
-  withTransaction,
   DrizzleAgentInteractionRepository,
   DrizzleArtifactRepository,
   DrizzleAutomationExecutionRepository,
@@ -40,17 +39,14 @@ import {
   DrizzleSequenceAllocator,
   DrizzleSessionAllocationRepository,
   DrizzleSessionRepository,
-  DrizzleStageDefinitionRepository,
-  DrizzleStageEdgeRepository,
   DrizzleStageRunRepository,
-  DrizzleWorkflowDefinitionRepository,
   DrizzleWorkflowRunRepository,
   EntryRepository,
   RegisterRepository,
+  SqliteWorkflowDefinitionStore,
   type AppDatabase,
 } from '@generatorai/db';
 import type { ILogger, ResolvedAgentProjection } from '@generatorai/shared';
-import { ImportWorkflowJsonSchema } from '@generatorai/shared';
 import { createCoreServices, type CoreServices } from '../../src/bootstrap/createCoreServices.js';
 import { AgentResolver } from '../../src/services/AgentResolver.js';
 import { AdmissionController } from '../../src/services/AdmissionController.js';
@@ -236,9 +232,7 @@ function boot(db: AppDatabase, workDir: string): Env {
     chatMessageRepo: new DrizzleChatMessageRepository(db),
     artifactRepo: new DrizzleArtifactRepository(db),
     chatEntityRepo: new DrizzleChatRepository(db),
-    workflowDefinitionRepo: new DrizzleWorkflowDefinitionRepository(db),
-    stageDefinitionRepo: new DrizzleStageDefinitionRepository(db),
-    stageEdgeRepo: new DrizzleStageEdgeRepository(db),
+    workflowDefinitionStore: new SqliteWorkflowDefinitionStore(db),
     workflowRunRepo: new DrizzleWorkflowRunRepository(db),
     stageRunRepo: new DrizzleStageRunRepository(db),
     automationRepo: new DrizzleAutomationRepository(db),
@@ -252,7 +246,6 @@ function boot(db: AppDatabase, workDir: string): Env {
     admissionController: new AdmissionController(),
     scmFlow: { run: async () => { throw new Error('golden: no source control'); } },
     config: { artifactsDir: join(workDir, 'art') },
-    withTransaction: (fn) => withTransaction(db, fn),
     chatExtensions: {},
     planRepo: new DrizzlePlanRepository(db),
     agentInteractionRepo: new DrizzleAgentInteractionRepository(db),
@@ -304,21 +297,25 @@ async function runStage(
   extraVars: Record<string, unknown> = {},
 ): Promise<CreateConversationParams> {
   const { workflowDefinitionService, workflowRunService, stageExecutionService } = env.services;
-  const def = await workflowDefinitionService.importFromJSON(
-    ImportWorkflowJsonSchema.parse({
-      name: 'golden',
-      sessionMode: 'per-stage',
-      harnessConfig: {
-        model: 'claude-sonnet',
-        harnessType: 'claude-agent',
-        systemMessage: { mode: 'append', content: 'WORKFLOW-AUTHOR-SYSTEM-MESSAGE' },
+  const def = await workflowDefinitionService.createFromSpec(
+    {
+      formatVersion: 2,
+      workflow: {
+        name: 'golden',
+        session: {
+          model: 'claude-sonnet',
+          harnessType: 'claude-agent',
+          systemMessage: { mode: 'append', content: 'WORKFLOW-AUTHOR-SYSTEM-MESSAGE' },
+        },
       },
-      stages: [{ order: 0, prompts: [{ label: 'p', text: 'Do the golden stage.' }], ...stage }],
-    }),
+      stages: [{ kind: 'agent', key: 'golden', name: 'golden', prompts: [{ label: 'p', text: 'Do the golden stage.' }], ...stage }],
+      edges: [],
+    },
+    { canEditCommands: true, status: 'published' },
   );
   const run = await workflowRunService.createRun({ workflowDefinitionId: def.id });
   const [stageRun] = await new DrizzleStageRunRepository(env.db).getByRunId(run.id);
-  await stageExecutionService.executeStage(stageRun!, run.id, 'per-stage', def.harnessConfig, {
+  await stageExecutionService.executeStage(stageRun!, run.id, 'per-stage', def.graph.workflow.session, {
     __workingDirectory: join(env.workDir, 'run'),
     __workflowRunId: run.id,
     ...extraVars,
@@ -410,7 +407,7 @@ describe('session composition golden snapshots', () => {
 
   it('(f) stage with the same agent', async () => {
     const env = fresh();
-    const stageParams = await runStage(env, { name: 'golden-stage', agentRef: AGENT_REF });
+    const stageParams = await runStage(env, { name: 'golden-stage', session: { agentRef: AGENT_REF } });
     await expect(golden(stageParams, env.workDir)).toMatchFileSnapshot('__snapshots__/f-stage-agent.json');
 
     // Same agent through the chat builder, for the drift assertions.
@@ -444,7 +441,7 @@ describe('session composition golden snapshots', () => {
       ensureStarted: async () => undefined,
     } as unknown as BrowserService;
     env.services.stageExecutionService.setBrowserService(browser);
-    const p = await runStage(env, { name: 'golden-browser-stage', agentRef: AGENT_REF }, { __workspaceId: 'ws-golden' });
+    const p = await runStage(env, { name: 'golden-browser-stage', session: { agentRef: AGENT_REF } }, { __workspaceId: 'ws-golden' });
     const toolNames = ((p as unknown as { tools?: Array<{ name: string }> }).tools ?? []).map((t) => t.name);
     expect(toolNames).toContain('open_browser_page');
     await expect(golden(p, env.workDir)).toMatchFileSnapshot('__snapshots__/g-stage-browser.json');

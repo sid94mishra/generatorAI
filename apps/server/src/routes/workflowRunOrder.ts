@@ -1,12 +1,12 @@
-/** Database update order is not execution order; retain the run's frozen outline. */
-export function orderStageRuns<T extends { id: string; stageDefinitionId: string }>(
+/** Database update order is not execution order; list stage runs in the pinned graph's stage order. */
+export function orderStageRuns<T extends { id: string; stageKey: string }>(
   stages: readonly T[],
-  definitions: readonly { id: string; order: number }[] | undefined,
+  stageKeys: readonly string[] | undefined,
 ): T[] {
-  if (!definitions?.length) return [...stages];
-  const order = new Map(definitions.map((stage) => [stage.id, stage.order]));
+  if (!stageKeys?.length) return [...stages];
+  const order = new Map(stageKeys.map((key, i) => [key, i]));
   return [...stages].sort((a, b) =>
-    (order.get(a.stageDefinitionId) ?? Number.MAX_SAFE_INTEGER) -
-      (order.get(b.stageDefinitionId) ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id),
+    (order.get(a.stageKey) ?? Number.MAX_SAFE_INTEGER) -
+      (order.get(b.stageKey) ?? Number.MAX_SAFE_INTEGER) || a.id.localeCompare(b.id),
   );
 }

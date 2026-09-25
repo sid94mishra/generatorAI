@@ -14,7 +14,9 @@ import { ResultValidator } from '../src/services/ResultValidator.js';
 import { MockStageRunRepository } from './MockRepositories.js';
 import { EventBus } from '../src/events/EventBus.js';
 import type { IChatMessageRepository } from '../src/domain/ports/IRepositories.js';
+import type { IScriptRunner } from '../src/domain/ports/IScriptRunner.js';
 import type { ChatMessage, ILogger, StageRun } from '@generatorai/shared';
+import type { ResultValidationRule } from '@generatorai/workflow-spec';
 
 function makeMessage(sessionId: string, stageRunId: string, content: string): ChatMessage {
   return {
@@ -51,12 +53,13 @@ function makeStageRun(id: string, name: string, sessionId: string): StageRun {
   return {
     id,
     workflowRunId: 'run-1',
-    stageDefinitionId: `def-${id}`,
+    stageKey: `stage_${id.replace(/\W/g, '_')}`,
     name,
     status: 'completed',
     currentStep: 0,
     totalSteps: 1,
     retryCount: 0,
+    version: 0,
     sessionId,
     createdAt: new Date(),
   };
@@ -92,7 +95,7 @@ describe('ResultValidator — shared-session scoping', () => {
       'run-1',
       'sr-2',
       {
-        stageIndex: 1,
+        stageKey: 'stage_two',
         rules: [{ type: 'not_contains', value: 'SECRET_MARKER_1', message: 'must not contain stage 1 marker' }],
       },
     );
@@ -120,7 +123,7 @@ describe('ResultValidator — shared-session scoping', () => {
     const result = await validator.validateStageResult(
       'run-1',
       'sr-a',
-      { stageIndex: 0, rules: [{ type: 'contains', value: 'REQUIRED_MARKER', message: 'needs REQUIRED_MARKER' }] },
+      { stageKey: 'stage_a', rules: [{ type: 'contains', value: 'REQUIRED_MARKER', message: 'needs REQUIRED_MARKER' }] },
     );
 
     expect(result.passed).toBe(false);
@@ -129,18 +132,23 @@ describe('ResultValidator — shared-session scoping', () => {
 });
 
 describe('ResultValidator — regex rules run on the linear-time engine (RV-21)', () => {
-  async function check(pattern: string, output: string) {
+  async function check(pattern: string, output: string, flags?: string) {
     const stage = makeStageRun('sr-r', 'Regex', 'ses-r');
     const messageRepo = createScopedMessageRepo([makeMessage('ses-r', 'sr-r', output)]);
     const stageRunRepo = new MockStageRunRepository();
     await stageRunRepo.create(stage);
     const validator = new ResultValidator(messageRepo, stageRunRepo, new EventBus(), noopLogger);
-    return validator.validateStageResult('run-1', 'sr-r', { stageIndex: 0, rules: [{ type: 'regex', value: pattern, message: 'no match' }] });
+    return validator.validateStageResult('run-1', 'sr-r', { stageKey: 'regex', rules: [{ type: 'regex', pattern, ...(flags ? { flags } : {}), message: 'no match' }] });
   }
 
   it('matches like a regular expression', async () => {
     expect((await check('^DONE: \\d+ files$', 'DONE: 12 files')).passed).toBe(true);
     expect((await check('^DONE: \\d+ files$', 'done')).passed).toBe(false);
+  });
+
+  it('honours the rule flags', async () => {
+    expect((await check('^done$', 'DONE')).passed).toBe(false);
+    expect((await check('^done$', 'DONE', 'i')).passed).toBe(true);
   });
 
   it('cannot be stalled by a catastrophic pattern', async () => {
@@ -151,5 +159,37 @@ describe('ResultValidator — regex rules run on the linear-time engine (RV-21)'
 
   it('fails a rule whose pattern the engine cannot run', async () => {
     expect((await check('(a)\\1', 'aa')).passed).toBe(false);
+  });
+});
+
+describe('ResultValidator — json_schema and custom_script rules', () => {
+  async function validate(rule: ResultValidationRule, output: string, scriptRunner?: IScriptRunner) {
+    const messageRepo = createScopedMessageRepo([makeMessage('ses-j', 'sr-j', output)]);
+    const stageRunRepo = new MockStageRunRepository();
+    await stageRunRepo.create(makeStageRun('sr-j', 'Json', 'ses-j'));
+    const validator = new ResultValidator(messageRepo, stageRunRepo, new EventBus(), noopLogger, scriptRunner);
+    return validator.validateStageResult('run-1', 'sr-j', { stageKey: 'json', rules: [rule] }, '/ws', { vars: { who: 'me' } });
+  }
+
+  const schema = { type: 'object', required: ['ok'], properties: { ok: { type: 'boolean' } } };
+
+  it('validates the JSON in the output against the schema', async () => {
+    expect((await validate({ type: 'json_schema', schema }, '```json\n{"ok": true}\n```')).passed).toBe(true);
+    expect((await validate({ type: 'json_schema', schema }, '{"ok": "yes"}')).passed).toBe(false);
+    expect((await validate({ type: 'json_schema', schema }, 'no json here')).passed).toBe(false);
+  });
+
+  it('runs the literal command with rendered env and the stage output', async () => {
+    const run = vi.fn(async () => ({ exitCode: 0, stdout: '', stderr: '' }));
+    const rule: ResultValidationRule = {
+      type: 'custom_script', command: 'node', args: ['check.js'], env: { WHO: '{{ vars.who }}' }, timeoutMs: 5000,
+    };
+    expect((await validate(rule, 'the output', { run } as unknown as IScriptRunner)).passed).toBe(true);
+    expect(run).toHaveBeenCalledWith('node', ['check.js'], expect.objectContaining({
+      cwd: '/ws',
+      timeout: 5000,
+      env: expect.objectContaining({ WHO: 'me', STAGE_OUTPUT: 'the output', STAGE_RUN_ID: 'sr-j' }),
+    }));
+    expect((await validate(rule, 'x')).passed).toBe(false); // no runner → fails closed
   });
 });

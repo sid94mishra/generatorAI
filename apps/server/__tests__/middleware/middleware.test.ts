@@ -58,7 +58,7 @@ describe('Middleware Integration', () => {
     });
 
     it('should map ValidationError to 400', async () => {
-      (container.workflowDefinitionService.createDefinition as ReturnType<typeof import('vitest').vi.fn>)
+      (container.workflowDefinitionService.create as ReturnType<typeof import('vitest').vi.fn>)
         .mockRejectedValue(new ValidationError('Invalid config', { name: ['too short'] }));
 
       const res = await request(app)
@@ -70,7 +70,7 @@ describe('Middleware Integration', () => {
     });
 
     it('should map unknown errors to 502', async () => {
-      (container.workflowDefinitionService.listDefinitions as ReturnType<typeof import('vitest').vi.fn>)
+      (container.workflowDefinitionService.list as ReturnType<typeof import('vitest').vi.fn>)
         .mockRejectedValue(new Error('Something unexpected'));
 
       const res = await request(app).get('/api/workflow-definitions');

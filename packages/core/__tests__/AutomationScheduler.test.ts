@@ -169,6 +169,10 @@ function makeExecutionRepo(calls: string[] = []): {
       executions.set(e.id, { ...e });
       return { ...e };
     },
+    openExecution: async (e) => {
+      calls.push('execution-created');
+      executions.set(e.id, { ...e });
+    },
     getExecutionById: async (id) => {
       const e = executions.get(id);
       if (!e) throw new Error(`execution ${id} not found`);
@@ -279,9 +283,7 @@ function setup(outcomeFor?: (variables: Record<string, unknown>, defId: string) 
     eventBus,
     mockLogger(),
     makeEngine(),
-    undefined,
-    undefined,
-    undefined,
+    undefined, // artifactsDir
     // Item 38 — huge interval: these tests drive `runSchedulerTick()`
     // directly rather than waiting on the real setInterval.
     { pollIntervalMs: 1_000_000, leaseMs: 60_000 },

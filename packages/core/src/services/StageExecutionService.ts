@@ -5,7 +5,6 @@
 
 import type {
   StageRun,
-  StageDefinition,
   AgentEvent,
   ChatMessage,
   HarnessConfig,
@@ -18,8 +17,15 @@ import {
   HarnessTimeoutError,
   withSpan,
   getMeter,
-  interpolateVariables,
 } from '@generatorai/shared';
+import {
+  renderTemplate,
+  resolveSessionSpec,
+  templateVariableNames,
+  type AgentMode,
+  type AgentStage,
+  type SessionSpec,
+} from '@generatorai/workflow-spec';
 
 // ── OTel Metrics ──
 const meter = getMeter('core.stage');
@@ -45,7 +51,9 @@ function digest(text: string): string {
 }
 import { resolveWithinBase, isSymlink } from '../utils/safePath.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
-import type { IStageDefinitionRepository } from '../domain/ports/IStageDefinitionRepository.js';
+import type { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
+import { sessionSpecToHarnessConfig } from './definitions/sessionSpec.js';
+import { templateScope } from './definitions/runScope.js';
 import type { IChatMessageRepository } from '../domain/ports/IRepositories.js';
 import type { IAgentHarness, AttachmentRef, SendPromptOptions } from '../domain/ports/IAgentHarness.js';
 import type { EventBus } from '../events/EventBus.js';
@@ -53,7 +61,6 @@ import type { SessionAllocator } from './SessionAllocator.js';
 import type { HookExecutor, HookContext } from './HookExecutor.js';
 import type { WorkspaceManager } from './WorkspaceManager.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
-import type { IWorkflowDefinitionRepository } from '../domain/ports/IWorkflowDefinitionRepository.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import type { HitlService } from './HitlService.js';
 import {
@@ -68,7 +75,6 @@ import { AgentResolver } from './AgentResolver.js';
 import type { AgentStagingService } from './AgentStagingService.js';
 import type { PermissionRequest, PermissionResponse } from '../domain/ports/IAgentHarness.js';
 import { buildBrowserToolSet } from '../tools/browser/index.js';
-import { resolveStageHooks } from './resolveStageHooks.js';
 import { StageRunStateMachine } from '../domain/state-machines/StageRunStateMachine.js';
 import type { DurableContext, DurableExecutionEngine } from './DurableExecutionEngine.js';
 import { isSyntheticEffectResult, replayPolicyForToolGroups } from './DurableExecutionEngine.js';
@@ -206,16 +212,26 @@ const SUMMARY_FALLBACK_MAX_CHARS = 3000;
  * in-session strategy for every attempt below the final one. Kept in step
  * with that method — if the strategy there changes, change it here too.
  */
-function mayRetryInSession(
-  stageDef: { resultValidation?: unknown[]; retryPolicy?: { maxRetries: number } },
-  stageRun: { retryCount: number },
-): boolean {
-  if (!stageDef.resultValidation?.length) return false;
-  const maxRetries = stageDef.retryPolicy?.maxRetries ?? 0;
+function mayRetryInSession(stage: AgentStage, stageRun: { retryCount: number }): boolean {
+  if (stage.output.rules.length === 0) return false;
+  const maxRetries = stageRetryPolicy(stage)?.maxRetries ?? 0;
   if (stageRun.retryCount >= maxRetries) return false;
-  const inSessionThreshold = Math.max(1, (stageDef.retryPolicy?.maxRetries ?? 1) - 1);
+  const inSessionThreshold = Math.max(1, (stageRetryPolicy(stage)?.maxRetries ?? 1) - 1);
   return stageRun.retryCount < inSessionThreshold;
 }
+
+/** The v1 executor's retry numbers from a v2 retry policy (attempts include the first). */
+function stageRetryPolicy(stage: AgentStage): { maxRetries: number; backoffMs: number; backoffMultiplier: number } | undefined {
+  if (!stage.retry) return undefined;
+  return {
+    maxRetries: Math.max(0, stage.retry.maxAttempts - 1),
+    backoffMs: stage.retry.initialDelayMs,
+    backoffMultiplier: stage.retry.backoffMultiplier,
+  };
+}
+
+/** Session fields that bind the agent or pick the turn mode rather than configure the conversation. */
+const NON_CONVERSATION_SESSION_FIELDS = new Set(['agentRef', 'defaultAgentMode']);
 
 /**
  * Thrown when a reviewer rejects a stage at its completion gate.
@@ -273,18 +289,14 @@ const LANG_EXTENSIONS: Record<string, string> = {
 export class StageExecutionService {
   constructor(
     private stageRunRepo: IStageRunRepository,
-    private stageDefRepo: IStageDefinitionRepository,
+    /** The graph of each run's pinned definition version (stages by key). */
+    private definitions: RunDefinitionReader,
     private messageRepo: IChatMessageRepository,
     private harness: IAgentHarness,
     private eventBus: EventBus,
     private sessionAllocator: SessionAllocator,
     private hookExecutor: HookExecutor,
     private workspaceManager: WorkspaceManager,
-    /**
-     * The definition's `hooksFile` (HooksFileConfig.stages['*' | stageName])
-     * is merged into each stage's hooks via resolveStageHooks (HOOK-2).
-     */
-    private workflowDefinitionRepo: IWorkflowDefinitionRepository,
     /**
      * HITL-06: read with `hitlService` on every tool-permission request — the
      * run's current `permissionMode` decides whether the request is routed
@@ -349,28 +361,28 @@ export class StageExecutionService {
   /**
    * Fold the stage's agent into `sessionConfig`.
    *
-   * `harnessConfigOverrides` has already been applied, so it acts as the
+   * The stage `session` has already been applied, so it acts as the
    * binding-site delta: capability lists UNION with the agent's, scalars are
    * most-specific-wins, and the instructions are appended after the platform blocks.
    */
   private async resolveStageAgent(
     sessionConfig: Record<string, unknown>,
-    stageDef: StageDefinition,
+    stage: AgentStage,
     workflowharnessConfig: Partial<HarnessConfig> | undefined,
     variables: Record<string, unknown> | undefined,
   ): Promise<ResolvedAgentProjection> {
-    const ref = stageDef.agentRef ?? workflowharnessConfig?.agentRef;
+    const ref = stage.session?.agentRef ?? workflowharnessConfig?.agentRef;
     if (!this.agentResolver) {
       if (!ref) return AgentResolver.empty();
       // Fail loudly: silently running a stage without its agent's skills and
       // tool policy is worse than not running it.
       throw new StageExecutionError(
         'Stage is bound to an agent but no AgentResolver is wired into StageExecutionService',
-        stageDef.id,
+        stage.key,
       );
     }
 
-    const stageHarness = stageDef.harnessConfigOverrides as Partial<HarnessConfig> | undefined;
+    const stageHarness = stage.session ? sessionSpecToHarnessConfig(stage.session) : undefined;
     const projectId = typeof variables?.['__projectId'] === 'string'
       ? (variables['__projectId'] as string)
       : undefined;
@@ -378,7 +390,7 @@ export class StageExecutionService {
     const projection = await this.agentResolver.resolve({
       ...(ref ? { agentRef: ref } : {}),
       ...(workflowharnessConfig ? { baseHarnessConfig: workflowharnessConfig } : {}),
-      // The stage's harness overrides are the MOST specific level, so they go
+      // The stage's session is the MOST specific level, so it goes
       // in as `runtimeOverrides` — that single slot carries both the stage's
       // `agentOverrides` delta and its `excludedMcpServerIds`. Passing the
       // delta a second time as `overrides` would duplicate
@@ -1011,7 +1023,7 @@ export class StageExecutionService {
     stageRun: StageRun,
     workflowRunId: string,
     sessionMode: 'single' | 'per-stage' | 'auto',
-    workflowharnessConfig?: Partial<HarnessConfig>,
+    workflowSession?: SessionSpec,
     variables?: Record<string, unknown>,
     predecessorSummaries?: Array<{ stageName: string; summary: string; outputData?: Record<string, unknown>; fullOutput?: string }>,
     resumeContext?: { resumeFromPause: true; continuationNeeded: boolean },
@@ -1035,21 +1047,11 @@ export class StageExecutionService {
       stageCounter.add(1, { stage_name: stageRun.name });
 
     const sm = new StageRunStateMachine(stageRun.status);
-    const stageDef = await this.stageDefRepo.getById(stageRun.stageDefinitionId);
-
-    // HOOK-2: merge the workflow definition's hooksFile (per-stage + wildcard)
-    // into this stage's hooks so `.hooks.json`-style hooks actually fire on the
-    // live path. stageDef is a freshly-mapped object from the repo, so mutating
-    // its `hooks` here is safe and propagates to every downstream phase
-    // (pre_run/post_prompt/post_run/on_error) that reads stageDef.hooks.
-    try {
-      const def = await this.workflowDefinitionRepo.getById(stageDef.workflowDefinitionId);
-      if (def.hooksFile) {
-        stageDef.hooks = resolveStageHooks(stageDef.hooks, stageDef.name, def.hooksFile);
-      }
-    } catch {
-      // Definition unreadable — inline stage hooks only.
-    }
+    // The stage as the run's pinned definition version declares it.
+    const stage = await this.stageOf(stageRun);
+    const workflowharnessConfig = workflowSession ? sessionSpecToHarnessConfig(workflowSession) : undefined;
+    // The effective agent mode: the stage session over the workflow session.
+    const stageAgentMode = resolveSessionSpec(workflowSession, stage.session).defaultAgentMode;
 
     // Transition: pending → queued → running
     if (stageRun.status === 'pending') {
@@ -1101,8 +1103,12 @@ export class StageExecutionService {
       }
     }
 
-    // Build session config from workflow-level harnessConfig + stage-level overrides
-    const stageOverrides = stageDef.harnessConfigOverrides as Record<string, unknown> | undefined;
+    // Build session config from the workflow session + the stage session
+    const stageOverrides = stage.session
+      ? Object.fromEntries(
+          Object.entries(sessionSpecToHarnessConfig(stage.session)).filter(([k]) => !NON_CONVERSATION_SESSION_FIELDS.has(k)),
+        )
+      : undefined;
     const sessionConfig: Record<string, unknown> = {};
 
     // Apply workflow-level config first
@@ -1166,11 +1172,11 @@ export class StageExecutionService {
     //
     // Replaces the historical `sessionConfig['defaultAgent'] = agentName`,
     // which never reached the harness. Resolution happens AFTER the stage
-    // overrides are folded in so `harnessConfigOverrides` acts as the
+    // overrides are folded in so the stage `session` acts as the
     // binding-site delta (capability lists UNION, scalars most-specific-wins).
     const agentProjection = await this.resolveStageAgent(
       sessionConfig,
-      stageDef,
+      stage,
       workflowharnessConfig,
       variables,
     );
@@ -1183,7 +1189,7 @@ export class StageExecutionService {
     // when the run's browserConfig has `enabled: true` AND
     // `visibility !== 'off'`; otherwise the first `open_browser_page`
     // tool call boots it lazily. The stage's own
-    // `harnessConfigOverrides.availableTools` can filter these off if
+    // `session.tools.available` can filter these off if
     // the workflow author wants to constrain — same mechanism as any
     // other tool.
     const stageWorkspaceId = typeof variables?.['__workspaceId'] === 'string'
@@ -1235,7 +1241,7 @@ export class StageExecutionService {
     // If a hook with failurePolicy='abort' fails, the stage is aborted.
     // Hook results can inject variables, context messages, and attachments.
     let hookContextMessages: Array<{ content: string; metadata?: Record<string, unknown> }> = [];
-    if (stageDef.hooks && stageDef.hooks.length > 0) {
+    if (stage.hooks && stage.hooks.length > 0) {
       const preRunHookContext: HookContext = {
         sessionId: stageRun.sessionId ?? '__pre_session__',
         workflowId: workflowRunId,
@@ -1248,7 +1254,7 @@ export class StageExecutionService {
         eventBus: this.eventBus,
         workflowRunId,
       };
-      const preResult = await this.hookExecutor.executePhase('pre_run', stageDef.hooks, preRunHookContext);
+      const preResult = await this.hookExecutor.executePhase('pre_run', stage.hooks, preRunHookContext);
       if (!preResult.shouldContinue) {
         throw new StageExecutionError(
           preResult.mergedResult.abortReason ?? `pre_run hook aborted stage "${stageRun.name}"`,
@@ -1324,7 +1330,7 @@ export class StageExecutionService {
       sessionId: session.id,
       status: 'running',
       ...(isResuming ? {} : { startedAt: new Date() }),
-      totalSteps: stageDef.prompts.length,
+      totalSteps: stage.prompts.length,
     });
 
     // Skip SM transition on resume — stage was already 'running' before pause
@@ -1640,12 +1646,12 @@ export class StageExecutionService {
 
     try {
       // Inject predecessor stage summaries as context before executing prompts.
-      // Controlled by stageDef.contextFilter: 'summary-only' (default), 'full', 'structured', or 'none'.
+      // Controlled by the stage's context.mode: 'summary' (default), 'output', 'structured' or 'none'.
       // Skip context injection on resume — the reused conversation already has prior context.
-      const contextFilter = stageDef.contextFilter ?? 'summary-only';
-      if (!isResuming && contextFilter !== 'none' && predecessorSummaries && predecessorSummaries.length > 0 && session.conversationId) {
+      const contextMode = stage.context.mode;
+      if (!isResuming && contextMode !== 'none' && predecessorSummaries && predecessorSummaries.length > 0 && session.conversationId) {
         let contextMessage: string;
-        if (contextFilter === 'full') {
+        if (contextMode === 'output') {
           // HANDOFF-1: full mode injects each predecessor's COMPLETE output
           // (its raw response text), not just the condensed summary. Falls back
           // to the summary when a predecessor has no captured output (e.g. a
@@ -1658,7 +1664,7 @@ export class StageExecutionService {
           contextMessage =
             `The following stages have already been completed in this workflow. Use their FULL outputs as context for your work in this stage:\n\n` +
             contextLines.join('\n\n---\n\n');
-        } else if (contextFilter === 'structured') {
+        } else if (contextMode === 'structured') {
           // Structured mode: include outputData JSON alongside summaries
           const contextLines = predecessorSummaries.map((ps) => {
             let section = `## Completed Stage: "${ps.stageName}"\n${ps.summary}`;
@@ -1777,12 +1783,23 @@ export class StageExecutionService {
 
       // Execute prompts sequentially (resume from currentStep)
       const startStep = stageRun.currentStep ?? 0;
-      const outputFormat = stageDef.outputFormat ?? 'text';
+      const outputFormat = stage.output.format;
+      const outputSchema = stage.output.schema;
+      // Templates render with Expression v2: variables (bare {{name}} is sugar),
+      // run.codebases and upstream stages.
+      const renderScope = templateScope(
+        await this.workflowRunRepo.getById(workflowRunId),
+        variables,
+        await this.stageRunRepo.getByRunId(workflowRunId),
+      );
+      const outputInstructions = stage.output.instructions
+        ? this.renderStageTemplate(stage.output.instructions, renderScope, stageRun.name).rendered
+        : undefined;
 
-      for (let i = startStep; i < stageDef.prompts.length; i++) {
-        const prompt = stageDef.prompts[i]!;
+      for (let i = startStep; i < stage.prompts.length; i++) {
+        const prompt = stage.prompts[i]!;
         const isFirstPrompt = (i === startStep);
-        const isLastPrompt = (i === stageDef.prompts.length - 1);
+        const isLastPrompt = (i === stage.prompts.length - 1);
 
         // When resuming from pause AND the model was mid-response, send a
         // short continuation prompt. If the step completed before pause
@@ -1803,7 +1820,7 @@ export class StageExecutionService {
             stageRunId: stageRun.id,
             workflowRunId,
             step: i,
-            totalSteps: stageDef.prompts.length,
+            totalSteps: stage.prompts.length,
             label: prompt.label,
           },
         });
@@ -1823,10 +1840,7 @@ export class StageExecutionService {
           // a system message on the stream — otherwise raw `{{name}}` tokens
           // silently leak into the harness prompt and the user sees confusing
           // "why isn't my variable being replaced?" behavior.
-          const unresolved = new Set<string>();
-          const rawPromptText = variables
-            ? interpolateVariables(prompt.text, variables, unresolved)
-            : prompt.text;
+          const { rendered: rawPromptText, unresolved } = this.renderStageTemplate(prompt.text, renderScope, stageRun.name);
           if (unresolved.size > 0) {
             const names = Array.from(unresolved).join(', ');
             console.warn(
@@ -1867,20 +1881,20 @@ export class StageExecutionService {
 
           // Output format instructions — combined with the FIRST prompt only
           if (isFirstPrompt) {
-            // Append expectedOutput instruction if defined
-            if (stageDef.expectedOutput) {
+            // Append the output contract's instructions if defined
+            if (outputInstructions) {
               promptText +=
                 '\n\n---\n**Expected Output:**\n' +
-                stageDef.expectedOutput + '\n';
+                outputInstructions + '\n';
             }
 
             // Append output format instruction based on outputFormat
-            if (outputFormat === 'json' && stageDef.outputSchema) {
+            if (outputFormat === 'json' && outputSchema) {
               promptText +=
                 '\n\n---\n**IMPORTANT: Structured Output Required**\n' +
                 'You MUST include a JSON code block labeled `output.json` with your structured output matching this schema:\n' +
                 '```json output.json\n' +
-                JSON.stringify(stageDef.outputSchema, null, 2) + '\n' +
+                JSON.stringify(outputSchema, null, 2) + '\n' +
                 '```\n' +
                 'Include this JSON block in addition to any other code or text you produce.\n';
             } else if (outputFormat === 'text') {
@@ -1899,8 +1913,8 @@ export class StageExecutionService {
         // and have no per-turn mode. Prepending to the prompt is the one channel
         // that reaches both providers without rebuilding the session, and it is
         // scoped to exactly the turns that need it.
-        const stageInstructions = instructionsForMode(stageDef.agentMode);
-        if (stageInstructions && resolveModeDescriptor(stageDef.agentMode).planGate === 'blocking') {
+        const stageInstructions = instructionsForMode(stageAgentMode);
+        if (stageInstructions && resolveModeDescriptor(stageAgentMode).planGate === 'blocking') {
           promptText = `${stageInstructions}\n\n---\n\n${promptText}`;
         }
 
@@ -1956,14 +1970,15 @@ export class StageExecutionService {
             // PLN-01 — a stage's agent mode drives tool availability and the
             // permission policy exactly as a chat's per-turn mode does. Resolved
             // through the shared registry so a new mode needs no change here.
-            const stageTurnOptions = this.resolveStageTurnOptions(stageDef);
+            const stageTurnOptions = this.resolveStageTurnOptions(stageAgentMode);
             const conversationId = session.conversationId;
             // Every prompt turn is awaited under a real deadline: an explicit
-            // `stageDef.timeoutMs` is honoured (floored at MIN_TIMEOUT_MS), and a
+            // `timeouts.attemptMs` is honoured (floored at MIN_TIMEOUT_MS), and a
             // stage with none gets the default. `withStageTimeout` clears its
             // timer on the common path and aborts the harness call on timeout.
-            const effectiveTimeout = stageDef.timeoutMs
-              ? Math.max(stageDef.timeoutMs, MIN_TIMEOUT_MS)
+            const attemptMs = stage.timeouts?.attemptMs;
+            const effectiveTimeout = attemptMs
+              ? Math.max(attemptMs, MIN_TIMEOUT_MS)
               : this.defaultStageTimeoutMs;
             promptResponse = await this.withStageTimeout(
               effectiveTimeout,
@@ -2005,9 +2020,9 @@ export class StageExecutionService {
         }, { contributesOutput: true });
 
         // ── POST_PROMPT hook — fire after each prompt turn completes ──
-        if (stageDef.hooks && stageDef.hooks.length > 0) {
+        if (stage.hooks && stage.hooks.length > 0) {
           const wkDir = variables?.['__workingDirectory'];
-          await this.hookExecutor.executePhase('post_prompt', stageDef.hooks, {
+          await this.hookExecutor.executePhase('post_prompt', stage.hooks, {
             sessionId: session.id,
             workflowId: workflowRunId,
             workspacePath: typeof wkDir === 'string' ? wkDir : process.cwd(),
@@ -2037,7 +2052,7 @@ export class StageExecutionService {
         for (let retryAttempt = 0; retryAttempt < maxOutputRetries; retryAttempt++) {
           let outputValid = true;
 
-          if (outputFormat === 'json' && stageDef.outputSchema) {
+          if (outputFormat === 'json' && outputSchema) {
             // JSON mode: check for output.json code block
             const outputMatch = /```(?:json)?\s*output\.json\s*\n([\s\S]*?)```/.exec(stageOutputContent);
             if (!outputMatch?.[1]) {
@@ -2063,7 +2078,7 @@ export class StageExecutionService {
           const retryPrompt = outputFormat === 'json'
             ? `Your response is missing the required structured output. You MUST include a JSON code block labeled \`output.json\` matching this schema:\n` +
               '```json output.json\n' +
-              JSON.stringify(stageDef.outputSchema, null, 2) + '\n' +
+              JSON.stringify(outputSchema, null, 2) + '\n' +
               '```\n' +
               'Please produce ONLY the output.json block now.'
             : `Your response did not include a clear summary of your work. Please provide a concise summary of the actions taken, decisions made, and outputs produced.`;
@@ -2155,7 +2170,7 @@ export class StageExecutionService {
           });
         } catch {
           // Non-fatal — the stage still completes. But it must NOT complete
-          // with no summary at all: `contextFilter: 'summary-only'` (the
+          // with no summary at all: `context.mode: 'summary'` (the
           // default) feeds this text to every downstream stage, so a dropped
           // summary silently starves the rest of the DAG of context.
           //
@@ -2200,7 +2215,7 @@ export class StageExecutionService {
       // ── Structured output extraction ──
       // If outputSchema is defined, extract the output.json code block from the response
       let outputData: Record<string, unknown> | undefined;
-      if (stageDef.outputSchema && stageOutputContent) {
+      if (outputSchema && stageOutputContent) {
         try {
           const outputMatch = /```(?:json)?\s*output\.json\s*\n([\s\S]*?)```/.exec(stageOutputContent);
           if (outputMatch?.[1]) {
@@ -2233,7 +2248,7 @@ export class StageExecutionService {
       }
 
       // ── POST_RUN hooks — execute after stage work completes but before status update ──
-      if (stageDef.hooks && stageDef.hooks.length > 0) {
+      if (stage.hooks && stage.hooks.length > 0) {
         const postRunHookContext: HookContext = {
           sessionId: session.id,
           workflowId: workflowRunId,
@@ -2246,12 +2261,12 @@ export class StageExecutionService {
         };
         // post_run hooks are non-blocking by convention — failures don't prevent
         // the stage from being marked complete (but they will be logged/evented).
-        await this.hookExecutor.executePhase('post_run', stageDef.hooks, postRunHookContext)
+        await this.hookExecutor.executePhase('post_run', stage.hooks, postRunHookContext)
           .catch(() => { /* non-fatal — stage already completed its work */ });
       }
 
       // ── APPROVAL GATE — stage-level review before advancing the DAG ──
-      // When stageDef.approvalRequired is true, park the stage in
+      // When the stage declares `approval`, park the stage in
       // `awaiting_input` after all work + hooks finish. The reviewer can:
       //   • Approve → break the loop and let the stage flip to `completed`.
       //   • Provide feedback → the feedback is sent as a follow-up prompt on
@@ -2259,14 +2274,14 @@ export class StageExecutionService {
       //     stage re-parks for the next review round.
       // Reserve the pending-follow-up slot so per-stage session release is
       // deferred until after the reviewer approves.
-      if (stageDef.approvalRequired) {
+      if (stage.approval) {
         const hitl = this.hitlService;
         this.pendingFollowUps.add(stageRun.id);
         try {
           // Persist the current output before parking so the reviewer sees a
           // complete stage on refresh even before approval.
           await this.stageRunRepo.update(stageRun.id, {
-            currentStep: stageDef.prompts.length,
+            currentStep: stage.prompts.length,
             summary: stageSummary,
             outputText: stageOutputContent,
             outputData,
@@ -2280,7 +2295,7 @@ export class StageExecutionService {
           // tab, same revisions, same markdown file under <workspace>/plans/.
           const stagePlansEnabled =
             !!this.planService &&
-            resolveModeDescriptor(stageDef.agentMode).planGate === 'blocking';
+            resolveModeDescriptor(stageAgentMode).planGate === 'blocking';
           let stagePlanId: string | undefined;
 
           while (!approved) {
@@ -2464,7 +2479,7 @@ export class StageExecutionService {
                   feedbackText,
                   undefined,
                   undefined,
-                  this.resolveStageTurnOptions(stageDef),
+                  this.resolveStageTurnOptions(stageAgentMode),
                 );
                 return turnContent;
               },
@@ -2525,11 +2540,11 @@ export class StageExecutionService {
       // Mark complete — set currentStep to totalSteps so progress shows 100%
       await this.stageRunRepo.update(stageRun.id, {
         status: 'completed',
-        currentStep: stageDef.prompts.length,
+        currentStep: stage.prompts.length,
         completedAt: new Date(),
         summary: stageSummary,
         // HANDOFF-1: persist the full raw output so a successor with
-        // contextFilter='full' can receive the complete output, not just the
+        // context.mode 'output' can receive the complete output, not just the
         // condensed summary.
         outputText: stageOutputContent,
         outputData,
@@ -2554,7 +2569,7 @@ export class StageExecutionService {
 
       // ── SCRATCHPAD UPDATE ──
       // Write stage output to the per-run scratchpad JSON file
-      this.updateScratchpad(variables, workflowRunId, stageRun, stageDef, outputData, stageSummary)
+      this.updateScratchpad(variables, workflowRunId, stageRun, stage, outputData, stageSummary)
         .catch(() => { /* non-fatal */ });
 
       // Release session in per-stage mode — fire-and-forget with timeout
@@ -2574,7 +2589,7 @@ export class StageExecutionService {
       if (
         (sessionMode === 'per-stage' || sessionMode === 'auto') &&
         !this.pendingFollowUps.has(stageRun.id) &&
-        !mayRetryInSession(stageDef, stageRun)
+        !mayRetryInSession(stage, stageRun)
       ) {
         this.releaseSessionSafe(stageRun.id);
       }
@@ -2609,8 +2624,8 @@ export class StageExecutionService {
       const errorMsg = error instanceof Error ? error.message : String(error);
 
       // ── ON_ERROR hook — fire before retry decision ──
-      if (stageDef.hooks && stageDef.hooks.length > 0) {
-        await this.hookExecutor.executePhase('on_error', stageDef.hooks, {
+      if (stage.hooks && stage.hooks.length > 0) {
+        await this.hookExecutor.executePhase('on_error', stage.hooks, {
           sessionId: stageRun.sessionId ?? '__error_session__',
           workflowId: workflowRunId,
           workspacePath: typeof variables?.['__workingDirectory'] === 'string'
@@ -2629,7 +2644,7 @@ export class StageExecutionService {
       // A human rejection is never retried: re-running the stage would ignore
       // the very verdict the reviewer just gave. It goes straight to `failed`,
       // which is what blocks the downstream DAG.
-      const retryPolicy = stageDef.retryPolicy ?? DEFAULT_RETRY_POLICY;
+      const retryPolicy = stageRetryPolicy(stage) ?? DEFAULT_RETRY_POLICY;
       const rejected = error instanceof StageRejectedError;
       if (!rejected && stageRun.retryCount < retryPolicy.maxRetries) {
         // BUGFIX (variable interpolation on internal retry): pass the full
@@ -2643,7 +2658,7 @@ export class StageExecutionService {
           workflowRunId,
           sessionMode,
           retryPolicy,
-          workflowharnessConfig,
+          workflowSession,
           variables,
           predecessorSummaries,
         );
@@ -2707,10 +2722,10 @@ export class StageExecutionService {
     stageRun: StageRun,
     workflowRunId: string,
     validationReason: string,
-    sessionConfig?: Partial<HarnessConfig>,
+    _workflowSession?: SessionSpec,
     variables?: Record<string, unknown>,
   ): Promise<void> {
-    const stageDef = await this.stageDefRepo.getById(stageRun.stageDefinitionId);
+    const stage = await this.stageOf(stageRun);
 
     // The stage must already have a session assigned from the original execution
     if (!stageRun.sessionId) {
@@ -2856,7 +2871,7 @@ export class StageExecutionService {
       }
 
       // ── POST_RUN hooks — also run after in-session retry completion ──
-      if (stageDef.hooks && stageDef.hooks.length > 0) {
+      if (stage.hooks && stage.hooks.length > 0) {
         const postRunHookContext: HookContext = {
           sessionId: session.id,
           workflowId: workflowRunId,
@@ -2867,7 +2882,7 @@ export class StageExecutionService {
           eventBus: this.eventBus,
           workflowRunId,
         };
-        await this.hookExecutor.executePhase('post_run', stageDef.hooks, postRunHookContext)
+        await this.hookExecutor.executePhase('post_run', stage.hooks, postRunHookContext)
           .catch(() => { /* non-fatal — stage already completed its work */ });
       }
 
@@ -3107,7 +3122,7 @@ export class StageExecutionService {
     stageRunId: string,
     workflowRunId: string,
     sessionMode: 'single' | 'per-stage' | 'auto',
-    workflowharnessConfig?: Partial<HarnessConfig>,
+    workflowSession?: SessionSpec,
     variables?: Record<string, unknown>,
     predecessorSummaries?: Array<{ stageName: string; summary: string; outputData?: Record<string, unknown> }>,
   ): Promise<void> {
@@ -3171,9 +3186,9 @@ export class StageExecutionService {
     // so executeStage doesn't re-run the completed step.
     if (!continuationNeeded) {
       const currentStep = stageRun.currentStep ?? 0;
-      const stageDef = await this.stageDefRepo.getById(stageRun.stageDefinitionId);
+      const stage = await this.stageOf(stageRun);
       const nextStep = currentStep + 1;
-      if (nextStep >= stageDef.prompts.length) {
+      if (nextStep >= stage.prompts.length) {
         // All steps were completed before pause (pause during finalization).
         // Advance currentStep past bounds so the for-loop in executeStage is skipped
         // and finalization logic (summary, artifacts) re-runs.
@@ -3193,7 +3208,7 @@ export class StageExecutionService {
       updated,
       workflowRunId,
       sessionMode,
-      workflowharnessConfig,
+      workflowSession,
       variables,
       predecessorSummaries,
       {
@@ -3220,9 +3235,9 @@ export class StageExecutionService {
     }
 
     // ── ON_CANCEL hook — fire before status update ──
-    const cancelStageDef = await this.stageDefRepo?.getById?.(stageRun.stageDefinitionId).catch(() => null);
-    if (cancelStageDef?.hooks && cancelStageDef.hooks.length > 0) {
-      await this.hookExecutor.executePhase('on_cancel', cancelStageDef.hooks, {
+    const cancelStage = await this.stageOf(stageRun).catch(() => null);
+    if (cancelStage && cancelStage.hooks.length > 0) {
+      await this.hookExecutor.executePhase('on_cancel', cancelStage.hooks, {
         sessionId: stageRun.sessionId ?? '__cancel_session__',
         workflowId: stageRun.workflowRunId,
         workspacePath: process.cwd(),
@@ -3243,7 +3258,7 @@ export class StageExecutionService {
     workflowRunId: string,
     sessionMode: 'single' | 'per-stage' | 'auto',
     retryPolicy: { maxRetries: number; backoffMs: number; backoffMultiplier: number },
-    workflowharnessConfig?: Partial<HarnessConfig>,
+    workflowSession?: SessionSpec,
     variables?: Record<string, unknown>,
     predecessorSummaries?: Array<{ stageName: string; summary: string; outputData?: Record<string, unknown> }>,
   ): Promise<void> {
@@ -3272,10 +3287,38 @@ export class StageExecutionService {
       updated,
       workflowRunId,
       sessionMode,
-      workflowharnessConfig,
+      workflowSession,
       variables,
       predecessorSummaries,
     );
+  }
+
+  /** The stage a stage run executes, from the run's pinned definition version. */
+  private async stageOf(stageRun: Pick<StageRun, 'workflowRunId' | 'stageKey'>): Promise<AgentStage> {
+    const run = await this.workflowRunRepo.getById(stageRun.workflowRunId);
+    return this.definitions.stage(run.definitionVersionId, stageRun.stageKey);
+  }
+
+  /**
+   * Render a stage template (Expression v2). Declared variables that have no
+   * value are reported so the run shows why a placeholder rendered empty; a
+   * template that does not parse (validation normally rejects it at save)
+   * is sent as written.
+   */
+  private renderStageTemplate(
+    text: string,
+    scope: ReturnType<typeof templateScope>,
+    stageName: string,
+  ): { rendered: string; unresolved: Set<string> } {
+    const unresolved = new Set(
+      templateVariableNames(text).filter((n) => scope.variables[n] === undefined || scope.variables[n] === null),
+    );
+    const result = renderTemplate(text, scope as unknown as Record<string, unknown>);
+    if (!result.ok) {
+      console.warn(`[StageExecutionService] Template error in stage "${stageName}": ${result.error.message}`);
+      return { rendered: text, unresolved };
+    }
+    return { rendered: result.text, unresolved };
   }
 
   private async getSessionForStageRun(stageRunId: string): Promise<{ conversationId?: string } | null> {
@@ -3370,8 +3413,8 @@ export class StageExecutionService {
    * opts into `plan`, the permission policy is forced read-only by the mode
    * descriptor — the same mechanism the chat composer uses.
    */
-  private resolveStageTurnOptions(stageDef: StageDefinition): SendPromptOptions {
-    const agentMode = stageDef.agentMode ?? DEFAULT_AGENT_MODE;
+  private resolveStageTurnOptions(stageAgentMode: AgentMode | undefined): SendPromptOptions {
+    const agentMode = stageAgentMode ?? DEFAULT_AGENT_MODE;
     return {
       agentMode,
       permissionMode: resolveTurnPermissionMode(agentMode, undefined),
@@ -3398,8 +3441,8 @@ export class StageExecutionService {
   private async updateScratchpad(
     variables: Record<string, unknown> | undefined,
     workflowRunId: string,
-    stageRun: { id: string; name: string; stageDefinitionId: string },
-    stageDef: { outputFormat?: 'text' | 'json' },
+    stageRun: { id: string; name: string; stageKey: string },
+    stage: AgentStage,
     outputData: Record<string, unknown> | undefined,
     summary: string | undefined,
   ): Promise<void> {
@@ -3410,14 +3453,14 @@ export class StageExecutionService {
     const { join } = await import('node:path');
 
     const scratchpadPath = join(executionDir, '..', 'scratchpad.json');
-    const outputFormat = stageDef.outputFormat ?? 'text';
+    const outputFormat = stage.output.format;
 
     // Read existing scratchpad or create new one
     let scratchpad: {
       workflowRunId: string;
       entries: Array<{
         stageName: string;
-        stageDefinitionId: string;
+        stageKey: string;
         stageRunId: string;
         status: string;
         outputFormat: string;
@@ -3445,7 +3488,7 @@ export class StageExecutionService {
     );
     const entry = {
       stageName: stageRun.name,
-      stageDefinitionId: stageRun.stageDefinitionId,
+      stageKey: stageRun.stageKey,
       stageRunId: stageRun.id,
       status: 'completed' as const,
       outputFormat,

@@ -3,6 +3,9 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
+import type { StageRunOverride } from '@generatorai/shared';
+import { STAGE_OVERRIDES_VARIABLE } from '@generatorai/client-core';
+import type { WorkflowGraph } from '@generatorai/workflow-spec';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
@@ -24,6 +27,7 @@ import {
   waitForRunTerminal,
   watchFlag,
 } from './_shared.js';
+import { findDefinition } from './workflow.js';
 
 export const RUN_GROUP = {
   name: 'run',
@@ -38,7 +42,8 @@ export interface RunProfile {
   permissionMode?: string;
   projectId?: string;
   name?: string;
-  stageOverrides?: Array<{ stageId: string; patch: Record<string, unknown> }>;
+  /** Per-stage overrides, by stage key. */
+  stageOverrides?: StageRunOverride[];
 }
 
 async function findRun(ctx: CliContext, ref: string) {
@@ -55,21 +60,78 @@ async function findRun(ctx: CliContext, ref: string) {
   });
 }
 
-async function findDefinition(ctx: CliContext, ref: string) {
-  const definitions = await ctx.api.definitions.list();
-  return resolveRef(ref, { kind: 'workflow', candidates: definitions });
-}
-
+/** A stage run by its stage key, its name, or its own id. */
 async function findStage(ctx: CliContext, runId: string, ref: string) {
   const stages = await ctx.api.runs.stages(runId);
+  const byKey = stages.filter((s) => s.stageKey === ref.trim());
+  // A retried stage has several runs under one key; the latest is the one
+  // an operator means.
+  const latest = byKey[byKey.length - 1];
+  if (latest) return { id: latest.id, name: latest.name, status: latest.status };
   return resolveRef(ref, {
     kind: 'stage',
-    candidates: (stages as unknown as Array<Record<string, unknown>>).map((s) => ({
-      id: String(s['id'] ?? s['stageDefinitionId'] ?? ''),
-      name: (s['name'] ?? s['stageName']) as string | null,
-      status: s['status'] as string | null,
-    })),
+    candidates: stages.map((s) => ({ id: s.id, name: s.name, status: s.status })),
   });
+}
+
+/**
+ * The graph a run of this definition executes: the draft for a test run,
+ * otherwise the current published version.
+ */
+async function graphToRun(ctx: CliContext, definitionId: string, testRun: boolean): Promise<WorkflowGraph> {
+  const definition = await ctx.api.definitions.get(definitionId);
+  if (testRun) return definition.graph;
+  if (!definition.currentVersionId) {
+    throw new CliError('VALIDATION', `"${definition.graph.workflow.name}" is a draft that was never published.`, {
+      hint: 'Publish it (`generatorai workflow publish`), or run the draft with --test-run.',
+    });
+  }
+  if (!definition.hasUnpublishedChanges) return definition.graph;
+  return (await ctx.api.definitions.version(definitionId, definition.currentVersionId)).graph;
+}
+
+/**
+ * Merges stage overrides by key (later sources win field by field) and
+ * refuses keys the graph does not have: an override for a missing stage
+ * would otherwise do nothing, silently.
+ */
+export function mergeStageOverrides(
+  graph: WorkflowGraph,
+  ...sources: Array<StageRunOverride[] | undefined>
+): StageRunOverride[] {
+  const keys = new Set(graph.stages.map((s) => s.key));
+  const merged = new Map<string, StageRunOverride>();
+  for (const override of sources.flatMap((source) => source ?? [])) {
+    if (typeof override?.stageKey !== 'string' || !keys.has(override.stageKey)) {
+      throw new CliError('VALIDATION', `Stage override targets unknown stage key "${String(override?.stageKey)}".`, {
+        hint: `Stage keys: ${[...keys].join(', ') || '(none)'}`,
+      });
+    }
+    const previous = merged.get(override.stageKey);
+    const variables = previous?.variables || override.variables
+      ? { ...previous?.variables, ...override.variables }
+      : undefined;
+    merged.set(override.stageKey, {
+      stageKey: override.stageKey,
+      ...(override.skip || previous?.skip ? { skip: true } : {}),
+      ...(variables ? { variables } : {}),
+    });
+  }
+  return [...merged.values()];
+}
+
+/** `--skip <key>` and `--stage-var <key>.<name>=<value>` as overrides by key. */
+export function overridesFromFlags(skip: string[] | undefined, stageVars: string[] | undefined): StageRunOverride[] {
+  const out: StageRunOverride[] = (skip ?? []).map((stageKey) => ({ stageKey: stageKey.trim(), skip: true }));
+  for (const pair of stageVars ?? []) {
+    const dot = pair.indexOf('.');
+    const equals = pair.indexOf('=');
+    if (dot <= 0 || equals === -1 || dot > equals) {
+      throw CliError.usage(`Expected <stageKey>.<name>=<value>, got "${pair}".`);
+    }
+    out.push({ stageKey: pair.slice(0, dot), variables: parseKeyValues([pair.slice(dot + 1)]) });
+  }
+  return out;
 }
 
 /**
@@ -312,6 +374,14 @@ export function runCommands(): CommandSpec[] {
         },
         { name: 'var', description: 'Variable as key=value (repeatable)', type: 'string', variadic: true },
         { name: 'profile', description: 'Run profile name or path', type: 'string' },
+        { name: 'skip', description: 'Skip the stage with this key (repeatable)', type: 'string', variadic: true, completes: 'stage' },
+        {
+          name: 'stageVar',
+          description: 'Variable for one stage as <stageKey>.<name>=<value> (repeatable)',
+          type: 'string',
+          variadic: true,
+        },
+        { name: 'testRun', description: 'Run the draft (unpublished) graph as a test version', type: 'boolean' },
         { name: 'project', description: 'Project id or name', type: 'string', completes: 'project' },
         {
           name: 'permissionMode',
@@ -329,6 +399,9 @@ export function runCommands(): CommandSpec[] {
           name: z.string().optional(),
           var: z.array(z.string()).optional(),
           profile: z.string().optional(),
+          skip: z.array(z.string()).optional(),
+          stageVar: z.array(z.string()).optional(),
+          testRun: z.boolean().optional(),
           project: z.string().optional(),
           permissionMode: z.enum(PERMISSION_MODES).optional(),
           watch: z.boolean().optional(),
@@ -339,17 +412,13 @@ export function runCommands(): CommandSpec[] {
       output: { kind: 'record', successMessage: 'Started run {id}' },
       async handler(ctx, { args, flags }) {
         const definition = await findDefinition(ctx, args.workflow);
-        const full = await ctx.api.definitions.get(definition.id);
+        const testRun = Boolean(flags.testRun);
+        const graph = await graphToRun(ctx, definition.id, testRun);
 
         const profile = flags.profile ? await loadRunProfile(flags.profile) : {};
-        const variables = { ...profile.variables, ...parseKeyValues(flags.var) };
+        const variables: Record<string, unknown> = { ...profile.variables, ...parseKeyValues(flags.var) };
 
-        const declared = ((full as unknown as Record<string, unknown>)['variables'] ?? []) as Array<{
-          name: string;
-          required?: boolean;
-          type?: string;
-          defaultValue?: unknown;
-        }>;
+        const declared = graph.workflow.variables;
         const { errors, warnings } = validateVariables(declared, variables);
         if (errors.length) {
           throw new CliError('VALIDATION', `Cannot start run:\n${errors.map((e) => `  ${e}`).join('\n')}`, {
@@ -365,17 +434,21 @@ export function runCommands(): CommandSpec[] {
           projectId = resolveRef(flags.project, { kind: 'project', candidates: projects }).id;
         }
 
-        // Stage overrides ride in as a reserved variable; that is the channel
-        // the run service reads them from.
-        if (profile.stageOverrides?.length) {
-          (variables as Record<string, unknown>)['__stageOverrides'] = profile.stageOverrides;
-        }
+        // Stage overrides (by key) ride in the run's reserved variable; that
+        // is the channel the run service reads them from.
+        const stageOverrides = mergeStageOverrides(
+          graph,
+          profile.stageOverrides,
+          overridesFromFlags(flags.skip, flags.stageVar),
+        );
+        if (stageOverrides.length) variables[STAGE_OVERRIDES_VARIABLE] = stageOverrides;
 
         const created = await ctx.api.runs.create(
           compact({
             workflowDefinitionId: definition.id,
             variables,
             projectId,
+            testRun: testRun || undefined,
           }),
         );
 
@@ -531,7 +604,8 @@ export function runCommands(): CommandSpec[] {
         kind: 'list',
         columns: [
           { key: 'id', header: 'Stage Run', format: 'id', priority: 0 },
-          { key: 'stageName', header: 'Stage', priority: 0 },
+          { key: 'stageKey', header: 'Key', priority: 0 },
+          { key: 'name', header: 'Stage', priority: 1 },
           statusColumn,
           { key: 'startedAt', header: 'Started', format: 'relative', priority: 3 },
           { key: 'durationMs', header: 'Duration', format: 'duration', priority: 2 },
@@ -738,12 +812,11 @@ export function runCommands(): CommandSpec[] {
       output: { kind: 'record' },
       async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
         const definition = await findDefinition(ctx, args.workflow);
-        const full = (await ctx.api.definitions.get(definition.id)) as unknown as Record<string, unknown>;
-        const declared = (full['variables'] ?? []) as Array<{ name: string; defaultValue?: unknown }>;
+        const { graph } = await ctx.api.definitions.get(definition.id);
 
         const profile: RunProfile = {
-          name: `${String(full['name'] ?? 'run')} profile`,
-          variables: Object.fromEntries(declared.map((v) => [v.name, v.defaultValue ?? ''])),
+          name: `${graph.workflow.name} profile`,
+          variables: Object.fromEntries(graph.workflow.variables.map((v) => [v.name, v.defaultValue ?? ''])),
           permissionMode: 'default',
           stageOverrides: [],
         };
@@ -773,18 +846,15 @@ export function runCommands(): CommandSpec[] {
       output: { kind: 'record' },
       async handler(ctx, { args }) {
         const definition = await findDefinition(ctx, args.workflow);
-        const full = (await ctx.api.definitions.get(definition.id)) as unknown as Record<string, unknown>;
-        const declared = (full['variables'] ?? []) as Array<{ name: string; required?: boolean; type?: string }>;
+        const { graph } = await ctx.api.definitions.get(definition.id);
         const profile = await loadRunProfile(args.profile);
 
-        const { errors, warnings } = validateVariables(declared, profile.variables ?? {});
+        const { errors, warnings } = validateVariables(graph.workflow.variables, profile.variables ?? {});
 
-        const stageIds = new Set(
-          ((full['stages'] ?? []) as Array<{ id: string }>).map((s) => s.id),
-        );
+        const stageKeys = new Set(graph.stages.map((s) => s.key));
         for (const override of profile.stageOverrides ?? []) {
-          if (!stageIds.has(override.stageId)) {
-            errors.push(`stage override targets unknown stage "${override.stageId}"`);
+          if (!stageKeys.has(override.stageKey)) {
+            errors.push(`stage override targets unknown stage key "${String(override.stageKey)}"`);
           }
         }
 
@@ -815,15 +885,13 @@ export function runCommands(): CommandSpec[] {
       },
       async handler(ctx, { args, flags }) {
         const target = await findRun(ctx, args.run);
-        const stages = (await ctx.api.runs.stages(target.id)) as unknown as Array<Record<string, unknown>>;
+        const stages = await ctx.api.runs.stages(target.id);
 
         const wanted = flags.stage
           ? [await findStage(ctx, target.id, flags.stage)]
-          : stages.map((s) => ({ id: String(s['id']), name: String(s['stageName'] ?? '') }));
+          : stages.map((s) => ({ id: s.id, name: s.name }));
 
-        const sessionByStage = new Map(
-          stages.map((s) => [String(s['id']), s['sessionId'] as string | undefined]),
-        );
+        const sessionByStage = new Map(stages.map((s) => [s.id, s.sessionId]));
 
         const rows: Array<Record<string, unknown>> = [];
         for (const stage of wanted) {

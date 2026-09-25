@@ -37,7 +37,8 @@
     "@generatorai/core": "workspace:*",
     "@generatorai/db": "workspace:*",
     "@generatorai/secrets": "workspace:*",
-    "@generatorai/shared": "workspace:*"
+    "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*"
   },
   "engines": {
     "node": ">=22"

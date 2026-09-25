@@ -29,10 +29,13 @@ async function pendingCall(e: TestEngine, stage: string, kind = 'prompt'): Promi
 
 const T8 = {
   name: 't8-crash',
-  sessionMode: 'per-stage',
   stages: [
     { name: 'C1', prompt: 'Write the numbers 1 to 600, one per line.' },
     { name: 'C2', prompt: 'Write one line containing the token C2.' },
+    // A second root makes the graph parallel, so the v1 engine resolves the
+    // run to per-stage sessions (a definition has no session mode since P01;
+    // a linear graph would share one conversation).
+    { name: 'side', prompt: 'Write one line containing the token SIDE.' },
   ],
   edges: [['C1', 'C2']] as const,
 };
