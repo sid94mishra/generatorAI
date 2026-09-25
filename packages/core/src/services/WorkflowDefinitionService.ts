@@ -253,7 +253,6 @@ export class WorkflowDefinitionService {
       workflowDefinitionId: params.workflowDefinitionId,
       name: params.name,
       description: params.description,
-      templateId: params.templateId,
       order: params.order ?? maxOrder + 1,
       prompts: params.prompts ?? [],
       harnessConfigOverrides: params.harnessConfigOverrides,

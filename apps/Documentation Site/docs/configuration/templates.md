@@ -188,97 +188,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | text | string | `required` | min 1 |
 | waitForCompletion | boolean | `default true` | — |
 
-## StageTemplateSchema
-
-| Field | Type / choices | Input / default | Constraints |
-| --- | --- | --- | --- |
-| id | string | `required` | — |
-| name | string | `required` | min 1 |
-| description | string | `default ""` | — |
-| category | "code-generation" / "code-review" / "testing" / "e2e-testing" / "refactoring" / "documentation" / "deployment" / "custom" / "system" | `default "custom"` | — |
-| version | string | `default "1.0.0"` | — |
-| tags | array of string | `default []` | — |
-| prompts | array of object | `required` | minLength 1 |
-| prompts[] | object | `required` | unknown keys: strip |
-| prompts[].label | string | `required` | min 1 |
-| prompts[].text | string | `required` | min 1 |
-| prompts[].waitForCompletion | boolean | `default true` | — |
-| harnessConfigOverrides | object | `optional` | unknown keys: strip |
-| harnessConfigOverrides.model | string | `default "claude-sonnet-4.6"` | — |
-| harnessConfigOverrides.systemMessage | object | `optional` | unknown keys: strip |
-| harnessConfigOverrides.systemMessage.mode | "append" / "replace" | `default "append"` | — |
-| harnessConfigOverrides.systemMessage.content | string | `required` | — |
-| harnessConfigOverrides.systemPromptAppend | string | `optional` | — |
-| harnessConfigOverrides.streaming | boolean | `default true` | — |
-| harnessConfigOverrides.mcpServers | map of object | `default {}` | — |
-| harnessConfigOverrides.mcpServers.{key} | object | `required` | unknown keys: strip |
-| harnessConfigOverrides.mcpServers.{key}.type | "http" / "stdio" | `required` | — |
-| harnessConfigOverrides.mcpServers.{key}.url | string | `optional` | — |
-| harnessConfigOverrides.mcpServers.{key}.command | string | `optional` | — |
-| harnessConfigOverrides.mcpServers.{key}.args | array of string | `optional` | — |
-| harnessConfigOverrides.availableTools | array of string | `default []` | — |
-| harnessConfigOverrides.excludedTools | array of string | `default []` | — |
-| harnessConfigOverrides.skillDirectories | array of string | `default []` | — |
-| harnessConfigOverrides.disabledSkills | array of string | `default []` | — |
-| harnessConfigOverrides.customAgents | array of object | `default []` | — |
-| harnessConfigOverrides.customAgents[] | object | `required` | unknown keys: strip |
-| harnessConfigOverrides.customAgents[].name | string | `required` | — |
-| harnessConfigOverrides.customAgents[].description | string | `required` | — |
-| harnessConfigOverrides.customAgents[].instructions | string | `required` | — |
-| harnessConfigOverrides.customAgents[].tools | array of string | `optional` | — |
-| harnessConfigOverrides.provider | object | `optional` | unknown keys: strip |
-| harnessConfigOverrides.provider.name | string | `required` | — |
-| harnessConfigOverrides.provider.baseUrl | string | `required` | url |
-| harnessConfigOverrides.provider.apiKey | string | `required` | — |
-| harnessConfigOverrides.provider.model | string | `optional` | — |
-| harnessConfigOverrides.configDir | string | `optional` | — |
-| harnessConfigOverrides.reasoningEffort | "low" / "medium" / "high" / "xhigh" / "max" / "ultra" | `optional` | — |
-| harnessConfigOverrides.maxTurns | number | `optional` | int; min 1 |
-| variables | array of object | `default []` | — |
-| variables[] | object | `required` | unknown keys: strip |
-| variables[].name | string | `required` | min 1; regex /^[a-zA-Z_][a-zA-Z0-9_]*$/ |
-| variables[].type | "string" / "number" / "boolean" / "choice" / "text" / "git_url" / "git_urls" | `required` | — |
-| variables[].label | string | `required` | min 1 |
-| variables[].description | string | `optional` | — |
-| variables[].required | boolean | `default false` | — |
-| variables[].defaultValue | unknown | `optional` | — |
-| variables[].options | array of string | `optional` | — |
-| hooks | array of object | `default []` | — |
-| hooks[] | object | `required` | unknown keys: strip |
-| hooks[].id | string | `required` | — |
-| hooks[].name | string | `required` | — |
-| hooks[].phase | "pre_run" / "post_run" / "pre_clone" / "post_clone" / "pre_prompt" / "post_prompt" / "pre_commit" / "post_commit" / "on_error" / "on_cancel" / "pre_tool_use" / "post_tool_use" / "on_message" / "on_reasoning" / "on_session_start" / "on_session_idle" / "on_session_error" / "on_session_cancelled" / "on_client_start" / "on_client_stop" / "on_client_error" / "on_client_restart" / "on_permission" / "on_run_start" / "on_run_complete" / "on_run_failed" / "on_run_cancelled" / "on_pr_created" / "on_preprocessing_complete" / "on_postprocessing_start" / "on_all_stages_scheduled" / "on_stage_completed" / "on_stage_failed" / "on_parallel_join" | `required` | — |
-| hooks[].type | "script" / "http" / "function" | `required` | — |
-| hooks[].priority | number | `default 0` | — |
-| hooks[].enabled | boolean | `default true` | — |
-| hooks[].failurePolicy | "abort" / "skip" / "continue" | `default "skip"` | — |
-| hooks[].timeoutMs | number | `default 30000` | — |
-| hooks[].retries | number | `default 0` | — |
-| hooks[].config | variants by type (object / object / object) | `required` | — |
-| hooks[].config&lt;variant 1&gt; | object | `required` | unknown keys: strip |
-| hooks[].config&lt;variant 1&gt;.type | "script" | `required` | — |
-| hooks[].config&lt;variant 1&gt;.command | string | `required` | — |
-| hooks[].config&lt;variant 1&gt;.args | array of string | `optional` | — |
-| hooks[].config&lt;variant 1&gt;.cwd | string | `optional` | — |
-| hooks[].config&lt;variant 1&gt;.env | map of string | `optional` | — |
-| hooks[].config&lt;variant 2&gt; | object | `required` | unknown keys: strip |
-| hooks[].config&lt;variant 2&gt;.type | "http" | `required` | — |
-| hooks[].config&lt;variant 2&gt;.url | string | `required` | url |
-| hooks[].config&lt;variant 2&gt;.method | "GET" / "POST" / "PUT" / "PATCH" / "DELETE" | `required` | — |
-| hooks[].config&lt;variant 2&gt;.headers | map of string | `optional` | — |
-| hooks[].config&lt;variant 2&gt;.bodyTemplate | string | `optional` | — |
-| hooks[].config&lt;variant 3&gt; | object | `required` | unknown keys: strip |
-| hooks[].config&lt;variant 3&gt;.type | "function" | `required` | — |
-| hooks[].config&lt;variant 3&gt;.modulePath | string | `optional` | — |
-| hooks[].config&lt;variant 3&gt;.handlerName | string | `optional` | — |
-| hooks[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
-| retryPolicy | object | `optional` | unknown keys: strip |
-| retryPolicy.maxRetries | number | `default 0` | int; min 0; max 10 |
-| retryPolicy.backoffMs | number | `default 1000` | int; min 100 |
-| retryPolicy.backoffMultiplier | number | `default 2` | min 1 |
-| timeoutMs | number | `optional` | int; min 1000 |
-| isLocked | boolean | `default false` | — |
-
 ## WorkflowTemplateStageSchema
 
 | Field | Type / choices | Input / default | Constraints |
@@ -286,7 +195,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | name | string | `required` | min 1 |
 | description | string | `default ""` | — |
 | order | number | `required` | int; min 0 |
-| stageTemplateId | string | `optional` | — |
 | prompts | array of object | `default []` | — |
 | prompts[] | object | `required` | unknown keys: strip |
 | prompts[].label | string | `required` | min 1 |
@@ -432,7 +340,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | stages[].name | string | `required` | min 1 |
 | stages[].description | string | `default ""` | — |
 | stages[].order | number | `required` | int; min 0 |
-| stages[].stageTemplateId | string | `optional` | — |
 | stages[].prompts | array of object | `default []` | — |
 | stages[].prompts[] | object | `required` | unknown keys: strip |
 | stages[].prompts[].label | string | `required` | min 1 |
@@ -587,8 +494,7 @@ The following source snapshot contains the additional refinements, transformatio
 
 ```typescript
 // ────────────────────────────────────────────────────────────────
-// Template System — Unified schemas for Workflow Templates,
-// Stage Templates
+// Template System — schemas for Workflow Templates
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
@@ -820,7 +726,7 @@ export const ResultValidationSchema = z.object({
   })),
 });
 
-// ── Stage Template Prompt ──────────────────────────────────────
+// ── Template stage prompt ──────────────────────────────────────
 
 export const StageTemplatePromptSchema = z.object({
   label: z.string().min(1),
@@ -828,45 +734,12 @@ export const StageTemplatePromptSchema = z.object({
   waitForCompletion: z.boolean().default(true),
 });
 
-// ── Stage Template (reusable per-stage blueprint) ──────────────
-
-export const StageTemplateSchema = z.object({
-  id: z.string(),
-  name: z.string().min(1),
-  description: z.string().default(''),
-  category: TemplateCategorySchema.default('custom'),
-  version: z.string().default('1.0.0'),
-  tags: z.array(z.string()).default([]),
-  /** Prompt templates with {{variable}} placeholders */
-  prompts: z.array(StageTemplatePromptSchema).min(1),
-  /** Per-stage harness config overrides */
-  harnessConfigOverrides: TemplateHarnessConfigSchema.optional(),
-  /** Variables this stage expects */
-  variables: z.array(ConfigurableVariableSchema).default([]),
-  /** Hooks for this stage */
-  hooks: z.array(HookDefinitionSchema).default([]),
-  /** Retry policy */
-  retryPolicy: z.object({
-    maxRetries: z.number().int().min(0).max(10).default(0),
-    backoffMs: z.number().int().min(100).default(1000),
-    backoffMultiplier: z.number().min(1).default(2),
-  }).optional(),
-  /** Timeout in ms */
-  timeoutMs: z.number().int().min(1000).optional(),
-  /** Whether this stage is locked (non-editable when used in a workflow) */
-  isLocked: z.boolean().default(false),
-});
-
-export type StageTemplate = z.infer<typeof StageTemplateSchema>;
-
 // ── Workflow Template Stage ────────────────────────────────────
 
 export const WorkflowTemplateStageSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(''),
   order: z.number().int().min(0),
-  /** Either inline prompts OR a reference to a stage template */
-  stageTemplateId: z.string().optional(),
   prompts: z.array(StageTemplatePromptSchema).default([]),
   harnessConfigOverrides: TemplateHarnessConfigSchema.optional(),
   hooks: z.array(HookDefinitionSchema).default([]),
@@ -996,7 +869,6 @@ export function templateStageToCreateParams(
     workflowDefinitionId,
     name: stage.name,
     description: stage.description,
-    templateId: (stage as { templateId?: string }).templateId,
     order: order ?? stage.order,
     prompts: stage.prompts,
     harnessConfigOverrides: stage.harnessConfigOverrides,

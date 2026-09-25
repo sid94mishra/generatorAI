@@ -376,6 +376,22 @@
         "apps/web/src/pages/WorkflowBuilderPage.tsx"
       ],
       "reason": "WP-1.4: stage-level variables and their editor deleted (never merged at run time); definition variables"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(StageTemplateSchema|StageTemplate|stageTemplateId|loadStageTemplates|registerStageTemplate|getStageTemplate|getAllStageTemplates|hasStageTemplate)\\b",
+      "reason": "WP-1.4: stage templates deleted (never loaded)"
+    },
+    {
+      "phase": "01",
+      "pattern": "templateId",
+      "paths": [
+        "packages/shared/src/types/StageDefinition.ts",
+        "packages/db/src/repositories/StageDefinitionRepository.ts",
+        "apps/web/src/components/workflow/",
+        "apps/web/src/pages/WorkflowBuilderPage.tsx"
+      ],
+      "reason": "WP-1.4: stage templateId + template select deleted"
     }
   ],
   "comments": {

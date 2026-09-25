@@ -223,7 +223,6 @@ export const CreateStageSchema = z.object({
   workflowDefinitionId: z.string().uuid(),
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
-  templateId: z.string().optional(),
   /** When omitted, the service auto-appends (`max existing order + 1`). */
   order: z.number().int().min(0).optional(),
   prompts: z.array(PromptDefinitionSchema).default([]),
@@ -292,7 +291,6 @@ export const WorkflowDefinitionSchema = z.object({
 const ImportStageSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
-  templateId: z.string().optional(),
   order: z.number().int().min(0),
   prompts: z.array(PromptDefinitionSchema).default([]),
   harnessConfigOverrides: HarnessConfigSchema.optional(),

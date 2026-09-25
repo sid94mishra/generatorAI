@@ -23,7 +23,6 @@ import { AgentBindingSection } from './AgentBindingSection.js';
 import { NumberStepper } from './NumberStepper.js';
 import { CollapsibleSection } from './CollapsibleSection.js';
 import { Button, Input, Select, Textarea, ToggleSwitch } from '@/components/ui/index.js';
-import { useTemplates } from '@/hooks/queries.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
 import { cn } from '@/lib/utils.js';
 
@@ -41,8 +40,6 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
   });
   const updateStage = useWorkflowBuilderStore((s) => s.updateStage);
   const [activeTab, setActiveTab] = useState<PanelTab>('properties');
-
-  const { data: templates } = useTemplates();
 
   const handleUpdate = useCallback(
     (updates: Partial<StageDefinition>) => {
@@ -67,12 +64,6 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
     );
   }
 
-  // Build select options
-  const templateOptions = [
-    { value: '', label: 'No template', description: 'Use custom prompts' },
-    ...(templates?.map((t) => ({ value: t.id, label: t.name, description: t.description })) ?? []),
-  ];
-
   const conditionOptions = [
     { value: 'always', label: 'Always run' },
     { value: 'on_success', label: 'On upstream success' },
@@ -95,7 +86,7 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
                 {stage.name || 'Untitled Stage'}
               </h3>
               <p className="truncate text-[11px] text-muted-foreground">
-                {stage.templateId ?? 'Custom stage'}
+                {stage.agentRef ?? 'Custom stage'}
               </p>
             </div>
           </div>
@@ -140,7 +131,7 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
       {/* Scrollable form body */}
       <div className="flex-1 overflow-y-auto" role="tabpanel" id={`tabpanel-${activeTab}`}>
         {activeTab === 'properties' ? (
-          <PropertiesTab stage={stage} onUpdate={handleUpdate} templateOptions={templateOptions} />
+          <PropertiesTab stage={stage} onUpdate={handleUpdate} />
         ) : (
           <ExecutionTab stage={stage} onUpdate={handleUpdate} conditionOptions={conditionOptions} />
         )}
@@ -155,11 +146,9 @@ type PromptSubTab = 'inline' | 'agent';
 function PropertiesTab({
   stage,
   onUpdate,
-  templateOptions,
 }: {
   stage: StageDefinition;
   onUpdate: (updates: Partial<StageDefinition>) => void;
-  templateOptions: { value: string; label: string; description?: string }[];
 }) {
   const [promptSubTab, setPromptSubTab] = useState<PromptSubTab>('inline');
 
@@ -189,18 +178,8 @@ function PropertiesTab({
         </div>
       </CollapsibleSection>
 
-      {/* Template & Model */}
-      <CollapsibleSection title="Model & Template" icon={<Cpu className="h-3.5 w-3.5" />} defaultOpen>
-        <div>
-          <label className="mb-1.5 block text-xs font-medium text-foreground">Template</label>
-          <Select
-            aria-label="Template"
-            value={stage.templateId ?? ''}
-            onChange={(v) => onUpdate({ templateId: v || undefined })}
-            options={templateOptions}
-            placeholder="Select a template..."
-          />
-        </div>
+      {/* Model */}
+      <CollapsibleSection title="Model" icon={<Cpu className="h-3.5 w-3.5" />} defaultOpen>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Model Override</label>
           <ModelPicker

@@ -1,16 +1,15 @@
 // ────────────────────────────────────────────────────────────────
-// TemplateRegistry — unified registry for workflow and stage templates
+// TemplateRegistry — registry of workflow templates
 // ────────────────────────────────────────────────────────────────
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ILogger } from '@generatorai/shared';
-import { WorkflowTemplateSchema, StageTemplateSchema } from '@generatorai/shared';
-import type { WorkflowTemplate, StageTemplate } from '@generatorai/shared';
+import { WorkflowTemplateSchema } from '@generatorai/shared';
+import type { WorkflowTemplate } from '@generatorai/shared';
 
 export class TemplateRegistry {
   private workflowTemplates = new Map<string, WorkflowTemplate>();
-  private stageTemplates = new Map<string, StageTemplate>();
 
   constructor(private readonly logger: ILogger) {}
 
@@ -37,29 +36,6 @@ export class TemplateRegistry {
     }
   }
 
-  /** Load stage templates from a directory (JSON files). */
-  async loadStageTemplates(dir: string): Promise<void> {
-    const files = await this.safeReadDir(dir);
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      const filePath = path.join(dir, file);
-      try {
-        const raw = JSON.parse(await fs.readFile(filePath, 'utf-8'));
-        const parsed = StageTemplateSchema.safeParse(raw);
-        if (parsed.success) {
-          this.registerStageTemplate(parsed.data);
-          this.logger.info(`[TemplateRegistry] Loaded stage template: ${parsed.data.id} from ${file}`);
-        } else {
-          this.logger.warn(
-            `[TemplateRegistry] Invalid stage template ${file}: ${JSON.stringify(parsed.error.format())}`,
-          );
-        }
-      } catch (err) {
-        this.logger.warn(`[TemplateRegistry] Failed to load ${file}: ${err}`);
-      }
-    }
-  }
-
   // ── Workflow Templates ─────────────────────────────────────────
 
   registerWorkflowTemplate(template: WorkflowTemplate): void {
@@ -78,29 +54,9 @@ export class TemplateRegistry {
     return this.workflowTemplates.has(id);
   }
 
-  // ── Stage Templates ────────────────────────────────────────────
-
-  registerStageTemplate(template: StageTemplate): void {
-    this.stageTemplates.set(template.id, template);
-  }
-
-  getStageTemplate(id: string): StageTemplate | undefined {
-    return this.stageTemplates.get(id);
-  }
-
-  getAllStageTemplates(): StageTemplate[] {
-    return [...this.stageTemplates.values()];
-  }
-
-  hasStageTemplate(id: string): boolean {
-    return this.stageTemplates.has(id);
-  }
-
-  // ── Combined accessors ─────────────────────────────────────────
-
-  /** Get total template count (workflow + stage) */
+  /** Number of registered workflow templates */
   getTemplateCount(): number {
-    return this.workflowTemplates.size + this.stageTemplates.size;
+    return this.workflowTemplates.size;
   }
 
   // ── Private helpers ────────────────────────────────────────────

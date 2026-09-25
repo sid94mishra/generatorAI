@@ -1,6 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// Template System — Unified schemas for Workflow Templates,
-// Stage Templates
+// Template System — schemas for Workflow Templates
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
@@ -232,7 +231,7 @@ export const ResultValidationSchema = z.object({
   })),
 });
 
-// ── Stage Template Prompt ──────────────────────────────────────
+// ── Template stage prompt ──────────────────────────────────────
 
 export const StageTemplatePromptSchema = z.object({
   label: z.string().min(1),
@@ -240,45 +239,12 @@ export const StageTemplatePromptSchema = z.object({
   waitForCompletion: z.boolean().default(true),
 });
 
-// ── Stage Template (reusable per-stage blueprint) ──────────────
-
-export const StageTemplateSchema = z.object({
-  id: z.string(),
-  name: z.string().min(1),
-  description: z.string().default(''),
-  category: TemplateCategorySchema.default('custom'),
-  version: z.string().default('1.0.0'),
-  tags: z.array(z.string()).default([]),
-  /** Prompt templates with {{variable}} placeholders */
-  prompts: z.array(StageTemplatePromptSchema).min(1),
-  /** Per-stage harness config overrides */
-  harnessConfigOverrides: TemplateHarnessConfigSchema.optional(),
-  /** Variables this stage expects */
-  variables: z.array(ConfigurableVariableSchema).default([]),
-  /** Hooks for this stage */
-  hooks: z.array(HookDefinitionSchema).default([]),
-  /** Retry policy */
-  retryPolicy: z.object({
-    maxRetries: z.number().int().min(0).max(10).default(0),
-    backoffMs: z.number().int().min(100).default(1000),
-    backoffMultiplier: z.number().min(1).default(2),
-  }).optional(),
-  /** Timeout in ms */
-  timeoutMs: z.number().int().min(1000).optional(),
-  /** Whether this stage is locked (non-editable when used in a workflow) */
-  isLocked: z.boolean().default(false),
-});
-
-export type StageTemplate = z.infer<typeof StageTemplateSchema>;
-
 // ── Workflow Template Stage ────────────────────────────────────
 
 export const WorkflowTemplateStageSchema = z.object({
   name: z.string().min(1),
   description: z.string().default(''),
   order: z.number().int().min(0),
-  /** Either inline prompts OR a reference to a stage template */
-  stageTemplateId: z.string().optional(),
   prompts: z.array(StageTemplatePromptSchema).default([]),
   harnessConfigOverrides: TemplateHarnessConfigSchema.optional(),
   hooks: z.array(HookDefinitionSchema).default([]),
@@ -408,7 +374,6 @@ export function templateStageToCreateParams(
     workflowDefinitionId,
     name: stage.name,
     description: stage.description,
-    templateId: (stage as { templateId?: string }).templateId,
     order: order ?? stage.order,
     prompts: stage.prompts,
     harnessConfigOverrides: stage.harnessConfigOverrides,

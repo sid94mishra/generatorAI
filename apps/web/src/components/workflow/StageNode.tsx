@@ -92,7 +92,6 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
   }, [id, selectNode]);
 
   const promptCount = stage.prompts?.length ?? 0;
-  const hasTemplate = !!stage.templateId;
 
   // Capability summary — surface what matters while building, not just the name
   const model = stage.harnessConfigOverrides?.model;
@@ -205,11 +204,6 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
               <span className="truncate">{model}</span>
             </span>
           </Tooltip>
-        )}
-        {hasTemplate && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-primary)]/10 px-1.5 py-0.5 text-[var(--color-primary)] font-medium">
-            {stage.templateId}
-          </span>
         )}
         <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5">
           {promptCount} prompt{promptCount !== 1 ? 's' : ''}

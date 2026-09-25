@@ -21,7 +21,6 @@ id                            text PK
 workflowDefinitionId          FK
 name                          text
 description?                  text
-templateId?                   text                  (cloned-from id)
 order                         int                   (display + tie-break for parallel layers)
 prompts                       JSON PromptDefinition[]
 harnessConfigOverrides        JSON Partial<HarnessConfig>
@@ -51,7 +50,6 @@ Surfaced in [apps/web/src/components/workflow/StagePropertiesPanel.tsx](../../ap
 
 ### 2.2 Model & Template
 
-- **Template** — `templateId`, the stage template this was cloned from (read-only display).
 - **Model Override** — `harnessConfigOverrides.model`. Dropdown populated from `harness.getModels()`. `"Workflow default"` = inherit from `workflow.harnessConfig.model`. Provider-specific.
 - **Reasoning Effort** — `harnessConfigOverrides.reasoningEffort`. Five options: `Default | Low | Medium | High | Extra High`. Maps to SDK `reasoningEffort` field. Default = inherit.
 

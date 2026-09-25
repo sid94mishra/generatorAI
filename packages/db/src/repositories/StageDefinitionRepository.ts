@@ -48,7 +48,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
         workflowDefinitionId: stage.workflowDefinitionId,
         name: stage.name,
         description: stage.description ?? null,
-        templateId: stage.templateId ?? null,
         order: stage.order,
         prompts: stage.prompts,
         harnessConfigOverrides: stage.harnessConfigOverrides ?? null,
@@ -112,7 +111,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
     if (updates.description !== undefined) values['description'] = updates.description;
-    if (updates.templateId !== undefined) values['templateId'] = updates.templateId;
     if (updates.order !== undefined) values['order'] = updates.order;
     if (updates.prompts !== undefined) values['prompts'] = updates.prompts;
     if (updates.harnessConfigOverrides !== undefined)
@@ -185,7 +183,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
       workflowDefinitionId: row.workflowDefinitionId,
       name: row.name,
       description: row.description ?? undefined,
-      templateId: row.templateId ?? undefined,
       order: row.order,
       prompts: (safeJsonColumn(row.prompts, jsonArray, { fallback: [] }) ?? []) as PromptDefinition[],
       harnessConfigOverrides: safeJsonColumn(row.harnessConfigOverrides, jsonRecord, { fallback: undefined }),

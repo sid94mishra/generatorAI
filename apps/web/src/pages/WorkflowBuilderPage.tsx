@@ -67,7 +67,6 @@ function toStageParams(stage: StageDefinition) {
   return {
     name: stage.name,
     description: stage.description,
-    templateId: stage.templateId,
     order: stage.order,
     prompts: stage.prompts,
     harnessConfigOverrides: stage.harnessConfigOverrides,

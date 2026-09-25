@@ -513,7 +513,6 @@ Zod schema for creating a StageDefinition
 | workflowDefinitionId | string | `required` | uuid |
 | name | string | `required` | min 1; max 200 |
 | description | string | `optional` | max 2000 |
-| templateId | string | `optional` | — |
 | order | number | `optional` | int; min 0 |
 | prompts | array of object | `default []` | — |
 | prompts[] | object | `required` | unknown keys: strip |
@@ -886,7 +885,6 @@ Zod schema for importing a full workflow from a JSON file upload
 | stages[] | object | `required` | unknown keys: strip |
 | stages[].name | string | `required` | min 1; max 200 |
 | stages[].description | string | `optional` | max 2000 |
-| stages[].templateId | string | `optional` | — |
 | stages[].order | number | `required` | int; min 0 |
 | stages[].prompts | array of object | `default []` | — |
 | stages[].prompts[] | object | `required` | unknown keys: strip |
@@ -1469,7 +1467,6 @@ export const CreateStageSchema = z.object({
   workflowDefinitionId: z.string().uuid(),
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
-  templateId: z.string().optional(),
   /** When omitted, the service auto-appends (`max existing order + 1`). */
   order: z.number().int().min(0).optional(),
   prompts: z.array(PromptDefinitionSchema).default([]),
@@ -1538,7 +1535,6 @@ export const WorkflowDefinitionSchema = z.object({
 const ImportStageSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
-  templateId: z.string().optional(),
   order: z.number().int().min(0),
   prompts: z.array(PromptDefinitionSchema).default([]),
   harnessConfigOverrides: HarnessConfigSchema.optional(),

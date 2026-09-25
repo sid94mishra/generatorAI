@@ -27,7 +27,6 @@ export type { McpServerBody, SystemMcpPrefsBody } from './McpSchemas.js';
 export type { AppConfig } from './AppConfig.js';
 export {
   WorkflowTemplateSchema,
-  StageTemplateSchema,
   HookDefinitionSchema,
   WorkflowHookDefinitionSchema,
   HooksFileConfigSchema,
@@ -41,7 +40,7 @@ export {
   templateStageToCreateParams,
   StageTemplatePromptSchema,
 } from './WorkflowTemplate.js';
-export type { WorkflowTemplate, WorkflowTemplateStage, StageTemplate } from './WorkflowTemplate.js';
+export type { WorkflowTemplate, WorkflowTemplateStage } from './WorkflowTemplate.js';
 
 export {
   CreateWorkflowDefinitionSchema,

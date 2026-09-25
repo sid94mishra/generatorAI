@@ -68,7 +68,6 @@ export interface StageDefinition {
   workflowDefinitionId: string;
   name: string;
   description?: string;
-  templateId?: string;
   order: number;
   prompts: PromptDefinition[];
   /** Agent harness config overrides for this stage (provider-agnostic) */
@@ -152,7 +151,6 @@ export interface CreateStageParams {
   workflowDefinitionId: string;
   name: string;
   description?: string;
-  templateId?: string;
   order?: number;
   prompts?: PromptDefinition[];
   harnessConfigOverrides?: Partial<HarnessConfig>;
