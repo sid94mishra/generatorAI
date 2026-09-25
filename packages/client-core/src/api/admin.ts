@@ -366,8 +366,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       disable: (id: string) => req<Automation>(`/api/automations/${id}/disable`, json({})),
       rotateWebhookToken: (id: string) =>
         req<{ token: string }>(`/api/automations/${id}/rotate-webhook-token`, json({})),
-      testDataSource: (config: Record<string, unknown>) =>
-        req<Record<string, unknown>>('/api/automations/test-data-source', json(config)),
       executions: (id: string) =>
         req<AutomationExecution[]>(`/api/automations/${id}/executions`),
       /**

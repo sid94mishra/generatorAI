@@ -52,21 +52,20 @@ Source: `apps/server/src/routes/automations.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/automations` | 173 |
-| `GET` | `/api/automations` | 186 |
-| `POST` | `/api/automations/test-data-source` | 199 |
-| `POST` | `/api/automations/preview-iterations` | 214 |
-| `GET` | `/api/automations/:id` | 236 |
-| `PATCH` | `/api/automations/:id` | 250 |
-| `DELETE` | `/api/automations/:id` | 260 |
-| `POST` | `/api/automations/:id/enable` | 272 |
-| `POST` | `/api/automations/:id/disable` | 282 |
-| `POST` | `/api/automations/:id/rotate-webhook-token` | 300 |
-| `POST` | `/api/automations/:id/trigger` | 326 |
-| `POST` | `/api/automations/webhooks/:token` | 386 |
-| `GET` | `/api/automations/:id/executions` | 454 |
-| `GET` | `/api/automations/:id/executions/:execId` | 464 |
-| `POST` | `/api/automations/:id/executions/:execId/cancel` | 478 |
+| `POST` | `/api/automations` | 172 |
+| `GET` | `/api/automations` | 185 |
+| `POST` | `/api/automations/preview-iterations` | 201 |
+| `GET` | `/api/automations/:id` | 223 |
+| `PATCH` | `/api/automations/:id` | 237 |
+| `DELETE` | `/api/automations/:id` | 247 |
+| `POST` | `/api/automations/:id/enable` | 259 |
+| `POST` | `/api/automations/:id/disable` | 269 |
+| `POST` | `/api/automations/:id/rotate-webhook-token` | 287 |
+| `POST` | `/api/automations/:id/trigger` | 313 |
+| `POST` | `/api/automations/webhooks/:token` | 373 |
+| `GET` | `/api/automations/:id/executions` | 441 |
+| `GET` | `/api/automations/:id/executions/:execId` | 451 |
+| `POST` | `/api/automations/:id/executions/:execId/cancel` | 465 |
 
 ## browser
 

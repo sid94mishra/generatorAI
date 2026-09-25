@@ -111,7 +111,6 @@ export type { BrowserConfigInput } from './BrowserConfigSchema.js';
 export {
   CreateAutomationSchema,
   UpdateAutomationSchema,
-  TestDataSourceSchema,
   DataSchemaSchema,
   IterationModeSchema,
   AutomationDatasetSchema,

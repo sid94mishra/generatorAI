@@ -22,7 +22,7 @@ GeneratorAI follows **Hexagonal / Ports-and-Adapters with a DDD core**. Four str
 │     StageExecutionService, DAGScheduler,                    │
 │     SessionAllocator, HookExecutor,                         │
 │     HookInterceptor, ArtifactService, AutomationService,    │
-│     HitlService, ResultValidator, DataSourceResolver,       │
+│     HitlService, ResultValidator,                           │
 │     ProjectService, CodebaseService, ProjectConfigService,  │
 │     WorktreeService, WorktreeCleanupService,                │
 │     WorkspaceManager, PathResolver, TemplateRegistry,       │

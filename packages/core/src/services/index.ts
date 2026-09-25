@@ -70,8 +70,6 @@ export type {
 // Automation services
 export { AutomationService, hashWebhookToken, toPublicAutomation } from './AutomationService.js';
 export type { IAutomationRepository, IAutomationExecutionRepository, ResolvedWebhook } from './AutomationService.js';
-export { DataSourceResolver } from './DataSourceResolver.js';
-export type { SecretResolver } from './DataSourceResolver.js';
 export { splitShellWords, ShellWordsError } from './shellWords.js';
 export { planIterations, previewIterations } from './IterationPlanner.js';
 export type { PlanArgs } from './IterationPlanner.js';

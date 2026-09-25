@@ -463,7 +463,6 @@ export class GeneratorAI {
       config: {
         artifactsDir: resolved.artifactsDir,
         maxConcurrentStages: resolved.maxConcurrentStages,
-        projectRoot: resolved.projectRoot,
       },
       withTransaction: <T>(fn: () => Promise<T>) => withTransaction(db, fn),
       chatExtensions: { customToolRegistry, mcpHub },
@@ -543,8 +542,6 @@ export class GeneratorAI {
         services.hookExecutor,
       );
       await scriptLoader.discoverScripts();
-      // Connect script loader to data source resolver for automation
-      services.dataSourceResolver.setScriptLoader(scriptLoader);
     }
 
     // ── Background lifecycle services (constructed here, started by initialize()) ──

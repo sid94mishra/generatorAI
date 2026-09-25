@@ -58,7 +58,6 @@ import { StageExecutionService } from '../services/StageExecutionService.js';
 import { WorkflowRunService } from '../services/WorkflowRunService.js';
 import { AutomationService } from '../services/AutomationService.js';
 import { AutomationRecoveryService } from '../services/AutomationRecoveryService.js';
-import { DataSourceResolver } from '../services/DataSourceResolver.js';
 import { HitlService } from '../services/HitlService.js';
 import { AgentInteractionService } from '../services/AgentInteractionService.js';
 import { PlanService } from '../services/PlanService.js';
@@ -139,7 +138,6 @@ export interface CoreServicesInputs {
      * harness subprocess fan-out). `<= 0` ⇒ unlimited. Defaults to 8.
      */
     maxConcurrentStages?: number;
-    projectRoot?: string;
   };
 
   /** W22 / W47 — durable execution engine repositories. */
@@ -200,7 +198,6 @@ export interface CoreServices {
   workflowRunService: WorkflowRunService;
 
   // Automation
-  dataSourceResolver: DataSourceResolver;
   automationService: AutomationService;
   /** Track A — boot reconciler + idempotency-key sweeper. May be null
    *  when the caller didn't supply an idempotency repository. */
@@ -489,7 +486,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   hitlService.setRedriveRun((runId: string) => workflowRunService.redriveRun(runId));
 
   // ── Automation ──
-  const dataSourceResolver = new DataSourceResolver(scriptRunner, httpClient, logger, config.projectRoot);
   const automationService = new AutomationService(
     automationRepo,
     automationExecutionRepo,
@@ -501,7 +497,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     // W22: durable iteration claiming (P0-41 fix).
     durableExecutionEngine,
     config.artifactsDir,
-    dataSourceResolver,
     withTransaction,
   );
 
@@ -563,7 +558,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     workflowDefinitionService,
     stageExecutionService,
     workflowRunService,
-    dataSourceResolver,
     automationService,
     automationRecoveryService,
     hitlService,

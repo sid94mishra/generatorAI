@@ -764,105 +764,98 @@
       "method": "POST",
       "path": "/api/automations",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 173,
+      "line": 172,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/automations",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 186,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/automations/test-data-source",
-      "source": "apps/server/src/routes/automations.ts",
-      "line": 199,
+      "line": 185,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/preview-iterations",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 214,
+      "line": 201,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/automations/:id",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 236,
+      "line": 223,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/automations/:id",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 250,
+      "line": 237,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/automations/:id",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 260,
+      "line": 247,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/enable",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 272,
+      "line": 259,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/disable",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 282,
+      "line": 269,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/rotate-webhook-token",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 300,
+      "line": 287,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/trigger",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 326,
+      "line": 313,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/webhooks/:token",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 386,
+      "line": 373,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/automations/:id/executions",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 454,
+      "line": 441,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/automations/:id/executions/:execId",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 464,
+      "line": 451,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/executions/:execId/cancel",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 478,
+      "line": 465,
       "mounted": true
     },
     {
@@ -4307,7 +4300,6 @@
     "packages/core/src/services/ComputerService.ts",
     "packages/core/src/services/createRunSandbox.ts",
     "packages/core/src/services/DAGScheduler.ts",
-    "packages/core/src/services/DataSourceResolver.ts",
     "packages/core/src/services/DeltaLog.ts",
     "packages/core/src/services/DurableExecutionEngine.ts",
     "packages/core/src/services/DurableSleepService.ts",

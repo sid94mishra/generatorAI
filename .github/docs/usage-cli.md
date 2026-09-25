@@ -84,9 +84,9 @@ generatorai
 │     · show · stage cancel · stage list · stage pause · stage resume ·
 │     stage retry · start · watch · workspace
 ├── automation (auto)     # Scheduled, webhook and manual triggers that fan out into runs
-│     create · datasource test · delete · disable · enable · execution
-│     cancel · execution list · execution show · list ·
-│     rotate-webhook-token · show · trigger · update
+│     create · delete · disable · enable · execution cancel · execution
+│     list · execution show · list · rotate-webhook-token · show · trigger
+│     · update
 ├── project (proj)        # Projects, linked codebases, configs, MCP servers and worktrees
 │     codebase branches · codebase browse · codebase fetch · codebase file
 │     · codebase link · codebase list · codebase unlink · config delete ·
@@ -263,8 +263,7 @@ Scheduled, webhook and manual triggers that fan out into runs
 
 | Command | What | Flags |
 |---|---|---|
-| `automation create [options]` | Create an automation | `--name` `--workflow` `--trigger` `--schedule` `--input-mode` `--loop-variable` `--loop-items` `--batch-format` `--batch-data` `--batch-data-file` `--var` `--max-concurrency` `--on-error` `--data-source` `--project` `--enabled` |
-| `automation datasource test <config>` | Dry-run a data-source config and print what it would yield | — |
+| `automation create [options]` | Create an automation | `--name` `--workflow` `--trigger` `--schedule` `--data-schema` `--iteration-mode` `--default-dataset-file` `--default-dataset-format` `--var` `--max-concurrency` `--on-error` `--project` `--enabled` |
 | `automation delete <automation>` | Delete an automation | — |
 | `automation disable <automation>` | Disable an automation | — |
 | `automation enable <automation>` | Enable an automation | — |

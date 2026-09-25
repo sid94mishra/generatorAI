@@ -119,7 +119,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | computerUse.extraBlockedNameFragments | array of string | `default []` | maxLength 500 |
 | computerUse.extraBlockedExecutables | array of string | `default []` | maxLength 500 |
 | computerUse.alwaysAllowedApps | array of string | `default []` | maxLength 100 |
-| projectRoot | string | `optional` | — |
 
 ## Complete validation contract
 
@@ -579,8 +578,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  /** Project root directory — used as default CWD for data source scripts */
-  projectRoot: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

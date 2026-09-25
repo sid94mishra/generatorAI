@@ -6,7 +6,6 @@ import { sqliteTable, text, integer, blob, index, uniqueIndex, primaryKey } from
 import type {
   ChatMessageMetadata,
   WorkflowDefinitionSnapshot,
-  DataSourceConfig,
   ProjectSettings,
   CodebaseSettings,
   DataSchema,
@@ -682,7 +681,7 @@ export const automations = sqliteTable(
     batchData: text('batch_data'),
     batchColumns: text('batch_columns', { mode: 'json' }).$type<string[]>().default([]),
     batchColumnMapping: text('batch_column_mapping', { mode: 'json' }).$type<Record<string, string>>().default({}),
-    dataSourceConfig: text('data_source_config', { mode: 'json' }).$type<DataSourceConfig>(),
+    dataSourceConfig: text('data_source_config', { mode: 'json' }).$type<Record<string, unknown>>(),
     variables: text('variables', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
     maxConcurrency: integer('max_concurrency').notNull().default(1),
     onError: text('on_error', { enum: ['continue', 'stop'] }).notNull().default('continue'),

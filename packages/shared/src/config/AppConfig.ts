@@ -448,8 +448,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  /** Project root directory — used as default CWD for data source scripts */
-  projectRoot: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // AutomationService — Manages automation lifecycle, execution,
-//   cron scheduling, webhook handling, and loop/batch processing
+//   cron scheduling, webhook handling, and dataset iterations
 // ────────────────────────────────────────────────────────────────
 
 import { randomBytes } from 'node:crypto';
@@ -18,17 +18,11 @@ import type {
   UpdateAutomationParams,
   AutomationWithExecutions,
   AutomationExecutionWithRuns,
-  DataSourceConfig,
-  DataSourceTestResult,
-  ParsedBatchData,
   ILogger,
 } from '@generatorai/shared';
 import { hashWebhookToken } from '@generatorai/shared/node';
 import {
   generateId,
-  parseBatchData,
-  resolveIterationVariables,
-  buildIterationLabel,
   ValidationError,
   SECRET_MASK,
   isSensitiveKey,
@@ -37,7 +31,6 @@ import {
 } from '@generatorai/shared';
 import type { WorkflowRunService } from './WorkflowRunService.js';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
-import type { DataSourceResolver } from './DataSourceResolver.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import { planIterations } from './IterationPlanner.js';
@@ -70,27 +63,7 @@ export function toPublicAutomation(automation: Automation): Automation {
   // create/rotate route hands it out — every other projection masks it.
   if (redacted.webhookToken) redacted.webhookToken = SECRET_MASK;
 
-  const config = redacted.dataSourceConfig as Record<string, unknown> | undefined;
-  if (config) {
-    redacted.dataSourceConfig = redactSecretBag(config) as unknown as typeof redacted.dataSourceConfig;
-  }
-
   return redacted;
-}
-
-/** Mask credential-shaped entries in a data-source config, at any depth. */
-function redactSecretBag(value: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
-      out[key] = redactSecretBag(entry as Record<string, unknown>);
-    } else if (isSensitiveKey(key) && entry !== undefined && entry !== null && entry !== '') {
-      out[key] = SECRET_MASK;
-    } else {
-      out[key] = entry;
-    }
-  }
-  return out;
 }
 
 /** Interface for automation repository */
@@ -191,7 +164,6 @@ export class AutomationService {
      */
     private durableEngine: DurableExecutionEngine,
     private artifactsDir?: string,
-    private dataSourceResolver?: DataSourceResolver,
     /**
      * Optional transactional wrapper. When supplied, the initial burst of
      * writes that open an execution (createExecution + update automation's
@@ -254,14 +226,6 @@ export class AutomationService {
       // lookup is `getByWebhookTokenHash`.
       ...(params.triggerType === 'webhook' ? this.mintWebhookToken() : {}),
       workflowIds: params.workflowIds,
-      inputMode: params.inputMode,
-      loopVariable: params.loopVariable,
-      loopItems: params.loopItems ?? [],
-      batchDataFormat: params.batchDataFormat,
-      batchData: params.batchData,
-      batchColumns: params.batchColumns,
-      batchColumnMapping: params.batchColumnMapping,
-      dataSourceConfig: params.dataSourceConfig,
       variables: params.variables ?? {},
       maxConcurrency: params.maxConcurrency ?? 1,
       onError: params.onError ?? 'continue',
@@ -405,17 +369,6 @@ export class AutomationService {
     return final;
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // Data Source Testing (E1)
-  // ═══════════════════════════════════════════════════════════════
-
-  /** Test a data source configuration — returns preview without creating an execution */
-  async testDataSource(config: DataSourceConfig): Promise<DataSourceTestResult> {
-    if (!this.dataSourceResolver) {
-      throw new Error('Data source resolver is not configured');
-    }
-    return this.dataSourceResolver.testDataSource(config);
-  }
 
   // ═══════════════════════════════════════════════════════════════
   // Trigger & Execution
@@ -454,7 +407,7 @@ export class AutomationService {
       await this.automationRepo.update(id, { defaultDataset: opts.dataset });
     }
 
-    return this.executeAutomation(automation, 'manual', undefined, undefined, dataset);
+    return this.executeAutomation(automation, 'manual', undefined, dataset);
   }
 
   /**
@@ -462,8 +415,8 @@ export class AutomationService {
    *
    * When the automation has a `dataSchema`, the raw HTTP body is
    * treated as the dataset (content-type drives the format hint but
-   * the schema-declared format wins). Otherwise the legacy behaviour
-   * applies: top-level payload keys become extra variables.
+   * the schema-declared format wins). Otherwise the workflows run once
+   * with the base variables; the payload is recorded on the execution.
    */
   async triggerWebhook(
     token: string,
@@ -486,35 +439,11 @@ export class AutomationService {
         automation,
         'webhook',
         JSON.stringify(payload).slice(0, 5000),
-        undefined,
         dataset,
       );
     }
 
-    // Legacy webhook handling — extract variables from payload object.
-    // Use null-prototype object to prevent prototype pollution.
-    let extraVariables: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
-        if (
-          Object.prototype.hasOwnProperty.call(payload, key) &&
-          !key.startsWith('__') &&
-          key !== '__proto__' &&
-          key !== 'constructor' &&
-          key !== 'prototype' &&
-          /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)
-        ) {
-          extraVariables[key] = value;
-        }
-      }
-    }
-
-    return this.executeAutomation(
-      automation,
-      'webhook',
-      JSON.stringify(payload).slice(0, 5000),
-      extraVariables,
-    );
+    return this.executeAutomation(automation, 'webhook', JSON.stringify(payload).slice(0, 5000));
   }
 
   /**
@@ -561,7 +490,6 @@ export class AutomationService {
     automation: Automation,
     triggeredBy: AutomationTriggerType,
     webhookPayload?: string,
-    extraVariables?: Record<string, unknown>,
     dataset?: AutomationDataset,
   ): Promise<AutomationExecution> {
     // For schedule triggers, fall back to the persisted default dataset
@@ -585,7 +513,7 @@ export class AutomationService {
           schema: automation.dataSchema,
           mode: automation.iterationMode,
           dataset,
-          baseVariables: { ...automation.variables, ...(extraVariables ?? {}) },
+          baseVariables: { ...automation.variables },
         });
       } catch (err) {
         // Surface planning errors before we open the execution row so
@@ -609,9 +537,8 @@ export class AutomationService {
       totalIterations: 0, // Updated after resolution
       completedIterations: 0,
       failedIterations: 0,
-      // Only snapshot for the schema-driven pipeline (dataset is
-      // meaningful there); legacy execs already record inline data on
-      // the automation.
+      // Only snapshot for the schema-driven pipeline (a dataset is
+      // meaningful there).
       datasetSnapshot: automation.dataSchema && dataset ? {
         format: dataset.format,
         data: dataset.data,
@@ -633,39 +560,9 @@ export class AutomationService {
       await openExecution();
     }
 
-    // Resolve iteration count based on input mode.
-    let iterationCount: number;
-    let resolvedDataSource: ParsedBatchData | null = null;
-
-    if (plannedIterations) {
-      // Schema-driven — planner already produced the iteration list.
-      iterationCount = plannedIterations.iterations.length;
-    } else {
-      try {
-        // Legacy paths (dynamic data source, batch, loop, single).
-        if (automation.dataSourceConfig && automation.dataSourceConfig.type !== 'static' && this.dataSourceResolver) {
-          resolvedDataSource = await this.dataSourceResolver.resolve(automation);
-          iterationCount = resolvedDataSource?.rowCount ?? 1;
-        } else if (automation.inputMode === 'batch' && automation.batchData && automation.batchDataFormat) {
-          const parsed = parseBatchData(automation.batchDataFormat, automation.batchData);
-          iterationCount = parsed.rowCount;
-        } else if (automation.inputMode === 'loop' && automation.loopItems?.length) {
-          iterationCount = automation.loopItems.length;
-        } else {
-          iterationCount = 1;
-        }
-      } catch (err) {
-        // Data source resolution failed — mark execution as failed
-        const errMessage = err instanceof Error ? err.message : String(err);
-        this.logger.error(`[AutomationService] Data source resolution failed for execution ${execution.id}: ${errMessage}`);
-        await this.executionRepo.updateExecution(execution.id, {
-          status: 'failed',
-          completedAt: new Date(),
-          error: `Data source resolution failed: ${errMessage}`,
-        });
-        return execution;
-      }
-    }
+    // Schema-driven — the planner already produced the iteration list;
+    // without a schema the workflows run once.
+    const iterationCount = plannedIterations ? plannedIterations.iterations.length : 1;
 
     // totalRuns = (number of iterations) * (number of workflows per iteration)
     const totalRuns = iterationCount * automation.workflowIds.length;
@@ -677,7 +574,7 @@ export class AutomationService {
     execution.totalIterations = totalRuns;
 
     // Start execution in background
-    this.runExecution(automation, execution, extraVariables, resolvedDataSource, plannedIterations).catch((err) => {
+    this.runExecution(automation, execution, plannedIterations).catch((err) => {
       this.logger.error(`[AutomationService] Execution ${execution.id} failed: ${err instanceof Error ? err.message : String(err)}`);
     });
 
@@ -688,8 +585,6 @@ export class AutomationService {
   private async runExecution(
     automation: Automation,
     execution: AutomationExecution,
-    extraVariables?: Record<string, unknown>,
-    resolvedDataSource?: ParsedBatchData | null,
     plannedIterations?: ReturnType<typeof planIterations> | null,
   ): Promise<void> {
     await this.executionRepo.updateExecution(execution.id, {
@@ -706,90 +601,33 @@ export class AutomationService {
     });
 
     await this.driveIterations(automation, execution, { completed: 0, failed: 0 }, () =>
-      this.buildIterationList(automation, extraVariables, resolvedDataSource, plannedIterations),
+      this.buildIterationList(automation, plannedIterations),
     );
   }
 
   /**
-   * Expand the automation's input configuration into the concrete iteration
-   * list. Pure — every branch is a function of the arguments, which is why it
+   * The concrete iteration list: the planner's rows for a schema-driven
+   * automation, otherwise one iteration with the base variables. Pure, so it
    * can be handed to `driveIterations` as a thunk and evaluated inside its
-   * error handling (a malformed batch payload must fail the execution, not
-   * escape as an unhandled rejection).
+   * error handling.
    */
   private buildIterationList(
     automation: Automation,
-    extraVariables?: Record<string, unknown>,
-    resolvedDataSource?: ParsedBatchData | null,
     plannedIterations?: ReturnType<typeof planIterations> | null,
   ): { variables: Record<string, unknown>; label: string }[] {
-    // Build iteration list based on input mode
-    let iterations: { variables: Record<string, unknown>; label: string }[];
-
-      if (plannedIterations) {
-        // Track C: schema-driven pipeline. IterationPlanner already
-        // validated + coerced + merged base variables + reserved keys.
-        iterations = plannedIterations.iterations;
-      } else if (resolvedDataSource && resolvedDataSource.rowCount > 0) {
-        // Legacy E1: Dynamic data source — use resolved data as iteration items
-        const totalIter = resolvedDataSource.rows.length;
-
-        iterations = resolvedDataSource.rows.map((row, idx) => ({
-          variables: resolveIterationVariables(
-            row,
-            automation.batchColumnMapping,
-            { ...automation.variables, ...(extraVariables ?? {}) },
-            idx,
-            totalIter,
-          ),
-          label: buildIterationLabel(row, idx),
-        }));
-      } else if (automation.inputMode === 'batch' && automation.batchData && automation.batchDataFormat) {
-        // Legacy batch mode: parse structured data, map columns to variables
-        const parsed = parseBatchData(automation.batchDataFormat, automation.batchData);
-        const totalIter = parsed.rows.length;
-
-        iterations = parsed.rows.map((row, idx) => ({
-          variables: resolveIterationVariables(
-            row,
-            automation.batchColumnMapping,
-            { ...automation.variables, ...(extraVariables ?? {}) },
-            idx,
-            totalIter,
-          ),
-          label: buildIterationLabel(row, idx),
-        }));
-      } else if (automation.inputMode === 'loop' && automation.loopItems?.length) {
-        // Legacy loop mode: single variable injection
-        iterations = automation.loopItems.map((item, idx) => {
-          const vars: Record<string, unknown> = {
-            ...automation.variables,
-            ...(extraVariables ?? {}),
-            __iteration_index: idx,
-            __iteration_total: automation.loopItems!.length,
-          };
-          if (automation.loopVariable && item !== null) {
-            vars[automation.loopVariable] = item;
-          }
-          return {
-            variables: vars,
-            label: `${automation.loopVariable ?? 'item'}=${String(item).slice(0, 80)}`,
-          };
-        });
-      } else {
-        // Single mode: one iteration with base variables
-        iterations = [{
-          variables: {
-            ...automation.variables,
-            ...(extraVariables ?? {}),
-            __iteration_index: 0,
-            __iteration_total: 1,
-          },
-          label: 'Single run',
-        }];
-      }
-
-    return iterations;
+    if (plannedIterations) {
+      // IterationPlanner already validated + coerced + merged base
+      // variables + reserved keys.
+      return plannedIterations.iterations;
+    }
+    return [{
+      variables: {
+        ...automation.variables,
+        __iteration_index: 0,
+        __iteration_total: 1,
+      },
+      label: 'Single run',
+    }];
   }
 
   /**
@@ -847,7 +685,7 @@ export class AutomationService {
       }
       // ──────────────────────────────────────────────────────────
 
-      // In batch/loop mode, maxConcurrency controls how many iterations run in parallel.
+      // maxConcurrency controls how many iterations run in parallel.
       // Within each iteration, workflows still run sequentially (they share context).
       for (;;) {
         // Check if this execution has been cancelled before starting a new batch

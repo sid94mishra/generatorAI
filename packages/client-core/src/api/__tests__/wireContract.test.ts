@@ -91,16 +91,14 @@ describe('chat attachment wire contract', () => {
 });
 
 describe('automation wire contract (create/update)', () => {
-  it('sends workflowIds/cronExpression/batchDataFormat/onError, not the CLI-flag-shaped names', async () => {
+  it('sends workflowIds/cronExpression/onError, not the CLI-flag-shaped names', async () => {
     const { calls, fetchImpl } = capture();
     await createAdminApi(fetchImpl).automations.create({
       name: 'nightly',
       workflowIds: ['00000000-0000-0000-0000-000000000001'],
       triggerType: 'schedule',
-      inputMode: 'batch',
       variables: {},
       cronExpression: '0 2 * * *',
-      batchDataFormat: 'csv',
       onError: 'stop',
     });
 
@@ -111,7 +109,6 @@ describe('automation wire contract (create/update)', () => {
     expect(calls[0]?.body).toMatchObject({
       workflowIds: ['00000000-0000-0000-0000-000000000001'],
       cronExpression: '0 2 * * *',
-      batchDataFormat: 'csv',
       onError: 'stop',
     });
     expect(calls[0]?.body).not.toHaveProperty('workflowDefinitionIds');

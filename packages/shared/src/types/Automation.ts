@@ -5,125 +5,14 @@
 /** How the automation is triggered */
 export type AutomationTriggerType = 'manual' | 'schedule' | 'webhook';
 
-/** How inputs are processed */
-export type AutomationInputMode = 'single' | 'loop' | 'batch' | 'script';
-
-/** Data format for batch input */
+/** Raw dataset format understood by `parseBatchData` */
 export type BatchDataFormat = 'json' | 'csv' | 'jsonl';
 
-/** Parsed batch data — result of parsing raw batch input */
+/** Parsed dataset — result of parsing a raw CSV / JSON / JSONL dataset */
 export interface ParsedBatchData {
   columns: string[];
   rows: Record<string, unknown>[];
   rowCount: number;
-}
-
-// ── Dynamic Data Source (E1) ──
-
-/** Type of dynamic data source */
-export type DataSourceType = 'static' | 'script' | 'http' | 'file' | 'workflow_script';
-
-/** Output format expected from a data source script/file */
-export type DataSourceOutputFormat = 'json_array' | 'csv' | 'jsonl';
-
-/** Configuration for a script-based data source */
-export interface ScriptDataSourceConfig {
-  type: 'script';
-  /** Shell command to execute (e.g. "python fetch_jira.py") */
-  command: string;
-  /** Working directory for the script (default: system temp) */
-  workingDirectory?: string;
-  /** Max execution time in ms (default: 60000) */
-  timeout?: number;
-  /** Expected output format on stdout (default: json_array) */
-  outputFormat?: DataSourceOutputFormat;
-  /** Environment variables to pass to the script */
-  env?: Record<string, string>;
-  /** Optional schema validation for the output */
-  schema?: DataSourceSchema;
-}
-
-/** Configuration for an HTTP-based data source */
-export interface HttpDataSourceConfig {
-  type: 'http';
-  /** URL to fetch (supports {{variable}} interpolation) */
-  url: string;
-  /** HTTP method (default: GET) */
-  method?: 'GET' | 'POST';
-  /** Request headers */
-  headers?: Record<string, string>;
-  /** Request body (for POST) */
-  body?: string;
-  /** JSONPath-like expression to extract array from response (e.g. ".issues" or ".data.items") */
-  resultPath?: string;
-  /** Max response time in ms (default: 30000) */
-  timeout?: number;
-  /** Optional schema validation */
-  schema?: DataSourceSchema;
-}
-
-/** Configuration for a file-based data source */
-export interface FileDataSourceConfig {
-  type: 'file';
-  /**
-   * Path to the file to read, resolved against the automation's project
-   * root (never the server's working directory) and confined to it.
-   */
-  filePath: string;
-  /**
-   * Hidden files/directories (`.env`, `.git/…`) are refused unless this
-   * is explicitly true — they are where credentials live.
-   */
-  allowHidden?: boolean;
-  /** File format (default: json_array) */
-  format?: DataSourceOutputFormat;
-  /** Optional schema validation */
-  schema?: DataSourceSchema;
-}
-
-/** Static data source — existing behavior (no dynamic resolution) */
-export interface StaticDataSourceConfig {
-  type: 'static';
-}
-
-/** Workflow script data source — uses a .workflow.mjs script's profiles for iteration */
-export interface WorkflowScriptDataSourceConfig {
-  type: 'workflow_script';
-  /** ID of the workflow script */
-  scriptId: string;
-  /** Profile name to use (optional — uses default if omitted) */
-  profileName?: string;
-  /** Key in the profile's variables to iterate over */
-  iterationVariable?: string;
-}
-
-/** Schema validation for data source output */
-export interface DataSourceSchema {
-  /** Required field names that must exist in each row */
-  requiredFields?: string[];
-  /** Maximum number of items allowed */
-  maxItems?: number;
-}
-
-/** Union of all data source configurations */
-export type DataSourceConfig =
-  | StaticDataSourceConfig
-  | ScriptDataSourceConfig
-  | HttpDataSourceConfig
-  | FileDataSourceConfig
-  | WorkflowScriptDataSourceConfig;
-
-/** Result of testing a data source */
-export interface DataSourceTestResult {
-  success: boolean;
-  /** Preview of first N rows */
-  preview?: ParsedBatchData;
-  /** Total row count */
-  totalCount?: number;
-  /** Execution time in ms */
-  durationMs?: number;
-  /** Error message if failed */
-  error?: string;
 }
 
 /** What to do when a workflow run in the batch fails */
@@ -222,39 +111,10 @@ export interface Automation {
   /** Ordered list of workflow definition IDs to execute sequentially */
   workflowIds: string[];
 
-  /** Whether to run once (single) or iterate over loopItems (loop) */
-  inputMode: AutomationInputMode;
-
-  /** Variable name to substitute in each loop iteration */
-  loopVariable?: string;
-
-  /** Array of values for loop iterations — each becomes the loopVariable value */
-  loopItems?: unknown[];
-
   /** Base variables merged into every workflow run */
   variables: Record<string, unknown>;
 
-  // ── Batch mode fields ──
-
-  /** Format of the batch data source (json array of objects, csv, jsonl) */
-  batchDataFormat?: BatchDataFormat;
-
-  /** Raw batch data text — CSV text, JSON array, or JSONL lines */
-  batchData?: string;
-
-  /** Detected/configured column names from the batch data */
-  batchColumns?: string[];
-
-  /** Column-to-workflow-variable mapping overrides. Key = column name, Value = variable name.
-   *  Unmapped columns pass through with their original names. */
-  batchColumnMapping?: Record<string, string>;
-
-  // ── Dynamic Data Source fields ──
-
-  /** Dynamic data source configuration (E1) — overrides static batch/loop data at execution time */
-  dataSourceConfig?: DataSourceConfig;
-
-  /** Max concurrent workflow runs (for loop/batch mode) */
+  /** Max concurrent iterations */
   maxConcurrency: number;
 
   /** Error policy for batch processing */
@@ -269,11 +129,10 @@ export interface Automation {
   // ── Schema-driven fields (new; Track C) ──
 
   /**
-   * Optional row schema. When present, the automation uses the new
-   * schema-driven pipeline: dataset supplied at trigger time is
-   * validated against `dataSchema` and expanded via `iterationMode`.
-   * When null, legacy `inputMode`/`loopItems`/`batchData` are used
-   * (compatibility shim in `AutomationService`).
+   * Optional row schema. When present, the dataset supplied at trigger
+   * time (or `defaultDataset`) is validated against `dataSchema` and
+   * expanded via `iterationMode`. When null, each trigger runs the
+   * workflows once with the base `variables`.
    */
   dataSchema?: DataSchema;
 
@@ -315,8 +174,8 @@ export interface AutomationExecution {
   error?: string;
   /**
    * Audit snapshot of the dataset used for this run (Track C).
-   * Set when the automation ran with `dataSchema`; null for legacy
-   * automations. Persisted so the UI can show "exactly what ran" and
+   * Set when the automation ran with `dataSchema`; null for an
+   * automation without one. Persisted so the UI can show "exactly what ran" and
    * users can re-run with the same input.
    */
   datasetSnapshot?: AutomationDataset;
@@ -366,15 +225,6 @@ export interface CreateAutomationParams {
   missedRunPolicy?: AutomationMissedRunPolicy;
   overlapPolicy?: AutomationOverlapPolicy;
   workflowIds: string[];
-  /** Legacy — required when `dataSchema` is absent. Ignored otherwise. */
-  inputMode: AutomationInputMode;
-  loopVariable?: string;
-  loopItems?: unknown[];
-  batchDataFormat?: BatchDataFormat;
-  batchData?: string;
-  batchColumns?: string[];
-  batchColumnMapping?: Record<string, string>;
-  dataSourceConfig?: DataSourceConfig;
   variables?: Record<string, unknown>;
   maxConcurrency?: number;
   onError?: AutomationErrorPolicy;
@@ -398,14 +248,6 @@ export interface UpdateAutomationParams {
   missedRunPolicy?: AutomationMissedRunPolicy;
   overlapPolicy?: AutomationOverlapPolicy;
   workflowIds?: string[];
-  inputMode?: AutomationInputMode;
-  loopVariable?: string;
-  loopItems?: unknown[];
-  batchDataFormat?: BatchDataFormat;
-  batchData?: string;
-  batchColumns?: string[];
-  batchColumnMapping?: Record<string, string>;
-  dataSourceConfig?: DataSourceConfig;
   variables?: Record<string, unknown>;
   maxConcurrency?: number;
   onError?: AutomationErrorPolicy;

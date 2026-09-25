@@ -28,7 +28,6 @@ function makeAutomation(overrides: Partial<Automation> = {}): Automation {
     enabled: true,
     triggerType: 'webhook',
     workflowIds: ['wf-1'],
-    inputMode: 'single',
     variables: {},
     maxConcurrency: 1,
     onError: 'continue',
@@ -92,7 +91,6 @@ function buildApp(automationOverrides: Record<string, unknown> = {}) {
     getAutomation: vi.fn(),
     triggerWebhook: vi.fn(),
     triggerManual: vi.fn(),
-    testDataSource: vi.fn(),
     getExecutionsByAutomation: vi.fn(async () => []),
     getExecutionWithRuns: vi.fn(),
     getExecution: vi.fn(),
@@ -135,8 +133,7 @@ describe('Automation routes — webhook signature verification', () => {
       name: 'x',
       triggerType: 'webhook',
       workflowIds: ['00000000-0000-0000-0000-000000000001'],
-      inputMode: 'single',
-    });
+      });
     expect(createRes.status).toBe(201);
     expect(createRes.body.webhookToken).toBe(rawToken);
     const signingSecret: string = createRes.body.webhookSigningSecret;
@@ -219,12 +216,11 @@ describe('Automation routes — webhook signature verification', () => {
 });
 
 describe('Automation routes — token/credential redaction on read paths', () => {
-  it('never returns the raw token or a data-source credential from GET /:id', async () => {
+  it('never returns the raw token from GET /:id', async () => {
     const { app } = buildApp({
       getAutomationWithExecutions: vi.fn(async () => ({
         ...makeAutomation({
           webhookToken: 'super-secret-raw-token',
-          dataSourceConfig: { type: 'rest', apiKey: 'sk-live-abc123' } as never,
         }),
         executions: [{ id: 'exec-1' }],
       })),
@@ -234,7 +230,6 @@ describe('Automation routes — token/credential redaction on read paths', () =>
     expect(res.status).toBe(200);
     expect(res.body.webhookToken).toBe(SECRET_MASK);
     expect(JSON.stringify(res.body)).not.toContain('super-secret-raw-token');
-    expect(JSON.stringify(res.body)).not.toContain('sk-live-abc123');
     // The executions array must still be present — redaction must not drop it.
     expect(res.body.executions).toEqual([{ id: 'exec-1' }]);
   });

@@ -506,12 +506,44 @@
         "apps/server/"
       ],
       "reason": "WP-1.4: plaintext automations.webhook_token path deleted; webhook_token_hash only (column dropped in v55)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(AutomationInputMode|DataSourceConfig|DataSourceResolver|dataSourceResolver|TestDataSourceSchema|DataSourceTestResult|testDataSource|resolveIterationVariables|buildIterationLabel|loopVariable|loopItems|batchColumnMapping|batchColumns|dataSourceConfig)\\b|test-data-source|data-source-scripts",
+      "paths": [
+        "packages/shared/src/",
+        "packages/core/src/",
+        "packages/sdk/src/",
+        "packages/client-core/src/",
+        "packages/cli-core/src/",
+        "packages/db/src/repositories/",
+        "apps/server/src/",
+        "apps/web/src/",
+        "apps/mobile/src/",
+        "apps/cli/src/"
+      ],
+      "reason": "WP-1.4 / PD-8: automation legacy input modes and dynamic data sources deleted; dataSchema + IterationPlanner"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\binputMode\\b|\\bbatchData\\b",
+      "paths": [
+        "packages/shared/src/types/Automation.ts",
+        "packages/shared/src/config/AutomationSchemas.ts",
+        "packages/core/src/services/AutomationService.ts",
+        "packages/db/src/repositories/AutomationRepository.ts",
+        "packages/cli-core/src/commands/automation.ts",
+        "apps/web/src/pages/",
+        "apps/mobile/src/components/work/",
+        "apps/cli/src/tui/panes.tsx"
+      ],
+      "reason": "WP-1.4 / PD-8: automation inputMode / batchData deleted"
     }
   ],
   "comments": {
     "phase": "01",
     "failFromPhase": null,
-    "baseline": 27,
+    "baseline": 12,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

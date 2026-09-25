@@ -78,12 +78,6 @@
     "passed": true
   },
   {
-    "id": "http-data-source",
-    "module": "packages/shared/src/config/AutomationSchemas.ts",
-    "schema": "TestDataSourceSchema",
-    "passed": true
-  },
-  {
     "id": "browser-config",
     "module": "packages/shared/src/config/BrowserConfigSchema.ts",
     "schema": "BrowserConfigSchema",

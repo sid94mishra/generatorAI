@@ -45,8 +45,7 @@ GeneratorAI/
 │   ├── system/mcp-servers.json      System MCP registry
 │   ├── system/artifacts/            System skills / agents / prompts (incl. `extension-author` skill)
 │   ├── system/extensions/           System-scope extensions (loaded read-only at boot)
-│   ├── scripts/*.workflow.mjs       Programmatic Workflow Scripts (PWS)
-│   └── data-source-scripts/         Automation data source helpers (py/sh/js)
+│   └── scripts/*.workflow.mjs       Programmatic Workflow Scripts (PWS)
 ├── docs/CLI_SURFACE_SNAPSHOT.md     Generated from the CLI registry; diffed by CI
 ├── oldDocs/                         Superseded internal planning + audit notes.
 │                                    NOT tracked (see .gitignore) and not published —

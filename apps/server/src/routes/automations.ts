@@ -12,7 +12,6 @@ import { validate } from '../middleware/validate.js';
 import {
   CreateAutomationSchema,
   UpdateAutomationSchema,
-  TestDataSourceSchema,
   TriggerAutomationBodySchema,
   PreviewIterationsBodySchema,
   ValidationError,
@@ -188,18 +187,6 @@ export function createAutomationRoutes(container: Container): Router {
       const projectId = req.query['projectId'] as string | undefined;
       const automations = await automationService.listAutomations(projectId);
       res.json(automations.map(toPublicAutomation));
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // ── Data Source Testing (E1) — MUST be before /:id routes ──
-
-  /** POST /api/automations/test-data-source — Test a data source configuration */
-  router.post('/test-data-source', validate(TestDataSourceSchema), async (req, res, next) => {
-    try {
-      const result = await automationService.testDataSource(req.body);
-      res.json(result);
     } catch (err) {
       next(err);
     }

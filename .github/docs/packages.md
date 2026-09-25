@@ -95,7 +95,6 @@ Thirty-plus services. Most relevant:
 | `SystemArtifactService` | Load system agents/prompts/skills on boot |
 | `TemplateRegistry` | Load + serve workflow templates from `templates/system/` |
 | `AutomationService` | Automation CRUD + cron scheduler + webhook trigger + execution fan-out |
-| `DataSourceResolver` | Resolve `dataSourceConfig` (file path / script / inline) to a row array |
 | `ProjectService`, `CodebaseService`, `ProjectConfigService` | Project + codebase + config CRUD |
 | `WorktreeService`, `WorktreeCleanupService` | Per-run worktree lifecycle + retention sweeper |
 | `WorkspaceManager`, `PathResolver` | Execution workspaces (chat / run / automation) + path boundary enforcement |

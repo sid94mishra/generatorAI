@@ -7,9 +7,9 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 
 | Measure | Count |
 |---|---:|
-| Commands | 212 |
+| Commands | 211 |
 | Groups | 24 |
-| Server-backed commands | 185 |
+| Server-backed commands | 184 |
 | Destructive commands | 33 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
@@ -29,7 +29,6 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 | `agent.show` | `agent show` | yes | no | yes | yes | agent | — |
 | `agent.usage` | `agent usage` | yes | no | yes | yes | agent | — |
 | `automation.create` | `automation create` | yes | no | yes | yes | — | --name, --workflow |
-| `automation.datasource.test` | `automation datasource test` | yes | no | yes | yes | config | — |
 | `automation.delete` | `automation delete` | yes | yes | yes | yes | automation | — |
 | `automation.disable` | `automation disable` | yes | no | yes | yes | automation | — |
 | `automation.enable` | `automation enable` | yes | no | yes | yes | automation | — |

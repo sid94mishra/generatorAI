@@ -77,7 +77,6 @@ const COLUMNS: Partial<Record<DataKey, ColumnSpec[]>> = {
   automations: [
     { key: 'name', header: 'Name', priority: 0 },
     { key: 'triggerType', header: 'Trigger', priority: 1 },
-    { key: 'inputMode', header: 'Input', priority: 2 },
     { key: 'enabled', header: 'On', format: 'boolean', priority: 0 },
     { key: 'schedule', header: 'Schedule', priority: 3 },
   ],

@@ -849,7 +849,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
             onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
           })
         : undefined,
-      projectRoot: config.projectRoot,
     },
     // Atomically commit multi-row writes (run + stage_rows, automation open);
     // a mid-sequence failure rolls back.
@@ -887,7 +886,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     hitlService,
     planService,
     agentInteractionService,
-    dataSourceResolver,
     workflowPreprocessor,
   } = core;
 
@@ -2105,9 +2103,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // not opted in — not just the upload route.
     enabled: config.scripts.workflowScriptsEnabled,
   });
-
-  // Late-bind script loader into DataSourceResolver for 'workflow_script' data source support
-  dataSourceResolver.setScriptLoader(workflowScriptLoader);
 
   // ── Widgets & Extensions ──
   const widgetRegistry = new WidgetRegistry();

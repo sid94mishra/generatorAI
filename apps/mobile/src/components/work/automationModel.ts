@@ -29,7 +29,6 @@ export interface AutomationView {
   nextRunAt?: WireTime;
   lastRunAt?: WireTime;
   workflowIds?: string[] | null;
-  inputMode?: string | null;
   dataSchema?: unknown;
   defaultDataset?: unknown;
   executions?: ExecutionView[];

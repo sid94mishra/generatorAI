@@ -23,39 +23,33 @@ function fakeContext(overrides: {
 const create = automationCommands().find((c) => c.id === 'automation.create')!;
 
 describe('automation create', () => {
-  it('rejects invalid --dataSource JSON before creating anything', async () => {
+  it('rejects invalid --data-schema JSON before creating anything', async () => {
     const createFn = vi.fn();
     const ctx = fakeContext({ create: createFn });
 
     await expect(
       create.handler(ctx, {
         args: {},
-        flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', inputMode: 'single', dataSource: '{not json' },
+        flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', dataSchema: '{not json', iterationMode: '{"kind":"each_row"}' },
       } as never),
     ).rejects.toMatchObject({ code: 'USAGE' });
     expect(createFn).not.toHaveBeenCalled();
   });
 
-  it('rejects a --dataSource object missing a valid "type" discriminant', async () => {
+  it('requires --iteration-mode with --data-schema (the server refuses a schema without one)', async () => {
     const createFn = vi.fn();
     const ctx = fakeContext({ create: createFn });
 
     await expect(
       create.handler(ctx, {
         args: {},
-        flags: {
-          name: 'x',
-          workflow: ['e2e'],
-          trigger: 'manual',
-          inputMode: 'single',
-          dataSource: JSON.stringify({ scriptId: 'abc' }),
-        },
+        flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', dataSchema: '{"format":"json_array","fields":[]}' },
       } as never),
     ).rejects.toMatchObject({ code: 'USAGE' });
     expect(createFn).not.toHaveBeenCalled();
   });
 
-  it('accepts a valid typed --dataSource and forwards it as dataSourceConfig', async () => {
+  it('forwards the parsed data schema and iteration mode', async () => {
     const createFn = vi.fn(async () => ({ id: 'auto_1', enabled: false }));
     const ctx = fakeContext({ create: createFn });
 
@@ -65,14 +59,31 @@ describe('automation create', () => {
         name: 'x',
         workflow: ['e2e'],
         trigger: 'manual',
-        inputMode: 'single',
-        dataSource: JSON.stringify({ type: 'script', command: 'python fetch.py' }),
+        dataSchema: '{"format":"json_array","fields":[{"name":"file","type":"string"}]}',
+        iterationMode: '{"kind":"each_row"}',
       },
     } as never);
 
     expect(createFn).toHaveBeenCalledWith(
-      expect.objectContaining({ dataSourceConfig: { type: 'script', command: 'python fetch.py' } }),
+      expect.objectContaining({
+        dataSchema: { format: 'json_array', fields: [{ name: 'file', type: 'string' }] },
+        iterationMode: { kind: 'each_row' },
+      }),
     );
+    expect(createFn).toHaveBeenCalledWith(expect.not.objectContaining({ inputMode: expect.anything() }));
+  });
+
+  it('requires --default-dataset-format with --default-dataset-file', async () => {
+    const createFn = vi.fn();
+    const ctx = fakeContext({ create: createFn });
+
+    await expect(
+      create.handler(ctx, {
+        args: {},
+        flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', defaultDatasetFile: '/tmp/rows.json' },
+      } as never),
+    ).rejects.toMatchObject({ code: 'USAGE' });
+    expect(createFn).not.toHaveBeenCalled();
   });
 
   it('calls enable() as a follow-up when --enabled is set, since create has no such field', async () => {
@@ -82,7 +93,7 @@ describe('automation create', () => {
 
     const result = await create.handler(ctx, {
       args: {},
-      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', inputMode: 'single', enabled: true },
+      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', enabled: true },
     } as never);
 
     expect(createFn).toHaveBeenCalledWith(expect.not.objectContaining({ enabled: expect.anything() }));
@@ -102,7 +113,7 @@ describe('automation create', () => {
 
     const result = await create.handler(ctx, {
       args: {},
-      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', inputMode: 'single', enabled: true },
+      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', enabled: true },
     } as never);
 
     expect(result.data).toEqual({ id: 'auto_1', enabled: false });
@@ -115,123 +126,16 @@ describe('automation create', () => {
 
     await create.handler(ctx, {
       args: {},
-      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', inputMode: 'single' },
+      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual' },
     } as never);
 
     expect(enableFn).not.toHaveBeenCalled();
   });
 
-  it('--input-mode loop requires --loop-items, which the server also requires non-empty', async () => {
-    const createFn = vi.fn();
-    const ctx = fakeContext({ create: createFn });
-
-    await expect(
-      create.handler(ctx, {
-        args: {},
-        flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', inputMode: 'loop', loopVariable: 'file' },
-      } as never),
-    ).rejects.toMatchObject({ code: 'USAGE' });
-    expect(createFn).not.toHaveBeenCalled();
-  });
-
-  it('rejects --loop-items that is not a non-empty JSON array', async () => {
-    const createFn = vi.fn();
-    const ctx = fakeContext({ create: createFn });
-
-    await expect(
-      create.handler(ctx, {
-        args: {},
-        flags: {
-          name: 'x',
-          workflow: ['e2e'],
-          trigger: 'manual',
-          inputMode: 'loop',
-          loopVariable: 'file',
-          loopItems: '[]',
-        },
-      } as never),
-    ).rejects.toMatchObject({ code: 'USAGE' });
-    expect(createFn).not.toHaveBeenCalled();
-  });
-
-  it('sends parsed loopItems through to automations.create for a valid loop-mode request', async () => {
-    const createFn = vi.fn(async () => ({ id: 'auto_1', enabled: false }));
-    const ctx = fakeContext({ create: createFn });
-
-    await create.handler(ctx, {
-      args: {},
-      flags: {
-        name: 'x',
-        workflow: ['e2e'],
-        trigger: 'manual',
-        inputMode: 'loop',
-        loopVariable: 'file',
-        loopItems: '["a.ts","b.ts"]',
-      },
-    } as never);
-
-    expect(createFn).toHaveBeenCalledWith(expect.objectContaining({ loopItems: ['a.ts', 'b.ts'] }));
-  });
-
-  it('--input-mode batch requires --batch-format and --batch-data (server 400s without either)', async () => {
-    const createFn = vi.fn();
-    const ctx = fakeContext({ create: createFn });
-
-    await expect(
-      create.handler(ctx, {
-        args: {},
-        flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', inputMode: 'batch', batchFormat: 'csv' },
-      } as never),
-    ).rejects.toMatchObject({ code: 'USAGE' });
-    expect(createFn).not.toHaveBeenCalled();
-  });
-
-  it('accepts --batch-data directly and forwards it', async () => {
-    const createFn = vi.fn(async () => ({ id: 'auto_1', enabled: false }));
-    const ctx = fakeContext({ create: createFn });
-
-    await create.handler(ctx, {
-      args: {},
-      flags: {
-        name: 'x',
-        workflow: ['e2e'],
-        trigger: 'manual',
-        inputMode: 'batch',
-        batchFormat: 'csv',
-        batchData: 'a,b\n1,2',
-      },
-    } as never);
-
-    expect(createFn).toHaveBeenCalledWith(
-      expect.objectContaining({ batchDataFormat: 'csv', batchData: 'a,b\n1,2' }),
-    );
-  });
-
-  it('rejects --batch-data and --batch-data-file together', async () => {
-    const createFn = vi.fn();
-    const ctx = fakeContext({ create: createFn });
-
-    await expect(
-      create.handler(ctx, {
-        args: {},
-        flags: {
-          name: 'x',
-          workflow: ['e2e'],
-          trigger: 'manual',
-          inputMode: 'batch',
-          batchFormat: 'csv',
-          batchData: 'a,b',
-          batchDataFile: '/tmp/whatever.csv',
-        },
-      } as never),
-    ).rejects.toMatchObject({ code: 'USAGE' });
-    expect(createFn).not.toHaveBeenCalled();
-  });
-
   it("caps --maxConcurrency at the server's limit of 10 via the command schema", () => {
     const result = create.schema!.safeParse({
       args: {},
-      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', inputMode: 'single', maxConcurrency: '20' },
+      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', maxConcurrency: '20' },
     });
     expect(result.success).toBe(false);
   });
@@ -239,7 +143,7 @@ describe('automation create', () => {
   it('allows --maxConcurrency at exactly the cap', () => {
     const result = create.schema!.safeParse({
       args: {},
-      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', inputMode: 'single', maxConcurrency: '10' },
+      flags: { name: 'x', workflow: ['e2e'], trigger: 'manual', maxConcurrency: '10' },
     });
     expect(result.success).toBe(true);
   });

@@ -76,8 +76,6 @@ export interface GeneratorAIConfig {
   /** Sandbox configuration */
   sandbox?: SandboxConfig;
 
-  /** Project root for workspace resolution. Defaults to process.cwd() */
-  projectRoot?: string;
 
 }
 
@@ -91,7 +89,6 @@ export interface ResolvedConfig {
   maxConcurrentStages: number;
   logger: LoggerConfig | false;
   sandbox: SandboxConfig;
-  projectRoot: string;
 }
 
 export function resolveConfig(config: GeneratorAIConfig): ResolvedConfig {
@@ -111,6 +108,5 @@ export function resolveConfig(config: GeneratorAIConfig): ResolvedConfig {
     maxConcurrentStages: config.maxConcurrentStages ?? 8,
     logger: config.logger ?? { level: 'info' },
     sandbox: config.sandbox ?? { enabled: false },
-    projectRoot: config.projectRoot ?? process.cwd(),
   };
 }

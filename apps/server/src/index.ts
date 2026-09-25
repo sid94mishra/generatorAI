@@ -241,11 +241,6 @@ async function startServer(): Promise<void> {
     process.env['GENERATORAI_EXTENSIONS_DIR'] ?? process.env['EXTENSIONS_DIR'] ?? '~/.generatorai/extensions',
   );
 
-  // Compute the monorepo project root (three levels up from apps/server/src/)
-  const __filename_idx = fileURLToPath(import.meta.url);
-  const __dirname_idx = dirname(__filename_idx);
-  const projectRoot = resolve(__dirname_idx, '..', '..', '..');
-
   // Ensure directories exist (mkdirSync is safe with { recursive: true })
   for (const dir of [workspacesDir, artifactsDir, extensionsDir]) {
     mkdirSync(dir, { recursive: true });
@@ -287,7 +282,6 @@ async function startServer(): Promise<void> {
     artifactsDir,
     templatesDir,
     extensionsDir,
-    projectRoot,
     // Bounded: this feeds a concurrency cap, and `NaN` from a typo makes
     // every `>=` check against it false — removing the bound silently.
     maxConcurrentSessions: readBoundedInt('MAX_CONCURRENT_SESSIONS', {

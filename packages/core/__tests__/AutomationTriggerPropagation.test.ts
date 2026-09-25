@@ -50,7 +50,6 @@ function automation(overrides: Partial<Automation> = {}): Automation {
     enabled: true,
     triggerType: 'manual',
     workflowIds: ['wf-1'],
-    inputMode: 'single',
     variables: {},
     maxConcurrency: 1,
     onError: 'continue',
@@ -137,9 +136,9 @@ describe('X-21 — the trigger reaches the workflow run', () => {
 
     // The execution runs in the background (durable slot claim first).
     await vi.waitFor(() => expect(createdRunVariables).toHaveLength(1));
-    // The trigger travels alongside the payload-derived variables, not
-    // instead of them.
     expect(createdRunVariables[0]!['__triggeredBy']).toBe('webhook');
-    expect(createdRunVariables[0]!['topic']).toBe('x');
+    // Without a data schema the payload is recorded on the execution, not
+    // spread into run variables (the legacy extraction is gone, P01 WP-1.4).
+    expect(createdRunVariables[0]!['topic']).toBeUndefined();
   });
 });

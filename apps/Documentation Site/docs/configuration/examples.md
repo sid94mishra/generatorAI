@@ -373,7 +373,6 @@ Contract: `CreateAutomationSchema` in `packages/shared/src/config/AutomationSche
   "workflowIds": [
     "11111111-1111-4111-8111-111111111111"
   ],
-  "inputMode": "single",
   "maxConcurrency": 1,
   "onError": "stop",
   "dataSchema": {
@@ -439,7 +438,6 @@ Contract: `CreateAutomationSchema` in `packages/shared/src/config/AutomationSche
   "workflowIds": [
     "11111111-1111-4111-8111-111111111111"
   ],
-  "inputMode": "single",
   "variables": {
     "feature": "Inspect dependency updates and report actionable changes."
   },
@@ -493,33 +491,6 @@ Contract: `PreviewIterationsBodySchema` in `packages/shared/src/config/Automatio
 **Verify:** Expect two groups, web and mobile, with two and one rows respectively.
 
 <ExampleDownload file="group-dataset.json" />
-
-## Read automation input from HTTP
-
-Use Test data source in the automation form with your actual permitted endpoint. The URL is illustrative and is not contacted by documentation validation. Add secrets through the host configuration path, not public example files.
-
-Contract: `TestDataSourceSchema` in `packages/shared/src/config/AutomationSchemas.ts`.
-
-```json
-{
-  "type": "http",
-  "url": "https://api.example.com/issues",
-  "method": "GET",
-  "resultPath": "items",
-  "timeout": 10000,
-  "schema": {
-    "requiredFields": [
-      "issueId",
-      "feature"
-    ],
-    "maxItems": 100
-  }
-}
-```
-
-**Verify:** Inspect the extracted rows, required-field errors, timeout behavior, and host network restrictions.
-
-<ExampleDownload file="http-data-source.json" />
 
 ## Enable a bounded workspace browser
 

@@ -80,7 +80,6 @@ const ai = await createGeneratorAI({
   artifactsDir: './artifacts',        // Output directory (default: ./artifacts)
   scriptsDir: './workflows',          // Workflow scripts directory
   templatesDir: './templates',        // Workflow/stage templates + system artifacts
-  projectRoot: process.cwd(),         // Project root for git operations
   maxConcurrentStages: 8,             // Concurrent stage executions across runs (default: 8)
   logger: { level: 'info' },          // Pino log level or false to disable
   providerOptions: { ... },           // Harness-specific config

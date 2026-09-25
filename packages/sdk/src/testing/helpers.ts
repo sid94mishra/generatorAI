@@ -23,7 +23,6 @@ export async function createTestGeneratorAI(
     artifactsDir: path.join(tmpDir, 'artifacts'),
     scriptsDir: path.join(tmpDir, 'scripts'),
     logger: false,
-    projectRoot: tmpDir,
     ...overrides,
   });
 }

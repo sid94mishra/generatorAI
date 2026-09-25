@@ -24,70 +24,6 @@ const timezoneSchema = z.string().min(1).max(64).refine(isValidTimezone, {
 const missedRunPolicySchema = z.enum(['skip', 'run_once']);
 const overlapPolicySchema = z.enum(['skip', 'queue']);
 
-// ── Data Source Config Schemas (E1) ──
-
-const DataSourceSchemaValidator = z.object({
-  requiredFields: z.array(z.string().max(100)).max(50).optional(),
-  maxItems: z.number().int().min(1).max(10_000).optional(),
-}).optional();
-
-const ScriptDataSourceSchema = z.object({
-  type: z.literal('script'),
-  command: z.string().min(1).max(2000),
-  workingDirectory: z.string().max(500).optional(),
-  timeout: z.number().int().min(1000).max(300_000).optional(), // 1s to 5min
-  outputFormat: z.enum(['json_array', 'csv', 'jsonl']).optional(),
-  env: z.record(z.string().max(1000)).optional(),
-  schema: DataSourceSchemaValidator,
-});
-
-const HttpDataSourceSchema = z.object({
-  type: z.literal('http'),
-  url: z.string().min(1).max(2000),
-  method: z.enum(['GET', 'POST']).optional(),
-  headers: z.record(z.string().max(1000)).optional(),
-  body: z.string().max(50_000).optional(),
-  resultPath: z.string().max(200).optional(),
-  timeout: z.number().int().min(1000).max(60_000).optional(),
-  schema: DataSourceSchemaValidator,
-});
-
-const FileDataSourceSchema = z.object({
-  type: z.literal('file'),
-  filePath: z.string().min(1).max(500),
-  format: z.enum(['json_array', 'csv', 'jsonl']).optional(),
-  /** Hidden files (`.env`, `.git/…`) are refused unless explicitly allowed. */
-  allowHidden: z.boolean().optional(),
-  schema: DataSourceSchemaValidator,
-});
-
-const StaticDataSourceSchema = z.object({
-  type: z.literal('static'),
-});
-
-const WorkflowScriptDataSourceSchema = z.object({
-  type: z.literal('workflow_script'),
-  scriptId: z.string().min(1).max(200),
-  profileName: z.string().max(100).optional(),
-  iterationVariable: z.string().max(100).optional(),
-});
-
-const DataSourceConfigSchema = z.discriminatedUnion('type', [
-  StaticDataSourceSchema,
-  ScriptDataSourceSchema,
-  HttpDataSourceSchema,
-  FileDataSourceSchema,
-  WorkflowScriptDataSourceSchema,
-]);
-
-/** Standalone schema for testing a data source configuration (E1) */
-export const TestDataSourceSchema = z.discriminatedUnion('type', [
-  ScriptDataSourceSchema,
-  HttpDataSourceSchema,
-  FileDataSourceSchema,
-  WorkflowScriptDataSourceSchema,
-]);
-
 // ── Track C — Schema-driven pipeline ──
 
 /** Field names must be valid identifiers so they can be used in
@@ -193,21 +129,6 @@ export const CreateAutomationSchema = z.object({
   missedRunPolicy: missedRunPolicySchema.optional(),
   overlapPolicy: overlapPolicySchema.optional(),
   workflowIds: z.array(z.string().uuid()).min(1, 'At least one workflow is required'),
-  inputMode: z.enum(['single', 'loop', 'batch', 'script']).default('single'),
-  loopVariable: z.string().max(100).optional(),
-  loopItems: z.array(z.unknown()).optional(),
-  batchDataFormat: z.enum(['json', 'csv', 'jsonl']).optional(),
-  batchData: z.string().max(500_000).optional(), // Up to ~500KB of batch data
-  batchColumns: z.array(z.string().max(100)).max(100).optional(),
-  batchColumnMapping: z.record(z.string().max(100)).optional().refine(
-    (mapping) => {
-      if (!mapping) return true;
-      const values = Object.values(mapping).filter((v) => v.trim() !== '');
-      return new Set(values).size === values.length;
-    },
-    { message: 'Column mapping cannot have duplicate target variable names' },
-  ),
-  dataSourceConfig: DataSourceConfigSchema.optional(),
   variables: z.record(z.unknown()).default({}),
   maxConcurrency: z.number().int().min(1).max(10).default(1),
   onError: z.enum(['continue', 'stop']).default('continue'),
@@ -235,57 +156,10 @@ export const CreateAutomationSchema = z.object({
   { message: 'iterationMode is required when dataSchema is set', path: ['iterationMode'] },
 ).refine(
   (data) => {
-    // Legacy refinements only apply when NOT using the schema-driven pipeline.
-    if (data.dataSchema) return true;
-    if (data.inputMode === 'loop' && !data.loopVariable) return false;
-    return true;
-  },
-  { message: 'loopVariable is required for loop input mode', path: ['loopVariable'] },
-).refine(
-  (data) => {
-    if (data.dataSchema) return true;
-    if (data.inputMode === 'loop' && (!data.loopItems || data.loopItems.length === 0)) return false;
-    return true;
-  },
-  { message: 'loopItems must not be empty in loop mode', path: ['loopItems'] },
-).refine(
-  (data) => {
-    if (data.dataSchema) return true;
-    if (data.inputMode === 'batch' && !data.batchDataFormat) return false;
-    return true;
-  },
-  { message: 'batchDataFormat is required for batch input mode', path: ['batchDataFormat'] },
-).refine(
-  (data) => {
-    if (data.dataSchema) return true;
-    if (data.inputMode === 'batch' && (!data.batchData || data.batchData.trim() === '')) return false;
-    return true;
-  },
-  { message: 'batchData is required for batch input mode', path: ['batchData'] },
-).refine(
-  (data) => {
-    // Cannot provide both static batchData and a dynamic data source
-    const hasBatchData = data.batchData && data.batchData.trim() !== '';
-    const hasDynamicSource = data.dataSourceConfig && data.dataSourceConfig.type !== 'static';
-    return !(hasBatchData && hasDynamicSource);
-  },
-  { message: 'Cannot specify both batchData and a dynamic dataSourceConfig', path: ['dataSourceConfig'] },
-).refine(
-  (data) => {
-    if (data.dataSchema) return true;
-    if (data.inputMode === 'script') {
-      return data.dataSourceConfig && data.dataSourceConfig.type !== 'static';
-    }
-    return true;
-  },
-  { message: 'dataSourceConfig is required for script input mode', path: ['dataSourceConfig'] },
-).refine(
-  (data) => {
     // Schedule triggers must have a way to source data at run time.
     if (data.triggerType !== 'schedule') return true;
     if (data.dataSchema) return !!data.defaultDataset;
-    // Legacy pipeline: single mode is fine, otherwise the legacy data
-    // must be inline on the automation.
+    // Without a schema a schedule trigger runs once with the base variables.
     return true;
   },
   { message: 'Schedule triggers require a defaultDataset when using dataSchema', path: ['defaultDataset'] },
@@ -301,27 +175,12 @@ export const UpdateAutomationSchema = z.object({
   missedRunPolicy: missedRunPolicySchema.optional(),
   overlapPolicy: overlapPolicySchema.optional(),
   workflowIds: z.array(z.string().uuid()).min(1).optional(),
-  inputMode: z.enum(['single', 'loop', 'batch', 'script']).optional(),
-  loopVariable: z.string().max(100).optional(),
-  loopItems: z.array(z.unknown()).optional(),
-  batchDataFormat: z.enum(['json', 'csv', 'jsonl']).optional(),
-  batchData: z.string().max(500_000).optional(),
-  batchColumns: z.array(z.string().max(100)).max(100).optional(),
-  batchColumnMapping: z.record(z.string().max(100)).optional().refine(
-    (mapping) => {
-      if (!mapping) return true;
-      const values = Object.values(mapping).filter((v) => v.trim() !== '');
-      return new Set(values).size === values.length;
-    },
-    { message: 'Column mapping cannot have duplicate target variable names' },
-  ),
-  dataSourceConfig: DataSourceConfigSchema.optional(),
   variables: z.record(z.unknown()).optional(),
   maxConcurrency: z.number().int().min(1).max(10).optional(),
   onError: z.enum(['continue', 'stop']).optional(),
   projectId: z.string().uuid().optional(),
   useWorktree: z.boolean().optional(),
-  // ── Track C ── (nullable so callers can clear these back to legacy)
+  // ── Track C ── (nullable so callers can clear a schema back to a single run)
   dataSchema: DataSchemaSchema.nullable().optional(),
   iterationMode: IterationModeSchema.nullable().optional(),
   defaultDataset: AutomationDatasetSchema.nullable().optional(),
