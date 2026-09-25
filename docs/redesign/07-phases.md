@@ -111,7 +111,7 @@ Baseline check for every T-task: GitHub/blue pinned, dark and light, screenshots
 
 | Order | ID | Gap | Needed by |
 |---|---|---|---|
-| 0 | P2-00 | Test harness: rename the load-test-only fake-provider env var (`GENERATORAI_LOAD_TEST_FAUX_HARNESS`) to a general test flag, add a scripted-response hook, seeded isolated server script for VRT/e2e (ports 3197/5197) — or adopt the Workflow Overhaul Plan's test server if it has landed | P1-SB VRT routes, P3 |
+| 0 | P2-00 | Test harness: rename the load-test-only fake-provider env var (`GENERATORAI_LOAD_TEST_FAUX_HARNESS`) to a general test flag, add a scripted-response hook, seeded isolated server script for VRT/e2e (ports 3197/5197) — or adopt the Workflow Overhaul Plan's test server if it has landed. The fake provider must report `ready` in `/harness/providers` and the CI e2e server must enable it, so `subsystems-live.spec.ts` "every ready provider publishes a non-empty model catalog" runs in CI instead of skipping (P0 review R15) | P1-SB VRT routes, P3 |
 | 1 | P2-01 | **G-01 attention feed** (service, `GET /attention`, SSE events, client-core store, web hook) — start during P1 | P3 sidebar |
 | 2 | P2-02 | G-02 chat list v2 (migration for `last_*`/`changes_*`, paging, filters) + G-14 | P3 ChatsList |
 | 3 | P2-03 | G-03 server switcher, G-04 update state in renderer, G-05 attention counts in desktop main (parallel) | P3 |

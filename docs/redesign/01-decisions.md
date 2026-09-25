@@ -211,6 +211,12 @@ Kept unchanged: React 19.2, TanStack Query 5, zustand 5, @xyflow/react 12, @dagr
 ### D-39 Out of scope for this pass — Final
 Internationalisation (no i18n exists; do not start it), device-scoped appearance for desktop remote mode (`06-desktop-and-shell.md` §6.5; appearance stays per server origin), mobile UI implementation (next pass, D-40), Workflow Overhaul Plan backend work (its own plan), relay end-to-end encryption (`packages/relay-protocol/src/e2ee.ts` has no importers — flagged separately), React Compiler and Vite 8 (D-37).
 
+### D-41 Z-index scale — Final
+Named layers replace ad hoc values (`z-[1000]`, `z-[1100]`, `z-[1200]`, `z-50` …): `base 0 < sticky 10 < dock 20 < rail/sidebar 30 < dialog 1000 < dropdown/popover 1100 < toast 1150 < tooltip 1200`. Dropdowns and popovers sit **above** dialogs because selects, menus and comboboxes open from inside dialogs. Values in `02-design-system-spec.md` §6.
+
+### D-42 When a board disagrees with the server or the code's real behaviour, the server wins — Final
+Boards are the layout and visual reference; the server and working code define behaviour. Examples found: the Pairing board draws a 6-box code but the code format is 12 characters in 3 groups of 4 (`PAIRING_CODE_LENGTH`/`PAIRING_CODE_GROUP_SIZE` in `packages/shared/src/utils/pairingCode.ts`) — `PairingCodeInput` renders from those constants; the Security board offers a "Custom" network exposure the server does not support (not offered); the Settings group is "Agents & models" on the board and "Agents" in `SETTINGS_NAV` (use the board label only if the group really contains both). Each such case is listed in `04-screen-map.md` and `11-design-feedback.md`.
+
 ### D-43 P0 guardrail implementation details — Final
 Decided while building P0-04 where `09-verification.md` was silent or wrong:
 - `check:design` is **one** script: `check-design-system.mjs` runs `check-stories.mjs` itself, because with `a.mjs && b.mjs` pnpm forwards `--strict` only to the last command.
@@ -221,15 +227,15 @@ Decided while building P0-04 where `09-verification.md` was silent or wrong:
 - ESLint import resolution uses `apps/web/tsconfig.eslint.json` (the web tsconfig without `references`): eslint-import-resolver-typescript v4 ignores `paths` in a tsconfig that has references, so every `@/` import escaped the layer rules.
 - better-tailwindcss needs `cwd: apps/web` (from the root `tailwindcss` resolves to the docs site's 3.x) and keeps its default callee matchers (setting `callees` replaces them).
 - Vitest: `apps/web/vitest.config.ts` exports its `unit` project and the root config reuses it with `extends`; Vitest ignores a `projects` list nested inside a referenced config.
+- Layers fail closed (P0 review R2): `boundaries/no-unknown-dependencies` and `boundaries/no-unknown-files` are errors, so a folder that is not a declared element (`src/services/` …) can be neither created nor imported until it is declared. Tests are `boundaries/ignore`d (they may import any layer); `src/styles` is a `styles` element importable from `root`.
+- `features/` may not import `@tanstack/react-query`, `@generatorai/client-*` or `providers/PlatformProvider` (type imports allowed): "data only via hooks/*Queries.ts or stores" is lint-enforced (R5). "Inline style only for computed geometry" is approximated by the ratchet's `literalInlineStyle` rule (`scope: 'new'`): a `style={{…}}` with a literal string or number value.
+- Lint messages in `src/{ui,blocks,features,app}` point at `@/ui/primitives` / `@/ui/icons`, never the legacy `@/components/ui`; `src/ui/primitives/**` is exempt from the raw-element lint rule as it is from the ratchet (R12).
 
 ### D-44 Isolated test servers use the server's bare env names — Final
 The server reads `DB_PATH`, `ARTIFACTS_DIR`, `WORKSPACES_DIR`, `TEMPLATES_DIR` and `PORT` (`apps/server/src/index.ts`); the `GENERATORAI_`-prefixed names in the old CI e2e job, `AGENTS.md` and an earlier draft of `09` §4.2 were silently ignored, so "isolated" servers opened the default database. Every isolated server (CI e2e, sandbox, VRT, smokes) sets the bare names plus `GENERATORAI_BIND_HOST=127.0.0.1` (required for `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK`), and scripts assert the `dbPath` in the startup log before running tests. Renaming the server's variables to a prefixed form is out of scope (it would touch every deployment doc); if it is ever done, it is a clean rename with no aliases (D-02).
 
-### D-41 Z-index scale — Final
-Named layers replace ad hoc values (`z-[1000]`, `z-[1100]`, `z-[1200]`, `z-50` …): `base 0 < sticky 10 < dock 20 < rail/sidebar 30 < dialog 1000 < dropdown/popover 1100 < toast 1150 < tooltip 1200`. Dropdowns and popovers sit **above** dialogs because selects, menus and comboboxes open from inside dialogs. Values in `02-design-system-spec.md` §6.
-
-### D-42 When a board disagrees with the server or the code's real behaviour, the server wins — Final
-Boards are the layout and visual reference; the server and working code define behaviour. Examples found: the Pairing board draws a 6-box code but the code format is 12 characters in 3 groups of 4 (`PAIRING_CODE_LENGTH`/`PAIRING_CODE_GROUP_SIZE` in `packages/shared/src/utils/pairingCode.ts`) — `PairingCodeInput` renders from those constants; the Security board offers a "Custom" network exposure the server does not support (not offered); the Settings group is "Agents & models" on the board and "Agents" in `SETTINGS_NAV` (use the board label only if the group really contains both). Each such case is listed in `04-screen-map.md` and `11-design-feedback.md`.
+### D-45 Stories: design vocabulary yes, demo scaffolding free — Final
+Decided for P0 review R6, where the ratchet and ESLint disagreed. `*.stories.tsx` files show the kit to people and to the Storybook MCP, so they must use real design classes: the Tailwind vocabulary rules (ESLint block (a): D-13 sizes, D-14 radii, palette, white/black, shadows, heights) and the ratchet's vocabulary rules (`defaultTextSize`, `legacyTokenUtility`, `hexOrRgbInTs`, `lucideDirectImport` …) apply to them, hard-zero in `src/{ui,blocks,features,app}`. Exempt in **both** tools, as demo scaffolding only: raw `<button>`/`<input>`/`<textarea>`/`<select>` (ratchet `rawButtonElement`/`rawInputElement`, ESLint `no-restricted-syntax`) and arbitrary values such as a fixed-width frame (ratchet `arbitraryValue`, ESLint `ARBITRARY_VALUE_RESTRICTION`). Layer and import rules apply to stories unchanged. Tests stay exempt from everything, as before. `scripts/__tests__/redesign-rails.test.mjs` pins the split.
 
 ---
 

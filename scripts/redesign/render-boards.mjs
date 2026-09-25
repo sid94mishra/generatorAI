@@ -24,32 +24,6 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const BOARDS_DIR = path.join(REPO, 'docs', 'redesign', 'boards', 'web');
 const require = createRequire(import.meta.url);
 
-const args = Object.fromEntries(
-  process.argv.slice(2).map((a) => {
-    const m = /^--([^=]+)(?:=(.*))?$/.exec(a);
-    if (!m) throw new Error(`Unknown argument: ${a}`);
-    return [m[1], m[2] ?? 'true'];
-  }),
-);
-const only = args.only ? new Set(args.only.split(',').map((s) => s.trim()).filter(Boolean)) : null;
-const modes = (args.modes ?? 'dark,light').split(',').map((s) => s.trim());
-const accent = args.accent ?? 'ink';
-const outDir = path.resolve(REPO, args.out ?? path.join('docs', 'redesign', 'boards', 'png'));
-
-for (const m of modes) if (m !== 'dark' && m !== 'light') throw new Error(`--modes accepts dark,light (got ${m})`);
-
-const boards = fs
-  .readdirSync(BOARDS_DIR)
-  .filter((f) => f.endsWith('.dc.html'))
-  .map((f) => f.slice(0, -'.dc.html'.length))
-  .filter((b) => !only || only.has(b))
-  .sort();
-if (only) {
-  const missing = [...only].filter((b) => !boards.includes(b));
-  if (missing.length) throw new Error(`No such board(s): ${missing.join(', ')}`);
-}
-if (!boards.length) throw new Error('No boards selected');
-
 /** Returns inline @font-face CSS for the bundled fonts, or null before P1 adds them. */
 function bundledFontFaces() {
   const families = [
@@ -105,7 +79,38 @@ export function flattenBoard(source, { mode, accent: acc }) {
   return { html, width, height, usedBundledFonts: Boolean(fonts) };
 }
 
+/** Parses the CLI flags; only main() calls it, so the module can be imported (tests). */
+function parseArgs(argv) {
+  const args = Object.fromEntries(
+    argv.map((a) => {
+      const m = /^--([^=]+)(?:=(.*))?$/.exec(a);
+      if (!m) throw new Error(`Unknown argument: ${a}`);
+      return [m[1], m[2] ?? 'true'];
+    }),
+  );
+  const only = args.only ? new Set(args.only.split(',').map((s) => s.trim()).filter(Boolean)) : null;
+  const modes = (args.modes ?? 'dark,light').split(',').map((s) => s.trim());
+  const accent = args.accent ?? 'ink';
+  const outDir = path.resolve(REPO, args.out ?? path.join('docs', 'redesign', 'boards', 'png'));
+
+  for (const m of modes) if (m !== 'dark' && m !== 'light') throw new Error(`--modes accepts dark,light (got ${m})`);
+
+  const boards = fs
+    .readdirSync(BOARDS_DIR)
+    .filter((f) => f.endsWith('.dc.html'))
+    .map((f) => f.slice(0, -'.dc.html'.length))
+    .filter((b) => !only || only.has(b))
+    .sort();
+  if (only) {
+    const missing = [...only].filter((b) => !boards.includes(b));
+    if (missing.length) throw new Error(`No such board(s): ${missing.join(', ')}`);
+  }
+  if (!boards.length) throw new Error('No boards selected');
+  return { boards, modes, accent, outDir };
+}
+
 async function main() {
+  const { boards, modes, accent, outDir } = parseArgs(process.argv.slice(2));
   const { chromium } = require('playwright-core');
   const tmp = path.join(os.tmpdir(), 'generatorai-boards');
   fs.mkdirSync(tmp, { recursive: true });
@@ -158,7 +163,17 @@ async function main() {
   if (failures) process.exit(1);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) {
+// realpath: through a symlink, a junction or macOS /tmp → /private/tmp, argv[1]
+// differs from import.meta.url and the script would silently do nothing.
+function isMain() {
+  try {
+    return Boolean(process.argv[1]) && fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url);
+  } catch {
+    return false; // argv[1] is not a file (node -e, a test runner's flags)
+  }
+}
+
+if (isMain()) {
   main().catch((err) => {
     console.error(err);
     process.exit(1);

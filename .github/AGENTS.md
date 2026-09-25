@@ -206,10 +206,10 @@ Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 |---|---|---|
 | `PORT` | `3100` | API server port |
 | `GENERATORAI_WEB_PORT` | `5173` | Vite dev port |
-| `DB_PATH` | `~/.generatorai/data.db` (dev: `packages/db/data/generatorai.db`) | SQLite path |
+| `DB_PATH` | `<repo>/packages/db/data/generatorai.db` (the desktop app passes its own data-dir path) | SQLite path. Isolated test servers must set it (D-44) |
 | `WORKSPACES_DIR` | `~/.generatorai/workspaces` | Worktree + workspace root |
 | `ARTIFACTS_DIR` | `~/.generatorai/artifacts` | Project + artifact root |
-| `TEMPLATES_DIR` | `~/.generatorai/templates` | System templates + system MCP / artifacts |
+| `TEMPLATES_DIR` | `<repo>/templates` (the desktop app passes its bundled copy) | System templates + system MCP / artifacts |
 | `HARNESS_TYPE` | `copilot` | Default provider: `copilot`, `claude-agent` or `codex` |
 | `CODEX_CLI_PATH` | auto-resolved | Codex CLI location (unset: PATH, then the ChatGPT desktop app's bundled CLI) |
 | `COPILOT_GH_HOST` | (none) | Set for GHEC tenants (`https://<tenant>.ghe.com/`) |

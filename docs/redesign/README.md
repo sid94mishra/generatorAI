@@ -23,8 +23,7 @@ Read design artifacts with the Artifact tool (`action: "read"` / `"list"`), neve
 | Script | What it does |
 |---|---|
 | `node scripts/redesign/render-boards.mjs [--only=ChatsList,Home] [--modes=dark,light] [--accent=ink]` | Flattens each `boards/web/*.dc.html` (helmet → head, `{{rootClass}}` → `t-<mode> acc-<accent>`) and screenshots it at its preview size into `boards/png/<Board>.<mode>.png`. Fails if a board has an unknown shape. Uses the bundled Fontsource fonts once P1-T7 installs them, Google Fonts before that. ~2 min for all 60 × 2 |
-| `node scripts/redesign/side-by-side.mjs --board=ChatsList --mode=dark --shot=docs/redesign/shots/chats/1440x900-instrument-dark.png` | Board PNG (rendered on demand) next to an app screenshot → `shots/<route>/compare-<w>-<mode>.png` for the Done loop's DIFF.md |
-
+| `node scripts/redesign/side-by-side.mjs --board=ChatsList --mode=dark --shot=docs/redesign/shots/chats/1440x900-instrument-dark.png` | Board PNG (rendered on demand, and re-rendered when older than the board or `VERSION`) next to an app screenshot → `shots/<route>/compare-<w>-<mode>.png` for the Done loop's DIFF.md |
 | `node scripts/redesign/make-dummy-repo.mjs [--clean]` | Throwaway git repo (bare origin + `work/` clone with branches, a conflict pair, and a dirty tree) under the OS temp dir for SCM walkthroughs; prints the `work/` path. `--clean` removes them all |
 
 Both PNG folders are gitignored; `shots/**/DIFF.md` is tracked.
@@ -34,7 +33,7 @@ Both PNG folders are gitignored; `shots/**/DIFF.md` is tracked.
 | File | What it holds | Use it when |
 |---|---|---|
 | `00-context-and-analysis.md` | How the web and desktop clients work today, the diagnosis with numbers, the design summary, what the independent review changed, the relationship to the Workflow Overhaul Plan, non-negotiable constraints | Understanding *why* |
-| `01-decisions.md` | D-01…D-42: every decision with options, evidence and consequences; sources | Always |
+| `01-decisions.md` | D-01…D-45: every decision with options, evidence and consequences; sources | Always |
 | `02-design-system-spec.md` | Token architecture; every colour token (derivation, Instrument values); collisions and codemods; Instrument theme and ink accent; type, radius, heights and density, z-index, focus, motion; the status map with the full server→state mapping; `CHROME`; icon concepts; emitters file by file; pre-paint; WCAG suite; the P1 token checklist | Tokens and foundations (P1), any styling question |
 | `03-component-inventory-kit.md` | The presentational kit: 48 primitives, 35 patterns, 13 shell parts, 5 templates, 5 layouts — anatomy, exact sizes, props, Base UI part, board usage counts, what each replaces, phase. **Rosetta table** (board markup → component). Usage matrix, delete list, build order | Building or using any `ui/` component; translating a board |
 | `03-component-inventory-domain.md` | Query-aware parts: 27 blocks, ~90 feature composites, 20 workflow kit pieces, 4 extension registries; the composer state map; decomposition plans and characterization behaviours for the giant files | Building blocks and features; splitting giant files (P4) |

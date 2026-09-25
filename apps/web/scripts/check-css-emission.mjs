@@ -66,13 +66,20 @@ const referenced = new Map(); // runtime var → the theme key that maps to it
 for (const block of themeBlocks) {
   for (const [, key, value] of block.matchAll(/(--[\w-]+)\s*:\s*([^;]+);/g)) {
     for (const [, name] of value.matchAll(/var\(\s*(--[\w-]+)/g)) {
-      // `--font-sans: var(--font-sans)` refers to itself; the real value is the
-      // @font-face / :root declaration, which the self-check below still needs.
+      // `--font-sans: var(--font-sans)` refers to itself; the real value is a
+      // :root declaration elsewhere, and `defined` below ignores the self-reference.
       if (!referenced.has(name)) referenced.set(name, key);
     }
   }
 }
-const defined = new Set([...css.matchAll(/(?<![\w-])(--[\w-]+)\s*:/g)].map((m) => m[1]));
+// A declaration counts as a definition unless its value is exactly
+// `var(<its own name>)`: the built CSS repeats `--font-sans:var(--font-sans)`
+// from the @theme block, and counting that would make the check vacuous.
+const defined = new Set();
+for (const [, name, value] of css.matchAll(/(?<![\w-])(--[\w-]+)\s*:\s*([^;}]*)/g)) {
+  const self = new RegExp(`^var\\(\\s*${name}\\s*\\)\\s*(?:!important)?\\s*$`);
+  if (!self.test(value.trim())) defined.add(name);
+}
 for (const [name, key] of referenced) {
   if (!defined.has(name)) failures.push(`@theme inline ${key} → var(${name}), but ${name} is not defined in the built CSS`);
 }

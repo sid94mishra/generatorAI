@@ -117,6 +117,14 @@ jobs:
 
       - run: pnpm turbo test
 
+      # Root-package script tests (scripts/__tests__), which `turbo test` never
+      # reaches: it runs package suites only. Includes the redesign rails
+      # fixtures (ratchet, stories-present, board flattener, ESLint layer
+      # rules — P0 review R4). All three OSes: the layer rules and path
+      # handling are exactly what differs on Windows.
+      - name: Root script tests (redesign rails)
+        run: pnpm exec vitest run --project node scripts/__tests__
+
       # WEB-03: enforce 800 KB gzipped budget on the web bundle.
       # `pnpm turbo build` above already produced dist/ — this just checks it.
       # Bundle size does not vary by platform, so once is enough.
@@ -360,13 +368,16 @@ jobs:
           echo "E2E_STATE=$state" >> "$GITHUB_ENV"
 
           # Server: same env shape as agent-tests/concurrent-load-1q.mjs.
+          # The server reads the BARE names (apps/server/src/index.ts); the
+          # GENERATORAI_-prefixed ones used here before were ignored, so e2e
+          # ran against the default database instead of this temp one.
+          # No comment lines inside the continuation below: a `#` there ends
+          # the command and turns the variables above it into unexported
+          # shell assignments.
           (
             cd apps/server
             PORT="$SERVER_PORT" \
             WIDGET_PORT="$((SERVER_PORT + 1))" \
-            # The server reads the BARE names (apps/server/src/index.ts); the
-            # GENERATORAI_-prefixed ones used here before were ignored, so e2e
-            # ran against the default database instead of this temp one.
             DB_PATH="$state/e2e.db" \
             ARTIFACTS_DIR="$state/artifacts" \
             WORKSPACES_DIR="$state/workspaces" \
@@ -399,6 +410,21 @@ jobs:
             echo "$name is up: $url"
           }
           wait_for "http://127.0.0.1:$SERVER_PORT/api/health" server
+
+          # D-44: the server must be on the temp DB, never a default one. The
+          # startup line is pino JSON: {"…","dbPath":"<path>",…,"msg":"[Server] … listening …"}.
+          # Polled briefly: /api/health can answer before the logger flushes.
+          db_deadline=$((SECONDS + 15))
+          until grep -qF "\"dbPath\":\"$state/e2e.db\"" "$state/logs/server.log"; do
+            if (( SECONDS >= db_deadline )); then
+              echo "::error::server is not on the temp DB ($state/e2e.db); startup log:"
+              grep -F '"dbPath"' "$state/logs/server.log" || tail -n 50 "$state/logs/server.log"
+              exit 1
+            fi
+            sleep 1
+          done
+          echo "server is on the temp DB: $state/e2e.db"
+
           wait_for "http://127.0.0.1:$WEB_PORT/" web
 
       - name: Run Playwright e2e suite

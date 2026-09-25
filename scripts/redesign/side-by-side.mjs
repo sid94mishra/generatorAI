@@ -4,7 +4,8 @@
 //   node scripts/redesign/side-by-side.mjs --board=ChatsList --mode=dark \
 //        --shot=docs/redesign/shots/chats/1440x900-instrument-dark.png [--out=<png>]
 //
-// The board PNG comes from render-boards.mjs (rendered on demand if missing).
+// The board PNG comes from render-boards.mjs (rendered on demand if missing or older
+// than the board's .dc.html or boards/VERSION).
 // Default output: docs/redesign/shots/<route>/compare-<w>-<mode>.png, where <route>
 // is the folder of --shot and <w> the screenshot's width. Uses Playwright, so no
 // image library is needed.
@@ -32,7 +33,15 @@ const shot = path.resolve(REPO, args.shot);
 if (!fs.existsSync(shot)) throw new Error(`Screenshot not found: ${shot}`);
 
 const boardPng = path.join(REPO, 'docs', 'redesign', 'boards', 'png', `${args.board}.${mode}.png`);
-if (!fs.existsSync(boardPng)) {
+const boardSrc = path.join(REPO, 'docs', 'redesign', 'boards', 'web', `${args.board}.dc.html`);
+const boardVersion = path.join(REPO, 'docs', 'redesign', 'boards', 'VERSION');
+if (!fs.existsSync(boardSrc)) throw new Error(`No such board: ${args.board}`);
+// Re-render when the PNG is missing or older than the board source or VERSION:
+// the PNG is gitignored, so after a board refresh it would otherwise compare
+// against the old design.
+const mtime = (f) => (fs.existsSync(f) ? fs.statSync(f).mtimeMs : 0);
+const stale = !fs.existsSync(boardPng) || mtime(boardPng) < Math.max(mtime(boardSrc), mtime(boardVersion));
+if (stale) {
   execFileSync(process.execPath, [path.join(REPO, 'scripts', 'redesign', 'render-boards.mjs'), `--only=${args.board}`, `--modes=${mode}`], {
     stdio: 'inherit',
   });

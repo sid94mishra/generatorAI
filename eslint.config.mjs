@@ -40,6 +40,22 @@ const WEB_RESTRICTED_SYNTAX = [
 // ── Redesign layers (docs/redesign/09-verification.md §2.3, D-04) ──────────
 const WEB_NEW_CODE = 'apps/web/src/{ui,blocks,features,app}/**/*.{ts,tsx}';
 const WEB_TEST_FILES = ['apps/web/src/**/__tests__/**', 'apps/web/src/**/*.test.{ts,tsx}'];
+const WEB_STORIES = '**/*.stories.tsx';
+
+// The same raw-element / confirm rules for the redesign folders, pointing at the
+// new kit: `ui/` may not import @/components/*, so the legacy messages above
+// would steer a session the wrong way (P0 review R12). Loader2 needs no entry
+// here: every lucide import outside ui/icons is already banned (LUCIDE below).
+const NEW_CODE_RESTRICTED_SYNTAX = [
+  {
+    selector: "JSXOpeningElement[name.name='button']",
+    message: 'Use <Button> / <IconButton> from @/ui/primitives instead of a raw <button>.',
+  },
+  {
+    selector: "JSXOpeningElement[name.name='select']",
+    message: 'Use <Select> from @/ui/primitives instead of a raw <select>.',
+  },
+];
 
 const LUCIDE = { name: 'lucide-react', message: 'Import icons from @/ui/icons by concept (D-17).' };
 const HEADLESS = {
@@ -54,6 +70,27 @@ const UI_LAYER = [
   {
     group: ['@/stores/*', '@/platform/*', '@/hooks/*', '@/features/*', '@/blocks/*', '@/components/*', '@/pages/*'],
     message: 'ui/ may import only ui/ (D-04).',
+  },
+];
+
+// features/ get data only through hooks/*Queries.ts or stores (D-04), never the
+// query client, the platform client or the client packages directly. Type
+// imports stay allowed: sharing a type is not reaching the data.
+const FEATURES_DATA = [
+  {
+    group: ['@tanstack/react-query', '@tanstack/react-query/*'],
+    allowTypeImports: true,
+    message: 'features/ read data through hooks/*Queries.ts or stores, not react-query directly (D-04).',
+  },
+  {
+    group: ['@generatorai/client-*', '@generatorai/client-*/*'],
+    allowTypeImports: true,
+    message: 'features/ reach the client packages through hooks/*Queries.ts or stores (D-04). Type imports are fine.',
+  },
+  {
+    group: ['@/providers/PlatformProvider', '**/providers/PlatformProvider'],
+    allowTypeImports: true,
+    message: 'features/ never hold the platform client (usePlatform); add a hook in hooks/ instead (D-04).',
   },
 ];
 
@@ -140,21 +177,31 @@ export default [
     },
   },
   {
-    // Design-system enforcement for the web app (see apps/web/DESIGN_SYSTEM.md).
-    // `warn` during the migration phases; flipped to `error` in the final
-    // lock-in phase once counts hit ~0. The primitives themselves are exempt.
+    // Design-system enforcement for the LEGACY web code (see apps/web/DESIGN_SYSTEM.md).
+    // `warn` during the migration phases (the ratchet holds the counts). The
+    // primitives themselves are exempt; stories may use raw elements (D-45).
     files: ['apps/web/src/**/*.tsx'],
-    ignores: [
-      'apps/web/src/components/ui/**',
-      'apps/web/src/**/__tests__/**',
-      'apps/web/src/**/*.test.tsx',
-    ],
+    ignores: ['apps/web/src/components/ui/**', WEB_NEW_CODE, WEB_STORIES, ...WEB_TEST_FILES],
     rules: {
       'no-restricted-syntax': ['warn', ...WEB_RESTRICTED_SYNTAX],
       'no-restricted-imports': ['warn', { paths: WEB_RESTRICTED_IMPORT_PATHS }],
       'no-restricted-globals': [
         'warn',
         { name: 'confirm', message: 'Use <ConfirmDialog> from @/components/ui.' },
+      ],
+    },
+  },
+  {
+    // The same for the redesign folders, with messages that point at the new
+    // kit. `error`: the ratchet already hard-zeros these there. ui/primitives
+    // render the raw elements by design (D-43), and stories may (D-45).
+    files: [WEB_NEW_CODE],
+    ignores: ['apps/web/src/ui/primitives/**', WEB_STORIES, ...WEB_TEST_FILES],
+    rules: {
+      'no-restricted-syntax': ['error', ...NEW_CODE_RESTRICTED_SYNTAX],
+      'no-restricted-globals': [
+        'error',
+        { name: 'confirm', message: 'Use useConfirm() / <AlertDialog> from @/ui/primitives (P-32).' },
       ],
     },
   },
@@ -168,9 +215,12 @@ export default [
   // `callees` is left at the plugin default on purpose: it already covers cn,
   // cva, clsx and twMerge (including cva `variants` values), and setting the
   // option replaces those matchers instead of extending them.
+  //
+  // Stories are linted too (D-45): they must show real classes, so the
+  // vocabulary applies; only arbitrary values are free (demo frames), below.
   {
     files: [WEB_NEW_CODE],
-    ignores: ['**/*.stories.tsx', ...WEB_TEST_FILES],
+    ignores: WEB_TEST_FILES,
     plugins: { 'better-tailwindcss': betterTailwind },
     settings: { 'better-tailwindcss': { entryPoint: WEB_CSS, cwd: WEB_DIR } },
     rules: {
@@ -183,11 +233,12 @@ export default [
     },
   },
   {
-    // ui/lib is the one sanctioned home of arbitrary values (Base UI CSS-variable
-    // passthroughs, each with a comment) — the same exemption the ratchet's
-    // `arbitraryValue` rule gives it. Everything else in (a) still applies.
-    files: ['apps/web/src/ui/lib/**/*.{ts,tsx}'],
-    ignores: ['**/*.stories.tsx', ...WEB_TEST_FILES],
+    // ui/lib is the one sanctioned home of arbitrary values in product code
+    // (Base UI CSS-variable passthroughs, each with a comment), and stories may
+    // use them as demo scaffolding (D-45) — the same exemptions the ratchet's
+    // `arbitraryValue` rule gives. Everything else in (a) still applies.
+    files: ['apps/web/src/ui/lib/**/*.{ts,tsx}', `apps/web/src/{ui,blocks,features,app}/${WEB_STORIES}`],
+    ignores: WEB_TEST_FILES,
     rules: {
       'better-tailwindcss/no-restricted-classes': [
         'error',
@@ -203,6 +254,10 @@ export default [
       'import/resolver': { typescript: { project: WEB_TSCONFIG } },
       'boundaries/root-path': REPO_ROOT,
       'boundaries/include': ['apps/web/src/**/*'],
+      // Tests are not a layer: they may import any layer, and nothing but
+      // tests imports them. Ignoring them keeps no-unknown-files quiet for
+      // src/__tests__ without inventing a policy-free element.
+      'boundaries/ignore': WEB_TEST_FILES,
       // Lazy route modules and barrel re-exports cross layers too.
       'boundaries/dependency-nodes': ['import', 'dynamic-import', 'export'],
       'boundaries/elements': [
@@ -213,6 +268,8 @@ export default [
         { type: 'platform', pattern: 'apps/web/src/platform', partialMatch: false },
         { type: 'data', pattern: 'apps/web/src/{stores,hooks,lib,utils,providers,types,audio}', partialMatch: false },
         { type: 'legacy', pattern: 'apps/web/src/{components,pages}', partialMatch: false },
+        // Stylesheets (globals.css), imported for their side effect by the entry.
+        { type: 'styles', pattern: 'apps/web/src/styles', partialMatch: false },
         // The loose files at the top of src (App, main, router). v7 has no
         // non-deprecated way to make a single file an element; `mode: 'file'`
         // is it.
@@ -252,22 +309,46 @@ export default [
             // Migration scaffolding; deleted in P7.
             { from: { element: { type: 'legacy' } }, allow: toTypes('legacy', 'ui', 'blocks', 'data', 'platform') },
             // `root` too: each loose file is its own element, and main.tsx imports App.tsx.
-            { from: { element: { type: 'root' } }, allow: toTypes('root', 'app', 'ui', 'data', 'platform', 'legacy') },
+            { from: { element: { type: 'root' } }, allow: toTypes('root', 'app', 'ui', 'data', 'platform', 'legacy', 'styles') },
           ],
         },
       ],
+      // Fail closed (D-03): a folder that is not declared above (src/services,
+      // src/queries …) is neither importable nor allowed to exist, so it cannot
+      // sidestep the policies. Declare it as an element first.
+      'boundaries/no-unknown-dependencies': 'error',
+      'boundaries/no-unknown-files': 'error',
     },
   },
-  // (c) no-restricted-imports per layer. The three file sets are DISJOINT, so
-  // no block replaces another's rule; each repeats WEB_RESTRICTED_IMPORT_PATHS
-  // because it replaces the design-system block's rule above.
+  // (c) no-restricted-imports per layer. The file sets are DISJOINT, so no
+  // block replaces another's rule; each legacy block repeats
+  // WEB_RESTRICTED_IMPORT_PATHS because it replaces the design-system block's
+  // rule above (the new folders are outside that block).
   {
-    // Everything outside ui/ (legacy included): `warn` until P7, ratcheted by
-    // check-design-system.mjs (lucideDirectImport, rawHeadlessImport).
+    // Legacy code (everything outside the redesign folders and components/ui):
+    // `warn` until P7, ratcheted by check-design-system.mjs (lucideDirectImport,
+    // rawHeadlessImport).
     files: ['apps/web/src/**/*.{ts,tsx}'],
-    ignores: ['apps/web/src/ui/**', 'apps/web/src/components/ui/**', ...WEB_TEST_FILES],
+    ignores: [WEB_NEW_CODE, 'apps/web/src/components/ui/**', ...WEB_TEST_FILES],
     rules: {
       'no-restricted-imports': ['warn', { paths: [...WEB_RESTRICTED_IMPORT_PATHS, LUCIDE], patterns: [HEADLESS] }],
+    },
+  },
+  {
+    // blocks/ and app/: icons by concept, headless only through the kit. `error`:
+    // the ratchet already hard-zeros both in the new folders.
+    files: ['apps/web/src/{blocks,app}/**/*.{ts,tsx}'],
+    ignores: WEB_TEST_FILES,
+    rules: {
+      'no-restricted-imports': ['error', { paths: [LUCIDE], patterns: [HEADLESS] }],
+    },
+  },
+  {
+    // features/: the same, plus data only through hooks or stores (D-04).
+    files: ['apps/web/src/features/**/*.{ts,tsx}'],
+    ignores: WEB_TEST_FILES,
+    rules: {
+      'no-restricted-imports': ['error', { paths: [LUCIDE], patterns: [HEADLESS, ...FEATURES_DATA] }],
     },
   },
   {
@@ -285,18 +366,15 @@ export default [
     files: ['apps/web/src/ui/**/*.{ts,tsx}'],
     ignores: ['apps/web/src/ui/icons/**'],
     rules: {
-      'no-restricted-imports': ['error', { paths: [...WEB_RESTRICTED_IMPORT_PATHS, LUCIDE], patterns: UI_LAYER }],
+      'no-restricted-imports': ['error', { paths: [LUCIDE], patterns: UI_LAYER }],
     },
   },
   {
-    // The icon registry: the only lucide importer (it maps the loader concept,
-    // so the Loader2 path is deliberately not repeated here).
+    // The icon registry: the only lucide importer (it maps the loader concept
+    // too, so Loader2 is allowed here).
     files: ['apps/web/src/ui/icons/**/*.{ts,tsx}'],
     rules: {
-      'no-restricted-imports': [
-        'error',
-        { paths: WEB_RESTRICTED_IMPORT_PATHS.filter((p) => p.name !== 'lucide-react'), patterns: UI_LAYER },
-      ],
+      'no-restricted-imports': ['error', { patterns: UI_LAYER }],
     },
   },
   // ── W33 Layer boundary rules ────────────────────────────────────────────────

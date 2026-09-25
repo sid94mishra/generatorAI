@@ -52,7 +52,12 @@ console.log('[render] base', base);
       .catch(() => false); // a pairing reload can destroy the context mid-call
     if (!paired) await new Promise((r) => setTimeout(r, 1000));
   }
-  if (!paired) console.log('[smoke] WARN — renderer never paired with its embedded server');
+  if (!paired) {
+    // A failure, not a warning: every API call below would fail confusingly.
+    console.log('[render] FAIL — renderer never paired with its embedded server');
+    await app.close();
+    process.exit(1);
+  }
 }
 
 const errors = [];

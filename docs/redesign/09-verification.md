@@ -147,6 +147,8 @@ const WEB_CSS = fileURLToPath(new URL('./apps/web/src/styles/globals.css', impor
 
 Pure layout heights (`h-full`, `h-screen`) still pass. The `h-<n>` restriction applies only to fixed heights.
 
+> **Superseded by D-43 (and D-45).** The block below is the original sketch. The implemented config in `eslint.config.mjs` resolves through `apps/web/tsconfig.eslint.json` (not `tsconfig.json`, whose `references` make the resolver ignore `paths`), uses the v7 `boundaries/dependencies` rule (not `element-types`) with policies, declares a `styles` element, ignores tests, and fails closed with `no-unknown-dependencies` + `no-unknown-files`. Copy from `eslint.config.mjs`, not from here.
+
 ```js
 // (b) Boundaries (D-04)
 {
@@ -382,7 +384,7 @@ Before building or changing any `ui/`/`blocks/` component, the session starts St
 - **Interaction stories use `play`:** open/close, keyboard navigation, and the return of focus to the trigger. Every floating component asserts that `data-gai-overlay` is present on its floating layer (D-19) with `expect(document.querySelector('[data-gai-overlay]')).not.toBeNull()` after opening.
 - Stories never fetch. Time comes from `parameters.fixedNow` (a decorator stubs `Date.now`) so relative times are stable.
 - Tags: `vrt` is on by default and `!vrt` opts out. `vrt-themes` adds the light and Solarized combinations (§4.3) and is used for every shell part, template, composite and status component.
-- A component PR without a story fails review. `check-stories.mjs`, run inside `check:design`, fails when a `*.tsx` under `src/ui/{primitives,patterns,shell,templates}` exports a component and has no sibling `*.stories.tsx`.
+- A component PR without a story fails review. `check-stories.mjs`, run inside `check:design`, fails when a `*.tsx` under `src/ui/{primitives,patterns,shell,templates}` declares a PascalCase component and exports anything (including the shadcn `function X` … `export { X }` shape) and has no sibling `*.stories.tsx`. What stories themselves may contain: D-45.
 
 ### 3.7 Scripts
 
@@ -396,6 +398,8 @@ Before building or changing any `ui/`/`blocks/` component, the session starts St
 "check:design": "node scripts/check-design-system.mjs && node scripts/check-stories.mjs",
 "check:css": "node scripts/check-css-emission.mjs"
 ```
+
+> **Superseded by D-43:** `check:design` is the single `node scripts/check-design-system.mjs`, which runs the stories check itself; with `a && b`, pnpm forwards `--strict` only to the last command.
 
 `turbo.json`:
 

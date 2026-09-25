@@ -64,7 +64,9 @@ record('renderer window', true, base);
       .catch(() => false); // a pairing reload can destroy the context mid-call
     if (!paired) await new Promise((r) => setTimeout(r, 1000));
   }
-  if (!paired) console.log('[smoke] WARN — renderer never paired with its embedded server');
+  // A failed check, not a warning: without pairing every API call below fails
+  // with a confusing error, and the smoke must exit non-zero.
+  record('renderer paired with its embedded server', paired, paired ? '' : 'no /api/health answer within 90 s');
 }
 
 // Surface any renderer-side errors: a failed worker load shows up here first.

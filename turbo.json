@@ -28,7 +28,8 @@
       "cache": false
     },
     "lint": {
-      "dependsOn": []
+      "dependsOn": [],
+      "inputs": ["$TURBO_DEFAULT$", "$TURBO_ROOT$/eslint.config.mjs"]
     },
     "typecheck": {
       "dependsOn": ["^build"]

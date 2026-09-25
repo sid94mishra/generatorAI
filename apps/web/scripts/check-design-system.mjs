@@ -19,6 +19,7 @@
 //   node scripts/check-design-system.mjs            # check; fails on rises
 //   node scripts/check-design-system.mjs --strict   # CI: also fails on falls the baseline has not locked in
 //   node scripts/check-design-system.mjs --update   # write min(baseline, now), lock zeros, then check
+//   … --web-dir=<dir>                                # check another apps/web-shaped tree (rails tests)
 //
 // `--update` can never RAISE a count. To raise one, edit the JSON by hand in a
 // PR with a "Ratchet increase" section (rule, delta, reason) — allowed only for
@@ -28,18 +29,21 @@
 // 09 §3.6) runs too, so `check:design` is one command that forwards its flags.
 // ────────────────────────────────────────────────────────────────
 
+import { execFileSync } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { findMissingStories } from './check-stories.mjs';
 
-const webDir = fileURLToPath(new URL('..', import.meta.url));
+const argv = process.argv.slice(2);
+const webDirArg = argv.find((a) => a.startsWith('--web-dir='))?.slice('--web-dir='.length);
+const webDir = webDirArg ? resolve(webDirArg) : fileURLToPath(new URL('..', import.meta.url));
 const srcDir = join(webDir, 'src');
 const baselinePath = join(webDir, 'design-system-baseline.json');
 const filesBaselinePath = join(webDir, 'design-system-baseline.files.json');
 const globalsCssPath = join(srcDir, 'styles', 'globals.css');
 
-const args = new Set(process.argv.slice(2));
+const args = new Set(argv);
 const update = args.has('--update');
 const strict = args.has('--strict');
 
@@ -49,6 +53,13 @@ const strict = args.has('--strict');
 
 /** Exempt from every rule: tests and the stylesheet layer. */
 const GLOBAL_EXEMPT = [/\.test\.tsx?$/, /(^|\/)__tests__\//, /^src\/styles\//];
+
+/**
+ * Stories (D-45): held to the vocabulary rules so they show real classes, but
+ * free to use raw elements and arbitrary values as demo scaffolding (a
+ * trigger <button>, a fixed-width frame). ESLint applies the same split.
+ */
+const STORIES = /\.stories\.tsx$/;
 
 /** The redesign folders (D-04): every rule is hard-zero inside them. */
 const NEW_FOLDERS = /^src\/(?:ui|blocks|features|app)\//;
@@ -132,12 +143,12 @@ const RULES = {
   rawButtonElement: {
     patterns: [/<button[\s>]/g],
     description: 'Raw <button> — use the Button primitive.',
-    exempt: [LEGACY_PRIMITIVES, NEW_PRIMITIVES],
+    exempt: [LEGACY_PRIMITIVES, NEW_PRIMITIVES, STORIES],
   },
   rawInputElement: {
     patterns: [/<(?:input|textarea|select)[\s>]/g],
     description: 'Raw <input>/<textarea>/<select> — use the Input / Textarea / Select primitives.',
-    exempt: [LEGACY_PRIMITIVES, NEW_PRIMITIVES],
+    exempt: [LEGACY_PRIMITIVES, NEW_PRIMITIVES, STORIES],
   },
   adHocSpinner: {
     patterns: [/Loader2[^\n]*animate-spin|animate-spin[^\n]*Loader2/g],
@@ -175,7 +186,7 @@ const RULES = {
       /(?<=^|[\s"'\x60{])\[[a-z-]+:[^\]\s]+\]/gm,
     ],
     description: 'Arbitrary value / property — add a token or a kit variant (ui/lib is the one sanctioned place, with a comment).',
-    exempt: [/^src\/ui\/lib\//],
+    exempt: [/^src\/ui\/lib\//, STORIES],
   },
   varInClassString: {
     patterns: [/\[(?:[\w-]+:)?var\(--|-\(--[\w-]+\)/g],
@@ -212,6 +223,16 @@ const RULES = {
   unstyledVariant: {
     patterns: [/variant=["']unstyled["']|variant:\s*['"]unstyled['"]/g],
     description: 'variant="unstyled" — add a real kit variant instead.',
+  },
+  literalInlineStyle: {
+    // CLAUDE.md "inline style except for computed geometry": a style object with
+    // a literal string or number value is not computed. `style={{ width }}`,
+    // `style={{ height: rowHeight }}` and template literals pass. Hard-zero in
+    // the new folders; the legacy count is informational until a later phase.
+    patterns: [/style=\{\{[^}]*?:\s*(?:['"]|-?\d)/g],
+    description: 'Inline style with a literal value — use design utilities; inline style is for computed geometry only.',
+    files: /\.tsx$/,
+    scope: 'new',
   },
   radixOverlaySelector: {
     // Count-only until P4 (D-19 replaces the Radix couplings with data-gai-overlay).
@@ -329,16 +350,53 @@ function sortKeys(obj) {
 let failed = false;
 const locked = new Set(baseline.locked);
 
-/** Occurrences in files whose count rose above the per-file baseline. */
+/**
+ * Line numbers added to a file relative to HEAD (`git diff -U0`), or null when
+ * git cannot say (not a repository, or the rise is already committed — CI).
+ * @type {Map<string, Set<number> | null>}
+ */
+const addedLinesCache = new Map();
+function addedLines(rel) {
+  if (addedLinesCache.has(rel)) return addedLinesCache.get(rel);
+  let lines = null;
+  try {
+    const opts = { cwd: webDir, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] };
+    const tracked = execFileSync('git', ['ls-files', '--', rel], opts).trim() !== '';
+    if (tracked) {
+      const diff = execFileSync('git', ['diff', '-U0', '--no-color', '--no-ext-diff', 'HEAD', '--', rel], opts);
+      const set = new Set();
+      for (const [, start, count] of diff.matchAll(/^@@ -\S+ \+(\d+)(?:,(\d+))? @@/gm)) {
+        for (let i = 0; i < Number(count ?? 1); i++) set.add(Number(start) + i);
+      }
+      lines = set.size > 0 ? set : null;
+    }
+  } catch {
+    lines = null;
+  }
+  addedLinesCache.set(rel, lines);
+  return lines;
+}
+
+/**
+ * Occurrences in files whose count rose above the per-file baseline. The
+ * `file (was → now)` summary comes first, so truncation cannot hide which files
+ * rose; then each file's hits, narrowed to lines added since HEAD when git
+ * knows them (otherwise every hit in the file).
+ */
 function newOccurrences(name, fileMap) {
-  const lines = [];
-  for (const [rel, n] of Object.entries(results[name].perFile)) {
+  const summary = [];
+  const details = [];
+  for (const [rel, n] of Object.entries(results[name].perFile).sort(([a], [b]) => a.localeCompare(b))) {
     const was = fileMap[rel] ?? 0;
     if (n <= was) continue;
-    lines.push(`${rel}  (${was} → ${n})`);
-    for (const o of occurrences(name, rel)) lines.push(`  ${o}`);
+    summary.push(`${rel}  (${was} → ${n})`);
+    const all = occurrences(name, rel);
+    const added = addedLines(rel);
+    const hits = added ? all.filter((o) => added.has(Number(/:(\d+) {2}/.exec(o)?.[1]))) : all;
+    details.push(added ? `${rel}: hits on lines changed since HEAD` : `${rel}: every hit`);
+    for (const o of hits.length > 0 ? hits : all) details.push(`  ${o}`);
   }
-  return lines;
+  return [...summary, ...details];
 }
 
 function printBlock(lines) {
