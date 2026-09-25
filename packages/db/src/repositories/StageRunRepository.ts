@@ -1,13 +1,42 @@
 // ────────────────────────────────────────────────────────────────
-// DrizzleStageRunRepository — IStageRunRepository impl (v2)
+// DrizzleStageRunRepository — IStageRunRepository impl (v1 engine)
+//
+// Since v57 the `stage_runs` table is the v2 engine's instance table. Until
+// the P03 cutover deletes the v1 engine, its rows are mapped here (P03
+// WP-3.2 deviation, DEVIATIONS.md):
+//   - v1 `queued` is stored as v2 `ready` (the table's CHECK has no queued);
+//   - `retryCount` is `current_attempt`;
+//   - `currentStep`/`totalSteps` live in `usage.v1Steps`;
+//   - `kind` is `agent` and `instance_path` is the stage key.
 // ────────────────────────────────────────────────────────────────
 
-import { eq, and, inArray, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql, type SQL } from 'drizzle-orm';
 import type { IStageRunRepository } from '@generatorai/core';
 import type { StageRun, StageRunStatus } from '@generatorai/shared';
 import { NotFoundError, StorageError } from '@generatorai/shared';
 import { stageRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
+
+type DbStageStatus = (typeof stageRuns.$inferSelect)['status'];
+
+/** v1 status → stored v2 status. */
+function toDbStatus(status: StageRunStatus): DbStageStatus {
+  return status === 'queued' ? 'ready' : status;
+}
+
+/** Stored v2 status → v1 status (v2-only states never occur on v1 rows). */
+function fromDbStatus(status: string): StageRunStatus {
+  return (status === 'ready' ? 'queued' : status) as StageRunStatus;
+}
+
+function stepsUsage(currentStep: number, totalSteps: number): Record<string, unknown> {
+  return { v1Steps: { current: currentStep, total: totalSteps } };
+}
+
+/** `usage = json_set(usage, '$.v1Steps.<field>', value)`. */
+function setStep(field: 'current' | 'total', value: number): SQL {
+  return sql`json_set(${stageRuns.usage}, ${`$.v1Steps.${field}`}, ${value})`;
+}
 
 /** Column values of a new stage run (shared with the run repository's atomic insert). */
 export function stageRunInsertValues(stageRun: StageRun): typeof stageRuns.$inferInsert {
@@ -15,14 +44,16 @@ export function stageRunInsertValues(stageRun: StageRun): typeof stageRuns.$infe
     id: stageRun.id,
     workflowRunId: stageRun.workflowRunId,
     stageKey: stageRun.stageKey,
+    kind: 'agent',
+    instancePath: stageRun.stageKey,
     sessionId: stageRun.sessionId ?? null,
     name: stageRun.name,
-    status: stageRun.status,
-    currentStep: stageRun.currentStep,
-    totalSteps: stageRun.totalSteps,
-    retryCount: stageRun.retryCount,
+    status: toDbStatus(stageRun.status),
+    currentAttempt: stageRun.retryCount,
+    usage: stepsUsage(stageRun.currentStep, stageRun.totalSteps),
     error: stageRun.error ?? null,
     createdAt: stageRun.createdAt,
+    updatedAt: stageRun.createdAt,
     startedAt: stageRun.startedAt ?? null,
     completedAt: stageRun.completedAt ?? null,
   };
@@ -80,7 +111,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       .where(
         and(
           eq(stageRuns.workflowRunId, workflowRunId),
-          inArray(stageRuns.status, statuses),
+          inArray(stageRuns.status, statuses.map(toDbStatus)),
         ),
       );
     return rows.map((r) => this.mapRow(r));
@@ -89,10 +120,15 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
   async update(id: string, updates: Partial<StageRun>): Promise<StageRun> {
     const values: Record<string, unknown> = {};
     if (updates.sessionId !== undefined) values['sessionId'] = updates.sessionId;
-    if (updates.status !== undefined) values['status'] = updates.status;
-    if (updates.currentStep !== undefined) values['currentStep'] = updates.currentStep;
-    if (updates.totalSteps !== undefined) values['totalSteps'] = updates.totalSteps;
-    if (updates.retryCount !== undefined) values['retryCount'] = updates.retryCount;
+    if (updates.status !== undefined) values['status'] = toDbStatus(updates.status);
+    if (updates.currentStep !== undefined && updates.totalSteps !== undefined) {
+      values['usage'] = stepsUsage(updates.currentStep, updates.totalSteps);
+    } else if (updates.currentStep !== undefined) {
+      values['usage'] = setStep('current', updates.currentStep);
+    } else if (updates.totalSteps !== undefined) {
+      values['usage'] = setStep('total', updates.totalSteps);
+    }
+    if (updates.retryCount !== undefined) values['currentAttempt'] = updates.retryCount;
     if (updates.error !== undefined) values['error'] = updates.error;
     if (updates.summary !== undefined) values['summary'] = updates.summary;
     if (updates.outputText !== undefined) values['outputText'] = updates.outputText;
@@ -112,6 +148,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     // `version` in `updates`; a stale-version write is rejected by those
     // conditional methods, not by this one.
     values['version'] = sql`${stageRuns.version} + 1`;
+    values['updatedAt'] = new Date();
 
     await this.db
       .update(stageRuns)
@@ -133,8 +170,9 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     const result = await this.db
       .update(stageRuns)
       .set({
-        status: 'queued',
+        status: toDbStatus('queued'),
         version: sql`${stageRuns.version} + 1`,
+        updatedAt: new Date(),
       })
       .where(and(eq(stageRuns.id, id), eq(stageRuns.status, 'pending')))
       .returning({ id: stageRuns.id });
@@ -151,6 +189,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       .update(stageRuns)
       .set({
         status: 'awaiting_input',
+        updatedAt: new Date(),
         interruptData,
         version: sql`${stageRuns.version} + 1`,
       })
@@ -181,6 +220,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       .update(stageRuns)
       .set({
         status: nextStatus,
+        updatedAt: new Date(),
         interruptData: null,
         version: sql`${stageRuns.version} + 1`,
       })
@@ -217,7 +257,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
         : and(eq(stageRuns.id, id), eq(stageRuns.version, expectedVersion));
     const result = await this.db
       .update(stageRuns)
-      .set({ status, version: sql`${stageRuns.version} + 1` })
+      .set({ status: toDbStatus(status), version: sql`${stageRuns.version} + 1`, updatedAt: new Date() })
       .where(where)
       .returning({ id: stageRuns.id });
     return result.length > 0;
@@ -236,7 +276,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       .set({
         heartbeatAt: new Date(),
       })
-      .where(and(eq(stageRuns.id, id), inArray(stageRuns.status, ['queued', 'running'])))
+      .where(and(eq(stageRuns.id, id), inArray(stageRuns.status, [toDbStatus('queued'), 'running'])))
       .returning({ id: stageRuns.id });
     return result.length > 0;
   }
@@ -248,7 +288,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       const result = await this.db
         .update(stageRuns)
         .set({
-          retryCount: sql`${stageRuns.retryCount} + 1`,
+          currentAttempt: sql`${stageRuns.currentAttempt} + 1`,
           version: sql`${stageRuns.version} + 1`,
         })
         .where(eq(stageRuns.id, id))
@@ -264,7 +304,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     const result = await this.db
       .update(stageRuns)
       .set({
-        retryCount: sql`${stageRuns.retryCount} + 1`,
+        currentAttempt: sql`${stageRuns.currentAttempt} + 1`,
         version: sql`${stageRuns.version} + 1`,
       })
       .where(and(eq(stageRuns.id, id), eq(stageRuns.version, expectedVersion)))
@@ -281,6 +321,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       .update(stageRuns)
       .set({
         status: 'pending',
+        updatedAt: new Date(),
         error: null,
         startedAt: null,
         completedAt: null,
@@ -298,7 +339,7 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     if (ids.length === 0) return;
     await this.db
       .update(stageRuns)
-      .set({ status, version: sql`${stageRuns.version} + 1` })
+      .set({ status: toDbStatus(status), version: sql`${stageRuns.version} + 1`, updatedAt: new Date() })
       .where(inArray(stageRuns.id, ids));
   }
 
@@ -313,16 +354,17 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
   }
 
   private mapRow(row: typeof stageRuns.$inferSelect): StageRun {
+    const steps = (jsonValue<{ v1Steps?: { current?: number; total?: number } }>(row.usage) ?? {}).v1Steps ?? {};
     return {
       id: row.id,
       workflowRunId: row.workflowRunId,
       stageKey: row.stageKey,
       sessionId: row.sessionId ?? undefined,
       name: row.name,
-      status: row.status as StageRunStatus,
-      currentStep: row.currentStep,
-      totalSteps: row.totalSteps,
-      retryCount: row.retryCount,
+      status: fromDbStatus(row.status),
+      currentStep: steps.current ?? 0,
+      totalSteps: steps.total ?? 0,
+      retryCount: row.currentAttempt,
       version: row.version,
       error: row.error ?? undefined,
       summary: row.summary ?? undefined,

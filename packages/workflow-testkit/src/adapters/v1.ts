@@ -121,7 +121,7 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
     SELECT sr.id AS id, sr.name AS name, sr.workflow_run_id AS runId
       FROM sessions s JOIN stage_runs sr ON sr.session_id = s.id
      WHERE s.conversation_id = ?
-     ORDER BY CASE sr.status WHEN 'running' THEN 0 WHEN 'queued' THEN 1 WHEN 'awaiting_input' THEN 2 ELSE 3 END,
+     ORDER BY CASE sr.status WHEN 'running' THEN 0 WHEN 'ready' THEN 1 WHEN 'awaiting_input' THEN 2 ELSE 3 END,
               COALESCE(sr.started_at, 0) DESC
      LIMIT 1`);
   const stageById = sqlite.prepare(`SELECT id, name, workflow_run_id AS runId FROM stage_runs WHERE id = ?`);

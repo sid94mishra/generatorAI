@@ -34,8 +34,8 @@ export interface TestEngineTiming {
 }
 
 /**
- * `stage_runs.heartbeat_at` is stored with ONE-SECOND precision (drizzle
- * `mode: 'timestamp'`), so a stale window under ~1.5 s reaps healthy stages.
+ * `stage_runs.heartbeat_at` had ONE-SECOND precision before v57 (it is
+ * milliseconds now), so a stale window under ~1.5 s reaped healthy stages.
  * 200 ms × 10 = 2 s keeps a real margin while still letting a test provoke
  * the reaper (W-02) with a few seconds of delay.
  */

@@ -6,6 +6,7 @@ import type Database from 'better-sqlite3';
 import type { AppDatabase } from '../index.js';
 import { BASELINE_SQL, BASELINE_VERSION } from './baseline.generated.js';
 import { runV55, V55_LOCK_FILES } from './v55_workflow_definitions_v2.js';
+import { runV57, V57_LOCK_FILES } from './v57_workflow_engine_v2.js';
 
 export { BASELINE_VERSION };
 
@@ -2626,6 +2627,19 @@ export const MIGRATIONS: readonly Migration[] = [
         `UPDATE chat_messages SET complete = 0 WHERE metadata IS NOT NULL AND json_valid(metadata) AND json_extract(metadata, '$.partial') = 1;`,
         `ALTER TABLE automations ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'acceptEdits';`,
       ],
+    },
+    // v57 — workflow overhaul P03 WP-3.2 `workflow_engine_v2`: the v2
+    // engine's run tables (instances, attempts, run sessions, timers,
+    // outbox, journal, engine lock), dev runs purged with explicit child
+    // deletes (RV-1), and `chat_messages.turn_role` (added only). The DDL is
+    // frozen in ./v57/ddl.ts.
+    {
+      version: 57,
+      name: 'workflow_engine_v2',
+      sql: [],
+      disableForeignKeys: true,
+      run: runV57,
+      lockFiles: V57_LOCK_FILES,
     },
   ];
 

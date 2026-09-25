@@ -210,11 +210,11 @@ describe('Workflow definitions on the real service', () => {
     const id = created.body.id as string;
     const published = await request(app).post(`/api/workflow-definitions/${id}/publish`);
     expect(published.status).toBe(200);
-    const now = Math.floor(Date.now() / 1000);
+    const now = Date.now();
     sqlite
       .prepare(
-        `INSERT INTO workflow_runs (id, workflow_definition_id, definition_version_id, name, created_at, updated_at)
-         VALUES ('run-1', ?, ?, 'Run', ?, ?)`,
+        `INSERT INTO workflow_runs (id, workflow_definition_id, definition_version_id, name, permission_mode, root_run_id, created_at, updated_at)
+         VALUES ('run-1', ?, ?, 'Run', 'default', 'run-1', ?, ?)`,
       )
       .run(id, published.body.currentVersionId, now, now);
 

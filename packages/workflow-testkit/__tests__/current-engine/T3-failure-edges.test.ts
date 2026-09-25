@@ -53,13 +53,13 @@ describe('T3 failure paths and edge types (current engine)', () => {
     expect(new Set(attempts.map((c) => c.conversationId)).size).toBe(3);
     expect(attempts[1]!.startedAt - attempts[0]!.endedAt!).toBeGreaterThanOrEqual(90);
     expect(attempts[2]!.startedAt - attempts[1]!.endedAt!).toBeGreaterThanOrEqual(190);
-    // O-5: no attempt history is kept. Only the last attempt's error survives,
-    // and there is no attempts table to hold the others.
+    // O-5: no attempt history is kept. Only the last attempt's error survives;
+    // v57 created the stage_attempts table, but the v1 engine never writes it.
     const e = engine;
     const stored = (text: string) =>
       (e.sqlite.prepare(`SELECT COUNT(*) AS n FROM stage_runs WHERE error LIKE ?`).get(`%${text}%`) as { n: number }).n;
     expect(stored('boom-1') + stored('boom-2')).toBe(0); // KNOWN-BUG W-39 (earlier attempts' errors are lost)
-    expect(e.sqlite.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'stage_attempts'`).get()).toBeUndefined(); // KNOWN-BUG W-39 (no per-attempt record)
+    expect(e.sqlite.prepare(`SELECT COUNT(*) AS n FROM stage_attempts`).get()).toEqual({ n: 0 }); // KNOWN-BUG W-39 (no per-attempt record)
   });
 
   it('an `always` cleanup turns an unhandled failure into a completed run', async () => {

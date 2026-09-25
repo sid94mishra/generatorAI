@@ -1,5 +1,15 @@
 // ────────────────────────────────────────────────────────────────
-// DrizzleWorkflowRunRepository — IWorkflowRunRepository impl (v2)
+// DrizzleWorkflowRunRepository — IWorkflowRunRepository impl (v1 engine)
+//
+// Since v57 `workflow_runs` is the v2 engine's run table. Until the P03
+// cutover deletes the v1 engine, its rows are mapped here (P03 WP-3.2
+// deviation, DEVIATIONS.md):
+//   - the v1 run-level permission mode is optional (the layers resolve an
+//     unset one every turn), so it is kept in `run_overrides.permissionMode`;
+//     the NOT NULL `permission_mode` column holds it or `default`, and v1
+//     never reads the column;
+//   - `session_mode` is gone: every v1 run is `per-stage` (P01 R4);
+//   - `root_run_id` is the run itself.
 // ────────────────────────────────────────────────────────────────
 
 import { count, eq, inArray } from 'drizzle-orm';
@@ -8,7 +18,6 @@ import type {
   StageRun,
   WorkflowRun,
   WorkflowRunStatus,
-  WorkflowSessionMode,
   WorkflowRunPermissionMode,
 } from '@generatorai/shared';
 import { StorageError, NotFoundError } from '@generatorai/shared';
@@ -19,6 +28,11 @@ import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
 import { stageRunInsertValues } from './StageRunRepository.js';
 
+/** The v1 run-level permission mode lives in `run_overrides` (see the header). */
+function v1Overrides(mode: WorkflowRunPermissionMode | null | undefined): Record<string, unknown> {
+  return mode ? { permissionMode: mode } : {};
+}
+
 function runInsertValues(run: WorkflowRun): typeof workflowRuns.$inferInsert {
   return {
     id: run.id,
@@ -26,11 +40,11 @@ function runInsertValues(run: WorkflowRun): typeof workflowRuns.$inferInsert {
     definitionVersionId: run.definitionVersionId,
     name: run.name,
     status: run.status,
-    sessionMode: run.sessionMode,
     variables: run.variables,
     error: run.error ?? null,
-    // HITL — persist chosen mode; NULL reads as 'bypassPermissions'.
-    permissionMode: run.permissionMode ?? null,
+    permissionMode: run.permissionMode ?? 'default',
+    runOverrides: v1Overrides(run.permissionMode),
+    rootRunId: run.id,
     workspaceId: run.workspaceId ?? null,
     // W23: persist the ancestor reference for the retry identity chain.
     ...(run.ancestorRunId ? { ancestorRunId: run.ancestorRunId } : {}),
@@ -132,10 +146,12 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
     if (updates.status !== undefined) values['status'] = updates.status;
-    if (updates.sessionMode !== undefined) values['sessionMode'] = updates.sessionMode;
     if (updates.variables !== undefined) values['variables'] = updates.variables;
     if (updates.error !== undefined) values['error'] = updates.error;
-    if (updates.permissionMode !== undefined) values['permissionMode'] = updates.permissionMode;
+    if (updates.permissionMode !== undefined) {
+      values['permissionMode'] = updates.permissionMode ?? 'default';
+      values['runOverrides'] = v1Overrides(updates.permissionMode);
+    }
     if (updates.workspaceId !== undefined) values['workspaceId'] = updates.workspaceId;
     // F8 fix (PLAUSIBLE): ancestorRunId was omitted from the values map, so
     // any update call attempting to set or correct the ancestor chain was a
@@ -173,10 +189,10 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
       definitionVersionId: row.definitionVersionId,
       name: row.name,
       status: row.status as WorkflowRunStatus,
-      sessionMode: row.sessionMode as WorkflowSessionMode,
+      sessionMode: 'per-stage',
       variables: safeJsonColumn(row.variables, jsonRecord, { fallback: {} }) ?? {},
       error: row.error ?? undefined,
-      permissionMode: (row.permissionMode as WorkflowRunPermissionMode | null) ?? undefined,
+      permissionMode: ((row.runOverrides as { permissionMode?: WorkflowRunPermissionMode } | null)?.permissionMode) ?? undefined,
       workspaceId: row.workspaceId ?? undefined,
       // W23: ancestor run for the retry identity chain.
       ancestorRunId: row.ancestorRunId ?? undefined,

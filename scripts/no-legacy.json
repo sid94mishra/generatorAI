@@ -615,8 +615,8 @@
     },
     {
       "phase": "01",
-      "pattern": "\\b(stageDefinitionId|definitionSnapshot|leaseOwner)\\b",
-      "reason": "WP-1.6: stage runs carry stageKey; runs pin definitionVersionId (the snapshot column and stage lease owner are gone)"
+      "pattern": "\\b(stageDefinitionId|definitionSnapshot)\\b",
+      "reason": "WP-1.6: stage runs carry stageKey; runs pin definitionVersionId (the snapshot column is gone; the v1 dead lease_owner was dropped, and v57 brings back lease_owner as the v2 executor lease)"
     },
     {
       "phase": "01",

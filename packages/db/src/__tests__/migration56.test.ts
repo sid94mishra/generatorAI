@@ -70,7 +70,7 @@ describe('migration v56 session_parity', () => {
     seedV55(s);
     const before = hash(s);
 
-    migrateDB(db);
+    migrateDB(db, { targetVersion: 56 });
 
     expect((s.prepare(`SELECT MAX(version) AS v FROM _schema_versions`).get() as { v: number }).v).toBe(56);
     expect(hash(s)).toEqual(before);

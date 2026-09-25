@@ -44,8 +44,8 @@ function seedParents(): void {
     .run(now);
   client
     .prepare(
-      `INSERT INTO workflow_runs (id, workflow_definition_id, definition_version_id, name, status, created_at, updated_at)
-         VALUES (?, ?, 'v-1', ?, ?, ?, ?)`,
+      `INSERT INTO workflow_runs (id, workflow_definition_id, definition_version_id, name, status, permission_mode, root_run_id, created_at, updated_at)
+         VALUES (?, ?, 'v-1', ?, ?, 'default', 'wr-1', ?, ?)`,
     )
     .run('wr-1', 'def-1', 'run', 'running', now, now);
 }

@@ -16,7 +16,7 @@
 //    schema-only copy first). Workflow run history is not chat data: v55
 //    drops it (README R-3), and the totals show how much went.
 // 3. Runs the real `migrateDB` on the copy, then records the same again. The
-//    copy is a throwaway, so v55's run-cleanup precondition is skipped for it.
+//    copy is a throwaway, so the v55/v57 run-cleanup precondition is skipped for it.
 // 4. Compares the upgraded schema with a fresh database's (structural diff,
 //    `packages/db/scripts/schemaShape.ts`) and prints the drift.
 // 5. Exits 1 if any chat, session or message count or hash changed.
@@ -130,6 +130,7 @@ export async function runUpgradeCheck({ dbPath, dumpSchema, keep = false, log = 
     // The chat-table columns that survive the upgrade: migrate a schema-only
     // in-memory copy and read them back.
     process.env.GENERATORAI_V55_SKIP_RUN_CLEANUP = '1';
+    process.env.GENERATORAI_V57_SKIP_RUN_CLEANUP = '1';
     const ro = new Database(copy, { readonly: true });
     const schemaSql = dumpSchemaOnly(ro);
     const columnsBefore = Object.fromEntries(CHAT_TABLES.map((t) => [t, ro.pragma(`table_info(${t})`).map((c) => c.name)]));
