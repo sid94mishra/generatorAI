@@ -1,10 +1,10 @@
 // P03 WP-3.4 — every recorded provider failure maps to its stage error code,
 // and the engine's classifier reads a HarnessError without knowing the provider.
 
-import { classifyStageError } from '@generatorai/core';
+import { classifyStageError, errorClassOf } from '@generatorai/core';
 import { describe, expect, it } from 'vitest';
 
-import { HarnessError, harnessErrorClass, toHarnessError } from '../errors.js';
+import { HarnessError, toHarnessError } from '../errors.js';
 import { HARNESS_ERROR_FIXTURES } from './fixtures/harnessErrors.js';
 
 describe('toHarnessError (recorded fixtures)', () => {
@@ -19,7 +19,7 @@ describe('toHarnessError (recorded fixtures)', () => {
     // The core classifier reads the same code and class, provider-blind.
     const c = classifyStageError(err);
     expect(c.code).toBe(f.code);
-    expect(c.class).toBe(harnessErrorClass(err));
+    expect(c.class).toBe(errorClassOf(err.code));
     expect(c.unclassified === true).toBe(f.unclassified === true);
     if (f.retryAfterMs !== undefined) expect(c.retryAfterMs).toBe(f.retryAfterMs);
   });

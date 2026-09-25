@@ -17,7 +17,8 @@
 // scheduler retries those at most once.
 // ────────────────────────────────────────────────────────────────
 
-import { errorClassOf, type ErrorClass, type StageErrorCode } from '@generatorai/core';
+// Types only: the barrel must not load core at runtime (W41 lazy loading).
+import type { StageErrorCode } from '@generatorai/core';
 
 export type HarnessErrorProvider = 'claude-agent' | 'codex' | 'copilot' | 'opencode' | 'acp' | 'faux';
 
@@ -260,7 +261,3 @@ export function toHarnessError(provider: HarnessErrorProvider, raw: unknown): Ha
   return new HarnessError(hit?.code ?? 'transport', message, provider, opts);
 }
 
-/** The class of a harness error's code (transient, deterministic, …). */
-export function harnessErrorClass(err: HarnessError): ErrorClass {
-  return errorClassOf(err.code);
-}

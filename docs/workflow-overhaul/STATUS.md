@@ -7,7 +7,7 @@ The coding agent updates this file in every phase PR.
 | 00 Baseline | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | Baseline section below | gate pass with the recorded baseline exceptions |
 | 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass ; part B gate 2026-09-25: typecheck 52/52; workflow-spec 359/359; lint green; no-legacy 72 bans, 0 hits; generate:workflow-spec --check clean; **phase gate 2026-09-25 (part C): see "Phase 01 gate" below** | WP-1.6–1.9 done (1d67d0f, 28f9c5e, 9c61ec6, ebb4e82); v55 applied to the dev-DB copy |
 | 02 SessionComposer | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-25: see "Phase 02 gate" below** | WP-2.0–2.11 (0c02b1c..a220bb3), bans/docs c35f905, gate fixes f14cf5a; v56 applied to the dev-DB copy |
-| 03 Engine v2 | wf/phase-03-engine-v2 | not started | | | |
+| 03 Engine v2 | wf/overhaul (see DEVIATIONS) | in progress: part 1 done (WP-3.1–3.4) | local only | **part 1 gate 2026-09-25: see "Phase 03 part 1 gate" below** | v57 applied to the dev-DB copy; parts 2 (WP-3.5/3.6) and 3 (WP-3.7–3.9 cutover) remain |
 | 03b Stage conversation | wf/phase-03b-stage-conversation | not started | | | |
 | 04 Lifecycle and invocation | wf/phase-04-invocation | not started | | | |
 | 05 Control flow (5A, 5B) | wf/phase-05-control-flow | not started | | | |
@@ -217,6 +217,21 @@ Run at `wf/overhaul` @ f14cf5a (Windows 11, Node 26.8.2, pnpm 10.29.2).
 - **`pnpm workflow:dbcopy-upgrade`** (`C:/gaiwf/dbcopy/generatorai.db`; the real DB was not opened): v52 → v56 via the legacy route in 2.7 s. Chat rows **UNCHANGED** (362 chats, 392 chat sessions, 841 messages); drift 0. Found and fixed on the way: with the baseline at 56 a v55 database took the legacy route and failed (`VERSIONED_ONLY_FROM = 55`, DEVIATIONS).
 - **W-19 / C7:** covered at composer level (session/composer.test.ts). **Live E2E** (advisory, `P02-perm` and the other P02 scenarios): not run.
 - **Acceptance:** no session-config builders outside `services/session/` (the SES and CMS blocks are deleted and banned); chat and stage bound to one agent get the same tools, blocks and MCP servers apart from the documented owner differences (golden + composer tests); a stage widget now carries its stage run id so the run page Widget tab routes it to that stage (unit-tested; not checked in a browser); an automation cannot be saved without a permission mode (schema + route + web form).
+
+## Phase 03 part 1 gate (2026-09-25: Milestone 3A + WP-3.3/3.4)
+
+Run at `wf/overhaul` @ 527f41c plus the HarnessError barrel fix (Windows 11, Node 26.8.2, pnpm 10.29.2). Commits: dd00852 (WP-3.2), 7d4ecb4 (WP-3.4), 5d7b3e9 (WP-3.3), 527f41c (WP-3.1).
+
+- **`pnpm turbo typecheck`:** pass, 52/52.
+- **`pnpm turbo test --concurrency=2 --continue`** (v57 recreated the v1 run tables, so the full suite ran): 9 min 2 s. Failures: the recorded baseline only — cli 5 (TUI on Windows), core 1 (symlink EPERM), git 2 (CRLF), server 2 (symlink EPERM, CSP hash) — plus one new failure, agent-harness-providers `W41-lazy-loading` (the providers barrel loaded `@generatorai/core` at runtime through the new `errors.ts`); fixed (type-only import) and re-run: agent-harness-providers 741/741. The web task's `check-bundle-size` "FAIL" lines are the script's own fixtures.
+- **Counts that moved:** core 1862 pass (1757 at P02; + scheduler 78, errors 23), db 151 (137; + migration57 2, RunStore 12), agent-harness-providers 741 (704; + harness error fixtures 37), workflow-testkit 45, server 541. Everything else unchanged.
+- **`pnpm lint`:** pass (turbo lint; security, durability, docs, syncio, tokens; workflow-invariants 24 = baseline, with the CAS implementation `engineCas.ts`/`RunStore.ts` allowed beside `StageRunRepository.ts`).
+- **`check-no-legacy`:** 90 banned patterns, 0 hits (the P01 `leaseOwner` ban dropped: v57 brings `lease_owner` back as the v2 executor lease); 11 legacy comments (baseline 11).
+- **`check:migrations-lock`:** 57 locked. **`check:db-baseline`:** baseline v57 up to date. **`check:workflow-spec`:** up to date.
+- **Fresh DB:** `BaselineFreshDb.test.ts` passes (an empty DB reaches v57 through `baseline.sql`, matches `schema.ts` both ways with the existing allowlist, historic path identical); `migration57.test.ts` also migrates a fresh DB and checks the CHECKs.
+- **`pnpm workflow:dbcopy-upgrade`** (`C:/gaiwf/dbcopy/generatorai.db`; the real DB was not opened): v52 → v57 via the legacy route in 7.3 s. Chat rows **UNCHANGED** (362 chats, 392 chat sessions, 841 messages); sessions 2323 → 392 and messages 8178 → 841 (stage history purged); 343 definitions, 19 invalid, all with notes; drift 0.
+- **Testkit (hard gate):** 45/45 on the v1 engine over the v57 tables.
+- **Not in part 1 (by the plan):** WP-3.5+ (executor, actor, supervisor, commands API, cutover), `ENGINE_LEVEL` stays `v1`. Model-based and replay tests deferred (DEVIATIONS). Live E2E not run (advisory).
 
 ## Migration versions (authoritative, RV-17)
 
