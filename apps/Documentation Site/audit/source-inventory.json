@@ -63,6 +63,7 @@
         "@generatorai/design-tokens",
         "@generatorai/secrets",
         "@generatorai/shared",
+        "@generatorai/workflow-spec",
         "@generatorai/tui-kit"
       ]
     },
@@ -134,6 +135,7 @@
         "@generatorai/design-tokens",
         "@generatorai/relay-protocol",
         "@generatorai/shared",
+        "@generatorai/workflow-spec",
         "@generatorai/auth"
       ]
     },
@@ -215,7 +217,8 @@
         "@generatorai/client-core",
         "@generatorai/client-runtime",
         "@generatorai/design-tokens",
-        "@generatorai/shared"
+        "@generatorai/shared",
+        "@generatorai/workflow-spec"
       ]
     },
     {
@@ -298,7 +301,8 @@
         "@generatorai/client-runtime",
         "@generatorai/client-transport",
         "@generatorai/secrets",
-        "@generatorai/shared"
+        "@generatorai/shared",
+        "@generatorai/workflow-spec"
       ]
     },
     {
@@ -314,7 +318,8 @@
       },
       "dependencies": [
         "@generatorai/client-transport",
-        "@generatorai/shared"
+        "@generatorai/shared",
+        "@generatorai/workflow-spec"
       ]
     },
     {
@@ -390,7 +395,8 @@
         "@generatorai/core",
         "@generatorai/checkpoints",
         "@generatorai/review",
-        "@generatorai/shared"
+        "@generatorai/shared",
+        "@generatorai/workflow-spec"
       ]
     },
     {
@@ -437,7 +443,8 @@
       "dependencies": [
         "@generatorai/core",
         "@generatorai/sdk",
-        "@generatorai/shared"
+        "@generatorai/shared",
+        "@generatorai/workflow-spec"
       ]
     },
     {
@@ -484,7 +491,8 @@
         "@generatorai/core",
         "@generatorai/db",
         "@generatorai/secrets",
-        "@generatorai/shared"
+        "@generatorai/shared",
+        "@generatorai/workflow-spec"
       ]
     },
     {
@@ -513,7 +521,9 @@
         "test": "vitest run",
         "lint": "eslint src/"
       },
-      "dependencies": []
+      "dependencies": [
+        "@generatorai/workflow-spec"
+      ]
     },
     {
       "path": "packages/source-control",
@@ -558,9 +568,7 @@
         "test": "vitest run",
         "lint": "eslint src/"
       },
-      "dependencies": [
-        "@generatorai/shared"
-      ]
+      "dependencies": []
     },
     {
       "path": "packages/workflow-testkit",
@@ -576,7 +584,8 @@
         "@generatorai/agent-harness-providers",
         "@generatorai/core",
         "@generatorai/db",
-        "@generatorai/shared"
+        "@generatorai/shared",
+        "@generatorai/workflow-spec"
       ]
     }
   ],
@@ -1530,70 +1539,70 @@
       "method": "POST",
       "path": "/api/orchestrator/runs/:id/cancel",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 165,
+      "line": 169,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/orchestrator/workflows/:id/uploads",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 184,
+      "line": 188,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/workflows/:id/files",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 249,
+      "line": 253,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/workflows/:id/files/download",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 277,
+      "line": 281,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/orchestrator/workflows/:id/files",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 321,
+      "line": 325,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/orchestrator/runs/:id/uploads",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 353,
+      "line": 357,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/runs/:id/workspace",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 433,
+      "line": 437,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/runs/:id/workspace/download",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 544,
+      "line": 548,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/runs/:id/workspace/content",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 611,
+      "line": 615,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/orchestrator/runs/:id/workspace/diff",
       "source": "apps/server/src/routes/orchestrator.ts",
-      "line": 671,
+      "line": 675,
       "mounted": true
     },
     {
@@ -2311,297 +2320,276 @@
       "mounted": true
     },
     {
-      "method": "POST",
-      "path": "/api/workflow-definitions",
-      "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 26,
-      "mounted": true
-    },
-    {
       "method": "GET",
       "path": "/api/workflow-definitions",
       "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 51,
-      "mounted": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/workflow-definitions/:id",
-      "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 62,
-      "mounted": true
-    },
-    {
-      "method": "PATCH",
-      "path": "/api/workflow-definitions/:id",
-      "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 73,
-      "mounted": true
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/workflow-definitions/:id",
-      "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 94,
+      "line": 44,
       "mounted": true
     },
     {
       "method": "POST",
-      "path": "/api/workflow-definitions/:id/stages",
+      "path": "/api/workflow-definitions",
       "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 123,
-      "mounted": true
-    },
-    {
-      "method": "PUT",
-      "path": "/api/workflow-definitions/:id/stages/:stageId",
-      "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 140,
-      "mounted": true
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/workflow-definitions/:id/stages/:stageId",
-      "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 154,
+      "line": 64,
       "mounted": true
     },
     {
       "method": "POST",
-      "path": "/api/workflow-definitions/:id/edges",
+      "path": "/api/workflow-definitions/validate",
       "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 172,
-      "mounted": true
-    },
-    {
-      "method": "DELETE",
-      "path": "/api/workflow-definitions/:id/edges/:edgeId",
-      "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 189,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflow-definitions/:id/validate",
-      "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 207,
+      "line": 75,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-definitions/import",
       "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 219,
+      "line": 84,
+      "mounted": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-definitions/:id",
+      "source": "apps/server/src/routes/workflowDefinitions.ts",
+      "line": 109,
+      "mounted": true
+    },
+    {
+      "method": "PUT",
+      "path": "/api/workflow-definitions/:id/graph",
+      "source": "apps/server/src/routes/workflowDefinitions.ts",
+      "line": 117,
       "mounted": true
     },
     {
       "method": "POST",
-      "path": "/api/workflow-definitions/import-json",
+      "path": "/api/workflow-definitions/:id/publish",
       "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 239,
+      "line": 137,
+      "mounted": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-definitions/:id/versions",
+      "source": "apps/server/src/routes/workflowDefinitions.ts",
+      "line": 150,
+      "mounted": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-definitions/:id/versions/:versionId",
+      "source": "apps/server/src/routes/workflowDefinitions.ts",
+      "line": 158,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-definitions/:id/export",
       "source": "apps/server/src/routes/workflowDefinitions.ts",
-      "line": 252,
+      "line": 166,
+      "mounted": true
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/workflow-definitions/:id",
+      "source": "apps/server/src/routes/workflowDefinitions.ts",
+      "line": 179,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 35,
+      "line": 45,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 48,
+      "line": 58,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 80,
+      "line": 90,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/scratchpad",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 92,
+      "line": 103,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/start",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 121,
+      "line": 132,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/pause",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 143,
+      "line": 154,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/resume",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 157,
+      "line": 168,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/retry",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 173,
+      "line": 184,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/cancel",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 203,
+      "line": 214,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 217,
+      "line": 228,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/stages",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 236,
+      "line": 247,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/pause",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 247,
+      "line": 258,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/resume",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 261,
+      "line": 272,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/retry",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 283,
+      "line": 294,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/cancel",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 311,
+      "line": 322,
       "mounted": true
     },
     {
       "method": "GET",
-      "path": "/api/workflow-runs/:id/permission-mode",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 337,
-      "mounted": true
-    },
-    {
-      "method": "PATCH",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
       "line": 348,
       "mounted": true
     },
     {
+      "method": "PATCH",
+      "path": "/api/workflow-runs/:id/permission-mode",
+      "source": "apps/server/src/routes/workflowRuns.ts",
+      "line": 359,
+      "mounted": true
+    },
+    {
       "method": "GET",
       "path": "/api/workflow-runs/:id/pending-interrupts",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 373,
+      "line": 384,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/approve",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 393,
+      "line": 404,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-scripts",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 29,
+      "line": 30,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-scripts/:id",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 39,
+      "line": 40,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-scripts/:id/profiles",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 59,
+      "line": 55,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/:id/materialize",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 74,
+      "line": 88,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/:id/run",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 161,
+      "line": 117,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/reload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 307,
+      "line": 184,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/:id/reload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 319,
+      "line": 196,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/upload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 346,
+      "line": 223,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/validate",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 395,
+      "line": 272,
       "mounted": true
     },
     {
@@ -2942,10 +2930,7 @@
     "packages/shared/src/config/McpSchemas.ts",
     "packages/shared/src/config/numericEnv.ts",
     "packages/shared/src/config/OrchestratorSchemas.ts",
-    "packages/shared/src/config/WidgetSchemas.ts",
-    "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
-    "packages/shared/src/config/WorkflowScriptSchema.ts",
-    "packages/shared/src/config/WorkflowTemplate.ts"
+    "packages/shared/src/config/WidgetSchemas.ts"
   ],
   "environment": [
     "ANTHROPIC_API_KEY",
@@ -2970,7 +2955,6 @@
     "CORS_ORIGINS",
     "DB_MMAP_BYTES",
     "DB_PATH",
-    "DB_TRANSACTION_TIMEOUT_MS",
     "DESKTOP_DEV_SERVER_URL",
     "EDITOR",
     "EVENT_BUS_MAX_LISTENERS",
@@ -2988,6 +2972,7 @@
     "GENERATORAI_ALLOW_WORKFLOW_SCRIPTS",
     "GENERATORAI_API_KEY",
     "GENERATORAI_AUDIT_RETENTION_DAYS",
+    "GENERATORAI_BACKUP_ROOT",
     "GENERATORAI_BIND_HOST",
     "GENERATORAI_BROWSER_EXECUTABLE_PATH",
     "GENERATORAI_BROWSER_HOST_IDLE_MS",
@@ -3100,6 +3085,7 @@
     "GENERATORAI_TOOL_TIMEOUT_MS",
     "GENERATORAI_TTS",
     "GENERATORAI_URLENCODED_LIMIT",
+    "GENERATORAI_V55_SKIP_RUN_CLEANUP",
     "GENERATORAI_VOICE_IDLE_REAPER_MS",
     "GENERATORAI_VOICE_IDLE_TTL_MS",
     "GENERATORAI_VOICE_IN_PROCESS",
@@ -3908,6 +3894,7 @@
     "apps/web/src/components/workflow/CollapsibleSection.tsx",
     "apps/web/src/components/workflow/DAGCanvas.tsx",
     "apps/web/src/components/workflow/edgeTypeStyles.ts",
+    "apps/web/src/components/workflow/engineGate.tsx",
     "apps/web/src/components/workflow/McpServerSelector.tsx",
     "apps/web/src/components/workflow/NumberStepper.tsx",
     "apps/web/src/components/workflow/PromptEditor.tsx",
@@ -3922,6 +3909,7 @@
     "apps/web/src/components/workflow/RunTimeline.tsx",
     "apps/web/src/components/workflow/RuntimeStageEdge.tsx",
     "apps/web/src/components/workflow/RuntimeStageNode.tsx",
+    "apps/web/src/components/workflow/sessionPatch.ts",
     "apps/web/src/components/workflow/settings/GeneralTab.tsx",
     "apps/web/src/components/workflow/settings/HooksTab.tsx",
     "apps/web/src/components/workflow/settings/ProjectCodebasesTab.tsx",
@@ -3934,7 +3922,6 @@
     "apps/web/src/components/workflow/VariableInputModal.tsx",
     "apps/web/src/components/workflow/WorkflowCard.tsx",
     "apps/web/src/components/workflow/WorkflowConfigPanel.tsx",
-    "apps/web/src/components/workflow/WorkflowDefinitionList.tsx",
     "apps/web/src/hooks/agentQueries.ts",
     "apps/web/src/hooks/automationQueries.ts",
     "apps/web/src/hooks/composerQueries.ts",
@@ -4028,6 +4015,7 @@
     "apps/web/src/utils/formatRelativeTime.ts",
     "apps/web/src/utils/hydrateWidgets.ts",
     "apps/web/src/utils/replayEvents.ts",
+    "apps/web/src/utils/workflowExport.ts",
     "apps/web/vitest.setup.ts",
     "packages/agent-harness-providers/src/AgentHostSupervisor.ts",
     "packages/agent-harness-providers/src/childEnv.ts",
@@ -4175,7 +4163,7 @@
     "packages/client-transport/src/index.ts",
     "packages/client-transport/src/TransportAdapter.ts",
     "packages/core/src/bootstrap/createCoreServices.ts",
-    "packages/core/src/domain/dag/DAGValidator.ts",
+    "packages/core/src/domain/dag/buildDAG.ts",
     "packages/core/src/domain/dag/index.ts",
     "packages/core/src/domain/dag/types.ts",
     "packages/core/src/domain/index.ts",
@@ -4201,14 +4189,12 @@
     "packages/core/src/domain/ports/ISequenceAllocator.ts",
     "packages/core/src/domain/ports/ISessionAllocationRepository.ts",
     "packages/core/src/domain/ports/ISpeechToTextEngine.ts",
-    "packages/core/src/domain/ports/IStageDefinitionRepository.ts",
-    "packages/core/src/domain/ports/IStageEdgeRepository.ts",
     "packages/core/src/domain/ports/IStageRunRepository.ts",
     "packages/core/src/domain/ports/ITerminalHost.ts",
     "packages/core/src/domain/ports/ITextFormatter.ts",
     "packages/core/src/domain/ports/ITextToSpeechEngine.ts",
     "packages/core/src/domain/ports/IWidgetRegistry.ts",
-    "packages/core/src/domain/ports/IWorkflowDefinitionRepository.ts",
+    "packages/core/src/domain/ports/IWorkflowDefinitionStore.ts",
     "packages/core/src/domain/ports/IWorkflowRunRepository.ts",
     "packages/core/src/domain/ports/IWorkspaceArtifactRepository.ts",
     "packages/core/src/domain/ports/IWorkspaceFileReviewRepository.ts",
@@ -4301,6 +4287,10 @@
     "packages/core/src/services/ComputerService.ts",
     "packages/core/src/services/createRunSandbox.ts",
     "packages/core/src/services/DAGScheduler.ts",
+    "packages/core/src/services/definitions/canonical.ts",
+    "packages/core/src/services/definitions/RunDefinitionReader.ts",
+    "packages/core/src/services/definitions/runScope.ts",
+    "packages/core/src/services/definitions/sessionSpec.ts",
     "packages/core/src/services/DeltaLog.ts",
     "packages/core/src/services/DurableExecutionEngine.ts",
     "packages/core/src/services/ErrorHandler.ts",
@@ -4326,7 +4316,6 @@
     "packages/core/src/services/push/index.ts",
     "packages/core/src/services/push/notificationPolicy.ts",
     "packages/core/src/services/push/PushDispatcher.ts",
-    "packages/core/src/services/resolveStageHooks.ts",
     "packages/core/src/services/ResultValidator.ts",
     "packages/core/src/services/SandboxLifecycleManager.ts",
     "packages/core/src/services/scm/AutoSourceControlRunner.ts",
@@ -4389,11 +4378,24 @@
     "packages/core/src/utils/safePath.ts",
     "packages/core/src/utils/Semaphore.ts",
     "packages/core/src/utils/withDeadline.ts",
+    "packages/db/scripts/_tmp_dev.ts",
+    "packages/db/scripts/_tmp_h.ts",
+    "packages/db/scripts/_tmp_v55.ts",
     "packages/db/scripts/prepare-db.ts",
     "packages/db/scripts/schemaShape.ts",
     "packages/db/src/index.ts",
     "packages/db/src/migrations/baseline.generated.ts",
     "packages/db/src/migrations/index.ts",
+    "packages/db/src/migrations/v55/convert.ts",
+    "packages/db/src/migrations/v55/spec/common.ts",
+    "packages/db/src/migrations/v55/spec/constants.ts",
+    "packages/db/src/migrations/v55/spec/edge.ts",
+    "packages/db/src/migrations/v55/spec/errors.ts",
+    "packages/db/src/migrations/v55/spec/graph.ts",
+    "packages/db/src/migrations/v55/spec/session.ts",
+    "packages/db/src/migrations/v55/spec/stage.ts",
+    "packages/db/src/migrations/v55/spec/workflow.ts",
+    "packages/db/src/migrations/v55_workflow_definitions_v2.ts",
     "packages/db/src/repositories/AgentInteractionRepository.ts",
     "packages/db/src/repositories/AgentRepository.ts",
     "packages/db/src/repositories/ArtifactRepository.ts",
@@ -4421,13 +4423,11 @@
     "packages/db/src/repositories/SequenceAllocator.ts",
     "packages/db/src/repositories/SessionAllocationRepository.ts",
     "packages/db/src/repositories/SessionRepository.ts",
-    "packages/db/src/repositories/StageDefinitionRepository.ts",
-    "packages/db/src/repositories/StageEdgeRepository.ts",
     "packages/db/src/repositories/StageRunRepository.ts",
     "packages/db/src/repositories/StreamCursorRepository.ts",
     "packages/db/src/repositories/SystemConfigRepository.ts",
     "packages/db/src/repositories/WidgetInstanceRepository.ts",
-    "packages/db/src/repositories/WorkflowDefinitionRepository.ts",
+    "packages/db/src/repositories/WorkflowDefinitionStore.ts",
     "packages/db/src/repositories/WorkflowRunRepository.ts",
     "packages/db/src/repositories/WorkspaceArtifactRepository.ts",
     "packages/db/src/repositories/WorkspaceFileReviewRepository.ts",
@@ -4515,10 +4515,6 @@
     "packages/secrets/src/migrateLegacySecrets.ts",
     "packages/secrets/src/redaction.ts",
     "packages/secrets/src/SecretStore.ts",
-    "packages/shared/src/builders/index.ts",
-    "packages/shared/src/builders/StageBuilder.ts",
-    "packages/shared/src/builders/types.ts",
-    "packages/shared/src/builders/WorkflowBuilder.ts",
     "packages/shared/src/client.ts",
     "packages/shared/src/config/AgentSchemas.ts",
     "packages/shared/src/config/AppConfig.ts",
@@ -4532,9 +4528,6 @@
     "packages/shared/src/config/numericEnv.ts",
     "packages/shared/src/config/OrchestratorSchemas.ts",
     "packages/shared/src/config/WidgetSchemas.ts",
-    "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
-    "packages/shared/src/config/WorkflowScriptSchema.ts",
-    "packages/shared/src/config/WorkflowTemplate.ts",
     "packages/shared/src/constants/computerUseBlocklist.ts",
     "packages/shared/src/constants/index.ts",
     "packages/shared/src/errors/index.ts",
@@ -4548,6 +4541,7 @@
     "packages/shared/src/node.ts",
     "packages/shared/src/protocol/buildStamp.ts",
     "packages/shared/src/protocol/hostProtocol.ts",
+    "packages/shared/src/security/atomicWrite.ts",
     "packages/shared/src/security/webhookToken.ts",
     "packages/shared/src/telemetry/fallbackCounters.ts",
     "packages/shared/src/telemetry/index.ts",
@@ -4578,13 +4572,11 @@
     "packages/shared/src/types/RunProfile.ts",
     "packages/shared/src/types/Session.ts",
     "packages/shared/src/types/SourceControl.ts",
-    "packages/shared/src/types/StageDefinition.ts",
     "packages/shared/src/types/StageRunStateMachine.ts",
     "packages/shared/src/types/Terminal.ts",
     "packages/shared/src/types/Voice.ts",
     "packages/shared/src/types/Widget.ts",
     "packages/shared/src/types/Workflow.ts",
-    "packages/shared/src/types/WorkflowDefinition.ts",
     "packages/shared/src/types/WorkflowOrchestrator.ts",
     "packages/shared/src/types/WorkflowRun.ts",
     "packages/shared/src/types/WorkflowRunStateMachine.ts",
@@ -4619,6 +4611,7 @@
     "packages/workflow-spec/src/builders/index.ts",
     "packages/workflow-spec/src/commandBearing.ts",
     "packages/workflow-spec/src/constants.ts",
+    "packages/workflow-spec/src/definition.ts",
     "packages/workflow-spec/src/document.ts",
     "packages/workflow-spec/src/expr/ast.ts",
     "packages/workflow-spec/src/expr/evaluate.ts",

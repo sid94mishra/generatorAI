@@ -426,12 +426,12 @@ VS Code's Copilot extension injects `COPILOT_GITHUB_TOKEN` into spawned child pr
 Run `claude login` once on the host to populate `~/.claude/.credentials.json`. The SDK reads from there. No env var needed in our provider.
 
 ### `Claude Code returned an error result: There's an issue with the selected model`
-A workflow stage's `harnessConfigOverrides.model` is provider-specific. Switching `HARNESS_TYPE` without clearing/aliasing model overrides fails. Either:
+A workflow's or stage's `session.model` is provider-specific. Switching `HARNESS_TYPE` without clearing/aliasing model overrides fails. Either:
 - Set the model field to a provider-appropriate value (`claude-sonnet-4-6` for Claude Agent; `claude-sonnet-4.6` for Copilot).
 - Remove the override to fall back to provider default.
 
-### `Workflow has no root stages`
-The DAG has no entry point. Either (a) every stage has incoming edges (cycle hiding via `condition: on_failure`), or (b) you have edges referencing non-existent stage IDs. Run `workflow validate <id>` to see the offenders.
+### `Invalid DAG: Cycle detected involving stages: …`
+The graph has a cycle, so no stage can start. `validateWorkflow` rejects cycles and edges to unknown stage keys at save, publish and run start, so this only appears for a graph that bypassed validation. Run `generatorai workflow validate <workflow>` to see the offending keys.
 
 ### `gpt-5.3-codex` hangs / no tokens
 The auto-router on some GHEC tenants picks `gpt-5.3-codex` and the model never emits anything. Default was switched to `claude-sonnet-4.6`. Override at the workflow/stage level if you want a specific model.
@@ -458,11 +458,10 @@ A write is trying to put an invalid shape into a JSON column. Likely a schema dr
 
 ## 11. Performance tuning
 
-- **`sessionMode: 'single'`** is fastest for sequential stages on cheap models.
-- **`sessionMode: 'per-stage'`** maximizes parallelism but multiplies harness sessions.
+- **Session sharing is automatic** — a purely linear graph runs every stage in one shared conversation (fastest for sequential stages); any parallel branch gives each stage its own session, which maximizes parallelism but multiplies harness sessions. There is no per-definition session mode.
 - **`reasoningEffort: 'low'`** halves Claude/Copilot latency at the cost of quality.
-- **`harnessConfig.availableTools`** — restricting tools speeds up model decision-making.
-- **`contextFilter: 'summary-only'`** (default) is much smaller than `'full'` for long predecessor outputs.
+- **`session.tools.available`** — restricting tools speeds up model decision-making.
+- **`context.mode: 'summary'`** (default) is much smaller than `'output'` for long predecessor outputs.
 - **`stream_cursors` retention** — the 30-day TTL is not env-configurable (see §4 Streaming); shorten `retention.eventPayloadTtlDays` in `AppConfig` if disk is tight.
 - **`SANDBOX_ENABLED=false`** — host execution is faster than Docker; only enable in shared environments.
 

@@ -1,6 +1,6 @@
 # Feature: Workflow Runs
 
-> **WorkflowRun** is a single execution of a `WorkflowDefinition`. This doc covers run lifecycle, DAG scheduling, session allocation, run profiles, HITL, retries, file management, and durability.
+> **WorkflowRun** is a single execution of one pinned version of a workflow definition (a v2 `WorkflowGraph`). This doc covers run lifecycle, DAG scheduling, session allocation, run profiles, HITL, retries, file management, and durability.
 
 For definition/stage authoring, see [feature-workflows.md](./feature-workflows.md) and [feature-stages.md](./feature-stages.md).
 
@@ -12,15 +12,17 @@ For definition/stage authoring, see [feature-workflows.md](./feature-workflows.m
 ```
 id                    text PK
 workflowDefinitionId  FK
+definitionVersionId   FK → workflow_definition_versions.id     (the pinned graph; the engine never reads the live definition)
 name                  text
-status                enum 'created'|'starting'|'running'|'paused'|'completed'|'failed'|'cancelled'
-sessionMode           enum 'single'|'per-stage'|'auto'         (snapshot at run start)
-masterSessionId?      text                                     (when sessionMode=single)
+status                enum 'created'|'starting'|'running'|'paused'|'cancelling'|'completed'|'failed'|'cancelled'
+sessionMode           enum 'single'|'per-stage'|'auto'         (created 'auto'; resolved from the graph shape at start, see §5)
 variables             JSON Record<string, unknown>             (resolved variables + system vars)
 error?                text
-permissionMode        enum 'bypassPermissions'|'default'|'acceptEdits'|'plan'
-projectId?            FK → projects.id
-workspaceId?          FK → execution_workspaces.id
+permissionMode?       enum 'bypassPermissions'|'default'|'acceptEdits'|'plan'
+projectId?            text
+workspaceId?          text                                     (execution workspace)
+agentSnapshot?        JSON                                     (frozen agent projection at start)
+ancestorRunId?        FK → workflow_runs.id                    (set on a retry run)
 createdAt, updatedAt, startedAt, completedAt
 ```
 
@@ -28,7 +30,7 @@ createdAt, updatedAt, startedAt, completedAt
 ```
 id                    text PK
 workflowRunId         FK
-stageDefinitionId     FK
+stageKey              text                                     (the stage's key in the pinned graph)
 sessionId?            FK                                       (allocated session, set on first execute)
 name                  text
 status                enum 'pending'|'queued'|'running'|'paused'|'completed'|'failed'|'cancelled'|'skipped'|'awaiting_input'
@@ -37,11 +39,12 @@ totalSteps            int
 retryCount            int (default 0)
 error?                text
 summary?              text                                     (~200-400 chars, used as predecessor context)
-outputData?           JSON                                     (parsed JSON when outputFormat=json)
+outputText?           text                                     (full output, for context mode `output`)
+outputData?           JSON                                     (parsed JSON when output.format = json)
+artifactManifest?     JSON                                     (files the stage created/modified)
 version               int                                      (optimistic lock)
-wakeAt?               int (epoch-ms)                           (DUR-05 — durable sleep deadline)
-sleptSince?           int
 interruptData?        JSON                                     (HITL-02 — pending approval payload)
+heartbeatAt?          timestamp                                (liveness beat, see §5)
 createdAt, startedAt, completedAt
 ```
 
@@ -82,24 +85,22 @@ Stage run state machine similar but with the extra state `awaiting_input` (HITL-
 ## 3. Run creation & start
 
 API: `POST /api/workflow-runs`
-Body (`CreateWorkflowRunSchema`):
+Body (`CreateWorkflowRunSchema` in `routes/workflowRuns.ts`):
 ```typescript
 {
   workflowDefinitionId: string;
-  name?: string;
   variables?: Record<string, unknown>;
   projectId?: string;            // override the definition's projectId
-  permissionMode?: 'bypassPermissions'|'default'|'acceptEdits'|'plan';
-  orchestratorConfig?: {
-    stageOverrides?: StageOverride[];
-  };
+  testRun?: boolean;             // run the working graph as a `test` version — the only way to run a draft
 }
 ```
 
+Stage overrides (`[{ stageKey, skip?, variables? }]`) and the lifecycle envelope go through `POST /api/orchestrator/runs` instead; the permission mode is set with `POST /api/workflow-runs/:id/permission-mode` (§8).
+
 Server-side:
-1. `WorkflowRunService.createRun(params)` validates variables against definition.
-2. Inserts `workflow_runs` row in `created` state.
-3. Inserts N `stage_runs` rows (one per stage def), status `pending`.
+1. `WorkflowRunService.createRun(params)` resolves the version to run (`resolveVersionForRun`: the current published version, or a `test` version with `testRun`) and validates variables against that graph.
+2. Inserts `workflow_runs` row in `created` state with `definitionVersionId` pinned.
+3. Inserts N `stage_runs` rows (one per stage in the pinned graph, carrying `stageKey`), status `pending`.
 4. Returns `WorkflowRun`.
 
 `POST /api/workflow-runs/:id/start` → `WorkflowRunService.startRun(runId)`:
@@ -109,13 +110,15 @@ Server-side:
 2. If first start (no __workingDirectory):
      - workspaceManager.createWorkspace({ ownerType: 'workflow_run', ownerId: runId, … })
      - if projectId → worktreeService.createRunWorktrees(projectId, runId, aliases, 'workflow')
-     - inject __workingDirectory, __artifactsDirectory, __workspaceId, repo_path_<alias>, repo_branch_<alias>
-3. State transition: created → starting → running.
-4. Build DAG (DAGScheduler.buildDAGForDefinition, hash-cached).
-5. Get root stages.
-6. For each root stage:
-       - apply stageOverrides (if skip=true, mark stage_run as 'skipped' and emit event)
-       - executeStage(stageRun, runId, sessionMode, harnessConfig, variables).catch(onStageFailed)
+     - inject __workingDirectory, __artifactsDirectory, __workspaceId, and the engine-recorded
+       checkouts repo_path_<alias> / repo_branch_<alias> (templates and expressions read them as
+       run.codebases.<alias>.path|branch; authors cannot declare variables with those names)
+3. State transition: created → starting; resolve sessionMode from the graph shape (§5); → running.
+4. Build DAG of the pinned version (DAGScheduler.buildDAGForRun, cached per definitionVersionId).
+5. advanceRun(runId) → DAGScheduler.reconcileRun(runId) → { toLaunch, toSkip } (roots with a false guard are skipped, not launched).
+6. For each stage to launch:
+       - apply the stage override for its stageKey (if skip=true, mark stage_run 'skipped' and emit event)
+       - executeStage(stageRun, runId, sessionMode, graph.workflow.session, variables).catch(onStageFailed)
 7. startPolling(runId) — 3s interval to detect stage completion changes
    (resilient to executeStage hangs/session release stalls)
 ```
@@ -128,40 +131,30 @@ Server-side:
 
 `DAGScheduler` ([packages/core/src/services/DAGScheduler.ts](../../packages/core/src/services/DAGScheduler.ts)) is the runtime brain.
 
-### `buildDAGForDefinition(defId)`
-Reads stages + edges, hashes them (SHA1 of sorted serialization), caches. Re-uses cache when hash unchanged.
+The graph is the run's **pinned definition version** (read through `RunDefinitionReader`); DAG nodes are keyed by stage key.
 
-### `getRootStages(runId, defId)`
-Returns stage IDs with no incoming edges, i.e., `dependencyIds.length === 0`. Used at run start.
+### `buildDAGForRun(run)`
+Builds the DAG of `run.definitionVersionId` (`buildDAG` over the validated graph) and caches it per version. A version never changes, so a cache entry is valid forever (the cache is capped at 512 entries).
 
-### `onStageCompleted(runId, defId, completedStageDefId)`
-Called by `WorkflowRunService.onStageCompleted()` after a stage transitions to terminal status.
+### `reconcileRun(runId)` — the one reconcile
+Called by `WorkflowRunService.advanceRun()` on every stage completion/failure, at start, and by the 3 s reconciler backstop; serialized per run. It re-evaluates every `pending` stage with one readiness predicate (`resolveStageReadiness`) and returns `{ toLaunch, toSkip, runTerminal? }`:
 
 ```
-1. Read all stage_runs for this run + the DAG.
-2. Find outgoing edges from completed stage.
-3. For each candidate target stage:
-       3.1  Skip if already non-pending.
-       3.2  Check ALL predecessors are terminal (completed | failed | skipped).
-       3.3  Evaluate stage.condition against { parentStatus }.
-       3.4  If passes → add to toSchedule.
-4. Return toSchedule[].
+For each pending stage (repeated until nothing changes, so skips cascade):
+  1. Every predecessor must be terminal (completed | failed | skipped | cancelled), else blocked.
+  2. Inbound edges are gates. An edge is active when its `on` matches the source outcome
+     (success → completed; failure → failed; completion → completed or failed; always → any terminal)
+     and its optional `when` expression holds (it may read `parent.status`).
+     An inactive edge from a completed/failed/cancelled source vetoes the stage → skip.
+     No active inbound edge → skip.
+  3. The stage's `guard` (Expression v2) must hold, else skip.
+  4. Otherwise → launch.
 ```
 
-### `getReadyStages(runId, defId)`
-Polling-style alternative — returns all stages currently ready.
-
-### `getSkippableStages(runId, defId)`
-For cascading skips — returns stages whose predecessors are terminal but their condition can never be satisfied.
-
-### `isDAGComplete(runId, defId)`
-Returns true when all stages are in a terminal status.
-
-### Cache invalidation
-Hash-based. Any mutation to stages/edges (via `WorkflowDefinitionService.addStage()` etc.) does not actively invalidate; the next call sees a different hash and rebuilds. **Manual override:** `dagScheduler.clearCache(defId)` if needed.
+When everything is terminal, `runTerminal` is `completed` unless a failed stage is unhandled (no active outgoing edge to a stage that completed) → `failed`, or an unhandled cancellation → `cancelled`. Recovery branches (`on: failure` edges) therefore let a run complete.
 
 ### Cycle handling
-`DAGValidator.validateDAG()` runs at definition save time. If a cycle slips through (e.g., direct DB write), `topologicalSort()` throws `DAGValidationError` at run start.
+Cycles, unknown edge endpoints and duplicate edges are rejected by `validateWorkflow` at save, publish and run start. `buildDAG` still throws `DAGValidationError` if a cyclic graph reaches it.
 
 ---
 
@@ -171,11 +164,12 @@ Hash-based. Any mutation to stages/edges (via `WorkflowDefinitionService.addStag
 
 ### Modes (from `WorkflowRun.sessionMode`)
 
+Definitions have no session mode. Every run is created with `sessionMode: 'auto'`, and `startRun` resolves it once from the pinned graph's shape and persists the answer: `per-stage` when the DAG has any parallelism (more than one root, or a layer with more than one stage), otherwise `single`.
+
 | Mode | Allocation rule |
 |---|---|
-| `single` | One session for the whole run. First `allocateSession()` creates it (`harness.createConversation`); subsequent calls return the same `conversationId`. Stored in `workflow_runs.masterSessionId`. |
+| `single` | One session for the whole run. First `allocateSession()` creates it (`harness.createConversation`); subsequent calls return the same `conversationId` (tracked in `session_allocations.sharedSessionId`). |
 | `per-stage` | Each `allocateSession()` returns a fresh session. Stage runs in their own conversation. |
-| `auto` | Not a per-stage heuristic: `startRun` resolves it once for the whole run to `per-stage` (any parallelism in the DAG) or `single`, and persists the answer. |
 
 ### Persistence (1.6)
 - `session_allocations` table — one row per (workflowRunId), records `mode`, `sharedSessionId`, `sharedRefCount`.
@@ -197,7 +191,7 @@ After a stage completes (success or failure), `sessionAllocator.releaseSession(s
 The existing 3s process-wide reconciler (`WorkflowRunService.ensureReconciler` — the same `setInterval` that drives event-driven DAG routing as a backstop) gains one more check per tick: a `queued`/`running` stage whose last beat is older than `heartbeatIntervalMs * heartbeatStaleMultiplier` (default 10s × 3 = 30s) is judged stuck. The reconciler:
 1. best-effort asks `StageExecutionService.abortStage()` to cancel the wedged call (aborts the tracked `AbortSignal` for the in-flight turn, and separately asks the harness to abort the conversation) — so a relaunch never races a still-writing agent in the same working directory;
 2. marks the stage `failed` with an error explaining the stale beat;
-3. routes it through the normal `onStageFailed` path, so `on_failure`/`on_completion`/`always` edges and operator skip overrides apply exactly as for any other failure.
+3. routes it through the normal `onStageFailed` path, so `failure`/`completion`/`always` edges and operator skip overrides apply exactly as for any other failure.
 
 No second polling interval was added — this extends the existing one.
 
@@ -205,37 +199,35 @@ No second polling interval was added — this extends the existing one.
 
 ## 6. Run profiles & stage overrides
 
-A **RunProfile** is a reusable preset bundled either inside a `.workflow.mjs` script (`.profile({...})`) or saved as JSON in `.generatorai/run-profiles/`.
+Two kinds of profile exist:
 
-Schema (`RunProfileSchema`):
+- **Script profiles** (`ScriptRunProfile`, `@generatorai/workflow-spec`) — exported as `profiles` from a `.workflow.mjs` script and applied by `POST /api/workflow-scripts/:id/run { profileName }`. See [feature-templates-scripts.md](./feature-templates-scripts.md).
+  ```typescript
+  { name: string; description?: string; variables: Record<string, unknown>;
+    permissionMode?: 'plan'|'default'|'acceptEdits'|'bypassPermissions';
+    stageOverrides?: StageRunOverride[] }
+  ```
+- **CLI run profiles** (`RunProfile`, `@generatorai/shared`) — JSON files (e.g. in `.generatorai/run-profiles/`) passed to `run start --profile <path>`:
+  ```typescript
+  { version: 1; name: string; description?: string; workflowDefinitionId: string;
+    runName?: string; variables: Record<string, unknown>;
+    permissionMode?: 'bypassPermissions'|'default'|'acceptEdits'|'plan';
+    projectId?: string; selectedCodebases?: string[];       // aliases
+    stageOverrides?: StageRunOverride[];
+    promptFiles?: string[]; skillFiles?: string[]; agentFiles?: string[];   // uploaded custom content
+    browserConfig?: BrowserConfig }
+  ```
+
+Stage overrides target a stage by **key** (keys are stable; names and positions are not):
 ```typescript
-{
-  name: string;
-  description?: string;
-  runName?: string;
-  variables?: Record<string, unknown>;
-  sessionMode?: 'single'|'per-stage'|'auto';
-  permissionMode?: 'bypassPermissions'|'default'|'acceptEdits'|'plan';
-  projectId?: string;
-  selectedCodebases?: string[];                  // aliases
-  stageOverrides?: StageOverride[];
-  promptFiles?: string[];                         // uploaded prompts (custom content)
-  skillFiles?: string[];                          // uploaded skills (custom content)
-  agentFiles?: string[];                          // uploaded agents (custom content)
-}
-
-type StageOverride = {
-  stageName?: string;
-  stageIndex?: number;
+type StageRunOverride = {
+  stageKey: string;
   skip?: boolean;
-  agentName?: string;
-  contextFilter?: ContextFilter;
-  timeoutMs?: number;
   variables?: Record<string, unknown>;            // stage-local var overrides
 };
 ```
 
-Resolution: `WorkflowRunService.findStageOverride(variables.__stageOverrides, stageName, stageIndex)`. Skips matched. Override fields merge into the resolved per-stage config.
+Resolution: `WorkflowRunService.findStageOverride(variables.__stageOverrides, stageKey)`. `skip` marks the stage `skipped` (reason `runtime_override`) and the DAG advances past it; `variables` merge over the run variables for that stage only. An override whose key matches no stage is ignored.
 
 `__stageOverrides` is folded into `workflow_runs.variables` at run start so the run remains self-describing.
 
@@ -258,7 +250,7 @@ POST /api/workflow-runs/:id/stages/:stageId/cancel
 POST /api/workflow-runs/:id/stages/:stageId/retry
 ```
 
-Stage retry resets the stage to `queued` (full restart) regardless of `retryPolicy`.
+Stage retry resets the stage to `queued` (full restart) regardless of the stage's `retry` policy.
 
 ---
 
@@ -293,14 +285,15 @@ Web `HitlPanel` (in Run Settings drawer) provides the UI: 4-mode dropdown + per-
 When `StageExecutionService` finishes a stage's prompts:
 
 1. Builds concatenated `content` (all assistant message_complete texts).
-2. Runs `ResultValidator.validate(content, stageDef.resultValidation)`.
-3. If any rule fails → `workflowRunService.retryStageAfterValidation(runId, stageRunId, reason)`.
+2. Runs `ResultValidator.validateStageResult(...)` with the stage's `output.rules` (read from the pinned version by `stageKey`).
+3. If any rule fails and `retryCount < retry.maxAttempts - 1` → `workflowRunService.retryStageAfterValidation(runId, stageRunId, reason)`; otherwise the stage fails (`onStageFailed`). A stage without `retry` gets no validation retry.
 
 `retryStageAfterValidation`:
 
 ```
 1. Remove stageRun.id from processedStageRuns dedup set (so we can re-emit completion).
-2. Read retryPolicy = stageDef.retryPolicy ?? { maxRetries:1, backoffMs:3000, backoffMultiplier:1 }.
+2. Read the stage's `retry` → maxRetries = maxAttempts - 1, backoffMs = initialDelayMs, backoffMultiplier
+   (no `retry` → { maxRetries:1, backoffMs:3000, backoffMultiplier:1 }).
 3. inSessionThreshold = max(1, maxRetries - 1).
 4. useInSessionRetry = retryCount < inSessionThreshold.
 5. Await backoffMs * backoffMultiplier^retryCount.
@@ -314,7 +307,7 @@ When `StageExecutionService` finishes a stage's prompts:
    Else (full restart):
      - Reset status = 'queued', currentStep = 0.
      - sessionAllocator.releaseSession(stageRunId).
-     - executeStage(stage, runId, sessionMode, config, enrichedVars).
+     - executeStage(stage, runId, sessionMode, graph.workflow.session, enrichedVars).
 ```
 
 When `retryCount >= maxRetries`, the next failure is terminal → stage transitions to `failed`.
@@ -332,7 +325,7 @@ For the full deep-dive see [feature-workspaces-files.md](./feature-workspaces-fi
 
 - **`workspace_artifacts` table** tracks every file with `artifactType ∈ { code_file | response_md | attachment | script_output | log | snapshot | browser_screenshot | browser_dom | browser_har | browser_console_log | browser_video | browser_selection }`.
 
-- **Stage responses** persisted to `artifacts/responses/stage-<order>-<name>.md`.
+- **Stage responses** persisted to the run's artifacts directory as `<stage_name>_response_<n>.md`.
 
 - **Change tracking** — `workspace_worktrees.hasUncommittedChanges` + `commitHash` columns. `POST /api/workspaces/:id/commit` runs `git commit` per worktree and stamps the new hash.
 
@@ -479,7 +472,7 @@ const run = await ai.workflows.run(definitionId, {
 // Stream and react
 for await (const event of ai.workflows.stream(run.id)) {
   if (event.kind === 'stage_run.completed') {
-    console.log(`Stage ${event.data.stageName} done`);
+    console.log(`Stage ${event.data.name} done`);
   }
   if (event.kind === 'workflow_run.completed' || event.kind === 'workflow_run.failed') {
     break;
@@ -504,6 +497,6 @@ const retried = await ai.workflows.retry(run.id);
 5. **Pause + worktree changes** — pausing does not commit any worktree changes. If you `workspace commit` then `cancel`, the commit is preserved (worktree remains).
 6. **`workflow_runs.variables` is the snapshot** — variables there persist for the run's lifetime. Stage-time changes via hooks (`HookResult.variables`) merge in but are not retroactive.
 7. **Concurrent retries** — `retryStageAfterValidation` and explicit `run retry` can race. `processedStageRuns` + optimistic lock on `stage_runs.version` prevent state corruption but the user-visible behavior may double-execute one prompt. Avoid simultaneous retries from CLI + UI.
-8. **DAG with no roots** — illegal at definition save; if it slips, `startRun` throws `ValidationError('Workflow has no root stages')`.
-9. **Variables with `{{undefined}}` references** — interpolated as the literal `{{name}}` string. The prompt is still sent.
+8. **DAG with no roots** — only possible with a cycle, which `validateWorkflow` rejects at save, publish and run start; `buildDAG` throws `DAGValidationError` if one slips through.
+9. **Unresolved `{{…}}` references** — a bare name that is not a declared variable is a save-time error (`template-unknown-variable`); a declared variable the run leaves empty renders empty and raises an `unresolved_variables` warning on the stream. The prompt is still sent.
 10. **Run cancel while a hook is in flight** — the hook's `AbortSignal` is signalled; subprocesses are SIGKILLed after `hook.timeoutMs`.

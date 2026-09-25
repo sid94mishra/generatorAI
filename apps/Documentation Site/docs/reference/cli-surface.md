@@ -7,9 +7,9 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 
 | Measure | Count |
 |---|---:|
-| Commands | 211 |
+| Commands | 212 |
 | Groups | 24 |
-| Server-backed commands | 184 |
+| Server-backed commands | 185 |
 | Destructive commands | 33 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
@@ -199,25 +199,26 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 | `widget.read` | `widget read` | yes | no | yes | yes | widget | — |
 | `widget.setState` | `widget set-state` | yes | no | yes | yes | widget, state | — |
 | `workflow.clone` | `workflow clone` | yes | no | yes | yes | workflow | — |
-| `workflow.create` | `workflow create` | yes | no | yes | yes | name | — |
+| `workflow.create` | `workflow create` | yes | no | yes | yes | — | — |
 | `workflow.delete` | `workflow delete` | yes | yes | yes | yes | workflow | — |
 | `workflow.edge.add` | `workflow edge add` | yes | no | yes | yes | workflow | --from, --to |
-| `workflow.edge.delete` | `workflow edge delete` | yes | yes | yes | yes | workflow, edge | — |
 | `workflow.edge.list` | `workflow edge list` | yes | no | yes | yes | workflow | — |
+| `workflow.edge.remove` | `workflow edge remove` | yes | yes | yes | yes | workflow | --from, --to |
 | `workflow.export` | `workflow export` | yes | no | yes | yes | workflow | — |
-| `workflow.fromTemplate` | `workflow from-template` | yes | no | yes | yes | template | — |
-| `workflow.importJson` | `workflow import-json` | yes | no | yes | yes | file | — |
+| `workflow.import` | `workflow import` | yes | no | yes | yes | — | — |
 | `workflow.list` | `workflow list` | yes | no | yes | yes | — | — |
+| `workflow.publish` | `workflow publish` | yes | no | yes | yes | workflow | — |
 | `workflow.show` | `workflow show` | yes | no | yes | yes | workflow | — |
 | `workflow.stage.add` | `workflow stage add` | yes | no | yes | yes | workflow | --name |
-| `workflow.stage.delete` | `workflow stage delete` | yes | yes | yes | yes | workflow, stage | — |
 | `workflow.stage.hook.add` | `workflow stage hook add` | yes | no | yes | yes | workflow, stage | --name, --phase, --type, --config |
 | `workflow.stage.hook.list` | `workflow stage hook list` | yes | no | yes | yes | workflow, stage | — |
 | `workflow.stage.hook.remove` | `workflow stage hook remove` | yes | yes | yes | yes | workflow, stage, hook | — |
 | `workflow.stage.list` | `workflow stage list` | yes | no | yes | yes | workflow | — |
+| `workflow.stage.remove` | `workflow stage remove` | yes | yes | yes | yes | workflow, stage | — |
 | `workflow.stage.update` | `workflow stage update` | yes | no | yes | yes | workflow, stage | — |
 | `workflow.update` | `workflow update` | yes | no | yes | yes | workflow | — |
-| `workflow.validate` | `workflow validate` | yes | no | yes | yes | workflow | — |
+| `workflow.validate` | `workflow validate` | yes | no | yes | yes | target | — |
+| `workflow.versions` | `workflow versions` | yes | no | yes | yes | workflow | — |
 | `workspace.archive` | `workspace archive` | yes | no | yes | yes | workspace | — |
 | `workspace.changes` | `workspace changes` | yes | no | yes | yes | workspace | — |
 | `workspace.checkpoints` | `workspace checkpoints` | yes | no | yes | yes | workspace | — |

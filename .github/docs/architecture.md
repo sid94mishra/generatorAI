@@ -40,7 +40,7 @@ GeneratorAI follows **Hexagonal / Ports-and-Adapters with a DDD core**. Four str
 │   packages/core/src/domain                                  │
 │     ports/   — IAgentHarness, IXxxRepository, …             │
 │     state-machines/  — Session, WorkflowRun, StageRun       │
-│     dag/    — DAGValidator, ConditionEvaluator, types       │
+│     dag/    — buildDAG (over a validated graph), types      │
 │     events  — AgentEvent factories                          │
 │       │                                                     │
 │       ▼ implemented by                                      │
@@ -193,24 +193,24 @@ Both perform auth + Origin gating **before** `wss.handleUpgrade`. Lifecycle even
 ## 6. Configuration resolution (3-level hierarchy)
 
 ```
-WorkflowDefinition.harnessConfig          (template defaults)
-   ↓ deep-merged with
-StageDefinition.harnessConfigOverrides    (per-stage overrides)
-   ↓ deep-merged with
+graph.workflow.session                    (SessionSpec — workflow defaults)
+   ↓ merged with (resolveSessionSpec)
+stage.session                             (partial SessionSpec — per-stage overrides)
+   ↓ merged with
 RunProfile / Runtime variables            (per-run overrides)
    │
    ▼
 Final resolved config → passed to harness.createConversation()
 ```
 
-Service: [packages/core/src/services/ConfigResolver.ts](../../packages/core/src/services/ConfigResolver.ts).
+Merge: `resolveSessionSpec` in `@generatorai/workflow-spec`; mapping to the harness config: [packages/core/src/services/definitions/sessionSpec.ts](../../packages/core/src/services/definitions/sessionSpec.ts) (`sessionSpecToHarnessConfig`), applied in `StageExecutionService`.
 
 Variables in prompts are interpolated with mustache-style `{{varName}}` after the resolver runs. The set of variables passed in is the union of:
 
 - Workflow-level `variables` defaults
 - Runtime/Profile `variables` (override defaults)
-- Stage-local `variables` (override both)
-- System variables: `__workingDirectory`, `__artifactsDirectory`, `__workflowRunId`, `__workspaceId`, `__validationFeedback`, `__validationRetryAttempt`, `__stageOverrides`, `repo_path_<alias>`, `repo_branch_<alias>`, `repo_path_target`.
+- Run-time stage override `variables` (`stageOverrides[].variables`, by stage key — override both)
+- System variables: `__workingDirectory`, `__artifactsDirectory`, `__workflowRunId`, `__workspaceId`, `__validationFeedback`, `__validationRetryAttempt`, `__stageOverrides`, and the engine-recorded checkouts `repo_path_<alias>` / `repo_branch_<alias>`. Templates and expressions read checkouts as `{{run.codebases.<alias>.path}}` / `.branch`; authors cannot declare `repo_path_*` / `repo_branch_*` variables (see [feature-workflows.md](./feature-workflows.md) §4).
 
 ---
 

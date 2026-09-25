@@ -5,7 +5,7 @@ description: Every application and shared package, its responsibility, and the s
 
 # Modules and dependency boundaries
 
-The product is a pnpm workspace with **10 application packages and 20 shared packages** in the inspected source, excluding this documentation site and the separate `agent-tests` workspace. The root `pnpm-workspace.yaml` includes `apps/*`, `packages/*`, and `agent-tests`; Turbo orchestrates the repository's build, typecheck, lint, and test tasks.
+The product is a pnpm workspace with **10 application packages and 22 shared packages** in the inspected source, excluding this documentation site and the separate `agent-tests` workspace. The root `pnpm-workspace.yaml` includes `apps/*`, `packages/*`, and `agent-tests`; Turbo orchestrates the repository's build, typecheck, lint, and test tasks.
 
 ## Application inventory
 
@@ -28,7 +28,7 @@ The local Expo module at `apps/mobile/modules/generatorai-device-key` belongs to
 
 | Package directory | Responsibility | Dependency direction / important exported surface |
 | --- | --- | --- |
-| `shared` | Domain/wire types, Zod configuration schemas, event types, builders, logging, telemetry, IPC protocols | Common foundation; browser-safe and Node-oriented entry points are separated |
+| `shared` | Domain/wire types, Zod configuration schemas, event types, logging, telemetry, IPC protocols | Common foundation; browser-safe and Node-oriented entry points are separated |
 | `core` | Domain services, execution state machines, ports, scheduling, workspace lifecycle, capability services, infrastructure adapters | Uses shared types and focused git/change/checkpoint/review/source-control packages; accepts repository ports |
 | `db` | SQLite/Drizzle schema, migrations, repository implementations, retention | Implements domain persistence ports; imports core/auth/shared types |
 | `agent-harness-providers` | Copilot, Claude Agent SDK, Codex, OpenCode, ACP, deterministic Faux adapters; registry and supervision | Implements core's `IAgentHarness`; provider protocol/SDK details live here |
@@ -46,6 +46,8 @@ The local Expo module at `apps/mobile/modules/generatorai-device-key` belongs to
 | `checkpoints` | Snapshot service and private shadow git refs | `CheckpointService`, `GitShadowRefStore`, snapshot/repository ports |
 | `review` | Inline review threads, anchor mapping, comment serialization into agent prompts | `ReviewThreadService`, `AnchorResolver`; persistence injected through `IReviewRepository` |
 | `source-control` | Remote VCS-host abstraction and GitHub integration | Provider registry, device flow, PR operations, CLI token fallback; currently GitHub is the implemented provider |
+| `workflow-spec` | The workflow definition document (v2 `WorkflowGraph`): Zod schemas, validator, Expression v2, canonical import/export, builders, generated JSON Schema | Leaf package (depends only on zod); shared, core, db, clients and the SDK consume it |
+| `workflow-testkit` | Deterministic engine harness for workflow characterisation tests (scripted provider, virtual clock, crash/restart) | Test-only; composes core, db and the provider registry in process |
 | `sdk` | Internal embedded-engine facade and builders | Composes core/db/harness in the calling process; private package, not an HTTP client or supported external distribution |
 | `mcp-server` | MCP stdio server exposing selected GeneratorAI operations | `GeneratorAiMcpServer`, custom tool adapter, CLI that boots the internal SDK |
 

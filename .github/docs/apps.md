@@ -23,9 +23,9 @@ Single Node process binding to `$GENERATORAI_PORT` (default 3100). Owns:
 | `sessions.ts` | `GET /api/sessions/{id}/chat` (message history by session id) | `chatMessageRepo` |
 | `chats.ts`, `chat.ts`, `chats-list.ts` | v2 `POST /api/chats`, `GET /api/chats[/:id]`, `PUT/DELETE /api/chats/:id`, `POST /api/chats/:id/prompt`, `GET /api/chats/:id/messages`, `GET /api/chats/:id/workspace`, `GET /api/chats/:id/workspace/files`, `POST /api/chats/:id/archive` | `ChatManagementService` |
 | `workflows.ts` | v1 legacy CRUD | `WorkflowService` |
-| `workflowDefinitions.ts` | `POST/GET/PATCH/DELETE /api/workflow-definitions`, `POST /api/workflow-definitions/import-json`, `POST /api/workflow-definitions/:id/validate`, `GET /api/workflow-definitions/:id/export`, stage CRUD, edge CRUD | `WorkflowDefinitionService` |
+| `workflowDefinitions.ts` | `GET/POST /api/workflow-definitions`, `POST /api/workflow-definitions/validate`, `POST /api/workflow-definitions/import` (graph or `{ templateId }`), `GET/DELETE /:id`, `PUT /:id/graph` (whole-graph save with `expectedRevision`), `POST /:id/publish`, `GET /:id/versions[/:versionId]`, `GET /:id/export` | `WorkflowDefinitionService` |
 | `workflowRuns.ts` | `POST /api/workflow-runs`, `GET /api/workflow-runs[/:id]`, `/{id}/{start,pause,resume,cancel,retry}`, `/{id}/stages`, `/{id}/scratchpad`, `/{id}/workspace`, `/{id}/messages`, HITL approval & rejection | `WorkflowRunService` + `HitlService` |
-| `workflowScripts.ts` | `GET /api/workflow-scripts`, `/:id`, `/:id/profiles`, `POST /:id/validate`, `POST /:id/materialize`, `POST /:id/run`, `POST /reload` | `WorkflowScriptLoader` + `WorkflowDefinitionService` + `WorkflowRunService` |
+| `workflowScripts.ts` | `GET /api/workflow-scripts`, `/:id`, `/:id/profiles`, `POST /validate`, `POST /:id/materialize`, `POST /:id/run`, `POST /reload`, `POST /:id/reload`, `POST /upload` | `WorkflowScriptLoader` + `WorkflowDefinitionService` + `WorkflowRunService` |
 | `orchestrator.ts` | `GET /api/orchestrator/templates`, `POST /api/orchestrator/runs`, `/{id}/{start,pause,cancel}`, `/{id}/context`, `/{id}/runs` | `WorkflowOrchestrator` |
 | `automations.ts` | `POST/GET/PUT/DELETE /api/automations`, `/{id}/{enable,disable,trigger,rotate-webhook-token}`, `/{id}/executions`, `/executions/{execId}`, `/executions/{execId}/cancel`, `POST /api/automations/preview-iterations` | `AutomationService` |
 | `projects.ts` | `POST/GET/PUT/DELETE /api/projects`, `/{id}/codebases/*`, `/{id}/configs/*`, `/{id}/mcp-servers/*`, `/{id}/worktrees/*`, `/{id}/available-artifacts` | `ProjectService`, `CodebaseService`, `ProjectConfigService`, `WorktreeService`, `SystemArtifactService` |
@@ -198,9 +198,9 @@ generatorai
 ├── config / config profile {list,create,use,delete}
 ├── copilot {conversations, messages, ping}
 ├── chat {list, create, show, send, messages, watch, archive, delete}
-├── workflow|wf {list, create, show, update, delete, validate,
-│                 import-json, import-template, export, from-template,
-│                 stage {add,update,delete}, edge {add,delete}}
+├── workflow|wf {list, create, show, update, delete, validate, clone,
+│                 import, export, publish, versions,
+│                 stage {list,add,update,remove,hook}, edge {list,add,remove}}
 ├── run {list, start, show, watch, pause, resume, cancel, retry, messages, workspace,
 │         stage {pause,resume,retry,cancel,list},
 │         hitl {mode, pending, resume},

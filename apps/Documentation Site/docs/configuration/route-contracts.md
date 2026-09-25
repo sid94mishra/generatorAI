@@ -402,3 +402,18 @@ const SignalBodySchema = z.object({
 });
 ```
 
+## workflowRuns
+
+Source: `apps/server/src/routes/workflowRuns.ts`. Imported symbols retain their source names; see the linked feature/configuration guides for those values.
+
+### CreateWorkflowRunSchema
+
+```typescript
+const CreateWorkflowRunSchema = z.object({
+  workflowDefinitionId: z.string().uuid(),
+  variables: z.record(z.unknown()).default({}),
+  projectId: z.string().uuid().optional(),
+  testRun: z.boolean().optional(),
+});
+```
+

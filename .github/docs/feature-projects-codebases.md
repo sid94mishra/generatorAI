@@ -407,9 +407,9 @@ const codebases = await ai.services.codebaseService.getByProjectId(proj.id);
 3. **`local-dir` codebases are used in place** — no copy, so nothing isolates concurrent runs from each other; use `git-local` + worktrees when isolation matters.
 4. **`worktreeInclude`** — files copied verbatim from the source repo into each new worktree. Useful for `.env` files that aren't committed. Path traversal is *not* checked here because the source path is the codebase's own clone.
 5. **Project deletion with active worktrees** — cascades worktrees away but does not stop running workflows. Cancel runs first.
-6. **MCP server enable/disable** — `enabled` field on the JSON config. Workflow stages can additionally exclude via `harnessConfigOverrides.excludedTools`.
+6. **MCP server enable/disable** — `enabled` field on the JSON config. Workflow stages can additionally exclude servers via `session.mcp.excludedIds` (and individual tools via `session.tools.excluded`).
 7. **System artifacts auto-load** — on every server boot. New files dropped into `templates/system/artifacts/<type>s/` appear without manual DB sync.
-8. **Project filter on workflows** — `scope='project'` workflows are invisible in the global list unless `?projectId=<id>` is passed.
+8. **Project filter on workflows** — a definition is bound to a project by `workflow.projectId` (null = global). `GET /api/workflow-definitions?projectId=<id>` lists one project's definitions, `?projectId=global` lists those without a project, and no filter lists all.
 9. **Codebase status `error`** — happens when clone fails (e.g., bad URL, auth required). `lastError` field captures the message; UI shows in `CodebaseDetailPage`.
 10. **Branches** — `GET /api/projects/:id/codebases/:cid/branches` shells out to `git for-each-ref refs/heads refs/remotes`. Returns up to 1000 names.
 11. **Project rootPath move** — `rootPath` is stored in DB. If you move the artifacts directory on disk, you must update each project's rootPath manually (no migration helper yet).

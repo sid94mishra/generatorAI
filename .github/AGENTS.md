@@ -118,12 +118,13 @@ The single most important boundary is **`IAgentHarness`** ([packages/core/src/do
 Project ──< ProjectCodebase ──< Worktree (per run)
 Project ──< ProjectConfig  (agents / prompts / skills / mcp)
 
-WorkflowDefinition ──< StageDefinition ──< PromptDefinition
-                  ╰─< StageEdge (on_success | on_failure | on_completion | always)
-                  ╰─< VariableDefinition
-                  ╰─< HookDefinition (workflow-scope phases)
+WorkflowDefinition = one v2 WorkflowGraph document (@generatorai/workflow-spec)
+  ├─ workflow: session, variables, hooks, lifecycle, tags, projectId
+  ├─ stages[] by key (AgentStage: prompts, guard, session, context, output, retry, approval, hooks)
+  ├─ edges[] { from, to, on: success | failure | completion | always, when? }
+  ╰─< WorkflowDefinitionVersion (immutable; published | test)  ← every run pins one
 
-WorkflowRun ──< StageRun ──── allocated Session (1:1 conversation with harness)
+WorkflowRun (definitionVersionId) ──< StageRun (stageKey) ──── allocated Session (1:1 conversation with harness)
             ╰─ ExecutionWorkspace (chat | workflow_run | automation_execution)
                 ├─< WorkspaceWorktree (one per linked codebase)
                 ├─< WorkspaceArtifact (code_file | response_md | attachment | browser_screenshot | …)
@@ -152,13 +153,13 @@ If you change anything below, you will break user-visible behavior. Confirm test
 2. **EventBus per-session promise queue** must remain sequential — concurrent emits would cause out-of-order SSE on the wire. See [docs/feature-streaming-events.md](./docs/feature-streaming-events.md).
 3. **StreamBroker commit-then-broadcast** order — DB insert into `stream_cursors` must happen *before* in-memory broadcast so replay is always at least as new as live. See [docs/feature-streaming-events.md](./docs/feature-streaming-events.md).
 4. **`sseManager` cross-buffer flush (apps/web/src/stores/sseManager.ts lines ~160–183)** is load-bearing for thinking↔token interleaving. Do not "simplify".
-5. **DAG cache invalidation** is hash-based by stages + edges; if you mutate definitions out-of-band, call `dagScheduler.clearCache(definitionId)`.
+5. **Runs read their pinned definition version.** Everything the engine reads about a run's stages comes from `RunDefinitionReader` (by `definitionVersionId` and `stageKey`); versions are immutable, so there is no cache to invalidate. Never read the live definition from engine code. Definitions change only through `WorkflowDefinitionService` (whole-graph save with `expectedRevision`, one transaction).
 6. **`acquireSseSlot()` release** must be called in `res.on('close')` for every SSE handler, otherwise the per-(scope,id) cap leaks.
 7. **`workflow.useWorktree`** and `chat.useWorktree` default to `true` when a project is attached. If you skip worktree creation, `__workingDirectory` falls back to the workspace root.
-8. **`harnessConfigOverrides.model`** is provider-specific. `gpt-5.4-mini` works on `copilot` only; `claude-sonnet-4-6` works on `claude-agent` only. Switching `HARNESS_TYPE` mid-deploy without scrubbing overrides will fail stages.
+8. **A stage `session.model`** is provider-specific. `gpt-5.4-mini` works on `copilot` only; `claude-sonnet-4-6` works on `claude-agent` only. Switching `HARNESS_TYPE` mid-deploy without scrubbing overrides will fail stages.
 9. **`script` hooks** must use commands on the allowlist (`node`, `python`, `bash`, `git`, `echo`, `pwsh`, …). `cmd.exe` is *not* allowed. See [docs/feature-hooks.md](./docs/feature-hooks.md#hook-types).
 10. **`function` hooks** require `hookExecutor.registerFunctionHandler(name, fn)` at boot. Built-in handlers are wired in [apps/server/src/composition-root.ts](../apps/server/src/composition-root.ts).
-11. **3-level config resolution** order: WorkflowDefinition.harnessConfig → StageDefinition.harnessConfigOverrides → RunProfile / runtime overrides. The `ConfigResolver` deep-merges; do not bypass it.
+11. **3-level config resolution** order: `workflow.session` → stage `session` → run profile / runtime overrides. The `ConfigResolver` deep-merges; do not bypass it.
 12. **JSON columns** in DB are validated *symmetrically* (`validateJsonColumn` on write, `safeJsonColumn` on read). Adding a new JSON column without both will eventually corrupt the DB. See [docs/packages.md](./docs/packages.md#db).
 13. **DB migrations** are append-only via the `_schema_versions` ledger. Never re-number an existing migration.
 14. **Integrated Browser + Terminal are workspace-scoped resources.** Both hook into `WorkspaceManager.registerBeforeDelete` so their native processes (Chromium / PTY) never outlive a deleted workspace. If you touch workspace deletion, keep this hook alive. See [docs/feature-integrated-browser.md](./docs/feature-integrated-browser.md) + [docs/feature-integrated-terminal.md](./docs/feature-integrated-terminal.md).
@@ -232,9 +233,9 @@ Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 | Feature | Web | CLI | SDK | Notes |
 |---|---|---|---|---|
 | Chats: create / list / send / archive / delete | ✅ | ✅ (`chat …`) | ✅ (`ai.chat`) | Streaming via SSE. Optional project + up to 3 codebases + worktree. |
-| Workflow defs: CRUD / validate / import-json / import-template / export | ✅ | ✅ (`workflow …`) | ✅ (`ai.workflows.create/list/get`) | Visual DAG builder in web. |
+| Workflow defs: create / save graph / publish / versions / validate / import (document or template) / export | ✅ | ✅ (`workflow …`) | ✅ (`ai.workflows.create/save/publish/validate/list/get`) | Visual DAG builder in web; drafts run only as test runs. |
 | Workflow runs: start / pause / resume / cancel / retry / watch / messages / workspace | ✅ | ✅ (`run …`) | ✅ (`ai.workflows.run/stream/pause/resume/cancel/retry`) | Run profiles supported in CLI + SDK + script materialize. |
-| Stage CRUD + edge CRUD | ✅ | ✅ (`workflow stage`, `workflow edge`) | via builder (`StageBuilder`) | All edge types (`on_success / on_failure / on_completion / always`). |
+| Stage + edge edits (by stage key) | ✅ | ✅ (`stage …`, `edge …`, read-modify-write) | via builder (`workflow().stage().edge()`) | Edge `on`: `success / failure / completion / always`, optional `when`. |
 | HITL (permission mode + approve/reject) | ✅ | ✅ (`run hitl`) | via `services.hitlService` (advanced) | 4 modes: `bypassPermissions / default / acceptEdits / plan`. |
 | Automations: CRUD / enable / disable / trigger / executions | ✅ | ✅ (`automation …`) | ✅ (`ai.automations`) | 3 triggers × 4 input modes + 7 data-source scripts shipped. |
 | Projects + codebases (3 types) + configs (agents/prompts/skills/mcp) | ✅ | ✅ (`project …`) | partial (via `services.projectService`) | Worktree creation per run / chat / automation iteration. |
@@ -245,7 +246,7 @@ Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 | Webhooks (incoming for automations + outgoing GH webhook) | ✅ | ✅ (`webhook …`) | ✅ (`services.webhookService`) | HMAC verification + delivery audit log. |
 | MCP servers (system + per-project) | ✅ | ✅ (`project mcp …`, `system mcp-servers`) | passed via `params.mcpServers` to harness | 8 system servers by default. |
 | Programmatic Workflow Scripts (PWS) | ✅ (Scripts page + Run with profile) | ✅ (`script …`) | ✅ (`ai.scripts`) | `.workflow.mjs` reloadable without restart. |
-| Templates | ✅ | ✅ (`template list`, `workflow from-template`) | ✅ via `services.templateRegistry` | 5 built-in v2 templates. |
+| Templates | ✅ | ✅ (`template list`, `workflow import --template`) | ✅ via `services.templateRegistry` | 5 built-in templates (`{ id, category, graph }`), validated at boot. |
 | Provider switch (Copilot ↔ Claude Agent) | ✅ (Settings → Provider) | ✅ (`harness …`) | constructor option | Hot-swappable via `HarnessProxy.switchAdapter`. |
 | Custom tools (Zod-typed) | n/a | n/a | ✅ (`ai.tools.register / tool()`) | SDK-only. |
 | Custom event subscription | n/a | via `run watch` SSE | ✅ (`ai.events.onAll/onRun/onSession/replay/emit`) | |
@@ -258,16 +259,15 @@ Critical env vars (full list in [docs/operations.md](./docs/operations.md)):
 Common change patterns and the bare-minimum checklist:
 
 **Add a new stage option** (e.g., a new validation rule type):
-1. `packages/shared/src/types/StageDefinition.ts` — extend the union.
-2. `packages/shared/src/config/WorkflowDefinitionSchemas.ts` — extend the Zod schema for `CreateStageSchema` *and* `ImportStageSchema`.
-3. `packages/db/src/repositories/StageDefinitionRepository.ts` — read/write the new field (if it lives in its own column) or it inherits the JSON column.
-4. `packages/core/src/services/ResultValidator.ts` (or related) — implement.
-5. `apps/web/src/components/workflow/StagePropertiesPanel.tsx` — surface it in the Execution tab.
-6. `apps/cli/src/commands/workflow.ts` — add a flag if it makes sense from CLI.
-7. Add unit + Playwright E2E coverage.
+1. `packages/workflow-spec/src/schemas/` — extend the Zod schema (with `.describe()`); if the current engine cannot run it yet, add it to the engine gate in `validate/capability.ts`.
+2. `pnpm generate:workflow-spec` — regenerates the JSON Schema and `docs/workflow-overhaul/generated/FIELDS.md`.
+3. `packages/core/src/services/ResultValidator.ts` / `StageExecutionService.ts` — implement (read it from the stage the run's pinned version holds). No DB change: the stage JSON lives in `stage_definitions.spec`.
+4. `apps/web/src/components/workflow/StagePropertiesPanel.tsx` — surface it.
+5. `packages/cli-core/src/commands/workflow.ts` — add a flag if it makes sense from CLI.
+6. Add unit + testkit coverage.
 
 **Add a new hook phase**:
-1. `packages/shared/src/types/HookDefinition.ts` — extend `HookPhase` union.
+1. `packages/workflow-spec/src/schemas/common.ts` — extend `STAGE_HOOK_PHASES` or `WORKFLOW_HOOK_PHASES` (and the phase catalogue); `packages/shared/src/types/HookDefinition.ts` re-exports the types.
 2. `packages/core/src/services/HookInterceptor.ts` (or `WorkflowRunService` / `StageExecutionService`) — find the right call site and invoke `hookExecutor.executePhase(phase, ctx)`.
 3. `apps/server/src/routes/hooks.ts` — confirm it surfaces in `GET /api/hooks/phases`.
 4. `apps/web/src/components/workflow/settings/HooksTab.tsx` (or `StagePropertiesPanel`) — add to the dropdown.

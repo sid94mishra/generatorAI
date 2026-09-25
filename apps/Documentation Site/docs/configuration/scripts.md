@@ -1,334 +1,721 @@
-# Workflow scripts and profiles: configuration fields
+# Definition records, templates and script profiles: configuration fields
 
-Generated from `packages/shared/src/config/WorkflowScriptSchema.ts` by `npm run configuration:generate`. These are the actual evaluated Zod contracts, including composed/partial schemas, defaults, nested objects, unions, and numeric/string limits.
+Generated from `packages/workflow-spec/src/definition.ts` by `npm run configuration:generate`. These are the actual evaluated Zod contracts, including composed/partial schemas, defaults, nested objects, unions, and numeric/string limits.
 
 Start with the [configuration map](./index.md) and [worked examples](./examples.md). **Schema defaults are not necessarily effective runtime defaults**: entrypoints, persisted preferences, agent resolution, and route logic may override them. A field accepted by a schema is not a promise of UI availability or provider support.
 
 Nested fields apply only when their parent/union variant is present. Arrays use `[]`; records use `{key}`. Required children of an optional object do not make that parent required. Custom refinements, transforms and cross-field rules are preserved in the source contract below and explained in the feature guides.
 
-## WorkflowScriptOutputSchema
+## SaveGraphRequestSchema
 
-Zod schema for validating WorkflowScriptOutput from .workflow.mjs files.
-The inlineHooks field (Map of functions) is excluded from schema validation
-since functions can't be serialized — it's validated separately at runtime.
+`PUT /workflow-definitions/:id/graph`. The graph is validated separately.
 
 | Field | Type / choices | Input / default | Constraints |
 | --- | --- | --- | --- |
-| id | string | `required` | min 1; regex /^[a-zA-Z][a-zA-Z0-9_-]*$/ |
-| definition | object | `required` | unknown keys: strip |
-| definition.name | string | `required` | min 1; max 255 |
-| definition.description | string | `optional` | max 2000 |
-| definition.sessionMode | "single" / "per-stage" / "auto" | `required` | — |
-| definition.harnessConfig | map of unknown | `optional` | — |
-| definition.variables | array of object | `required` | — |
-| definition.variables[] | object | `required` | unknown keys: strip |
-| definition.variables[].name | string | `required` | min 1; regex /^[a-zA-Z_][a-zA-Z0-9_]*$/ |
-| definition.variables[].type | "string" / "number" / "boolean" / "choice" / "text" | `required` | — |
-| definition.variables[].label | string | `required` | min 1 |
-| definition.variables[].description | string | `optional` | — |
-| definition.variables[].required | boolean | `required` | — |
-| definition.variables[].defaultValue | unknown | `optional` | — |
-| definition.variables[].options | array of string | `optional` | — |
-| definition.tags | array of string | `required` | — |
-| definition.orchestratorConfig | map of unknown | `optional` | — |
-| definition.hooks | array of object | `optional` | — |
-| definition.hooks[] | object | `required` | unknown keys: strip |
-| definition.hooks[].id | string | `required` | — |
-| definition.hooks[].name | string | `required` | — |
-| definition.hooks[].phase | "on_run_start" / "on_run_complete" / "on_run_failed" / "on_run_cancelled" / "on_pr_created" / "on_preprocessing_complete" / "on_postprocessing_start" / "on_all_stages_scheduled" / "on_stage_completed" / "on_stage_failed" / "on_parallel_join" / "pre_clone" / "post_clone" / "pre_commit" / "post_commit" | `required` | — |
-| definition.hooks[].type | "script" / "http" / "function" | `required` | — |
-| definition.hooks[].priority | number | `required` | int; min 0 |
-| definition.hooks[].enabled | boolean | `required` | — |
-| definition.hooks[].failurePolicy | "abort" / "skip" / "continue" | `required` | — |
-| definition.hooks[].timeoutMs | number | `required` | int; min 0 (exclusive) |
-| definition.hooks[].retries | number | `required` | int; min 0 |
-| definition.hooks[].config | variants by type (object / object / object) | `required` | — |
-| definition.hooks[].config&lt;variant 1&gt; | object | `required` | unknown keys: strip |
-| definition.hooks[].config&lt;variant 1&gt;.type | "script" | `required` | — |
-| definition.hooks[].config&lt;variant 1&gt;.command | string | `required` | — |
-| definition.hooks[].config&lt;variant 1&gt;.args | array of string | `optional` | — |
-| definition.hooks[].config&lt;variant 1&gt;.cwd | string | `optional` | — |
-| definition.hooks[].config&lt;variant 1&gt;.env | map of string | `optional` | — |
-| definition.hooks[].config&lt;variant 2&gt; | object | `required` | unknown keys: strip |
-| definition.hooks[].config&lt;variant 2&gt;.type | "http" | `required` | — |
-| definition.hooks[].config&lt;variant 2&gt;.url | string | `required` | — |
-| definition.hooks[].config&lt;variant 2&gt;.method | "GET" / "POST" / "PUT" | `default "POST"` | — |
-| definition.hooks[].config&lt;variant 2&gt;.headers | map of string | `optional` | — |
-| definition.hooks[].config&lt;variant 2&gt;.bodyTemplate | string | `optional` | — |
-| definition.hooks[].config&lt;variant 3&gt; | object | `required` | unknown keys: strip |
-| definition.hooks[].config&lt;variant 3&gt;.type | "function" | `required` | — |
-| definition.hooks[].config&lt;variant 3&gt;.modulePath | string | `optional` | — |
-| definition.hooks[].config&lt;variant 3&gt;.handlerName | string | `optional` | — |
-| definition.hooks[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
-| definition.useWorktree | boolean | `optional` | — |
-| stages | array of object | `required` | minLength 1; maxLength 50 |
-| stages[] | object | `required` | unknown keys: strip |
-| stages[].localId | string | `required` | min 1; regex /^[a-zA-Z][a-zA-Z0-9_-]*$/ |
-| stages[].config | object | `required` | unknown keys: strip |
-| stages[].config.name | string | `required` | min 1 |
-| stages[].config.description | string | `optional` | — |
-| stages[].config.order | number | `required` | int; min 0 |
-| stages[].config.prompts | array of object | `required` | minLength 0 |
-| stages[].config.prompts[] | object | `required` | unknown keys: strip |
-| stages[].config.prompts[].label | string | `optional` | — |
-| stages[].config.prompts[].text | string | `required` | — |
-| stages[].config.hooks | array of object | `optional` | — |
-| stages[].config.hooks[] | object | `required` | unknown keys: strip |
-| stages[].config.hooks[].id | string | `required` | — |
-| stages[].config.hooks[].name | string | `required` | — |
-| stages[].config.hooks[].phase | string | `required` | — |
-| stages[].config.hooks[].type | "script" / "http" / "function" | `required` | — |
-| stages[].config.hooks[].priority | number | `required` | int; min 0 |
-| stages[].config.hooks[].enabled | boolean | `required` | — |
-| stages[].config.hooks[].failurePolicy | "abort" / "skip" / "continue" | `required` | — |
-| stages[].config.hooks[].timeoutMs | number | `required` | int; min 0 (exclusive) |
-| stages[].config.hooks[].retries | number | `required` | int; min 0 |
-| stages[].config.hooks[].config | variants by type (object / object / object) | `required` | — |
-| stages[].config.hooks[].config&lt;variant 1&gt; | object | `required` | unknown keys: strip |
-| stages[].config.hooks[].config&lt;variant 1&gt;.type | "script" | `required` | — |
-| stages[].config.hooks[].config&lt;variant 1&gt;.command | string | `required` | — |
-| stages[].config.hooks[].config&lt;variant 1&gt;.args | array of string | `optional` | — |
-| stages[].config.hooks[].config&lt;variant 1&gt;.cwd | string | `optional` | — |
-| stages[].config.hooks[].config&lt;variant 1&gt;.env | map of string | `optional` | — |
-| stages[].config.hooks[].config&lt;variant 2&gt; | object | `required` | unknown keys: strip |
-| stages[].config.hooks[].config&lt;variant 2&gt;.type | "http" | `required` | — |
-| stages[].config.hooks[].config&lt;variant 2&gt;.url | string | `required` | — |
-| stages[].config.hooks[].config&lt;variant 2&gt;.method | "GET" / "POST" / "PUT" | `default "POST"` | — |
-| stages[].config.hooks[].config&lt;variant 2&gt;.headers | map of string | `optional` | — |
-| stages[].config.hooks[].config&lt;variant 2&gt;.bodyTemplate | string | `optional` | — |
-| stages[].config.hooks[].config&lt;variant 3&gt; | object | `required` | unknown keys: strip |
-| stages[].config.hooks[].config&lt;variant 3&gt;.type | "function" | `required` | — |
-| stages[].config.hooks[].config&lt;variant 3&gt;.modulePath | string | `optional` | — |
-| stages[].config.hooks[].config&lt;variant 3&gt;.handlerName | string | `optional` | — |
-| stages[].config.hooks[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
-| stages[].config.harnessConfigOverrides | map of unknown | `optional` | — |
-| stages[].config.contextFilter | "full" / "summary-only" / "none" / "structured" | `optional` | — |
-| stages[].config.contextSources | array of string | `optional` | — |
-| stages[].config.outputFormat | "text" / "json" | `optional` | — |
-| stages[].config.outputSchema | map of unknown | `optional` | — |
-| stages[].config.retryPolicy | object | `optional` | unknown keys: strip |
-| stages[].config.retryPolicy.maxRetries | number | `required` | int; min 0; max 10 |
-| stages[].config.retryPolicy.backoffMs | number | `required` | int; min 0 |
-| stages[].config.retryPolicy.backoffMultiplier | number | `optional` | min 1 |
-| stages[].config.timeoutMs | number | `optional` | int; min 0 (exclusive) |
-| stages[].config.condition | object | `optional` | unknown keys: strip |
-| stages[].config.condition.type | "always" / "on_success" / "on_failure" / "expression" | `required` | — |
-| stages[].config.condition.expression | string | `optional` | — |
-| stages[].config.skills | array of object | `optional` | — |
-| stages[].config.skills[] | object | `required` | unknown keys: strip |
-| stages[].config.skills[].name | string | `required` | — |
-| stages[].config.skills[].directory | string | `optional` | — |
-| stages[].config.skills[].description | string | `optional` | — |
-| edges | array of object | `required` | — |
-| edges[] | object | `required` | unknown keys: strip |
-| edges[].from | string | `required` | min 1 |
-| edges[].to | string | `required` | min 1 |
-| edges[].edgeType | "on_success" / "on_failure" / "on_completion" / "always" | `required` | — |
-| edges[].condition | string | `optional` | — |
+| graph | unknown | `optional` | — |
+| expectedRevision | number | `required` | int; min 1 |
+
+## ImportTemplateRequestSchema
+
+`POST /workflow-definitions` and `POST /workflow-definitions/import` with a template.
+
+| Field | Type / choices | Input / default | Constraints |
+| --- | --- | --- | --- |
+| templateId | string | `required` | min 1; max 100 |
+| name | string | `optional` | min 1; max 200 |
+| projectId | string | `optional; null accepted` | uuid |
+
+## WorkflowTemplateSchema
+
+A template file (`templates/system/*.json`): an id, a category and a graph.
+
+| Field | Type / choices | Input / default | Constraints |
+| --- | --- | --- | --- |
+| id | string | `required` | regex /^[a-z0-9][a-z0-9-]{0,63}$/ |
+| category | "system" / "code-generation" / "code-review" / "testing" / "e2e-testing" / "refactoring" / "documentation" / "deployment" / "custom" | `required` | — |
+| graph | object | `required` | unknown keys: strict |
+| graph.formatVersion | 2 | `required` | — |
+| graph.workflow | object | `required` | unknown keys: strict |
+| graph.workflow.name | string | `required` | min 1; max 200 |
+| graph.workflow.description | string | `optional` | max 2000 |
+| graph.workflow.session | object | `default {}` | unknown keys: strict |
+| graph.workflow.session.model | string | `optional` | max 200 |
+| graph.workflow.session.harnessType | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `optional` | — |
+| graph.workflow.session.reasoningEffort | "low" / "medium" / "high" / "xhigh" / "max" / "ultra" | `optional` | — |
+| graph.workflow.session.contextTier | "default" / "long_context" | `optional` | — |
+| graph.workflow.session.maxTurns | number | `optional` | int; min 1; max 1000 |
+| graph.workflow.session.provider | object | `optional` | unknown keys: strict |
+| graph.workflow.session.provider.name | string | `required` | min 1; max 100 |
+| graph.workflow.session.provider.baseUrl | string | `required` | url; max 2000 |
+| graph.workflow.session.provider.apiKey | string | `required` | min 1; max 500 |
+| graph.workflow.session.provider.model | string | `optional` | max 200 |
+| graph.workflow.session.agentRef | string | `optional` | min 1; max 128 |
+| graph.workflow.session.agentOverrides | object | `optional` | unknown keys: strict |
+| graph.workflow.session.agentOverrides.addSkillIds | array of string | `optional` | maxLength 100 |
+| graph.workflow.session.agentOverrides.removeSkillIds | array of string | `optional` | maxLength 100 |
+| graph.workflow.session.agentOverrides.addMcpServerIds | array of string | `optional` | maxLength 100 |
+| graph.workflow.session.agentOverrides.removeMcpServerIds | array of string | `optional` | maxLength 100 |
+| graph.workflow.session.agentOverrides.tools | object | `optional` | unknown keys: strict |
+| graph.workflow.session.agentOverrides.tools.browser | boolean | `optional` | — |
+| graph.workflow.session.agentOverrides.tools.widgets | boolean | `optional` | — |
+| graph.workflow.session.agentOverrides.tools.extensionAuthoring | boolean | `optional` | — |
+| graph.workflow.session.agentOverrides.tools.orchestration | boolean | `optional` | — |
+| graph.workflow.session.agentOverrides.tools.fileRead | boolean | `optional` | — |
+| graph.workflow.session.agentOverrides.tools.fileWrite | boolean | `optional` | — |
+| graph.workflow.session.agentOverrides.tools.shell | boolean | `optional` | — |
+| graph.workflow.session.agentOverrides.tools.web | boolean | `optional` | — |
+| graph.workflow.session.agentOverrides.runtime | object | `optional` | unknown keys: strict |
+| graph.workflow.session.agentOverrides.runtime.model | string | `optional` | max 200 |
+| graph.workflow.session.agentOverrides.runtime.harnessType | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `optional` | — |
+| graph.workflow.session.agentOverrides.runtime.reasoningEffort | "low" / "medium" / "high" / "xhigh" / "max" / "ultra" | `optional` | — |
+| graph.workflow.session.agentOverrides.runtime.contextTier | "default" / "long_context" | `optional` | — |
+| graph.workflow.session.agentOverrides.runtime.maxTurns | number | `optional` | int; min 1; max 1000 |
+| graph.workflow.session.agentOverrides.runtime.permissionMode | "default" / "acceptEdits" / "plan" / "bypassPermissions" / "dontAsk" | `optional` | — |
+| graph.workflow.session.agentOverrides.runtime.defaultAgentMode | "auto" / "plan" | `optional` | — |
+| graph.workflow.session.agentOverrides.appendInstructions | string | `optional` | max 16000 |
+| graph.workflow.session.agentOverrides.extraAllow | array of string | `optional` | maxLength 200 |
+| graph.workflow.session.agentOverrides.extraDeny | array of string | `optional` | maxLength 200 |
+| graph.workflow.session.systemMessage | object | `optional` | unknown keys: strict |
+| graph.workflow.session.systemMessage.mode | "append" / "replace" | `default "append"` | — |
+| graph.workflow.session.systemMessage.content | string | `required` | max 100000 |
+| graph.workflow.session.systemPromptAppend | string | `optional` | max 100000 |
+| graph.workflow.session.planModeInstructions | string | `optional` | max 20000 |
+| graph.workflow.session.tools | object | `optional` | unknown keys: strict |
+| graph.workflow.session.tools.available | array of string | `optional` | maxLength 500 |
+| graph.workflow.session.tools.excluded | array of string | `optional` | maxLength 500 |
+| graph.workflow.session.mcp | object | `optional` | unknown keys: strict |
+| graph.workflow.session.mcp.servers | map of object | `optional` | — |
+| graph.workflow.session.mcp.servers.{key} | object | `required` | unknown keys: strict |
+| graph.workflow.session.mcp.servers.{key}.type | "http" / "sse" / "stdio" | `required` | — |
+| graph.workflow.session.mcp.servers.{key}.url | string | `optional` | max 2000 |
+| graph.workflow.session.mcp.servers.{key}.headers | map of string | `optional` | — |
+| graph.workflow.session.mcp.servers.{key}.command | string | `optional` | max 1000 |
+| graph.workflow.session.mcp.servers.{key}.args | array of string | `optional` | maxLength 64 |
+| graph.workflow.session.mcp.servers.{key}.env | map of string | `optional` | — |
+| graph.workflow.session.mcp.servers.{key}.cwd | string | `optional` | max 1000 |
+| graph.workflow.session.mcp.servers.{key}.tools | array of string | `optional` | maxLength 500 |
+| graph.workflow.session.mcp.servers.{key}.timeoutMs | number | `optional` | int; min 0; max 600000 |
+| graph.workflow.session.mcp.servers.{key}.enabled | boolean | `optional` | — |
+| graph.workflow.session.mcp.excludedIds | array of string | `optional` | maxLength 200 |
+| graph.workflow.session.skills | object | `optional` | unknown keys: strict |
+| graph.workflow.session.skills.directories | array of string | `optional` | maxLength 100 |
+| graph.workflow.session.skills.disabled | array of string | `optional` | maxLength 500 |
+| graph.workflow.session.customAgents | array of object | `optional` | maxLength 50 |
+| graph.workflow.session.customAgents[] | object | `required` | unknown keys: strict |
+| graph.workflow.session.customAgents[].name | string | `required` | min 1; max 120 |
+| graph.workflow.session.customAgents[].description | string | `required` | min 1; max 2000 |
+| graph.workflow.session.customAgents[].instructions | string | `required` | min 1; max 64000 |
+| graph.workflow.session.customAgents[].tools | array of string | `optional` | maxLength 200 |
+| graph.workflow.session.permissionMode | "default" / "acceptEdits" / "plan" / "bypassPermissions" / "dontAsk" | `optional` | — |
+| graph.workflow.session.defaultAgentMode | "auto" / "plan" | `optional` | — |
+| graph.workflow.session.browser | object | `optional` | unknown keys: strict |
+| graph.workflow.session.browser.enabled | boolean | `optional` | — |
+| graph.workflow.session.browser.mode | "auto" / "native" / "screencast" | `optional` | — |
+| graph.workflow.session.browser.visibility | "visible" / "headless" / "off" | `optional` | — |
+| graph.workflow.session.browser.headless | boolean | `optional` | — |
+| graph.workflow.session.browser.viewport | object | `optional` | unknown keys: strict |
+| graph.workflow.session.browser.viewport.width | number | `required` | int; min 320; max 3840 |
+| graph.workflow.session.browser.viewport.height | number | `required` | int; min 240; max 2160 |
+| graph.workflow.session.browser.allowedHosts | array of string | `optional` | maxLength 100 |
+| graph.workflow.session.browser.persistProfile | boolean | `optional` | — |
+| graph.workflow.session.browser.screencastFps | number | `optional` | int; min 1; max 15 |
+| graph.workflow.session.browser.screencastQuality | number | `optional` | int; min 20; max 95 |
+| graph.workflow.session.browser.idlePauseMinutes | number | `optional` | int; min 1; max 120 |
+| graph.workflow.session.browser.evalAllowed | boolean | `optional` | — |
+| graph.workflow.session.browser.dialogPolicy | "dismiss" / "accept" / "ask" | `optional` | — |
+| graph.workflow.session.browser.permissions | array of string | `optional` | maxLength 20 |
+| graph.workflow.session.browser.piiRedaction | boolean | `optional` | — |
+| graph.workflow.session.browser.injectionDefense | "off" / "classifier" | `optional` | — |
+| graph.workflow.session.browser.recordVideo | boolean | `optional` | — |
+| graph.workflow.session.browser.allowLocalhostSelfSigned | boolean | `optional` | — |
+| graph.workflow.session.computerUse | boolean | `optional` | — |
+| graph.workflow.session.widgets | boolean | `optional` | — |
+| graph.workflow.session.orchestrator | boolean | `optional` | — |
+| graph.workflow.variables | array of object | `default []` | maxLength 50 |
+| graph.workflow.variables[] | object | `required` | unknown keys: strict; refinement |
+| graph.workflow.variables[].name | string | `required` | min 1; max 64; regex /^[A-Za-z_][A-Za-z0-9_]*$/ |
+| graph.workflow.variables[].type | "string" / "number" / "boolean" / "choice" / "text" | `required` | — |
+| graph.workflow.variables[].label | string | `required` | min 1; max 200 |
+| graph.workflow.variables[].description | string | `optional` | max 2000 |
+| graph.workflow.variables[].required | boolean | `default false` | — |
+| graph.workflow.variables[].defaultValue | unknown | `optional` | — |
+| graph.workflow.variables[].options | array of string | `optional` | maxLength 100 |
+| graph.workflow.hooks | array of object | `default []` | maxLength 50 |
+| graph.workflow.hooks[] | object | `required` | unknown keys: strict; refinement |
+| graph.workflow.hooks[].id | string | `required` | min 1; max 100 |
+| graph.workflow.hooks[].name | string | `required` | min 1; max 200 |
+| graph.workflow.hooks[].type | "script" / "http" / "function" | `required` | — |
+| graph.workflow.hooks[].priority | number | `default 0` | int; min -1000; max 1000 |
+| graph.workflow.hooks[].enabled | boolean | `default true` | — |
+| graph.workflow.hooks[].failurePolicy | "abort" / "skip" / "continue" | `default "skip"` | — |
+| graph.workflow.hooks[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.workflow.hooks[].retries | number | `default 0` | int; min 0; max 5 |
+| graph.workflow.hooks[].config | variants by type (object / object / object) | `required` | refinement |
+| graph.workflow.hooks[].config&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.hooks[].config&lt;variant 1&gt;.type | "script" | `required` | — |
+| graph.workflow.hooks[].config&lt;variant 1&gt;.command | string | `required` | min 1; max 1000 |
+| graph.workflow.hooks[].config&lt;variant 1&gt;.args | array of string | `optional` | maxLength 64 |
+| graph.workflow.hooks[].config&lt;variant 1&gt;.cwd | string | `optional` | max 1000 |
+| graph.workflow.hooks[].config&lt;variant 1&gt;.env | map of string | `optional` | — |
+| graph.workflow.hooks[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.hooks[].config&lt;variant 2&gt;.type | "http" | `required` | — |
+| graph.workflow.hooks[].config&lt;variant 2&gt;.url | string | `required` | url; max 2000 |
+| graph.workflow.hooks[].config&lt;variant 2&gt;.method | "GET" / "POST" / "PUT" / "PATCH" / "DELETE" | `required` | — |
+| graph.workflow.hooks[].config&lt;variant 2&gt;.headers | map of string | `optional` | — |
+| graph.workflow.hooks[].config&lt;variant 2&gt;.bodyTemplate | string | `optional` | max 100000 |
+| graph.workflow.hooks[].config&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.hooks[].config&lt;variant 3&gt;.type | "function" | `required` | — |
+| graph.workflow.hooks[].config&lt;variant 3&gt;.modulePath | string | `optional` | max 1000 |
+| graph.workflow.hooks[].config&lt;variant 3&gt;.handlerName | string | `optional` | max 200 |
+| graph.workflow.hooks[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
+| graph.workflow.hooks[].phase | "on_run_start" / "on_run_complete" / "on_run_failed" / "on_run_cancelled" / "pre_clone" / "post_clone" / "pre_commit" / "post_commit" / "on_pr_created" / "on_preprocessing_complete" / "on_postprocessing_start" / "on_all_stages_scheduled" / "on_stage_completed" / "on_stage_failed" / "on_parallel_join" | `required` | — |
+| graph.workflow.onExit | array of object | `optional` | maxLength 20 |
+| graph.workflow.onExit[] | object | `required` | unknown keys: strict |
+| graph.workflow.onExit[].name | string | `required` | min 1; max 200 |
+| graph.workflow.onExit[].config | variants by type (object / object / object) | `required` | refinement |
+| graph.workflow.onExit[].config&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.onExit[].config&lt;variant 1&gt;.type | "script" | `required` | — |
+| graph.workflow.onExit[].config&lt;variant 1&gt;.command | string | `required` | min 1; max 1000 |
+| graph.workflow.onExit[].config&lt;variant 1&gt;.args | array of string | `optional` | maxLength 64 |
+| graph.workflow.onExit[].config&lt;variant 1&gt;.cwd | string | `optional` | max 1000 |
+| graph.workflow.onExit[].config&lt;variant 1&gt;.env | map of string | `optional` | — |
+| graph.workflow.onExit[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.onExit[].config&lt;variant 2&gt;.type | "http" | `required` | — |
+| graph.workflow.onExit[].config&lt;variant 2&gt;.url | string | `required` | url; max 2000 |
+| graph.workflow.onExit[].config&lt;variant 2&gt;.method | "GET" / "POST" / "PUT" / "PATCH" / "DELETE" | `required` | — |
+| graph.workflow.onExit[].config&lt;variant 2&gt;.headers | map of string | `optional` | — |
+| graph.workflow.onExit[].config&lt;variant 2&gt;.bodyTemplate | string | `optional` | max 100000 |
+| graph.workflow.onExit[].config&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.onExit[].config&lt;variant 3&gt;.type | "function" | `required` | — |
+| graph.workflow.onExit[].config&lt;variant 3&gt;.modulePath | string | `optional` | max 1000 |
+| graph.workflow.onExit[].config&lt;variant 3&gt;.handlerName | string | `optional` | max 200 |
+| graph.workflow.onExit[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
+| graph.workflow.onExit[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.workflow.onExit[].retries | number | `default 0` | int; min 0; max 5 |
+| graph.workflow.onFailure | array of object | `optional` | maxLength 20 |
+| graph.workflow.onFailure[] | object | `required` | unknown keys: strict |
+| graph.workflow.onFailure[].name | string | `required` | min 1; max 200 |
+| graph.workflow.onFailure[].config | variants by type (object / object / object) | `required` | refinement |
+| graph.workflow.onFailure[].config&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.onFailure[].config&lt;variant 1&gt;.type | "script" | `required` | — |
+| graph.workflow.onFailure[].config&lt;variant 1&gt;.command | string | `required` | min 1; max 1000 |
+| graph.workflow.onFailure[].config&lt;variant 1&gt;.args | array of string | `optional` | maxLength 64 |
+| graph.workflow.onFailure[].config&lt;variant 1&gt;.cwd | string | `optional` | max 1000 |
+| graph.workflow.onFailure[].config&lt;variant 1&gt;.env | map of string | `optional` | — |
+| graph.workflow.onFailure[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.onFailure[].config&lt;variant 2&gt;.type | "http" | `required` | — |
+| graph.workflow.onFailure[].config&lt;variant 2&gt;.url | string | `required` | url; max 2000 |
+| graph.workflow.onFailure[].config&lt;variant 2&gt;.method | "GET" / "POST" / "PUT" / "PATCH" / "DELETE" | `required` | — |
+| graph.workflow.onFailure[].config&lt;variant 2&gt;.headers | map of string | `optional` | — |
+| graph.workflow.onFailure[].config&lt;variant 2&gt;.bodyTemplate | string | `optional` | max 100000 |
+| graph.workflow.onFailure[].config&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.onFailure[].config&lt;variant 3&gt;.type | "function" | `required` | — |
+| graph.workflow.onFailure[].config&lt;variant 3&gt;.modulePath | string | `optional` | max 1000 |
+| graph.workflow.onFailure[].config&lt;variant 3&gt;.handlerName | string | `optional` | max 200 |
+| graph.workflow.onFailure[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
+| graph.workflow.onFailure[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.workflow.onFailure[].retries | number | `default 0` | int; min 0; max 5 |
+| graph.workflow.lifecycle | object | `default {}` | unknown keys: strict |
+| graph.workflow.lifecycle.codebaseAliases | array of string | `default []` | maxLength 5 |
+| graph.workflow.lifecycle.useWorktree | boolean | `default true` | — |
+| graph.workflow.lifecycle.requiresCodebase | boolean | `default false` | — |
+| graph.workflow.lifecycle.preprocessingSteps | array of object | `default []` | maxLength 50 |
+| graph.workflow.lifecycle.preprocessingSteps[] | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].name | string | `required` | min 1; max 200 |
+| graph.workflow.lifecycle.preprocessingSteps[].failOnError | boolean | `default true` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config | variants by type (object / object / object / object / object) | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 1&gt;.type | "clone_repo" | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 1&gt;.repoAlias | string | `required` | min 1; max 50; regex /^[A-Za-z0-9._-]+$/ |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 2&gt;.type | "run_script" | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 2&gt;.script | string | `required` | min 1; max 20000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 2&gt;.cwd | string | `optional` | max 1000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 2&gt;.timeoutMs | number | `optional` | int; min 1000; max 3600000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.type | "validate_input" | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.variableName | string | `required` | min 1; max 64 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules | array of variants by type (object / object / object / object) | `required` | minLength 1; maxLength 20 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[] | variants by type (object / object / object / object) | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 1&gt;.type | "required" | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 1&gt;.message | string | `required` | min 1; max 1000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 2&gt;.type | "regex" | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 2&gt;.pattern | string | `required` | min 1; max 1000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 2&gt;.flags | string | `optional` | regex /^[ims]{0,3}$/ |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 2&gt;.message | string | `required` | min 1; max 1000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 3&gt;.type | "min_length" | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 3&gt;.value | number | `required` | int; min 0; max 1000000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 3&gt;.message | string | `required` | min 1; max 1000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 4&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 4&gt;.type | "max_length" | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 4&gt;.value | number | `required` | int; min 0; max 1000000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 3&gt;.rules[]&lt;variant 4&gt;.message | string | `required` | min 1; max 1000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 4&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 4&gt;.type | "set_variable" | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 4&gt;.variableName | string | `required` | min 1; max 64 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 4&gt;.value | string | `required` | max 100000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 5&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 5&gt;.type | "conditional" | `required` | — |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 5&gt;.condition | string | `required` | min 1; max 2000 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 5&gt;.thenSteps | array of lazy | `required` | maxLength 20 |
+| graph.workflow.lifecycle.preprocessingSteps[].config&lt;variant 5&gt;.elseSteps | array of lazy | `optional` | maxLength 20 |
+| graph.workflow.lifecycle.postProcessing | object | `default {}` | unknown keys: strict |
+| graph.workflow.lifecycle.postProcessing.autoCommit | boolean | `default false` | — |
+| graph.workflow.lifecycle.postProcessing.autoPush | boolean | `default false` | — |
+| graph.workflow.lifecycle.postProcessing.autoCreatePR | boolean | `default false` | — |
+| graph.workflow.lifecycle.postProcessing.steps | array of object | `default []` | maxLength 50 |
+| graph.workflow.lifecycle.postProcessing.steps[] | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.postProcessing.steps[].name | string | `required` | min 1; max 200 |
+| graph.workflow.lifecycle.postProcessing.steps[].failOnError | boolean | `default true` | — |
+| graph.workflow.lifecycle.postProcessing.steps[].config | variants by type (object / object / object) | `required` | — |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 1&gt;.type | "commit_and_push" | `required` | — |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 1&gt;.repoAlias | string | `optional` | min 1; max 50; regex /^[A-Za-z0-9._-]+$/ |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 1&gt;.commitMessage | string | `required` | min 1; max 100000 |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 1&gt;.push | boolean | `optional` | — |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 1&gt;.generateMessage | boolean | `optional` | — |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 1&gt;.baseBranch | string | `optional` | max 200 |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 2&gt;.type | "create_pr" | `required` | — |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 2&gt;.repoAlias | string | `optional` | min 1; max 50; regex /^[A-Za-z0-9._-]+$/ |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 2&gt;.title | string | `required` | min 1; max 100000 |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 2&gt;.body | string | `required` | max 100000 |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 2&gt;.baseBranch | string | `optional` | max 200 |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 2&gt;.generateText | boolean | `optional` | — |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 2&gt;.draft | boolean | `optional` | — |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 3&gt;.type | "run_script" | `required` | — |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 3&gt;.script | string | `required` | min 1; max 20000 |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 3&gt;.cwd | string | `optional` | max 1000 |
+| graph.workflow.lifecycle.postProcessing.steps[].config&lt;variant 3&gt;.timeoutMs | number | `optional` | int; min 1000; max 3600000 |
+| graph.workflow.budget | object | `optional` | unknown keys: strict |
+| graph.workflow.budget.maxTurns | number | `optional` | int; min 1; max 100000 |
+| graph.workflow.budget.maxCostUsd | number | `optional` | min 0 (exclusive); max 100000 |
+| graph.workflow.budget.maxWallClockMs | number | `optional` | int; min 1000; max 604800000 |
+| graph.workflow.maxParallel | number | `optional` | int; min 1; max 32 |
+| graph.workflow.outputs | map of string | `optional` | — |
+| graph.workflow.tags | array of string | `default []` | maxLength 20 |
+| graph.workflow.projectId | string | `optional; null accepted` | uuid |
+| graph.stages | array of variants by kind (object) | `required` | maxLength 100 |
+| graph.stages[] | variants by kind (object) | `required` | — |
+| graph.stages[]&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.key | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 1&gt;.name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 1&gt;.description | string | `optional` | max 2000 |
+| graph.stages[]&lt;variant 1&gt;.parentKey | string | `optional` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 1&gt;.guard | string | `optional` | min 1; max 2000 |
+| graph.stages[]&lt;variant 1&gt;.join | variants by mode (object / object / object) | `default {"mode":"all"}` | — |
+| graph.stages[]&lt;variant 1&gt;.join&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.join&lt;variant 1&gt;.mode | "all" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.join&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.join&lt;variant 2&gt;.mode | "any" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.join&lt;variant 2&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 1&gt;.join&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.join&lt;variant 3&gt;.mode | "n_of_m" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.join&lt;variant 3&gt;.n | number | `required` | int; min 1; max 100 |
+| graph.stages[]&lt;variant 1&gt;.join&lt;variant 3&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 1&gt;.position | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.position.x | number | `required` | finite |
+| graph.stages[]&lt;variant 1&gt;.position.y | number | `required` | finite |
+| graph.stages[]&lt;variant 1&gt;.compensate | array of object | `optional` | maxLength 20 |
+| graph.stages[]&lt;variant 1&gt;.compensate[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.compensate[].name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 1&gt;.compensate[].config | union (variants by type (object / object / object) / object) | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.compensate[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.compensate[].config&lt;variant 2&gt;.type | "restore_checkpoint" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.compensate[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.stages[]&lt;variant 1&gt;.compensate[].retries | number | `default 3` | int; min 0; max 5 |
+| graph.stages[]&lt;variant 1&gt;.kind | "agent" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.prompts | array of object | `default []` | maxLength 50 |
+| graph.stages[]&lt;variant 1&gt;.prompts[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.prompts[].label | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 1&gt;.prompts[].text | string | `required` | min 1; max 100000 |
+| graph.stages[]&lt;variant 1&gt;.followUpPrompts | array of object | `optional` | maxLength 50 |
+| graph.stages[]&lt;variant 1&gt;.followUpPrompts[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.followUpPrompts[].label | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 1&gt;.followUpPrompts[].text | string | `required` | min 1; max 100000 |
+| graph.stages[]&lt;variant 1&gt;.session | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.model | string | `optional` | max 200 |
+| graph.stages[]&lt;variant 1&gt;.session.harnessType | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.reasoningEffort | "low" / "medium" / "high" / "xhigh" / "max" / "ultra" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.contextTier | "default" / "long_context" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.maxTurns | number | `optional` | int; min 1; max 1000 |
+| graph.stages[]&lt;variant 1&gt;.session.provider | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.provider.name | string | `required` | min 1; max 100 |
+| graph.stages[]&lt;variant 1&gt;.session.provider.baseUrl | string | `required` | url; max 2000 |
+| graph.stages[]&lt;variant 1&gt;.session.provider.apiKey | string | `required` | min 1; max 500 |
+| graph.stages[]&lt;variant 1&gt;.session.provider.model | string | `optional` | max 200 |
+| graph.stages[]&lt;variant 1&gt;.session.agentRef | string | `optional` | min 1; max 128 |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.addSkillIds | array of string | `optional` | maxLength 100 |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.removeSkillIds | array of string | `optional` | maxLength 100 |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.addMcpServerIds | array of string | `optional` | maxLength 100 |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.removeMcpServerIds | array of string | `optional` | maxLength 100 |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.tools | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.tools.browser | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.tools.widgets | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.tools.extensionAuthoring | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.tools.orchestration | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.tools.fileRead | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.tools.fileWrite | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.tools.shell | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.tools.web | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.runtime | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.runtime.model | string | `optional` | max 200 |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.runtime.harnessType | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.runtime.reasoningEffort | "low" / "medium" / "high" / "xhigh" / "max" / "ultra" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.runtime.contextTier | "default" / "long_context" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.runtime.maxTurns | number | `optional` | int; min 1; max 1000 |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.runtime.permissionMode | "default" / "acceptEdits" / "plan" / "bypassPermissions" / "dontAsk" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.runtime.defaultAgentMode | "auto" / "plan" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.appendInstructions | string | `optional` | max 16000 |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.extraAllow | array of string | `optional` | maxLength 200 |
+| graph.stages[]&lt;variant 1&gt;.session.agentOverrides.extraDeny | array of string | `optional` | maxLength 200 |
+| graph.stages[]&lt;variant 1&gt;.session.systemMessage | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.systemMessage.mode | "append" / "replace" | `default "append"` | — |
+| graph.stages[]&lt;variant 1&gt;.session.systemMessage.content | string | `required` | max 100000 |
+| graph.stages[]&lt;variant 1&gt;.session.systemPromptAppend | string | `optional` | max 100000 |
+| graph.stages[]&lt;variant 1&gt;.session.planModeInstructions | string | `optional` | max 20000 |
+| graph.stages[]&lt;variant 1&gt;.session.tools | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.tools.available | array of string | `optional` | maxLength 500 |
+| graph.stages[]&lt;variant 1&gt;.session.tools.excluded | array of string | `optional` | maxLength 500 |
+| graph.stages[]&lt;variant 1&gt;.session.mcp | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers | map of object | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key} | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.type | "http" / "sse" / "stdio" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.url | string | `optional` | max 2000 |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.headers | map of string | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.command | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.args | array of string | `optional` | maxLength 64 |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.env | map of string | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.cwd | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.tools | array of string | `optional` | maxLength 500 |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.timeoutMs | number | `optional` | int; min 0; max 600000 |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.servers.{key}.enabled | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.mcp.excludedIds | array of string | `optional` | maxLength 200 |
+| graph.stages[]&lt;variant 1&gt;.session.skills | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.skills.directories | array of string | `optional` | maxLength 100 |
+| graph.stages[]&lt;variant 1&gt;.session.skills.disabled | array of string | `optional` | maxLength 500 |
+| graph.stages[]&lt;variant 1&gt;.session.customAgents | array of object | `optional` | maxLength 50 |
+| graph.stages[]&lt;variant 1&gt;.session.customAgents[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.customAgents[].name | string | `required` | min 1; max 120 |
+| graph.stages[]&lt;variant 1&gt;.session.customAgents[].description | string | `required` | min 1; max 2000 |
+| graph.stages[]&lt;variant 1&gt;.session.customAgents[].instructions | string | `required` | min 1; max 64000 |
+| graph.stages[]&lt;variant 1&gt;.session.customAgents[].tools | array of string | `optional` | maxLength 200 |
+| graph.stages[]&lt;variant 1&gt;.session.permissionMode | "default" / "acceptEdits" / "plan" / "bypassPermissions" / "dontAsk" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.defaultAgentMode | "auto" / "plan" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.browser.enabled | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.mode | "auto" / "native" / "screencast" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.visibility | "visible" / "headless" / "off" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.headless | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.viewport | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.session.browser.viewport.width | number | `required` | int; min 320; max 3840 |
+| graph.stages[]&lt;variant 1&gt;.session.browser.viewport.height | number | `required` | int; min 240; max 2160 |
+| graph.stages[]&lt;variant 1&gt;.session.browser.allowedHosts | array of string | `optional` | maxLength 100 |
+| graph.stages[]&lt;variant 1&gt;.session.browser.persistProfile | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.screencastFps | number | `optional` | int; min 1; max 15 |
+| graph.stages[]&lt;variant 1&gt;.session.browser.screencastQuality | number | `optional` | int; min 20; max 95 |
+| graph.stages[]&lt;variant 1&gt;.session.browser.idlePauseMinutes | number | `optional` | int; min 1; max 120 |
+| graph.stages[]&lt;variant 1&gt;.session.browser.evalAllowed | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.dialogPolicy | "dismiss" / "accept" / "ask" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.permissions | array of string | `optional` | maxLength 20 |
+| graph.stages[]&lt;variant 1&gt;.session.browser.piiRedaction | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.injectionDefense | "off" / "classifier" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.recordVideo | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.browser.allowLocalhostSelfSigned | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.computerUse | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.widgets | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.session.orchestrator | boolean | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.sessionReuse | "fresh" / "continue" | `default "fresh"` | — |
+| graph.stages[]&lt;variant 1&gt;.sessionGroup | string | `optional` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 1&gt;.context | object | `default {}` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.context.from | array of string | `optional` | maxLength 50 |
+| graph.stages[]&lt;variant 1&gt;.context.mode | "summary" / "output" / "structured" / "none" | `default "summary"` | — |
+| graph.stages[]&lt;variant 1&gt;.output | object | `default {}` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.output.format | "text" / "json" | `default "text"` | — |
+| graph.stages[]&lt;variant 1&gt;.output.schema | map of unknown | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.output.extraction | "auto" / "native" / "tool" / "final_json_block" | `default "auto"` | — |
+| graph.stages[]&lt;variant 1&gt;.output.instructions | string | `optional` | max 5000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules | array of variants by type (object / object / object / object / object / object / object) | `default []` | maxLength 20 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[] | variants by type (object / object / object / object / object / object / object) | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 1&gt;.type | "contains" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 1&gt;.value | string | `required` | min 1; max 10000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 1&gt;.message | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 2&gt;.type | "not_contains" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 2&gt;.value | string | `required` | min 1; max 10000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 2&gt;.message | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 3&gt;.type | "min_length" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 3&gt;.value | number | `required` | int; min 0; max 10000000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 3&gt;.message | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 4&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 4&gt;.type | "max_length" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 4&gt;.value | number | `required` | int; min 0; max 10000000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 4&gt;.message | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 5&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 5&gt;.type | "regex" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 5&gt;.pattern | string | `required` | min 1; max 1000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 5&gt;.flags | string | `optional` | regex /^[ims]{0,3}$/ |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 5&gt;.message | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 6&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 6&gt;.type | "custom_script" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 6&gt;.command | string | `required` | min 1; max 1000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 6&gt;.args | array of string | `default []` | maxLength 64 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 6&gt;.env | map of string | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 6&gt;.timeoutMs | number | `default 60000` | int; min 1000; max 600000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 6&gt;.message | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 7&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 7&gt;.type | "json_schema" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 7&gt;.schema | map of unknown | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 7&gt;.message | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.retry | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.retry.maxAttempts | number | `default 2` | int; min 1; max 10 |
+| graph.stages[]&lt;variant 1&gt;.retry.initialDelayMs | number | `default 2000` | int; min 0; max 3600000 |
+| graph.stages[]&lt;variant 1&gt;.retry.backoffMultiplier | number | `default 2` | min 1; max 10 |
+| graph.stages[]&lt;variant 1&gt;.retry.maxDelayMs | number | `default 60000` | int; min 0; max 3600000 |
+| graph.stages[]&lt;variant 1&gt;.retry.jitter | "full" / "equal" / "none" | `default "full"` | — |
+| graph.stages[]&lt;variant 1&gt;.retry.retryOn | array of "rate_limited" / "overloaded" / "provider_5xx" / "transport" / "provider_crashed" / "idle_timeout" / "attempt_timeout" / "auth" / "model_not_found" / "quota_exhausted" / "context_overflow" / "max_turns" / "budget_exceeded" / "config_invalid" / "agent_not_found" / "agent_disabled" / "pre_run_hook_abort" / "rejected_by_human" / "pause_expired" / "condition_error" / "queue_timeout" / "output_schema" / "validation_rule" / "missing_artifact" / "process_restart_unsafe" / "lease_expired" | `optional` | maxLength 40 |
+| graph.stages[]&lt;variant 1&gt;.retry.mode | "resume" / "restart" | `default "resume"` | — |
+| graph.stages[]&lt;variant 1&gt;.retry.restoreCheckpointOnRestart | boolean | `default true` | — |
+| graph.stages[]&lt;variant 1&gt;.repair | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.repair.maxRepairs | number | `default 2` | int; min 0; max 5 |
+| graph.stages[]&lt;variant 1&gt;.repair.restartOnExhausted | boolean | `default true` | — |
+| graph.stages[]&lt;variant 1&gt;.onExhausted | "pause" / "fail" | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.timeouts | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.timeouts.queueMs | number | `optional` | int; min 1000; max 86400000 |
+| graph.stages[]&lt;variant 1&gt;.timeouts.attemptMs | number | `optional` | int; min 1000; max 86400000 |
+| graph.stages[]&lt;variant 1&gt;.timeouts.idleMs | number | `optional` | int; min 1000; max 86400000 |
+| graph.stages[]&lt;variant 1&gt;.timeouts.totalMs | number | `optional` | int; min 1000; max 604800000 |
+| graph.stages[]&lt;variant 1&gt;.budget | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.budget.maxTurns | number | `optional` | int; min 1; max 100000 |
+| graph.stages[]&lt;variant 1&gt;.budget.maxCostUsd | number | `optional` | min 0 (exclusive); max 100000 |
+| graph.stages[]&lt;variant 1&gt;.budget.maxWallClockMs | number | `optional` | int; min 1000; max 604800000 |
+| graph.stages[]&lt;variant 1&gt;.approval | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.approval.prompt | string | `optional` | max 5000 |
+| graph.stages[]&lt;variant 1&gt;.approval.allowChanges | boolean | `default true` | — |
+| graph.stages[]&lt;variant 1&gt;.approval.maxRounds | number | `default 3` | int; min 1; max 10 |
+| graph.stages[]&lt;variant 1&gt;.hooks | array of object | `default []` | maxLength 50 |
+| graph.stages[]&lt;variant 1&gt;.hooks[] | object | `required` | unknown keys: strict; refinement |
+| graph.stages[]&lt;variant 1&gt;.hooks[].id | string | `required` | min 1; max 100 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].type | "script" / "http" / "function" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].priority | number | `default 0` | int; min -1000; max 1000 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].enabled | boolean | `default true` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].failurePolicy | "abort" / "skip" / "continue" | `default "skip"` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].retries | number | `default 0` | int; min 0; max 5 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config | variants by type (object / object / object) | `required` | refinement |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 1&gt;.type | "script" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 1&gt;.command | string | `required` | min 1; max 1000 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 1&gt;.args | array of string | `optional` | maxLength 64 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 1&gt;.cwd | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 1&gt;.env | map of string | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 2&gt;.type | "http" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 2&gt;.url | string | `required` | url; max 2000 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 2&gt;.method | "GET" / "POST" / "PUT" / "PATCH" / "DELETE" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 2&gt;.headers | map of string | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 2&gt;.bodyTemplate | string | `optional` | max 100000 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 3&gt;.type | "function" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 3&gt;.modulePath | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 3&gt;.handlerName | string | `optional` | max 200 |
+| graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
+| graph.stages[]&lt;variant 1&gt;.hooks[].phase | "pre_run" / "post_run" / "pre_prompt" / "post_prompt" / "on_error" / "on_cancel" / "pre_tool_use" / "post_tool_use" / "on_message" / "on_reasoning" / "on_session_start" / "on_session_idle" / "on_session_error" / "on_session_cancelled" | `required` | — |
+| graph.edges | array of object | `default []` | maxLength 500 |
+| graph.edges[] | object | `required` | unknown keys: strict |
+| graph.edges[].from | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.edges[].to | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.edges[].on | "success" / "failure" / "completion" / "always" | `default "success"` | — |
+| graph.edges[].when | string | `optional` | min 1; max 2000 |
+| graph.edges[].handlesFailure | boolean | `optional` | — |
 
 ## ScriptRunProfileSchema
 
-Schema for RunProfileConfig as exported by scripts.
+A named set of run inputs a `.workflow.mjs` script exports as `profiles`.
 
 | Field | Type / choices | Input / default | Constraints |
 | --- | --- | --- | --- |
-| version | 1 | `required` | — |
-| name | string | `required` | min 1 |
-| description | string | `optional` | — |
+| name | string | `required` | min 1; max 100 |
+| description | string | `optional` | max 2000 |
 | variables | map of unknown | `default {}` | — |
-| permissionMode | "bypassPermissions" / "default" / "acceptEdits" / "plan" | `optional` | — |
-| sessionMode | "single" / "per-stage" / "auto" | `optional` | — |
-| stageOverrides | array of object | `optional` | — |
-| stageOverrides[] | object | `required` | unknown keys: strip |
-| stageOverrides[].stageName | string | `optional` | — |
-| stageOverrides[].stageIndex | number | `optional` | int; min 0 |
-| stageOverrides[].variables | map of unknown | `optional` | — |
+| permissionMode | "plan" / "default" / "acceptEdits" / "bypassPermissions" | `optional` | — |
+| stageOverrides | array of object | `optional` | maxLength 100 |
+| stageOverrides[] | object | `required` | unknown keys: strict |
+| stageOverrides[].stageKey | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
 | stageOverrides[].skip | boolean | `optional` | — |
+| stageOverrides[].variables | map of unknown | `optional` | — |
 
 ## Complete validation contract
 
 The following source snapshot contains the additional refinements, transformations, comments, and imported contract names. It is reference material, not a configuration file to paste into the app.
 
 <details>
-<summary>Read the complete WorkflowScriptSchema.ts source contract</summary>
+<summary>Read the complete definition.ts source contract</summary>
 
 ```typescript
 // ────────────────────────────────────────────────────────────────
-// WorkflowScriptSchema — Zod validation for script outputs
+// Persisted definitions (P01 WP-1.7): the records the definition API
+// returns around a `WorkflowGraph`, the request bodies it accepts, and
+// the template file format. Timestamps are ISO strings: these are wire
+// documents, shared by the server, every client and the CLI.
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
-import { MAX_STAGES_PER_WORKFLOW } from '../constants/index.js';
+import { WorkflowGraphSchema, type WorkflowGraph } from './schemas/graph.js';
+import { RUN_PERMISSION_MODES } from './constants.js';
+import { StageKeySchema } from './schemas/common.js';
 
-const HookConfigSchema = z.discriminatedUnion('type', [
-  z.object({
-    type: z.literal('script'),
-    command: z.string(),
-    args: z.array(z.string()).optional(),
-    cwd: z.string().optional(),
-    env: z.record(z.string()).optional(),
-  }),
-  z.object({
-    type: z.literal('http'),
-    url: z.string(),
-    method: z.enum(['GET', 'POST', 'PUT']).default('POST'),
-    headers: z.record(z.string()).optional(),
-    bodyTemplate: z.string().optional(),
-  }),
-  z.object({
-    type: z.literal('function'),
-    modulePath: z.string().optional(),
-    handlerName: z.string().optional(),
-    args: z.record(z.unknown()).optional(),
-  }),
-]);
+export const DEFINITION_STATUSES = ['draft', 'published'] as const;
+export type DefinitionStatus = (typeof DEFINITION_STATUSES)[number];
 
-const HookDefinitionOutputSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  phase: z.string(),
-  type: z.enum(['script', 'http', 'function']),
-  priority: z.number().int().min(0),
-  enabled: z.boolean(),
-  failurePolicy: z.enum(['abort', 'skip', 'continue']),
-  timeoutMs: z.number().int().positive(),
-  retries: z.number().int().min(0),
-  config: HookConfigSchema,
-});
+export const VERSION_KINDS = ['published', 'test'] as const;
+export type VersionKind = (typeof VERSION_KINDS)[number];
 
-const PromptDefinitionOutputSchema = z.object({
-  label: z.string().optional(),
-  text: z.string(),
-});
+/** A definition: its working graph plus the store's bookkeeping. */
+export interface WorkflowDefinitionRecord {
+  id: string;
+  status: DefinitionStatus;
+  /** Bumped by every graph save; `saveGraph` requires the current value. */
+  revision: number;
+  /** The version runs use (the latest published one); null for a never-published draft. */
+  currentVersionId: string | null;
+  /** True when the working graph differs from the current published version. */
+  hasUnpublishedChanges: boolean;
+  archivedAt: string | null;
+  /** Notes a migration left for the author; cleared by the next save. */
+  needsAttention: string[];
+  createdAt: string;
+  updatedAt: string;
+  graph: WorkflowGraph;
+}
 
-const RetryPolicyOutputSchema = z.object({
-  maxRetries: z.number().int().min(0).max(10),
-  backoffMs: z.number().int().min(0),
-  backoffMultiplier: z.number().min(1).optional(),
-});
+/** One row of the definition list. */
+export interface WorkflowDefinitionSummary {
+  id: string;
+  name: string;
+  description?: string;
+  projectId: string | null;
+  status: DefinitionStatus;
+  revision: number;
+  currentVersionId: string | null;
+  tags: string[];
+  stageCount: number;
+  needsAttention: boolean;
+  archivedAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
 
-const StageConditionOutputSchema = z.object({
-  // Mirror the canonical StageCondition: `type` is the discriminator and
-  // `expression` is only required for `type: 'expression'`. The previous shape
-  // (expression-only) stripped `type` and rejected non-expression conditions.
-  type: z.enum(['always', 'on_success', 'on_failure', 'expression']),
-  expression: z.string().optional(),
-});
+/** An immutable version (runs pin one). */
+export interface WorkflowDefinitionVersionSummary {
+  id: string;
+  workflowDefinitionId: string;
+  version: number;
+  kind: VersionKind;
+  contentHash: string;
+  createdAt: string;
+}
 
-const StageSkillReferenceOutputSchema = z.object({
-  name: z.string(),
-  directory: z.string().optional(),
-  description: z.string().optional(),
-});
+export interface WorkflowDefinitionVersionRecord extends WorkflowDefinitionVersionSummary {
+  graph: WorkflowGraph;
+}
 
-const StageOutputSchema = z.object({
-  localId: z.string().min(1).regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/),
-  config: z.object({
-    name: z.string().min(1),
-    description: z.string().optional(),
-    order: z.number().int().min(0),
-    prompts: z.array(PromptDefinitionOutputSchema).min(0),
-    hooks: z.array(HookDefinitionOutputSchema).optional(),
-    harnessConfigOverrides: z.record(z.unknown()).optional(),
-    contextFilter: z.enum(['full', 'summary-only', 'none', 'structured']).optional(),
-    contextSources: z.array(z.string()).optional(),
-    outputFormat: z.enum(['text', 'json']).optional(),
-    outputSchema: z.record(z.unknown()).optional(),
-    retryPolicy: RetryPolicyOutputSchema.optional(),
-    timeoutMs: z.number().int().positive().optional(),
-    condition: StageConditionOutputSchema.optional(),
-    skills: z.array(StageSkillReferenceOutputSchema).optional(),
-  }),
-});
+/** `PUT /workflow-definitions/:id/graph`. The graph is validated separately. */
+export const SaveGraphRequestSchema = z
+  .object({
+    graph: z.unknown().describe('The whole WorkflowGraph; it replaces the stored one'),
+    expectedRevision: z.number().int().min(1).describe('The revision the client edited; a mismatch is a 409 REVISION_CONFLICT'),
+  })
+  .strict()
+  .describe('Replace a definition graph');
+export type SaveGraphRequest = z.infer<typeof SaveGraphRequestSchema>;
 
-const EdgeOutputSchema = z.object({
-  from: z.string().min(1),
-  to: z.string().min(1),
-  edgeType: z.enum(['on_success', 'on_failure', 'on_completion', 'always']),
-  condition: z.string().optional(),
-});
+/** `POST /workflow-definitions` and `POST /workflow-definitions/import` with a template. */
+export const ImportTemplateRequestSchema = z
+  .object({
+    templateId: z.string().min(1).max(100).describe('Id of a registered template'),
+    name: z.string().min(1).max(200).optional().describe('Name of the new definition (defaults to the template name)'),
+    projectId: z.string().uuid().nullable().optional().describe('Bind the new definition to a project'),
+  })
+  .strict()
+  .describe('Create a definition from a template');
+export type ImportTemplateRequest = z.infer<typeof ImportTemplateRequestSchema>;
 
-const VariableDefinitionOutputSchema = z.object({
-  name: z.string().min(1).regex(/^[a-zA-Z_][a-zA-Z0-9_]*$/),
-  type: z.enum(['string', 'number', 'boolean', 'choice', 'text']),
-  label: z.string().min(1),
-  description: z.string().optional(),
-  required: z.boolean(),
-  defaultValue: z.unknown().optional(),
-  options: z.array(z.string()).optional(),
-});
+/** Returned with 409 when `expectedRevision` is stale. */
+export interface RevisionConflict {
+  code: 'REVISION_CONFLICT';
+  message: string;
+  current: WorkflowDefinitionRecord;
+}
 
-const WorkflowHookPhaseSchema = z.enum([
-  'on_run_start',
-  'on_run_complete',
-  'on_run_failed',
-  'on_run_cancelled',
-  'on_pr_created',
-  'on_preprocessing_complete',
-  'on_postprocessing_start',
-  'on_all_stages_scheduled',
-  'on_stage_completed',
-  'on_stage_failed',
-  'on_parallel_join',
-  'pre_clone',
-  'post_clone',
-  'pre_commit',
-  'post_commit',
-]);
+// ── Templates ────────────────────────────────────────────────────
 
-const WorkflowHookDefinitionOutputSchema = z.object({
-  id: z.string(),
-  name: z.string(),
-  phase: WorkflowHookPhaseSchema,
-  type: z.enum(['script', 'http', 'function']),
-  priority: z.number().int().min(0),
-  enabled: z.boolean(),
-  failurePolicy: z.enum(['abort', 'skip', 'continue']),
-  timeoutMs: z.number().int().positive(),
-  retries: z.number().int().min(0),
-  config: HookConfigSchema,
-});
+export const TEMPLATE_CATEGORIES = [
+  'system',
+  'code-generation',
+  'code-review',
+  'testing',
+  'e2e-testing',
+  'refactoring',
+  'documentation',
+  'deployment',
+  'custom',
+] as const;
 
-/**
- * Zod schema for validating WorkflowScriptOutput from .workflow.mjs files.
- * The inlineHooks field (Map of functions) is excluded from schema validation
- * since functions can't be serialized — it's validated separately at runtime.
- */
-export const WorkflowScriptOutputSchema = z.object({
-  id: z.string().min(1).regex(/^[a-zA-Z][a-zA-Z0-9_-]*$/),
-  definition: z.object({
-    name: z.string().min(1).max(255),
-    description: z.string().max(2000).optional(),
-    sessionMode: z.enum(['single', 'per-stage', 'auto']),
-    harnessConfig: z.record(z.unknown()).optional(),
-    variables: z.array(VariableDefinitionOutputSchema),
-    tags: z.array(z.string()),
-    orchestratorConfig: z.record(z.unknown()).optional(),
-    hooks: z.array(WorkflowHookDefinitionOutputSchema).optional(),
-    useWorktree: z.boolean().optional(),
-  }),
-  stages: z.array(StageOutputSchema).min(1).max(MAX_STAGES_PER_WORKFLOW),
-  edges: z.array(EdgeOutputSchema),
-});
+/** A template file (`templates/system/*.json`): an id, a category and a graph. */
+export const WorkflowTemplateSchema = z
+  .object({
+    id: z
+      .string()
+      .regex(/^[a-z0-9][a-z0-9-]{0,63}$/, 'Template ids are lower-case words joined by -')
+      .describe('Stable template id'),
+    category: z.enum(TEMPLATE_CATEGORIES).describe('Catalog category'),
+    graph: WorkflowGraphSchema,
+  })
+  .strict()
+  .describe('A workflow template: a canonical graph with catalog metadata');
+export type WorkflowTemplate = z.infer<typeof WorkflowTemplateSchema>;
 
-/** Schema for RunProfileConfig as exported by scripts. */
-export const ScriptRunProfileSchema = z.object({
-  version: z.literal(1),
-  name: z.string().min(1),
-  description: z.string().optional(),
-  variables: z.record(z.unknown()).default({}),
-  permissionMode: z.enum(['bypassPermissions', 'default', 'acceptEdits', 'plan']).optional(),
-  sessionMode: z.enum(['single', 'per-stage', 'auto']).optional(),
-  stageOverrides: z.array(z.object({
-    stageName: z.string().optional(),
-    stageIndex: z.number().int().min(0).optional(),
-    variables: z.record(z.unknown()).optional(),
-    skip: z.boolean().optional(),
-  })).optional(),
-});
+// ── Script run profiles ──────────────────────────────────────────
 
-export type WorkflowScriptOutputParsed = z.infer<typeof WorkflowScriptOutputSchema>;
-export type ScriptRunProfileParsed = z.infer<typeof ScriptRunProfileSchema>;
+/** A named set of run inputs a `.workflow.mjs` script exports as `profiles`. */
+export const ScriptRunProfileSchema = z
+  .object({
+    name: z.string().min(1).max(100).describe('Profile name'),
+    description: z.string().max(2000).optional().describe('What the profile is for'),
+    variables: z.record(z.unknown()).default({}).describe('Variable values'),
+    permissionMode: z.enum(RUN_PERMISSION_MODES).optional().describe('Permission mode for the run'),
+    stageOverrides: z
+      .array(
+        z
+          .object({
+            stageKey: StageKeySchema,
+            skip: z.boolean().optional().describe('Skip the stage in this run'),
+            variables: z.record(z.unknown()).optional().describe('Variables for this stage only'),
+          })
+          .strict()
+          .describe('Per-stage override'),
+      )
+      .max(100)
+      .optional()
+      .describe('Per-stage overrides, by stage key'),
+  })
+  .strict()
+  .describe('A run profile exported by a workflow script');
+export type ScriptRunProfile = z.infer<typeof ScriptRunProfileSchema>;
+
+/** Look a stage up by key. */
+export function stageByKey(graph: WorkflowGraph, key: string): WorkflowGraph['stages'][number] | undefined {
+  return graph.stages.find((s) => s.key === key);
+}
 ```
 
 </details>

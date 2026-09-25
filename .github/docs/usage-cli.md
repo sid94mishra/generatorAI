@@ -72,11 +72,11 @@ generatorai
 │     watch
 ├── agent                 # First-class agent definitions
 │     delete · export · import · list · resolve · show · usage
-├── workflow (wf)         # Workflow definitions: stages, edges, variables and validation
-│     clone · create · delete · edge add · edge delete · edge list ·
-│     export · from-template · import-json · list · show · stage add ·
-│     stage delete · stage hook add · stage hook list · stage hook remove
-│     · stage list · stage update · update · validate
+├── workflow (wf)         # Workflow definitions: documents, versions, stages and edges
+│     clone · create · delete · edge add · edge list · edge remove ·
+│     export · import · list · publish · show · stage add · stage hook add
+│     · stage hook list · stage hook remove · stage list · stage remove ·
+│     stage update · update · validate · versions
 ├── run                   # Workflow run lifecycle, stage controls and human-in-the-loop gates
 │     cancel · delete · diff · hitl approve · hitl changes-request · hitl
 │     mode · hitl pending · hitl reject · list · messages · pause ·
@@ -200,30 +200,31 @@ First-class agent definitions
 
 ### `workflow` (alias: `wf`)
 
-Workflow definitions: stages, edges, variables and validation
+Workflow definitions: documents, versions, stages and edges
 
 | Command | What | Flags |
 |---|---|---|
-| `workflow clone <workflow> [name]` | Copy a definition, stages and edges included | — |
-| `workflow create <name> [options]` | Create an empty workflow definition | `--description` `--project` `--tags` |
-| `workflow delete <workflow>` | Delete a definition | — |
-| `workflow edge add <workflow> [options]` | Connect two stages | `--from` `--to` `--on` |
-| `workflow edge delete <workflow> <edge>` | Delete an edge | — |
+| `workflow clone <workflow> [name]` | Copy a definition into a new draft | — |
+| `workflow create [file] [options]` | Create a draft from a workflow document, or an empty one with --name | `--name` `--description` `--project` `--tags` `--publish` |
+| `workflow delete <workflow>` | Delete a definition (archived instead when runs pin it) | — |
+| `workflow edge add <workflow> [options]` | Connect two stages | `--from` `--to` `--on` `--when` |
 | `workflow edge list <workflow>` | Edges in a definition | — |
-| `workflow export <workflow> [options]` | Export a definition as JSON | `--out` |
-| `workflow from-template <template> [options]` | Create a definition from a system template | `--name` |
-| `workflow import-json <file> [options]` | Import a definition from a JSON file | `--name` |
-| `workflow list [options]` | List workflow definitions | `--project` `--tag` `--limit` |
-| `workflow show <workflow>` | Show a definition with its stages and edges | — |
-| `workflow stage add <workflow> [options]` | Add a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--order` `--timeout` `--retries` `--condition` `--condition-expression` |
-| `workflow stage delete <workflow> <stage>` | Delete a stage and its edges | — |
-| `workflow stage hook add <workflow> <stage> [options]` | Attach a lifecycle hook to a stage | `--name` `--phase` `--type` `--config` `--priority` `--timeout` `--retries` `--failure-policy` `--disabled` |
+| `workflow edge remove <workflow> [options]` | Disconnect two stages | `--from` `--to` `--on` |
+| `workflow export <workflow> [options]` | The canonical document (import gives it back unchanged) | `--out` |
+| `workflow import [file] [options]` | Import a canonical workflow document, or instantiate a template | `--template` `--name` `--project` `--publish` |
+| `workflow list [options]` | List workflow definitions | `--project` `--status` `--search` `--tag` `--archived` `--limit` |
+| `workflow publish <workflow>` | Publish the working graph as a new version (runs use the latest) | — |
+| `workflow show <workflow>` | Show a definition: status, revision and its graph | — |
+| `workflow stage add <workflow> [options]` | Add an agent stage | `--name` `--key` `--description` `--prompt` `--prompt-file` `--guard` `--retry-attempts` `--timeout-ms` `--output-format` `--context-from` `--context-mode` `--agent` `--model` `--approval` |
+| `workflow stage hook add <workflow> <stage> [options]` | Attach a lifecycle hook to a stage | `--name` `--phase` `--type` `--config` `--priority` `--timeout-ms` `--retries` `--failure-policy` `--disabled` |
 | `workflow stage hook list <workflow> <stage>` | A stage's lifecycle hooks | — |
 | `workflow stage hook remove <workflow> <stage> <hook>` | Detach a lifecycle hook from a stage | — |
 | `workflow stage list <workflow>` | Stages in a definition | — |
-| `workflow stage update <workflow> <stage> [options]` | Patch a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--timeout` `--retries` `--condition` `--condition-expression` |
-| `workflow update <workflow> [options]` | Patch a definition | `--name` `--description` `--tags` |
-| `workflow validate <workflow>` | Check a definition for cycles, orphans and bad references | — |
+| `workflow stage remove <workflow> <stage>` | Remove a stage, its edges and references to it as a context source | — |
+| `workflow stage update <workflow> <stage> [options]` | Change a stage | `--name` `--description` `--prompt` `--prompt-file` `--guard` `--retry-attempts` `--timeout-ms` `--output-format` `--context-from` `--context-mode` `--agent` `--model` `--approval` |
+| `workflow update <workflow> [options]` | Change a definition's name, description or tags | `--name` `--description` `--tags` |
+| `workflow validate <target>` | Validate a document file, or a stored definition | — |
+| `workflow versions <workflow>` | Published and test versions of a definition | — |
 
 ### `run`
 
@@ -253,7 +254,7 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 | `run stage pause <run> <stage>` | Pause one stage | — |
 | `run stage resume <run> <stage>` | Resume one stage | — |
 | `run stage retry <run> <stage>` | Retry one stage | — |
-| `run start <workflow> [options]` | Create and start a run<br>⚠️ `--name` — The server has no route that names a run, so this value is accepted and discarded. | `--name` ⚠️ `--var` `--profile` `--project` `--permission-mode` `--watch` `--verbosity` `--no-start` |
+| `run start <workflow> [options]` | Create and start a run<br>⚠️ `--name` — The server has no route that names a run, so this value is accepted and discarded. | `--name` ⚠️ `--var` `--profile` `--skip` `--stage-var` `--test-run` `--project` `--permission-mode` `--watch` `--verbosity` `--no-start` |
 | `run watch <run> [options]` | Stream a run until it reaches a terminal state | `--verbosity` |
 | `run workspace <run>` | Workspace a run executed in | — |
 
@@ -345,7 +346,7 @@ Programmatic workflow scripts (.workflow.mjs)
 | Command | What | Flags |
 |---|---|---|
 | `script list` | List programmatic workflow scripts | — |
-| `script materialize <script> [options]` | Turn a script into a concrete workflow definition | `--profile` |
+| `script materialize <script> [options]` | Turn a script into a concrete workflow definition | `--name` `--project` |
 | `script profiles <script>` | Profiles a script exposes | — |
 | `script reload [script]` | Re-read scripts from disk without restarting the server | — |
 | `script run <script> [options]` | Materialize and start a script | `--profile` `--watch` `--verbosity` |
@@ -515,8 +516,8 @@ Configuration, profiles and key bindings
 For deep coverage of each, see the matching feature doc:
 
 - Chat: [feature-chat.md → CLI](./feature-chat.md#6-cli)
-- Workflows: [feature-workflows.md → CLI](./feature-workflows.md#6-cli)
-- Stages: [feature-stages.md → CLI](./feature-stages.md#6-cli)
+- Workflows: [feature-workflows.md → CLI](./feature-workflows.md#8-cli)
+- Stages: [feature-stages.md → CLI](./feature-stages.md#5-cli)
 - Runs: [feature-workflow-runs.md → CLI](./feature-workflow-runs.md#13-cli)
 - Automations: [feature-automations.md → CLI](./feature-automations.md#7-cli)
 - Projects: [feature-projects-codebases.md → CLI](./feature-projects-codebases.md#7-cli)
@@ -750,7 +751,7 @@ Editing a workflow definition.
 | `d` | Delete the selected stage |
 | `E` | Connect this stage to another |
 | `D` | Delete an edge on this stage |
-| `v` | Edit the stage's variables |
+| `v` | Show the workflow's input variables |
 | `h` | Manage the stage's hooks |
 | `V` | Validate — jump from a finding to its stage |
 | `r` | Start a run of this workflow |
@@ -946,8 +947,8 @@ generatorai run hitl resume <runId> <stageId> --approve
 
 ### Export + re-import a workflow
 ```powershell
-generatorai workflow export <id> > my-wf.json
-generatorai workflow import-json ./my-wf.json
+generatorai workflow export <id> --out my-wf.json
+generatorai workflow import ./my-wf.json            # a new draft; --publish to publish it
 ```
 
 ### Link a private repo to a project
@@ -985,7 +986,7 @@ generatorai project worktree cleanup <projId>
 ## 11. Edge cases
 
 1. **Server not running** — `system health` returns a clear "Could not connect" error. Most other commands need the server.
-2. **`--json` + interactive prompts** — when commands need user input (`workflow import-json` confirmation, etc.), `--json` skips prompts and assumes defaults / refuses.
+2. **`--json` + interactive prompts** — when commands need user input (a destructive-action confirmation, etc.), `--json` skips prompts and assumes defaults / refuses.
 3. **`Ctrl+C` while watching** — sends SIGINT; the SSE client unsubscribes cleanly. The remote run continues.
 4. **`hook phases` output** — flattens `categories` object to a row list (fix from session 66). Older API responses (where it was already a list) still parse correctly.
 5. **CLI version vs server version mismatch** — currently no strict compatibility check. Wire formats are backwards-compatible within a major version.

@@ -1,14 +1,12 @@
 {
-  "version": 1,
   "name": "review-trial",
   "variables": {
     "objective": "Inspect priority-filter compatibility"
   },
   "permissionMode": "default",
-  "sessionMode": "per-stage",
   "stageOverrides": [
     {
-      "stageIndex": 0,
+      "stageKey": "plan",
       "skip": true
     }
   ]

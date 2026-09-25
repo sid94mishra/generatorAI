@@ -43,14 +43,14 @@
   },
   {
     "id": "review-workflow",
-    "module": "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
-    "schema": "ImportWorkflowJsonSchema",
+    "module": "packages/workflow-spec/src/schemas/graph.ts",
+    "schema": "WorkflowGraphSchema",
     "passed": true
   },
   {
     "id": "workflow-run-profile",
-    "module": "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
-    "schema": "RunProfileSchema",
+    "module": "packages/workflow-spec/src/schemas/invocation.ts",
+    "schema": "InvocationStageOverrideSchema",
     "passed": true
   },
   {
@@ -115,13 +115,13 @@
   },
   {
     "id": "stage-hook",
-    "module": "packages/shared/src/config/WorkflowTemplate.ts",
+    "module": "packages/workflow-spec/src/schemas/common.ts",
     "schema": "HookDefinitionSchema",
     "passed": true
   },
   {
     "id": "script-profile",
-    "module": "packages/shared/src/config/WorkflowScriptSchema.ts",
+    "module": "packages/workflow-spec/src/definition.ts",
     "schema": "ScriptRunProfileSchema",
     "passed": true
   },

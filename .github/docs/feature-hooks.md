@@ -85,7 +85,7 @@ Return shape (`HookResult`) — hooks can mutate downstream behavior:
 - `on_permission` — emitted alongside permission requests; informational.
 
 ### Stage errors (1)
-- `on_error` — fired when a stage fails (after `retryPolicy` exhausted).
+- `on_error` — fired when a stage fails (after its `retry` attempts are exhausted).
 
 ---
 
@@ -135,7 +135,7 @@ type HttpHookConfig = {
 ```typescript
 type FunctionHookConfig = {
   type: 'function';
-  handler: string;                        // registered name
+  handlerName?: string;                   // registered name (handlerName or modulePath is required)
   modulePath?: string;                    // optional subprocess module loader
   args?: Record<string, unknown>;
 }
@@ -214,85 +214,89 @@ Listener leak detection (ORC-05): tracked separately per session inside the harn
 
 ### Inside a workflow definition
 
+Workflow hooks live in `workflow.hooks` of the v2 document:
+
 ```json
 {
-  "hooks": [
-    {
-      "id": "h1",
-      "name": "validate-input",
-      "phase": "on_run_start",
-      "type": "script",
-      "priority": 0,
-      "enabled": true,
-      "failurePolicy": "abort",
-      "timeoutMs": 30000,
-      "retries": 1,
-      "config": {
+  "formatVersion": 2,
+  "workflow": {
+    "name": "…",
+    "hooks": [
+      {
+        "id": "h1",
+        "name": "validate-input",
+        "phase": "on_run_start",
         "type": "script",
-        "command": "node",
-        "args": ["./scripts/validate-input.mjs"],
-        "env": { "STRICT": "true" }
+        "priority": 0,
+        "enabled": true,
+        "failurePolicy": "abort",
+        "timeoutMs": 30000,
+        "retries": 1,
+        "config": {
+          "type": "script",
+          "command": "node",
+          "args": ["./scripts/validate-input.mjs"],
+          "env": { "STRICT": "true" }
+        }
       }
-    }
-  ]
+    ]
+  },
+  "stages": [ … ],
+  "edges": [ … ]
 }
 ```
+
+`command` and `args` are literals; templated values reach a script only through `env`. Adding or changing a script hook needs the `admin:settings` scope.
 
 ### Inside a stage definition
 
-Same shape, but accepted phases are stage-scope (`pre_run`, `post_run`, `pre_prompt`, `post_prompt`, `on_error`) plus the harness-scope phases routed via HookBridge.
+Same shape in the stage's `hooks[]`, but accepted phases are stage-scope (`pre_run`, `post_run`, `pre_prompt`, `post_prompt`, `on_error`, `on_cancel`) plus the harness-scope phases routed via HookBridge.
 
-### Side-car `.hooks.json` file
-
-A workflow can reference an external hooks file via `hooksFile`:
-
-```json
-{
-  "version": 1,
-  "workflow": [
-    { "phase": "on_run_start", "name": "startup", "type": "function", "config": { "type": "function", "handler": "logCompletion" } }
-  ],
-  "stages": {
-    "*":             [ { "phase": "pre_prompt", … } ],
-    "review-stage":  [ { "phase": "post_prompt", … } ]
-  }
-}
-```
-
-`*` wildcards apply to all stages.
+There is no side-car hooks file: `hooksFile` was removed; hooks live only in `workflow.hooks` and each stage's `hooks`.
 
 ### Programmatic Workflow Script (PWS)
 
-```js
-b.hook({
-  id: 'wf-start',
-  phase: 'on_run_start',
-  type: 'script',
-  priority: 0,
-  enabled: true,
-  failurePolicy: 'continue',
-  timeoutMs: 5000,
-  retries: 0,
-  config: { type: 'script', command: 'node', args: ['-e', 'console.log("hi")'] },
-});
+With the builder from `@generatorai/workflow-spec/builders`, `.hook()` takes either a full hook definition or a phase plus an inline function (registered by the script loader as a `function` hook with a generated `handlerName`):
 
-// Per-stage hook
-b.stage('summarize', s => s
-  .name('Summarize')
-  .prompts([{ text: 'Summarize {{topic}}' }])
-  .hooks([{
-    id: 'pre',
-    phase: 'pre_run',
-    type: 'function',
-    config: { type: 'function', handler: 'injectRequirements' },
+```js
+import { workflow } from '@generatorai/workflow-spec/builders';
+
+export default workflow('Summarize')
+  .variable('topic', { type: 'string', label: 'Topic', required: true })
+  .hook({
+    id: 'wf-start',
+    name: 'startup',
+    phase: 'on_run_start',
+    type: 'script',
     priority: 0,
     enabled: true,
     failurePolicy: 'continue',
     timeoutMs: 5000,
     retries: 0,
-  }])
-);
+    config: { type: 'script', command: 'node', args: ['-e', 'console.log("hi")'] },
+  })
+  .hook('on_run_complete', async (ctx) => ({ proceed: true, message: `Run ${ctx.runId} complete` }))
+
+  // Per-stage hooks
+  .stage('summarize', (s) => s
+    .name('Summarize')
+    .prompt('Summarize {{topic}}')
+    .hook({
+      id: 'pre',
+      name: 'inject requirements',
+      phase: 'pre_run',
+      type: 'function',
+      config: { type: 'function', handlerName: 'injectRequirements' },
+      priority: 0,
+      enabled: true,
+      failurePolicy: 'continue',
+      timeoutMs: 5000,
+      retries: 0,
+    })
+    .hook('post_run', async (ctx) => ({ proceed: true })));
 ```
+
+A `function` hook with a `handlerName` must have that handler registered with the `HookExecutor` (`registerFunctionHandler`) before it fires.
 
 ---
 
