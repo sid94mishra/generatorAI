@@ -258,15 +258,36 @@ export function runTransition(
   return row ? { ok: true, row: mapRunRow(row) } : { ok: false, current: current() };
 }
 
-export function claimRunOwnership(sqlite: BetterSqlite3.Database, id: string, ownerId: string, ttlMs: number, now = Date.now()): number | null {
-  const row = sqlite
-    .prepare(
-      `UPDATE workflow_runs SET owner_id = ?, owner_epoch = owner_epoch + 1, owner_expires_at = ?
-        WHERE id = ? AND (owner_id IS NULL OR owner_id = ? OR owner_expires_at IS NULL OR owner_expires_at < ?)
-        RETURNING owner_epoch`,
-    )
-    .get(ownerId, now + ttlMs, id, ownerId, now) as { owner_epoch: number } | undefined;
+export function claimRunOwnership(
+  sqlite: BetterSqlite3.Database,
+  id: string,
+  ownerId: string,
+  ttlMs: number,
+  now = Date.now(),
+  opts: { force?: boolean } = {},
+): number | null {
+  // `force`: the caller holds the single-engine lock, so any other owner is dead.
+  const row = opts.force
+    ? (sqlite
+        .prepare(`UPDATE workflow_runs SET owner_id = ?, owner_epoch = owner_epoch + 1, owner_expires_at = ? WHERE id = ? RETURNING owner_epoch`)
+        .get(ownerId, now + ttlMs, id) as { owner_epoch: number } | undefined)
+    : (sqlite
+        .prepare(
+          `UPDATE workflow_runs SET owner_id = ?, owner_epoch = owner_epoch + 1, owner_expires_at = ?
+            WHERE id = ? AND (owner_id IS NULL OR owner_id = ? OR owner_expires_at IS NULL OR owner_expires_at < ?)
+            RETURNING owner_epoch`,
+        )
+        .get(ownerId, now + ttlMs, id, ownerId, now) as { owner_epoch: number } | undefined);
   return row ? row.owner_epoch : null;
+}
+
+/** Extend an owner's hold at the same epoch; false once another owner fenced it. */
+export function renewRunOwnership(sqlite: BetterSqlite3.Database, id: string, ownerId: string, epoch: number, ttlMs: number, now = Date.now()): boolean {
+  return (
+    sqlite
+      .prepare(`UPDATE workflow_runs SET owner_expires_at = ? WHERE id = ? AND owner_id = ? AND owner_epoch = ?`)
+      .run(now + ttlMs, id, ownerId, epoch).changes > 0
+  );
 }
 
 export function getRunRow(sqlite: BetterSqlite3.Database, id: string): WorkflowRunRow | null {

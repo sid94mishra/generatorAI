@@ -58,6 +58,8 @@ export type { RunSandboxOptions } from './createRunSandbox.js';
 export { WorkflowPreprocessor } from './WorkflowPreprocessor.js';
 export type { WorkflowScmFlowPort } from './WorkflowPreprocessor.js';
 export { ResultValidator } from './ResultValidator.js';
+// Engine v2 (P03 WP-3.5/3.6)
+export * from './engine/index.js';
 
 // Phase 4 streaming rewrite (additive — coexists with legacy transports)
 export { StreamBroker } from './StreamBroker.js';

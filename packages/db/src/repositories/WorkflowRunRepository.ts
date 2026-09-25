@@ -31,7 +31,7 @@ import { StorageError, NotFoundError } from '@generatorai/shared';
 import { stageRuns, workflowRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { sqliteHandle } from './AuthRepositories.js';
-import { claimRunOwnership, getRunRow, runTransition } from './engineCas.js';
+import { claimRunOwnership, getRunRow, renewRunOwnership, runTransition } from './engineCas.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
@@ -74,8 +74,12 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
     return runTransition(sqliteHandle(this.db), id, from, to, opts);
   }
 
-  claimOwnership(id: string, ownerId: string, ttlMs: number, now?: number): number | null {
-    return claimRunOwnership(sqliteHandle(this.db), id, ownerId, ttlMs, now);
+  claimOwnership(id: string, ownerId: string, ttlMs: number, now?: number, opts?: { force?: boolean }): number | null {
+    return claimRunOwnership(sqliteHandle(this.db), id, ownerId, ttlMs, now, opts);
+  }
+
+  renewOwnership(id: string, ownerId: string, epoch: number, ttlMs: number, now?: number): boolean {
+    return renewRunOwnership(sqliteHandle(this.db), id, ownerId, epoch, ttlMs, now);
   }
 
   getRunRow(id: string): WorkflowRunRow | null {

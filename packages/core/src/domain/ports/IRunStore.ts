@@ -106,9 +106,13 @@ export interface IWorkflowRunCas {
   /**
    * Take the run for this process: `owner_id = ownerId`, `owner_epoch + 1`.
    * Succeeds when the run is unowned, owned by `ownerId`, or its ownership
-   * expired. Returns the new epoch, or null.
+   * expired. Returns the new epoch, or null. `force` takes it from any
+   * owner: the supervisor holds the single-engine lock at boot, so every
+   * other owner of the database is dead (G5 §5.6).
    */
-  claimOwnership(id: string, ownerId: string, ttlMs: number, now?: number): number | null;
+  claimOwnership(id: string, ownerId: string, ttlMs: number, now?: number, opts?: { force?: boolean }): number | null;
+  /** Extend this owner's hold at the same epoch. False when fenced. */
+  renewOwnership(id: string, ownerId: string, epoch: number, ttlMs: number, now?: number): boolean;
   getRunRow(id: string): WorkflowRunRow | null;
 }
 

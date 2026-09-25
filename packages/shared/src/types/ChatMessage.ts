@@ -129,5 +129,11 @@ export interface ChatMessage {
    * `chat_messages.complete` (v56); absent on other roles.
    */
   complete?: boolean;
+  /**
+   * The role of the turn in a workflow stage conversation
+   * (`chat_messages.turn_role`, v57): prompt, repair, summary,
+   * approval_feedback and so on. Absent on chat messages.
+   */
+  turnRole?: string;
   timestamp: Date;
 }

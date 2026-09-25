@@ -32,7 +32,14 @@ import { stampCardSequence, type GatePort } from './gates.js';
 import type { TurnContext } from './types.js';
 
 export interface StageGatePortDeps {
-  hitl: HitlService;
+  /** The v1 engine's durable wait. */
+  hitl?: HitlService | undefined;
+  /**
+   * The v2 engine's wait (P03 WP-3.5): the executor moves its instance to
+   * `awaiting_input` (a CAS), releases its admission slot and waits for the
+   * verdict the actor delivers. Takes precedence over `hitl`.
+   */
+  park?: ((turn: TurnContext, data: Record<string, unknown>, prompt: string) => Promise<InterruptResolution>) | undefined;
   eventBus: EventBus;
   planService?: PlanService | undefined;
   /** The run workspace's managed root: plans land in its `plans/` folder. */
@@ -62,7 +69,9 @@ export class StageGatePort implements GatePort {
 
   /** Park on the HITL wait with the stage-semaphore permit released. */
   private async park(turn: TurnContext, data: Record<string, unknown>, prompt: string): Promise<InterruptResolution> {
+    if (this.deps.park) return this.deps.park(turn, data, prompt);
     const { stageRunId, workflowRunId } = stageIds(turn);
+    if (!this.deps.hitl) return { outcome: 'rejected', reason: 'No approval channel is available for this stage.' };
     turn.semaphore?.pause();
     try {
       return await this.deps.hitl.interrupt(stageRunId, workflowRunId, data, { prompt });

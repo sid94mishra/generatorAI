@@ -71,6 +71,8 @@ export {
   type JournalRow,
 } from './repositories/EngineRepositories.js';
 export { RunStore, jitteredDelay } from './repositories/RunStore.js';
+// Engine v2 (P03 WP-3.5/3.6): turn journal, single-engine lock, scans
+export { StageTurnJournal, EngineLockRepository, EngineQueries, createEngineStores } from './repositories/EngineStores.js';
 
 // Automation repositories
 export { DrizzleAutomationRepository } from './repositories/AutomationRepository.js';

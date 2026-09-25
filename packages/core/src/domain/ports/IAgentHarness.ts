@@ -97,6 +97,12 @@ export interface HarnessModel {
 export interface ConversationResponse {
   content: string;
   toolCalls?: { tool: string; args: unknown; result: unknown }[];
+  /**
+   * RV-9 — the turn's structured output, when the turn asked for one with
+   * `SendPromptOptions.outputSchema` and the provider produces it natively
+   * (claude-agent `structured_output`, Codex's schema-constrained final message).
+   */
+  structuredOutput?: unknown;
 }
 
 export interface ConversationMessage {
@@ -243,6 +249,15 @@ export interface SendPromptOptions {
    * mode derived from `agentMode` and over the stored conversation default.
    */
   permissionMode?: HarnessPermissionMode;
+  /**
+   * RV-9 — constrain THIS turn's final answer to a JSON Schema, for a
+   * provider whose `capabilities().structuredOutput` is `native`
+   * (claude-agent `outputFormat`, Codex `turn/start.outputSchema`). The
+   * workflow engine sends it on a stage's final prompt turn only: on Claude
+   * the format is session-scoped. The value comes back as
+   * `ConversationResponse.structuredOutput`. Other providers ignore it.
+   */
+  outputSchema?: Record<string, unknown>;
 }
 
 /** What the adapter hands the host when the agent finishes planning. */

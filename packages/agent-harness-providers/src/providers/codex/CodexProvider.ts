@@ -309,6 +309,20 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * RV-9 — a turn sent with `outputSchema` ends in a schema-constrained final
+ * message: its JSON is the turn's structured output. Text that does not
+ * parse leaves the output unset (the engine's extractor then repairs).
+ */
+function withStructuredOutput(content: string, options: SendPromptOptions | undefined): ConversationResponse {
+  if (!options?.outputSchema) return { content };
+  try {
+    return { content, structuredOutput: JSON.parse(content.trim()) as unknown };
+  } catch {
+    return { content };
+  }
+}
+
 /** Thread items that represent a tool the model invoked. */
 const TOOL_ITEM_TYPES: ReadonlySet<string> = new Set([
   'commandExecution',
@@ -1666,6 +1680,8 @@ export class CodexProvider implements IAgentHarness {
       // "This turn and subsequent turns" — re-sent each turn so a change made
       // between turns (or a resumed thread) always takes the chat's effort.
       ...(conv.params.reasoningEffort ? { effort: conv.params.reasoningEffort } : {}),
+      // RV-9 — a workflow stage's final prompt turn asks for its structured output.
+      ...(options?.outputSchema ? { outputSchema: options.outputSchema } : {}),
     };
 
     let assistantText = '';
@@ -2266,7 +2282,7 @@ export class CodexProvider implements IAgentHarness {
               // `providerTurnId` is the anchor `thread/fork` / `thread/revert` take.
               if (turn?.id) this.broadcast(conv, { kind: 'harness.turn_end', data: { turnId: turn.id, providerTurnId: turn.id } });
               this.broadcast(conv, { kind: 'harness.idle', data: {} });
-              resolve({ content: finalAnswer ?? assistantText });
+              resolve(withStructuredOutput(finalAnswer ?? assistantText, options));
             });
             break;
           }

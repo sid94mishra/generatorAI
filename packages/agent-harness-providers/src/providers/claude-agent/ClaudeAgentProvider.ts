@@ -99,6 +99,7 @@ import {
   normaliseClaudeQuestions,
 } from './plan-gate.js';
 import { buildHarnessEnv, filterDelegatedHarnessEnv } from '../../childEnv.js';
+import { toHarnessError } from '../../errors.js';
 
 // ── W41 — lazy SDK module singleton ──────────────────────────────
 //
@@ -1933,6 +1934,8 @@ export class ClaudeAgentProvider implements IAgentHarness {
         let sessionId: string | undefined;
         // W13-B1: track truncation so we can fail all in-flight tool calls.
         let truncationStopReason: string | undefined;
+        let structuredOutput: unknown;
+        let structuredOutputFailure: Error | undefined;
 
         for await (const message of queryHandle) {
           // Idle-watchdog: every SDK message resets the inactivity clock,
@@ -1993,9 +1996,16 @@ export class ClaudeAgentProvider implements IAgentHarness {
               if (!fullContent && message.result) {
                 fullContent = message.result;
               }
+              if (turnOptions?.outputSchema && message.structured_output !== undefined) {
+                structuredOutput = message.structured_output;
+              }
+            } else if (message.subtype === 'error_max_structured_output_retries' && turnOptions?.outputSchema) {
+              // RV-9 — the model could not satisfy the schema: repairable, not a crash.
+              structuredOutputFailure = toHarnessError('claude-agent', message);
             }
           }
         }
+        if (structuredOutputFailure) throw structuredOutputFailure;
 
         // W13-B1: If the response was truncated and contains tool calls, fail
         // ALL of them rather than executing potentially-incomplete arguments.
@@ -2040,6 +2050,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         return {
           content: fullContent,
           toolCalls: toolCalls.length > 0 ? toolCalls : undefined,
+          ...(structuredOutput !== undefined ? { structuredOutput } : {}),
         };
       } catch (err) {
         activeQuery.status = 'failed';
@@ -2589,6 +2600,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
     // user-level settings, where sharing the profile is the point.
     if (!(this.options.settingSources ?? []).includes('user')) {
       (options as Record<string, unknown>)['settings'] = { autoMemoryEnabled: false };
+    }
+
+    // RV-9 — native structured output for THIS turn (a workflow stage's final
+    // prompt turn). The format is session-scoped in the SDK, so it is only
+    // ever set per turn, never on the conversation.
+    if (turnOptions?.outputSchema) {
+      options.outputFormat = { type: 'json_schema', schema: turnOptions.outputSchema };
     }
 
     // PLN-01 — Claude-native custom plan-mode workflow body. Only meaningful
