@@ -9,7 +9,7 @@ import { PlatformProvider } from '@/providers/PlatformProvider.js';
 import { ThemeProvider } from '@/providers/ThemeProvider.js';
 import { AuthGate } from '@/components/AuthGate.js';
 import { Toaster } from '@/components/Toast.js';
-import { router } from '@/router.js';
+import { router } from '@/app/router.js';
 
 export function App() {
   return (
