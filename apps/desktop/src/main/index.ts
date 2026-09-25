@@ -15,12 +15,12 @@ import { getServerManager, VAULT_UNREADABLE_MESSAGE } from './server-manager';
 import { resolveTarget } from './serverConnections';
 import { getWindowManager } from './window-manager';
 import { nativeBrowserEnabled } from './browser-host';
-import { disposeComputerHost, initComputerHost } from './computer-host-registry';
+import { initComputerHost } from './computer-host-registry';
 import { setIpcToken } from './cdp/ipc-token';
 import { registerIpc } from './ipc';
 import { NAV_DESTINATIONS } from '@generatorai/shared/ui-contract';
 import { buildMenu, syncMenuThemeFromSettings } from './menu';
-import { createTray, destroyTray, refreshTrayMenu } from './tray';
+import { createTray, refreshTrayMenu } from './tray';
 import { registerDownloadHandler } from './downloads';
 import {
   registerDeepLinks,
@@ -30,13 +30,12 @@ import {
 } from './deep-link';
 import { initAutoUpdates, checkForUpdatesInteractive } from './updater';
 import { repointTarget } from './repoint';
+import { isQuitHandled, isQuitting, markQuitting, runQuitShutdown } from './quit-coordinator';
 
 const DEV_SERVER_URL = process.env['DESKTOP_DEV_SERVER_URL'] || null;
 const mode: 'dev' | 'standalone' = DEV_SERVER_URL ? 'dev' : 'standalone';
 
 let appUrl: string | null = null;
-let isQuitting = false;
-let quitHandled = false;
 /**
  * One process-lifetime secret used to authenticate the desktop→server
  * handshake route that pushes each workspace's scoped CDP endpoint (see
@@ -56,31 +55,6 @@ if (!app.requestSingleInstanceLock()) {
     setIpcToken(ipcToken);
   }
   main();
-}
-
-/**
- * Resolve `work`, or give up after `ms` and carry on.
- *
- * Deliberately resolves rather than rejects on the deadline: the caller's job
- * is to finish quitting either way, and a rejection there would only travel to
- * a `catch` that logs and continues. The timer is unref'd so it can never be
- * the reason the process stays alive — which would be a fine irony in a
- * shutdown path.
- */
-async function withDeadline(work: Promise<void>, ms: number, message: string): Promise<void> {
-  let timer: NodeJS.Timeout | undefined;
-  const deadline = new Promise<void>((resolve) => {
-    timer = setTimeout(() => {
-      log.warn(message);
-      resolve();
-    }, ms);
-    timer.unref?.();
-  });
-  try {
-    await Promise.race([work, deadline]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
 }
 
 function main(): void {
@@ -123,56 +97,23 @@ function main(): void {
   });
 
   app.on('before-quit', async (event) => {
-    if (quitHandled) return;
+    // Already run — either this handler ran it, or `installUpdate` did on the
+    // update-install path (quit-coordinator.ts). Returning without
+    // `preventDefault()` lets Electron's own quit sequence finish normally,
+    // which matters for `quitAndInstall()`: it needs `will-quit`/`quit` to
+    // actually fire, and `app.exit(0)` below never emits them.
+    if (isQuitHandled()) return;
     event.preventDefault();
     // Ask before discarding unsaved edits — Cmd+Q and the Dock's Quit reach
     // here without the window's close handler ever running.
-    if (!(await getWindowManager().confirmDiscard())) return;
-    quitHandled = true;
-    isQuitting = true;
-    // Let the minimise-to-tray `close` interception stand aside.
-    getWindowManager().setQuitting(true);
-    log.info('Quitting — shutting down embedded server');
-    try {
-      // Bounded, because `app.exit(0)` below is the only thing that actually
-      // ends the process once `preventDefault()` has been called. Anything that
-      // can hang in here — a server that will not drain, a driver that will not
-      // release — takes the whole quit with it, and the user is left with a
-      // window that closed and an application that did not, still holding the
-      // database and the port. That happened: the packaged app hung here
-      // indefinitely and had to be killed from the task manager.
-      //
-      // Graceful shutdown gets a generous window and then loses. `stop()` runs
-      // its own 15 s drain-then-force sequence inside this, so reaching the
-      // deadline means something below it is genuinely stuck, and the honest
-      // response is to say so and go.
-      await withDeadline(
-        (async () => {
-          // Before the server: the driver holds OS-level input grants, and
-          // leaving it running past the app that is responsible for it is
-          // exactly the orphaned-automation case the TCC model is meant to
-          // prevent.
-          await disposeComputerHost();
-          if (mode === 'standalone') await getServerManager().stop();
-        })(),
-        20_000,
-        'shutdown did not finish in 20s — exiting anyway',
-      );
-    } catch (e) {
-      log.warn('Error stopping server during quit', e);
-    } finally {
-      // Logged, not silent. This is the last stretch of a path that has already
-      // hung once in a shipped build, and when it hangs the only evidence is
-      // which of these lines was the last one written.
-      log.info('Shutdown complete — destroying tray');
-      try {
-        destroyTray();
-      } catch (e) {
-        log.warn('Error destroying tray during quit', e);
-      }
-      log.info('Exiting');
-      app.exit(0);
-    }
+    const proceeded = await runQuitShutdown(mode);
+    if (!proceeded) return;
+    // Bounded shutdown already ran inside `runQuitShutdown`; `app.exit(0)` is
+    // the only thing that actually ends the process once `preventDefault()`
+    // has been called. Anything that could still hang belongs in that
+    // routine's own deadline, not here.
+    log.info('Exiting');
+    app.exit(0);
   });
 }
 
@@ -229,7 +170,7 @@ async function onReady(): Promise<void> {
   // A vault that stops opening mid-session leaves the server dead and every
   // request failing; the same recovery is offered as at startup.
   sm.on('vault-unreadable', () => {
-    if (isQuitting) return;
+    if (isQuitting()) return;
     void offerVaultReset(sm);
   });
 
@@ -265,7 +206,7 @@ async function onReady(): Promise<void> {
       // reject — reporting that to the user would be blaming them for their own
       // decision, and the window it opens is what used to stop the app exiting
       // at all (see `showError`, which now refuses regardless).
-      if (isQuitting) {
+      if (isQuitting()) {
         log.info('Server start abandoned because the app is quitting');
         return;
       }
@@ -315,7 +256,7 @@ async function onReady(): Promise<void> {
   const initialLink = findDeepLinkInArgv(process.argv);
   if (initialLink) handleDeepLink(initialLink);
 
-  void initAutoUpdates();
+  void initAutoUpdates(mode);
 }
 
 /**
@@ -361,7 +302,7 @@ async function promptVaultReset(sm: ReturnType<typeof getServerManager>): Promis
       'vault file is kept next to it in case the keystore entry can be restored.',
   });
   if (response !== 0) {
-    isQuitting = true;
+    markQuitting(true);
     app.quit();
     return false;
   }
@@ -453,6 +394,3 @@ function showAbout(): void {
       .join('\n'),
   });
 }
-
-// Referenced to keep the linter aware these are intentionally part of lifecycle.
-// `isQuitting` is read by the startup-failure path in `onReady`.

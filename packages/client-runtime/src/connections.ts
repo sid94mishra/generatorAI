@@ -231,3 +231,64 @@ export function clearConnectionCredentials(storage: Storage, serverId: string): 
     // Nothing to clear.
   }
 }
+
+// ────────────────────────────────────────────────────────────────
+// Reachability probe (G-03, 05-gap-matrix.md §G-03).
+// ────────────────────────────────────────────────────────────────
+//
+// `GET /api/auth/server-info` is deliberately public (see `auth.ts`'s own
+// comment): a device that has not paired yet still needs to identify the
+// server it is about to pair with. That makes it exactly the right endpoint
+// for a reachability probe too — it works for every entry in the switcher,
+// paired or not, on every OS (desktop main via Node's global `fetch`, or the
+// browser via the same code path — "the same code runs on every OS", 05
+// §G-03).
+
+export interface ServerProbeResult {
+  /**
+   * `offline` — the request could not complete at all (timeout, DNS, refused
+   * connection). `unpaired` — something answered, but not with a recognisable
+   * GeneratorAI identity (non-2xx, or a body with no `serverId`): reachable,
+   * but not something this client can treat as a known server yet. `connected`
+   * — it identified itself.
+   */
+  status: 'connected' | 'offline' | 'unpaired';
+  serverName?: string;
+  latencyMs?: number;
+}
+
+export interface ProbeServerOptions {
+  timeoutMs?: number;
+}
+
+const DEFAULT_PROBE_TIMEOUT_MS = 2500;
+
+/** Probes one server origin for reachability and identity. Never throws. */
+export async function probeServer(
+  endpoint: string,
+  options: ProbeServerOptions = {},
+): Promise<ServerProbeResult> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
+  const startedAt = Date.now();
+  try {
+    const response = await fetch(`${endpoint}/api/auth/server-info`, { signal: controller.signal });
+    const latencyMs = Date.now() - startedAt;
+    if (!response.ok) return { status: 'unpaired', latencyMs };
+    const body = (await response.json().catch(() => null)) as
+      | { serverId?: unknown; serverName?: unknown }
+      | null;
+    if (!body || typeof body.serverId !== 'string' || !body.serverId) {
+      return { status: 'unpaired', latencyMs };
+    }
+    return {
+      status: 'connected',
+      latencyMs,
+      ...(typeof body.serverName === 'string' ? { serverName: body.serverName } : {}),
+    };
+  } catch {
+    return { status: 'offline' };
+  } finally {
+    clearTimeout(timer);
+  }
+}

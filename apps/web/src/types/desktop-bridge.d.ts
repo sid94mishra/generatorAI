@@ -139,12 +139,53 @@ interface GeneratorAIDesktopWindowChrome {
   isWayland: boolean;
 }
 
+/** Needs-you / running totals from the D-36 attention feed (G-01), mirrored into the native menu (G-05). */
+interface GeneratorAIDesktopAttentionCounts {
+  needsYou: number;
+  running: number;
+  byEntity: Record<'chat' | 'workflow_run' | 'automation_execution', { needsYou: number; running: number }>;
+}
+
 /** Renderer UI state mirrored into the native menu (checkmarks, enablement). */
 interface GeneratorAIDesktopMenuState {
   sidebarOpen: boolean;
   rightPaneOpen: boolean;
   hasUnsavedWork: boolean;
   recent: Array<{ label: string; route: string }>;
+  /** `null` until the renderer's own attention subscription has a first snapshot. */
+  attention: GeneratorAIDesktopAttentionCounts | null;
+}
+
+/** One known server (G-03): this machine or a paired remote. */
+interface GeneratorAIDesktopServerEntry {
+  id: string;
+  label: string;
+  url: string;
+  kind: 'embedded' | 'remote';
+  active: boolean;
+}
+
+interface GeneratorAIDesktopServersApi {
+  list: () => Promise<GeneratorAIDesktopServerEntry[]>;
+  switchTo: (id: string) => Promise<void>;
+  /** Opens the shell's own "Connect to a server" prompt window. */
+  add: () => Promise<void>;
+  onChanged: (cb: () => void) => () => void;
+}
+
+/** Auto-updater state (G-04), for the future "Restart to update" pill. */
+interface GeneratorAIDesktopUpdateState {
+  status: 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
+  currentVersion: string;
+  nextVersion?: string;
+  percent?: number;
+  error?: string;
+}
+
+interface GeneratorAIDesktopUpdatesApi {
+  getState: () => Promise<GeneratorAIDesktopUpdateState>;
+  install: () => Promise<void>;
+  onChange: (cb: (state: GeneratorAIDesktopUpdateState) => void) => () => void;
 }
 
 /** The renderer's appearance, mirrored by the shell (D-25): `#rrggbb` chrome colours for both appearances. */
@@ -189,6 +230,8 @@ interface GeneratorAIDesktopBridge {
   getWindowChrome?: () => Promise<GeneratorAIDesktopWindowChrome>;
   window?: GeneratorAIDesktopWindowApi;
   setMenuState?: (state: Partial<GeneratorAIDesktopMenuState>) => Promise<void>;
+  servers?: GeneratorAIDesktopServersApi;
+  updates?: GeneratorAIDesktopUpdatesApi;
   onWindowStateChanged?: (
     cb: (state: GeneratorAIDesktopWindowStateChange) => void,
   ) => () => void;

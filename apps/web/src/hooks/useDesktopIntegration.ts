@@ -30,6 +30,7 @@ import { useUiStore } from '@/stores/uiStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { usePageTitleStore } from '@/stores/pageTitleStore.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
+import { useAttentionCounts } from './attentionQueries.js';
 
 /** `File ▸ Open Recent` label for a route without a page title: its section (D-22). */
 function routeLabel(pathname: string): string {
@@ -52,6 +53,10 @@ export function useDesktopIntegration(): DesktopWindowChrome {
   // recent entry read as its section, so three chats were three "Chats".
   const pageTitle = usePageTitleStore((s) => s.title);
   const hasUnsavedWork = useUnsavedWorkStore((s) => s.dirtyKeys.size > 0);
+  // Undefined until the attention feed's first snapshot loads (D-36) — kept
+  // undefined here too, so main's `sanitizeAttention` sees no `attention` key
+  // at all rather than a fabricated zeroed one (G-05).
+  const attentionCounts = useAttentionCounts();
 
   // ── 1. Publish window chrome ──
   useEffect(() => {
@@ -107,8 +112,9 @@ export function useDesktopIntegration(): DesktopWindowChrome {
       rightPaneOpen,
       recent: next,
       hasUnsavedWork,
+      ...(attentionCounts ? { attention: attentionCounts } : {}),
     });
-  }, [location.pathname, sidebarOpen, rightPaneOpen, pageTitle, hasUnsavedWork]);
+  }, [location.pathname, sidebarOpen, rightPaneOpen, pageTitle, hasUnsavedWork, attentionCounts]);
 
   // Appearance is not handled here: ThemeProvider is its only writer and owns
   // the desktop appearance IPC in both directions (D-25).

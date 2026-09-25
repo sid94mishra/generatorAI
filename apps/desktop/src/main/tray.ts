@@ -8,7 +8,7 @@ import * as path from 'node:path';
 import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { log } from './logger';
-import { accel } from './menu';
+import { accel, getMenuState } from './menu';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
 
@@ -54,13 +54,33 @@ export function createTray(): void {
   getServerManager().on('status', () => refreshTrayMenu());
 }
 
+/**
+ * The live attention counts, or `null` when there is nothing to show yet —
+ * either the renderer has not pushed a snapshot, or (05 §G-05: "if the window
+ * has been destroyed, the counts are omitted") the main window that would
+ * refresh them no longer exists, so a stale count could never be corrected.
+ */
+function liveAttention() {
+  const win = getWindowManager().getMainWindow();
+  if (!win || win.isDestroyed()) return null;
+  return getMenuState().attention;
+}
+
 export function refreshTrayMenu(): void {
   if (!tray) return;
   const sm = getServerManager();
   const wm = getWindowManager();
   const status = sm.getStatus();
+  const attention = liveAttention();
+  // "3 agents" is running CHATS specifically (DesktopMac board: "Server
+  // running · 3 agents") — workflow runs and automations do not count here.
+  const runningChats = attention?.byEntity.chat.running ?? 0;
+  const agentsLabel = attention ? ` · ${runningChats} agent${runningChats === 1 ? '' : 's'}` : '';
   const menu = Menu.buildFromTemplate([
-    { label: `Server: ${status.state}${status.port ? ` (:${status.port})` : ''}`, enabled: false },
+    {
+      label: `Server: ${status.state}${agentsLabel}${status.port ? ` (:${status.port})` : ''}`,
+      enabled: false,
+    },
     { type: 'separator' },
     { label: 'Open GeneratorAI', click: () => wm.restoreFromTray() },
     {
@@ -75,9 +95,14 @@ export function refreshTrayMenu(): void {
     },
     { type: 'separator' },
     { label: 'Go to', enabled: false },
-    // Same destinations and order as the sidebar (D-22), minus Scripts.
+    // Same destinations and order as the sidebar (D-22), minus Scripts. The
+    // board's per-entity badges (e.g. "Workflows 1") cannot be derived from
+    // aggregate counts, so the needs-you total goes on Home only (06 §8).
     ...NAV_DESTINATIONS.filter((d) => d.tray).map<MenuItemConstructorOptions>((d) => ({
-      label: d.label,
+      label:
+        d.id === 'home' && attention && attention.needsYou > 0
+          ? `${d.label} (${attention.needsYou})`
+          : d.label,
       click: () => wm.navigateTo(d.path),
     })),
     { type: 'separator' },
@@ -88,6 +113,11 @@ export function refreshTrayMenu(): void {
     { label: 'Quit', click: () => { wm.setQuitting(true); app.quit(); } },
   ]);
   tray.setContextMenu(menu);
+  tray.setToolTip(
+    attention && attention.needsYou > 0
+      ? `GeneratorAI — ${attention.needsYou} need${attention.needsYou === 1 ? 's' : ''} you`
+      : 'GeneratorAI',
+  );
 }
 
 export function destroyTray(): void {

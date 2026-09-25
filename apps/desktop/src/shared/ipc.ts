@@ -4,6 +4,8 @@
 // drift between the two sides.
 // ────────────────────────────────────────────────────────────────
 
+import type { AttentionCounts } from '@generatorai/shared';
+
 export type ThemePreference = 'light' | 'dark' | 'system';
 
 /**
@@ -104,6 +106,28 @@ export interface MenuState {
   mode: ThemePreference;
   /** Most recently visited routes, newest first. */
   recent: { label: string; route: string }[];
+  /**
+   * Needs-you / running totals from the D-36 attention feed (G-01), pushed by
+   * the renderer's own live subscription (`useAttentionCounts`) — main holds
+   * no server connection of its own, so it never fetches these directly (05
+   * §G-05). `null` until the renderer has a first snapshot; the tray and menu
+   * degrade to today's server-only text while it is null, and also once the
+   * main window is destroyed (a dead renderer cannot refresh a stale count).
+   *
+   * `byEntity.chat.running` is what the tray calls "agents" (DesktopMac
+   * board: "Server running · 3 agents").
+   */
+  attention: AttentionCounts | null;
+}
+
+/** One entry in the desktop server switcher (G-03). */
+export interface DesktopServerEntry {
+  /** `'embedded'` for this machine's own server; a connection id otherwise. */
+  id: string;
+  label: string;
+  url: string;
+  kind: 'embedded' | 'remote';
+  active: boolean;
 }
 
 /**
@@ -157,6 +181,13 @@ export const IPC = {
   /** Native window controls, used only when we draw our own title bar. */
   windowMaximizeToggle: 'desktop:windowMaximizeToggle',
   windowIsMaximized: 'desktop:windowIsMaximized',
+  /** Known servers (this machine + paired remotes), for the switcher (G-03). */
+  getServers: 'desktop:getServers',
+  switchServer: 'desktop:switchServer',
+  addServer: 'desktop:addServer',
+  /** Updater state, for the renderer's "Restart to update" pill (G-04). */
+  getUpdateState: 'desktop:getUpdateState',
+  installUpdate: 'desktop:installUpdate',
 } as const;
 
 /** Result of {@link IPC.requestPairingCode}. */
@@ -191,6 +222,10 @@ export const IPC_EVENT = {
    * pushes the result back through {@link IPC.setAppearance}.
    */
   appearanceRequest: 'desktop:appearance-request',
+  /** The known-servers list changed (switched, added, forgotten) — G-03. */
+  serversChanged: 'desktop:servers-changed',
+  /** Updater state changed (checking/downloading/ready/error) — G-04. */
+  updateStateChanged: 'desktop:update-state-changed',
 } as const;
 
 /** Payload of {@link IPC_EVENT.windowStateChanged}. */
@@ -198,6 +233,21 @@ export interface WindowStateChange {
   maximized: boolean;
   fullScreen: boolean;
   focused: boolean;
+}
+
+/**
+ * Auto-updater state, mirrored to the renderer for the "Restart to update"
+ * pill (G-04, 06-desktop-and-shell.md §8). `currentVersion` is always the
+ * running build's version, even while `status` is `'idle'`; `nextVersion`
+ * and `percent` are only meaningful once a check has found something.
+ */
+export interface UpdateState {
+  status: 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
+  currentVersion: string;
+  nextVersion?: string;
+  /** 0–100, while `status === 'downloading'`. */
+  percent?: number;
+  error?: string;
 }
 
 /** Result of one find-in-page pass, as Chromium reports it. */

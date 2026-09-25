@@ -29,9 +29,9 @@ Every designed element whose data or behaviour the current API, stores and deskt
 |---|---|---|---|---|
 | G-01 | Attention feed (Needs you + Running, live) — **built (P2-01)** | P3 | P2 | L |
 | G-02 | Chat list v2: status, Changes ±, last activity, filters, paging — **built (P2-02)** | P3 | P2 | M |
-| G-03 | Server switcher: server list, reachability, desktop IPC | P3 | P2 | M |
-| G-04 | Desktop update state in the renderer ("Restart to update") | P3 | P2 | S |
-| G-05 | Attention counts in the desktop main process (tray, menu, badge) | P3 | P2 | S |
+| G-03 | Server switcher: server list, reachability, desktop IPC — **built (P2-03)** | P3 | P2 | M |
+| G-04 | Desktop update state in the renderer ("Restart to update") — **built (P2-03)** | P3 | P2 | S |
+| G-05 | Attention counts in the desktop main process (tray, menu, badge) — **built (P2-03)** | P3 | P2 | S |
 | G-06 | Transcript view mode Normal / Verbose / Summary | P4 | P4 (client only) | S |
 | G-07 | Computer consent plan + scope; Pause agent / Take over | P4 (degrades) | P2 | M–L |
 | G-08 | Deep links keep an allowlisted query string | P4 | P2 (desktop) | S |
@@ -223,9 +223,14 @@ Palette "Recent chats" also uses it.
   - the event `onChanged`.
 - **Web:** `hooks/serverQueries.ts` `useServers()`. It picks the desktop list when `lib/desktop.ts` reports the bridge, and the client-runtime catalog otherwise, then adds probe status. The same code runs on every OS.
 
+**As built (P2-03).**
+- `probeServer(endpoint, { timeoutMs })` (`packages/client-runtime/src/connections.ts`) fetches `GET {endpoint}/api/auth/server-info` with an `AbortController` timeout (default 2500ms): a thrown/aborted request is `offline`; a non-2xx response, or a body with no `serverId`, is `unpaired` (reachable but not identifiable as a known server); a 2xx body with a `serverId` is `connected`, carrying `serverName`/`latencyMs` when present.
+- **Desktop IPC** (`apps/desktop/src/shared/ipc.ts`): `IPC.getServers` (`desktop:getServers`) → `DesktopServerEntry[]` (`{ id; label; url; kind: 'embedded' | 'remote'; active }`, `id: 'embedded'` for this machine); `IPC.switchServer` (`desktop:switchServer`, payload `id`) → `backend-switcher.ts`'s new `switchServerById` (`'embedded'` routes to `switchToEmbedded`, anything else to `switchToRemote`, an unknown remote id is a no-op); `IPC.addServer` (`desktop:addServer`) → `promptForRemoteServer()`. `IPC_EVENT.serversChanged` (`desktop:servers-changed`) fires whenever `backend-switcher.ts`'s `persist()` runs (switch, add, forget), via a new `onServersChanged` subscription. Preload exposes all four as `window.generatoraiDesktop.servers = { list, switchTo, add, onChanged }`.
+- **Web:** `lib/desktop.ts` gained a `desktopServers` wrapper (mirrors `pushMenuState`'s no-op-off-desktop shape) and `hooks/serverQueries.ts` (`useServers`, `switchServer`, `addServer`) exactly as specified above; `useServers` invalidates its query when `desktopServers.onChanged` fires.
+
 **Consumers.** Sidebar and popover (P3), Windows strip chip (P3), Settings Security (P6), mobile drawer switcher.
 
-**Owner / phase / effort.** P2 · P3 · **M**. Until it lands, the switcher shows the active server only, with no status dot.
+**Owner / phase / effort.** P2 · P3 · **M**. Until P3's UI lands, the switcher shows the active server only, with no status dot.
 
 ### G-04 — Update state in the renderer
 
@@ -237,6 +242,13 @@ Palette "Recent chats" also uses it.
 - **IPC** `updates.getState()` → `{ status: 'idle' | 'checking' | 'downloading' | 'ready' | 'error'; currentVersion; nextVersion? }`, plus `updates.onChanged` and `updates.install()` (`quitAndInstall`).
 - The native dialog is shown only while no window is visible.
 - **Web:** `lib/desktop.ts` wrapper and `useUpdateState()`.
+
+**As built (P2-03).**
+- `UpdateState` (`apps/desktop/src/shared/ipc.ts`) is `{ status: 'idle' | 'checking' | 'downloading' | 'ready' | 'error'; currentVersion; nextVersion?; percent?; error? }`; `currentVersion` is always read live from `app.getVersion()`. `updater.ts` folds every real `electron-updater` event (`checking-for-update`, `update-available`, `download-progress`, `update-downloaded`, `error`) into it and notifies subscribers.
+- IPC: `IPC.getUpdateState` (`desktop:getUpdateState`), `IPC.installUpdate` (`desktop:installUpdate`, calls the new `installUpdate()`), `IPC_EVENT.updateStateChanged` (`desktop:update-state-changed`). Preload: `window.generatoraiDesktop.updates = { getState, install, onChange }`.
+- The `update-downloaded` native dialog now fires only when there is no visible main window (`win.isVisible()` false or no window at all); picking "Restart Now" there calls the same `installUpdate()` the future pill will call.
+- **Web:** `lib/desktop.ts` gained `desktopUpdates` (`getState`, `onChange`, `restartToUpdate`) and `hooks/updateQueries.ts` (`useUpdateState()`, `restartToUpdate()`); `useUpdateState` is `null` on plain web (D-23: "web: never" shows the pill).
+- **R5 (06 §11), verified and fixed.** `before-quit` (`index.ts`) always finishes in `app.exit(0)`, and Electron's own docs state `app.exit()` never emits `before-quit`/`will-quit` — and by extension never `quit` either, which is what `electron-updater`'s `autoInstallOnAppQuit` listens for (`app.once('quit', …)`, `BaseUpdater.addQuitHandler`). Reading `node_modules/electron-updater/out/BaseUpdater.js` confirmed `quitAndInstall()` itself is not actually broken by this — it spawns the platform installer as a **detached** child process synchronously, inside `install()`, before its own `app.quit()` call — but the quit-triggered auto-install path was silently skipped. Fix: the bounded shutdown sequence (`confirmDiscard`, `disposeComputerHost`, stop the embedded server, destroy the tray) moved out of `index.ts` into a new shared `quit-coordinator.ts` (`runQuitShutdown`), used by both `before-quit` and the new `installUpdate()`. `installUpdate()` runs that same sequence and then calls `quitAndInstall()` instead of `app.exit(0)`; `runQuitShutdown` marks the quit handled first, so `quitAndInstall()`'s own later `app.quit()` finds `before-quit` a no-op and completes Electron's normal quit sequence, letting `will-quit`/`quit` fire for real. Not yet run against a real installer per OS — that is 06 §8's `mock-update-server` step, deferred to the P3-06 / phase-end smokes per this task's scope.
 
 **Owner / phase / effort.** P2 · P3 · **S**.
 
@@ -250,6 +262,11 @@ Palette "Recent chats" also uses it.
 - Extend `MenuState` with `attention: { needsYou; running; runningChats; byEntity }`, pushed from the G-01 store. `tray.ts` and `menu.ts` rebuild from it.
 - `app.setBadgeCount(needsYou)` where the OS supports it (macOS dock, Linux Unity). On Windows, `setOverlayIcon` through a shared helper; no ad-hoc platform checks.
 - If the window has been destroyed, the counts are omitted and the item text degrades to today's.
+
+**As built (P2-03).** The mechanism is exactly what "Exists today" describes, extended rather than replaced: main never subscribes to the server itself (it has no session for it) — it reuses the existing renderer→main `setMenuState` push (`useDesktopIntegration.ts`), which now includes `attention` whenever `useAttentionCounts()` (G-01) has a snapshot.
+- `MenuState.attention` (`apps/desktop/src/shared/ipc.ts`) is the G-01 `AttentionCounts` type verbatim (`{ needsYou; running; byEntity: Record<'chat'|'workflow_run'|'automation_execution', {needsYou;running}> }`) or `null`; `ipc.ts`'s `setMenuState` handler validates it (non-negative integers capped at 999, per-entity rows defaulted to zero) before storing or using it. "3 agents" reads as `byEntity.chat.running` — workflow runs/automations do not count there.
+- `menu.ts` exposes the latest pushed state via a new `getMenuState()`; `tray.ts`'s `refreshTrayMenu()` reads it to build `Server: {state} · {n} agents (:{port})` and to suffix `Home` with `(needsYou)` (the board's per-entity badges cannot be derived from aggregate counts, so only Home gets one, per 06 §8) and to set the tray tooltip. Both the badge and the tray text are omitted (degrade to today's) when the main window is destroyed, even if a stale `attention` value is still cached.
+- `apps/desktop/src/main/badge.ts`, one function (`applyAttentionBadge`) called from `ipc.ts`'s `setMenuState` handler for every platform: macOS `app.dock.setBadge`, Linux `app.setBadgeCount` (a no-op on a DE without a Unity/libunity launcher — that is graceful degradation, not a platform special-case), and Windows a per-window `setOverlayIcon` with a 16×16 dot generated in-process (no bundled asset) — real parity on all three OSes rather than skipping Windows.
 
 **Owner / phase / effort.** P2 · P3 · **S** (depends on G-01).
 

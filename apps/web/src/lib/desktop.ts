@@ -11,6 +11,9 @@ export type DesktopMenuState = GeneratorAIDesktopMenuState;
 export type DesktopWindowState = GeneratorAIDesktopWindowStateChange;
 export type DesktopCommand = GeneratorAIDesktopCommand;
 export type DesktopAppearance = GeneratorAIDesktopAppearance;
+export type DesktopAttentionCounts = GeneratorAIDesktopAttentionCounts;
+export type DesktopServerEntry = GeneratorAIDesktopServerEntry;
+export type DesktopUpdateState = GeneratorAIDesktopUpdateState;
 
 /** True only inside the Electron shell. */
 export const isDesktop: boolean =
@@ -110,6 +113,66 @@ export function onWindowStateChanged(cb: (state: DesktopWindowState) => void): (
   if (!api) return () => undefined;
   return api(cb);
 }
+
+/** The desktop server switcher bridge (G-03). Every member no-ops in a plain browser tab. */
+export const desktopServers = {
+  isAvailable: (): boolean => Boolean(bridge()?.servers),
+  list: async (): Promise<DesktopServerEntry[]> => {
+    const api = bridge()?.servers?.list;
+    if (!api) return [];
+    try {
+      return await api();
+    } catch {
+      return [];
+    }
+  },
+  switchTo: (id: string): void => {
+    const api = bridge()?.servers?.switchTo;
+    if (!api) return;
+    void api(id).catch(() => undefined);
+  },
+  /** Opens the shell's native "Connect to a server" prompt. */
+  add: (): void => {
+    const api = bridge()?.servers?.add;
+    if (!api) return;
+    void api().catch(() => undefined);
+  },
+  /** Subscribe to switches/adds/forgets made anywhere (menu, tray, this call). */
+  onChanged: (cb: () => void): (() => void) => {
+    const api = bridge()?.servers?.onChanged;
+    if (!api) return () => undefined;
+    return api(cb);
+  },
+};
+
+/** The desktop updater bridge (G-04). Every member no-ops/resolves-null in a plain browser tab. */
+export const desktopUpdates = {
+  isAvailable: (): boolean => Boolean(bridge()?.updates),
+  getState: async (): Promise<DesktopUpdateState | null> => {
+    const api = bridge()?.updates?.getState;
+    if (!api) return null;
+    try {
+      return await api();
+    } catch {
+      return null;
+    }
+  },
+  onChange: (cb: (state: DesktopUpdateState) => void): (() => void) => {
+    const api = bridge()?.updates?.onChange;
+    if (!api) return () => undefined;
+    return api(cb);
+  },
+  /** Runs the shell's bounded shutdown and `quitAndInstall()` (06 §11 R5). */
+  restartToUpdate: async (): Promise<void> => {
+    const api = bridge()?.updates?.install;
+    if (!api) return;
+    try {
+      await api();
+    } catch {
+      // Surfaced through the next `onChange` push (status: 'error'), not here.
+    }
+  },
+};
 
 export const desktopWindow = {
   /** Zoom/restore, for the native double-click-the-title-bar gesture. */

@@ -12,11 +12,13 @@
 // page never renders at all.
 
 import { app, dialog } from 'electron';
+import { EventEmitter } from 'node:events';
 import { loadSettings, saveSettings } from './config';
 import { log } from './logger';
 import { showPrompt } from './prompt-window';
 import { getServerManager } from './server-manager';
 import { getWindowManager } from './window-manager';
+import type { DesktopServerEntry } from '../shared/ipc';
 import {
   activateConnection,
   activateEmbedded,
@@ -32,9 +34,71 @@ export function connectionState(): ServerConnectionState {
   return loadSettings().servers;
 }
 
+/**
+ * Fires whenever `connectionState()` changes — switched, added or forgotten a
+ * server. `ipc.ts` relays this to the renderer as `IPC_EVENT.serversChanged`
+ * (G-03); the native Server menu rebuilds on the next `updateMenuState` call
+ * regardless, since `buildMenu` reads `connectionState()` fresh every time.
+ */
+const serverEvents = new EventEmitter();
+
+export function onServersChanged(listener: () => void): () => void {
+  serverEvents.on('changed', listener);
+  return () => serverEvents.off('changed', listener);
+}
+
 function persist(next: ServerConnectionState): ServerConnectionState {
   saveSettings({ servers: next });
+  serverEvents.emit('changed');
   return next;
+}
+
+/** Label for the embedded server, independent of whether it is active. */
+function embeddedLabel(): string {
+  return `This computer (${app.getName()})`;
+}
+
+/**
+ * Every server this shell knows about — the embedded one plus every saved
+ * remote — for the sidebar switcher and its popover (G-03). The desktop is
+ * the source of truth here (`localStorage` is per-origin, so the renderer
+ * cannot hold this list itself; see `serverConnections.ts`).
+ */
+export function listServers(): DesktopServerEntry[] {
+  const state = connectionState();
+  const sm = getServerManager();
+  return [
+    {
+      id: 'embedded',
+      label: embeddedLabel(),
+      url: sm.url ?? '',
+      kind: 'embedded',
+      active: state.serverMode === 'embedded',
+    },
+    ...state.connections.map(
+      (c): DesktopServerEntry => ({
+        id: c.id,
+        label: c.label,
+        url: c.url,
+        kind: 'remote',
+        active: state.serverMode === 'remote' && state.activeConnectionId === c.id,
+      }),
+    ),
+  ];
+}
+
+/**
+ * Switches by the id shape `listServers()`/the renderer use: `'embedded'` or
+ * a connection id. Unknown remote ids are ignored (same fail-safe as
+ * `activateConnection`) rather than thrown, so a stale id from a renderer
+ * that has not refreshed its list yet is a no-op, not a crash.
+ */
+export async function switchServerById(id: string): Promise<void> {
+  if (id === 'embedded') {
+    await switchToEmbedded();
+    return;
+  }
+  await switchToRemote(id);
 }
 
 /**
@@ -112,7 +176,7 @@ export function forgetRemoteConnection(connectionId: string): void {
 export function currentBackendLabel(): string {
   const remote = activeConnection(connectionState());
   if (remote) return remote.label;
-  return `This computer (${app.getName()})`;
+  return embeddedLabel();
 }
 
 /**

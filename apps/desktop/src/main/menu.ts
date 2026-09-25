@@ -54,9 +54,15 @@ let menuState: MenuState = {
   rightPaneOpen: false,
   mode: 'dark',
   recent: [],
+  attention: null,
 };
 
 let cachedActions: MenuActions | null = null;
+
+/** Latest renderer-pushed state, for `tray.ts` (G-05: "Server running · N agents", the Home badge). */
+export function getMenuState(): Readonly<MenuState> {
+  return menuState;
+}
 
 /**
  * Whether Back/Forward can move, asked of the thing that actually knows.

@@ -16,8 +16,10 @@ import {
   type SaveFileOptions,
   type DesktopCommand,
   type DesktopPairingCode,
+  type DesktopServerEntry,
   type ShellState,
   type FindInPageResult,
+  type UpdateState,
   type WindowChrome,
   type WindowStateChange,
 } from '../shared/ipc';
@@ -105,6 +107,29 @@ const api = {
    */
   setMenuState: (state: Partial<ShellState>): Promise<void> =>
     ipcRenderer.invoke(IPC.setMenuState, state),
+
+  // ── Server switcher (G-03) ──
+  servers: {
+    list: (): Promise<DesktopServerEntry[]> => ipcRenderer.invoke(IPC.getServers),
+    switchTo: (id: string): Promise<void> => ipcRenderer.invoke(IPC.switchServer, id),
+    add: (): Promise<void> => ipcRenderer.invoke(IPC.addServer),
+    onChanged: (cb: () => void): Unsubscribe => {
+      const handler = () => cb();
+      ipcRenderer.on(IPC_EVENT.serversChanged, handler);
+      return () => ipcRenderer.removeListener(IPC_EVENT.serversChanged, handler);
+    },
+  },
+
+  // ── Updater (G-04) ──
+  updates: {
+    getState: (): Promise<UpdateState> => ipcRenderer.invoke(IPC.getUpdateState),
+    install: (): Promise<void> => ipcRenderer.invoke(IPC.installUpdate),
+    onChange: (cb: (state: UpdateState) => void): Unsubscribe => {
+      const handler = (_e: unknown, state: UpdateState) => cb(state);
+      ipcRenderer.on(IPC_EVENT.updateStateChanged, handler);
+      return () => ipcRenderer.removeListener(IPC_EVENT.updateStateChanged, handler);
+    },
+  },
 
   // Subscriptions (main → renderer)
   onNavigate: (cb: (path: string) => void): Unsubscribe => {

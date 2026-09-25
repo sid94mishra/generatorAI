@@ -2,13 +2,14 @@
 // here is either a silent lockout (session stored where nothing looks for it)
 // or a credential mix-up between servers. Both are covered below.
 
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   activeConnection,
   clearConnectionCredentials,
   deviceKeyId,
   hostLabel,
   loadCatalog,
+  probeServer,
   removeConnection,
   saveCatalog,
   sessionStorageKey,
@@ -219,5 +220,76 @@ describe('helpers', () => {
     const catalog = upsertConnection(loadCatalog(storage), connection());
     expect(activeConnection(catalog)?.serverId).toBe(SERVER_A);
     expect(activeConnection({ connections: [], activeServerId: null })).toBeNull();
+  });
+});
+
+// The switcher's status dot (G-03) reads directly off this, so each branch is
+// pinned: reachable-and-identified, reachable-but-not-recognisable, and
+// genuinely unreachable never get confused with each other.
+describe('probeServer', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('reports connected with the server name and latency on a good response', async () => {
+    const fetchMock = vi.fn(async () =>
+      new Response(JSON.stringify({ serverId: 'srv-1', serverName: 'Studio' }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+
+    const result = await probeServer('https://studio.example:3100');
+    expect(result.status).toBe('connected');
+    expect(result.serverName).toBe('Studio');
+    expect(typeof result.latencyMs).toBe('number');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://studio.example:3100/api/auth/server-info',
+      expect.objectContaining({ signal: expect.anything() }),
+    );
+  });
+
+  it('reports unpaired on a non-2xx response', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 503 })));
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toMatchObject({ status: 'unpaired' });
+  });
+
+  it('reports unpaired when the body has no serverId', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ hello: 'world' }), { status: 200 })),
+    );
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toMatchObject({ status: 'unpaired' });
+  });
+
+  it('reports unpaired on unparseable JSON', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('not json', { status: 200 })));
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toMatchObject({ status: 'unpaired' });
+  });
+
+  it('reports offline when the request throws (network error)', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('ECONNREFUSED');
+      }),
+    );
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toEqual({ status: 'offline' });
+  });
+
+  it('reports offline on a timeout, honouring a custom timeoutMs', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(
+        (_url: string, init?: { signal?: AbortSignal }) =>
+          new Promise((_resolve, reject) => {
+            init?.signal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
+          }),
+      ),
+    );
+    const result = await probeServer('https://studio.example:3100', { timeoutMs: 5 });
+    expect(result).toEqual({ status: 'offline' });
   });
 });

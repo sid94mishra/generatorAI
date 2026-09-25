@@ -10,29 +10,69 @@ import {
   IPC_EVENT,
   type AppInfo,
   type DesktopPairingCode,
+  type DesktopServerEntry,
   type MenuState,
   type ShellState,
   type SaveFileOptions,
+  type UpdateState,
   type WindowChrome,
 } from '../shared/ipc';
 import { BROWSER_IPC, BROWSER_IPC_EVENT, type BrowserBounds, type NativeBrowserEvent } from '../shared/browser-ipc';
 import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { getNativeBrowserHost } from './browser-host';
-import { connectionState } from './backend-switcher';
+import {
+  connectionState,
+  listServers,
+  onServersChanged,
+  promptForRemoteServer,
+  switchServerById,
+} from './backend-switcher';
 import { resolvePaths } from './paths';
 import { loadSettings, saveSettings } from './config';
 import { windowChrome } from './platform';
 import { updateMenuState } from './menu';
+import { refreshTrayMenu } from './tray';
+import { applyAttentionBadge } from './badge';
+import { getUpdateState, installUpdate, onUpdateStateChange } from './updater';
 import { setUnsavedWork } from './unsaved-work';
 import { log } from './logger';
 import { createIpcGuard, defaultFromWebContents } from './ipc-guard';
 import { admitPairingRequest, PairingGate } from './pairing-gate';
 import { isRendererSettingKey, validateSettingValue } from './settings-schema';
 import { commitAppearance } from './appearance';
+import type { AttentionCounts, AttentionEntity } from '@generatorai/shared';
 
 /** One gate per process: the limits are about THIS shell's lifetime. */
 const pairingGate = new PairingGate();
+
+const ATTENTION_ENTITIES: readonly AttentionEntity[] = ['chat', 'workflow_run', 'automation_execution'];
+
+/** Non-negative integer, capped at 999 (06 §5.4) — this feeds native menu/tray text. */
+function clampCount(value: unknown): number {
+  const n = typeof value === 'number' && Number.isFinite(value) ? Math.trunc(value) : 0;
+  return Math.max(0, Math.min(999, n));
+}
+
+/**
+ * Validates a renderer-pushed `attention` patch. `null` (no snapshot yet) and
+ * a well-formed `AttentionCounts` both pass through; anything else is
+ * dropped, same as the rest of `setMenuState`'s validation — the value ends
+ * up in a native menu and the tray, both of which are attacker-adjacent if a
+ * compromised page could inject arbitrary text into them.
+ */
+function sanitizeAttention(value: unknown): AttentionCounts | null | undefined {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object') return undefined;
+  const a = value as Partial<AttentionCounts>;
+  if (!a.byEntity || typeof a.byEntity !== 'object') return undefined;
+  const byEntity = {} as AttentionCounts['byEntity'];
+  for (const entity of ATTENTION_ENTITIES) {
+    const raw = (a.byEntity as Record<string, { needsYou?: unknown; running?: unknown } | undefined>)[entity];
+    byEntity[entity] = { needsYou: clampCount(raw?.needsYou), running: clampCount(raw?.running) };
+  }
+  return { needsYou: clampCount(a.needsYou), running: clampCount(a.running), byEntity };
+}
 
 /**
  * Native confirmation for every pairing mint after the first. Drawn by the OS,
@@ -233,7 +273,16 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
         .slice(0, 10)
         .map((r) => ({ label: r.label.slice(0, 80), route: r.route.slice(0, 300) }));
     }
+    const attention = sanitizeAttention((p as { attention?: unknown }).attention);
+    if (attention !== undefined) safe.attention = attention;
     updateMenuState(safe);
+    // Only when this push actually carried attention data: G-05's badge and
+    // tray text follow the D-36 feed, which is optional right up until the
+    // renderer has a first snapshot.
+    if (attention !== undefined) {
+      refreshTrayMenu();
+      applyAttentionBadge(attention?.needsYou ?? 0, { getMainWindow: () => wm.getMainWindow() });
+    }
   });
 
   // ── Appearance (D-25) ──────────────────────────────────────────
@@ -275,6 +324,39 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
 
   guardedHandle(IPC.reload, () => wm.reload());
   guardedHandle(IPC.toggleDevtools, () => wm.toggleDevtools());
+
+  // ── Servers (G-03) ────────────────────────────────────────────
+  //
+  // The desktop is the source of truth for "which servers does this shell
+  // know about" — `localStorage` is per-origin, so the renderer cannot hold
+  // this list itself once it has navigated to a server's own origin.
+  guardedHandle(IPC.getServers, (): DesktopServerEntry[] => listServers());
+
+  guardedHandle(IPC.switchServer, async (_e, id: unknown) => {
+    if (typeof id !== 'string' || !id) return;
+    await switchServerById(id);
+  });
+
+  guardedHandle(IPC.addServer, async () => {
+    await promptForRemoteServer();
+  });
+
+  onServersChanged(() => {
+    const win = wm.getMainWindow();
+    if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.serversChanged);
+  });
+
+  // ── Updates (G-04) ─────────────────────────────────────────────
+  guardedHandle(IPC.getUpdateState, (): UpdateState => getUpdateState());
+
+  guardedHandle(IPC.installUpdate, async () => {
+    await installUpdate();
+  });
+
+  onUpdateStateChange((state) => {
+    const win = wm.getMainWindow();
+    if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.updateStateChanged, state);
+  });
 
   // Push server status changes to the renderer (so a UI badge can react live).
   sm.on('status', (status) => {
