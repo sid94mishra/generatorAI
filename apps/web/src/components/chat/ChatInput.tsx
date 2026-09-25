@@ -1411,7 +1411,7 @@ export function ChatInput({
               type="button"
               variant="ghost"
               onClick={onCancelPendingInteraction}
-              className="h-auto flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+              className="h-auto flex-shrink-0 rounded-md px-2 py-1 text-[11px] font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]"
             >
               Cancel and send
             </Button>
@@ -1623,7 +1623,7 @@ export function ChatInput({
                 size="icon"
                 onClick={handleFileSelect}
                 disabled={disabled}
-                className="h-7 w-7 flex-shrink-0 rounded-full text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+                className="h-7 w-7 flex-shrink-0 rounded-full text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]"
                 title="Attach file"
                 aria-label="Attach file"
               >
@@ -1678,8 +1678,8 @@ export function ChatInput({
                     activeAgentMode === 'plan'
                       ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
                       : showModeDropdown
-                        ? 'text-[var(--color-foreground)] bg-[var(--color-accent)]'
-                        : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent)]/60',
+                        ? 'text-[var(--color-foreground)] bg-[var(--color-accent-tint)]'
+                        : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]/60',
                   )}
                   title={AGENT_MODE_REGISTRY[activeAgentMode].description}
                 >
@@ -1715,7 +1715,7 @@ export function ChatInput({
                           'h-auto w-full items-start justify-start gap-2 rounded-md px-2 py-1.5 text-left font-normal',
                           activeAgentMode === option.mode
                             ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                            : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
+                            : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]',
                         )}
                       >
                         {activeAgentMode === option.mode ? (
@@ -1752,8 +1752,8 @@ export function ChatInput({
                       className={cn(
                         'h-auto gap-1 rounded-md px-2 py-1 text-xs font-medium capitalize',
                         showReasoningDropdown
-                          ? 'text-[var(--color-foreground)] bg-[var(--color-accent)]'
-                          : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent)]/60',
+                          ? 'text-[var(--color-foreground)] bg-[var(--color-accent-tint)]'
+                          : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]/60',
                       )}
                       title="Reasoning effort"
                     >
@@ -1772,7 +1772,7 @@ export function ChatInput({
                             onClick={() => { onReasoningEffortChange?.(level); setShowReasoningDropdown(false); }}
                             className={cn(
                               'h-auto w-full items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-xs font-normal capitalize',
-                              effectiveEffort === level ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
+                              effectiveEffort === level ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]',
                             )}
                           >
                             {effectiveEffort === level ? <Check className="h-3 w-3" /> : <span className="w-3" />}
@@ -1795,8 +1795,8 @@ export function ChatInput({
                       className={cn(
                         'h-auto gap-1 rounded-md px-2 py-1 text-xs font-medium',
                         showToolsMenu
-                          ? 'text-[var(--color-foreground)] bg-[var(--color-accent)]'
-                          : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent)]/60',
+                          ? 'text-[var(--color-foreground)] bg-[var(--color-accent-tint)]'
+                          : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]/60',
                       )}
                       title="Context window"
                     >
@@ -1815,7 +1815,7 @@ export function ChatInput({
                             onClick={() => { onContextTierChange?.(t.tier); setShowToolsMenu(false); }}
                             className={cn(
                               'h-auto w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs font-normal',
-                              effectiveTier === t.tier ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
+                              effectiveTier === t.tier ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]',
                             )}
                           >
                             <span className="flex items-center gap-2">
@@ -1845,8 +1845,8 @@ export function ChatInput({
                   className={cn(
                     'h-7 w-7 flex-shrink-0 rounded-md',
                     showToolsMenu
-                      ? 'text-[var(--color-foreground)] bg-[var(--color-accent)]'
-                      : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent)]/60',
+                      ? 'text-[var(--color-foreground)] bg-[var(--color-accent-tint)]'
+                      : 'text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]/60',
                   )}
                   title="More options"
                   aria-label="More options"
@@ -1865,7 +1865,7 @@ export function ChatInput({
                             onClick={() => { onReasoningEffortChange?.(level); }}
                             className={cn(
                               'h-auto w-full items-center justify-start gap-2 rounded-md px-2 py-1.5 text-left text-xs font-normal capitalize',
-                              effectiveEffort === level ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
+                              effectiveEffort === level ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]',
                             )}
                           >
                             {effectiveEffort === level ? <Check className="h-3 w-3" /> : <span className="w-3" />}
@@ -1884,7 +1884,7 @@ export function ChatInput({
                             onClick={() => { onContextTierChange?.(t.tier); }}
                             className={cn(
                               'h-auto w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-xs font-normal',
-                              effectiveTier === t.tier ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
+                              effectiveTier === t.tier ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]',
                             )}
                           >
                             <span className="flex items-center gap-2">
@@ -2005,7 +2005,7 @@ export function ChatInput({
               'h-auto gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-medium',
               showCodebasePanel || connectedRepoCount > 0
                 ? 'border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10'
-                : 'border-[var(--color-border)] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent)]/60',
+                : 'border-[var(--color-border)] text-[var(--color-muted-foreground)] hover:text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]/60',
             )}
           >
             <FolderGit2 className="h-3.5 w-3.5" />
@@ -2061,7 +2061,7 @@ function ComposerChip({
       className={cn(
         'flex items-center gap-1.5 rounded-md border px-2.5 py-1 text-[11px] font-medium',
         muted
-          ? 'border-[var(--color-border)] bg-[var(--color-accent)] text-[var(--color-foreground)]'
+          ? 'border-[var(--color-border)] bg-[var(--color-accent-tint)] text-[var(--color-foreground)]'
           : 'border-[var(--color-primary)]/20 bg-[var(--color-primary)]/8 text-[var(--color-primary)]',
       )}
       title={title ?? label}

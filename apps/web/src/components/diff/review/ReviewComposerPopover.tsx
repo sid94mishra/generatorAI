@@ -133,7 +133,7 @@ export function ReviewComposerPopover({
               aria-pressed={intent === i.value}
               onClick={() => setIntent(i.value)}
               className={cn(
-                'h-auto rounded border px-1.5 py-0.5 text-[10px] font-normal text-foreground hover:bg-accent hover:text-foreground',
+                'h-auto rounded border px-1.5 py-0.5 text-[10px] font-normal text-foreground hover:bg-accent-tint hover:text-foreground',
                 intent === i.value &&
                   'border-primary bg-primary/15 font-medium text-primary hover:bg-primary/15 hover:text-primary',
               )}

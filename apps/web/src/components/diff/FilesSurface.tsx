@@ -218,8 +218,8 @@ export function FilesSurface({
           aria-pressed={showTree}
           title={showTree ? 'Hide file tree' : 'Show file tree'}
           className={cn(
-            'h-6 w-6 shrink-0 text-foreground hover:bg-accent hover:text-foreground',
-            showTree && 'bg-accent',
+            'h-6 w-6 shrink-0 text-foreground hover:bg-accent-tint hover:text-foreground',
+            showTree && 'bg-accent-tint',
           )}
         >
           <ListTree className="h-3.5 w-3.5" />
@@ -535,8 +535,8 @@ function ModeButton({
       className={cn(
         'h-[18px] rounded-sm px-1.5',
         active
-          ? 'bg-accent text-foreground hover:bg-accent'
-          : 'text-muted-foreground hover:bg-accent/50 hover:text-muted-foreground',
+          ? 'bg-accent-tint text-foreground hover:bg-accent-tint'
+          : 'text-muted-foreground hover:bg-accent-tint/50 hover:text-muted-foreground',
       )}
     >
       {children}
@@ -568,8 +568,8 @@ function IconButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'h-6 w-6 text-foreground hover:bg-accent hover:text-foreground',
-        active && 'bg-accent',
+        'h-6 w-6 text-foreground hover:bg-accent-tint hover:text-foreground',
+        active && 'bg-accent-tint',
       )}
     >
       {children}

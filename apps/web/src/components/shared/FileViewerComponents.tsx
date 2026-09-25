@@ -209,7 +209,7 @@ export const HighlightedCodeBlock = memo(function HighlightedCodeBlock({ code, l
       <table className="w-full border-collapse">
         <tbody>
           {highlighted.map((lineHtml, i) => (
-            <tr key={i} className="hover:bg-[var(--color-accent)]/50">
+            <tr key={i} className="hover:bg-[var(--color-accent-tint)]/50">
               <td className="select-none border-r border-[var(--color-border)] px-3 py-0 text-right text-[var(--color-muted-foreground)]/60 w-10">
                 {i + 1}
               </td>
@@ -252,7 +252,7 @@ export const TreeNodeItem = memo(function TreeNodeItem({ node, depth, onFileClic
         <Button
           variant="ghost"
           onClick={() => setExpanded(!expanded)}
-          className="h-auto flex w-full items-center gap-1 rounded px-1 py-0.5 text-[11px] hover:bg-[var(--color-accent)] transition-colors"
+          className="h-auto flex w-full items-center gap-1 rounded px-1 py-0.5 text-[11px] hover:bg-[var(--color-accent-tint)] transition-colors"
           style={{ paddingLeft: `${depth * 12 + 4}px` }}
         >
           {expanded ? (
@@ -297,7 +297,7 @@ export const TreeNodeItem = memo(function TreeNodeItem({ node, depth, onFileClic
       onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), onFileClick(node.path, node.source, node.worktreeAlias))}
       className={cn(
         'group flex w-full items-center gap-1 rounded px-1 py-0.5 text-[11px] cursor-pointer transition-colors',
-        isSelected ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'hover:bg-[var(--color-accent)]',
+        isSelected ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]' : 'hover:bg-[var(--color-accent-tint)]',
       )}
       style={{ paddingLeft: `${depth * 12 + 16}px` }}
     >
@@ -586,7 +586,7 @@ export function ChangesViewerModal({ onClose, changeEntries, isLoading, hasGit, 
                       'h-auto flex w-full items-center gap-1.5 px-3 py-1.5 text-left text-[11px] transition-colors',
                       i === currentIndex
                         ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                        : 'hover:bg-[var(--color-accent)] text-[var(--color-foreground)]',
+                        : 'hover:bg-[var(--color-accent-tint)] text-[var(--color-foreground)]',
                     )}
                   >
                     {getFileIcon(name)}

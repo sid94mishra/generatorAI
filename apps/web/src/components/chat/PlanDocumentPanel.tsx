@@ -224,7 +224,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
                 }}
                 title="Edit plan"
                 aria-label="Edit plan"
-                className="rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+                className="rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]"
               >
                 <Pencil className="h-3.5 w-3.5" />
               </Button>
@@ -245,7 +245,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
               }}
               title="Save a tracked copy into the workspace"
               aria-label="Save plan to workspace"
-              className="rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+              className="rounded-md text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]"
             >
               <Download className="h-3.5 w-3.5" />
             </Button>
@@ -267,7 +267,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
                     'h-auto rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors',
                     r.revision === revision.revision
                       ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                      : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]',
+                      : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent-tint)]',
                   )}
                   title={`${r.authoredBy === 'user' ? 'Your edit' : 'Agent revision'} · ${new Date(r.createdAt).toLocaleString()}`}
                 >
@@ -301,7 +301,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
                 type="button"
                 variant="ghost"
                 onClick={() => setEditing(false)}
-                className="flex h-auto items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-normal text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+                className="flex h-auto items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-normal text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)]"
               >
                 <X className="h-3 w-3" />
                 Cancel
@@ -349,7 +349,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
                       setSelection(null);
                       setCommentDraft('');
                     }}
-                    className="h-auto rounded-md px-2 py-1 text-[11px] font-normal text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]"
+                    className="h-auto rounded-md px-2 py-1 text-[11px] font-normal text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent-tint)]"
                   >
                     Cancel
                   </Button>
@@ -430,7 +430,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
               variant="secondary"
               disabled={decide.isPending}
               onClick={() => void handleDecision(false)}
-              className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+              className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-2 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent-tint)]"
             >
               <MessageSquarePlus className="h-3.5 w-3.5" />
               Request changes
@@ -445,7 +445,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
               // `p-0` + `shrink-0`: the default button padding left a 32px
               // square with a 4px content box, and the icon was squeezed into
               // it — the control rendered as a single grey dot.
-              className="h-8 w-8 shrink-0 items-center justify-center rounded-md p-0 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+              className="h-8 w-8 shrink-0 items-center justify-center rounded-md p-0 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]"
             >
               <CircleSlash className="h-3.5 w-3.5 shrink-0" />
             </Button>

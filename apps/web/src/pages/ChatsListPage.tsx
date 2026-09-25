@@ -203,7 +203,7 @@ export function ChatsListPage() {
 
         {/* ── Selection Toolbar — shown when in bulk selection mode ── */}
         {selectionMode && (
-          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-accent/50 px-4 py-2">
+          <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-accent-tint/50 px-4 py-2">
             <Button
               variant="ghost"
               size="sm"

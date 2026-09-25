@@ -5043,12 +5043,8 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
-  --color-raised: var(--raised);
-  --color-overlay: var(--overlay);
   --color-subtle: var(--subtle);
   --color-emphasis: var(--emphasis);
-  --color-surface: var(--surface);
-  --color-surface-hover: var(--surface-hover);
   --color-primary: var(--primary);
   --color-primary-emphasis: var(--primary-emphasis);
   --color-primary-foreground: var(--primary-foreground);
@@ -5056,8 +5052,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-tint: var(--accent);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
@@ -5103,12 +5098,8 @@
   --color-card-foreground: var(--card-foreground);
   --color-popover: var(--popover);
   --color-popover-foreground: var(--popover-foreground);
-  --color-raised: var(--raised);
-  --color-overlay: var(--overlay);
   --color-subtle: var(--subtle);
   --color-emphasis: var(--emphasis);
-  --color-surface: var(--surface);
-  --color-surface-hover: var(--surface-hover);
   --color-primary: var(--primary);
   --color-primary-emphasis: var(--primary-emphasis);
   --color-primary-foreground: var(--primary-foreground);
@@ -5116,8 +5107,7 @@
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
+  --color-accent-tint: var(--accent);
   --color-destructive: var(--destructive);
   --color-destructive-foreground: var(--destructive-foreground);
   --color-border: var(--border);
@@ -5383,7 +5373,7 @@ pre.hljs-pre { background: var(--color-subtle); }
   padding: 0.5rem 1rem;
   margin-bottom: 0.75em;
   margin-left: 0;
-  background: var(--color-accent);
+  background: var(--color-accent-tint);
   border-radius: 0 var(--radius) var(--radius) 0;
   color: var(--color-muted-foreground);
 }

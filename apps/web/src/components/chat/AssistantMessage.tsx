@@ -126,7 +126,7 @@ export function AssistantMessage({ message, showHeader = false, onOpenPlan, onOp
             variant="ghost"
             size="sm"
             onClick={handleReadAloud}
-            className="mt-1.5 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] transition-colors"
+            className="mt-1.5 flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)] transition-colors"
             title={isSpeakingOrConnecting ? 'Stop reading' : 'Read this message aloud'}
             aria-label={isSpeakingOrConnecting ? 'Stop reading' : 'Read this message aloud'}
           >

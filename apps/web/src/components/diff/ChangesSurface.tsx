@@ -999,7 +999,7 @@ export function ChangesSurface({
           className={cn(
             'group relative flex h-full w-full min-w-0 items-center gap-1.5 border-b pl-2 pr-1 text-xs transition-colors',
             // Tints are built on `--color-primary` (a solid colour), NOT
-            // `--color-accent`, which is already a ~10%-alpha wash of it —
+            // `--color-accent-tint`, which is already a ~10%-alpha wash of it —
             // tinting that again lands around 1-2% and reads as nothing.
             expanded && !isActive && 'bg-primary/[0.06]',
             isActive && 'bg-primary/15',
@@ -1054,7 +1054,7 @@ export function ChangesSurface({
             aria-expanded={expanded}
             aria-label={expanded ? `Collapse ${item.path}` : `Expand ${item.path}`}
             title={expanded ? 'Hide changes' : 'Show changes'}
-            className="h-4 w-4 shrink-0 rounded text-muted-foreground hover:bg-accent hover:text-foreground disabled:opacity-30"
+            className="h-4 w-4 shrink-0 rounded text-muted-foreground hover:bg-accent-tint hover:text-foreground disabled:opacity-30"
           >
             {loading ? (
               <Spinner size="xs" />
@@ -1143,7 +1143,7 @@ export function ChangesSurface({
                   e.stopPropagation();
                   setConfirmRevert(null);
                 }}
-                className="h-auto rounded px-1.5 py-px text-[10px] font-normal hover:bg-accent"
+                className="h-auto rounded px-1.5 py-px text-[10px] font-normal hover:bg-accent-tint"
               >
                 Cancel
               </Button>
@@ -1192,7 +1192,7 @@ export function ChangesSurface({
                     e.stopPropagation();
                     void unkeepFile(item.id, item.alias, item.path);
                   }}
-                  className="h-auto w-auto shrink-0 rounded p-0.5 text-success hover:bg-accent"
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-success hover:bg-accent-tint"
                 >
                   {rowBusy ? <Spinner size="xs" /> : <RotateCcw className="h-3 w-3" />}
                 </Button>
@@ -1209,7 +1209,7 @@ export function ChangesSurface({
                     e.stopPropagation();
                     void keepFile(item.id, item.alias, item.path, file?.newBlob);
                   }}
-                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-success"
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent-tint hover:text-success"
                 >
                   {rowBusy ? <Spinner size="xs" /> : <Check className="h-3 w-3" />}
                 </Button>
@@ -1226,7 +1226,7 @@ export function ChangesSurface({
                     e.stopPropagation();
                     openFileInEditor(item.alias, item.path);
                   }}
-                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent-tint hover:text-foreground"
                 >
                   <Code2 className="h-3 w-3" />
                 </Button>
@@ -1244,7 +1244,7 @@ export function ChangesSurface({
                     e.stopPropagation();
                     setConfirmRevert(item.id);
                   }}
-                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent hover:text-foreground"
+                  className="h-auto w-auto shrink-0 rounded p-0.5 text-muted-foreground hover:bg-accent-tint hover:text-foreground"
                 >
                   <Undo2 className="h-3 w-3" />
                 </Button>
@@ -1445,7 +1445,7 @@ export function ChangesSurface({
                 size="icon-sm"
                 title="View settings"
                 aria-label="View settings"
-                className="h-6 w-6 rounded hover:bg-accent"
+                className="h-6 w-6 rounded hover:bg-accent-tint"
               >
                 <Settings2 className="h-3.5 w-3.5" />
               </Button>
@@ -1845,7 +1845,7 @@ function MenuCheckItem({
       aria-checked={checked}
       onClick={onSelect}
       {...(hint ? { title: hint } : {})}
-      className="h-auto w-full items-center justify-start gap-2 rounded px-2 py-1 text-left text-[11.5px] font-normal hover:bg-accent"
+      className="h-auto w-full items-center justify-start gap-2 rounded px-2 py-1 text-left text-[11.5px] font-normal hover:bg-accent-tint"
     >
       <Check
         className={cn('h-3 w-3 shrink-0', checked ? 'opacity-100' : 'opacity-0')}
@@ -1880,8 +1880,8 @@ function IconButton({
       onClick={onClick}
       disabled={disabled}
       className={cn(
-        'h-6 w-6 rounded hover:bg-accent',
-        active && 'bg-accent',
+        'h-6 w-6 rounded hover:bg-accent-tint',
+        active && 'bg-accent-tint',
       )}
     >
       {children}

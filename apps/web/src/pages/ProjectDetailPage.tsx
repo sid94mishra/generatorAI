@@ -596,7 +596,7 @@ export function ProjectDetailPage() {
               {codebases.map((cb) => (
                 <div
                   key={cb.id}
-                  className="flex items-center justify-between rounded-lg border border-border p-3 transition-colors hover:bg-accent/50 cursor-pointer"
+                  className="flex items-center justify-between rounded-lg border border-border p-3 transition-colors hover:bg-accent-tint/50 cursor-pointer"
                   onClick={() => navigate(`/projects/${id}/codebases/${cb.id}`)}
                 >
                   <div className="flex items-center gap-3">

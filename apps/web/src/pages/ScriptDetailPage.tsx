@@ -139,7 +139,7 @@ export function ScriptDetailPage() {
                 className={cn(
                   'text-left p-3 rounded-lg border transition-all',
                   selectedProfile === profile.name
-                    ? 'border-primary bg-accent text-foreground'
+                    ? 'border-primary bg-accent-tint text-foreground'
                     : 'border-border bg-subtle text-foreground hover:border-primary',
                 )}
               >

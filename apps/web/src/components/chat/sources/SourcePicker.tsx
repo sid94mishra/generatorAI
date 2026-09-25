@@ -663,8 +663,8 @@ function Segmented({
             className={cn(
               'h-5 rounded px-2 text-[11px] font-normal',
               value === opt.value
-                ? 'bg-accent text-foreground hover:bg-accent'
-                : 'text-muted-foreground hover:bg-accent/50',
+                ? 'bg-accent-tint text-foreground hover:bg-accent-tint'
+                : 'text-muted-foreground hover:bg-accent-tint/50',
             )}
           >
             {opt.label}

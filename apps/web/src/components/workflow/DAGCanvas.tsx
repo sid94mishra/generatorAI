@@ -228,7 +228,7 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
             '[&>button]:!bg-[var(--color-card)]',
             '[&>button]:!fill-[var(--color-foreground)]',
             '[&>button]:!shadow-sm',
-            '[&>button:hover]:!bg-[var(--color-accent)]',
+            '[&>button:hover]:!bg-[var(--color-accent-tint)]',
             '[&>button]:!transition-all [&>button]:!duration-150',
             '!bg-transparent !border-none !shadow-none',
             '!gap-1.5 !p-0 !m-3',
@@ -255,7 +255,7 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
                 onClick={handleAutoLayout}
                 variant="ghost"
                 size="sm"
-                className="h-auto flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-sm font-medium text-[var(--color-foreground)] shadow-sm transition-colors hover:bg-[var(--color-accent)]"
+                className="h-auto flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-sm font-medium text-[var(--color-foreground)] shadow-sm transition-colors hover:bg-[var(--color-accent-tint)]"
               >
                 <AlignHorizontalDistributeCenter className="h-4 w-4" />
                 Auto-Layout

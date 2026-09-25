@@ -138,7 +138,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
               aria-label="Previous question"
               disabled={current === 0}
               onClick={() => setIndex(current - 1)}
-              className="h-6 w-6 shrink-0 rounded p-0 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
+              className="h-6 w-6 shrink-0 rounded p-0 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)] disabled:opacity-30"
             >
               <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
@@ -151,7 +151,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
               aria-label="Next question"
               disabled={current >= total - 1}
               onClick={() => setIndex(current + 1)}
-              className="h-6 w-6 shrink-0 rounded p-0 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-30"
+              className="h-6 w-6 shrink-0 rounded p-0 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)] disabled:opacity-30"
             >
               <ChevronRight className="h-3.5 w-3.5" />
             </Button>
@@ -195,7 +195,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
                           'flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-1.5 transition-colors',
                           selected
                             ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5'
-                            : 'border-[var(--color-border)]/60 hover:bg-[var(--color-accent)]/50',
+                            : 'border-[var(--color-border)]/60 hover:bg-[var(--color-accent-tint)]/50',
                           !isAnswerable && 'cursor-default opacity-60',
                         )}
                       >
@@ -235,7 +235,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
                         'flex cursor-pointer items-start gap-2 rounded-lg border px-2.5 py-1.5 transition-colors',
                         picked.includes(OTHER)
                           ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/5'
-                          : 'border-[var(--color-border)]/60 hover:bg-[var(--color-accent)]/50',
+                          : 'border-[var(--color-border)]/60 hover:bg-[var(--color-accent-tint)]/50',
                         !isAnswerable && 'cursor-default opacity-60',
                       )}
                     >
@@ -285,7 +285,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
                   'Skip the questions and use your best judgement.',
                 )
               }
-              className="h-auto rounded-md px-2 py-1.5 text-[11px] font-normal text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+              className="h-auto rounded-md px-2 py-1.5 text-[11px] font-normal text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]"
             >
               Skip &amp; let the agent decide
             </Button>
@@ -297,7 +297,7 @@ export function QuestionCard({ question, onSubmit, busy }: QuestionCardProps) {
                 type="button"
                 variant="secondary"
                 onClick={() => setIndex(nextUnanswered)}
-                className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+                className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent-tint)]"
               >
                 Next question
                 <ChevronRight className="h-3 w-3" />

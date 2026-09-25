@@ -1322,7 +1322,7 @@ export function SecuritySection() {
                                 'relative before:absolute before:-inset-y-1 before:inset-x-0 before:content-[""]',
                                 held
                                   ? 'border-primary/40 bg-primary/10 text-primary hover:bg-primary/10'
-                                  : 'border-border text-muted-foreground hover:bg-accent hover:text-foreground',
+                                  : 'border-border text-muted-foreground hover:bg-accent-tint hover:text-foreground',
                               )}
                             >
                               {busy ? (

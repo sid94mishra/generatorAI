@@ -187,7 +187,7 @@ function StageEdgeComponent({
                   onClick={(e) => pick(e, type)}
                   variant="ghost"
                   size="sm"
-                  className="h-auto flex w-full items-start gap-2 rounded-none px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--color-accent)]"
+                  className="h-auto flex w-full items-start gap-2 rounded-none px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--color-accent-tint)]"
                 >
                   <span
                     className="mt-1 h-2 w-2 shrink-0 rounded-full"

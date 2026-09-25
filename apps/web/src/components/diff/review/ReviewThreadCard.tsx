@@ -107,7 +107,7 @@ export function ReviewThreadCard({
         variant="ghost"
         onClick={() => setExpanded((v) => !v)}
         aria-expanded={expanded}
-        className="h-auto w-full items-center justify-start gap-1.5 rounded-none px-2 py-1.5 text-left font-normal hover:bg-accent/50"
+        className="h-auto w-full items-center justify-start gap-1.5 rounded-none px-2 py-1.5 text-left font-normal hover:bg-accent-tint/50"
       >
         {expanded ? (
           <ChevronDown className="h-3 w-3 shrink-0 text-muted-foreground" />
@@ -161,7 +161,7 @@ export function ReviewThreadCard({
                   title="Send this comment to the agent"
                   onClick={() => onSend(thread.id)}
                   disabled={busy}
-                  className="h-5 items-center gap-1 rounded border px-1.5 text-[10px] font-normal hover:bg-accent disabled:opacity-50"
+                  className="h-5 items-center gap-1 rounded border px-1.5 text-[10px] font-normal hover:bg-accent-tint disabled:opacity-50"
                 >
                   {busy ? (
                     <Spinner size="xs" />
@@ -179,7 +179,7 @@ export function ReviewThreadCard({
                   title="Resolve"
                   aria-label="Resolve thread"
                   onClick={() => onResolve(thread.id)}
-                  className="h-5 w-5 rounded hover:bg-accent"
+                  className="h-5 w-5 rounded hover:bg-accent-tint"
                 >
                   <Check className="h-3 w-3" />
                 </Button>
@@ -192,7 +192,7 @@ export function ReviewThreadCard({
                   title="Delete"
                   aria-label="Delete thread"
                   onClick={() => onDelete(thread.id)}
-                  className="h-5 w-5 rounded hover:bg-accent hover:text-danger"
+                  className="h-5 w-5 rounded hover:bg-accent-tint hover:text-danger"
                 >
                   <Trash2 className="h-3 w-3" />
                 </Button>
@@ -245,7 +245,7 @@ export function ReviewThreadCard({
                           aria-label="Save edit"
                           title={`Save (${modEnterLabel()})`}
                           onClick={commitEdit}
-                          className="mt-0.5 h-5 w-5 rounded hover:bg-accent"
+                          className="mt-0.5 h-5 w-5 rounded hover:bg-accent-tint"
                         >
                           <Check className="h-3 w-3" />
                         </Button>
@@ -255,7 +255,7 @@ export function ReviewThreadCard({
                           size="icon-sm"
                           aria-label="Cancel edit"
                           onClick={() => setEditing(null)}
-                          className="mt-0.5 h-5 w-5 rounded hover:bg-accent"
+                          className="mt-0.5 h-5 w-5 rounded hover:bg-accent-tint"
                         >
                           <X className="h-3 w-3" />
                         </Button>
@@ -282,7 +282,7 @@ export function ReviewThreadCard({
                             onClick={() =>
                               setEditing({ id: comment.id, body: comment.body })
                             }
-                            className="ml-1 h-4 w-4 rounded align-text-bottom text-muted-foreground opacity-0 hover:bg-accent hover:text-foreground focus-visible:opacity-100 group-hover/comment:opacity-100"
+                            className="ml-1 h-4 w-4 rounded align-text-bottom text-muted-foreground opacity-0 hover:bg-accent-tint hover:text-foreground focus-visible:opacity-100 group-hover/comment:opacity-100"
                           >
                             <Pencil className="h-2.5 w-2.5" />
                           </Button>
@@ -333,7 +333,7 @@ export function ReviewThreadCard({
                       setReplyText('');
                       setReplying(false);
                     }}
-                    className="mt-0.5 h-5 w-5 rounded hover:bg-accent"
+                    className="mt-0.5 h-5 w-5 rounded hover:bg-accent-tint"
                   >
                     <X className="h-3 w-3" />
                   </Button>

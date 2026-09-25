@@ -57,7 +57,7 @@ export function ReviewCommentsPopover({
           title="Comments — review every note and send them to the agent"
           aria-label={`Comments (${total})`}
           className={cn(
-            'h-6 gap-1 rounded px-1.5 text-[11px] hover:bg-accent hover:text-current',
+            'h-6 gap-1 rounded px-1.5 text-[11px] hover:bg-accent-tint hover:text-current',
             total > 0 ? 'text-primary' : 'text-foreground',
           )}
         >
@@ -97,7 +97,7 @@ export function ReviewCommentsPopover({
               return (
                 <div
                   key={thread.id}
-                  className="group flex items-start gap-2 px-3 py-1.5 hover:bg-accent/50"
+                  className="group flex items-start gap-2 px-3 py-1.5 hover:bg-accent-tint/50"
                 >
                   <Button
                     type="button"

@@ -178,7 +178,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
               variant="ghost"
               size="icon-sm"
               aria-label="Duplicate stage"
-              className="h-auto w-auto rounded-lg p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+              className="h-auto w-auto rounded-lg p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]"
             >
               <Copy className="h-3.5 w-3.5" />
             </Button>

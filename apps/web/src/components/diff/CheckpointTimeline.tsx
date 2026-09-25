@@ -160,7 +160,7 @@ export function CheckpointTimeline({
             {groups.map((group) => (
               <li
                 key={group.key}
-                className="rounded border border-border p-2 hover:bg-accent/40"
+                className="rounded border border-border p-2 hover:bg-accent-tint/40"
               >
                 <div className="flex items-center gap-1.5">
                   <span className="font-medium text-foreground">{checkpointLabel(group)}</span>
@@ -257,7 +257,7 @@ export function CheckpointTimeline({
                         variant="ghost"
                         size="sm"
                         onClick={() => setConfirming(null)}
-                        className="h-auto rounded px-2 py-0.5 text-[11px] font-normal text-foreground hover:bg-accent hover:text-foreground"
+                        className="h-auto rounded px-2 py-0.5 text-[11px] font-normal text-foreground hover:bg-accent-tint hover:text-foreground"
                       >
                         Cancel
                       </Button>

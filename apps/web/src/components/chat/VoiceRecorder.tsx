@@ -154,7 +154,7 @@ export function VoiceRecorder({
           variant="ghost"
           size="icon-sm"
           onClick={onCancel}
-          className="rounded-full hover:bg-[var(--color-accent)]"
+          className="rounded-full hover:bg-[var(--color-accent-tint)]"
           title="Cancel voice input"
           aria-label="Cancel voice input"
         >
@@ -189,7 +189,7 @@ export function VoiceRecorder({
       onClick={onStart}
       disabled={disabled}
       className={cn(
-        'h-8 w-8 rounded-full hover:bg-[var(--color-accent)]',
+        'h-8 w-8 rounded-full hover:bg-[var(--color-accent-tint)]',
         status === 'error' && 'text-[var(--color-destructive,#ef4444)] hover:text-[var(--color-destructive,#ef4444)]',
       )}
       title={error ?? (deviceLabel ? `Voice input — ${deviceLabel}` : 'Voice input')}

@@ -269,7 +269,7 @@ function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCan
         <Background variant={BackgroundVariant.Dots} gap={20} size={1} color="var(--color-border)" />
         <Controls
           showInteractive={false}
-          className="[&>button]:!border-[var(--color-border)] [&>button]:!bg-[var(--color-background)] [&>button]:!fill-[var(--color-foreground)] [&>button:hover]:!bg-[var(--color-accent)]"
+          className="[&>button]:!border-[var(--color-border)] [&>button]:!bg-[var(--color-background)] [&>button]:!fill-[var(--color-foreground)] [&>button:hover]:!bg-[var(--color-accent-tint)]"
         />
         {/* Minimap only earns its space on larger graphs; themed surface (no white box) */}
         {nodes.length > 6 && (

@@ -92,7 +92,7 @@ function ForkProvenanceChip({ parentChatId }: { parentChatId: string }) {
   const navigate = useNavigate();
   const { data: parent } = useChat(parentChatId);
   return (
-    <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5">
+    <div className="flex items-center gap-2 border-b border-[var(--color-border)] bg-[var(--color-card)] px-4 py-1.5">
       <Button variant="unstyled"
         type="button"
         data-testid="fork-provenance"
@@ -1399,7 +1399,7 @@ export function ChatPage() {
             <Button variant="unstyled"
               type="button"
               onClick={() => setMsgLimit((prev) => prev + PAGE_SIZE)}
-              className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-1.5 text-xs text-[var(--color-muted-foreground)] transition hover:bg-[var(--color-surface-hover)] hover:text-[var(--color-foreground)]"
+              className="rounded-md border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-1.5 text-xs text-[var(--color-muted-foreground)] transition hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
             >
               Load earlier messages
             </Button>
@@ -1460,7 +1460,7 @@ export function ChatPage() {
         {/* Empty state */}
         {!messagesLoading && displayMessages.length === 0 && !showStreamingMessage && !isPending && !pendingUserMessage && (
           <div className="flex h-full flex-col items-center justify-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-accent)]">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-accent-tint)]">
               <Bot className="h-8 w-8 text-[var(--color-primary)] opacity-60" />
             </div>
             <div className="text-center">

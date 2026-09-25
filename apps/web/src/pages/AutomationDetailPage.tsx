@@ -563,7 +563,7 @@ function IterationRow({
 
   return (
     <div className="rounded-lg">
-      <div className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent">
+      <div className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-colors hover:bg-accent-tint">
         <StatusBadge status={run.status} size="sm" />
         <span className="text-xs text-muted-foreground">
           Iteration {run.iterationIndex + 1}
@@ -573,7 +573,7 @@ function IterationRow({
         </span>
         <Button variant="unstyled"
           onClick={() => setShowChanges((v) => !v)}
-          className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
+          className="ml-auto flex items-center gap-1 rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent-tint"
           title="Show the files this iteration changed"
         >
           <FileCode className="h-3 w-3" />
@@ -581,7 +581,7 @@ function IterationRow({
         </Button>
         <Button variant="unstyled"
           onClick={() => onViewRun(run.workflowRunId, run.workflowDefinitionId)}
-          className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
+          className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent-tint"
         >
           Run: {run.workflowRunId.slice(0, 8)}…
         </Button>

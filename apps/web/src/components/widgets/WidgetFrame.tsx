@@ -243,7 +243,7 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
         border: fullscreen ? 'none' : '1px solid var(--color-border, #d0d7de)',
         borderRadius: fullscreen ? 0 : 10,
         overflow: 'hidden',
-        background: 'var(--color-surface)',
+        background: 'var(--color-card)',
         height: fullscreen ? '100%' : undefined,
       }}
       data-widget-id={block.instanceId}
@@ -303,7 +303,7 @@ export function WidgetFrame({ block, sessionId, className, fullscreen, minHeight
             gap: 6,
             padding: 16,
             textAlign: 'center',
-            background: 'var(--color-surface)',
+            background: 'var(--color-card)',
             fontSize: 12,
             color: 'var(--color-muted-foreground, #57606a)',
           }}

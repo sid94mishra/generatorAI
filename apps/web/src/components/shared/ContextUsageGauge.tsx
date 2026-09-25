@@ -141,7 +141,7 @@ export function ContextUsageGauge({
         data-context-used={resolved.used ?? ''}
         data-context-limit={resolved.limit ?? ''}
         data-context-source={resolved.source}
-        className="h-auto flex items-center gap-1 rounded-md px-1 py-1 transition-colors hover:bg-[var(--color-accent)]/60"
+        className="h-auto flex items-center gap-1 rounded-md px-1 py-1 transition-colors hover:bg-[var(--color-accent-tint)]/60"
       >
         <ContextRing pct={resolved.pct} />
         {showLabel && (

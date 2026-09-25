@@ -443,7 +443,7 @@ export function WorkflowListPage() {
 
       {/* ── Selection Toolbar — shown when in bulk selection mode ── */}
       {selectionMode && (
-        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-accent/50 px-4 py-2">
+        <div className="mb-4 flex flex-wrap items-center gap-3 rounded-lg border border-border bg-accent-tint/50 px-4 py-2">
           <Button
             variant="ghost"
             size="sm"
@@ -499,7 +499,7 @@ export function WorkflowListPage() {
               className={cn(
                 'h-auto w-auto rounded-l-lg rounded-r-none p-1.5 transition-colors',
                 viewMode === 'grid'
-                  ? 'bg-accent text-foreground'
+                  ? 'bg-accent-tint text-foreground'
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >
@@ -514,7 +514,7 @@ export function WorkflowListPage() {
               className={cn(
                 'h-auto w-auto rounded-r-lg rounded-l-none p-1.5 transition-colors',
                 viewMode === 'list'
-                  ? 'bg-accent text-foreground'
+                  ? 'bg-accent-tint text-foreground'
                   : 'text-muted-foreground hover:text-foreground',
               )}
             >

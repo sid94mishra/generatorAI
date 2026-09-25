@@ -43,7 +43,7 @@ const SYNTHETIC_NOTE =
   'The provider does not support native rewind; the model will receive a summary of the surviving conversation with your next message.';
 
 const BUTTON_CLASS =
-  'h-auto inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:cursor-not-allowed disabled:opacity-50';
+  'h-auto inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-xs font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)] disabled:cursor-not-allowed disabled:opacity-50';
 
 export function MessageActions({ chatId, turnId, alwaysVisible, className }: MessageActionsProps) {
   const navigate = useNavigate();

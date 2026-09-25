@@ -85,7 +85,7 @@ export class PageErrorBoundary extends React.Component<
               variant="ghost"
               type="button"
               onClick={() => { window.location.href = '/'; }}
-              className="inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm hover:bg-accent"
+              className="inline-flex items-center gap-2 rounded border border-border px-3 py-1.5 text-sm hover:bg-accent-tint"
             >
               <ArrowLeft className="h-4 w-4" aria-hidden />
               Back to home

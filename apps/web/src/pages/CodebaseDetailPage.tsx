@@ -465,8 +465,8 @@ function FilePreviewPanel({
               className={cn(
                 'inline-flex h-[18px] items-center rounded-sm px-1.5',
                 markdownMode === 'preview'
-                  ? 'bg-accent text-foreground'
-                  : 'text-muted-foreground hover:bg-accent/50',
+                  ? 'bg-accent-tint text-foreground'
+                  : 'text-muted-foreground hover:bg-accent-tint/50',
               )}
             >
               <Eye className="h-3 w-3" />
@@ -481,8 +481,8 @@ function FilePreviewPanel({
               className={cn(
                 'inline-flex h-[18px] items-center rounded-sm px-1.5',
                 markdownMode === 'code'
-                  ? 'bg-accent text-foreground'
-                  : 'text-muted-foreground hover:bg-accent/50',
+                  ? 'bg-accent-tint text-foreground'
+                  : 'text-muted-foreground hover:bg-accent-tint/50',
               )}
             >
               <Code2 className="h-3 w-3" />

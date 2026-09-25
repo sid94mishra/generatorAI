@@ -108,7 +108,7 @@ export function SyntaxHighlightedCode({
             'opacity-0 group-hover:opacity-100',
             copied
               ? 'text-green-600 bg-green-50 dark:bg-green-900/20'
-              : 'text-[var(--color-muted-foreground)] bg-[var(--color-background)]/80 hover:bg-[var(--color-accent)]',
+              : 'text-[var(--color-muted-foreground)] bg-[var(--color-background)]/80 hover:bg-[var(--color-accent-tint)]',
           )}
         >
           {copied ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
@@ -123,7 +123,7 @@ export function SyntaxHighlightedCode({
         <table className="w-full border-collapse">
           <tbody>
             {lines.map((line, index) => (
-              <tr key={index} className="hover:bg-[var(--color-accent)]/20 leading-relaxed">
+              <tr key={index} className="hover:bg-[var(--color-accent-tint)]/20 leading-relaxed">
                 {showLineNumbers && (
                   <td
                     className="select-none text-right align-top pr-3 font-mono text-[10px] text-[var(--color-muted-foreground)]/50 border-r border-[var(--color-border)]/40"

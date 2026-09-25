@@ -302,7 +302,7 @@ function ActionButton({ onClick, loading, disabled, icon, label, variant }: Acti
     success: 'text-green-600 hover:bg-green-50 dark:text-green-400 dark:hover:bg-green-900/20',
     warning: 'text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-900/20',
     destructive: 'text-red-600 hover:bg-red-50 dark:text-red-400 dark:hover:bg-red-900/20',
-    default: 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]',
+    default: 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent-tint)]',
   };
 
   return (

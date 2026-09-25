@@ -128,20 +128,23 @@ const SYNTAX_ROLES = [
 
 const CHART_SLOTS = 6;
 
-/** Every token that ends up as a Tailwind colour utility in Layer 2. */
-const THEME_COLOR_VARS = [
+/**
+ * Every token that ends up as a Tailwind colour utility in Layer 2.
+ *
+ * Names that collide with the design vocabulary (02 §3) are not bridged:
+ * `accent` is bridged as `accent-tint` (the raw `--accent` keeps its name,
+ * mobile reads it), and `surface`, `surface-hover`, `raised`, `overlay` and
+ * `accent-foreground` are dropped — their raw variables still emit until P7.
+ */
+export const THEME_COLOR_VARS = [
   'background',
   'foreground',
   'card',
   'card-foreground',
   'popover',
   'popover-foreground',
-  'raised',
-  'overlay',
   'subtle',
   'emphasis',
-  'surface',
-  'surface-hover',
   'primary',
   'primary-emphasis',
   'primary-foreground',
@@ -149,8 +152,7 @@ const THEME_COLOR_VARS = [
   'secondary-foreground',
   'muted',
   'muted-foreground',
-  'accent',
-  'accent-foreground',
+  'accent-tint',
   'destructive',
   'destructive-foreground',
   'border',
@@ -276,10 +278,17 @@ function accentBlock(theme: ThemeDef, accentId: AccentId, appearance: Appearance
   ].join('\n');
 }
 
+/** Raw variable behind a legacy bridge name (only `accent-tint` is renamed). */
+const LEGACY_BRIDGE_SOURCE: Partial<Record<(typeof THEME_COLOR_VARS)[number], string>> = {
+  'accent-tint': 'accent',
+};
+const bridgeSource = (name: (typeof THEME_COLOR_VARS)[number]): string =>
+  LEGACY_BRIDGE_SOURCE[name] ?? name;
+
 function themeInlineBlock(): string {
   const lines = ['@theme inline {'];
   for (const name of THEME_COLOR_VARS) {
-    lines.push(`  --color-${name}: var(--${name});`);
+    lines.push(`  --color-${name}: var(--${bridgeSource(name)});`);
   }
   lines.push('  --font-sans: var(--font-sans);');
   lines.push('  --font-mono: var(--font-mono);');
@@ -290,7 +299,7 @@ function themeInlineBlock(): string {
 function compatAliasBlock(): string {
   const lines = [':root {'];
   for (const name of THEME_COLOR_VARS) {
-    lines.push(`  --color-${name}: var(--${name});`);
+    lines.push(`  --color-${name}: var(--${bridgeSource(name)});`);
   }
   lines.push('}');
   return lines.join('\n');

@@ -112,6 +112,15 @@ describe('web CSS emitter', () => {
     }
   });
 
+  it('renames the legacy bridges that collide with the design vocabulary (02 §3)', () => {
+    // The selection tint is `accent-tint`; `accent`, `surface`, `raised` and
+    // `overlay` belong to the design layer, so the legacy layer must not claim them.
+    expect(css).toContain('--color-accent-tint: var(--accent);');
+    for (const name of ['accent', 'accent-foreground', 'surface', 'surface-hover', 'raised', 'overlay']) {
+      expect(css, `--color-${name} still bridged to the legacy value`).not.toContain(`--color-${name}: var(--${name});`);
+    }
+  });
+
   it('drives highlight.js from syntax tokens rather than a bundled palette', () => {
     expect(css).toContain('.hljs-keyword');
     expect(css).toContain('color: var(--syntax-keyword);');

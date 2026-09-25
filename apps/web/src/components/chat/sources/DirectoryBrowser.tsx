@@ -210,7 +210,7 @@ function RowButton({
       {...(onDoubleClick ? { onDoubleClick } : {})}
       className={cn(
         'h-auto w-full justify-start gap-2 rounded-none px-3 py-1.5 text-left text-xs font-normal',
-        'hover:bg-accent focus-visible:bg-accent',
+        'hover:bg-accent-tint focus-visible:bg-accent-tint',
       )}
     >
       {icon}

@@ -341,8 +341,8 @@ export function ModelPicker({
             : [
                 'min-w-0 max-w-[160px] gap-1 rounded-md px-2 py-1 text-xs font-medium',
                 open
-                  ? 'bg-[var(--color-accent)] text-[var(--color-foreground)]'
-                  : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)]/60 hover:text-[var(--color-foreground)]',
+                  ? 'bg-[var(--color-accent-tint)] text-[var(--color-foreground)]'
+                  : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent-tint)]/60 hover:text-[var(--color-foreground)]',
               ],
         )}
       >
@@ -425,7 +425,7 @@ export function ModelPicker({
                       !p.enabled && 'cursor-not-allowed opacity-30',
                       effectiveProviderTab === p.id && p.enabled
                         ? 'bg-[var(--color-primary)]/15 text-[var(--color-primary)]'
-                        : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]',
+                        : 'text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]',
                     )}
                   >
                     <ProviderIcon provider={p.id} className="h-5 w-5" />
@@ -496,7 +496,7 @@ export function ModelPicker({
                     onClick={() => select('')}
                     className={cn(
                       'h-auto mb-1 flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors',
-                      !hasValue ? 'bg-[var(--color-primary)]/10' : 'hover:bg-[var(--color-accent)]',
+                      !hasValue ? 'bg-[var(--color-primary)]/10' : 'hover:bg-[var(--color-accent-tint)]',
                     )}
                   >
                     <span className="flex h-4 w-4 flex-shrink-0 items-center justify-center">
@@ -544,7 +544,7 @@ export function ModelPicker({
                       key={m.id}
                       className={cn(
                         'group flex w-full items-center gap-1 rounded-lg py-2 pl-2 pr-1 transition-colors',
-                        value === m.id ? 'bg-[var(--color-primary)]/10' : 'hover:bg-[var(--color-accent)]',
+                        value === m.id ? 'bg-[var(--color-primary)]/10' : 'hover:bg-[var(--color-accent-tint)]',
                       )}
                     >
                       <Button
@@ -581,7 +581,7 @@ export function ModelPicker({
                           'h-6 w-6 flex-shrink-0 items-center justify-center rounded transition-colors',
                           infoModelId === m.id
                             ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                            : 'text-[var(--color-muted-foreground)]/60 opacity-0 hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] group-hover:opacity-100',
+                            : 'text-[var(--color-muted-foreground)]/60 opacity-0 hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)] group-hover:opacity-100',
                         )}
                         title="Model details"
                       >

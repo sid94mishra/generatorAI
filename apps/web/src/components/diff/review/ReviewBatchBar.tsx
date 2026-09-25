@@ -40,7 +40,7 @@ export function ReviewBatchBar({
   if (pendingCount === 0 && submittedCount === 0 && addressedCount === 0) return null;
 
   return (
-    <div className="border-b bg-accent/30 px-2 py-1.5">
+    <div className="border-b bg-accent-tint/30 px-2 py-1.5">
       <div className="flex flex-wrap items-center gap-1.5 text-[11px]">
         {pendingCount > 0 && (
           <span className="font-medium">

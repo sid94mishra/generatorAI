@@ -253,7 +253,7 @@ function PreBlock({ children, ...props }: React.HTMLAttributes<HTMLPreElement> &
           variant="ghost"
           size="sm"
           onClick={handleCopy}
-          className="shrink-0 text-[11px] hover:bg-[var(--color-accent)]"
+          className="shrink-0 text-[11px] hover:bg-[var(--color-accent-tint)]"
           aria-label={copied ? 'Copied' : 'Copy code'}
         >
           {copied ? (

@@ -188,7 +188,7 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
                 type="button"
                 variant="ghost"
                 onClick={() => onOpen(plan.planId)}
-                className="h-auto rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+                className="h-auto rounded-md px-2.5 py-1.5 text-xs font-medium text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]"
               >
                 Review plan
               </Button>
@@ -238,7 +238,7 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
                         setShowActions(false);
                         onApprove?.(plan.planId, 'implement_autopilot');
                       }}
-                      className="block h-auto w-full whitespace-normal rounded-md px-2 py-1.5 text-left text-xs font-normal text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+                      className="block h-auto w-full whitespace-normal rounded-md px-2 py-1.5 text-left text-xs font-normal text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent-tint)]"
                     >
                       <span className="block font-medium">Approve &amp; run autonomously</span>
                       <span className="block text-[10px] text-[var(--color-muted-foreground)]">
@@ -253,7 +253,7 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
                 variant="secondary"
                 disabled={busy}
                 onClick={() => setShowFeedback(true)}
-                className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+                className="h-auto flex items-center gap-1.5 rounded-md border border-[var(--color-border)] px-2.5 py-1.5 text-xs font-medium text-[var(--color-foreground)] transition-colors hover:bg-[var(--color-accent-tint)]"
               >
                 <MessageSquarePlus className="h-3 w-3" />
                 Request changes
@@ -284,7 +284,7 @@ export function PlanCard({ plan, onOpen, onApprove, onRequestChanges, busy }: Pl
                     setShowFeedback(false);
                     setFeedback('');
                   }}
-                  className="h-auto rounded-md px-2.5 py-1.5 text-xs font-normal text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]"
+                  className="h-auto rounded-md px-2.5 py-1.5 text-xs font-normal text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]"
                 >
                   Cancel
                 </Button>

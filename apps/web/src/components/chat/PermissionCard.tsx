@@ -150,7 +150,7 @@ export function PermissionCard({ permission, onAnswer, busy }: PermissionCardPro
                 type="button"
                 disabled={busy}
                 onClick={handleDenyCancel}
-                className="rounded-md px-2 py-1.5 text-[11px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)] disabled:opacity-50"
+                className="rounded-md px-2 py-1.5 text-[11px] text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)] disabled:opacity-50"
               >
                 Cancel
               </Button>

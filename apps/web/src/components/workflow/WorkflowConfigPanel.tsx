@@ -64,7 +64,7 @@ export function WorkflowConfigPanel({ open, onClose }: WorkflowConfigPanelProps)
                   'h-auto flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs font-medium transition-all duration-150',
                   activeTab === key
                     ? 'bg-[var(--color-primary)]/10 text-[var(--color-primary)] hover:bg-[var(--color-primary)]/10'
-                    : 'bg-transparent text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent)] hover:text-[var(--color-foreground)]',
+                    : 'bg-transparent text-[var(--color-muted-foreground)] hover:bg-[var(--color-accent-tint)] hover:text-[var(--color-foreground)]',
                 )}
               >
                 <span className={cn(
@@ -103,7 +103,7 @@ export function WorkflowConfigPanel({ open, onClose }: WorkflowConfigPanelProps)
               aria-label="Close settings"
               variant="ghost"
               size="icon-sm"
-              className="h-auto w-auto rounded-md p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent)]"
+              className="h-auto w-auto rounded-md p-1.5 text-[var(--color-muted-foreground)] transition-colors hover:bg-[var(--color-accent-tint)]"
             >
               <X className="h-4 w-4" />
             </Button>

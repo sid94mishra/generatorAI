@@ -78,7 +78,7 @@ export function ComposerMenu({
                 'h-auto w-full justify-start gap-2.5 px-3 py-1.5 text-left font-normal transition-colors',
                 i === activeIndex
                   ? 'bg-[var(--color-primary)]/12 text-[var(--color-foreground)]'
-                  : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent)]',
+                  : 'text-[var(--color-foreground)] hover:bg-[var(--color-accent-tint)]',
               )}
             >
               {item.icon && (

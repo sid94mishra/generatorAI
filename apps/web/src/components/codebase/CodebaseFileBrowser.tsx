@@ -143,7 +143,7 @@ function FileTreeNode({
         variant="ghost"
         onClick={handleClick}
         className={cn(
-          'h-auto flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-xs transition-colors hover:bg-[var(--color-accent)]',
+          'h-auto flex w-full items-center gap-1.5 rounded px-1.5 py-1 text-xs transition-colors hover:bg-[var(--color-accent-tint)]',
           !isDir && 'cursor-pointer',
           !isDir && selectedFile === entry.path &&
             'bg-[var(--color-primary)]/15 text-[var(--color-primary)] font-medium',

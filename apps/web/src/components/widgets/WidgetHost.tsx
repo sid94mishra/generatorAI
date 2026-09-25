@@ -81,7 +81,7 @@ export function WidgetHost({ sessionId, instanceId, onOpenWidget }: WidgetHostPr
             variant="ghost"
             type="button"
             onClick={() => onOpenWidget(w.instanceId)}
-            className="h-auto flex items-center gap-2.5 rounded-lg border border-[var(--color-border)]/60 px-3 py-2 text-left transition-colors hover:bg-[var(--color-accent)]/50"
+            className="h-auto flex items-center gap-2.5 rounded-lg border border-[var(--color-border)]/60 px-3 py-2 text-left transition-colors hover:bg-[var(--color-accent-tint)]/50"
           >
             <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md bg-[var(--color-primary)]/10 text-[var(--color-primary)]">
               <LayoutGrid className="h-3.5 w-3.5" />

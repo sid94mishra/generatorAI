@@ -99,7 +99,7 @@ export const DIFF_UNSAFE_CSS = `
  *    theme we resolved is what makes every `light-dark()` inside the shadow
  *    root pick the right branch.
  *
- * 2. Selection/hover built on `--color-primary`, not `--color-accent`.
+ * 2. Selection/hover built on `--color-primary`, not `--color-accent-tint`.
  *    `--accent` is ALREADY a ~10%-alpha wash of the primary, so mixing it
  *    down again (`22%` of an alpha colour) landed at ~2% opacity — visually
  *    nothing, which is why selection was invisible in light mode.

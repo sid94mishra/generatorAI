@@ -129,7 +129,7 @@ export function ProjectsListPage() {
               aria-pressed={view === 'card'}
               className={cn(
                 'h-auto w-auto rounded-l-lg rounded-r-none p-1.5 transition-colors',
-                view === 'card' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+                view === 'card' ? 'bg-accent-tint text-foreground' : 'text-muted-foreground hover:text-foreground',
               )}
             >
               <LayoutGrid className="h-4 w-4" />
@@ -142,7 +142,7 @@ export function ProjectsListPage() {
               aria-pressed={view === 'list'}
               className={cn(
                 'h-auto w-auto rounded-r-lg rounded-l-none p-1.5 transition-colors',
-                view === 'list' ? 'bg-accent text-foreground' : 'text-muted-foreground hover:text-foreground',
+                view === 'list' ? 'bg-accent-tint text-foreground' : 'text-muted-foreground hover:text-foreground',
               )}
             >
               <ListIcon className="h-4 w-4" />
