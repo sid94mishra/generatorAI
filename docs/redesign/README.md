@@ -25,6 +25,8 @@ Read design artifacts with the Artifact tool (`action: "read"` / `"list"`), neve
 | `node scripts/redesign/render-boards.mjs [--only=ChatsList,Home] [--modes=dark,light] [--accent=ink]` | Flattens each `boards/web/*.dc.html` (helmet → head, `{{rootClass}}` → `t-<mode> acc-<accent>`) and screenshots it at its preview size into `boards/png/<Board>.<mode>.png`. Fails if a board has an unknown shape. Uses the bundled Fontsource fonts once P1-T7 installs them, Google Fonts before that. ~2 min for all 60 × 2 |
 | `node scripts/redesign/side-by-side.mjs --board=ChatsList --mode=dark --shot=docs/redesign/shots/chats/1440x900-instrument-dark.png` | Board PNG (rendered on demand) next to an app screenshot → `shots/<route>/compare-<w>-<mode>.png` for the Done loop's DIFF.md |
 
+| `node scripts/redesign/make-dummy-repo.mjs [--clean]` | Throwaway git repo (bare origin + `work/` clone with branches, a conflict pair, and a dirty tree) under the OS temp dir for SCM walkthroughs; prints the `work/` path. `--clean` removes them all |
+
 Both PNG folders are gitignored; `shots/**/DIFF.md` is tracked.
 
 ## Document map
@@ -137,7 +139,7 @@ Update in every PR (task ID, PR link, date).
 
 | Phase | Status | Notes |
 |---|---|---|
-| P0 Documentation & rails | in progress | P0-01 done (plan, boards, render/side-by-side scripts) |
+| P0 Documentation & rails | in progress | P0-01 ✓ plan + boards + render scripts · P0-02 ✓ CLAUDE.md, launch.json, make-dummy-repo |
 | P1 Platform, tokens, registries | not started | |
 | P2 Backend track | not started | G-01 is on the critical path for P3 |
 | P3 Slice A — shell + Chats list | not started | |

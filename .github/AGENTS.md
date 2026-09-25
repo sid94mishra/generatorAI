@@ -67,6 +67,7 @@ GeneratorAI/
 | **Top-level architecture, layered model, dependency rules** | [docs/architecture.md](./docs/architecture.md) |
 | **Every package** (shared, core, db, sdk, agent-harness-providers, mcp-server) | [docs/packages.md](./docs/packages.md) |
 | **Every app** (server, web, cli, desktop) | [docs/apps.md](./docs/apps.md) |
+| **Web + desktop UI redesign** (plan, binding decisions, design boards, component kit, verification loop) | [docs/redesign/README.md](../docs/redesign/README.md) |
 | **Chat feature** lifecycle, configs, edge cases | [docs/feature-chat.md](./docs/feature-chat.md) |
 | **Workflow definitions** (CRUD, builder, validation, templates) | [docs/feature-workflows.md](./docs/feature-workflows.md) |
 | **Stage definitions** (every config / option / edge case) | [docs/feature-stages.md](./docs/feature-stages.md) |
@@ -281,6 +282,8 @@ Common change patterns and the bare-minimum checklist:
 3. Bridge auto-routes to all scopes (session / run / chat / global). No route change required for new kinds.
 4. `apps/web/src/stores/sseManager.ts` `processEvent()` — handle the new kind if it should drive UI state.
 5. `apps/cli/src/streaming/EventRenderer.ts` `handleEvent()` — handle if it should render in `run watch`.
+
+**Change web or desktop UI** (anything under `apps/web/src` or `apps/desktop`): the UI is being rebuilt by the plan in [docs/redesign/](../docs/redesign/README.md). Read its README and `01-decisions.md` (binding) first, follow the rules in `.claude/CLAUDE.md` (layers, design vocabulary, selector preservation, the Done loop in `09-verification.md` §6), and build new UI in `apps/web/src/{ui,blocks,features,app}` — not in the legacy `components/` and `pages/` folders.
 
 **Add a new harness provider** — see the full checklist in [docs/packages.md](./docs/packages.md#adding-a-new-provider).
 
