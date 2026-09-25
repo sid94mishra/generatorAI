@@ -13840,7 +13840,7 @@
       },
       {
         "field": "permissionMode",
-        "type": "\"askOnEachTool\" / \"askOnce\" / \"bypassPermissions\" / \"default\" / \"acceptEdits\" / \"plan\"",
+        "type": "\"bypassPermissions\" / \"default\" / \"acceptEdits\" / \"plan\"",
         "presence": "optional",
         "constraints": "—"
       },

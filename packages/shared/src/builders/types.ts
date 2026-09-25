@@ -203,12 +203,8 @@ export interface RunProfileConfig {
   name: string;
   description?: string;
   variables: Record<string, unknown>;
-  /**
-   * Permission mode for the run. Accepts the script-authoring vocabulary
-   * (`askOnEachTool`/`askOnce`) as well as the canonical runtime modes; the
-   * server maps the former to the latter (see `mapScriptPermissionMode`).
-   */
-  permissionMode?: WorkflowRunPermissionMode | 'askOnEachTool' | 'askOnce';
+  /** Permission mode for the run (the run permission-mode vocabulary). */
+  permissionMode?: WorkflowRunPermissionMode;
   sessionMode?: WorkflowSessionMode;
   stageOverrides?: Array<{
     stageName?: string;

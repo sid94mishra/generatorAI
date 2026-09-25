@@ -510,15 +510,15 @@ Source: `apps/server/src/routes/workflowScripts.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/workflow-scripts` | 55 |
-| `GET` | `/api/workflow-scripts/:id` | 65 |
-| `GET` | `/api/workflow-scripts/:id/profiles` | 85 |
-| `POST` | `/api/workflow-scripts/:id/materialize` | 100 |
-| `POST` | `/api/workflow-scripts/:id/run` | 187 |
-| `POST` | `/api/workflow-scripts/reload` | 338 |
-| `POST` | `/api/workflow-scripts/:id/reload` | 350 |
-| `POST` | `/api/workflow-scripts/upload` | 377 |
-| `POST` | `/api/workflow-scripts/validate` | 426 |
+| `GET` | `/api/workflow-scripts` | 29 |
+| `GET` | `/api/workflow-scripts/:id` | 39 |
+| `GET` | `/api/workflow-scripts/:id/profiles` | 59 |
+| `POST` | `/api/workflow-scripts/:id/materialize` | 74 |
+| `POST` | `/api/workflow-scripts/:id/run` | 161 |
+| `POST` | `/api/workflow-scripts/reload` | 307 |
+| `POST` | `/api/workflow-scripts/:id/reload` | 319 |
+| `POST` | `/api/workflow-scripts/upload` | 346 |
+| `POST` | `/api/workflow-scripts/validate` | 395 |
 
 ## workspaces
 

@@ -41,7 +41,7 @@ This lists static environment reads in runtime source, including platform, provi
 | `GENERATORAI_ADVERTISED_URLS` | `apps/server/src/index.ts:732`<br>`apps/server/src/routes/auth.ts:732` |
 | `GENERATORAI_AGENT_HOST` | `apps/server/src/composition-root.ts:487` |
 | `GENERATORAI_ALLOW_HOST_SANDBOX` | `apps/server/src/composition-root.ts:662` |
-| `GENERATORAI_ALLOW_SCRIPT_UPLOAD` | `apps/server/src/index.ts:386`<br>`apps/server/src/routes/workflowScripts.ts:382` |
+| `GENERATORAI_ALLOW_SCRIPT_UPLOAD` | `apps/server/src/index.ts:386`<br>`apps/server/src/routes/workflowScripts.ts:351` |
 | `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK` | `apps/server/src/composition/security.ts:157`<br>`apps/server/src/index.ts:338` |
 | `GENERATORAI_ALLOW_WORKFLOW_SCRIPTS` | `apps/server/src/index.ts:385` |
 | `GENERATORAI_API_KEY` | `apps/server/src/composition/security.ts:148` |

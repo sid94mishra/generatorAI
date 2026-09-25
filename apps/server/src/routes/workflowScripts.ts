@@ -4,7 +4,7 @@
 
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
-import type { StageEdgeType } from '@generatorai/shared';
+import type { StageEdgeType, WorkflowRunPermissionMode } from '@generatorai/shared';
 import { ScriptSecurityError } from '@generatorai/core';
 import type { Response } from 'express';
 
@@ -19,32 +19,6 @@ function respondIfScriptsDisabled(err: unknown, res: Response): boolean {
     return true;
   }
   return false;
-}
-
-type CanonicalPermissionMode = 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan';
-
-/**
- * SCHEMA-1: Map the script-profile permission-mode vocabulary
- * (`askOnEachTool | askOnce | bypassPermissions`) onto the canonical run
- * permission-mode vocabulary (`bypassPermissions | default | acceptEdits |
- * plan`). The two enums diverged; persisting a raw script value left invalid
- * data on the run. Already-canonical values pass through unchanged.
- */
-function mapScriptPermissionMode(mode: string | undefined): CanonicalPermissionMode | undefined {
-  if (!mode) return undefined;
-  switch (mode) {
-    case 'askOnEachTool':
-      return 'default'; // prompt on each tool use === default HITL behaviour
-    case 'askOnce':
-      return 'acceptEdits'; // ask once, then auto-accept edits
-    case 'bypassPermissions':
-    case 'default':
-    case 'acceptEdits':
-    case 'plan':
-      return mode;
-    default:
-      return undefined; // unknown — drop rather than persist garbage
-  }
 }
 
 export function createWorkflowScriptRoutes(container: Container): Router {
@@ -203,7 +177,7 @@ export function createWorkflowScriptRoutes(container: Container): Router {
       let resolvedVars = variables ?? {};
       let resolvedSessionMode = script.output.definition.sessionMode;
       let resolvedStageOverrides: unknown[] | undefined;
-      let resolvedPermissionMode: string | undefined;
+      let resolvedPermissionMode: WorkflowRunPermissionMode | undefined;
 
       if (profileName) {
         const profile = script.profiles.find((p: { name: string }) => p.name === profileName);
@@ -230,7 +204,7 @@ export function createWorkflowScriptRoutes(container: Container): Router {
             ...(runtimeOverrides ?? []),
           ];
         }
-        resolvedPermissionMode = (profile as { permissionMode?: string }).permissionMode;
+        resolvedPermissionMode = profile.permissionMode;
       }
 
       // Stage overrides — fold into variables so the runner picks them up.
@@ -300,19 +274,14 @@ export function createWorkflowScriptRoutes(container: Container): Router {
         projectId,
       });
 
-      // Apply profile permissionMode if provided.
-      // SCHEMA-1: the script-profile vocabulary (askOnEachTool | askOnce |
-      // bypassPermissions) is NOT the canonical run permission-mode vocabulary
-      // (bypassPermissions | default | acceptEdits | plan). Map it before
-      // persisting, otherwise an invalid value (e.g. 'askOnce') is stored and
-      // every downstream consumer of the canonical enum chokes on it.
-      const canonicalPermissionMode = mapScriptPermissionMode(resolvedPermissionMode);
-      if (canonicalPermissionMode) {
+      // Apply the profile's permission mode (the run vocabulary; the script
+      // schema rejects anything else at load).
+      if (resolvedPermissionMode) {
         try {
-          await workflowRunService.setPermissionMode(run.id, canonicalPermissionMode);
+          await workflowRunService.setPermissionMode(run.id, resolvedPermissionMode);
         } catch (err) {
           logger.warn(
-            `[WorkflowScripts] Failed to set permissionMode '${canonicalPermissionMode}' (from profile '${resolvedPermissionMode}') on run ${run.id}: ${err instanceof Error ? err.message : String(err)}`,
+            `[WorkflowScripts] Failed to set permissionMode '${resolvedPermissionMode}' on run ${run.id}: ${err instanceof Error ? err.message : String(err)}`,
           );
         }
       }

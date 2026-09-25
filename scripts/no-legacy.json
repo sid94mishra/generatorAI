@@ -465,6 +465,21 @@
         "packages/core/src/services/WorkflowOrchestrator.ts"
       ],
       "reason": "WP-1.4: PostProcessingStep.enabled deleted; every declared step runs"
+    },
+    {
+      "phase": "01",
+      "pattern": "askOnEachTool|askOnce|mapScriptPermissionMode",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/cli-core/",
+        "apps/server/",
+        "apps/web/",
+        "apps/mobile/src/",
+        "apps/mobile/app/"
+      ],
+      "reason": "WP-1.4: script permission vocabulary deleted; WorkflowRunPermissionMode"
     }
   ],
   "comments": {

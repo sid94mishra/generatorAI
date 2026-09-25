@@ -137,7 +137,7 @@ Schema for RunProfileConfig as exported by scripts.
 | name | string | `required` | min 1 |
 | description | string | `optional` | — |
 | variables | map of unknown | `default {}` | — |
-| permissionMode | "askOnEachTool" / "askOnce" / "bypassPermissions" / "default" / "acceptEdits" / "plan" | `optional` | — |
+| permissionMode | "bypassPermissions" / "default" / "acceptEdits" / "plan" | `optional` | — |
 | sessionMode | "single" / "per-stage" / "auto" | `optional` | — |
 | stageOverrides | array of object | `optional` | — |
 | stageOverrides[] | object | `required` | unknown keys: strip |
@@ -322,14 +322,7 @@ export const ScriptRunProfileSchema = z.object({
   name: z.string().min(1),
   description: z.string().optional(),
   variables: z.record(z.unknown()).default({}),
-  // Accepts BOTH the script-authoring vocabulary (`askOnEachTool`/`askOnce`)
-  // and the canonical runtime vocabulary. The server's `mapScriptPermissionMode`
-  // (apps/server/src/routes/workflowScripts.ts) translates the former to the
-  // latter before persisting. Both must be allowed so existing scripts using
-  // `askOnce` keep loading while canonical values also work.
-  permissionMode: z
-    .enum(['askOnEachTool', 'askOnce', 'bypassPermissions', 'default', 'acceptEdits', 'plan'])
-    .optional(),
+  permissionMode: z.enum(['bypassPermissions', 'default', 'acceptEdits', 'plan']).optional(),
   sessionMode: z.enum(['single', 'per-stage', 'auto']).optional(),
   stageOverrides: z.array(z.object({
     stageName: z.string().optional(),

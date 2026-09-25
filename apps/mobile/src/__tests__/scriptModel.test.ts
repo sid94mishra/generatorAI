@@ -48,14 +48,14 @@ describe('script detail', () => {
 
 describe('profiles', () => {
   const profiles = parseScriptProfiles([
-    { name: 'fast', variables: { depth: 1 }, stageOverrides: [{ stageName: 'a', skip: true }], permissionMode: 'askOnce' },
+    { name: 'fast', variables: { depth: 1 }, stageOverrides: [{ stageName: 'a', skip: true }], permissionMode: 'acceptEdits' },
     { name: 'plain' },
     { description: 'nameless' },
   ]);
 
   it('parses and summarises', () => {
     expect(profiles.map((p) => p.name)).toEqual(['fast', 'plain']);
-    expect(profileSummary(profiles[0]!)).toBe('Pre-fills 1 input · skips 1 stage · permissions: askOnce');
+    expect(profileSummary(profiles[0]!)).toBe('Pre-fills 1 input · skips 1 stage · permissions: acceptEdits');
     expect(profileSummary(profiles[1]!)).toBeNull();
   });
 
