@@ -16,7 +16,6 @@ import type { Semaphore } from '../utils/Semaphore.js';
 import type { AdmissionController, AdmissionTicket } from './AdmissionController.js';
 import { generateId, withSpan, getMeter, ValidationError } from '@generatorai/shared';
 import * as path from 'node:path';
-import { RunLogger } from '../events/StreamLogger.js';
 
 // ── OTel Metrics ──
 const meter = getMeter('core.workflow');
@@ -103,8 +102,6 @@ export class WorkflowRunService {
   private pollInFlight = new Set<string>();
   /** Per-run EventBus unsubscribe handles for event-driven DAG routing. */
   private eventUnsubscribers = new Map<string, () => void>();
-  /** Per-run event loggers writing JSONL to the artifacts dir */
-  private runLoggers = new Map<string, RunLogger>();
   /** Optional hook executor for workflow-level lifecycle hooks */
   private hookExecutor?: HookExecutor;
   /**
@@ -342,14 +339,6 @@ export class WorkflowRunService {
       run.status = 'running';
     }
     if (run.status !== 'running') return;
-
-    // Re-attach the per-run JSONL logger (in-memory; lost on restart).
-    const artifactsDirPath = run.variables?.['__artifactsDirectory'] as string | undefined;
-    if (artifactsDirPath && this.logger && !this.runLoggers.has(runId)) {
-      const runLogger = new RunLogger(runId, artifactsDirPath, this.logger);
-      runLogger.attach(this.eventBus);
-      this.runLoggers.set(runId, runLogger);
-    }
 
     const stageRuns = await this.stageRunRepo.getByRunId(runId);
 
@@ -707,14 +696,6 @@ export class WorkflowRunService {
       run.variables = updatedVars;
     }
 
-    // Start per-run JSONL logger (captures all streaming + lifecycle events)
-    const artifactsDirPath = run.variables?.['__artifactsDirectory'] as string | undefined;
-    if (artifactsDirPath && this.logger) {
-      const runLogger = new RunLogger(runId, artifactsDirPath, this.logger);
-      runLogger.attach(this.eventBus);
-      this.runLoggers.set(runId, runLogger);
-    }
-
     sm.transition('sys:start');
     // Set startedAt only on first start — not on resume after crash recovery
     const updateFields: Record<string, unknown> = { status: 'starting' };
@@ -1056,15 +1037,6 @@ export class WorkflowRunService {
       }
     }
     this.eventUnsubscribers.clear();
-
-    for (const logger of this.runLoggers.values()) {
-      try {
-        logger.close();
-      } catch {
-        /* best-effort */
-      }
-    }
-    this.runLoggers.clear();
   }
 
   /**
@@ -1150,7 +1122,6 @@ export class WorkflowRunService {
     this.stopPolling(runId);
     this.unsubscribeRunEvents(runId);
     await this.pruneProcessedForRun(runId);
-    this.closeRunLogger(runId);
     activeRuns.add(-1);
 
     await this.runRepo.updateStatus(runId, 'cancelling');
@@ -1502,7 +1473,6 @@ export class WorkflowRunService {
 
     this.stopPolling(runId);
     this.unsubscribeRunEvents(runId);
-    this.closeRunLogger(runId);
     this.dagScheduler.forgetRun(runId);
     activeRuns.add(-1);
 
@@ -1688,7 +1658,6 @@ export class WorkflowRunService {
     this.stopPolling(runId);
     this.unsubscribeRunEvents(runId);
     await this.pruneProcessedForRun(runId);
-    this.closeRunLogger(runId);
     this.dagScheduler.forgetRun(runId);
     activeRuns.add(-1);
 
@@ -1713,17 +1682,6 @@ export class WorkflowRunService {
       kind: 'workflow_run.completed',
       data: { workflowRunId: runId },
     });
-  }
-
-  /**
-   * Close and remove the per-run event logger for a given run.
-   */
-  private closeRunLogger(runId: string): void {
-    const rl = this.runLoggers.get(runId);
-    if (rl) {
-      rl.close();
-      this.runLoggers.delete(runId);
-    }
   }
 
   /**

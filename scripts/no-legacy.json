@@ -566,6 +566,11 @@
       "phase": "01",
       "pattern": "\bwaitForCompletion\b",
       "reason": "WP-1.4: every prompt turn is awaited; the fire-and-forget branch and the Wait checkbox are gone"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(RunLogger|RunLoggerDispatcher|RUN_LOG_FILENAME|closeRunLogger|runLoggers)\\b|StreamLogger|stream-log",
+      "reason": "WP-1.4: the per-run JSONL logger is deleted; run history comes from stream replay"
     }
   ],
   "comments": {

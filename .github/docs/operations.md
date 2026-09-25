@@ -331,7 +331,7 @@ Structured JSON logs via pino:
 { "level": 30, "time": ..., "service": "generatorai-server", "msg": "...", "runId": "...", "sessionId": "..." }
 ```
 
-Per-run JSONL logs are written to `<workspace>/artifacts/logs/run.jsonl` by `RunLogger`. Each line is one event.
+There is no per-run JSONL log file; run events are replayed from the persisted stream.
 
 `GENERATORAI_LOG_LEVEL=debug` enables detailed logs in `EventBus`, `StreamBroker`, `DAGScheduler`, harness providers.
 

@@ -147,9 +147,6 @@ Background timers (unref'd):
    ├── WorktreeCleanupService → retention sweep (default hourly)
    ├── EventRetentionService → DB pruning sweep
    └── AutomationService    → cron evaluator + lease lock (1.23) for scheduled triggers
-
-Per-run loggers:
-   └── RunLogger            → per-runId JSONL stream attached to EventBus
 ```
 
 ### 4.2 Harness sub-process
@@ -254,7 +251,7 @@ Routes use `ErrorHandler.normalize(err)` to map all errors to a stable wire form
 
 ## 9. Observability
 
-- **Structured logging** — pino (`@generatorai/shared/logging/Logger.ts`). JSON in prod, pretty in dev. Per-run `RunLogger` attaches to `EventBus` and writes JSONL files into the run's `artifacts/` directory.
+- **Structured logging** — pino (`@generatorai/shared/logging/Logger.ts`). JSON in prod, pretty in dev. Run history is replayed from the persisted stream (DeltaLog/stream cursors); there is no per-run JSONL file.
 - **OpenTelemetry** — metrics + traces. Initialized in `apps/server/src/instrumentation.ts` and `apps/cli/src/instrumentation.ts`. Default OTLP-compatible. Collector compose file: [docker/observability/](../../docker/observability/).
 - **Metrics shipped:**
   - `copilot.prompts.total`, `copilot.prompt.duration_ms`, `copilot.active_sessions`

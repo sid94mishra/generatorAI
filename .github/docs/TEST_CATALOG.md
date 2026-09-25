@@ -305,7 +305,7 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | J2 | Workspace auto-created on chat (with project) | Same | ✅ (session 70 — ChatManagementService.createChat with `projectId` triggers workspace creation; verified at architectural level in session 44) |
 | J3 | Workspace UI tree | Browse files | ✅ |
 | J4 | Workspace file content | Open in viewer | ✅ (session 69 — `GET /workspaces/:id/files` returns workspaceFiles/artifactFiles/sourceFiles arrays + worktrees) |
-| J5 | Workspace artifacts table | `workspace_artifacts` rows for code_file/response_md | ✅ (session 70 — `GET /api/workspaces/:id/files` returns `artifactFiles` array with files like `code_analysis_response_1.md`, `stream-log.jsonl`) |
+| J5 | Workspace artifacts table | `workspace_artifacts` rows for code_file/response_md | ✅ (session 70 — `GET /api/workspaces/:id/files` returns `artifactFiles` array with files like `code_analysis_response_1.md`) |
 | J6 | Workspace status — `creating → active` | After init | ✅ (session 70 — active workspaces queryable via `?status=active`; lifecycle managed by WorkspaceService; verified in session 44) |
 | J7 | Workspace status — `completed` | On run terminal | ✅ (session 70 — status flips to `completed` when run terminates; archived workspaces show in `?status=archived`) |
 | J8 | Archive workspace | `POST /:id/archive` | ✅ (session 70 — HTTP 200; status changed from `active` to `archived`) |

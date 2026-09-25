@@ -749,7 +749,6 @@ function workspaceFilesFromRun(workspace: RunWorkspaceInfo | undefined): FileCha
       // Legacy fabricated files from pre-fix runs — kept out of the file list
       // so they don't pollute the Inspector view.
       /(^|\/)extracted\//.test(norm) ||
-      /stream-log\.jsonl$/.test(norm) ||
       /\.workspace\.json$/.test(norm)
     );
   };

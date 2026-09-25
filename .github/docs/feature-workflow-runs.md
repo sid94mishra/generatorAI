@@ -110,14 +110,13 @@ Server-side:
      - workspaceManager.createWorkspace({ ownerType: 'workflow_run', ownerId: runId, … })
      - if projectId → worktreeService.createRunWorktrees(projectId, runId, aliases, 'workflow')
      - inject __workingDirectory, __artifactsDirectory, __workspaceId, repo_path_<alias>, repo_branch_<alias>
-3. Start per-run JSONL logger (RunLogger attaches to EventBus).
-4. State transition: created → starting → running.
-5. Build DAG (DAGScheduler.buildDAGForDefinition, hash-cached).
-6. Get root stages.
-7. For each root stage:
+3. State transition: created → starting → running.
+4. Build DAG (DAGScheduler.buildDAGForDefinition, hash-cached).
+5. Get root stages.
+6. For each root stage:
        - apply stageOverrides (if skip=true, mark stage_run as 'skipped' and emit event)
        - executeStage(stageRun, runId, sessionMode, harnessConfig, variables).catch(onStageFailed)
-8. startPolling(runId) — 3s interval to detect stage completion changes
+7. startPolling(runId) — 3s interval to detect stage completion changes
    (resilient to executeStage hangs/session release stalls)
 ```
 

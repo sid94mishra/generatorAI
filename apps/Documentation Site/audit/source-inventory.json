@@ -4211,7 +4211,6 @@
     "packages/core/src/domain/state-machines/WorkflowRunStateMachine.ts",
     "packages/core/src/events/EventBus.ts",
     "packages/core/src/events/index.ts",
-    "packages/core/src/events/StreamLogger.ts",
     "packages/core/src/index.ts",
     "packages/core/src/infrastructure/browser/AntiDetectionScript.ts",
     "packages/core/src/infrastructure/browser/CookieImport.ts",

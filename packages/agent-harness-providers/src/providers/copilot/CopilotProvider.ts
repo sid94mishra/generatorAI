@@ -140,7 +140,7 @@ const listenerLeakWarnings = meter.createCounter('copilot.listeners.leak_warning
  * ORC-05 — warn threshold above which we log "listener leak suspected" and
  * bump the `copilot.listeners.leak_warnings` metric. 50 is chosen because
  * a single conversation realistically needs ~3-5 listeners (one per
- * consumer: route SSE, RunLogger, hook phases). Anything north of 50
+ * consumer: route SSE, hook phases). Anything north of 50
  * almost always indicates a subscription without a matching cleanup.
  */
 const LISTENER_LEAK_THRESHOLD = 50;

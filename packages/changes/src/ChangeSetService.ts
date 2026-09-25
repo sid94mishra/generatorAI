@@ -184,10 +184,8 @@ export function isMetadataPath(p: string): boolean {
     s === 'uploads' ||
     s === '.workspace.json' ||
     s === 'scratchpad.json' ||
-    s === 'stream-log.jsonl' ||
     s.endsWith('/.workspace.json') ||
-    s.endsWith('/scratchpad.json') ||
-    s.endsWith('/stream-log.jsonl')
+    s.endsWith('/scratchpad.json')
   );
 }
 
