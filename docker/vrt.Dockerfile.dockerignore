@@ -1,0 +1,41 @@
+# Build context for docker/vrt.Dockerfile (BuildKit reads <Dockerfile>.dockerignore
+# in place of the root .dockerignore). Unlike the server image it keeps
+# agent-tests and every workspace package, so `pnpm install --frozen-lockfile`
+# sees exactly the importers the lockfile lists.
+.git
+.github
+.claude
+.turbo
+**/.turbo
+**/node_modules
+**/dist
+**/dist-bundle
+**/dist-electron
+**/release
+**/coverage
+**/*.tsbuildinfo
+**/test-results
+**/.playwright-cli
+**/storybook-static
+
+# Baselines are bind-mounted by scripts/redesign/vrt.mjs, never baked in: an
+# image built before `--update` would otherwise compare against stale copies.
+agent-tests/vrt/__screenshots__
+
+# Runtime data and secrets never enter an image.
+**/data/*.db
+**/data/*.db-wal
+**/data/*.db-shm
+**/data/*.db-journal
+**/data/secrets
+**/data/delta-logs
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.*
+
+# Large and irrelevant to rendering (root *.png = stray screenshots).
+docs
+oldDocs
+*.png

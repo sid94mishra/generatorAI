@@ -12,6 +12,12 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["scripts/redesign/sandbox.mjs"],
       "port": 5197
+    },
+    {
+      "name": "storybook",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--filter", "@generatorai/web", "storybook"],
+      "port": 6006
     }
   ]
 }

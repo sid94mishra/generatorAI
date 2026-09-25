@@ -1,13 +1,21 @@
 import { fileURLToPath } from 'node:url';
-import { defineConfig } from 'vitest/config';
+import { defineConfig, type TestProjectInlineConfiguration } from 'vitest/config';
+import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
+import { playwright } from '@vitest/browser-playwright';
 
 /**
  * The single Vitest config for the web app (docs/redesign/09-verification.md
  * §1.1, §3.4). `pnpm --filter @generatorai/web test`, turbo, CI and the root
  * `vitest.config.ts` all run the web tests through this file.
  *
- * Already in the `projects` form so the Done loop's `--project unit` works;
- * P1-SB adds the `storybook` browser project next to `unit`.
+ *   unit                         happy-dom component and logic tests
+ *   storybook                    every story, rendered in headless Chromium:
+ *                                play function + axe (a11y.test = 'error')
+ *   storybook-instrument-light   the `vrt-themes` stories again, in the light
+ *   storybook-solarized-light    and Solarized light combos (09 §9.1)
+ *
+ * `pnpm test` runs `unit`; `pnpm test:stories` runs the three storybook projects (listed by name: a quoted glob
+ * is not portable to Windows cmd, an unquoted one expands to storybook-static/).
  */
 const dirname = fileURLToPath(new URL('.', import.meta.url));
 
@@ -25,10 +33,58 @@ export const unitProject = {
   root: dirname,
 } as const;
 
+/**
+ * One browser project per appearance combo. Storybook pins the toolbar globals
+ * per project (`initialGlobals`), so axe sees exactly what a user of that
+ * theme sees. Chromium comes from Playwright's own download, not the Chrome
+ * channel: CI has no Chrome (09 §3.4).
+ */
+function storybookProject(
+  name: string,
+  options: { initialGlobals?: Record<string, string>; includeTags?: string[] } = {},
+): TestProjectInlineConfiguration {
+  return {
+    extends: true,
+    plugins: [
+      storybookTest({
+        configDir: `${dirname}.storybook`,
+        storybookScript: 'pnpm storybook --ci',
+        ...(options.initialGlobals ? { initialGlobals: options.initialGlobals } : {}),
+        ...(options.includeTags ? { tags: { include: options.includeTags } } : {}),
+      }),
+    ],
+    test: {
+      name,
+      setupFiles: [`${dirname}.storybook/vitest.setup.ts`],
+      browser: {
+        enabled: true,
+        headless: true,
+        provider: playwright(),
+        instances: [{ browser: 'chromium' }],
+        // On a cold cache the page connects only after Vite's dependency scan
+        // and pre-bundle (~55 s measured here, three projects sharing one
+        // Storybook cache dir); the 60 s default failed the first run.
+        connectTimeout: 180_000,
+      },
+    },
+  };
+}
+
 export default defineConfig({
   // `@` is `apps/web/src` and nothing else — see `vite.config.ts`.
   resolve: { alias: { '@': `${dirname}src` } },
   test: {
-    projects: [{ extends: true, test: unitProject }],
+    projects: [
+      { extends: true, test: unitProject },
+      storybookProject('storybook'),
+      storybookProject('storybook-instrument-light', {
+        initialGlobals: { mode: 'light', theme: 'instrument' },
+        includeTags: ['vrt-themes'],
+      }),
+      storybookProject('storybook-solarized-light', {
+        initialGlobals: { mode: 'light', theme: 'solarized' },
+        includeTags: ['vrt-themes'],
+      }),
+    ],
   },
 });

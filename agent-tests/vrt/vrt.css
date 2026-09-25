@@ -1,0 +1,17 @@
+/* Injected into every VRT screenshot (playwright.vrt.config.ts `stylePath`,
+   09-verification.md §4.2): nothing that moves or blinks reaches a baseline. */
+*,
+*::before,
+*::after {
+  animation: none !important;
+  transition: none !important;
+  caret-color: transparent !important;
+}
+
+* {
+  scrollbar-width: none !important;
+}
+
+*::-webkit-scrollbar {
+  display: none !important;
+}

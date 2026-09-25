@@ -470,6 +470,90 @@ jobs:
           if-no-files-found: ignore
           retention-days: 14
 
+  # ── Storybook stories: render + play + axe (D-10, 09-verification.md §3.4) ─
+  # Every story rendered in headless Chromium through addon-vitest: its play
+  # function runs and axe runs with `a11y.test: 'error'`, in Instrument dark,
+  # plus Instrument light and Solarized light for `vrt-themes` stories (§9.1).
+  # Chromium comes from Playwright's download (CI has no Chrome channel).
+  storybook:
+    name: Storybook stories (render + axe)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - run: pnpm install --frozen-lockfile
+
+      # Same browser cache the e2e job uses (see the load-test job for why the
+      # install runs through @generatorai/core).
+      - run: pnpm --filter @generatorai/core exec playwright install --with-deps chromium
+
+      # Workspace packages the stories import resolve to their built dist/.
+      - run: pnpm turbo run build --filter='@generatorai/web^...'
+
+      - run: pnpm --filter @generatorai/web test:stories
+
+      - run: pnpm --filter @generatorai/web build-storybook
+
+  # ── Visual regression: stories (D-34, 09-verification.md §4) ─────────────
+  # Runs the pinned container (docker/vrt.Dockerfile) through the same wrapper
+  # developers use. `--update-missing` writes a baseline only for a story that
+  # has none (existing baselines are compared strictly, threshold never tuned);
+  # the last step then FAILS if any baseline was written, so a new story cannot
+  # pass without its PNGs committed, and the artifact holds the exact files to
+  # commit (the only way to get them on a host without Docker).
+  vrt:
+    name: Visual regression (stories)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          version: 10
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      # Only agent-tests' installed @playwright/test is needed on the host, for
+      # the wrapper's image-tag check; everything else happens in the image.
+      - run: pnpm install --frozen-lockfile --filter @generatorai/agent-tests
+
+      - run: pnpm vrt --project stories --update-missing
+
+      - name: Upload baselines and results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: vrt-stories
+          path: |
+            agent-tests/vrt/__screenshots__/
+            agent-tests/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      - name: Fail on baselines that are not committed
+        shell: bash
+        run: |
+          new=$(git status --porcelain --untracked-files=all -- agent-tests/vrt/__screenshots__)
+          if [ -n "$new" ]; then
+            echo "::error::VRT wrote baselines that are not committed. Download the vrt-stories artifact, open each PNG, and commit them:"
+            echo "$new"
+            exit 1
+          fi
+
   # ── Phone bundle hygiene ─────────────────────────────────────────────────
   # The phone app's unit tests and lint already run inside the turbo sweep
   # above, but the two checks that matter for SHIPPING it did not run

@@ -109,3 +109,6 @@ scripts/tmp-cu-*
 # (scripts/redesign/render-boards.mjs, playwright-cli walkthroughs). DIFF.md files stay tracked.
 docs/redesign/boards/png/
 docs/redesign/shots/**/*.png
+
+# Storybook static build (pnpm --filter @generatorai/web build-storybook); VRT serves it.
+apps/web/storybook-static/

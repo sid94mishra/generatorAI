@@ -37,6 +37,17 @@
     "check:css": {
       "dependsOn": ["build"],
       "cache": false
+    },
+    "build-storybook": {
+      "dependsOn": ["^build"],
+      "outputs": ["storybook-static/**"]
+    },
+    "test:stories": {
+      "dependsOn": ["^build"],
+      "cache": false
+    },
+    "vrt": {
+      "cache": false
     }
   }
 }

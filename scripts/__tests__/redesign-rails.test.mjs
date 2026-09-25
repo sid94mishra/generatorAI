@@ -1,6 +1,6 @@
 // Fixture tests for the redesign rails (docs/redesign/09-verification.md §2,
 // P0 review R4): the design-system ratchet, the stories-present check, the
-// board flattener and the ESLint layer rules. Every fixture lives under
+// board flattener, the ESLint layer rules and the VRT wrapper. Every fixture lives under
 // os.tmpdir() and is removed afterwards; nothing is written into the checkout.
 //
 // Runs under the root vitest "node" project:
@@ -15,6 +15,7 @@ import { fileURLToPath } from 'node:url';
 import { ESLint } from 'eslint';
 import { findMissingStories, isComponentSource } from '../../apps/web/scripts/check-stories.mjs';
 import { flattenBoard } from '../redesign/render-boards.mjs';
+import { dockerPlaywrightVersion, playwrightArgs } from '../redesign/vrt.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const RATCHET = path.join(REPO, 'apps', 'web', 'scripts', 'check-design-system.mjs');
@@ -309,4 +310,27 @@ describe('ESLint layer rules with the real config settings', () => {
     });
     expect(result.messages.filter((m) => m.severity === 2).map((m) => m.ruleId)).toContain('boundaries/dependencies');
   }, 60_000);
+});
+
+// ── 6. The VRT wrapper (scripts/redesign/vrt.mjs, 09 §4.4) ───────────────────
+// The container's Playwright must be the one agent-tests resolves, or
+// baselines would be rendered by a different browser build than the one the
+// specs were written against; vrt.mjs refuses to run on a mismatch.
+describe('pnpm vrt', () => {
+  it('pins the container image to agent-tests’ @playwright/test version', () => {
+    const want = dockerPlaywrightVersion(fs.readFileSync(path.join(REPO, 'docker', 'vrt.Dockerfile'), 'utf8'));
+    const have = JSON.parse(
+      fs.readFileSync(path.join(REPO, 'agent-tests', 'node_modules', '@playwright', 'test', 'package.json'), 'utf8'),
+    ).version;
+    expect(want).toBe(have);
+  });
+
+  it('maps its flags onto Playwright’s and forwards the rest', () => {
+    expect(playwrightArgs(['--update', '--grep', 'foundations'])).toEqual(['--update-snapshots=changed', '--grep', 'foundations']);
+    expect(playwrightArgs(['--no-build', '--update-missing', '--project', 'stories'])).toEqual([
+      '--update-snapshots=missing',
+      '--project',
+      'stories',
+    ]);
+  });
 });
