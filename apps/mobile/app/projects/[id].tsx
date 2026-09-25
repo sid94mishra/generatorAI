@@ -180,7 +180,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
   );
   const needsYou = useMemo(() => runsNeedingYou(projectRunList), [projectRunList]);
   const recentRuns = useMemo(() => mostRecent(projectRunList, RECENT_LIMIT), [projectRunList]);
-  const recentChats = useMemo(() => mostRecent(chats.data ?? [], RECENT_LIMIT), [chats.data]);
+  const recentChats = useMemo(() => mostRecent(chats.data?.items ?? [], RECENT_LIMIT), [chats.data]);
   const openPrs = useMemo(
     () => mostRecent((prs.data?.items ?? []).filter((pr) => matchesState(pr, 'open')), Number.MAX_SAFE_INTEGER),
     [prs.data],
@@ -223,7 +223,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
   const codebases = project.data.codebases ?? [];
   const counts: Array<{ key: string; label: string; value: number | null; onPress: () => void }> = [
     { key: 'codebases', label: 'Codebases', value: codebases.length, onPress: () => scrollTo('codebases') },
-    { key: 'chats', label: 'Chats', value: chats.data ? chats.data.length : null, onPress: () => scrollTo('chats') },
+    { key: 'chats', label: 'Chats', value: chats.data ? chats.data.total : null, onPress: () => scrollTo('chats') },
     { key: 'runs', label: 'Runs', value: runs.data && workflows.data ? projectRunList.length : null, onPress: () => scrollTo('runs') },
     {
       key: 'prs',

@@ -13,7 +13,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo } from 'react';
-import { useChats, useHealth } from './queries.js';
+import { useHealth } from './queries.js';
+import { useChats } from './chatListQueries.js';
 import { useWorkflowDefinitions, useWorkflowRuns } from './workflowQueries.js';
 import { useAutomations, useLatestAutomationExecutions } from './automationQueries.js';
 
@@ -62,7 +63,9 @@ export interface LiveOperations {
 
 /** Compose live chats / runs / automation executions into the dashboard model. */
 export function useLiveOperations(): LiveOperations {
-  const { data: chats, isLoading: chatsLoading } = useChats();
+  // The most recently active chats — the ones "today" and "running" can be about.
+  const { data: chatPage, isLoading: chatsLoading } = useChats({ status: 'active', limit: 100 });
+  const chats = chatPage?.items;
   const { data: definitions } = useWorkflowDefinitions();
   const { data: runs, isLoading: runsLoading } = useWorkflowRuns();
   const { data: automations, isLoading: autosLoading } = useAutomations();
@@ -129,7 +132,7 @@ export function useLiveOperations(): LiveOperations {
           key: `chat-${c.id}`, kind: 'chat', id: c.id, name: c.name,
           status: isRunning ? 'running' : 'active', href: `/chats/${c.id}`,
         };
-        const ts = new Date(c.updatedAt).getTime();
+        const ts = new Date(c.summary.lastActivityAt).getTime();
         if (isRunning) running.push({ ...base, ts, live: true });
         pushToday({ ...base, ts, live: isRunning });
       });

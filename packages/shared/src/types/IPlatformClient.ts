@@ -13,6 +13,7 @@ import type { Chat, CreateChatParams } from './Chat.js';
 import type { WorkflowDefinition, WorkflowDefinitionWithStages, CreateWorkflowDefinitionParams } from './WorkflowDefinition.js';
 import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams, StageRun } from './WorkflowRun.js';
 import type { AttentionFilter, AttentionSnapshot } from './Attention.js';
+import type { ChatBulkResult, ChatListPage, ChatListQuery } from './ChatList.js';
 
 /** Platform type discriminator */
 export type PlatformType = 'web' | 'cli' | 'desktop';
@@ -116,7 +117,8 @@ export interface IPlatformClient {
 
   // ── v2: Chat Operations ──
   createChat(params: CreateChatParams): Promise<Chat>;
-  listChats(filter?: { status?: string }): Promise<Chat[]>;
+  /** One page of chats with row summaries (chat list v2, G-02). Pass `nextCursor` back as `cursor`. */
+  listChats(query?: ChatListQuery): Promise<ChatListPage>;
   getChat(chatId: string): Promise<Chat>;
   updateChat(chatId: string, updates: Partial<Pick<Chat, 'model' | 'harnessConfig'>>): Promise<Chat>;
   archiveChat(chatId: string): Promise<void>;
@@ -182,4 +184,10 @@ export interface IPlatformClient {
    * `attentionReducer`.
    */
   getAttention(filter?: AttentionFilter): Promise<AttentionSnapshot>;
+
+  // ── Chat list v2 (G-02): bulk actions for the list's bulk bar ──
+  /** Archive several chats in one request; the outcome is per id. */
+  archiveChats(chatIds: string[]): Promise<ChatBulkResult>;
+  /** Permanently delete several chats in one request; the outcome is per id. */
+  deleteChats(chatIds: string[]): Promise<ChatBulkResult>;
 }

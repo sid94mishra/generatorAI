@@ -259,8 +259,16 @@ export async function findIdByName(path: string, name: string): Promise<string |
   return res.data.find((item) => item.name === name)?.id;
 }
 
+/**
+ * `GET /api/chats` answers a page (`{ items, nextCursor, total, counts }`),
+ * not a bare array like the other list endpoints `findIdByName` handles —
+ * so this looks up chats with its own request instead of going through it.
+ * `workers: true` so a worker chat created by a test is still findable.
+ */
 export async function findChatIdByName(name: string): Promise<string | undefined> {
-  return findIdByName('/chats', name);
+  const res = await apiRequest<{ items: Array<{ id: string; name: string }> }>('GET', '/chats?limit=200&workers=true');
+  if (!res.ok || !Array.isArray(res.data?.items)) return undefined;
+  return res.data.items.find((item) => item.name === name)?.id;
 }
 
 export async function findProjectIdByName(name: string): Promise<string | undefined> {

@@ -31,7 +31,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react-native';
-import { epochOr, isArchived, queryKeys, type ChatSummary } from '@generatorai/client-core';
+import { epochOr, isArchived, queryKeys, type ChatListRow } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
 import { useActivity } from '../../src/api/useActivity';
@@ -94,9 +94,9 @@ export default function ChatsScreen(): React.ReactElement {
     });
   }, []);
   const [creating, setCreating] = useState(false);
-  const [menuFor, setMenuFor] = useState<ChatSummary | null>(null);
-  const [renaming, setRenaming] = useState<ChatSummary | null>(null);
-  const [deleting, setDeleting] = useState<ChatSummary | null>(null);
+  const [menuFor, setMenuFor] = useState<ChatListRow | null>(null);
+  const [renaming, setRenaming] = useState<ChatListRow | null>(null);
+  const [deleting, setDeleting] = useState<ChatListRow | null>(null);
 
   useEffect(() => {
     if (params.new !== '1') return;
@@ -177,8 +177,8 @@ export default function ChatsScreen(): React.ReactElement {
 
   const removeMany = useMutation({
     mutationFn: async (ids: string[]) => {
-      const results = await Promise.allSettled(ids.map((id) => api.chats.remove(id)));
-      return { failed: results.filter((r) => r.status === 'rejected').length, total: ids.length };
+      const result = await api.chats.removeMany(ids);
+      return { failed: result.failed.length, total: ids.length };
     },
     onSuccess: ({ failed, total }) => {
       invalidate();
@@ -192,7 +192,7 @@ export default function ChatsScreen(): React.ReactElement {
   });
 
   const archiveChat = useCallback(
-    (chat: ChatSummary) => {
+    (chat: ChatListRow) => {
       setStatus.mutate({ id: chat.id, status: 'archived' });
       // Undo is what makes a swipe safe: the gesture is easy to trigger by
       // accident, so the recovery has to be one tap and immediate.
@@ -209,7 +209,7 @@ export default function ChatsScreen(): React.ReactElement {
   );
 
   const unarchiveChat = useCallback(
-    (chat: ChatSummary) => {
+    (chat: ChatListRow) => {
       setStatus.mutate({ id: chat.id, status: 'active' });
       toast({ message: `Restored “${displayChatName(chat.name)}”`, tone: 'success' });
     },
@@ -217,7 +217,7 @@ export default function ChatsScreen(): React.ReactElement {
   );
 
   const visible = useMemo(() => {
-    const list = chats.data ?? [];
+    const list = chats.data?.items ?? [];
     const q = query.trim().toLowerCase();
     return (
       list
@@ -228,7 +228,7 @@ export default function ChatsScreen(): React.ReactElement {
           (chat) =>
             !q ||
             displayChatName(chat.name).toLowerCase().includes(q) ||
-            (chat.preview ?? '').toLowerCase().includes(q),
+            (chat.summary.preview?.text ?? '').toLowerCase().includes(q),
         )
         // `updatedAt` arrives as an ISO string; subtracting them directly is NaN
         // and leaves the list in whatever order the server returned.
@@ -239,7 +239,7 @@ export default function ChatsScreen(): React.ReactElement {
 
   // Today / Yesterday / This week / Older. Search results stay one flat list:
   // a match's date is not what the user is scanning for.
-  const rows = useMemo<SectionRow<ChatSummary>[]>(
+  const rows = useMemo<SectionRow<ChatListRow>[]>(
     () =>
       query.trim()
         ? visible.map((chat) => ({ type: 'item' as const, key: chat.id, item: chat }))
@@ -247,8 +247,11 @@ export default function ChatsScreen(): React.ReactElement {
     [visible, query],
   );
 
-  const activeCount = (chats.data ?? []).filter((c) => !isArchived(c)).length;
-  const archivedCount = (chats.data ?? []).filter(isArchived).length;
+  // Server-computed across every matching chat, not just the page loaded —
+  // filtering the loaded `.items` would undercount once an install has more
+  // chats than the page's `limit`.
+  const activeCount = chats.data?.counts.active ?? 0;
+  const archivedCount = chats.data?.counts.archived ?? 0;
 
   const pull = usePullToRefresh(() => chats.refetch(), chats.isFetching);
 
@@ -339,7 +342,7 @@ export default function ChatsScreen(): React.ReactElement {
                 icon={<SquarePen size={20} color={colors.foreground} />}
                 onPress={() => setCreating(true)}
               />
-              {(chats.data?.length ?? 0) > 0 ? (
+              {(chats.data?.items.length ?? 0) > 0 ? (
                 <IconButton
                   testID="chats-select"
                   accessibilityLabel="Select chats"
@@ -356,8 +359,8 @@ export default function ChatsScreen(): React.ReactElement {
         <LegendList
           ref={listRef as never}
           data={rows}
-          keyExtractor={(row: SectionRow<ChatSummary>) => row.key}
-          getItemType={(row: SectionRow<ChatSummary>) => row.type}
+          keyExtractor={(row: SectionRow<ChatListRow>) => row.key}
+          getItemType={(row: SectionRow<ChatListRow>) => row.type}
           estimatedItemSize={64}
           recycleItems
           // Rows read selection state that is not part of `data`; without this
@@ -372,7 +375,7 @@ export default function ChatsScreen(): React.ReactElement {
           ListEmptyComponent={empty}
           refreshing={pull.refreshing}
           onRefresh={pull.onRefresh}
-          renderItem={({ item: row }: { item: SectionRow<ChatSummary> }) =>
+          renderItem={({ item: row }: { item: SectionRow<ChatListRow> }) =>
             row.type === 'header' ? (
               <ListSectionHeader label={row.label} />
             ) : (
@@ -500,7 +503,7 @@ function ChatRow({
   onDelete,
   onMenu,
 }: {
-  chat: ChatSummary;
+  chat: ChatListRow;
   live: boolean;
   waiting: boolean;
   archived: boolean;
@@ -555,10 +558,10 @@ function ChatRow({
 
   // "You: …" for your own last line reads as a conversation; an unlabelled
   // excerpt of your own prompt reads as the agent repeating you back.
-  const preview = chat.preview
-    ? chat.previewRole === 'user'
-      ? `You: ${chat.preview}`
-      : chat.preview
+  const preview = chat.summary.preview
+    ? chat.summary.preview.role === 'user'
+      ? `You: ${chat.summary.preview.text}`
+      : chat.summary.preview.text
     : null;
   // `default` is not a model anyone chose; it says nothing.
   const model = chat.model && chat.model !== 'default' ? chat.model : null;

@@ -28,7 +28,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | ID | Element | Needed by | Owner | Effort |
 |---|---|---|---|---|
 | G-01 | Attention feed (Needs you + Running, live) — **built (P2-01)** | P3 | P2 | L |
-| G-02 | Chat list v2: status, Changes ±, last activity, filters, paging | P3 | P2 | M |
+| G-02 | Chat list v2: status, Changes ±, last activity, filters, paging — **built (P2-02)** | P3 | P2 | M |
 | G-03 | Server switcher: server list, reachability, desktop IPC | P3 | P2 | M |
 | G-04 | Desktop update state in the renderer ("Restart to update") | P3 | P2 | S |
 | G-05 | Attention counts in the desktop main process (tray, menu, badge) | P3 | P2 | S |
@@ -40,7 +40,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-11 | Recently finished activity | P5 | P2 | M |
 | G-12 | System info (version, database size, disk, agent capacity) | P5 | P2 | S |
 | G-13 | Project summaries (Projects columns, tab counts) | P5 | P2 | S–M |
-| G-14 | ProjectDetail Chats tab (project filter on the client) | P5 | P2 (via G-02) | S |
+| G-14 | ProjectDetail Chats tab (project filter on the client) — **built (P2-02)** | P5 | P2 (via G-02) | S |
 | G-15 | ProjectDetail Runs tab (`projectId` filter on runs) | P5 | P2 | S |
 | G-16 | Codebase fetch/clone logs and live status | P5 | P2 | M |
 | G-17 | Worktree size, linked entity, reclaimable space | P5 | P2 | M |
@@ -153,6 +153,20 @@ Every designed element whose data or behaviour the current API, stores and deskt
 **Owner / phase / effort.** P2 · needed by P3 · **L**. This is the first item of the track.
 
 ### G-02 — Chat list v2
+
+**Status: built in P2-02.** Migration **v55** `chat_list_summary_columns` — the next free number here; migration versions must be contiguous (`SchemaConvergence.test.ts`), so the Workflow Overhaul's planned v55 (run-history drop) and this one renumber on merge, whichever lands second (07 §Running in parallel). Shapes as built — `packages/shared/src/types/ChatList.ts` is the source of truth:
+- **Columns** (`chats`): `last_activity_at` (epoch ms), `last_turn_status` / `last_turn_ended_at` (ms) / `last_turn_error`, `changes_files` / `changes_additions` / `changes_deletions`; indexes on `last_activity_at` and `workspace_id`. Backfill: activity = newest message, else creation; last turn = newest assistant reply (`partial` → cancelled, an `Error:` system line → failed, else succeeded). Change columns start NULL and are filled lazily (below).
+- **`GET /chats`** (replaces the bare array; the old `archived=` spelling is gone) — `status=active|archived`, `projectId`, `agentRef`, `tag`, `state=needs_you|running|done|failed` (these four **repeat for "any of"**; different filters AND), `q` (case-insensitive substring of name, description **or a tag**), `sort=activity|created|name` (activity and created newest first, name A→Z), `cursor`, `limit` (default 50, **clamped to 200**), `workers=false`. Answers `ChatListPage = { items: ChatListItem[]; nextCursor: string | null; total; counts: { all; active; archived } }`; `total` matches every filter, `counts` every filter except `status`. Cursors are opaque keyset positions (base64url `{s, v, i}`), valid only for the sort they were issued under (else 400). Invalid parameters answer 400 `VALIDATION_ERROR`.
+- **`ChatListItem = Chat & { summary: ChatListSummary }`** with `summary = { lastActivityAt; lastTurn?: { status: 'succeeded'|'failed'|'cancelled'; endedAt; error? }; changes?: { files; additions; deletions }; agent?: { ref; name; role? }; preview?: { text; role; at } }`. Deviations from the text below: the one-line `preview` moved from the top-level `preview`/`previewRole`/`previewAt` fields into `summary.preview`; `agent.role` is optional (absent for an unresolvable ref); `agent` prefers the live agent (renames show) and falls back to the frozen `agentSnapshot`, then the bare ref; `changes` is absent (render "—") until computed; `lastTurn.error` only on `failed`.
+- **State filter:** `needs_you` / `running` come from `AttentionService.getSnapshot()` via `liveChatIds` (shared), where a worker chat's ask or run also counts for its orchestrator; `done` / `failed` are the last turn's outcome of a chat that is not live right now.
+- **Turn columns** are written by `ChatManagementService`: activity at turn start, and at turn end (idle, provider error, send failure, cancel — whichever finalisation route wins) the outcome: cancelled if the turn was stopped, failed if any `harness.error` arrived or the prompt could not be sent, else succeeded.
+- **Change columns**: `ChatChangeStatsService` (core) recomputes the workspace's baseline → working summary (the change-summary engine; the legacy `root` repo excluded when a codebase is mounted, like the Changes tab) on `workspace.changed`, `checkpoint.restored` and `harness.idle`, coalesced per workspace (1.5 s window), and once per workspace per process for a listed row whose columns are NULL. A repo the engine fails on keeps the previous value (its zeros are placeholders). Every chat on a shared workspace (orchestrator + workers) gets the same stats. A commit does not move baseline → working, so it triggers nothing.
+- **Bulk (03-domain F-chats-01):** `POST /chats/archive` and `POST /chats/delete` with `{ ids }` (1–200) → `ChatBulkResult = { succeeded: string[]; failed: Array<{ id; code; message }> }`; an already archived chat counts as archived.
+- **SSE:** `chat.updated` `{ chatId }` (lifecycle kind, emitted when a summary column moves). `chat.deleted` was declared but never emitted; `deleteChat` now emits it on the global path.
+- **Status map:** `chatTurn` domain in `packages/shared/src/status/maps.ts` (succeeded → "Done", failed, cancelled → skipped "Cancelled"; 02 §7.3).
+- **client-core:** `chats.list(query)` → `ChatListPage<ChatListRow>`, `chats.archiveMany`, `chats.removeMany`; read model `packages/client-core/src/chats/` — `chatRowState(row, chatLiveSets(attentionSnapshot))` (archived › needs_you › running › last turn › idle), `chatRowStatus`, `chatListInvalidatedBy` / `chatListStreamFilter` (attention kinds only for a live-state filter), `chatListKey`, `mergeChatListPages`.
+- **Platform client:** `IPlatformClient.listChats(query?: ChatListQuery): Promise<ChatListPage>` (replaced in place), `archiveChats(ids)`, `deleteChats(ids)` (appended).
+- **Web:** `hooks/chatListQueries.ts` — `useChats(query)` (one page), `useChatPages(query)` (infinite, merged), `useBulkArchiveChats`, `useBulkDeleteChats`; live through one `global` subscription per hook, no polling. The legacy `ChatsListPage` pages, searches and filters on the server (scroll loads the next page); `DashboardPage` reads `counts.active`; `useLiveOperations` reads the first 100 active chats by activity. Mobile, `cli-core` `chat list` and the TUI read `.items`.
 
 **Elements & boards.** ChatsList:
 - the Status column (Needs you / Running / Done / Failed / Archived);
@@ -365,6 +379,8 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 **Exists today.** The server already filters with `GET /chats?projectId` (`chats.ts:330`). The client drops the parameter (`HttpPlatformClient.ts:720`, `queries.ts:394`).
 
 **Needed.** Delivered by G-02's list signature: `useChats({ projectId })`.
+
+**Status: built in P2-02** with G-02: `GET /chats?projectId=` (repeatable) combines with every other filter and the counts follow it; `useChats({ projectId })` / `useChatPages({ projectId })` on the web, `api.chats.list({ projectId })` in client-core.
 
 **Owner / phase / effort.** P2 · P5 · **S**.
 

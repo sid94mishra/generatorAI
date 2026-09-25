@@ -6,7 +6,7 @@
 import React, { useState, useMemo, useLayoutEffect, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useChats, useBulkDeleteChats } from '@/hooks/queries.js';
+import { useChatPages, useBulkDeleteChats } from '@/hooks/chatListQueries.js';
 import { CreateChatDialog } from '@/components/chat/CreateChatDialog.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { SearchInput, EmptyState, Button, Spinner, Badge, StatusBadge, PageHeader } from '@/components/ui/index.js';
@@ -25,7 +25,7 @@ import {
   Trash,
   X,
 } from 'lucide-react';
-import type { Chat } from '@generatorai/shared';
+import type { ChatListItem } from '@generatorai/shared';
 
 type StatusFilter = 'all' | 'active' | 'archived';
 
@@ -47,7 +47,24 @@ export function ChatsListPage() {
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
 
-  const { data: chats, isLoading } = useChats();
+  // Server-side paging, search and status filter (G-02): the list loads a
+  // page at a time, newest activity first, and the next page as the user
+  // scrolls towards the end.
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const {
+    data: chatList,
+    isLoading,
+    hasNextPage,
+    isFetchingNextPage,
+    fetchNextPage,
+  } = useChatPages({
+    ...(statusFilter !== 'all' ? { status: statusFilter } : {}),
+    ...(debouncedSearch ? { q: debouncedSearch } : {}),
+  });
   const bulkDelete = useBulkDeleteChats();
 
   // ── Bulk selection state ──
@@ -55,27 +72,8 @@ export function ChatsListPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 
-  /** Filtered and sorted chat list based on search and status filter */
-  const filteredChats = useMemo(() => {
-    if (!chats) return [];
-    let result = [...chats];
-
-    if (statusFilter !== 'all') {
-      result = result.filter((c) => c.status === statusFilter);
-    }
-
-    if (search.trim()) {
-      const q = search.toLowerCase();
-      result = result.filter(
-        (c) =>
-          c.name.toLowerCase().includes(q) ||
-          c.tags?.some((t) => t.toLowerCase().includes(q)),
-      );
-    }
-
-    result.sort((a, b) => new Date(b.updatedAt).getTime() - new Date(a.updatedAt).getTime());
-    return result;
-  }, [chats, search, statusFilter]);
+  /** The rows loaded so far, already filtered and sorted by the server. */
+  const filteredChats = useMemo(() => chatList?.items ?? [], [chatList]);
 
   // ── Virtualization ──
   // Measured on /chats with 359 real chats: 7,538 DOM nodes, worst long task
@@ -115,6 +113,14 @@ export function ChatsListPage() {
     overscan: 8,
     scrollMargin,
   });
+
+  // Load the next page once the last rendered row is near the end of what is loaded.
+  const lastVirtualIndex = rowVirtualizer.getVirtualItems().at(-1)?.index ?? -1;
+  useEffect(() => {
+    if (hasNextPage && !isFetchingNextPage && lastVirtualIndex >= filteredChats.length - 10) {
+      void fetchNextPage();
+    }
+  }, [hasNextPage, isFetchingNextPage, lastVirtualIndex, filteredChats.length, fetchNextPage]);
 
   // ── Bulk selection helpers ──
 
@@ -180,7 +186,7 @@ export function ChatsListPage() {
           actions={
             <>
               {/* Bulk select toggle */}
-              {!selectionMode && chats && chats.length > 0 && (
+              {!selectionMode && filteredChats.length > 0 && (
                 <Button
                   variant="secondary"
                   onClick={enterSelectionMode}
@@ -220,7 +226,7 @@ export function ChatsListPage() {
               {selectedIds.size === filteredChats.length ? 'Deselect All' : 'Select All'}
             </Button>
             <span className="text-xs text-muted-foreground">
-              {selectedIds.size} of {filteredChats.length} selected
+              {selectedIds.size} of {chatList?.total ?? filteredChats.length} selected
             </span>
             <div className="flex-1" />
             <Button
@@ -349,7 +355,7 @@ function ChatCard({
   onToggleSelect,
   onClick,
 }: {
-  chat: Chat;
+  chat: ChatListItem;
   selectionMode: boolean;
   selected: boolean;
   onToggleSelect: () => void;
@@ -406,7 +412,7 @@ function ChatCard({
         <span className="flex items-center gap-3">
           <span className="flex items-center gap-1">
             <Clock className="h-3 w-3" />
-            {formatRelativeTime(new Date(chat.updatedAt))}
+            {formatRelativeTime(new Date(chat.summary.lastActivityAt))}
           </span>
           {chat.tags && chat.tags.length > 0 && (
             <span className="flex gap-1">

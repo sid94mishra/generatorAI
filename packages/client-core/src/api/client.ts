@@ -6,7 +6,17 @@
 // no transport, no retries live here — those belong to the layers below.
 // ────────────────────────────────────────────────────────────────
 
-import type { AttentionFilter, AttentionSnapshot, RunStatus, StageRunStatus } from '@generatorai/shared';
+import {
+  chatListSearchParams,
+  type AttentionFilter,
+  type AttentionSnapshot,
+  type ChatBulkResult,
+  type ChatListPage,
+  type ChatListQuery,
+  type ChatListSummary,
+  type RunStatus,
+  type StageRunStatus,
+} from '@generatorai/shared';
 
 export interface ApiFetch {
   (path: string, init?: RequestInit): Promise<Response>;
@@ -259,14 +269,18 @@ export interface ChatSummary {
   /** Conversation-branch provenance (a fork stays in the sidebar; workers do not). */
   forkedFromChatId?: string | null;
   forkedAtTurnId?: string | null;
-  /**
-   * One line of the newest message, for a catalogue row. Present on the LIST
-   * response only — a single chat is fetched with its messages anyway.
-   */
-  preview?: string;
-  previewRole?: 'user' | 'assistant' | 'system' | 'tool';
-  previewAt?: Timestamp;
+  /** Portable `scope:slug` ref of the bound agent. */
+  agentRef?: string | null;
+  /** Set on orchestrator WORKER chats. */
+  parentChatId?: string | null;
 }
+
+/**
+ * One row of `GET /api/chats` (chat list v2, G-02): the chat plus the summary
+ * a list row needs — last activity, last turn outcome, "Changes ±", agent and
+ * a one-line preview. Only list responses carry `summary`.
+ */
+export type ChatListRow = ChatSummary & { summary: ChatListSummary };
 
 /** True when a chat has been archived. */
 export function isArchived(chat: Pick<ChatSummary, 'status'>): boolean {
@@ -978,23 +992,24 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     chats: {
-      // NOTE ON LIST SHAPES
-      //
-      // Every list endpoint on this server responds with a BARE ARRAY, not a
-      // `{ chats: [...] }` envelope. These signatures previously declared an
-      // envelope, which type-checked fine (nothing validates the wire at
-      // runtime) and then silently produced `undefined` at every call site —
-      // the mobile Chats tab rendered "No chats yet" against a server holding
-      // 128 chats. Verified against the live API; keep these in step with
-      // `apps/server/src/routes/chats.ts`, which does `res.json(chats)`.
-      list: (params?: { archived?: boolean; limit?: number; projectId?: string }) => {
-        const q = new URLSearchParams();
-        if (params?.archived !== undefined) q.set('archived', String(params.archived));
-        if (params?.projectId) q.set('projectId', params.projectId);
-        if (params?.limit !== undefined) q.set('limit', String(params.limit));
-        const suffix = q.toString() ? `?${q}` : '';
-        return request<ChatSummary[]>(fetchImpl, `/api/chats${suffix}`);
+      /**
+       * One page of chats (chat list v2, G-02): `{ items, nextCursor, total,
+       * counts }`. Unlike most list endpoints this one is paged — pass
+       * `nextCursor` back as `cursor` (with the same query) for the next page.
+       * Worker chats are left out unless `workers: true`.
+       */
+      list: (query: ChatListQuery = {}) => {
+        const suffix = chatListSearchParams(query);
+        return request<ChatListPage<ChatListRow>>(fetchImpl, `/api/chats${suffix ? `?${suffix}` : ''}`);
       },
+
+      /** Archive several chats in one request; the result is per id. */
+      archiveMany: (ids: string[]) =>
+        request<ChatBulkResult>(fetchImpl, '/api/chats/archive', json({ ids })),
+
+      /** Permanently delete several chats in one request; the result is per id. */
+      removeMany: (ids: string[]) =>
+        request<ChatBulkResult>(fetchImpl, '/api/chats/delete', json({ ids })),
 
       get: (id: string) => request<ChatSummary>(fetchImpl, `/api/chats/${id}`),
 

@@ -32,6 +32,12 @@ Background: `research/mobile-design-analysis.md` (design analysis) and `research
 - **Rules to keep:** until the first snapshot arrives the lists are unknown, not empty (`selectCounts` returns `null`); quick actions call the existing chat, run and consent endpoints (`ask.actions` says which); `item.href` is a web route — map it to the mobile route by `entity` + `entityId` (+ `ask.kind` for the plan/computer sheets, `parent` for worker chats).
 - **Notifications / Live Activities:** `attention.counts` carries totals without items for surfaces that only badge.
 
+**M-10 (part) landed (P2-02, G-02 / G-14 chat list v2).** What the mobile pass consumes:
+- **Wire types:** `ChatListQuery`, `ChatListPage`, `ChatListItem`, `ChatListSummary`, `ChatBulkResult`, `chatListSearchParams`, `liveChatIds` in `packages/shared/src/types/ChatList.ts`; status words from the `chatTurn` domain of the shared status map.
+- **Calls:** `createApiClient(...).chats.list(query)` returns one keyset page (`{ items, nextCursor, total, counts }`; pass `nextCursor` back as `cursor` with the same query), `chats.archiveMany(ids)` / `chats.removeMany(ids)` for bulk actions. Filters: `status`, `projectId` (the project screen's chats, G-14), `agentRef`, `tag`, `state`, `q`, `sort`, `workers`. The one-line preview is `summary.preview` (it used to be top-level `preview`).
+- **Read model:** `packages/client-core/src/chats/` — `chatRowState(row, chatLiveSets(attention))` for the Status column (combine with the M-09 attention store), `chatListInvalidatedBy(kind, query)` / `chatListStreamFilter(query)` to refetch on the `global` scope instead of polling, `chatListKey(query)` for cache keys, `mergeChatListPages(pages)` for infinite lists.
+- **This pass already moved** the mobile Chats tab, project chats, search and activity feed to `.items` / `counts` and bulk delete to `removeMany`; they still load one page (up to 200) and filter locally — paging and server-side search are the mobile pass's to adopt.
+
 **Rule for this pass:** when you build anything that mobile will also draw — a status, a verb, a gate card, a composer state, a nav destination, a command — put the *data and types* in `packages/shared` or `packages/client-core` first. The web component then consumes them. This is enforced in review; `07-phases.md` §"Mobile-readiness deliverables → tasks" names the task that owns each M-xx item.
 
 ## 2. What the mobile design contains (summary for planning)

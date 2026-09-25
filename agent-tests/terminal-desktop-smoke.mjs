@@ -95,7 +95,9 @@ async function findFirst(listPath) {
   return await page.evaluate(async (p) => {
     const res = await fetch(p);
     if (!res.ok) return null;
-    const list = await res.json();
+    const data = await res.json();
+    // `/api/chats` answers a page (`{ items, ... }`), not a bare array.
+    const list = Array.isArray(data) ? data : data?.items;
     return Array.isArray(list) && list.length > 0 ? list[0] : null;
   }, listPath);
 }

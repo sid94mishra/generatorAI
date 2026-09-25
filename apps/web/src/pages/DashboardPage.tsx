@@ -12,7 +12,8 @@
 
 import { useState } from 'react';
 import { useNavigate } from 'react-router';
-import { useHealth, useChats } from '@/hooks/queries.js';
+import { useHealth } from '@/hooks/queries.js';
+import { useChats } from '@/hooks/chatListQueries.js';
 import { useWorkflowDefinitions } from '@/hooks/workflowQueries.js';
 import { useAutomations } from '@/hooks/automationQueries.js';
 import { useLiveOperations } from '@/hooks/useLiveOperations.js';
@@ -39,13 +40,14 @@ export function DashboardPage() {
 
   const { today, running, attention, isLoading } = useLiveOperations();
   const { data: health, isError } = useHealth();
-  const { data: chats, isLoading: chatsLoading } = useChats();
+  // One row is enough: the page carries the Active count of the whole list.
+  const { data: chatPage, isLoading: chatsLoading } = useChats({ status: 'active', limit: 1 });
   const { data: definitions, isLoading: defsLoading } = useWorkflowDefinitions();
   const { data: automations, isLoading: autosLoading } = useAutomations();
 
   const connected = !isError && !!health;
 
-  const activeChats = chats?.filter((c) => c.status === 'active').length ?? health?.activeChats ?? 0;
+  const activeChats = chatPage?.counts.active ?? health?.activeChats ?? 0;
 
   return (
     <PageContainer className="animate-fade-in">

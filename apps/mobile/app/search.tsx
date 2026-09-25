@@ -21,7 +21,7 @@ import {
   queryKeys,
   type AgentSummary,
   type AutomationSummary,
-  type ChatSummary,
+  type ChatListRow,
   type ProjectSummary,
   type WorkflowRunSummary,
   type WorkflowSummary,
@@ -118,7 +118,7 @@ export default function SearchScreen(): React.ReactElement {
   const index = useMemo(
     () =>
       buildSearchIndex({
-        chats: chats.data as ChatSummary[] | undefined,
+        chats: chats.data?.items as ChatListRow[] | undefined,
         runs: runs.data as WorkflowRunSummary[] | undefined,
         workflows: workflows.data as WorkflowSummary[] | undefined,
         projects: projects.data as ProjectSummary[] | undefined,

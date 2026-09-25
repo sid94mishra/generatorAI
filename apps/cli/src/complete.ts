@@ -111,7 +111,7 @@ async function fetchCandidates(
 ): Promise<Array<{ id: string; label?: string | null }>> {
   switch (source) {
     case 'chat':
-      return (await api.chats.list({ limit: MAX_CANDIDATES })).map((c) => ({ id: c.id, label: c.name }));
+      return (await api.chats.list({ limit: MAX_CANDIDATES })).items.map((c) => ({ id: c.id, label: c.name }));
     case 'agent':
       return (await api.agents.list()).map((a) => ({
         id: (a as { id: string }).id,

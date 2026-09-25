@@ -1189,7 +1189,7 @@ function buildDashboardRows(data: DataCache): DashboardRow[] {
 // ── Data loading ──────────────────────────────────────────────────
 
 const LOADERS: Record<DataKey, (api: Api) => Promise<Array<Record<string, unknown>>>> = {
-  chats: async (api) => (await api.chats.list({ limit: 200 })) as never,
+  chats: async (api) => (await api.chats.list({ limit: 200 })).items as never,
   workflows: async (api) => (await api.definitions.list()) as never,
   runs: async (api) => (await api.runs.list({ limit: 200 })) as never,
   automations: async (api) => (await api.automations.list()) as never,

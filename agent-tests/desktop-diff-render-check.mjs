@@ -84,7 +84,8 @@ const api = async (p, init) =>
 // Reuse an existing chat that already has changes, else make one.
 const chatsRes = await api('/api/chats');
 const chats = JSON.parse(chatsRes.body);
-const list = Array.isArray(chats) ? chats : (chats.chats ?? []);
+// `/api/chats` answers a page (`{ items, ... }`), not a bare array.
+const list = Array.isArray(chats) ? chats : (chats.items ?? []);
 let target = null;
 for (const c of list) {
   if (!c.workspaceId) continue;

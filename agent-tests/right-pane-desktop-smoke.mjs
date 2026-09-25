@@ -102,11 +102,13 @@ async function navigateSpa(pathname) {
 }
 
 async function findFirst(kind, listPath) {
-  const items = await page.evaluate(async (p) => {
+  const page_ = await page.evaluate(async (p) => {
     const res = await fetch(p);
     if (!res.ok) return null;
     return await res.json();
   }, listPath);
+  // `/api/chats` answers a page (`{ items, ... }`), not a bare array.
+  const items = Array.isArray(page_) ? page_ : page_?.items;
   if (!items || !Array.isArray(items) || items.length === 0) return null;
   return items[0];
 }

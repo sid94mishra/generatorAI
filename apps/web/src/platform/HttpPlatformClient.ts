@@ -23,6 +23,7 @@ import type {
 } from '@generatorai/shared';
 import type { Artifact } from '@generatorai/shared';
 import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
+import { chatListSearchParams, type ChatBulkResult, type ChatListPage, type ChatListQuery } from '@generatorai/shared';
 // AGT-01 — first-class agents
 import type {
   Agent,
@@ -718,11 +719,9 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  async listChats(filter?: { status?: string }): Promise<Chat[]> {
-    const params = new URLSearchParams();
-    if (filter?.status) params.set('status', filter.status);
-    const qs = params.toString();
-    return apiFetch<Chat[]>(`${this.baseUrl}/api/chats${qs ? `?${qs}` : ''}`);
+  async listChats(query?: ChatListQuery): Promise<ChatListPage> {
+    const qs = chatListSearchParams(query);
+    return apiFetch<ChatListPage>(`${this.baseUrl}/api/chats${qs ? `?${qs}` : ''}`);
   }
 
   async getChat(chatId: string): Promise<Chat> {
@@ -2665,5 +2664,23 @@ export class HttpPlatformClient implements IPlatformClient {
   async getAttention(filter?: AttentionFilter): Promise<AttentionSnapshot> {
     const query = filter?.projectId ? `?projectId=${encodeURIComponent(filter.projectId)}` : '';
     return apiFetch<AttentionSnapshot>(`${this.baseUrl}/api/attention${query}`);
+  }
+
+  // G-02: bulk actions for the chat list's bulk bar. One request each; the
+  // server answers per id, so a partial failure is reported, not thrown.
+  async archiveChats(chatIds: string[]): Promise<ChatBulkResult> {
+    return apiFetch<ChatBulkResult>(`${this.baseUrl}/api/chats/archive`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: chatIds }),
+    });
+  }
+
+  async deleteChats(chatIds: string[]): Promise<ChatBulkResult> {
+    return apiFetch<ChatBulkResult>(`${this.baseUrl}/api/chats/delete`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: chatIds }),
+    });
   }
 }

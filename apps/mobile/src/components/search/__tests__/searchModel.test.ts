@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type {
   AgentSummary,
-  ChatSummary,
+  ChatListRow,
   ProjectSummary,
   WorkflowRunSummary,
   WorkflowSummary,
@@ -16,8 +16,16 @@ import {
   removeRecentSearch,
 } from '../searchModel';
 
-const chat = (id: string, name: string, updatedAt: string, status = 'active'): ChatSummary =>
-  ({ id, name, sessionId: null, status, createdAt: updatedAt, updatedAt }) as ChatSummary;
+const chat = (id: string, name: string, updatedAt: string, status = 'active'): ChatListRow =>
+  ({
+    id,
+    name,
+    sessionId: null,
+    status,
+    createdAt: updatedAt,
+    updatedAt,
+    summary: { lastActivityAt: updatedAt },
+  }) as ChatListRow;
 
 const run = (id: string, name: string, updatedAt: string): WorkflowRunSummary =>
   ({ id, name, workflowDefinitionId: 'w', status: 'running', createdAt: updatedAt, updatedAt }) as WorkflowRunSummary;

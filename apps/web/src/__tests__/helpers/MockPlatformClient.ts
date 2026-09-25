@@ -25,6 +25,7 @@ import type {
   AttentionSnapshot,
 } from '@generatorai/shared';
 import { emptyAttentionCounts } from '@generatorai/shared';
+import type { ChatBulkResult, ChatListPage, ChatListQuery } from '@generatorai/shared';
 import { vi } from 'vitest';
 
 export function createMockSession(overrides: Partial<Session> = {}): Session {
@@ -195,9 +196,12 @@ export class MockPlatformClient implements IPlatformClient {
     throw new Error('Not implemented in mock');
   });
 
-  listChats = vi.fn(async (_filter?: { status?: string }): Promise<Chat[]> => {
-    return [];
-  });
+  listChats = vi.fn(async (_query?: ChatListQuery): Promise<ChatListPage> => ({
+    items: [],
+    nextCursor: null,
+    total: 0,
+    counts: { all: 0, active: 0, archived: 0 },
+  }));
 
   getChat = vi.fn(async (_chatId: string): Promise<Chat> => {
     throw new Error('Not implemented in mock');
@@ -288,4 +292,8 @@ export class MockPlatformClient implements IPlatformClient {
     running: [],
     counts: emptyAttentionCounts(),
   }));
+
+  archiveChats = vi.fn(async (chatIds: string[]): Promise<ChatBulkResult> => ({ succeeded: [...chatIds], failed: [] }));
+
+  deleteChats = vi.fn(async (chatIds: string[]): Promise<ChatBulkResult> => ({ succeeded: [...chatIds], failed: [] }));
 }

@@ -38,7 +38,7 @@ export function SearchResultRow({
       return (
         <ListItem
           title={name}
-          subtitle={item.raw.preview ?? null}
+          subtitle={item.raw.summary.preview?.text ?? null}
           meta={relativeTime(item.raw.updatedAt)}
           avatar={{ icon: <ENTITY_ICON.chat size={17} color={muted} />, tone: 'neutral' }}
           badge={item.archived ? { label: 'Archived', tone: 'neutral' } : null}

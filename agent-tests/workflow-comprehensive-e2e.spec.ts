@@ -959,8 +959,8 @@ test.describe('7. Chat Functionality', () => {
   test('list chats includes new chat', async () => {
     const { status, data } = await api('GET', '/api/chats');
     expect(status).toBe(200);
-    const chats = data as Array<{ id: string }>;
-    expect(chats.some((c) => c.id === chatId)).toBe(true);
+    const { items } = data as { items: Array<{ id: string }> };
+    expect(items.some((c) => c.id === chatId)).toBe(true);
   });
 
   test('chat SSE stream is accessible', async () => {

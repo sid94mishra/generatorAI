@@ -15,7 +15,7 @@ import {
   queryKeys,
   toEpochMs,
   type AutomationSummary,
-  type ChatSummary,
+  type ChatListRow,
   type HealthSnapshot,
   type WorkflowRunSummary,
 } from '@generatorai/client-core';
@@ -79,7 +79,7 @@ export function useActivity() {
   const [health, chats, runs, automations] = results;
 
   const runningChatIds = (health.data as HealthSnapshot | undefined)?.runningChatIds;
-  const chatRows = chats.data as ChatSummary[] | undefined;
+  const chatRows = (chats.data as { items: ChatListRow[] } | undefined)?.items;
 
   /**
    * D10 — chats parked on a gate (tool permission, question, plan review).
@@ -196,7 +196,10 @@ export function useActivity() {
     operations,
     health: health.data as HealthSnapshot | undefined,
     counts: {
-      chats: ((chats.data as ChatSummary[] | undefined) ?? []).filter((c) => !isArchived(c)).length,
+      // Server-computed across every active chat, not just the probed page —
+      // filtering the loaded `.items` undercounts once an install has more
+      // active chats than the query's `limit`.
+      chats: (chats.data as { counts: { active: number } } | undefined)?.counts.active ?? 0,
       runs: ((runs.data as WorkflowRunSummary[] | undefined) ?? []).length,
       automations: ((automations.data as AutomationSummary[] | undefined) ?? []).length,
       attention: operations.filter((op) => op.blocked).length,

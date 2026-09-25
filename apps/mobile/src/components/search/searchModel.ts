@@ -18,7 +18,7 @@ import {
   toEpochMs,
   type AgentSummary,
   type AutomationSummary,
-  type ChatSummary,
+  type ChatListRow,
   type ProjectSummary,
   type WorkflowRunSummary,
   type WorkflowSummary,
@@ -29,7 +29,7 @@ import { fuzzyScore } from '../../lib/fuzzyMatch';
 export type SearchKind = 'chat' | 'run' | 'workflow' | 'project' | 'automation' | 'agent';
 
 export type SearchItem =
-  | { kind: 'chat'; id: string; raw: ChatSummary; fields: string[]; updatedAt: number; archived: boolean }
+  | { kind: 'chat'; id: string; raw: ChatListRow; fields: string[]; updatedAt: number; archived: boolean }
   | { kind: 'run'; id: string; raw: WorkflowRunSummary; fields: string[]; updatedAt: number; archived: false }
   | { kind: 'workflow'; id: string; raw: WorkflowSummary; fields: string[]; updatedAt: number; archived: false }
   | { kind: 'project'; id: string; raw: ProjectSummary; fields: string[]; updatedAt: number; archived: false }
@@ -37,7 +37,7 @@ export type SearchItem =
   | { kind: 'agent'; id: string; raw: AgentSummary; fields: string[]; updatedAt: number; archived: false };
 
 export interface SearchSources {
-  chats?: readonly ChatSummary[] | undefined;
+  chats?: readonly ChatListRow[] | undefined;
   runs?: readonly WorkflowRunSummary[] | undefined;
   workflows?: readonly WorkflowSummary[] | undefined;
   projects?: readonly ProjectSummary[] | undefined;

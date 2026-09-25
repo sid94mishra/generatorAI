@@ -390,20 +390,7 @@ export function useDownloadArtifact() {
 // v2: Chat Operations — first-class Chat entity hooks
 // ════════════════════════════════════════════════════════════════
 
-/** List all chats, optionally filtered by status */
-export function useChats(statusFilter?: 'active' | 'archived') {
-  const platform = usePlatform();
-  return useQuery({
-    queryKey: [...queryKeys.chats, statusFilter ?? 'all'],
-    queryFn: async () => {
-      const all = await platform.listChats(statusFilter ? { status: statusFilter } : undefined);
-      // Hide orchestrator WORKER chats (they have a parentChatId) from the main
-      // list — they live in the parent orchestrator's Background Tasks panel.
-      return all.filter((c) => !(c as { parentChatId?: string }).parentChatId);
-    },
-    refetchInterval: 30_000,
-  });
-}
+// The chat LIST (paged, filtered, live) is in `chatListQueries.ts` (G-02).
 
 /** Get a single chat by ID */
 export function useChat(chatId: string | undefined) {
@@ -1179,35 +1166,6 @@ export function useDeleteChat() {
   return useMutation({
     mutationFn: (chatId: string) => platform.deleteChat(chatId),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats });
-    },
-  });
-}
-
-/**
- * Bulk-delete multiple chats in parallel.
- * Calls the single-delete endpoint for each ID and invalidates
- * the chats cache once after all deletions complete.
- */
-export function useBulkDeleteChats() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: async (chatIds: string[]) => {
-      const results = await Promise.allSettled(
-        chatIds.map((id) => platform.deleteChat(id)),
-      );
-      const failed = results.filter((r) => r.status === 'rejected');
-      if (failed.length > 0) {
-        throw new Error(`Failed to delete ${failed.length} of ${chatIds.length} chats`);
-      }
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.chats });
-    },
-    onError: () => {
-      // Still refresh — some deletions may have succeeded
       queryClient.invalidateQueries({ queryKey: queryKeys.chats });
     },
   });

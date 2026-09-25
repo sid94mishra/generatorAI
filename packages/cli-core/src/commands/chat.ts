@@ -3,7 +3,8 @@
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
-import type { SendMessageInput } from '@generatorai/client-core';
+import type { ChatListRow, SendMessageInput } from '@generatorai/client-core';
+import { CHAT_LIST_MAX_LIMIT } from '@generatorai/shared';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError, EXIT_CODES } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
@@ -33,10 +34,23 @@ export const CHAT_GROUP = {
 
 /** Resolves a chat reference against the full list. */
 async function findChat(ctx: CliContext, ref: string) {
-  const chats = await ctx.api.chats.list();
+  // `workers: true` so a ref can still resolve an orchestrator worker chat,
+  // matching the old bare-array `/api/chats`, which had no such exclusion.
+  // Every page: a ref may name a chat older than the newest page.
+  const items: ChatListRow[] = [];
+  let cursor: string | undefined;
+  do {
+    const page = await ctx.api.chats.list({
+      limit: CHAT_LIST_MAX_LIMIT,
+      workers: true,
+      ...(cursor ? { cursor } : {}),
+    });
+    items.push(...page.items);
+    cursor = page.nextCursor ?? undefined;
+  } while (cursor);
   return resolveRef(ref, {
     kind: 'chat',
-    candidates: chats.map((c) => ({
+    candidates: items.map((c) => ({
       id: c.id,
       name: c.name,
       status: c.status,
@@ -182,18 +196,19 @@ export function chatCommands(): CommandSpec[] {
         ],
       },
       async handler(ctx, { flags }) {
-        const params: { archived?: boolean; limit?: number } = {};
-        if (flags.status === 'archived') params.archived = true;
-        if (flags.status === 'active') params.archived = false;
+        const params: { status?: 'active' | 'archived'; limit?: number; projectId?: string } = {};
+        if (flags.status === 'archived') params.status = 'archived';
+        if (flags.status === 'active') params.status = 'active';
         if (flags.limit) params.limit = flags.limit;
 
-        let rows = await ctx.api.chats.list(params);
         if (flags.project) {
           const projects = await ctx.api.projects.list();
           const project = resolveRef(flags.project, { kind: 'project', candidates: projects });
-          rows = rows.filter((c) => c.projectId === project.id);
+          params.projectId = project.id;
         }
-        return list(rows);
+
+        const { items } = await ctx.api.chats.list(params);
+        return list(items);
       },
     }),
 
