@@ -14,9 +14,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 
 import { closeDB, createDB, type AppDatabase } from '../index.js';
 import { migrateDB } from '../migrations/index.js';
-import { AgentStageSchema } from '../migrations/v55/spec/stage.js';
-import { WorkflowGraphSchema } from '../migrations/v55/spec/graph.js';
-import { WorkflowSpecSchema } from '../migrations/v55/spec/workflow.js';
+import { AgentStageSchema } from '../migrations/v55/spec/schemas/stage.js';
+import { WorkflowGraphSchema } from '../migrations/v55/spec/schemas/graph.js';
+import { WorkflowSpecSchema } from '../migrations/v55/spec/schemas/workflow.js';
+import { convertLegacyDefinition, type LegacyDefinitionRow, type LegacyStageRow } from '../migrations/v55/convert.js';
+import { validateWorkflow } from '../migrations/v55/spec/validate/validateWorkflow.js';
 
 const open: AppDatabase[] = [];
 afterEach(() => {
@@ -265,5 +267,32 @@ describe('migration v55 workflow_definitions_v2', () => {
     const logged = s.prepare(`SELECT entity_id, message FROM _migration_log WHERE entity = 'automation' ORDER BY entity_id, id`).all() as Array<{ entity_id: string; message: string }>;
     expect(logged.map((l) => l.entity_id)).toEqual(expect.arrayContaining(['a-batch', 'a-loop', 'a-script', 'a-single']));
     expect(logged.find((l) => l.entity_id === 'a-script')!.message).toMatch(/^disabled:/);
+  });
+
+  it('repairs what it can and flags every definition the validator still rejects (P01 review R2)', () => {
+    const nulls = <T,>(o: Partial<T>, keys: string[]): T => Object.fromEntries(keys.map((k) => [k, (o as Record<string, unknown>)[k] ?? null])) as T;
+    const def = nulls<LegacyDefinitionRow>(
+      { id: 'dx', name: 'Needs work', version: 1, created_at: T, updated_at: T,
+        variables: JSON.stringify([{ name: 'count', type: 'number', label: 'Count', defaultValue: '5' }, { name: 'flag', type: 'string', label: 'Flag' }]) },
+      ['id', 'name', 'description', 'version', 'session_mode', 'copilot_config', 'harness_config', 'variables', 'tags', 'orchestrator_config', 'project_id', 'selected_artifacts', 'use_worktree', 'hooks', 'hooks_file', 'default_agent_ref', 'skills', 'agents', 'scope', 'created_at', 'updated_at'],
+    );
+    const stageKeys = ['id', 'workflow_definition_id', 'name', 'description', 'template_id', 'order', 'prompts', 'copilot_config_overrides', 'harness_config_overrides', 'variables', 'hooks', 'retry_policy', 'timeout_ms', 'condition', 'context_filter', 'context_sources', 'output_format', 'agent_name', 'result_validation', 'expected_output', 'output_schema', 'iteration_config', 'approval_required', 'agent_mode', 'agent_ref', 'created_at'];
+    const stage = nulls<LegacyStageRow>(
+      { id: 'sx', workflow_definition_id: 'dx', name: 'Only', order: 0, created_at: T,
+        prompts: JSON.stringify([{ label: 'p', text: 'Fix {{ticket}} ({{count}})' }]),
+        output_format: 'text', output_schema: JSON.stringify({ type: 'object' }),
+        condition: JSON.stringify({ type: 'expression', expression: '{{flag}}' }) },
+      stageKeys,
+    );
+    const r = convertLegacyDefinition(def, [stage], []);
+    // Repaired: the undeclared {{ticket}} is an optional string, the default is a number,
+    // and the schema that a text output never applied is dropped.
+    expect(r.graph.workflow.variables.find((v) => v.name === 'ticket')).toMatchObject({ type: 'string', required: false });
+    expect(r.graph.workflow.variables.find((v) => v.name === 'count')!.defaultValue).toBe(5);
+    expect(r.graph.stages[0]!.output.schema).toBeUndefined();
+    // Not repairable (a string used as a condition): invalid, and says so.
+    const errors = validateWorkflow(r.graph, { engine: 'v1' }).issues.filter((i) => i.severity === 'error');
+    expect(errors.map((i) => i.code)).toEqual(['expr-not-boolean']);
+    expect(r.attention.some((n) => n.includes('[expr-not-boolean]'))).toBe(true);
   });
 });

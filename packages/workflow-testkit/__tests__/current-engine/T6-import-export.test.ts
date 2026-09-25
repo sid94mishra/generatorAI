@@ -47,7 +47,7 @@ const stage = (key: string, extra: Record<string, unknown> = {}) => ({
   output: { format: 'text', rules: [{ type: 'contains', value: 'WF-LEVEL', message: 'wf-level rule' }] },
   retry: { maxAttempts: 4, initialDelayMs: 1500, backoffMultiplier: 3 },
   timeouts: { attemptMs: 120_000 },
-  approval: { prompt: 'Looks right?', allowChanges: true, maxRounds: 2 },
+  approval: { prompt: 'Looks right?', allowChanges: true, maxRounds: 3 },
   hooks: [hook(`${key}_h`, 'pre_run')],
   ...extra,
 });

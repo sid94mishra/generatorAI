@@ -96,9 +96,10 @@ describe('X-21 — the trigger reaches the workflow run', () => {
     } as unknown as IAutomationExecutionRepository;
 
     const workflowRunService = {
-      createRun: async (params: { workflowDefinitionId: string; variables?: Record<string, unknown> }) => {
+      createRun: async (params: { workflowDefinitionId: string; variables?: Record<string, unknown>; triggeredBy?: string }) => {
         counter += 1;
-        createdRunVariables.push(params.variables ?? {});
+        // What the run service records: the user variables plus the typed trigger.
+        createdRunVariables.push({ ...(params.variables ?? {}), __triggeredBy: params.triggeredBy });
         const run = {
           id: `run-${counter}`,
           workflowDefinitionId: params.workflowDefinitionId,

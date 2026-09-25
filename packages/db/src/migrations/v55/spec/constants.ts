@@ -1,6 +1,7 @@
 // FROZEN COPY for migration v55 (README R-3, RV-33). Copied from
-// packages/workflow-spec/src at 32c6d7c. Never edit: v55 converts legacy rows
-// into exactly these shapes; the live spec package may move on.
+// packages/workflow-spec/src (P01 review fixes). Never edit: v55 converts
+// legacy rows into exactly these shapes and validates them with this copy of
+// the validator; the live spec package may move on.
 
 // ────────────────────────────────────────────────────────────────
 // Constants shared by every schema in the spec package.
@@ -8,7 +9,8 @@
 // The enums below mirror values that the rest of the monorepo also names
 // (provider ids, reasoning efforts, agent modes). The spec package depends
 // only on zod, so it cannot import them from `@generatorai/shared`; a drift
-// test (`__tests__/constants.test.ts`) keeps both lists identical.
+// test (`packages/shared/__tests__/workflowSpecConstants.test.ts`) keeps both
+// lists identical.
 // ────────────────────────────────────────────────────────────────
 
 /**

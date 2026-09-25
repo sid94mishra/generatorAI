@@ -28,13 +28,14 @@
 
 import { createHash } from 'node:crypto';
 import type { z } from 'zod';
-import { RESERVED_ROOTS } from './spec/constants.js';
-import { HookDefinitionSchema, PromptDefinitionSchema, ResultValidationRuleSchema, VariableDefinitionSchema, WorkflowHookDefinitionSchema } from './spec/common.js';
-import { EdgeSpecSchema } from './spec/edge.js';
-import { WorkflowGraphSchema } from './spec/graph.js';
-import { SessionSpecSchema } from './spec/session.js';
-import { AgentStageSchema } from './spec/stage.js';
-import { PostProcessingStepSchema, PreprocessingStepSchema, WorkflowSpecSchema } from './spec/workflow.js';
+import { ENGINE_LEVEL, FORBIDDEN_VARIABLE_NAME_PATTERN, RESERVED_ROOTS, VARIABLE_NAME_PATTERN } from './spec/constants.js';
+import { validateWorkflow } from './spec/validate/validateWorkflow.js';
+import { HookDefinitionSchema, PromptDefinitionSchema, ResultValidationRuleSchema, VariableDefinitionSchema, WorkflowHookDefinitionSchema } from './spec/schemas/common.js';
+import { EdgeSpecSchema } from './spec/schemas/edge.js';
+import { WorkflowGraphSchema } from './spec/schemas/graph.js';
+import { SessionSpecSchema } from './spec/schemas/session.js';
+import { AgentStageSchema } from './spec/schemas/stage.js';
+import { PostProcessingStepSchema, PreprocessingStepSchema, WorkflowSpecSchema } from './spec/schemas/workflow.js';
 
 type Json = Record<string, unknown>;
 
@@ -549,16 +550,81 @@ function convertVariables(raw: unknown, attention: string[]): { variables: Varia
       required: v['required'] === true,
     };
     if (str(v['description'])) candidate['description'] = str(v['description'])!.slice(0, 2000);
-    if (v['defaultValue'] !== undefined && v['defaultValue'] !== null) candidate['defaultValue'] = v['defaultValue'];
     if (Array.isArray(v['options'])) {
       const opts = (v['options'] as unknown[]).map((o) => String(o)).filter((o) => o.length > 0 && o.length <= 200);
       if (opts.length > 0) candidate['options'] = [...new Set(opts)].slice(0, 100);
+    }
+    if (v['defaultValue'] !== undefined && v['defaultValue'] !== null && v['defaultValue'] !== '') {
+      const coerced = coerceDefault(v['defaultValue'], type, candidate['options'] as string[] | undefined);
+      if (coerced.ok) {
+        candidate['defaultValue'] = coerced.value;
+        if (coerced.value !== v['defaultValue']) attention.push(`variable '${next}': default ${JSON.stringify(v['defaultValue'])} converted to the ${type} ${JSON.stringify(coerced.value)}`);
+      } else {
+        attention.push(`variable '${next}': default ${JSON.stringify(v['defaultValue'])} dropped (not a valid ${type})`);
+      }
     }
     const r = fit(VariableDefinitionSchema, candidate);
     if (r.value) variables.push(r.value);
     else attention.push(`variable '${name}' could not be converted and was dropped`);
   }
   return { variables, renames };
+}
+
+/** A legacy default converted to the variable's declared type, when it has one. */
+function coerceDefault(raw: unknown, type: Variable['type'], options: string[] | undefined): { ok: true; value: unknown } | { ok: false } {
+  switch (type) {
+    case 'number': {
+      const n = typeof raw === 'number' ? raw : typeof raw === 'string' && raw.trim() !== '' ? Number(raw) : Number.NaN;
+      return Number.isFinite(n) ? { ok: true, value: n } : { ok: false };
+    }
+    case 'boolean': {
+      if (typeof raw === 'boolean') return { ok: true, value: raw };
+      const t = String(raw).trim().toLowerCase();
+      if (t === 'true' || t === '1' || t === 'yes') return { ok: true, value: true };
+      if (t === 'false' || t === '0' || t === 'no') return { ok: true, value: false };
+      return { ok: false };
+    }
+    case 'choice': {
+      const v = typeof raw === 'object' ? JSON.stringify(raw) : String(raw);
+      return !options || options.includes(v) ? { ok: true, value: v } : { ok: false };
+    }
+    default:
+      return { ok: true, value: typeof raw === 'object' ? JSON.stringify(raw) : String(raw) };
+  }
+}
+
+const UNKNOWN_TEMPLATE_NAME = /^'([^']+)' is not a declared variable/;
+
+/**
+ * Validate the converted graph with the frozen validator (engine v1) and
+ * repair what the conversion can repair without changing behaviour:
+ * an undeclared bare `{{x}}` becomes an optional string variable (the v1
+ * engine rendered it from the run's variables, empty when unset). Every
+ * remaining error is recorded as a needs-attention note, so a definition that
+ * cannot run always says why (P01 review R2).
+ */
+function validateConverted(graph: z.infer<typeof WorkflowGraphSchema>, attention: string[], log: string[]): z.infer<typeof WorkflowGraphSchema> {
+  let current = graph;
+  for (let pass = 0; pass < 3; pass++) {
+    const r = validateWorkflow(current, { engine: ENGINE_LEVEL });
+    const names = new Set<string>();
+    for (const i of r.issues) {
+      const m = i.code === 'template-unknown-variable' ? UNKNOWN_TEMPLATE_NAME.exec(i.message) : null;
+      const name = m?.[1];
+      if (!name || !VARIABLE_NAME_PATTERN.test(name) || FORBIDDEN_VARIABLE_NAME_PATTERN.test(name)) continue;
+      if ((RESERVED_ROOTS as readonly string[]).includes(name)) continue;
+      if (current.workflow.variables.some((v) => v.name === name)) continue;
+      names.add(name);
+    }
+    if (names.size === 0 || current.workflow.variables.length + names.size > 100) break;
+    const added = [...names].map((name) => VariableDefinitionSchema.parse({ name, type: 'string', label: name, required: false }));
+    for (const v of added) log.push(`variable '${v.name}' declared (optional string): a template referenced it without a declaration`);
+    current = WorkflowGraphSchema.parse({ ...current, workflow: { ...current.workflow, variables: [...current.workflow.variables, ...added] } });
+  }
+  for (const i of validateWorkflow(current, { engine: ENGINE_LEVEL }).issues) {
+    if (i.severity === 'error') attention.push(`${i.path || '/'}: ${i.message} [${i.code}]`);
+  }
+  return current;
 }
 
 const sortByOrder = (steps: unknown[]): Json[] =>
@@ -820,7 +886,10 @@ export function convertLegacyDefinition(def: LegacyDefinitionRow, stageRows: Leg
       .slice(0, 20);
     const output: Json = { format: row.output_format === 'json' ? 'json' : 'text', rules };
     const schema = parseJson(row.output_schema);
-    if (isObject(schema)) output['schema'] = schema;
+    if (isObject(schema)) {
+      if (output['format'] === 'json') output['schema'] = schema;
+      else log.push(`${where}: output schema dropped (the output format is text, so it was never applied)`);
+    }
     if (row.expected_output) {
       const instructions = convertTemplate(row.expected_output, renames);
       if (instructions.length > 5000) attention.push(`${where}: expected output text shortened to 5000 characters`);
@@ -937,7 +1006,11 @@ export function convertLegacyDefinition(def: LegacyDefinitionRow, stageRows: Leg
     return [];
   });
 
-  const graph = WorkflowGraphSchema.parse({ formatVersion: 2, workflow, stages: stages.map((s) => s.spec), edges });
+  const graph = validateConverted(
+    WorkflowGraphSchema.parse({ formatVersion: 2, workflow, stages: stages.map((s) => s.spec), edges }),
+    attention,
+    log,
+  );
   const canonical = `${JSON.stringify(graph, null, 2)}\n`;
   return {
     graph,

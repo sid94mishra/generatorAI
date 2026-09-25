@@ -122,7 +122,7 @@
         "variables": {
           "type": "object",
           "additionalProperties": {},
-          "description": "Variable values by name; __* names are refused",
+          "description": "Variable values by name; engine-reserved names are refused",
           "default": {}
         },
         "projectId": {
@@ -182,7 +182,7 @@
               },
               "variables": {
                 "$ref": "#/definitions/InvocationRequest/properties/variables",
-                "description": "Variable values by name; __* names are refused"
+                "description": "Variable values by name; engine-reserved names are refused"
               },
               "model": {
                 "type": "string",

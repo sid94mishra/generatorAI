@@ -4,12 +4,18 @@
 // The v1 engine runs v2 documents but cannot execute every v2 feature.
 // Rather than translating back or silently ignoring a field, validation
 // rejects the field until the engine that executes it ships (P03 flips
-// ENGINE_LEVEL to v2). The builder hides the same controls.
+// ENGINE_LEVEL to v2). The builder disables the same controls. A field
+// with a default is gated only when it differs from the default.
 // ────────────────────────────────────────────────────────────────
 
 import type { EngineLevel } from '../constants.js';
 import type { WorkflowGraph } from '../schemas/graph.js';
-import type { ValidationIssue } from './issues.js';
+import type { SessionSpec } from '../schemas/session.js';
+import { ApprovalSpecSchema, RetryPolicySchema } from '../schemas/stage.js';
+import { pointerToken, type ValidationIssue } from './issues.js';
+
+const RETRY_DEFAULTS = RetryPolicySchema.parse({});
+const APPROVAL_DEFAULTS = ApprovalSpecSchema.parse({});
 
 const HINT = 'Available after the engine upgrade (engine v2)';
 
@@ -27,6 +33,7 @@ export function engineIssues(graph: WorkflowGraph, engine: EngineLevel): Validat
     });
 
   const wf = graph.workflow;
+  const stageSessions: Array<[string, SessionSpec | undefined, string | undefined]> = [];
   if (wf.onExit !== undefined) add('/workflow/onExit', 'onExit');
   if (wf.onFailure !== undefined) add('/workflow/onFailure', 'onFailure');
   if (wf.maxParallel !== undefined) add('/workflow/maxParallel', 'maxParallel');
@@ -45,7 +52,41 @@ export function engineIssues(graph: WorkflowGraph, engine: EngineLevel): Validat
       if (s.timeouts?.[t] !== undefined) add(`${p}/timeouts/${t}`, `timeouts.${t}`, s.key);
     }
     if (s.output.extraction !== 'auto') add(`${p}/output/extraction`, `output.extraction '${s.output.extraction}'`, s.key);
+    // Retry and approval fields the v1 executor has no reader for: only their
+    // defaults are accepted (P01 review R5).
+    const r = s.retry;
+    if (r) {
+      if (r.maxDelayMs !== RETRY_DEFAULTS.maxDelayMs) add(`${p}/retry/maxDelayMs`, 'retry.maxDelayMs', s.key);
+      if (r.jitter !== RETRY_DEFAULTS.jitter) add(`${p}/retry/jitter`, `retry.jitter '${r.jitter}'`, s.key);
+      if (r.retryOn !== undefined) add(`${p}/retry/retryOn`, 'retry.retryOn', s.key);
+      if (r.mode !== RETRY_DEFAULTS.mode) add(`${p}/retry/mode`, `retry.mode '${r.mode}'`, s.key);
+      if (r.restoreCheckpointOnRestart !== RETRY_DEFAULTS.restoreCheckpointOnRestart) {
+        add(`${p}/retry/restoreCheckpointOnRestart`, 'retry.restoreCheckpointOnRestart', s.key);
+      }
+    }
+    const a = s.approval;
+    if (a) {
+      if (a.allowChanges !== APPROVAL_DEFAULTS.allowChanges) add(`${p}/approval/allowChanges`, 'approval.allowChanges', s.key);
+      if (a.maxRounds !== APPROVAL_DEFAULTS.maxRounds) add(`${p}/approval/maxRounds`, 'approval.maxRounds', s.key);
+    }
+    // Provider credentials and MCP secret references are resolved by the
+    // session composer (P02); the v1 engine would hand them to the harness
+    // verbatim (P01 review R6).
+    stageSessions.push([`${p}/session`, s.session, s.key]);
   });
+
+  stageSessions.push(['/workflow/session', wf.session, undefined]);
+  for (const [path, session, key] of stageSessions) {
+    if (!session) continue;
+    if (session.provider !== undefined) add(`${path}/provider`, 'session.provider', key);
+    for (const [id, server] of Object.entries(session.mcp?.servers ?? {})) {
+      const values = [...Object.values(server.env ?? {}), ...Object.values(server.headers ?? {})];
+      if (values.some((v) => typeof v === 'string' && v.startsWith('secretref:'))) {
+        add(`${path}/mcp/servers/${pointerToken(id)}`, `A secretref: value in MCP server '${id}'`, key);
+      }
+    }
+  }
+  if (wf.outputs !== undefined) add('/workflow/outputs', 'workflow outputs');
 
   graph.edges.forEach((e, i) => {
     if (e.handlesFailure !== undefined) add(`/edges/${i}/handlesFailure`, 'handlesFailure', undefined);

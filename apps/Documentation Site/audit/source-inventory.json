@@ -2400,133 +2400,133 @@
       "method": "POST",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 45,
+      "line": 52,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 58,
+      "line": 65,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 90,
+      "line": 97,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/scratchpad",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 103,
+      "line": 110,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/start",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 132,
+      "line": 139,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/pause",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 154,
+      "line": 161,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/resume",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 168,
+      "line": 175,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/retry",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 184,
+      "line": 191,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/cancel",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 214,
+      "line": 221,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 228,
+      "line": 235,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/stages",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 247,
+      "line": 254,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/pause",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 258,
+      "line": 265,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/resume",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 272,
+      "line": 279,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/retry",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 294,
+      "line": 301,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/cancel",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 322,
+      "line": 329,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 348,
+      "line": 355,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 359,
+      "line": 366,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/pending-interrupts",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 384,
+      "line": 391,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/approve",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 404,
+      "line": 411,
       "mounted": true
     },
     {
@@ -2568,28 +2568,28 @@
       "method": "POST",
       "path": "/api/workflow-scripts/reload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 184,
+      "line": 183,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/:id/reload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 196,
+      "line": 195,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/upload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 223,
+      "line": 222,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/validate",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 272,
+      "line": 271,
       "mounted": true
     },
     {
@@ -3085,7 +3085,6 @@
     "GENERATORAI_TOOL_TIMEOUT_MS",
     "GENERATORAI_TTS",
     "GENERATORAI_URLENCODED_LIMIT",
-    "GENERATORAI_V55_SKIP_RUN_CLEANUP",
     "GENERATORAI_VOICE_IDLE_REAPER_MS",
     "GENERATORAI_VOICE_IDLE_TTL_MS",
     "GENERATORAI_VOICE_IN_PROCESS",
@@ -4135,6 +4134,7 @@
     "packages/client-core/src/api/index.ts",
     "packages/client-core/src/api/stageOverrides.ts",
     "packages/client-core/src/api/transcript.ts",
+    "packages/client-core/src/api/workflowStart.ts",
     "packages/client-core/src/diff/parseUnifiedDiff.ts",
     "packages/client-core/src/index.ts",
     "packages/client-core/src/runTitle.ts",
@@ -4378,23 +4378,46 @@
     "packages/core/src/utils/safePath.ts",
     "packages/core/src/utils/Semaphore.ts",
     "packages/core/src/utils/withDeadline.ts",
-    "packages/db/scripts/_tmp_dev.ts",
-    "packages/db/scripts/_tmp_h.ts",
-    "packages/db/scripts/_tmp_v55.ts",
     "packages/db/scripts/prepare-db.ts",
     "packages/db/scripts/schemaShape.ts",
     "packages/db/src/index.ts",
     "packages/db/src/migrations/baseline.generated.ts",
     "packages/db/src/migrations/index.ts",
     "packages/db/src/migrations/v55/convert.ts",
-    "packages/db/src/migrations/v55/spec/common.ts",
+    "packages/db/src/migrations/v55/spec/commandBearing.ts",
     "packages/db/src/migrations/v55/spec/constants.ts",
-    "packages/db/src/migrations/v55/spec/edge.ts",
-    "packages/db/src/migrations/v55/spec/errors.ts",
-    "packages/db/src/migrations/v55/spec/graph.ts",
-    "packages/db/src/migrations/v55/spec/session.ts",
-    "packages/db/src/migrations/v55/spec/stage.ts",
-    "packages/db/src/migrations/v55/spec/workflow.ts",
+    "packages/db/src/migrations/v55/spec/expr/ast.ts",
+    "packages/db/src/migrations/v55/spec/expr/evaluate.ts",
+    "packages/db/src/migrations/v55/spec/expr/filters.ts",
+    "packages/db/src/migrations/v55/spec/expr/functions.ts",
+    "packages/db/src/migrations/v55/spec/expr/grammar.ts",
+    "packages/db/src/migrations/v55/spec/expr/index.ts",
+    "packages/db/src/migrations/v55/spec/expr/parse.ts",
+    "packages/db/src/migrations/v55/spec/expr/template.ts",
+    "packages/db/src/migrations/v55/spec/expr/typecheck.ts",
+    "packages/db/src/migrations/v55/spec/expr/types.ts",
+    "packages/db/src/migrations/v55/spec/expr/values.ts",
+    "packages/db/src/migrations/v55/spec/regex/safeRegex.ts",
+    "packages/db/src/migrations/v55/spec/schemas/common.ts",
+    "packages/db/src/migrations/v55/spec/schemas/edge.ts",
+    "packages/db/src/migrations/v55/spec/schemas/errors.ts",
+    "packages/db/src/migrations/v55/spec/schemas/graph.ts",
+    "packages/db/src/migrations/v55/spec/schemas/session.ts",
+    "packages/db/src/migrations/v55/spec/schemas/stage.ts",
+    "packages/db/src/migrations/v55/spec/schemas/workflow.ts",
+    "packages/db/src/migrations/v55/spec/state/index.ts",
+    "packages/db/src/migrations/v55/spec/state/stageRun.ts",
+    "packages/db/src/migrations/v55/spec/state/workflowRun.ts",
+    "packages/db/src/migrations/v55/spec/util/text.ts",
+    "packages/db/src/migrations/v55/spec/util/zodWalk.ts",
+    "packages/db/src/migrations/v55/spec/validate/capability.ts",
+    "packages/db/src/migrations/v55/spec/validate/dag.ts",
+    "packages/db/src/migrations/v55/spec/validate/hints.ts",
+    "packages/db/src/migrations/v55/spec/validate/index.ts",
+    "packages/db/src/migrations/v55/spec/validate/issues.ts",
+    "packages/db/src/migrations/v55/spec/validate/scope.ts",
+    "packages/db/src/migrations/v55/spec/validate/security.ts",
+    "packages/db/src/migrations/v55/spec/validate/validateWorkflow.ts",
     "packages/db/src/migrations/v55_workflow_definitions_v2.ts",
     "packages/db/src/repositories/AgentInteractionRepository.ts",
     "packages/db/src/repositories/AgentRepository.ts",

@@ -971,12 +971,10 @@ export class AutomationService {
       // state from the previous failed attempt.
       const run = await this.workflowRunService.createRun({
         workflowDefinitionId: workflowDefId,
-        // X-21 — `__triggeredBy` is how the trigger reaches the run. The
-        // shared `CreateWorkflowRunParams` has no field for it, and the
-        // `__`-prefixed internal-variable convention is the established
-        // channel for exactly this (`__workingDirectory`, `__workspaceId`,
-        // `__projectId`, `__validationFeedback` all travel the same way).
-        variables: { ...variables, __triggeredBy: triggeredBy },
+        // X-21 — the trigger reaches the run as a typed param (the run
+        // records it as engine state); variables are the user's only.
+        variables,
+        triggeredBy,
         ...(projectId ? { projectId } : {}),
       });
 

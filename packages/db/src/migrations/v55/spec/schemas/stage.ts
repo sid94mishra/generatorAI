@@ -1,6 +1,7 @@
 // FROZEN COPY for migration v55 (README R-3, RV-33). Copied from
-// packages/workflow-spec/src at 32c6d7c. Never edit: v55 converts legacy rows
-// into exactly these shapes; the live spec package may move on.
+// packages/workflow-spec/src (P01 review fixes). Never edit: v55 converts
+// legacy rows into exactly these shapes and validates them with this copy of
+// the validator; the live spec package may move on.
 
 // ────────────────────────────────────────────────────────────────
 // StageSpec v2 (P01 design decision 2; G5 §2.3, §3.2; P05 §1.3).

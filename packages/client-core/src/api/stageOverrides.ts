@@ -2,19 +2,10 @@
 // Run-time stage overrides — ONE encoding for every client.
 //
 // A start-run form lets the operator skip stages or give one stage extra
-// variables for this run only. The server reads those in two different
-// places depending on how the run is started:
-//
-//   • Orchestrated runs (`POST /orchestrator/runs`) take a top-level
-//     `stageOverrides` array; the orchestrator copies it into the run's
-//     resolved variables itself.
-//   • Plain runs (`POST /workflow-runs`) and script runs
-//     (`POST /workflow-scripts/:id/run`) have no such field — the runner
-//     reads them from the run's own `__stageOverrides` variable
-//     (`WorkflowRunService.findStageOverride`, matched by stage KEY).
-//
-// Web grew the split twice (definition page and builder) and mobile would
-// have been the third copy, so the rule lives here.
+// variables for this run only. Every start route (`POST /workflow-runs`,
+// `POST /orchestrator/runs`, `POST /workflow-scripts/:id/run`) takes them as
+// a typed top-level `stageOverrides` array, matched by stage KEY. Variables
+// never carry them: engine-reserved names are refused (R-8).
 // ────────────────────────────────────────────────────────────────
 
 /** What a start-run form edits for one stage. */
@@ -33,9 +24,6 @@ export interface StageOverrideWire {
   skip?: true;
   variables?: Record<string, unknown>;
 }
-
-/** The variable key plain and script runs carry overrides under. */
-export const STAGE_OVERRIDES_VARIABLE = '__stageOverrides';
 
 /** One untouched draft per stage, in order. */
 export function blankStageOverrides(stages: ReadonlyArray<{ key: string; name: string }>): StageOverrideDraft[] {
@@ -64,19 +52,15 @@ export function activeStageOverrides(
 }
 
 /**
- * Split the start payload for the route that will receive it.
- *
- * `orchestrated: true` → `{ variables, stageOverrides? }` (top-level array);
- * otherwise → `{ variables }` with `__stageOverrides` folded in when any are
- * active. The input `variables` object is never mutated.
+ * The start payload: `{ variables, stageOverrides? }`. Both start routes take
+ * the overrides as a typed top-level array; the input `variables` object is
+ * never mutated.
  */
 export function encodeStageOverrides(
   variables: Record<string, unknown>,
   drafts: readonly StageOverrideDraft[] | undefined,
-  options: { orchestrated: boolean },
 ): { variables: Record<string, unknown>; stageOverrides?: StageOverrideWire[] } {
   const active = activeStageOverrides(drafts);
   if (active.length === 0) return { variables };
-  if (options.orchestrated) return { variables, stageOverrides: active };
-  return { variables: { ...variables, [STAGE_OVERRIDES_VARIABLE]: active } };
+  return { variables, stageOverrides: active };
 }

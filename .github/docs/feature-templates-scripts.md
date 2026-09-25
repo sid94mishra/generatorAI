@@ -145,7 +145,7 @@ POST /api/workflow-scripts/upload            → 201 ScriptMetadata   body: { fi
 
 `/:id/run` needs `write:workflows` + `exec:agent`. `upload` needs `admin:settings` **and** `GENERATORAI_ALLOW_SCRIPT_UPLOAD=true` with scripts enabled; a shipped script cannot be replaced by an upload.
 
-> **Wire detail:** the run endpoint accepts `profileName` (not `profile`). The profile's `variables` are merged under the request's `variables`; its `stageOverrides` (by stage key) ride in the run's `__stageOverrides` variable, with any `__stageOverrides` from the request appended; its `permissionMode` is set on the run before it starts.
+> **Wire detail:** the run endpoint accepts `profileName` (not `profile`). The profile's `variables` are merged under the request's `variables`; its `stageOverrides` (by stage key) are applied first, then any typed `stageOverrides` from the request; its `permissionMode` is set on the run before it starts.
 
 ### Materialize vs Run
 

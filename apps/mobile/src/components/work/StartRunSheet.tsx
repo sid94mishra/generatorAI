@@ -165,7 +165,7 @@ export function StartRunSheet({
   const start = useMutation({
     mutationFn: async (): Promise<string> => {
       if (orchestrated) {
-        const encoded = encodeStageOverrides(result.variables, effectiveOverrides, { orchestrated: true });
+        const encoded = encodeStageOverrides(result.variables, effectiveOverrides);
         const context = await admin.orchestrator.startRun({
           workflowDefinitionId: workflow.id,
           variables: encoded.variables,
@@ -191,9 +191,11 @@ export function StartRunSheet({
         }
         return runId;
       }
+      const encoded = encodeStageOverrides(result.variables, effectiveOverrides);
       const run = await admin.runs.create({
         workflowDefinitionId: workflow.id,
-        variables: encodeStageOverrides(result.variables, effectiveOverrides, { orchestrated: false }).variables,
+        variables: encoded.variables,
+        ...(encoded.stageOverrides ? { stageOverrides: encoded.stageOverrides } : {}),
         ...(projectId ? { projectId } : {}),
         ...(testRun ? { testRun: true } : {}),
       });

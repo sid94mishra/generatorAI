@@ -154,6 +154,28 @@ export async function runUpgradeCheck({ dbPath, dumpSchema, keep = false, log = 
     migrateDB(db);
     const ms = Date.now() - t0;
     const after = chatFingerprint(sqlite, before.columns);
+    // Every migrated definition either validates (engine v1, with the frozen
+    // validator v55 uses) or carries needs-attention notes saying why.
+    const { validateWorkflow } = await tsImport('packages/db/src/migrations/v55/spec/validate/validateWorkflow.ts');
+    const defs = { total: 0, invalid: 0, invalidWithoutNotes: [] };
+    const hasVersions = sqlite
+      .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'workflow_definition_versions'`)
+      .get();
+    if (hasVersions) {
+      const rows = sqlite
+        .prepare(
+          `SELECT d.id, d.needs_attention AS notes, v.spec FROM workflow_definitions d
+           JOIN workflow_definition_versions v ON v.id = d.current_version_id`,
+        )
+        .all();
+      for (const row of rows) {
+        defs.total++;
+        const errors = validateWorkflow(JSON.parse(row.spec), { engine: 'v1' }).issues.filter((i) => i.severity === 'error');
+        if (errors.length === 0) continue;
+        defs.invalid++;
+        if (!row.notes) defs.invalidWithoutNotes.push(row.id);
+      }
+    }
     const fresh = createDB(':memory:');
     migrateDB(fresh);
     const drift = diffShapes(schemaShape(sqlite), schemaShape(fresh.session.client), ['upgraded', 'fresh']);
@@ -177,6 +199,7 @@ export async function runUpgradeCheck({ dbPath, dumpSchema, keep = false, log = 
       droppedColumns,
       sessionsByOwnerType: before.sessionsByOwnerType,
       chatRowsPreserved: changed.length === 0 && sameOwners,
+      definitions: defs,
       changed,
       schemaDrift: drift,
     };
@@ -185,6 +208,11 @@ export async function runUpgradeCheck({ dbPath, dumpSchema, keep = false, log = 
         `chats ${before.counts.chats}, sessions ${before.counts.sessions} ${JSON.stringify(before.sessionsByOwnerType)}, ` +
         `messages ${before.counts.chat_messages}; chat rows ${result.chatRowsPreserved ? 'UNCHANGED (hashes match)' : `CHANGED: ${changed.join(', ')}`}; ` +
         `all rows before/after: sessions ${before.totals.sessions}→${after.totals.sessions}, messages ${before.totals.chat_messages}→${after.totals.chat_messages}`,
+    );
+    log(
+      `[dbcopy-upgrade] definitions: ${defs.total} migrated, ${defs.invalid} fail validation (engine v1), ` +
+        `${defs.invalidWithoutNotes.length} of them without needs-attention notes` +
+        (defs.invalidWithoutNotes.length ? `: ${defs.invalidWithoutNotes.join(', ')}` : ''),
     );
     log(`[dbcopy-upgrade] schema drift vs a fresh database (${drift.length}):`);
     for (const d of drift) log(`  ${d}`);
@@ -203,7 +231,7 @@ if (isMain) {
     dumpSchema: typeof args['dump-schema'] === 'string' ? resolve(args['dump-schema']) : undefined,
     keep: !!args.keep,
   })
-    .then((r) => process.exit(r.dumped || r.chatRowsPreserved ? 0 : 1))
+    .then((r) => process.exit(r.dumped || (r.chatRowsPreserved && r.definitions.invalidWithoutNotes.length === 0) ? 0 : 1))
     .catch((err) => {
       console.error(`[dbcopy-upgrade] ${err.message}`);
       process.exit(err.exitCode ?? 1);

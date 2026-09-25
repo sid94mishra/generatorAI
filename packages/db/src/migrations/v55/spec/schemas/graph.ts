@@ -1,6 +1,7 @@
 // FROZEN COPY for migration v55 (README R-3, RV-33). Copied from
-// packages/workflow-spec/src at 32c6d7c. Never edit: v55 converts legacy rows
-// into exactly these shapes; the live spec package may move on.
+// packages/workflow-spec/src (P01 review fixes). Never edit: v55 converts
+// legacy rows into exactly these shapes and validates them with this copy of
+// the validator; the live spec package may move on.
 
 // ────────────────────────────────────────────────────────────────
 // WorkflowGraph: the canonical document. Import, export, the builder,
@@ -9,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
-import { MAX_EDGES, MAX_STAGES, WORKFLOW_FORMAT_VERSION } from './constants.js';
+import { MAX_EDGES, MAX_STAGES, WORKFLOW_FORMAT_VERSION } from '../constants.js';
 import { EdgeSpecSchema } from './edge.js';
 import { StageSpecSchema } from './stage.js';
 import { WorkflowSpecSchema } from './workflow.js';

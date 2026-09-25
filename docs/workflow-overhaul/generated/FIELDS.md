@@ -633,7 +633,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `target.rerunFrom` | string (1..500 chars)[] (≤50) |  |  | Instance paths to re-run from; omitted means the failed instances |
 | `target.definition` | 'pinned' \| 'latest' |  | `"pinned"` | Definition version of the fork |
 | `target.workspace` | 'restore_checkpoint' \| 'reuse' \| 'fresh' |  | `"restore_checkpoint"` | Workspace of the fork |
-| `variables` | record<string, any> |  | `{}` | Variable values by name; __* names are refused |
+| `variables` | record<string, any> |  | `{}` | Variable values by name; engine-reserved names are refused |
 | `projectId` | string uuid |  |  | Project whose codebases the run may mount |
 | `codebases` | object[] (≤10) |  |  | Codebases to mount; omitted means lifecycle.codebaseAliases |
 | `codebases[].alias` | string `^[A-Za-z0-9._-]+$` (1..50 chars) | yes |  | Alias of a project codebase |
@@ -642,7 +642,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stageOverrides` | object[] (≤100) |  |  | Per-stage overrides, by stage key |
 | `stageOverrides[].stageKey` | string `^[a-z][a-z0-9_]{0,47}$` | yes |  | Stage to override |
 | `stageOverrides[].skip` | boolean |  |  | Skip the stage for this run |
-| `stageOverrides[].variables` | record<string, any> |  |  | Variable values by name; __* names are refused |
+| `stageOverrides[].variables` | record<string, any> |  |  | Variable values by name; engine-reserved names are refused |
 | `stageOverrides[].model` | string (≤200 chars) |  |  | Model for this stage in this run |
 | `overrides` | object |  |  | Run-wide overrides |
 | `overrides.model` | string (≤200 chars) |  |  | Model for every stage without its own |

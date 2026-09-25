@@ -417,7 +417,7 @@ export function WorkflowBuilderPage() {
         const projectForRun = store.workflow.projectId ?? undefined;
 
         if (needsOrchestratedStart(store.workflow)) {
-          const encoded = encodeStageOverrides(runVariables, stageOverrides, { orchestrated: true });
+          const encoded = encodeStageOverrides(runVariables, stageOverrides);
           const aliases = store.workflow.lifecycle.codebaseAliases;
           const context = await startOrchestratedRun.mutateAsync({
             workflowDefinitionId: defId,
@@ -432,7 +432,7 @@ export function WorkflowBuilderPage() {
         } else {
           const params: CreateWorkflowRunParams = {
             workflowDefinitionId: defId,
-            variables: encodeStageOverrides(runVariables, stageOverrides, { orchestrated: false }).variables,
+            ...encodeStageOverrides(runVariables, stageOverrides),
             ...(testRun ? { testRun: true } : {}),
           };
           const run = await createRun.mutateAsync(params);

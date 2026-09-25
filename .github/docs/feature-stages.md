@@ -93,8 +93,7 @@ values only through `env`), `http`, and `function` (a registered handler). Scrip
 [StageExecutionService](../../packages/core/src/services/StageExecutionService.ts):
 
 1. Read the stage from the run's pinned version (`RunDefinitionReader`, by `stageKey`).
-2. Allocate the session (per stage when the graph has parallel branches; one shared session for
-   a linear graph).
+2. Allocate a fresh session for the stage (`sessionReuse: 'fresh'`).
 3. Resolve the session config: workflow `session` ⊕ stage `session` ⊕ run overrides.
 4. Send the context turn (unless `context.mode` is `none`).
 5. Run `pre_run` hooks; then for each prompt: render the template, send it, run `pre_prompt` /
@@ -105,7 +104,9 @@ values only through `env`), `http`, and `function` (a registered handler). Scrip
 
 Fields the engine cannot run yet (`join` other than `all`, `repair`, `onExhausted: 'pause'`,
 `sessionReuse: 'continue'`, `sessionGroup`, `budget`, `timeouts.queueMs|idleMs|totalMs`,
-non-`auto` `output.extraction`, `compensate`) are rejected at save with `engine-unsupported`.
+non-`auto` `output.extraction`, `compensate`, `session.provider`, MCP `secretref:` values, and
+non-default `retry.maxDelayMs|jitter|retryOn|mode|restoreCheckpointOnRestart` or
+`approval.allowChanges|maxRounds`) are rejected at save with `engine-unsupported`.
 
 ---
 

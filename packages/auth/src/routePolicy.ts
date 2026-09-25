@@ -22,7 +22,7 @@ export interface RoutePolicy {
   write: Scope[];
   /** Extra scopes required regardless of method. */
   always?: Scope[];
-  /** Reachable without any credential (health, webhooks with their own HMAC). */
+  /** Reachable without any credential (health, automation webhook triggers with their own token). */
   public?: boolean;
   riskLevel?: 'low' | 'medium' | 'high';
 }
@@ -35,9 +35,8 @@ export const DEFAULT_POLICY: RoutePolicy = {
 };
 
 export const ROUTE_POLICIES: RoutePolicy[] = [
-  // Public — health probes and webhook receivers (own HMAC verification).
+  // Public — health probes.
   { prefix: '/health', read: [], write: [], public: true },
-  { prefix: '/webhooks', read: [], write: [], public: true },
   // Auth bootstrap. Pairing completion is deliberately public: the caller has
   // no credential yet, and the single-use pairing grant IS the credential.
   { prefix: '/auth/pair/complete', read: [], write: [], public: true },

@@ -71,6 +71,8 @@ describe('route policy — resolution', () => {
     // the public policy and let an unauthenticated caller list/create them.
     expect(resolveRoutePolicy('/automations').public).toBeFalsy();
     expect(resolveRoutePolicy('/automations/a1').public).toBeFalsy();
+    // The v1 /webhooks routes are gone; no public entry may survive them.
+    expect(resolveRoutePolicy('/webhooks/github').public).toBeFalsy();
     expect(allowed([], '/automations', 'GET')).toBe(false);
     expect(allowed([], '/automations', 'POST')).toBe(false);
   });

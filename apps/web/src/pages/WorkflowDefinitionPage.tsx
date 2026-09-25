@@ -160,7 +160,7 @@ export function WorkflowDefinitionPage() {
 
           // Pass stage overrides if any are active (shared encoding: a
           // top-level array on the orchestrated route).
-          const encoded = encodeStageOverrides(variables, stageOverrides, { orchestrated: true });
+          const encoded = encodeStageOverrides(variables, stageOverrides);
           if (encoded.stageOverrides) orchParams['stageOverrides'] = encoded.stageOverrides;
 
           const context = await startOrchestratedRun.mutateAsync(orchParams);
@@ -168,12 +168,9 @@ export function WorkflowDefinitionPage() {
           setVariableModalOpen(false);
           navigate(`/workflows/${id}/runs/${context.workflowRunId}`);
         } else {
-          // Plain runs carry overrides (by stage key) in the run's own
-          // `__stageOverrides` variable, which is also how the script-run
-          // route passes them through.
           const params: CreateWorkflowRunParams = {
             workflowDefinitionId: id,
-            variables: encodeStageOverrides(variables, stageOverrides, { orchestrated: false }).variables,
+            ...encodeStageOverrides(variables, stageOverrides),
             ...(testRun ? { testRun: true } : {}),
           };
           const run = await createRun.mutateAsync(params);

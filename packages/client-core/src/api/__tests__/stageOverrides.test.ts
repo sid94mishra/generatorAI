@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  STAGE_OVERRIDES_VARIABLE,
   activeStageOverrides,
   blankStageOverrides,
   encodeStageOverrides,
@@ -28,27 +27,16 @@ describe('stage overrides', () => {
 
   it('sends nothing extra for an untouched form', () => {
     const vars = { repo: 'x' };
-    expect(encodeStageOverrides(vars, blankStageOverrides([{ key: 'a', name: 'A' }]), { orchestrated: true })).toEqual({ variables: vars });
-    expect(encodeStageOverrides(vars, [], { orchestrated: false })).toEqual({ variables: vars });
+    expect(encodeStageOverrides(vars, blankStageOverrides([{ key: 'a', name: 'A' }]))).toEqual({ variables: vars });
+    expect(encodeStageOverrides(vars, [])).toEqual({ variables: vars });
   });
 
-  it('uses a top-level array for orchestrated runs', () => {
-    const drafts = [{ stageKey: 'a', stageName: 'A', skip: true, variables: {} }];
-    const out = encodeStageOverrides({ repo: 'x' }, drafts, { orchestrated: true });
-    expect(out.variables).toEqual({ repo: 'x' });
-    expect(out.stageOverrides).toEqual([{ stageKey: 'a', skip: true }]);
-  });
-
-  it('folds overrides into __stageOverrides for plain runs without mutating input', () => {
+  it('sends overrides as a typed top-level array, never inside variables', () => {
     const vars = { repo: 'x' };
     const drafts = [{ stageKey: 'a', stageName: 'A', skip: true, variables: {} }];
-    const out = encodeStageOverrides(vars, drafts, { orchestrated: false });
-    expect(out.stageOverrides).toBeUndefined();
-    expect(out.variables).toEqual({
-      repo: 'x',
-      [STAGE_OVERRIDES_VARIABLE]: [{ stageKey: 'a', skip: true }],
-    });
+    const out = encodeStageOverrides(vars, drafts);
+    expect(out.variables).toEqual({ repo: 'x' });
+    expect(out.stageOverrides).toEqual([{ stageKey: 'a', skip: true }]);
     expect(vars).toEqual({ repo: 'x' });
-    expect(STAGE_OVERRIDES_VARIABLE).toBe('__stageOverrides');
   });
 });

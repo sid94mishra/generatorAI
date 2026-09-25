@@ -444,6 +444,7 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
                 placeholder="What should the reviewer check?"
               />
             </div>
+            <EngineGated>
             <ToggleSwitch
               checked={stage.approval.allowChanges}
               onChange={(checked) => onUpdate({ approval: { ...stage.approval!, allowChanges: checked } })}
@@ -460,6 +461,7 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
                 step={1}
               />
             )}
+            </EngineGated>
           </div>
         )}
         <FieldIssues issues={issuesAt(issues, '/approval')} />
@@ -530,6 +532,7 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
               step={0.5}
               unit="x"
             />
+            <EngineGated>
             <NumberStepper
               label="Max delay (ms)"
               value={stage.retry.maxDelayMs}
@@ -552,6 +555,7 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
                 ]}
               />
             </div>
+            </EngineGated>
           </div>
         )}
         <FieldIssues issues={issuesAt(issues, '/retry')} />

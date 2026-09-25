@@ -35,6 +35,24 @@ describe('E2E: Workflow Run API Flow', () => {
         expect.objectContaining({ workflowDefinitionId: '11111111-1111-1111-1111-111111111111', testRun: true }),
       );
     });
+
+    it('refuses engine-reserved variables and takes stage overrides as a typed field (R-8)', async () => {
+      for (const key of ['__workingDirectory', '__stageOverrides', 'repo_path_target']) {
+        const res = await request(app)
+          .post('/api/workflow-runs')
+          .send({ workflowDefinitionId: '11111111-1111-1111-1111-111111111111', variables: { [key]: '/elsewhere' } });
+        expect(res.status).toBe(400);
+      }
+      expect(container.workflowRunService.createRun).not.toHaveBeenCalled();
+
+      const ok = await request(app)
+        .post('/api/workflow-runs')
+        .send({ workflowDefinitionId: '11111111-1111-1111-1111-111111111111', stageOverrides: [{ stageKey: 'review', skip: true }] });
+      expect(ok.status).toBe(201);
+      expect(container.workflowRunService.createRun).toHaveBeenCalledWith(
+        expect.objectContaining({ stageOverrides: [{ stageKey: 'review', skip: true }] }),
+      );
+    });
   });
 
   describe('GET /api/workflow-runs — List Runs', () => {

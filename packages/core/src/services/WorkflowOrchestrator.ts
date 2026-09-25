@@ -267,6 +267,7 @@ export class WorkflowOrchestrator {
       workflowDefinitionId: params.workflowDefinitionId,
       definitionVersionId,
       variables: params.variables,
+      ...(params.stageOverrides && params.stageOverrides.length > 0 ? { stageOverrides: params.stageOverrides } : {}),
       // Tags the run with `__projectId`, which is how clients find a
       // project's runs; without it a run started for a project was listed
       // under no project at all.

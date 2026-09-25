@@ -226,6 +226,7 @@ describe('expressions and templates layer', () => {
         outputs: { verdict: 'stages.a.output.verdict', bad: 'stages.zz.output' },
         lifecycle: { postProcessing: { steps: [{ name: 'pr', config: { type: 'create_pr', title: 'Fix {{ stages.a.output.verdict }}', body: '{{nope}}' } }] } },
       }),
+      { engine: 'v2' },
     );
     expect(r.issues.map((i) => [i.code, i.path])).toEqual([
       ['expr-unknown-stage', '/workflow/outputs/bad'],
@@ -265,7 +266,7 @@ describe('security layer', () => {
   it('requires secretref for provider keys and rejects literal secrets', () => {
     const provider = { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'sk-live-abcdefghijklmnopqrstuvwxyz' };
     expect(codes(validateWorkflow(graph([agent('a', { session: { provider } })])))).toContain('secret-not-secretref');
-    expect(codes(validateWorkflow(graph([agent('a')], [], { session: { provider: { ...provider, apiKey: 'secretref:openai' } } })))).toEqual([]);
+    expect(codes(validateWorkflow(graph([agent('a')], [], { session: { provider: { ...provider, apiKey: 'secretref:openai' } } }), { engine: 'v2' }))).toEqual([]);
     const env = (e: Record<string, string>) => codes(validateWorkflow(graph([agent('a', { hooks: [scriptHook({ command: 'x', env: e })] })])));
     expect(env({ GITHUB_TOKEN: 'abc123' })).toContain('secret-literal');
     expect(env({ ANYTHING: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789' })).toContain('secret-literal');
@@ -309,6 +310,16 @@ describe('engine capability gate', () => {
     ['onFailure', graph([agent('a')], [], { onFailure: [{ name: 'x', config: { type: 'function', handlerName: 'h' } }] })],
     ['maxParallel', graph([agent('a')], [], { maxParallel: 2 })],
     ['handlesFailure', graph([agent('a'), agent('b')], [{ from: 'a', to: 'b', on: 'always', handlesFailure: true }])],
+    ['retry.maxDelayMs', graph([agent('a', { retry: { maxDelayMs: 1000 } })])],
+    ['retry.jitter', graph([agent('a', { retry: { jitter: 'none' } })])],
+    ['retry.retryOn', graph([agent('a', { retry: { retryOn: ['overloaded'] } })])],
+    ['retry.mode', graph([agent('a', { retry: { mode: 'restart' } })])],
+    ['retry.restoreCheckpointOnRestart', graph([agent('a', { retry: { restoreCheckpointOnRestart: false } })])],
+    ['approval.allowChanges', graph([agent('a', { approval: { allowChanges: false } })])],
+    ['approval.maxRounds', graph([agent('a', { approval: { maxRounds: 1 } })])],
+    ['workflow outputs', graph([agent('a')], [], { outputs: { done: "stages.a.status == 'completed'" } })],
+    ['session.provider', graph([agent('a', { session: { provider: { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'secretref:k' } } })])],
+    ['MCP secretref', graph([agent('a')], [], { session: { mcp: { servers: { gh: { type: 'http', url: 'https://mcp.test', headers: { Authorization: 'secretref:gh' } } } } } })],
   ])('%s is rejected on v1 and accepted on v2', (_what, g) => {
     const r1 = v1(g);
     expect(codes(r1, 'error')).toEqual(['engine-unsupported']);

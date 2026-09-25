@@ -10,7 +10,7 @@ import type {
   CreateWorkflowRunParams,
   ILogger,
 } from '@generatorai/shared';
-import type { AgentStage, SessionSpec, WorkflowGraph } from '@generatorai/workflow-spec';
+import { FORBIDDEN_VARIABLE_NAME_PATTERN, type AgentStage, type SessionSpec, type WorkflowGraph } from '@generatorai/workflow-spec';
 import type { TerminalRunStatus } from './DAGScheduler.js';
 import type { Semaphore } from '../utils/Semaphore.js';
 import type { AdmissionController, AdmissionTicket } from './AdmissionController.js';
@@ -32,6 +32,7 @@ const activeRuns = meter.createUpDownCounter('workflow.active_runs', {
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import type { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
+import { templateScope } from './definitions/runScope.js';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { DAGScheduler } from './DAGScheduler.js';
@@ -222,6 +223,7 @@ export class WorkflowRunService {
         eventBus: this.eventBus,
         // Stamp the run id so hook lifecycle events surface in scope='run'.
         workflowRunId: runId,
+        templateScope: templateScope(run, run.variables, await this.stageRunRepo.getByRunId(runId)),
       };
       await this.hookExecutor.executePhase(phase, [...hooks], hookCtx);
     } catch (err) {
@@ -379,6 +381,24 @@ export class WorkflowRunService {
    * One stage run per stage of that version, keyed by stage key.
    */
   async createRun(params: CreateWorkflowRunParams): Promise<WorkflowRun> {
+    // R-8: engine state (`__*`, codebase checkouts) never comes from caller
+    // variables; it is derived from the typed params below.
+    const reserved = Object.keys(params.variables ?? {}).filter((k) => FORBIDDEN_VARIABLE_NAME_PATTERN.test(k));
+    if (reserved.length > 0) {
+      throw new ValidationError(
+        `Invalid workflow run variables: ${reserved.map((k) => `"${k}"`).join(', ')} ` +
+          'are engine-reserved names (__*, repo_path_*, repo_branch_*) and cannot be supplied',
+      );
+    }
+    const engineState: Record<string, unknown> = {};
+    if (params.projectId) engineState['__projectId'] = params.projectId;
+    if (params.triggeredBy) engineState['__triggeredBy'] = params.triggeredBy;
+    if (params.stageOverrides && params.stageOverrides.length > 0) engineState['__stageOverrides'] = params.stageOverrides;
+    return this.materializeRun(params, engineState);
+  }
+
+  /** Create the run row and its stage rows; `engineState` holds the engine's own run-state keys. */
+  private async materializeRun(params: CreateWorkflowRunParams, engineState: Record<string, unknown>): Promise<WorkflowRun> {
     return withSpan('core.workflow', 'workflow.createRun', async (span) => {
       span.setAttribute('workflow.definition_id', params.workflowDefinitionId);
 
@@ -448,39 +468,15 @@ export class WorkflowRunService {
         runVars[v.name] = v.defaultValue;
       }
     }
-    if (params.projectId) {
-      runVars['__projectId'] = params.projectId;
-    }
-
-    // ── X-21 — a scheduled run starts from a clean slate ──────────
-    //
-    // W24 requires "fresh agent with no history for scheduled runs". Sessions
-    // and conversations are already per-run, so the surviving leak is the
-    // EXECUTION CONTEXT: `startRun` skips workspace creation entirely when the
-    // caller pre-seeds `__workingDirectory` + `__artifactsDirectory`, and an
-    // automation whose `variables` carry those keys hands every nightly run
-    // the same directory. A manual run keeps the pinned directory, because a
-    // human who typed one meant it.
-    if (runVars['__triggeredBy'] === 'schedule') {
-      const inherited = ['__workingDirectory', '__artifactsDirectory', '__workspaceId'].filter(
-        (k) => runVars[k] !== undefined,
-      );
-      for (const key of inherited) delete runVars[key];
-      if (inherited.length > 0) {
-        this.logger?.info(
-          `[WorkflowRunService] Scheduled run of definition ${params.workflowDefinitionId}: dropped ` +
-          `inherited execution context (${inherited.join(', ')}) so it provisions a fresh workspace`,
-        );
-      }
-    }
+    Object.assign(runVars, engineState);
     const run: WorkflowRun = {
       id: generateId(),
       workflowDefinitionId: params.workflowDefinitionId,
       definitionVersionId,
       name: `${graph.workflow.name} - Run ${Date.now()}`,
       status: 'created',
-      // The v1 engine resolves the session mode from the graph shape at start.
-      sessionMode: 'auto',
+      // v2: every stage gets a fresh session (sessionReuse 'fresh').
+      sessionMode: 'per-stage',
       variables: runVars,
       // W23: carry the ancestor reference if this run was created by retry.
       ...(params.ancestorRunId ? { ancestorRunId: params.ancestorRunId } : {}),
@@ -568,13 +564,22 @@ export class WorkflowRunService {
             `(${dropped.join(', ')}) so the retry provisions a fresh workspace`,
         );
       }
-      const newRun = await this.createRun({
-        workflowDefinitionId: ancestor.workflowDefinitionId,
-        variables: inheritedVars,
-        projectId: undefined, // definition-scoped, not run-scoped
-        ancestorRunId: runId,
-        definitionVersionId: ancestor.definitionVersionId,
-      });
+      // The ancestor's user variables are re-validated; its remaining engine
+      // state (project tag, trigger, stage overrides) is carried as is.
+      const userVars: Record<string, unknown> = {};
+      const engineState: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(inheritedVars)) {
+        (FORBIDDEN_VARIABLE_NAME_PATTERN.test(k) ? engineState : userVars)[k] = v;
+      }
+      const newRun = await this.materializeRun(
+        {
+          workflowDefinitionId: ancestor.workflowDefinitionId,
+          variables: userVars,
+          ancestorRunId: runId,
+          definitionVersionId: ancestor.definitionVersionId,
+        },
+        engineState,
+      );
 
       // Copy completed/skipped stage runs from the ancestor into the new run so
       // the DAG scheduler does not re-execute work that already succeeded —
@@ -696,44 +701,10 @@ export class WorkflowRunService {
     await this.executeWorkflowHooks('on_run_start', workflow.hooks, runId, run.workflowDefinitionId);
 
     // The DAG of the run's pinned definition version.
-    const dag = await this.dagScheduler.buildDAGForRun(run);
+    await this.dagScheduler.buildDAGForRun(run);
 
-    // FEAT-1: resolve `auto` session mode adaptively (was a silent alias for
-    // `per-stage`). A purely linear DAG (every execution layer has exactly one
-    // stage) runs better as `single` — one shared SDK conversation carries
-    // context forward across the chain. Any parallelism (a layer with >1 stage,
-    // or multiple roots) needs `per-stage` isolation so concurrent stages don't
-    // clobber a shared conversation. Persist the resolved mode so every later
-    // re-fetch of the run (onStageCompleted/onStageFailed/resume) sees it.
-    //
-    // FEAT-1b: also override `single` when the DAG has parallelism. A shared
-    // session cannot correctly serve two stages executing concurrently — every
-    // Claude event fires BOTH stages' onConversationEvent subscribers and the
-    // frontend sees identical streams for both stage rows (STR-11). Detecting
-    // this at run start and forcing per-stage isolation prevents the duplicate-
-    // stream footgun without asking authors to remember the mode.
-    const hasParallelism =
-      dag.rootIds.length > 1 || dag.executionLayers.some((layer) => layer.length > 1);
-    if (run.sessionMode === 'auto') {
-      const resolvedMode = hasParallelism ? 'per-stage' : 'single';
-      await this.runRepo.update(runId, { sessionMode: resolvedMode });
-      run.sessionMode = resolvedMode;
-      this.logger?.info?.(
-        `[WorkflowRunService] auto session mode resolved to '${resolvedMode}' for run ${runId} (parallel=${hasParallelism})`,
-      );
-    } else if (run.sessionMode === 'single' && hasParallelism) {
-      // Definition explicitly requested `single` but the DAG has concurrent
-      // stages — silently override to `per-stage` and log so the operator can
-      // fix the definition. Keeping `single` here would deliver identical
-      // event streams to every parallel stage.
-      await this.runRepo.update(runId, { sessionMode: 'per-stage' });
-      run.sessionMode = 'per-stage';
-      this.logger?.warn?.(
-        `[WorkflowRunService] Overriding sessionMode 'single' → 'per-stage' for run ${runId}: ` +
-        `definition has parallel stages (roots=${dag.rootIds.length}, maxLayer=${Math.max(...dag.executionLayers.map((l) => l.length))}). ` +
-        `A shared session cannot correctly serve concurrent stages.`,
-      );
-    }
+    // Every stage runs in its own fresh session (v2 `sessionReuse: 'fresh'`);
+    // shared sessions arrive with session groups in the engine upgrade (P03).
 
     sm.transition('sys:dag_ready');
     await this.runRepo.updateStatus(runId, 'running');
@@ -1714,7 +1685,7 @@ export class WorkflowRunService {
   /**
    * The runtime override for a stage, matched by stage KEY (names and
    * positions change; keys do not). Overrides ride in the run's
-   * `__stageOverrides` variable (set by the orchestrator and the run routes).
+   * `__stageOverrides` engine state (from the typed `stageOverrides` of the start request).
    */
   private findStageOverride(
     variables: Record<string, unknown> | undefined,

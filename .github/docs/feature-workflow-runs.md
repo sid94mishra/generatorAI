@@ -15,7 +15,7 @@ workflowDefinitionId  FK
 definitionVersionId   FK → workflow_definition_versions.id     (the pinned graph; the engine never reads the live definition)
 name                  text
 status                enum 'created'|'starting'|'running'|'paused'|'cancelling'|'completed'|'failed'|'cancelled'
-sessionMode           enum 'single'|'per-stage'|'auto'         (created 'auto'; resolved from the graph shape at start, see §5)
+sessionMode           enum 'single'|'per-stage'|'auto'         (always 'per-stage': every stage gets a fresh session, see §5)
 variables             JSON Record<string, unknown>             (resolved variables + system vars)
 error?                text
 permissionMode?       enum 'bypassPermissions'|'default'|'acceptEdits'|'plan'
@@ -113,7 +113,7 @@ Server-side:
      - inject __workingDirectory, __artifactsDirectory, __workspaceId, and the engine-recorded
        checkouts repo_path_<alias> / repo_branch_<alias> (templates and expressions read them as
        run.codebases.<alias>.path|branch; authors cannot declare variables with those names)
-3. State transition: created → starting; resolve sessionMode from the graph shape (§5); → running.
+3. State transition: created → starting → running.
 4. Build DAG of the pinned version (DAGScheduler.buildDAGForRun, cached per definitionVersionId).
 5. advanceRun(runId) → DAGScheduler.reconcileRun(runId) → { toLaunch, toSkip } (roots with a false guard are skipped, not launched).
 6. For each stage to launch:
@@ -164,7 +164,7 @@ Cycles, unknown edge endpoints and duplicate edges are rejected by `validateWork
 
 ### Modes (from `WorkflowRun.sessionMode`)
 
-Definitions have no session mode. Every run is created with `sessionMode: 'auto'`, and `startRun` resolves it once from the pinned graph's shape and persists the answer: `per-stage` when the DAG has any parallelism (more than one root, or a layer with more than one stage), otherwise `single`.
+Definitions have no session mode. Every run is created with `sessionMode: 'per-stage'`: each stage gets a fresh session (the v2 default `sessionReuse: 'fresh'`). Shared sessions arrive with session groups in the engine upgrade (P03).
 
 | Mode | Allocation rule |
 |---|---|
@@ -229,7 +229,7 @@ type StageRunOverride = {
 
 Resolution: `WorkflowRunService.findStageOverride(variables.__stageOverrides, stageKey)`. `skip` marks the stage `skipped` (reason `runtime_override`) and the DAG advances past it; `variables` merge over the run variables for that stage only. An override whose key matches no stage is ignored.
 
-`__stageOverrides` is folded into `workflow_runs.variables` at run start so the run remains self-describing.
+Clients send overrides as the typed `stageOverrides` field of the start request (every start route); the run service records them as the engine-owned `__stageOverrides` entry of `workflow_runs.variables`, so the run remains self-describing. Caller variables can never carry `__*` or `repo_path_*` / `repo_branch_*` names (400).
 
 ---
 

@@ -13,16 +13,23 @@ import { orderStageRuns } from './workflowRunOrder.js';
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
 import { z } from 'zod';
+import { StageKeySchema, UserVariablesSchema } from '@generatorai/workflow-spec';
 import { validate } from '../middleware/validate.js';
 import { isStageReviewOutcome } from '@generatorai/shared';
 import type { StageReviewOutcome } from '@generatorai/shared';
 
 /** `POST /workflow-runs`. A draft can only start as a test run. */
+const StageOverrideSchema = z
+  .object({ stageKey: StageKeySchema, skip: z.boolean().optional(), variables: UserVariablesSchema.optional() })
+  .strict();
+
 const CreateWorkflowRunSchema = z.object({
   workflowDefinitionId: z.string().uuid(),
-  variables: z.record(z.unknown()).default({}),
+  // Engine-reserved names (__*, repo_path_*, repo_branch_*) are refused (R-8).
+  variables: UserVariablesSchema.default({}),
   projectId: z.string().uuid().optional(),
   testRun: z.boolean().optional(),
+  stageOverrides: z.array(StageOverrideSchema).max(100).optional(),
 });
 
 export function createWorkflowRunRoutes(container: Container): Router {

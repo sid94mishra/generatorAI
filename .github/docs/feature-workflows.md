@@ -44,8 +44,11 @@ Stage configuration is covered in [feature-stages.md](./feature-stages.md).
   cannot execute (code `engine-unsupported`): `join.mode` other than `all`, `repair`,
   `onExhausted: 'pause'`, `sessionReuse: 'continue'`, `sessionGroup`, `budget`,
   `timeouts.queueMs|idleMs|totalMs`, `output.extraction` other than `auto`, `compensate`,
-  `onExit`, `onFailure`, `maxParallel`, and edge `handlesFailure`. They become available when
-  the engine level changes (one constant, `ENGINE_LEVEL`).
+  `onExit`, `onFailure`, `maxParallel`, `workflow.outputs`, edge `handlesFailure`,
+  `session.provider` and `secretref:` values in MCP server env/headers (resolved by the session
+  composer, P02), and non-default `retry.maxDelayMs|jitter|retryOn|mode|restoreCheckpointOnRestart`
+  and `approval.allowChanges|maxRounds`. They become available when the engine level changes
+  (one constant, `ENGINE_LEVEL`).
 
 ### Validation
 
@@ -109,9 +112,11 @@ values reach commands only through `env`, secrets only as `secretref:`); reserve
 
 An invalid graph anywhere returns **422** `{ error: { code: 'WORKFLOW_INVALID', message, issues } }`.
 
-Runs: `POST /api/workflow-runs { workflowDefinitionId, variables?, projectId?, testRun? }`, then
-`POST /api/workflow-runs/:id/start`; or `POST /api/orchestrator/runs` (lifecycle-aware start,
-also takes `testRun` and `stageOverrides: [{ stageKey, skip?, variables? }]`). Stage runs carry
+Runs: `POST /api/workflow-runs { workflowDefinitionId, variables?, projectId?, testRun?, stageOverrides? }`,
+then `POST /api/workflow-runs/:id/start`; or `POST /api/orchestrator/runs` (lifecycle-aware start,
+same fields). `stageOverrides` is `[{ stageKey, skip?, variables? }]`. Engine-reserved variable
+names (`__*`, `repo_path_*`, `repo_branch_*`) are refused with 400: engine state comes only from
+typed fields. Stage runs carry
 `stageKey`, and `GET /api/workflow-runs/:id` orders them by the pinned graph.
 
 ### Import and export
@@ -157,9 +162,8 @@ read-only. Variables named `repo_path_*` / `repo_branch_*` are rejected; migrati
 
 `workflow.session` is a `SessionSpec` (provider, model, reasoning effort, agent binding
 `agentRef` + `agentOverrides`, tools, MCP, skills, permission mode, browser, …). A stage's
-`session` is merged over it. On the current engine every stage gets its own conversation when
-the graph has parallel branches, and a purely linear graph shares one conversation; there is no
-per-definition session mode (session groups arrive with the engine upgrade).
+`session` is merged over it. Every stage gets its own fresh conversation (`sessionReuse:
+'fresh'`); shared conversations arrive with session groups in the engine upgrade.
 
 ---
 

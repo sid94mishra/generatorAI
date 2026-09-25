@@ -123,13 +123,15 @@ export function createWorkflowScriptRoutes(container: Container): Router {
         return;
       }
 
-      const { profileName, variables, projectId } = req.body as {
+      const { profileName, variables, projectId, stageOverrides } = req.body as {
         profileName?: string;
         variables?: Record<string, unknown>;
         projectId?: string;
+        stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }>;
       };
 
       let resolvedVars = variables ?? {};
+      let profileOverrides: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }> = [];
       let resolvedPermissionMode: WorkflowRunPermissionMode | undefined;
       if (profileName) {
         const profile = script.profiles.find((p) => p.name === profileName);
@@ -140,13 +142,9 @@ export function createWorkflowScriptRoutes(container: Container): Router {
           return;
         }
         resolvedVars = { ...profile.variables, ...resolvedVars };
-        // PWS-08 — the profile's stage overrides (by stage key) ride in the
-        // run's `__stageOverrides` variable; explicit ones in the request are
-        // merged on top.
-        const runtimeOverrides = variables?.['__stageOverrides'] as unknown[] | undefined;
-        if (profile.stageOverrides || runtimeOverrides) {
-          resolvedVars = { ...resolvedVars, __stageOverrides: [...(profile.stageOverrides ?? []), ...(runtimeOverrides ?? [])] };
-        }
+        // PWS-08 — the profile's stage overrides (by stage key); explicit
+        // ones in the request are applied after them.
+        profileOverrides = profile.stageOverrides ?? [];
         resolvedPermissionMode = profile.permissionMode;
       }
 
@@ -158,6 +156,7 @@ export function createWorkflowScriptRoutes(container: Container): Router {
         workflowDefinitionId: definition.id,
         variables: resolvedVars,
         ...(projectId ? { projectId } : {}),
+        stageOverrides: [...profileOverrides, ...(stageOverrides ?? [])],
       });
 
       // Apply the profile's permission mode (the run vocabulary; the script

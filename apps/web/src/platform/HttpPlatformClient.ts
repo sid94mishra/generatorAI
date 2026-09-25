@@ -983,11 +983,20 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
+  /** Every definition: follows `nextCursor` across pages. */
   async listDefinitions(): Promise<WorkflowDefinitionSummary[]> {
-    const page = await apiFetch<{ items: WorkflowDefinitionSummary[]; nextCursor?: string }>(
-      `${this.baseUrl}/api/workflow-definitions?limit=500`,
-    );
-    return page.items;
+    const items: WorkflowDefinitionSummary[] = [];
+    let cursor: string | undefined;
+    do {
+      const qs = new URLSearchParams({ limit: '200' });
+      if (cursor) qs.set('cursor', cursor);
+      const page = await apiFetch<{ items: WorkflowDefinitionSummary[]; nextCursor?: string }>(
+        `${this.baseUrl}/api/workflow-definitions?${qs.toString()}`,
+      );
+      items.push(...page.items);
+      cursor = page.nextCursor;
+    } while (cursor);
+    return items;
   }
 
   async getDefinition(id: string): Promise<WorkflowDefinitionRecord> {

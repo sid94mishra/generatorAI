@@ -478,25 +478,25 @@ Source: `apps/server/src/routes/workflowRuns.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/workflow-runs` | 45 |
-| `GET` | `/api/workflow-runs` | 58 |
-| `GET` | `/api/workflow-runs/:id` | 90 |
-| `GET` | `/api/workflow-runs/:id/scratchpad` | 103 |
-| `POST` | `/api/workflow-runs/:id/start` | 132 |
-| `POST` | `/api/workflow-runs/:id/pause` | 154 |
-| `POST` | `/api/workflow-runs/:id/resume` | 168 |
-| `POST` | `/api/workflow-runs/:id/retry` | 184 |
-| `POST` | `/api/workflow-runs/:id/cancel` | 214 |
-| `DELETE` | `/api/workflow-runs/:id` | 228 |
-| `GET` | `/api/workflow-runs/:id/stages` | 247 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/pause` | 258 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/resume` | 272 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/retry` | 294 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/cancel` | 322 |
-| `GET` | `/api/workflow-runs/:id/permission-mode` | 348 |
-| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 359 |
-| `GET` | `/api/workflow-runs/:id/pending-interrupts` | 384 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/approve` | 404 |
+| `POST` | `/api/workflow-runs` | 52 |
+| `GET` | `/api/workflow-runs` | 65 |
+| `GET` | `/api/workflow-runs/:id` | 97 |
+| `GET` | `/api/workflow-runs/:id/scratchpad` | 110 |
+| `POST` | `/api/workflow-runs/:id/start` | 139 |
+| `POST` | `/api/workflow-runs/:id/pause` | 161 |
+| `POST` | `/api/workflow-runs/:id/resume` | 175 |
+| `POST` | `/api/workflow-runs/:id/retry` | 191 |
+| `POST` | `/api/workflow-runs/:id/cancel` | 221 |
+| `DELETE` | `/api/workflow-runs/:id` | 235 |
+| `GET` | `/api/workflow-runs/:id/stages` | 254 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/pause` | 265 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/resume` | 279 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/retry` | 301 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/cancel` | 329 |
+| `GET` | `/api/workflow-runs/:id/permission-mode` | 355 |
+| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 366 |
+| `GET` | `/api/workflow-runs/:id/pending-interrupts` | 391 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/approve` | 411 |
 
 ## workflowScripts
 
@@ -509,10 +509,10 @@ Source: `apps/server/src/routes/workflowScripts.ts`.
 | `GET` | `/api/workflow-scripts/:id/profiles` | 55 |
 | `POST` | `/api/workflow-scripts/:id/materialize` | 88 |
 | `POST` | `/api/workflow-scripts/:id/run` | 117 |
-| `POST` | `/api/workflow-scripts/reload` | 184 |
-| `POST` | `/api/workflow-scripts/:id/reload` | 196 |
-| `POST` | `/api/workflow-scripts/upload` | 223 |
-| `POST` | `/api/workflow-scripts/validate` | 272 |
+| `POST` | `/api/workflow-scripts/reload` | 183 |
+| `POST` | `/api/workflow-scripts/:id/reload` | 195 |
+| `POST` | `/api/workflow-scripts/upload` | 222 |
+| `POST` | `/api/workflow-scripts/validate` | 271 |
 
 ## workspaces
 

@@ -1259,14 +1259,23 @@ export function createApiClient(fetchImpl: ApiFetch) {
     models: () => request<ModelInfo[]>(fetchImpl, '/api/harness/models'),
 
     workflows: {
-      /** The first page of definitions (up to 200), newest first. */
-      list: async (projectId?: string): Promise<WorkflowSummary[]> =>
-        (
-          await request<{ items: WorkflowSummary[] }>(
+      /** Every definition (all pages, following `nextCursor`), newest first. */
+      list: async (projectId?: string): Promise<WorkflowSummary[]> => {
+        const items: WorkflowSummary[] = [];
+        let cursor: string | undefined;
+        do {
+          const qs = new URLSearchParams({ limit: '200' });
+          if (projectId) qs.set('projectId', projectId);
+          if (cursor) qs.set('cursor', cursor);
+          const page = await request<{ items: WorkflowSummary[]; nextCursor?: string }>(
             fetchImpl,
-            `/api/workflow-definitions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
-          )
-        ).items,
+            `/api/workflow-definitions?${qs.toString()}`,
+          );
+          items.push(...page.items);
+          cursor = page.nextCursor;
+        } while (cursor);
+        return items;
+      },
 
       get: (id: string) => request<WorkflowDefinitionRecord>(fetchImpl, `/api/workflow-definitions/${id}`),
     },

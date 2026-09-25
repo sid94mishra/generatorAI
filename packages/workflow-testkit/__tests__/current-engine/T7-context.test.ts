@@ -92,7 +92,7 @@ describe('T7 context passing (current engine)', () => {
     expect(prompt).toContain('**IMPORTANT: How to create files**'); // KNOWN-BUG W-48 (boilerplate on every prompt provokes refusals)
   });
 
-  it('a linear auto-mode workflow shares one conversation and still re-sends context', async () => {
+  it('a linear workflow gives every stage its own fresh session with its own config', async () => {
     engine = await createTestEngine();
     const run = await engine.runWorkflow({
       stages: [
@@ -102,15 +102,11 @@ describe('T7 context passing (current engine)', () => {
       edges: [['S1', 'S2']],
     });
     const snap = await run.waitForTerminal();
-    expect(snap.run.sessionMode).toBe('single');
-    const convs = new Set(snap.calls.map((c) => c.conversationId));
-    expect(convs.size).toBe(1);
-    // The one conversation was created with stage 1's config; stage 2's
-    // model override never reaches a conversation.
-    const params = [...engine.harness.conversationParams.values()];
-    expect(params).toHaveLength(1);
-    expect(params[0]!.model).toBe('model-one'); // KNOWN-BUG W-09 (stages 2..N run with stage 1's model/tools)
-    // ...and S2 is still sent a context turn about S1 into the same conversation.
-    expect(snap.calls.filter((c) => c.stageName === 'S2').map((c) => c.kind)[0]).toBe('context'); // KNOWN-BUG W-09 (F-18 re-injected context)
+    expect(snap.run.sessionMode).toBe('per-stage');
+    // v2 sessionReuse 'fresh' (P01 review R4): one conversation per stage, each
+    // created with its own stage's model (W-09 closed for the v1 engine).
+    expect(new Set(snap.calls.map((c) => c.conversationId)).size).toBe(2);
+    const models = [...engine.harness.conversationParams.values()].map((p) => p.model).sort();
+    expect(models).toEqual(['model-one', 'model-two']);
   });
 });

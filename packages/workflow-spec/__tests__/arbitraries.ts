@@ -28,10 +28,8 @@ const retry = fc.record(
     maxAttempts: fc.integer({ min: 1, max: 10 }),
     initialDelayMs: fc.integer({ min: 0, max: 5000 }),
     backoffMultiplier: fc.integer({ min: 1, max: 5 }),
-    maxDelayMs: fc.integer({ min: 5000, max: 60000 }),
-    jitter: fc.constantFrom('full', 'equal', 'none'),
-    retryOn: fc.subarray(['rate_limited', 'overloaded', 'transport'] as const),
-    mode: fc.constantFrom('resume', 'restart'),
+    // maxDelayMs, jitter, retryOn, mode and restoreCheckpointOnRestart are
+    // engine-gated on v1 unless they keep their defaults.
   },
   { requiredKeys: [] },
 );
@@ -69,7 +67,7 @@ export const validGraph: fc.Arbitrary<WorkflowGraphInput> = fc
           retry,
           timeouts: fc.record({ attemptMs: fc.integer({ min: 1000, max: 600000 }) }),
           onExhausted: fc.constant('fail' as const),
-          approval: fc.record({ prompt: text(30), maxRounds: fc.integer({ min: 1, max: 5 }) }, { requiredKeys: [] }),
+          approval: fc.record({ prompt: text(30) }, { requiredKeys: [] }),
           context: fc.record({ mode: fc.constantFrom('summary', 'output', 'structured', 'none') }),
           output: fc.record({ format: fc.constant('text' as const), rules: fc.constant([{ type: 'min_length' as const, value: 1 }]) }),
           position: fc.record({ x: fc.integer({ min: -500, max: 500 }), y: fc.integer({ min: -500, max: 500 }) }),

@@ -40,12 +40,12 @@ This lists static environment reads in runtime source, including platform, provi
 | `GENERATORAI_ADVERTISED_URLS` | `apps/server/src/index.ts:726`<br>`apps/server/src/routes/auth.ts:732` |
 | `GENERATORAI_AGENT_HOST` | `apps/server/src/composition-root.ts:483` |
 | `GENERATORAI_ALLOW_HOST_SANDBOX` | `apps/server/src/composition-root.ts:658` |
-| `GENERATORAI_ALLOW_SCRIPT_UPLOAD` | `apps/server/src/index.ts:380`<br>`apps/server/src/routes/workflowScripts.ts:228` |
+| `GENERATORAI_ALLOW_SCRIPT_UPLOAD` | `apps/server/src/index.ts:380`<br>`apps/server/src/routes/workflowScripts.ts:227` |
 | `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK` | `apps/server/src/composition/security.ts:157`<br>`apps/server/src/index.ts:332` |
 | `GENERATORAI_ALLOW_WORKFLOW_SCRIPTS` | `apps/server/src/index.ts:379` |
 | `GENERATORAI_API_KEY` | `apps/server/src/composition/security.ts:148` |
 | `GENERATORAI_AUDIT_RETENTION_DAYS` | `apps/server/src/index.ts:344`<br>`apps/server/src/index.ts:346` |
-| `GENERATORAI_BACKUP_ROOT` | `packages/db/src/migrations/v55_workflow_definitions_v2.ts:89` |
+| `GENERATORAI_BACKUP_ROOT` | `packages/db/src/migrations/v55_workflow_definitions_v2.ts:115` |
 | `GENERATORAI_BIND_HOST` | `apps/server/src/composition/security.ts:144`<br>`apps/server/src/index.ts:328`<br>`apps/server/src/routes/security.ts:97`<br>`apps/server/src/routes/security.ts:168` |
 | `GENERATORAI_BROWSER_EXECUTABLE_PATH` | `packages/core/src/infrastructure/browser/ScreencastEncoder.ts:285`<br>`packages/core/src/infrastructure/browser/ScreencastEncoder.ts:286`<br>`packages/core/src/infrastructure/browser/ServerPlaywrightHost.ts:336`<br>`packages/core/src/infrastructure/browser/ServerPlaywrightHost.ts:337`<br>`packages/core/src/infrastructure/browser/ServerPlaywrightHost.ts:354` |
 | `GENERATORAI_BROWSER_HOST_IDLE_MS` | `apps/browser-host/src/BrowserHostServer.ts:31` |
@@ -158,7 +158,6 @@ This lists static environment reads in runtime source, including platform, provi
 | `GENERATORAI_TOOL_TIMEOUT_MS` | `packages/agent-harness-providers/src/toolSemaphore.ts:51` |
 | `GENERATORAI_TTS` | `apps/server/src/composition-root.ts:1945`<br>`apps/server/src/composition-root.ts:2042`<br>`apps/server/src/tts-ws.ts:66` |
 | `GENERATORAI_URLENCODED_LIMIT` | `apps/server/src/app.ts:90` |
-| `GENERATORAI_V55_SKIP_RUN_CLEANUP` | `packages/db/scripts/_tmp_dev.ts:2` |
 | `GENERATORAI_VOICE_IDLE_REAPER_MS` | `packages/core/src/services/VoiceService.ts:183` |
 | `GENERATORAI_VOICE_IDLE_TTL_MS` | `packages/core/src/services/VoiceService.ts:176` |
 | `GENERATORAI_VOICE_IN_PROCESS` | `apps/server/src/composition-root.ts:1866` |

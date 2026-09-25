@@ -8,21 +8,21 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
-import { HARNESS_PROVIDER_IDS, REASONING_EFFORTS, RUN_PERMISSION_MODES } from '../constants.js';
+import { FORBIDDEN_VARIABLE_NAME_PATTERN, HARNESS_PROVIDER_IDS, REASONING_EFFORTS, RUN_PERMISSION_MODES } from '../constants.js';
 import { customIssue, StageKeySchema } from './common.js';
 import { CodebaseAliasSchema } from './workflow.js';
 
-/** Caller-supplied variables. `__*` names are system values and always refused (R-8). */
+/** Caller-supplied variables. Engine-reserved names (`__*`, `repo_path_*`, `repo_branch_*`) are always refused (R-8). */
 export const UserVariablesSchema = z
   .record(z.unknown())
   .superRefine((vars, ctx) => {
     for (const k of Object.keys(vars)) {
-      if (k.startsWith('__')) {
-        customIssue(ctx, 'reserved-variable-name', 'Reserved variable names (__*) cannot be supplied by callers', [k]);
+      if (FORBIDDEN_VARIABLE_NAME_PATTERN.test(k)) {
+        customIssue(ctx, 'reserved-variable-name', 'Engine-reserved variable names (__*, repo_path_*, repo_branch_*) cannot be supplied by callers', [k]);
       }
     }
   })
-  .describe('Variable values by name; __* names are refused');
+  .describe('Variable values by name; engine-reserved names are refused');
 
 export const InvocationTargetSchema = z
   .discriminatedUnion('kind', [

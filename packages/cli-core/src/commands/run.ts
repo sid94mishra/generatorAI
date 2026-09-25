@@ -4,7 +4,6 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { StageRunOverride } from '@generatorai/shared';
-import { STAGE_OVERRIDES_VARIABLE } from '@generatorai/client-core';
 import type { WorkflowGraph } from '@generatorai/workflow-spec';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError } from '../errors/CliError.js';
@@ -434,14 +433,12 @@ export function runCommands(): CommandSpec[] {
           projectId = resolveRef(flags.project, { kind: 'project', candidates: projects }).id;
         }
 
-        // Stage overrides (by key) ride in the run's reserved variable; that
-        // is the channel the run service reads them from.
+        // Stage overrides (by key) are a typed field of the create request.
         const stageOverrides = mergeStageOverrides(
           graph,
           profile.stageOverrides,
           overridesFromFlags(flags.skip, flags.stageVar),
         );
-        if (stageOverrides.length) variables[STAGE_OVERRIDES_VARIABLE] = stageOverrides;
 
         const created = await ctx.api.runs.create(
           compact({
@@ -449,6 +446,7 @@ export function runCommands(): CommandSpec[] {
             variables,
             projectId,
             testRun: testRun || undefined,
+            stageOverrides: stageOverrides.length ? stageOverrides : undefined,
           }),
         );
 

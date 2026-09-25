@@ -155,26 +155,12 @@ describe('WorkflowRunService', () => {
     });
 
     // ── FEAT-1: adaptive `auto` session mode resolution ──
-    it('resolves auto → single for a linear DAG', async () => {
-      const AUTO_LINEAR = await seed('def-auto-linear', ['a', 'b'], [['a', 'b']]);
-
-      const run = await service.createRun({ workflowDefinitionId: AUTO_LINEAR });
-      expect(run.sessionMode).toBe('auto');
+    it('gives every stage a fresh session, linear or parallel (v2 sessionReuse fresh)', async () => {
+      const LINEAR = await seed('def-linear', ['a', 'b'], [['a', 'b']]);
+      const run = await service.createRun({ workflowDefinitionId: LINEAR });
+      expect(run.sessionMode).toBe('per-stage');
       await service.startRun(run.id);
-
-      const updated = await runRepo.getById(run.id);
-      expect(updated.sessionMode).toBe('single');
-    });
-
-    it('resolves auto → per-stage for a DAG with parallelism', async () => {
-      // a → b and a → c : b and c land in the same parallel layer.
-      const AUTO_PARALLEL = await seed('def-auto-parallel', ['a', 'b', 'c'], [['a', 'b'], ['a', 'c']]);
-
-      const run = await service.createRun({ workflowDefinitionId: AUTO_PARALLEL });
-      await service.startRun(run.id);
-
-      const updated = await runRepo.getById(run.id);
-      expect(updated.sessionMode).toBe('per-stage');
+      expect((await runRepo.getById(run.id)).sessionMode).toBe('per-stage');
     });
   });
 
@@ -599,7 +585,7 @@ describe('WorkflowRunService', () => {
 
       const run = await service.createRun({
         workflowDefinitionId: RECOVERY_DEF,
-        variables: { __stageOverrides: [{ stageKey: 'recover', skip: true }] },
+        stageOverrides: [{ stageKey: 'recover', skip: true }],
       });
       await runRepo.updateStatus(run.id, 'running');
 

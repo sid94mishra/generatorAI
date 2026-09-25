@@ -651,6 +651,14 @@
         "packages/workflow-spec/"
       ],
       "reason": "WP-1.7: edge `on` is success | failure | completion | always"
+    },
+    {
+      "phase": "01",
+      "pattern": "prefix: '/webhooks'",
+      "paths": [
+        "packages/auth/"
+      ],
+      "reason": "P01 review R7: the v1 /webhooks routes are deleted; a public policy entry for them fails open"
     }
   ],
   "comments": {

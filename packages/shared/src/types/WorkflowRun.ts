@@ -196,6 +196,10 @@ export interface CreateWorkflowRunParams {
   definitionVersionId?: string;
   /** Run the working graph as a `test` version (the only way to run a draft). */
   testRun?: boolean;
+  /** Per-stage overrides for this run, by stage key. */
+  stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }>;
+  /** What started the run (an automation trigger); a scheduled run never inherits an execution context. */
+  triggeredBy?: string;
 }
 
 // ────────────────────────────────────────────────────────────────

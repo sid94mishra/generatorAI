@@ -1,6 +1,7 @@
 // FROZEN COPY for migration v55 (README R-3, RV-33). Copied from
-// packages/workflow-spec/src at 32c6d7c. Never edit: v55 converts legacy rows
-// into exactly these shapes; the live spec package may move on.
+// packages/workflow-spec/src (P01 review fixes). Never edit: v55 converts
+// legacy rows into exactly these shapes and validates them with this copy of
+// the validator; the live spec package may move on.
 
 // ────────────────────────────────────────────────────────────────
 // Building blocks shared by the stage, edge and workflow schemas.
@@ -18,7 +19,7 @@ import {
   RESERVED_ROOTS,
   STAGE_KEY_PATTERN,
   VARIABLE_NAME_PATTERN,
-} from './constants.js';
+} from '../constants.js';
 
 /**
  * zod custom issues carry their stable validator code in `params.code`, so

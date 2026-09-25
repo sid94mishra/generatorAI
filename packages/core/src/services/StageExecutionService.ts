@@ -1253,6 +1253,7 @@ export class StageExecutionService {
         ),
         eventBus: this.eventBus,
         workflowRunId,
+        templateScope: await this.hookTemplateScope(workflowRunId, variables),
       };
       const preResult = await this.hookExecutor.executePhase('pre_run', stage.hooks, preRunHookContext);
       if (!preResult.shouldContinue) {
@@ -2031,6 +2032,7 @@ export class StageExecutionService {
             ),
             eventBus: this.eventBus,
             workflowRunId,
+            templateScope: await this.hookTemplateScope(workflowRunId, variables),
           }).catch(() => { /* non-fatal — stage continues regardless */ });
         }
 
@@ -2258,6 +2260,7 @@ export class StageExecutionService {
           ),
           eventBus: this.eventBus,
           workflowRunId,
+          templateScope: await this.hookTemplateScope(workflowRunId, variables),
         };
         // post_run hooks are non-blocking by convention — failures don't prevent
         // the stage from being marked complete (but they will be logged/evented).
@@ -2636,6 +2639,7 @@ export class StageExecutionService {
           ),
           eventBus: this.eventBus,
           workflowRunId,
+          templateScope: await this.hookTemplateScope(workflowRunId, variables),
         }).catch(() => { /* non-fatal — error handling must not throw */ });
       }
 
@@ -2881,6 +2885,7 @@ export class StageExecutionService {
           ),
           eventBus: this.eventBus,
           workflowRunId,
+          templateScope: await this.hookTemplateScope(workflowRunId, variables),
         };
         await this.hookExecutor.executePhase('post_run', stage.hooks, postRunHookContext)
           .catch(() => { /* non-fatal — stage already completed its work */ });
@@ -3244,6 +3249,7 @@ export class StageExecutionService {
         variables: {},
         eventBus: this.eventBus,
         workflowRunId: stageRun.workflowRunId,
+        templateScope: await this.hookTemplateScope(stageRun.workflowRunId, undefined),
       }).catch(() => { /* non-fatal — cancellation must not throw */ });
     }
 
@@ -3305,6 +3311,19 @@ export class StageExecutionService {
    * template that does not parse (validation normally rejects it at save)
    * is sent as written.
    */
+  /** The Expression v2 scope stage hooks render their templated fields with. */
+  private async hookTemplateScope(
+    workflowRunId: string,
+    variables: Record<string, unknown> | undefined,
+  ): Promise<Record<string, unknown> | undefined> {
+    try {
+      const run = await this.workflowRunRepo.getById(workflowRunId);
+      return templateScope(run, variables, await this.stageRunRepo.getByRunId(workflowRunId));
+    } catch {
+      return undefined; // the executor derives a scope from the hook's variables
+    }
+  }
+
   private renderStageTemplate(
     text: string,
     scope: ReturnType<typeof templateScope>,

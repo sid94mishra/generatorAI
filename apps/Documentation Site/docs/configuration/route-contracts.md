@@ -406,14 +406,24 @@ const SignalBodySchema = z.object({
 
 Source: `apps/server/src/routes/workflowRuns.ts`. Imported symbols retain their source names; see the linked feature/configuration guides for those values.
 
+### StageOverrideSchema
+
+```typescript
+const StageOverrideSchema = z
+  .object({ stageKey: StageKeySchema, skip: z.boolean().optional(), variables: UserVariablesSchema.optional() })
+  .strict();
+```
+
 ### CreateWorkflowRunSchema
 
 ```typescript
 const CreateWorkflowRunSchema = z.object({
   workflowDefinitionId: z.string().uuid(),
-  variables: z.record(z.unknown()).default({}),
+  // Engine-reserved names (__*, repo_path_*, repo_branch_*) are refused (R-8).
+  variables: UserVariablesSchema.default({}),
   projectId: z.string().uuid().optional(),
   testRun: z.boolean().optional(),
+  stageOverrides: z.array(StageOverrideSchema).max(100).optional(),
 });
 ```
 
