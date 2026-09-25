@@ -6,7 +6,7 @@
 // no transport, no retries live here — those belong to the layers below.
 // ────────────────────────────────────────────────────────────────
 
-import type { RunStatus, StageRunStatus } from '@generatorai/shared';
+import type { AttentionFilter, AttentionSnapshot, RunStatus, StageRunStatus } from '@generatorai/shared';
 
 export interface ApiFetch {
   (path: string, init?: RequestInit): Promise<Response>;
@@ -946,6 +946,14 @@ export const queryKeys = {
 export function createApiClient(fetchImpl: ApiFetch) {
   return {
     health: () => request<HealthSnapshot>(fetchImpl, '/api/health'),
+
+    /**
+     * G-01 — Needs you + Running across chats, runs and automation
+     * executions. Named like `IPlatformClient.getAttention` so this client
+     * satisfies `createAttentionStore`'s snapshot source directly.
+     */
+    getAttention: (filter?: AttentionFilter) =>
+      request<AttentionSnapshot>(fetchImpl, `/api/attention${qs({ projectId: filter?.projectId })}`),
 
     harness: {
       /**

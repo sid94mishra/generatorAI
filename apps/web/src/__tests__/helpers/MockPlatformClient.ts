@@ -21,7 +21,10 @@ import type {
   WorkflowRun,
   WorkflowRunWithStages,
   CreateWorkflowRunParams,
+  AttentionFilter,
+  AttentionSnapshot,
 } from '@generatorai/shared';
+import { emptyAttentionCounts } from '@generatorai/shared';
 import { vi } from 'vitest';
 
 export function createMockSession(overrides: Partial<Session> = {}): Session {
@@ -276,4 +279,13 @@ export class MockPlatformClient implements IPlatformClient {
   setPermissionMode = vi.fn(async (_runId: string, _mode: string): Promise<void> => {});
   listPendingInterrupts = vi.fn(async (_runId: string) => []);
   resumeStage = vi.fn(async (_runId: string, _stageId: string, _resolution: { approved: boolean; value?: unknown; reason?: string }) => ({ ok: true }));
+
+  // ── Attention feed (G-01) ──
+  getAttention = vi.fn(async (_filter?: AttentionFilter): Promise<AttentionSnapshot> => ({
+    seq: 0,
+    generatedAt: new Date(0).toISOString(),
+    needsYou: [],
+    running: [],
+    counts: emptyAttentionCounts(),
+  }));
 }

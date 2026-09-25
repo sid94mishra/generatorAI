@@ -12,6 +12,7 @@ import type { AgentEvent, PersistedEvent } from './AgentEvent.js';
 import type { Chat, CreateChatParams } from './Chat.js';
 import type { WorkflowDefinition, WorkflowDefinitionWithStages, CreateWorkflowDefinitionParams } from './WorkflowDefinition.js';
 import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams, StageRun } from './WorkflowRun.js';
+import type { AttentionFilter, AttentionSnapshot } from './Attention.js';
 
 /** Platform type discriminator */
 export type PlatformType = 'web' | 'cli' | 'desktop';
@@ -172,4 +173,13 @@ export interface IPlatformClient {
     stageId: string,
     resolution: { approved: boolean; value?: unknown; reason?: string },
   ): Promise<{ ok: boolean; reason?: string }>;
+
+  // ── Attention feed (G-01) ──
+  /**
+   * Needs you + Running across chats, workflow runs and automation
+   * executions (`GET /api/attention`). Live deltas arrive on the `global`
+   * stream scope as `attention.*`; fold them in with client-core's
+   * `attentionReducer`.
+   */
+  getAttention(filter?: AttentionFilter): Promise<AttentionSnapshot>;
 }

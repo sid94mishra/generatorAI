@@ -25,6 +25,13 @@ Background: `research/mobile-design-analysis.md` (design analysis) and `research
 | M-13 | Copy for statuses, gate-card actions and empty states | `packages/shared/src/ui-contract/copy.ts` (status labels live with the status map) | P1-T10, P4-07, P5-01 | Kit | Mobile |
 | M-14 | Fonts: licensing and file choice (Instrument Sans, JetBrains Mono; static weights 400/500/600) documented | `packages/design-tokens/src/themes/fonts.ts` header | P1 (P1-T7) | Fontsource variable packages | `expo-font` config plugin with static TTFs (variable fonts need SDK 58) |
 
+**M-09 landed (P2-01, G-01).** What the mobile pass consumes, with no server work left:
+- **Wire types:** `AttentionSnapshot`, `AttentionItem`, `AttentionCounts`, the `attention.*` event payloads and `countAttention` / `compareAttentionItems` in `packages/shared/src/types/Attention.ts` (exported from `@generatorai/shared/client` too).
+- **Read model:** `packages/client-core/src/attention/` — `attentionReducer` + `initialAttentionState`, `applyAttentionEvent`, the selectors (`selectNeedsYou`, `selectRunning`, `selectCounts`, `selectAttentionFor`, `selectAttentionByProject`) and `createAttentionStore(api, mux, { projectId? })`. The store takes `createApiClient(...)` (it has `getAttention`) and the app's `MuxStreamClient` as-is; wrap its `subscribe`/`getState` in the mobile state container (e.g. `useSyncExternalStore`).
+- **Scopes:** the snapshot and the `global` deltas need only `read:activity`, which the default mobile grant carries. Without `read:chats` / `read:workflows` the server strips `ask.detail` and `progress.label`; render the row without them.
+- **Rules to keep:** until the first snapshot arrives the lists are unknown, not empty (`selectCounts` returns `null`); quick actions call the existing chat, run and consent endpoints (`ask.actions` says which); `item.href` is a web route — map it to the mobile route by `entity` + `entityId` (+ `ask.kind` for the plan/computer sheets, `parent` for worker chats).
+- **Notifications / Live Activities:** `attention.counts` carries totals without items for surfaces that only badge.
+
 **Rule for this pass:** when you build anything that mobile will also draw — a status, a verb, a gate card, a composer state, a nav destination, a command — put the *data and types* in `packages/shared` or `packages/client-core` first. The web component then consumes them. This is enforced in review; `07-phases.md` §"Mobile-readiness deliverables → tasks" names the task that owns each M-xx item.
 
 ## 2. What the mobile design contains (summary for planning)

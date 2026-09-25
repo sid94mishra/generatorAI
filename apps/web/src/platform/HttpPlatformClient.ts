@@ -22,6 +22,7 @@ import type {
   PlanRevision,
 } from '@generatorai/shared';
 import type { Artifact } from '@generatorai/shared';
+import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
 // AGT-01 — first-class agents
 import type {
   Agent,
@@ -2657,5 +2658,12 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<{ token: string }>(`${this.baseUrl}/api/automations/${automationId}/rotate-webhook-token`, {
       method: 'POST',
     });
+  }
+
+  // G-01: the attention feed snapshot (Needs you + Running). Live deltas
+  // arrive on the `global` scope; `hooks/attentionQueries.ts` folds them in.
+  async getAttention(filter?: AttentionFilter): Promise<AttentionSnapshot> {
+    const query = filter?.projectId ? `?projectId=${encodeURIComponent(filter.projectId)}` : '';
+    return apiFetch<AttentionSnapshot>(`${this.baseUrl}/api/attention${query}`);
   }
 }

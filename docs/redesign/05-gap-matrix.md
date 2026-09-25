@@ -27,7 +27,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 
 | ID | Element | Needed by | Owner | Effort |
 |---|---|---|---|---|
-| G-01 | Attention feed (Needs you + Running, live) | P3 | P2 | L |
+| G-01 | Attention feed (Needs you + Running, live) — **built (P2-01)** | P3 | P2 | L |
 | G-02 | Chat list v2: status, Changes ±, last activity, filters, paging | P3 | P2 | M |
 | G-03 | Server switcher: server list, reachability, desktop IPC | P3 | P2 | M |
 | G-04 | Desktop update state in the renderer ("Restart to update") | P3 | P2 | S |
@@ -54,6 +54,14 @@ Every designed element whose data or behaviour the current API, stores and deskt
 ## 2. Gaps owned by the redesign (P2 backend track)
 
 ### G-01 — Attention feed
+
+**Status: built in P2-01.** `AttentionService` (`packages/core/src/services/AttentionService.ts`), `GET /attention` (`apps/server/src/routes/attention.ts`, policy `read:activity`, OpenAPI `AttentionSnapshot`), `attention.upsert|remove|counts` on `global` with per-principal redaction in `routes/stream.ts`, `packages/client-core/src/attention/`, `IPlatformClient.getAttention`, `hooks/attentionQueries.ts`. No migration. Deviations from the text below, all forced by the parallel-work rules or the code:
+- `HitlService.listAllPending()` is not added (workflow engine is PW-owned): stage asks are read with `IStageRunRepository.getByRunId` for every live run, which is the same set.
+- `ChatManagementService.getStreamingSince()` is backed by `StreamingChatRegistry` (the existing in-flight map), which also exposes `onStreamingChange`; the service listens to that rather than inferring streaming from `session.active` / `harness.idle`, which race the map.
+- Bus events are triggers only: each one re-reads the affected entity and the result is diffed, so a missed or reordered event cannot leave a stale ask.
+- An entity with an ask is listed under Needs you only (never also under Running).
+- `progress.label` is optional (omitted when there is no step title), per the "If there is none, the field is omitted" rule below.
+- `seq` starts at `Date.now() × 1000` per process, so a client that outlives a server restart sees a gap and refetches.
 
 **Elements & boards.**
 - Sidebar "Needs you" (two-line rows) and "Running" (title + elapsed), plus the rail's needs-you dot and running counter. Every board with a sidebar shows them; ChatNarrow and WorkflowBuilder show the rail form.
