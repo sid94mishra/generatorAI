@@ -3,3 +3,4 @@ export * from './types.js';
 export * from './cfg.js';
 export { PlatformToolBinder, type BindTarget } from './PlatformToolBinder.js';
 export { resolveMcp } from './resolveMcp.js';
+export { PROVIDER_CAPABILITY_LEVELS, capabilityLevelsFor, type CapabilityLevels } from './capabilityLevels.js';

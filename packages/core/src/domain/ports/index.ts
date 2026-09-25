@@ -214,5 +214,9 @@ export type {
   ProviderCapabilities,
   ProviderInstanceId,
   ProviderWireProtocol,
+  ApprovalGatingLevel,
+  HostToolsLevel,
+  StructuredOutputLevel,
+  SkillsLevel,
 } from './IProviderInstance.js';
 export { makeProviderInstanceId } from './IProviderInstance.js';

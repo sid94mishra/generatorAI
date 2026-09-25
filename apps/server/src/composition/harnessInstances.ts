@@ -243,7 +243,7 @@ export async function registerHarnessInstances(
         displayName: record.displayName,
         capabilities: {
           vision: false, reasoning: false, reasoningEfforts: [], planMode: false,
-          mcpServers: false, skillDirectories: false, fullToolGating: false,
+          mcpServers: false, approvalGating: 'none', hostTools: 'none', structuredOutput: 'none', skills: 'none',
           sessionPersistence: false, budgetTracking: false,
         },
         enabled: true,

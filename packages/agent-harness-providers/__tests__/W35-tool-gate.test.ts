@@ -30,7 +30,7 @@
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { ClaudeAgentProvider } from '../src/providers/claude-agent/ClaudeAgentProvider.js';
-import type { HookBridge, ProviderCapabilities } from '@generatorai/core';
+import type { HookBridge } from '@generatorai/core';
 
 type ClaudeHookFn = (input: unknown) => Promise<Record<string, unknown>>;
 type HookMap = Record<string, Array<{ hooks: ClaudeHookFn[] }> | undefined>;
@@ -181,11 +181,7 @@ describe('W35-B2 — the installed gate fails CLOSED', () => {
 
 // ── (c) The ledger matches runtime behaviour ──
 
-describe('W35 — capabilities().fullToolGating is honest', () => {
-  function gatingOf(caps: ProviderCapabilities): boolean {
-    return caps.fullToolGating;
-  }
-
+describe('W35 — preToolUseGated() is honest', () => {
   it('reports FALSE while no policy is attached, matching the hookless runtime', async () => {
     const provider = makeProvider();
     const options = queryOptionsFor(provider, { conversationId: 'c-honest' });
@@ -193,8 +189,8 @@ describe('W35 — capabilities().fullToolGating is honest', () => {
     // Runtime: the hook is installed but expresses no opinion.
     expect(decisionOf(await preToolUseOf(options)!(HOOK_INPUT()))).toBeUndefined();
     // Ledger: says exactly that. It used to hardcode `true` here.
-    expect(gatingOf(provider.capabilities())).toBe(false);
-    expect(gatingOf(provider.conversationCapabilities('c-honest'))).toBe(false);
+    expect(provider.preToolUseGated()).toBe(false);
+    expect(provider.preToolUseGated('c-honest')).toBe(false);
   });
 
   it('reports TRUE per conversation when that conversation supplies its own gate', async () => {
@@ -203,24 +199,24 @@ describe('W35 — capabilities().fullToolGating is honest', () => {
     const options = queryOptionsFor(provider, { conversationId: 'c-gated', hooks: bridge });
 
     expect(decisionOf(await preToolUseOf(options)!(HOOK_INPUT()))).toBe('deny');
-    expect(gatingOf(provider.conversationCapabilities('c-gated'))).toBe(true);
+    expect(provider.preToolUseGated('c-gated')).toBe(true);
     // …but the provider-wide floor stays false: the NEXT conversation may
     // supply no bridge, and the floor must not promise on its behalf.
-    expect(gatingOf(provider.capabilities())).toBe(false);
+    expect(provider.preToolUseGated()).toBe(false);
   });
 
   it('reports TRUE provider-wide once a default gate is installed — and then enforces it', async () => {
     const provider = makeProvider();
-    expect(gatingOf(provider.capabilities())).toBe(false);
+    expect(provider.preToolUseGated()).toBe(false);
 
     provider.setDefaultToolGate(() => ({ decision: 'deny', reason: 'default policy' }));
 
-    expect(gatingOf(provider.capabilities())).toBe(true);
+    expect(provider.preToolUseGated()).toBe(true);
     // A conversation with NO hooks of its own is now genuinely gated — this is
     // what makes the `true` honest for acp-entry / StageExecutionService.
     const options = queryOptionsFor(provider, { conversationId: 'c-default-gate' });
     expect(decisionOf(await preToolUseOf(options)!(HOOK_INPUT()))).toBe('deny');
-    expect(gatingOf(provider.conversationCapabilities('c-default-gate'))).toBe(true);
+    expect(provider.preToolUseGated('c-default-gate')).toBe(true);
   });
 
   it('lets a conversation bridge override the provider default', async () => {
@@ -233,6 +229,6 @@ describe('W35 — capabilities().fullToolGating is honest', () => {
 
   it('fails closed on an unknown conversation id', () => {
     const provider = makeProvider();
-    expect(provider.conversationCapabilities('never-created').fullToolGating).toBe(false);
+    expect(provider.preToolUseGated('never-created')).toBe(false);
   });
 });

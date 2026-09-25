@@ -664,8 +664,10 @@ export class HarnessRegistry {
     }
     const dropped: string[] = [];
     if (!caps.mcpServers) dropped.push('tools (no MCP server support)');
-    if (!caps.skillDirectories) dropped.push('skills (no skill directory support)');
-    if (!caps.fullToolGating) dropped.push('permissions (no per-call PreToolUse gate — treat as lower-trust)');
+    if (caps.skills === 'none') dropped.push('skills (no skill support)');
+    if (caps.approvalGating === 'none') dropped.push('permissions (the provider never asks — only bypass/acceptEdits runs)');
+    else if (caps.approvalGating === 'exec_and_patch') dropped.push('permissions (asks per command/patch, not per tool)');
+    if (caps.hostTools !== 'full') dropped.push(`host tools (${caps.hostTools === 'none' ? 'none' : 'bound at thread start only'})`);
     dropped.push(...(UNMODELED_CAPABILITIES[type] ?? []));
     if (dropped.length === 0) return;
     this.opts.logger?.warn(

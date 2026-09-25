@@ -416,10 +416,12 @@ export class OpenCodeProvider implements IAgentHarness {
       planMode: false,
       mcpServers: true,  // OpenCode has native MCP support (`/mcp` routes)
       // `GET /skill` exists; there is no way to point it at our directories.
-      skillDirectories: false,
-      // Permissions are asked per request via `/session/{id}/permissions`, not
-      // as a gate on every tool call.
-      fullToolGating: false,
+      skills: 'none',
+      // Nothing routes OpenCode's own permission requests to the session's
+      // gate, so a run cannot be held to `default` or `plan` (PD-17).
+      approvalGating: 'none',
+      hostTools: 'none',
+      structuredOutput: 'none',
       sessionPersistence: true, // opencode persists sessions server-side
       // Assistant messages carry `cost`; there is no budget ceiling to set.
       budgetTracking: false,

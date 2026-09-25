@@ -980,11 +980,16 @@ export class CodexProvider implements IAgentHarness {
       // `mcpServerStatus/list`, `mcpServer/tool/call` and MCP elicitation
       // requests are all in the protocol.
       mcpServers: true,
-      // `skills/list` and `skills/extraRoots/set` exist upstream.
-      skillDirectories: true,
+      // `skills/extraRoots/set` takes directories, scoped to the app-server
+      // process rather than a thread (the composer warns, C-19).
+      skills: 'directories',
       // Approvals are per-command/patch and only fire under an approval policy
-      // that asks for them — not a PreToolUse gate on every call.
-      fullToolGating: false,
+      // that asks for them — not a gate on every tool call (PD-17).
+      approvalGating: 'exec_and_patch',
+      // `dynamicTools` are accepted on `thread/start` only.
+      hostTools: 'start_only',
+      // `outputSchema` on `turn/start`.
+      structuredOutput: 'native',
       // Threads are persisted server-side and rejoinable via `thread/resume`.
       sessionPersistence: true,
       // `thread/fork { lastTurnId }` and `thread/revert { beforeTurnId }` are

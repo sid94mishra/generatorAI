@@ -143,12 +143,12 @@ describe('ClaudeAgentProvider — workspace mounts reach the SDK', () => {
     expect(sessionFingerprint(before as never)).not.toBe(sessionFingerprint(after as never));
   });
 
-  it('declares skillDirectories: false and warns, because the SDK has no such option', async () => {
-    // SDK 0.3.220 `Options` has `skills` (names) and `plugins` (plugin roots);
-    // neither takes the staged skill directories. The capability used to read
-    // `true` while `params.skillDirectories` was dropped silently.
+  it('declares plugin skills and warns on skill directories, because the SDK has no such option', async () => {
+    // SDK `Options` has `skills` (names) and `plugins` (plugin roots); neither
+    // takes the staged skill directories, so the composer delivers skills as
+    // a local plugin (RV-7) and a directory list is reported, not dropped.
     const provider = makeProvider();
-    expect(provider.capabilities().skillDirectories).toBe(false);
+    expect(provider.capabilities().skills).toBe('plugin');
 
     await provider.createConversation({
       conversationId: 'c8',

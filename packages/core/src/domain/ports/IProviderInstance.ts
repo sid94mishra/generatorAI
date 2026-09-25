@@ -37,6 +37,11 @@ export type ProviderWireProtocol =
   | 'opencode-http'  // W38 — future
   | 'acp';           // W39 — future
 
+export type ApprovalGatingLevel = 'per_call' | 'exec_and_patch' | 'none';
+export type HostToolsLevel = 'full' | 'start_only' | 'none';
+export type StructuredOutputLevel = 'native' | 'tool' | 'none';
+export type SkillsLevel = 'plugin' | 'directories' | 'none';
+
 /**
  * Declared capabilities for a provider instance.
  *
@@ -61,17 +66,33 @@ export interface ProviderCapabilities {
   planMode: boolean;
   /** Whether this provider supports reading MCP server configuration. */
   mcpServers: boolean;
-  /** Whether this provider supports skill/prompt directories. */
-  skillDirectories: boolean;
   /**
-   * Whether per-tool permission gates fire on EVERY tool call (not just
-   * fall-through). Required for security compliance (L16, N-5).
-   *
-   * true  = the security gate is wired to PreToolUse, so every tool is gated.
-   * false = the gate fires only on fall-through (canUseTool) — NOT a security
-   *         boundary. The caller must treat this provider as lower-trust.
+   * How the provider asks before acting (RV-6, PD-17):
+   * - `per_call`: every tool call the provider does not auto-allow reaches
+   *   the session's permission gate (Copilot, ACP, claude-agent);
+   * - `exec_and_patch`: only command executions and patch applications ask
+   *   (Codex); other tools run under the sandbox policy;
+   * - `none`: the provider never asks (opencode).
    */
-  fullToolGating: boolean;
+  approvalGating: ApprovalGatingLevel;
+  /**
+   * Whether host tools (the platform's own tool handlers) reach the model
+   * (RV-9): `full` on every turn, `start_only` only when the conversation is
+   * started (Codex `dynamicTools` on `thread/start`), `none` never.
+   */
+  hostTools: HostToolsLevel;
+  /**
+   * How the provider can return structured output: `native` (claude-agent
+   * `outputFormat`, Codex `outputSchema`), `tool` (a host tool the model
+   * calls), `none`.
+   */
+  structuredOutput: StructuredOutputLevel;
+  /**
+   * How skills reach the model (RV-7, RV-8): `plugin` (a local plugin root,
+   * claude-agent), `directories` (skill directories, Copilot and Codex),
+   * `none`.
+   */
+  skills: SkillsLevel;
   /** Whether the provider supports session persistence across restarts. */
   sessionPersistence: boolean;
   /** Whether the provider supports cost/budget tracking (maxBudgetUsd). */

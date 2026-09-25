@@ -58,7 +58,7 @@ describe('AcpProvider (real JSON-RPC-over-stdio ACP)', () => {
     await provider.initialize();
     const caps = provider.capabilities();
     expect(caps.computerUse).toBe(false);
-    expect(caps.fullToolGating).toBe(false); // tierB default true → fullToolGating false
+    expect(caps.approvalGating).toBe('per_call'); // session/request_permission reaches the gate per call
     expect(() => runCapabilityDeclarationConformance(provider)).not.toThrow();
   }, 10_000);
 

@@ -160,8 +160,10 @@ export class FauxProvider implements IAgentHarness {
       maxParallelTools: 8,
       planMode: false,
       mcpServers: false,
-      skillDirectories: false,
-      fullToolGating: true,
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      structuredOutput: 'tool',
+      skills: 'directories',
       sessionPersistence: false,
       budgetTracking: false,
       computerUse: false, // MINOR-4: explicit fail-closed default (L9)

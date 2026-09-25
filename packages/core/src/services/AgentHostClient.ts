@@ -51,8 +51,12 @@ const HOST_CLIENT_CAPABILITIES: ProviderCapabilities = {
   maxParallelTools: 8,
   planMode: true,
   mcpServers: true,
-  skillDirectories: true,
-  fullToolGating: true,
+  // The host proxies a MultiHarness; the composer decides per provider from
+  // `PROVIDER_CAPABILITY_LEVELS`, so these are the proxy's own claims.
+  approvalGating: 'per_call',
+  hostTools: 'full',
+  structuredOutput: 'tool',
+  skills: 'directories',
   sessionPersistence: true,
   budgetTracking: true,
   // The host proxies provider turns over IPC and owns no computer-use driver

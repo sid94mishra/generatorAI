@@ -924,8 +924,10 @@ export class MultiHarness implements IAgentHarness {
         reasoningEfforts: [],
         planMode: false,
         mcpServers: false,
-        skillDirectories: false,
-        fullToolGating: false,
+        approvalGating: 'none',
+        hostTools: 'none',
+        structuredOutput: 'none',
+        skills: 'none',
         sessionPersistence: false,
         budgetTracking: false,
       };
@@ -945,8 +947,11 @@ export class MultiHarness implements IAgentHarness {
       maxParallelTools: Math.min(...caps.map((c) => c.maxParallelTools ?? 8)),
       planMode: caps.every((c) => c.planMode),
       mcpServers: caps.every((c) => c.mcpServers),
-      skillDirectories: caps.every((c) => c.skillDirectories),
-      fullToolGating: caps.every((c) => c.fullToolGating),
+      // Levels: the weakest level any ready provider declares.
+      approvalGating: weakest(caps.map((c) => c.approvalGating), ['per_call', 'exec_and_patch', 'none']),
+      hostTools: weakest(caps.map((c) => c.hostTools), ['full', 'start_only', 'none']),
+      structuredOutput: weakest(caps.map((c) => c.structuredOutput), ['native', 'tool', 'none']),
+      skills: caps.every((c) => c.skills === caps[0]!.skills) ? caps[0]!.skills : 'none',
       sessionPersistence: caps.every((c) => c.sessionPersistence),
       budgetTracking: caps.every((c) => c.budgetTracking),
       conversationFork: caps.every((c) => c.conversationFork === true),
@@ -976,4 +981,11 @@ export class MultiHarness implements IAgentHarness {
     }
     return (adapter as IAgentHarness).capabilities();
   }
+}
+
+/** The weakest of `levels`, where `order` runs strongest → weakest. */
+function weakest<T extends string>(levels: T[], order: readonly T[]): T {
+  let worst = 0;
+  for (const l of levels) worst = Math.max(worst, order.indexOf(l));
+  return order[worst] ?? order[order.length - 1]!;
 }

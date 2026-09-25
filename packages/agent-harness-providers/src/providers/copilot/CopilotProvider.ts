@@ -1645,7 +1645,7 @@ export class CopilotProvider implements IAgentHarness {
    * L9: Capability discovery is by declaration, not by exception.
    * W42 — N-2 fix: no runtime probe required.
    *
-   * Copilot does not support the PreToolUse hook (N-5), so fullToolGating
+   * Copilot does not support the PreToolUse hook (N-5), so its gating level
    * is false — permission checking can fall through to the SDK's canUseTool.
    * vision / reasoning are model-specific; declare conservatively as false;
    * the model catalogue already surfaces per-model limits.
@@ -1657,13 +1657,16 @@ export class CopilotProvider implements IAgentHarness {
       reasoningEfforts: [],   // query the live model for supported efforts
       planMode: true,         // Copilot has plan/normal mode switching
       mcpServers: false,      // Copilot SDK does not support MCP servers
-      skillDirectories: false,
-      // Finding-9 fix: the Copilot SDK DOES wire onPreToolUse (SessionConfig.hooks)
-      // which fires before every tool call — identical in semantics to Claude's
-      // PreToolUse hook. The original 'false' was wrong (the code at
-      // createConversation line ~686 explicitly maps HookBridge.onPreToolUse to
-      // sessionConfig.hooks.onPreToolUse). fullToolGating is therefore true.
-      fullToolGating: true,
+      // The SDK routes onPermissionRequest for every tool it does not
+      // auto-approve (and SessionConfig.hooks.onPreToolUse fires before every
+      // call), so a run's permission mode is enforceable per call.
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      // No output-schema option: structured output is a host tool.
+      structuredOutput: 'tool',
+      // `skillDirectories` IS passed to the SDK (RV-8); it used to be declared
+      // unsupported while `createConversation` forwarded it.
+      skills: 'directories',
       sessionPersistence: true,
       budgetTracking: false,
       // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).

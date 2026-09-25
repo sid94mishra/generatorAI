@@ -790,14 +790,14 @@ export class ClaudeAgentProvider implements IAgentHarness {
    *
    * Left `undefined` deliberately: see `DEFER` in `preToolUseHandler` for why
    * the no-policy default cannot be "deny", and `capabilities()` for why the
-   * ledger reports `fullToolGating: false` until this is set.
+   * `preToolUseGated()` reports false until this is set.
    */
   private defaultToolGate: PreToolUseGate | undefined;
 
   /**
    * W35 — install (or clear) the provider-level default tool gate.
    *
-   * Setting this flips `capabilities().fullToolGating` to `true`, because it
+   * Setting this flips `preToolUseGated()` to `true`, because it
    * is then true: every conversation, hooks or no hooks, is evaluated by a
    * fail-closed `PreToolUse` policy. Callers that do NOT set it get an honest
    * `false` rather than the unconditional `true` this provider used to claim.
@@ -947,7 +947,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * L9: Capability discovery is by declaration, not by exception.
    * W42 — N-2 fix: no runtime probe required.
    *
-   * W35 — `fullToolGating` is NO LONGER an unconditional `true`.
+   * W35 — PreToolUse gating is NO LONGER claimed unconditionally (see `preToolUseGated`).
    *
    * It used to be, on the strength of a comment asserting "the PreToolUse hook
    * fires on EVERY tool call". The hook did fire on every tool call — of the
@@ -964,10 +964,13 @@ export class ClaudeAgentProvider implements IAgentHarness {
    *   1. The `PreToolUse` hook is now installed on EVERY conversation
    *      (`buildConversationHooks`), so a policy always has somewhere to land
    *      and no caller has to remember to opt in.
-   *   2. This flag reports whether a POLICY is actually attached. Provider-wide
-   *      that means `setDefaultToolGate()` has been called; per conversation,
-   *      ask `conversationCapabilities()`, which also counts a conversation's
-   *      own `hooks.onPreToolUse`.
+   *   2. `preToolUseGated()` reports whether a POLICY is actually attached.
+   *      Provider-wide that means `setDefaultToolGate()` has been called; per
+   *      conversation it also counts the conversation's own `hooks.onPreToolUse`.
+   *
+   * The capability ledger itself declares `approvalGating: 'per_call'`: with
+   * the session's permission handler attached, canUseTool reaches it for
+   * every call the turn's permission mode does not auto-allow (PD-17).
    */
   capabilities(): ProviderCapabilities {
     return {
@@ -977,19 +980,15 @@ export class ClaudeAgentProvider implements IAgentHarness {
       maxParallelTools: MAX_PARALLEL_TOOLS > 0 ? MAX_PARALLEL_TOOLS : undefined,
       planMode: true,
       mcpServers: true,
-      // The installed SDK (0.3.220) has NO option that takes skill
-      // DIRECTORIES. `Options.skills` filters by name and `Options.plugins`
-      // loads plugin roots (a plugin is not a skill directory); neither
-      // accepts the staged directories `AgentStagingService` produces. This
-      // used to read `true` while `params.skillDirectories` was dropped on
-      // the floor — declaring a capability the adapter did not have. It is
-      // now declared honestly and the drop is reported as a warning.
-      skillDirectories: false,
-      // W35 / N-5 — true only when a policy is genuinely attached to every
-      // conversation. The hook itself is always installed; a hook with no
-      // policy behind it defers to the SDK's own permission evaluation and
-      // must not be advertised as a gate.
-      fullToolGating: this.hasDefaultToolGate(),
+      // No SDK option takes skill DIRECTORIES; skills load from a local
+      // plugin root (`Options.plugins`) filtered by `Options.skills` (RV-7).
+      skills: 'plugin',
+      // With the session's permission handler attached, canUseTool reaches it
+      // for every call the mode does not auto-allow (PD-17). The PreToolUse
+      // hook is a separate, optional policy (W35: `hasDefaultToolGate`).
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      structuredOutput: 'native',
       sessionPersistence: true,
       budgetTracking: true,
       // `forkSession(id, { upToMessageId })` copies the transcript file up to
@@ -1019,12 +1018,19 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * An unknown conversation id reports the floor — fail-closed: we never
    * claim gating for a conversation we cannot see.
    */
-  conversationCapabilities(conversationId: string): ProviderCapabilities {
-    const bridge = this.conversations.get(conversationId)?.hooks as HookBridge | undefined;
-    return {
-      ...this.capabilities(),
-      fullToolGating: !!bridge?.onPreToolUse || this.hasDefaultToolGate(),
-    };
+  conversationCapabilities(_conversationId: string): ProviderCapabilities {
+    return this.capabilities();
+  }
+
+  /**
+   * W35 — whether a PreToolUse POLICY applies to a conversation: its own
+   * hook bridge, or the provider-wide default gate. The hook is always
+   * installed; without a policy it defers to the SDK's own permission
+   * evaluation. Unknown conversations report the provider-wide answer.
+   */
+  preToolUseGated(conversationId?: string): boolean {
+    const bridge = conversationId ? (this.conversations.get(conversationId)?.hooks as HookBridge | undefined) : undefined;
+    return !!bridge?.onPreToolUse || this.hasDefaultToolGate();
   }
 
   // ══════════════════════════════════════════════════════════════
@@ -2269,7 +2275,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
    *           rather than merely asserted.
    *
    * DEFER is honest, not sufficient — which is why `capabilities()` reports
-   * `fullToolGating: false` while it is the operative policy.
+   * `preToolUseGated()` false while it is the operative policy.
    */
   private preToolUseHandler(
     gate: PreToolUseGate | undefined,
@@ -2640,7 +2646,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     //
     // W35: UNCONDITIONAL. This used to be `if (config.hooks)`, so a caller that
     // passed no hooks got no `PreToolUse` hook and therefore no tool gate,
-    // while `capabilities()` claimed `fullToolGating: true` regardless.
+    // while the capability ledger claimed full tool gating regardless.
     // `buildConversationHooks` always installs the gate; see there for the
     // no-policy default and `capabilities()` for the (now honest) ledger.
     options.hooks = this.buildConversationHooks(config, persistent);
