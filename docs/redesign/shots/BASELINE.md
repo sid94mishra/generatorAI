@@ -54,4 +54,14 @@ Not baselined in P0: the owner asked not to spend time testing the legacy UI. `r
 
 ## End-of-P0 verification
 
-(appended at phase close)
+2026-09-25, `desktop_redesign @ eeec80e` (P0-01…P0-05 applied: guardrails, dead-code deletions, spec repairs), same isolated-server recipe on a fresh temp DB:
+
+**e2e: 80 passed · 0 failed · 3 skipped (3.2 min).** P0-05 is therefore "unchanged vs BASELINE" (every test that passed before still passes; the 23 pre-repair failures were spec drift/spec bugs/env and are fixed in the specs).
+
+Skipped, with reasons:
+- `context-usage:74` — asserts a `claude-opus-4.7` budget; skips when that model is not in the local catalog.
+- `streaming-turn-live:27` — needs a live provider turn; skipped unless explicitly enabled (unchanged from before).
+- `workflow-run:48` — `test.fixme` in the spec (unchanged from before).
+- Note: `subsystems-live` "every ready provider publishes a non-empty model catalog" runs here (Claude Code is ready) but **skips on a CI runner with no ready provider**; the primary-provider-ready assertion was replaced because it failed on any machine without a Copilot login. Restoring CI coverage needs a provider that reports ready on the isolated server (the Faux harness, P2-00).
+
+Web unit: 69 files / 650 tests green; typecheck, lint, `check:design --strict`, build, `check:bundle` (309.5 KB gzip initial / 800 KB), `check:css` green.

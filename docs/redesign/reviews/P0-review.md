@@ -1,0 +1,132 @@
+# P0 review — Documentation & rails
+
+- **Range:** `a83a7bf..HEAD` on `desktop_redesign` (HEAD `eeec80e`; commits 53ba8f1, 780e256, 004e1c5, b2afabc, 24e435b, d007e87, eeec80e)
+- **Date:** 2026-09-25 · macOS arm64 · reviewer: independent adversarial pass (read-only apart from this file)
+- **Scope:** scripts, ESLint/Vitest/CI config, spec and smoke repairs, P0-05 deletions, doc edits made after the plan was added in 53ba8f1. I did not review the plan text itself. As instructed, I did not run the e2e suite or the desktop smokes; the lead appends the e2e result to BASELINE.md.
+
+## Verification re-run
+
+| Command | Result |
+|---|---|
+| `pnpm --filter @generatorai/web typecheck` | green |
+| `pnpm lint` | green (0 errors; web 311 warnings). **All 26 turbo tasks were cache hits** (see P0-R11), so I also ran `pnpm --filter @generatorai/web lint` without the cache: 0 errors, 311 warnings, plus the boundaries `mode` deprecation notice |
+| `pnpm --filter @generatorai/web check:design --strict` | OK: every rule unchanged or locked; `radixOverlaySelector` info 3; storiesPresent ok |
+| `pnpm --filter @generatorai/web test` | 69 files / 650 tests passed (matches BASELINE) |
+| `pnpm --filter @generatorai/web build && check:bundle && check:css` | build ok; bundle 309.5 KB gzip / 800 KB budget OK; check-css: 3 stylesheets, 51 `@theme inline` vars, OK |
+| `node scripts/redesign/render-boards.mjs --only=ChatsList,Home` | 4 rendered, 0 failed; PNGs inspected, and the mono and sans fonts render correctly |
+| `node scripts/redesign/render-boards.mjs --out=<tmp>` (all boards) | **120 rendered, 0 failed**, so the P0-01 acceptance holds |
+| `node scripts/redesign/side-by-side.mjs --board=Home --mode=dark --shot=<tmp png>` | produced `compare-1440-dark.png` next to the shot |
+| `node scripts/redesign/make-dummy-repo.mjs`, then `--clean` | work/ under `/var/folders/…/T/generatorai-dummy-repo-*` (outside the checkout); status shows A/M/D/R/?? as specified; branches main, feature/redesign-test, conflict-a/b and their remotes; big.json 716,809 B > 512 KiB; `--clean` removed it |
+| Layer probes: `eslint --stdin --stdin-filename apps/web/src/<layer>/…` with throwaway targets created in `src/{ui,blocks,features/*,app,zzunknown}` and deleted in the same command | ui→data/legacy/blocks/features/app/platform/root, type-only imports, `export *` and dynamic `import()` all fail; blocks→features/legacy/app fail; features→other feature (alias and relative)/platform/legacy/app/root fail; legacy→features/app fail; data→ui/features/non-whitelisted legacy fail; root→features/blocks fail. **ui→unknown folder passes** (P0-R2). better-tailwindcss restricted/unknown classes fire in `ui/` and `features/` from both the repo root and `apps/web` |
+| Ratchet scenarios on a temp copy of `apps/web/{src,scripts,baselines}` | a rise fails with file:line output; a locked rule fails; `--update` after a rise does not raise the baseline; a fall passes without `--strict`, fails with `--strict` and is locked in by `--update`; new-folder hits fail. **shadcn-shaped component without a story passes** (P0-R3) |
+
+Repo state after the review: `git status` clean, and all probe and temp files removed.
+
+---
+
+## Critical
+
+None.
+
+## Major
+
+### P0-R1 — CI e2e: a comment inside the line continuation drops `PORT`/`WIDGET_PORT`, and nothing asserts the dbPath (D-44)
+- **Where:** `.github/workflows/ci.yml:365-376` (added in 004e1c5).
+- **Evidence:** the three `# The server reads the BARE names…` lines sit between `WIDGET_PORT=… \` and `DB_PATH=… \`. In bash a `#` after a continuation starts a comment that ends the command, so `PORT=… WIDGET_PORT=…` becomes a bare assignment (not exported), and the server starts with only `DB_PATH…NODE_ENV`. I reproduced it with the same shape: `PORT=undefined WIDGET_PORT=undefined DB_PATH=/x/e2e.db`. The job passes today only because the server defaults (`apps/server/src/index.ts`: port 3100, `WIDGET_PORT ?? '3101'`) happen to equal `SERVER_PORT`. D-44 also requires that "scripts assert the `dbPath` in the startup log before running tests", and the job never checks it. That check is the only guard against a repeat of the silent real-DB bug that D-44 was written for.
+- **Fix:** move the comment above the `(` subshell, or put the env in an `env:` block. After `wait_for … server`, add `grep -F "\"dbPath\":\"$state/e2e.db\"" "$state/logs/server.log" || { echo "::error::server not on the temp DB"; exit 1; }` (adjust to the log's actual format).
+
+### P0-R2 — Boundaries fail open for any folder not declared as an element
+- **Where:** `eslint.config.mjs:198-260` (the `boundaries/elements` list and the `boundaries/dependencies` rule only).
+- **Evidence:** the probe `apps/web/src/ui/ProbeFrom.tsx` → `import { PZ } from '@/zzunknown/ProbeZ'` produced **no error**, while every declared layer was rejected. `default: 'disallow'` covers only known elements. A new `src/services/`, `src/queries/` or `src/constants/` folder therefore escapes D-04 for `ui`, `blocks` and `features` alike. `UI_LAYER` in `no-restricted-imports` does not list such folders either. D-03 ("enforcement by construction") is not met for this case.
+- **Fix:** in block (b), enable `'boundaries/no-unknown': 'error'` (unknown targets) and `'boundaries/no-unknown-files': 'error'`. Scope `no-unknown-files` to non-test files, or add a `tests` element for `src/**/__tests__/**` and `*.test.*`, and add `styles` if TS ever imports from it. Add a probe case to the fixture test from P0-R4.
+
+### P0-R3 — `check-stories` misses the component shape the shadcn CLI generates
+- **Where:** `apps/web/scripts/check-stories.mjs:20-21, 42`.
+- **Evidence:** `EXPORTED_COMPONENT` matches only `export function X`, `export const X`, `export class X`. The shadcn v4 templates, which the plan uses to seed Base UI (README "Key facts": "Base UI (seeded via shadcn CLI)"), declare `function Button(…) {…}` and end with `export { Button, buttonVariants }`. I created `src/ui/primitives/Button/Button.tsx` with exactly that shape in a temp copy, and the check printed `storiesPresent: every kit component has a story`. The header comment treats `export { … }` files as re-exports and skips them. The P1 "file + story" rule would be unenforced from its first component.
+- **Fix:** treat a file as a component when it declares a PascalCase `function`/`const`/`class` (exported or not) **and** exports anything. Or parse the `export { A, B }` list and require a story when any name is PascalCase and declared in the file. Treat only `export { X } from '…'` or `export * from` with no local declarations as re-exports.
+
+### P0-R4 — The rails have no tests, and the "bad file fails lint" acceptance has no durable evidence
+- **Where:** there are no tests for `check-design-system.mjs`, `check-stories.mjs`, `check-css-emission.mjs`, `render-boards.mjs` (`flattenBoard` is exported but never tested) or the ESLint layer rules. `scripts/__tests__/` holds only `copySecretsDir.test.mjs`.
+- **Evidence:** the ratchet semantics (never raise, `--strict` fails on unlocked falls, lock at zero, per-file map kept on a rise) held when I checked them by hand, but nothing stops a regression. P0-R2 and P0-R3 are exactly the defects fixture tests would have caught. The P0-04 acceptance "a deliberately bad file in `ui/` fails lint (shown in PR)" has no PR, because work lands directly on the branch. The only evidence is this review's probe.
+- **Fix:** add `scripts/__tests__/redesign-rails.test.mjs` (root `node` vitest project). It should (1) run the ratchet against a temp `webDir` fixture for rise, fall, `--strict`, `--update`, lock and new-folder cases (the script needs a `--web-dir`/env override for this); (2) run `findMissingStories` on fixtures, including the shadcn shape; (3) run `flattenBoard` on one real board plus malformed variants (extra prop, missing helmet, leftover `{{`); (4) run `new ESLint().lintText(src, { filePath: 'apps/web/src/ui/X.tsx' })` for each layer edge from the probe table above, including the unknown-folder case.
+
+## Minor
+
+### P0-R5 — `.claude/CLAUDE.md` says "Layers (lint-enforced)", but some listed rules are not enforced
+- **Where:** `.claude/CLAUDE.md:12-15, 22-23`; `eslint.config.mjs:230`.
+- **Evidence:** "features: Data only via hooks/*Queries.ts or stores". The probe `features/alpha/ProbeFrom.ts` → `@tanstack/react-query` passes. `@/providers/PlatformProvider` (`usePlatform()` returns the raw `HttpPlatformClient`) is a `data` element, so features can reach the platform despite D-04 "platform only through hooks". `@generatorai/client-core` is also allowed. "inline style except for computed geometry" has no ratchet rule and no ESLint rule. This conflicts with D-03 ("every rule … has a mechanical check").
+- **Fix:** add a features-only `no-restricted-imports` block (`@tanstack/react-query` except `useQueryClient` if it is needed, `@/providers/PlatformProvider`, `@generatorai/client-*`). The block must repeat `WEB_RESTRICTED_IMPORT_PATHS`, `LUCIDE` and `HEADLESS` because of the flat-config replace trap. Add a `scope: 'new'` ratchet rule for `style=\{\{`, or record in 01 which rules are review-only and drop "(lint-enforced)" for those.
+
+### P0-R6 — The ratchet and ESLint disagree about stories
+- **Where:** `apps/web/scripts/check-design-system.mjs:51` (`GLOBAL_EXEMPT` has no `*.stories.tsx`) vs `eslint.config.mjs:173` (block (a) ignores `**/*.stories.tsx`).
+- **Evidence:** a P1 `Matrix` story in `src/ui/**` with a demo `<button>` or a fixed-width wrapper passes lint but fails `check:design` as a hard-zero new-folder hit. Sessions get contradictory signals.
+- **Fix:** pick one policy and record it as a D-xx. Most likely, stories get the vocabulary rules (so they show real classes) but are exempt from `rawButtonElement`/`rawInputElement`/`arbitraryValue` for demo scaffolding. Then make both tools match.
+
+### P0-R7 — "file:line for each new occurrence" can hide the new occurrence
+- **Where:** `apps/web/scripts/check-design-system.mjs:333-347`.
+- **Evidence:** a rise prints **every** occurrence in each file whose per-file count rose, capped at 60 lines. In the temp-copy scenario, adding one `text-xs` to `AgentEditorPage.tsx` printed all 11 matches. In the 100+-hit legacy files (`ChatInput.tsx`, `globals`-heavy pages), the new line can fall past the cap. 09 §2.1 asks for the new occurrences.
+- **Fix:** when a file rose, intersect its hit lines with `git diff -U0 HEAD -- <file>` added lines (fall back to all hits when git is unavailable), or at least sort by line and print the count per file before truncating.
+
+### P0-R8 — The `check-css` variable check is vacuous for self-referencing `@theme` keys
+- **Where:** `apps/web/scripts/check-css-emission.mjs:66-78`.
+- **Evidence:** `globals.css` has `--font-sans: var(--font-sans)` and `--font-mono: var(--font-mono)` in `@theme inline`, and the built CSS contains the literal declaration `--font-sans:var(--font-sans)`. `defined` counts that declaration as the definition, so the check passes even when the real value is missing. The comment ("the self-check below still needs") refers to a check that does not exist.
+- **Fix:** build `defined` from declarations whose value is not exactly `var(<same name>)`, and fix the comment.
+
+### P0-R9 — The main-module guard silently no-ops when a script is run through a symlink
+- **Where:** `apps/web/scripts/check-stories.mjs:50`; `scripts/redesign/render-boards.mjs:161`.
+- **Evidence:** `node <symlink-to-repo>/apps/web/scripts/check-stories.mjs` prints nothing and exits 0; run directly, it prints `[check-stories] OK`. `import.meta.url` is the realpath, but `process.argv[1]` is not. The same thing happens with macOS `/tmp`→`/private/tmp`, Windows junctions/`subst` drives and symlinked worktrees, and `render-boards` then exits 0 without rendering anything.
+- **Fix:** `fs.realpathSync(process.argv[1]) === fileURLToPath(import.meta.url)` (Node 22 has no `import.meta.main`).
+
+### P0-R10 — `side-by-side` compares against a stale board PNG after a board refresh
+- **Where:** `scripts/redesign/side-by-side.mjs:34-39`.
+- **Evidence:** it renders only when `boards/png/<Board>.<mode>.png` is missing. After `boards/web/*.dc.html` or `VERSION` changes, the old gitignored PNG is reused, and DIFF.md is written against the old design.
+- **Fix:** re-render when the PNG's mtime is older than the `.dc.html` (or `VERSION`), or always render one board (about 1 s).
+
+### P0-R11 — Turbo's lint cache ignores the root ESLint config
+- **Where:** `turbo.json:30-32`.
+- **Evidence:** `turbo run lint --filter=@generatorai/web --dry=json` shows `globalCacheInputs.files: []`, and the task inputs include `apps/web/tsconfig.eslint.json` but not `eslint.config.mjs`. After a guardrail edit, `pnpm lint` replays a cached green result. My run was 26/26 cached. CI is unaffected because it has no turbo cache.
+- **Fix:** add `"globalDependencies": ["eslint.config.mjs"]`, or give `lint` the inputs `["$TURBO_DEFAULT$", "$TURBO_ROOT$/eslint.config.mjs"]`.
+
+### P0-R12 — Lint messages in new code point at the legacy kit
+- **Where:** `eslint.config.mjs:26, 32, 36, 146-159, 288`.
+- **Evidence:** in `ui/`, `blocks/` and `features/`, the raw `<button>`/`<select>` warnings say "Use <Button> from @/components/ui", and the `Loader2` error inside `ui/` says "Use <Spinner> from @/components/ui". The boundaries rule forbids `ui/` from importing `@/components/*`. The raw-element warning also fires on `src/ui/primitives/**`, where D-43 says the kit must render raw elements (only the ratchet exempts them). Per D-03 these messages steer sessions, and they currently steer them the wrong way.
+- **Fix:** build the new-folder variants of `WEB_RESTRICTED_SYNTAX`/`WEB_RESTRICTED_IMPORT_PATHS` with messages that point at `@/ui/primitives` / `@/ui/icons`, and add `apps/web/src/ui/primitives/**` to the design-system block's `ignores` (keeping `components/ui/**`).
+
+### P0-R13 — Doc drift
+- `docs/redesign/README.md:27-28`: a blank line splits the scripts table, so the `make-dummy-repo` row renders as a header-less broken table. Delete the blank line.
+- `docs/redesign/README.md:37`: says "D-01…D-42", but D-43 and D-44 now exist. In `01-decisions.md`, D-43 and D-44 sit before D-41 and D-42. Move them to the end of §E or of the file.
+- `docs/redesign/09-verification.md:396` (§3.7) still has `check:design: a && b`, and §2.3 (`:156`, `:170`) still shows `apps/web/tsconfig.json` and `boundaries/element-types`. D-43 overrides all three, but a P1 session copying §3.7/§2.3 would reintroduce them. Add "superseded by D-43" notes inline.
+- `.github/AGENTS.md:209, 212`: P0-03 renamed these rows but kept the wrong defaults. The server's `DB_PATH` default is `<repo>/packages/db/data/generatorai.db` and `TEMPLATES_DIR` is `<repo>/templates` (`apps/server/src/index.ts:217-231`).
+
+### P0-R14 — The COORDINATION note understates P0-04's impact on the Workflow Overhaul
+- **Where:** `docs/redesign/COORDINATION.md:11` ("warnings only in legacy code").
+- **Evidence:** `boundaries/dependencies` is **error** across all of `apps/web/src`. The workflow-owned `hooks/{workflow,automation,script}Queries.ts` and `stores/workflow*` are `data` elements, so any new import from them into `components/**` (other than the three whitelisted targets) or into `pages/**` now fails lint. Legacy → `app`/`features` also fails. The other session will hit these as errors after merging.
+- **Fix:** rewrite the note: "boundaries errors apply to workflow-owned data files: data → components/pages is an error except Toast.tsx and composer/{builtins,types}.ts". List the escape: move shared types to `packages/shared` or `hooks/`.
+
+### P0-R15 — Two repairs pass without checking anything
+- `agent-tests/e2e/subsystems-live.spec.ts:123-131`: the new "every ready provider publishes a non-empty model catalog" test skips whenever no provider is ready. That is always the case on the CI runner, so in CI the catalog assertion never runs, and the primary-ready assertion was removed. The logic is right (it avoids special-casing a platform), but CI coverage is now nil. Surface the skip in BASELINE's end-of-P0 section. Longer term, give the CI/sandbox server a provider that reports ready (for example, check whether `GENERATORAI_LOAD_TEST_FAUX_HARNESS=true` registers as ready in `/harness/providers`) so the test runs somewhere.
+- `agent-tests/desktop-diff-review-smoke.mjs:67`, `desktop-diff-render-check.mjs:55`: if pairing never succeeds, the smoke logs `WARN` and continues, and the failure then surfaces later as a confusing API error. Record it as a failed check (`record('pairing', false)`) or exit non-zero.
+
+The other repairs are as strong as the originals or stronger. They pin `exact`/`level`, assert `aria-current`, the URL per settings section, the provider registry-driven "Default" badge and "n of m connected", the scoped stage-#1 locators, and the header toggle testid. Every testid they use exists in `apps/web/src` (`settings-page`, `project-pull-requests`, `pr-empty`, `pr-unavailable`, `data-stage-id`, `header-toggle-right-pane`, `right-pane-tab-${type}`, `right-pane-add-${type}`). `chats.spec.ts:14` (`.first()` on "New Chat") is the only loosening, and the empty-state duplicate justifies it. No app source changed in P0-03.
+
+---
+
+## Other checks (no findings)
+
+- **P0-05 deletions:** zero importers confirmed for `ArtifactBrowser`, `ArtifactPicker`, `ChatList`, `chat/redesign/{StepRow,UsageChip}`, `CodebasePicker`, `ProjectPicker`, `WorkflowDefinitionList`: no static, relative, dynamic or string references in `apps/`, `packages/` or `agent-tests/` (only comments and the non-CI docs-site audit JSON). The 15 CSS classes and 8 keyframes have no users in web, desktop, design-tokens or shared, and no template-built `animate-${…}`/`dot-pulse-${…}`; `skeleton-shimmer`/`text-shimmer` are distinct and kept. `material-file-icons` and `rehype-highlight` are gone from package.json and the lockfile. `ToggleSwitch`/`StyledSelect` were correctly kept. Leftover comments still name deleted components (`components/ui/SearchableSelect.tsx:4`, `stores/catalogPrefsStore.ts:6`); cosmetic.
+- **Baseline integrity:** each count in `design-system-baseline.json` equals the sum of its per-file map, and no keys are orphaned.
+- **Cross-platform:** the scripts use `path`/`os.tmpdir()`/`pathToFileURL`/`execFileSync('git')` (no shell), and turn paths into POSIX form before regex tests. The ratchet regexes and `lineOf` give identical counts on CRLF checkouts. The dummy repo pins `core.autocrlf=false` and isolates git config. `@boundaries/elements` normalises `\` → `/`. Windows lint runs only on push (not on PRs), so Windows layer enforcement is so far established by reading the code, not by a run.
+- **Vitest:** single web `unit` project (happy-dom + `vitest.setup.ts`), with the root config reusing it. No web tests exist outside `src/`, so the narrowed include loses nothing. `vitest related --run --project unit <file with no tests>` exits 0.
+- **CLAUDE.md:** 79 lines (< 120); it contains the §6.1 loop, the §7.2 selector rule and the owner overrides.
+
+## Exit criteria
+
+| Item | Acceptance (07 §P0) | Status | Evidence |
+|---|---|---|---|
+| P0-01 | all 60 boards × 2 modes render with no validation error; side-by-side produces a compare PNG; scripts documented in README | **Met** (README table formatting: P0-R13) | 120/120 rendered; compare PNG produced; README "Redesign scripts" |
+| P0-02 | launch.json starts the dev server; CLAUDE.md < 120 lines; make-dummy-repo prints a path outside the checkout | **Met** (launch.json by inspection only; I did not start it because :5173 is in use) | `dev` → `pnpm dev`, port 5173; 79 lines; path under `/var/folders/…/T` |
+| P0-03 | CI runs on a PR into `desktop_redesign`; baseline lists pass/fail per spec | **Partly met.** Triggers are in place, but CI has never run on the branch (no push/PR). The per-spec table is there (57/23/2 pre-repair; sums check). UI smokes not baselined (owner waiver). The e2e server env is broken (P0-R1) | `ci.yml:5, 19`; BASELINE.md |
+| P0-04 | `pnpm lint` + `check:design --strict` green; a bad file in `ui/` fails lint | **Met, with gaps.** Green re-run; the probe proves ui/ violations fail. Gaps: unknown folders (P0-R2), stories check (P0-R3), no durable fixture (P0-R4) | Verification table above |
+| P0-05 | typecheck/test/e2e unchanged vs BASELINE | **Pending e2e.** typecheck green; 69/650 unchanged; e2e is being run by the lead | — |
+| P0-06 | PD-19 amendment recorded in the Workflow Overhaul Plan | **Open** (owner action) | README progress |
+| **Phase exit** | CI green on the redesign branch with all new rules; plan and boards in repo; BASELINE recorded | **Not yet met.** Plan and boards are in the repo (60 boards + canvas.json, VERSION). BASELINE has the pre-repair run, but its "End-of-P0 verification" section is empty. CI has not run on `desktop_redesign`; the local equivalents are green except e2e. Fix P0-R1 before the first push, otherwise the first CI e2e run relies on the default ports | — |
