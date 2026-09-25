@@ -218,6 +218,53 @@ describe('design layer (L1b)', () => {
   });
 });
 
+describe('design scales (L1c)', () => {
+  const blockOf = (selector: string): string => {
+    const i = css.indexOf(`\n${selector} {`);
+    expect(i, `${selector} missing`).toBeGreaterThan(-1);
+    return css.slice(i, css.indexOf('}', i));
+  };
+  const declared = (body: string): string[] => [...body.matchAll(/^\s+(--[\w-]+):/gm)].map((m) => m[1]!);
+
+  it('defaults sit on :root, after the design colour layer', () => {
+    const start = css.indexOf('Layer 1c');
+    expect(start).toBeGreaterThan(css.indexOf(DESIGN_LAYER_HEADER));
+    const root = css.slice(css.indexOf(':root {', start), css.indexOf('}', css.indexOf(':root {', start)));
+    for (const name of ['--gai-h-row: 44px', '--gai-h-control: 28px', '--gai-text-ui: 13px', '--gai-leading-body: 1.6',
+      '--gai-weight-title: 600', '--gai-tracking-heading: -0.01em', '--gai-duration-fast: 120ms',
+      '--gai-ease-standard: cubic-bezier(0.2, 0, 0, 1)', '--gai-z-dialog: 1000', '--gai-z-dropdown: 1100', '--gai-w-sidebar: 232px']) {
+      expect(root, name).toContain(`  ${name};`);
+    }
+  });
+
+  it('16: density and font size never touch colour — each axis block declares only its own variables', () => {
+    const compact = declared(blockOf('[data-density="compact"]'));
+    expect(compact.length).toBeGreaterThan(0);
+    for (const name of compact) expect(name).toMatch(/^--gai-h-/);
+    for (const size of ['12', '14']) {
+      const names = declared(blockOf(`[data-font-size="${size}"]`));
+      expect(names.length).toBe(7);
+      for (const name of names) expect(name).toMatch(/^--gai-(?:text|leading)-/);
+    }
+    for (const name of declared(blockOf('[data-motion="reduce"]'))) expect(name).toMatch(/^--gai-duration-/);
+    expect(blockOf('[data-density="compact"]')).toContain('--gai-h-row: 36px;');
+    expect(blockOf('[data-font-size="12"]')).toContain('--gai-text-ui: 12px;');
+    expect(blockOf('[data-font-size="14"]')).toContain('--gai-text-display: 29px;');
+    expect(blockOf('[data-motion="reduce"]')).toContain('--gai-duration-fast: 0ms;');
+  });
+
+  it('gives every theme its derived radius scale (D-14)', () => {
+    const l1b = css.slice(css.indexOf(DESIGN_LAYER_HEADER));
+    for (const theme of THEMES) {
+      const i = l1b.indexOf(`\n[data-theme="${theme.id}"] {`);
+      const body = l1b.slice(i, l1b.indexOf('}', i));
+      expect(body, theme.id).toContain(`--gai-radius-card: ${Math.max(2, theme.radius.DEFAULT + 2)}px;`);
+      expect(body, theme.id).toContain('--gai-radius-dialog:');
+    }
+    expect(l1b).toContain('--gai-radius-badge: 4px;'); // :root = Instrument
+  });
+});
+
 describe('shared class vocabulary', () => {
   const vocab = emitVocabularyCss();
 
@@ -227,6 +274,15 @@ describe('shared class vocabulary', () => {
       expect(vocab).toContain(`  --text-color-${name}: var(--gai-${variable});`);
     }
     expect(vocab).toContain('  --shadow-pop: var(--gai-shadow-pop);');
+    expect(vocab).toContain('  --text-title--font-weight: var(--gai-weight-title);');
+    expect(vocab).toContain('  --text-heading--letter-spacing: var(--gai-tracking-heading);');
+    expect(vocab).not.toContain('--text-ui--font-weight');
+    expect(vocab).toContain('  --radius-card: var(--gai-radius-card);');
+    expect(vocab).toContain('  --height-row: var(--gai-h-row);');
+    expect(vocab).toContain('  --size-control: var(--gai-h-control);');
+    expect(vocab).toContain('  --z-index-dialog: var(--gai-z-dialog);');
+    expect(vocab).toContain('  --container-sidebar: var(--gai-w-sidebar);');
+    expect(vocab).toContain('  --ease-standard: var(--gai-ease-standard);');
     for (const name of SHARED_COLOR_NAMES) expect(vocab).toContain(`  --color-${name}: var(--${name});`);
   });
 
@@ -235,9 +291,9 @@ describe('shared class vocabulary', () => {
     expect(vocab).toContain('GENERATED');
   });
 
-  it('has a design variable behind every colour name', () => {
-    const vars = new Set(DESIGN_COLOR_VARS.map(([, n]) => n));
-    for (const [, v] of vocab.matchAll(/var\((--gai-[\w-]+)\)/g)) expect(vars.has(v!), v).toBe(true);
+  it('has a web value behind every variable it maps to', () => {
+    // Every var(--gai-*) the vocabulary reads must be declared by globals.css.
+    for (const [, v] of vocab.matchAll(/var\((--gai-[\w-]+)\)/g)) expect(css, v).toContain(`  ${v}: `);
   });
 
   it('exports the lists Node tools read, identical to the TS source', () => {

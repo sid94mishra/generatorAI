@@ -44,7 +44,19 @@
 //    `color-scheme` — which is exactly where these tokens are consumed.
 // ────────────────────────────────────────────────────────────────
 
-import { DESIGN_ACCENT_KEYS, DESIGN_COLOR_VARS, resolveDesignTokens } from '../design.js';
+import {
+  DESIGN_ACCENT_KEYS,
+  DESIGN_COLOR_VARS,
+  HEIGHTS,
+  MOTION_CSS,
+  SHELL_WIDTHS,
+  TYPE_SCALE,
+  Z_INDEX,
+  radiusScale,
+  resolveDesignTokens,
+  typeSizes,
+} from '../design.js';
+import { FONT_SIZES, DEFAULT_FONT_SIZE } from '../registry.js';
 import {
   LEGACY_BRIDGE_SOURCE,
   LEGACY_COLOR_NAMES,
@@ -310,6 +322,14 @@ function designAppearanceBlock(theme: ThemeDef, appearance: Appearance, selector
   const d = resolveDesignTokens(theme, appearance, theme.defaultAccent);
   const lines = [`${selector} {`, `  color-scheme: ${appearance};`];
   for (const [key, name] of DESIGN_COLOR_VARS) lines.push(`  ${name}: ${d[key]};`);
+  if (appearance === 'dark') {
+    // Radius is appearance-independent, so it rides on the dark (base) block
+    // only; the light block overrides colours alone (D-14, 02 §6.1).
+    lines.push(`  /* Radius scale from base ${theme.radius.DEFAULT}px (D-14) */`);
+    for (const [step, value] of Object.entries(radiusScale(theme.radius.DEFAULT))) {
+      lines.push(`  --gai-radius-${step}: ${value}px;`);
+    }
+  }
   lines.push('}');
   return lines.join('\n');
 }
@@ -355,6 +375,62 @@ function designLayer(base: ThemeDef): string[] {
     }
   }
   return sections;
+}
+
+const em = (n: number): string => `${n}em`;
+
+/**
+ * Layer 1c: the theme- and appearance-independent axes (02 §10.1 item 3).
+ * `:root` carries the defaults (comfortable, 13px, full motion); each axis
+ * override is a single attribute selector emitted after it, so the same
+ * attribute on any element (a Storybook decorator) re-scales its subtree.
+ */
+function axisLayer(): string[] {
+  const root = [':root {', '  /* Heights — comfortable density (D-15) */'];
+  for (const [name, value] of Object.entries(HEIGHTS.comfortable)) root.push(`  --gai-h-${name}: ${value}px;`);
+  root.push(`  /* Type — interface font size ${DEFAULT_FONT_SIZE} (D-13) */`);
+  for (const [step, t] of Object.entries(TYPE_SCALE)) {
+    root.push(
+      `  --gai-text-${step}: ${t.size}px;`,
+      `  --gai-leading-${step}: ${t.lineHeight};`,
+      `  --gai-weight-${step}: ${t.weight};`,
+      `  --gai-tracking-${step}: ${em(t.tracking)};`,
+    );
+  }
+  root.push('  /* Motion (D-20) */');
+  for (const [name, value] of Object.entries(MOTION_CSS.duration)) root.push(`  --gai-duration-${name}: ${value};`);
+  for (const [name, value] of Object.entries(MOTION_CSS.ease)) root.push(`  --gai-ease-${name}: ${value};`);
+  root.push('  /* Stacking layers (D-41) */');
+  for (const [name, value] of Object.entries(Z_INDEX)) root.push(`  --gai-z-${name}: ${value};`);
+  root.push('  /* Shell widths (D-15, 02 §8) */');
+  for (const [name, value] of Object.entries(SHELL_WIDTHS)) root.push(`  --gai-w-${name}: ${value}px;`);
+  root.push('}');
+
+  const compact = ['[data-density="compact"] {'];
+  for (const [name, value] of Object.entries(HEIGHTS.compact)) compact.push(`  --gai-h-${name}: ${value}px;`);
+  compact.push('}');
+
+  const fontSizes = FONT_SIZES.filter((size) => size !== DEFAULT_FONT_SIZE).map((size) => {
+    const lines = [`[data-font-size="${size}"] {`];
+    for (const [step, px] of Object.entries(typeSizes(size))) lines.push(`  --gai-text-${step}: ${px}px;`);
+    lines.push('}');
+    return lines.join('\n');
+  });
+
+  const reduce = ['[data-motion="reduce"] {'];
+  for (const name of Object.keys(MOTION_CSS.duration)) reduce.push(`  --gai-duration-${name}: 0ms;`);
+  reduce.push('}');
+
+  return [
+    [
+      '/* ── Layer 1c — design scales (--gai-*): density, font size, motion ──',
+      '   Each override is one attribute selector after :root; source order wins the tie. */',
+    ].join('\n'),
+    root.join('\n'),
+    compact.join('\n'),
+    ...fontSizes,
+    reduce.join('\n'),
+  ];
 }
 
 /**
@@ -430,6 +506,7 @@ export function emitCss(): string {
   }
 
   sections.push(...designLayer(base));
+  sections.push(...axisLayer());
 
   sections.push(
     [

@@ -38,6 +38,81 @@
   /* Elevation (02 §6.4). */
   --shadow-pop: var(--gai-shadow-pop);
 
+  /* Type (D-13). Weight and tracking only where a step sets them, so other steps inherit. */
+  --text-micro: var(--gai-text-micro);
+  --text-micro--line-height: var(--gai-leading-micro);
+  --text-small: var(--gai-text-small);
+  --text-small--line-height: var(--gai-leading-small);
+  --text-ui: var(--gai-text-ui);
+  --text-ui--line-height: var(--gai-leading-ui);
+  --text-body: var(--gai-text-body);
+  --text-body--line-height: var(--gai-leading-body);
+  --text-title: var(--gai-text-title);
+  --text-title--line-height: var(--gai-leading-title);
+  --text-title--font-weight: var(--gai-weight-title);
+  --text-heading: var(--gai-text-heading);
+  --text-heading--line-height: var(--gai-leading-heading);
+  --text-heading--font-weight: var(--gai-weight-heading);
+  --text-heading--letter-spacing: var(--gai-tracking-heading);
+  --text-display: var(--gai-text-display);
+  --text-display--line-height: var(--gai-leading-display);
+  --text-display--font-weight: var(--gai-weight-display);
+  --text-display--letter-spacing: var(--gai-tracking-display);
+
+  /* Radius (D-14), per theme. */
+  --radius-badge: var(--gai-radius-badge);
+  --radius-control-sm: var(--gai-radius-control-sm);
+  --radius-control: var(--gai-radius-control);
+  --radius-seg: var(--gai-radius-seg);
+  --radius-card: var(--gai-radius-card);
+  --radius-panel: var(--gai-radius-panel);
+  --radius-dialog: var(--gai-radius-dialog);
+
+  /* Heights (D-15), per density. */
+  --height-control-sm: var(--gai-h-control-sm);
+  --height-control: var(--gai-h-control);
+  --height-control-lg: var(--gai-h-control-lg);
+  --height-nav: var(--gai-h-nav);
+  --height-item: var(--gai-h-item);
+  --height-step: var(--gai-h-step);
+  --height-th: var(--gai-h-th);
+  --height-row: var(--gai-h-row);
+  --height-tab: var(--gai-h-tab);
+  --height-bar: var(--gai-h-bar);
+  --height-badge: var(--gai-h-badge);
+  --height-kbd: var(--gai-h-kbd);
+  --height-panel-bar: var(--gai-h-panel-bar);
+  --height-dialog-bar: var(--gai-h-dialog-bar);
+  --height-footer: var(--gai-h-footer);
+  --size-control-sm: var(--gai-h-control-sm);
+  --size-control: var(--gai-h-control);
+  --size-control-lg: var(--gai-h-control-lg);
+
+  /* Stacking (D-41). */
+  --z-index-base: var(--gai-z-base);
+  --z-index-sticky: var(--gai-z-sticky);
+  --z-index-dock: var(--gai-z-dock);
+  --z-index-rail: var(--gai-z-rail);
+  --z-index-sidebar: var(--gai-z-sidebar);
+  --z-index-dialog: var(--gai-z-dialog);
+  --z-index-dropdown: var(--gai-z-dropdown);
+  --z-index-popover: var(--gai-z-popover);
+  --z-index-toast: var(--gai-z-toast);
+  --z-index-tooltip: var(--gai-z-tooltip);
+
+  /* Motion (D-20). */
+  --ease-standard: var(--gai-ease-standard);
+
+  /* Shell widths (02 §8): w-sidebar, max-w-dialog …. */
+  --container-sidebar: var(--gai-w-sidebar);
+  --container-rail: var(--gai-w-rail);
+  --container-dock: var(--gai-w-dock);
+  --container-dock-run: var(--gai-w-dock-run);
+  --container-sheet: var(--gai-w-sheet);
+  --container-dialog-sm: var(--gai-w-dialog-sm);
+  --container-dialog: var(--gai-w-dialog);
+  --container-dialog-lg: var(--gai-w-dialog-lg);
+
   /* Shared layer: kept through P7 (02 §2.3 "Kept tokens"). */
   --color-chart-1: var(--chart-1);
   --color-chart-2: var(--chart-2);

@@ -25202,6 +25202,16 @@ export const themeMeta = [
       "lg": 8,
       "xl": 10
     },
+    "radiusBase": 6,
+    "radiusScale": {
+      "badge": 4,
+      "control-sm": 5,
+      "control": 6,
+      "seg": 7,
+      "card": 8,
+      "panel": 10,
+      "dialog": 12
+    },
     "swatch": {
       "dark": [
         "#0b0b0c",
@@ -25225,6 +25235,16 @@ export const themeMeta = [
       "DEFAULT": 6,
       "lg": 8,
       "xl": 10
+    },
+    "radiusBase": 6,
+    "radiusScale": {
+      "badge": 4,
+      "control-sm": 5,
+      "control": 6,
+      "seg": 7,
+      "card": 8,
+      "panel": 10,
+      "dialog": 12
     },
     "swatch": {
       "dark": [
@@ -25250,6 +25270,16 @@ export const themeMeta = [
       "lg": 6,
       "xl": 8
     },
+    "radiusBase": 4,
+    "radiusScale": {
+      "badge": 2,
+      "control-sm": 3,
+      "control": 4,
+      "seg": 5,
+      "card": 6,
+      "panel": 8,
+      "dialog": 10
+    },
     "swatch": {
       "dark": [
         "#08090a",
@@ -25273,6 +25303,16 @@ export const themeMeta = [
       "DEFAULT": 8,
       "lg": 12,
       "xl": 16
+    },
+    "radiusBase": 8,
+    "radiusScale": {
+      "badge": 6,
+      "control-sm": 7,
+      "control": 8,
+      "seg": 9,
+      "card": 10,
+      "panel": 12,
+      "dialog": 14
     },
     "swatch": {
       "dark": [
@@ -25298,6 +25338,16 @@ export const themeMeta = [
       "lg": 14,
       "xl": 20
     },
+    "radiusBase": 10,
+    "radiusScale": {
+      "badge": 8,
+      "control-sm": 9,
+      "control": 10,
+      "seg": 11,
+      "card": 12,
+      "panel": 14,
+      "dialog": 16
+    },
     "swatch": {
       "dark": [
         "#262624",
@@ -25321,6 +25371,16 @@ export const themeMeta = [
       "DEFAULT": 6,
       "lg": 8,
       "xl": 12
+    },
+    "radiusBase": 6,
+    "radiusScale": {
+      "badge": 4,
+      "control-sm": 5,
+      "control": 6,
+      "seg": 7,
+      "card": 8,
+      "panel": 10,
+      "dialog": 12
     },
     "swatch": {
       "dark": [
@@ -25346,6 +25406,16 @@ export const themeMeta = [
       "lg": 10,
       "xl": 14
     },
+    "radiusBase": 6,
+    "radiusScale": {
+      "badge": 4,
+      "control-sm": 5,
+      "control": 6,
+      "seg": 7,
+      "card": 8,
+      "panel": 10,
+      "dialog": 12
+    },
     "swatch": {
       "dark": [
         "#282a36",
@@ -25369,6 +25439,16 @@ export const themeMeta = [
       "DEFAULT": 6,
       "lg": 10,
       "xl": 14
+    },
+    "radiusBase": 6,
+    "radiusScale": {
+      "badge": 4,
+      "control-sm": 5,
+      "control": 6,
+      "seg": 7,
+      "card": 8,
+      "panel": 10,
+      "dialog": 12
     },
     "swatch": {
       "dark": [
@@ -25394,6 +25474,16 @@ export const themeMeta = [
       "lg": 12,
       "xl": 16
     },
+    "radiusBase": 8,
+    "radiusScale": {
+      "badge": 6,
+      "control-sm": 7,
+      "control": 8,
+      "seg": 9,
+      "card": 10,
+      "panel": 12,
+      "dialog": 14
+    },
     "swatch": {
       "dark": [
         "#1e1e2e",
@@ -25417,6 +25507,16 @@ export const themeMeta = [
       "DEFAULT": 6,
       "lg": 8,
       "xl": 12
+    },
+    "radiusBase": 6,
+    "radiusScale": {
+      "badge": 4,
+      "control-sm": 5,
+      "control": 6,
+      "seg": 7,
+      "card": 8,
+      "panel": 10,
+      "dialog": 12
     },
     "swatch": {
       "dark": [
@@ -25442,6 +25542,16 @@ export const themeMeta = [
       "lg": 10,
       "xl": 14
     },
+    "radiusBase": 6,
+    "radiusScale": {
+      "badge": 4,
+      "control-sm": 5,
+      "control": 6,
+      "seg": 7,
+      "card": 8,
+      "panel": 10,
+      "dialog": 12
+    },
     "swatch": {
       "dark": [
         "#011627",
@@ -25465,6 +25575,16 @@ export const themeMeta = [
       "DEFAULT": 10,
       "lg": 14,
       "xl": 18
+    },
+    "radiusBase": 10,
+    "radiusScale": {
+      "badge": 8,
+      "control-sm": 9,
+      "control": 10,
+      "seg": 11,
+      "card": 12,
+      "panel": 14,
+      "dialog": 16
     },
     "swatch": {
       "dark": [
@@ -25490,6 +25610,16 @@ export const themeMeta = [
       "lg": 6,
       "xl": 8
     },
+    "radiusBase": 4,
+    "radiusScale": {
+      "badge": 2,
+      "control-sm": 3,
+      "control": 4,
+      "seg": 5,
+      "card": 6,
+      "panel": 8,
+      "dialog": 10
+    },
     "swatch": {
       "dark": [
         "#2e3440",
@@ -25513,6 +25643,16 @@ export const themeMeta = [
       "DEFAULT": 6,
       "lg": 10,
       "xl": 14
+    },
+    "radiusBase": 6,
+    "radiusScale": {
+      "badge": 4,
+      "control-sm": 5,
+      "control": 6,
+      "seg": 7,
+      "card": 8,
+      "panel": 10,
+      "dialog": 12
     },
     "swatch": {
       "dark": [
@@ -25538,6 +25678,16 @@ export const themeMeta = [
       "lg": 6,
       "xl": 8
     },
+    "radiusBase": 4,
+    "radiusScale": {
+      "badge": 2,
+      "control-sm": 3,
+      "control": 4,
+      "seg": 5,
+      "card": 6,
+      "panel": 8,
+      "dialog": 10
+    },
     "swatch": {
       "dark": [
         "#282828",
@@ -25561,6 +25711,16 @@ export const themeMeta = [
       "DEFAULT": 4,
       "lg": 6,
       "xl": 10
+    },
+    "radiusBase": 4,
+    "radiusScale": {
+      "badge": 2,
+      "control-sm": 3,
+      "control": 4,
+      "seg": 5,
+      "card": 6,
+      "panel": 8,
+      "dialog": 10
     },
     "swatch": {
       "dark": [
@@ -25586,6 +25746,16 @@ export const themeMeta = [
       "lg": 6,
       "xl": 10
     },
+    "radiusBase": 4,
+    "radiusScale": {
+      "badge": 2,
+      "control-sm": 3,
+      "control": 4,
+      "seg": 5,
+      "card": 6,
+      "panel": 8,
+      "dialog": 10
+    },
     "swatch": {
       "dark": [
         "#100f0f",
@@ -25609,6 +25779,16 @@ export const themeMeta = [
       "DEFAULT": 4,
       "lg": 6,
       "xl": 8
+    },
+    "radiusBase": 4,
+    "radiusScale": {
+      "badge": 2,
+      "control-sm": 3,
+      "control": 4,
+      "seg": 5,
+      "card": 6,
+      "panel": 8,
+      "dialog": 10
     },
     "swatch": {
       "dark": [

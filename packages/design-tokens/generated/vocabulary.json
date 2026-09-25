@@ -25,7 +25,34 @@
     "bg-add-bg",
     "bg-del-bg",
     "shadow-pop",
-    "bg-scrim"
+    "bg-scrim",
+    "text-micro",
+    "text-small",
+    "text-ui",
+    "text-body",
+    "text-title",
+    "text-heading",
+    "text-display",
+    "rounded-badge",
+    "rounded-control-sm",
+    "rounded-control",
+    "rounded-seg",
+    "rounded-card",
+    "rounded-panel",
+    "rounded-dialog",
+    "h-control-sm",
+    "h-control",
+    "h-control-lg",
+    "h-bar",
+    "h-tab",
+    "h-row",
+    "h-nav",
+    "size-control",
+    "z-dialog",
+    "z-tooltip",
+    "w-sidebar",
+    "max-w-dialog",
+    "ease-standard"
   ],
   "legacyUtilityNames": [
     "background",
@@ -135,6 +162,131 @@
       ],
       "names": [
         "pop"
+      ]
+    },
+    {
+      "id": "text",
+      "prefixes": [
+        "text"
+      ],
+      "names": [
+        "micro",
+        "small",
+        "ui",
+        "body",
+        "title",
+        "heading",
+        "display"
+      ]
+    },
+    {
+      "id": "radius",
+      "prefixes": [
+        "rounded",
+        "rounded-s",
+        "rounded-e",
+        "rounded-t",
+        "rounded-r",
+        "rounded-b",
+        "rounded-l",
+        "rounded-ss",
+        "rounded-se",
+        "rounded-ee",
+        "rounded-es",
+        "rounded-tl",
+        "rounded-tr",
+        "rounded-br",
+        "rounded-bl"
+      ],
+      "names": [
+        "badge",
+        "control-sm",
+        "control",
+        "seg",
+        "card",
+        "panel",
+        "dialog"
+      ]
+    },
+    {
+      "id": "height",
+      "prefixes": [
+        "h",
+        "min-h",
+        "max-h"
+      ],
+      "names": [
+        "control-sm",
+        "control",
+        "control-lg",
+        "nav",
+        "item",
+        "step",
+        "th",
+        "row",
+        "tab",
+        "bar",
+        "badge",
+        "kbd",
+        "panel-bar",
+        "dialog-bar",
+        "footer"
+      ]
+    },
+    {
+      "id": "size",
+      "prefixes": [
+        "size"
+      ],
+      "names": [
+        "control-sm",
+        "control",
+        "control-lg"
+      ]
+    },
+    {
+      "id": "z",
+      "prefixes": [
+        "z"
+      ],
+      "names": [
+        "base",
+        "sticky",
+        "dock",
+        "rail",
+        "sidebar",
+        "dialog",
+        "dropdown",
+        "popover",
+        "toast",
+        "tooltip"
+      ]
+    },
+    {
+      "id": "container",
+      "prefixes": [
+        "w",
+        "min-w",
+        "max-w"
+      ],
+      "names": [
+        "sidebar",
+        "rail",
+        "dock",
+        "dock-run",
+        "sheet",
+        "dialog-sm",
+        "dialog",
+        "dialog-lg"
+      ]
+    },
+    {
+      "id": "ease",
+      "prefixes": [
+        "ease"
+      ],
+      "names": [
+        "standard"
       ]
     }
   ]

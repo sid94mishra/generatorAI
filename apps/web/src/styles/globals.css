@@ -4,6 +4,8 @@
 
 /* Use .dark class for dark mode */
 @custom-variant dark (&:is(.dark *));
+/* `reduced:` — the "Reduce motion" setting or the OS preference sets data-motion="reduce" on <html> (D-20). */
+@custom-variant reduced (&:where([data-motion="reduce"], [data-motion="reduce"] *));
 /* @generated-tokens:start — regenerate with `pnpm tokens:write`; do not edit by hand */
 
 /* ══════════════════════════════════════════════════════════════
@@ -5904,6 +5906,14 @@
   --gai-del-bg: #ff63691a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #ededef0f;
+  /* Radius scale from base 6px (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
 }
 
 .light {
@@ -5976,6 +5986,14 @@
   --gai-del-bg: #ff63691a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #ededef0f;
+  /* Radius scale from base 6px (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
 }
 
 .light[data-theme="instrument"] {
@@ -6048,6 +6066,14 @@
   --gai-del-bg: #f851491a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #e6edf30f;
+  /* Radius scale from base 6px (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
 }
 
 .light[data-theme="github"] {
@@ -6120,6 +6146,14 @@
   --gai-del-bg: #ff5f571a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #f2f3f50f;
+  /* Radius scale from base 4px (D-14) */
+  --gai-radius-badge: 2px;
+  --gai-radius-control-sm: 3px;
+  --gai-radius-control: 4px;
+  --gai-radius-seg: 5px;
+  --gai-radius-card: 6px;
+  --gai-radius-panel: 8px;
+  --gai-radius-dialog: 10px;
 }
 
 .light[data-theme="graphite"] {
@@ -6192,6 +6226,14 @@
   --gai-del-bg: #f2555a1a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #ececec0f;
+  /* Radius scale from base 8px (D-14) */
+  --gai-radius-badge: 6px;
+  --gai-radius-control-sm: 7px;
+  --gai-radius-control: 8px;
+  --gai-radius-seg: 9px;
+  --gai-radius-card: 10px;
+  --gai-radius-panel: 12px;
+  --gai-radius-dialog: 14px;
 }
 
 .light[data-theme="carbon"] {
@@ -6264,6 +6306,14 @@
   --gai-del-bg: #e5786d1a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #f5f4ee0f;
+  /* Radius scale from base 10px (D-14) */
+  --gai-radius-badge: 8px;
+  --gai-radius-control-sm: 9px;
+  --gai-radius-control: 10px;
+  --gai-radius-seg: 11px;
+  --gai-radius-card: 12px;
+  --gai-radius-panel: 14px;
+  --gai-radius-dialog: 16px;
 }
 
 .light[data-theme="clay"] {
@@ -6336,6 +6386,14 @@
   --gai-del-bg: #e06c751a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #dce1e80f;
+  /* Radius scale from base 6px (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
 }
 
 .light[data-theme="one"] {
@@ -6408,6 +6466,14 @@
   --gai-del-bg: #ff55551a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #f8f8f20f;
+  /* Radius scale from base 6px (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
 }
 
 .light[data-theme="dracula"] {
@@ -6480,6 +6546,14 @@
   --gai-del-bg: #f7768e1a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #c0caf50f;
+  /* Radius scale from base 6px (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
 }
 
 .light[data-theme="tokyo-night"] {
@@ -6552,6 +6626,14 @@
   --gai-del-bg: #f38ba81a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #cdd6f40f;
+  /* Radius scale from base 8px (D-14) */
+  --gai-radius-badge: 6px;
+  --gai-radius-control-sm: 7px;
+  --gai-radius-control: 8px;
+  --gai-radius-seg: 9px;
+  --gai-radius-card: 10px;
+  --gai-radius-panel: 12px;
+  --gai-radius-dialog: 14px;
 }
 
 .light[data-theme="catppuccin"] {
@@ -6624,6 +6706,14 @@
   --gai-del-bg: #f071781a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #bfbdb60f;
+  /* Radius scale from base 6px (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
 }
 
 .light[data-theme="ayu"] {
@@ -6696,6 +6786,14 @@
   --gai-del-bg: #ef53501a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #d6deeb0f;
+  /* Radius scale from base 6px (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
 }
 
 .light[data-theme="night-owl"] {
@@ -6768,6 +6866,14 @@
   --gai-del-bg: #eb6f921a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #e0def40f;
+  /* Radius scale from base 10px (D-14) */
+  --gai-radius-badge: 8px;
+  --gai-radius-control-sm: 9px;
+  --gai-radius-control: 10px;
+  --gai-radius-seg: 11px;
+  --gai-radius-card: 12px;
+  --gai-radius-panel: 14px;
+  --gai-radius-dialog: 16px;
 }
 
 .light[data-theme="rose-pine"] {
@@ -6840,6 +6946,14 @@
   --gai-del-bg: #cf77831a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #eceff40f;
+  /* Radius scale from base 4px (D-14) */
+  --gai-radius-badge: 2px;
+  --gai-radius-control-sm: 3px;
+  --gai-radius-control: 4px;
+  --gai-radius-seg: 5px;
+  --gai-radius-card: 6px;
+  --gai-radius-panel: 8px;
+  --gai-radius-dialog: 10px;
 }
 
 .light[data-theme="nord"] {
@@ -6912,6 +7026,14 @@
   --gai-del-bg: #e67e801a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #d3c6aa0f;
+  /* Radius scale from base 6px (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
 }
 
 .light[data-theme="everforest"] {
@@ -6984,6 +7106,14 @@
   --gai-del-bg: #fb49341a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #ebdbb20f;
+  /* Radius scale from base 4px (D-14) */
+  --gai-radius-badge: 2px;
+  --gai-radius-control-sm: 3px;
+  --gai-radius-control: 4px;
+  --gai-radius-seg: 5px;
+  --gai-radius-card: 6px;
+  --gai-radius-panel: 8px;
+  --gai-radius-dialog: 10px;
 }
 
 .light[data-theme="gruvbox"] {
@@ -7056,6 +7186,14 @@
   --gai-del-bg: #e3453f1a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #eee8d50f;
+  /* Radius scale from base 4px (D-14) */
+  --gai-radius-badge: 2px;
+  --gai-radius-control-sm: 3px;
+  --gai-radius-control: 4px;
+  --gai-radius-seg: 5px;
+  --gai-radius-card: 6px;
+  --gai-radius-panel: 8px;
+  --gai-radius-dialog: 10px;
 }
 
 .light[data-theme="solarized"] {
@@ -7128,6 +7266,14 @@
   --gai-del-bg: #d14d411a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #cecdc30f;
+  /* Radius scale from base 4px (D-14) */
+  --gai-radius-badge: 2px;
+  --gai-radius-control-sm: 3px;
+  --gai-radius-control: 4px;
+  --gai-radius-seg: 5px;
+  --gai-radius-card: 6px;
+  --gai-radius-panel: 8px;
+  --gai-radius-dialog: 10px;
 }
 
 .light[data-theme="flexoki"] {
@@ -7200,6 +7346,14 @@
   --gai-del-bg: #ff8a801a;
   --gai-scrim: #0000009e;
   --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #ffffff0f;
+  /* Radius scale from base 4px (D-14) */
+  --gai-radius-badge: 2px;
+  --gai-radius-control-sm: 3px;
+  --gai-radius-control: 4px;
+  --gai-radius-seg: 5px;
+  --gai-radius-card: 6px;
+  --gai-radius-panel: 8px;
+  --gai-radius-dialog: 10px;
 }
 
 .light[data-theme="contrast"] {
@@ -8534,6 +8688,126 @@
   --gai-focus: #005f57;
 }
 
+/* ── Layer 1c — design scales (--gai-*): density, font size, motion ──
+   Each override is one attribute selector after :root; source order wins the tie. */
+
+:root {
+  /* Heights — comfortable density (D-15) */
+  --gai-h-control-sm: 24px;
+  --gai-h-control: 28px;
+  --gai-h-control-lg: 32px;
+  --gai-h-nav: 30px;
+  --gai-h-item: 30px;
+  --gai-h-step: 28px;
+  --gai-h-th: 32px;
+  --gai-h-row: 44px;
+  --gai-h-tab: 36px;
+  --gai-h-bar: 44px;
+  --gai-h-badge: 20px;
+  --gai-h-kbd: 18px;
+  --gai-h-panel-bar: 40px;
+  --gai-h-dialog-bar: 48px;
+  --gai-h-footer: 56px;
+  /* Type — interface font size 13 (D-13) */
+  --gai-text-micro: 11px;
+  --gai-leading-micro: 1.45;
+  --gai-weight-micro: 400;
+  --gai-tracking-micro: 0em;
+  --gai-text-small: 12px;
+  --gai-leading-small: 1.45;
+  --gai-weight-small: 400;
+  --gai-tracking-small: 0em;
+  --gai-text-ui: 13px;
+  --gai-leading-ui: 1.45;
+  --gai-weight-ui: 400;
+  --gai-tracking-ui: 0em;
+  --gai-text-body: 14px;
+  --gai-leading-body: 1.6;
+  --gai-weight-body: 400;
+  --gai-tracking-body: 0em;
+  --gai-text-title: 16px;
+  --gai-leading-title: 1.3;
+  --gai-weight-title: 600;
+  --gai-tracking-title: 0em;
+  --gai-text-heading: 20px;
+  --gai-leading-heading: 1.3;
+  --gai-weight-heading: 600;
+  --gai-tracking-heading: -0.01em;
+  --gai-text-display: 28px;
+  --gai-leading-display: 1.2;
+  --gai-weight-display: 600;
+  --gai-tracking-display: -0.02em;
+  /* Motion (D-20) */
+  --gai-duration-fast: 120ms;
+  --gai-duration-normal: 180ms;
+  --gai-duration-slow: 220ms;
+  --gai-ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  /* Stacking layers (D-41) */
+  --gai-z-base: 0;
+  --gai-z-sticky: 10;
+  --gai-z-dock: 20;
+  --gai-z-rail: 30;
+  --gai-z-sidebar: 30;
+  --gai-z-dialog: 1000;
+  --gai-z-dropdown: 1100;
+  --gai-z-popover: 1100;
+  --gai-z-toast: 1150;
+  --gai-z-tooltip: 1200;
+  /* Shell widths (D-15, 02 §8) */
+  --gai-w-sidebar: 232px;
+  --gai-w-rail: 48px;
+  --gai-w-dock: 480px;
+  --gai-w-dock-run: 440px;
+  --gai-w-sheet: 380px;
+  --gai-w-dialog-sm: 420px;
+  --gai-w-dialog: 640px;
+  --gai-w-dialog-lg: 960px;
+}
+
+[data-density="compact"] {
+  --gai-h-control-sm: 20px;
+  --gai-h-control: 24px;
+  --gai-h-control-lg: 28px;
+  --gai-h-nav: 26px;
+  --gai-h-item: 26px;
+  --gai-h-step: 24px;
+  --gai-h-th: 28px;
+  --gai-h-row: 36px;
+  --gai-h-tab: 32px;
+  --gai-h-bar: 44px;
+  --gai-h-badge: 20px;
+  --gai-h-kbd: 18px;
+  --gai-h-panel-bar: 40px;
+  --gai-h-dialog-bar: 48px;
+  --gai-h-footer: 56px;
+}
+
+[data-font-size="12"] {
+  --gai-text-micro: 10px;
+  --gai-text-small: 11px;
+  --gai-text-ui: 12px;
+  --gai-text-body: 13px;
+  --gai-text-title: 15px;
+  --gai-text-heading: 19px;
+  --gai-text-display: 27px;
+}
+
+[data-font-size="14"] {
+  --gai-text-micro: 12px;
+  --gai-text-small: 13px;
+  --gai-text-ui: 14px;
+  --gai-text-body: 15px;
+  --gai-text-title: 17px;
+  --gai-text-heading: 21px;
+  --gai-text-display: 29px;
+}
+
+[data-motion="reduce"] {
+  --gai-duration-fast: 0ms;
+  --gai-duration-normal: 0ms;
+  --gai-duration-slow: 0ms;
+}
+
 /* ══════════════════════════════════════════════════════════════
    Layer 2 — Tailwind utility bridge. Makes `bg-background`,
    `text-muted-foreground`, `bg-success-muted`, `ring-ring`… real
@@ -8583,7 +8857,7 @@
 
 /* Design utilities are mapped in css/vocabulary.css (imported at the top of
    globals.css). The required ones are always built (09 §2.4). */
-@source inline("bg-ground bg-surface bg-raised bg-overlay bg-sunken bg-hover bg-selected border-line border-line-soft border-line-strong text-fg text-fg-2 text-fg-3 bg-accent text-on-accent outline-focus bg-run text-run bg-run-bg text-ok text-warn text-err bg-add-bg bg-del-bg shadow-pop bg-scrim");
+@source inline("bg-ground bg-surface bg-raised bg-overlay bg-sunken bg-hover bg-selected border-line border-line-soft border-line-strong text-fg text-fg-2 text-fg-3 bg-accent text-on-accent outline-focus bg-run text-run bg-run-bg text-ok text-warn text-err bg-add-bg bg-del-bg shadow-pop bg-scrim text-micro text-small text-ui text-body text-title text-heading text-display rounded-badge rounded-control-sm rounded-control rounded-seg rounded-card rounded-panel rounded-dialog h-control-sm h-control h-control-lg h-bar h-tab h-row h-nav size-control z-dialog z-tooltip w-sidebar max-w-dialog ease-standard");
 
 /* ══════════════════════════════════════════════════════════════
    Layer 3 — compat aliases. Keeps every pre-existing
@@ -9117,4 +9391,120 @@ label:has(> input[type="radio"]) {
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════
+   Design layer — hand-written parts (02 §2.3, §5.3, §6.7; P1-T6).
+   New code only: legacy pages never use these classes.
+   ══════════════════════════════════════════════════════════════ */
+
+/* The focus ring (D-12): outline + offset shows the real backdrop on raised
+   and overlay surfaces, follows border-radius, and does not fight shadow-pop. */
+@utility focus-ring {
+  &:focus-visible {
+    outline: 2px solid var(--gai-focus);
+    outline-offset: 2px;
+  }
+}
+
+/* The only transition kit components use: hover/press, ≤ 120 ms (D-20). */
+@utility transition-control {
+  transition-property: color, background-color, border-color, outline-color, box-shadow, opacity;
+  transition-duration: var(--gai-duration-fast);
+  transition-timing-function: var(--gai-ease-standard);
+}
+
+/* The in-app "Reduce motion" setting, mirroring the OS media rule above. */
+[data-motion="reduce"] *,
+[data-motion="reduce"] *::before,
+[data-motion="reduce"] *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+}
+
+/* Prose for the new transcript and Streamdown output (02 §5.3).
+   The legacy .markdown-content rules stay until P7. */
+.gai-prose {
+  font-size: var(--gai-text-body);
+  line-height: var(--gai-leading-body);
+  color: var(--gai-fg);
+}
+.gai-prose :where(p, ul, ol, pre, table, blockquote) {
+  margin: 0 0 8px;
+}
+.gai-prose > :first-child {
+  margin-top: 0;
+}
+.gai-prose > :last-child {
+  margin-bottom: 0;
+}
+.gai-prose h1 {
+  font-size: var(--gai-text-title);
+  font-weight: 600;
+  line-height: var(--gai-leading-title);
+  margin: 16px 0 8px;
+}
+.gai-prose h2 {
+  font-size: var(--gai-text-body);
+  font-weight: 600;
+  margin: 14px 0 6px;
+}
+.gai-prose :where(h3, h4) {
+  font-size: var(--gai-text-ui);
+  font-weight: 600;
+}
+.gai-prose h4 {
+  color: var(--gai-fg-2);
+}
+.gai-prose li::marker {
+  color: var(--gai-fg-3);
+}
+.gai-prose a {
+  color: var(--gai-fg);
+  text-decoration: underline;
+  text-decoration-color: var(--gai-line-strong);
+  text-underline-offset: 2px;
+}
+.gai-prose a:hover {
+  text-decoration-color: var(--gai-fg);
+}
+.gai-prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: var(--gai-text-small);
+  background: var(--gai-selected);
+  border-radius: var(--gai-radius-badge);
+  padding: 1px 4px;
+}
+.gai-prose pre {
+  background: var(--gai-sunken);
+  border: 1px solid var(--gai-line-soft);
+  border-radius: var(--gai-radius-card);
+  padding: 10px 12px;
+  font-family: var(--font-mono);
+  font-size: var(--gai-text-small);
+  line-height: 1.5;
+}
+.gai-prose blockquote {
+  border-left: 2px solid var(--gai-line);
+  padding-left: 12px;
+  color: var(--gai-fg-2);
+}
+.gai-prose th {
+  font-size: var(--gai-text-small);
+  font-weight: 500;
+  color: var(--gai-fg-2);
+  text-transform: none;
+  text-align: left;
+  border-bottom: 1px solid var(--gai-line);
+  padding: 6px 10px;
+}
+.gai-prose td {
+  border-bottom: 1px solid var(--gai-line-soft);
+  padding: 6px 10px;
+}
+.gai-prose hr {
+  border: 0;
+  border-top: 1px solid var(--gai-line-soft);
+  margin: 16px 0;
 }

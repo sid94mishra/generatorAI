@@ -3,6 +3,7 @@ export * from './tokens.js';
 export * from './themes/index.js';
 export * from './registry.js';
 export * from './design.js';
+export * from './geometry.js';
 export * from './vocabulary.js';
 export * from './emit/ansi.js';
 export * from './icons.js';

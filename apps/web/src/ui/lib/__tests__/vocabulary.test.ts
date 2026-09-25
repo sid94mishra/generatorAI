@@ -70,6 +70,29 @@ describe('design vocabulary compiles to --gai-* utilities', () => {
     expect(css).toContain('background-color: var(--gai-selected)');
   });
 
+  it.each([
+    ['text-ui', ['font-size: var(--gai-text-ui)', 'line-height: var(--tw-leading, var(--gai-leading-ui))']],
+    ['text-title', ['font-size: var(--gai-text-title)', 'font-weight: var(--tw-font-weight, var(--gai-weight-title))']],
+    ['text-heading', ['letter-spacing: var(--tw-tracking, var(--gai-tracking-heading))']],
+    ['rounded-card', ['border-radius: var(--gai-radius-card)']],
+    ['rounded-t-dialog', ['var(--gai-radius-dialog)']],
+    ['h-row', ['height: var(--gai-h-row)']],
+    ['min-h-control', ['min-height: var(--gai-h-control)']],
+    ['size-control', ['width: var(--gai-h-control)', 'height: var(--gai-h-control)']],
+    ['z-dialog', ['z-index: var(--gai-z-dialog)']],
+    ['w-sidebar', ['width: var(--gai-w-sidebar)']],
+    ['max-w-dialog', ['max-width: var(--gai-w-dialog)']],
+    ['ease-standard', ['var(--gai-ease-standard)']],
+  ])('scale utility %s', (cls, declarations) => {
+    const css = build([cls]);
+    const body = rule(css, cls);
+    for (const declaration of declarations) expect(body, css).toContain(declaration);
+  });
+
+  it('text-ui does not force a weight, so it inherits one', () => {
+    expect(rule(build(['text-ui']), 'text-ui')).not.toContain('font-weight');
+  });
+
   it('shadow-pop is the design shadow', () => {
     expect(rule(build(['shadow-pop']), 'shadow-pop')).toContain('var(--gai-shadow-pop)');
   });

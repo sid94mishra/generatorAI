@@ -61,6 +61,54 @@ export const TEXT_COLOR_OVERRIDES = {
 /** `shadow-pop` is the only shadow (02 §6.4). */
 export const SHADOW_NAMES = ['pop'] as const;
 
+/** Type steps (D-13, 02 §5.2): `text-micro … text-display`. */
+export const TEXT_STEPS = ['micro', 'small', 'ui', 'body', 'title', 'heading', 'display'] as const;
+export type TextStep = (typeof TEXT_STEPS)[number];
+
+/** Radius steps (D-14, 02 §6.1): `rounded-badge … rounded-dialog`. */
+export const RADIUS_STEPS = ['badge', 'control-sm', 'control', 'seg', 'card', 'panel', 'dialog'] as const;
+export type RadiusStep = (typeof RADIUS_STEPS)[number];
+
+/** Density-driven heights (D-15, 02 §6.3): `h-*`, `min-h-*`, `max-h-*`. */
+export const HEIGHT_NAMES = [
+  'control-sm',
+  'control',
+  'control-lg',
+  'nav',
+  'item',
+  'step',
+  'th',
+  'row',
+  'tab',
+  'bar',
+  'badge',
+  'kbd',
+  'panel-bar',
+  'dialog-bar',
+  'footer',
+] as const;
+export type HeightName = (typeof HEIGHT_NAMES)[number];
+
+/** Square sizes (`size-control` …): the three control heights. */
+export const SIZE_NAMES = ['control-sm', 'control', 'control-lg'] as const satisfies readonly HeightName[];
+
+/** Z layers (D-41, 02 §6.5): `z-base … z-tooltip`. */
+export const Z_NAMES = ['base', 'sticky', 'dock', 'rail', 'sidebar', 'dialog', 'dropdown', 'popover', 'toast', 'tooltip'] as const;
+export type ZName = (typeof Z_NAMES)[number];
+
+/** Shell widths (D-15, 02 §8): `w-sidebar`, `max-w-dialog` … via `--container-*`. */
+export const CONTAINER_NAMES = ['sidebar', 'rail', 'dock', 'dock-run', 'sheet', 'dialog-sm', 'dialog', 'dialog-lg'] as const;
+export type ContainerName = (typeof CONTAINER_NAMES)[number];
+
+/** Easing curves: `ease-standard`. */
+export const EASE_NAMES = ['standard'] as const;
+
+/** Every side/corner form of `rounded-*`. */
+export const RADIUS_UTILITY_PREFIXES = [
+  'rounded',
+  ...['s', 'e', 't', 'r', 'b', 'l', 'ss', 'se', 'ee', 'es', 'tl', 'tr', 'br', 'bl'].map((side) => `rounded-${side}`),
+] as const;
+
 /**
  * Shared tokens: neither legacy nor design-named, and they survive P7
  * (02 §2.3 "Kept tokens"). Bridged to their unprefixed raw variables.
@@ -164,6 +212,13 @@ export const VOCABULARY_NAMESPACES: readonly VocabularyNamespace[] = [
   { id: 'color', prefixes: COLOR_UTILITY_PREFIXES, names: COLOR_NAMES },
   { id: 'text-color', prefixes: ['text'], names: Object.keys(TEXT_COLOR_OVERRIDES) },
   { id: 'shadow', prefixes: ['shadow'], names: SHADOW_NAMES },
+  { id: 'text', prefixes: ['text'], names: TEXT_STEPS },
+  { id: 'radius', prefixes: RADIUS_UTILITY_PREFIXES, names: RADIUS_STEPS },
+  { id: 'height', prefixes: ['h', 'min-h', 'max-h'], names: HEIGHT_NAMES },
+  { id: 'size', prefixes: ['size'], names: SIZE_NAMES },
+  { id: 'z', prefixes: ['z'], names: Z_NAMES },
+  { id: 'container', prefixes: ['w', 'min-w', 'max-w'], names: CONTAINER_NAMES },
+  { id: 'ease', prefixes: ['ease'], names: EASE_NAMES },
 ];
 
 /**
@@ -198,4 +253,31 @@ export const REQUIRED_UTILITIES = [
   'bg-del-bg',
   'shadow-pop',
   'bg-scrim',
+  'text-micro',
+  'text-small',
+  'text-ui',
+  'text-body',
+  'text-title',
+  'text-heading',
+  'text-display',
+  'rounded-badge',
+  'rounded-control-sm',
+  'rounded-control',
+  'rounded-seg',
+  'rounded-card',
+  'rounded-panel',
+  'rounded-dialog',
+  'h-control-sm',
+  'h-control',
+  'h-control-lg',
+  'h-bar',
+  'h-tab',
+  'h-row',
+  'h-nav',
+  'size-control',
+  'z-dialog',
+  'z-tooltip',
+  'w-sidebar',
+  'max-w-dialog',
+  'ease-standard',
 ] as const;

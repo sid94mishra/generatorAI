@@ -18,7 +18,7 @@
 // and the iOS status-bar API all take a literal string.
 // ────────────────────────────────────────────────────────────────
 
-import { DESIGN_COLOR_VARS, resolveDesignTokens } from '../design.js';
+import { DESIGN_COLOR_VARS, radiusScale, resolveDesignTokens } from '../design.js';
 import { COLOR_NAMES, TEXT_COLOR_OVERRIDES } from '../vocabulary.js';
 import {
   ACCENT_IDS,
@@ -144,6 +144,8 @@ export function emitNative(): string {
       credit: theme.credit ?? null,
       defaultAccent: theme.defaultAccent,
       radius: theme.radius,
+      radiusBase: theme.radius.DEFAULT,
+      radiusScale: radiusScale(theme.radius.DEFAULT),
       swatch: { dark: themeSwatch(theme, 'dark'), light: themeSwatch(theme, 'light') },
     });
   }
