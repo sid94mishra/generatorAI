@@ -242,6 +242,15 @@ Decided for P0 review R6, where the ratchet and ESLint disagreed. `*.stories.tsx
 
 ## F. Mobile readiness
 
+### D-46 P1 registry and router details — Final
+Decided while building P1-S3, P1-T10, P1-T11, P1-S1 and P1-S2 where the plan was silent:
+- **Status unions.** Client-side status unions (`RunStatus` = `WorkflowRunStatus | 'pending'`, stream/tool/question/permission/hook/widget, `ReviewThreadStatus`) live in `packages/shared/src/status/unions.ts`; `client-core`, `packages/review` and web `types/review.ts` re-export them, so the exhaustive map covers every union.
+- **Icons.** `NAV_DESTINATIONS.icon` uses the real `ICON_CONCEPTS` keys (`chats`, `projects` …). The registry names lucide 0.460 glyphs today and records the three 1.x renames in a `lucide1` field for P1-U5.
+- **Window size.** `sanitizeBounds` clamps restored windows to `CHROME.minWindow` (860×560), per `06` §3.4.
+- **Command host.** `useCommandHost` lives in `hooks/` (the legacy `AppLayout` may not import `app/`); it moves to `app/shell` with the shell in P3. `RendererCommandId` = global commands executed in the renderer; scoped commands (composer, palette) are display-only. On web, `Mod` chords fire everywhere, including inputs; bare keys and sequences never fire in editable fields, comboboxes, menus, or while a dialog/palette overlay is open. The browser-reserved list is `BROWSER_RESERVED_CHORDS` (avoids a clash with `CHROME`). Desktop menu section items keep `navigateTo` because it also restores a window hidden to the tray.
+- **ShortcutsSheet** is temporary scaffolding on the legacy `components/ui` Modal + Kbd (design class names only) until the kit exists; rebuilt on `ui/` in P3.
+- **Router.** `app/router.tsx` keeps `<AppLayout/>` as the shell element until P3-04; the 404, route-error and page-loader markup moved into legacy `components/{NotFoundPage,RouteErrorFallback,PageLoader}.tsx` so `app/**` carries no Tailwind classes; `GaiRouteHandle.nav` is typed as `NavDestinationId`.
+
 ### D-40 Web and mobile share a design contract and logic, not UI components — Final
 - **Evidence:** Bluesky (the flagship react-native-web app) still uses Radix and floating-ui on web; Discord shares logic, not UI; Linear's mobile apps are native; react-native-web's last release was October 2025; GeneratorAI's densest web surfaces (xterm, @xyflow, @pierre/diffs, the Electron WebContentsView) are DOM-only.
 - **Shared now (this pass):** tokens and the generated class vocabulary (D-08), per-platform geometry schema, `CHROME` constants, icon concept registry (D-17), 8-state status map + labels (D-18), nav destinations (D-22), shortcut/command registry (D-24), attention feed and other new read models in `client-core` (D-36), component *contract* types for shared concepts (status badge, tool block, gate cards, composer states, pane tab set) in `packages/shared/src/ui-contract/` — types only.

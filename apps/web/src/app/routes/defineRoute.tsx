@@ -11,6 +11,7 @@
 import type { ComponentType, ReactElement } from 'react';
 import React, { lazy, Suspense } from 'react';
 import type { RouteObject } from 'react-router';
+import type { NavDestinationId } from '@generatorai/shared/ui-contract';
 import { PageErrorBoundary } from '@/components/PageErrorBoundary.js';
 import { PageLoader } from '@/components/PageLoader.js';
 
@@ -23,8 +24,7 @@ export interface GaiRouteHandle {
    *  fallback labels. */
   title: string;
   /** Sidebar nav destination this route belongs to, if any. */
-  // P1-S2: NavDestinationId
-  nav?: string;
+  nav?: NavDestinationId;
 }
 
 /** The element wrapper every route renders through. Replaces `withBoundary()`.
