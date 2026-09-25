@@ -659,10 +659,91 @@
         "packages/auth/"
       ],
       "reason": "P01 review R7: the v1 /webhooks routes are deleted; a public policy entry for them fails open"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bDEFAULT_WORKFLOW_RUN_PERMISSION_MODE\\b",
+      "reason": "WP-2.7: no bypass default; the permission source resolves run → stage → workflow → trigger → posture"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\b(resolveStageAgent|resolveStageTurnOptions|NON_CONVERSATION_SESSION_FIELDS)\\b",
+      "reason": "WP-2.8: the stage session is built by the SessionComposer (R-1)"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\b(setAgentServices|setBrowserService)\\b",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts",
+        "packages/core/src/bootstrap/",
+        "apps/server/src/"
+      ],
+      "reason": "WP-2.8: SES takes the composer; the agent and browser services are composer deps"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bbuildPermissionHandler\\b",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts"
+      ],
+      "reason": "WP-2.6/2.8: stage gates are the StageGatePort installed by the composer"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bapplyPlanModeConfig\\b",
+      "reason": "WP-2.6: applyModeConfig in session/modeConfig.ts"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bsessionSpecToHarnessConfig\\b|definitions/sessionSpec",
+      "reason": "WP-2.8: definitions/sessionSpec.ts deleted; resolverLayer lives in session/agentProjection.ts"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bfullToolGating\\b|skillDirectories:\\s*(true|false)",
+      "paths": [
+        "packages/core/src/",
+        "packages/agent-harness-providers/src/",
+        "apps/server/src/"
+      ],
+      "reason": "RV-6/RV-9: boolean capabilities replaced by approvalGating/hostTools/structuredOutput/skills levels"
+    },
+    {
+      "phase": "02",
+      "pattern": "process\\.cwd\\(\\)",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts"
+      ],
+      "reason": "B-5: a stage's directory is its run workspace's; no server-cwd fallback"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\b(turnThinkingText|turnToolCalls|turnSystemMessages|assistantPersisted)\\b",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts",
+        "packages/core/src/services/ChatManagementService.ts"
+      ],
+      "reason": "WP-2.9: turns are recorded by session/TurnRecorder.ts"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\binstructionsForMode\\b",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts"
+      ],
+      "reason": "WP-2.8: plan-mode text reaches a stage through the composed planModeInstructions / preparePrompt"
+    },
+    {
+      "phase": "02",
+      "pattern": "components/workflow/(SkillSelector|McpServerSelector|AgentBindingSection)",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-2.11: moved to components/session and take a session"
     }
   ],
   "comments": {
-    "phase": "01",
+    "phase": "02",
     "failFromPhase": null,
     "baseline": 11,
     "paths": [

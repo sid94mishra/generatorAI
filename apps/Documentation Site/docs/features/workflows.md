@@ -24,6 +24,24 @@ The builder includes undo/redo, a collapsible stage properties panel, and an uns
 | Per-Stage Sessions | Every stage has its own agent session; independent branches can run in parallel |
 | Auto | Resolved once at run start: any parallel branch selects per-stage sessions; otherwise the run uses one shared session |
 
+### A stage is a compact chat
+
+The server builds every stage session with the same composer that builds a chat, so a stage gets what a chat gets: the bound agent (its instructions last, its tool groups enforced), skills, MCP servers (with `secretref:` values resolved from the secret store), a bring-your-own-key provider, custom and platform tools (browser, widgets; computer use only when the stage opts in and never on a bypass run), orchestrator tools, and the run workspace as its working directory. A stage whose agent is missing or disabled, whose secret cannot be resolved, or whose run has no workspace fails with that reason instead of starting with less.
+
+The workflow's **General** settings and each stage's panel use one session editor: model, provider, reasoning effort, context tier, agent and overrides, agent mode, permission mode, skills, MCP servers and platform toggles. A stage value overrides the workflow's. The editor shows what the chosen provider cannot do (see the table below) before the run starts.
+
+### Permission mode
+
+A run's permission mode comes from, in order: the run itself (set at start or changed while it runs), the stage's session, the workflow's session, the automation that started it, then the server's default. There is no silent bypass default. The mode is read again at every turn, so a change applies to the next tool call. A stage that asks for approval, a question or a plan review waits in the run's approval queue, and the answer survives a server restart.
+
+| Provider | Approval gating | Platform tools | Skills |
+| --- | --- | --- | --- |
+| Claude Code | Every tool call | Yes | Loaded as a local plugin |
+| GitHub Copilot | Every tool call | Yes | Skill folders |
+| Codex | Commands and patches only (a warning on `default`/`acceptEdits`) | Only when the session starts | Skill folders shared by every Codex session |
+| OpenCode | None: `default` and `plan` are refused at run start | No | No |
+| ACP agent | Every tool call | No | No |
+
 Edge types in the contract are `on_success`, `on_failure`, `on_completion`, and `always`. Stage conditions can be always, on success, on failure, or an expression. A graph must remain acyclic; adding a visual connection is not equivalent to writing a loop. Iterative sub-workflow execution is represented separately in the advanced stage contract.
 
 ## Stage properties
@@ -31,10 +49,11 @@ Edge types in the contract are `on_success`, `on_failure`, `on_completion`, and 
 | Section | Controls |
 | --- | --- |
 | Basic | Name and description |
-| Model & Template | Template, model/runtime overrides, reasoning effort, agent binding where supported |
+| Model | Model, provider, reasoning effort, context tier, agent mode and permission mode over the workflow session, with the provider's capability warnings |
 | Prompts & Context | Inline or file-based prompts and prompt editor |
 | Skills | Stage-selected skill context |
 | MCP Servers | Stage-selected registered servers |
+| Platform Tools | Integrated browser, computer use (opt-in), widgets |
 | Variables | Values specific to the stage |
 | Execution | Condition, expression when relevant, timeout, predecessor context filter, approval required |
 | Retry Policy | Retry enablement, maximum retries, backoff milliseconds, multiplier |

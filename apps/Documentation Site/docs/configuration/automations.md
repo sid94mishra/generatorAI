@@ -100,6 +100,14 @@ Body accepted by `POST /api/automations/preview-iterations`.
 | dataset.data | string | `required` | max 5000000 |
 | dataset.parsedRowCount | number | `optional` | int; min 0 |
 
+## AutomationPermissionModeSchema
+
+The permission modes an automation's runs can use (PD-18).
+
+| Field | Type / choices | Input / default | Constraints |
+| --- | --- | --- | --- |
+| (value) | "default" / "acceptEdits" / "plan" / "bypassPermissions" | `required` | — |
+
 ## CreateAutomationSchema
 
 | Field | Type / choices | Input / default | Constraints |
@@ -149,6 +157,7 @@ Body accepted by `POST /api/automations/preview-iterations`.
 | retryPolicy.backoffMultiplier | number | `required` | min 1; max 10 |
 | retryPolicy.maxBackoffMs | number | `required` | int; min 1000; max 600000 |
 | retryPolicy.retryOn | array of "timeout" / "network" / "workflow_failed" | `required` | minLength 1; maxLength 3 |
+| permissionMode | "default" / "acceptEdits" / "plan" / "bypassPermissions" | `required` | — |
 
 ## UpdateAutomationSchema
 
@@ -199,6 +208,7 @@ Body accepted by `POST /api/automations/preview-iterations`.
 | retryPolicy.backoffMultiplier | number | `required` | min 1; max 10 |
 | retryPolicy.maxBackoffMs | number | `required` | int; min 1000; max 600000 |
 | retryPolicy.retryOn | array of "timeout" / "network" / "workflow_failed" | `required` | minLength 1; maxLength 3 |
+| permissionMode | "default" / "acceptEdits" / "plan" / "bypassPermissions" | `optional` | — |
 
 ## Complete validation contract
 
@@ -330,6 +340,9 @@ export const PreviewIterationsBodySchema = z.object({
   dataset: AutomationDatasetSchema,
 });
 
+/** The permission modes an automation's runs can use (PD-18). */
+export const AutomationPermissionModeSchema = z.enum(['default', 'acceptEdits', 'plan', 'bypassPermissions']);
+
 export const CreateAutomationSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
@@ -349,6 +362,8 @@ export const CreateAutomationSchema = z.object({
   iterationMode: IterationModeSchema.optional(),
   defaultDataset: AutomationDatasetSchema.optional(),
   retryPolicy: AutomationRetryPolicySchema.optional(),
+  // PD-18 — unattended runs must declare their permission mode.
+  permissionMode: AutomationPermissionModeSchema,
 }).refine(
   (data) => {
     if (data.triggerType === 'schedule' && !data.cronExpression) {
@@ -395,6 +410,7 @@ export const UpdateAutomationSchema = z.object({
   iterationMode: IterationModeSchema.nullable().optional(),
   defaultDataset: AutomationDatasetSchema.nullable().optional(),
   retryPolicy: AutomationRetryPolicySchema.nullable().optional(),
+  permissionMode: AutomationPermissionModeSchema.optional(),
 });
 ```
 

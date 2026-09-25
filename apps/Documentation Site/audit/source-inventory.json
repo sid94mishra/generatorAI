@@ -790,98 +790,98 @@
       "method": "POST",
       "path": "/api/automations",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 172,
+      "line": 173,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/automations",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 185,
+      "line": 197,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/preview-iterations",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 201,
+      "line": 213,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/automations/:id",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 223,
+      "line": 235,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/automations/:id",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 237,
+      "line": 249,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/automations/:id",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 247,
+      "line": 273,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/enable",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 259,
+      "line": 285,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/disable",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 269,
+      "line": 295,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/rotate-webhook-token",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 287,
+      "line": 313,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/trigger",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 313,
+      "line": 339,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/webhooks/:token",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 373,
+      "line": 399,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/automations/:id/executions",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 441,
+      "line": 467,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/automations/:id/executions/:execId",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 451,
+      "line": 477,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/automations/:id/executions/:execId/cancel",
       "source": "apps/server/src/routes/automations.ts",
-      "line": 465,
+      "line": 491,
       "mounted": true
     },
     {
@@ -993,196 +993,196 @@
       "method": "POST",
       "path": "/api/chats",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 274,
+      "line": 260,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 328,
+      "line": 314,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 405,
+      "line": 391,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/chats/:id/sources",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 420,
+      "line": 406,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/workspace/prepare",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 438,
+      "line": 424,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/chats/:id",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 454,
+      "line": 440,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/chats/:id",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 466,
+      "line": 452,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/cancel",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 580,
+      "line": 566,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/prompt",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 613,
+      "line": 599,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/attachments/:artifactId",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 740,
+      "line": 726,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/messages",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 767,
+      "line": 753,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/transcript",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 797,
+      "line": 783,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/rewind",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 814,
+      "line": 800,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/fork",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 830,
+      "line": 816,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/background-tasks",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 864,
+      "line": 850,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/background-tasks/:taskId",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 875,
+      "line": 861,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/background-tasks/:taskId/cancel",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 886,
+      "line": 872,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/plans",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 905,
+      "line": 891,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/plans/:planId",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 916,
+      "line": 902,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/plans/:planId/content",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 940,
+      "line": 926,
       "mounted": true
     },
     {
       "method": "PUT",
       "path": "/api/chats/:id/plans/:planId/content",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 975,
+      "line": 961,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/plans/:planId/comments",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1020,
+      "line": 1006,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/plans/:planId/decision",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1056,
+      "line": 1042,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/plans/:planId/save-to-workspace",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1110,
+      "line": 1096,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/chats/:id/interactions",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1143,
+      "line": 1129,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/interactions/:interactionId/respond",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1163,
+      "line": 1149,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/chats/:id/interactions/:interactionId/permission",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1198,
+      "line": 1184,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/chats/:id/permission-mode",
       "source": "apps/server/src/routes/chats.ts",
-      "line": 1231,
+      "line": 1217,
       "mounted": true
     },
     {
@@ -2400,133 +2400,133 @@
       "method": "POST",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 52,
+      "line": 53,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 65,
+      "line": 66,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 97,
+      "line": 98,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/scratchpad",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 110,
+      "line": 111,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/start",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 139,
+      "line": 140,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/pause",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 161,
+      "line": 162,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/resume",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 175,
+      "line": 176,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/retry",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 191,
+      "line": 192,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/cancel",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 221,
+      "line": 222,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 235,
+      "line": 236,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/stages",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 254,
+      "line": 255,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/pause",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 265,
+      "line": 266,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/resume",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 279,
+      "line": 280,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/retry",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 301,
+      "line": 302,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/cancel",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 329,
+      "line": 330,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 355,
+      "line": 356,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 366,
+      "line": 367,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/pending-interrupts",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 391,
+      "line": 403,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/approve",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 411,
+      "line": 423,
       "mounted": true
     },
     {
@@ -2568,28 +2568,28 @@
       "method": "POST",
       "path": "/api/workflow-scripts/reload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 183,
+      "line": 174,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/:id/reload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 195,
+      "line": 186,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/upload",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 222,
+      "line": 213,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-scripts/validate",
       "source": "apps/server/src/routes/workflowScripts.ts",
-      "line": 271,
+      "line": 262,
       "mounted": true
     },
     {
@@ -3674,6 +3674,7 @@
     "apps/server/src/routes/internal-desktop.ts",
     "apps/server/src/routes/openapi.ts",
     "apps/server/src/routes/orchestrator.ts",
+    "apps/server/src/routes/permissionScope.ts",
     "apps/server/src/routes/projects.ts",
     "apps/server/src/routes/review.ts",
     "apps/server/src/routes/scopeRequests.ts",
@@ -3821,6 +3822,10 @@
     "apps/web/src/components/scm/ScmResultCard.tsx",
     "apps/web/src/components/scm/SourceControlOptionsFields.tsx",
     "apps/web/src/components/scm/SourceControlPanel.tsx",
+    "apps/web/src/components/session/AgentBindingSection.tsx",
+    "apps/web/src/components/session/McpServerSelector.tsx",
+    "apps/web/src/components/session/SessionSpecEditor.tsx",
+    "apps/web/src/components/session/SkillSelector.tsx",
     "apps/web/src/components/settings/BrandIcons.tsx",
     "apps/web/src/components/settings/sectionRegistry.tsx",
     "apps/web/src/components/settings/sections/Agents.tsx",
@@ -3888,13 +3893,11 @@
     "apps/web/src/components/widgets/WidgetFrame.tsx",
     "apps/web/src/components/widgets/WidgetHost.tsx",
     "apps/web/src/components/widgets/widgetTabId.ts",
-    "apps/web/src/components/workflow/AgentBindingSection.tsx",
     "apps/web/src/components/workflow/canvasContext.ts",
     "apps/web/src/components/workflow/CollapsibleSection.tsx",
     "apps/web/src/components/workflow/DAGCanvas.tsx",
     "apps/web/src/components/workflow/edgeTypeStyles.ts",
     "apps/web/src/components/workflow/engineGate.tsx",
-    "apps/web/src/components/workflow/McpServerSelector.tsx",
     "apps/web/src/components/workflow/NumberStepper.tsx",
     "apps/web/src/components/workflow/PromptEditor.tsx",
     "apps/web/src/components/workflow/redesign/deriveRunView.ts",
@@ -3914,7 +3917,6 @@
     "apps/web/src/components/workflow/settings/ProjectCodebasesTab.tsx",
     "apps/web/src/components/workflow/settings/TagsMetadataTab.tsx",
     "apps/web/src/components/workflow/settings/VariablesTab.tsx",
-    "apps/web/src/components/workflow/SkillSelector.tsx",
     "apps/web/src/components/workflow/StageEdge.tsx",
     "apps/web/src/components/workflow/StageNode.tsx",
     "apps/web/src/components/workflow/StagePropertiesPanel.tsx",
@@ -4290,7 +4292,6 @@
     "packages/core/src/services/definitions/canonical.ts",
     "packages/core/src/services/definitions/RunDefinitionReader.ts",
     "packages/core/src/services/definitions/runScope.ts",
-    "packages/core/src/services/definitions/sessionSpec.ts",
     "packages/core/src/services/DeltaLog.ts",
     "packages/core/src/services/DurableExecutionEngine.ts",
     "packages/core/src/services/ErrorHandler.ts",
@@ -4329,7 +4330,25 @@
     "packages/core/src/services/scm/SourceControlFlowService.ts",
     "packages/core/src/services/scm/turnHint.ts",
     "packages/core/src/services/scm/workspaceMounts.ts",
+    "packages/core/src/services/session/agentProjection.ts",
+    "packages/core/src/services/session/bindingKey.ts",
+    "packages/core/src/services/session/capabilityLevels.ts",
+    "packages/core/src/services/session/cfg.ts",
+    "packages/core/src/services/session/chatSpec.ts",
+    "packages/core/src/services/session/gates.ts",
+    "packages/core/src/services/session/index.ts",
+    "packages/core/src/services/session/modeConfig.ts",
+    "packages/core/src/services/session/permissionSource.ts",
+    "packages/core/src/services/session/PlatformToolBinder.ts",
+    "packages/core/src/services/session/providerSession.ts",
+    "packages/core/src/services/session/resolveMcp.ts",
+    "packages/core/src/services/session/SessionComposer.ts",
+    "packages/core/src/services/session/StageGatePort.ts",
+    "packages/core/src/services/session/TurnRecorder.ts",
+    "packages/core/src/services/session/types.ts",
+    "packages/core/src/services/session/workspaceExposure.ts",
     "packages/core/src/services/SessionAllocator.ts",
+    "packages/core/src/services/SessionHookRegistry.ts",
     "packages/core/src/services/shellWords.ts",
     "packages/core/src/services/SourceControlService.ts",
     "packages/core/src/services/StageExecutionService.ts",
@@ -4553,6 +4572,7 @@
     "packages/shared/src/config/WidgetSchemas.ts",
     "packages/shared/src/constants/computerUseBlocklist.ts",
     "packages/shared/src/constants/index.ts",
+    "packages/shared/src/constants/providerCapabilityLevels.ts",
     "packages/shared/src/errors/index.ts",
     "packages/shared/src/index.ts",
     "packages/shared/src/ipc/AgentHostIpc.ts",

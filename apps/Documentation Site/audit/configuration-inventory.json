@@ -7315,6 +7315,19 @@
   },
   {
     "file": "packages/shared/src/config/AutomationSchemas.ts",
+    "schema": "AutomationPermissionModeSchema",
+    "page": "configuration/automations",
+    "fields": [
+      {
+        "field": "(value)",
+        "type": "\"default\" / \"acceptEdits\" / \"plan\" / \"bypassPermissions\"",
+        "presence": "required",
+        "constraints": "—"
+      }
+    ]
+  },
+  {
+    "file": "packages/shared/src/config/AutomationSchemas.ts",
     "schema": "CreateAutomationSchema",
     "page": "configuration/automations",
     "fields": [
@@ -7587,6 +7600,12 @@
         "type": "array of \"timeout\" / \"network\" / \"workflow_failed\"",
         "presence": "required",
         "constraints": "minLength 1; maxLength 3"
+      },
+      {
+        "field": "permissionMode",
+        "type": "\"default\" / \"acceptEdits\" / \"plan\" / \"bypassPermissions\"",
+        "presence": "required",
+        "constraints": "—"
       }
     ]
   },
@@ -7864,6 +7883,12 @@
         "type": "array of \"timeout\" / \"network\" / \"workflow_failed\"",
         "presence": "required",
         "constraints": "minLength 1; maxLength 3"
+      },
+      {
+        "field": "permissionMode",
+        "type": "\"default\" / \"acceptEdits\" / \"plan\" / \"bypassPermissions\"",
+        "presence": "optional",
+        "constraints": "—"
       }
     ]
   },
