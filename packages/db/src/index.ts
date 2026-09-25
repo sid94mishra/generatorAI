@@ -56,6 +56,22 @@ export { SqliteWorkflowDefinitionStore } from './repositories/WorkflowDefinition
 export { DrizzleWorkflowRunRepository } from './repositories/WorkflowRunRepository.js';
 export { DrizzleStageRunRepository } from './repositories/StageRunRepository.js';
 
+// Engine v2 (P03 WP-3.1): CAS, run-side repositories, RunStore
+export { IllegalTransitionError } from './repositories/engineCas.js';
+export {
+  StageAttemptRepository,
+  RunSessionRepository,
+  WorkflowTimerRepository,
+  WorkflowOutboxRepository,
+  SchedulerJournalRepository,
+  type StageAttemptRow,
+  type RunSessionRow,
+  type WorkflowTimerRow,
+  type OutboxRow,
+  type JournalRow,
+} from './repositories/EngineRepositories.js';
+export { RunStore, jitteredDelay } from './repositories/RunStore.js';
+
 // Automation repositories
 export { DrizzleAutomationRepository } from './repositories/AutomationRepository.js';
 export { DrizzleAutomationExecutionRepository } from './repositories/AutomationExecutionRepository.js';

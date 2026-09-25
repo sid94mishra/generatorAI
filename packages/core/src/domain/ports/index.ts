@@ -220,3 +220,20 @@ export type {
   SkillsLevel,
 } from './IProviderInstance.js';
 export { makeProviderInstanceId } from './IProviderInstance.js';
+
+// ── Engine v2 persistence (P03 WP-3.1) ──
+export type {
+  IRunStore,
+  IStageRunCas,
+  IWorkflowRunCas,
+  StageInstanceRow,
+  StageRunCasPatch,
+  StageTransitionOptions,
+  LeaseOption,
+  TransitionResult,
+  WorkflowRunRow,
+  RunTransitionOptions,
+  ArmedTimer,
+  ApplyResult,
+  ApplyContext,
+} from './IRunStore.js';

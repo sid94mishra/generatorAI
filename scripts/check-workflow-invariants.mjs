@@ -4,7 +4,9 @@
 //
 // Rule `no-direct-stage-status-write`: a stage run's `status` may only change
 // through the repository's own transition methods. Flagged anywhere outside
-// `packages/db/src/repositories/StageRunRepository.ts`:
+// `packages/db/src/repositories/StageRunRepository.ts` and the v2 engine's CAS
+// implementation behind it (`engineCas.ts`, and `RunStore.ts` which applies
+// decision batches through it, P03 WP-3.1):
 //   - `<x>stageRunRepo.updateStatus(` and `.batchUpdateStatus(` (any receiver
 //     ending in stageRunRepo, including `this.stageRunRepo!.` and `?.`)
 //   - `<x>stageRunRepo.update(<id>, { … status … })`
@@ -39,7 +41,11 @@ export const BASELINE = 24;
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCAN = ['packages/*/src/**/*.{ts,tsx,mts}', 'apps/*/src/**/*.{ts,tsx,mts}'];
-const ALLOW = new Set(['packages/db/src/repositories/StageRunRepository.ts']);
+const ALLOW = new Set([
+  'packages/db/src/repositories/StageRunRepository.ts',
+  'packages/db/src/repositories/engineCas.ts',
+  'packages/db/src/repositories/RunStore.ts',
+]);
 const WAIVER = /\/\/\s*workflow-invariant-ok:/;
 
 const isTestFile = (f) => /(^|\/)(__tests__|__mocks__)\//.test(f) || /\.(test|spec)\.[cm]?tsx?$/.test(f);

@@ -13,7 +13,14 @@
 // ────────────────────────────────────────────────────────────────
 
 import { count, eq, inArray } from 'drizzle-orm';
-import type { IWorkflowRunRepository } from '@generatorai/core';
+import type {
+  IWorkflowRunCas,
+  IWorkflowRunRepository,
+  RunTransitionOptions,
+  TransitionResult,
+  WorkflowRunRow,
+} from '@generatorai/core';
+import type { WorkflowRunState } from '@generatorai/workflow-spec';
 import type {
   StageRun,
   WorkflowRun,
@@ -23,6 +30,8 @@ import type {
 import { StorageError, NotFoundError } from '@generatorai/shared';
 import { stageRuns, workflowRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
+import { sqliteHandle } from './AuthRepositories.js';
+import { claimRunOwnership, getRunRow, runTransition } from './engineCas.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
@@ -55,8 +64,25 @@ function runInsertValues(run: WorkflowRun): typeof workflowRuns.$inferInsert {
   };
 }
 
-export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository {
+export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWorkflowRunCas {
   constructor(private db: AppDatabase) {}
+
+  // ── v2 engine: compare-and-set and ownership (P03 WP-3.1) ──────
+
+  /** The run's CAS, checked against WORKFLOW_RUN_TRANSITIONS; `ownerEpoch` fences it (RV-27). */
+  transition(id: string, from: readonly WorkflowRunState[], to: WorkflowRunState, opts?: RunTransitionOptions): TransitionResult<WorkflowRunRow> {
+    return runTransition(sqliteHandle(this.db), id, from, to, opts);
+  }
+
+  claimOwnership(id: string, ownerId: string, ttlMs: number, now?: number): number | null {
+    return claimRunOwnership(sqliteHandle(this.db), id, ownerId, ttlMs, now);
+  }
+
+  getRunRow(id: string): WorkflowRunRow | null {
+    return getRunRow(sqliteHandle(this.db), id);
+  }
+
+  // ── v1 engine (deleted at the P03 cutover) ─────────────────────
 
   async create(run: WorkflowRun): Promise<WorkflowRun> {
     try {

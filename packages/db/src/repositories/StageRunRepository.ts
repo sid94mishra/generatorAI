@@ -11,11 +11,20 @@
 // ────────────────────────────────────────────────────────────────
 
 import { eq, and, inArray, sql, type SQL } from 'drizzle-orm';
-import type { IStageRunRepository } from '@generatorai/core';
+import type {
+  IStageRunCas,
+  IStageRunRepository,
+  StageInstanceRow,
+  StageTransitionOptions,
+  TransitionResult,
+} from '@generatorai/core';
+import type { StageRunState } from '@generatorai/workflow-spec';
 import type { StageRun, StageRunStatus } from '@generatorai/shared';
 import { NotFoundError, StorageError } from '@generatorai/shared';
 import { stageRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
+import { sqliteHandle } from './AuthRepositories.js';
+import { getInstanceRow, markStageProgress, renewStageLease, stageTransition } from './engineCas.js';
 
 type DbStageStatus = (typeof stageRuns.$inferSelect)['status'];
 
@@ -70,8 +79,29 @@ function jsonValue<T>(v: unknown): T | undefined {
   }
 }
 
-export class DrizzleStageRunRepository implements IStageRunRepository {
+export class DrizzleStageRunRepository implements IStageRunRepository, IStageRunCas {
   constructor(private db: AppDatabase) {}
+
+  // ── v2 engine: compare-and-set (P03 WP-3.1, G5 §5.4) ───────────
+
+  /** The only v2 status writer: a synchronous CAS checked against STAGE_RUN_TRANSITIONS. */
+  transition(id: string, from: readonly StageRunState[], to: StageRunState, opts?: StageTransitionOptions): TransitionResult<StageInstanceRow> {
+    return stageTransition(sqliteHandle(this.db), id, from, to, opts);
+  }
+
+  renewLease(id: string, owner: string, ttlMs: number, now?: number): boolean {
+    return renewStageLease(sqliteHandle(this.db), id, owner, ttlMs, now);
+  }
+
+  markProgress(id: string, owner: string, at: number): boolean {
+    return markStageProgress(sqliteHandle(this.db), id, owner, at);
+  }
+
+  getInstance(id: string): StageInstanceRow | null {
+    return getInstanceRow(sqliteHandle(this.db), id);
+  }
+
+  // ── v1 engine (deleted at the P03 cutover) ─────────────────────
 
   async create(stageRun: StageRun): Promise<StageRun> {
     try {
