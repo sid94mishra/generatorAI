@@ -312,7 +312,6 @@ When designing a new feature: start in `shared/types`, sketch the port, write th
 - ✅ **Integrated Browser** shipped — workspace-scoped Chromium session with VSCode-style share/inspect/capture panel. Two host implementations (`ServerPlaywrightHost` + `ElectronBridgeAdapter`) behind the `IBrowserBridge` port. See [docs/feature-integrated-browser.md](./docs/feature-integrated-browser.md).
 - ✅ **Integrated Terminal** shipped — workspace-scoped PTY via `node-pty` + xterm.js, WebSocket transport at `/api/workspaces/:id/terminals/:sid/stream`, watermark flow control, multi-tab support, attach-to-chat. Phase 2 items (sandbox-attached terminal, agent-typed commands, DB persistence, recording) tracked in [docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md](../docs/INTEGRATED_TERMINAL_PHASE2_PLAN.md). See [docs/feature-integrated-terminal.md](./docs/feature-integrated-terminal.md).
 - ⚠️ **`packages/mcp-server/`** exposes a tool adapter but does not yet ship a standalone MCP server binary; system MCP definitions live in [templates/system/mcp-servers.json](../templates/system/mcp-servers.json).
-- ⚠️ **`StageDefinition.iterationConfig`** has a schema but the runtime "iteration" feature is deferred (use Automation `input mode: loop` or `batch` instead).
 - ⚠️ **`auto` and `gpt-5.3-codex` Copilot models** hang on at least one GHEC tenant — default model was changed to `claude-sonnet-4.6`.
 
 ---

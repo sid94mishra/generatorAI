@@ -883,7 +883,6 @@ export function templateStageToCreateParams(
     resultValidation: stage.resultValidation ?? undefined,
     expectedOutput: stage.expectedOutput ?? undefined,
     outputSchema: stage.outputSchema ?? undefined,
-    iterationConfig: (stage as { iterationConfig?: unknown }).iterationConfig ?? undefined,
     approvalRequired: stage.approvalRequired ?? false,
   };
 }

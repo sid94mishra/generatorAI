@@ -149,7 +149,6 @@ export function createWorkflowScriptRoutes(container: Container): Router {
           retryPolicy: stage.config.retryPolicy,
           timeoutMs: stage.config.timeoutMs,
           condition: stage.config.condition,
-          iterationConfig: stage.config.iterationConfig,
           skills: stage.config.skills,
           approvalRequired: stage.config.approvalRequired,
         });
@@ -278,7 +277,6 @@ export function createWorkflowScriptRoutes(container: Container): Router {
           retryPolicy: stage.config.retryPolicy,
           timeoutMs: stage.config.timeoutMs,
           condition: stage.config.condition,
-          iterationConfig: stage.config.iterationConfig,
           skills: stage.config.skills,
           approvalRequired: stage.config.approvalRequired,
         });

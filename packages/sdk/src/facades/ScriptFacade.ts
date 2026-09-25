@@ -109,7 +109,6 @@ export class ScriptFacade {
         retryPolicy: stage.config.retryPolicy,
         timeoutMs: stage.config.timeoutMs,
         condition: stage.config.condition,
-        iterationConfig: stage.config.iterationConfig,
         skills: stage.config.skills,
       });
       stageIdMap.set(stage.localId, created.id);

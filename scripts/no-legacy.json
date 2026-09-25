@@ -392,6 +392,32 @@
         "apps/web/src/pages/WorkflowBuilderPage.tsx"
       ],
       "reason": "WP-1.4: stage templateId + template select deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(iterationConfig|IterationConfig|IterationConfigSchema|IterationConfigOutputSchema)\\b",
+      "reason": "WP-1.4: stage iterationConfig deleted (never executed); loop/subworkflow kinds arrive in P05",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/db/src/repositories/",
+        "packages/cli-core/",
+        "packages/client-core/",
+        "apps/server/",
+        "apps/web/",
+        "apps/mobile/"
+      ]
+    },
+    {
+      "phase": "01",
+      "pattern": "iterationIndex|parentStageRunId",
+      "paths": [
+        "packages/shared/src/types/WorkflowRun.ts",
+        "packages/db/src/repositories/StageRunRepository.ts",
+        "apps/server/src/routes/workflowRunOrder.ts"
+      ],
+      "reason": "WP-1.4: stage-run iteration index / parent link deleted (never set)"
     }
   ],
   "comments": {

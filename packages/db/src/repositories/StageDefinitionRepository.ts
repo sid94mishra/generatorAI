@@ -62,7 +62,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
         resultValidation: stage.resultValidation ?? null,
         expectedOutput: stage.expectedOutput ?? null,
         outputSchema: stage.outputSchema ?? null,
-        iterationConfig: (stage.iterationConfig as Record<string, unknown> | undefined) ?? null,
         approvalRequired: stage.approvalRequired ?? false,
         agentMode: stage.agentMode ?? null,
         createdAt: stage.createdAt,
@@ -106,7 +105,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
     if (updates.resultValidation !== undefined) validateJsonColumn(updates.resultValidation, stageJsonGuards.hooks, { column: 'resultValidation', table: 'stage_definitions' });
     if (updates.outputSchema !== undefined) validateJsonColumn(updates.outputSchema, jsonRecord, { column: 'outputSchema', table: 'stage_definitions' });
     if (updates.contextSources !== undefined) validateJsonColumn(updates.contextSources, stageJsonGuards.prompts, { column: 'contextSources', table: 'stage_definitions' });
-    if (updates.iterationConfig !== undefined) validateJsonColumn(updates.iterationConfig, jsonRecord, { column: 'iterationConfig', table: 'stage_definitions' });
 
     const values: Record<string, unknown> = {};
     if (updates.name !== undefined) values['name'] = updates.name;
@@ -126,7 +124,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
     if (updates.resultValidation !== undefined) values['resultValidation'] = updates.resultValidation;
     if (updates.expectedOutput !== undefined) values['expectedOutput'] = updates.expectedOutput;
     if (updates.outputSchema !== undefined) values['outputSchema'] = updates.outputSchema;
-    if (updates.iterationConfig !== undefined) values['iterationConfig'] = updates.iterationConfig;
     if (updates.approvalRequired !== undefined) values['approvalRequired'] = updates.approvalRequired;
     if (updates.agentMode !== undefined) values['agentMode'] = updates.agentMode;
 
@@ -197,7 +194,6 @@ export class DrizzleStageDefinitionRepository implements IStageDefinitionReposit
       resultValidation: (safeJsonColumn(row.resultValidation, jsonArray, { fallback: undefined }) ?? undefined) as ResultValidationRule[] | undefined,
       expectedOutput: row.expectedOutput ?? undefined,
       outputSchema: safeJsonColumn(row.outputSchema, jsonRecord, { fallback: undefined }) as Record<string, unknown> | undefined,
-      iterationConfig: safeJsonColumn(row.iterationConfig, jsonRecord, { fallback: undefined }) as StageDefinition['iterationConfig'],
       approvalRequired: row.approvalRequired ?? false,
       ...(row.agentMode ? { agentMode: row.agentMode } : {}),
       createdAt: row.createdAt,

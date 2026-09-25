@@ -159,10 +159,6 @@ export interface StageRun {
   outputData?: Record<string, unknown>;
   /** Manifest of files created/modified by this stage */
   artifactManifest?: Array<{ path: string; language: string; action: string; sizeBytes: number }>;
-  /** Current iteration index for iteration stages (sub-workflow loops) */
-  iterationIndex?: number;
-  /** Links child workflow runs back to parent iteration stage */
-  parentStageRunId?: string;
   /**
    * DUR-05 — epoch-ms wall-clock time at which a sleeping stage should
    * be woken. `undefined` unless `status === 'sleeping'`. The background

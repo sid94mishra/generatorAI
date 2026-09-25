@@ -82,8 +82,6 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     if (updates.outputText !== undefined) values['outputText'] = updates.outputText;
     if (updates.outputData !== undefined) values['outputData'] = updates.outputData ? JSON.stringify(updates.outputData) : null;
     if (updates.artifactManifest !== undefined) values['artifactManifest'] = updates.artifactManifest ? JSON.stringify(updates.artifactManifest) : null;
-    if (updates.iterationIndex !== undefined) values['iterationIndex'] = updates.iterationIndex;
-    if (updates.parentStageRunId !== undefined) values['parentStageRunId'] = updates.parentStageRunId;
     if (updates.startedAt !== undefined) values['startedAt'] = updates.startedAt;
     if (updates.completedAt !== undefined) values['completedAt'] = updates.completedAt;
     // DUR-05 — allow setting sleep fields to `null` to explicitly clear
@@ -387,8 +385,6 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       outputText: (row as Record<string, unknown>).outputText as string | undefined ?? undefined,
       outputData: (() => { const v = (row as Record<string, unknown>).outputData; return typeof v === 'string' ? JSON.parse(v) as Record<string, unknown> : undefined; })(),
       artifactManifest: (() => { const v = (row as Record<string, unknown>).artifactManifest; return typeof v === 'string' ? JSON.parse(v) as Array<{ path: string; language: string; action: string; sizeBytes: number }> : undefined; })(),
-      iterationIndex: (row as Record<string, unknown>).iterationIndex as number | undefined,
-      parentStageRunId: (row as Record<string, unknown>).parentStageRunId as string | undefined,
       wakeAt: row.wakeAt ?? undefined,
       sleptSince: row.sleptSince ?? undefined,
       interruptData: row.interruptData ?? undefined,

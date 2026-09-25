@@ -31,22 +31,6 @@ export interface StageCondition {
 /** Controls what context from predecessor stages is injected */
 export type ContextFilter = 'full' | 'summary-only' | 'none' | 'structured';
 
-/** Configuration for iteration-based sub-workflow execution */
-export interface IterationConfig {
-  /** ID of the workflow definition to run as sub-workflow */
-  subWorkflowDefinitionId: string;
-  /** Map parent variables → sub-workflow input variables */
-  inputMapping: Record<string, string>;
-  /** Map sub-workflow output → parent stage variables */
-  outputMapping: Record<string, string>;
-  /** Value in sub-workflow's final stage output_data that signals "done" */
-  exitValue?: string;
-  /** Field in output_data to check for exit signal (default: "status") */
-  exitField?: string;
-  /** Max iterations before forced exit (safety cap) */
-  maxIterations: number;
-}
-
 /** Artifact manifest entry — describes a file produced by a stage */
 export interface ArtifactManifestEntry {
   path: string;
@@ -102,8 +86,6 @@ export interface StageDefinition {
   expectedOutput?: string;
   /** JSON Schema to extract and validate structured output from LLM response */
   outputSchema?: Record<string, unknown>;
-  /** Configuration for iteration-based sub-workflow execution */
-  iterationConfig?: IterationConfig;
   /**
    * When true, the stage pauses in `awaiting_input` after its work and hooks
    * complete so a human can review the output before the workflow advances.
@@ -165,7 +147,6 @@ export interface CreateStageParams {
   resultValidation?: ResultValidationRule[];
   expectedOutput?: string;
   outputSchema?: Record<string, unknown>;
-  iterationConfig?: IterationConfig;
   contextSources?: string[];
   outputFormat?: 'text' | 'json';
   approvalRequired?: boolean;

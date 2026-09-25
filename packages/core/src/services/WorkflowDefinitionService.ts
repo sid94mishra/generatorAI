@@ -264,7 +264,6 @@ export class WorkflowDefinitionService {
       resultValidation: params.resultValidation,
       expectedOutput: params.expectedOutput,
       outputSchema: params.outputSchema,
-      iterationConfig: params.iterationConfig,
       contextSources: params.contextSources,
       outputFormat: params.outputFormat,
       approvalRequired: params.approvalRequired ?? false,

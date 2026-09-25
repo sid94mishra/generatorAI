@@ -7410,48 +7410,6 @@
         "constraints": "—"
       },
       {
-        "field": "iterationConfig",
-        "type": "object",
-        "presence": "optional",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "iterationConfig.subWorkflowDefinitionId",
-        "type": "string",
-        "presence": "required",
-        "constraints": "uuid"
-      },
-      {
-        "field": "iterationConfig.inputMapping",
-        "type": "map of string",
-        "presence": "required",
-        "constraints": "—"
-      },
-      {
-        "field": "iterationConfig.outputMapping",
-        "type": "map of string",
-        "presence": "required",
-        "constraints": "—"
-      },
-      {
-        "field": "iterationConfig.exitValue",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "iterationConfig.exitField",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "iterationConfig.maxIterations",
-        "type": "number",
-        "presence": "default 10",
-        "constraints": "int; min 1; max 100"
-      },
-      {
         "field": "approvalRequired",
         "type": "boolean",
         "presence": "optional",
@@ -9500,48 +9458,6 @@
         "type": "map of unknown",
         "presence": "optional",
         "constraints": "—"
-      },
-      {
-        "field": "stages[].iterationConfig",
-        "type": "object",
-        "presence": "optional",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "stages[].iterationConfig.subWorkflowDefinitionId",
-        "type": "string",
-        "presence": "required",
-        "constraints": "uuid"
-      },
-      {
-        "field": "stages[].iterationConfig.inputMapping",
-        "type": "map of string",
-        "presence": "required",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].iterationConfig.outputMapping",
-        "type": "map of string",
-        "presence": "required",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].iterationConfig.exitValue",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].iterationConfig.exitField",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].iterationConfig.maxIterations",
-        "type": "number",
-        "presence": "default 10",
-        "constraints": "int; min 1; max 100"
       },
       {
         "field": "stages[].approvalRequired",
@@ -13888,48 +13804,6 @@
       },
       {
         "field": "stages[].config.condition.expression",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].config.iterationConfig",
-        "type": "object",
-        "presence": "optional",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "stages[].config.iterationConfig.subWorkflowDefinitionId",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].config.iterationConfig.inputMapping",
-        "type": "map of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].config.iterationConfig.outputMapping",
-        "type": "map of string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].config.iterationConfig.maxIterations",
-        "type": "number",
-        "presence": "optional",
-        "constraints": "int; min 0 (exclusive)"
-      },
-      {
-        "field": "stages[].config.iterationConfig.exitField",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stages[].config.iterationConfig.exitValue",
         "type": "string",
         "presence": "optional",
         "constraints": "—"

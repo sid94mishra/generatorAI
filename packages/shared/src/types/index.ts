@@ -171,7 +171,6 @@ export type {
   CreateEdgeParams,
   ContextFilter,
   StageSkillReference,
-  IterationConfig,
   ArtifactManifestEntry,
 } from './StageDefinition.js';
 export type {

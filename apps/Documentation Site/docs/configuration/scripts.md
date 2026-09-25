@@ -126,13 +126,6 @@ since functions can't be serialized — it's validated separately at runtime.
 | stages[].config.condition | object | `optional` | unknown keys: strip |
 | stages[].config.condition.type | "always" / "on_success" / "on_failure" / "expression" | `required` | — |
 | stages[].config.condition.expression | string | `optional` | — |
-| stages[].config.iterationConfig | object | `optional` | unknown keys: strip |
-| stages[].config.iterationConfig.subWorkflowDefinitionId | string | `optional` | — |
-| stages[].config.iterationConfig.inputMapping | map of string | `optional` | — |
-| stages[].config.iterationConfig.outputMapping | map of string | `optional` | — |
-| stages[].config.iterationConfig.maxIterations | number | `optional` | int; min 0 (exclusive) |
-| stages[].config.iterationConfig.exitField | string | `optional` | — |
-| stages[].config.iterationConfig.exitValue | string | `optional` | — |
 | stages[].config.skills | array of object | `optional` | — |
 | stages[].config.skills[] | object | `required` | unknown keys: strip |
 | stages[].config.skills[].name | string | `required` | — |
@@ -238,15 +231,6 @@ const StageConditionOutputSchema = z.object({
   expression: z.string().optional(),
 });
 
-const IterationConfigOutputSchema = z.object({
-  subWorkflowDefinitionId: z.string().optional(),
-  inputMapping: z.record(z.string()).optional(),
-  outputMapping: z.record(z.string()).optional(),
-  maxIterations: z.number().int().positive().optional(),
-  exitField: z.string().optional(),
-  exitValue: z.string().optional(),
-});
-
 const StageSkillReferenceOutputSchema = z.object({
   name: z.string(),
   directory: z.string().optional(),
@@ -269,7 +253,6 @@ const StageOutputSchema = z.object({
     retryPolicy: RetryPolicyOutputSchema.optional(),
     timeoutMs: z.number().int().positive().optional(),
     condition: StageConditionOutputSchema.optional(),
-    iterationConfig: IterationConfigOutputSchema.optional(),
     skills: z.array(StageSkillReferenceOutputSchema).optional(),
   }),
 });

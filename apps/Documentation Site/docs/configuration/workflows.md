@@ -639,13 +639,6 @@ Zod schema for creating a StageDefinition
 | resultValidation[].message | string | `required` | — |
 | expectedOutput | string | `optional` | max 5000 |
 | outputSchema | map of unknown | `optional` | — |
-| iterationConfig | object | `optional` | unknown keys: strip |
-| iterationConfig.subWorkflowDefinitionId | string | `required` | uuid |
-| iterationConfig.inputMapping | map of string | `required` | — |
-| iterationConfig.outputMapping | map of string | `required` | — |
-| iterationConfig.exitValue | string | `optional` | — |
-| iterationConfig.exitField | string | `optional` | — |
-| iterationConfig.maxIterations | number | `default 10` | int; min 1; max 100 |
 | approvalRequired | boolean | `optional` | — |
 | agentMode | "auto" / "plan" | `optional` | — |
 | browserConfig | object | `optional` | unknown keys: strict |
@@ -1011,13 +1004,6 @@ Zod schema for importing a full workflow from a JSON file upload
 | stages[].resultValidation[].message | string | `required` | — |
 | stages[].expectedOutput | string | `optional` | max 5000 |
 | stages[].outputSchema | map of unknown | `optional` | — |
-| stages[].iterationConfig | object | `optional` | unknown keys: strip |
-| stages[].iterationConfig.subWorkflowDefinitionId | string | `required` | uuid |
-| stages[].iterationConfig.inputMapping | map of string | `required` | — |
-| stages[].iterationConfig.outputMapping | map of string | `required` | — |
-| stages[].iterationConfig.exitValue | string | `optional` | — |
-| stages[].iterationConfig.exitField | string | `optional` | — |
-| stages[].iterationConfig.maxIterations | number | `default 10` | int; min 1; max 100 |
 | stages[].approvalRequired | boolean | `optional` | — |
 | stages[].agentMode | "auto" / "plan" | `optional` | — |
 | stages[].browserConfig | object | `optional` | unknown keys: strict |
@@ -1367,16 +1353,6 @@ const StageResultValidationSchema = z.object({
   rules: z.array(ResultValidationRuleSchema),
 });
 
-/** Zod schema for IterationConfig */
-const IterationConfigSchema = z.object({
-  subWorkflowDefinitionId: z.string().uuid(),
-  inputMapping: z.record(z.string()),
-  outputMapping: z.record(z.string()),
-  exitValue: z.string().optional(),
-  exitField: z.string().optional(),
-  maxIterations: z.number().int().min(1).max(100).default(10),
-});
-
 /** Zod schema for OrchestratorConfig — uses project/codebase model (no direct git repo cloning) */
 const OrchestratorConfigSchema = z.object({
   category: z.enum(['system', 'custom', 'derived']).default('custom'),
@@ -1488,8 +1464,6 @@ export const CreateStageSchema = z.object({
   expectedOutput: z.string().max(5000).optional(),
   /** JSON Schema describing the expected structured output */
   outputSchema: z.record(z.unknown()).optional(),
-  /** Iteration config for sub-workflow loop stages */
-  iterationConfig: IterationConfigSchema.optional(),
   /** When true, pause the stage in `awaiting_input` after completion for human review before advancing the DAG. Default false. */
   approvalRequired: z.boolean().optional(),
   /** Per-stage agent mode ('auto' | 'plan'). */
@@ -1554,8 +1528,6 @@ const ImportStageSchema = z.object({
   expectedOutput: z.string().max(5000).optional(),
   /** JSON Schema describing the expected structured output */
   outputSchema: z.record(z.unknown()).optional(),
-  /** Iteration config for sub-workflow loop stages */
-  iterationConfig: IterationConfigSchema.optional(),
   /** When true, pause after completion for human review before advancing. */
   approvalRequired: z.boolean().optional(),
   /** Per-stage agent mode ('auto' | 'plan'). */

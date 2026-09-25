@@ -61,15 +61,6 @@ const StageConditionOutputSchema = z.object({
   expression: z.string().optional(),
 });
 
-const IterationConfigOutputSchema = z.object({
-  subWorkflowDefinitionId: z.string().optional(),
-  inputMapping: z.record(z.string()).optional(),
-  outputMapping: z.record(z.string()).optional(),
-  maxIterations: z.number().int().positive().optional(),
-  exitField: z.string().optional(),
-  exitValue: z.string().optional(),
-});
-
 const StageSkillReferenceOutputSchema = z.object({
   name: z.string(),
   directory: z.string().optional(),
@@ -92,7 +83,6 @@ const StageOutputSchema = z.object({
     retryPolicy: RetryPolicyOutputSchema.optional(),
     timeoutMs: z.number().int().positive().optional(),
     condition: StageConditionOutputSchema.optional(),
-    iterationConfig: IterationConfigOutputSchema.optional(),
     skills: z.array(StageSkillReferenceOutputSchema).optional(),
   }),
 });

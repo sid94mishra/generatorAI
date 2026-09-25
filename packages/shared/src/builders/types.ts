@@ -17,7 +17,6 @@ import type {
   StageEdgeType,
   ContextFilter,
   StageSkillReference,
-  IterationConfig,
 } from '../types/StageDefinition.js';
 import type {
   HookPhase,
@@ -138,7 +137,6 @@ export interface StageOutput {
     retryPolicy?: RetryPolicy;
     timeoutMs?: number;
     condition?: StageCondition;
-    iterationConfig?: IterationConfig;
     skills?: StageSkillReference[];
     approvalRequired?: boolean;
   };

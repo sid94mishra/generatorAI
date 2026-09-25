@@ -123,16 +123,6 @@ const StageResultValidationSchema = z.object({
   rules: z.array(ResultValidationRuleSchema),
 });
 
-/** Zod schema for IterationConfig */
-const IterationConfigSchema = z.object({
-  subWorkflowDefinitionId: z.string().uuid(),
-  inputMapping: z.record(z.string()),
-  outputMapping: z.record(z.string()),
-  exitValue: z.string().optional(),
-  exitField: z.string().optional(),
-  maxIterations: z.number().int().min(1).max(100).default(10),
-});
-
 /** Zod schema for OrchestratorConfig — uses project/codebase model (no direct git repo cloning) */
 const OrchestratorConfigSchema = z.object({
   category: z.enum(['system', 'custom', 'derived']).default('custom'),
@@ -244,8 +234,6 @@ export const CreateStageSchema = z.object({
   expectedOutput: z.string().max(5000).optional(),
   /** JSON Schema describing the expected structured output */
   outputSchema: z.record(z.unknown()).optional(),
-  /** Iteration config for sub-workflow loop stages */
-  iterationConfig: IterationConfigSchema.optional(),
   /** When true, pause the stage in `awaiting_input` after completion for human review before advancing the DAG. Default false. */
   approvalRequired: z.boolean().optional(),
   /** Per-stage agent mode ('auto' | 'plan'). */
@@ -310,8 +298,6 @@ const ImportStageSchema = z.object({
   expectedOutput: z.string().max(5000).optional(),
   /** JSON Schema describing the expected structured output */
   outputSchema: z.record(z.unknown()).optional(),
-  /** Iteration config for sub-workflow loop stages */
-  iterationConfig: IterationConfigSchema.optional(),
   /** When true, pause after completion for human review before advancing. */
   approvalRequired: z.boolean().optional(),
   /** Per-stage agent mode ('auto' | 'plan'). */

@@ -9,7 +9,6 @@ import type {
   StageCondition,
   ContextFilter,
   StageSkillReference,
-  IterationConfig,
 } from '../types/StageDefinition.js';
 import type { HarnessConfig } from '../types/Workflow.js';
 import type { HookPhase, HookType, HookConfig } from '../types/HookDefinition.js';
@@ -32,7 +31,6 @@ export class StageBuilder {
   private _outputFormat?: 'text' | 'json';
   private _outputSchema?: Record<string, unknown>;
   private _harnessOverrides?: Partial<HarnessConfig>;
-  private _iterationConfig?: IterationConfig;
   private _skills: StageSkillReference[] = [];
   private _approvalRequired?: boolean;
   private _hooks: Array<{
@@ -186,12 +184,6 @@ export class StageBuilder {
     return this;
   }
 
-  /** Configure iteration (sub-workflow loop) for this stage. */
-  iterationConfig(config: IterationConfig): this {
-    this._iterationConfig = config;
-    return this;
-  }
-
   /** Toggle the human review gate. When true, the workflow pauses after this
    *  stage completes and waits for approve/request-changes before advancing. */
   approvalRequired(required = true): this {
@@ -231,7 +223,6 @@ export class StageBuilder {
         retryPolicy: this._retryPolicy,
         timeoutMs: this._timeoutMs,
         condition: this._condition,
-        iterationConfig: this._iterationConfig,
         skills: this._skills.length > 0 ? this._skills : undefined,
         approvalRequired: this._approvalRequired,
       },

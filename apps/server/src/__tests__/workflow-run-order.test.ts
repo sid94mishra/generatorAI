@@ -8,9 +8,9 @@ describe('run outline order', () => {
       .toEqual(['d', 'h']);
     expect(rows[0]?.id).toBe('h');
   });
-  it('orders repeated iterations and retains legacy order without a snapshot', () => {
-    const rows = [{ id: 'second', stageDefinitionId: 'loop', iterationIndex: 1 }, { id: 'first', stageDefinitionId: 'loop', iterationIndex: 0 }];
-    expect(orderStageRuns(rows, [{ id: 'loop', order: 0 }]).map((s) => s.id)).toEqual(['first', 'second']);
+  it('breaks ties by id and keeps the given order without a snapshot', () => {
+    const rows = [{ id: 'b', stageDefinitionId: 'x' }, { id: 'a', stageDefinitionId: 'x' }];
+    expect(orderStageRuns(rows, [{ id: 'x', order: 0 }]).map((s) => s.id)).toEqual(['a', 'b']);
     expect(orderStageRuns(rows, undefined)).toEqual(rows);
   });
 });

@@ -33,7 +33,6 @@ contextSources?               JSON string[]                  (explicit predecess
 resultValidation?             JSON ResultValidationRule[]
 outputFormat?                 enum 'text' | 'json'
 outputSchema?                 JSON                            (JSON schema for outputFormat=json)
-iterationConfig?              JSON                            (schema present, runtime deferred)
 createdAt
 ```
 
@@ -317,7 +316,7 @@ generatorai workflow stage delete <defId> <stageId>
 5. **`condition.type = 'expression'` referencing variables.foo.bar** — dotted path traversal. Missing keys resolve to `undefined`, which compares to anything as `false` (except `!=`).
 6. **`hooks` runtime errors** — see `failurePolicy` in [feature-hooks.md](./feature-hooks.md). `abort` fails the stage; `skip` logs and continues; `continue` ignores.
 7. **`retryPolicy.maxRetries = 0`** — no retries; first failure terminal.
-8. **`iterationConfig` runtime** — currently deferred. Use Automation `input mode: loop` / `batch` for iteration. UI may surface the field but it has no executor.
+8. **Iteration** — there is no per-stage iteration field; loops and sub-workflows arrive as stage kinds in the workflow overhaul (P05). Automations iterate over a dataset.
 9. **Stage with no predecessors** — root. Started immediately at run start.
 10. **Stage with `condition = on_failure` but only `on_success` in-edges** — never runs; cascades to `skipped` via `skipUnreachableStages`.
 11. **Multiple in-edges convergence** — stage doesn't run until **all** predecessor stages are terminal (per `DAGScheduler`).
