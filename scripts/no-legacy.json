@@ -604,6 +604,14 @@
         "packages/core/src/"
       ],
       "reason": "WP-1.5 / RV-21: regex rules run on the linear-time engine (compileSafeRegex)"
+    },
+    {
+      "phase": "01",
+      "pattern": "HOOK_PHASE_INFO",
+      "paths": [
+        "packages/shared/"
+      ],
+      "reason": "WP-1.5: the hook-phase catalogue lives in @generatorai/workflow-spec (HOOK_PHASE_INFO, STAGE_HOOK_PHASES, WORKFLOW_HOOK_PHASES)"
     }
   ],
   "comments": {

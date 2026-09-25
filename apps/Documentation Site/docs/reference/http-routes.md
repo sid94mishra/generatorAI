@@ -220,8 +220,8 @@ Source: `apps/server/src/routes/hooks.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/hooks/phases` | 20 |
-| `POST` | `/api/hooks/sessions/:id/hooks/test` | 47 |
+| `GET` | `/api/hooks/phases` | 24 |
+| `POST` | `/api/hooks/sessions/:id/hooks/test` | 51 |
 
 ## internal-browser
 

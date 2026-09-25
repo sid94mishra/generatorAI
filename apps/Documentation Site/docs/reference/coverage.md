@@ -18,7 +18,7 @@ The top-level product modules exclude the separate `agent-tests` workspace and t
 | `apps/mobile` | `@generatorai/mobile` | `client-core`, `client-runtime`, `client-transport`, `design-tokens`, `relay-protocol`, `shared`, `auth` | [Architecture](/architecture/modules.md) |
 | `apps/pty-host` | `@generatorai/pty-host` | `shared` | [Architecture](/architecture/modules.md) |
 | `apps/relay` | `@generatorai/relay` | `relay-protocol` | [Architecture](/architecture/modules.md) |
-| `apps/server` | `@generatorai/server` | `agent-harness-providers`, `auth`, `core`, `db`, `relay-protocol`, `secrets`, `shared` | [Architecture](/architecture/modules.md) |
+| `apps/server` | `@generatorai/server` | `agent-harness-providers`, `auth`, `core`, `db`, `relay-protocol`, `secrets`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `apps/web` | `@generatorai/web` | `client-core`, `client-runtime`, `design-tokens`, `shared` | [Architecture](/architecture/modules.md) |
 | `packages/agent-harness-providers` | `@generatorai/agent-harness-providers` | `core`, `shared` | [Architecture](/architecture/modules.md) |
 | `packages/auth` | `@generatorai/auth` | `secrets`, `shared` | [Architecture](/architecture/modules.md) |

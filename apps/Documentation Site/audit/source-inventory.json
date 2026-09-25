@@ -193,7 +193,8 @@
         "@generatorai/db",
         "@generatorai/relay-protocol",
         "@generatorai/secrets",
-        "@generatorai/shared"
+        "@generatorai/shared",
+        "@generatorai/workflow-spec"
       ]
     },
     {
@@ -1466,14 +1467,14 @@
       "method": "GET",
       "path": "/api/hooks/phases",
       "source": "apps/server/src/routes/hooks.ts",
-      "line": 20,
+      "line": 24,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/hooks/sessions/:id/hooks/test",
       "source": "apps/server/src/routes/hooks.ts",
-      "line": 47,
+      "line": 51,
       "mounted": true
     },
     {

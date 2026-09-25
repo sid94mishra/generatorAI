@@ -569,6 +569,9 @@ importers:
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@generatorai/workflow-spec':
+        specifier: workspace:*
+        version: link:../../packages/workflow-spec
       '@opentelemetry/exporter-metrics-otlp-proto':
         specifier: ^0.214.0
         version: 0.214.0(@opentelemetry/api@1.9.1)
@@ -19550,14 +19553,6 @@ snapshots:
       chai: 5.3.3
       tinyrainbow: 2.0.0
 
-  '@vitest/mocker@3.2.7(vite@6.4.1(@types/node@22.20.0)(jiti@1.21.7)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))':
-    dependencies:
-      '@vitest/spy': 3.2.7
-      estree-walker: 3.0.3
-      magic-string: 0.30.21
-    optionalDependencies:
-      vite: 6.4.1(@types/node@22.20.0)(jiti@1.21.7)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3)
-
   '@vitest/mocker@3.2.7(vite@6.4.1(@types/node@22.20.0)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))':
     dependencies:
       '@vitest/spy': 3.2.7
@@ -27558,7 +27553,7 @@ snapshots:
     dependencies:
       '@types/chai': 5.2.3
       '@vitest/expect': 3.2.7
-      '@vitest/mocker': 3.2.7(vite@6.4.1(@types/node@22.20.0)(jiti@1.21.7)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))
+      '@vitest/mocker': 3.2.7(vite@6.4.1(@types/node@22.20.0)(jiti@2.6.1)(lightningcss@1.31.1)(terser@5.51.2)(tsx@4.21.0)(yaml@2.8.3))
       '@vitest/pretty-format': 3.2.7
       '@vitest/runner': 3.2.7
       '@vitest/snapshot': 3.2.7

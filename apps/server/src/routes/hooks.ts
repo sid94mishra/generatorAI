@@ -4,10 +4,14 @@
 
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
-import { HOOK_PHASE_INFO, HookDefinitionSchema, type HookDefinition } from '@generatorai/shared';
+import type { HookDefinition } from '@generatorai/shared';
+import { HOOK_PHASE_INFO, STAGE_HOOK_PHASES, WORKFLOW_HOOK_PHASES } from '@generatorai/workflow-spec';
 
-/** Every hook phase the schema accepts, in schema order, with its catalogue entry. */
-const HOOK_PHASES = HookDefinitionSchema.shape.phase.options.map((phase) => ({
+/**
+ * Every hook phase the workflow spec defines (stage phases, then workflow
+ * phases), with its catalogue entry. Each phase has a producer.
+ */
+const HOOK_PHASES = [...STAGE_HOOK_PHASES, ...WORKFLOW_HOOK_PHASES].map((phase) => ({
   phase,
   ...HOOK_PHASE_INFO[phase],
 }));

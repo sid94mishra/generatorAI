@@ -51,48 +51,6 @@ export type WorkflowHookPhase =
   | 'on_stage_failed'
   | 'on_parallel_join';
 
-/**
- * Category and description of every hook phase — the `GET /hooks/phases`
- * catalogue. Typed over `HookPhase`, so a phase added to the type (and to
- * `HookDefinitionSchema`) without an entry here is a compile error.
- */
-export const HOOK_PHASE_INFO: Readonly<Record<HookPhase, { category: string; description: string }>> = {
-  pre_run: { category: 'workflow', description: 'Before workflow execution starts' },
-  post_run: { category: 'workflow', description: 'After workflow execution completes' },
-  pre_clone: { category: 'git', description: 'Before repository clone' },
-  post_clone: { category: 'git', description: 'After repository clone' },
-  pre_prompt: { category: 'prompt', description: 'Before sending a prompt to the agent' },
-  post_prompt: { category: 'prompt', description: 'After receiving the prompt response' },
-  pre_commit: { category: 'git', description: 'Before git commit' },
-  post_commit: { category: 'git', description: 'After git commit' },
-  on_error: { category: 'error', description: 'When a workflow error occurs' },
-  on_cancel: { category: 'lifecycle', description: 'When workflow is cancelled' },
-  pre_tool_use: { category: 'tool', description: 'Before an agent tool is invoked' },
-  post_tool_use: { category: 'tool', description: 'After an agent tool completes' },
-  on_message: { category: 'message', description: 'When a message is received from the agent' },
-  on_reasoning: { category: 'message', description: 'When reasoning content is received' },
-  on_session_start: { category: 'session', description: 'When a session starts' },
-  on_session_idle: { category: 'session', description: 'When a session becomes idle' },
-  on_session_error: { category: 'session', description: 'When a session error occurs' },
-  on_session_cancelled: { category: 'session', description: 'When the user stops a session' },
-  on_client_start: { category: 'client', description: 'When the agent client starts' },
-  on_client_stop: { category: 'client', description: 'When the agent client stops' },
-  on_client_error: { category: 'client', description: 'When the agent client encounters an error' },
-  on_client_restart: { category: 'client', description: 'When the agent client restarts' },
-  on_permission: { category: 'security', description: 'When a permission request is made' },
-  on_run_start: { category: 'run', description: 'When a workflow run starts' },
-  on_run_complete: { category: 'run', description: 'When a workflow run completes' },
-  on_run_failed: { category: 'run', description: 'When a workflow run fails' },
-  on_run_cancelled: { category: 'run', description: 'When a workflow run is cancelled' },
-  on_pr_created: { category: 'git', description: 'After a pull request is created' },
-  on_preprocessing_complete: { category: 'orchestration', description: 'After preprocessing steps complete' },
-  on_postprocessing_start: { category: 'orchestration', description: 'Before post-processing steps start' },
-  on_all_stages_scheduled: { category: 'orchestration', description: 'After every stage has been scheduled' },
-  on_stage_completed: { category: 'stage', description: 'When any stage completes' },
-  on_stage_failed: { category: 'stage', description: 'When any stage fails' },
-  on_parallel_join: { category: 'stage', description: 'When parallel branches join' },
-};
-
 export type HookType = 'script' | 'http' | 'function';
 export type HookFailurePolicy = 'abort' | 'skip' | 'continue';
 

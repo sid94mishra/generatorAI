@@ -23,6 +23,7 @@
     "@generatorai/relay-protocol": "workspace:*",
     "@generatorai/secrets": "workspace:*",
     "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*",
     "@opentelemetry/exporter-metrics-otlp-proto": "^0.214.0",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.214.0",
     "@opentelemetry/instrumentation-express": "^0.62.0",
