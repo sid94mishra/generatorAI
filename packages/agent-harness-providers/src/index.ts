@@ -10,6 +10,9 @@
 export { createHarnessProvider, getAvailableProviders } from './HarnessFactory.js';
 export { HarnessProxy } from './HarnessProxy.js';
 
+// ── Stage error vocabulary (P03 WP-3.4) ──
+export { HarnessError, toHarnessError, harnessErrorClass, type HarnessErrorProvider } from './errors.js';
+
 // ── Multi-provider (run every installed provider side by side) ──
 export {
   HarnessRegistry,

@@ -2,6 +2,7 @@
 export * from './state-machines/index.js';
 export * from './ports/index.js';
 export * from './dag/index.js';
+export * from './errors/index.js';
 
 // Shared domain entities and value objects
 export type {
