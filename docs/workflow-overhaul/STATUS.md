@@ -7,7 +7,7 @@ The coding agent updates this file in every phase PR.
 | 00 Baseline | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | Baseline section below | gate pass with the recorded baseline exceptions |
 | 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass ; part B gate 2026-09-25: typecheck 52/52; workflow-spec 359/359; lint green; no-legacy 72 bans, 0 hits; generate:workflow-spec --check clean; **phase gate 2026-09-25 (part C): see "Phase 01 gate" below** | WP-1.6–1.9 done (1d67d0f, 28f9c5e, 9c61ec6, ebb4e82); v55 applied to the dev-DB copy |
 | 02 SessionComposer | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-25: see "Phase 02 gate" below** | WP-2.0–2.11 (0c02b1c..a220bb3), bans/docs c35f905, gate fixes f14cf5a; v56 applied to the dev-DB copy |
-| 03 Engine v2 | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-26: see "Phase 03 gate" below** (part 1 and part 2 gates below it) | WP-3.1–3.9 (dd00852..DOCS_COMMIT); the cutover is 5dad4e7; v57 applied to the dev-DB copy |
+| 03 Engine v2 | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-26: see "Phase 03 gate" below** (part 1 and part 2 gates below it) | WP-3.1–3.9 (dd00852..48cc4ec); the cutover is 5dad4e7; v57 applied to the dev-DB copy |
 | 03b Stage conversation | wf/phase-03b-stage-conversation | not started | | | |
 | 04 Lifecycle and invocation | wf/phase-04-invocation | not started | | | |
 | 05 Control flow (5A, 5B) | wf/phase-05-control-flow | not started | | | |
@@ -220,7 +220,7 @@ Run at `wf/overhaul` @ f14cf5a (Windows 11, Node 26.8.2, pnpm 10.29.2).
 
 ## Phase 03 gate (2026-09-26, after part 3: the cutover)
 
-Run at `wf/overhaul` @ 5dad4e7 (Windows 11, Node 26.8.2, pnpm 10.29.2). Part 3 commits: 5dad4e7 (WP-3.7 + WP-3.8), DOCS_COMMIT (WP-3.9, tracker).
+Run at `wf/overhaul` @ 5dad4e7 (Windows 11, Node 26.8.2, pnpm 10.29.2). Part 3 commits: 5dad4e7 (WP-3.7 + WP-3.8), 48cc4ec (WP-3.9, tracker).
 
 - **`pnpm turbo typecheck`:** pass, 52/52.
 - **`pnpm turbo test --concurrency=2 --continue`:** failures = the recorded baseline only — cli 5 (TUI on Windows), git 2 (CRLF / merge), server 2 (symlink EPERM, CSP hash). The core symlink EPERM baseline is gone with `StageExecutionService.test.ts`. Two new failures in that run were fixed and re-run: `test:scripts` `workflowInvariants` (an apostrophe inside a template literal of `check-workflow-invariants.mjs` tripped vite's import lexer; 28/28 after the fix) and testkit T4 (nine runs finalizing at once exceeded 15 s under the suite's load; the wait is now 60 s) plus a same-millisecond flake in T5's "nothing sent after the pause" (`<` → `<=`); testkit re-run 47/47.

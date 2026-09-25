@@ -158,7 +158,7 @@ The P02 plan's **Closes** list, with the commits and the tests that pin each ite
 
 ## Phase 03 closure (2026-09-26, review pending)
 
-The P03 plan's **Closes** list, with the commits and the tests that pin each item. Commits: dd00852 (3.2), 7d4ecb4 (3.4), 5d7b3e9 (3.3), 527f41c (3.1), 9732b79 (3.5), 08c1206 (3.6), 5dad4e7 (3.7 + 3.8, the cutover), DOCS_COMMIT (3.9). The v2 engine is the only engine since 5dad4e7.
+The P03 plan's **Closes** list, with the commits and the tests that pin each item. Commits: dd00852 (3.2), 7d4ecb4 (3.4), 5d7b3e9 (3.3), 527f41c (3.1), 9732b79 (3.5), 08c1206 (3.6), 5dad4e7 (3.7 + 3.8, the cutover), 48cc4ec (3.9). The v2 engine is the only engine since 5dad4e7.
 
 | ID | What P03 closed | Commits | Evidence |
 |---|---|---|---|
