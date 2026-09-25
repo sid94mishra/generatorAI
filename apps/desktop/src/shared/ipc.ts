@@ -6,6 +6,27 @@
 
 export type ThemePreference = 'light' | 'dark' | 'system';
 
+/**
+ * What the renderer pushes on every appearance change (D-25; 06 §6.1–§6.4).
+ * The renderer owns appearance; main only mirrors it: the chrome colours are
+ * `#rrggbb` literals from the token package for BOTH appearances, so the next
+ * launch paints the right window background even if the OS flipped between
+ * light and dark while the app was closed.
+ */
+export interface AppearancePush {
+  mode: ThemePreference;
+  themeId: string;
+  groundLight: string;
+  groundDark: string;
+  fgLight: string;
+  fgDark: string;
+}
+
+/** Payload of {@link IPC_EVENT.appearanceRequest}. */
+export interface AppearanceRequest {
+  mode: ThemePreference;
+}
+
 export type ServerState =
   | 'idle'
   | 'starting'
@@ -79,7 +100,8 @@ export interface WindowChrome {
 export interface MenuState {
   sidebarOpen: boolean;
   rightPaneOpen: boolean;
-  theme: ThemePreference;
+  /** Radio state of View ▸ Appearance; set from the renderer's appearance push only. */
+  mode: ThemePreference;
   /** Most recently visited routes, newest first. */
   recent: { label: string; route: string }[];
 }
@@ -105,8 +127,12 @@ export const IPC = {
   selectFile: 'desktop:selectFile',
   saveFile: 'desktop:saveFile',
   openExternal: 'desktop:openExternal',
-  getTheme: 'desktop:getTheme',
-  setTheme: 'desktop:setTheme',
+  /**
+   * The renderer's appearance ({@link AppearancePush}). Main persists it,
+   * mirrors `nativeTheme.themeSource`, repaints the window background and the
+   * caption glyphs, and updates the View ▸ Appearance radio.
+   */
+  setAppearance: 'desktop:setAppearance',
   getSetting: 'desktop:getSetting',
   setSetting: 'desktop:setSetting',
   reload: 'desktop:reload',
@@ -154,18 +180,17 @@ export const IPC_EVENT = {
   navigate: 'desktop:navigate',
   serverStatus: 'desktop:server-status',
   command: 'desktop:command',
-  themeChanged: 'desktop:theme-changed',
   /** Window maximize/unmaximize/fullscreen, so a custom bar can restyle. */
   windowStateChanged: 'desktop:window-state-changed',
   /** Match count for the current find-in-page query. */
   foundInPage: 'desktop:found-in-page',
   /**
-   * The user picked an appearance in the native View ▸ Appearance menu.
-   * Distinct from `themeChanged`, which reports the RESOLVED colour after an
-   * OS change: this one carries the preference itself, so the renderer adopts
-   * light/dark/system rather than a colour it may be pinned against.
+   * The user picked a mode in the native View ▸ Appearance menu
+   * ({@link AppearanceRequest}). Main does not apply it: the renderer's
+   * ThemeProvider is the only appearance writer (D-25), applies the mode and
+   * pushes the result back through {@link IPC.setAppearance}.
    */
-  themePreferenceChanged: 'desktop:theme-preference-changed',
+  appearanceRequest: 'desktop:appearance-request',
 } as const;
 
 /** Payload of {@link IPC_EVENT.windowStateChanged}. */

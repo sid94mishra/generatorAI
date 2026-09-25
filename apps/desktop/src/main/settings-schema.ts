@@ -28,9 +28,23 @@ const windowSchema = z.object({
   maximized: z.boolean().optional(),
 });
 
+const hex = z.string().regex(/^#[0-9a-f]{6}$/i, 'must be a #rrggbb colour');
+
+/** The renderer's appearance push (06 §6.2); also the persisted shape. */
+const appearanceSchema = z
+  .object({
+    mode: z.enum(['light', 'dark', 'system']),
+    themeId: z.string().max(40).regex(/^[a-z0-9-]+$/, 'must be a theme id'),
+    groundLight: hex,
+    groundDark: hex,
+    fgLight: hex,
+    fgDark: hex,
+  })
+  .strict();
+
 /** One schema per user-settable key. `servers` is repaired separately. */
 export const SETTING_SCHEMAS = {
-  theme: z.enum(['light', 'dark', 'system']),
+  appearance: appearanceSchema,
   serverPort: port,
   lastServerPort: port,
   harnessType: z.enum(HARNESS_TYPES),
@@ -43,7 +57,9 @@ export const SETTING_SCHEMAS = {
 export type ValidatedSettingKey = keyof typeof SETTING_SCHEMAS;
 
 /** Keys the renderer may read/write through the settings IPC. */
-export const RENDERER_SETTING_KEYS = ['theme', 'serverPort', 'harnessType', 'minimizeToTray', 'lastRoute'] as const;
+// `appearance` is not here: it is written only through IPC.setAppearance, which
+// also mirrors it into nativeTheme, the window background and the menu.
+export const RENDERER_SETTING_KEYS = ['serverPort', 'harnessType', 'minimizeToTray', 'lastRoute'] as const;
 export type RendererSettingKey = (typeof RENDERER_SETTING_KEYS)[number];
 
 export function isRendererSettingKey(key: unknown): key is RendererSettingKey {
@@ -81,7 +97,7 @@ export function sanitizeSettings(
     servers: { ...DEFAULT_CONNECTION_STATE },
   };
 
-  for (const key of ['theme', 'serverPort', 'harnessType', 'minimizeToTray'] as const) {
+  for (const key of ['appearance', 'serverPort', 'harnessType', 'minimizeToTray'] as const) {
     if (!(key in input)) continue;
     const v = validateSettingValue(key, input[key]);
     if (v.ok) (out as unknown as Record<string, unknown>)[key] = v.value;

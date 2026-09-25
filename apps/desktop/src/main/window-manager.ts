@@ -4,7 +4,7 @@
 // state persistence, and safe navigation helpers.
 // ────────────────────────────────────────────────────────────────
 
-import { BrowserWindow, dialog, shell, nativeTheme, screen, type MessageBoxOptions } from 'electron';
+import { BrowserWindow, dialog, shell, screen, type MessageBoxOptions } from 'electron';
 import * as path from 'node:path';
 import { CHROME } from '@generatorai/design-tokens/chrome';
 import { log } from './logger';
@@ -17,8 +17,9 @@ import {
   TITLE_BAR_HEIGHT,
   useCustomTitleBar,
 } from './platform';
-import type { DesktopCommand } from '../shared/ipc';
+import type { AppearanceRequest, DesktopCommand, ThemePreference } from '../shared/ipc';
 import { IPC_EVENT } from '../shared/ipc';
+import { appearanceMirror } from './appearance';
 import { appRouteOf, isAppOrigin, isExternalUrlAllowed } from './navigation-guard';
 import { hasUnsavedWork } from './unsaved-work';
 import { appWindowPermissionPolicy, installCspFloor, installPermissionPolicy } from './session-hardening';
@@ -67,10 +68,26 @@ export class WindowManager {
     this.quitting = value;
   }
 
+  /**
+   * The window background before the renderer paints: the persisted `ground`
+   * of the user's theme for the current appearance (D-25), so a cold start in
+   * any of the 18 themes opens on its own colour instead of a GitHub literal.
+   */
   private backgroundColor(): string {
-    const theme = loadSettings().theme;
-    const dark = theme === 'system' ? nativeTheme.shouldUseDarkColors : theme === 'dark';
-    return dark ? '#0d1117' : '#ffffff';
+    return appearanceMirror().ground;
+  }
+
+  /**
+   * Repaints everything main draws in the theme's colours after an appearance
+   * push or an OS light/dark flip: the window backgrounds (visible while
+   * resizing and before the renderer paints) and the caption glyphs.
+   */
+  applyAppearance(): void {
+    const ground = this.backgroundColor();
+    for (const win of [this.mainWindow, this.splashWindow]) {
+      if (win && !win.isDestroyed()) win.setBackgroundColor(ground);
+    }
+    this.refreshTitleBarTheme();
   }
 
   showSplash(): void {
@@ -460,10 +477,16 @@ export class WindowManager {
     return response === 0;
   }
 
-  /** Tells the renderer which appearance the user picked natively. */
-  sendThemePreference(theme: 'light' | 'dark' | 'system'): void {
+  /**
+   * Asks the renderer to apply a mode picked in View ▸ Appearance. Main does
+   * not apply it itself: ThemeProvider is the only appearance writer (D-25)
+   * and pushes the result back through IPC.setAppearance.
+   */
+  sendAppearanceRequest(mode: ThemePreference): void {
     const win = this.mainWindow;
-    if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.themePreferenceChanged, theme);
+    if (!win || win.isDestroyed()) return;
+    const request: AppearanceRequest = { mode };
+    win.webContents.send(IPC_EVENT.appearanceRequest, request);
   }
 
   openExternalSafely(url: string): void {

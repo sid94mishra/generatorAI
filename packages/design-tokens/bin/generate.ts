@@ -15,10 +15,19 @@ import { fileURLToPath } from 'node:url';
 
 import { emitCss, spliceCss } from '../src/emit/css.js';
 import { emitNative } from '../src/emit/native.js';
+import { prepaintCspHash, splicePrepaint } from '../src/emit/prepaint.js';
 import { emitVocabularyCss, emitVocabularyJson } from '../src/emit/vocabulary.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '../../..');
+
+/** Swap the one `sha256-…` source the pattern captures around for the current pre-paint hash. */
+function replacePin(existing: string | null, pattern: RegExp): string {
+  if (existing === null || !pattern.test(existing)) {
+    throw new Error(`CSP pin not found (expected ${pattern})`);
+  }
+  return existing.replace(pattern, `$1${prepaintCspHash()}$2`);
+}
 
 interface Target {
   label: string;
@@ -39,6 +48,28 @@ const targets: Target[] = [
       }
       return spliceCss(existing, emitCss());
     },
+  },
+  {
+    label: 'web pre-paint script',
+    path: resolve(repoRoot, 'apps/web/index.html'),
+    render(existing) {
+      if (existing === null) {
+        throw new Error('apps/web/index.html not found');
+      }
+      return splicePrepaint(existing);
+    },
+  },
+  // The pre-paint script is allow-listed by SHA-256 in two CSPs (the server's
+  // header and the desktop's CSP floor); both pins must follow the script.
+  {
+    label: 'server CSP pre-paint hash',
+    path: resolve(repoRoot, 'apps/server/src/middleware/csp.ts'),
+    render: (existing) => replacePin(existing, /(THEME_SCRIPT_CSP_HASH = ')sha256-[A-Za-z0-9+/=]+(')/),
+  },
+  {
+    label: 'desktop CSP pre-paint hash',
+    path: resolve(repoRoot, 'apps/desktop/src/main/session-hardening.ts'),
+    render: (existing) => replacePin(existing, /("script-src 'self' ')sha256-[A-Za-z0-9+/=]+(')/),
   },
   {
     label: 'shared class vocabulary',

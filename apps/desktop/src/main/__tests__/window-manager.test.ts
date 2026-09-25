@@ -70,7 +70,10 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
     isFocused = () => true;
     getBounds = () => ({ x: 0, y: 0, width: 1440, height: 900 });
     setTitleBarOverlay = vi.fn();
-    constructor(_opts: unknown) {
+    setBackgroundColor = vi.fn();
+    opts: Record<string, unknown>;
+    constructor(opts: Record<string, unknown>) {
+      this.opts = opts;
       FakeBrowserWindow.instances.push(this);
     }
     on(event: string, fn: Listener) {
@@ -89,7 +92,14 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
 });
 
 const settings = {
-  theme: 'system',
+  appearance: {
+    mode: 'system',
+    themeId: 'solarized',
+    groundLight: '#eee8d5',
+    groundDark: '#002b36',
+    fgLight: '#586e75',
+    fgDark: '#93a1a1',
+  } as Record<string, string>,
   window: { width: 1440, height: 900 },
   serverPort: 0,
   harnessType: 'copilot',
@@ -291,5 +301,36 @@ describe('repointMainWindow', () => {
     wm.repointMainWindow('http://127.0.0.1:4200');
     expect(FakeBrowserWindow.instances).toHaveLength(2);
     expect(FakeBrowserWindow.instances[1]!.loadURL).toHaveBeenCalledWith('http://127.0.0.1:4200');
+  });
+});
+
+describe('appearance mirror (D-25)', () => {
+  beforeEach(() => {
+    settings.appearance.mode = 'system';
+  });
+
+  it('a cold start paints the persisted ground of the theme, not a GitHub literal', () => {
+    // mode=system and the (mocked) OS is light → Solarized light's ground.
+    const { win } = makeWindow();
+    expect(win.opts['backgroundColor']).toBe('#eee8d5');
+  });
+
+  it('a pinned mode ignores the OS', () => {
+    settings.appearance.mode = 'dark';
+    const { win } = makeWindow();
+    expect(win.opts['backgroundColor']).toBe('#002b36');
+  });
+
+  it('applyAppearance repaints the window background from the latest push', () => {
+    const { wm, win } = makeWindow();
+    settings.appearance.mode = 'dark';
+    wm.applyAppearance();
+    expect(win.setBackgroundColor).toHaveBeenCalledWith('#002b36');
+  });
+
+  it('View ▸ Appearance only ASKS the renderer (appearanceRequest)', () => {
+    const { wm, win } = makeWindow();
+    wm.sendAppearanceRequest('light');
+    expect(win.webContents.send).toHaveBeenCalledWith('desktop:appearance-request', { mode: 'light' });
   });
 });

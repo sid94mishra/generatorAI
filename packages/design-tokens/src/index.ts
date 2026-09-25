@@ -2,6 +2,7 @@ export * from './color.js';
 export * from './tokens.js';
 export * from './themes/index.js';
 export * from './registry.js';
+export * from './appearance.js';
 export * from './design.js';
 export * from './geometry.js';
 export * from './vocabulary.js';

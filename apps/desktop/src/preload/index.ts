@@ -11,7 +11,8 @@ import {
   IPC_EVENT,
   type AppInfo,
   type ServerStatus,
-  type ThemePreference,
+  type AppearancePush,
+  type AppearanceRequest,
   type SaveFileOptions,
   type DesktopCommand,
   type DesktopPairingCode,
@@ -62,19 +63,21 @@ const api = {
     return () => ipcRenderer.removeListener(IPC_EVENT.foundInPage, handler);
   },
 
-  onThemePreferenceChanged: (cb: (theme: ThemePreference) => void): (() => void) => {
-    const handler = (_e: unknown, t: ThemePreference) => cb(t);
-    ipcRenderer.on(IPC_EVENT.themePreferenceChanged, handler);
-    return () => ipcRenderer.removeListener(IPC_EVENT.themePreferenceChanged, handler);
+  /** A mode picked in the native View ▸ Appearance menu; ThemeProvider applies it (D-25). */
+  onAppearanceRequest: (cb: (request: AppearanceRequest) => void): (() => void) => {
+    const handler = (_e: unknown, r: AppearanceRequest) => cb(r);
+    ipcRenderer.on(IPC_EVENT.appearanceRequest, handler);
+    return () => ipcRenderer.removeListener(IPC_EVENT.appearanceRequest, handler);
   },
+
+  /** The renderer's appearance, mirrored by main (background, caption glyphs, themeSource). */
+  setAppearance: (appearance: AppearancePush): Promise<void> =>
+    ipcRenderer.invoke(IPC.setAppearance, appearance),
 
   showItemInFolder: (fullPath: string): Promise<boolean> =>
     ipcRenderer.invoke(IPC.showItemInFolder, fullPath),
 
   openExternal: (url: string): Promise<void> => ipcRenderer.invoke(IPC.openExternal, url),
-
-  getTheme: (): Promise<ThemePreference> => ipcRenderer.invoke(IPC.getTheme),
-  setTheme: (theme: ThemePreference): Promise<void> => ipcRenderer.invoke(IPC.setTheme, theme),
 
   getSetting: <T = unknown>(key: string): Promise<T | undefined> =>
     ipcRenderer.invoke(IPC.getSetting, key),
@@ -118,11 +121,6 @@ const api = {
     const handler = (_e: unknown, command: DesktopCommand) => cb(command);
     ipcRenderer.on(IPC_EVENT.command, handler);
     return () => ipcRenderer.removeListener(IPC_EVENT.command, handler);
-  },
-  onThemeChanged: (cb: (resolved: 'light' | 'dark') => void): Unsubscribe => {
-    const handler = (_e: unknown, resolved: 'light' | 'dark') => cb(resolved);
-    ipcRenderer.on(IPC_EVENT.themeChanged, handler);
-    return () => ipcRenderer.removeListener(IPC_EVENT.themeChanged, handler);
   },
   /** Maximise/fullscreen/focus changes, so a custom title bar can restyle. */
   onWindowStateChanged: (cb: (state: WindowStateChange) => void): Unsubscribe => {

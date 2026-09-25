@@ -14,6 +14,7 @@
 import { BrowserWindow, ipcMain } from 'electron';
 import * as path from 'node:path';
 import { PROMPT_IPC } from '../shared/ipc';
+import { appearanceMirror } from './appearance';
 import { log } from './logger';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
@@ -41,7 +42,9 @@ export function showPrompt(options: PromptOptions): Promise<string | null> {
     fullscreenable: false,
     show: false,
     title: options.title,
-    backgroundColor: '#0d1117',
+    // The theme's ground, like every other window (D-25). The prompt page
+    // itself is still GitHub-dark until the static pages get tokens (06 §7).
+    backgroundColor: appearanceMirror().ground,
     ...(parent ? { parent, modal: true } : {}),
     webPreferences: {
       preload: PRELOAD,

@@ -144,8 +144,17 @@ interface GeneratorAIDesktopMenuState {
   sidebarOpen: boolean;
   rightPaneOpen: boolean;
   hasUnsavedWork: boolean;
-  theme: 'system' | 'light' | 'dark';
   recent: Array<{ label: string; route: string }>;
+}
+
+/** The renderer's appearance, mirrored by the shell (D-25): `#rrggbb` chrome colours for both appearances. */
+interface GeneratorAIDesktopAppearance {
+  mode: 'system' | 'light' | 'dark';
+  themeId: string;
+  groundLight: string;
+  groundDark: string;
+  fgLight: string;
+  fgDark: string;
 }
 
 interface GeneratorAIDesktopWindowStateChange {
@@ -185,8 +194,10 @@ interface GeneratorAIDesktopBridge {
   ) => () => void;
   onCommand?: (cb: (command: GeneratorAIDesktopCommand) => void) => () => void;
   onNavigate?: (cb: (path: string) => void) => () => void;
-  /** Appearance chosen in the native View ▸ Appearance menu. */
-  onThemePreferenceChanged?: (cb: (mode: 'light' | 'dark' | 'system') => void) => () => void;
+  /** A mode picked in the native View ▸ Appearance menu; ThemeProvider applies it. */
+  onAppearanceRequest?: (cb: (request: { mode: 'light' | 'dark' | 'system' }) => void) => () => void;
+  /** Mirror the applied appearance into the shell (background, caption glyphs, themeSource). */
+  setAppearance?: (appearance: GeneratorAIDesktopAppearance) => Promise<void>;
 
   // ── OS file manager ──
   /** Reveals a path in Finder / File Explorer. False when it is not on this machine. */

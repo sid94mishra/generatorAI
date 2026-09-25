@@ -323,6 +323,15 @@ export default [
                 },
               },
             },
+            // The kit's pure helpers in ui/lib (applyAppearance, cn) are shared
+            // with the data layer: ThemeProvider (providers/) writes the
+            // appearance through applyAppearance (D-25, 09 §3.3), and the
+            // legacy lib/utils `cn` re-exports ui/lib/cn. Only ui/lib; never
+            // components.
+            {
+              from: { element: { type: 'data' } },
+              allow: { to: { element: { type: 'ui' }, file: { path: ['apps/web/src/ui/lib/*.ts'] } } },
+            },
             { from: { element: { type: 'platform' } }, allow: toTypes('platform', 'data') },
             // Migration scaffolding; deleted in P7.
             { from: { element: { type: 'legacy' } }, allow: toTypes('legacy', 'ui', 'blocks', 'data', 'platform') },

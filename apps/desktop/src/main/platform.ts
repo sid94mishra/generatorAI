@@ -16,8 +16,8 @@
 //            outright — so we degrade rather than appear broken.
 // ────────────────────────────────────────────────────────────────
 
-import { nativeTheme } from 'electron';
 import type { WindowChrome } from '../shared/ipc';
+import { appearanceMirror } from './appearance';
 
 export const isMac = process.platform === 'darwin';
 export const isWindows = process.platform === 'win32';
@@ -65,9 +65,12 @@ export function useCustomTitleBar(): boolean {
   return process.env['GENERATORAI_LINUX_CUSTOM_TITLEBAR'] === '1';
 }
 
-/** Title-bar symbol colour that stays legible in either theme. */
+/**
+ * Caption glyph colour for the Window Controls Overlay: the active theme's
+ * `fg` for the current appearance, as last pushed by the renderer (D-25).
+ */
 export function titleBarSymbolColor(): string {
-  return nativeTheme.shouldUseDarkColors ? '#e6edf3' : '#1f2328';
+  return appearanceMirror().fg;
 }
 
 /**

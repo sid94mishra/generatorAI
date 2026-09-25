@@ -20,12 +20,12 @@
 // groups and enabled/disabled items reflect the app rather than decorating it.
 // ────────────────────────────────────────────────────────────────
 
-import { app, Menu, shell, nativeTheme, type MenuItemConstructorOptions } from 'electron';
+import { app, Menu, shell, type MenuItemConstructorOptions } from 'electron';
 import * as path from 'node:path';
 import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { resolvePaths } from './paths';
-import { loadSettings, saveSettings } from './config';
+import { loadSettings } from './config';
 import { COMMANDS, NAV_DESTINATIONS, toElectronAccelerator, type CommandId } from '@generatorai/shared/ui-contract';
 import { isMac, mnemonic } from './platform';
 import { log } from './logger';
@@ -52,7 +52,7 @@ export interface MenuActions {
 let menuState: MenuState = {
   sidebarOpen: true,
   rightPaneOpen: false,
-  theme: 'system',
+  mode: 'dark',
   recent: [],
 };
 
@@ -288,8 +288,8 @@ export function buildMenu(actions: MenuActions): void {
         submenu: (['light', 'dark', 'system'] as ThemePreference[]).map((t) => ({
           label: t === 'system' ? 'Follow System' : t === 'dark' ? 'Dark' : 'Light',
           type: 'radio' as const,
-          checked: menuState.theme === t,
-          click: () => setTheme(t),
+          checked: menuState.mode === t,
+          click: () => requestAppearance(t),
         })),
       },
       { type: 'separator' },
@@ -371,19 +371,18 @@ export function buildMenu(actions: MenuActions): void {
   );
 }
 
-/** Applies a theme everywhere: OS, persisted settings, renderer and menu. */
-function setTheme(theme: ThemePreference): void {
-  nativeTheme.themeSource = theme;
-  saveSettings({ theme });
-  updateMenuState({ theme });
-  // The renderer keeps its own light/dark/system preference and only follows
-  // the OS while that preference is "system". Without telling it which
-  // appearance was CHOSEN, picking Light here moved the native theme and left
-  // the app itself dark.
-  getWindowManager().sendThemePreference(theme);
+/**
+ * View ▸ Appearance asks the renderer; it does not apply anything itself.
+ * ThemeProvider is the only appearance writer (D-25): it applies the mode and
+ * pushes it back (IPC.setAppearance), which persists it, sets themeSource and
+ * moves this radio. Writing themeSource here made "System" lie whenever the
+ * renderer disagreed.
+ */
+function requestAppearance(mode: ThemePreference): void {
+  getWindowManager().sendAppearanceRequest(mode);
 }
 
-/** Re-reads persisted theme into the menu. Called once at startup. */
+/** Re-reads the persisted appearance mode into the menu. Called once at startup. */
 export function syncMenuThemeFromSettings(): void {
-  updateMenuState({ theme: loadSettings().theme });
+  updateMenuState({ mode: loadSettings().appearance.mode });
 }

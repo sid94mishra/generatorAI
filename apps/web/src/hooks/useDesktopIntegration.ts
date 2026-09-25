@@ -19,7 +19,6 @@ import {
   applyFullscreenInsets,
   isDesktop,
   onDesktopNavigate,
-  onDesktopThemePreference,
   onWindowStateChanged,
   pushMenuState,
   readWindowChrome,
@@ -29,7 +28,6 @@ import {
 import { navDestinationFor } from '@generatorai/shared/ui-contract';
 import { useUiStore } from '@/stores/uiStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
-import { useTheme } from '@/providers/ThemeProvider.js';
 import { usePageTitleStore } from '@/stores/pageTitleStore.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 
@@ -43,7 +41,6 @@ export function useDesktopIntegration(): DesktopWindowChrome {
   const [chrome, setChrome] = useState<DesktopWindowChrome>(NATIVE_CHROME);
   const navigate = useNavigate();
   const location = useLocation();
-  const { mode, setMode } = useTheme();
 
   const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const rightPaneController = useRightPaneStore((s) => s.controller);
@@ -108,36 +105,13 @@ export function useDesktopIntegration(): DesktopWindowChrome {
     pushMenuState({
       sidebarOpen,
       rightPaneOpen,
-      theme: mode,
       recent: next,
       hasUnsavedWork,
     });
-  }, [location.pathname, sidebarOpen, rightPaneOpen, mode, pageTitle, hasUnsavedWork]);
+  }, [location.pathname, sidebarOpen, rightPaneOpen, pageTitle, hasUnsavedWork]);
 
-  // The native View ▸ Appearance radio group is a user choice of MODE, so it
-  // sets the app's own preference. Reporting only the resolved colour meant
-  // picking "Light" did nothing whenever the in-app preference was pinned.
-  useEffect(() => {
-    if (!isDesktop) return undefined;
-    return onDesktopThemePreference((next) => setMode(next));
-  }, [setMode]);
-
-  // The native View ▸ Appearance radio group writes to the shell's settings;
-  // reflect that back into the SPA theme provider.
-  useEffect(() => {
-    if (!isDesktop) return undefined;
-    const bridgeTheme = (window as unknown as {
-      generatoraiDesktop?: { onThemeChanged?: (cb: (t: 'light' | 'dark') => void) => () => void };
-    }).generatoraiDesktop?.onThemeChanged;
-    if (!bridgeTheme) return undefined;
-    return bridgeTheme((resolved) => {
-      // Only follow the OS when the user has not pinned a mode themselves.
-      // Toggling the class directly (rather than calling setMode) keeps the
-      // stored preference on `system` — the OS is the source of truth here,
-      // and persisting its current value would silently pin it.
-      if (mode === 'system') document.documentElement.classList.toggle('dark', resolved === 'dark');
-    });
-  }, [mode, setMode]);
+  // Appearance is not handled here: ThemeProvider is its only writer and owns
+  // the desktop appearance IPC in both directions (D-25).
 
   return chrome;
 }

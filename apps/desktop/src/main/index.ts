@@ -178,7 +178,9 @@ function main(): void {
 
 async function onReady(): Promise<void> {
   const settings = loadSettings();
-  nativeTheme.themeSource = settings.theme;
+  // Mirror the renderer's last mode (D-25) before any window exists, so
+  // prefers-color-scheme and the native chrome agree from the first frame.
+  nativeTheme.themeSource = settings.appearance.mode;
 
   const wm = getWindowManager();
   const sm = getServerManager();

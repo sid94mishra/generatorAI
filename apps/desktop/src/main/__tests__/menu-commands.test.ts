@@ -23,6 +23,8 @@ const state = vi.hoisted(() => ({
   trayTemplate: [] as unknown[],
   sendCommand: vi.fn(),
   navigateTo: vi.fn(),
+  sendAppearanceRequest: vi.fn(),
+  nativeTheme: { shouldUseDarkColors: true, themeSource: 'system' },
   restoreFromTray: vi.fn(),
 }));
 
@@ -36,7 +38,7 @@ vi.mock('electron', () => {
   return {
     app: { name: 'GeneratorAI', getPath: () => '/tmp', quit: vi.fn() },
     shell: { openPath: vi.fn() },
-    nativeTheme: { shouldUseDarkColors: true, themeSource: 'system' },
+    nativeTheme: state.nativeTheme,
     nativeImage: {
       createFromPath: () => ({ isEmpty: () => false, resize: () => ({ setTemplateImage() {} }) }),
     },
@@ -70,7 +72,7 @@ vi.mock('../window-manager', () => ({
     toggleDevtools: vi.fn(),
     openExternalSafely: vi.fn(),
     setQuitting: vi.fn(),
-    sendThemePreference: vi.fn(),
+    sendAppearanceRequest: state.sendAppearanceRequest,
   }),
 }));
 
@@ -78,7 +80,7 @@ vi.mock('../server-manager', () => ({
   getServerManager: () => ({ restart: vi.fn(async () => undefined), url: null, getStatus: () => ({ state: 'running', port: 3100 }), on: vi.fn() }),
 }));
 vi.mock('../paths', () => ({ resolvePaths: () => ({ dataDir: '/tmp/data' }) }));
-vi.mock('../config', () => ({ loadSettings: () => ({ theme: 'system' }), saveSettings: vi.fn() }));
+vi.mock('../config', () => ({ loadSettings: () => ({ appearance: { mode: 'system' } }) }));
 vi.mock('../logger', () => ({ log: { error: vi.fn(), warn: vi.fn(), info: vi.fn() } }));
 vi.mock('../backend-switcher', () => ({
   connectionState: () => ({ serverMode: 'embedded', connections: [], activeConnectionId: null }),
@@ -181,6 +183,27 @@ describe.each([true, false])('application menu (mac=%s)', (mac) => {
     const { menu } = await loadMenu(mac);
     for (const d of NAV_DESTINATIONS) expect(menu.accel(d.command)).not.toMatch(/Mod| /);
     expect(menu.accel('project.new')).toBeUndefined();
+  });
+});
+
+describe('View ▸ Appearance (D-25: the renderer is the only appearance writer)', () => {
+  const radio = (label: string) =>
+    find(state.template as Item[], 'Appearance')!.submenu!.find((i) => i.label === label) as Item & { checked?: boolean };
+
+  it('asks the renderer and writes nothing itself', async () => {
+    await loadMenu(false);
+    radio('Light').click?.();
+    expect(state.sendAppearanceRequest).toHaveBeenCalledWith('light');
+    expect(state.nativeTheme.themeSource).toBe('system');
+  });
+
+  it('the radio follows the persisted mode and each renderer push', async () => {
+    const { menu } = await loadMenu(false);
+    menu.syncMenuThemeFromSettings();
+    expect(radio('Follow System').checked).toBe(true);
+    menu.updateMenuState({ mode: 'dark' });
+    expect(radio('Dark').checked).toBe(true);
+    expect(radio('Follow System').checked).toBe(false);
   });
 });
 

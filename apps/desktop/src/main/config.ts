@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // Desktop settings store — a tiny JSON file in userData. Persists window
-// state, theme preference, harness selection and an optional fixed server
+// state, the mirrored appearance, harness selection and an optional fixed server
 // port. Intentionally dependency-free (no electron-store) to keep the bundle
 // small and the format trivially inspectable.
 // ────────────────────────────────────────────────────────────────
@@ -8,7 +8,8 @@
 import { app } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import type { ThemePreference } from '../shared/ipc';
+import { CHROME_FALLBACK_COLORS } from '@generatorai/design-tokens/chrome';
+import type { AppearancePush } from '../shared/ipc';
 import { log } from './logger';
 import { DEFAULT_CONNECTION_STATE, type ServerConnectionState } from './serverConnections';
 import { sanitizeSettings, type SanitizeReport } from './settings-schema';
@@ -21,8 +22,29 @@ export interface WindowState {
   maximized?: boolean;
 }
 
+/**
+ * The renderer's last appearance push (D-25): mode + the theme's chrome
+ * colours for both appearances. Main never chooses these; it mirrors them so
+ * the next launch paints the right background before the renderer exists.
+ */
+export type AppearanceSettings = AppearancePush;
+
+/**
+ * Before any push: the web app's own defaults (dark, Instrument). The colours
+ * are the lean `./chrome` literals; a test pins them, and the mode and theme,
+ * to DEFAULT_MODE / DEFAULT_THEME / chromeColors() in the token package.
+ */
+export const DEFAULT_APPEARANCE: AppearanceSettings = {
+  mode: 'dark',
+  themeId: 'instrument',
+  groundLight: CHROME_FALLBACK_COLORS.light.background,
+  groundDark: CHROME_FALLBACK_COLORS.dark.background,
+  fgLight: CHROME_FALLBACK_COLORS.light.symbol,
+  fgDark: CHROME_FALLBACK_COLORS.dark.symbol,
+};
+
 export interface DesktopSettings {
-  theme: ThemePreference;
+  appearance: AppearanceSettings;
   window: WindowState;
   /** Fixed server port. 0 (default) means "pick a free port each launch". */
   serverPort: number;
@@ -49,7 +71,7 @@ export interface DesktopSettings {
 }
 
 export const DEFAULTS: DesktopSettings = {
-  theme: 'system',
+  appearance: DEFAULT_APPEARANCE,
   window: { width: 1440, height: 900 },
   serverPort: 0,
   harnessType: 'copilot',

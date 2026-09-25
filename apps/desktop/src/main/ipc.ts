@@ -13,7 +13,6 @@ import {
   type MenuState,
   type ShellState,
   type SaveFileOptions,
-  type ThemePreference,
   type WindowChrome,
 } from '../shared/ipc';
 import { BROWSER_IPC, BROWSER_IPC_EVENT, type BrowserBounds, type NativeBrowserEvent } from '../shared/browser-ipc';
@@ -30,6 +29,7 @@ import { log } from './logger';
 import { createIpcGuard, defaultFromWebContents } from './ipc-guard';
 import { admitPairingRequest, PairingGate } from './pairing-gate';
 import { isRendererSettingKey, validateSettingValue } from './settings-schema';
+import { commitAppearance } from './appearance';
 
 /** One gate per process: the limits are about THIS shell's lifetime. */
 const pairingGate = new PairingGate();
@@ -220,7 +220,6 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     if (typeof p.rightPaneOpen === 'boolean') safe.rightPaneOpen = p.rightPaneOpen;
     // Not menu state — the shell's close/quit guard reads it (unsaved-work.ts).
     if (typeof p.hasUnsavedWork === 'boolean') setUnsavedWork(p.hasUnsavedWork);
-    if (p.theme === 'light' || p.theme === 'dark' || p.theme === 'system') safe.theme = p.theme;
     if (Array.isArray(p.recent)) {
       // Bound and sanitise: this list is rendered into a native menu, and an
       // unbounded or malformed entry would corrupt it.
@@ -237,12 +236,23 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     updateMenuState(safe);
   });
 
-  guardedHandle(IPC.getTheme, (): ThemePreference => loadSettings().theme);
-
-  guardedHandle(IPC.setTheme, (_e, theme: ThemePreference) => {
-    if (theme !== 'light' && theme !== 'dark' && theme !== 'system') return;
-    saveSettings({ theme });
-    nativeTheme.themeSource = theme;
+  // ── Appearance (D-25) ──────────────────────────────────────────
+  //
+  // The renderer is the only appearance writer; main mirrors each push
+  // (persist, themeSource, window background, caption glyphs, menu radio).
+  guardedHandle(IPC.setAppearance, (_e, payload: unknown) => {
+    const result = commitAppearance(payload, {
+      save: (appearance) => saveSettings({ appearance }),
+      setThemeSource: (mode) => {
+        nativeTheme.themeSource = mode;
+      },
+      repaint: () => wm.applyAppearance(),
+      updateMenu: (mode) => updateMenuState({ mode }),
+    });
+    if (!result.ok) {
+      log.warn('[ipc] rejected appearance push', { error: result.error });
+      throw new Error(`Invalid appearance: ${result.error}`);
+    }
   });
 
   guardedHandle(IPC.getSetting, (_e, key: unknown) => {
@@ -272,17 +282,12 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.serverStatus, status);
   });
 
-  // Propagate OS theme changes for any renderer that wants to follow them.
-  nativeTheme.on('updated', () => {
-    const win = wm.getMainWindow();
-    if (win && !win.isDestroyed()) {
-      win.webContents.send(IPC_EVENT.themeChanged, nativeTheme.shouldUseDarkColors ? 'dark' : 'light');
-    }
-    // The OS paints the Window Controls Overlay glyphs, so they do not inherit
-    // our CSS. Without this repaint the close button stays dark-on-dark after
-    // the system flips to dark mode.
-    wm.refreshTitleBarTheme();
-  });
+  // An OS light/dark flip while the mode is `system`: the renderer re-resolves
+  // through its own matchMedia listener; main repaints what the OS draws or
+  // what shows before the renderer paints — the window background and the
+  // Window Controls Overlay glyphs, which do not inherit our CSS (without this
+  // the close button stays dark-on-dark after the system flips to dark).
+  nativeTheme.on('updated', () => wm.applyAppearance());
 
   // ── Native Browser (feature-flagged; Phase 2) ──
   // Only wire the channels if the flag is on so a mis-typed invoke from an

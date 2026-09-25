@@ -10,6 +10,7 @@ export type DesktopWindowChrome = GeneratorAIDesktopWindowChrome;
 export type DesktopMenuState = GeneratorAIDesktopMenuState;
 export type DesktopWindowState = GeneratorAIDesktopWindowStateChange;
 export type DesktopCommand = GeneratorAIDesktopCommand;
+export type DesktopAppearance = GeneratorAIDesktopAppearance;
 
 /** True only inside the Electron shell. */
 export const isDesktop: boolean =
@@ -82,11 +83,25 @@ export function onDesktopNavigate(cb: (path: string) => void): () => void {
   return api(cb);
 }
 
-/** Subscribe to the appearance the user picks in the native menu. */
-export function onDesktopThemePreference(cb: (mode: 'light' | 'dark' | 'system') => void): () => void {
-  const api = bridge()?.onThemePreferenceChanged;
+/**
+ * Subscribe to the mode the user picks in the native View ▸ Appearance menu.
+ * The shell only asks; ThemeProvider applies it (D-25).
+ */
+export function onDesktopAppearanceRequest(cb: (mode: 'light' | 'dark' | 'system') => void): () => void {
+  const api = bridge()?.onAppearanceRequest;
   if (!api) return () => undefined;
-  return api(cb);
+  return api((request) => cb(request.mode));
+}
+
+/**
+ * Mirror the renderer's appearance into the shell: it persists it, sets
+ * `nativeTheme.themeSource`, repaints the window background and the caption
+ * glyphs, so the next launch opens in the right colour. Fire-and-forget.
+ */
+export function pushDesktopAppearance(appearance: DesktopAppearance): void {
+  const api = bridge()?.setAppearance;
+  if (!api) return;
+  void api(appearance).catch(() => undefined);
 }
 
 /** Subscribe to maximise/fullscreen/focus changes. */
