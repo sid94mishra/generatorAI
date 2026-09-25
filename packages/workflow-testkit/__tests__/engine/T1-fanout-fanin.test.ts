@@ -1,11 +1,11 @@
 // ────────────────────────────────────────────────────────────────
-// T1 on engine v2 — fan-out / fan-in (F_live_tests §1 T1).
+// T1 — fan-out / fan-in (F_live_tests §1 T1).
 //
-// The v1 characterisation (`current-engine/T1`) pins three KNOWN-BUGs:
-// every hop waits for a 3 s poll (B-1), every stage pays a context and a
-// summary turn (W-49), and a short answer triggers an output-retry turn
-// (W-48). On v2 the join runs on the actor's hop, context rides in the first
-// prompt, and no retry turn exists.
+// The P00 characterisation pinned three bugs of the v1 engine: every hop
+// waited for a 3 s poll (B-1), every stage paid a context and a summary turn
+// (W-49), and a short answer triggered an output-retry turn (W-48). Here the
+// join runs on the actor's hop, context rides in the first prompt, and no
+// retry turn exists.
 // ────────────────────────────────────────────────────────────────
 
 import { afterEach, describe, expect, it } from 'vitest';

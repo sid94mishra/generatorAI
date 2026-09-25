@@ -156,6 +156,36 @@ The P02 plan's **Closes** list, with the commits and the tests that pin each ite
 | F-3b | Stage sessions record and resume the provider session handle | 8f3dbe3, ad35d22 | turnRecorder.test.ts |
 | PD-5, PD-17, PD-19 | Computer use opt-in for stages and never on bypass; gating refusals/warnings at compose and run start; SessionSpecEditor with inline warnings | 8f3dbe3, 8cfe62a, a220bb3 | composer.test.ts; SessionSpecEditor.test.tsx |
 
+## Phase 03 closure (2026-09-26, review pending)
+
+The P03 plan's **Closes** list, with the commits and the tests that pin each item. Commits: dd00852 (3.2), 7d4ecb4 (3.4), 5d7b3e9 (3.3), 527f41c (3.1), 9732b79 (3.5), 08c1206 (3.6), 5dad4e7 (3.7 + 3.8, the cutover), DOCS_COMMIT (3.9). The v2 engine is the only engine since 5dad4e7.
+
+| ID | What P03 closed | Commits | Evidence |
+|---|---|---|---|
+| W-01 | Pause/cancel write the desired state before aborting; a paused stage never completes, a resume continues its conversation | 9732b79, 08c1206 | testkit T5 pause/cancel; decide commands tests |
+| W-02 | No heartbeat reaper: an executor lease renewed while the attempt lives; a slow repair is not reaped | 527f41c, 9732b79 | testkit T4 slow repair (F-4) |
+| W-08 | Event routing on the actor's hop (no 3 s poll, no subscribeRunEvents); validation inside the attempt | 08c1206, 5dad4e7 | testkit T1 (join within one hop) |
+| W-09 (session model) | `sessionReuse` / `sessionGroup` on `run_sessions`; a fresh session per stage by default with its own config | 9732b79 | testkit T7 fresh sessions |
+| W-11 | A re-run is a fork: completed instances are memoized (never re-validated), workspace fresh/reuse/restore_checkpoint | 5dad4e7 | testkit fork.test.ts |
+| W-12 | Stage retry/resume are commands on paused instances (resume attempts keep the conversation); run retry is a guarded, idempotent fork | 08c1206, 5dad4e7 | T3, T5, T8; fork.test.ts (409 on live, idempotency key) |
+| W-14 | Cancel reaches every live instance, parked ones included (their frame is aborted after the write) | 08c1206 | T5 cancel; decide commands tests |
+| W-15 | Every turn inside the attempt deadline; parked time excluded | 9732b79 | T3 deadline test |
+| W-16 | Recovery never completes on missing work: unsafe interrupted turns pause the stage, safe ones replay | 9732b79, 08c1206 | T8 crash tests |
+| W-17 | Rules judge the latest answer only, inside the attempt (`validating`); nothing completes unvalidated | 9732b79 | T4; output-contract tests |
+| W-29 | Only `on: failure` / `handlesFailure` absorbs a failure | 5d7b3e9 | T3 (always no longer masks); readiness tests |
+| W-31 (runtime) | A guard/when evaluation error fails the stage (`condition_error`), never a silent skip | 5d7b3e9 | decide/readiness tests; T2 |
+| W-32 | Boot-order race gone (no allocator map; `run_sessions` read at bind time), CAS finalize, no 24 h poll listeners in the engine | 08c1206, 5dad4e7 | T8 |
+| W-39 (engine) | Error classes, retry precedence, jitter drawn in the store | 7d4ecb4, 5d7b3e9 | errors tests; T3 |
+| W-41 (engine sub-items) | `pre_run` hook variables scoped to the attempt; errors carry the instance id | 9732b79 | executor code; T3 |
+| W-46 | "Request changes" runs a journalled revision that reaches the successor | 9732b79 | T5 changes |
+| W-47 (runtime) | JSON Schema contract with ajv, native/tool/final-block extraction, repair turns | 9732b79 | output-contract tests; T4 |
+| W-48 (output retry) | No output-retry turn, no file-writing boilerplate on prompts | 9732b79 | T1, T7 |
+| W-59 | A fork keeps the permission mode, overrides, project and trigger lineage | 5dad4e7 | fork.test.ts |
+| W-66 | One concurrency gate (the admission controller); no stage Semaphore | 9732b79, 5dad4e7 | T1; `maxConcurrentStages` banned in core/server |
+| RV-1, RV-5, RV-9, RV-10, RV-17, RV-20, RV-27 | v57 explicit purge; RV-5 terminal events from the outbox; output strategies; turn settlement with the message; migration numbers; rebind; engine lock + fencing | dd00852..5dad4e7 | migration57, RunStore, T8 lock refusal |
+
+Not closed by P03 (with the phase that owns them): the fast-check model test over the G5 §7.2 invariants, T10 (25 stages) and the hop-latency p95 assertion (DEVIATIONS / handoff), the run-page correctness work (P03b), clone/preprocess/post-processing in the lifecycle (P04).
+
 ## Independent review findings
 
 All 44 findings (RV-1..RV-44) are dispositioned in `REVIEW-LOG.md`. Accepted findings are implemented in the WPs cited there. The coding agent verifies each accepted RV item in the phase PR that implements it.

@@ -24,15 +24,15 @@ The shared artifact browser supports produced artifacts and their metadata. A fi
 
 | Action | Use |
 | --- | --- |
-| Pause | Request a pause on an active run |
-| Resume | Continue an eligible paused run |
-| Cancel | Request termination of an active or paused run |
-| Retry | Start a new run from an eligible failed run; the previous record remains terminal |
-| Stage retry | Retry an eligible stage through its stage action |
+| Pause | Stop the active run; in-flight stages stop and resume their conversation later |
+| Resume | Continue a paused run or a paused stage |
+| Cancel | Stop the run or one stage |
+| Retry failed | Fork a failed or cancelled run: a new run re-runs every stage that did not complete and copies the completed ones; the previous record stays as it ended |
+| Stage retry | Start a new attempt of a paused stage in a live run |
 
-Controls are state-dependent. The UI distinguishes pending/starting, running, paused, cancelling, cancelled, completed, and failed. A cancellation request first entering **Cancelling** is not proof that all children have already exited. Inspect final state and workspace effects.
+Every control is a run command (`POST /api/workflow-runs/:id/commands`). Controls are state-dependent; the run moves through created, starting, running, waiting (nothing to run until a person or a timer acts), paused, finalizing, cancelling and a terminal state. A cancellation first entering **Cancelling** is not proof that all children have already exited. Inspect final state and workspace effects.
 
-Retries and recovery are not universal transaction rollback. A hook, command, file edit, or external request may already have happened. For example, a hook that posts a notification can repeat if its relevant stage is retried. Design such hooks with the expected retry semantics.
+Retries and recovery are not universal transaction rollback. A hook, command, file edit, or external request may already have happened. After a restart, a stage whose interrupted step may have changed the workspace is paused for you instead of being re-run; a stage whose settled steps can be replayed continues on its own.
 
 ## Review a stage
 
@@ -54,7 +54,7 @@ For a brownfield change, use stages for source analysis, implementation, indepen
 
 ## Source evidence
 
-`apps/web/src/pages/WorkflowDefinitionPage.tsx`, `apps/web/src/pages/WorkflowRunPage.tsx`, `apps/web/src/components/workflow/RuntimeDAGCanvas.tsx`, `apps/web/src/components/workflow/redesign/RunHeaderBar.tsx`, `apps/web/src/components/workflow/redesign/RightInspector.tsx`, `apps/web/src/components/workflow/redesign/InlineHitlControls.tsx`, `apps/web/src/components/artifacts/ArtifactBrowser.tsx`, and `packages/shared/src/types/WorkflowRunStateMachine.ts`.
+`apps/web/src/pages/WorkflowDefinitionPage.tsx`, `apps/web/src/pages/WorkflowRunPage.tsx`, `apps/web/src/components/workflow/RuntimeDAGCanvas.tsx`, `apps/web/src/components/workflow/redesign/RunHeaderBar.tsx`, `apps/web/src/components/workflow/redesign/RightInspector.tsx`, `apps/web/src/components/workflow/redesign/InlineHitlControls.tsx`, `apps/web/src/components/artifacts/ArtifactBrowser.tsx`, and `packages/workflow-spec/src/state/workflowRun.ts`.
 
 ## Configuration and worked examples
 

@@ -78,7 +78,7 @@ Advanced orchestration configuration also includes preprocessing, result validat
 
 ## Source evidence
 
-`apps/web/src/pages/WorkflowBuilderPage.tsx`, `apps/web/src/components/workflow/DAGCanvas.tsx`, `apps/web/src/components/workflow/StagePropertiesPanel.tsx`, `apps/web/src/components/workflow/WorkflowConfigPanel.tsx`, `apps/web/src/components/workflow/settings`, `packages/shared/src/types/WorkflowDefinition.ts`, `packages/shared/src/types/StageDefinition.ts`, `packages/shared/src/types/HookDefinition.ts`, `packages/shared/src/types/WorkflowOrchestrator.ts`, and `packages/core/src/services/ResultValidator.ts`.
+`apps/web/src/pages/WorkflowBuilderPage.tsx`, `apps/web/src/components/workflow/DAGCanvas.tsx`, `apps/web/src/components/workflow/StagePropertiesPanel.tsx`, `apps/web/src/components/workflow/WorkflowConfigPanel.tsx`, `apps/web/src/components/workflow/settings`, `packages/shared/src/types/WorkflowDefinition.ts`, `packages/shared/src/types/StageDefinition.ts`, `packages/shared/src/types/HookDefinition.ts`, `packages/shared/src/types/WorkflowOrchestrator.ts`, and `packages/core/src/services/engine/OutputExtractor.ts`.
 
 ## Configuration and worked examples
 

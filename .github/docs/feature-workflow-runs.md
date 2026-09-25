@@ -1,502 +1,144 @@
 # Feature: Workflow Runs
 
-> **WorkflowRun** is a single execution of one pinned version of a workflow definition (a v2 `WorkflowGraph`). This doc covers run lifecycle, DAG scheduling, session allocation, run profiles, HITL, retries, file management, and durability.
+> A **WorkflowRun** is one execution of one pinned version of a workflow definition (a v2 `WorkflowGraph`). The run is driven by the workflow engine (engine v2, P03): a pure scheduler (`decide()`), one serial actor per run, a stage executor, durable timers, an outbox and crash recovery. This doc covers the run and instance states, attempts, failure precedence, recovery, ownership, the commands API and fork.
 
-For definition/stage authoring, see [feature-workflows.md](./feature-workflows.md) and [feature-stages.md](./feature-stages.md).
-
----
-
-## 1. Entity & DB shape
-
-`workflow_runs`:
-```
-id                    text PK
-workflowDefinitionId  FK
-definitionVersionId   FK → workflow_definition_versions.id     (the pinned graph; the engine never reads the live definition)
-name                  text
-status                enum 'created'|'starting'|'running'|'paused'|'cancelling'|'completed'|'failed'|'cancelled'
-sessionMode           enum 'single'|'per-stage'|'auto'         (always 'per-stage': every stage gets a fresh session, see §5)
-variables             JSON Record<string, unknown>             (resolved variables + system vars)
-error?                text
-permissionMode?       enum 'bypassPermissions'|'default'|'acceptEdits'|'plan'
-projectId?            text
-workspaceId?          text                                     (execution workspace)
-agentSnapshot?        JSON                                     (frozen agent projection at start)
-ancestorRunId?        FK → workflow_runs.id                    (set on a retry run)
-createdAt, updatedAt, startedAt, completedAt
-```
-
-`stage_runs`:
-```
-id                    text PK
-workflowRunId         FK
-stageKey              text                                     (the stage's key in the pinned graph)
-sessionId?            FK                                       (allocated session, set on first execute)
-name                  text
-status                enum 'pending'|'queued'|'running'|'paused'|'completed'|'failed'|'cancelled'|'skipped'|'awaiting_input'
-currentStep           int                                      (which prompt within the stage, for multi-prompt)
-totalSteps            int
-retryCount            int (default 0)
-error?                text
-summary?              text                                     (~200-400 chars, used as predecessor context)
-outputText?           text                                     (full output, for context mode `output`)
-outputData?           JSON                                     (parsed JSON when output.format = json)
-artifactManifest?     JSON                                     (files the stage created/modified)
-version               int                                      (optimistic lock)
-interruptData?        JSON                                     (HITL-02 — pending approval payload)
-heartbeatAt?          timestamp                                (liveness beat, see §5)
-createdAt, startedAt, completedAt
-```
+For definition/stage authoring, see [feature-workflows.md](./feature-workflows.md) and [feature-stages.md](./feature-stages.md). The design is G5 (`docs/workflow-audit/evidence/G5_scheduler_v2_loops.md`); the field reference is `docs/workflow-overhaul/generated/FIELDS.md`.
 
 ---
 
-## 2. Lifecycle (state machine)
+## 1. Tables (v57)
 
-Pure state machine: [packages/core/src/domain/state-machines/WorkflowRunStateMachine.ts](../../packages/core/src/domain/state-machines/WorkflowRunStateMachine.ts).
+| Table | What a row is |
+|---|---|
+| `workflow_runs` | A run: `status`, `status_reason`, `outcome`, `version` (CAS), pinned `definition_version_id`, `variables`, `permission_mode` (the effective run-level mode), `run_overrides.permissionMode` (the operator's explicit run-level mode, optional), `stage_overrides`, `trigger`, `ancestor_run_id` + `fork_spec` (a fork), `idempotency_key`, `owner_id` / `owner_epoch` (who hosts it), `usage`, `budget`. |
+| `stage_runs` | An **instance** of a stage: `instance_path` (the stage key at the top level; `loop#2/fix` inside containers from P05), `status`, `status_reason`, `version`, `current_attempt`, `skip_reason`, `interrupt_data` (a parked gate's request), `output_text` / `output_data` / `summary`, `error_class` / `error_code`, the executor lease (`lease_owner`, `lease_expires_at`, `heartbeat_at`, `last_progress_at`), `copied_from_stage_run_id` (a memoized fork copy). Ids are UUIDv5 of (run, instance path). |
+| `stage_attempts` | One execution try of an instance: `attempt_no`, `mode` (`fresh` / `resume` / `restart`), `epoch`, `status` (`running` / `succeeded` / `failed` / `aborted` / `interrupted`), `repair_count`, `error_*`, `overrides` (a carried verdict), `checkpoint_before_id`, `usage`. |
+| `run_sessions` | The conversations a run uses, keyed by session key (`instance:<path>@<epoch>`, or `group:<g>`) and config hash. |
+| `workflow_timers` | Durable timers: `retry`, `queue_timeout`, `pause_ttl`, `run_budget_wall_clock`, … |
+| `workflow_outbox` | Engine events, written in the same transaction as the state change they describe. |
+| `scheduler_journal` | One row per committed decision batch (`{message, decisions, stateHash}`). |
+| `engine_lock` | The single-engine lock: one process drives a database's runs. |
 
-```
-created → starting → running ←→ paused
-                              ↓
-                              cancelled
-                              ↓
-                              failed
-                              ↓
-                              completed
-```
+---
 
-Transitions:
+## 2. States
 
-| From | Event | To |
+The state tables are data in `@generatorai/workflow-spec` (`state/stageRun.ts`, `state/workflowRun.ts`). Every status write is a compare-and-set against them (`transition(id, from[], to)`): development and test builds throw on an illegal pair, and `pnpm lint` fails on any other status writer (`check-workflow-invariants`).
+
+**Run:** `created → starting → running ⇄ waiting → finalizing → completed | failed`, plus `paused` and `cancelling → cancelled`.
+- `starting` runs the prepare phases (PD-17 permission check, workspace and project worktrees, `on_run_start` hooks); a failed phase fails the run with `status_reason = setup:<phase>`.
+- `waiting`: nothing is launchable or in flight, but something is awaiting input, in retry backoff or paused.
+- `finalizing`: the outcome is fixed; compensation (last completed first), `onFailure` / `onExit` actions, the run hooks, then every session and turn journal is released.
+- Terminal states have no exits. Re-running a terminal run is a **fork** (§7).
+
+**Instance:** `pending → ready → starting → running → validating → completed`, with `awaiting_input` (a human gate), `retry_wait` (backoff), `paused`, `failed`, `skipped` (with `skip_reason`: `guard_false`, `edge_inactive`, `upstream_skipped`, `join_unsatisfiable`, `operator`, …) and `cancelled`.
+- The executor owns the in-attempt moves (claim `ready → starting` with a lease, `starting → running`, `running → validating`, repairs, `running ⇄ awaiting_input`); the actor owns everything else.
+- Success is accepted only from `validating`: no stage completes without its output contract holding (F-5).
+
+---
+
+## 3. Attempts, precedence and repairs
+
+A failed attempt is classified (`classifyStageError`: `transient`, `deterministic`, `interrupted`, …, with a code such as `rate_limited`, `auth`, `validation_rule`, `attempt_timeout`) and handled in this order (G5 §3.5):
+
+1. **Repair** (inside the executor): an output that breaks the contract (schema, then `output.rules`) gets up to `repair.maxRepairs` repair turns in the same attempt, each judged on its own answer. Only the latest answer is the output (W-17).
+2. **Retry**: while `retry.maxAttempts` allows and the class is retryable, the instance goes `retry_wait` and a durable `retry` timer (backoff with jitter) starts a new attempt — `resume` (the same conversation, settled turns replayed from the journal) or `restart` (a fresh session).
+3. **Route**: an edge with `on: failure` (or `handlesFailure`) from the failed instance absorbs the failure. `always` / `completion` edges run but do not mask it (W-29).
+4. **onExhausted**: `pause` (default: the instance waits for an operator, the run is `waiting`) or `fail`.
+
+Every turn — internal ones included — runs inside the attempt deadline (`timeouts.attemptMs`), and an idle watchdog fails a turn with no harness activity (W-15). The admission controller's ordinary lane is the one concurrency gate (W-66); a run's `maxParallel` and `sessionGroup` exclusivity apply on top.
+
+Context from predecessors rides inside the first prompt, fenced as `<generatorai:stage-context trust="untrusted">`. There is no context turn and no output-retry turn; a text stage pays a summary turn only when a successor reads `context.mode: summary` (W-48, W-49).
+
+---
+
+## 4. Human gates
+
+A stage parks its executor frame on a completion review (`approval`), a tool permission, a question or a plan review: the instance goes `awaiting_input` with the request in `interrupt_data` (`kind`: `stage_completion_review` | `tool_permission` | `question` | `plan_review`), its admission slot is handed back and its lease cleared. The `approve` command answers it:
+
+- `approved` resumes the parked turn; `rejected` fails the instance (`rejected_by_human`), and routing applies.
+- `changes_requested` (completion review) runs the reviewer's feedback as a journalled revision turn, validated again before the next round; the revision is the output successors see (W-46).
+
+The run's permission mode decides which tool calls park: the run row's explicit mode, else the stage's and workflow's `session.permissionMode`, else the trigger's, else the deployment posture (never a bypass default). `PATCH /api/workflow-runs/:id/permission-mode` changes the run row's mode; stages read it from their next turn.
+
+---
+
+## 5. Ownership and recovery
+
+- **Single engine**: at boot the `RunSupervisor` takes `engine_lock` (a heartbeat older than 30 s is stale) and renews it every 10 s. Another live process on the same database (a second server, the desktop app, an SDK host) starts **without** an engine: its run commands answer `503 ENGINE_UNAVAILABLE`.
+- **Fencing**: every run the engine hosts is claimed with `owner_epoch + 1`, and every decision batch is applied in one synchronous transaction fenced on that epoch (RV-27).
+- **Recovery** (G5 §3.10) never completes a stage on missing work. For each live run: an admitted-but-unclaimed instance is launched again; a lost attempt whose in-flight turn is safe to replay ends `interrupted` and a resume attempt replays the settled turns from the journal; a never-replay turn in flight pauses the instance (`process_restart_unsafe`, W-16); a completion review stays parked and its approval starts a resume attempt that carries the verdict; a gate inside a turn (tool permission, question, plan review) pauses the instance as `interrupted`, and a resume re-sends the turn, which asks again. Timers are re-armed, a lost prepare or finalize is re-dispatched, and the outbox is drained.
+- **Leases**: the executor renews its lease and stamps progress; the lease reaper posts `lease_expired` for an attempt whose lease lapsed.
+- **Unattended pause TTL** (PD-2): a run started by something other than a person (automation, schedule, webhook) fails a pause that lasts 72 h.
+
+---
+
+## 6. The commands API
+
+Every operator action is one route: `POST /api/workflow-runs/:id/commands` with a `RunCommand` (`@generatorai/workflow-spec`, `schemas/commands.ts`):
+
+| Command | Target | Effect |
 |---|---|---|
-| `created` | `sys:start` | `starting` |
-| `starting` | `sys:dag_ready` | `running` |
-| `running` | `user:pause` | `paused` |
-| `paused` | `user:resume` | `running` |
-| `running`/`paused` | `user:cancel` | `cancelled` |
-| `running` | `sys:dag_complete_all_success` | `completed` |
-| `running` | `sys:dag_complete_with_failure` | `failed` |
-| `failed` | `user:retry` | `running` (resets failed stages to `queued`) |
-| `running` | `sys:error` | `failed` |
+| `pause {mode: drain \| interrupt}` | run or instance | `drain` stops new launches; `interrupt` also stops in-flight attempts (their desired state is written before the executor is aborted) |
+| `resume` | run or instance | a paused instance goes `ready` with a resume attempt |
+| `cancel` | run or instance | every live instance is cancelled, then the run finalizes |
+| `retry {mode: resume \| restart}` | paused instance | a new attempt |
+| `skip {as: completed \| skipped, output?}` | paused or ready instance | `completed` lets on-success successors run |
+| `fail` | paused instance | fails it; routing applies |
+| `approve {outcome, feedback?, data?}` | awaiting instance | answers the gate (§4); `data` carries a question's `{answers}` or a plan decision |
 
-Stage run state machine similar but with the extra state `awaiting_input` (HITL-02).
+Every command takes an optional `expectedVersion`. Answers: `202` accepted; `404` unknown run or instance; `409` `invalid_state` / `version_conflict`; `400` invalid; `503` no engine. `approve` needs `exec:agent` only (a paired phone can answer a gate); every other command also needs `write:workflows`.
+
+`POST /api/workflow-runs/:id/start` starts a created run (the PD-17 check refuses it synchronously). Pending approvals are the `awaiting_input` instances of `GET /api/workflow-runs/:id`. The engine's events (`workflow_run.*`, `stage_run.*`) are published to the run's stream scope and the global bus from the outbox, awaited; the terminal events are `workflow_run.completed | failed | cancelled` with `data.workflowRunId` (RV-5).
 
 ---
 
-## 3. Run creation & start
+## 7. Fork
 
-API: `POST /api/workflow-runs`
-Body (`CreateWorkflowRunSchema` in `routes/workflowRuns.ts`):
+A terminal run is never mutated. `POST /api/workflow-runs/:id/fork` (`WorkflowRunService.forkRun`, G5 §3.8) creates and starts a NEW run:
+
 ```typescript
-{
-  workflowDefinitionId: string;
-  variables?: Record<string, unknown>;
-  projectId?: string;            // override the definition's projectId
-  testRun?: boolean;             // run the working graph as a `test` version — the only way to run a draft
-}
+{ rerunFrom?: string[];                      // instance paths; default: every instance that did not complete
+  definition?: 'pinned' | 'latest';          // latest: a stage whose spec changed is not memoized
+  variablesOverride?: Record<string, unknown>;
+  workspace?: 'fresh' | 'reuse' | 'restore_checkpoint';
+  idempotencyKey?: string;                   // a repeated key returns the fork it created
+  start?: boolean }                          // default true
 ```
 
-Stage overrides (`[{ stageKey, skip?, variables? }]`) and the lifecycle envelope go through `POST /api/orchestrator/runs` instead; the permission mode is set with `POST /api/workflow-runs/:id/permission-mode` (§8).
-
-Server-side:
-1. `WorkflowRunService.createRun(params)` resolves the version to run (`resolveVersionForRun`: the current published version, or a `test` version with `testRun`) and validates variables against that graph.
-2. Inserts `workflow_runs` row in `created` state with `definitionVersionId` pinned.
-3. Inserts N `stage_runs` rows (one per stage in the pinned graph, carrying `stageKey`), status `pending`.
-4. Returns `WorkflowRun`.
-
-`POST /api/workflow-runs/:id/start` → `WorkflowRunService.startRun(runId)`:
-
-```
-1. Read run + state machine.
-2. If first start (no __workingDirectory):
-     - workspaceManager.createWorkspace({ ownerType: 'workflow_run', ownerId: runId, … })
-     - if projectId → worktreeService.createRunWorktrees(projectId, runId, aliases, 'workflow')
-     - inject __workingDirectory, __artifactsDirectory, __workspaceId, and the engine-recorded
-       checkouts repo_path_<alias> / repo_branch_<alias> (templates and expressions read them as
-       run.codebases.<alias>.path|branch; authors cannot declare variables with those names)
-3. State transition: created → starting → running.
-4. Build DAG of the pinned version (DAGScheduler.buildDAGForRun, cached per definitionVersionId).
-5. advanceRun(runId) → DAGScheduler.reconcileRun(runId) → { toLaunch, toSkip } (roots with a false guard are skipped, not launched).
-6. For each stage to launch:
-       - apply the stage override for its stageKey (if skip=true, mark stage_run 'skipped' and emit event)
-       - executeStage(stageRun, runId, sessionMode, graph.workflow.session, variables).catch(onStageFailed)
-7. startPolling(runId) — 3s interval to detect stage completion changes
-   (resilient to executeStage hangs/session release stalls)
-```
-
-`POST /api/workflow-runs/:id/start` returns `202 Accepted` immediately; progress observable via SSE.
+Instances not downstream of any `rerunFrom` path are **memoized**: copied with their results and `copied_from_stage_run_id`, never re-run or re-validated (B-6). The fork keeps the source's explicit permission mode, stage overrides, project and trigger lineage (`trigger = {kind: 'fork', sourceRunId}`, `ancestor_run_id`) (W-59). `restore_checkpoint` rolls the source workspace back to the checkpoint taken before the earliest re-run instance's first attempt. The run page's **Retry failed** is a default fork; forking a live run answers 409.
 
 ---
 
-## 4. DAG scheduling
+## 8. Stage overrides and profiles
 
-`DAGScheduler` ([packages/core/src/services/DAGScheduler.ts](../../packages/core/src/services/DAGScheduler.ts)) is the runtime brain.
-
-The graph is the run's **pinned definition version** (read through `RunDefinitionReader`); DAG nodes are keyed by stage key.
-
-### `buildDAGForRun(run)`
-Builds the DAG of `run.definitionVersionId` (`buildDAG` over the validated graph) and caches it per version. A version never changes, so a cache entry is valid forever (the cache is capped at 512 entries).
-
-### `reconcileRun(runId)` — the one reconcile
-Called by `WorkflowRunService.advanceRun()` on every stage completion/failure, at start, and by the 3 s reconciler backstop; serialized per run. It re-evaluates every `pending` stage with one readiness predicate (`resolveStageReadiness`) and returns `{ toLaunch, toSkip, runTerminal? }`:
-
-```
-For each pending stage (repeated until nothing changes, so skips cascade):
-  1. Every predecessor must be terminal (completed | failed | skipped | cancelled), else blocked.
-  2. Inbound edges are gates. An edge is active when its `on` matches the source outcome
-     (success → completed; failure → failed; completion → completed or failed; always → any terminal)
-     and its optional `when` expression holds (it may read `parent.status`).
-     An inactive edge from a completed/failed/cancelled source vetoes the stage → skip.
-     No active inbound edge → skip.
-  3. The stage's `guard` (Expression v2) must hold, else skip.
-  4. Otherwise → launch.
-```
-
-When everything is terminal, `runTerminal` is `completed` unless a failed stage is unhandled (no active outgoing edge to a stage that completed) → `failed`, or an unhandled cancellation → `cancelled`. Recovery branches (`on: failure` edges) therefore let a run complete.
-
-### Cycle handling
-Cycles, unknown edge endpoints and duplicate edges are rejected by `validateWorkflow` at save, publish and run start. `buildDAG` still throws `DAGValidationError` if a cyclic graph reaches it.
+A run request's `stageOverrides: [{ stageKey, skip?, variables? }]` is stored on the run (`stage_overrides`). `decide()` skips an overridden stage when it becomes ready (`skip_reason = operator`); `variables` merge over the run variables for that stage's attempts only. Caller variables can never carry `__*` or `repo_path_*` / `repo_branch_*` names (400). Script profiles and CLI run profiles (`run start --profile`) feed the same fields.
 
 ---
 
-## 5. Session allocation
-
-`SessionAllocator` ([packages/core/src/services/SessionAllocator.ts](../../packages/core/src/services/SessionAllocator.ts)).
-
-### Modes (from `WorkflowRun.sessionMode`)
-
-Definitions have no session mode. Every run is created with `sessionMode: 'per-stage'`: each stage gets a fresh session (the v2 default `sessionReuse: 'fresh'`). Shared sessions arrive with session groups in the engine upgrade (P03).
-
-| Mode | Allocation rule |
-|---|---|
-| `single` | One session for the whole run. First `allocateSession()` creates it (`harness.createConversation`); subsequent calls return the same `conversationId` (tracked in `session_allocations.sharedSessionId`). |
-| `per-stage` | Each `allocateSession()` returns a fresh session. Stage runs in their own conversation. |
-
-### Persistence (1.6)
-- `session_allocations` table — one row per (workflowRunId), records `mode`, `sharedSessionId`, `sharedRefCount`.
-- `stage_session_maps` table — one row per (allocationId, stageRunId), records the `sessionId` assigned.
-
-This survives process restarts: on recovery, `StartupRecoveryService` re-binds the allocator to the existing maps.
-
-### Release
-After a stage completes (success or failure), `sessionAllocator.releaseSession(stageRunId)`:
-- If `per-stage`: `harness.deleteConversation(sessionId)`.
-- If `single`: decrement `sharedRefCount`. When zero (run terminal), `harness.deleteConversation`.
-
-> **Edge case:** if `executeStage` hangs and never releases, the stage-liveness reconciler (below) marks the stage failed once its heartbeat goes stale, but the session leak can persist. Use `run cancel` then `workspace cleanup` to recover.
-
-### Stage liveness (heartbeat reaper)
-
-`StageExecutionService` beats `stage_runs.heartbeat_at` roughly every 10s for as long as a stage is `queued`/`running` (an immediate beat at start, then on an interval; the interval is cleared the moment the stage leaves that state — success, failure, pause, or cancel). This is a real signal of "this stage's executor is still alive," independent of any individual prompt's own timeout (§ feature-stages.md "Timeout").
-
-The existing 3s process-wide reconciler (`WorkflowRunService.ensureReconciler` — the same `setInterval` that drives event-driven DAG routing as a backstop) gains one more check per tick: a `queued`/`running` stage whose last beat is older than `heartbeatIntervalMs * heartbeatStaleMultiplier` (default 10s × 3 = 30s) is judged stuck. The reconciler:
-1. best-effort asks `StageExecutionService.abortStage()` to cancel the wedged call (aborts the tracked `AbortSignal` for the in-flight turn, and separately asks the harness to abort the conversation) — so a relaunch never races a still-writing agent in the same working directory;
-2. marks the stage `failed` with an error explaining the stale beat;
-3. routes it through the normal `onStageFailed` path, so `failure`/`completion`/`always` edges and operator skip overrides apply exactly as for any other failure.
-
-No second polling interval was added — this extends the existing one.
-
----
-
-## 6. Run profiles & stage overrides
-
-Two kinds of profile exist:
-
-- **Script profiles** (`ScriptRunProfile`, `@generatorai/workflow-spec`) — exported as `profiles` from a `.workflow.mjs` script and applied by `POST /api/workflow-scripts/:id/run { profileName }`. See [feature-templates-scripts.md](./feature-templates-scripts.md).
-  ```typescript
-  { name: string; description?: string; variables: Record<string, unknown>;
-    permissionMode?: 'plan'|'default'|'acceptEdits'|'bypassPermissions';
-    stageOverrides?: StageRunOverride[] }
-  ```
-- **CLI run profiles** (`RunProfile`, `@generatorai/shared`) — JSON files (e.g. in `.generatorai/run-profiles/`) passed to `run start --profile <path>`:
-  ```typescript
-  { version: 1; name: string; description?: string; workflowDefinitionId: string;
-    runName?: string; variables: Record<string, unknown>;
-    permissionMode?: 'bypassPermissions'|'default'|'acceptEdits'|'plan';
-    projectId?: string; selectedCodebases?: string[];       // aliases
-    stageOverrides?: StageRunOverride[];
-    promptFiles?: string[]; skillFiles?: string[]; agentFiles?: string[];   // uploaded custom content
-    browserConfig?: BrowserConfig }
-  ```
-
-Stage overrides target a stage by **key** (keys are stable; names and positions are not):
-```typescript
-type StageRunOverride = {
-  stageKey: string;
-  skip?: boolean;
-  variables?: Record<string, unknown>;            // stage-local var overrides
-};
-```
-
-Resolution: `WorkflowRunService.findStageOverride(variables.__stageOverrides, stageKey)`. `skip` marks the stage `skipped` (reason `runtime_override`) and the DAG advances past it; `variables` merge over the run variables for that stage only. An override whose key matches no stage is ignored.
-
-Clients send overrides as the typed `stageOverrides` field of the start request (every start route); the run service records them as the engine-owned `__stageOverrides` entry of `workflow_runs.variables`, so the run remains self-describing. Caller variables can never carry `__*` or `repo_path_*` / `repo_branch_*` names (400).
-
----
-
-## 7. Pause / Resume / Cancel / Retry
-
-API:
-- `POST /api/workflow-runs/:id/pause` — `WorkflowRunStateMachine.transition('user:pause')`. The polling loop stops scheduling new stages; running stages complete their current prompt then exit. Mid-prompt pause **waits for the in-flight SDK call** to finish (cannot abort mid-prompt without `cancel`).
-- `POST /api/workflow-runs/:id/resume` — `transition('user:resume')`. Polling resumes; pending stages start.
-- `POST /api/workflow-runs/:id/cancel` — `transition('user:cancel')`. `harness.abortConversation` called on every active session; subprocesses killed.
-- `POST /api/workflow-runs/:id/retry` — valid from `failed` or `cancelled`. Creates and starts a **new** run carrying `ancestorRunId`; the ancestor stays terminal. Stages that were `completed` or `skipped` in the ancestor are promoted to that state in the new run, so successful work is not re-run. The response's `runId` is the NEW run.
-
-Stage-level controls (subset of run-level):
-
-```
-POST /api/workflow-runs/:id/stages/:stageId/pause
-POST /api/workflow-runs/:id/stages/:stageId/resume
-POST /api/workflow-runs/:id/stages/:stageId/cancel
-POST /api/workflow-runs/:id/stages/:stageId/retry
-```
-
-Stage retry resets the stage to `queued` (full restart) regardless of the stage's `retry` policy.
-
----
-
-## 8. HITL (Human-In-The-Loop)
-
-Permission mode determines who decides on tool calls:
-
-| Mode | Behavior |
-|---|---|
-| `bypassPermissions` (default) | every tool call auto-approved |
-| `default` | provider asks for unmatched requests (using harness's built-in permission UI when present) |
-| `acceptEdits` | auto-approve file edits only; ask for shell exec / network |
-| `plan` | every tool call requires explicit human approval (stage parks in `awaiting_input`) |
-
-API:
-- `GET /api/workflow-runs/:id/permission-mode`
-- `POST /api/workflow-runs/:id/permission-mode` body `{ mode }`
-- `GET /api/workflow-runs/:id/pending-interrupts` — list `awaiting_input` stages with their `interruptData`
-- `POST /api/workflow-runs/:id/stages/:stageId/approve` body `{ outcome: approved | changes_requested | rejected, value?, reason?, followUpPrompt? }` (400 without an outcome)
-
-Web `HitlPanel` (in Run Settings drawer) provides the UI: 4-mode dropdown + per-stage approve/reject buttons.
-
-`HitlService` orchestrates via `IHookBridge` → `onPreToolUse` returns `{ decision: 'allow'|'deny'|'ask', reason }`. When `ask`, the service:
-1. Sets `stage_runs.status = 'awaiting_input'` + writes `interruptData` JSON.
-2. Emits `stage_run.awaiting_input` SSE event.
-3. Returns the user's eventual decision back to the harness when approval arrives.
-
----
-
-## 9. Result validation & retries (in-depth)
-
-When `StageExecutionService` finishes a stage's prompts:
-
-1. Builds concatenated `content` (all assistant message_complete texts).
-2. Runs `ResultValidator.validateStageResult(...)` with the stage's `output.rules` (read from the pinned version by `stageKey`).
-3. If any rule fails and `retryCount < retry.maxAttempts - 1` → `workflowRunService.retryStageAfterValidation(runId, stageRunId, reason)`; otherwise the stage fails (`onStageFailed`). A stage without `retry` gets no validation retry.
-
-`retryStageAfterValidation`:
-
-```
-1. Remove stageRun.id from processedStageRuns dedup set (so we can re-emit completion).
-2. Read the stage's `retry` → maxRetries = maxAttempts - 1, backoffMs = initialDelayMs, backoffMultiplier
-   (no `retry` → { maxRetries:1, backoffMs:3000, backoffMultiplier:1 }).
-3. inSessionThreshold = max(1, maxRetries - 1).
-4. useInSessionRetry = retryCount < inSessionThreshold.
-5. Await backoffMs * backoffMultiplier^retryCount.
-6. Increment stage_runs.retryCount.
-7. Emit stage_run.retrying.
-8. If useInSessionRetry:
-     - Reset status = 'running', clear error/completedAt.
-     - Enrich vars: __validationFeedback = reason, __validationRetryAttempt = count.
-     - stageExecutionService.retryInSession(stage, runId, reason, config, enrichedVars)
-       → sends a follow-up prompt: "The previous response failed validation: <reason>. Please fix it."
-   Else (full restart):
-     - Reset status = 'queued', currentStep = 0.
-     - sessionAllocator.releaseSession(stageRunId).
-     - executeStage(stage, runId, sessionMode, graph.workflow.session, enrichedVars).
-```
-
-When `retryCount >= maxRetries`, the next failure is terminal → stage transitions to `failed`.
-
----
-
-## 10. File management & artifacts
-
-For the full deep-dive see [feature-workspaces-files.md](./feature-workspaces-files.md). Quick summary:
-
-- **Per-run execution workspace** at `<workspacesDir>/<runId>/`:
-  - `source/<alias>/` — worktrees of selected codebases
-  - `artifacts/` — generated files + per-run JSONL log + stage response markdown files
-  - `cache/` — temporary files
-
-- **`workspace_artifacts` table** tracks every file with `artifactType ∈ { code_file | response_md | attachment | script_output | log | snapshot | browser_screenshot | browser_dom | browser_har | browser_console_log | browser_video | browser_selection }`.
-
-- **Stage responses** persisted to the run's artifacts directory as `<stage_name>_response_<n>.md`.
-
-- **Change tracking** — `workspace_worktrees.hasUncommittedChanges` + `commitHash` columns. `POST /api/workspaces/:id/commit` runs `git commit` per worktree and stamps the new hash.
-
-API for browsing files mid-run:
-```
-GET  /api/workflow-runs/:id/workspace                       → tree view
-GET  /api/workflow-runs/:id/workspace/files?path=&source=   → file content
-GET  /api/workflow-runs/:id/diff                            → git diff across worktrees
-```
-
-### Right side pane on the run page
-
-`WorkflowRunPage` shares the same `RightPane` shell used by chats. Tabs available on this page:
-
-- **Changes** *(default)* — `RunArtifactsPanel` (per-worktree files + response markdown + code files).
-- **Inspector** — per-stage prompt / output / hooks / tools drill-down (`RightInspector`).
-- **Browser** — Integrated Browser panel, disabled until `runData.workspaceId` exists. See [feature-integrated-browser.md](./feature-integrated-browser.md).
-- **Terminal** — Integrated Terminal panel, `allowMultiple: true`. Header includes a `[cd ▾]` dropdown listing the run's worktrees so users can jump into `source/<alias>` with one click. See [feature-integrated-terminal.md](./feature-integrated-terminal.md).
-
-State (open tabs / active / width) is persisted in `localStorage:generatorai:rightPane:workflow-run`.
-
----
-
-## 11. Durability & crash recovery
-
-- **DB-backed event log** (`stream_cursors` + `stream_sequences`) — survives process restart. SSE clients reconnect with `Last-Event-ID`.
-- **Per-run JSONL log** (`<artifacts>/run.jsonl`) — append-only audit of every event for that run.
-- **State persisted** — every `stage_runs.status` transition is committed before downstream effects, so a crash mid-run leaves the DB in a recoverable state.
-- **`StartupRecoveryService`** scans `workflow_runs` in `running`/`paused` on boot; resumes those within `recoveryThresholdMs` window, cancels older ones (operator can `run retry` them).
-- **Optimistic locking** — `stage_runs.version` prevents concurrent updates from clobbering each other. Conflict raises `ConcurrentModificationError` → caller retries with fresh read.
-- **Worktree leakage** — if the process dies mid-run, worktrees remain on disk. `WorktreeCleanupService` periodically reaps orphans based on `worktreeRetention` setting.
-
----
-
-## 12. Streaming during a run
-
-For full details see [feature-streaming-events.md](./feature-streaming-events.md).
-
-The SSE endpoint for runs: `GET /api/stream?scope=run&id=<runId>`. Every event is also published to `scope=session, id=<sessionId>` for its underlying session, so subscribers to a single stage's session see token-level detail and run-level subscribers see lifecycle.
-
-Common run-scope events:
-
-```
-workflow_run.starting
-workflow_run.running
-workflow_run.paused
-workflow_run.resumed
-workflow_run.cancelling
-workflow_run.cancelled
-workflow_run.completed
-workflow_run.failed
-workflow_run.retrying
-
-stage_run.queued
-stage_run.running
-stage_run.completed
-stage_run.failed
-stage_run.cancelled
-stage_run.skipped
-stage_run.retrying
-stage_run.awaiting_input
-stage_run.approved
-stage_run.rejected
-stage_run.woken
-
-permission.requested
-permission.granted
-permission.denied
-permission.timeout
-
-hook.started
-hook.completed
-hook.failed
-hook.skipped
-
-artifact.created
-
-git.clone_start
-git.clone_progress
-git.clone_complete
-git.commit
-git.push
-git.pr_created
-
-script.stdout
-script.stderr
-script.exit
-```
-
-…plus every harness.* event from inside each session.
-
----
-
-## 13. CLI
+## 9. CLI and SDK
 
 ```powershell
-# Lifecycle
-generatorai run start <defId> --var topic="caching strategies" --watch
-generatorai run start <defId> --profile ./profiles/fast.json --project <pid>
-generatorai run list [--status running,completed,failed] [--definition <id>] [--limit 50]
-generatorai run show <id>
-generatorai run watch <id> [--verbosity minimal|normal|verbose]
-generatorai run pause <id>
-generatorai run resume <id>
-generatorai run cancel <id>
-generatorai run retry <id>
-generatorai run delete <id>
-
-# Stage-level
-generatorai run stage list <runId>
-generatorai run stage pause <runId> <stageId>
-generatorai run stage resume <runId> <stageId>
-generatorai run stage retry <runId> <stageId>
-generatorai run stage cancel <runId> <stageId>
-
-# HITL
-generatorai run hitl mode <runId>                       # show
-generatorai run hitl mode <runId> --set acceptEdits     # set
-generatorai run hitl pending <runId>                    # list awaiting_input stages
-generatorai run hitl resume <runId> <stageId> --approve
-generatorai run hitl resume <runId> <stageId> --reject
-
-# Run profiles
-generatorai run profile generate <defId> -o ./profiles/template.json    # create template
-generatorai run profile validate ./profiles/myprofile.json
-generatorai run profile list
-
-# Inspection
-generatorai run messages <runId>                        # per-stage prompt+response
-generatorai run workspace <runId>                       # files in workspace
-generatorai run hitl approve|reject|changes-request <runId> <stageId>
+generatorai run start <defId> --var topic="caching" --watch
+generatorai run pause|resume|cancel <runId>
+generatorai run retry <runId> [--from <stage>]          # a fork
+generatorai run stage pause|resume|retry|cancel <runId> <stageId>
+generatorai run hitl pending <runId>                    # awaiting_input instances
+generatorai run hitl approve|reject|changes-request <runId> <stageId> [--feedback "…"]
+generatorai run hitl mode <runId> [--set acceptEdits]
 ```
-
----
-
-## 14. SDK
 
 ```typescript
-const run = await ai.workflows.run(definitionId, {
-  variables: { topic: 'AI safety' },
-  projectId: 'proj-123',
-});
-
-// Stream and react
-for await (const event of ai.workflows.stream(run.id)) {
-  if (event.kind === 'stage_run.completed') {
-    console.log(`Stage ${event.data.name} done`);
-  }
-  if (event.kind === 'workflow_run.completed' || event.kind === 'workflow_run.failed') {
-    break;
-  }
-}
-
-// Control
-await ai.workflows.pause(run.id);
-await ai.workflows.resume(run.id);
-await ai.workflows.cancel(run.id);
-const retried = await ai.workflows.retry(run.id);
+const run = await ai.workflows.run(definitionId, { variables: { topic: 'AI safety' } });
+await ai.workflows.command(run.id, { command: 'pause', mode: 'interrupt' });
+await ai.workflows.command(run.id, { command: 'resume' });
+const fork = await ai.workflows.fork(run.id);                       // after it failed
+const parked = await ai.hitl.pending(run.id);
+await ai.hitl.resolve(run.id, parked[0]!.id, { outcome: 'approved' });
 ```
 
 ---
 
-## 15. Edge cases & invariants (run-level)
+## 10. Files, streaming and cleanup
 
-1. **`startPolling()` keeps running** until `run.status !== 'running'`. If your code transitions a stage to terminal without firing `onStageCompleted`, the poller will still pick it up within 3s.
-2. **`processedStageRuns` dedup** — must be cleared by `retryStageAfterValidation` (and equivalent). Forgetting to clear it causes "stage completed but never re-evaluated".
-3. **`__workingDirectory` resolution** — first worktree path (or workspace root if no worktrees). Stage harness call uses this as cwd.
-4. **`permissionMode = 'plan'` runs hang forever** without approval; the test harness must approve or cancel.
-5. **Pause + worktree changes** — pausing does not commit any worktree changes. If you `workspace commit` then `cancel`, the commit is preserved (worktree remains).
-6. **`workflow_runs.variables` is the snapshot** — variables there persist for the run's lifetime. Stage-time changes via hooks (`HookResult.variables`) merge in but are not retroactive.
-7. **Concurrent retries** — `retryStageAfterValidation` and explicit `run retry` can race. `processedStageRuns` + optimistic lock on `stage_runs.version` prevent state corruption but the user-visible behavior may double-execute one prompt. Avoid simultaneous retries from CLI + UI.
-8. **DAG with no roots** — only possible with a cycle, which `validateWorkflow` rejects at save, publish and run start; `buildDAG` throws `DAGValidationError` if one slips through.
-9. **Unresolved `{{…}}` references** — a bare name that is not a declared variable is a save-time error (`template-unknown-variable`); a declared variable the run leaves empty renders empty and raises an `unresolved_variables` warning on the stream. The prompt is still sent.
-10. **Run cancel while a hook is in flight** — the hook's `AbortSignal` is signalled; subprocesses are SIGKILLed after `hook.timeoutMs`.
+Every run has an execution workspace (`<workspacesDir>/executions/<runId>/`, see [feature-workspaces-files.md](./feature-workspaces-files.md)); a project run's codebases are checked out as worktrees under `source/<alias>` in the prepare phase and recorded as `repo_path_<alias>` / `repo_branch_<alias>` (read as `run.codebases.<alias>`). The run page subscribes to `GET /api/stream?scope=run&id=<runId>`; each stage's conversation streams on its session scope (see [feature-streaming-events.md](./feature-streaming-events.md)). A terminal run's sessions are closed and its turn journal released at finalization; `DELETE /api/workflow-runs/:id` refuses a live run (cancel it first).

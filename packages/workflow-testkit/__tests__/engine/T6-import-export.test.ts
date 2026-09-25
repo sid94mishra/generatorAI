@@ -5,7 +5,7 @@
 //
 // Drives the definition service behind the routes. P01 rewrote the
 // definition model: a definition is one v2 `WorkflowGraph` document, so
-// the P00 KNOWN-BUGs W-20 / W-25 (fields dropped on create or export),
+// the P00 characterised bugs W-20 / W-25 (fields dropped on create or export),
 // W-30 (broken definitions accepted) and W-64 (non-strict import) flipped
 // to PASS here, and W-13 (a run reads the live definition) is covered by
 // the pinned-version test below.

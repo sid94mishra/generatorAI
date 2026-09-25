@@ -75,8 +75,11 @@ exact SDK version and expect to adjust on upgrade.
 
 ## Durability note (important for embedders)
 
-Workflow runs are driven by an in-process scheduler backed by the durable SQLite
-state. If your host process restarts, `initialize()` auto-resumes interrupted
-runs from the database (in-flight stages re-run at-least-once). Make stage side
-effects idempotent where possible. This behaviour is part of the stable
-contract; the mechanism (`StartupRecoveryService` etc.) is not.
+Workflow runs are driven by an in-process engine backed by the durable SQLite
+state. If your host process restarts, `initialize()` recovers interrupted runs
+from the database: settled turns replay from the journal, an interrupted turn
+that is safe to repeat is re-sent, and one that may have changed the
+workspace pauses its stage for an operator instead of re-running. Only one
+process drives a database's runs (the engine lock); a second one runs
+without an engine. This behaviour is part of the stable contract; the
+mechanism (`RunSupervisor` etc.) is not.
