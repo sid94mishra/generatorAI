@@ -2,3 +2,4 @@
 export * from './types.js';
 export * from './cfg.js';
 export { PlatformToolBinder, type BindTarget } from './PlatformToolBinder.js';
+export { resolveMcp } from './resolveMcp.js';

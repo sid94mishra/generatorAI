@@ -54,7 +54,6 @@ import {
   type RecordPlanArgs,
   type RecordPlanResult,
 } from '../tools/recordPlanTool.js';
-import type { IMcpHub } from '../mcp/IMcpHub.js';
 import type { WorktreeService } from './WorktreeService.js';
 import { branchSlugFor, type MountService, type PlannedMount } from './MountService.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
@@ -67,12 +66,11 @@ import {
 } from './scm/AutoSourceControlRunner.js';
 import { scmMountTargets } from './scm/workspaceMounts.js';
 import { buildTurnHint } from './scm/turnHint.js';
-import { mergeMcpServers } from '../mcp/mergeMcpServers.js';
-import type { McpServerConfig } from '@generatorai/shared';
 import { withDeadline } from '../utils/withDeadline.js';
 import { appendSystemBlock, appendTools, unionList } from './session/cfg.js';
 import { PlatformToolBinder, type BindTarget } from './session/PlatformToolBinder.js';
-import type { SessionComposerDeps } from './session/types.js';
+import type { ComposeWarning, SessionComposerDeps } from './session/types.js';
+import { resolveMcp } from './session/resolveMcp.js';
 import {
   groupTurns,
   lastAnchor,
@@ -1091,6 +1089,20 @@ export class ChatManagementService {
     return { ok: true };
   }
 
+  /**
+   * Composer warnings (a dropped MCP server, a capability the provider cannot
+   * deliver) reach the chat stream as `harness.session_info` — never silence
+   * (C-11).
+   */
+  private async emitComposeWarnings(sessionId: string, chatId: string, warnings: ComposeWarning[]): Promise<void> {
+    for (const w of warnings) {
+      await this.eventBus.emit(sessionId, {
+        kind: 'harness.session_info',
+        data: { infoType: w.code, message: w.message, chatId, ...(w.params ? { params: w.params } : {}) },
+      } as unknown as AgentEvent);
+    }
+  }
+
   /** Lists the gates a reconnecting client must re-render. */
   async listPendingInteractions(chatId: string) {
     return this.extensions.agentInteractionService?.listPendingByChat(chatId) ?? [];
@@ -1654,30 +1666,16 @@ export class ChatManagementService {
     this.binder.widgets(conversationConfig, bindTarget, { enabled: true });
     this.binder.sourceControlHint(conversationConfig, params.sourceControl);
 
-    // TOL-06 — resolve MCP server config through the hub so run-level
-    // overrides / disable-flags take effect. Falls back to the declared
-    // map when no hub is wired (behaviour-identical to pre-rollout).
-    // ONE merge, shared with the resume path. Each side used to assemble the
-    // final map differently — the create path handed the hub only the chat's
-    // own `harnessConfig.mcpServers`, so an agent's servers were dropped at
-    // creation and reappeared on the next turn (review 8.2's duplicated-logic
-    // pattern, with the divergence visible to the user).
-    const declaredMcp = mergeMcpServers({
-      agent: conversationConfig['mcpServers'] as Record<string, McpServerConfig> | undefined,
-      chatOverrides: params.harnessConfig?.mcpServers,
-    });
-    if (this.extensions.mcpHub) {
-      const resolved = await this.extensions.mcpHub.resolveForRun({
-        workflowDefinitionId: `chat:${chatId}`,
-        workflowRunId: conversationId,
-        declared: declaredMcp,
-      });
-      if (Object.keys(resolved.servers).length > 0) {
-        conversationConfig['mcpServers'] = resolved.servers;
-      }
-    } else if (declaredMcp) {
-      conversationConfig['mcpServers'] = declaredMcp;
-    }
+    // TOL-06 / W-18 — one merge (agent ∪ explicit, explicit last) and the
+    // hub (disable flags, secretref resolution), shared with the resume path
+    // and with stages.
+    const mcpWarnings = await resolveMcp(
+      conversationConfig,
+      params.harnessConfig?.mcpServers,
+      bindTarget.owner,
+      conversationId,
+      this.extensions.mcpHub,
+    );
 
     this.binder.custom(conversationConfig, bindTarget);
     // Workers never get the orchestrator tool set (no recursive spawning).
@@ -1797,6 +1795,7 @@ export class ChatManagementService {
       kind: 'chat.created',
       data: { chatId, name: chat.name },
     });
+    await this.emitComposeWarnings(sessionId, chatId, mcpWarnings);
 
     return chat;
   }
@@ -1969,31 +1968,15 @@ export class ChatManagementService {
       ...(chat.agentSnapshot ? { snapshot: chat.agentSnapshot } : {}),
     });
 
-    // MCP servers — the resume path used to drop these entirely, so a chat's
-    // MCP tools silently vanished after a restart.
-    //
-    // Uses the SAME merge as the create path. Hand-rolling it here spread the
-    // two maps in the opposite order, so the agent's config beat the chat's
-    // explicit override on resume while the chat's won at creation: a setting
-    // that worked when you made the chat quietly reverted on the next restart.
-    // That is precisely the create-vs-resume divergence this helper exists to
-    // end, so there is one call and one precedence rule.
-    const declaredMcp = mergeMcpServers({
-      agent: conversationConfig['mcpServers'] as Record<string, McpServerConfig> | undefined,
-      chatOverrides: chat.harnessConfig?.mcpServers,
-    });
-    if (this.extensions.mcpHub) {
-      const resolved = await this.extensions.mcpHub.resolveForRun({
-        workflowDefinitionId: `chat:${chat.id}`,
-        workflowRunId: conversationId,
-        declared: declaredMcp as Parameters<IMcpHub['resolveForRun']>[0]['declared'],
-      });
-      if (Object.keys(resolved.servers).length > 0) {
-        conversationConfig['mcpServers'] = resolved.servers;
-      }
-    } else if (Object.keys(declaredMcp).length > 0) {
-      conversationConfig['mcpServers'] = declaredMcp;
-    }
+    // MCP servers: the SAME merge and hub resolution as the create path.
+    const mcpWarnings = await resolveMcp(
+      conversationConfig,
+      chat.harnessConfig?.mcpServers,
+      { kind: 'chat', chatId: chat.id, sessionId: chat.sessionId },
+      conversationId,
+      this.extensions.mcpHub,
+    );
+    await this.emitComposeWarnings(chat.sessionId, chat.id, mcpWarnings);
 
     // The same platform tool surface as the create path (tool handlers are
     // in-memory and must be rebound on every resume). No auto-start here: a

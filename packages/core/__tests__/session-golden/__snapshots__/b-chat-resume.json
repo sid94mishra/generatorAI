@@ -17,6 +17,7 @@
   ],
   "reasoningEffort": "high",
   "maxTurns": 7,
+  "mcpServers": {},
   "onPlanReviewRequest": "[Function]",
   "onQuestionRequest": "[Function]",
   "onPermissionRequest": "[Function]",
