@@ -96,6 +96,19 @@ describe('buildTerminalTheme', () => {
     }
   });
 
+  it('paints ink as the foreground with surface-coloured text on it', () => {
+    for (const theme of THEMES) {
+      for (const appearance of ['dark', 'light'] as const) {
+        const built = buildTerminalTheme(theme, appearance, 'ink');
+        expect(built.primary, `${theme.id}/${appearance}`).toBe(built.foreground);
+        const spec = theme[appearance];
+        const surface = relativeLuminance(spec.card) >= relativeLuminance(spec.background) ? spec.card : spec.background;
+        expect(built.primaryForeground, `${theme.id}/${appearance}`).toBe(surface);
+        expect(contrast(built.primaryForeground, built.primary)).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
   it('keeps danger red regardless of the chosen accent', () => {
     const theme = getThemeDef('tokyo-night');
     const a = buildTerminalTheme(theme, 'dark', 'green');

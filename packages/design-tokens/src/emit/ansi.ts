@@ -139,7 +139,7 @@ export function buildTerminalTheme(
     focusBorder: flat(accents.ring),
 
     primary: flat(accents.primary),
-    primaryForeground: flat(tokens.primaryForeground),
+    primaryForeground: flat(accents.onAccent),
 
     success: flat(tokens.success),
     warning: flat(tokens.warning),

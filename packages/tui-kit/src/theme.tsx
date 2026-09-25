@@ -11,6 +11,7 @@
 import React, { createContext, useContext, useMemo } from 'react';
 import {
   resolveTerminalTheme,
+  type AccentId,
   type ColorLadder,
   type TerminalTheme,
 } from '@generatorai/design-tokens';
@@ -113,7 +114,7 @@ export interface ThemeProviderProps {
   capabilities: TerminalCapabilities;
   theme?: string;
   appearance?: 'light' | 'dark';
-  accent?: 'blue' | 'violet' | 'green' | 'orange' | 'rose' | 'teal';
+  accent?: AccentId;
   children: React.ReactNode;
 }
 
@@ -121,7 +122,7 @@ export function buildTheme(options: {
   capabilities: TerminalCapabilities;
   theme?: string | undefined;
   appearance?: 'light' | 'dark' | undefined;
-  accent?: 'blue' | 'violet' | 'green' | 'orange' | 'rose' | 'teal' | undefined;
+  accent?: AccentId | undefined;
 }): Theme {
   const base = resolveTerminalTheme({
     ...(options.theme ? { theme: options.theme } : {}),

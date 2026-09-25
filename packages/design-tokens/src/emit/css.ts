@@ -197,7 +197,7 @@ function appearanceBlock(theme: ThemeDef, appearance: Appearance, selector: stri
   lines.push('', `  /* Interactive — accent axis, default '${theme.defaultAccent}' */`);
   lines.push(`  --primary: ${a.primary};`);
   lines.push(`  --primary-emphasis: ${a.primaryEmphasis};`);
-  lines.push(`  --primary-foreground: ${t.primaryForeground};`);
+  lines.push(`  --primary-foreground: ${a.onAccent};`);
   lines.push(`  --secondary: ${t.secondary};`);
   lines.push(`  --secondary-foreground: ${t.secondaryForeground};`);
   lines.push(`  --muted: ${t.muted};`);
@@ -270,6 +270,7 @@ function accentBlock(theme: ThemeDef, accentId: AccentId, appearance: Appearance
     `${selector} {`,
     `  --primary: ${a.primary};`,
     `  --primary-emphasis: ${a.primaryEmphasis};`,
+    `  --primary-foreground: ${a.onAccent};`,
     `  --ring: ${a.ring};`,
     `  --accent: ${a.accent};`,
     `  --sidebar-accent: ${a.sidebarAccent};`,

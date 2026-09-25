@@ -143,7 +143,7 @@ describe('theme registry', () => {
     }
   });
 
-  it('exposes the same six accents on every theme', () => {
+  it('exposes the same seven accents on every theme', () => {
     for (const theme of THEMES) {
       const accents = themeAccents(theme);
       expect(accents.map((a) => a.id), theme.id).toEqual([...ACCENT_IDS]);
@@ -173,6 +173,28 @@ describe('theme registry', () => {
     }
   });
 
+  it('gives hue accents the theme onAccent, and ink the foreground with surface-coloured text', () => {
+    for (const theme of THEMES) {
+      for (const appearance of APPEARANCES) {
+        const spec = theme[appearance];
+        for (const accentId of ACCENT_IDS) {
+          const a = resolveAccentTokens(theme, accentId, appearance);
+          if (accentId !== 'ink') {
+            expect(a.onAccent, `${theme.id}/${appearance}/${accentId}`).toBe(spec.onAccent);
+            continue;
+          }
+          const surface =
+            relativeLuminance(parseHex(spec.card)) >= relativeLuminance(parseHex(spec.background))
+              ? spec.card
+              : spec.background;
+          expect(a.primary, `${theme.id}/${appearance}/ink primary`).toBe(spec.foreground);
+          expect(a.primaryEmphasis, `${theme.id}/${appearance}/ink emphasis`).toBe(spec.foreground);
+          expect(a.onAccent, `${theme.id}/${appearance}/ink onAccent`).toBe(surface);
+        }
+      }
+    }
+  });
+
   it('derives tints from emphasis on dark and primary on light', () => {
     for (const theme of THEMES) {
       const dark = resolveAccentTokens(theme, theme.defaultAccent, 'dark');
@@ -190,8 +212,7 @@ describe('WCAG AA compliance — every theme × appearance', () => {
   it('filled buttons clear 4.5:1 for every accent', () => {
     for (const { theme, appearance, label, tokens } of MATRIX) {
       for (const accentId of ACCENT_IDS) {
-        const { primaryEmphasis } = resolveAccentTokens(theme, accentId, appearance);
-        const fg = tokens.primaryForeground;
+        const { primaryEmphasis, onAccent: fg } = resolveAccentTokens(theme, accentId, appearance);
         const ratio = contrastRatio(fg, primaryEmphasis);
         expect(
           ratio,

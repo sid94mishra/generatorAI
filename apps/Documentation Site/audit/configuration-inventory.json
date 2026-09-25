@@ -17887,8 +17887,8 @@
       },
       {
         "field": "accent",
-        "type": "\"blue\" / \"violet\" / \"green\" / \"orange\" / \"rose\" / \"teal\"",
-        "presence": "default \"blue\"",
+        "type": "\"auto\" / \"ink\" / \"blue\" / \"violet\" / \"green\" / \"orange\" / \"rose\" / \"teal\"",
+        "presence": "default \"auto\"",
         "constraints": "—"
       },
       {
@@ -18112,7 +18112,7 @@
       },
       {
         "field": "tui.accent",
-        "type": "\"blue\" / \"violet\" / \"green\" / \"orange\" / \"rose\" / \"teal\"",
+        "type": "\"auto\" / \"ink\" / \"blue\" / \"violet\" / \"green\" / \"orange\" / \"rose\" / \"teal\"",
         "presence": "optional",
         "constraints": "—"
       },
@@ -18287,8 +18287,8 @@
       },
       {
         "field": "tui.accent",
-        "type": "\"blue\" / \"violet\" / \"green\" / \"orange\" / \"rose\" / \"teal\"",
-        "presence": "default \"blue\"",
+        "type": "\"auto\" / \"ink\" / \"blue\" / \"violet\" / \"green\" / \"orange\" / \"rose\" / \"teal\"",
+        "presence": "default \"auto\"",
         "constraints": "—"
       },
       {
@@ -18521,7 +18521,7 @@
       },
       {
         "field": "profiles.{key}.tui.accent",
-        "type": "\"blue\" / \"violet\" / \"green\" / \"orange\" / \"rose\" / \"teal\"",
+        "type": "\"auto\" / \"ink\" / \"blue\" / \"violet\" / \"green\" / \"orange\" / \"rose\" / \"teal\"",
         "presence": "optional",
         "constraints": "—"
       },

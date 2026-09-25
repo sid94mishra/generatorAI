@@ -76,6 +76,9 @@ export function resolveTokenSet(
   out['--accent'] = a.accent;
   out['--sidebar-accent'] = a.sidebarAccent;
   out['--sidebar-accent-foreground'] = a.sidebarAccentForeground;
+  // Text on the accent fill: identical to the appearance value for the six hue
+  // accents, the surface colour for ink (02 §4.2).
+  out['--primary-foreground'] = a.onAccent;
 
   resolveChartRamp(theme, appearance).forEach((colour, i) => {
     out[`--chart-${i + 1}`] = colour;

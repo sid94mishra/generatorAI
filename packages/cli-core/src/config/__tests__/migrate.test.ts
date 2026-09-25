@@ -54,8 +54,9 @@ describe('migrateConfig — salvage', () => {
     expect(result.config.tui.theme).toBe('gruvbox');
     expect(result.config.server.url).toBe('https://example.test');
     expect(result.config.server.timeoutMs).toBe(5000);
-    // Only the bad one is lost, and it falls back to its default.
-    expect(result.config.tui.accent).toBe('blue');
+    // Only the bad one is lost, and it falls back to its default ('auto': the
+    // theme's own default accent applies).
+    expect(result.config.tui.accent).toBe('auto');
     expect(result.dropped.map((d) => d.path)).toEqual(['tui.accent']);
   });
 

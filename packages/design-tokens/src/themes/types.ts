@@ -30,15 +30,23 @@
 // hand-authored values byte-for-byte.
 // ────────────────────────────────────────────────────────────────
 
-import { ensureContrast, mix, toHex, withAlpha } from '../color.js';
+import { ensureContrast, mix, parseHex, relativeLuminance, toHex, withAlpha } from '../color.js';
 
 export type Appearance = 'dark' | 'light';
 
-/** Accent ids are stable across themes; each theme supplies its own hues. */
-export const ACCENT_IDS = ['blue', 'violet', 'green', 'orange', 'rose', 'teal'] as const;
+/**
+ * Accent ids are stable across themes; each theme supplies its own hues.
+ *
+ * `ink` is not a hue: the accent IS the theme's foreground, and text on it is
+ * the surface colour (D-11). The other six are derived from the theme's hues.
+ */
+export const ACCENT_IDS = ['ink', 'blue', 'violet', 'green', 'orange', 'rose', 'teal'] as const;
 export type AccentId = (typeof ACCENT_IDS)[number];
+/** The accents drawn from a hue — every accent except `ink`. */
+export type HueAccentId = Exclude<AccentId, 'ink'>;
 
 export const ACCENT_LABELS: Record<AccentId, string> = {
+  ink: 'Ink',
   blue: 'Blue',
   violet: 'Violet',
   green: 'Green',
@@ -47,8 +55,8 @@ export const ACCENT_LABELS: Record<AccentId, string> = {
   teal: 'Teal',
 };
 
-/** Which hue each accent id draws from. */
-const ACCENT_HUE: Record<AccentId, keyof HuePalette> = {
+/** Which hue each hue accent draws from. */
+const ACCENT_HUE: Record<HueAccentId, keyof HuePalette> = {
   blue: 'blue',
   violet: 'purple',
   green: 'green',
@@ -112,7 +120,7 @@ export interface ThemeAppearanceSpec {
    * Filled-button colour per accent. Omitted entries are derived by darkening
    * (or lightening) the hue until it clears 4.5:1 against `onAccent`.
    */
-  accentEmphasis?: Partial<Record<AccentId, string>>;
+  accentEmphasis?: Partial<Record<HueAccentId, string>>;
 
   /** ANSI overrides for the integrated terminal. Derived when omitted. */
   terminal?: Partial<TerminalPalette>;
@@ -237,7 +245,7 @@ export interface AppearanceTokens {
   canvasDot: string;
 }
 
-/** The six interactive tokens an accent controls. */
+/** The interactive tokens an accent controls. */
 export interface AccentTokens {
   primary: string;
   primaryEmphasis: string;
@@ -245,6 +253,8 @@ export interface AccentTokens {
   accent: string;
   sidebarAccent: string;
   sidebarAccentForeground: string;
+  /** Text on a `primaryEmphasis` fill: the theme's `onAccent`, or the surface for ink. */
+  onAccent: string;
 }
 
 export interface AccentDef {
@@ -327,11 +337,28 @@ export const TINT = {
 
 const AA_TEXT = 4.5;
 
+/**
+ * The lighter of `background` / `card` — the design layer's `surface`
+ * (02 §2.2). Ink puts this colour on its foreground-coloured fill.
+ */
+export function lighterSurface(spec: ThemeAppearanceSpec): string {
+  const bg = relativeLuminance(parseHex(spec.background));
+  const card = relativeLuminance(parseHex(spec.card));
+  // Tie → surface = card, matching `ground = background` on a tie (02 §2.2 step 1).
+  return card >= bg ? spec.card : spec.background;
+}
+
 /** Filled-button colour for one accent: authored if given, derived otherwise. */
 export function accentEmphasis(spec: ThemeAppearanceSpec, id: AccentId): string {
+  if (id === 'ink') return spec.foreground;
   const authored = spec.accentEmphasis?.[id];
   if (authored) return authored;
   return toHex(ensureContrast(spec.hues[ACCENT_HUE[id]], spec.onAccent, AA_TEXT));
+}
+
+/** The accent's own colour in one appearance: the hue, or the foreground for ink. */
+function accentPrimary(spec: ThemeAppearanceSpec, id: AccentId): string {
+  return id === 'ink' ? spec.foreground : spec.hues[ACCENT_HUE[id]];
 }
 
 /** The accent table a theme exposes, one entry per stable accent id. */
@@ -339,8 +366,8 @@ export function themeAccents(theme: ThemeDef): AccentDef[] {
   return ACCENT_IDS.map((id) => ({
     id,
     label: ACCENT_LABELS[id],
-    dark: { primary: theme.dark.hues[ACCENT_HUE[id]], emphasis: accentEmphasis(theme.dark, id) },
-    light: { primary: theme.light.hues[ACCENT_HUE[id]], emphasis: accentEmphasis(theme.light, id) },
+    dark: { primary: accentPrimary(theme.dark, id), emphasis: accentEmphasis(theme.dark, id) },
+    light: { primary: accentPrimary(theme.light, id), emphasis: accentEmphasis(theme.light, id) },
   }));
 }
 
@@ -355,7 +382,8 @@ export function themeAccents(theme: ThemeDef): AccentDef[] {
  *
  * Tints derive from `emphasis` on dark and `primary` on light: the deeper
  * colour reads better as a wash on a dark surface, the lighter one on a light
- * surface.
+ * surface. For ink both are the foreground, so its tints are foreground
+ * washes and the text on its fill is the surface colour (02 §4.2).
  */
 export function resolveAccentTokens(
   theme: ThemeDef,
@@ -363,7 +391,7 @@ export function resolveAccentTokens(
   appearance: Appearance,
 ): AccentTokens {
   const spec = theme[appearance];
-  const primary = spec.hues[ACCENT_HUE[accentId]];
+  const primary = accentPrimary(spec, accentId);
   const emphasis = accentEmphasis(spec, accentId);
   const tintBase = appearance === 'dark' ? emphasis : primary;
 
@@ -374,6 +402,7 @@ export function resolveAccentTokens(
     accent: toHex(withAlpha(tintBase, TINT.accent[appearance])),
     sidebarAccent: toHex(withAlpha(tintBase, TINT.sidebar[appearance])),
     sidebarAccentForeground: primary,
+    onAccent: accentId === 'ink' ? lighterSurface(spec) : spec.onAccent,
   };
 }
 
@@ -530,5 +559,5 @@ export function resolveChartRamp(theme: ThemeDef, appearance: Appearance): strin
 /** Swatch triple for the theme picker: [background, card/mid, accent]. */
 export function themeSwatch(theme: ThemeDef, appearance: Appearance): [string, string, string] {
   const s = theme[appearance];
-  return [s.background, s.emphasis, s.hues[ACCENT_HUE[theme.defaultAccent]]];
+  return [s.background, s.emphasis, accentPrimary(s, theme.defaultAccent)];
 }
