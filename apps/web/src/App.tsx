@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { RouterProvider } from 'react-router-dom';
+import { RouterProvider } from 'react-router/dom';
 import { QueryProvider } from '@/providers/QueryProvider.js';
 import { PlatformProvider } from '@/providers/PlatformProvider.js';
 import { ThemeProvider } from '@/providers/ThemeProvider.js';

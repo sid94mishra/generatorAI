@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import {
   ArrowLeft,
   GitBranch,

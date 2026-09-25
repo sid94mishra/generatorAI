@@ -9,7 +9,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useMemo, useState } from 'react';
-import { Link, useNavigate, useParams } from 'react-router-dom';
+import { Link, useNavigate, useParams } from 'react-router';
 import {
   AlertTriangle, ArrowLeft, Check, ChevronDown, ChevronRight, ExternalLink,
   FileDiff, GitPullRequest, MessageSquare, Sparkles, X,

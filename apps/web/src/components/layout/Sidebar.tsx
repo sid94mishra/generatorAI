@@ -6,7 +6,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router';
 
 import { Settings, Zap, MessageSquare, GitBranch, LayoutDashboard, RefreshCw, FolderKanban, FileCode2, PanelLeftClose, Bot } from 'lucide-react';
 import { Kbd, Button } from '@/components/ui/index.js';

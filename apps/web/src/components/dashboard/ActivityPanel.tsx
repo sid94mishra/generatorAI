@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import {
   MessageSquare, GitBranch, Zap, RotateCcw, X, Activity, CircleCheck,
 } from 'lucide-react';

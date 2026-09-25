@@ -7,7 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { Bot, Network, ExternalLink, Plus } from 'lucide-react';
 
 import { useAgents } from '@/hooks/agentQueries.js';

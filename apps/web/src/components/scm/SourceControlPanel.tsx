@@ -13,7 +13,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import {
   AlertTriangle, Check, ExternalLink, GitBranch, GitCommit, GitPullRequest, Github, Sparkles, X,
 } from 'lucide-react';

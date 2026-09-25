@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useCreateAutomation } from '@/hooks/automationQueries.js';
 import { useWorkflowDefinitions } from '@/hooks/workflowQueries.js';
 import { useProjects } from '@/hooks/projectQueries.js';

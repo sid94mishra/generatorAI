@@ -7,7 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useCallback, useMemo, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelChat, useBackgroundTasks, useHarnessConfig, useModels } from '@/hooks/queries.js';
 import { ChatChangesTray } from '@/components/chat/ChatChangesTray.js';
 import { LiveActivityStrip, useRunningBackgroundTaskCount } from '@/components/agent/LiveActivityStrip.js';

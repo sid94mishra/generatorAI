@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback } from 'react';
-import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router';
 import { useChat, useArchiveChat } from '@/hooks/queries.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useTheme } from '@/providers/ThemeProvider.js';

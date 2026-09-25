@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { useCreateChat } from '@/hooks/queries.js';
 import { X, MessageSquarePlus, Tag, Plus, Boxes, Bot, Network } from 'lucide-react';
 import { Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';

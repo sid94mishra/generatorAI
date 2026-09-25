@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
   Edit3,

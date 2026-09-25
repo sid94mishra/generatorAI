@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import {
   Server, LayoutTemplate, Globe, Terminal, ChevronRight, Loader2,
   FileText, Plus, Trash2, ArrowLeft, X, Eye, AlertTriangle,

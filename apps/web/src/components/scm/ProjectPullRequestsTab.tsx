@@ -9,7 +9,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router';
 import { AlertTriangle, GitPullRequest, Github } from 'lucide-react';
 import { useProjectPullRequests } from '@/hooks/queries.js';
 import { Badge, Spinner, Tabs, type BadgeTone, Button } from '@/components/ui/index.js';

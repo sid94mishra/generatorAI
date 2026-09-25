@@ -5,7 +5,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { ArrowLeft, FolderKanban, FolderOpen, Plus, Trash2, GitBranch } from 'lucide-react';
 import { useCreateProject, useLinkCodebase } from '@/hooks/projectQueries.js';
 import { toast } from '@/components/Toast.js';

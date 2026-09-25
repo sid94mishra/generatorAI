@@ -16,7 +16,7 @@ import {
   FileDiff, SquareTerminal, TriangleAlert, XCircle, Image as ImageIcon, Layers,
   ExternalLink,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 import { useStreamActions, browserArtifactUrl } from '@/components/agent/streamActions.js';
 import { Button, Spinner } from '@/components/ui/index.js';
 import { InlineDiff } from '@/components/chat/InlineDiff.js';

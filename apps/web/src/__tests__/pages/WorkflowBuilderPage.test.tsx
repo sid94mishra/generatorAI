@@ -28,7 +28,8 @@
 import React from 'react';
 import { render, screen, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { createMemoryRouter } from 'react-router';
+import { RouterProvider } from 'react-router/dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PlatformContext } from '@/providers/PlatformProvider.js';
 import { ThemeProvider } from '@/providers/ThemeProvider.js';

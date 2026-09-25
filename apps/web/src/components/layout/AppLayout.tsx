@@ -10,7 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useRef } from 'react';
-import { Outlet, useLocation, useNavigate } from 'react-router-dom';
+import { Outlet, useLocation, useNavigate } from 'react-router';
 import { Sidebar } from './Sidebar.js';
 import { Header } from './Header.js';
 import { TitleBar } from './TitleBar.js';

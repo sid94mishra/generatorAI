@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useMemo, useLayoutEffect, useRef, useEffect } from 'react';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams } from 'react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { useChats, useBulkDeleteChats } from '@/hooks/queries.js';
 import { CreateChatDialog } from '@/components/chat/CreateChatDialog.js';

@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { useParams, useNavigate, useBlocker } from 'react-router-dom';
+import { useParams, useNavigate, useBlocker } from 'react-router';
 import { useShallow } from 'zustand/react/shallow';
 import { ReactFlowProvider } from '@xyflow/react';
 import {

@@ -11,7 +11,8 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, act } from '@testing-library/react';
-import { createMemoryRouter, RouterProvider } from 'react-router-dom';
+import { createMemoryRouter } from 'react-router';
+import { RouterProvider } from 'react-router/dom';
 
 // The real registry pulls every settings section (and every query they make)
 // into this test. Routing is what is under test here.

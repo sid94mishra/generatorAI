@@ -5,7 +5,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { CheckCircle2, XCircle, Clock, Eye, ExternalLink, Ban } from 'lucide-react';
 import { useBackgroundTasks, useBackgroundTaskDigest, useChat } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';

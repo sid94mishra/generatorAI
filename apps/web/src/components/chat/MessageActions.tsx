@@ -16,7 +16,7 @@
 
 import React, { useCallback, useState } from 'react';
 import { copyTextToClipboard } from '@/utils/copyToClipboard.js';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate } from 'react-router';
 import { Copy, GitFork } from 'lucide-react';
 import { toast } from '@/components/Toast.js';
 import { fetchChatTranscript, useForkChat } from '@/hooks/queries.js';

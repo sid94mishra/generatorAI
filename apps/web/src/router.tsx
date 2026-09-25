@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { Suspense, lazy } from 'react';
-import { createBrowserRouter } from 'react-router-dom';
+import { createBrowserRouter } from 'react-router';
 import { AppLayout } from '@/components/layout/AppLayout.js';
 import { ErrorBoundary } from '@/components/ErrorBoundary.js';
 import { PageErrorBoundary } from '@/components/PageErrorBoundary.js';

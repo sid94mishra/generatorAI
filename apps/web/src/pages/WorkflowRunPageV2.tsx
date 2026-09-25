@@ -11,7 +11,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
   AlertCircle, ListTree, FolderOpen, FileText, TerminalSquare, LayoutGrid,

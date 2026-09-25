@@ -13,7 +13,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router';
 import { ArrowLeft, Settings2 } from 'lucide-react';
 import { Button } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';

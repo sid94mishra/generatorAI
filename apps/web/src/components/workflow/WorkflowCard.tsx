@@ -17,7 +17,7 @@ import {
   CheckSquare,
   Square,
 } from 'lucide-react';
-import { Link } from 'react-router-dom';
+import { Link } from 'react-router';
 
 import { Card, Badge, Button } from '@/components/ui/index.js';
 import { EntityListRow } from '@/components/data/index.js';
