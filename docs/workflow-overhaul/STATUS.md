@@ -5,7 +5,7 @@ The coding agent updates this file in every phase PR.
 | Phase | Branch | Status | PR | Gate report | Notes |
 |---|---|---|---|---|---|
 | 00 Baseline | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | Baseline section below | gate pass with the recorded baseline exceptions |
-| 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | in progress: part A (WP-1.1–1.4) and part B (WP-1.5) done | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass ; part B gate 2026-09-25: typecheck 52/52; workflow-spec 359/359; lint green; no-legacy 72 bans, 0 hits; generate:workflow-spec --check clean | WP-1.6–1.9 todo (part C wiring list in TRACKER 1.5); v55 drop list in TRACKER 1.4 |
+| 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass ; part B gate 2026-09-25: typecheck 52/52; workflow-spec 359/359; lint green; no-legacy 72 bans, 0 hits; generate:workflow-spec --check clean; **phase gate 2026-09-25 (part C): see "Phase 01 gate" below** | WP-1.6–1.9 done (1d67d0f, 28f9c5e, 9c61ec6, ebb4e82); v55 applied to the dev-DB copy |
 | 02 SessionComposer | wf/phase-02-session-composer | not started | | | |
 | 03 Engine v2 | wf/phase-03-engine-v2 | not started | | | |
 | 03b Stage conversation | wf/phase-03b-stage-conversation | not started | | | |
@@ -183,6 +183,22 @@ Two timing facts the testkit had to work around, which P03 should keep in mind:
 **New findings during P00** (recorded against existing register items):
 - **W-32 boot-order race.** `StartupRecoveryService.recover()` re-drives interrupted runs (step 2) before it rehydrates `SessionAllocator` (step 4). A relaunched stage that reaches `allocateSession` first fails with `UNIQUE constraint failed: session_allocations.workflow_run_id`. Live, the ~2.5 s checkpoint capture usually hides it. Pinned by T8.
 - **W-17 finalize race.** The race is deterministic under the production 3 s tick: two validated root stages that both finish before the first tick. Pinned by T4.
+
+## Phase 01 gate (2026-09-25, after part C)
+
+Run at `wf/overhaul` @ ebb4e82 plus the tracker update (Windows 11, Node 26.8.2, pnpm 10.29.2).
+
+- **`pnpm install --frozen-lockfile`:** pass.
+- **`pnpm turbo typecheck`:** pass, 52/52 (forced, 2 min 30 s).
+- **`pnpm turbo test --concurrency=2 --continue`:** 9 min 25 s. Every failure is a recorded baseline failure: cli 5 (TUI on Windows), core 1 (symlink EPERM), git 2 (CRLF), server 2 (symlink EPERM, CSP hash). Two baseline failures are gone: core `SourceControlFlowService` (e) (the test now clones with `core.autocrlf=false`) and `workflowPreprocessorClone` (the expectation uses `path.join`). The run also showed two new failures, fixed in 9c61ec6 and re-run: db `migrations lock` (v55 re-locked) and `test:scripts` `workflowCleanupRuns` (its fixture now builds the v54 schema the cleanup runs against); db 134 pass / 4 skip, scripts 28/28.
+- **Counts that moved** (P01 deleted or rewrote the tests of removed code): core 1721 pass (was 1862), cli-core 872 (901), client-core 295 (297), mobile 1098 (1099), shared 326 (322), workflow-spec 355 (359; the constants drift test moved to shared), server 539 (554), web 636 (650), workflow-testkit 43 (38), db 134 (136). Everything else is unchanged.
+- **`pnpm lint`:** pass (turbo lint 28/28, security, durability, docs, syncio, tokens; workflow-invariants 24 = baseline).
+- **`check-no-legacy`:** 78 banned patterns, 0 hits; 11 legacy comments, baseline lowered to 11.
+- **`check:migrations-lock`:** 55 locked and unchanged. **`check:db-baseline`:** baseline v55 up to date. **`check:workflow-spec`:** generated files up to date.
+- **Testkit (hard gate):** 43/43. T1–T8 run v2 specs on the v1 engine; T6 is PASS (round trip with zero diffs, every malformed import rejected, draft → test run → publish → run, pinned version W-13, revision conflict, command scope, archive on delete).
+- **Fresh DB:** `BaselineFreshDb.test.ts` passes. An empty DB reaches v55 through `baseline.sql`; the P00 install-drift allowlist is **empty** (v55 reconciled all 8 entries); the real v52 developer schema plus synthetic chats reaches v55 with chat rows intact and stage-run history purged.
+- **`pnpm workflow:dbcopy-upgrade`** (`C:/gaiwf/dbcopy/generatorai.db`, a copy of the developer DB; the real DB was not opened): v52 → v55 via the legacy route in 3.9 s. Chat rows **UNCHANGED** (hashes match): chats 362, chat sessions 392, chat messages 841. All rows before/after: sessions 2323 → 392 (the 1931 stage-run sessions go with the run history), messages 8178 → 841. Schema drift against a fresh DB: **0**. An earlier conversion run on the same copy: 343 definitions converted (47 with `needs_attention` notes), 1113 runs and 1931 stage-run sessions purged, loop/batch automations converted, 3 script-mode automations disabled, 1 plaintext webhook token hashed.
+- **Live E2E** (advisory, RV-35): not run in this part.
 
 ## Migration versions (authoritative, RV-17)
 
