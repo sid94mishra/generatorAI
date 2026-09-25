@@ -290,6 +290,17 @@ export class ChatManagementService {
   private turnContexts = new Map<string, TurnContext>();
 
   /**
+   * The harness that runs a chat session's conversation, for plan records: the
+   * router's answer when the harness can tell, else the configured type, else
+   * `'unknown'` — never a guessed provider.
+   */
+  private async planHarnessType(sessionId: string, configured: string | undefined): Promise<string> {
+    const session = await this.sessionRepo.getById(sessionId).catch(() => null);
+    const owner = session?.conversationId ? this.harness.conversationHarness?.(session.conversationId) : undefined;
+    return owner ?? configured ?? 'unknown';
+  }
+
+  /**
    * Commits the in-flight turn's transcript row. Held per chat so `cancelTurn`
    * can flush what streamed before it tears the subscription down.
    */
@@ -474,7 +485,7 @@ export class ChatManagementService {
           turnId: ctx.turnId,
           summary: request.summary,
           content: request.planContent,
-          harnessType: chat?.harnessConfig?.harnessType ?? 'copilot',
+          harnessType: await this.planHarnessType(ctx.sessionId, chat?.harnessConfig?.harnessType),
           availableActions: request.actions,
           ...(request.recommendedAction ? { recommendedAction: request.recommendedAction } : {}),
           ...(workspaceRoot ? { workspaceRoot } : {}),
@@ -888,7 +899,7 @@ export class ChatManagementService {
         title: args.title,
         summary: args.title,
         content: args.content,
-        harnessType: chat?.harnessConfig?.harnessType ?? 'copilot',
+        harnessType: await this.planHarnessType(ctx.sessionId, chat?.harnessConfig?.harnessType),
         // A recorded plan is never decided, so it offers no actions.
         availableActions: [],
         status: 'recorded',

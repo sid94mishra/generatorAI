@@ -581,6 +581,16 @@
       "phase": "01",
       "pattern": "stages/:stageId/interrupt|/stages/\\$\\{stageId\\}/interrupt|stages/s1/interrupt",
       "reason": "WP-1.4: the test-only interrupt route is deleted; the testkit `interrupt` command replaces it"
+    },
+    {
+      "phase": "01",
+      "pattern": "harnessType\\s*\\?\\?\\s*'copilot'|harnessType: 'copilot',",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts",
+        "packages/core/src/services/ChatManagementService.ts",
+        "packages/core/src/services/PlanService.ts"
+      ],
+      "reason": "WP-1.4: plan records carry the resolved harness (IAgentHarness.conversationHarness), never a guessed copilot"
     }
   ],
   "comments": {

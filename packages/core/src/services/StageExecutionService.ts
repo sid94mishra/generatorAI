@@ -2292,6 +2292,7 @@ export class StageExecutionService {
                 stageRun,
                 workflowRunId,
                 sessionId: session.id,
+                harnessType: this.resolvedHarnessType(session.conversationId, sessionConfig['harnessType']),
                 content: stageOutputContent,
                 variables,
               });
@@ -3288,6 +3289,17 @@ export class StageExecutionService {
   }
 
   /**
+   * The harness that runs a stage's conversation: the router's answer when the
+   * harness can tell, else the configured type. `'unknown'` only when neither
+   * is known — never a guessed provider.
+   */
+  private resolvedHarnessType(conversationId: string | undefined, configured: unknown): string {
+    const owner = conversationId ? this.harness.conversationHarness?.(conversationId) : undefined;
+    if (owner) return owner;
+    return typeof configured === 'string' && configured ? configured : 'unknown';
+  }
+
+  /**
    * Creates or revises the PlanDocument backing a plan-mode stage review.
    *
    * Best-effort and non-throwing: a bookkeeping failure must never fail a
@@ -3299,6 +3311,7 @@ export class StageExecutionService {
     stageRun: StageRun;
     workflowRunId: string;
     sessionId: string;
+    harnessType: string;
     content: string;
     variables?: Record<string, unknown>;
   }): Promise<string | undefined> {
@@ -3335,7 +3348,7 @@ export class StageExecutionService {
         title: params.stageRun.name,
         summary: params.content.slice(0, 400).trim(),
         content: params.content,
-        harnessType: 'copilot',
+        harnessType: params.harnessType,
         availableActions: ['implement_interactive', 'exit_only'],
         ...(workspaceRoot ? { workspaceRoot } : {}),
       });

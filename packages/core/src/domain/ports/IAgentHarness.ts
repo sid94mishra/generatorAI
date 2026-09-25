@@ -686,6 +686,13 @@ export interface IHarnessConversationLifecycle {
    */
   getProviderSessionId?(conversationId: string): string | undefined;
   /**
+   * The provider that actually runs `conversationId` — the router's answer,
+   * which may differ from the configured `harnessType` (unset, or picked by
+   * model). Callers that record which harness produced something (plans) read
+   * this instead of guessing. Optional: a single-provider harness may omit it.
+   */
+  conversationHarness?(conversationId: string): HarnessType | undefined;
+  /**
    * Branch `conversationId` into a NEW conversation whose provider-side
    * history is a copy of the source through `throughAnchor`. OPTIONAL —
    * declare `capabilities().conversationFork` when implemented. The source is

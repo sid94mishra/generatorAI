@@ -123,6 +123,26 @@ describe('T5 manual interrupt (testkit helper)', () => {
   });
 });
 
+describe('T5 plan-mode stage records its harness (WP-1.4)', () => {
+  it('files the plan under the configured harness, not a guessed copilot', async () => {
+    engine = await createTestEngine({ script: { PL: [{ text: '# Plan\n1. Do the thing.' }] } });
+    const { definitionId } = await engine.importDefinition({
+      name: 't5-plan-harness',
+      stages: [{ name: 'PL', prompt: 'Plan it.', approvalRequired: true, harnessConfigOverrides: { harnessType: 'claude-agent' } }],
+      edges: [],
+    });
+    // Import drops agentMode today (T6 W-25), so set it the way the builder does.
+    const svc = engine.services.workflowDefinitionService;
+    const [stage] = (await svc.getDefinitionWithStages(definitionId)).stages;
+    await svc.updateStage(stage!.id, { agentMode: 'plan' });
+    const run = await engine.runWorkflow({ definitionId });
+    await run.waitForStage('PL', 'awaiting_input');
+    const rows = engine.sqlite.prepare('SELECT harness_type FROM plan_documents WHERE stage_run_id = ?').all(run.stageRunId('PL')) as Array<{ harness_type: string }>;
+    expect(rows.map((r) => r.harness_type)).toEqual(['claude-agent']);
+    await engine.commands.cancel(run.runId);
+  });
+});
+
 describe('T5 pause / cancel (current engine)', () => {
   it('pausing mid-turn completes the stage with empty output; resume never re-runs it', async () => {
     engine = await createTestEngine({ script: { L1: [{ hang: true }] } });

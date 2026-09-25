@@ -592,6 +592,10 @@ export class MultiHarness implements IAgentHarness {
     return adapter.resumeConversation(conversationId, this.withModelSupportedBy(target, params));
   }
 
+  conversationHarness(conversationId: string): HarnessType {
+    return this.ownerOf(conversationId);
+  }
+
   getProviderSessionId(conversationId: string): string | undefined {
     if (this.orphanedInstanceFor(conversationId)) return undefined;
     const instanceId = this.resolveInstance(conversationId);
