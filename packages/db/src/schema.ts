@@ -163,6 +163,11 @@ export const chatMessages = sqliteTable(
     agentRef: text('agent_ref'),
     agentVersion: integer('agent_version'),
     timestamp: integer('timestamp', { mode: 'timestamp' }).notNull(),
+    /**
+     * v56 (RV-10) — true only when the message was written on the provider's
+     * final turn event; false for a partial written on cancel or pause.
+     */
+    complete: integer('complete', { mode: 'boolean' }).notNull().default(true),
   },
   (table) => ({
     sessionIdx: index('idx_chat_session_id').on(table.sessionId),
@@ -591,6 +596,13 @@ export const automations = sqliteTable(
     iterationMode: text('iteration_mode', { mode: 'json' }).$type<IterationMode>(),
     defaultDataset: text('default_dataset', { mode: 'json' }).$type<AutomationDataset>(),
     retryPolicy: text('retry_policy', { mode: 'json' }).$type<AutomationRetryPolicy>(),
+    /**
+     * v56 (PD-18) — the permission mode an automation's unattended runs use.
+     * Required; bypass on a webhook trigger needs an admin-scoped opt-in.
+     */
+    permissionMode: text('permission_mode', { enum: ['default', 'acceptEdits', 'plan', 'bypassPermissions'] })
+      .notNull()
+      .default('acceptEdits'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },

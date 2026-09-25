@@ -156,7 +156,7 @@ describe('migration v55 workflow_definitions_v2', () => {
     const before = chatHash(s);
     const messagesBefore = (s.prepare(`SELECT COUNT(*) AS n FROM chat_messages`).get() as { n: number }).n;
 
-    migrateDB(db);
+    migrateDB(db, { targetVersion: 55 });
 
     expect((s.prepare(`SELECT MAX(version) AS v FROM _schema_versions`).get() as { v: number }).v).toBe(55);
     expect(chatHash(s)).toEqual(before);

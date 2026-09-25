@@ -77,7 +77,7 @@ This file tracks the implementation of every work package (WP) in the overhaul p
 | 2.7 | PermissionModeSource, unattended defaults | todo | | | |
 | 2.8 | Composer assembly and caller switch | todo | | | |
 | 2.9 | TurnRecorder and provider-session resume | todo | | | |
-| 2.10 | Migration v56 `session_parity` | todo | | | |
+| 2.10 | Migration v56 `session_parity` | done |  | PENDING | v56 `session_parity` (SQL only, no rebuilds, chat-safe): `chat_messages.complete INTEGER NOT NULL DEFAULT 1` with `complete = 0` backfilled where `json_valid(metadata) AND json_extract(metadata,'$.partial') = 1`; `automations.permission_mode TEXT NOT NULL DEFAULT 'acceptEdits'` (existing rows get acceptEdits, PD-18). schema.ts updated, lock entry added, baseline regenerated (BASELINE_VERSION 56). Found and fixed: with the baseline at 56 a v55 database took the legacy route, whose bootstrap fails on a post-v55 schema (`no such column "order"`) — the dev DB would have failed its next upgrade. `chooseMigrationRoute` now sends every database at or above `VERSIONED_ONLY_FROM = 55` down the versioned route (DEVIATIONS). Tests: migration56.test.ts (a v55 DB with chats, a partial message, a stage session and automations: chat rows unchanged by hash, `complete` backfilled, automations get acceptEdits, FK check clean); migration55.test.ts now stops at 55; db 136 pass / 4 skip. `pnpm workflow:dbcopy-upgrade` on C:/gaiwf/dbcopy: v52 → v56 via legacy in 2.7 s, chat rows UNCHANGED (362 chats, 392 chat sessions, 841 messages), drift 0. |
 | 2.11 | UI: SessionSpecEditor | todo | | | |
 
 ## Phase 03: Engine v2

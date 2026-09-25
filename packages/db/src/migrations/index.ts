@@ -71,11 +71,9 @@ export type MigrationRoute =
  *   — stamped v1..BASELINE_VERSION as applied, then migrated above it. This
  *   is what lets a later migration drop a legacy table: the historic
  *   migrations that still reference it never run on a fresh install again.
- * - A database already at or above `BASELINE_VERSION` only runs the
- *   versioned migrations above its version. The legacy bootstrap block below
- *   is all `IF NOT EXISTS` / swallowed `ADD COLUMN`, so skipping it here is a
- *   no-op today; it matters once a migration drops a table the bootstrap
- *   would otherwise re-create on the next boot.
+ * - A database at or above `VERSIONED_ONLY_FROM` (v55, which dropped legacy
+ *   tables) only runs the versioned migrations above its version: the legacy
+ *   bootstrap block below would re-create what v55 dropped.
  * - Anything older takes the historic path unchanged: the legacy bootstrap,
  *   then every versioned migration above its version. That block is never
  *   edited again (R-3).
@@ -96,8 +94,18 @@ export function chooseMigrationRoute(sqlite: Database.Database, opts?: MigrateOp
     .get();
   if (!hasVersions) return { kind: 'legacy' };
   const { v } = sqlite.prepare(`SELECT COALESCE(MAX(version), 0) AS v FROM _schema_versions`).get() as { v: number };
-  return v >= BASELINE_VERSION ? { kind: 'versioned', currentVersion: v } : { kind: 'legacy' };
+  return v >= VERSIONED_ONLY_FROM ? { kind: 'versioned', currentVersion: v } : { kind: 'legacy' };
 }
+
+/**
+ * The first version whose databases must never see the legacy bootstrap:
+ * v55 dropped legacy tables and columns the bootstrap would re-create (and
+ * indexes it would build on columns that no longer exist). A database at or
+ * above it only runs the versioned migrations above its version, whatever
+ * the current baseline is — the baseline moves with every migration, this
+ * boundary does not.
+ */
+export const VERSIONED_ONLY_FROM = 55;
 
 /** Create an empty database's schema from the baseline and stamp v1..BASELINE_VERSION. */
 /**
@@ -2602,6 +2610,22 @@ export const MIGRATIONS: readonly Migration[] = [
       disableForeignKeys: true,
       run: runV55,
       lockFiles: V55_LOCK_FILES,
+    },
+    // v56 — workflow overhaul P02 WP-2.10 `session_parity`. Chat-safe: two
+    // added columns, one data backfill, nothing dropped or rebuilt.
+    //  - chat_messages.complete (RV-10): 1 unless the message was written
+    //    before its turn settled. Rows written on cancel already carry
+    //    `metadata.partial`; those become 0.
+    //  - automations.permission_mode (PD-18): unattended runs must declare a
+    //    mode; existing automations get `acceptEdits`, the UI default.
+    {
+      version: 56,
+      name: 'session_parity',
+      sql: [
+        `ALTER TABLE chat_messages ADD COLUMN complete INTEGER NOT NULL DEFAULT 1;`,
+        `UPDATE chat_messages SET complete = 0 WHERE metadata IS NOT NULL AND json_valid(metadata) AND json_extract(metadata, '$.partial') = 1;`,
+        `ALTER TABLE automations ADD COLUMN permission_mode TEXT NOT NULL DEFAULT 'acceptEdits';`,
+      ],
     },
   ];
 
