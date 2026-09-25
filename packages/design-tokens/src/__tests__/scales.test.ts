@@ -1,13 +1,15 @@
 // Scales (P1-T6): radius (D-14), type (D-13), heights + density (D-15),
 // z-order (D-41), shell widths, and the per-platform geometry schema (M-04).
 
+import { readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
 import {
   HEIGHTS,
   MIN_HIT_TARGET,
   RADIUS_OFFSETS,
-  SHELL_WIDTHS,
+  CONTAINER_WIDTHS,
   TYPE_SCALE,
   Z_INDEX,
   radiusScale,
@@ -107,14 +109,22 @@ describe('per-platform geometry (M-04)', () => {
       heights: HEIGHTS,
       minHitTarget: MIN_HIT_TARGET,
       zIndex: Z_INDEX,
-      shell: SHELL_WIDTHS,
+      shell: CONTAINER_WIDTHS,
     });
     expect(GEOMETRY.ios).toBeUndefined();
     expect(GEOMETRY.android).toBeUndefined();
   });
 
   it('covers every shell width name', () => {
-    expect(Object.keys(SHELL_WIDTHS)).toEqual([...CONTAINER_NAMES]);
-    expect(SHELL_WIDTHS).toMatchObject({ sidebar: 232, rail: 48, dock: 480, 'dock-run': 440, sheet: 380, dialog: 640 });
+    expect(Object.keys(CONTAINER_WIDTHS)).toEqual([...CONTAINER_NAMES]);
+    expect(CONTAINER_WIDTHS).toMatchObject({ sidebar: 232, rail: 48, dock: 480, 'dock-run': 440, sheet: 380, dialog: 640 });
+  });
+
+  it('takes every width from SHELL (chrome.ts): one source for the CSS vocabulary and the desktop', () => {
+    const src = readFileSync(fileURLToPath(new URL('../design.ts', import.meta.url)), 'utf8');
+    const block = /export const CONTAINER_WIDTHS = \{([^}]*)\}/.exec(src)?.[1] ?? '';
+    const values = [...block.matchAll(/:\s*([^,\n]+),/g)].map((m) => m[1]!.trim());
+    expect(values).toHaveLength(CONTAINER_NAMES.length);
+    for (const v of values) expect(v).toMatch(/^SHELL\./);
   });
 });

@@ -281,3 +281,35 @@ export const REQUIRED_UTILITIES = [
   'max-w-dialog',
   'ease-standard',
 ] as const;
+
+/**
+ * The tailwind-merge v3 extension for the design vocabulary (D-09, 02 §10.3).
+ * `apps/web/src/ui/lib/cn.ts` passes it to `extendTailwindMerge` at runtime,
+ * so a name added above is merged correctly without touching the web app:
+ *   • `text-title` is a SIZE (theme `text`), so `cn('text-fg-2', 'text-title')`
+ *     keeps both — v2 read every unknown `text-*` as a colour and dropped one;
+ *   • `h-row`, `size-control`, `z-dialog` join their default groups, so a later
+ *     `h-full` / `size-4` / `z-10` replaces them instead of both surviving.
+ * Returned as plain data (no tailwind-merge import) to keep this module a leaf.
+ */
+export function twMergeExtension() {
+  return {
+    extend: {
+      theme: {
+        color: [...COLOR_NAMES, ...SHARED_COLOR_NAMES, ...LEGACY_COLOR_NAMES],
+        text: [...TEXT_STEPS],
+        radius: [...RADIUS_STEPS],
+        shadow: [...SHADOW_NAMES],
+        container: [...CONTAINER_NAMES],
+        ease: [...EASE_NAMES],
+      },
+      classGroups: {
+        h: [{ h: [...HEIGHT_NAMES] }],
+        'min-h': [{ 'min-h': [...HEIGHT_NAMES] }],
+        'max-h': [{ 'max-h': [...HEIGHT_NAMES] }],
+        size: [{ size: [...SIZE_NAMES] }],
+        z: [{ z: [...Z_NAMES] }],
+      },
+    },
+  };
+}

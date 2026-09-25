@@ -35,6 +35,7 @@ import {
   type ThemeDef,
 } from './themes/types.js';
 import { DEFAULT_FONT_SIZE, type Density, type FontSizeSetting } from './registry.js';
+import { SHELL } from './chrome.js';
 import { MOTION } from './tokens.js';
 import {
   RADIUS_STEPS,
@@ -375,20 +376,20 @@ export const MOTION_CSS = {
 } as const;
 
 /**
- * Shell widths in px (D-15, 02 §8), emitted as `--gai-w-*` for `w-sidebar`,
- * `max-w-dialog` …. P1-S1 owns the `SHELL` constant in chrome.ts; these are the
- * same numbers keyed by the vocabulary's container names, and S1 reconciles the
- * two into one source when it lands.
+ * The vocabulary's container names (`w-sidebar`, `max-w-dialog` …) → shell
+ * widths in px, emitted as `--gai-w-*` (D-15, 02 §8). A projection of `SHELL`
+ * (chrome.ts), the one source of the numbers, which the desktop main process
+ * imports through the lean `./chrome` subpath — never redefine a width here.
  */
-export const SHELL_WIDTHS = {
-  sidebar: 232,
-  rail: 48,
-  dock: 480,
-  'dock-run': 440,
-  sheet: 380,
-  'dialog-sm': 420,
-  dialog: 640,
-  'dialog-lg': 960,
+export const CONTAINER_WIDTHS = {
+  sidebar: SHELL.sidebarWidth,
+  rail: SHELL.railWidth,
+  dock: SHELL.dockWidth,
+  'dock-run': SHELL.dockWidthRun,
+  sheet: SHELL.dockSheetWidth,
+  'dialog-sm': SHELL.dialogWidth.sm,
+  dialog: SHELL.dialogWidth.md,
+  'dialog-lg': SHELL.dialogWidth.lg,
 } as const satisfies Record<ContainerName, number>;
 
 /** Elevation recipes (02 §6.4) as design-class strings: flat, float, modal. */

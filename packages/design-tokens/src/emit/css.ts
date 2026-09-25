@@ -49,7 +49,7 @@ import {
   DESIGN_COLOR_VARS,
   HEIGHTS,
   MOTION_CSS,
-  SHELL_WIDTHS,
+  CONTAINER_WIDTHS,
   TYPE_SCALE,
   Z_INDEX,
   radiusScale,
@@ -403,7 +403,7 @@ function axisLayer(): string[] {
   root.push('  /* Stacking layers (D-41) */');
   for (const [name, value] of Object.entries(Z_INDEX)) root.push(`  --gai-z-${name}: ${value};`);
   root.push('  /* Shell widths (D-15, 02 §8) */');
-  for (const [name, value] of Object.entries(SHELL_WIDTHS)) root.push(`  --gai-w-${name}: ${value}px;`);
+  for (const [name, value] of Object.entries(CONTAINER_WIDTHS)) root.push(`  --gai-w-${name}: ${value}px;`);
   root.push('}');
 
   const compact = ['[data-density="compact"] {'];
