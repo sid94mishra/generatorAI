@@ -27,3 +27,17 @@ export {
   type StrategyChoice,
 } from './OutputExtractor.js';
 export { describeRule, evaluateOutputRule, extractJsonValue, type RuleContext } from './outputRules.js';
+export { RunActor, stateHash, type ProcessResult, type DecideRecord, type RunActorDeps } from './RunActor.js';
+export {
+  RunSupervisor,
+  EngineLockedError,
+  DEFAULT_SUPERVISOR_TIMING,
+  type RunSupervisorDeps,
+  type SupervisorTiming,
+  type CommandResult,
+} from './RunSupervisor.js';
+export { TimerService, type ScheduledTimer } from './TimerService.js';
+export { LeaseReaper, inFlightIsSafe } from './LeaseReaper.js';
+export { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
+export { EffectsDispatcher } from './EffectsDispatcher.js';
+export { DefaultRunLifecycle, PrepareError, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';

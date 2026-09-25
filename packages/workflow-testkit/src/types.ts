@@ -81,7 +81,11 @@ export interface StageSnapshot {
   /** The engine's own row, for assertions the neutral fields do not cover. */
   row: StageRun;
   /** Chat messages that belong to this instance. */
-  messages: Array<Pick<ChatMessage, 'role' | 'content'> & { metadata?: Record<string, unknown> }>;
+  messages: Array<Pick<ChatMessage, 'role' | 'content'> & { metadata?: Record<string, unknown>; turnRole?: string; complete?: boolean }>;
+  /** Engine v2: the instance's attempts, oldest first. */
+  attempts?: Array<{ attemptNo: number; mode: string; status: string; errorCode: string | null; repairCount: number; sessionId: string | null }>;
+  /** Engine v2: why the instance is in its status (`interrupted:process_restart_unsafe`, `retry:resume`, …). */
+  statusReason?: string | null;
 }
 
 export interface RunSnapshot {
@@ -115,7 +119,9 @@ export type RunCommand =
   | { type: 'retry-stage'; stageRunId: string }
   | { type: 'approve'; stageRunId: string; body?: ApproveBody }
   /** Force a stage into `awaiting_input` (the deleted test-only interrupt route, WP-1.4). */
-  | { type: 'interrupt'; stageRunId: string; data?: unknown; prompt?: string };
+  | { type: 'interrupt'; stageRunId: string; data?: unknown; prompt?: string }
+  /** Engine v2: any `RunCommand` of `@generatorai/workflow-spec`, as the commands API takes it. */
+  | { type: 'command'; command: Record<string, unknown> };
 
 /** What a command returned, in HTTP terms. `runId` is set for a retry. */
 export interface CommandResult {

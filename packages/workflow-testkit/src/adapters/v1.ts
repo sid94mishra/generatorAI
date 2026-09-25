@@ -406,6 +406,9 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
           .catch(() => undefined);
         return { status: 202 };
       }
+      case 'command':
+        // The v2 commands API; the v1 engine has per-action routes only.
+        return { status: 501, body: { error: { code: 'NOT_IMPLEMENTED', message: 'v1 has no commands API' } } };
     }
   };
 

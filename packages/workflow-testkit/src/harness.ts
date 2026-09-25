@@ -42,7 +42,11 @@ export type TurnKind =
   | 'validation_feedback'
   | 'recap'
   | 'continuation'
-  | 'follow_up';
+  | 'follow_up'
+  /** Engine v2 (`turn_role`): a repair turn after a failed output contract. */
+  | 'repair'
+  /** Engine v2 (`turn_role`): a reviewer's requested changes. */
+  | 'approval_feedback';
 
 /** Kinds a `Turn` without an explicit `on` answers. */
 export const WORK_TURN_KINDS: ReadonlySet<TurnKind> = new Set([
@@ -50,6 +54,8 @@ export const WORK_TURN_KINDS: ReadonlySet<TurnKind> = new Set([
   'continuation',
   'validation_feedback',
   'follow_up',
+  'repair',
+  'approval_feedback',
 ]);
 
 /** Shape of a provider failure a turn can simulate. */
@@ -88,6 +94,12 @@ export interface Turn {
   hang?: true;
   /** Prompt kinds this turn answers. Default: `WORK_TURN_KINDS`. */
   on?: TurnKind | TurnKind[];
+  /**
+   * Call the conversation's `submit_output` host tool with this value before
+   * replying, as a model would (engine v2 output contracts, RV-9). The
+   * tool's answer is recorded on the call as `submitResult`.
+   */
+  submit?: unknown;
 }
 
 /** The stage run a conversation is speaking for. */
@@ -120,6 +132,8 @@ export interface HarnessCall {
   scripted?: Turn;
   outcome: 'replied' | 'error' | 'aborted' | 'pending';
   response?: string;
+  /** What `submit_output` answered to a scripted `submit`. */
+  submitResult?: unknown;
   /** Wall-clock start and end of the call (ms). */
   startedAt: number;
   endedAt?: number;
@@ -356,6 +370,17 @@ export class ScriptedFauxHarness extends FauxProvider {
             },
           } as AgentEvent);
         }
+      }
+
+      if (turn?.submit !== undefined) {
+        const tool = (this.conversationParams.get(conversationId)?.tools ?? []).find((t) => t.name === 'submit_output');
+        const callId = `tk-call-${++this.callIdSeq}`;
+        this.emitTo(conversationId, { kind: 'harness.tool_start', data: { tool: 'submit_output', args: { output: turn.submit }, callId } } as AgentEvent);
+        call.submitResult = tool ? await tool.handler({ output: turn.submit }) : { error: 'submit_output is not bound' };
+        this.emitTo(conversationId, {
+          kind: 'harness.tool_complete',
+          data: { tool: 'submit_output', callId, result: call.submitResult, success: !!tool },
+        } as AgentEvent);
       }
 
       const entries: FauxScriptEntry[] = [];

@@ -26,6 +26,7 @@ export {
   type AdapterFactory,
 } from './types.js';
 export { createV1Adapter } from './adapters/v1.js';
+export { createV2Adapter, v2Adapter, type V2AdapterOptions } from './adapters/v2.js';
 export {
   ScriptedFauxHarness,
   ScriptBook,
