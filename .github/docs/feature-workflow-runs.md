@@ -463,7 +463,7 @@ generatorai run profile list
 # Inspection
 generatorai run messages <runId>                        # per-stage prompt+response
 generatorai run workspace <runId>                       # files in workspace
-generatorai run interrupt <runId> <stageId> [--approve] [--value json] [--reason "..."]
+generatorai run hitl approve|reject|changes-request <runId> <stageId>
 ```
 
 ---

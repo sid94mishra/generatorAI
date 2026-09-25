@@ -576,6 +576,11 @@
       "phase": "01",
       "pattern": "stageOverrides\\??:[^\\n]*\\b(agentName|timeoutMs|contextFilter)\\b",
       "reason": "WP-1.4: the unused stage-override fields agentName/timeoutMs/contextFilter are deleted; P04 adds real stage overrides"
+    },
+    {
+      "phase": "01",
+      "pattern": "stages/:stageId/interrupt|/stages/\\$\\{stageId\\}/interrupt|stages/s1/interrupt",
+      "reason": "WP-1.4: the test-only interrupt route is deleted; the testkit `interrupt` command replaces it"
     }
   ],
   "comments": {

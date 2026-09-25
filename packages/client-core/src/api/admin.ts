@@ -324,11 +324,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
           req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/retry`, json({})),
         cancel: (runId: string, stageId: string) =>
           req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/cancel`, json({})),
-        interrupt: (runId: string, stageId: string, body: Record<string, unknown>) =>
-          req<Record<string, unknown>>(
-            `/api/workflow-runs/${runId}/stages/${stageId}/interrupt`,
-            json(body),
-          ),
         approve: (runId: string, stageId: string, body: Record<string, unknown>) =>
           req<Record<string, unknown>>(
             `/api/workflow-runs/${runId}/stages/${stageId}/approve`,

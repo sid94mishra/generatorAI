@@ -109,6 +109,20 @@ describe('T5 human in the loop (current engine)', () => {
   });
 });
 
+describe('T5 manual interrupt (testkit helper)', () => {
+  it('parks a running stage in awaiting_input with the given data, and approve answers it', async () => {
+    engine = await createTestEngine({ script: { M1: [{ hang: true }] } });
+    const run = await engine.runWorkflow({ name: 't5-interrupt', stages: [{ name: 'M1', prompt: 'Write one line.' }], edges: [] });
+    await pendingCall(engine, 'M1');
+    const m1 = run.stageRunId('M1');
+    expect((await engine.commands.interrupt(run.runId, m1, { type: 'manual', reason: 'check' })).status).toBe(202);
+    const snap = await run.waitForStage('M1', 'awaiting_input');
+    expect(snap.stages['M1']!.interruptData).toMatchObject({ type: 'manual', reason: 'check' });
+    expect((await engine.commands.approve(run.runId, m1, { outcome: 'approved' })).status).toBe(202);
+    await engine.commands.cancel(run.runId);
+  });
+});
+
 describe('T5 pause / cancel (current engine)', () => {
   it('pausing mid-turn completes the stage with empty output; resume never re-runs it', async () => {
     engine = await createTestEngine({ script: { L1: [{ hang: true }] } });

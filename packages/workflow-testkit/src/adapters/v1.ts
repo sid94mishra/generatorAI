@@ -408,6 +408,15 @@ export function createV1Adapter(ctx: AdapterContext): EngineAdapter {
       }
       case 'approve':
         return approve(runId, cmd.stageRunId, cmd.body);
+      case 'interrupt': {
+        // Fire-and-forget, as the old route did: interrupt() returns the
+        // resolution promise a stage body would await.
+        const { hitlService } = current.services;
+        void hitlService
+          .interrupt(cmd.stageRunId, runId, cmd.data ?? { type: 'manual', source: 'testkit' }, cmd.prompt ? { prompt: cmd.prompt } : undefined)
+          .catch(() => undefined);
+        return { status: 202 };
+      }
     }
   };
 

@@ -2519,16 +2519,9 @@
     },
     {
       "method": "POST",
-      "path": "/api/workflow-runs/:runId/stages/:stageId/interrupt",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 394,
-      "mounted": true
-    },
-    {
-      "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/approve",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 429,
+      "line": 393,
       "mounted": true
     },
     {

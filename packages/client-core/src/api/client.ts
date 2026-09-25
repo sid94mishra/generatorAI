@@ -489,7 +489,7 @@ export interface StageRunSummary {
  *
  * The server returns the parked STAGE RUN rows themselves
  * (`HitlService.listPending` → `StageRun[]`), so `id` is the stage-run id —
- * the id the approve/interrupt routes take — and the prompt, when there is
+ * the id the approve route takes — and the prompt, when there is
  * one, lives inside `interruptData`. This previously declared a
  * `{ stageId, prompt }` shape the server never sent, which is how a client
  * ended up matching on a field that was always undefined.
@@ -1299,14 +1299,6 @@ export function createApiClient(fetchImpl: ApiFetch) {
         request<{ message: string; outcome: ApprovalOutcome; followUp: boolean }>(
           fetchImpl,
           `/api/workflow-runs/${runId}/stages/${stageId}/approve`,
-          json(body),
-        ),
-
-      /** Supply data to a stage waiting on input. Also `exec:agent`. */
-      interrupt: (runId: string, stageId: string, body: { data?: unknown; prompt?: string }) =>
-        request<{ message: string }>(
-          fetchImpl,
-          `/api/workflow-runs/${runId}/stages/${stageId}/interrupt`,
           json(body),
         ),
     },

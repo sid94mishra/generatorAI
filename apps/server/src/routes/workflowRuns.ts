@@ -380,42 +380,6 @@ export function createWorkflowRunRoutes(container: Container): Router {
     }
   });
 
-  // POST /workflow-runs/:runId/stages/:stageId/interrupt — Force a stage
-  // into `awaiting_input` for manual approval testing.
-  //
-  // The default `bypassPermissions` mode never auto-blocks tool calls, so
-  // this endpoint exists so operators (and E2E tests) can drive a stage
-  // through the HITL approve/reject loop without writing custom hooks.
-  // The interrupt fires fire-and-forget — we don't await the resolution
-  // promise here; the row is flipped to `awaiting_input` and the approver
-  // later resolves it via POST /stages/:stageId/approve (HITL approval).
-  //
-  // Body: { data?: unknown, prompt?: string }
-  router.post('/:runId/stages/:stageId/interrupt', async (req, res, next) => {
-    try {
-      const runId = String(req.params['runId']);
-      const stageId = String(req.params['stageId']);
-      const body = (req.body ?? {}) as { data?: unknown; prompt?: unknown };
-      const interruptData = body.data ?? { type: 'manual', source: 'api' };
-      const prompt = typeof body.prompt === 'string' ? body.prompt : undefined;
-      // Fire-and-forget — interrupt() returns the resolution promise that
-      // would be awaited by the stage body in a fully wired flow.
-      void hitlService
-        .interrupt(stageId, runId, interruptData, prompt ? { prompt } : undefined)
-        .catch((err) => {
-          logger.warn(`[WorkflowRunRoutes] HITL interrupt failed for ${stageId}`, {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-      logger.info(`[WorkflowRunRoutes] Triggered HITL interrupt on stage ${stageId}`, {
-        requestId: req.requestId,
-      });
-      res.status(202).json({ message: 'Stage interrupted', stageId, runId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
   // POST /workflow-runs/:runId/stages/:stageId/approve — Approver resume (HITL)
   //
   // Renamed from /resume to avoid colliding with the pause/resume route

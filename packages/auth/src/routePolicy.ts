@@ -106,11 +106,6 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
     read: ['read:workflows'],
     write: ['exec:agent'],
   },
-  {
-    prefix: '/workflow-runs/:id/stages/:stageId/interrupt',
-    read: ['read:workflows'],
-    write: ['exec:agent'],
-  },
   { prefix: '/workflow-runs', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
   // Running a script materialises a definition AND starts a run — agents
   // execute, exactly like `POST /workflow-runs/:id/start`. Authoring scripts

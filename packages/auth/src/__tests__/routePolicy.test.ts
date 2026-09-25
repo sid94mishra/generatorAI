@@ -112,7 +112,6 @@ describe('route policy — mobile device authority', () => {
     // with the DESIGN-TIME right to edit a workflow, and would lock out the
     // one client the approval flow exists for.
     expect(allowed(mobile, '/workflow-runs/r1/stages/s1/approve', 'POST')).toBe(true);
-    expect(allowed(mobile, '/workflow-runs/r1/stages/s1/interrupt', 'POST')).toBe(true);
   });
 
   it('still cannot control the run itself', () => {

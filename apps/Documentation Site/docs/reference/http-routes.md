@@ -499,8 +499,7 @@ Source: `apps/server/src/routes/workflowRuns.ts`.
 | `GET` | `/api/workflow-runs/:id/permission-mode` | 337 |
 | `PATCH` | `/api/workflow-runs/:id/permission-mode` | 348 |
 | `GET` | `/api/workflow-runs/:id/pending-interrupts` | 373 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/interrupt` | 394 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/approve` | 429 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/approve` | 393 |
 
 ## workflowScripts
 

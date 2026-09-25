@@ -113,7 +113,9 @@ export type RunCommand =
   | { type: 'cancel' }
   | { type: 'retry-run' }
   | { type: 'retry-stage'; stageRunId: string }
-  | { type: 'approve'; stageRunId: string; body?: ApproveBody };
+  | { type: 'approve'; stageRunId: string; body?: ApproveBody }
+  /** Force a stage into `awaiting_input` (the deleted test-only interrupt route, WP-1.4). */
+  | { type: 'interrupt'; stageRunId: string; data?: unknown; prompt?: string };
 
 /** What a command returned, in HTTP terms. `runId` is set for a retry. */
 export interface CommandResult {

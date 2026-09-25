@@ -63,6 +63,8 @@ export interface RunCommands {
   retryRun(runId: string): Promise<string>;
   retryStage(runId: string, stageRunId: string): Promise<void>;
   approve(runId: string, stageRunId: string, body?: ApproveBody): Promise<CommandResult>;
+  /** Force a stage into `awaiting_input` for a manual approval. */
+  interrupt(runId: string, stageRunId: string, data?: unknown): Promise<CommandResult>;
   /** Any command, as data. */
   send(runId: string, cmd: RunCommand): Promise<CommandResult>;
 }
@@ -191,6 +193,8 @@ export async function createTestEngine(opts: TestEngineOptions = {}): Promise<Te
     retryStage: async (runId, stageRunId) => void (await adapter.command(runId, { type: 'retry-stage', stageRunId })),
     approve: (runId, stageRunId, body) =>
       adapter.command(runId, { type: 'approve', stageRunId, ...(body ? { body } : {}) }),
+    interrupt: (runId, stageRunId, data) =>
+      adapter.command(runId, { type: 'interrupt', stageRunId, ...(data !== undefined ? { data } : {}) }),
   };
 
   return {
