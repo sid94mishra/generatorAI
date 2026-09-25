@@ -139,7 +139,7 @@ Update in every PR (task ID, PR link, date).
 | Phase | Status | Notes |
 |---|---|---|
 | P0 Documentation & rails | done 2026-09-25 (review: reviews/P0-review.md, 3 rounds, 0 open) | P0-01 ✓ · P0-02 ✓ · P0-03 ✓ CI triggers + e2e env fix + spec repairs + BASELINE · P0-04 ✓ guardrails · P0-05 ✓ dead code · P0-06 owner action |
-| P1 Platform, tokens, registries | in progress | U1 ✓ Tailwind 4.3.3 · U2 ✓ TS 6.0.3 · U3 ✓ Vite 7.3.6 + Vitest 4.1.11 · U4 ✓ React Router 8.4 + React 19.3 |
+| P1 Platform, tokens, registries | in progress | U1 ✓ Tailwind 4.3.3 · U2 ✓ TS 6.0.3 · U3 ✓ Vite 7.3.6 + Vitest 4.1.11 · U4 ✓ React Router 8.4 + React 19.3 · S3 ✓ router split |
 | P2 Backend track | not started | G-01 is on the critical path for P3 |
 | P3 Slice A — shell + Chats list | not started | |
 | P4 Slice B — chat workspace | not started | |
