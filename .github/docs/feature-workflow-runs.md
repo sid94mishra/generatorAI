@@ -278,8 +278,7 @@ API:
 - `GET /api/workflow-runs/:id/permission-mode`
 - `POST /api/workflow-runs/:id/permission-mode` body `{ mode }`
 - `GET /api/workflow-runs/:id/pending-interrupts` — list `awaiting_input` stages with their `interruptData`
-- `POST /api/workflow-runs/:id/stages/:stageId/approve` body `{ approved, value?, reason? }`
-- `POST /api/workflow-runs/:id/stages/:stageId/reject` body `{ reason? }` (alias for approve with `approved:false` but stage still resumes; "reject" semantically means "deny this action and continue")
+- `POST /api/workflow-runs/:id/stages/:stageId/approve` body `{ outcome: approved | changes_requested | rejected, value?, reason?, followUpPrompt? }` (400 without an outcome)
 
 Web `HitlPanel` (in Run Settings drawer) provides the UI: 4-mode dropdown + per-stage approve/reject buttons.
 
