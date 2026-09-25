@@ -21,7 +21,24 @@ import {
   SetChatPermissionModeSchema,
   coerceAgentMode,
 } from '@generatorai/shared';
-import type { ChatMessage, ChatSourceControlOptions, PlanDocument } from '@generatorai/shared';
+import {
+  CHAT_BULK_MAX_IDS,
+  CHAT_LIST_DEFAULT_LIMIT,
+  CHAT_LIST_MAX_LIMIT,
+  CHAT_LIST_SORTS,
+  CHAT_LIST_STATES,
+  NotFoundError,
+} from '@generatorai/shared';
+import type {
+  ChatBulkFailure,
+  ChatBulkResult,
+  ChatListSort,
+  ChatListState,
+  ChatMessage,
+  ChatSourceControlOptions,
+  PlanDocument,
+} from '@generatorai/shared';
+import type { ChatListRequest } from '@generatorai/core';
 
 /**
  * Body of `POST /chats/:id/cancel`. The budget is clamped, not rejected: the
@@ -199,21 +216,127 @@ function canBypassPermissions(req: { principal?: { scopes?: readonly string[] } 
  * Send on it and shows the preparation error, so it travels with the chat
  * rather than requiring a second request.
  */
-/**
- * A message rendered as one line of catalogue text.
- *
- * Fenced code, images and long tool output all collapse: the row has ~40
- * characters of usable width on a phone, and a preview that starts with
- * ```ts tells the reader nothing about the conversation.
- */
-function previewText(content: string): string {
-  const flat = content
-    .replace(/```[\s\S]*?```/g, ' [code] ')
-    .replace(/!\[[^\]]*\]\([^)]*\)/g, ' [image] ')
-    .replace(/[*_`#>]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return flat.length > 160 ? `${flat.slice(0, 159)}…` : flat;
+// ── Chat list v2 (G-02) ─────────────────────────────────────────
+
+/** Most values one repeated filter may carry, and the longest one. */
+const MAX_FILTER_VALUES = 50;
+const MAX_FILTER_VALUE_LENGTH = 200;
+
+type Parsed<T> = { ok: true; value: T } | { ok: false; message: string };
+
+/** A query parameter that may repeat (`?tag=a&tag=b`), as a list of strings. */
+function listParam(query: Record<string, unknown>, key: string): Parsed<string[]> {
+  const raw = query[key];
+  if (raw === undefined) return { ok: true, value: [] };
+  const values = Array.isArray(raw) ? raw : [raw];
+  if (values.some((v) => typeof v !== 'string' || v.length === 0 || v.length > MAX_FILTER_VALUE_LENGTH)) {
+    return { ok: false, message: `\`${key}\` must be non-empty strings of at most ${MAX_FILTER_VALUE_LENGTH} characters` };
+  }
+  if (values.length > MAX_FILTER_VALUES) {
+    return { ok: false, message: `\`${key}\` may repeat at most ${MAX_FILTER_VALUES} times` };
+  }
+  return { ok: true, value: [...new Set(values as string[])] };
+}
+
+function singleParam(query: Record<string, unknown>, key: string): Parsed<string | undefined> {
+  const raw = query[key];
+  if (raw === undefined) return { ok: true, value: undefined };
+  if (typeof raw !== 'string') return { ok: false, message: `\`${key}\` must be given once` };
+  return { ok: true, value: raw };
+}
+
+/** The wire query of `GET /chats`, validated. Exported for the route tests. */
+export function parseChatListQuery(query: Record<string, unknown>): Parsed<ChatListRequest> {
+  const status = singleParam(query, 'status');
+  if (!status.ok) return status;
+  if (status.value !== undefined && status.value !== 'active' && status.value !== 'archived') {
+    return { ok: false, message: '`status` must be "active" or "archived"' };
+  }
+
+  const lists: Record<'projectId' | 'agentRef' | 'tag' | 'state', string[]> = {
+    projectId: [],
+    agentRef: [],
+    tag: [],
+    state: [],
+  };
+  for (const key of Object.keys(lists) as Array<keyof typeof lists>) {
+    const parsed = listParam(query, key);
+    if (!parsed.ok) return parsed;
+    lists[key] = parsed.value;
+  }
+  const badState = lists.state.find((s) => !(CHAT_LIST_STATES as readonly string[]).includes(s));
+  if (badState) {
+    return { ok: false, message: `\`state\` must be one of ${CHAT_LIST_STATES.join(', ')}` };
+  }
+
+  const sort = singleParam(query, 'sort');
+  if (!sort.ok) return sort;
+  if (sort.value !== undefined && !(CHAT_LIST_SORTS as readonly string[]).includes(sort.value)) {
+    return { ok: false, message: `\`sort\` must be one of ${CHAT_LIST_SORTS.join(', ')}` };
+  }
+
+  const q = singleParam(query, 'q');
+  if (!q.ok) return q;
+  if (q.value !== undefined && q.value.length > MAX_FILTER_VALUE_LENGTH) {
+    return { ok: false, message: `\`q\` must be at most ${MAX_FILTER_VALUE_LENGTH} characters` };
+  }
+
+  const cursor = singleParam(query, 'cursor');
+  if (!cursor.ok) return cursor;
+  if (cursor.value !== undefined && (cursor.value.length === 0 || cursor.value.length > 1_000)) {
+    return { ok: false, message: '`cursor` is not a cursor this server issued' };
+  }
+
+  const limitRaw = singleParam(query, 'limit');
+  if (!limitRaw.ok) return limitRaw;
+  let limit = CHAT_LIST_DEFAULT_LIMIT;
+  if (limitRaw.value !== undefined) {
+    const n = Number(limitRaw.value);
+    if (!Number.isInteger(n) || n < 1) return { ok: false, message: '`limit` must be a positive integer' };
+    limit = Math.min(n, CHAT_LIST_MAX_LIMIT);
+  }
+
+  const workers = singleParam(query, 'workers');
+  if (!workers.ok) return workers;
+  if (workers.value !== undefined && workers.value !== 'true' && workers.value !== 'false') {
+    return { ok: false, message: '`workers` must be "true" or "false"' };
+  }
+
+  const text = q.value?.trim();
+  return {
+    ok: true,
+    value: {
+      ...(status.value ? { status: status.value as 'active' | 'archived' } : {}),
+      projectIds: lists.projectId,
+      agentRefs: lists.agentRef,
+      tags: lists.tag,
+      states: lists.state as ChatListState[],
+      ...(text ? { q: text } : {}),
+      sort: (sort.value as ChatListSort | undefined) ?? 'activity',
+      ...(cursor.value ? { cursor: cursor.value } : {}),
+      limit,
+      workers: workers.value === 'true',
+    },
+  };
+}
+
+/** Body of `POST /chats/archive` and `POST /chats/delete`. */
+const ChatBulkSchema = z.object({
+  ids: z.array(z.string().min(1).max(MAX_FILTER_VALUE_LENGTH)).min(1).max(CHAT_BULK_MAX_IDS),
+});
+
+function uniqueIds(ids: readonly string[]): string[] {
+  return [...new Set(ids)];
+}
+
+function bulkFailure(id: string, err: unknown): ChatBulkFailure {
+  if (err instanceof NotFoundError) return { id, code: 'NOT_FOUND', message: `Chat not found: ${id}` };
+  const code = (err as { code?: unknown })?.code;
+  return {
+    id,
+    code: typeof code === 'string' ? code : 'INTERNAL_ERROR',
+    message: err instanceof Error ? err.message : String(err),
+  };
 }
 
 async function withWorkspacePrep<T extends { workspaceId?: string; conversationSeed?: string }>(
@@ -324,78 +447,77 @@ export function createChatApiRoutes(container: Container): Router {
     }
   });
 
-  // GET /chats — List chats with optional ?status and ?projectId filter
+  // GET /chats — chat list v2 (G-02 / G-14, docs/redesign/05-gap-matrix.md)
+  //
+  //   ?status=active|archived  &projectId=  &agentRef=  &tag=  &state=needs_you|running|done|failed
+  //   &q=  &sort=activity|created|name  &cursor=  &limit=50  &workers=false
+  //
+  // → { items: ChatListItem[], nextCursor, total, counts: { all, active, archived } }
+  //
+  // projectId / agentRef / tag / state repeat for "any of". Keyset paging:
+  // `nextCursor` is opaque and only valid for the same sort. Worker chats are
+  // left out unless `workers=true`.
   router.get('/', async (req, res, next) => {
     try {
-      const projectId = req.query['projectId'] as string | undefined;
-
-      // Two spellings of the same filter reach this route. The shared client
-      // (web, mobile, CLI) sends `archived=true|false`; older callers and the
-      // OpenAPI surface send `status=active|archived`. The route understood
-      // only `status`, so every `--status` filter from the terminal was
-      // silently ignored and the full list came back regardless.
-      let statusFilter = req.query['status'] as string | undefined;
-      const archivedParam = req.query['archived'];
-      if (statusFilter === undefined && archivedParam !== undefined) {
-        statusFilter = String(archivedParam) === 'true' ? 'archived' : 'active';
-      }
-      if (statusFilter && !['active', 'archived'].includes(statusFilter)) {
-        res.status(400).json({
-          error: { code: 'VALIDATION_ERROR', message: 'Invalid status. Must be "active" or "archived"' },
-        });
+      const parsed = parseChatListQuery(req.query as Record<string, unknown>);
+      if (!parsed.ok) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: parsed.message } });
         return;
       }
-
-      // `limit` was documented on the terminal's `chat list`, accepted by the
-      // client, and dropped here — so "give me 3" returned all 343, and every
-      // client paid for the whole table on every list.
-      const limitParam = req.query['limit'];
-      let limit: number | undefined;
-      if (limitParam !== undefined) {
-        const parsed = Number(limitParam);
-        if (!Number.isInteger(parsed) || parsed < 1) {
-          res.status(400).json({
-            error: { code: 'VALIDATION_ERROR', message: '`limit` must be a positive integer' },
-          });
-          return;
-        }
-        limit = Math.min(parsed, 500);
-      }
-
-      const chats = await chatManagementService.listChats(
-        statusFilter as 'active' | 'archived' | undefined,
-        projectId,
+      const page = await container.chatListService.list(parsed.value);
+      const items = await Promise.all(
+        page.items.map(async ({ chat, summary }) => ({
+          ...(await withWorkspacePrep(container, chat)),
+          summary,
+        })),
       );
-      const page = limit === undefined ? chats : chats.slice(0, limit);
-      // One-line preview per row, in ONE extra query for the whole page. The
-      // catalogue is the phone's main navigation surface and a title plus a
-      // relative time is not enough to tell two chats apart.
-      //
-      // Best-effort: a preview is a nicety, and a catalogue that fails
-      // outright because the preview query did is worse than one without.
-      let previews = new Map<string, ChatMessage>();
-      try {
-        previews = await container.chatMessageRepo.latestBySessionIds(
-          page.map((c) => c.sessionId).filter((id): id is string => Boolean(id)),
-        );
-      } catch (previewErr) {
-        logger.warn(
-          `[ChatRoutes] Could not load list previews: ${
-            previewErr instanceof Error ? previewErr.message : String(previewErr)
-          }`,
-        );
+      res.json({ ...page, items });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /chats/archive { ids } — archive several chats (the list's bulk bar).
+  // Per-id outcome; an already archived chat counts as archived.
+  router.post('/archive', validate(ChatBulkSchema), async (req, res, next) => {
+    try {
+      const ids = uniqueIds((req.body as { ids: string[] }).ids);
+      const result: ChatBulkResult = { succeeded: [], failed: [] };
+      for (const id of ids) {
+        try {
+          const chat = await container.chatEntityRepo.getById(id);
+          if (chat.status !== 'archived') await chatManagementService.archiveChat(id);
+          result.succeeded.push(id);
+        } catch (err) {
+          result.failed.push(bulkFailure(id, err));
+        }
       }
-      const withPreview = page.map((c) => {
-        const last = c.sessionId ? previews.get(c.sessionId) : undefined;
-        if (!last) return c;
-        return {
-          ...c,
-          preview: previewText(last.content),
-          previewRole: last.role,
-          previewAt: last.timestamp,
-        };
+      logger.info(`[ChatRoutes] Bulk archive: ${result.succeeded.length} archived, ${result.failed.length} failed`, {
+        requestId: req.requestId,
       });
-      res.json(await Promise.all(withPreview.map((c) => withWorkspacePrep(container, c))));
+      res.json(result);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /chats/delete { ids } — permanently delete several chats.
+  router.post('/delete', validate(ChatBulkSchema), async (req, res, next) => {
+    try {
+      const ids = uniqueIds((req.body as { ids: string[] }).ids);
+      const result: ChatBulkResult = { succeeded: [], failed: [] };
+      for (const id of ids) {
+        try {
+          await chatManagementService.deleteChat(id);
+          result.succeeded.push(id);
+        } catch (err) {
+          result.failed.push(bulkFailure(id, err));
+        }
+      }
+      logger.info(`[ChatRoutes] Bulk delete: ${result.succeeded.length} deleted, ${result.failed.length} failed`, {
+        requestId: req.requestId,
+      });
+      res.json(result);
     } catch (err) {
       next(err);
     }

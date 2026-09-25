@@ -2479,6 +2479,75 @@ export const MIGRATIONS: readonly Migration[] = [
       name: 'chat_source_control_options',
       sql: [`ALTER TABLE chats ADD COLUMN source_control TEXT;`],
     },
+    // v55 — chat list v2 (redesign G-02, docs/redesign/05-gap-matrix.md).
+    //
+    // The list row's summary columns, so a page of chats can be filtered,
+    // sorted by last activity and show its last outcome and "Changes ±"
+    // without N extra requests:
+    //   last_activity_at    newest turn start/end (epoch ms)
+    //   last_turn_*         how the most recent turn ended
+    //   changes_*           net change of the chat's workspace, baseline →
+    //                       working, recomputed at turn end and on a debounced
+    //                       `workspace.changed`; NULL = not computed yet (the
+    //                       server fills it in lazily the first time the row
+    //                       is listed).
+    //
+    // The next free number on this branch. The Workflow Overhaul branch plans
+    // its own v55 (drops run history); whichever lands second renumbers
+    // before merging (07-phases.md §"Running in parallel") — versions must
+    // stay contiguous (SchemaConvergence.test.ts).
+    //
+    // Backfill: last activity is the newest message (else creation time); the
+    // last turn is read off the newest assistant message — `partial` means it
+    // was stopped, an `Error:` system line means it failed. Timestamps in
+    // `chats` / `chat_messages` are epoch SECONDS; the new ones are ms.
+    {
+      version: 55,
+      name: 'chat_list_summary_columns',
+      sql: [
+        `ALTER TABLE chats ADD COLUMN last_activity_at INTEGER;`,
+        `ALTER TABLE chats ADD COLUMN last_turn_status TEXT;`,
+        `ALTER TABLE chats ADD COLUMN last_turn_ended_at INTEGER;`,
+        `ALTER TABLE chats ADD COLUMN last_turn_error TEXT;`,
+        `ALTER TABLE chats ADD COLUMN changes_files INTEGER;`,
+        `ALTER TABLE chats ADD COLUMN changes_additions INTEGER;`,
+        `ALTER TABLE chats ADD COLUMN changes_deletions INTEGER;`,
+        `UPDATE chats SET last_activity_at = COALESCE(
+           (SELECT MAX(m.timestamp) FROM chat_messages m WHERE m.session_id = chats.session_id),
+           chats.created_at
+         ) * 1000
+         WHERE last_activity_at IS NULL;`,
+        `WITH last_reply AS (
+           SELECT session_id, ts, metadata FROM (
+             SELECT m.session_id, m.timestamp AS ts, m.metadata,
+                    ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.timestamp DESC, m.rowid DESC) AS rn
+             FROM chat_messages m
+             WHERE m.role = 'assistant'
+           ) WHERE rn = 1
+         ),
+         outcome AS (
+           SELECT session_id, ts,
+             CASE WHEN json_valid(metadata) THEN
+               (SELECT substr(e.value, 8, 500) FROM json_each(metadata, '$.systemMessages') e
+                 WHERE e.type = 'text' AND e.value LIKE 'Error:%' LIMIT 1)
+             END AS error,
+             CASE WHEN json_valid(metadata) THEN json_extract(metadata, '$.partial') END AS partial
+           FROM last_reply
+         )
+         UPDATE chats SET
+           last_turn_status = CASE
+             WHEN o.partial = 1 THEN 'cancelled'
+             WHEN o.error IS NOT NULL THEN 'failed'
+             ELSE 'succeeded'
+           END,
+           last_turn_ended_at = o.ts * 1000,
+           last_turn_error = CASE WHEN o.partial = 1 THEN NULL ELSE trim(o.error) END
+         FROM outcome o
+         WHERE o.session_id = chats.session_id AND chats.last_turn_status IS NULL;`,
+        `CREATE INDEX IF NOT EXISTS idx_chats_last_activity ON chats(last_activity_at);`,
+        `CREATE INDEX IF NOT EXISTS idx_chats_workspace_id ON chats(workspace_id);`,
+      ],
+    },
   ];
 
 

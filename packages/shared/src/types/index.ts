@@ -486,3 +486,33 @@ export {
   countAttention,
   compareAttentionItems,
 } from './Attention.js';
+
+// ── Chat list v2 (G-02) ──
+export type {
+  ChatTurnStatus,
+  ChatChangeStats,
+  ChatLastTurn,
+  ChatListAgent,
+  ChatListPreview,
+  ChatListSummary,
+  ChatListItem,
+  ChatListState,
+  ChatListSort,
+  ChatListQuery,
+  ChatListCounts,
+  ChatListPage,
+  ChatBulkRequest,
+  ChatBulkFailure,
+  ChatBulkResult,
+  ChatUpdatedEventData,
+} from './ChatList.js';
+export {
+  CHAT_TURN_STATUSES,
+  CHAT_LIST_STATES,
+  CHAT_LIST_SORTS,
+  CHAT_LIST_DEFAULT_LIMIT,
+  CHAT_LIST_MAX_LIMIT,
+  CHAT_BULK_MAX_IDS,
+  chatListSearchParams,
+  liveChatIds,
+} from './ChatList.js';

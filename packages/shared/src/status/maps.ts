@@ -13,6 +13,7 @@ import type { StageRunStatus } from '../types/WorkflowRun.js';
 import type { WorkflowStatus } from '../types/WorkflowStateMachine.js';
 import type { AutomationExecutionStatus, AutomationRunItemStatus } from '../types/Automation.js';
 import type { BackgroundTaskStatus, ChatStatus } from '../types/Chat.js';
+import type { ChatTurnStatus } from '../types/ChatList.js';
 import type { SessionStatus } from '../types/Session.js';
 import type { PlanStatus, AgentInteractionStatus } from '../types/AgentMode.js';
 import type { CheckConclusion, DeviceLoginStatus, ScmFlowResult, ScmFlowStep } from '../types/SourceControl.js';
@@ -104,6 +105,13 @@ export const STATUS_MAPS = {
     active: null,
     archived: null,
   } satisfies Record<ChatStatus, StatusMapping | null>,
+
+  /** How a chat's last turn ended (chat list v2, G-02) — the Status column when the chat is not live. */
+  chatTurn: {
+    succeeded: m('succeeded'),
+    failed: m('failed'),
+    cancelled: m('skipped', 'Cancelled'),
+  } satisfies Record<ChatTurnStatus, StatusMapping | null>,
 
   stream: {
     idle: null,
@@ -233,6 +241,7 @@ export type StatusValue<D extends StatusDomain> = keyof (typeof STATUS_MAPS)[D] 
 /** Default-word overrides per domain (chats say "Done", not "Succeeded"). */
 export const STATUS_DOMAIN_LABELS: Partial<Record<StatusDomain, Partial<Record<StatusState, string>>>> = {
   chat: { succeeded: 'Done' },
+  chatTurn: { succeeded: 'Done' },
   stream: { succeeded: 'Done' },
   backgroundTask: { succeeded: 'Done' },
 };

@@ -360,6 +360,17 @@ export const chats = sqliteTable(
     agentOverrides: text('agent_overrides', { mode: 'json' }).$type<AgentOverrides>(),
     /** Frozen, redacted projection captured at session creation. */
     agentSnapshot: text('agent_snapshot', { mode: 'json' }).$type<ResolvedAgentProjection>(),
+    // ── Chat list v2 (v55, G-02) — the list row's summary columns ──
+    /** Newest turn start or end (creation time before the first turn). Epoch ms. */
+    lastActivityAt: integer('last_activity_at', { mode: 'timestamp_ms' }),
+    /** How the most recent turn ended; NULL until the first one does. */
+    lastTurnStatus: text('last_turn_status', { enum: ['succeeded', 'failed', 'cancelled'] }),
+    lastTurnEndedAt: integer('last_turn_ended_at', { mode: 'timestamp_ms' }),
+    lastTurnError: text('last_turn_error'),
+    /** Net change of the chat's workspace (baseline → working); NULL = not computed. */
+    changesFiles: integer('changes_files'),
+    changesAdditions: integer('changes_additions'),
+    changesDeletions: integer('changes_deletions'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },
@@ -370,6 +381,8 @@ export const chats = sqliteTable(
     createdAtIdx: index('idx_chats_created_at').on(table.createdAt),
     parentChatIdx: index('idx_chats_parent_chat_id').on(table.parentChatId),
     agentRefIdx: index('idx_chats_agent_ref').on(table.agentRef),
+    lastActivityIdx: index('idx_chats_last_activity').on(table.lastActivityAt),
+    workspaceIdx: index('idx_chats_workspace_id').on(table.workspaceId),
   }),
 );
 

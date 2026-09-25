@@ -15,6 +15,7 @@ import type { TerminalHostKind } from './Terminal.js';
 import type { ScmFlowResult } from './SourceControl.js';
 import type { SttEngineKind } from './Voice.js';
 import type { AttentionCountsEventData, AttentionRemoveEventData, AttentionUpsertEventData } from './Attention.js';
+import type { ChatUpdatedEventData } from './ChatList.js';
 
 /**
  * Per-operation file-change stats, derived from the provider's structured
@@ -186,6 +187,9 @@ export type AgentEvent =
   | { kind: 'chat.prompt_failed'; data: { chatId: string; error: string } }
   | { kind: 'chat.archived'; data: { chatId: string } }
   | { kind: 'chat.deleted'; data: { chatId: string } }
+  // A list row's summary moved (last activity, last turn outcome, change stats — G-02).
+  // Lifecycle kind: list views on the `global` scope refetch on it.
+  | { kind: 'chat.updated'; data: ChatUpdatedEventData }
   // ── Agent-native source control (doc §5) ──
   //
   // Emitted on the chat's SESSION scope after a turn whose chat opted into

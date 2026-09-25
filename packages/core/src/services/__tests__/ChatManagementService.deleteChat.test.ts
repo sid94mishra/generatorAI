@@ -50,7 +50,7 @@ function build(opts: {
     { getById: async () => session, delete: sessionDelete } as never,
     { deleteBySession: async () => {} } as never,
     {} as never,
-    { deleteSessionEvents: async () => {} } as never,
+    { deleteSessionEvents: async () => {}, emitGlobal: async () => {} } as never,
     opts.withWorkspaceManager === false
       ? {}
       : { workspaceManager: { getExecutionWorkspace, deleteWorkspace } as never },

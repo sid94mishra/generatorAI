@@ -4,14 +4,19 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
-  Chat, ChatStatus, BackgroundTaskStatus,
+  Chat, ChatStatus, BackgroundTaskStatus, ChatChangeStats, ChatTurnStatus,
   WorkflowDefinition,
   StageDefinition,
   StageEdge,
   WorkflowRun, WorkflowRunStatus,
   StageRun, StageRunStatus,
 } from '@generatorai/shared';
-import type { IChatRepository } from '../src/domain/ports/IChatRepository.js';
+import type {
+  ChatListActivity,
+  ChatListPageQuery,
+  ChatListPageResult,
+  IChatRepository,
+} from '../src/domain/ports/IChatRepository.js';
 import type { IWorkflowDefinitionRepository } from '../src/domain/ports/IWorkflowDefinitionRepository.js';
 import type { IStageDefinitionRepository } from '../src/domain/ports/IStageDefinitionRepository.js';
 import type { IStageEdgeRepository } from '../src/domain/ports/IStageEdgeRepository.js';
@@ -98,6 +103,72 @@ export class MockChatRepository implements IChatRepository {
 
   async clearOrchestratorWaveState(chatId: string): Promise<void> {
     this.waveState.delete(chatId);
+  }
+
+  // ── Chat list v2 (G-02) — in-memory summary columns ──
+  private activity = new Map<string, ChatListActivity>();
+
+  private activityOf(chat: Chat): ChatListActivity {
+    return this.activity.get(chat.id) ?? { lastActivityAt: chat.createdAt };
+  }
+
+  async getByWorkspaceId(workspaceId: string): Promise<Chat[]> {
+    return [...this.store.values()].filter((c) => c.workspaceId === workspaceId).map((c) => ({ ...c }));
+  }
+
+  /** Status / project / workers filters and the activity sort only; the SQL behaviour is tested against the real repository. */
+  async listPage(query: ChatListPageQuery): Promise<ChatListPageResult> {
+    const { filter } = query;
+    const base = [...this.store.values()].filter(
+      (c) =>
+        (filter.includeWorkers || !c.parentChatId) &&
+        (!filter.projectIds?.length || (c.projectId !== undefined && filter.projectIds.includes(c.projectId))),
+    );
+    const matching = base
+      .filter((c) => !filter.status || c.status === filter.status)
+      .sort((a, b) => this.activityOf(b).lastActivityAt.getTime() - this.activityOf(a).lastActivityAt.getTime());
+    const rows = matching.slice(0, query.limit).map((c) => ({ chat: { ...c }, activity: this.activityOf(c) }));
+    return {
+      rows,
+      next: null,
+      total: matching.length,
+      counts: {
+        active: base.filter((c) => c.status === 'active').length,
+        archived: base.filter((c) => c.status === 'archived').length,
+      },
+    };
+  }
+
+  async getListActivity(id: string): Promise<ChatListActivity | null> {
+    const chat = this.store.get(id);
+    return chat ? this.activityOf(chat) : null;
+  }
+
+  async touchActivity(id: string, at: Date): Promise<void> {
+    const chat = this.store.get(id);
+    if (!chat) return;
+    const current = this.activityOf(chat);
+    if (at.getTime() > current.lastActivityAt.getTime()) this.activity.set(id, { ...current, lastActivityAt: at });
+  }
+
+  async recordTurnEnd(id: string, turn: { status: ChatTurnStatus; endedAt: Date; error?: string }): Promise<void> {
+    const chat = this.store.get(id);
+    if (!chat) return;
+    const current = this.activityOf(chat);
+    this.activity.set(id, {
+      ...current,
+      lastActivityAt: turn.endedAt.getTime() > current.lastActivityAt.getTime() ? turn.endedAt : current.lastActivityAt,
+      lastTurn: { ...turn },
+    });
+  }
+
+  async setChangeStats(id: string, stats: ChatChangeStats): Promise<boolean> {
+    const chat = this.store.get(id);
+    if (!chat) return false;
+    const current = this.activityOf(chat);
+    if (JSON.stringify(current.changes) === JSON.stringify(stats)) return false;
+    this.activity.set(id, { ...current, changes: { ...stats } });
+    return true;
   }
 }
 

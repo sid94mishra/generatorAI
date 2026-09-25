@@ -298,4 +298,15 @@ export type {
   AttentionConsentEntry,
 } from './AttentionService.js';
 export { StreamingChatRegistry } from './StreamingChatRegistry.js';
+
+// G-02 — chat list v2 (paging, filters, row summaries) and its "Changes ±" column
+export {
+  ChatListService,
+  encodeChatListCursor,
+  decodeChatListCursor,
+  previewText,
+} from './ChatListService.js';
+export type { ChatListRequest, ChatListEntry, ChatListServiceDeps } from './ChatListService.js';
+export { ChatChangeStatsService, netChangeStats } from './ChatChangeStatsService.js';
+export type { ChatChangeStatsDeps, ChangeStatsRepo } from './ChatChangeStatsService.js';
 export type { StreamingChangeListener } from './StreamingChatRegistry.js';

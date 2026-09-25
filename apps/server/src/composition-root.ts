@@ -155,6 +155,9 @@ import {
   PendingConsentStore,
   // G-01 — attention feed
   AttentionService,
+  ChatChangeStatsService,
+  ChatListService,
+  netChangeStats,
   // Integrated Terminal
   TerminalService,
   NodePtyHost,
@@ -1873,6 +1876,43 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     consent: computerConsentStore,
     logger,
   });
+
+  // G-02 — chat list v2. The "Changes ±" column is the chat workspace's net
+  // change (baseline → working), recomputed at turn end and on a coalesced
+  // `workspace.changed`; the list itself pages over the chats table and
+  // resolves the live Status filter against the attention feed.
+  const chatChangeStatsService = new ChatChangeStatsService({
+    eventBus,
+    chats: chatEntityRepo,
+    computeStats: async (workspaceId) => {
+      const ws = await workspaceManager.getExecutionWorkspace(workspaceId);
+      const info = ws ? await workspaceManager.getWorkspaceInfo(workspaceId) : null;
+      if (!ws || !info) return null;
+      // Same reason as the review re-anchor below: the memoised working tree
+      // is for one panel render, and this runs because the tree just moved.
+      changeSummaryService.invalidateWorkingTree();
+      const summary = await changeSummaryService.getSummary({
+        workspaceId,
+        rootPath: ws.codeRoot ?? ws.rootPath,
+        worktrees: (info.worktrees ?? []).map((wt) => ({
+          alias: wt.alias,
+          worktreePath: resolveWorktreePath(info.rootPath, wt.worktreePath),
+        })),
+        mounts: await workspaceManager.toMountRefs(ws),
+        autoInit: false,
+      });
+      return netChangeStats(summary.repos);
+    },
+    logger,
+  });
+  const chatListService = new ChatListService({
+    chats: chatEntityRepo,
+    attention: attentionService,
+    messages: chatMessageRepo,
+    agents: agentService,
+    changeStats: chatChangeStatsService,
+    logger,
+  });
   const cuaDriverBridge = new CuaDriverBridge({
     logger,
     maxSnapshotElements: computerUseConfig.maxSnapshotElements,
@@ -2401,6 +2441,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     screenCast,
     // G-01 — attention feed
     attentionService,
+    // G-02 — chat list v2
+    chatListService,
+    chatChangeStatsService,
     // Expose the execution-workspace + artifact repos so routes can read
     // browser artifacts + workspace rows without a full service round-trip.
     executionWorkspaceRepo,
@@ -2683,6 +2726,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       } catch (err) {
         logger.warn(`[Container] attention feed failed to start: ${err instanceof Error ? err.message : String(err)}`);
       }
+      chatChangeStatsService.start();
 
       logger.info('[Container] All services initialized');
     },
@@ -2690,6 +2734,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     /** Graceful shutdown. */
     async shutdown(): Promise<void> {
       attentionService.stop();
+      chatChangeStatsService.stop();
       scriptRunner.shutdown();
       automationService.shutdown();
       // Track A1 — stop the idempotency-key sweeper.
@@ -2880,6 +2925,10 @@ export interface Container {
   computerConsentStore: PendingConsentStore;
   /** G-01 — Needs you + Running snapshot for `GET /api/attention`. */
   attentionService: AttentionService;
+  /** G-02 — one page of `GET /api/chats` with row summaries. */
+  chatListService: ChatListService;
+  /** G-02 — keeps each chat's "Changes ±" columns current. */
+  chatChangeStatsService: ChatChangeStatsService;
   screenCast: ScreenCast;
   /** Execution workspace repo — exposed for the browser route (read workspace row). */
   executionWorkspaceRepo: InstanceType<typeof DrizzleExecutionWorkspaceRepository>;

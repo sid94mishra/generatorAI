@@ -853,6 +853,106 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
         required: ['needsYou', 'running', 'byEntity'],
       },
+      // ── Chat list v2 (G-02; mirrors packages/shared/src/types/ChatList.ts) ──
+      ChatChangeStats: {
+        type: 'object',
+        description: 'Net change of the chat workspace, session baseline → working tree.',
+        properties: {
+          files: { type: 'integer' },
+          additions: { type: 'integer' },
+          deletions: { type: 'integer' },
+        },
+        required: ['files', 'additions', 'deletions'],
+      },
+      ChatListSummary: {
+        type: 'object',
+        properties: {
+          lastActivityAt: { type: 'string', format: 'date-time', description: 'Newest turn start or end (creation time before the first turn).' },
+          lastTurn: {
+            type: 'object',
+            description: 'Absent until the first turn ends.',
+            properties: {
+              status: { type: 'string', enum: ['succeeded', 'failed', 'cancelled'] },
+              endedAt: { type: 'string', format: 'date-time' },
+              error: { type: 'string', description: 'First line of the provider error; only on `failed`.' },
+            },
+            required: ['status', 'endedAt'],
+          },
+          changes: {
+            allOf: [{ $ref: '#/components/schemas/ChatChangeStats' }],
+            description: 'Absent when the chat has no workspace or the stats were not computed yet.',
+          },
+          agent: {
+            type: 'object',
+            properties: {
+              ref: { type: 'string' },
+              name: { type: 'string' },
+              role: { type: 'string', enum: ['agent', 'orchestrator'] },
+            },
+            required: ['ref', 'name'],
+          },
+          preview: {
+            type: 'object',
+            description: 'One line of the newest message.',
+            properties: {
+              text: { type: 'string' },
+              role: { type: 'string', enum: ['user', 'assistant', 'system', 'tool'] },
+              at: { type: 'string', format: 'date-time' },
+            },
+            required: ['text', 'role', 'at'],
+          },
+        },
+        required: ['lastActivityAt'],
+      },
+      ChatListItem: {
+        allOf: [
+          { $ref: '#/components/schemas/Chat' },
+          {
+            type: 'object',
+            properties: { summary: { $ref: '#/components/schemas/ChatListSummary' } },
+            required: ['summary'],
+          },
+        ],
+      },
+      ChatListPage: {
+        type: 'object',
+        properties: {
+          items: { type: 'array', items: { $ref: '#/components/schemas/ChatListItem' } },
+          nextCursor: { type: 'string', nullable: true, description: 'Pass back as `cursor` (same sort); null on the last page.' },
+          total: { type: 'integer', description: 'Rows matching every filter, across all pages.' },
+          counts: {
+            type: 'object',
+            description: 'All / Active / Archived — every filter applied except `status`.',
+            properties: {
+              all: { type: 'integer' },
+              active: { type: 'integer' },
+              archived: { type: 'integer' },
+            },
+            required: ['all', 'active', 'archived'],
+          },
+        },
+        required: ['items', 'nextCursor', 'total', 'counts'],
+      },
+      ChatBulkRequest: {
+        type: 'object',
+        properties: { ids: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 200 } },
+        required: ['ids'],
+      },
+      ChatBulkResult: {
+        type: 'object',
+        properties: {
+          succeeded: { type: 'array', items: { type: 'string' } },
+          failed: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: { id: { type: 'string' }, code: { type: 'string' }, message: { type: 'string' } },
+              required: ['id', 'code', 'message'],
+            },
+          },
+        },
+        required: ['succeeded', 'failed'],
+      },
       AttentionSnapshot: {
         type: 'object',
         description:
@@ -919,18 +1019,37 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     '/api/chats': {
       get: {
         tags: ['Chats'],
-        summary: 'List chats',
+        summary: 'List chats, one page at a time (G-02)',
+        description:
+          'Keyset-paged. `projectId`, `agentRef`, `tag` and `state` may repeat (any of); different filters must all match. ' +
+          '`state=needs_you|running` is resolved against the attention feed; `done|failed` is the last turn outcome of a chat that is not live. ' +
+          'Worker chats are left out unless `workers=true`.',
         parameters: [
-          { in: 'query', name: 'status', schema: { type: 'string', enum: ['active', 'archived'] } },
+          { in: 'query', name: 'status', schema: { type: 'string', enum: ['active', 'archived'] }, description: 'Lifecycle segment; omitted = all.' },
+          { in: 'query', name: 'projectId', schema: { type: 'array', items: { type: 'string' } }, style: 'form', explode: true },
+          { in: 'query', name: 'agentRef', schema: { type: 'array', items: { type: 'string' } }, style: 'form', explode: true },
+          { in: 'query', name: 'tag', schema: { type: 'array', items: { type: 'string' } }, style: 'form', explode: true },
+          {
+            in: 'query',
+            name: 'state',
+            schema: { type: 'array', items: { type: 'string', enum: ['needs_you', 'running', 'done', 'failed'] } },
+            style: 'form',
+            explode: true,
+          },
+          { in: 'query', name: 'q', schema: { type: 'string', maxLength: 200 }, description: 'Case-insensitive substring of the name, the description or a tag.' },
+          { in: 'query', name: 'sort', schema: { type: 'string', enum: ['activity', 'created', 'name'], default: 'activity' } },
+          { in: 'query', name: 'cursor', schema: { type: 'string' }, description: '`nextCursor` of the previous page (same sort).' },
+          { in: 'query', name: 'limit', schema: { type: 'integer', minimum: 1, maximum: 200, default: 50 } },
+          { in: 'query', name: 'workers', schema: { type: 'boolean', default: false } },
         ],
         responses: {
           '200': {
-            description: 'Chats',
-            content: {
-              'application/json': {
-                schema: { type: 'array', items: { $ref: '#/components/schemas/Chat' } },
-              },
-            },
+            description: 'One page of chats',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatListPage' } } },
+          },
+          '400': {
+            description: 'Invalid filter, sort, limit or cursor',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },
       },
@@ -958,6 +1077,41 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             description: 'Created chat',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Chat' } } },
           },
+        },
+      },
+    },
+    '/api/chats/archive': {
+      post: {
+        tags: ['Chats'],
+        summary: 'Archive several chats (G-02 bulk bar)',
+        description: 'Per-id outcome; an already archived chat counts as archived.',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatBulkRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'Per-id outcome',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatBulkResult' } } },
+          },
+          '400': { description: 'Invalid body', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/chats/delete': {
+      post: {
+        tags: ['Chats'],
+        summary: 'Permanently delete several chats (G-02 bulk bar)',
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatBulkRequest' } } },
+        },
+        responses: {
+          '200': {
+            description: 'Per-id outcome',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatBulkResult' } } },
+          },
+          '400': { description: 'Invalid body', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },

@@ -54,7 +54,16 @@ export type {
   IWebhookRepository,
 } from './IRepositories.js';
 
-export type { IChatRepository } from './IChatRepository.js';
+export type {
+  IChatRepository,
+  ChatListActivity,
+  ChatListRow,
+  ChatListStateFilter,
+  ChatListFilter,
+  ChatListKeyset,
+  ChatListPageQuery,
+  ChatListPageResult,
+} from './IChatRepository.js';
 export type { IAgentRepository, AgentListFilter, AgentUsage } from './IAgentRepository.js';
 export type {
   IPlanRepository,

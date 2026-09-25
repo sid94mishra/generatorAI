@@ -40,6 +40,8 @@ export const LIFECYCLE_EVENT_KINDS: ReadonlySet<string> = new Set([
   'chat.created',
   'chat.archived',
   'chat.deleted',
+  // Chat list v2 (G-02): a row's summary columns moved.
+  'chat.updated',
   'chat.mode_changed',
   'chat.agent_changed',
   // Workflow runs

@@ -510,11 +510,24 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     stageExecutionService,
     sessionAllocator,
     chatEntityRepo,
-    // The chat LIST route enriches each row with a one-line preview of its
-    // newest message, in one batched query. Without this double the route
-    // answers 502 and the failure reads like a route bug.
     chatMessageRepo: {
       latestBySessionIds: vi.fn().mockResolvedValue(new Map()),
+    },
+    // G-02 — the chat LIST route is one page from this service. The paging,
+    // filter and summary behaviour is tested against a real database in
+    // src/__tests__/chatList.test.ts; this double only answers the shape.
+    chatListService: {
+      list: vi.fn().mockResolvedValue({
+        items: [
+          {
+            chat: { id: 'chat-1', sessionId: 'sess-1', name: 'Test Chat', status: 'active', tags: [], createdAt: new Date(), updatedAt: new Date() },
+            summary: { lastActivityAt: new Date().toISOString() },
+          },
+        ],
+        nextCursor: null,
+        total: 1,
+        counts: { all: 1, active: 1, archived: 0 },
+      }),
     },
     workflowRunRepo,
     stageRunRepo,

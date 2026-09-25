@@ -5,6 +5,7 @@
 import type {
   Chat,
   ChatStatus,
+  ChatTurnStatus,
   CreateChatParams,
   ChatMessage,
   ChatMessageMetadata,
@@ -2887,6 +2888,8 @@ export class ChatManagementService {
       kind: 'harness.user_message',
       data: { content: prompt, chatId } as { content: string },
     } as AgentEvent);
+    // G-02 — a turn starting is activity: the chat list sorts by it.
+    await this.updateListSummary(chat, () => this.chatRepo.touchActivity(chatId, new Date()));
 
     // "Cancelled" describes THIS turn. Only the aborted-`sendPrompt` catch
     // used to clear the flag, so a provider whose abort resolves instead of
@@ -2916,6 +2919,25 @@ export class ChatManagementService {
 
     // Idempotency guard: prevent double-persistence per turn.
     let assistantPersisted = false;
+    // G-02 — how the turn ended, for the chat list's Status column. The
+    // first provider error of the turn; recorded once, by whichever route
+    // finalises first (see `finalizeTurn`).
+    let turnError: string | undefined;
+    let outcomeRecorded = false;
+    const recordTurnOutcome = (opts: { cancelled?: boolean; error?: string }): void => {
+      if (outcomeRecorded) return;
+      outcomeRecorded = true;
+      const cancelled = opts.cancelled === true || this.cancelledTurns.has(chatId);
+      const error = opts.error ?? turnError;
+      const status: ChatTurnStatus = cancelled ? 'cancelled' : error ? 'failed' : 'succeeded';
+      void this.updateListSummary(chat, () =>
+        this.chatRepo.recordTurnEnd(chatId, {
+          status,
+          endedAt: new Date(),
+          ...(status === 'failed' && error ? { error: firstLine(error) } : {}),
+        }),
+      );
+    };
 
     /**
      * Write whatever this turn produced into the transcript.
@@ -2925,7 +2947,10 @@ export class ChatManagementService {
      * which took the only reference to the accumulated content with it, so the
      * partial answer was streamed to the screen and then lost forever.
      */
-    const finalizeTurn = async (opts: { partial?: boolean } = {}): Promise<void> => {
+    const finalizeTurn = async (
+      opts: { partial?: boolean; cancelled?: boolean; error?: string } = {},
+    ): Promise<void> => {
+      recordTurnOutcome(opts);
       if (assistantPersisted) return;
       // Whether this turn was CANCELLED is a fact about the chat, not about
       // who happened to call this function.
@@ -3155,6 +3180,7 @@ export class ChatManagementService {
           }
           case 'harness.error':
             turnMetadata.systemMessages!.push(`Error: ${data?.['message']}`);
+            turnError ??= typeof data?.['message'] === 'string' ? data['message'] : 'The provider reported an error';
             break;
         }
 
@@ -3319,7 +3345,7 @@ export class ChatManagementService {
       // for good when the abandoned query never settled.
       if (this.cancelledTurns.has(chatId)) {
         this.cancelledTurns.delete(chatId);
-        await finalizeTurn({ partial: true });
+        await finalizeTurn({ partial: true, cancelled: true });
         this.turnFinalizers.delete(chatId);
         this.activeSubscriptions.delete(chatId);
         unsub();
@@ -3338,13 +3364,16 @@ export class ChatManagementService {
       const errMsg = err instanceof Error ? err.message : String(err);
       // A user-initiated stop aborts the in-flight prompt, which surfaces here
       // as a rejection. That is the requested outcome, not a failure to report.
-      if (!this.cancelledTurns.delete(chatId)) {
+      const wasCancelled = this.cancelledTurns.delete(chatId);
+      if (!wasCancelled) {
         await this.eventBus.emit(chat.sessionId, {
           kind: 'harness.error',
           data: { message: `Failed to send prompt: ${errMsg}` },
         });
       }
-      await finalizeTurn({ partial: true });
+      await finalizeTurn(
+        wasCancelled ? { partial: true, cancelled: true } : { partial: true, error: `Failed to send prompt: ${errMsg}` },
+      );
       await this.eventBus.emit(chat.sessionId, {
         kind: 'harness.idle',
         data: {},
@@ -4100,7 +4129,38 @@ export class ChatManagementService {
     await this.chatRepo.delete(chatId);
     await this.eventBus.deleteSessionEvents(chat.sessionId);
     await this.sessionRepo.delete(chat.sessionId);
+
+    // List views drop the row (G-02). On the global path: the session this
+    // chat's events lived on is gone.
+    await this.eventBus
+      .emitGlobal({ kind: 'chat.deleted', data: { chatId } })
+      .catch((err: unknown) =>
+        console.warn(`[ChatManagement] deleteChat ${chatId}: could not announce the delete:`, err instanceof Error ? err.message : String(err)),
+      );
   }
+
+  /**
+   * Write one of the chat list's summary columns and tell list views
+   * (`chat.updated`, G-02). Best effort: the list is a view of the chat, and a
+   * failed bookkeeping write must never fail the turn that caused it.
+   */
+  private async updateListSummary(chat: Chat, write: () => Promise<unknown>): Promise<void> {
+    try {
+      await write();
+      await this.eventBus.emit(chat.sessionId, { kind: 'chat.updated', data: { chatId: chat.id } });
+    } catch (err) {
+      console.warn(
+        `[ChatManagement] could not update the list summary of chat ${chat.id}:`,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+}
+
+/** The first non-empty line of an error, capped: a list cell, not a log. */
+function firstLine(text: string): string {
+  const line = text.split(/\r?\n/).find((l) => l.trim().length > 0)?.trim() ?? text.trim();
+  return line.length > 300 ? `${line.slice(0, 299)}…` : line;
 }
 
 // ── Sources ──────────────────────────────────────────────────

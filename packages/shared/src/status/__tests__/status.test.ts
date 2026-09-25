@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AutomationExecutionStatus, AutomationRunItemStatus } from '../../types/Automation.js';
 import type { AgentInteractionStatus, PlanStatus } from '../../types/AgentMode.js';
 import type { BackgroundTaskStatus, ChatStatus } from '../../types/Chat.js';
+import type { ChatTurnStatus } from '../../types/ChatList.js';
 import type { SessionStatus } from '../../types/Session.js';
 import type { CheckConclusion, DeviceLoginStatus, ScmFlowResult, ScmFlowStep } from '../../types/SourceControl.js';
 import type { WidgetInstanceStatus } from '../../types/Widget.js';
@@ -44,6 +45,7 @@ const UNION_VALUES: Record<StatusDomain, string[]> = {
   automationRunItem: every<AutomationRunItemStatus>({ pending: true, running: true, completed: true, failed: true, cancelled: true }),
   backgroundTask: every<BackgroundTaskStatus>({ spawned: true, running: true, needs_review: true, completed: true, failed: true, cancelled: true }),
   chat: every<ChatStatus>({ active: true, archived: true }),
+  chatTurn: every<ChatTurnStatus>({ succeeded: true, failed: true, cancelled: true }),
   stream: every<StreamStatus>({ idle: true, pending: true, streaming: true, thinking: true, complete: true, error: true }),
   session: every<SessionStatus>({ created: true, active: true, paused: true, closing: true, closed: true, error: true }),
   toolCall: every<ToolCallStatus>({ running: true, complete: true }),
@@ -73,6 +75,7 @@ const TABLE: Record<StatusDomain, string> = {
   automationRunItem: 'pending → queued; running → running; completed → succeeded; failed → failed; cancelled → skipped "Cancelled"',
   backgroundTask: 'spawned → queued "Starting"; running → running; needs_review → needs_you "Needs review"; completed → succeeded "Done"; failed → failed; cancelled → skipped "Cancelled"',
   chat: 'active → null; archived → null',
+  chatTurn: 'succeeded → succeeded; failed → failed; cancelled → skipped "Cancelled"',
   stream: 'idle → null; pending → running "Starting"; streaming → running; thinking → running "Thinking"; complete → succeeded "Done"; error → failed',
   session: 'created → queued; active → null; paused → paused; closing → running "Closing"; closed → null; error → failed',
   toolCall: 'running → running; complete → succeeded',

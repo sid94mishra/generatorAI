@@ -2,9 +2,25 @@
 // DrizzleChatRepository — IChatRepository impl (v2)
 // ────────────────────────────────────────────────────────────────
 
-import { count, eq } from 'drizzle-orm';
-import type { IChatRepository } from '@generatorai/core';
-import type { Chat, ChatLocalFolder, ChatStatus, BackgroundTaskMeta, BackgroundTaskStatus } from '@generatorai/shared';
+import { and, asc, count, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import type {
+  ChatListActivity,
+  ChatListFilter,
+  ChatListKeyset,
+  ChatListPageQuery,
+  ChatListPageResult,
+  IChatRepository,
+} from '@generatorai/core';
+import type {
+  Chat,
+  ChatChangeStats,
+  ChatListSort,
+  ChatLocalFolder,
+  ChatStatus,
+  ChatTurnStatus,
+  BackgroundTaskMeta,
+  BackgroundTaskStatus,
+} from '@generatorai/shared';
 import { NotFoundError, StorageError, DEFAULT_AGENT_MODE, coerceAgentMode } from '@generatorai/shared';
 import { chats } from '../schema.js';
 import type { AppDatabase } from '../index.js';
@@ -61,6 +77,7 @@ export class DrizzleChatRepository implements IChatRepository {
         agentVersion: chat.agentVersion ?? null,
         agentOverrides: chat.agentOverrides ?? null,
         agentSnapshot: chat.agentSnapshot ?? null,
+        lastActivityAt: chat.createdAt,
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
       });
@@ -243,6 +260,99 @@ export class DrizzleChatRepository implements IChatRepository {
       .where(eq(chats.id, chatId));
   }
 
+  async getByWorkspaceId(workspaceId: string): Promise<Chat[]> {
+    const rows = await this.db
+      .select()
+      .from(chats)
+      .where(eq(chats.workspaceId, workspaceId))
+      .orderBy(chats.createdAt);
+    return rows.map((r) => this.mapRow(r));
+  }
+
+  // ── Chat list v2 (G-02) ──────────────────────────────────────
+
+  async listPage(query: ChatListPageQuery): Promise<ChatListPageResult> {
+    const { filter, sort, after, limit } = query;
+    const key = sortKey(sort);
+    const where = filterConditions(filter, true);
+    if (after) where.push(keysetCondition(sort, key, after));
+
+    const rows = await this.db
+      .select({ row: chats, sortValue: key })
+      .from(chats)
+      .where(and(...where))
+      .orderBy(...sortOrder(sort, key))
+      .limit(limit + 1);
+    const page = rows.slice(0, limit);
+    const last = page[page.length - 1];
+    const next: ChatListKeyset | null =
+      rows.length > limit && last ? { value: last.sortValue, id: last.row.id } : null;
+
+    const grouped = await this.db
+      .select({ status: chats.status, n: count() })
+      .from(chats)
+      .where(and(...filterConditions(filter, false)))
+      .groupBy(chats.status);
+    const counts = { active: 0, archived: 0 };
+    for (const g of grouped) {
+      if (g.status === 'active' || g.status === 'archived') counts[g.status] = g.n;
+    }
+    const total = filter.status ? counts[filter.status] : counts.active + counts.archived;
+
+    return {
+      rows: page.map(({ row }) => ({ chat: this.mapRow(row), activity: mapActivity(row) })),
+      next,
+      total,
+      counts,
+    };
+  }
+
+  async getListActivity(id: string): Promise<ChatListActivity | null> {
+    const rows = await this.db.select().from(chats).where(eq(chats.id, id)).limit(1);
+    const row = rows[0];
+    return row ? mapActivity(row) : null;
+  }
+
+  async touchActivity(id: string, at: Date): Promise<void> {
+    await this.db
+      .update(chats)
+      .set({ lastActivityAt: sql`MAX(COALESCE(${chats.lastActivityAt}, 0), ${at.getTime()})` })
+      .where(eq(chats.id, id));
+  }
+
+  async recordTurnEnd(
+    id: string,
+    turn: { status: ChatTurnStatus; endedAt: Date; error?: string },
+  ): Promise<void> {
+    await this.db
+      .update(chats)
+      .set({
+        lastTurnStatus: turn.status,
+        lastTurnEndedAt: turn.endedAt,
+        lastTurnError: turn.status === 'failed' ? (turn.error ?? null) : null,
+        lastActivityAt: sql`MAX(COALESCE(${chats.lastActivityAt}, 0), ${turn.endedAt.getTime()})`,
+      })
+      .where(eq(chats.id, id));
+  }
+
+  async setChangeStats(id: string, stats: ChatChangeStats): Promise<boolean> {
+    const result = await this.db
+      .update(chats)
+      .set({
+        changesFiles: stats.files,
+        changesAdditions: stats.additions,
+        changesDeletions: stats.deletions,
+      })
+      .where(
+        and(
+          eq(chats.id, id),
+          sql`(${chats.changesFiles} IS NOT ${stats.files} OR ${chats.changesAdditions} IS NOT ${stats.additions} OR ${chats.changesDeletions} IS NOT ${stats.deletions})`,
+        ),
+      )
+      .run();
+    return result.changes > 0;
+  }
+
   private mapRow(row: typeof chats.$inferSelect): Chat {
     const backgroundTask: BackgroundTaskMeta | undefined =
       row.parentChatId
@@ -287,4 +397,94 @@ export class DrizzleChatRepository implements IChatRepository {
       updatedAt: row.updatedAt,
     };
   }
+}
+
+// ── Chat list helpers ──────────────────────────────────────────
+
+type ChatRow = typeof chats.$inferSelect;
+
+/** The value a page is ordered by; returned with each row so the cursor uses SQLite's own collation. */
+function sortKey(sort: ChatListSort): SQL<number | string> {
+  switch (sort) {
+    case 'created':
+      return sql<number>`${chats.createdAt}`;
+    case 'name':
+      return sql<string>`lower(${chats.name})`;
+    case 'activity':
+    default:
+      // `created_at` is epoch seconds, the activity column epoch ms.
+      return sql<number>`COALESCE(${chats.lastActivityAt}, ${chats.createdAt} * 1000)`;
+  }
+}
+
+function sortOrder(sort: ChatListSort, key: SQL<number | string>): SQL[] {
+  return sort === 'name' ? [asc(key), asc(chats.id)] : [desc(key), desc(chats.id)];
+}
+
+function keysetCondition(sort: ChatListSort, key: SQL<number | string>, after: ChatListKeyset): SQL {
+  const past = sort === 'name' ? gt : lt;
+  return or(past(key, after.value), and(eq(key, after.value), past(chats.id, after.id)))!;
+}
+
+/** `!` escapes LIKE's wildcards, so a search for `50%` means the text. */
+function likePattern(text: string): string {
+  return `%${text.toLowerCase().replace(/[!%_]/g, (c) => `!${c}`)}%`;
+}
+
+function filterConditions(filter: ChatListFilter, withStatus: boolean): SQL[] {
+  const where: SQL[] = [];
+  if (withStatus && filter.status) where.push(eq(chats.status, filter.status));
+  if (!filter.includeWorkers) where.push(isNull(chats.parentChatId));
+  if (filter.projectIds?.length) where.push(inArray(chats.projectId, [...filter.projectIds]));
+  if (filter.agentRefs?.length) where.push(inArray(chats.agentRef, [...filter.agentRefs]));
+  if (filter.tags?.length) {
+    const tags = sql.join(filter.tags.map((t) => sql`${t}`), sql`, `);
+    where.push(
+      sql`EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${chats.tags}) THEN ${chats.tags} ELSE '[]' END) AS tag WHERE tag.value IN (${tags}))`,
+    );
+  }
+  const q = filter.q?.trim();
+  if (q) {
+    const pattern = likePattern(q);
+    where.push(
+      sql`(lower(${chats.name}) LIKE ${pattern} ESCAPE '!'
+        OR lower(COALESCE(${chats.description}, '')) LIKE ${pattern} ESCAPE '!'
+        OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${chats.tags}) THEN ${chats.tags} ELSE '[]' END) AS t
+                   WHERE lower(t.value) LIKE ${pattern} ESCAPE '!'))`,
+    );
+  }
+  if (filter.state) {
+    const { ids, turnStatuses, excludeIds } = filter.state;
+    const anyOf: SQL[] = [];
+    if (ids.length) anyOf.push(inArray(chats.id, [...ids]));
+    if (turnStatuses.length) {
+      const ended = [inArray(chats.lastTurnStatus, [...turnStatuses])];
+      if (excludeIds.length) ended.push(notInArray(chats.id, [...excludeIds]));
+      anyOf.push(and(...ended)!);
+    }
+    // An empty state filter (e.g. "Running" while nothing runs) matches nothing.
+    where.push(anyOf.length ? or(...anyOf)! : sql`0`);
+  }
+  return where;
+}
+
+function mapActivity(row: ChatRow): ChatListActivity {
+  const activity: ChatListActivity = {
+    lastActivityAt: row.lastActivityAt ?? row.createdAt,
+  };
+  if (row.lastTurnStatus && row.lastTurnEndedAt) {
+    activity.lastTurn = {
+      status: row.lastTurnStatus,
+      endedAt: row.lastTurnEndedAt,
+      ...(row.lastTurnError ? { error: row.lastTurnError } : {}),
+    };
+  }
+  if (row.changesFiles !== null && row.changesAdditions !== null && row.changesDeletions !== null) {
+    activity.changes = {
+      files: row.changesFiles,
+      additions: row.changesAdditions,
+      deletions: row.changesDeletions,
+    };
+  }
+  return activity;
 }
