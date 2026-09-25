@@ -10,3 +10,4 @@ export { workspaceExposure, applyWorkspaceExposure, runWorkspace } from './works
 export { TurnContextRegistry, withAgentToolPolicy, stampCardSequence, type GatePort } from './gates.js';
 export { applyModeConfig, planPromptPrefix, type ModeConfigInput } from './modeConfig.js';
 export { StageGatePort, type StageGatePortDeps } from './StageGatePort.js';
+export { runPermissionSource, runPermissionMode, turnOptionsFrom, checkPermissionGating, TRIGGER_PERMISSION_MODE_KEY, type PermissionModeSource } from './permissionSource.js';

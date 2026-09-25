@@ -157,19 +157,10 @@ export function createWorkflowScriptRoutes(container: Container): Router {
         variables: resolvedVars,
         ...(projectId ? { projectId } : {}),
         stageOverrides: [...profileOverrides, ...(stageOverrides ?? [])],
+        // The profile's permission mode is the run row's own (the script
+        // schema accepts the run vocabulary only).
+        ...(resolvedPermissionMode ? { permissionMode: resolvedPermissionMode } : {}),
       });
-
-      // Apply the profile's permission mode (the run vocabulary; the script
-      // schema rejects anything else at load).
-      if (resolvedPermissionMode) {
-        try {
-          await workflowRunService.setPermissionMode(run.id, resolvedPermissionMode);
-        } catch (err) {
-          logger.warn(
-            `[WorkflowScripts] Failed to set permissionMode '${resolvedPermissionMode}' on run ${run.id}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
 
       await workflowRunService.startRun(run.id);
       logger.info(`[WorkflowScripts] Created and started run from script '${id}': ${run.id}`);

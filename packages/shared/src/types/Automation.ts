@@ -2,6 +2,8 @@
 // Automation — Types for automation definitions and executions
 // ────────────────────────────────────────────────────────────────
 
+import type { WorkflowRunPermissionMode } from './WorkflowRun.js';
+
 /** How the automation is triggered */
 export type AutomationTriggerType = 'manual' | 'schedule' | 'webhook';
 
@@ -148,6 +150,14 @@ export interface Automation {
   /** Per-iteration retry policy. Null means "no retry" (default). */
   retryPolicy?: AutomationRetryPolicy;
 
+  /**
+   * PD-18 — the permission mode this automation's unattended runs use.
+   * Required: nobody is watching a scheduled or webhook run, so the choice is
+   * made when the automation is saved (the editor offers `acceptEdits`).
+   * `bypassPermissions` on a webhook trigger needs the admin:settings scope.
+   */
+  permissionMode: WorkflowRunPermissionMode;
+
   lastRunAt?: Date;
   /**
    * Next scheduled firing, written on create / update / enable / fire by
@@ -238,6 +248,8 @@ export interface CreateAutomationParams {
   iterationMode?: IterationMode;
   defaultDataset?: AutomationDataset;
   retryPolicy?: AutomationRetryPolicy;
+  /** PD-18 — required; see `Automation.permissionMode`. */
+  permissionMode: WorkflowRunPermissionMode;
 }
 /** Params for updating an automation */
 export interface UpdateAutomationParams {
@@ -259,6 +271,7 @@ export interface UpdateAutomationParams {
   iterationMode?: IterationMode | null;
   defaultDataset?: AutomationDataset | null;
   retryPolicy?: AutomationRetryPolicy | null;
+  permissionMode?: WorkflowRunPermissionMode;
 }
 
 /** Body of `POST /api/automations/:id/trigger`. Optional dataset

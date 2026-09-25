@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { randomBytes } from 'node:crypto';
+import { canBypassPermissions } from './permissionScope.js';
 import { Router } from 'express';
 import type { Request, Response } from 'express';
 import type { z } from 'zod';
@@ -171,6 +172,17 @@ export function createAutomationRoutes(container: Container): Router {
    */
   router.post('/', validate(CreateAutomationSchema), async (req, res, next) => {
     try {
+      // PD-18 — an unattended webhook run with approvals off is the riskiest
+      // automation there is: anyone holding the token drives the agent.
+      if (req.body.triggerType === 'webhook' && req.body.permissionMode === 'bypassPermissions' && !canBypassPermissions(req)) {
+        res.status(403).json({
+          error: {
+            code: 'FORBIDDEN',
+            message: 'A webhook automation with tool approvals off requires the admin:settings scope.',
+          },
+        });
+        return;
+      }
       const automation = await automationService.createAutomation(req.body);
       const webhookSigningSecret = await mintWebhookSigningSecret(automation);
       res.status(201).json(
@@ -236,6 +248,20 @@ export function createAutomationRoutes(container: Container): Router {
   /** PATCH /api/automations/:id — Update automation (token/credentials redacted) */
   router.patch('/:id', validate(UpdateAutomationSchema), async (req, res, next) => {
     try {
+      if (req.body.permissionMode !== undefined || req.body.triggerType !== undefined) {
+        const existing = await automationService.getAutomation(param(req, 'id'));
+        const trigger = req.body.triggerType ?? existing.triggerType;
+        const mode = req.body.permissionMode ?? existing.permissionMode;
+        if (trigger === 'webhook' && mode === 'bypassPermissions' && !canBypassPermissions(req)) {
+          res.status(403).json({
+            error: {
+              code: 'FORBIDDEN',
+              message: 'A webhook automation with tool approvals off requires the admin:settings scope.',
+            },
+          });
+          return;
+        }
+      }
       const automation = await automationService.updateAutomation(param(req, 'id'), req.body);
       res.json(toPublicAutomation(automation));
     } catch (err) {

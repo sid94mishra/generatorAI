@@ -49,6 +49,14 @@ function formatDate(date: Date | string | undefined): string {
   });
 }
 
+/** PD-18 — the unattended runs' tool-approval policy. */
+const PERMISSION_MODE_LABEL: Record<string, string> = {
+  acceptEdits: 'Accept edits',
+  default: 'Ask',
+  plan: 'Plan (read-only)',
+  bypassPermissions: 'Bypass',
+};
+
 export function AutomationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -204,6 +212,10 @@ export function AutomationDetailPage() {
               ? <><Repeat className="h-4 w-4" /> Schema · {automation.iterationMode.kind.replace('_', ' ')}</>
               : 'Single run'}
           </div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-xs font-medium text-muted-foreground">Permission mode</div>
+          <div className="mt-1 text-sm font-semibold text-foreground">{PERMISSION_MODE_LABEL[automation.permissionMode] ?? automation.permissionMode}</div>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="text-xs font-medium text-muted-foreground">Last Run</div>

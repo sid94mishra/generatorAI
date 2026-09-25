@@ -38,6 +38,8 @@ const TRIGGERS = ['manual', 'schedule', 'webhook'] as const;
 // does not accept and `validate()` would have silently stripped.
 const ERROR_POLICIES = ['continue', 'stop'] as const;
 const DATASET_FORMATS = ['json_array', 'csv', 'jsonl'] as const;
+// PD-18 — the permission mode an automation's unattended runs use.
+const PERMISSION_MODES = ['acceptEdits', 'default', 'plan', 'bypassPermissions'] as const;
 
 /** Parses a JSON-valued flag, or fails naming the flag. */
 function parseJsonFlag(flag: string, raw: string): unknown {
@@ -143,6 +145,13 @@ export function automationCommands(): CommandSpec[] {
         { name: 'var', description: 'Static variable key=value (repeatable)', type: 'string', variadic: true },
         { name: 'maxConcurrency', description: 'Parallel run cap (1-10)', type: 'number' },
         { name: 'onError', description: 'Error policy', type: 'string', choices: ERROR_POLICIES },
+        {
+          name: 'permissionMode',
+          description: 'Permission mode of the unattended runs (bypass on a webhook needs admin:settings)',
+          type: 'string',
+          choices: PERMISSION_MODES,
+          default: 'acceptEdits',
+        },
         projectFlag,
         { name: 'enabled', description: 'Enable immediately', type: 'boolean' },
       ],
@@ -160,6 +169,7 @@ export function automationCommands(): CommandSpec[] {
           var: z.array(z.string()).optional(),
           maxConcurrency: z.coerce.number().int().min(1).max(10).optional(),
           onError: z.enum(ERROR_POLICIES).optional(),
+          permissionMode: z.enum(PERMISSION_MODES).default('acceptEdits'),
           project: z.string().optional(),
           enabled: z.boolean().optional(),
         },
@@ -208,6 +218,7 @@ export function automationCommands(): CommandSpec[] {
           name: flags.name,
           workflowIds,
           triggerType: flags.trigger,
+          permissionMode: flags.permissionMode,
           variables: parseKeyValues(flags.var),
           ...compact({
             cronExpression: flags.schedule,
@@ -252,6 +263,7 @@ export function automationCommands(): CommandSpec[] {
         { name: 'schedule', description: 'New cron expression', type: 'string' },
         { name: 'maxConcurrency', description: 'Parallel run cap (1-10)', type: 'number' },
         { name: 'onError', description: 'Error policy', type: 'string', choices: ERROR_POLICIES },
+        { name: 'permissionMode', description: 'Permission mode of the unattended runs', type: 'string', choices: PERMISSION_MODES },
         { name: 'var', description: 'Static variable key=value (repeatable, replaces)', type: 'string', variadic: true },
       ],
       schema: inputSchema(
@@ -261,6 +273,7 @@ export function automationCommands(): CommandSpec[] {
           schedule: z.string().optional(),
           maxConcurrency: z.coerce.number().int().min(1).max(10).optional(),
           onError: z.enum(ERROR_POLICIES).optional(),
+          permissionMode: z.enum(PERMISSION_MODES).optional(),
           var: z.array(z.string()).optional(),
         },
       ),
@@ -277,6 +290,7 @@ export function automationCommands(): CommandSpec[] {
             cronExpression: flags.schedule,
             maxConcurrency: flags.maxConcurrency,
             onError: flags.onError,
+            permissionMode: flags.permissionMode,
             variables: flags.var ? parseKeyValues(flags.var) : undefined,
           }),
           'Pass at least one field to change.',

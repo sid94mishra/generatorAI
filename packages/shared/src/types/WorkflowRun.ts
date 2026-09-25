@@ -50,26 +50,23 @@ export type StageRunStatus =
   | 'awaiting_input';
 
 /**
- * HITL + TOL-04 — permission mode for tool + interrupt prompts.
+ * HITL + TOL-04 — the permission policy a run's tool calls are judged by.
  *
- * Default is `bypassPermissions`: GeneratorAI runs fully autonomous and
- * silently approves every tool call, matching the "it just works" UX
- * the product is opinionated about. Users opt in to human-in-the-loop
- * by flipping the mode (via UI dropdown, CLI flag, or runtime API).
+ * A run with no explicit mode does NOT default to `bypassPermissions` (W-07,
+ * PD-18): the mode resolves through the layers — the run row, the stage's
+ * `session.permissionMode`, the workflow's, the trigger's (an automation's
+ * declared mode), then the deployment posture — and is re-read every turn.
  *
- * - `bypassPermissions` — all requests auto-allow (DEFAULT).
- * - `default`           — rules decide; unmatched requests surface via `awaiting_input`.
- * - `acceptEdits`       — auto-allow file writes; prompt for everything else.
- * - `plan`              — every tool call becomes `awaiting_input` so the
- *                         agent surfaces its plan before executing anything.
+ * - `bypassPermissions` — all requests auto-allow.
+ * - `default`           — every gated request parks the stage (`awaiting_input`).
+ * - `acceptEdits`       — auto-allow file reads and writes; ask for the rest.
+ * - `plan`              — read-only; the agent plans and submits the plan.
  */
 export type WorkflowRunPermissionMode =
   | 'bypassPermissions'
   | 'default'
   | 'acceptEdits'
   | 'plan';
-
-export const DEFAULT_WORKFLOW_RUN_PERMISSION_MODE: WorkflowRunPermissionMode = 'bypassPermissions';
 
 /** WorkflowRun domain entity — one execution instance of a WorkflowDefinition */
 export interface WorkflowRun {
@@ -200,6 +197,17 @@ export interface CreateWorkflowRunParams {
   stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }>;
   /** What started the run (an automation trigger); a scheduled run never inherits an execution context. */
   triggeredBy?: string;
+  /**
+   * The run's own permission mode (the run row; the most specific layer). Omit
+   * to let the stage / workflow / trigger / deployment layers decide.
+   */
+  permissionMode?: WorkflowRunPermissionMode;
+  /**
+   * The trigger's declared mode (an automation's `permissionMode`, PD-18). It
+   * sits UNDER the stage and workflow session modes, above the deployment
+   * posture.
+   */
+  triggerPermissionMode?: WorkflowRunPermissionMode;
 }
 
 // ────────────────────────────────────────────────────────────────

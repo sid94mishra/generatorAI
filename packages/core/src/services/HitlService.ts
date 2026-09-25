@@ -62,13 +62,12 @@
 // larger, higher-risk change to the live turn-execution path and is
 // intentionally left for its own pass.
 //
-// Default mode = auto-approve
-// ---------------------------
-// The product ships with `permission_mode='bypassPermissions'` by default
-// (see WorkflowRun schema + `DEFAULT_WORKFLOW_RUN_PERMISSION_MODE`). That
-// means HITL code paths never fire without explicit opt-in from either
-// the UI mode selector or the CLI permission-mode command. This service
-// is always present but inert until opted into.
+// No bypass default
+// -----------------
+// A run's permission mode resolves through its layers (run row → stage
+// session → workflow session → trigger → deployment posture, P02 WP-2.7);
+// NULL is never bypass. Gated modes park a stage here through the session
+// composer's StageGatePort (tool permission, question, plan review).
 // ────────────────────────────────────────────────────────────────
 
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';

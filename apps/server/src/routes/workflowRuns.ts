@@ -10,6 +10,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { orderStageRuns } from './workflowRunOrder.js';
+import { canBypassPermissions } from './permissionScope.js';
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
 import { z } from 'zod';
@@ -373,6 +374,17 @@ export function createWorkflowRunRoutes(container: Container): Router {
           error: {
             code: 'VALIDATION_ERROR',
             message: `Invalid permission mode. Allowed: ${allowed.join(', ')}`,
+          },
+        });
+        return;
+      }
+      // Raising a run to bypass turns its approval gate off for every later
+      // tool call: an administrative act, like a chat's (review 5.2).
+      if (mode === 'bypassPermissions' && !canBypassPermissions(req)) {
+        res.status(403).json({
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Turning off tool approvals requires the admin:settings scope.',
           },
         });
         return;

@@ -4,6 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
+import { canBypassPermissions } from './permissionScope.js';
 import multer from 'multer';
 import { z } from 'zod';
 import type { Container } from '../composition-root.js';
@@ -178,21 +179,6 @@ const upload = multer({
 // unified `/api/stream?scope=chat&id=<chatId>` endpoint backed by the
 // persistent `stream_cursors` log.
 
-/**
- * May this caller turn a chat's tool approvals OFF?
- *
- * `write:chats` is the default grant for every paired device, and until the
- * approval gate existed it was already equivalent to running code on the host
- * (review 5.2). Now that the gate is real, dropping it is the privileged act
- * and needs an administrative scope; entering a gated mode does not.
- */
-function canBypassPermissions(req: { principal?: { scopes?: readonly string[] } }): boolean {
-  const scopes = req.principal?.scopes;
-  // No principal at all is unauthenticated-loopback development mode, which
-  // is already fully trusted by design.
-  if (!scopes) return true;
-  return scopes.includes('admin:settings');
-}
 
 /**
  * Attach `workspacePrep` (mount readiness) to a chat DTO. The composer gates

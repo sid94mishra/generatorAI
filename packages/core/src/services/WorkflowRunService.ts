@@ -10,11 +10,14 @@ import type {
   CreateWorkflowRunParams,
   ILogger,
 } from '@generatorai/shared';
-import { FORBIDDEN_VARIABLE_NAME_PATTERN, type AgentStage, type SessionSpec, type WorkflowGraph } from '@generatorai/workflow-spec';
+import { FORBIDDEN_VARIABLE_NAME_PATTERN, resolveSessionSpec, type AgentStage, type SessionSpec, type WorkflowGraph } from '@generatorai/workflow-spec';
+import { checkPermissionGating, runPermissionMode, TRIGGER_PERMISSION_MODE_KEY } from './session/permissionSource.js';
+import { ComposeError } from './session/types.js';
+import { getDefaultChatPermissionMode } from './agentModePolicy.js';
 import type { TerminalRunStatus } from './DAGScheduler.js';
 import type { Semaphore } from '../utils/Semaphore.js';
 import type { AdmissionController, AdmissionTicket } from './AdmissionController.js';
-import { generateId, withSpan, getMeter, ValidationError } from '@generatorai/shared';
+import { generateId, withSpan, getMeter, ValidationError, PermissionGatingUnsupportedError } from '@generatorai/shared';
 import * as path from 'node:path';
 
 // ── OTel Metrics ──
@@ -393,6 +396,9 @@ export class WorkflowRunService {
     const engineState: Record<string, unknown> = {};
     if (params.projectId) engineState['__projectId'] = params.projectId;
     if (params.triggeredBy) engineState['__triggeredBy'] = params.triggeredBy;
+    // PD-18 — the trigger's declared mode sits under the stage and workflow
+    // session modes (see `runPermissionMode`); it is not the run row.
+    if (params.triggerPermissionMode) engineState[TRIGGER_PERMISSION_MODE_KEY] = params.triggerPermissionMode;
     if (params.stageOverrides && params.stageOverrides.length > 0) engineState['__stageOverrides'] = params.stageOverrides;
     return this.materializeRun(params, engineState);
   }
@@ -480,6 +486,8 @@ export class WorkflowRunService {
       variables: runVars,
       // W23: carry the ancestor reference if this run was created by retry.
       ...(params.ancestorRunId ? { ancestorRunId: params.ancestorRunId } : {}),
+      // The run row's own permission mode — the most specific layer.
+      ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -577,6 +585,8 @@ export class WorkflowRunService {
           variables: userVars,
           ancestorRunId: runId,
           definitionVersionId: ancestor.definitionVersionId,
+          // A retry keeps the policy the operator ran the ancestor under.
+          ...(ancestor.permissionMode ? { permissionMode: ancestor.permissionMode } : {}),
         },
         engineState,
       );
@@ -632,6 +642,9 @@ export class WorkflowRunService {
 
     const graph = await this.definitions.get(run.definitionVersionId);
     const workflow = graph.workflow;
+
+    // PD-17 — refuse before anything is created for the run.
+    await this.assertPermissionGating(run, graph);
 
     // Set up per-run workspace and artifacts directories if not already set
     if (!run.variables?.['__workingDirectory'] || !run.variables?.['__artifactsDirectory']) {
@@ -1088,21 +1101,18 @@ export class WorkflowRunService {
   }
 
   /**
-   * HITL — change the permission mode on a live run.
-   *
-   * Default is 'bypassPermissions' (auto-approve everything) so runs
-   * never block unless a user has explicitly switched. Valid transitions
-   * are any → any — an operator might start in `plan` mode to review,
-   * then flip to `bypassPermissions` once they've approved a few tool
-   * calls and trust the agent. Emits `workflow_run.permission_mode_changed`.
+   * HITL — change the permission mode on a live run (the run row, the most
+   * specific layer). Stages read it from their next turn on. Valid
+   * transitions are any → any. Emits `workflow_run.permission_mode_changed`
+   * with the previously EFFECTIVE mode.
    */
   async setPermissionMode(
     runId: string,
     mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan',
   ): Promise<void> {
+    const previous = await this.getPermissionMode(runId);
     const run = await this.runRepo.getById(runId);
-    const previous = run.permissionMode ?? 'bypassPermissions';
-    if (previous === mode) return; // no-op
+    if (run.permissionMode === mode) return; // no-op
     await this.runRepo.update(runId, { permissionMode: mode });
     await this.eventBus.emitGlobal({
       kind: 'workflow_run.permission_mode_changed',
@@ -1110,12 +1120,50 @@ export class WorkflowRunService {
     });
   }
 
-  /** HITL — read the active permission mode; NULL columns read as the default. */
+  /**
+   * HITL — the run's effective permission mode: the run row, else the
+   * workflow session, else the trigger's, else the deployment posture. Never
+   * a bypass default (W-07). A stage's own session mode can still tighten it
+   * for that stage.
+   */
   async getPermissionMode(
     runId: string,
   ): Promise<'bypassPermissions' | 'default' | 'acceptEdits' | 'plan'> {
     const run = await this.runRepo.getById(runId);
-    return run.permissionMode ?? 'bypassPermissions';
+    const graph = await this.definitions.get(run.definitionVersionId).catch(() => null);
+    const mode = runPermissionMode(run, undefined, graph?.workflow.session);
+    return (mode ?? getDefaultChatPermissionMode()) as 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan';
+  }
+
+  /**
+   * Resolves which provider a session would run on (MultiHarness routing),
+   * for the PD-17 check at run start. Late-bound by `createCoreServices`.
+   */
+  private providerResolver?: (params: { harnessType?: string; model?: string }) => Promise<string | undefined>;
+
+  setProviderResolver(fn: (params: { harnessType?: string; model?: string }) => Promise<string | undefined>): void {
+    this.providerResolver = fn;
+  }
+
+  /**
+   * PD-17 — refuse a run whose permission mode a stage's provider cannot
+   * hold (opencode never asks, so `default`/`plan` would silently run
+   * unattended). Checked per stage with the stage's own session layered over
+   * the workflow's, before anything is created for the run.
+   */
+  private async assertPermissionGating(run: WorkflowRun, graph: WorkflowGraph): Promise<void> {
+    for (const stage of graph.stages) {
+      const session = resolveSessionSpec(graph.workflow.session, stage.session);
+      const provider =
+        session.harnessType ??
+        (this.providerResolver ? await this.providerResolver({ ...(session.model ? { model: session.model } : {}) }) : undefined);
+      try {
+        checkPermissionGating(provider, runPermissionMode(run, stage.session, graph.workflow.session));
+      } catch (err) {
+        if (err instanceof ComposeError) throw new PermissionGatingUnsupportedError(`Stage "${stage.name}": ${err.message}`);
+        throw err;
+      }
+    }
   }
 
   /**

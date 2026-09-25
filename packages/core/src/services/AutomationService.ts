@@ -230,6 +230,7 @@ export class AutomationService {
       iterationMode: params.iterationMode,
       defaultDataset: params.defaultDataset,
       retryPolicy: params.retryPolicy,
+      permissionMode: params.permissionMode,
       createdAt: now,
       updatedAt: now,
     };
@@ -727,6 +728,7 @@ export class AutomationService {
                     automation.projectId,
                     automation.retryPolicy,
                     execution.triggeredBy,
+                    automation.permissionMode,
                   );
                   if (success) {
                     completedCount++;
@@ -955,6 +957,8 @@ export class AutomationService {
      * mechanism behind it at all.
      */
     triggeredBy: AutomationTriggerType,
+    /** PD-18 — the automation's declared mode: the run's trigger layer. */
+    permissionMode: Automation['permissionMode'],
   ): Promise<boolean> {
     const maxAttempts = Math.max(1, retryPolicy?.maxAttempts ?? 1);
     const retryOn = new Set(retryPolicy?.retryOn ?? []);
@@ -975,6 +979,7 @@ export class AutomationService {
         // records it as engine state); variables are the user's only.
         variables,
         triggeredBy,
+        triggerPermissionMode: permissionMode,
         ...(projectId ? { projectId } : {}),
       });
 

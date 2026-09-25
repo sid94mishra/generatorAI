@@ -30,6 +30,9 @@ export function CreateAutomationPage() {
   const [variablesText, setVariablesText] = useState('{}');
   const [maxConcurrency, setMaxConcurrency] = useState(1);
   const [onError, setOnError] = useState<'continue' | 'stop'>('continue');
+  // PD-18 — unattended runs must declare a permission mode; accept-edits is
+  // the default offered (file edits run, commands wait for an approver).
+  const [permissionMode, setPermissionMode] = useState<CreateAutomationParams['permissionMode']>('acceptEdits');
   const [error, setError] = useState<string | null>(null);
   // Item A5 — one-time reveal of the webhook token + signing secret after
   // a webhook automation is created. Navigation to the detail page is held
@@ -112,6 +115,7 @@ export function CreateAutomationPage() {
       variables,
       maxConcurrency,
       onError,
+      permissionMode,
       projectId: selectedProjectId || undefined,
     };
 
@@ -391,6 +395,22 @@ export function CreateAutomationPage() {
                   { value: 'stop', label: 'Stop on error' },
                 ]}
               />
+            </div>
+            <div className="col-span-2">
+              <label htmlFor="automation-permission-mode" className="mb-1.5 block text-xs font-medium text-muted-foreground">Permission mode</label>
+              <Select id="automation-permission-mode"
+                value={permissionMode}
+                onChange={(v) => setPermissionMode(v as CreateAutomationParams['permissionMode'])}
+                options={[
+                  { value: 'acceptEdits', label: 'Accept edits — file edits run, other tools wait for approval' },
+                  { value: 'default', label: 'Ask — every gated tool call waits for approval' },
+                  { value: 'plan', label: 'Plan — read-only; the plan waits for approval' },
+                  { value: 'bypassPermissions', label: 'Bypass — no approvals (webhook triggers need admin)' },
+                ]}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Nobody watches an automation run, so its tool-approval policy is set here. A stage or workflow can still tighten it.
+              </p>
             </div>
           </div>
         </div>

@@ -120,6 +120,20 @@ export class ValidationError extends GeneratorAIError {
   }
 }
 
+/**
+ * PD-17 — a run's permission mode cannot be enforced by a stage's provider
+ * (a provider that never asks cannot hold `default` or `plan`). Refused at
+ * run start instead of running the stage silently unattended.
+ */
+export class PermissionGatingUnsupportedError extends GeneratorAIError {
+  readonly category = 'validation' as const;
+  readonly severity = 'info' as const;
+  readonly recoverable = false;
+  constructor(message: string) {
+    super(message, 'PERMISSION_GATING_UNSUPPORTED');
+  }
+}
+
 export class SecurityError extends GeneratorAIError {
   readonly category = 'validation' as const;
   readonly severity = 'error' as const;

@@ -120,6 +120,9 @@ export const PreviewIterationsBodySchema = z.object({
   dataset: AutomationDatasetSchema,
 });
 
+/** The permission modes an automation's runs can use (PD-18). */
+export const AutomationPermissionModeSchema = z.enum(['default', 'acceptEdits', 'plan', 'bypassPermissions']);
+
 export const CreateAutomationSchema = z.object({
   name: z.string().min(1).max(200),
   description: z.string().max(2000).optional(),
@@ -139,6 +142,8 @@ export const CreateAutomationSchema = z.object({
   iterationMode: IterationModeSchema.optional(),
   defaultDataset: AutomationDatasetSchema.optional(),
   retryPolicy: AutomationRetryPolicySchema.optional(),
+  // PD-18 — unattended runs must declare their permission mode.
+  permissionMode: AutomationPermissionModeSchema,
 }).refine(
   (data) => {
     if (data.triggerType === 'schedule' && !data.cronExpression) {
@@ -185,4 +190,5 @@ export const UpdateAutomationSchema = z.object({
   iterationMode: IterationModeSchema.nullable().optional(),
   defaultDataset: AutomationDatasetSchema.nullable().optional(),
   retryPolicy: AutomationRetryPolicySchema.nullable().optional(),
+  permissionMode: AutomationPermissionModeSchema.optional(),
 });

@@ -77,6 +77,7 @@ export class DrizzleAutomationRepository {
         iterationMode: automation.iterationMode ?? null,
         defaultDataset: automation.defaultDataset ?? null,
         retryPolicy: automation.retryPolicy ?? null,
+        permissionMode: automation.permissionMode,
         createdAt: automation.createdAt,
         updatedAt: automation.updatedAt,
       });
@@ -173,6 +174,7 @@ export class DrizzleAutomationRepository {
     if (updates.iterationMode !== undefined) values.iterationMode = updates.iterationMode ?? null;
     if (updates.defaultDataset !== undefined) values.defaultDataset = updates.defaultDataset ?? null;
     if (updates.retryPolicy !== undefined) values.retryPolicy = updates.retryPolicy ?? null;
+    if (updates.permissionMode !== undefined) values.permissionMode = updates.permissionMode;
     values.updatedAt = new Date();
 
     await this.db
@@ -303,6 +305,7 @@ export class DrizzleAutomationRepository {
       iterationMode: safeJsonColumn(row.iterationMode, jsonRecord, { fallback: undefined }) as IterationMode | undefined,
       defaultDataset: safeJsonColumn(row.defaultDataset, jsonRecord, { fallback: undefined }) as AutomationDataset | undefined,
       retryPolicy: safeJsonColumn(row.retryPolicy, jsonRecord, { fallback: undefined }) as AutomationRetryPolicy | undefined,
+      permissionMode: row.permissionMode as Automation['permissionMode'],
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

@@ -461,6 +461,12 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     stageSemaphore,
   );
 
+  // PD-17 — which provider a stage would run on, for the run-start check.
+  if (harness.resolveProvider) {
+    const resolveProvider = harness.resolveProvider.bind(harness);
+    workflowRunService.setProviderResolver((p) => resolveProvider(p));
+  }
+
   // X-25 — read side of the durable artifact channel, so a successor's
   // context comes from the predecessor's durable result rather than a column
   // that an interrupted stage may never have written.

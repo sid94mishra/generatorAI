@@ -161,7 +161,6 @@ export type {
   RunScratchpad,
   RunScratchpadEntry,
 } from './WorkflowRun.js';
-export { DEFAULT_WORKFLOW_RUN_PERMISSION_MODE } from './WorkflowRun.js';
 export type { RunProfile, StageRunOverride } from './RunProfile.js';
 
 export type {
