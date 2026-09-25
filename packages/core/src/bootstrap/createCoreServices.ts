@@ -42,6 +42,7 @@ import { EventBus } from '../events/EventBus.js';
 import { ArtifactService } from '../services/ArtifactService.js';
 import { HookExecutor } from '../services/HookExecutor.js';
 import { HookInterceptor } from '../services/HookInterceptor.js';
+import { SessionHookRegistry } from '../services/SessionHookRegistry.js';
 import { TemplateRegistry } from '../services/TemplateRegistry.js';
 import { StartupRecoveryService } from '../services/StartupRecoveryService.js';
 import { ErrorHandler } from '../services/ErrorHandler.js';
@@ -177,6 +178,11 @@ export interface CoreServices {
   templateRegistry: TemplateRegistry;
   hookExecutor: HookExecutor;
   hookInterceptor: HookInterceptor;
+  /**
+   * In-process hooks every agent session runs (W-54). The composition root
+   * turns it into the composer's `buildHookBridge` and feeds it extension hooks.
+   */
+  sessionHookRegistry: SessionHookRegistry;
 
   // Session/workflow services
   artifactService: ArtifactService;
@@ -253,6 +259,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   // ── Hooks ──
   const hookExecutor = new HookExecutor(scriptRunner, httpClient, eventBus);
   const hookInterceptor = new HookInterceptor(hookExecutor, eventBus);
+  const sessionHookRegistry = new SessionHookRegistry(hookExecutor);
 
   // ── Session services ──
   const artifactService = new ArtifactService(artifactRepo, config.artifactsDir);
@@ -527,6 +534,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     templateRegistry,
     hookExecutor,
     hookInterceptor,
+    sessionHookRegistry,
     artifactService,
     recoveryService,
     errorHandler,

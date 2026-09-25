@@ -31,7 +31,8 @@ import type {
   HostModelInfo,
   HostAgentInfo,
 } from '@generatorai/shared';
-import { HOST_PROTOCOL_VERSIONS, isAgentHostRequest } from '@generatorai/shared';
+import { HOST_PROTOCOL_VERSIONS, hydrateHostCallbacks, isAgentHostRequest } from '@generatorai/shared';
+import { randomUUID } from 'node:crypto';
 import { makeHostHello } from '@generatorai/shared/node';
 import type { IAgentHarness } from '@generatorai/core';
 import {
@@ -119,6 +120,15 @@ export class AgentHostServer {
   private readonly createHarness: (() => Promise<IAgentHarness>) | undefined;
   /** Shared so a burst of spawns after a failed boot builds ONE runtime. */
   private pendingRuntimeBuild: Promise<RuntimeEntry | undefined> | undefined;
+  /**
+   * RV-26 — calls into the gateway awaiting their `callback_result`: a host
+   * tool, a gate or a hook bridge member the provider invoked. Keyed by call
+   * id; rejected when their session is torn down.
+   */
+  private readonly pendingCallbacks = new Map<
+    string,
+    { sessionId: string; resolve: (v: unknown) => void; reject: (e: Error) => void }
+  >();
 
   constructor(loggerOrOptions: ILogger | AgentHostServerOptions) {
     const opts: AgentHostServerOptions =
@@ -333,6 +343,17 @@ export class AgentHostServer {
 
   private async handleRequest(req: AgentHostRequest): Promise<void> {
     switch (req.type) {
+      case 'callback_result': {
+        const pending = this.pendingCallbacks.get(req.callId);
+        if (pending) {
+          this.pendingCallbacks.delete(req.callId);
+          if (req.ok) pending.resolve(req.value);
+          else pending.reject(new Error(req.error ?? 'Gateway callback failed'));
+        }
+        this.sendControl({ type: 'ack', reqId: req.reqId, ok: true });
+        return;
+      }
+
       case 'ping':
         this.sendControl({ type: 'pong', reqId: req.reqId });
         return;
@@ -407,7 +428,7 @@ export class AgentHostServer {
       }
 
       case 'send_turn': {
-        const { reqId, sessionId, prompt, attachments } = req;
+        const { reqId, sessionId, prompt, attachments, options } = req;
         const session = this.sessions.get(sessionId);
         const runtime = session ? this.supervisor.get(session.runtimeId) : undefined;
         if (!session || !runtime) {
@@ -421,7 +442,12 @@ export class AgentHostServer {
           // provider: holding the permit only across the await would bound
           // nothing at all.
           await this.acquireTurnPermit(session);
-          await runtime.harness.sendPrompt(session.conversationId, prompt, attachments as never);
+          await runtime.harness.sendPrompt(
+            session.conversationId,
+            prompt,
+            attachments as never,
+            options as Parameters<IAgentHarness['sendPrompt']>[3],
+          );
           this.sendControl({ type: 'ack', reqId, ok: true });
           // M5-fix: cancel any prior waitForTurnEnd before registering a new one.
           this.waitForTurnEnd(sessionId, session, runtime.harness);
@@ -480,7 +506,12 @@ export class AgentHostServer {
     }
   }
 
-  private async handleSpawn(reqId: string, sessionId: string, params: Record<string, unknown>): Promise<void> {
+  private async handleSpawn(reqId: string, sessionId: string, wireParams: Record<string, unknown>): Promise<void> {
+    // RV-26 — the gateway's functions (host tools, gates, hook bridge) arrive
+    // as markers; each becomes a stub that calls back across the channel.
+    const params = hydrateHostCallbacks(wireParams, (callbackId, args) =>
+      this.invokeGatewayCallback(sessionId, callbackId, args),
+    ) as Record<string, unknown>;
     const runtime = (await this.ensureRuntime()) ?? undefined;
     if (!runtime) {
       this.sendControl({ type: 'error', reqId, ok: false, message: 'No provider runtime available', code: 'NO_RUNTIME' });
@@ -652,7 +683,21 @@ export class AgentHostServer {
     session.unsubscribeTurnEnd = unsubscribe;
   }
 
+  /** RV-26 — call a gateway-side function and wait for its answer. */
+  private invokeGatewayCallback(sessionId: string, callbackId: string, args: unknown[]): Promise<unknown> {
+    const callId = randomUUID();
+    return new Promise<unknown>((resolve, reject) => {
+      this.pendingCallbacks.set(callId, { sessionId, resolve, reject });
+      this.sendControl({ type: 'callback_invoke', sessionId, callId, callbackId, args });
+    });
+  }
+
   private teardownSession(sessionId: string): void {
+    for (const [callId, pending] of this.pendingCallbacks) {
+      if (pending.sessionId !== sessionId) continue;
+      this.pendingCallbacks.delete(callId);
+      pending.reject(new Error(`Session ${sessionId} was torn down`));
+    }
     const session = this.sessions.get(sessionId);
     if (!session) return;
     this.sessions.delete(sessionId);

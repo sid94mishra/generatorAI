@@ -21,6 +21,7 @@ import type {
   AgentHostResponse,
   AgentEventNotification,
   SessionEndedNotification,
+  CallbackInvokeNotification,
 } from '@generatorai/shared';
 import { HOST_PROTOCOL_VERSIONS, assertHostHello, isAgentHostResponse } from '@generatorai/shared';
 import { readBuildStamp } from '@generatorai/shared/node';
@@ -67,7 +68,9 @@ export type HostSupervisorState = 'idle' | 'starting' | 'running' | 'restarting'
 type DistributiveOmitReqId<T> = T extends { reqId: string } ? Omit<T, 'reqId'> : never;
 type AnyRequestNoReqId = DistributiveOmitReqId<AgentHostRequest>;
 
-export type HostEventHandler = (msg: AgentEventNotification | SessionEndedNotification) => void;
+export type HostEventHandler = (
+  msg: AgentEventNotification | SessionEndedNotification | CallbackInvokeNotification,
+) => void;
 
 export interface HostSupervisorOptions {
   /** Absolute path to the agent-host entry point (index.js after build). */
@@ -458,8 +461,8 @@ export class HostSupervisor {
 
   private routeResponse(msg: AgentHostResponse): void {
     // Streaming notifications — no reqId correlation
-    if (msg.type === 'agent_event' || msg.type === 'session_ended') {
-      this.onHostEvent?.(msg as AgentEventNotification | SessionEndedNotification);
+    if (msg.type === 'agent_event' || msg.type === 'session_ended' || msg.type === 'callback_invoke') {
+      this.onHostEvent?.(msg);
       return;
     }
 

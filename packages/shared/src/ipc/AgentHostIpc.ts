@@ -38,6 +38,12 @@ export interface SendTurnRequest {
   sessionId: string;
   prompt: string;
   attachments?: Array<{ type: string; id: string }>;
+  /**
+   * The per-turn options (`SendPromptOptions`): the agent mode and the
+   * permission mode the turn runs under. Dropping them made every turn over
+   * the host run under the provider's construction-time default.
+   */
+  options?: { agentMode?: string; permissionMode?: string };
 }
 
 export interface AbortSessionRequest {
@@ -80,7 +86,21 @@ export interface ListAgentsRequest {
   reqId: string;
   sessionId: string;
 }
+/**
+ * RV-26 — the gateway's answer to a `callback_invoke`: the value the host-side
+ * stub resolves with, or the error it rejects with.
+ */
+export interface CallbackResultRequest {
+  type: 'callback_result';
+  reqId: string;
+  callId: string;
+  ok: boolean;
+  value?: unknown;
+  error?: string;
+}
+
 export type AgentHostRequest =
+  | CallbackResultRequest
   | SpawnSessionRequest
   | SendTurnRequest
   | AbortSessionRequest
@@ -135,6 +155,23 @@ export interface AgentEventNotification {
    * event union that every consumer switches over.
    */
   droppedBefore?: number;
+}
+
+/**
+ * RV-26 — the host calls a function that lives in the gateway: a host tool's
+ * handler, a permission / question / plan-review gate, or a hook-bridge
+ * member. Functions cannot cross IPC, so a spawn replaces each with a
+ * `{ __hostCallback: id }` marker (`serializeHostCallbacks`) and the host
+ * rebuilds it as a stub that sends this frame and awaits `callback_result`.
+ * `args` are the call's JSON-serialisable arguments (tool input and any
+ * per-call context the provider passes, such as the tool call id).
+ */
+export interface CallbackInvokeNotification {
+  type: 'callback_invoke';
+  sessionId: string;
+  callId: string;
+  callbackId: string;
+  args: unknown[];
 }
 
 /** Session reached a terminal state. */
@@ -198,6 +235,7 @@ export type AgentHostResponse =
   | RequestError
   | AgentEventNotification
   | SessionEndedNotification
+  | CallbackInvokeNotification
   | HostStats
   | PongResponse
   | ModelsResponse
@@ -212,6 +250,7 @@ export type AgentHostResponse =
  * `handleRequest`'s `default:` branch.
  */
 const REQUEST_TYPES: ReadonlySet<AgentHostRequest['type']> = new Set([
+  'callback_result',
   'spawn_session',
   'send_turn',
   'abort_session',
@@ -229,6 +268,7 @@ const RESPONSE_TYPES: ReadonlySet<AgentHostResponse['type']> = new Set([
   'error',
   'agent_event',
   'session_ended',
+  'callback_invoke',
   'stats',
   'pong',
   'models',
@@ -264,5 +304,88 @@ export function isAgentHostResponse(msg: unknown): msg is AgentHostResponse {
   if (type === 'agent_event' || type === 'session_ended') {
     return typeof record['sessionId'] === 'string';
   }
+  if (type === 'callback_invoke') {
+    return (
+      typeof record['sessionId'] === 'string' &&
+      typeof record['callId'] === 'string' &&
+      typeof record['callbackId'] === 'string' &&
+      Array.isArray(record['args'])
+    );
+  }
   return typeof record['reqId'] === 'string';
+}
+
+// ─── RV-26: functions across the IPC boundary ─────────────────────────────
+
+/** Key of the marker that stands in for a gateway-side function. */
+export const HOST_CALLBACK_KEY = '__hostCallback';
+
+export interface HostCallbackRef {
+  [HOST_CALLBACK_KEY]: string;
+}
+
+export function isHostCallbackRef(value: unknown): value is HostCallbackRef {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    !Array.isArray(value) &&
+    typeof (value as Record<string, unknown>)[HOST_CALLBACK_KEY] === 'string'
+  );
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return false;
+  const proto = Object.getPrototypeOf(value) as unknown;
+  return proto === Object.prototype || proto === null;
+}
+
+/**
+ * Gateway side: replace every function in `value` (tool handlers, gate
+ * callbacks, hook-bridge members) with a marker, registering the function
+ * under the marker's id. Plain objects and arrays are walked; everything
+ * else is copied as is.
+ */
+export function serializeHostCallbacks(value: unknown, register: (fn: (...args: unknown[]) => unknown) => string): unknown {
+  if (typeof value === 'function') {
+    return { [HOST_CALLBACK_KEY]: register(value as (...args: unknown[]) => unknown) } satisfies HostCallbackRef;
+  }
+  if (Array.isArray(value)) return value.map((v) => serializeHostCallbacks(v, register));
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = serializeHostCallbacks(v, register);
+    return out;
+  }
+  return value;
+}
+
+/**
+ * Host side: replace every marker with an async stub that calls the gateway
+ * (`invoke(callbackId, args)`) and resolves with its answer.
+ */
+export function hydrateHostCallbacks(
+  value: unknown,
+  invoke: (callbackId: string, args: unknown[]) => Promise<unknown>,
+): unknown {
+  if (isHostCallbackRef(value)) {
+    const id = value[HOST_CALLBACK_KEY];
+    return (...args: unknown[]) => invoke(id, args.map(toWire));
+  }
+  if (Array.isArray(value)) return value.map((v) => hydrateHostCallbacks(v, invoke));
+  if (isPlainObject(value)) {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(value)) out[k] = hydrateHostCallbacks(v, invoke);
+    return out;
+  }
+  return value;
+}
+
+/** Arguments are JSON over the channel: functions and abort signals do not travel. */
+function toWire(arg: unknown): unknown {
+  if (typeof arg === 'function') return undefined;
+  if (typeof AbortSignal !== 'undefined' && arg instanceof AbortSignal) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(arg)) as unknown;
+  } catch {
+    return undefined;
+  }
 }

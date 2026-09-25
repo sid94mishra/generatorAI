@@ -16,11 +16,14 @@ import type {
   AgentEvent,
   AgentEventNotification,
   SessionEndedNotification,
+  CallbackInvokeNotification,
+  CallbackResultRequest,
   SpawnSessionRequest,
   SendTurnRequest,
   AbortSessionRequest,
   DeleteSessionRequest,
 } from '@generatorai/shared';
+import { serializeHostCallbacks } from '@generatorai/shared';
 import type {
   IAgentHarness,
   HarnessClientState,
@@ -65,10 +68,12 @@ const HOST_CLIENT_CAPABILITIES: ProviderCapabilities = {
  */
 interface HostSession {
   /**
-   * The spawn params exactly as sent to the host. Held so a restarted host —
-   * which boots with empty maps — can be handed the same session back.
+   * The spawn params as the CALLER passed them (functions included). Held so
+   * a restarted host — which boots with empty maps — can be handed the same
+   * session back; they are re-serialised, with fresh callback ids, on every
+   * spawn.
    */
-  params: Record<string, unknown>;
+  params: CreateConversationParams;
   /**
    * Last `seq` seen for this session. A jump means the host's bounded queue
    * dropped frames.
@@ -97,6 +102,14 @@ export class AgentHostClient implements IAgentHarness {
   private readonly sessions = new Map<string, HostSession>();
   private readonly conversationWarnings = new Map<string, ConversationWarning[]>();
   private readonly conversationMessages = new Map<string, ConversationMessage[]>();
+  /**
+   * RV-26 — sessionId → callbackId → the gateway-side function a host stub
+   * calls: host tool handlers, the permission / question / plan-review gates
+   * and the hook bridge. Functions cannot cross IPC; `spawnSession` swaps
+   * each for a marker and the host calls back with `callback_invoke`.
+   */
+  private readonly callbacks = new Map<string, Map<string, (...args: unknown[]) => unknown>>();
+  private callbackSeq = 0;
   /** Frames the host reported dropping, for health reporting. */
   private droppedEventCount = 0;
 
@@ -185,7 +198,14 @@ export class AgentHostClient implements IAgentHarness {
    * SESSION_NOT_FOUND permanently.
    */
   private async spawnSession(sessionId: string, params: CreateConversationParams): Promise<void> {
-    const serialized = params as unknown as Record<string, unknown>;
+    // A re-spawn (host restart) re-registers every callback under fresh ids.
+    const registry = new Map<string, (...args: unknown[]) => unknown>();
+    this.callbacks.set(sessionId, registry);
+    const serialized = serializeHostCallbacks(params, (fn) => {
+      const id = `cb-${++this.callbackSeq}`;
+      registry.set(id, fn);
+      return id;
+    }) as Record<string, unknown>;
 
     this.conversationHandlers.set(sessionId, this.conversationHandlers.get(sessionId) ?? new Set());
     if (!this.conversationWarnings.has(sessionId)) this.conversationWarnings.set(sessionId, []);
@@ -208,11 +228,12 @@ export class AgentHostClient implements IAgentHarness {
     }
 
     // Liveness is committed only on a confirmed spawn.
-    this.sessions.set(sessionId, { params: serialized, lastSeq: 0, terminalDelivered: false });
+    this.sessions.set(sessionId, { params, lastSeq: 0, terminalDelivered: false });
   }
 
   private cleanupSessionMaps(sessionId: string): void {
     this.sessions.delete(sessionId);
+    this.callbacks.delete(sessionId);
     this.conversationHandlers.delete(sessionId);
     this.conversationWarnings.delete(sessionId);
     this.conversationMessages.delete(sessionId);
@@ -276,7 +297,7 @@ export class AgentHostClient implements IAgentHarness {
     conversationId: string,
     prompt: string,
     attachments?: AttachmentRef[],
-    _options?: SendPromptOptions,
+    options?: SendPromptOptions,
   ): Promise<void> {
     const turnReq: Omit<SendTurnRequest, 'reqId'> = {
       type: 'send_turn',
@@ -284,6 +305,14 @@ export class AgentHostClient implements IAgentHarness {
       prompt,
       // AttachmentRef uses `path` as the stable identifier; the host resolves files by path
       attachments: attachments?.map((a) => ({ type: 'file', id: a.path })),
+      ...(options
+        ? {
+            options: {
+              ...(options.agentMode ? { agentMode: options.agentMode } : {}),
+              ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
+            },
+          }
+        : {}),
     };
     const resp = await this.supervisor.send(turnReq);
     if (resp.type === 'error') {
@@ -416,9 +445,13 @@ export class AgentHostClient implements IAgentHarness {
   // ── Called by HostSupervisor when events arrive from the host process ─────
 
   /** Wire this up: pass as `onHostEvent` to HostSupervisor. */
-  handleHostEvent(msg: AgentEventNotification | SessionEndedNotification): void {
+  handleHostEvent(msg: AgentEventNotification | SessionEndedNotification | CallbackInvokeNotification): void {
     if (msg.type === 'agent_event') {
       this.handleAgentEvent(msg);
+      return;
+    }
+    if (msg.type === 'callback_invoke') {
+      void this.handleCallbackInvoke(msg);
       return;
     }
     if (msg.type === 'session_ended') {
@@ -430,6 +463,30 @@ export class AgentHostClient implements IAgentHarness {
     // path end to end — the host built it, the supervisor forwarded it, and it
     // landed here and vanished.
     this.logger.warn(`[AgentHostClient] Unhandled host notification type: ${(msg as { type: string }).type}`);
+  }
+
+  /**
+   * RV-26 — run the gateway-side function a host stub called and send its
+   * answer back. A gate may block for as long as a human takes to answer, so
+   * there is no deadline here; the host rejects the stub when the session is
+   * torn down.
+   */
+  private async handleCallbackInvoke(msg: CallbackInvokeNotification): Promise<void> {
+    const fn = this.callbacks.get(msg.sessionId)?.get(msg.callbackId);
+    let reply: Omit<CallbackResultRequest, 'reqId'>;
+    if (!fn) {
+      reply = { type: 'callback_result', callId: msg.callId, ok: false, error: `Unknown callback ${msg.callbackId} for session ${msg.sessionId}` };
+    } else {
+      try {
+        const value = await fn(...msg.args);
+        reply = { type: 'callback_result', callId: msg.callId, ok: true, ...(value !== undefined ? { value } : {}) };
+      } catch (err: unknown) {
+        reply = { type: 'callback_result', callId: msg.callId, ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    await this.supervisor.send(reply).catch((err: unknown) => {
+      this.logger.warn(`[AgentHostClient] callback_result for ${msg.callId} could not be delivered: ${String(err)}`);
+    });
   }
 
   private handleAgentEvent(msg: AgentEventNotification): void {
@@ -556,7 +613,7 @@ export class AgentHostClient implements IAgentHarness {
       // drop it first so `spawnSession` commits a fresh one on success.
       this.sessions.delete(sessionId);
       try {
-        await this.spawnSession(sessionId, session.params as unknown as CreateConversationParams);
+        await this.spawnSession(sessionId, session.params);
       } catch (err: unknown) {
         failed++;
         this.logger.error(`[AgentHostClient] Failed to re-attach session ${sessionId}: ${String(err)}`);

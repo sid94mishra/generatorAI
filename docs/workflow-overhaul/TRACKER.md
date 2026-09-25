@@ -67,9 +67,9 @@ This file tracks the implementation of every work package (WP) in the overhaul p
 
 | WP | Task | Status | Review | Commit | Notes |
 |---|---|---|---|---|---|
-| 2.0 | Golden snapshots first | todo | | | |
-| 2.1 | Pure helpers | todo | | | |
-| 2.2 | PlatformToolBinder | todo | | | |
+| 2.0 | Golden snapshots first | done |  | (no code) | P00 golden suite re-run before any change: 7/7 green at wf-phase-01-done (0c02b1c parent). |
+| 2.1 | Pure helpers | done |  | 0c02b1c | `session/cfg.ts`: appendSystemBlock, appendTools, unionList (+ systemContent). Replaced the inline system-block / tool-list / exclusion-list copies in CMS (create and resume) and SES. No behaviour change: golden 7/7 byte-identical. |
+| 2.2 | PlatformToolBinder | done |  | PENDING | `session/PlatformToolBinder.ts` (browser, computer, widgets, SCM hint, custom, orchestrator, hooks, widget digest; owner-aware: chat or stage). CMS create and resume call it (chat snapshots byte-identical; `registerComputerUseSkill`/`selectCustomTools` moved into the binder). `SessionComposerDeps` (session/types.ts) is the shared deps object; `ChatManagementServiceExtensions` extends it. Orchestrator: `OrchestratorService.registerStageParent` + `parentView` (chat or stage parent; workers stay chats with `parentChatId` = stage run id; no nudge for a stage parent, digests via check_*); tool set takes `parentId`. W-54: `SessionHookRegistry` + `sessionHookBridgeFactory`; the server composition root assigns `buildHookBridge`; ExtensionManager commits `ai.registerHook` function hooks into it (function hook ctx gains `event`). RV-26: functions in spawn params cross the agent-host IPC as `{__hostCallback}` markers (`serializeHostCallbacks`/`hydrateHostCallbacks`), host stubs send `callback_invoke`, the gateway answers `callback_result`; `send_turn` now carries the turn options; agent-host protocol v2. Tests: session/sessionHooks.test.ts (a chat hook fires and denies; no bridge when empty), agent-host binderContract.test.ts (tools, permission gate, hook bridge, turn options with the host ON and OFF). Stage wiring of the binder lands with the SES switch in WP-2.8. |
 | 2.3 | resolveMcp for both owners | todo | | | |
 | 2.4 | Agent projection, instructions, skills | todo | | | |
 | 2.5 | Workspace exposure for stages | todo | | | |

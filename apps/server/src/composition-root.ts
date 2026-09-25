@@ -12,7 +12,7 @@ import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, Age
 import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
 import { readAudioPreferences } from './settings/audio.js';
-import { AgentHostClient, HostSupervisor, resolveWorktreePath } from '@generatorai/core';
+import { AgentHostClient, HostSupervisor, resolveWorktreePath, sessionHookBridgeFactory } from '@generatorai/core';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { registerHarnessInstances } from './composition/harnessInstances.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
@@ -2073,7 +2073,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       },
       logger,
     },
-    { widgetRegistry, customToolRegistry, eventBus },
+    { widgetRegistry, customToolRegistry, eventBus, sessionHookRegistry: core.sessionHookRegistry },
   );
   const widgetOrigin =
     process.env['WIDGET_ORIGIN'] ??
@@ -2093,6 +2093,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // host SPA/API — the MCP-Apps sandbox-proxy origin split. Override with
   // WIDGET_ORIGIN (e.g. a packaged desktop build's loopback URL).
   chatExtensions.widgetService = widgetService;
+  // HKS-01 / W-54 — the synchronous hook bridge every chat and stage session
+  // gets: the in-process hooks extensions register (`ai.registerHook`). With
+  // none registered the factory returns undefined and configs are unchanged.
+  chatExtensions.buildHookBridge = sessionHookBridgeFactory(core.sessionHookRegistry, hookInterceptor, eventBus);
   chatExtensions.widgetRegistry = widgetRegistry;
   chatExtensions.widgetAssetsBase = widgetOrigin;
 

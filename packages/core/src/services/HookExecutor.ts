@@ -106,6 +106,11 @@ export interface FunctionHookHandlerContext {
   args?: Record<string, unknown>;
   /** Fires when the hook's timeout expires or the caller aborts. */
   signal: AbortSignal;
+  /**
+   * The agent event a session hook fires on (the HookBridge path): the tool
+   * and its arguments / result, or the prompt text. Absent for lifecycle hooks.
+   */
+  event?: { toolName?: string; toolArgs?: unknown; toolResult?: unknown; message?: string };
 }
 
 export type FunctionHookHandler = (ctx: FunctionHookHandlerContext) => Promise<HookResult | void>;
@@ -634,6 +639,21 @@ export class HookExecutor {
       // thrown error propagates straight into our try/catch; we wrap so
       // consumers see a consistent HookScriptError.
       try {
+        const sdk = context as HookContext & {
+          toolName?: string;
+          toolArgs?: unknown;
+          toolResult?: unknown;
+          messageContent?: string;
+        };
+        const event =
+          sdk.toolName !== undefined || sdk.messageContent !== undefined
+            ? {
+                ...(sdk.toolName !== undefined ? { toolName: sdk.toolName } : {}),
+                ...(sdk.toolArgs !== undefined ? { toolArgs: sdk.toolArgs } : {}),
+                ...(sdk.toolResult !== undefined ? { toolResult: sdk.toolResult } : {}),
+                ...(sdk.messageContent !== undefined ? { message: sdk.messageContent } : {}),
+              }
+            : undefined;
         const handlerResult = await handler({
           sessionId: context.sessionId,
           workflowId: context.workflowId,
@@ -641,6 +661,7 @@ export class HookExecutor {
           variables: context.variables,
           args: config.args,
           signal: abortSignal,
+          ...(event ? { event } : {}),
         });
         return handlerResult ?? undefined;
       } catch (err) {

@@ -21,7 +21,7 @@ import type {
   HarnessConfig,
   ResolvedAgentProjection,
 } from '@generatorai/shared';
-import { generateId, DEFAULT_AGENT_MODE, ValidationError, COMPUTER_USE_SKILL_ID, COMPUTER_USE_SKILL_NAME } from '@generatorai/shared';
+import { generateId, DEFAULT_AGENT_MODE, ValidationError } from '@generatorai/shared';
 import * as path from 'node:path';
 import type { ChatSourceSpec, ExecutionWorkspace } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
@@ -35,8 +35,6 @@ import type {
   PermissionRequest,
   PermissionResponse,
 } from '../domain/ports/IAgentHarness.js';
-import type { AgentInteractionService } from './AgentInteractionService.js';
-import type { PlanService } from './PlanService.js';
 import {
   AUTO_MODE_PLAN_INSTRUCTIONS,
   PLAN_MODE_TURN_PREFIX,
@@ -49,41 +47,19 @@ import {
   buildToolPermissionPayload,
   type TurnContext,
 } from './agentModePolicy.js';
-import type { HookBridge } from '../domain/ports/IHookBridge.js';
 import type { EventBus } from '../events/EventBus.js';
-import type { CustomToolRegistry } from '../tools/CustomToolRegistry.js';
 import {
   createRecordPlanTool,
   RECORD_PLAN_TOOL_NAME,
   type RecordPlanArgs,
   type RecordPlanResult,
 } from '../tools/recordPlanTool.js';
-import { buildBrowserToolSet } from '../tools/browser/index.js';
-import { buildComputerToolSet } from '../tools/computer/index.js';
-import { buildWidgetTools } from '../tools/widgetTools.js';
-import { buildOrchestratorToolSet } from '../tools/orchestrator/index.js';
-import { ORCHESTRATOR_SYSTEM_PROMPT } from './orchestrator/prompts.js';
-import type { OrchestratorService } from './orchestrator/OrchestratorService.js';
 import type { IMcpHub } from '../mcp/IMcpHub.js';
 import type { WorktreeService } from './WorktreeService.js';
-import type { WorkspaceManager } from './WorkspaceManager.js';
 import { branchSlugFor, type MountService, type PlannedMount } from './MountService.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
-import type { BrowserService } from './BrowserService.js';
-import type { ComputerService } from './ComputerService.js';
-import type { WidgetService } from './WidgetService.js';
-import type { IWidgetRegistry } from '../domain/ports/IWidgetRegistry.js';
 import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebaseRepository.js';
 import { AgentResolver, redactProjection } from './AgentResolver.js';
-import type { AgentStagingService } from './AgentStagingService.js';
-import type { SystemArtifactService } from './SystemArtifactService.js';
-import {
-  BROWSER_SYSTEM_HINT,
-  COMPUTER_USE_SYSTEM_HINT,
-  EXTENSION_AUTHORING_HINT,
-  WIDGET_SYSTEM_HINT,
-  buildAutoCommitHint,
-} from './chatSystemHints.js';
 import {
   AutoSourceControlRunner,
   type AutoScmFlowPort,
@@ -91,11 +67,12 @@ import {
 } from './scm/AutoSourceControlRunner.js';
 import { scmMountTargets } from './scm/workspaceMounts.js';
 import { buildTurnHint } from './scm/turnHint.js';
-import { isExtensionAuthorToolName } from '../tools/extensionAuthorTools.js';
 import { mergeMcpServers } from '../mcp/mergeMcpServers.js';
 import type { McpServerConfig } from '@generatorai/shared';
 import { withDeadline } from '../utils/withDeadline.js';
 import { appendSystemBlock, appendTools, unionList } from './session/cfg.js';
+import { PlatformToolBinder, type BindTarget } from './session/PlatformToolBinder.js';
+import type { SessionComposerDeps } from './session/types.js';
 import {
   groupTurns,
   lastAnchor,
@@ -166,26 +143,9 @@ export interface CancelTurnOptions {
  * `@generatorai/core`; the Copilot adapter (or any future adapter) simply
  * honours whatever shape we pass into `CreateConversationParams`.
  */
-export interface ChatManagementServiceExtensions {
-  /** TOL-01 — surface registered custom tools to every new conversation. */
-  customToolRegistry?: CustomToolRegistry;
-  /** TOL-06 — transform the declared MCP config before the adapter sees it. */
-  mcpHub?: IMcpHub;
-  /**
-   * HKS-01 / TOL-04 — produce a synchronous `HookBridge` for each new
-   * conversation. Return `undefined` (or omit the factory entirely) to run
-   * without synchronous intercepts; the reactive `HookInterceptor` path
-   * still fires independently.
-   */
-  buildHookBridge?: (args: {
-    chatId: string;
-    sessionId: string;
-    conversationId: string;
-  }) => HookBridge | undefined;
+export interface ChatManagementServiceExtensions extends SessionComposerDeps {
   /** Worktree service for creating per-chat worktrees from project codebases. */
   worktreeService?: WorktreeService;
-  /** Workspace manager for creating per-chat isolated workspaces. */
-  workspaceManager?: WorkspaceManager;
   /**
    * Mounts — turns a chat's sources (codebases / folders, in place or as
    * worktrees, on a branch) into the directories the agent edits, and gates
@@ -195,67 +155,12 @@ export interface ChatManagementServiceExtensions {
   /** Codebase repo for resolving alias from codebase IDs (used for pre-computing worktree paths). */
   codebaseRepo?: IProjectCodebaseRepository;
   /**
-   * Integrated Browser (v13) — auto-start a shared Chromium for chats that
-   * opt in via `browserConfig.enabled: true` and expose the CDP endpoint to
-   * the `playwright-cli` skill through a system-prompt append.
-   */
-  browserService?: BrowserService;
-  /**
-   * Computer Use — registers the `computer_*` tool set on chats whose
-   * workspace has a root, so the agent can drive native desktop applications.
-   * Gated: the service's own feature switch decides whether any of it exists.
-   */
-  computerService?: ComputerService;
-  /**
-   * Widgets — extension-rendered UI. When set, every new chat conversation
-   * gets the v2 widget tools (`render_widget` / `update_widget` /
-   * `close_widget` / `search_widget`, plus legacy `ui_*` aliases) bound to
-   * its session so the agent can draw interactive widgets.
-   */
-  widgetService?: WidgetService;
-  /**
-   * Registry the widget tools query when the agent calls `search_widget`.
-   * Wire this alongside `widgetService`.
-   */
-  widgetRegistry?: IWidgetRegistry;
-  /**
-   * Absolute base URL used by widget iframes to fetch their bundle assets
-   * (e.g. `http://localhost:3100`). Empty string → same-origin relative
-   * path (safe when the SPA is served by the same server).
-   */
-  widgetAssetsBase?: string;
-  /**
-   * Orchestrator mode — when a chat is created with `orchestratorMode: true`,
-   * inject the orchestrator system prompt + the background-agent tool set
-   * (spawn/check/send/list) bound to this chat. Late-bound in the composition
-   * root to break the OrchestratorService ↔ ChatManagementService cycle.
-   */
-  orchestratorService?: OrchestratorService;
-  /**
    * Checkpoints — captures a snapshot of the chat's workspace immediately
    * before every user prompt, so "what did this message change?" and rewind
    * both have a stable baseline. Optional: chats without a workspace, and
    * deployments that disable checkpointing, simply skip it.
    */
   workspaceCheckpointService?: WorkspaceCheckpointService;
-  /**
-   * PLN-01 — plan mode. Both must be wired together: the interaction service
-   * owns the blocking gate, the plan service owns the document. Omit both to
-   * run without plan mode (the composer will still offer the toggle but the
-   * agent's exit-plan call simply passes through).
-   */
-  agentInteractionService?: AgentInteractionService;
-  planService?: PlanService;
-  /**
-   * Agents — resolves the bound agent into a capability projection. Wired in
-   * every composition root; a chat that names an agent while this is missing
-   * fails loudly rather than silently running without its capabilities.
-   */
-  agentResolver?: AgentResolver;
-  /** Materialises the projection's skills into the workspace for the harness. */
-  agentStaging?: AgentStagingService;
-  /** Source of platform-owned skill bodies (Computer Use). */
-  systemArtifacts?: SystemArtifactService;
   /**
    * Agent-native source control (doc §5). Both are wired together: the flow
    * runs the commit → sync → push → PR sequence, readiness decides whether a
@@ -337,6 +242,9 @@ export class ChatManagementService {
     } as unknown as AgentEvent;
   }
 
+  /** The platform tool surface (browser, computer, widgets, custom, orchestrator, hooks). */
+  private readonly binder: PlatformToolBinder;
+
   constructor(
     private chatRepo: IChatRepository,
     private sessionRepo: ISessionRepository,
@@ -344,7 +252,9 @@ export class ChatManagementService {
     private harness: IAgentHarness,
     private eventBus: EventBus,
     private extensions: ChatManagementServiceExtensions = {},
-  ) {}
+  ) {
+    this.binder = new PlatformToolBinder(extensions);
+  }
 
   // ══════════════════════════════════════════════════════════════
   // Files the user moved back in time since the agent last looked
@@ -1213,37 +1123,6 @@ export class ChatManagementService {
   private readonly conversationBindings = new Map<string, string>();
 
   /**
-   * Publishes the Computer Use skill through the harness's own skill mechanism.
-   *
-   * The alternative — pasting the manual into the user's message when they type
-   * `/computer-use` — put two thousand words of instructions in the transcript
-   * where the user's sentence should be, and re-sent them on every replay of
-   * that turn. Registered here, the model loads the body itself, once, only if
-   * it decides the task needs it.
-   */
-  private async registerComputerUseSkill(
-    conversationConfig: Record<string, unknown>,
-    workspaceRoot: string,
-  ): Promise<void> {
-    const { systemArtifacts, agentStaging } = this.extensions;
-    if (!systemArtifacts || !agentStaging) return;
-
-    const skills = await systemArtifacts.listSystemArtifacts('skill');
-    const skill = skills.find((s) => s.id === COMPUTER_USE_SKILL_ID);
-    if (!skill) return;
-
-    const content = await systemArtifacts.getSystemArtifactContent(skill.id);
-    // Staged under our own name, never the artifact's — see COMPUTER_USE_SKILL_NAME.
-    const dir = await agentStaging.ensurePlatformSkill(workspaceRoot, {
-      name: COMPUTER_USE_SKILL_NAME,
-      content,
-    });
-
-    unionList(conversationConfig, 'skills', [COMPUTER_USE_SKILL_NAME]);
-    unionList(conversationConfig, 'skillDirectories', [dir]);
-  }
-
-  /**
    * The model + provider + agent a chat currently asks for.
    *
    * ONE formatter, used by both the site that RECORDS a binding at creation
@@ -1268,26 +1147,6 @@ export class ChatManagementService {
     // when they turned it OFF would keep driving their desktop.
     const computerUse = this.extensions.computerService?.isEnabled() ? '1' : '0';
     return `${parts.harnessType}::${parts.model}::${parts.agentRef}::${parts.agentVersion}::cu${computerUse}::pm${parts.permissionMode ?? '-'}`;
-  }
-
-  /**
-   * Custom tools for one conversation, with the extension-authoring pair
-   * removed unless this chat's agent explicitly grants that capability.
-   *
-   * Review 5.3 — the number-one security finding. `write_extension` writes an
-   * arbitrary file tree and `reload_extension` imports it INTO THE SERVER'S OWN
-   * PROCESS, inheriting the vault key and every token the server can reach, and
-   * surviving reboots. They were registered on the process-wide registry, so
-   * the wiring comment said it plainly: "every chat conversation gets them
-   * automatically". Host code execution must be a capability a chat is granted,
-   * never one it has by default.
-   */
-  private selectCustomTools(allowExtensionAuthoring: boolean): unknown[] {
-    const all = this.extensions.customToolRegistry?.list() ?? [];
-    if (allowExtensionAuthoring) return all;
-    return all.filter(
-      (tool) => !isExtensionAuthorToolName((tool as { name?: string }).name ?? ''),
-    );
   }
 
   private conversationBindingKey(chat: Chat): string {
@@ -1778,129 +1637,22 @@ export class ChatManagementService {
       (conversationConfig['systemMessage'] as { content?: string } | undefined)?.content ?? '';
     this.appendWorkspaceHint(conversationConfig, workspaceHint);
 
-    // 2.7: Integrated Browser — VSCode-parity built-in tool set.
-    //
-    // We ship ten browser tools (open_browser_page, read_page, click_element,
-    // …, run_playwright_code) by default whenever the chat has a workspace.
-    // The LLM never needs CLI flags, MCP config, or --cdp-endpoint dances:
-    // it just calls the tools directly. If the workspace's browserConfig
-    // has `visibility: 'visible'` (or the legacy `enabled: true` when
-    // visibility is unset), we ALSO pre-boot Chromium so the user sees the
-    // Browser panel populated the moment the chat opens; otherwise the
-    // first `open_browser_page` tool call boots it lazily (headless).
-    //
-    // If the user has also configured `@playwright/mcp` under
-    // harnessConfig.mcpServers or the `playwright-cli` skill under
-    // skillDirectories, all three tool sets coexist and the model picks —
-    // precedence is the harness's call, not ours.
-    if (this.extensions.browserService && workspaceId && agentProjection.toolPolicy.groups.browser) {
-      try {
-        const workspace = await this.extensions.workspaceManager?.getExecutionWorkspace(workspaceId);
-        if (workspace) {
-          // Merge caller-supplied browserConfig onto the stored one so
-          // per-chat overrides (visibility, allowedHosts, evalAllowed…)
-          // take effect for the current session without a DB round-trip.
-          if (params.browserConfig) {
-            workspace.browserConfig = {
-              ...(workspace.browserConfig as Record<string, unknown> | undefined ?? {}),
-              ...(params.browserConfig as Record<string, unknown>),
-            };
-          }
-          const cfg = this.extensions.browserService.resolveConfig(workspace.browserConfig);
-          // Auto-start only when the user has explicitly enabled the
-          // browser AND visibility isn't 'off'. visibility='off' means
-          // "give the LLM the tools but don't spawn Chromium up-front" —
-          // useful for chats that only sometimes need a browser.
-          if (cfg.enabled && cfg.visibility !== 'off') {
-            await this.extensions.browserService.ensureStarted(workspace).catch((err) => {
-              console.warn(`[ChatManagement] Browser auto-start failed for chat ${chatId}:`, err);
-            });
-          }
-        }
-
-        // Always register the tool set when we have a workspace, even
-        // if Chromium isn't up yet — `open_browser_page` will lazy-start
-        // on first invocation.
-        const browserTools = buildBrowserToolSet({
-          browserService: this.extensions.browserService,
-          workspaceId,
-          owner: `chat:${chatId}`,
-        });
-        // Merge into whatever the harness already declared. Order:
-        // built-in browser tools first (so the model sees them as the
-        // primary path), then custom tools. Names are unique within
-        // the browser set so there's no collision here; a downstream
-        // user tool with the same name would collide — but that's true
-        // of any two ToolDefinitions sharing a name.
-        appendTools(conversationConfig, browserTools, 'start');
-
-        // One-sentence system-prompt hint, VSCode-style. Kept short to
-        // preserve context budget; the tool descriptions themselves carry
-        // the detail the model needs.
-        appendSystemBlock(conversationConfig, BROWSER_SYSTEM_HINT);
-      } catch (err) {
-        console.warn(`[ChatManagement] Browser tool registration failed for chat ${chatId}:`, err);
-      }
-    }
-
-    if (this.extensions.computerService?.isEnabled() && workspaceId) {
-      try {
-        const workspace = await this.extensions.workspaceManager?.getExecutionWorkspace(workspaceId);
-        // Screenshots and the staged computer-use skill are platform
-        // artifacts: managed root, never the directory the agent edits.
-        const workspaceRoot = workspace?.rootPath;
-        if (workspaceRoot) {
-          const computerTools = buildComputerToolSet({
-            computerService: this.extensions.computerService,
-            workspaceId,
-            workspaceRoot,
-            chatId,
-            owner: `chat:${chatId}`,
-          });
-          appendTools(conversationConfig, computerTools);
-          appendSystemBlock(conversationConfig, COMPUTER_USE_SYSTEM_HINT);
-          await this.registerComputerUseSkill(conversationConfig, workspaceRoot);
-        }
-      } catch (err) {
-        console.warn(`[ChatManagement] Computer tool registration failed for chat ${chatId}:`, err);
-      }
-    }
-
-    // Widgets — extension-rendered UI. When a widget service is wired,
-    // bind the v2 widget tools (render/update/close/search + legacy ui_*
-    // aliases) to this chat's session.
-    if (this.extensions.widgetService && this.extensions.widgetRegistry && agentProjection.toolPolicy.groups.widgets) {
-      const widgetTools = buildWidgetTools(
-        {
-          widgetService: this.extensions.widgetService,
-          widgetRegistry: this.extensions.widgetRegistry,
-        },
-        {
-          sessionId,
-          chatId,
-          assetsBase: this.extensions.widgetAssetsBase ?? '',
-        },
-      );
-      appendTools(conversationConfig, widgetTools);
-
-      // System-prompt hint — kept short. The tool descriptions carry the
-      // detail the model needs.
-      // The authoring block only makes sense when the chat actually HAS those
-      // tools — otherwise it spends ~5,800 characters a message describing a
-      // capability the model cannot exercise (reviews 3.7 and 5.3).
-      const uiHint = agentProjection.toolPolicy.groups.extensionAuthoring
-        ? WIDGET_SYSTEM_HINT + EXTENSION_AUTHORING_HINT
-        : WIDGET_SYSTEM_HINT;
-      appendSystemBlock(conversationConfig, uiHint);
-    }
-
-    // Agent-native source control (doc §5) — tell the agent the platform
-    // commits for it, and ask for the `Summary:` line that seeds the message.
-    // Appended on BOTH the create and the resume path so the prompt prefix
-    // stays byte-identical across a restart.
-    if (params.sourceControl?.autoCommit) {
-      appendSystemBlock(conversationConfig, buildAutoCommitHint(params.sourceControl));
-    }
+    // Platform tool surface, in the canonical order (R-10): browser →
+    // computer → widgets → SCM hint → MCP → custom → orchestrator → hooks.
+    const bindTarget: BindTarget = {
+      owner: { kind: 'chat', chatId, sessionId, ...(params.parentChatId ? { parentChatId: params.parentChatId } : {}) },
+      sessionId,
+      conversationId,
+      ...(workspaceId ? { workspaceId } : {}),
+      groups: agentProjection.toolPolicy.groups,
+    };
+    await this.binder.browser(conversationConfig, bindTarget, {
+      autoStart: true,
+      ...(params.browserConfig ? { browserConfig: params.browserConfig as Record<string, unknown> } : {}),
+    });
+    await this.binder.computer(conversationConfig, bindTarget, { enabled: true });
+    this.binder.widgets(conversationConfig, bindTarget, { enabled: true });
+    this.binder.sourceControlHint(conversationConfig, params.sourceControl);
 
     // TOL-06 — resolve MCP server config through the hub so run-level
     // overrides / disable-flags take effect. Falls back to the declared
@@ -1927,54 +1679,13 @@ export class ChatManagementService {
       conversationConfig['mcpServers'] = declaredMcp;
     }
 
-    // TOL-01 — surface every registered custom tool to the harness. The
-    // registry is process-wide; workflows that want a subset can filter
-    // via `availableTools` (already plumbed above) since the harness
-    // evaluates that list against the tool names we're about to pass.
-    // Merge with any tools already staged above (e.g. the built-in
-    // browser tool set) rather than clobbering them.
-    if (this.extensions.customToolRegistry && this.extensions.customToolRegistry.size > 0) {
-      appendTools(conversationConfig, this.selectCustomTools(agentProjection.toolPolicy.groups.extensionAuthoring));
-    }
-
-    // Orchestrator mode — inject the background-agent tool set + orchestrator
-    // system prompt. Only for orchestrator chats (never worker chats, which
-    // carry `parentChatId`), so workers cannot recursively spawn (v1).
-    if (orchestratorMode && !params.parentChatId && this.extensions.orchestratorService) {
-      const orchestratorTools = buildOrchestratorToolSet({
-        orchestratorService: this.extensions.orchestratorService,
-        parentChatId: chatId,
-        owner: `orchestrator:${chatId}`,
-        // 7th tool only for agent-driven orchestrators: adding it unconditionally
-        // would change the tool prefix of every existing orchestrator chat and
-        // cost a one-time full prompt-cache miss on upgrade.
-        includeAgentDiscovery: !!agentProjection.driving,
-      });
-      appendTools(conversationConfig, orchestratorTools);
-      appendSystemBlock(conversationConfig, `\n\n${ORCHESTRATOR_SYSTEM_PROMPT}`);
-
-      // The harness's NATIVE delegation tools must go. Observed live
-      // (2026-09-01): given both, Sonnet picked the SDK's own `Agent` tool —
-      // "Async agent launched successfully" — whose workers live inside the
-      // per-turn CLI process. The turn ended, the process exited, both
-      // "background" agents evaporated, and the orchestrator sat idle forever
-      // with zero Background Tasks. Platform orchestration only works through
-      // spawn_background_agent, so the in-process lookalikes are removed
-      // (claude-agent maps these into the SDK's disallowedTools; harnesses
-      // without such tools ignore unknown names).
-      unionList(conversationConfig, 'excludedBuiltinTools', ['Agent', 'Task']);
-    }
-
-    // HKS-01 + TOL-04 — synchronous hook bridge (plan-mode + user hooks).
-    // The factory is harness-agnostic; the CopilotAdapter translates it to
-    // SDK `SessionHooks` internally, a future Claude/OpenAI adapter does
-    // the same against its own surface.
-    if (this.extensions.buildHookBridge) {
-      const bridge = this.extensions.buildHookBridge({ chatId, sessionId, conversationId });
-      if (bridge) {
-        conversationConfig['hooks'] = bridge;
-      }
-    }
+    this.binder.custom(conversationConfig, bindTarget);
+    // Workers never get the orchestrator tool set (no recursive spawning).
+    this.binder.orchestrator(conversationConfig, bindTarget, {
+      enabled: orchestratorMode && !params.parentChatId,
+      includeAgentDiscovery: !!agentProjection.driving,
+    });
+    this.binder.hooks(conversationConfig, bindTarget);
 
     // PLN-01 — plan/question gates + plan-mode instructions.
     this.applyPlanModeConfig(conversationConfig, {
@@ -2284,97 +1995,25 @@ export class ChatManagementService {
       conversationConfig['mcpServers'] = declaredMcp;
     }
 
-    // Re-register built-in browser tools when the chat has a workspace, and
-    // re-append the browser system-prompt hint so the model knows to use them.
-    if (this.extensions.browserService && chat.workspaceId && agentProjection.toolPolicy.groups.browser) {
-      try {
-        const browserTools = buildBrowserToolSet({
-          browserService: this.extensions.browserService,
-          workspaceId: chat.workspaceId,
-          owner: `chat:${chat.id}`,
-        });
-        appendTools(conversationConfig, browserTools, 'start');
-        appendSystemBlock(conversationConfig, BROWSER_SYSTEM_HINT);
-      } catch {
-        // Non-fatal.
-      }
-    }
-
-    // Re-register the computer-use tools too. Without this they exist only on
-    // the turn that created the chat: on the next message the model finds them
-    // gone mid-task and falls back to shelling out, which routes around every
-    // gate this feature has.
-    if (this.extensions.computerService?.isEnabled() && chat.workspaceId) {
-      try {
-        const workspace = await this.extensions.workspaceManager?.getExecutionWorkspace(chat.workspaceId);
-        const workspaceRoot = workspace?.rootPath;
-        if (workspaceRoot) {
-          const computerTools = buildComputerToolSet({
-            computerService: this.extensions.computerService,
-            workspaceId: chat.workspaceId,
-            workspaceRoot,
-            chatId: chat.id,
-            owner: `chat:${chat.id}`,
-          });
-          appendTools(conversationConfig, computerTools);
-          appendSystemBlock(conversationConfig, COMPUTER_USE_SYSTEM_HINT);
-          await this.registerComputerUseSkill(conversationConfig, workspaceRoot);
-        }
-      } catch {
-        // Non-fatal.
-      }
-    }
-
-    // Re-register widget tools AND the widget hint. Omitting the hint here is
-    // what made the resumed prompt prefix diverge from the created one.
-    if (this.extensions.widgetService && this.extensions.widgetRegistry && agentProjection.toolPolicy.groups.widgets) {
-      try {
-        const widgetTools = buildWidgetTools(
-          {
-            widgetService: this.extensions.widgetService,
-            widgetRegistry: this.extensions.widgetRegistry,
-          },
-          { sessionId: chat.sessionId, chatId: chat.id, assetsBase: this.extensions.widgetAssetsBase ?? '' },
-        );
-        appendTools(conversationConfig, widgetTools);
-        appendSystemBlock(
-          conversationConfig,
-          agentProjection.toolPolicy.groups.extensionAuthoring
-            ? WIDGET_SYSTEM_HINT + EXTENSION_AUTHORING_HINT
-            : WIDGET_SYSTEM_HINT,
-        );
-      } catch {
-        // Non-fatal.
-      }
-    }
-
-    // Agent-native source control — same block, same place in the order.
-    if (chat.sourceControl?.autoCommit) {
-      appendSystemBlock(conversationConfig, buildAutoCommitHint(chat.sourceControl));
-    }
-
-    // Surface registered custom tools.
-    if (this.extensions.customToolRegistry && this.extensions.customToolRegistry.size > 0) {
-      appendTools(conversationConfig, this.selectCustomTools(agentProjection.toolPolicy.groups.extensionAuthoring));
-    }
-
-    // Orchestrator mode — re-inject the identical background-agent tool set +
-    // system prompt so a resumed orchestrator keeps its tools (and the prompt
-    // cache prefix stays byte-identical). Never for worker chats.
-    if (chat.orchestratorMode && !chat.parentChatId && this.extensions.orchestratorService) {
-      const orchestratorTools = buildOrchestratorToolSet({
-        orchestratorService: this.extensions.orchestratorService,
-        parentChatId: chat.id,
-        owner: `orchestrator:${chat.id}`,
-        includeAgentDiscovery: !!agentProjection.driving,
-      });
-      appendTools(conversationConfig, orchestratorTools);
-      appendSystemBlock(conversationConfig, `\n\n${ORCHESTRATOR_SYSTEM_PROMPT}`);
-
-      // Same as the create path: a resumed orchestrator must not regain the
-      // harness's native delegation, or it bypasses spawn_background_agent.
-      unionList(conversationConfig, 'excludedBuiltinTools', ['Agent', 'Task']);
-    }
+    // The same platform tool surface as the create path (tool handlers are
+    // in-memory and must be rebound on every resume). No auto-start here: a
+    // resumed conversation re-boots Chromium lazily on its first browser call.
+    const bindTarget: BindTarget = {
+      owner: { kind: 'chat', chatId: chat.id, sessionId: chat.sessionId, ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}) },
+      sessionId: chat.sessionId,
+      conversationId,
+      ...(chat.workspaceId ? { workspaceId: chat.workspaceId } : {}),
+      groups: agentProjection.toolPolicy.groups,
+    };
+    await this.binder.browser(conversationConfig, bindTarget, { autoStart: false });
+    await this.binder.computer(conversationConfig, bindTarget, { enabled: true });
+    this.binder.widgets(conversationConfig, bindTarget, { enabled: true });
+    this.binder.sourceControlHint(conversationConfig, chat.sourceControl);
+    this.binder.custom(conversationConfig, bindTarget);
+    this.binder.orchestrator(conversationConfig, bindTarget, {
+      enabled: !!chat.orchestratorMode && !chat.parentChatId,
+      includeAgentDiscovery: !!agentProjection.driving,
+    });
 
     // PLN-01 — the resume path MUST reinstall the gates. The SDK cannot
     // persist in-memory callbacks, so a resumed conversation without these
@@ -2388,14 +2027,7 @@ export class ChatManagementService {
 
     // HKS-01 — the hook bridge is a set of in-memory closures the SDK cannot
     // persist, so a resumed conversation without this silently loses hooks.
-    if (this.extensions.buildHookBridge) {
-      const bridge = this.extensions.buildHookBridge({
-        chatId: chat.id,
-        sessionId: chat.sessionId,
-        conversationId,
-      });
-      if (bridge) conversationConfig['hooks'] = bridge;
-    }
+    this.binder.hooks(conversationConfig, bindTarget);
 
     // Instructions last, after every platform block.
     this.appendAgentInstructions(conversationConfig, agentProjection, baseSystemMessage);
@@ -3124,37 +2756,10 @@ export class ChatManagementService {
       // Surface any widget interactions the USER performed since the last
       // turn (clicks, votes, drags, typing) so the agent has context without
       // needing to poll read_widget. Drained (cleared) once consumed.
-      let promptForHarness = prompt;
-      const interactions = this.extensions.widgetService?.drainRecentInteractions(
-        chatId,
+      let promptForHarness = this.binder.widgetDigest(
+        { kind: 'chat', chatId, sessionId: chat.sessionId },
         chat.sessionId,
-      );
-      if (interactions && interactions.length > 0) {
-        const safeJson = (v: unknown): string => {
-          try {
-            const s = JSON.stringify(v);
-            return s.length > 400 ? s.slice(0, 400) + '…' : s;
-          } catch {
-            return String(v);
-          }
-        };
-        const lines = interactions.map((it) => {
-          if (it.kind === 'action') {
-            return `  - ${it.instanceId} (${it.descriptorId}): action "${it.action}"` +
-              (it.payload !== undefined ? ` payload=${safeJson(it.payload)}` : '');
-          }
-          if (it.kind === 'context') {
-            return `  - ${it.instanceId} (${it.descriptorId}): note → ${it.content ?? ''}`;
-          }
-          return `  - ${it.instanceId} (${it.descriptorId}): state changed → ${safeJson(it.state)}`;
-        });
-        promptForHarness =
-          `[Widget interactions since your last turn — the user did these; ` +
-          `call read_widget(instanceId) for full current state before acting]\n` +
-          lines.join('\n') +
-          `\n\n` +
-          prompt;
-      }
+      ) + prompt;
       // Plan mode for a provider that has none of its own: say so here, in
       // front of the prompt, or nothing does (see `PLAN_MODE_TURN_PREFIX`).
       // The provider that OWNS this conversation answers for itself; the chat

@@ -3,6 +3,8 @@ export { ArtifactService } from './ArtifactService.js';
 export { HookExecutor } from './HookExecutor.js';
 export type { HookContext, HookDryRunPlan, HookDryRunEntry } from './HookExecutor.js';
 export { HookInterceptor } from './HookInterceptor.js';
+export { SessionHookRegistry, sessionHookBridgeFactory } from './SessionHookRegistry.js';
+export type { SessionHookHandler } from './SessionHookRegistry.js';
 export type { SDKHookContext, StageHookContext } from './HookInterceptor.js';
 export { TemplateRegistry, TemplateLoadError, TEMPLATE_FILE_SUFFIX } from './TemplateRegistry.js';
 export { StartupRecoveryService } from './StartupRecoveryService.js';
@@ -275,3 +277,4 @@ export type {
   EffectSpec,
   DurableContext,
 } from './DurableExecutionEngine.js';
+export * from './session/index.js';
