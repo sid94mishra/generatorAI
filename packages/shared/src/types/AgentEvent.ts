@@ -298,9 +298,6 @@ export type AgentEvent =
   | { kind: 'stage_run.cancelled'; data: { stageRunId: string; workflowRunId: string } }
   | { kind: 'stage_run.skipped'; data: { stageRunId: string; workflowRunId: string; reason: string } }
   | { kind: 'stage_run.retrying'; data: { stageRunId: string; workflowRunId: string; retryCount: number } }
-  // DUR-05 — durable step.sleep lifecycle events.
-  | { kind: 'stage_run.sleeping'; data: { stageRunId: string; workflowRunId: string; wakeAt: number; reason?: string } }
-  | { kind: 'stage_run.woken'; data: { stageRunId: string; workflowRunId: string; overdueMs: number } }
   // HITL — human-in-the-loop lifecycle events.
   | { kind: 'stage_run.awaiting_input'; data: { stageRunId: string; workflowRunId: string; interruptData?: unknown; prompt?: string } }
   | { kind: 'stage_run.input_received'; data: { stageRunId: string; workflowRunId: string; value?: unknown } }

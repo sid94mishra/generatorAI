@@ -13,7 +13,6 @@ export type StageStatus =
   | 'running'
   | 'paused'
   | 'awaiting_input'
-  | 'sleeping'
   | 'completed'
   | 'failed'
   | 'cancelled'
@@ -80,8 +79,6 @@ export interface StageView {
     tool?: string;
     args?: Record<string, unknown>;
   };
-  /** Remaining sleep in ms (status = sleeping). */
-  sleepRemainingMs?: number;
   /** Error message when status = failed. */
   error?: string;
   /** Summary passed to successor stages. */

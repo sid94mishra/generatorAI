@@ -81,7 +81,6 @@ export function runControlsFor(status: string): RunControls {
 export interface StageControls {
   retry: boolean;
   resume: boolean;
-  wake: boolean;
   cancel: boolean;
 }
 
@@ -91,13 +90,11 @@ export function stageControlsFor(stageStatus: string, runStatus?: string): Stage
   return {
     retry: stageStatus === 'failed' || (stageStatus === 'cancelled' && !runDone),
     resume: !runDone && stageStatus === 'paused',
-    wake: !runDone && stageStatus === 'sleeping',
     cancel:
       !runDone &&
       (stageStatus === 'running' ||
         stageStatus === 'queued' ||
-        stageStatus === 'paused' ||
-        stageStatus === 'sleeping'),
+        stageStatus === 'paused'),
   };
 }
 

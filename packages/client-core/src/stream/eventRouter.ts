@@ -1694,42 +1694,6 @@ export class StreamEventRouter {
         break;
       }
 
-      case 'stage_run.sleeping': {
-        this.flushKey(key, out);
-        const stageRunId = stageRunIdOf();
-        const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
-        const wake =
-          typeof data['wakeAt'] === 'number'
-            ? new Date(data['wakeAt']).toLocaleTimeString()
-            : null;
-        if (stageRunId) {
-          out.push({ op: 'stageStatus', stageRunId, status: 'sleeping', data });
-        }
-        out.push({
-          op: 'addSystemMessage',
-          key: stageKey,
-          message: `💤 Stage sleeping${wake ? ` — wake at ${wake}` : ''}`,
-          category: 'system',
-        });
-        break;
-      }
-
-      case 'stage_run.woken': {
-        this.flushKey(key, out);
-        const stageRunId = stageRunIdOf();
-        const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
-        if (stageRunId) {
-          out.push({ op: 'stageStatus', stageRunId, status: 'running', data });
-        }
-        out.push({
-          op: 'addSystemMessage',
-          key: stageKey,
-          message: '⏰ Stage woken — resuming execution',
-          category: 'system',
-        });
-        break;
-      }
-
       case 'stage_run.retrying': {
         this.flushKey(key, out);
         const stageRunId = stageRunIdOf();

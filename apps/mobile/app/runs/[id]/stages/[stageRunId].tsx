@@ -52,7 +52,6 @@ type Tab = 'transcript' | 'output' | 'files';
 const ACTION_LABEL: Record<StageAction, string> = {
   retry: 'Retry stage',
   resume: 'Resume stage',
-  wake: 'Wake now',
   cancel: 'Cancel stage',
 };
 
@@ -133,7 +132,7 @@ export default function StageScreen(): React.ReactElement {
   const runStatus = run.data.status;
   const workspaceId = run.data.workspaceId;
   const controls = stageControlsFor(stage.status, runStatus);
-  const available = (['retry', 'resume', 'wake', 'cancel'] as const).filter((a) => controls[a]);
+  const available = (['retry', 'resume', 'cancel'] as const).filter((a) => controls[a]);
   const elapsed = runElapsed(stage, isActive(stage.status) ? null : stage.completedAt);
   const files = (stage.artifactManifest ?? []).filter((f) => !/^unnamed\.[A-Za-z0-9]+$/.test(f.path));
   const outputText = stage.outputText?.trim();

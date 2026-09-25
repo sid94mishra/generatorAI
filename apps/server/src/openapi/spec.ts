@@ -604,10 +604,9 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             type: 'string',
             enum: [
               'pending', 'queued', 'running', 'paused', 'completed',
-              'failed', 'cancelled', 'skipped', 'sleeping', 'awaiting_input',
+              'failed', 'cancelled', 'skipped', 'awaiting_input',
             ],
           },
-          wakeAt: { type: 'string', format: 'date-time', nullable: true },
           interruptData: {},
           retryCount: { type: 'integer' },
           version: { type: 'integer' },

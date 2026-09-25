@@ -389,30 +389,6 @@
         "constraints": "maxLength 64"
       },
       {
-        "field": "durableSleep",
-        "type": "object",
-        "presence": "default {}",
-        "constraints": "unknown keys: strip"
-      },
-      {
-        "field": "durableSleep.sweepIntervalMs",
-        "type": "number",
-        "presence": "default 5000",
-        "constraints": "int; min 100"
-      },
-      {
-        "field": "durableSleep.maxWakesPerSweep",
-        "type": "number",
-        "presence": "default 100",
-        "constraints": "int; min 1; max 10000"
-      },
-      {
-        "field": "durableSleep.enabled",
-        "type": "boolean",
-        "presence": "default true",
-        "constraints": "—"
-      },
-      {
         "field": "retention",
         "type": "object",
         "presence": "default {}",

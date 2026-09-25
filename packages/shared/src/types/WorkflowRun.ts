@@ -41,14 +41,6 @@ export type StageRunStatus =
   | 'cancelled'
   | 'skipped'
   /**
-   * DUR-05 — the stage has voluntarily released its process and is waiting
-   * for `wakeAt` to pass. A background sweeper (`DurableSleepService`)
-   * transitions it back to `queued` via `sys:wake` so it can re-run.
-   * Sleeping stages hold NO in-memory state — the whole point is that the
-   * server can restart and pick them back up cleanly.
-   */
-  | 'sleeping'
-  /**
    * HITL-01 — the stage is paused waiting for a human approver to supply
    * a value via `POST /api/workflow-runs/:runId/stages/:stageId/resume`.
    * The payload needed for the approval (tool args, free-form prompt,
@@ -157,15 +149,6 @@ export interface StageRun {
   outputData?: Record<string, unknown>;
   /** Manifest of files created/modified by this stage */
   artifactManifest?: Array<{ path: string; language: string; action: string; sizeBytes: number }>;
-  /**
-   * DUR-05 — epoch-ms wall-clock time at which a sleeping stage should
-   * be woken. `undefined` unless `status === 'sleeping'`. The background
-   * sweeper compares `wakeAt <= Date.now()` to decide which rows to
-   * resurrect on each tick.
-   */
-  wakeAt?: Date;
-  /** DUR-05 — when the stage entered `sleeping`, for observability. */
-  sleptSince?: Date;
   /**
    * HITL-02 — opaque payload the stage asked an approver for. Set when
    * the stage enters `awaiting_input`; cleared on resume. Shape is

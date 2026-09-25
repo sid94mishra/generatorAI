@@ -23,7 +23,6 @@ import {
   useWorkflowRun, useWorkflowDefinition,
   usePauseWorkflowRun, useResumeWorkflowRun, useCancelWorkflowRun, useRetryWorkflowRun,
   useRetryStageRun,
-  useWakeStageRun,
   useRunWorkspace,
   useRunScratchpad,
 } from '@/hooks/workflowQueries.js';
@@ -105,7 +104,6 @@ export function WorkflowRunPage() {
   const cancelRun = useCancelWorkflowRun();
   const retryRun = useRetryWorkflowRun();
   const retryStageMutation = useRetryStageRun();
-  const wakeStageMutation = useWakeStageRun();
 
   // ── UI state ─────────────────────────────────────────────────
 
@@ -398,13 +396,6 @@ export function WorkflowRunPage() {
     void retryStageMutation.mutateAsync({ runId, stageId });
   }, [runId, retryStageMutation]);
 
-  const handleWakeStage = useCallback((stageId: string) => {
-    if (!runId) return;
-    // A 409 here just means the sweeper's timer beat the click; the stream
-    // pushes the resulting status either way, so there is nothing to report.
-    void wakeStageMutation.mutateAsync({ runId, stageId }).catch(() => undefined);
-  }, [runId, wakeStageMutation]);
-
   // ── Loading / error ─────────────────────────────────────────
 
   if (runLoading || !runView) {
@@ -545,7 +536,6 @@ export function WorkflowRunPage() {
                 onRejectHitl={handleRejectHitl}
                 onTerminalRejectHitl={handleTerminalRejectHitl}
                 onRetry={handleRetryStage}
-                onWake={handleWakeStage}
                 onSelectFiles={selectStage}
                 onSelectOutput={selectStage}
                 onOpenInspector={(id) => {

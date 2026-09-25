@@ -63,7 +63,7 @@ export function StageTimeline({
         const last = index === stages.length - 1;
         const elapsed = runElapsed(stage, isActive(stage.status) ? null : stage.completedAt);
         const controls = stageControlsFor(stage.status, runStatus);
-        const quick = controls.retry ? 'retry' : controls.resume ? 'resume' : controls.wake ? 'wake' : null;
+        const quick = controls.retry ? 'retry' : controls.resume ? 'resume' : null;
 
         return (
           <View key={stage.id}>
@@ -110,7 +110,7 @@ export function StageTimeline({
                 {quick && canControl ? (
                   <View className="pt-1">
                     <Button
-                      label={quick === 'retry' ? 'Retry stage' : quick === 'resume' ? 'Resume stage' : 'Wake now'}
+                      label={quick === 'retry' ? 'Retry stage' : 'Resume stage'}
                       variant="secondary"
                       size="sm"
                       haptic="commit"

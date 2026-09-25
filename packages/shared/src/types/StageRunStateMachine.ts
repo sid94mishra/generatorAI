@@ -21,7 +21,5 @@ export type StageRunTransition =
   | 'sys:parent_cancel'   // parent workflow cancelled, cascade
   | 'sys:skip'            // condition not met, skip this stage
   | 'sys:retry'           // retry after failure
-  | 'sys:sleep'           // DUR-05 — stage voluntarily released, enters `sleeping`
-  | 'sys:wake'            // DUR-05 — sweeper's wake_at deadline passed; resume via queued
   | 'sys:input_request'   // HITL-01 — stage asked for human input; enters `awaiting_input`
   | 'sys:input_received'; // HITL-01 — approver supplied a value; resume to `running`

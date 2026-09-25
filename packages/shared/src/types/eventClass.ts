@@ -178,8 +178,6 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'stage_run.cancelled': 'item',
   'stage_run.skipped': 'item',
   'stage_run.retrying': 'item',
-  'stage_run.sleeping': 'item',
-  'stage_run.woken': 'item',
   'stage_run.awaiting_input': 'item',
   'stage_run.input_received': 'item',
 

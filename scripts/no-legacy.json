@@ -538,6 +538,29 @@
         "apps/cli/src/tui/panes.tsx"
       ],
       "reason": "WP-1.4 / PD-8: automation inputMode / batchData deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(DurableSleepService|durableSleepService|DurableSleepConfig|findSleepersReadyToWake|wakeStageRun|useWakeStageRun|sleepRemainingMs)\\b|stage_run\\.(sleeping|woken)|'sys:(sleep|wake)'|/stages/\\$\\{\\w+\\}/wake|'/:runId/stages/:stageId/wake'",
+      "reason": "WP-1.4 / PD-7: durable sleep deleted; wait {type: timer} arrives in P05"
+    },
+    {
+      "phase": "01",
+      "pattern": "'sleeping'|\\b(wakeAt|sleptSince)\\b|durableSleep:",
+      "paths": [
+        "packages/shared/src/",
+        "packages/core/src/",
+        "packages/sdk/src/",
+        "packages/client-core/src/",
+        "packages/cli-core/src/",
+        "packages/db/src/repositories/",
+        "apps/server/src/",
+        "apps/web/src/",
+        "apps/mobile/src/",
+        "apps/mobile/app/",
+        "apps/cli/src/"
+      ],
+      "reason": "WP-1.4 / PD-7: the sleeping stage status and wake_at are gone (columns dropped in v55)"
     }
   ],
   "comments": {

@@ -1092,10 +1092,6 @@ export class HttpPlatformClient implements IPlatformClient {
     await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/resume`, { method: 'POST' });
   }
 
-  async wakeStageRun(runId: string, stageId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/wake`, { method: 'POST' });
-  }
-
   async retryStageRun(runId: string, stageId: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/stages/${stageId}/retry`, { method: 'POST' });
   }

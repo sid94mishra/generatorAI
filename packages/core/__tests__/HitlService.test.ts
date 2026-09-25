@@ -77,9 +77,6 @@ function createMemoryRepo(initial: StageRun[] = []): IStageRunRepository & {
     async batchUpdateStatus() {},
     async delete(id) { rows.delete(id); },
     async deleteByRunId() {},
-    async sleep() {},
-    async wake() { return false; },
-    async findSleepersReadyToWake() { return []; },
     async interrupt(id, data) {
       const r = rows.get(id);
       if (!r) throw new Error(`not found ${id}`);

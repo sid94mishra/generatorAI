@@ -140,15 +140,15 @@ describe('StageRunStateMachine', () => {
 
   it('validTransitions from running', () => {
     const sm = new StageRunStateMachine('running');
-    // DUR-05 added `sys:sleep` (→ sleeping); HITL-01 added
-    // `sys:input_request` (→ awaiting_input). Count climbed 6 → 7 → 8.
+    // HITL-01 added `sys:input_request` (→ awaiting_input); durable sleep
+    // (`sys:sleep`) was deleted with PD-7.
     expect(sm.validTransitions).toEqual(
       expect.arrayContaining([
         'user:pause', 'sys:parent_pause', 'user:cancel', 'sys:parent_cancel',
-        'sys:done', 'sys:error', 'sys:sleep', 'sys:input_request',
+        'sys:done', 'sys:error', 'sys:input_request',
       ]),
     );
-    expect(sm.validTransitions.length).toBe(8);
+    expect(sm.validTransitions.length).toBe(7);
   });
 
   // ── Full lifecycle ──

@@ -29,7 +29,6 @@ import {
   WorktreeService,
   ProjectConfigService,
   StreamBroker,
-  DurableSleepService,
   WorktreeCleanupService,
   SystemArtifactService,
   BrowserService,
@@ -91,7 +90,6 @@ import * as path from 'node:path';
 interface GeneratorAIInternals {
   repos: ReturnType<typeof createAllRepositories>;
   eventRetention: EventRetentionService;
-  durableSleep: DurableSleepService;
   worktreeCleanup: WorktreeCleanupService;
   systemArtifacts: SystemArtifactService;
 }
@@ -224,7 +222,7 @@ export class GeneratorAI {
     this._initialized = true;
     const { templateRegistry, hookInterceptor, recoveryService, automationService } =
       this.services;
-    const { repos, eventRetention, durableSleep, worktreeCleanup, systemArtifacts } = this._internals;
+    const { repos, eventRetention, worktreeCleanup, systemArtifacts } = this._internals;
 
     // 1. Templates (root + system subdirectory), tolerating a missing dir.
     const templatesDir = this._config.templatesDir;
@@ -260,7 +258,6 @@ export class GeneratorAI {
 
     // 7. Background sweepers.
     eventRetention.start();
-    durableSleep.start();
     await worktreeCleanup.recoverOnStartup();
     worktreeCleanup.start();
 
@@ -278,7 +275,6 @@ export class GeneratorAI {
     // Stop background sweepers first so they can't touch the DB after close.
     try {
       this._internals.eventRetention.stop();
-      this._internals.durableSleep.stop();
       this._internals.worktreeCleanup.stop();
       this.services.automationService.shutdown();
     } catch {
@@ -546,32 +542,10 @@ export class GeneratorAI {
 
     // ── Background lifecycle services (constructed here, started by initialize()) ──
     // Defaults mirror the server's AppConfig so SDK-embedded engines get the
-    // same durability (event retention, durable step.sleep wake, worktree GC).
+    // same durability (event retention, worktree GC).
     const eventRetention = new EventRetentionService(
       db,
       { eventPayloadTtlDays: 90, sweepIntervalMs: 6 * 60 * 60 * 1000, maxDeletePerSweep: 50_000, enabled: true },
-      logger,
-    );
-
-    const durableSleep = new DurableSleepService(
-      repos.stageRunRepo,
-      services.eventBus,
-      async (stage) => {
-        try {
-          const run = await repos.workflowRunRepo.getById(stage.workflowRunId);
-          // Fire-and-forget: WorkflowRunService.onStageCompleted/onStageFailed
-          // drives the DAG forward once executeStage settles.
-          services.stageExecutionService
-            .executeStage(stage, stage.workflowRunId, run.sessionMode)
-            .then(() => services.workflowRunService.onStageCompleted(stage.workflowRunId, stage.id))
-            .catch((err) => services.workflowRunService.onStageFailed(stage.workflowRunId, stage.id, err));
-        } catch (err) {
-          logger.error(`[DurableSleep] Failed to resume woken stage ${stage.id}`, {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      },
-      { sweepIntervalMs: 5_000, maxWakesPerSweep: 100, enabled: true },
       logger,
     );
 
@@ -618,7 +592,7 @@ export class GeneratorAI {
       worktreeService,
       projectConfigService,
       browserService,
-      { repos, eventRetention, durableSleep, worktreeCleanup, systemArtifacts },
+      { repos, eventRetention, worktreeCleanup, systemArtifacts },
       scriptLoader,
       customToolRegistry,
     );

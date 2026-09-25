@@ -46,22 +46,6 @@ export interface IStageRunRepository {
   delete(id: string): Promise<void>;
   deleteByRunId(workflowRunId: string): Promise<void>;
 
-  // ── DUR-05: durable step.sleep ────────────────────────────────
-  /**
-   * Atomically transition a `running` stage to `sleeping` with a
-   * `wake_at` deadline. Caller releases the SDK session BEFORE calling
-   * sleep() — this method only touches the row.
-   */
-  sleep(id: string, wakeAt: Date): Promise<void>;
-  /**
-   * Atomically transition `sleeping → queued`, clearing `wake_at` /
-   * `slept_since`. Returns `true` iff the row was actually sleeping when
-   * this call ran; `false` means another sweeper already woke it or the
-   * parent run cancelled. Used by the sweeper to claim a row before
-   * firing the wake handler.
-   */
-  wake(id: string): Promise<boolean>;
-
   // ── DUR-06: durable launch claim ──────────────────────────────
   /**
    * Atomically claim a `pending` stage for execution, transitioning it to
@@ -78,12 +62,6 @@ export interface IStageRunRepository {
    * that does not survive a restart.
    */
   claimForExecution(id: string): Promise<boolean>;
-  /**
-   * Return every stage whose `wake_at <= now` and `status = 'sleeping'`,
-   * ordered by oldest deadline first. Capped at `limit` rows per sweep so
-   * a single tick can't hold the write lock indefinitely.
-   */
-  findSleepersReadyToWake(now: Date, limit: number): Promise<StageRun[]>;
 
   // ── HITL-01..05: human-in-the-loop ─────────────────────────────
   /**

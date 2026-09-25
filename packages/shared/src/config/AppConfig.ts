@@ -241,22 +241,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  // DUR-05 — durable step.sleep sweeper. Active whenever at least one
-  // stage row is `sleeping`; runs a small poll against the indexed
-  // `wake_at` column. Defaults are deliberately modest — bump
-  // `sweepIntervalMs` in production once sleep semantics are exercised
-  // more aggressively.
-  durableSleep: z
-    .object({
-      /** How often (ms) the sweeper polls for wake-ready rows. */
-      sweepIntervalMs: z.number().int().min(100).default(5_000),
-      /** Cap per sweep to keep SQLite write windows bounded. */
-      maxWakesPerSweep: z.number().int().min(1).max(10_000).default(100),
-      /** Disable the sweeper entirely. */
-      enabled: z.boolean().default(true),
-    })
-    .default({}),
-
   // DB-04 — retention policy for streaming + event logs. The persistent
   // `stream_cursors` log (STR-02) and the legacy `events` table both grow
   // unbounded, and downstream DB-04 payload offload (EVT-04, not yet

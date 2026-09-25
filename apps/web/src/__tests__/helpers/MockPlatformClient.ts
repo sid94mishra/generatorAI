@@ -190,7 +190,6 @@ export class MockPlatformClient implements IPlatformClient {
   deleteRun = vi.fn(async (_id: string): Promise<void> => {});
   pauseStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
   resumeStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
-  wakeStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
   retryStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
   cancelStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
 

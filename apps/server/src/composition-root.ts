@@ -121,8 +121,6 @@ import {
   InMemoryMcpHub,
   McpCredentialVault,
   McpSettingsStore,
-  // DUR-05 — durable step.sleep sweeper
-  DurableSleepService,
   // Project & Codebase Management services
   ProjectService,
   CodebaseService,
@@ -1059,39 +1057,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       deltaLog.enforceGlobalCeiling(limit),
     );
   }
-
-  // DUR-05 — durable step.sleep sweeper. Flips `sleeping → queued` for
-  // stage rows whose `wake_at` has passed and then invokes `onWake` to
-  // resume execution. Stage code calls `durableSleepService.sleep(...)`
-  // to park a running stage; the sweeper owns the reverse transition.
-  //
-  // `onWake` lives in the composition root because it bridges two
-  // services — it needs `stageExecutionService` (to re-run the stage)
-  // AND `workflowRunRepo` (to fetch the run's sessionMode). Keeping it
-  // here avoids pulling either concern into `DurableSleepService`.
-  const durableSleepService = new DurableSleepService(
-    stageRunRepo,
-    eventBus,
-    async (stage) => {
-      try {
-        const run = await workflowRunRepo.getById(stage.workflowRunId);
-        // Fire-and-forget: the stage execution path already plumbs
-        // onStageCompleted / onStageFailed through WorkflowRunService,
-        // so the run loop continues on its own once executeStage
-        // resolves / rejects.
-        stageExecutionService
-          .executeStage(stage, stage.workflowRunId, run.sessionMode)
-          .then(() => workflowRunService.onStageCompleted(stage.workflowRunId, stage.id))
-          .catch((err) => workflowRunService.onStageFailed(stage.workflowRunId, stage.id, err));
-      } catch (err) {
-        logger.error(`[DurableSleep] Failed to resume woken stage ${stage.id}`, {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-    config.durableSleep,
-    logger,
-  );
 
   // ── Orchestrator Services ──
 
@@ -2277,7 +2242,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     mcpHub,
     mcpSettingsStore,
     mcpCredentialVault,
-    durableSleepService,
     templateRegistry,
     hookExecutor,
     workflowScriptLoader,
@@ -2468,11 +2432,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // DB-04 — start the event/stream retention sweeper. No-op if disabled.
       eventRetentionService.start();
 
-      // DUR-05 — start the durable-sleep sweeper. One tick fires
-      // immediately so a server that restarted mid-sleep resumes any
-      // stages whose `wake_at` is already in the past.
-      durableSleepService.start();
-
       // Worktree cleanup: detect orphaned worktrees from crashed runs
       // and start the background retention sweep timer.
       await worktreeCleanupService.recoverOnStartup();
@@ -2523,10 +2482,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // DB-04 — halt the retention sweeper so a pending sweep can't block
       // closeDB() by holding the write lock.
       eventRetentionService.stop();
-      // DUR-05 — stop the durable-sleep sweeper. Any stages still
-      // `sleeping` stay that way — a subsequent server boot resumes
-      // them on the next sweep.
-      durableSleepService.stop();
       worktreeCleanupService.stop();
       workspaceRetentionService.stop();
       // Stop run poll loops + unsubscribe EventBus listeners + close run loggers
@@ -2759,8 +2714,6 @@ export interface Container {
   mcpSettingsStore: McpSettingsStore;
   /** W48 — the only place MCP credential VALUES are read/written. */
   mcpCredentialVault: McpCredentialVault;
-  /** DUR-05 — durable step.sleep sweeper. Stage code calls `sleep(...)` to park. */
-  durableSleepService: DurableSleepService;
   templateRegistry: TemplateRegistry;
   hookExecutor: HookExecutor;
   workflowScriptLoader: WorkflowScriptLoader;

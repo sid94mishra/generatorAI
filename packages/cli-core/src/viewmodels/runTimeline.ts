@@ -360,7 +360,7 @@ export function reduceEvent(
     case 'stage_run.running': {
       const stageRunId = str(data['stageRunId'] ?? data['stageId'] ?? data['id']);
       const stageName = str(data['name'] ?? data['stageName'] ?? stageRunId);
-      // A retry, or resuming after `.paused`/`.sleeping`, re-fires `.running`
+      // A retry, or resuming after `.paused`, re-fires `.running`
       // for a stage run whose card already exists — update it in place
       // rather than pushing a duplicate card for the same stage run.
       const existing = stageRunId

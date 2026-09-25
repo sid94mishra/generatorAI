@@ -28,7 +28,6 @@ const STAGE_STATUS_MAP: Record<StageRunStatus, StageStatus> = {
   failed:         'failed',
   cancelled:      'cancelled',
   skipped:        'skipped',
-  sleeping:       'sleeping',
   awaiting_input: 'awaiting_input',
 };
 
@@ -320,13 +319,6 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
             .map(mapFile)
         : undefined;
 
-    // Sleep remaining
-    let sleepRemainingMs: number | undefined;
-    if (status === 'sleeping' && sr.wakeAt) {
-      const remaining = new Date(sr.wakeAt).getTime() - Date.now();
-      sleepRemainingMs = Math.max(0, remaining);
-    }
-
     // Prompt from definition (first prompt's text). Interpolate `{{var}}`
     // placeholders against the run variables so the UI matches what actually
     // reached the model. Unresolved placeholders are left as-is on purpose so
@@ -352,7 +344,6 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
       parallelWith: parallelIds.length > 0 ? parallelIds : undefined,
       durationMs: stageDuration(sr),
       interrupt,
-      sleepRemainingMs,
       error: sr.error,
       summary: sr.summary,
       outputData: sr.outputData,

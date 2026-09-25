@@ -74,10 +74,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | scripts | object | `default {}` | unknown keys: strip |
 | scripts.workflowScriptsEnabled | boolean | `default false` | — |
 | scripts.extraAllowlist | array of string | `default []` | maxLength 64 |
-| durableSleep | object | `default {}` | unknown keys: strip |
-| durableSleep.sweepIntervalMs | number | `default 5000` | int; min 100 |
-| durableSleep.maxWakesPerSweep | number | `default 100` | int; min 1; max 10000 |
-| durableSleep.enabled | boolean | `default true` | — |
 | retention | object | `default {}` | unknown keys: strip |
 | retention.eventPayloadTtlDays | number | `default 30` | int; min 1; max 3650 |
 | retention.deltaPayloadTtlDays | number | `default 1` | int; min 1; max 3650 |
@@ -368,22 +364,6 @@ export const AppConfigSchema = z.object({
        * (comma-separated).
        */
       extraAllowlist: z.array(z.string().min(1).max(64)).max(64).default([]),
-    })
-    .default({}),
-
-  // DUR-05 — durable step.sleep sweeper. Active whenever at least one
-  // stage row is `sleeping`; runs a small poll against the indexed
-  // `wake_at` column. Defaults are deliberately modest — bump
-  // `sweepIntervalMs` in production once sleep semantics are exercised
-  // more aggressively.
-  durableSleep: z
-    .object({
-      /** How often (ms) the sweeper polls for wake-ready rows. */
-      sweepIntervalMs: z.number().int().min(100).default(5_000),
-      /** Cap per sweep to keep SQLite write windows bounded. */
-      maxWakesPerSweep: z.number().int().min(1).max(10_000).default(100),
-      /** Disable the sweeper entirely. */
-      enabled: z.boolean().default(true),
     })
     .default({}),
 

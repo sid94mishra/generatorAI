@@ -58,12 +58,11 @@ describe('stageControlsFor', () => {
   it('offers Retry for failed and Resume for paused', () => {
     expect(stageControlsFor('failed', 'failed').retry).toBe(true);
     expect(stageControlsFor('paused', 'paused').resume).toBe(true);
-    expect(stageControlsFor('sleeping', 'running').wake).toBe(true);
   });
 
   it('offers nothing but Retry once the run is finished', () => {
-    expect(stageControlsFor('paused', 'cancelled')).toEqual({ retry: false, resume: false, wake: false, cancel: false });
-    expect(stageControlsFor('completed', 'running')).toEqual({ retry: false, resume: false, wake: false, cancel: false });
+    expect(stageControlsFor('paused', 'cancelled')).toEqual({ retry: false, resume: false, cancel: false });
+    expect(stageControlsFor('completed', 'running')).toEqual({ retry: false, resume: false, cancel: false });
   });
 });
 

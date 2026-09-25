@@ -10,7 +10,7 @@
 
 import React from 'react';
 import {
-  CircleDot, Loader2, Play, Pause, Check, X, Clock, SkipForward, AlertCircle, AlertTriangle, Archive, Hand, Moon,
+  CircleDot, Loader2, Play, Pause, Check, X, Clock, SkipForward, AlertCircle, AlertTriangle, Archive, Hand,
 } from 'lucide-react';
 import { Badge, type BadgeTone, type BadgeSize } from './Badge.js';
 import { cn } from '@/lib/utils.js';
@@ -41,7 +41,6 @@ const STATUS: Record<string, StatusEntry> = {
   pending: { tone: 'neutral', label: 'Pending', Icon: Clock },
   queued: { tone: 'info', label: 'Queued', Icon: Clock },
   skipped: { tone: 'neutral', label: 'Skipped', Icon: SkipForward },
-  sleeping: { tone: 'info', label: 'Sleeping', Icon: Moon },
   awaiting_input: { tone: 'warning', label: 'Awaiting input', Icon: Hand },
   // Chat / session
   active: { tone: 'success', label: 'Active', Icon: CircleDot },

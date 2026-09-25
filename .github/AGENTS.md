@@ -138,9 +138,9 @@ Chat ── 1:1 ── Session ── ExecutionWorkspace (optional)
 State machines (all pure, in [packages/core/src/domain/state-machines/](../packages/core/src/domain/state-machines/)):
 
 - `WorkflowRunStateMachine` — pending → starting → running ⇄ paused → completed / failed / cancelled
-- `StageRunStateMachine` — pending → queued → running ⇄ paused / sleeping / awaiting_input → completed / failed / cancelled / skipped
+- `StageRunStateMachine` — pending → queued → running ⇄ paused / awaiting_input → completed / failed / cancelled / skipped
 
-Stage run also supports the durable states `sleeping` (DUR-05 `wake_at` timestamp) and `awaiting_input` (HITL-02 `interrupt_data` payload).
+Stage run also supports the durable state `awaiting_input` (HITL-02 `interrupt_data` payload). Durable sleep was deleted (PD-7); timed waits arrive as `wait {type: timer}` stages (P05).
 
 ---
 

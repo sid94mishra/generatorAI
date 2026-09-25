@@ -56,7 +56,7 @@ export interface RunReconciliation {
   /**
    * Set when, once `toSkip` is applied, every stage in the DAG is terminal
    * and nothing is left to launch. Undefined while anything is still
-   * pending, queued, running, paused, sleeping or awaiting input.
+   * pending, queued, running, paused or awaiting input.
    */
   runTerminal?: TerminalRunStatus;
 }

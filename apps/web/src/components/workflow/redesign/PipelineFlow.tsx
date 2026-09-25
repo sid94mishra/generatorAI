@@ -8,7 +8,7 @@
 
 import React from 'react';
 import {
-  Check, Loader2, Clock, Pause, Hand, X, SkipForward, AlertTriangle, Zap, Moon, ChevronRight,
+  Check, Loader2, Clock, Pause, Hand, X, SkipForward, AlertTriangle, Zap, ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/index.js';
@@ -29,7 +29,6 @@ function statusVisual(status: StageStatus): { Icon: React.ComponentType<{ classN
     case 'pending':        return { Icon: Clock,          classes: 'text-[var(--color-muted-foreground)]/50', pulse: false };
     case 'paused':         return { Icon: Pause,          classes: 'text-[var(--color-warning)]',           pulse: false };
     case 'awaiting_input': return { Icon: Hand,           classes: 'text-[var(--color-warning)]',           pulse: true };
-    case 'sleeping':       return { Icon: Moon,           classes: 'text-indigo-400',                       pulse: false };
     case 'failed':         return { Icon: AlertTriangle,  classes: 'text-[var(--color-danger)]',            pulse: false };
     case 'cancelled':      return { Icon: X,              classes: 'text-[var(--color-muted-foreground)]/60', pulse: false };
     case 'skipped':        return { Icon: SkipForward,    classes: 'text-[var(--color-muted-foreground)]/60', pulse: false };

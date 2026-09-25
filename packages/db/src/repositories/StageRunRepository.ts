@@ -2,7 +2,7 @@
 // DrizzleStageRunRepository — IStageRunRepository impl (v2)
 // ────────────────────────────────────────────────────────────────
 
-import { eq, and, inArray, lte, isNotNull, sql } from 'drizzle-orm';
+import { eq, and, inArray, sql } from 'drizzle-orm';
 import type { IStageRunRepository } from '@generatorai/core';
 import type { StageRun, StageRunStatus } from '@generatorai/shared';
 import { NotFoundError, StorageError } from '@generatorai/shared';
@@ -84,10 +84,6 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     if (updates.artifactManifest !== undefined) values['artifactManifest'] = updates.artifactManifest ? JSON.stringify(updates.artifactManifest) : null;
     if (updates.startedAt !== undefined) values['startedAt'] = updates.startedAt;
     if (updates.completedAt !== undefined) values['completedAt'] = updates.completedAt;
-    // DUR-05 — allow setting sleep fields to `null` to explicitly clear
-    // them on wake; undefined leaves them unchanged.
-    if (updates.wakeAt !== undefined) values['wakeAt'] = updates.wakeAt;
-    if (updates.sleptSince !== undefined) values['sleptSince'] = updates.sleptSince;
     // HITL-02 — persist or clear interrupt_data alongside the status change.
     if (updates.interruptData !== undefined) values['interruptData'] = updates.interruptData;
     // WS-D1 — heartbeat/lease are normally written by `heartbeat()`; allow
@@ -107,50 +103,6 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       .set(values)
       .where(eq(stageRuns.id, id));
     return this.getById(id);
-  }
-
-  /**
-   * DUR-05 — atomic "put this stage to sleep" operation. Used by a caller
-   * that wants to transition running → sleeping with `wake_at` set in one
-   * SQL write so a crash between `updateStatus` and `update` can't leave
-   * the row in a half-sleeping state.
-   */
-  async sleep(id: string, wakeAt: Date): Promise<void> {
-    const now = new Date();
-    await this.db
-      .update(stageRuns)
-      .set({
-        status: 'sleeping',
-        wakeAt,
-        sleptSince: now,
-        // WS-D1 — a sleeping stage is not live; clear the beat so the
-        // reconciler's stale check has nothing to misread if the row is
-        // later resurrected, and bump version like every other mutation.
-        heartbeatAt: null,
-        version: sql`${stageRuns.version} + 1`,
-      })
-      .where(eq(stageRuns.id, id));
-  }
-
-  /**
-   * DUR-05 — atomic wake: transition sleeping → queued AND clear the
-   * sleep bookkeeping in a single write. Returns true iff this call
-   * actually woke the row (status was `sleeping` + wakeAt NOT NULL).
-   * The conditional WHERE guarantees two sweepers can't both wake the
-   * same row.
-   */
-  async wake(id: string): Promise<boolean> {
-    const result = await this.db
-      .update(stageRuns)
-      .set({
-        status: 'queued',
-        wakeAt: null,
-        sleptSince: null,
-        version: sql`${stageRuns.version} + 1`,
-      })
-      .where(and(eq(stageRuns.id, id), eq(stageRuns.status, 'sleeping')))
-      .returning({ id: stageRuns.id });
-    return result.length > 0;
   }
 
   /**
@@ -174,12 +126,6 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     return result.length > 0;
   }
 
-  /**
-   * DUR-05 — list stages ready to wake (`status = 'sleeping'` and
-   * `wake_at <= now`). Callers cap via `limit` to keep a single sweep
-   * bounded. Results are ordered by the oldest deadline first so
-   * long-overdue stages resume before newly-expired ones.
-   */
   /**
    * HITL-01 — atomically park a stage for human input. Sets
    * `status='awaiting_input'` AND writes `interrupt_data` in one UPDATE
@@ -242,21 +188,6 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
     return rows.map((r) => this.mapRow(r));
   }
 
-  async findSleepersReadyToWake(now: Date, limit: number): Promise<StageRun[]> {
-    const rows = await this.db
-      .select()
-      .from(stageRuns)
-      .where(
-        and(
-          eq(stageRuns.status, 'sleeping'),
-          isNotNull(stageRuns.wakeAt),
-          lte(stageRuns.wakeAt, now),
-        ),
-      )
-      .orderBy(stageRuns.wakeAt)
-      .limit(limit);
-    return rows.map((r) => this.mapRow(r));
-  }
 
   /**
    * WS-D1 — mirrors `claimForExecution`/`resumeFromInterrupt`: one
@@ -385,8 +316,6 @@ export class DrizzleStageRunRepository implements IStageRunRepository {
       outputText: (row as Record<string, unknown>).outputText as string | undefined ?? undefined,
       outputData: (() => { const v = (row as Record<string, unknown>).outputData; return typeof v === 'string' ? JSON.parse(v) as Record<string, unknown> : undefined; })(),
       artifactManifest: (() => { const v = (row as Record<string, unknown>).artifactManifest; return typeof v === 'string' ? JSON.parse(v) as Array<{ path: string; language: string; action: string; sizeBytes: number }> : undefined; })(),
-      wakeAt: row.wakeAt ?? undefined,
-      sleptSince: row.sleptSince ?? undefined,
       interruptData: row.interruptData ?? undefined,
       heartbeatAt: row.heartbeatAt ?? undefined,
       leaseOwner: row.leaseOwner ?? undefined,

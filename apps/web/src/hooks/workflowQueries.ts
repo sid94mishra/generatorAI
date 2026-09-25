@@ -356,12 +356,6 @@ function useStageControl(action: (runId: string, stageId: string) => Promise<voi
   });
 }
 
-/** Wake a single sleeping stage ahead of its scheduled wake time */
-export function useWakeStageRun() {
-  const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.wakeStageRun(runId, stageId));
-}
-
 /** Retry a single failed stage */
 export function useRetryStageRun() {
   const platform = usePlatform();

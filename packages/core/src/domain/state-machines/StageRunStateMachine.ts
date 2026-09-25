@@ -27,10 +27,6 @@ const STAGE_RUN_TRANSITIONS: Record<
     'sys:parent_cancel': 'cancelled',
     'sys:done': 'completed',
     'sys:error': 'failed',
-    // DUR-05 — running stage chose to wait. It releases its process and
-    // enters `sleeping`; the sweeper wakes it via `sys:wake` when the
-    // `wake_at` deadline passes.
-    'sys:sleep': 'sleeping',
     // HITL-01 — stage asked for human input. Release the SDK session
     // (caller's responsibility) and park with `interrupt_data` persisted
     // on the row; the POST /resume endpoint drives `sys:input_received`
@@ -54,15 +50,6 @@ const STAGE_RUN_TRANSITIONS: Record<
   },
   skipped: {
     // Terminal state
-  },
-  // DUR-05 — durable sleep state. A stage can only leave `sleeping` via
-  // (a) the sweeper firing `sys:wake` when `wake_at <= now`, or
-  // (b) its parent run cancelling everything. User-initiated resume from
-  // the outside is NOT allowed — sleep is a stage-driven lifecycle choice.
-  sleeping: {
-    'sys:wake': 'queued',
-    'sys:parent_cancel': 'cancelled',
-    'user:cancel': 'cancelled',
   },
   // HITL-01 — waiting for human approval. Only three exits:
   //   1. approver supplies value → `sys:input_received` → running

@@ -481,27 +481,26 @@ Source: `apps/server/src/routes/workflowRuns.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/workflow-runs` | 36 |
-| `GET` | `/api/workflow-runs` | 49 |
-| `GET` | `/api/workflow-runs/:id` | 81 |
-| `GET` | `/api/workflow-runs/:id/scratchpad` | 93 |
-| `POST` | `/api/workflow-runs/:id/start` | 122 |
-| `POST` | `/api/workflow-runs/:id/pause` | 144 |
-| `POST` | `/api/workflow-runs/:id/resume` | 158 |
-| `POST` | `/api/workflow-runs/:id/retry` | 174 |
-| `POST` | `/api/workflow-runs/:id/cancel` | 204 |
-| `DELETE` | `/api/workflow-runs/:id` | 218 |
-| `GET` | `/api/workflow-runs/:id/stages` | 237 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/pause` | 248 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/resume` | 262 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/wake` | 290 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/retry` | 330 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/cancel` | 358 |
-| `GET` | `/api/workflow-runs/:id/permission-mode` | 384 |
-| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 395 |
-| `GET` | `/api/workflow-runs/:id/pending-interrupts` | 420 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/interrupt` | 441 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/approve` | 476 |
+| `POST` | `/api/workflow-runs` | 35 |
+| `GET` | `/api/workflow-runs` | 48 |
+| `GET` | `/api/workflow-runs/:id` | 80 |
+| `GET` | `/api/workflow-runs/:id/scratchpad` | 92 |
+| `POST` | `/api/workflow-runs/:id/start` | 121 |
+| `POST` | `/api/workflow-runs/:id/pause` | 143 |
+| `POST` | `/api/workflow-runs/:id/resume` | 157 |
+| `POST` | `/api/workflow-runs/:id/retry` | 173 |
+| `POST` | `/api/workflow-runs/:id/cancel` | 203 |
+| `DELETE` | `/api/workflow-runs/:id` | 217 |
+| `GET` | `/api/workflow-runs/:id/stages` | 236 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/pause` | 247 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/resume` | 261 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/retry` | 283 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/cancel` | 311 |
+| `GET` | `/api/workflow-runs/:id/permission-mode` | 337 |
+| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 348 |
+| `GET` | `/api/workflow-runs/:id/pending-interrupts` | 373 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/interrupt` | 394 |
+| `POST` | `/api/workflow-runs/:runId/stages/:stageId/approve` | 429 |
 
 ## workflowScripts
 

@@ -24,7 +24,7 @@ import {
 export const runPermissionModeKey = (runId: string) => [...queryKeys.run(runId), 'permission-mode'] as const;
 
 export type RunAction = 'pause' | 'resume' | 'cancel' | 'retry';
-export type StageAction = 'retry' | 'resume' | 'wake' | 'cancel';
+export type StageAction = 'retry' | 'resume' | 'cancel';
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

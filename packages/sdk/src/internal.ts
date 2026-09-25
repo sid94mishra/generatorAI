@@ -44,7 +44,6 @@ export {
   ProjectConfigService,
   WorkspaceManager,
   HitlService,
-  DurableSleepService,
   WorkflowScriptLoader,
   CustomToolRegistry,
   InMemoryMcpHub,

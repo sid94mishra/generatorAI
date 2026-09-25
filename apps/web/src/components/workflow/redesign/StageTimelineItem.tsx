@@ -18,7 +18,7 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Check, Loader2, Clock, Pause, Hand, X, SkipForward, AlertTriangle, Zap, Moon,
+  Check, Loader2, Clock, Pause, Hand, X, SkipForward, AlertTriangle, Zap,
   ChevronRight, ChevronDown, User, FileText, Database, RefreshCw,
   PanelRightOpen,
 } from 'lucide-react';
@@ -49,8 +49,6 @@ interface StageTimelineItemProps {
   /** Terminal rejection — fails the stage and blocks the rest of the run. */
   onTerminalRejectHitl?: (id: string, reason?: string) => void;
   onRetry?: (id: string) => void;
-  /** Wake a sleeping stage ahead of its scheduled time. */
-  onWake?: (id: string) => void;
   onSelectFiles?: (id: string) => void;
   onSelectOutput?: (id: string) => void;
   /** Open the right inspector pane focused on this stage. */
@@ -65,7 +63,6 @@ function statusVisual(status: StageStatus) {
     case 'pending':        return { Icon: Clock,          dot: 'bg-[var(--color-muted-foreground)]/30 text-[var(--color-muted-foreground)]', label: 'Pending', tone: 'muted', pulse: false };
     case 'paused':         return { Icon: Pause,          dot: 'bg-[var(--color-warning)] text-white',        label: 'Paused',          tone: 'warning', pulse: false };
     case 'awaiting_input': return { Icon: Hand,           dot: 'bg-[var(--color-warning)] text-white',        label: 'Awaiting input',  tone: 'warning', pulse: 'breathe' };
-    case 'sleeping':       return { Icon: Moon,           dot: 'bg-indigo-500 text-white',                    label: 'Sleeping',        tone: 'indigo',  pulse: false };
     case 'failed':         return { Icon: AlertTriangle,  dot: 'bg-[var(--color-danger)] text-white',         label: 'Failed',          tone: 'danger',  pulse: false };
     case 'cancelled':      return { Icon: X,              dot: 'bg-[var(--color-muted-foreground)]/40 text-white', label: 'Cancelled', tone: 'muted', pulse: false };
     case 'skipped':        return { Icon: SkipForward,    dot: 'bg-[var(--color-muted-foreground)]/40 text-white', label: 'Skipped',  tone: 'muted', pulse: false };
@@ -78,20 +75,12 @@ function formatDuration(ms?: number): string | null {
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
-function formatCountdown(ms: number): string {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${(s % 60).toString().padStart(2, '0')}s`;
-}
-
 export const StageTimelineItem = React.memo(function StageTimelineItem({
-  stage, focused, defaultOpen, autoCollapse = true, openWhenFinished = false, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onRetry, onWake, onSelectFiles, onSelectOutput, onOpenInspector,
+  stage, focused, defaultOpen, autoCollapse = true, openWhenFinished = false, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onRetry, onSelectFiles, onSelectOutput, onOpenInspector,
 }: StageTimelineItemProps) {
   const v = statusVisual(stage.status);
   const isActive = stage.status === 'running' || stage.status === 'awaiting_input';
   const isTerminal = stage.status === 'completed' || stage.status === 'failed' || stage.status === 'cancelled' || stage.status === 'skipped';
-  const isSleeping = stage.status === 'sleeping';
   const isAwaiting = stage.status === 'awaiting_input';
   const isFailed = stage.status === 'failed';
   const isSkippedOrCancelled = stage.status === 'skipped' || stage.status === 'cancelled';
@@ -259,29 +248,6 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
                   {stage.prompt}
                 </p>
               </div>
-            </div>
-          )}
-
-          {/* Sleeping block */}
-          {isSleeping && stage.sleepRemainingMs != null && (
-            <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/[0.06] px-3 py-2 flex items-center gap-2 text-[12px]">
-              <Moon className="h-3.5 w-3.5 text-indigo-400" />
-              <span className="font-medium text-indigo-400">Sleeping</span>
-              <span className="text-[var(--color-muted-foreground)]">
-                Wakes in <span className="font-mono tabular-nums text-[var(--color-foreground)]/85">{formatCountdown(stage.sleepRemainingMs)}</span>
-              </span>
-              <Button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onWake?.(stage.id);
-                }}
-                disabled={!onWake}
-                variant="ghost"
-                size="sm"
-                className="h-auto ml-auto rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-0.5 text-[10.5px] font-medium text-indigo-300 hover:bg-indigo-500/20"
-              >
-                Wake now
-              </Button>
             </div>
           )}
 

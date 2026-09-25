@@ -24,7 +24,7 @@ workflow_run.*          starting, running, paused, resumed, cancelling, cancelle
                         completed, failed, retrying
 
 stage_run.*             queued, running, completed, failed, cancelled, skipped, retrying,
-                        awaiting_input, approved, rejected, sleeping, woken
+                        awaiting_input, approved, rejected
 
 automation.*            triggered, execution_started, execution_progress,
                         execution_completed, execution_failed, execution_cancelled,

@@ -29,7 +29,7 @@ GeneratorAI follows **Hexagonal / Ports-and-Adapters with a DDD core**. Four str
 │     StartupRecoveryService, ErrorHandler,                   │
 │     SandboxLifecycleManager, StreamBroker,                  │
 │     SystemArtifactService, WorkflowScriptLoader,            │
-│     DurableSleepService, WorkflowPreprocessor,              │
+│     WorkflowPreprocessor,                                   │
 │     WorkflowOrchestrator,                                   │
 │     BrowserService, TerminalService,                        │
 │     ExtensionManager, WidgetService, WidgetRegistry         │
@@ -146,7 +146,6 @@ Background timers (unref'd):
    ├── DAGScheduler         → per-run polling loop (3s) for stage completion detection
    ├── WorktreeCleanupService → retention sweep (default hourly)
    ├── EventRetentionService → DB pruning sweep
-   ├── DurableSleepService  → wakes 'sleeping' stage runs at wake_at
    └── AutomationService    → cron evaluator + lease lock (1.23) for scheduled triggers
 
 Per-run loggers:
@@ -223,7 +222,7 @@ Variables in prompts are interpolated with mustache-style `{{varName}}` after th
 All state transitions are encoded as guard tables in pure TypeScript. They have no IO dependencies and are unit-testable in isolation.
 
 - `WorkflowRunStateMachine` — 7 states.
-- `StageRunStateMachine` — 10 states (includes `sleeping`, `awaiting_input`, `skipped`).
+- `StageRunStateMachine` — 9 states (includes `awaiting_input`, `skipped`).
 
 The state machines fire **only on legal transitions**; illegal transitions throw `InvalidTransitionError`. All `*Repository.updateStatus()` calls go through these machines so the DB never holds an impossible state.
 

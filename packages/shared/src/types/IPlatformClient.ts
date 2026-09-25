@@ -129,11 +129,6 @@ export interface IPlatformClient {
   // ── PARITY-2: per-stage controls (dedicated /stages/:id/* endpoints) ──
   pauseStageRun(runId: string, stageId: string): Promise<void>;
   resumeStageRun(runId: string, stageId: string): Promise<void>;
-  /**
-   * Wake a stage parked by `step.sleep` ahead of its scheduled time. Rejects
-   * with a 409 when the stage is not actually sleeping.
-   */
-  wakeStageRun(runId: string, stageId: string): Promise<void>;
   retryStageRun(runId: string, stageId: string): Promise<void>;
   cancelStageRun(runId: string, stageId: string): Promise<void>;
 

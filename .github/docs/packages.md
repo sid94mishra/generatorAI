@@ -106,7 +106,6 @@ Thirty-plus services. Most relevant:
 | `WorkflowOrchestrator` | Higher-level system-template flows + preprocessing |
 | `WorkflowPreprocessor` | Variable resolution + workspace setup before run start |
 | `StartupRecoveryService` | Recover in-flight runs on server restart |
-| `DurableSleepService` | Wake stage runs from `sleeping` state when `wake_at` reached |
 | `StreamBroker` | Persistent SSE broker (see [feature-streaming-events.md](./feature-streaming-events.md)) |
 | `SandboxLifecycleManager` | Cleanup Docker sandbox containers on shutdown |
 | `ErrorHandler` | Normalize errors into wire format |

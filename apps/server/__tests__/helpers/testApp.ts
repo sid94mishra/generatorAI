@@ -77,12 +77,6 @@ export function createTestConfig(overrides?: Partial<AppConfig>): AppConfig {
       sweepIntervalMs: 6 * 60 * 60 * 1000,
       maxDeletePerSweep: 50_000,
     },
-    // DUR-05 — durable-sleep sweeper disabled in tests for the same reasons.
-    durableSleep: {
-      enabled: false,
-      sweepIntervalMs: 5_000,
-      maxWakesPerSweep: 100,
-    },
     ...overrides,
   } as AppConfig;
 }
@@ -465,16 +459,6 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     },
     workflowRunRepo,
     stageRunRepo,
-    // The stage "Wake now" route calls this. Without it the route throws on
-    // an undefined service rather than answering, and the failure would look
-    // like a route bug instead of a missing test double.
-    durableSleepService: {
-      wakeNow: vi.fn().mockResolvedValue('woken'),
-      sleep: vi.fn().mockResolvedValue(new Date()),
-      sweep: vi.fn().mockResolvedValue({ woken: 0, candidates: 0 }),
-      start: vi.fn(),
-      stop: vi.fn(),
-    },
     // Route tests still go through the real auth middleware; this context
     // resolves every request to a full-scope local principal so a route that
     // forgets its scope policy still fails closed here.

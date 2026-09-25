@@ -455,7 +455,6 @@ export type StageRunStatus =
   | 'queued'
   | 'running'
   | 'paused'
-  | 'sleeping'
   | 'awaiting_input'
   | 'completed'
   | 'failed'
@@ -483,7 +482,6 @@ export interface StageRunSummary {
   artifactManifest?: Array<{ path: string; language: string; action: string; sizeBytes: number }> | null;
   /** The parked payload while `awaiting_input` — shape varies by gate kind. */
   interruptData?: unknown;
-  wakeAt?: Timestamp | null;
 }
 
 /**

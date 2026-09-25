@@ -26,7 +26,6 @@ const STYLES: Record<string, StatusStyle> = {
   skipped: ['bg-subtle', 'text-muted-foreground'],
 
   paused: ['bg-warning-muted', 'text-warning'],
-  sleeping: ['bg-warning-muted', 'text-warning'],
   awaiting_input: ['bg-warning-muted', 'text-warning'],
 
   completed: ['bg-success-muted', 'text-success'],

@@ -84,13 +84,6 @@ const statusStyles: Record<StageRunStatus, {
     icon: <SkipForward className="h-4 w-4 text-gray-400" />,
     textColor: 'text-gray-500',
   },
-  sleeping: {
-    bg: 'bg-indigo-50 dark:bg-indigo-900/20',
-    border: 'border-indigo-300 dark:border-indigo-600',
-    ringColor: 'ring-indigo-300/30',
-    icon: <Clock className="h-4 w-4 text-indigo-400" />,
-    textColor: 'text-indigo-500',
-  },
   awaiting_input: {
     bg: 'bg-amber-50 dark:bg-amber-900/20',
     border: 'border-amber-400 dark:border-amber-500',

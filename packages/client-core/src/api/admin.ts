@@ -320,9 +320,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
           req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/pause`, json({})),
         resume: (runId: string, stageId: string) =>
           req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/resume`, json({})),
-        /** Wake a `sleeping` stage early. 409 when it is not parked. */
-        wake: (runId: string, stageId: string) =>
-          req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/wake`, json({})),
         retry: (runId: string, stageId: string) =>
           req<void>(`/api/workflow-runs/${runId}/stages/${stageId}/retry`, json({})),
         cancel: (runId: string, stageId: string) =>

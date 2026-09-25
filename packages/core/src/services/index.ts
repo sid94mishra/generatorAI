@@ -80,14 +80,6 @@ export type { IIdempotencyKeyRepository } from './AutomationRecoveryService.js';
 export { SandboxLifecycleManager } from './SandboxLifecycleManager.js';
 export type { SandboxSession, SandboxLifecycleConfig } from './SandboxLifecycleManager.js';
 
-// DUR-05 — durable step.sleep sweeper (background wake-up scheduler).
-export { DurableSleepService } from './DurableSleepService.js';
-export type {
-  DurableSleepConfig,
-  SleepLogger,
-  OnWakeHandler,
-} from './DurableSleepService.js';
-
 // HITL-01..05 — human-in-the-loop interrupt/resume.
 export { HitlService } from './HitlService.js';
 export type { InterruptResolution, HitlLogger } from './HitlService.js';

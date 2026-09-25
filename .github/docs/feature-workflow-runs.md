@@ -31,7 +31,7 @@ workflowRunId         FK
 stageDefinitionId     FK
 sessionId?            FK                                       (allocated session, set on first execute)
 name                  text
-status                enum 'pending'|'queued'|'running'|'paused'|'completed'|'failed'|'cancelled'|'skipped'|'sleeping'|'awaiting_input'
+status                enum 'pending'|'queued'|'running'|'paused'|'completed'|'failed'|'cancelled'|'skipped'|'awaiting_input'
 currentStep           int                                      (which prompt within the stage, for multi-prompt)
 totalSteps            int
 retryCount            int (default 0)
@@ -75,7 +75,7 @@ Transitions:
 | `failed` | `user:retry` | `running` (resets failed stages to `queued`) |
 | `running` | `sys:error` | `failed` |
 
-Stage run state machine similar but with extra states `sleeping` (DUR-05) and `awaiting_input` (HITL-02).
+Stage run state machine similar but with the extra state `awaiting_input` (HITL-02).
 
 ---
 
@@ -363,7 +363,6 @@ State (open tabs / active / width) is persisted in `localStorage:generatorai:rig
 - **Per-run JSONL log** (`<artifacts>/run.jsonl`) — append-only audit of every event for that run.
 - **State persisted** — every `stage_runs.status` transition is committed before downstream effects, so a crash mid-run leaves the DB in a recoverable state.
 - **`StartupRecoveryService`** scans `workflow_runs` in `running`/`paused` on boot; resumes those within `recoveryThresholdMs` window, cancels older ones (operator can `run retry` them).
-- **`DurableSleepService`** wakes stages from `sleeping` when `wake_at <= now`. Used by `step.sleep` style operations (DUR-05).
 - **Optimistic locking** — `stage_runs.version` prevents concurrent updates from clobbering each other. Conflict raises `ConcurrentModificationError` → caller retries with fresh read.
 - **Worktree leakage** — if the process dies mid-run, worktrees remain on disk. `WorktreeCleanupService` periodically reaps orphans based on `worktreeRetention` setting.
 
@@ -398,7 +397,6 @@ stage_run.retrying
 stage_run.awaiting_input
 stage_run.approved
 stage_run.rejected
-stage_run.sleeping
 stage_run.woken
 
 permission.requested

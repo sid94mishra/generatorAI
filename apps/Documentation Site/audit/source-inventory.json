@@ -2395,147 +2395,140 @@
       "method": "POST",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 36,
+      "line": 35,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 49,
+      "line": 48,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 81,
+      "line": 80,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/scratchpad",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 93,
+      "line": 92,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/start",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 122,
+      "line": 121,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/pause",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 144,
+      "line": 143,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/resume",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 158,
+      "line": 157,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/retry",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 174,
+      "line": 173,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/cancel",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 204,
+      "line": 203,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 218,
+      "line": 217,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/stages",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 237,
+      "line": 236,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/pause",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 248,
+      "line": 247,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/resume",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 262,
-      "mounted": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/workflow-runs/:runId/stages/:stageId/wake",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 290,
+      "line": 261,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/retry",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 330,
+      "line": 283,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/cancel",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 358,
+      "line": 311,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 384,
+      "line": 337,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 395,
+      "line": 348,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/pending-interrupts",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 420,
+      "line": 373,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/interrupt",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 441,
+      "line": 394,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:runId/stages/:stageId/approve",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 476,
+      "line": 429,
       "mounted": true
     },
     {
@@ -4302,7 +4295,6 @@
     "packages/core/src/services/DAGScheduler.ts",
     "packages/core/src/services/DeltaLog.ts",
     "packages/core/src/services/DurableExecutionEngine.ts",
-    "packages/core/src/services/DurableSleepService.ts",
     "packages/core/src/services/ErrorHandler.ts",
     "packages/core/src/services/ExtensionApi.ts",
     "packages/core/src/services/ExtensionManager.ts",
