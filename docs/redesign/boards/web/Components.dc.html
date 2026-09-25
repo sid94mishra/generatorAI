@@ -1,0 +1,441 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Components</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1440px; height: 1700px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<div style="flex-grow: 1; min-width: 0; padding: 56px; background: var(--surface); display: flex; flex-direction: column; gap: 28px; overflow: hidden;">
+
+<header style="display: flex; align-items: flex-end; gap: 16px;">
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.45;">Components</h1>
+<p style="margin: 0; font-size: 13px; color: var(--fg-2);">One component per job. Every screen in the redesign is assembled from this sheet; nothing is styled locally.</p>
+</div>
+<div style="flex-grow: 1;"></div>
+<span class="mono c-3" style="font-size: 11px;">apps/web/src/components/ui</span>
+</header>
+
+<!-- ZONE 1 -->
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; align-items: start;">
+
+<!-- col 1 -->
+<div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Buttons</h2><span style="font-size: 12px; color: var(--fg-3);">One primary per view. Danger only to destroy.</span></div>
+<div style="display: grid; grid-template-columns: 64px auto auto auto; gap: 8px; align-items: center; justify-items: start;">
+<span style="font-size: 12px; color: var(--fg-3);">Primary</span><button class="btn btn-sm btn-p">Commit</button><button class="btn btn-p">Commit</button><button class="btn btn-lg btn-p">Commit</button>
+<span style="font-size: 12px; color: var(--fg-3);">Secondary</span><button class="btn btn-sm">Cancel</button><button class="btn">Cancel</button><button class="btn btn-lg">Cancel</button>
+<span style="font-size: 12px; color: var(--fg-3);">Ghost</span><button class="btn btn-sm btn-g">Discard</button><button class="btn btn-g">Discard</button><button class="btn btn-lg btn-g">Discard</button>
+<span style="font-size: 12px; color: var(--fg-3);">Danger</span><button class="btn btn-sm btn-d">Delete</button><button class="btn btn-d">Delete</button><button class="btn btn-lg btn-d">Delete</button>
+</div>
+<div style="display: flex; align-items: center; gap: 8px;">
+<button class="btn"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>New chat</button>
+<button class="btn btn-p">Allow once<span class="kbd" style="background: transparent; border-color: currentColor; color: inherit; opacity: .7;">↵</span></button>
+</div>
+<div style="display: flex; align-items: center; gap: 4px;">
+<button class="ib" aria-label="More"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
+<button class="ib on" aria-label="Hide side dock"><svg class="i" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M15 3v18"></path></svg></button>
+<button class="ib ib-sm" aria-label="Copy"><svg class="i i14" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button>
+<button class="ib ib-sm" aria-label="Close"><svg class="i i14" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="btn" style="box-shadow: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);">Focused</button>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Choice</h2><span style="font-size: 12px; color: var(--fg-3);">Switches apply now; checkboxes wait for Save.</span></div>
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px 16px;">
+<label style="display: flex; align-items: center; gap: 8px; font-size: 13px;"><span class="cb"></span>Untracked files</label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 13px;"><span class="sw"></span>Notify on failure</label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 13px;"><span class="cb on"><svg class="i i12" viewBox="0 0 24 24" style="width: 10px; height: 10px; stroke-width: 3;"><path d="M20 6 9 17l-5-5"></path></svg></span>Run tests after edits</label>
+<label style="display: flex; align-items: center; gap: 8px; font-size: 13px;"><span class="sw on"></span>Enabled</label>
+</div>
+<div class="seg" style="align-self: flex-start;"><button class="on">All<span class="mono c-3" style="font-size: 11px;">24</span></button><button>Running<span class="mono c-3" style="font-size: 11px;">3</span></button><button>Failed<span class="mono c-3" style="font-size: 11px;">1</span></button></div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<span class="lbl">Trigger</span>
+<div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px;">
+<button style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--fg); font-family: inherit; text-align: left;"><span style="display: flex; align-items: center; width: 100%;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg><span style="margin-left: auto; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line-strong);"></span></span><span style="font-size: 13px; font-weight: 600;">Manual</span><span style="font-size: 11px; color: var(--fg-3); line-height: 1.3;">On demand or batch input</span></button>
+<button style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px; border-radius: 8px; border: 1px solid var(--accent); background: var(--selected); color: var(--fg); font-family: inherit; text-align: left;"><span style="display: flex; align-items: center; width: 100%;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg><span style="margin-left: auto; width: 14px; height: 14px; border-radius: 50%; border: 4px solid var(--accent);"></span></span><span style="font-size: 13px; font-weight: 600;">Schedule</span><span style="font-size: 11px; color: var(--fg-3); line-height: 1.3;">Cron or interval</span></button>
+<button style="display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 10px; border-radius: 8px; border: 1px solid var(--line); background: var(--raised); color: var(--fg); font-family: inherit; text-align: left;"><span style="display: flex; align-items: center; width: 100%;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"></path><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"></path><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"></path></svg><span style="margin-left: auto; width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line-strong);"></span></span><span style="font-size: 13px; font-weight: 600;">Webhook</span><span style="font-size: 11px; color: var(--fg-3); line-height: 1.3;">On an HTTP event</span></button>
+</div>
+</div>
+</section>
+</div>
+
+<!-- col 2 -->
+<div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Inputs</h2><span style="font-size: 12px; color: var(--fg-3);">Label above, hint below; an error replaces the hint.</span></div>
+<label style="display: flex; flex-direction: column; gap: 6px;"><span class="lbl">Workflow name</span><span class="inp">Nightly dependency audit</span><span class="hint">Shown in lists and run history.</span></label>
+<label style="display: flex; flex-direction: column; gap: 6px;"><span class="lbl">Cron schedule</span><span class="inp mono" style="font-size: 12px; border-color: var(--err);">0 2 * * 8</span><span class="hint" style="color: var(--err);">Day of week must be 0–6.</span></label>
+<div class="inp" style="color: var(--fg-3);"><svg class="i i14" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg><span>Search agents</span><span class="kbd" style="margin-left: auto;">/</span></div>
+<button class="inp" style="justify-content: flex-start; text-align: left;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="16" height="16" x="4" y="4" rx="2"></rect><rect width="6" height="6" x="9" y="9" rx="1"></rect><path d="M15 2v2"></path><path d="M15 20v2"></path><path d="M2 15h2"></path><path d="M2 9h2"></path><path d="M20 15h2"></path><path d="M20 9h2"></path><path d="M9 2v2"></path><path d="M9 20v2"></path></svg><span>Claude Sonnet 5</span><span class="mono c-3" style="font-size: 11px;">200K</span><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3); margin-left: auto;"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div class="inp" style="height: 64px; align-items: flex-start; padding: 7px 10px; line-height: 1.45;">List every dependency upgrade with its changelog link and risk.</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Chips &amp; tags</h2><span style="font-size: 12px; color: var(--fg-3);">Truncation always shows +N, never silently.</span></div>
+<div style="display: flex; align-items: center; gap: 6px;">
+<span class="chip mono" style="font-size: 11px;"><svg class="i i12" viewBox="0 0 24 24"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>fix/checkout-flake</span>
+<span class="chip" style="padding-right: 2px;"><svg class="i i12" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>ci-log-4412.txt<button class="ib" style="width: 18px; height: 18px; border-radius: 4px;" aria-label="Remove ci-log-4412.txt"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button></span>
+</div>
+<div style="display: flex; align-items: center; gap: 6px;">
+<span class="chip">backend</span><span class="chip">flaky</span><span class="chip">checkout</span><span class="chip" style="color: var(--fg-3);">+3</span>
+<span class="chip" style="margin-left: auto;">Any<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></span>
+</div>
+</section>
+</div>
+
+<!-- col 3 -->
+<div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Navigation</h2><span style="font-size: 12px; color: var(--fg-3);">Underline tabs for page sections; never tabs in tabs.</span></div>
+<div class="tabs"><a class="tab on" href="#">Overview</a><a class="tab" href="#">Runs<span class="mono c-3" style="font-size: 11px;">248</span></a><a class="tab" href="#">Stages</a><a class="tab" href="#">Settings</a></div>
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border: 1px solid var(--line-soft); border-radius: 8px;" role="tablist" aria-label="Side dock">
+<button class="btn btn-sm" style="height: 28px; background: var(--selected); border-color: transparent;" role="tab" aria-selected="true"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">2</span></button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="M20 7h-3a2 2 0 0 1-2-2V2"></path><path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z"></path><path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8"></path></svg>Files</button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Terminal</button>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 6px; font-size: 13px;"><a href="#" style="color: var(--fg-3); text-decoration: none;">Automations</a><span class="c-3">/</span><a href="#" style="color: var(--fg-3); text-decoration: none;">Nightly audit</a><span class="c-3">/</span><span style="font-weight: 600;">Run #248</span></div>
+<div style="display: flex; flex-direction: column; gap: 1px;">
+<a class="nav on" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>Chats<span class="cnt">selected</span></a>
+<a class="nav" href="#" style="background: var(--hover); color: var(--fg);"><svg class="i" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>Workflows<span class="cnt">hover</span></a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"></path><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h5"></path><path d="M17.5 17.5 16 16.3V14"></path><circle cx="16" cy="16" r="6"></circle></svg>Automations<span class="cnt">default</span></a>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Status</h2><span style="font-size: 12px; color: var(--fg-3);">Glyph plus word; never colour alone.</span></div>
+<div style="display: flex; flex-wrap: wrap; gap: 6px;">
+<span class="bdg s-idle"><svg class="i i12" viewBox="0 0 24 24"><path d="M10.1 2.182a10 10 0 0 1 3.8 0"></path><path d="M13.9 21.818a10 10 0 0 1-3.8 0"></path><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"></path><path d="M2.182 13.9a10 10 0 0 1 0-3.8"></path><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"></path><path d="M21.818 10.1a10 10 0 0 1 0 3.8"></path><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"></path><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"></path></svg>Queued</span>
+<span class="bdg s-run"><svg class="i i12" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>Running</span>
+<span class="bdg s-warn"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>Needs you</span>
+<span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Succeeded</span>
+<span class="bdg s-err"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>Failed</span>
+<span class="bdg s-idle"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="10" x2="10" y1="15" y2="9"></line><line x1="14" x2="14" y1="15" y2="9"></line></svg>Paused</span>
+<span class="bdg s-idle"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>Waiting</span>
+<span class="bdg s-idle"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M5 12h14"></path></svg>Skipped</span>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-3);"><span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Done</span>Chats say Done; runs say Succeeded</div>
+<div style="display: flex; align-items: center; gap: 12px;">
+<span class="dot" style="background: var(--fg-3);"></span><span class="dot" style="background: var(--run);"></span><span class="dot" style="background: var(--warn);"></span><span class="dot" style="background: var(--ok);"></span><span class="dot" style="background: var(--err);"></span><span class="dot" style="background: var(--fg-2);"></span>
+<span style="font-size: 12px; color: var(--fg-3);">8px dots for dense rows</span>
+</div>
+<div style="display: flex; flex-direction: column; gap: 6px;">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-2);"><span>Stage 3 of 6 · Apply upgrades</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">60%</span></div>
+<div style="height: 4px; border-radius: 2px; background: var(--selected);" role="progressbar" aria-valuenow="60" aria-valuemin="0" aria-valuemax="100" aria-label="Run progress"><div style="width: 60%; height: 4px; border-radius: 2px; background: var(--run);"></div></div>
+</div>
+<div style="display: flex; align-items: center; gap: 10px;">
+
+<span style="font-size: 12px; color: var(--fg-3);">Context · <span class="mono" style="font-size: 11px;">84K / 200K</span> tokens</span>
+</div>
+</section>
+</div>
+
+<!-- col 4 -->
+<div style="display: flex; flex-direction: column; gap: 28px; min-width: 0;">
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Menu &amp; tooltip</h2><span style="font-size: 12px; color: var(--fg-3);">One menu component; items 30px, shortcuts right.</span></div>
+<div style="display: flex; align-items: center; gap: 8px;">
+<button class="ib on" aria-label="Chat actions"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib" style="background: var(--hover); color: var(--fg);" aria-label="Copy branch name"><svg class="i i14" viewBox="0 0 24 24"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"></rect><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"></path></svg></button>
+<div style="display: inline-flex; align-items: center; gap: 8px; height: 28px; padding: 0 8px; border-radius: 6px; background: var(--overlay); border: 1px solid var(--line); box-shadow: var(--shadow-pop); font-size: 12px;">Copy branch name<span class="kbd">Ctrl C</span></div>
+</div>
+<div style="width: 236px; margin-top: -8px; background: var(--overlay); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-pop); padding: 4px;" role="menu">
+<div style="display: flex; align-items: center; height: 28px; padding: 0 8px; font-size: 12px; color: var(--fg-3);">Fix flaky checkout test</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;" role="menuitem"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg>Rename<span class="kbd" style="margin-left: auto;">F2</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px; background: var(--selected);" role="menuitem"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 17v5"></path><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"></path></svg>Pin to sidebar</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;" role="menuitem"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>Move to project<span class="c-3" style="margin-left: auto; display: flex;"><svg class="i i14" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg></span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;" role="menuitem"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>Copy link</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;" role="menuitem"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="20" height="5" x="2" y="3" rx="1"></rect><path d="M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8"></path><path d="M10 12h4"></path></svg>Archive<span class="kbd" style="margin-left: auto;">E</span></div>
+<div style="height: 1px; margin: 4px 0; background: var(--line-soft);"></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px; color: var(--err);" role="menuitem"><svg class="i i14" viewBox="0 0 24 24"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path><line x1="10" x2="10" y1="11" y2="17"></line><line x1="14" x2="14" y1="11" y2="17"></line></svg>Delete…<span class="kbd" style="margin-left: auto;">Del</span></div>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Skeleton rows</h2><span style="font-size: 12px; color: var(--fg-3);">Shape of the loaded row; no shimmer, no spinner.</span></div>
+<div style="display: flex; flex-direction: column; border: 1px solid var(--line-soft); border-radius: 8px;" aria-busy="true" aria-label="Loading chats">
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 14px; border-bottom: 1px solid var(--line-soft);"><span style="width: 24px; height: 24px; border-radius: 6px; background: var(--selected);"></span><span style="display: flex; flex-direction: column; gap: 6px; flex-grow: 1;"><span style="width: 62%; height: 8px; border-radius: 4px; background: var(--selected);"></span><span style="width: 38%; height: 6px; border-radius: 3px; background: var(--selected);"></span></span><span style="width: 32px; height: 6px; border-radius: 3px; background: var(--selected);"></span></div>
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 14px; border-bottom: 1px solid var(--line-soft);"><span style="width: 24px; height: 24px; border-radius: 6px; background: var(--selected);"></span><span style="display: flex; flex-direction: column; gap: 6px; flex-grow: 1;"><span style="width: 48%; height: 8px; border-radius: 4px; background: var(--selected);"></span><span style="width: 30%; height: 6px; border-radius: 3px; background: var(--selected);"></span></span><span style="width: 32px; height: 6px; border-radius: 3px; background: var(--selected);"></span></div>
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 14px;"><span style="width: 24px; height: 24px; border-radius: 6px; background: var(--selected);"></span><span style="display: flex; flex-direction: column; gap: 6px; flex-grow: 1;"><span style="width: 70%; height: 8px; border-radius: 4px; background: var(--selected);"></span><span style="width: 44%; height: 6px; border-radius: 3px; background: var(--selected);"></span></span><span style="width: 32px; height: 6px; border-radius: 3px; background: var(--selected);"></span></div>
+</div>
+</section>
+</div>
+</div>
+
+<!-- ZONE 2 -->
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; align-items: start;">
+<section style="grid-column: span 2; display: flex; flex-direction: column; gap: 12px; min-width: 0;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Table</h2><span style="font-size: 12px; color: var(--fg-3);">44px rows, fixed columns, numbers right-aligned in mono. Entity icons stay neutral.</span></div>
+<div style="border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden;">
+<div class="th" style="gap: 16px; padding: 0 16px; border-bottom: 1px solid var(--line-soft);"><span class="cb"></span><span style="flex-grow: 1;">Automation</span><span style="width: 104px;">Status</span><span style="width: 120px;">Trigger</span><span style="width: 64px; text-align: right;">Last run</span><span style="width: 40px; text-align: right;">Runs</span></div>
+<div class="tr" style="padding: 0 16px; background: var(--hover);"><span class="cb"></span><span class="trunc" style="flex-grow: 1; font-weight: 500;">Nightly audit</span><span style="width: 104px;"><span class="bdg s-ok"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>Succeeded</span></span><span style="width: 120px; display: flex; align-items: center; gap: 6px; color: var(--fg-2);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M8 2v4"></path><path d="M16 2v4"></path><rect width="18" height="18" x="3" y="4" rx="2"></rect><path d="M3 10h18"></path></svg>Daily <span class="mono" style="font-size: 11px;">02:00</span></span><span class="mono c-3" style="width: 64px; text-align: right; font-size: 11px;">02:14</span><span class="mono c-3" style="width: 40px; text-align: right; font-size: 11px;">248</span></div>
+<div class="tr" style="padding: 0 16px; background: var(--selected);"><span class="cb on"><svg class="i i12" viewBox="0 0 24 24" style="width: 10px; height: 10px; stroke-width: 3;"><path d="M20 6 9 17l-5-5"></path></svg></span><span class="trunc" style="flex-grow: 1; font-weight: 500;">Review every PR</span><span style="width: 104px;"><span class="bdg s-run"><svg class="i i12" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>Running</span></span><span style="width: 120px; display: flex; align-items: center; gap: 6px; color: var(--fg-2);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M18 16.98h-5.99c-1.1 0-1.95.94-2.48 1.9A4 4 0 0 1 2 17c.01-.7.2-1.4.57-2"></path><path d="m6 17 3.13-5.78c.53-.97.1-2.18-.5-3.1a4 4 0 1 1 6.89-4.06"></path><path d="m12 6 3.13 5.73C15.66 12.7 16.9 13 18 13a4 4 0 0 1 0 8"></path></svg>Webhook</span><span class="mono c-3" style="width: 64px; text-align: right; font-size: 11px;">13:58</span><span class="mono c-3" style="width: 40px; text-align: right; font-size: 11px;">311</span></div>
+<div class="tr" style="padding: 0 16px;"><span class="cb"></span><span class="trunc" style="flex-grow: 1; font-weight: 500;">Weekly release notes</span><span style="width: 104px;"><span class="bdg s-idle"><svg class="i i12" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><line x1="10" x2="10" y1="15" y2="9"></line><line x1="14" x2="14" y1="15" y2="9"></line></svg>Paused</span></span><span style="width: 120px; display: flex; align-items: center; gap: 6px; color: var(--fg-2);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M8 2v4"></path><path d="M16 2v4"></path><rect width="18" height="18" x="3" y="4" rx="2"></rect><path d="M3 10h18"></path></svg>Fri <span class="mono" style="font-size: 11px;">16:00</span></span><span class="mono c-3" style="width: 64px; text-align: right; font-size: 11px;">Sep 19</span><span class="mono c-3" style="width: 40px; text-align: right; font-size: 11px;">36</span></div>
+<div class="tr" style="padding: 0 16px; border-bottom: 0;"><span class="cb"></span><span class="trunc" style="flex-grow: 1; font-weight: 500;">Triage flaky tests</span><span style="width: 104px;"><span class="bdg s-warn"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>Needs you</span></span><span style="width: 120px; display: flex; align-items: center; gap: 6px; color: var(--fg-2);"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>Manual</span><span class="mono c-3" style="width: 64px; text-align: right; font-size: 11px;">11:20</span><span class="mono c-3" style="width: 40px; text-align: right; font-size: 11px;">12</span></div>
+</div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 12px; min-width: 0;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Callouts</h2><span style="font-size: 12px; color: var(--fg-3);">Full border and tint; never a left stripe.</span></div>
+<div style="display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--run-bg); font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--run); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="M12 16v-4"></path><path d="M12 8h.01"></path></svg><span>Runs use the project’s default model.</span></div>
+<div style="display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--warn-bg); font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn); margin-top: 2px;"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg><span>Branch is 3 commits behind <span class="mono">main</span>.</span></div>
+<div style="display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--err-bg); font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--err); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg><span>Run test suite failed: 3 of 20 tests.</span></div>
+<div style="display: flex; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--ok-bg); font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg><span>PR #412 opened on <span class="mono">acme/payments-api</span>.</span></div>
+</section>
+
+<section style="display: flex; flex-direction: column; gap: 12px; min-width: 0;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Empty state</h2><span style="font-size: 12px; color: var(--fg-3);">One icon, one sentence, one action.</span></div>
+<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; height: 204px; padding: 0 28px; border: 1px solid var(--line-soft); border-radius: 8px; text-align: center;">
+<svg class="i" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>
+<span style="font-size: 13px; font-weight: 600;">No runs yet</span>
+<span style="font-size: 12px; color: var(--fg-3);">Runs appear here when you start this workflow or an automation triggers it.</span>
+<button class="btn" style="margin-top: 4px;"><svg class="i i14" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>Run workflow</button>
+</div>
+</section>
+</div>
+
+<!-- ZONE 3 -->
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Transcript kit</h2><span style="font-size: 12px; color: var(--fg-3);">Steps are a timeline, not cards. Anything that needs you is a bordered card with a tinted 36px header and a keyboard default.</span></div>
+<div style="display: flex; gap: 24px; align-items: flex-start;">
+
+<div style="flex: 2; min-width: 0; display: flex; flex-direction: column; gap: 28px;">
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px; align-items: start;">
+
+<!-- steps -->
+<div style="display: flex; flex-direction: column; gap: 10px; min-width: 0;">
+<div style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--fg-3);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>
+<span style="color: var(--fg-2); font-weight: 500;">Bug Fixer</span><span>Claude Sonnet 5</span><span class="mono" style="font-size: 11px; margin-left: auto;">14:02</span>
+</div>
+<button style="display: flex; align-items: center; gap: 8px; height: 24px; padding: 0; border: 0; background: none; color: var(--fg-3); font-family: inherit; font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"></path></svg>Thought for 12s</button>
+<div style="display: flex; flex-direction: column; position: relative; padding-left: 2px;">
+<div style="position: absolute; left: 9px; top: 14px; bottom: 14px; width: 1px; background: var(--line);"></div>
+<div style="display: flex; align-items: center; gap: 10px; height: 28px; position: relative;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); background: var(--surface);"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+<span style="font-weight: 500;">Read</span><span class="mono trunc c-2">tests/checkout.spec.ts</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">0.1s</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; height: 28px; position: relative;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); background: var(--surface);"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+<span style="font-weight: 500;">Edited</span><span class="mono trunc c-2">src/cart/applyCoupon.ts</span><span class="mono" style="font-size: 11px;"><span class="c-ok">+14</span> <span class="c-err">−6</span></span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">0.2s</span>
+</div>
+<div style="display: flex; flex-direction: column; position: relative;">
+<div style="display: flex; align-items: center; gap: 10px; height: 28px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--err); background: var(--surface);"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>
+<span style="font-weight: 500;">Opened browser</span><span class="mono trunc c-2">localhost:5173/checkout</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">1.8s</span><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m6 9 6 6 6-6"></path></svg>
+</div>
+<div class="mono" style="margin: 2px 0 6px 24px; padding: 8px 10px; border-radius: 6px; background: var(--sunken); border: 1px solid var(--line-soft); color: var(--err); font-size: 12px; line-height: 1.5;">BrowserService: max concurrent sessions (5) reached</div>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; height: 28px; position: relative;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--run); background: var(--surface);"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+<span style="font-weight: 500;">Running</span><span class="mono trunc c-2">pnpm test checkout --repeat 50</span><span style="font-size: 12px; color: var(--run);">12 of 50</span><span class="mono c-3" style="font-size: 11px; margin-left: auto;">0:41</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; height: 28px; position: relative;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn); background: var(--surface);"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
+<span style="font-weight: 500; white-space: nowrap;">Wants to run</span><span class="mono trunc c-2">git push -u origin fix/checkout-flake</span><span style="font-size: 12px; color: var(--warn); flex-shrink: 0;">Needs you</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; height: 28px; position: relative;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-2);"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+<span style="font-weight: 500;">Waiting</span><span class="trunc c-2" style="font-size: 12px;">CI event</span><span class="mono trunc c-3" style="font-size: 11px;">ci:3f9a2c1</span><span class="mono c-3" style="font-size: 11px; margin-left: auto; white-space: nowrap;">4m</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; height: 28px; position: relative;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3); background: var(--surface);"><path d="M10.1 2.182a10 10 0 0 1 3.8 0"></path><path d="M13.9 21.818a10 10 0 0 1-3.8 0"></path><path d="M17.609 3.721a10 10 0 0 1 2.69 2.7"></path><path d="M2.182 13.9a10 10 0 0 1 0-3.8"></path><path d="M20.279 17.609a10 10 0 0 1-2.7 2.69"></path><path d="M21.818 10.1a10 10 0 0 1 0 3.8"></path><path d="M3.721 6.391a10 10 0 0 1 2.7-2.69"></path><path d="M6.391 20.279a10 10 0 0 1-2.69-2.7"></path></svg>
+<span style="font-weight: 500; color: var(--fg-2);">Open PR</span><span class="mono trunc c-3">gh pr create</span><span style="font-size: 12px; color: var(--fg-3); margin-left: auto;">Queued</span>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; height: 28px; position: relative;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3); background: var(--surface);"><circle cx="12" cy="12" r="10"></circle><path d="M5 12h14"></path></svg>
+<span style="font-weight: 500; color: var(--fg-2);">Lint</span><span class="mono trunc c-3">pnpm lint</span><span style="font-size: 12px; color: var(--fg-3); margin-left: auto;">Skipped · no lint config</span>
+</div>
+</div>
+</div>
+
+<!-- plan approval -->
+<div style="border: 1px solid var(--line); border-radius: 10px; background: var(--raised); overflow: hidden; min-width: 0;">
+<div style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; background: var(--warn-bg); border-bottom: 1px solid var(--line-soft);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="m3 17 2 2 4-4"></path><path d="m3 7 2 2 4-4"></path><path d="M13 6h8"></path><path d="M13 12h8"></path><path d="M13 18h8"></path></svg>
+<span style="font-weight: 600;">Plan ready for review</span>
+<span style="margin-left: auto; font-size: 12px; color: var(--fg-3);">Bug Fixer · 5 steps</span>
+</div>
+<div style="padding: 12px; display: flex; flex-direction: column; gap: 8px;">
+<span style="font-size: 14px; font-weight: 600;">Fix the coupon/total race in checkout</span>
+<div style="display: flex; flex-direction: column; font-size: 13px;">
+<div style="display: flex; gap: 10px; height: 22px; align-items: center;"><span class="mono c-3" style="width: 12px; font-size: 11px;">1</span><span class="trunc">Reproduce with <span class="mono">--repeat 20</span> and capture the failing order</span></div>
+<div style="display: flex; gap: 10px; height: 22px; align-items: center;"><span class="mono c-3" style="width: 12px; font-size: 11px;">2</span><span class="trunc">Derive totals from the <span class="mono">applyCoupon</span> response</span></div>
+<div style="display: flex; gap: 10px; height: 22px; align-items: center;"><span class="mono c-3" style="width: 12px; font-size: 11px;">3</span><span class="trunc">Extract <span class="mono">recalculate()</span> and unit-test it</span></div>
+<div style="display: flex; gap: 10px; height: 22px; align-items: center;"><span class="mono c-3" style="width: 12px; font-size: 11px;">4</span><span class="trunc">Run the suite 50× to confirm no flake</span></div>
+<div style="display: flex; gap: 10px; height: 22px; align-items: center;"><span class="mono c-3" style="width: 12px; font-size: 11px;">5</span><span class="trunc">Commit to <span class="mono">fix/checkout-flake</span> and open a PR</span></div>
+</div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--line-soft);">
+<span style="font-size: 12px; color: var(--fg-3);">No edits until approved.</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-sm">Request changes</button>
+<button class="btn btn-sm btn-p">Approve plan<span class="kbd" style="background: transparent; border-color: currentColor; color: inherit; opacity: .7;">Ctrl ↵</span></button>
+</div>
+</div>
+</div>
+
+<!-- composer -->
+<section style="display: flex; flex-direction: column; gap: 12px;">
+<div style="display: flex; flex-direction: column; gap: 2px;"><h2 style="margin: 0; font-size: 16px; font-weight: 600; line-height: 1.3;">Composer</h2><span style="font-size: 12px; color: var(--fg-3);">Changes tray above; agent, model, effort and permission chips inside; shortcuts and wait state below.</span></div>
+<div style="display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 6px 0 12px; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--raised); font-size: 12px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-2);"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>
+<span style="color: var(--fg-2);">2 files changed</span><span class="mono" style="font-size: 11px;"><span class="c-ok">+18</span> <span class="c-err">−8</span></span>
+<button class="btn btn-g btn-sm" style="margin-left: auto; color: var(--fg);">Review changes</button>
+</div>
+<div style="border: 1px solid var(--line); border-radius: 12px; background: var(--raised); padding: 12px 10px 8px 14px; display: flex; flex-direction: column; gap: 10px;">
+<div style="font-size: 14px; color: var(--fg-3); height: 22px;">Reply to Bug Fixer…</div>
+<div style="display: flex; align-items: center; gap: 4px;">
+<button class="ib ib-sm" aria-label="Attach"><svg class="i" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<button class="chip" style="border-color: transparent;"><svg class="i i12" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>Bug Fixer<svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg></button>
+<button class="chip" style="border-color: transparent;">Sonnet 5<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip" style="border-color: transparent;">Effort: Medium<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip" style="border-color: transparent;">Auto<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-g btn-sm" style="gap: 6px;" aria-label="Context usage 42 percent"><svg viewBox="0 0 16 16" style="width: 14px; height: 14px;"><circle cx="8" cy="8" r="6" style="fill: none; stroke: var(--line-strong); stroke-width: 2;"></circle><path d="M8 2a6 6 0 0 1 5.2 9" style="fill: none; stroke: var(--fg-2); stroke-width: 2; stroke-linecap: round;"></path></svg><span class="mono" style="font-size: 11px;">42%</span></button><button class="ib ib-sm" aria-label="Dictate"><svg class="i" viewBox="0 0 24 24"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3Z"></path><path d="M19 10v2a7 7 0 0 1-14 0v-2"></path><line x1="12" x2="12" y1="19" y2="22"></line></svg></button>
+<button class="ib" style="background: var(--accent); color: var(--on-accent); border-radius: 8px;" aria-label="Send"><svg class="i" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></button>
+</div>
+</div>
+<div style="display: flex; gap: 14px; padding: 0 4px; font-size: 11px; color: var(--fg-3);">
+<span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">↵</span>Send</span>
+<span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">Shift ↵</span>New line</span>
+<span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">/</span>Skills</span>
+<span style="display: flex; align-items: center; gap: 4px;"><span class="kbd">@</span>Files</span>
+<span style="display: flex; align-items: center; gap: 4px; margin-left: auto;"><span class="dot" style="background: var(--warn); width: 6px; height: 6px;"></span>Waiting for you · 3m 10s</span>
+</div>
+</div>
+</section>
+</div>
+
+<!-- right: permission + question -->
+<div style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 16px;">
+<div style="border: 1px solid var(--line); border-radius: 10px; background: var(--raised); overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; background: var(--warn-bg); border-bottom: 1px solid var(--line-soft);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
+<span style="font-weight: 600;">Allow this command?</span>
+<span style="margin-left: auto; font-size: 12px; color: var(--fg-3);">Network · writes to remote</span>
+</div>
+<div style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+<div class="mono" style="padding: 8px 10px; border-radius: 6px; background: var(--sunken); border: 1px solid var(--line-soft); font-size: 12px;">git push -u origin fix/checkout-flake</div>
+<span style="font-size: 12px; color: var(--fg-3);">Bug Fixer wants to publish the branch so it can open a PR.</span>
+<div style="display: flex; align-items: center; gap: 8px;">
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-sm">Deny<span class="kbd">Esc</span></button>
+<button class="btn btn-sm">Always in this chat</button>
+<button class="btn btn-sm btn-p">Allow once<span class="kbd" style="background: transparent; border-color: currentColor; color: inherit; opacity: .7;">↵</span></button>
+</div>
+</div>
+</div>
+
+<div style="border: 1px solid var(--line); border-radius: 10px; background: var(--raised); overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 8px; height: 36px; padding: 0 12px; background: var(--warn-bg); border-bottom: 1px solid var(--line-soft);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
+<span style="font-weight: 600;">Bug Fixer has a question</span>
+<span class="mono" style="margin-left: auto; font-size: 11px; color: var(--fg-3);">1 of 1</span>
+</div>
+<div style="padding: 12px; display: flex; flex-direction: column; gap: 10px;">
+<p style="margin: 0; font-size: 14px; line-height: 1.6;">Where should the shared coupon fixture live?</p>
+<div style="display: flex; flex-direction: column; gap: 6px;" role="radiogroup" aria-label="Answer">
+<button style="display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--accent); background: var(--selected); color: var(--fg); font-family: inherit; font-size: 13px; text-align: left;" role="radio" aria-checked="true"><span class="kbd">1</span><span class="trunc">With the other fixtures in <span class="mono">tests/fixtures/</span></span><svg class="i i14" viewBox="0 0 24 24" style="margin-left: auto;"><path d="M20 6 9 17l-5-5"></path></svg></button>
+<button style="display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg); font-family: inherit; font-size: 13px; text-align: left;" role="radio" aria-checked="false"><span class="kbd">2</span><span class="trunc">Inline in <span class="mono">checkout.spec.ts</span></span></button>
+<button style="display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 10px; border-radius: 6px; border: 1px solid var(--line); background: transparent; color: var(--fg-3); font-family: inherit; font-size: 13px; text-align: left;" role="radio" aria-checked="false"><span class="kbd">3</span><span>Something else — type an answer</span></button>
+</div>
+<div style="display: flex; align-items: center; gap: 8px;">
+<span style="font-size: 12px; color: var(--fg-3);">The agent waits for your answer.</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-sm">Skip</button>
+<button class="btn btn-sm btn-p">Answer<span class="kbd" style="background: transparent; border-color: currentColor; color: inherit; opacity: .7;">↵</span></button>
+</div>
+</div>
+</div>
+</div>
+
+</div>
+</section>
+
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1440,"height":1700}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>

@@ -100,3 +100,8 @@ oldDocs/
 b[0-9].yaml
 wf-list.yaml
 scripts/tmp-cu-*
+
+# Redesign review images: board renders and app screenshots are reproducible
+# (scripts/redesign/render-boards.mjs, playwright-cli walkthroughs). DIFF.md files stay tracked.
+docs/redesign/boards/png/
+docs/redesign/shots/**/*.png

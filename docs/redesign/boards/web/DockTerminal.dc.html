@@ -1,0 +1,337 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Dock · Terminal</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1600px; height: 1024px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<div style="flex-grow: 1; display: flex; flex-direction: column; gap: 20px; padding: 48px; min-width: 0;">
+<div style="display: flex; align-items: baseline; gap: 14px; height: 29px;">
+<h1 style="margin: 0; font-size: 20px; font-weight: 600; letter-spacing: -0.01em;">Terminal</h1>
+<p style="margin: 0; font-size: 13px; color: var(--fg-2);">Watch the commands the agent ran, and work in your own shells inside the chat’s workspace.</p>
+</div>
+<div style="display: flex; gap: 62px;">
+<section style="width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 13px; font-weight: 600; height: 19px; line-height: 19px;">Agent console</div>
+<div style="height: 790px; display: flex; flex-direction: column; gap: 10px;">
+<div style="width: 460px; height: 790px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; position: relative;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">5</span></button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="M20 7h-3a2 2 0 0 1-2-2V2"></path><path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z"></path><path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8"></path></svg>Files</button>
+<button class="btn btn-sm" style="height: 28px; background: var(--selected); border-color: transparent;" aria-selected="true" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Terminal</button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>Browser</button>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 12px; flex-shrink: 0;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>
+<span style="font-weight: 600;">Agent commands</span>
+<span class="mono c-3" style="font-size: 11px;">4 run in this chat</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg>Back to shell</button>
+</div>
+<div style="display: flex; gap: 8px; padding: 8px 12px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); font-size: 12px; color: var(--fg-3); flex-shrink: 0;">
+<svg class="i i12" viewBox="0 0 24 24" style="margin-top: 2px;"><rect width="18" height="11" x="3" y="11" rx="2" ry="2"></rect><path d="M7 11V7a5 5 0 0 1 10 0v4"></path></svg><span>Read-only. The agent runs commands in its own sandboxed shell; output appears the moment each command finishes.</span>
+</div>
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 8px; padding: 8px;">
+<div style="flex-shrink: 0; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--raised); overflow: hidden;">
+<div style="display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex-grow: 1;">
+<div class="mono" style="font-size: 12px; color: var(--fg); word-break: break-all;"><span class="c-3">$ </span>git log --oneline -3 -- src/cart</div>
+<div style="font-size: 12px; color: var(--fg-3);">Check recent changes to the cart module</div>
+</div>
+<span class="mono c-3" style="font-size: 11px; margin-top: 1px; flex-shrink: 0;">0.2s</span>
+</div>
+<div class="mono" style="border-top: 1px solid var(--line-soft); background: var(--sunken); padding: 8px 10px; font-size: 12px; line-height: 18px; color: var(--fg-2);">
+<div style="white-space: pre;"><span class="c-3">a41c9e2</span> checkout: show coupon line in summary</div>
+<div style="white-space: pre;"><span class="c-3">7be0d15</span> cart: move totals into cartStore</div>
+<div style="white-space: pre;"><span class="c-3">3f2d8aa</span> cart: add applyCoupon</div>
+</div>
+</div>
+<div style="flex-shrink: 0; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--raised); overflow: hidden; border-color: var(--line-strong); box-shadow: 0 0 0 1px var(--line-strong);" aria-current="true">
+<div style="display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--err); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex-grow: 1;">
+<div class="mono" style="font-size: 12px; color: var(--fg); word-break: break-all;"><span class="c-3">$ </span>pnpm test checkout --repeat 20</div>
+<div style="font-size: 12px; color: var(--fg-3);">Reproduce the flaky coupon test</div>
+</div>
+<span class="mono c-3" style="font-size: 11px; margin-top: 1px; flex-shrink: 0;">48s</span>
+</div>
+<div class="mono" style="border-top: 1px solid var(--line-soft); background: var(--sunken); padding: 8px 10px; font-size: 12px; line-height: 18px; color: var(--fg-2);">
+<div style="white-space: pre;"> <span class="c-ok">✓</span> applies coupon  <span class="c-3">run 1/20    402ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> applies coupon  <span class="c-3">run 2/20    391ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> applies coupon  <span class="c-3">run 3/20    398ms</span></div>
+<div style="white-space: pre;"> <span class="c-err">× applies coupon  run 4/20   1204ms</span></div>
+<div style="white-space: pre;">   <span class="c-err">→ expected total 81.00, received 90.00</span></div>
+<div style="white-space: pre;">     <span class="c-3">at tests/checkout.spec.ts:48:31</span></div>
+<div style="white-space: pre;"> <span class="c-3">…</span></div>
+<div style="white-space: pre;"> Tests  <span class="c-err">3 failed</span> | <span class="c-ok">17 passed</span> <span class="c-3">(20)</span></div>
+</div>
+</div>
+<div style="flex-shrink: 0; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--raised); overflow: hidden;">
+<div style="display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok); margin-top: 2px;"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex-grow: 1;">
+<div class="mono" style="font-size: 12px; color: var(--fg); word-break: break-all;"><span class="c-3">$ </span>pnpm test checkout --repeat 50</div>
+<div style="font-size: 12px; color: var(--fg-3);">Verify the fix holds over 50 runs</div>
+</div>
+<span class="mono c-3" style="font-size: 11px; margin-top: 1px; flex-shrink: 0;">1m 52s</span>
+</div>
+<div class="mono" style="border-top: 1px solid var(--line-soft); background: var(--sunken); padding: 8px 10px; font-size: 12px; line-height: 18px; color: var(--fg-2);">
+<div style="white-space: pre;"> Tests  <span class="c-ok">50 passed</span> <span class="c-3">(50)</span></div>
+<div style="white-space: pre;"> <span class="c-3">Duration  1m 51s</span></div>
+</div>
+</div>
+<div style="flex-shrink: 0; border: 1px solid var(--line-soft); border-radius: 8px; background: var(--raised); overflow: hidden;">
+<div style="display: flex; align-items: flex-start; gap: 8px; padding: 8px 10px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--run); margin-top: 2px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex-grow: 1;">
+<div class="mono" style="font-size: 12px; color: var(--fg); word-break: break-all;"><span class="c-3">$ </span>pnpm lint src/cart</div>
+<div style="font-size: 12px; color: var(--fg-3);">Lint the changed files</div>
+</div>
+<span class="mono c-3" style="font-size: 11px; margin-top: 1px; flex-shrink: 0;">0:06</span>
+</div>
+<div style="border-top: 1px solid var(--line-soft); padding: 8px 10px; font-size: 12px; color: var(--fg-3);">Running — output arrives when the command finishes…</div>
+</div>
+</div>
+</div>
+</div>
+<p style="margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg-3);">Opened from a Ran step in the transcript; that command is ringed. Read-only by design.</p>
+</section>
+<section style="width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 13px; font-weight: 600; height: 19px; line-height: 19px;">Interactive shell</div>
+<div style="height: 790px; display: flex; flex-direction: column; gap: 10px;">
+<div style="width: 460px; height: 790px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; position: relative;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">5</span></button>
+<button class="btn btn-sm" style="height: 28px; background: var(--selected); border-color: transparent;" aria-selected="true" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Terminal<span style="display: inline-flex; margin-left: 2px; color: var(--fg-3);" aria-label="Close Terminal tab"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span></button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Terminal 2<span style="display: inline-flex; margin-left: 2px; color: var(--fg-3);" aria-label="Close Terminal 2 tab"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span></button>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 12px; flex-shrink: 0;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>
+<span class="mono trunc c-2" style="font-size: 12px;" title="C:\gai\wt\payments-api">C:\gai\wt\payments-api</span>
+<span class="bdg s-idle mono" style="font-size: 11px; font-weight: 400;" title="pwsh • pid 18244 • node-pty">pty</span>
+<span class="bdg s-run" title="Agent is running"><svg class="i i12" viewBox="0 0 24 24"><path d="M4 14a1 1 0 0 1-.78-1.63l9.9-10.2a.5.5 0 0 1 .86.46l-1.92 6.02A1 1 0 0 0 13 10h7a1 1 0 0 1 .78 1.63l-9.9 10.2a.5.5 0 0 1-.86-.46l1.92-6.02A1 1 0 0 0 11 14z"></path></svg>Agent working</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-g btn-sm" title="cd to a worktree" aria-expanded="false"><svg class="i i12" viewBox="0 0 24 24"><path d="m6 14 1.5-2.9A2 2 0 0 1 9.24 10H20a2 2 0 0 1 1.94 2.5l-1.54 6a2 2 0 0 1-1.95 1.5H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.9a2 2 0 0 1 1.69.9l.81 1.2a2 2 0 0 0 1.67.9H18a2 2 0 0 1 2 2v2"></path></svg>cd<svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m6 9 6 6 6-6"></path></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 4px; height: 36px; padding: 0 8px; border-top: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<button class="btn btn-sm" title="Select text in the terminal, then click Attach"><svg class="i i12" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg>Attach selection</button>
+<button class="btn btn-g btn-sm" style="background: var(--selected); color: var(--fg);" aria-pressed="true" title="Find (Ctrl+F)"><svg class="i i12" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Find<span class="kbd">Ctrl F</span></button>
+<button class="btn btn-g btn-sm" title="Clear scrollback">Clear</button>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-g btn-sm btn-d" title="Kill the terminal process"><svg class="i i12" viewBox="0 0 24 24"><path d="M12 2v10"></path><path d="M18.4 6.6a9 9 0 1 1-12.77.04"></path></svg>Kill</button>
+</div>
+<div class="mono" style="position: relative; flex-grow: 1; min-height: 0; overflow: hidden; background: var(--sunken); padding: 10px 12px; font-size: 12px; line-height: 18px; color: var(--fg-2);">
+<div style="position: absolute; top: 8px; right: 8px; display: flex; align-items: center; gap: 2px; padding: 3px 3px 3px 8px; background: var(--overlay); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-pop); z-index: 2;" role="search" aria-label="Search terminal">
+<svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>
+<div class="mono" style="width: 150px; height: 24px; display: flex; align-items: center; padding: 0 6px; font-size: 12px; color: var(--fg);">applies coupon<span style="display: inline-block; width: 1px; height: 14px; margin-left: 1px; background: var(--fg);"></span></div>
+<button class="ib ib-sm" aria-label="Previous match" title="Previous match (Shift+Enter)"><svg class="i i14" viewBox="0 0 24 24"><path d="m18 15-6-6-6 6"></path></svg></button>
+<button class="ib ib-sm" aria-label="Next match" title="Next match (Enter)"><svg class="i i14" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="ib ib-sm" aria-label="Close search" title="Close (Escape)"><svg class="i i14" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></button>
+</div>
+<div style="white-space: pre;"><span class="c-3">PS C:\gai\wt\payments-api&gt;</span> <span style="color: var(--fg);">git status --short</span></div>
+<div style="white-space: pre;"> <span class="c-warn">M</span> src/cart/applyCoupon.ts</div>
+<div style="white-space: pre;"> <span class="c-warn">M</span> tests/checkout.spec.ts</div>
+<div style="white-space: pre;"><span class="c-3">PS C:\gai\wt\payments-api&gt;</span> <span style="color: var(--fg);">pnpm test checkout --repeat 50</span></div>
+<div style="white-space: pre;"> </div>
+<div style="white-space: pre;">&gt; payments-api@2.4.0 test</div>
+<div style="white-space: pre;">&gt; vitest run checkout --repeat 50</div>
+<div style="white-space: pre;"> </div>
+<div style="white-space: pre;"> <span class="c-run">RUN</span>  <span class="c-3">v3.2.4 C:/gai/wt/payments-api</span></div>
+<div style="white-space: pre;"> </div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 27/50) 395ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 28/50) 410ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 29/50) 391ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 30/50) 404ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 31/50) 399ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 32/50) 417ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 33/50) 386ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--line-strong); color: var(--fg); border-radius: 2px; box-shadow: 0 0 0 1px var(--fg-3);">applies coupon</span> <span class="c-3">(run 34/50) 393ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 35/50) 402ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 36/50) 388ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 37/50) 407ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 38/50) 396ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 39/50) 401ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 40/50) 392ms</span></div>
+<div style="white-space: pre;"> <span class="c-ok">✓</span> checkout.spec.ts › <span style="background: var(--selected); color: var(--fg); border-radius: 2px;">applies coupon</span> <span class="c-3">(run 41/50) 398ms</span><span style="display: inline-block; width: 7px; height: 14px; margin-left: 2px; vertical-align: -3px; background: var(--fg);"></span></div>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; height: 28px; padding: 0 12px; border-top: 1px solid var(--line-soft); flex-shrink: 0;">
+<svg class="i i12" viewBox="0 0 24 24" style="color: var(--run);"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span style="font-size: 12px; color: var(--fg-2);">node running</span>
+<span class="mono c-3" style="font-size: 11px;">pwsh 7.5 · pid 18244 · node-pty</span>
+<span class="mono c-3" style="font-size: 11px; margin-left: auto;">112×36</span>
+</div>
+</div>
+</div>
+<p style="margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg-3);">Each shell is its own dock tab (max 4). Find overlays the output; Attach sends a selection to chat.</p>
+</section>
+<section style="width: 460px; flex-shrink: 0; display: flex; flex-direction: column; gap: 8px;">
+<div style="font-size: 13px; font-weight: 600; height: 19px; line-height: 19px;">States</div>
+<div style="height: 790px; display: flex; flex-direction: column; gap: 10px;">
+<div style="font-size: 12px; color: var(--fg-3); height: 17px; line-height: 17px;">Exited</div>
+<div style="width: 460px; height: 250px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; position: relative;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">5</span></button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="M20 7h-3a2 2 0 0 1-2-2V2"></path><path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z"></path><path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8"></path></svg>Files</button>
+<button class="btn btn-sm" style="height: 28px; background: var(--selected); border-color: transparent;" aria-selected="true" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Terminal</button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>Browser</button>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 12px; flex-shrink: 0;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>
+<span class="mono trunc c-2" style="font-size: 12px;" title="C:\gai\wt\payments-api">C:\gai\wt\payments-api</span>
+<span class="bdg s-idle mono" style="font-size: 11px; font-weight: 400;" title="pwsh • pid 18244 • node-pty">pty</span>
+
+<div style="flex-grow: 1;"></div>
+
+</div>
+<div class="mono" style="position: relative; flex-grow: 1; min-height: 0; overflow: hidden; background: var(--sunken); padding: 10px 12px; font-size: 12px; line-height: 18px; color: var(--fg-2); border-top: 1px solid var(--line-soft);">
+<div style="white-space: pre;"><span class="c-3">PS C:\gai\wt\payments-api&gt;</span> <span style="color: var(--fg);">pnpm dev</span></div>
+<div style="white-space: pre;">&gt; vite --port 5173</div>
+<div style="white-space: pre;"><span class="c-err">error when starting dev server:</span></div>
+<div style="white-space: pre;"><span class="c-err">Error: Port 5173 is already in use</span></div>
+<div style="position: absolute; left: 10px; right: 10px; bottom: 10px; display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; border: 1px solid var(--line); background: var(--err-bg); font-family: 'Instrument Sans', sans-serif; font-size: 12px; color: var(--fg);" data-testid="terminal-exited">
+<svg class="i i12" viewBox="0 0 24 24" style="color: var(--err);"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg><span>Process exited — <span class="mono" style="font-size: 11px;">code 1</span>. Close the tab to restart.</span>
+</div>
+</div>
+</div>
+<div style="font-size: 12px; color: var(--fg-3); height: 17px; line-height: 17px;">Tab limit reached</div>
+<div style="width: 460px; height: 140px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; position: relative;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">5</span></button>
+<button class="btn btn-sm" style="height: 28px; background: var(--selected); border-color: transparent;" role="tab" aria-selected="true"><svg class="i i14" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Terminal<span style="display: inline-flex; margin-left: 2px; color: var(--fg-3);"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span></button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Terminal 2<span style="display: inline-flex; margin-left: 2px; color: var(--fg-3);"><svg class="i i12" viewBox="0 0 24 24"><path d="M18 6 6 18"></path><path d="m6 6 12 12"></path></svg></span></button>
+<button class="btn btn-g btn-sm" style="height: 28px; padding: 0 6px;" aria-label="Show 2 more tabs"><svg class="i i14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg><span class="mono c-3" style="font-size: 11px;">2</span></button>
+<button class="ib ib-sm on" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 10px; margin: 10px 10px 0 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--warn-bg); font-size: 13px;" role="status">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg><span><span class="mono" style="font-size: 12px;">4</span> Terminal tabs is the limit — close one to open another.</span>
+</div>
+</div>
+<div style="font-size: 12px; color: var(--fg-3); height: 17px; line-height: 17px;">Fallback host + lost connection</div>
+<div style="width: 460px; height: 292px; flex-shrink: 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden; position: relative;">
+<div style="display: flex; align-items: center; gap: 2px; height: 44px; padding: 0 8px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;" role="tablist" aria-label="Side dock">
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="18" cy="18" r="3"></circle><circle cx="6" cy="6" r="3"></circle><path d="M13 6h3a2 2 0 0 1 2 2v7"></path><path d="M11 18H8a2 2 0 0 1-2-2V9"></path></svg>Changes<span class="mono c-3" style="font-size: 11px;">5</span></button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="M20 7h-3a2 2 0 0 1-2-2V2"></path><path d="M9 18a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h7l4 4v10a2 2 0 0 1-2 2Z"></path><path d="M3 7.6v12.8A1.6 1.6 0 0 0 4.6 22h9.8"></path></svg>Files</button>
+<button class="btn btn-sm" style="height: 28px; background: var(--selected); border-color: transparent;" aria-selected="true" role="tab"><svg class="i i14" viewBox="0 0 24 24"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>Terminal</button>
+<button class="btn btn-g btn-sm" style="height: 28px;" role="tab"><svg class="i i14" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"></circle><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"></path><path d="M2 12h20"></path></svg>Browser</button>
+<button class="ib ib-sm" aria-label="Open another panel"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<button class="ib ib-sm" aria-label="Maximize dock"><svg class="i i14" viewBox="0 0 24 24"><polyline points="15 3 21 3 21 9"></polyline><polyline points="9 21 3 21 3 15"></polyline><line x1="21" x2="14" y1="3" y2="10"></line><line x1="3" x2="10" y1="21" y2="14"></line></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 40px; padding: 0 8px 0 12px; flex-shrink: 0;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m7 11 2-2-2-2"></path><path d="M11 13h4"></path><rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect></svg>
+<span class="mono trunc c-2" style="font-size: 12px;" title="C:\gai\wt\payments-api">C:\gai\wt\payments-api</span>
+<span class="bdg s-idle mono" style="font-size: 11px; font-weight: 400;" title="pwsh • pid 18244 • node-pty">pty</span>
+
+<div style="flex-grow: 1;"></div>
+
+</div>
+<div style="display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--line-soft); background: var(--warn-bg); font-size: 12px; color: var(--warn); flex-shrink: 0;">
+<svg class="i i12" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3"></path><path d="M12 9v4"></path><path d="M12 17h.01"></path></svg><span>Fallback shell — vim, htop won’t render. Install <span class="mono" style="font-size: 11px;">node-pty</span> for a real PTY.</span>
+</div>
+<div style="position: relative; flex-grow: 1; min-height: 0; overflow: hidden; background: var(--sunken);">
+<div class="mono" style="padding: 10px 12px; font-size: 12px; line-height: 18px; color: var(--fg-3); opacity: .35;">
+<div style="white-space: pre;">PS C:\gai\wt\payments-api&gt; pnpm test checkout</div>
+<div style="white-space: pre;"> ✓ checkout.spec.ts › applies coupon 395ms</div>
+</div>
+<div style="position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; padding: 0 36px; text-align: center;">
+<svg class="i i" viewBox="0 0 24 24" style="color: var(--err);"><circle cx="12" cy="12" r="10"></circle><line x1="12" x2="12" y1="8" y2="12"></line><line x1="12" x2="12.01" y1="16" y2="16"></line></svg>
+<span style="font-size: 13px; font-weight: 600; margin-top: 4px;">Terminal connection error</span>
+<span style="font-size: 12px; color: var(--fg-3);">The shell keeps running on the server. Reload the page to reattach; scrollback is replayed.</span>
+</div>
+</div>
+</div>
+</div>
+<p style="margin: 0; font-size: 12px; line-height: 1.45; color: var(--fg-3);">Exit keeps scrollback; the cap notice explains a “+” that did nothing; errors say what survives.</p>
+</section>
+</div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1600,"height":1024}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>

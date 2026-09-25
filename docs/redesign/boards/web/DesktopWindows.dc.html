@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Desktop · Windows title strip</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500&amp;display=swap">
+<style>
+body{margin:0;background:#0b0b0c}
+.t-dark{--ground:#0b0b0c;--surface:#111113;--raised:#17171a;--overlay:#1d1d21;--sunken:#0d0d0f;--hover:rgba(255,255,255,.035);--selected:rgba(255,255,255,.07);--line:#27272c;--line-soft:#1c1c20;--line-strong:#37373d;--fg:#ededef;--fg-2:#a1a1aa;--fg-3:#80808a;--run:#6aa6ff;--run-bg:rgba(106,166,255,.12);--ok:#4cc38a;--ok-bg:rgba(76,195,138,.12);--warn:#f0b429;--warn-bg:rgba(240,180,41,.12);--err:#ff6369;--err-bg:rgba(255,99,105,.12);--add-bg:rgba(76,195,138,.09);--del-bg:rgba(255,99,105,.09);--shadow-pop:0 16px 40px rgba(0,0,0,.55),0 0 0 1px rgba(255,255,255,.06);--scrim:rgba(0,0,0,.62);color-scheme:dark}
+.t-light{--ground:#f1f1ef;--surface:#ffffff;--raised:#fafaf9;--overlay:#ffffff;--sunken:#f6f6f4;--hover:rgba(0,0,0,.03);--selected:rgba(0,0,0,.055);--line:#e2e2de;--line-soft:#ecece9;--line-strong:#d0d0cb;--fg:#18181b;--fg-2:#55555d;--fg-3:#6b6b73;--run:#1d6ae5;--run-bg:rgba(29,106,229,.09);--ok:#16804c;--ok-bg:rgba(22,128,76,.09);--warn:#935f00;--warn-bg:rgba(214,150,0,.13);--err:#d1242f;--err-bg:rgba(209,36,47,.08);--add-bg:rgba(22,128,76,.08);--del-bg:rgba(209,36,47,.07);--shadow-pop:0 16px 40px rgba(20,20,30,.14),0 0 0 1px rgba(0,0,0,.06);--scrim:rgba(20,20,24,.3);color-scheme:light}
+.acc-ink{--accent:var(--fg);--on-accent:var(--surface)}
+.acc-blue{--accent:#2f6fed;--on-accent:#ffffff}
+.acc-violet{--accent:#7152e0;--on-accent:#ffffff}
+.acc-green{--accent:#1b8a52;--on-accent:#ffffff}
+.acc-orange{--accent:#d4561c;--on-accent:#ffffff}
+.acc-rose{--accent:#c8325f;--on-accent:#ffffff}
+.acc-teal{--accent:#0f7f7a;--on-accent:#ffffff}
+.app{font-family:"Instrument Sans",ui-sans-serif,system-ui,-apple-system,"Segoe UI",sans-serif;font-size:13px;line-height:1.45;color:var(--fg);-webkit-font-smoothing:antialiased;box-sizing:border-box}
+.app *{box-sizing:border-box}
+.mono{font-family:"JetBrains Mono",ui-monospace,SFMono-Regular,Consolas,monospace;font-size:12px}
+.i{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:1.75;stroke-linecap:round;stroke-linejoin:round;flex-shrink:0}
+.i12{width:12px;height:12px}.i14{width:14px;height:14px}.i20{width:20px;height:20px}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;height:28px;padding:0 10px;border-radius:6px;border:1px solid var(--line);background:var(--raised);color:var(--fg);font-family:inherit;font-size:13px;font-weight:500;line-height:1;white-space:nowrap;cursor:pointer;text-decoration:none}
+.btn-p{background:var(--accent);color:var(--on-accent);border-color:transparent}
+.btn-g{background:transparent;border-color:transparent;color:var(--fg-2)}
+.btn-d{color:var(--err)}
+.btn-sm{height:24px;padding:0 8px;font-size:12px;border-radius:5px}
+.btn-lg{height:32px;padding:0 12px}
+.ib{display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:6px;border:0;background:transparent;color:var(--fg-2);padding:0;cursor:pointer;flex-shrink:0}
+.ib-sm{width:24px;height:24px;border-radius:5px}
+.ib.on{background:var(--selected);color:var(--fg)}
+.kbd{display:inline-flex;align-items:center;justify-content:center;height:18px;min-width:18px;padding:0 4px;border-radius:4px;border:1px solid var(--line);background:var(--sunken);color:var(--fg-3);font-family:"JetBrains Mono",monospace;font-size:11px;line-height:1;font-weight:400}
+.bdg{display:inline-flex;align-items:center;gap:4px;height:20px;padding:0 6px;border-radius:4px;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.s-run{color:var(--run);background:var(--run-bg)}.s-ok{color:var(--ok);background:var(--ok-bg)}.s-warn{color:var(--warn);background:var(--warn-bg)}.s-err{color:var(--err);background:var(--err-bg)}.s-idle{color:var(--fg-2);background:var(--selected)}
+.c-run{color:var(--run)}.c-ok{color:var(--ok)}.c-warn{color:var(--warn)}.c-err{color:var(--err)}.c-1{color:var(--fg)}.c-2{color:var(--fg-2)}.c-3{color:var(--fg-3)}
+.chip{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 8px;border-radius:6px;border:1px solid var(--line);background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;white-space:nowrap;line-height:1}
+.inp{display:flex;align-items:center;gap:8px;height:32px;border-radius:6px;border:1px solid var(--line);background:var(--sunken);color:var(--fg);padding:0 10px;font-family:inherit;font-size:13px;width:100%}
+.lbl{font-size:12px;font-weight:500;color:var(--fg-2)}
+.hint{font-size:12px;color:var(--fg-3)}
+.nav{display:flex;align-items:center;gap:10px;height:30px;padding:0 8px;border-radius:6px;color:var(--fg-2);font-size:13px;font-weight:500;text-decoration:none}
+.nav.on{background:var(--selected);color:var(--fg)}
+.cnt{margin-left:auto;font-family:"JetBrains Mono",monospace;font-size:11px;color:var(--fg-3)}
+.sec{display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tabs{display:flex;gap:20px;border-bottom:1px solid var(--line-soft)}
+.tab{display:inline-flex;align-items:center;gap:6px;height:36px;padding:0;border:0;background:none;font-family:inherit;font-size:13px;font-weight:500;color:var(--fg-2);text-decoration:none}
+.tab.on{color:var(--fg);box-shadow:inset 0 -2px 0 var(--fg)}
+.seg{display:inline-flex;gap:2px;padding:2px;border-radius:7px;background:var(--sunken);border:1px solid var(--line-soft)}
+.seg button{display:inline-flex;align-items:center;gap:6px;height:24px;padding:0 10px;border-radius:5px;border:0;background:transparent;color:var(--fg-2);font-family:inherit;font-size:12px;font-weight:500;line-height:1}
+.seg button.on{background:var(--raised);color:var(--fg);box-shadow:0 0 0 1px var(--line)}
+.card{background:var(--raised);border:1px solid var(--line-soft);border-radius:8px}
+.th{display:flex;align-items:center;height:32px;font-size:12px;font-weight:500;color:var(--fg-3)}
+.tr{display:flex;align-items:center;gap:16px;height:44px;padding:0 20px;border-bottom:1px solid var(--line-soft);font-size:13px}
+.sw{position:relative;display:inline-block;width:28px;height:16px;border-radius:999px;border:0;padding:0;background:var(--line-strong);flex-shrink:0}
+.sw::after{content:"";position:absolute;top:2px;left:2px;width:12px;height:12px;border-radius:50%;background:#ffffff}
+.sw.on{background:var(--accent)}
+.sw.on::after{left:14px;background:var(--on-accent)}
+.cb{display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;border-radius:4px;border:1px solid var(--line-strong);flex-shrink:0;color:var(--on-accent)}
+.cb.on{background:var(--accent);border-color:var(--accent)}
+.av{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:var(--selected);color:var(--fg-2);font-size:11px;font-weight:600;flex-shrink:0}
+.dot{display:inline-block;width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.mono span{white-space:pre}
+.trunc{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+
+</style>
+</helmet>
+<div class="app {{rootClass}}" style="width: 1440px; height: 900px; position: relative; display: flex; background: var(--ground); overflow: hidden;">
+<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column;">
+<div style="position: relative; display: flex; align-items: center; height: 36px; flex-shrink: 0; padding-left: 8px; background: var(--ground);" data-drag-region="true">
+<div style="display: flex; align-items: center; gap: 2px;">
+<button class="ib ib-sm" aria-label="Back"><svg class="i i14" viewBox="0 0 24 24"><path d="m12 19-7-7 7-7"></path><path d="M19 12H5"></path></svg></button>
+<button class="ib ib-sm" aria-label="Forward"><svg class="i i14" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="m12 5 7 7-7 7"></path></svg></button>
+<button class="ib ib-sm" aria-label="Toggle sidebar" style="margin-left: 4px;"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect><path d="M9 3v18"></path></svg></button>
+</div>
+<button class="btn" style="position: absolute; left: 510px; top: 5px; width: 420px; height: 26px; justify-content: flex-start; background: var(--surface); color: var(--fg-3); font-weight: 400; font-size: 12px;"><svg class="i i14" viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"></circle><path d="m21 21-4.3-4.3"></path></svg>Search<span class="kbd" style="margin-left: auto;">Ctrl K</span></button>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-sm" style="height: 26px; margin-right: 6px; background: var(--run-bg); color: var(--run); border-color: transparent;" title="Update 0.0.2-alpha.1 is ready"><svg class="i i12" viewBox="0 0 24 24"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" x2="12" y1="15" y2="3"></line></svg>Restart to update</button>
+<button class="btn btn-sm" style="height: 26px; gap: 8px; background: var(--selected); border-color: var(--line);" aria-haspopup="menu" aria-expanded="true"><span class="dot" style="background: var(--ok); width: 6px; height: 6px;"></span>This computer<svg class="i i12" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div style="width: 138px; display: flex; margin-left: 8px;">
+<button aria-label="Minimize" style="width: 46px; height: 36px; display: flex; align-items: center; justify-content: center; border: 0; padding: 0; background: transparent;"><svg viewBox="0 0 10 10" style="width: 10px; height: 10px;"><path d="M0 5.5h10" style="fill: none; stroke: var(--fg-2); stroke-width: 1;"></path></svg></button>
+<button aria-label="Maximize" style="width: 46px; height: 36px; display: flex; align-items: center; justify-content: center; border: 0; padding: 0; background: transparent;"><svg viewBox="0 0 10 10" style="width: 10px; height: 10px;"><rect x="0.5" y="0.5" width="9" height="9" style="fill: none; stroke: var(--fg-2); stroke-width: 1;"></rect></svg></button>
+<button aria-label="Close" style="width: 46px; height: 36px; display: flex; align-items: center; justify-content: center; border: 0; padding: 0; background: transparent;"><svg viewBox="0 0 10 10" style="width: 10px; height: 10px;"><path d="M0.5 0.5l9 9M9.5 0.5l-9 9" style="fill: none; stroke: var(--fg-2); stroke-width: 1;"></path></svg></button>
+</div>
+</div>
+<div style="flex-grow: 1; min-height: 0; display: flex;">
+<aside style="width: 232px; flex-shrink: 0; display: flex; flex-direction: column; gap: 2px; padding: 4px 8px 8px 8px;">
+<div style="display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 4px 0 8px; margin-bottom: 6px;">
+<svg viewBox="0 0 20 20" style="width: 22px; height: 22px; flex-shrink: 0;"><rect width="20" height="20" rx="5" style="fill: var(--fg);"></rect><circle cx="6.5" cy="6.5" r="2.1" style="fill: var(--ground);"></circle><circle cx="13.5" cy="13.5" r="2.1" style="fill: var(--ground);"></circle><path d="M6.5 8.8v2.4a2.3 2.3 0 0 0 2.3 2.3h2.4" style="fill: none; stroke: var(--ground); stroke-width: 1.6; stroke-linecap: round;"></path></svg><span style="font-size: 13px; font-weight: 600;">GeneratorAI</span>
+<button class="ib" style="margin-left: auto;" aria-label="New chat"><svg class="i i14" viewBox="0 0 24 24"><path d="M21.174 6.812a1 1 0 0 0-3.986-3.987L3.842 16.174a2 2 0 0 0-.5.83l-1.321 4.352a.5.5 0 0 0 .623.622l4.353-1.32a2 2 0 0 0 .83-.497z"></path><path d="m15 5 4 4"></path></svg></button>
+</div>
+<nav style="display: flex; flex-direction: column; gap: 1px;">
+<a class="nav on" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M15 21v-8a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1v8"></path><path d="M3 10a2 2 0 0 1 .709-1.528l7-5.999a2 2 0 0 1 2.582 0l7 5.999A2 2 0 0 1 21 10v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"></path></svg>Home</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>Chats</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>Projects</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>Agents</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>Workflows</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"></path><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h5"></path><path d="M17.5 17.5 16 16.3V14"></path><circle cx="16" cy="16" r="6"></circle></svg>Automations</a>
+<a class="nav" href="#"><svg class="i" viewBox="0 0 24 24"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="m5 12-3 3 3 3"></path><path d="m9 18 3-3-3-3"></path></svg>Scripts</a>
+</nav>
+<div class="sec" style="margin-top: 14px;">Needs you<span class="cnt" style="color: var(--warn);">2</span></div>
+<a class="nav" href="#" style="height: 44px; align-items: flex-start; padding-top: 6px;">
+<span class="dot" style="background: var(--warn); margin: 5px 4px 0 4px;"></span>
+<span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.3;"><span class="trunc" style="color: var(--fg);">Nightly dependency audit</span><span class="trunc" style="font-size: 12px; font-weight: 400; color: var(--fg-3);">Approve “Apply upgrades”</span></span>
+</a>
+<a class="nav" href="#" style="height: 44px; align-items: flex-start; padding-top: 6px;">
+<span class="dot" style="background: var(--warn); margin: 5px 4px 0 4px;"></span>
+<span style="display: flex; flex-direction: column; min-width: 0; line-height: 1.3;"><span class="trunc" style="color: var(--fg);">Fix flaky checkout test</span><span class="trunc" style="font-size: 12px; font-weight: 400; color: var(--fg-3);">Allow git push?</span></span>
+</a>
+<div class="sec" style="margin-top: 10px;">Running<span class="cnt">3</span></div>
+<a class="nav" href="#"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--run); margin: 0 2px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span class="trunc">Upgrade React Flow to v12</span><span class="cnt">4:12</span></a>
+<a class="nav" href="#"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--run); margin: 0 2px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span class="trunc">PR review pipeline #311</span><span class="cnt">1:05</span></a>
+<a class="nav" href="#"><svg class="i i12" viewBox="0 0 24 24" style="color: var(--run); margin: 0 2px;"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg><span class="trunc">Memory leak in worker</span><span class="cnt">0:38</span></a>
+<div style="flex-grow: 1;"></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 44px; padding: 8px 4px 0 10px; border-top: 1px solid var(--line-soft); margin-top: 8px;">
+<span class="dot" style="background: var(--ok); width: 6px; height: 6px;"></span>
+<span style="font-size: 12px; color: var(--fg-2);">Connected</span>
+<span class="mono" style="font-size: 11px; color: var(--fg-3);">local:3100</span>
+<button class="ib" style="margin-left: auto;" aria-label="Settings"><svg class="i" viewBox="0 0 24 24"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg></button>
+</div>
+</aside>
+<main style="flex-grow: 1; min-width: 0; margin: 0 8px 8px 0; display: flex; flex-direction: column; background: var(--surface); border: 1px solid var(--line-soft); border-radius: 10px; overflow: hidden;">
+<header style="display: flex; align-items: center; gap: 10px; height: 44px; padding: 0 10px 0 16px; border-bottom: 1px solid var(--line-soft); flex-shrink: 0;">
+<span style="font-size: 13px; font-weight: 600;">Home</span>
+<div style="flex-grow: 1;"></div>
+<button class="btn btn-sm"><svg class="i i12" viewBox="0 0 24 24"><polygon points="6 3 20 12 6 21 6 3"></polygon></svg>Run workflow</button>
+<button class="btn btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg>New workflow</button>
+<button class="ib" aria-label="More"><svg class="i" viewBox="0 0 24 24"><circle cx="12" cy="12" r="1"></circle><circle cx="19" cy="12" r="1"></circle><circle cx="5" cy="12" r="1"></circle></svg></button>
+</header>
+
+<div style="flex-grow: 1; min-height: 0; overflow: hidden; padding: 24px 28px;">
+<div style="max-width: 1040px; margin: 0 auto; display: flex; gap: 24px; align-items: flex-start;">
+
+<!-- LEFT COLUMN -->
+<div style="flex-grow: 1; min-width: 0; display: flex; flex-direction: column; gap: 20px;">
+
+<div style="display: flex; flex-direction: column; gap: 4px;">
+<span class="mono" style="font-size: 12px; color: var(--fg-3);">Wed, Sep 23 · 14:12</span>
+<h1 style="margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.25;">2 need you · 3 running</h1>
+</div>
+
+<!-- quick-start composer -->
+<div style="border: 1px solid var(--line); border-radius: 10px; background: var(--raised); padding: 12px 10px 8px 14px; display: flex; flex-direction: column; gap: 10px;">
+<div role="textbox" aria-label="New chat task" style="font-size: 14px; color: var(--fg-3); height: 22px; line-height: 22px;">Start a chat — describe a task for an agent</div>
+<div style="display: flex; align-items: center; gap: 4px;">
+<button class="ib ib-sm" aria-label="Attach files"><svg class="i" viewBox="0 0 24 24"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"></path></svg></button>
+<button class="chip" style="border-color: transparent;"><svg class="i i12" viewBox="0 0 24 24"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg><span class="mono" style="font-size: 11px;">payments-service</span><svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip" style="border-color: transparent;"><svg class="i i12" viewBox="0 0 24 24"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>No agent<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip" style="border-color: transparent;">Sonnet 5<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<button class="chip" style="border-color: transparent;"><svg class="i i12" viewBox="0 0 24 24"><line x1="6" x2="6" y1="3" y2="15"></line><circle cx="18" cy="6" r="3"></circle><circle cx="6" cy="18" r="3"></circle><path d="M18 9a9 9 0 0 1-9 9"></path></svg>Worktree<svg class="i i12" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"></path></svg></button>
+<div style="flex-grow: 1;"></div>
+<span style="display: flex; align-items: center; gap: 4px; font-size: 11px; color: var(--fg-3); margin-right: 6px;"><span class="kbd">Ctrl ↵</span>More options</span>
+<button class="ib" style="background: var(--accent); color: var(--on-accent); border-radius: 8px;" aria-label="Start chat"><svg class="i" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7"></path><path d="M12 19V5"></path></svg></button>
+</div>
+</div>
+
+<!-- NEEDS YOU -->
+<section style="display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; align-items: center; gap: 8px; height: 24px;">
+<h2 style="margin: 0; font-size: 13px; font-weight: 600;">Needs you</h2><span class="mono" style="font-size: 11px; color: var(--warn);">2</span>
+</div>
+<div style="border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 12px 0 14px; border-bottom: 1px solid var(--line-soft);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex-grow: 1;">
+<div style="display: flex; align-items: center; gap: 8px; min-width: 0;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg><span class="trunc" style="font-weight: 500;">Nightly dependency audit</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">run #248</span></div>
+<span class="trunc" style="font-size: 12px; color: var(--fg-2);">Stage 3 of 6 “Apply upgrades” is waiting for approval · 14 packages, 3 majors</span>
+</div>
+<span class="mono" style="font-size: 11px; color: var(--fg-3);">12m</span>
+<button class="btn btn-sm">Review</button>
+<button class="btn btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg>Approve</button>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; height: 56px; padding: 0 12px 0 14px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--warn);"><path d="M18 11V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2"></path><path d="M14 10V4a2 2 0 0 0-2-2a2 2 0 0 0-2 2v2"></path><path d="M10 10.5V6a2 2 0 0 0-2-2a2 2 0 0 0-2 2v8"></path><path d="M18 8a2 2 0 1 1 4 0v6a8 8 0 0 1-8 8h-2c-2.8 0-4.5-.86-5.99-2.34l-3.6-3.6a2 2 0 0 1 2.83-2.82L7 15"></path></svg>
+<div style="display: flex; flex-direction: column; gap: 2px; min-width: 0; flex-grow: 1;">
+<div style="display: flex; align-items: center; gap: 8px; min-width: 0;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span class="trunc" style="font-weight: 500;">Fix flaky checkout test</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">payments-service</span></div>
+<span class="trunc" style="font-size: 12px; color: var(--fg-2);">Bug Fixer asks to run <span class="mono" style="font-size: 11px; color: var(--fg);">git push -u origin fix/checkout-flake</span></span>
+</div>
+<span class="mono" style="font-size: 11px; color: var(--fg-3);">3m</span>
+<button class="btn btn-sm">Open</button>
+<button class="btn btn-sm"><svg class="i i12" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg>Allow once</button>
+</div>
+</div>
+</section>
+
+<!-- RUNNING -->
+<section style="display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; align-items: center; gap: 8px; height: 24px;">
+<h2 style="margin: 0; font-size: 13px; font-weight: 600;">Running</h2><span class="mono" style="font-size: 11px; color: var(--fg-3);">3</span>
+</div>
+<div style="border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line-soft);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--run);"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+<span class="trunc" style="width: 184px; font-weight: 500;">Upgrade React Flow to v12</span>
+<span class="mono trunc" style="width: 116px; font-size: 11px; color: var(--fg-3);">web-dashboard</span>
+<span class="trunc" style="flex-grow: 1; font-size: 12px; color: var(--fg-2);">Running <span class="mono" style="font-size: 11px;">pnpm build</span></span>
+<span class="mono" style="width: 40px; text-align: right; font-size: 11px; color: var(--fg-3);">4:12</span>
+<button class="ib ib-sm" aria-label="Stop Upgrade React Flow to v12"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line-soft);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--run);"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>
+<span class="trunc" style="width: 184px; font-weight: 500;">PR review pipeline <span class="mono c-3" style="font-size: 11px; font-weight: 400;">#311</span></span>
+<span class="mono trunc" style="width: 116px; font-size: 11px; color: var(--fg-3);">payments-service</span>
+<span class="trunc" style="flex-grow: 1; font-size: 12px; color: var(--fg-2);">Stage 2 of 4 · Code Reviewer reading the diff</span>
+<span class="mono" style="width: 40px; text-align: right; font-size: 11px; color: var(--fg-3);">1:05</span>
+<button class="ib ib-sm" aria-label="Cancel PR review pipeline run 311"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 10px 0 14px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--run);"><path d="M21 12a9 9 0 1 1-6.219-8.56"></path></svg>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+<span class="trunc" style="width: 184px; font-weight: 500;">Memory leak in worker</span>
+<span class="mono trunc" style="width: 116px; font-size: 11px; color: var(--fg-3);">payments-service</span>
+<span class="trunc" style="flex-grow: 1; font-size: 12px; color: var(--fg-2);">Running <span class="mono" style="font-size: 11px;">node --inspect dist/worker.js</span></span>
+<span class="mono" style="width: 40px; text-align: right; font-size: 11px; color: var(--fg-3);">0:38</span>
+<button class="ib ib-sm" aria-label="Stop Memory leak in worker"><svg class="i i14" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"></rect></svg></button>
+</div>
+</div>
+</section>
+
+<!-- RECENTLY FINISHED -->
+<section style="display: flex; flex-direction: column; gap: 8px;">
+<div style="display: flex; align-items: center; gap: 8px; height: 24px;">
+<h2 style="margin: 0; font-size: 13px; font-weight: 600;">Recently finished</h2><span class="mono" style="font-size: 11px; color: var(--fg-3);">today</span>
+<div style="flex-grow: 1;"></div>
+<a href="#" class="btn btn-g btn-sm">All activity</a>
+</div>
+<div style="border: 1px solid var(--line-soft); border-radius: 8px; overflow: hidden;">
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line-soft); background: var(--hover);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok);"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+<span class="trunc" style="width: 184px; font-weight: 500;">Audit IAM policies</span>
+<span class="mono trunc" style="width: 116px; font-size: 11px; color: var(--fg-3);">infra-terraform</span>
+<span class="trunc" style="flex-grow: 1; font-size: 12px; color: var(--fg-2);"><span class="mono" style="font-size: 11px;"><span class="c-ok">+212</span> <span class="c-err">−48</span></span> · PR #1182 opened</span>
+<span class="mono" style="width: 40px; text-align: right; font-size: 11px; color: var(--fg-3);">13:05</span>
+<button class="ib ib-sm" aria-label="Open pull request 1182"><svg class="i i14" viewBox="0 0 24 24"><path d="M15 3h6v6"></path><path d="M10 14 21 3"></path><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"></path></svg></button>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line-soft);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok);"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="8" height="8" x="3" y="3" rx="2"></rect><path d="M7 11v4a2 2 0 0 0 2 2h4"></path><rect width="8" height="8" x="13" y="13" rx="2"></rect></svg>
+<span class="trunc" style="width: 184px; font-weight: 500;">PR review pipeline <span class="mono c-3" style="font-size: 11px; font-weight: 400;">#310</span></span>
+<span class="mono trunc" style="width: 116px; font-size: 11px; color: var(--fg-3);">payments-service</span>
+<span class="trunc" style="flex-grow: 1; font-size: 12px; color: var(--fg-2);">4 of 4 stages · 3 review comments on PR #1179</span>
+<span class="mono" style="width: 40px; text-align: right; font-size: 11px; color: var(--fg-3);">12:48</span>
+<span style="width: 24px;"></span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line-soft);">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--ok);"><circle cx="12" cy="12" r="10"></circle><path d="m9 12 2 2 4-4"></path></svg>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+<span class="trunc" style="width: 184px; font-weight: 500;">Draft release notes 2.4</span>
+<span class="mono trunc" style="width: 116px; font-size: 11px; color: var(--fg-3);">docs-site</span>
+<span class="trunc" style="flex-grow: 1; font-size: 12px; color: var(--fg-2);"><span class="mono" style="font-size: 11px;"><span class="c-ok">+96</span> <span class="c-err">−12</span></span> · committed to <span class="mono" style="font-size: 11px;">docs/release-2.4</span></span>
+<span class="mono" style="width: 40px; text-align: right; font-size: 11px; color: var(--fg-3);">12:31</span>
+<span style="width: 24px;"></span>
+</div>
+<div style="display: flex; align-items: center; gap: 12px; height: 44px; padding: 0 10px 0 14px;">
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--err);"><circle cx="12" cy="12" r="10"></circle><path d="m15 9-6 6"></path><path d="m9 9 6 6"></path></svg>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg>
+<span class="trunc" style="width: 184px; font-weight: 500;">Refactor pricing module</span>
+<span class="mono trunc" style="width: 116px; font-size: 11px; color: var(--fg-3);">payments-service</span>
+<span class="trunc" style="flex-grow: 1; font-size: 12px; color: var(--err);">Failed · <span class="mono" style="font-size: 11px;">pnpm typecheck</span> exited 2 (7 errors)</span>
+<span class="mono" style="width: 40px; text-align: right; font-size: 11px; color: var(--fg-3);">11:52</span>
+<button class="ib ib-sm" aria-label="Retry Refactor pricing module"><svg class="i i14" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"></path><path d="M3 3v5h5"></path></svg></button>
+</div>
+</div>
+</section>
+</div>
+
+<!-- RIGHT COLUMN -->
+<div style="width: 300px; flex-shrink: 0; display: flex; flex-direction: column; gap: 16px; padding-top: 6px;">
+
+<div class="card" style="display: flex; flex-direction: column;">
+<div style="display: flex; align-items: center; height: 40px; padding: 0 14px; border-bottom: 1px solid var(--line-soft);">
+<span style="font-size: 13px; font-weight: 600;">This week</span>
+<span class="mono" style="margin-left: auto; font-size: 11px; color: var(--fg-3);">Sep 21 – 27</span>
+</div>
+<div style="display: grid; grid-template-columns: 1fr 1fr;">
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-right: 1px solid var(--line-soft); border-bottom: 1px solid var(--line-soft); color: inherit; text-decoration: none;"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.2;">41</span><span style="font-size: 12px; color: var(--fg-3);">Chats</span></a>
+<a href="#" style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-bottom: 1px solid var(--line-soft); color: inherit; text-decoration: none;"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.2;">128</span><span style="font-size: 12px; color: var(--fg-3);">Workflow runs</span></a>
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px; border-right: 1px solid var(--line-soft);"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.2;">94%</span><span style="font-size: 12px; color: var(--fg-3);">Run success rate</span></div>
+<div style="display: flex; flex-direction: column; gap: 2px; padding: 12px 14px;"><span class="mono" style="font-size: 20px; font-weight: 600; line-height: 1.2;">6m 12s</span><span style="font-size: 12px; color: var(--fg-3);">Avg run time</span></div>
+</div>
+</div>
+
+<div class="card" style="display: flex; flex-direction: column;">
+<div style="display: flex; align-items: center; height: 40px; padding: 0 8px 0 14px; border-bottom: 1px solid var(--line-soft);">
+<span style="font-size: 13px; font-weight: 600;">System</span>
+<button class="btn btn-g btn-sm" style="margin-left: auto;">Diagnostics</button>
+</div>
+<div style="display: flex; flex-direction: column; padding: 6px 14px 10px 14px; font-size: 12px;">
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><span style="color: var(--fg-3); width: 92px;">Server</span><span class="dot" style="background: var(--ok); width: 6px; height: 6px;"></span><span>Connected</span><span class="mono" style="margin-left: auto; font-size: 11px; color: var(--fg-3);">local:3100</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><span style="color: var(--fg-3); width: 92px;">Agents</span><span>3 running</span><span class="mono" style="margin-left: auto; font-size: 11px; color: var(--fg-3);">max 8</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><span style="color: var(--fg-3); width: 92px;">Database</span><span>SQLite</span><span class="mono" style="margin-left: auto; font-size: 11px; color: var(--fg-3);">212 MB</span></div>
+<div style="display: flex; flex-direction: column; gap: 6px; padding: 6px 0;">
+<div style="display: flex; align-items: center; gap: 8px;"><span style="color: var(--fg-3); width: 92px;">Disk</span><span>38% used</span><span class="mono" style="margin-left: auto; font-size: 11px; color: var(--fg-3);">182 / 476 GB</span></div>
+<div style="height: 4px; border-radius: 2px; background: var(--selected); overflow: hidden;"><div style="width: 38%; height: 4px; background: var(--fg-3);"></div></div>
+</div>
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><span style="color: var(--fg-3); width: 92px;">Uptime</span><span class="mono" style="font-size: 11px;">3d 4h 12m</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><span style="color: var(--fg-3); width: 92px;">Version</span><span class="mono" style="font-size: 11px;">0.0.1-alpha.1</span></div>
+<div style="display: flex; align-items: center; gap: 8px; height: 28px;"><span style="color: var(--fg-3); width: 92px;">Update</span><span class="mono c-run" style="font-size: 11px;">0.0.2-alpha.1</span><button class="btn btn-sm" style="margin-left: auto;">Restart</button></div>
+</div>
+</div>
+
+<div class="card" style="display: flex; flex-direction: column; padding: 4px;">
+<a class="nav" href="#" style="font-weight: 400;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"></path></svg>Projects<span class="cnt">4</span></a>
+<a class="nav" href="#" style="font-weight: 400;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12 8V4H8"></path><rect width="16" height="12" x="4" y="8" rx="2"></rect><path d="M2 14h2"></path><path d="M20 14h2"></path><path d="M15 13v2"></path><path d="M9 13v2"></path></svg>Agents<span class="cnt">6</span></a>
+<a class="nav" href="#" style="font-weight: 400;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M21 7.5V6a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h3.5"></path><path d="M16 2v4"></path><path d="M8 2v4"></path><path d="M3 10h5"></path><path d="M17.5 17.5 16 16.3V14"></path><circle cx="16" cy="16" r="6"></circle></svg>Automations<span class="cnt">next 02:00</span></a>
+<a class="nav" href="#" style="font-weight: 400;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M4 22h14a2 2 0 0 0 2-2V7l-5-5H6a2 2 0 0 0-2 2v4"></path><path d="M14 2v4a2 2 0 0 0 2 2h4"></path><path d="m5 12-3 3 3 3"></path><path d="m9 18 3-3-3-3"></path></svg>Scripts<span class="cnt">2</span></a>
+</div>
+
+</div>
+</div>
+</div>
+</main>
+</div>
+</div>
+<div role="menu" aria-label="Servers" style="position: absolute; top: 38px; right: 146px; width: 280px; background: var(--overlay); border: 1px solid var(--line); border-radius: 8px; box-shadow: var(--shadow-pop); padding: 4px;">
+<div style="display: flex; align-items: center; height: 26px; padding: 0 8px; font-size: 12px; color: var(--fg-3);">Servers</div>
+<div role="menuitemradio" aria-checked="true" style="display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 8px; border-radius: 5px; background: var(--selected);">
+<span style="width: 14px; display: flex;"><svg class="i i14" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"></path></svg></span>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="20" height="14" x="2" y="3" rx="2"></rect><line x1="8" x2="16" y1="21" y2="21"></line><line x1="12" x2="12" y1="17" y2="21"></line></svg>
+<span style="display: flex; flex-direction: column; line-height: 1.3; min-width: 0;"><span style="font-size: 13px;">This computer</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">local:3100</span></span>
+<span style="margin-left: auto; font-size: 12px; color: var(--fg-3); display: flex; align-items: center; gap: 6px;"><span class="dot" style="background: var(--ok); width: 6px; height: 6px;"></span>Connected</span>
+</div>
+<div role="menuitemradio" aria-checked="false" style="display: flex; align-items: center; gap: 10px; height: 40px; padding: 0 8px; border-radius: 5px;">
+<span style="width: 14px; display: flex;"></span>
+<svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><rect width="20" height="8" x="2" y="2" rx="2" ry="2"></rect><rect width="20" height="8" x="2" y="14" rx="2" ry="2"></rect><line x1="6" x2="6.01" y1="6" y2="6"></line><line x1="6" x2="6.01" y1="18" y2="18"></line></svg>
+<span style="display: flex; flex-direction: column; line-height: 1.3; min-width: 0;"><span style="font-size: 13px;">build-box</span><span class="mono" style="font-size: 11px; color: var(--fg-3);">10.0.4.12:3100</span></span>
+<span style="margin-left: auto; font-size: 12px; color: var(--fg-3); display: flex; align-items: center; gap: 6px;">Offline</span>
+</div>
+<div style="height: 1px; background: var(--line-soft); margin: 4px 0;"></div>
+<div role="menuitem" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M5 12h14"></path><path d="M12 5v14"></path></svg><span class="trunc">Add server…</span></div>
+<div role="menuitem" style="display: flex; align-items: center; gap: 10px; height: 30px; padding: 0 8px; border-radius: 5px; font-size: 13px;"><svg class="i i14" viewBox="0 0 24 24" style="color: var(--fg-3);"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"></path><circle cx="12" cy="12" r="3"></circle></svg><span class="trunc">Manage servers</span><span style="margin-left: auto; display: flex; align-items: center; gap: 6px;"><span style="font-size: 12px; color: var(--fg-3);">Security &amp; devices</span></span></div>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"mode":{"editor":"enum","options":["dark","light"],"default":"dark","section":"Theme"},"accent":{"editor":"enum","options":["ink","blue","violet","green","orange","rose","teal"],"default":"ink","section":"Theme"},"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+const mode = this.props.mode ?? 'dark';
+const accent = this.props.accent ?? 'ink';
+return { rootClass: 't-' + mode + ' acc-' + accent };
+}
+}
+</script>
+</body>
+</html>
