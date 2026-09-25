@@ -301,15 +301,19 @@ describe('HttpPlatformClient', () => {
   }
 
   function makeMockEventSource(closeFn: () => void = vi.fn()) {
-    return vi.fn().mockImplementation(() => ({
-      onopen: null,
-      onerror: null,
-      onmessage: null,
-      close: closeFn,
-      readyState: 0,
-      addEventListener: vi.fn(),
-      removeEventListener: vi.fn(),
-    }));
+    // Called with `new`, so the implementation must be a `function` (Vitest 4
+    // refuses to construct an arrow-function mock).
+    return vi.fn().mockImplementation(function () {
+      return {
+        onopen: null,
+        onerror: null,
+        onmessage: null,
+        close: closeFn,
+        readyState: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      };
+    });
   }
 
   it('subscribeToEvents creates EventSource and returns unsubscribe function', async () => {

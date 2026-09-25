@@ -68,11 +68,14 @@
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-basic-ssl": "^2.3.0",
     "@vitejs/plugin-react": "^4.7.0",
+    "@vitest/browser-playwright": "^4.1.11",
     "happy-dom": "20.13.2",
     "jsdom": "^25.0.1",
     "lightningcss": "^1.31.1",
+    "playwright": "^1.58.2",
     "rollup-plugin-visualizer": "^7.0.1",
     "tailwindcss": "^4.3.3",
-    "vite": "^6.4.1"
+    "vite": "^7.3.6",
+    "vitest": "^4.1.11"
   }
 }

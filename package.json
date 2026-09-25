@@ -57,6 +57,7 @@
       "@types/react": "^19.2.14",
       "@types/react-dom": "^19.2.3",
       "@types/node": "^22.10.0",
+      "vite": "^7.3.6",
       "protobufjs@7": "^7.6.6",
       "protobufjs@8": "^8.8.0",
       "@protobufjs/utf8": "^1.1.1"
@@ -65,7 +66,7 @@
   "devDependencies": {
     "@typescript-eslint/eslint-plugin": "^8.70.1",
     "@typescript-eslint/parser": "^8.70.1",
-    "@vitest/coverage-v8": "^3.2.6",
+    "@vitest/coverage-v8": "^4.1.11",
     "eslint": "^9.27.0",
     "eslint-config-prettier": "^10.1.5",
     "eslint-import-resolver-typescript": "^4.4.5",
@@ -75,7 +76,7 @@
     "prettier": "^3.5.0",
     "turbo": "^2.5.0",
     "typescript": "^6.0.3",
-    "vitest": "^3.2.6"
+    "vitest": "^4.1.11"
   },
   "dependencies": {
     "tweetnacl": "^1.0.3"
