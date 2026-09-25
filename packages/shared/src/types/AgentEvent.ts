@@ -242,6 +242,16 @@ export type AgentEvent =
   | { kind: 'chat.permission.requested'; data: { chatId: string; interactionId: string; turnId?: string; toolName: string; type: string; description: string; inputSummary: string; permissionMode: string } }
   | { kind: 'chat.permission.resolved'; data: { chatId: string; interactionId: string; behavior: 'allow' | 'deny'; message?: string } }
   | { kind: 'chat.permission.expired'; data: { chatId: string; interactionId: string; reason: string } }
+  // ── Stage gates (P02): the chat gate shapes, keyed by the stage run ──
+  | { kind: 'stage.permission.requested'; data: { stageRunId: string; workflowRunId: string; interactionId: string; turnId?: string; toolName: string; type: string; description: string; inputSummary: string; permissionMode: string } }
+  | { kind: 'stage.permission.resolved'; data: { stageRunId: string; workflowRunId: string; interactionId: string; behavior: 'allow' | 'deny'; message?: string } }
+  | { kind: 'stage.permission.expired'; data: { stageRunId: string; workflowRunId: string; interactionId: string; reason: string } }
+  | { kind: 'stage.question.asked'; data: { stageRunId: string; workflowRunId: string; interactionId: string; turnId?: string; questions: unknown[] } }
+  | { kind: 'stage.question.answered'; data: { stageRunId: string; workflowRunId: string; interactionId: string; answers: Record<string, string[]>; freeformResponse?: string } }
+  | { kind: 'stage.question.expired'; data: { stageRunId: string; workflowRunId: string; interactionId: string; reason: string } }
+  | { kind: 'stage.plan.created'; data: { stageRunId: string; workflowRunId: string; planId: string; revision: number; title: string; fileName: string; summary: string; status?: string; turnId?: string } }
+  | { kind: 'stage.plan.review_requested'; data: { stageRunId: string; workflowRunId: string; interactionId: string; planId?: string; revision?: number; title?: string; fileName?: string; summary: string; actions: string[]; recommendedAction?: string } }
+  | { kind: 'stage.plan.decided'; data: { stageRunId: string; workflowRunId: string; interactionId: string; planId?: string; approved: boolean; action?: string; feedback?: string } }
 
   // ── Agents (first-class agent entity) ──
   | { kind: 'agent.created'; data: { agentId: string; ref: string; name: string; scope: string } }

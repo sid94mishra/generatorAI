@@ -869,6 +869,7 @@ export class StreamEventRouter {
       // state against, so refreshing it here keeps the two views from
       // disagreeing for up to a full poll period.
       case 'chat.plan.created':
+      case 'stage.plan.created':
         this.flushKey(key, out);
         out.push({
           op: 'upsertPlan',
@@ -909,6 +910,7 @@ export class StreamEventRouter {
         break;
 
       case 'chat.plan.review_requested':
+      case 'stage.plan.review_requested':
         this.flushKey(key, out);
         // `upsertPlan` merges onto the card from `chat.plan.created`, so
         // absent fields must be omitted rather than blanked.
@@ -938,7 +940,8 @@ export class StreamEventRouter {
         out.push({ op: 'invalidate', resource: 'interactions', ...chatId() });
         break;
 
-      case 'chat.plan.decided': {
+      case 'chat.plan.decided':
+      case 'stage.plan.decided': {
         this.flushKey(key, out);
         const approved = data['approved'] === true;
         const action = optStr(data['action']);
@@ -985,6 +988,7 @@ export class StreamEventRouter {
       // NEVER saw a clarifying question; both are accepted now so a rename in
       // either direction cannot silently break the gate again.
       case 'chat.question.asked':
+      case 'stage.question.asked':
       case 'chat.question_asked':
         this.flushKey(key, out);
         out.push({
@@ -1002,6 +1006,7 @@ export class StreamEventRouter {
         break;
 
       case 'chat.question.answered':
+      case 'stage.question.answered':
       case 'chat.question_answered':
         this.flushKey(key, out);
         out.push({
@@ -1017,6 +1022,7 @@ export class StreamEventRouter {
         break;
 
       case 'chat.question.expired':
+      case 'stage.question.expired':
       case 'chat.question_expired':
         this.flushKey(key, out);
         out.push({ op: 'expireQuestion', key, interactionId: str(data['interactionId']) });
@@ -1036,6 +1042,7 @@ export class StreamEventRouter {
       // pending → resolved/expired lifecycle, same pending-interaction
       // invalidation so the poll-based reconciliation in ChatPage sees it.
       case 'chat.permission.requested':
+      case 'stage.permission.requested':
         this.flushKey(key, out);
         out.push({
           op: 'upsertPermission',
@@ -1054,6 +1061,7 @@ export class StreamEventRouter {
         break;
 
       case 'chat.permission.resolved':
+      case 'stage.permission.resolved':
         this.flushKey(key, out);
         out.push({
           op: 'resolvePermission',
@@ -1066,6 +1074,7 @@ export class StreamEventRouter {
         break;
 
       case 'chat.permission.expired':
+      case 'stage.permission.expired':
         this.flushKey(key, out);
         out.push({
           op: 'expirePermission',

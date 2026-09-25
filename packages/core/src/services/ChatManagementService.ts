@@ -17,6 +17,7 @@ import type {
   PlanCardSummary,
   PlanDecision,
   QuestionCardSummary,
+  AgentToolPolicy,
 } from '@generatorai/shared';
 import { generateId, DEFAULT_AGENT_MODE, ValidationError } from '@generatorai/shared';
 import * as path from 'node:path';
@@ -24,7 +25,7 @@ import type { ChatSourceSpec, ExecutionWorkspace } from '@generatorai/shared';
 import * as fs from 'node:fs/promises';
 import type { IChatRepository } from '../domain/ports/IChatRepository.js';
 import type { ISessionRepository, IChatMessageRepository } from '../domain/ports/IRepositories.js';
-import type { IAgentHarness, AttachmentRef, CreateConversationParams, ToolDefinition, HarnessPermissionMode } from '../domain/ports/IAgentHarness.js';
+import type { IAgentHarness, AttachmentRef, CreateConversationParams, HarnessPermissionMode } from '../domain/ports/IAgentHarness.js';
 import type {
   PlanReviewRequest,
   PlanReviewDecision,
@@ -33,24 +34,16 @@ import type {
   PermissionResponse,
 } from '../domain/ports/IAgentHarness.js';
 import {
-  AUTO_MODE_PLAN_INSTRUCTIONS,
   PLAN_MODE_TURN_PREFIX,
   providerHasNativePlanGate,
-  PLAN_MODE_INSTRUCTIONS,
   resolveModeDescriptor,
   resolveTurnPermissionMode,
   shouldAttachPermissionHandler,
   decideToolPermission,
   buildToolPermissionPayload,
-  type TurnContext,
 } from './agentModePolicy.js';
 import type { EventBus } from '../events/EventBus.js';
-import {
-  createRecordPlanTool,
-  RECORD_PLAN_TOOL_NAME,
-  type RecordPlanArgs,
-  type RecordPlanResult,
-} from '../tools/recordPlanTool.js';
+import type { RecordPlanArgs, RecordPlanResult } from '../tools/recordPlanTool.js';
 import type { WorktreeService } from './WorktreeService.js';
 import { branchSlugFor, type MountService, type PlannedMount } from './MountService.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
@@ -64,9 +57,11 @@ import {
 import { scmMountTargets } from './scm/workspaceMounts.js';
 import { buildTurnHint } from './scm/turnHint.js';
 import { withDeadline } from '../utils/withDeadline.js';
-import { appendSystemBlock, appendTools } from './session/cfg.js';
+import { appendSystemBlock } from './session/cfg.js';
 import { PlatformToolBinder, type BindTarget } from './session/PlatformToolBinder.js';
-import type { ComposeWarning, SessionComposerDeps } from './session/types.js';
+import type { ComposeWarning, SessionComposerDeps, TurnContext } from './session/types.js';
+import { stampCardSequence, TurnContextRegistry, type GatePort } from './session/gates.js';
+import { applyModeConfig } from './session/modeConfig.js';
 import { resolveMcp } from './session/resolveMcp.js';
 import { applyAgentProjection, applyExplicitSpec, appendAgentInstructions, deliverSkills } from './session/agentProjection.js';
 import { chatSessionSpec } from './session/chatSpec.js';
@@ -190,7 +185,8 @@ export class ChatManagementService {
    * carry the CURRENT turnId. `sendPrompt` refreshes this holder before every
    * send and the handlers read it lazily.
    */
-  private turnContexts = new Map<string, TurnContext>();
+  /** chat id → the conversation its turns run on (for the registry lookups below). */
+  private readonly chatConversations = new Map<string, string>();
 
   /**
    * The harness that runs a chat session's conversation, for plan records: the
@@ -249,6 +245,8 @@ export class ChatManagementService {
     private harness: IAgentHarness,
     private eventBus: EventBus,
     private extensions: ChatManagementServiceExtensions = {},
+    /** The turn in flight on each conversation; shared with the stage executor. */
+    private readonly turns: TurnContextRegistry = new TurnContextRegistry(),
   ) {
     this.binder = new PlatformToolBinder(extensions);
   }
@@ -345,142 +343,139 @@ export class ChatManagementService {
    * suspends the provider callback until a human decides. On approval the
    * provider flips into its implementation policy and the same turn continues.
    */
-  private buildPlanReviewHandler(chatId: string) {
-    return async (request: PlanReviewRequest): Promise<PlanReviewDecision> => {
-      const planService = this.extensions.planService;
-      const interactions = this.extensions.agentInteractionService;
-      const ctx = this.turnContexts.get(chatId);
-      if (!planService || !interactions || !ctx) {
-        // Plan mode not wired — let the agent proceed rather than hanging.
-        return { approved: true, action: 'implement_interactive' };
-      }
+  private async chatPlanReview(chatId: string, request: PlanReviewRequest, ctx: TurnContext): Promise<PlanReviewDecision> {
+    const planService = this.extensions.planService;
+    const interactions = this.extensions.agentInteractionService;
+    if (!planService || !interactions) {
+      // Plan mode not wired — let the agent proceed rather than hanging.
+      return { approved: true, action: 'implement_interactive' };
+    }
 
-      const chat = await this.chatRepo.getById(chatId).catch(() => null);
-      const workspaceRoot = await this.resolveWorkspaceRoot(chat);
+    const chat = await this.chatRepo.getById(chatId).catch(() => null);
+    const workspaceRoot = await this.resolveWorkspaceRoot(chat);
 
-      // A follow-up plan on the same turn is a REVISION, not a new document —
-      // otherwise "request changes" would spawn a new card on every round.
-      const existing = ctx.planIds.length > 0
-        ? await planService.findById(ctx.planIds[ctx.planIds.length - 1]!)
-        : null;
+    // A follow-up plan on the same turn is a REVISION, not a new document —
+    // otherwise "request changes" would spawn a new card on every round.
+    const existing = ctx.planIds.length > 0
+      ? await planService.findById(ctx.planIds[ctx.planIds.length - 1]!)
+      : null;
 
-      let planId: string;
-      let revision: number;
-      let title: string;
-      let fileName: string;
+    let planId: string;
+    let revision: number;
+    let title: string;
+    let fileName: string;
 
-      if (existing && existing.status === 'changes_requested') {
-        const added = await planService.addRevision({
-          planId: existing.id,
-          content: request.planContent,
-          summary: request.summary,
-          authoredBy: 'agent',
-          ...(workspaceRoot ? { workspaceRoot } : {}),
-        });
-        planId = existing.id;
-        revision = added?.revision ?? existing.currentRevision;
-        title = existing.title;
-        fileName = existing.fileName;
-        await planService.setStatus(planId, 'awaiting_review');
-        await this.eventBus.emit(ctx.sessionId, {
-          kind: 'chat.plan.updated',
-          data: { chatId, planId, revision, title, fileName, summary: request.summary },
-        } as AgentEvent);
-      } else {
-        const plan = await planService.createFromGate({
+    if (existing && existing.status === 'changes_requested') {
+      const added = await planService.addRevision({
+        planId: existing.id,
+        content: request.planContent,
+        summary: request.summary,
+        authoredBy: 'agent',
+        ...(workspaceRoot ? { workspaceRoot } : {}),
+      });
+      planId = existing.id;
+      revision = added?.revision ?? existing.currentRevision;
+      title = existing.title;
+      fileName = existing.fileName;
+      await planService.setStatus(planId, 'awaiting_review');
+      await this.eventBus.emit(ctx.sessionId, {
+        kind: 'chat.plan.updated',
+        data: { chatId, planId, revision, title, fileName, summary: request.summary },
+      } as AgentEvent);
+    } else {
+      const plan = await planService.createFromGate({
+        chatId,
+        sessionId: ctx.sessionId,
+        turnId: ctx.turnId,
+        summary: request.summary,
+        content: request.planContent,
+        harnessType: await this.planHarnessType(ctx.sessionId, chat?.harnessConfig?.harnessType),
+        availableActions: request.actions,
+        ...(request.recommendedAction ? { recommendedAction: request.recommendedAction } : {}),
+        ...(workspaceRoot ? { workspaceRoot } : {}),
+      });
+      planId = plan.id;
+      revision = plan.currentRevision;
+      title = plan.title;
+      fileName = plan.fileName;
+      ctx.planIds.push(planId);
+      this.stampCardSequence(ctx, planId);
+      await this.eventBus.emit(ctx.sessionId, {
+        kind: 'chat.plan.created',
+        data: {
           chatId,
-          sessionId: ctx.sessionId,
-          turnId: ctx.turnId,
+          planId,
+          revision,
+          title: plan.title,
+          fileName: plan.fileName,
           summary: request.summary,
-          content: request.planContent,
-          harnessType: await this.planHarnessType(ctx.sessionId, chat?.harnessConfig?.harnessType),
-          availableActions: request.actions,
-          ...(request.recommendedAction ? { recommendedAction: request.recommendedAction } : {}),
-          ...(workspaceRoot ? { workspaceRoot } : {}),
-        });
-        planId = plan.id;
-        revision = plan.currentRevision;
-        title = plan.title;
-        fileName = plan.fileName;
-        ctx.planIds.push(planId);
-        this.stampCardSequence(ctx, planId);
-        await this.eventBus.emit(ctx.sessionId, {
-          kind: 'chat.plan.created',
-          data: {
-            chatId,
-            planId,
-            revision,
-            title: plan.title,
-            fileName: plan.fileName,
-            summary: request.summary,
-            turnId: ctx.turnId,
-          },
-        } as AgentEvent);
-      }
+          turnId: ctx.turnId,
+        },
+      } as AgentEvent);
+    }
 
-      const announce = (async () => {
-        for (let attempt = 0; attempt < 40; attempt += 1) {
-          const pending = (await interactions.listPendingByChat(chatId)).find(
-            (i) => i.kind === 'plan_review',
-          );
-          if (pending) {
-            await this.eventBus.emit(ctx.sessionId, {
-              kind: 'chat.plan.review_requested',
-              data: {
-                chatId,
-                planId,
-                interactionId: pending.id,
-                revision,
-                // The card header uses `title`; without it the UI would fall
-                // back to the full multi-paragraph summary.
-                title,
-                fileName,
-                summary: request.summary,
-                actions: request.actions,
-                ...(request.recommendedAction
-                  ? { recommendedAction: request.recommendedAction }
-                  : {}),
-              },
-            } as AgentEvent);
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 25));
+    const announce = (async () => {
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const pending = (await interactions.listPendingByChat(chatId)).find(
+          (i) => i.kind === 'plan_review',
+        );
+        if (pending) {
+          await this.eventBus.emit(ctx.sessionId, {
+            kind: 'chat.plan.review_requested',
+            data: {
+              chatId,
+              planId,
+              interactionId: pending.id,
+              revision,
+              // The card header uses `title`; without it the UI would fall
+              // back to the full multi-paragraph summary.
+              title,
+              fileName,
+              summary: request.summary,
+              actions: request.actions,
+              ...(request.recommendedAction
+                ? { recommendedAction: request.recommendedAction }
+                : {}),
+            },
+          } as AgentEvent);
+          return;
         }
-      })();
-
-      const outcome = await interactions.open<PlanDecision>(
-        { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
-        'plan_review',
-        { planId, revision, title, summary: request.summary, actions: request.actions },
-      );
-      await announce.catch(() => undefined);
-
-      if (outcome.status === 'approved') {
-        const decision = outcome.value as PlanDecision | undefined;
-        return {
-          approved: true,
-          action: decision?.action ?? request.recommendedAction ?? 'implement_interactive',
-          ...(decision?.editedContent ? { editedContent: decision.editedContent } : {}),
-        };
+        await new Promise((r) => setTimeout(r, 25));
       }
+    })();
 
-      if (outcome.status === 'changes_requested') {
-        const decision = outcome.value as PlanDecision | undefined;
-        return {
-          approved: false,
-          feedback: decision?.feedback ?? 'The user requested changes to the plan.',
-        };
-      }
+    const outcome = await interactions.open<PlanDecision>(
+      { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
+      'plan_review',
+      { planId, revision, title, summary: request.summary, actions: request.actions },
+    );
+    await announce.catch(() => undefined);
 
-      // rejected / cancelled / expired / failed all stop the agent politely.
-      const reason =
-        outcome.status === 'expired'
-          ? 'The plan review expired. Stop and wait for the user.'
-          : outcome.status === 'cancelled'
-            ? 'The user cancelled this turn. Stop immediately.'
-            : 'The user declined the plan. Do not implement it.';
-      return { approved: false, feedback: reason };
-    };
+    if (outcome.status === 'approved') {
+      const decision = outcome.value as PlanDecision | undefined;
+      return {
+        approved: true,
+        action: decision?.action ?? request.recommendedAction ?? 'implement_interactive',
+        ...(decision?.editedContent ? { editedContent: decision.editedContent } : {}),
+      };
+    }
+
+    if (outcome.status === 'changes_requested') {
+      const decision = outcome.value as PlanDecision | undefined;
+      return {
+        approved: false,
+        feedback: decision?.feedback ?? 'The user requested changes to the plan.',
+      };
+    }
+
+    // rejected / cancelled / expired / failed all stop the agent politely.
+    const reason =
+      outcome.status === 'expired'
+        ? 'The plan review expired. Stop and wait for the user.'
+        : outcome.status === 'cancelled'
+          ? 'The user cancelled this turn. Stop immediately.'
+          : 'The user declined the plan. Do not implement it.';
+    return { approved: false, feedback: reason };
   }
 
   /** Blocking gate invoked when the agent asks the user clarifying questions. */
@@ -502,68 +497,64 @@ export class ChatManagementService {
    * started with (`ctx.permissionMode`), not whatever the chat was flipped to
    * while the model was mid-answer.
    */
-  private buildPermissionHandler(chatId: string) {
-    return async (request: PermissionRequest): Promise<PermissionResponse> => {
-      const interactions = this.extensions.agentInteractionService;
-      const ctx = this.turnContexts.get(chatId);
-      // No durable gate available, or no turn context to attach it to. Deny
-      // rather than allow: reaching this handler means the harness did not
-      // auto-allow the call, and a silent allow is the exact failure this
-      // finding is about.
-      if (!interactions || !ctx) {
-        return { granted: false, reason: 'No approval channel is available for this chat.' };
-      }
+  private async chatPermission(chatId: string, request: PermissionRequest, ctx: TurnContext): Promise<PermissionResponse> {
+    const interactions = this.extensions.agentInteractionService;
+    // No durable gate available. Deny rather than allow: reaching this
+    // handler means the harness did not auto-allow the call, and a silent
+    // allow is the exact failure this finding is about.
+    if (!interactions) {
+      return { granted: false, reason: 'No approval channel is available for this chat.' };
+    }
 
-      const mode = ctx.permissionMode;
-      const verdict = decideToolPermission(mode, request.type);
-      if (verdict === 'allow') return { granted: true };
-      if (verdict === 'deny') {
-        return { granted: false, reason: `Blocked by the chat's ${mode} permission mode.` };
-      }
+    const mode = ctx.permissionMode;
+    const verdict = decideToolPermission(mode, request.type);
+    if (verdict === 'allow') return { granted: true };
+    if (verdict === 'deny') {
+      return { granted: false, reason: `Blocked by the chat's ${mode} permission mode.` };
+    }
 
-      const payload = buildToolPermissionPayload(request, mode);
+    const payload = buildToolPermissionPayload(request, mode);
 
-      // `open` blocks until the user answers, so the card is announced from a
-      // microtask that runs once the row exists — the same approach the
-      // question gate uses to learn the id without threading it out of the
-      // blocking call.
-      const announce = (async () => {
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          const pending = (await interactions.listPendingByChat(chatId)).find(
-            (i) => i.kind === 'tool_permission' && !ctx.interactionIds.includes(i.id),
-          );
-          if (pending) {
-            ctx.interactionIds.push(pending.id);
-            this.stampCardSequence(ctx, pending.id);
-            const chat = await this.chatRepo.getById(chatId).catch(() => null);
-            if (chat) {
-              await this.eventBus.emit(chat.sessionId, {
-                kind: 'chat.permission.requested',
-                data: { chatId, interactionId: pending.id, turnId: ctx.turnId, ...payload },
-              } as AgentEvent);
-            }
-            return;
+    // `open` blocks until the user answers, so the card is announced from a
+    // microtask that runs once the row exists — the same approach the
+    // question gate uses to learn the id without threading it out of the
+    // blocking call.
+    const announce = (async () => {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const pending = (await interactions.listPendingByChat(chatId)).find(
+          (i) => i.kind === 'tool_permission' && !ctx.interactionIds.includes(i.id),
+        );
+        if (pending) {
+          ctx.interactionIds.push(pending.id);
+          this.stampCardSequence(ctx, pending.id);
+          const chat = await this.chatRepo.getById(chatId).catch(() => null);
+          if (chat) {
+            await this.eventBus.emit(chat.sessionId, {
+              kind: 'chat.permission.requested',
+              data: { chatId, interactionId: pending.id, turnId: ctx.turnId, ...payload },
+            } as AgentEvent);
           }
-          await new Promise((r) => setTimeout(r, 25));
+          return;
         }
-      })();
-
-      const outcome = await interactions.open<PermissionResponse>(
-        { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
-        'tool_permission',
-        payload as unknown as Record<string, unknown>,
-      );
-      await announce.catch(() => undefined);
-
-      if (outcome.status === 'answered' && outcome.value) {
-        return outcome.value;
+        await new Promise((r) => setTimeout(r, 25));
       }
-      // Cancelled, expired, or the turn was stopped. Deny — an unanswered
-      // approval is not an approval.
-      return {
-        granted: false,
-        reason: 'The request was not approved (the prompt was cancelled or timed out).',
-      };
+    })();
+
+    const outcome = await interactions.open<PermissionResponse>(
+      { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
+      'tool_permission',
+      payload as unknown as Record<string, unknown>,
+    );
+    await announce.catch(() => undefined);
+
+    if (outcome.status === 'answered' && outcome.value) {
+      return outcome.value;
+    }
+    // Cancelled, expired, or the turn was stopped. Deny — an unanswered
+    // approval is not an approval.
+    return {
+      granted: false,
+      reason: 'The request was not approved (the prompt was cancelled or timed out).',
     };
   }
 
@@ -611,52 +602,49 @@ export class ChatManagementService {
     return { ok: true };
   }
 
-  private buildQuestionHandler(chatId: string) {
-    return async (request: QuestionRequest): Promise<AgentQuestionResponse> => {
-      const interactions = this.extensions.agentInteractionService;
-      const ctx = this.turnContexts.get(chatId);
-      if (!interactions || !ctx) {
-        return { answers: {} };
-      }
+  private async chatQuestion(chatId: string, request: QuestionRequest, ctx: TurnContext): Promise<AgentQuestionResponse> {
+    const interactions = this.extensions.agentInteractionService;
+    if (!interactions) {
+      return { answers: {} };
+    }
 
-      // `open` blocks, so announce the gate from a microtask that runs once
-      // the row exists. Polling the pending list is how we learn the id
-      // without threading it back out of the blocking call.
-      const announce = (async () => {
-        for (let attempt = 0; attempt < 20; attempt += 1) {
-          const pending = (await interactions.listPendingByChat(chatId)).find(
-            (i) => i.kind === 'question' && !ctx.interactionIds.includes(i.id),
+    // `open` blocks, so announce the gate from a microtask that runs once
+    // the row exists. Polling the pending list is how we learn the id
+    // without threading it back out of the blocking call.
+    const announce = (async () => {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        const pending = (await interactions.listPendingByChat(chatId)).find(
+          (i) => i.kind === 'question' && !ctx.interactionIds.includes(i.id),
+        );
+        if (pending) {
+          ctx.interactionIds.push(pending.id);
+          this.stampCardSequence(ctx, pending.id);
+          await this.announceQuestionGate(
+            chatId,
+            ctx.sessionId,
+            ctx.turnId,
+            pending.id,
+            request.questions,
           );
-          if (pending) {
-            ctx.interactionIds.push(pending.id);
-            this.stampCardSequence(ctx, pending.id);
-            await this.announceQuestionGate(
-              chatId,
-              ctx.sessionId,
-              ctx.turnId,
-              pending.id,
-              request.questions,
-            );
-            return;
-          }
-          await new Promise((r) => setTimeout(r, 25));
+          return;
         }
-      })();
-
-      const outcome = await interactions.open<AgentQuestionResponse>(
-        { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
-        'question',
-        { questions: request.questions },
-      );
-      await announce.catch(() => undefined);
-
-      if (outcome.status === 'answered' && outcome.value) {
-        return outcome.value;
+        await new Promise((r) => setTimeout(r, 25));
       }
-      // Cancelled / expired: return empty answers so the model proceeds with
-      // its own judgement rather than blocking forever.
-      return { answers: {}, freeformResponse: 'The user did not answer; use your best judgement.' };
-    };
+    })();
+
+    const outcome = await interactions.open<AgentQuestionResponse>(
+      { kind: 'chat', chatId, sessionId: ctx.sessionId, turnId: ctx.turnId },
+      'question',
+      { questions: request.questions },
+    );
+    await announce.catch(() => undefined);
+
+    if (outcome.status === 'answered' && outcome.value) {
+      return outcome.value;
+    }
+    // Cancelled / expired: return empty answers so the model proceeds with
+    // its own judgement rather than blocking forever.
+    return { answers: {}, freeformResponse: 'The user did not answer; use your best judgement.' };
   }
 
   /** Emits `chat.question.asked` when a question gate opens. */
@@ -694,65 +682,42 @@ export class ChatManagementService {
   }
 
   /**
-   * Applies agent-mode config to a conversation config object.
-   *
-   * Shared by `createChat` and `buildConversationConfig` so the resume path
-   * never silently loses the gates. Both the blocking gates and the
-   * non-blocking `record_plan` tool are installed unconditionally: the
-   * conversation outlives any single turn, and the effective mode is chosen
-   * per turn. The mode's descriptor decides which one the agent can actually
-   * reach — the native exit-plan-mode tool only exists while the session is in
-   * plan mode, and `record_plan` is instructed only in modes that declare it.
+   * The chat's gates for the session composer (`applyModeConfig`): durable
+   * interactions that expire on restart (the SDK callback cannot survive one),
+   * announced as `chat.*` events. The turn is the one in flight on the chat's
+   * conversation, handed in by the composer's callbacks.
    */
-  private applyPlanModeConfig(
+  private readonly chatGatePort: GatePort = {
+    permission: (req, turn) => this.chatPermission(chatOf(turn), req, turn),
+    question: (req, turn) => this.chatQuestion(chatOf(turn), req, turn),
+    planReview: (req, turn) => this.chatPlanReview(chatOf(turn), req, turn),
+    recordPlan: (args, turn) => this.recordPlan(chatOf(turn), args, turn),
+  };
+
+  /**
+   * Gates, plan-mode instructions and `record_plan` for a chat conversation.
+   * Workers get none (`attended: false`); a chat attaches its permission mode
+   * only when it asks for gated permissions (see
+   * `shouldAttachPermissionHandler`).
+   */
+  private chatModeConfig(
     conversationConfig: Record<string, unknown>,
-    chat: {
-      id: string;
-      parentChatId?: string;
-      permissionMode?: Chat['permissionMode'];
-      defaultAgentMode?: AgentMode;
-    },
+    conversationId: string,
+    chat: { parentChatId?: string | undefined; permissionMode?: Chat['permissionMode'] },
+    groups: AgentToolPolicy,
+    planModeInstructions: string | undefined,
   ): void {
-    if (!this.planModeEnabled) return;
-    // Workers never get gates (see isAttendedChat).
-    if (chat.parentChatId) return;
-
-    conversationConfig['onPlanReviewRequest'] = this.buildPlanReviewHandler(chat.id);
-    conversationConfig['onQuestionRequest'] = this.buildQuestionHandler(chat.id);
-    conversationConfig['onPermissionRequest'] = this.buildPermissionHandler(chat.id);
-
-    // Instruction blocks. BOTH are installed regardless of the chat's sticky
-    // default, because the mode is chosen per turn while the conversation
-    // config is fixed at creation — a chat created in Plan must still work if
-    // the composer switches to Auto for one turn.
-    //
-    // They reach the model through different channels, which is why both are
-    // needed:
-    //  • `planModeInstructions` is Claude-only and applied ONLY when the turn
-    //    runs with `permissionMode: 'plan'` — exactly the blocking flow.
-    //  • the system message reaches BOTH providers on every turn, which is
-    //    what the non-blocking flow needs (its `record_plan` tool has to be
-    //    discoverable without entering plan mode). That block is explicitly
-    //    scoped to "when you are NOT in plan mode" so it stays correct.
-    conversationConfig['planModeInstructions'] = PLAN_MODE_INSTRUCTIONS;
-
-    appendSystemBlock(conversationConfig, `\n\n${AUTO_MODE_PLAN_INSTRUCTIONS}`);
-
-    // `record_plan` gives autonomous turns a way to file a plan without a
-    // gate. Registered whenever any mode this chat can enter declares it, so
-    // switching Auto↔Plan mid-chat never requires a conversation rebuild.
-    const existingTools = Array.isArray(conversationConfig['tools'])
-      ? (conversationConfig['tools'] as ToolDefinition[])
-      : [];
-    if (!existingTools.some((t) => t.name === RECORD_PLAN_TOOL_NAME)) {
-      appendTools(conversationConfig, [createRecordPlanTool((args) => this.recordPlan(chat.id, args))]);
-    }
-
-    // Only attach the permission handler when the chat actually asked for
-    // gated permissions — see shouldAttachPermissionHandler for why.
-    if (shouldAttachPermissionHandler(chat.permissionMode)) {
-      conversationConfig['permissionMode'] = chat.permissionMode;
-    }
+    applyModeConfig(conversationConfig, {
+      conversationId,
+      turns: this.turns,
+      gates: this.planModeEnabled ? this.chatGatePort : undefined,
+      attended: !chat.parentChatId,
+      groups,
+      planModeInstructions,
+      ...(shouldAttachPermissionHandler(chat.permissionMode)
+        ? { attachPermissionMode: { mode: chat.permissionMode } }
+        : {}),
+    });
   }
 
   /**
@@ -766,10 +731,10 @@ export class ChatManagementService {
   private async recordPlan(
     chatId: string,
     args: RecordPlanArgs,
+    ctx: TurnContext,
   ): Promise<RecordPlanResult | null> {
     const planService = this.extensions.planService;
-    const ctx = this.turnContexts.get(chatId);
-    if (!planService || !ctx) return null;
+    if (!planService) return null;
 
     // In PLAN MODE the same call is the approval gate.
     //
@@ -838,12 +803,12 @@ export class ChatManagementService {
     ctx: TurnContext,
   ): Promise<RecordPlanResult | null> {
     try {
-      const decision = await this.buildPlanReviewHandler(chatId)({
+      const decision = await this.chatPlanReview(chatId, {
         summary: args.title,
         planContent: args.content,
         actions: ['implement_interactive', 'exit_only'],
         recommendedAction: 'implement_interactive',
-      });
+      }, ctx);
       const planId = ctx.planIds[ctx.planIds.length - 1] ?? '';
       const feedback = decision.feedback?.trim();
       if (!decision.approved) {
@@ -875,26 +840,20 @@ export class ChatManagementService {
    * Tool calls and cards draw from ONE counter so their relative order is
    * recoverable from the persisted message alone.
    */
-  private takeTurnSequence(chatId: string): number | undefined {
-    const ctx = this.turnContexts.get(chatId);
-    if (!ctx) return undefined;
-    const seq = ctx.nextSequence;
-    ctx.nextSequence += 1;
-    return seq;
+  private takeTurnSequence(conversationId: string): number | undefined {
+    return this.turns.takeSequence(conversationId);
   }
 
   /** Records where a plan/question card falls in the turn's ordered items. */
   private stampCardSequence(ctx: TurnContext, cardId: string): void {
-    if (ctx.cardSequence.has(cardId)) return;
-    ctx.cardSequence.set(cardId, ctx.nextSequence);
-    ctx.nextSequence += 1;
+    stampCardSequence(ctx, cardId);
   }
 
   /** Snapshot of the plan/question cards surfaced during the current turn. */
   private async collectTurnCards(
-    chatId: string,
+    conversationId: string,
   ): Promise<{ planCards: PlanCardSummary[]; questionCards: QuestionCardSummary[] }> {
-    const ctx = this.turnContexts.get(chatId);
+    const ctx = this.turns.get(conversationId);
     const planService = this.extensions.planService;
     const interactions = this.extensions.agentInteractionService;
     const planCards: PlanCardSummary[] = [];
@@ -1535,12 +1494,13 @@ export class ChatManagementService {
     );
 
     // PLN-01 — plan/question gates + plan-mode instructions.
-    this.applyPlanModeConfig(conversationConfig, {
-      id: chatId,
-      ...(params.parentChatId ? { parentChatId: params.parentChatId } : {}),
-      ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
-      ...(params.defaultAgentMode ? { defaultAgentMode: params.defaultAgentMode } : {}),
-    });
+    this.chatModeConfig(
+      conversationConfig,
+      conversationId,
+      { parentChatId: params.parentChatId, permissionMode: params.permissionMode },
+      agentProjection.toolPolicy.groups,
+      chatSpec.planModeInstructions,
+    );
 
     // The agent instructions go LAST — after every platform instruction block.
     appendAgentInstructions(conversationConfig, agentProjection, baseSystemMessage);
@@ -1847,12 +1807,13 @@ export class ChatManagementService {
     // PLN-01 — the resume path MUST reinstall the gates. The SDK cannot
     // persist in-memory callbacks, so a resumed conversation without these
     // silently loses plan mode and clarifying questions after a restart.
-    this.applyPlanModeConfig(conversationConfig, {
-      id: chat.id,
-      ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}),
-      ...(chat.permissionMode ? { permissionMode: chat.permissionMode } : {}),
-      ...(chat.defaultAgentMode ? { defaultAgentMode: chat.defaultAgentMode } : {}),
-    });
+    this.chatModeConfig(
+      conversationConfig,
+      conversationId,
+      chat,
+      agentProjection.toolPolicy.groups,
+      spec.planModeInstructions,
+    );
 
     // Instructions last, after every platform block.
     appendAgentInstructions(conversationConfig, agentProjection, baseSystemMessage);
@@ -2018,7 +1979,7 @@ export class ChatManagementService {
         'This chat is still generating a response. Wait for it to finish, or stop it first.',
       ) as Error & { code?: string; details?: unknown };
       err.code = 'CHAT_BUSY';
-      err.details = { turnId: this.turnContexts.get(chatId)?.turnId };
+      err.details = { turnId: this.turns.get(this.chatConversations.get(chatId) ?? '')?.turnId };
       throw err;
     }
     // Claim the chat NOW, synchronously, in the same tick as the check.
@@ -2134,8 +2095,9 @@ export class ChatManagementService {
     const turnId = generateId();
 
     // PLN-01 — refresh the context the plan/question gates report against.
-    this.turnContexts.set(chatId, {
-      chatId,
+    this.chatConversations.set(chatId, session.conversationId);
+    this.turns.set(session.conversationId, {
+      owner: { kind: 'chat', chatId, sessionId: chat.sessionId, ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}) },
       sessionId: chat.sessionId,
       turnId,
       agentMode,
@@ -2325,7 +2287,7 @@ export class ChatManagementService {
       // Event replay is SKIPPED for completed chats (replayEvents fast
       // path), so the message metadata is the only thing that can rebuild
       // these cards in historical conversations.
-      const cards = await this.collectTurnCards(chatId);
+      const cards = await this.collectTurnCards(session.conversationId!);
       if (cards.planCards.length > 0) metadata.planCards = cards.planCards;
       if (cards.questionCards.length > 0) metadata.questionCards = cards.questionCards;
 
@@ -2436,7 +2398,7 @@ export class ChatManagementService {
               // 'running' would strand the call mid-flight forever.
               break;
             }
-            const sequence = this.takeTurnSequence(chatId);
+            const sequence = this.takeTurnSequence(session.conversationId!);
             const parentId = data?.['parentToolCallId'];
             turnMetadata.toolCalls!.push({
               id: callId ?? `tc_${turnMetadata.toolCalls!.length}`,
@@ -2508,7 +2470,7 @@ export class ChatManagementService {
           // between tool waves and each narration is its own event. Keep them
           // all, ordered, so the transcript can be rebuilt as it streamed.
           if (content.trim().length > 0) {
-            const sequence = this.takeTurnSequence(chatId);
+            const sequence = this.takeTurnSequence(session.conversationId!);
             turnMetadata.textSegments!.push({
               content,
               ...(sequence === undefined ? {} : { sequence }),
@@ -2863,7 +2825,7 @@ export class ChatManagementService {
       });
 
       await this.messageRepo.deleteByIds(dropped.map((m) => m.id));
-      this.turnContexts.delete(chatId);
+      if (session.conversationId) this.turns.delete(session.conversationId);
       // The conversation went back with the files, so the agent no longer
       // remembers the work that was undone — there is nothing to warn it off.
       this.pendingRestores.delete(chatId);
@@ -3238,7 +3200,7 @@ export class ChatManagementService {
       );
     }
     this.turnFinalizers.delete(chatId);
-    this.turnContexts.delete(chatId);
+    if (session.conversationId) this.turns.delete(session.conversationId);
 
     // Tear down the turn's event listener so no late events leak through.
     const unsub = this.activeSubscriptions.get(chatId);
@@ -3435,4 +3397,10 @@ function normaliseSources(params: CreateChatParams): ChatSourceSpec[] {
 function firstAlias(sources: ChatSourceSpec[]): string | undefined {
   const first = sources[0];
   return first?.alias;
+}
+
+/** The chat a turn belongs to (chat gates are only ever called with chat turns). */
+function chatOf(turn: TurnContext): string {
+  if (turn.owner.kind !== 'chat') throw new Error('A chat gate was called for a stage turn');
+  return turn.owner.chatId;
 }

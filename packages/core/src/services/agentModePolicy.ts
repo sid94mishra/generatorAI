@@ -20,40 +20,6 @@ import type {
 } from '../domain/ports/IAgentHarness.js';
 import type { ToolPermissionRequestPayload } from '@generatorai/shared';
 
-/**
- * Per-turn context the plan/question gates need.
- *
- * The gates are installed once at conversation-creation time but must report
- * against the CURRENT turn, so `sendPrompt` refreshes this before every send
- * and the handlers close over the mutable holder.
- */
-export interface TurnContext {
-  chatId: string;
-  sessionId: string;
-  turnId: string;
-  agentMode: AgentMode;
-  /**
-   * Effective harness permission mode for this turn (see
-   * `resolveTurnPermissionMode`). The permission handler reads it lazily so
-   * a prompt raised mid-turn is judged against the mode the turn was sent
-   * with, not whatever the chat was flipped to afterwards.
-   */
-  permissionMode: HarnessPermissionMode;
-  /** Plans surfaced during this turn, for transcript persistence. */
-  planIds: string[];
-  /** Question + tool-permission gates opened during this turn, for transcript persistence. */
-  interactionIds: string[];
-  /**
-   * Monotonic ordinal handed out to every ordered item of the turn — each
-   * tool call, and each plan/question card. Persisting it is what lets the
-   * transcript be rebuilt in true chronological order after a reload; without
-   * it the cards can only be appended after the final answer.
-   */
-  nextSequence: number;
-  /** planId | interactionId → the ordinal that card was issued. */
-  cardSequence: Map<string, number>;
-}
-
 /** The behavioural contract for a mode. Re-exported so callers need one import. */
 export function resolveModeDescriptor(mode: AgentMode | undefined): AgentModeDescriptor {
   return agentModeDescriptor(mode ?? DEFAULT_AGENT_MODE);
