@@ -122,7 +122,9 @@ function fixture() {
 
   const dbPath = join(root, 'data.db');
   const db = createDB(dbPath);
-  migrateDB(db);
+  // The cleanup runs BEFORE migration 55 (which purges run history), so the
+  // fixture is a v54 database.
+  migrateDB(db, { targetVersion: 54 });
   const s = db.session.client;
   s.pragma('foreign_keys = OFF');
   const now = Date.now();

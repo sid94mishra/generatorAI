@@ -27,7 +27,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { createHash } from 'node:crypto';
-import { z } from 'zod';
+import type { z } from 'zod';
 import { RESERVED_ROOTS } from './spec/constants.js';
 import { HookDefinitionSchema, PromptDefinitionSchema, ResultValidationRuleSchema, VariableDefinitionSchema, WorkflowHookDefinitionSchema } from './spec/common.js';
 import { EdgeSpecSchema } from './spec/edge.js';

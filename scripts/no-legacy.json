@@ -656,7 +656,7 @@
   "comments": {
     "phase": "01",
     "failFromPhase": null,
-    "baseline": 12,
+    "baseline": 11,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",
