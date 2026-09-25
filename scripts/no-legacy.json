@@ -496,6 +496,16 @@
         "packages/shared/src/types/IPlatformClient.ts"
       ],
       "reason": "WP-1.4: HITL boolean approved deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "hashLegacyWebhookTokens|automations\\.webhookToken\\b|webhookToken: null",
+      "paths": [
+        "packages/db/src/repositories/",
+        "packages/core/",
+        "apps/server/"
+      ],
+      "reason": "WP-1.4: plaintext automations.webhook_token path deleted; webhook_token_hash only (column dropped in v55)"
     }
   ],
   "comments": {

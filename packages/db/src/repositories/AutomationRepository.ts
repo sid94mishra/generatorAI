@@ -74,7 +74,6 @@ export class DrizzleAutomationRepository {
         missedRunPolicy: automation.missedRunPolicy ?? 'skip',
         overlapPolicy: automation.overlapPolicy ?? 'skip',
         // The raw token is NEVER persisted — only its hash (v47).
-        webhookToken: null,
         webhookTokenHash: automation.webhookTokenHash ?? null,
         workflowIds: automation.workflowIds,
         inputMode: automation.inputMode,
@@ -163,27 +162,6 @@ export class DrizzleAutomationRepository {
       .where(eq(automations.webhookTokenHash, tokenHash))
       .limit(1);
     return rows[0] ? this.mapRow(rows[0]) : null;
-  }
-
-  /**
-   * v47 backfill — hash any plaintext tokens left in the legacy column and
-   * null the raw value. Idempotent; returns how many rows were converted.
-   */
-  async hashLegacyWebhookTokens(): Promise<number> {
-    const rows = await this.db
-      .select({ id: automations.id, webhookToken: automations.webhookToken })
-      .from(automations)
-      .where(isNotNull(automations.webhookToken));
-    let converted = 0;
-    for (const row of rows) {
-      if (!row.webhookToken) continue;
-      await this.db
-        .update(automations)
-        .set({ webhookTokenHash: hashWebhookToken(row.webhookToken), webhookToken: null })
-        .where(eq(automations.id, row.id));
-      converted++;
-    }
-    return converted;
   }
 
   async update(id: string, updates: Partial<Automation>): Promise<Automation> {

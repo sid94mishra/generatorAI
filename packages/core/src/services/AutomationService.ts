@@ -66,8 +66,8 @@ export interface ResolvedWebhook {
 export function toPublicAutomation(automation: Automation): Automation {
   const redacted: Automation = { ...automation };
 
-  // The raw token exists only in the create/rotate response. A stored one is
-  // legacy data the migration has not yet hashed away.
+  // The raw token exists only in the create/rotate response, and only the
+  // create/rotate route hands it out — every other projection masks it.
   if (redacted.webhookToken) redacted.webhookToken = SECRET_MASK;
 
   const config = redacted.dataSourceConfig as Record<string, unknown> | undefined;
