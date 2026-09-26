@@ -149,7 +149,7 @@ export function WorkflowRunPage() {
   const invokeWorkflow = useInvokeWorkflow({ errorTitle: 'Could not re-run' });
   const resolveGate = useResolveStageInteraction();
   const setRunPermissionMode = useSetRunPermissionMode();
-  const { confirm, dialog: confirmDialog } = useConfirm();
+  const { confirm: confirmAction, dialog: confirmDialog } = useConfirm();
 
   // ── UI state ─────────────────────────────────────────────────
 
@@ -418,14 +418,14 @@ export function WorkflowRunPage() {
     void sendCommand(command as RunCommand);
   }, [runBudget, sendCommand]);
   const handleCancel = useCallback(() => {
-    void confirm({
+    void confirmAction({
       title: 'Cancel this run?',
       description: 'Every stage still running or waiting is cancelled. A cancelled run can only be re-run as a new run.',
       confirmLabel: 'Cancel run',
       cancelLabel: 'Keep running',
       variant: 'destructive',
     }).then((ok) => { if (ok) void sendCommand({ command: 'cancel' }); });
-  }, [confirm, sendCommand]);
+  }, [confirmAction, sendCommand]);
 
   const setRunMode = setRunPermissionMode.mutateAsync;
   const handlePermissionModeChange = useCallback((mode: WorkflowRunPermissionMode) => {
@@ -552,14 +552,14 @@ export function WorkflowRunPage() {
       return;
     }
     const name = stageRunsRef.current?.find((sr) => sr.id === stageId)?.name ?? 'this stage';
-    void confirm({
+    void confirmAction({
       title: `Cancel ${name}?`,
       description: 'The stage stops and ends cancelled; routing decides what the run does next.',
       confirmLabel: 'Cancel stage',
       cancelLabel: 'Keep it',
       variant: 'destructive',
     }).then((ok) => { if (ok) void sendCommand(command); });
-  }, [confirm, sendCommand]);
+  }, [confirmAction, sendCommand]);
 
   const handleCopyOutput = useCallback((stageId: string) => {
     const sr = stageRunsRef.current?.find((s) => s.id === stageId);
