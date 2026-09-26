@@ -30,6 +30,9 @@ import { cn } from '@/lib/utils.js';
 import { useEditors, useOpenInEditor, useSourceControlSettings } from '@/hooks/queries.js';
 import { useEditorTargetStore } from '@/stores/editorTargetStore.js';
 import { isDesktop } from '@/lib/desktop.js';
+import { resolveDefaultEditor } from '@/blocks/editor/useEditorActions.js';
+
+export { resolveDefaultEditor };
 
 /** What the OS calls the thing this opens. */
 const FILE_MANAGER =
@@ -38,7 +41,7 @@ const FILE_MANAGER =
     : typeof navigator !== 'undefined' && navigator.userAgent.includes('Windows')
       ? 'File Explorer'
       : 'the file manager';
-import type { EditorId, EditorInfo } from '@generatorai/shared';
+import type { EditorId } from '@generatorai/shared';
 
 /** Copy to the clipboard with a `document.execCommand` fallback. */
 async function copyText(text: string): Promise<boolean> {
@@ -64,23 +67,6 @@ async function copyText(text: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-/**
- * Which editor the primary click uses: the configured default when the
- * server still reports it, else the first one it can actually launch, else
- * the first it knows about (its URL scheme is the browser fallback).
- */
-export function resolveDefaultEditor(
-  editors: EditorInfo[] | undefined,
-  configured: EditorId | null | undefined,
-): EditorInfo | undefined {
-  const list = editors ?? [];
-  if (configured) {
-    const match = list.find((e) => e.id === configured);
-    if (match) return match;
-  }
-  return list.find((e) => e.available) ?? list[0];
 }
 
 export function OpenInEditorButton({ className }: { className?: string }) {

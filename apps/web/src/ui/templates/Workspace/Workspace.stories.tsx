@@ -124,3 +124,41 @@ export const TogglePreservesDock: Story = {
     await expect(canvas.getByText('Dock content')).toBeInTheDocument();
   },
 };
+
+/**
+ * `bare` + `dockHost` (the chat page, P4-12): main scrolls itself, and a dock host that owns the split
+ * (blocks/dock's DockFrame) wraps the main column. Here a plain flex row stands in for the host.
+ */
+export const BareWithDockHost: Story = {
+  render: () => (
+    <div className="overflow-hidden rounded-panel border border-line-soft" style={DEFAULT_FRAME}>
+      <Workspace
+        bare
+        header={<PageHeader title="Fix flaky checkout test" titleIsHeading />}
+        main={
+          <div tabIndex={0} className="min-h-0 flex-1 overflow-y-auto px-7 pt-5">
+            <Transcript />
+          </div>
+        }
+        bottom={
+          <div className="px-4 pb-3">
+            <Composer />
+          </div>
+        }
+        dockHost={(column) => (
+          <div className="flex min-w-0 flex-1">
+            {column}
+            <div className="w-dock shrink-0 border-l border-line-soft">
+              <Dock />
+            </div>
+          </div>
+        )}
+      />
+    </div>
+  ),
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await expect(canvas.getByText('Dock content')).toBeInTheDocument();
+    await expect(canvas.getByRole('heading', { name: 'Fix flaky checkout test', level: 1 })).toBeVisible();
+  },
+};

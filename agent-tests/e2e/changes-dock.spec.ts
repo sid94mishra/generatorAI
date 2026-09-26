@@ -181,7 +181,7 @@ test.describe('Changes dock — dummy repo + Faux file_edit (09 §5.3)', () => {
 
       // Open the right pane; the web surface defaults it to the Changes tab
       // (surfaceCapabilities.ts defaultRightPaneTab — diffRendering supported).
-      await page.getByTestId('header-toggle-right-pane').click();
+      await page.getByTestId('dock-toggle').click();
       const changesTab = page.getByTestId('right-pane-tab-changes');
       await expect(changesTab).toBeVisible({ timeout: 10_000 });
       await changesTab.click();

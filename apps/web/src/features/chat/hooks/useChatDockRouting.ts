@@ -20,7 +20,7 @@ import {
 } from '@/hooks/chatSessionQueries.js';
 import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
 import { widgetTabId } from '@/lib/widgetTabId.js';
-import { useRightPaneStore } from '@/stores/rightPaneStore.js';
+import { useDockStore } from '@/stores/dockStore.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 
 /**
@@ -71,8 +71,8 @@ export function useChatDockRouting({
   widgetSurfaceKey,
   pathRoots,
 }: UseChatDockRoutingOptions) {
-  // Bridge the dock toggle up to the global header's side-pane icon.
-  const setDockController = useRightPaneStore((s) => s.setController);
+  // Register the dock with the shell: the dock.toggle command and the desktop menu checkmark.
+  const setDockController = useDockStore((s) => s.setController);
   useEffect(() => {
     setDockController({ open: dockOpen, toggle: toggleDock });
     return () => setDockController(null);

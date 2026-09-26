@@ -14,9 +14,10 @@ export const chatsRoutes: RouteObject[] = [
     'chats/:id',
     // The Tasks-panel section registrations (03 §1.5) load with the page.
     () =>
-      Promise.all([import('@/app/registries/tasksSections.js'), import('@/pages/ChatPage.js')]).then(([, m]) => ({
+      Promise.all([import('@/app/registries/tasksSections.js'), import('@/features/chat/ChatPage.js')]).then(([, m]) => ({
         default: m.ChatPage,
       })),
-    { legacyHeader: true, nav: 'chats', title: 'Chat' },
+    // P4-12: the chat workspace renders its own ChatHeader (T-04).
+    { legacyHeader: false, nav: 'chats', title: 'Chat' },
   ),
 ];

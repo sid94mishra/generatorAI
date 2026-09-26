@@ -8,11 +8,11 @@
 // three actions the Changes tab offers — when the base branch collided.
 // ────────────────────────────────────────────────────────────────
 
-import React from 'react';
-import { AlertTriangle, ExternalLink, GitCommit, GitPullRequest } from 'lucide-react';
-import { cn } from '@/lib/utils.js';
-import { ScmConflictActions } from '@/blocks/scm/ScmConflictActions.js';
 import type { ScmFlowResult } from '@generatorai/shared';
+import { Icon } from '@/ui/icons/Icon.js';
+import { Link } from '@/ui/primitives/Link/Link.js';
+import { cn } from '@/ui/lib/cn.js';
+import { ScmConflictActions } from '@/blocks/scm/ScmConflictActions.js';
 
 export interface ScmResultCardProps {
   result: ScmFlowResult;
@@ -40,35 +40,31 @@ export function ScmResultCard({ result, workspaceId, chatId, className }: ScmRes
     return (
       <div
         className={cn(
-          'flex flex-wrap items-center gap-2 rounded-md border border-border bg-card px-2.5 py-1.5 text-[11px]',
+          'flex flex-wrap items-center gap-2 rounded-card border border-line-soft bg-raised px-2.5 py-1.5 text-small',
           className,
         )}
         data-testid="scm-result-card"
       >
-        <GitCommit className="h-3.5 w-3.5 shrink-0 text-success" />
+        <Icon concept="commit" size={14} className="shrink-0 text-ok" />
         {result.commit ? (
           <span>
-            Committed <span className="font-mono text-foreground">{result.commit.sha.slice(0, 7)}</span>
+            Committed <span className="font-mono text-fg">{result.commit.sha.slice(0, 7)}</span>
           </span>
         ) : (
-          <span className="text-muted-foreground">Nothing to commit</span>
+          <span className="text-fg-3">Nothing to commit</span>
         )}
-        {result.branch && (
-          <span className="font-mono text-muted-foreground">on {result.branch}</span>
-        )}
-        {result.pushed && <span className="text-success">· pushed</span>}
+        {result.branch && <span className="font-mono text-fg-3">on {result.branch}</span>}
+        {result.pushed && <span className="text-ok">· pushed</span>}
         {result.pullRequest && (
-          <a
+          <Link
+            variant="external"
             href={result.pullRequest.url}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex items-center gap-1 text-primary hover:underline"
+            className="text-accent"
             data-testid="scm-result-pr-link"
           >
-            <GitPullRequest className="h-3 w-3" />
+            <Icon concept="pr" size={12} />
             PR #{result.pullRequest.number}
-            <ExternalLink className="h-2.5 w-2.5 opacity-70" />
-          </a>
+          </Link>
         )}
       </div>
     );
@@ -78,13 +74,13 @@ export function ScmResultCard({ result, workspaceId, chatId, className }: ScmRes
   return (
     <div
       className={cn(
-        'flex items-start gap-2 rounded-md border border-warning/40 bg-warning-muted/40 px-2.5 py-1.5 text-[11px]',
+        'flex items-start gap-2 rounded-card border border-line-soft bg-warn-bg px-2.5 py-1.5 text-small',
         className,
       )}
       data-testid="scm-result-card"
     >
-      <AlertTriangle className="mt-px h-3.5 w-3.5 shrink-0 text-warning" />
-      <span className="min-w-0">
+      <Icon concept="warning" size={14} className="mt-px shrink-0 text-warn" />
+      <span className="min-w-0 text-warn">
         Source control {result.status === 'blocked' ? 'was blocked' : 'failed'}
         {failing?.detail ? ` — ${failing.detail}` : result.error ? ` — ${result.error}` : '.'}
       </span>

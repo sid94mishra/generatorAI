@@ -38,7 +38,7 @@ import {
 import { commandHost, isMacOS, onDesktopCommand } from '@/lib/desktop.js';
 import { registerCommandRunner } from '@/lib/commandRunner.js';
 import { useShellStore } from '@/stores/shellStore.js';
-import { useRightPaneStore } from '@/stores/rightPaneStore.js';
+import { useDockStore } from '@/stores/dockStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import { useReloadScripts } from '@/hooks/scriptQueries.js';
@@ -79,7 +79,7 @@ export const HANDLERS: Record<RendererCommandId, (ctx: CommandCtx) => void> = {
   'automation.new': navTo('/automations/new'),
   'agent.new': navTo('/agents/new'),
   'sidebar.toggle': () => useShellStore.getState().toggleSidebar(),
-  'dock.toggle': () => useRightPaneStore.getState().controller?.toggle(),
+  'dock.toggle': () => useDockStore.getState().controller?.toggle(),
   'theme.toggle': (ctx) => ctx.toggleTheme(),
   // FindBar owns the find-in-page state and subscribes to these directly.
   'find.open': handledElsewhere,

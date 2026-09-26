@@ -8,5 +8,6 @@ export * from './copy.js';
 export * from './gates.js';
 export * from './keys.js';
 export * from './pane.js';
+export * from './providers.js';
 export * from './status.js';
 export * from './toolVerbs.js';

@@ -7,8 +7,8 @@
 //                 mac | strip (Windows, Linux custom) | native (Linux, web)
 //   sidebar mode  useSidebarMode: the rail below 1200px or on a forceRail
 //                 route, the saved preference otherwise
-//   overlays      the flyout (forced rail), the command palette, the find bar
-//                 and the shortcuts sheet
+//   overlays      the flyout (forced rail), the command palette and the
+//                 shortcuts sheet; the desktop find bar sits in the main card
 // The page renders into the MainCard through <Outlet/>; its RouteSlot adds
 // the LegacyHeader when the route still needs it (D-21).
 // ────────────────────────────────────────────────────────────────
@@ -22,11 +22,12 @@ import { AppFrame } from '@/ui/shell/AppFrame/AppFrame.js';
 import { MainCard } from '@/ui/shell/MainCard/MainCard.js';
 import { SidebarFlyout } from '@/ui/shell/SidebarFlyout/SidebarFlyout.js';
 import { CommandPalette } from '@/features/palette/index.js';
-import { FindBar } from '@/components/layout/FindBar.js';
 import { ShortcutsSheet } from '@/components/layout/ShortcutsSheet.js';
 import { ConnectedRail } from './ConnectedRail.js';
 import { ConnectedSidebar } from './ConnectedSidebar.js';
 import { ConnectedTitleStrip } from './ConnectedTitleStrip.js';
+import { EditSourcesHost } from './EditSourcesHost.js';
+import { FindBar } from './FindBar.js';
 import { useCommandHost } from './useCommandHost.js';
 import { useDesktopBridge } from './useDesktopBridge.js';
 import { useSidebarMode } from './useSidebarMode.js';
@@ -72,13 +73,16 @@ export function ShellRoute() {
         <>
           {/* The command palette (palette.toggle: Mod+K, menu, Search buttons). */}
           <CommandPalette />
-          <FindBar />
           <ShortcutsSheet />
+          {/* The chat workspace's "Edit sources…" dialog (editSourcesStore). */}
+          <EditSourcesHost />
         </>
       }
     >
       <MainCard underStrip={LAYOUT === 'strip'}>
         <Outlet />
+        {/* Desktop find-in-page, anchored to the card (S-12). */}
+        <FindBar />
       </MainCard>
     </AppFrame>
   );

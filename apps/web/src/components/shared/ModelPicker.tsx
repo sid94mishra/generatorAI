@@ -16,6 +16,7 @@
 // the active provider's live catalog — never hardcoded.
 // ────────────────────────────────────────────────────────────────
 
+import { HARNESS_PROVIDERS, harnessProviderLabel } from '@generatorai/shared/ui-contract';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { ChevronDown, Check, Search, X, Lock, Info, Cpu, Eye, Globe, Gauge, ArrowUp, RefreshCw, AlertTriangle } from 'lucide-react';
@@ -33,18 +34,10 @@ import { buildModelPickerCatalog, readyCatalogModels } from '@generatorai/client
 // providers that fail that probe render locked.
 // Labels match the server's `harnessTypeLabel`, so a provider is named the
 // same everywhere (a missing entry showed up as its raw id, e.g. "codex").
-export const PROVIDERS: Array<{ id: string; label: string }> = [
-  { id: 'copilot', label: 'GitHub Copilot' },
-  { id: 'claude-agent', label: 'Claude Code' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'opencode', label: 'OpenCode' },
-  { id: 'acp', label: 'ACP Agent' },
-];
+export const PROVIDERS = HARNESS_PROVIDERS;
 
 /** Human label for a harness/agent provider id. */
-export function providerLabel(id: string): string {
-  return PROVIDERS.find((p) => p.id === id)?.label ?? id;
-}
+export const providerLabel = harnessProviderLabel;
 
 // Brand marks live in one place (`VendorIcons`) so the picker, settings and
 // anything else stay in sync. Aliased + re-exported for existing import sites.

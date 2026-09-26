@@ -5,3 +5,4 @@ export { mintTabId, type DockStoredState, type DockTabRef } from './dockState.js
 export { useDockOpen } from './useDockOpen.js';
 export { useDockLinkParam } from './useDockLinkParam.js';
 export { CAP_NOTICE_MS } from './useDockState.js';
+export { useSurfaceDockTabs, type SurfaceDockTabs } from './useSurfaceDockTabs.js';

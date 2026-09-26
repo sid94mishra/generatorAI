@@ -26,7 +26,7 @@ import {
   windowChrome,
 } from '@/lib/desktop.js';
 import { navDestinationFor } from '@generatorai/shared/ui-contract';
-import { useRightPaneStore } from '@/stores/rightPaneStore.js';
+import { useDockStore } from '@/stores/dockStore.js';
 import { usePageTitleStore } from '@/stores/pageTitleStore.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 import { useAttentionCounts } from '@/hooks/attentionQueries.js';
@@ -46,7 +46,7 @@ export function useDesktopBridge({ sidebarExpanded }: DesktopBridgeOptions): voi
   const navigate = useNavigate();
   const location = useLocation();
 
-  const rightPaneController = useRightPaneStore((s) => s.controller);
+  const rightPaneController = useDockStore((s) => s.controller);
   const rightPaneOpen = rightPaneController?.open ?? false;
 
   // Visited routes, newest first — feeds the native `File ▸ Open Recent`.

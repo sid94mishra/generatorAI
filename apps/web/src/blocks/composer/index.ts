@@ -10,3 +10,4 @@ export {
   type ComposerToolChat,
   type ComposerToolState,
 } from './toolToggles.js';
+export { ChangesTray, type ChangesTrayProps } from './parts/ChangesTray.js';

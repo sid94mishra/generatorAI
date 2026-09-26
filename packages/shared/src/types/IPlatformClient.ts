@@ -129,7 +129,7 @@ export interface IPlatformClient {
   /** One page of chats with row summaries (chat list v2, G-02). Pass `nextCursor` back as `cursor`. */
   listChats(query?: ChatListQuery): Promise<ChatListPage>;
   getChat(chatId: string): Promise<Chat>;
-  updateChat(chatId: string, updates: Partial<Pick<Chat, 'model' | 'harnessConfig'>>): Promise<Chat>;
+  updateChat(chatId: string, updates: Partial<Pick<Chat, 'name' | 'model' | 'harnessConfig'>>): Promise<Chat>;
   archiveChat(chatId: string): Promise<void>;
   /** Restore an archived chat to Active (`PATCH { status: 'active' }`; P3-07 row action). */
   unarchiveChat(chatId: string): Promise<void>;

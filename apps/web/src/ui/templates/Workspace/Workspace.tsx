@@ -23,6 +23,12 @@
 // rendered elsewhere in the tree). Whoever builds S-08 computes `narrow` and
 // swaps `dock`'s content between an inline panel and a Sheet — the same
 // stable-React-tree requirement then falls on THAT component, not this one.
+//
+// P4-12: the chat page's dock is `blocks/dock` Dock, whose S-08 DockFrame
+// already owns the split, the sheet and Maximize; it comes in through
+// `dockHost` (it wraps the main column) instead of `dock`. `bare` drops the
+// template's scroll box and padding for a `main`/`bottom` that bring their
+// own (TranscriptView, the composer block).
 // ────────────────────────────────────────────────────────────────
 
 import type { ComponentProps, ReactNode } from 'react';
@@ -46,6 +52,17 @@ export interface WorkspaceProps extends Omit<ComponentProps<'div'>, 'children'> 
   narrow?: boolean;
   /** Persists the main/dock split ratio; unique per page. */
   splitId?: string;
+  /**
+   * `main` and `bottom` bring their own scroll box and padding (the chat's
+   * transcript kit and composer block): the template adds neither.
+   */
+  bare?: boolean;
+  /**
+   * A dock host that lays the main column out beside itself — the chat's
+   * `blocks/dock` Dock, whose S-08 DockFrame owns the split, the <1200px sheet
+   * (S-09) and Maximize. Use instead of `dock`.
+   */
+  dockHost?: (mainColumn: ReactNode) => ReactNode;
 }
 
 /** Page layout for the chat/run workspace: transcript + composer, optional resizable dock. */
@@ -59,12 +76,19 @@ export function Workspace({
   dockMinSize = 360,
   narrow = false,
   splitId = 'workspace-dock',
+  bare = false,
+  dockHost,
   className,
   ...rest
 }: WorkspaceProps) {
   const dockClosed = !dock || !dockOpen;
 
-  const mainColumn = (
+  const mainColumn = bare ? (
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      {main}
+      {bottom != null ? <div className="shrink-0">{bottom}</div> : null}
+    </div>
+  ) : (
     <div className={cn('flex min-h-0 flex-1 flex-col', narrow && !dockClosed && workspaceNarrowPadding)}>
       <div
         // The transcript scrolls independently of the page; tabIndex keeps a keyboard user able
@@ -86,7 +110,9 @@ export function Workspace({
   return (
     <div className={cn('flex h-full min-h-0 min-w-0 flex-col bg-surface text-fg', className)} {...rest}>
       {header}
-      {dock != null ? (
+      {dockHost ? (
+        <div className="relative flex min-h-0 flex-1">{dockHost(mainColumn)}</div>
+      ) : dock != null ? (
         <SplitPane
           id={splitId}
           defaultSize={dockDefaultSize}

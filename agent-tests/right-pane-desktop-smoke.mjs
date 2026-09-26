@@ -118,12 +118,11 @@ try {
   const chat = await findFirst('chat', '/api/chats');
   if (!chat) throw new Error('no chat available');
   await navigateSpa(`/chats/${chat.id}`);
-  // The per-page "chat-toggle-right-pane*" testids were replaced by a single
-  // global toggle in the app header (components/layout/Header.tsx), shown
-  // whenever the current page registers a right-pane controller. It keeps
-  // the accessible name "Show side pane" / "Hide side pane".
-  await page.waitForSelector('[data-testid="header-toggle-right-pane"]', { timeout: 15_000 });
-  const toggle = await page.$('[data-testid="header-toggle-right-pane"]');
+  // The dock toggle lives in the chat's own page header since P4-12
+  // (`dock-toggle`; the run page's legacy header uses the same testid). It
+  // keeps the accessible name "Show side pane" / "Hide side pane".
+  await page.waitForSelector('[data-testid="dock-toggle"]', { timeout: 15_000 });
+  const toggle = await page.$('[data-testid="dock-toggle"]');
   await toggle.click();
   await page.waitForSelector('[data-testid="right-pane"]', { timeout: 5_000 });
   record('chat: right pane opens', true);
@@ -153,11 +152,11 @@ try {
   if (!run) throw new Error('no run available');
   await navigateSpa(`/workflows/${run.workflowDefinitionId}/runs/${run.id}`);
   // Wait for the run page's breadcrumb / header before toggling the side pane.
-  // Same shared header toggle as the chat page (see above) — the workflow
-  // run page registers its own controller into the same rightPaneStore.
+  // The run page is still on the legacy header, whose side-pane toggle reads
+  // the controller the page registers in stores/dockStore (same `dock-toggle`).
   await page.waitForSelector('nav[aria-label="Breadcrumb"]', { timeout: 15_000 });
-  await page.waitForSelector('[data-testid="header-toggle-right-pane"]', { timeout: 15_000 });
-  await page.click('[data-testid="header-toggle-right-pane"]');
+  await page.waitForSelector('[data-testid="dock-toggle"]', { timeout: 15_000 });
+  await page.click('[data-testid="dock-toggle"]');
   await page.waitForSelector('[data-testid="right-pane"]', { timeout: 10_000 });
   record('workflow: right pane opens', true);
 

@@ -21,7 +21,7 @@ import { act, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStreamStore } from '@/stores/streamStore.js';
-import { useRightPaneStore } from '@/stores/rightPaneStore.js';
+import { useDockStore } from '@/stores/dockStore.js';
 import { dockAddableTabTypes, dockTabTypes } from '@/platform/surfaceCapabilities.js';
 import * as H from './helpers/chatPageFakes.js';
 import { renderChatPage } from './helpers/renderChatPage.js';
@@ -42,7 +42,7 @@ vi.mock('@/stores/sseManager.js', async (orig) => ({
 }));
 
 // Import under test — the only line that changes when P4 moves the file.
-import { ChatPage } from '@/pages/ChatPage.js';
+import { ChatPage } from '@/features/chat/ChatPage.js';
 
 // P4-06 (D-27): the dock's keys are `generatorai:dock:chat:*` (was `generatorai:rightPane:chat:*`),
 // and the split layout replaces the px width key.
@@ -111,11 +111,11 @@ describe('right-pane persistence (09 §5.4; ChatPage.tsx:360, 390, 1609-1619)', 
     mount();
     expect(pane()).not.toBeInTheDocument();
 
-    act(() => useRightPaneStore.getState().controller?.toggle());
+    act(() => useDockStore.getState().controller?.toggle());
     expect(pane()).toBeInTheDocument();
     expect(window.localStorage.getItem(OPEN_KEY)).toBe('1');
 
-    act(() => useRightPaneStore.getState().controller?.toggle());
+    act(() => useDockStore.getState().controller?.toggle());
     expect(pane()).not.toBeInTheDocument();
     expect(window.localStorage.getItem(OPEN_KEY)).toBe('0');
   });

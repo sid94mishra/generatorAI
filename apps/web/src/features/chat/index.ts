@@ -1,5 +1,8 @@
-// features/chat — the chat workspace (04 §0). P4-04 landed the controller;
-// the page itself moves here in P4-12.
+// features/chat — the chat workspace (04 §0): the page (P4-12), its controller
+// (P4-04), header, transcript host and chat-only dock panels.
+
+export { ChatPage } from './ChatPage.js';
+export { ChatHeader, type ChatHeaderProps } from './components/ChatHeader.js';
 
 export { useChatView, type ChatView, type UseChatViewOptions } from './hooks/useChatView.js';
 export { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS, type DockFocusRequest } from './hooks/useChatDockRouting.js';

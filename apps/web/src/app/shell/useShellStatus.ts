@@ -7,11 +7,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo } from 'react';
-import { bindingFor, formatBinding, type RendererCommandId } from '@generatorai/shared/ui-contract';
 import type { ConnectionState } from '@/stores/connectionStore.js';
 import { useConnectionSummary } from '@/hooks/useConnectionSummary.js';
 import { useServers } from '@/hooks/serverQueries.js';
-import { commandHost, isMacOS } from '@/lib/desktop.js';
 
 export type ShellTone = 'ok' | 'warn' | 'err';
 
@@ -33,13 +31,7 @@ export function displayAddress(url: string): string | undefined {
   }
 }
 
-/** One chord's key chips for this host (`['Ctrl','K']`, `['⌘','K']`), or undefined when unbound/a sequence. */
-export function shortcutFor(id: RendererCommandId): readonly string[] | undefined {
-  const binding = bindingFor(id, commandHost);
-  if (!binding) return undefined;
-  const chords = formatBinding(binding, commandHost, { mac: isMacOS });
-  return chords.length === 1 ? chords[0] : undefined;
-}
+export { shortcutFor } from '@/lib/shortcuts.js';
 
 export interface ShellStatus {
   /** The active server's name; undefined until the server list has loaded. */

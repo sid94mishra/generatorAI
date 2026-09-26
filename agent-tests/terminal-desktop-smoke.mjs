@@ -111,11 +111,9 @@ try {
   log(`chat=${chat.id} workspace=${workspaceId}`);
   await navigateSpa(`/chats/${chat.id}`);
 
-  // Open the right pane. The per-page "chat-toggle-right-pane*" testids were
-  // replaced by the single global header toggle (components/layout/Header.tsx),
-  // same repair as right-pane-desktop-smoke.mjs.
-  await page.waitForSelector('[data-testid="header-toggle-right-pane"]', { timeout: 15_000 });
-  const toggle = await page.$('[data-testid="header-toggle-right-pane"]');
+  // Open the dock with the chat header's toggle (`dock-toggle`, P4-12).
+  await page.waitForSelector('[data-testid="dock-toggle"]', { timeout: 15_000 });
+  const toggle = await page.$('[data-testid="dock-toggle"]');
   await toggle.click();
   await page.waitForSelector('[data-testid="right-pane"]', { timeout: 5_000 });
   record('chat: right pane opens', true);

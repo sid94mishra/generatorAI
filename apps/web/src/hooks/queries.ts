@@ -721,6 +721,19 @@ export function useUpdateChat(chatId: string) {
   });
 }
 
+/** Rename a chat (PATCH `/chats/:id` `{ name }`; the chat header's More ▸ Rename). */
+export function useRenameChat(chatId: string) {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => platform.updateChat(chatId, { name }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+      void queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+    },
+  });
+}
+
 // ── Orchestrator background tasks ──
 
 export const backgroundTasksKeys = {

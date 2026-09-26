@@ -43,16 +43,13 @@ vi.mock('@/stores/sseManager.js', async (orig) => ({
 }));
 
 // Import under test — the only line that changes when P4 moves the file.
-import { ChatPage } from '@/pages/ChatPage.js';
+import { ChatPage } from '@/features/chat/ChatPage.js';
 
 const store = () => useStreamStore.getState();
 const stream = () => store().streams[H.SESSION_ID];
 const composer = () => screen.queryByRole('textbox', { name: 'Message' });
-/**
- * ChatMessageSkeleton has no testid or role today, so it is found by its
- * pulse blocks. (Gap: give it a testid in the extraction PR.)
- */
-const skeletonBlocks = (root: HTMLElement) => root.querySelectorAll('.animate-pulse').length;
+/** The page / transcript skeleton (`chat-skeleton` since P4-12; the kit skeleton has no pulse, D-20). */
+const skeletonBlocks = (root: HTMLElement) => root.querySelectorAll('[data-testid="chat-skeleton"]').length;
 
 function mount(chat = H.makeChat(), messages: ChatMessage[] = []) {
   H.withChat(chat);
