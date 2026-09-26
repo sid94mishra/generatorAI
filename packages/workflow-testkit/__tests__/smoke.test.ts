@@ -21,9 +21,10 @@ describe('testkit smoke', () => {
     expect(snap.stages['a']!.outputText).toContain('A says hello');
     expect(snap.stages['a']!.instancePath).toBe('a');
     expect(snap.stages['b']!.status).toBe('completed');
-    // A summarises for B (whose context mode is `summary`); the context rides in
-    // B's first prompt, and the leaf B pays no summary turn (W-48, W-49).
-    expect(snap.calls.map((c) => `${c.stageName}:${c.kind}`)).toEqual(['A:prompt', 'A:summary', 'B:prompt']);
+    // B reads A's summary (context mode `summary`): A's output is short, so its
+    // `auto` summary is deterministic (no summary turn, P07 WP-7.1); the context
+    // rides in B's first prompt, and the leaf B pays no summary turn (W-48, W-49).
+    expect(snap.calls.map((c) => `${c.stageName}:${c.kind}`)).toEqual(['A:prompt', 'B:prompt']);
   });
 
   it('classifies a turn from the persisted turn_role before its text', async () => {

@@ -60,7 +60,30 @@ export class CheckpointService {
   async create(params: CreateCheckpointParams): Promise<CheckpointRecord | null> {
     const repoAlias = params.repoAlias ?? '.';
     const key = `${params.workspaceId}::${repoAlias}`;
+    // Nothing to capture, decided outside the per-repo lock (P07 WP-7.1,
+    // F O-1): parallel stages that write nothing no longer queue behind each
+    // other's `git add -A` + `write-tree`.
+    if ((params.skipIfUnchanged ?? true) && (await this.cleanAtPrevious(params.workspaceId, repoAlias, params.repoDir))) return null;
     return this.withLock(key, () => this.createUnlocked(params, repoAlias));
+  }
+
+  /**
+   * A git checkout whose `git status --porcelain` is empty and whose HEAD
+   * tree is the previous snapshot's has nothing new. False whenever it
+   * cannot tell (a shadow store, no previous snapshot, a git error): the
+   * full capture then decides.
+   */
+  private async cleanAtPrevious(workspaceId: string, repoAlias: string, repoDir: string): Promise<boolean> {
+    if (this.store.shadowGitDir(repoDir)) return false;
+    try {
+      const previous = await this.repository.findLatest(workspaceId, repoAlias);
+      if (!previous) return false;
+      const git = this.store.gitFor(repoDir);
+      if (!(await git.isClean(repoDir))) return false;
+      return (await git.revParse(repoDir, 'HEAD^{tree}')) === previous.treeSha;
+    } catch {
+      return false;
+    }
   }
 
   private async createUnlocked(

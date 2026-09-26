@@ -67,6 +67,7 @@ import type { LifecycleSteps } from './lifecycle/steps.js';
 import { LoopEffects } from './LoopEffects.js';
 import { MapEffects } from './MapEffects.js';
 import { SubworkflowEffects } from './SubworkflowEffects.js';
+import { SummaryEffects } from './summaries.js';
 import { WorktreeLeases } from './WorktreeLeases.js';
 import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
 import { inFlightIsSafe, LeaseReaper } from './LeaseReaper.js';
@@ -114,6 +115,8 @@ export interface RunSupervisorDeps {
   artifacts?: StageArtifactReader | undefined;
   /** Per-wait callback tokens (P05 §4.3). */
   callbacks?: WorkflowCallbacks | undefined;
+  /** The workflow summary model of `llm` summaries (engine settings, read per summary); unset uses the stage's model. */
+  summaryModel?: (() => string | null | undefined) | undefined;
   /** Where engine events go (default: `eventBus.emitGlobal`, awaited). */
   publish?: OutboxPublisher | undefined;
   /** Prepare/finalize (default: `DefaultRunLifecycle`). */
@@ -162,6 +165,7 @@ export class RunSupervisor {
   readonly leases: WorktreeLeases;
   readonly maps: MapEffects;
   readonly subworkflows: SubworkflowEffects;
+  readonly summaries: SummaryEffects;
   /** The compiled definition of every hosted run (the actors hold the same). */
   private readonly compiledByRun = new Map<string, CompiledWorkflow>();
   private readonly actors = new Map<string, Promise<RunActor | null>>();
@@ -245,6 +249,15 @@ export class RunSupervisor {
       command: (runId, command) => this.command(runId, command).then((r) => (r.ok ? { ok: true } : { ok: false, message: r.message })),
       logger: deps.logger,
     });
+    this.summaries = new SummaryEffects({
+      stores: deps.stores,
+      runRepo: deps.runRepo,
+      definitions: deps.definitions,
+      harness: deps.harness,
+      post,
+      summaryModel: deps.summaryModel,
+      logger: deps.logger,
+    });
     this.effects = new EffectsDispatcher({
       executor: this.executor,
       admission: deps.admission,
@@ -258,6 +271,7 @@ export class RunSupervisor {
       leases: this.leases,
       writerLeaseKeys: (runId, stageRunId) => this.writerLeaseKeys(runId, stageRunId),
       subworkflows: this.subworkflows,
+      summaries: this.summaries,
       logger: deps.logger,
     });
     this.reaper = new LeaseReaper({
@@ -575,6 +589,13 @@ export class RunSupervisor {
         } else if (cs.childRunId) {
           const settled = await this.subworkflows.settledMessage(cs.childRunId);
           if (settled) await actor.post(settled.msg);
+        }
+      }
+      // An `llm` summary that died with the process is written again (P07 WP-7.1).
+      const compiledRun = await this.compiled(runId);
+      for (const inst of state.instances) {
+        if (inst.status === 'completed' && inst.summary === null && compiledRun.nodes.get(inst.stageKey)?.summary === 'llm') {
+          this.effects.dispatch(runId, { effects: [{ t: 'summarize', stageRunId: inst.id }], timers: [], outbox: [] });
         }
       }
       this.timers.loadRun(runId);

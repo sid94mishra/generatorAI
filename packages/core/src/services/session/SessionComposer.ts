@@ -48,6 +48,7 @@ import { PlatformToolBinder, type BindTarget } from './PlatformToolBinder.js';
 import { resolveMcp } from './resolveMcp.js';
 import { ComposeError, type ComposeWarning, type SessionComposerDeps, type SessionOwner, type TurnPolicy } from './types.js';
 import { applyWorkspaceExposure } from './workspaceExposure.js';
+import { buildWorkspaceHint } from '../chatSystemHints.js';
 
 export interface ComposeInput {
   owner: SessionOwner;
@@ -178,9 +179,24 @@ export class SessionComposer {
     }
     if (uploads?.promptDirectories?.length) unionList(cfg, 'promptDirectories', uploads.promptDirectories);
 
-    // 6. everything appended below is a PLATFORM block
+    // 6. everything appended below is a PLATFORM block. A stage without
+    // file-write or shell tools gets the directories without the rules on
+    // where files go (P07 WP-7.1, F O-6).
     const replaceableBase = systemContent(cfg);
-    appendSystemBlock(cfg, workspaceHint);
+    const policy = projection.toolPolicy.groups;
+    const readOnlyStage = i.owner.kind === 'stage' && !!i.exposure && policy.fileWrite === false && policy.shell === false;
+    appendSystemBlock(
+      cfg,
+      readOnlyStage
+        ? buildWorkspaceHint({
+            workingDirectory: i.exposure!.workingDirectory,
+            scratchDir: i.exposure!.scratchDir,
+            rootPath: i.exposure!.rootPath,
+            mounts: i.exposure!.mounts,
+            writes: false,
+          })
+        : workspaceHint,
+    );
 
     const provider = await this.providerOf(cfg, i.conversationId);
     const levels = capabilityLevelsFor(provider);

@@ -120,6 +120,10 @@ export interface CompiledNode {
   timeouts: CompiledTimeouts;
   budget?: Budget;
   sessionGroup?: string;
+  /** An agent stage's summary policy (P07 WP-7.1): `llm` summaries are written after completion. */
+  summary?: 'none' | 'auto' | 'llm';
+  /** An agent stage's context sources and mode: a `summary` reader waits for a pending `llm` summary. */
+  context?: { mode: 'summary' | 'output' | 'structured' | 'none'; from?: readonly string[] };
   /** The stage declares compensation actions (run in LIFO order on failure/cancel). */
   compensates: boolean;
   /** Edges into the node, sorted by source key. */
@@ -258,6 +262,7 @@ export function compile(graph: WorkflowGraph): CompiledWorkflow {
       },
       ...((stage.kind === 'agent' || stage.kind === 'loop' || stage.kind === 'map' || stage.kind === 'subworkflow') && stage.budget ? { budget: stage.budget } : {}),
       ...(agent?.sessionGroup ? { sessionGroup: agent.sessionGroup } : {}),
+      ...(agent ? { summary: agent.output.summary, context: { mode: agent.context.mode, ...(agent.context.from ? { from: agent.context.from } : {}) } } : {}),
       compensates: (stage.compensate?.length ?? 0) > 0,
       incoming: [],
       outgoing: [],

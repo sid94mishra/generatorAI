@@ -15,7 +15,9 @@ afterEach(async () => {
   engine = undefined;
 });
 
-const A_OUTPUT = 'CODEWORD-PELICAN is the secret word for this run, followed by a long explanation.';
+// Over 6,000 characters: B_summary reads A's summary, so A's `auto` summary is a model turn (P07 WP-7.1).
+const A_OUTPUT = `CODEWORD-PELICAN is the secret word for this run, followed by a long explanation.
+${'The explanation goes on. '.repeat(260)}`;
 const A_SUMMARY = 'A-SUMMARY: stage A chose a codeword.';
 
 const T7 = {

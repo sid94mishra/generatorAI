@@ -22,7 +22,9 @@
 //     item first takes the `write` lease of the run mounts, so it waits
 //     while a map holds them (WorktreeLeases);
 //   - `start_child` / `child_command` (P05 sub-workflows) invoke the child
-//     run, or cancel, pause or resume it.
+//     run, or cancel, pause or resume it;
+//   - `summarize` (P07 WP-7.1) writes a completed stage's `llm` summary and
+//     posts `summary_ready`.
 // ────────────────────────────────────────────────────────────────
 
 import type { ILogger } from '@generatorai/shared';
@@ -32,6 +34,7 @@ import type { AdmissionController, AdmissionTicket } from '../AdmissionControlle
 import type { LoopEffects } from './LoopEffects.js';
 import type { MapEffects } from './MapEffects.js';
 import type { SubworkflowEffects } from './SubworkflowEffects.js';
+import type { SummaryEffects } from './summaries.js';
 import type { WorktreeLeases } from './WorktreeLeases.js';
 import type { OutboxDispatcher } from './OutboxDispatcher.js';
 import { PrepareError, type RunLifecycle } from './RunLifecycle.js';
@@ -56,6 +59,8 @@ export interface EffectsDispatcherDeps {
   writerLeaseKeys?: ((runId: string, stageRunId: string) => Promise<string[]>) | undefined;
   /** The sub-workflow effects (invoke the child, propagate commands). */
   subworkflows?: SubworkflowEffects | undefined;
+  /** The `llm` summaries written after completion. */
+  summaries?: SummaryEffects | undefined;
   logger?: ILogger | undefined;
 }
 
@@ -132,6 +137,9 @@ export class EffectsDispatcher {
           break;
         case 'start_child':
           this.track(this.startChild(runId, d.stageRunId, d.inputs));
+          break;
+        case 'summarize':
+          this.track(this.deps.summaries?.summarize(runId, d.stageRunId) ?? Promise.resolve());
           break;
         case 'child_command':
           this.track(this.deps.subworkflows?.childCommand(d.childRunId, d.command) ?? Promise.resolve());

@@ -273,6 +273,8 @@ function onAttemptSettled(w: Working, msg: Extract<RunMessage, { type: 'attempt_
       });
       w.push({ t: 'cancel_timer', stageRunId: inst.id });
       stageEvent(w, 'stage_run.completed', inst);
+      // An `llm` summary is written after completion (P07 WP-7.1): only the successors that read it wait.
+      if (w.node(inst)?.summary === 'llm' && outcome.output.summary === undefined) w.push({ t: 'summarize', stageRunId: inst.id });
       return;
     }
     case 'failed':
@@ -646,6 +648,8 @@ function resolveReadiness(w: Working): boolean {
         stageEvent(w, 'stage_run.skipped', inst, { reason: 'operator' });
         continue;
       }
+      // A reader of a summary still being written waits for `summary_ready` (P07 WP-7.1).
+      if (awaitsSummary(w, inst, node)) continue;
       w.transition(inst, 'ready', { statusReason: null });
       if (node.join.mode !== 'all' && node.join.cancelRemaining) {
         for (const key of exclusiveLosers(w, node)) {
@@ -739,12 +743,37 @@ function settle(w: Working): void {
   // effect in flight, or a sub-workflow whose child works. A wait is not.
   const busy = w.sorted().some((i) => {
     const node = w.node(i);
-    if (node?.class === 'work') return inAttempt(i.status) || i.status === 'ready';
+    if (node?.class === 'work') return inAttempt(i.status) || i.status === 'ready' || summaryPending(w, i);
     if (i.status === 'running' && i.loopState != null && ['starting', 'settling', 'restoring'].includes(i.loopState.phase)) return true;
     return mapBusy(i) || subworkflowBusy(i);
   });
   if (busy && w.run.status === 'waiting') w.runTransition('running');
   else if (!busy && w.run.status === 'running') w.runTransition('waiting');
+}
+
+// ── Summaries written after completion (P07 WP-7.1) ────────────────
+
+/** A completed stage whose `llm` summary is still being written. */
+function summaryPending(w: Working, inst: InstanceState): boolean {
+  return inst.status === 'completed' && inst.summary === null && w.node(inst)?.summary === 'llm';
+}
+
+/** Whether a stage reading its sources' summaries must wait for one still being written. */
+function awaitsSummary(w: Working, inst: InstanceState, node: CompiledNode): boolean {
+  if (node.context?.mode !== 'summary') return false;
+  const from = node.context.from ?? node.incoming.map((e) => e.from);
+  return from.some((key) => {
+    const src = w.sibling(inst, key);
+    return !!src && summaryPending(w, src);
+  });
+}
+
+function onSummaryReady(w: Working, msg: Extract<RunMessage, { type: 'summary_ready' }>): void {
+  const inst = w.get(msg.stageRunId);
+  if (!inst || !summaryPending(w, inst)) return; // a duplicate, or the instance moved on (a fork, a re-run)
+  if (msg.usage) w.usage(inst, msg.usage);
+  w.instancePatch(inst, { summary: msg.summary });
+  stageEvent(w, 'stage_run.summary_ready', inst);
 }
 
 // ── Entry point ───────────────────────────────────────────────────
@@ -821,6 +850,9 @@ export function decide(graph: CompiledWorkflow, state: RunState, msg: RunMessage
       break;
     case 'finalized':
       onFinalized(w, msg);
+      break;
+    case 'summary_ready':
+      onSummaryReady(w, msg);
       break;
     case 'tick':
       break;

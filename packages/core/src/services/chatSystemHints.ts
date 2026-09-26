@@ -237,6 +237,13 @@ export interface WorkspaceHintInput {
   scratchDir: string;
   rootPath: string;
   mounts: WorkspaceMount[];
+  /**
+   * The session can write files (file-write or shell tools). The rules on
+   * where files go are only for such sessions: a read-only stage gets the
+   * directories alone (P07 WP-7.1, F O-6: the file-creation boilerplate
+   * provoked refusals on stages that never write). Default true.
+   */
+  writes?: boolean;
 }
 
 function describeMount(m: WorkspaceMount): string {
@@ -260,6 +267,7 @@ export function buildWorkspaceHint(input: WorkspaceHintInput): string {
     lines.push(`Working directory: ${input.workingDirectory}`);
   }
   for (const m of rest) lines.push(`Also mounted: ${m.path}  (${describeMount(m)})`);
+  if (input.writes === false) return lines.join('\n');
   lines.push(`Scratch directory: ${input.scratchDir}`);
   lines.push('Rules:');
   lines.push(

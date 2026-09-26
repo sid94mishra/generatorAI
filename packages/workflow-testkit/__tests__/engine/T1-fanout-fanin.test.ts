@@ -49,8 +49,9 @@ describe('T1 fan-out / fan-in (engine)', () => {
 
     // The join ran once, after every branch finished; its first prompt carries all five, fenced.
     const joinCalls = snap.calls.filter((c) => c.stageName === 'join');
-    // A summary turn only because 'final' reads the join's summary (context.mode summary); the leaf pays none.
-    expect(joinCalls.map((c) => c.kind)).toEqual(['prompt', 'summary']);
+    // 'final' reads the join's summary (context.mode summary), but the join's output is short: its `auto`
+    // summary is deterministic, so no summary turn (P07 WP-7.1); the leaf pays none either.
+    expect(joinCalls.map((c) => c.kind)).toEqual(['prompt']);
     expect(snap.calls.filter((c) => c.stageName === 'final').map((c) => c.kind)).toEqual(['prompt']);
     expect(joinCalls[0]!.startedAt).toBeGreaterThanOrEqual(Math.max(...branchPrompts.map((c) => c.endedAt!)));
     expect(joinCalls[0]!.prompt).toContain('<generatorai:stage-context trust="untrusted">');

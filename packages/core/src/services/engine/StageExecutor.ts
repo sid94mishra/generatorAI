@@ -84,6 +84,7 @@ import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
 import { waitInterruptOf } from '../../domain/scheduler/waits.js';
 import { StageConversationError } from './StageConversationError.js';
 import { runCheck } from './CheckRunner.js';
+import { AUTO_SUMMARY_TURN_THRESHOLD, autoSummary, jsonSummary, summaryPrompt } from './summaries.js';
 import { compile, type CompiledNode, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import { isWrapUp, templateScope } from '../../domain/scheduler/scope.js';
 import {
@@ -1523,23 +1524,21 @@ export class StageExecutor {
     );
   }
 
+  /**
+   * The stage's summary under its `output.summary` policy (P07 WP-7.1,
+   * `summaries.ts`): `none` writes none; `llm` is written after completion
+   * by the `summarize` effect (undefined here); `auto` is deterministic,
+   * with one summary turn only when a successor reads the summary and the
+   * text output is over 6,000 characters.
+   */
   private async summary(ctx: AttemptContext, data: unknown): Promise<string | undefined> {
     const name = ctx.stage.name;
-    if (ctx.wrapUp) return undefined;
-    if (ctx.contract.format === 'json') {
-      const keys = data && typeof data === 'object' && !Array.isArray(data) ? Object.keys(data) : [];
-      return keys.length > 0 ? `Stage "${name}" completed. Produced structured output with keys: ${keys.join(', ')}.` : `Stage "${name}" completed.`;
-    }
-    if (!this.successorWantsSummary(ctx)) return undefined;
-    const turn = await this.turn(ctx, {
-      opId: `a${ctx.epoch}/summary`,
-      role: 'summary',
-      text:
-        `Provide a concise summary (max 500 words) of the work you just completed in this stage named "${name}". ` +
-        'Include key actions, files created or modified, decisions and outputs. It is handed to later workflow stages as context.',
-      expect: 'validating',
-    });
-    return turn.content.trim().length > 0 ? turn.content : undefined;
+    const policy = ctx.stage.output.summary;
+    if (ctx.wrapUp || policy === 'none' || policy === 'llm') return undefined;
+    if (ctx.contract.format === 'json') return jsonSummary(name, data);
+    if (ctx.outputText.length <= AUTO_SUMMARY_TURN_THRESHOLD || !this.successorWantsSummary(ctx)) return autoSummary(name, 'text', data, ctx.outputText);
+    const turn = await this.turn(ctx, { opId: `a${ctx.epoch}/summary`, role: 'summary', text: summaryPrompt(name), expect: 'validating' });
+    return turn.content.trim().length > 0 ? turn.content : autoSummary(name, 'text', data, ctx.outputText);
   }
 
   /**
