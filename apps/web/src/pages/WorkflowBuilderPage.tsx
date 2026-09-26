@@ -403,6 +403,11 @@ export function WorkflowBuilderPage() {
     try {
       const graph = useWorkflowBuilderStore.getState().toGraph();
       const record = await publishDefinition.mutateAsync(defId);
+      if (record.id !== defId) {
+        // An agent draft that replaces a workflow was published into it (and deleted): open that workflow.
+        navigate(`/workflows/${record.id}/edit`, { replace: true });
+        return record;
+      }
       useWorkflowBuilderStore.getState().applySaved(record, graph);
       return record;
     } catch (err) {
@@ -411,7 +416,7 @@ export function WorkflowBuilderPage() {
     } finally {
       setIsPublishing(false);
     }
-  }, [saveGraph, publishDefinition, showError]);
+  }, [saveGraph, publishDefinition, showError, navigate]);
 
   const handlePublish = useCallback(() => {
     void publish().then((record) => {

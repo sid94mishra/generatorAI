@@ -204,7 +204,7 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
         // An agent's import is an agent-authored draft (published only when the operator allows it).
         const draft = await authoring.createDraft(req.body, { authoredBy: author, canEditCommands: opts.canEditCommands });
         const record = wantsPublish
-          ? await authoring.publish(draft.workflowId, { person: false })
+          ? await authoring.publish(draft.workflowId, { person: false, canEditCommands: opts.canEditCommands })
           : await workflowDefinitionService.get(draft.workflowId);
         logger.info(`[WorkflowDefRoutes] Imported agent draft ${record.id}`, { requestId: req.requestId });
         res.status(201).json(record);
@@ -255,7 +255,7 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
   router.post('/:id/publish', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
-      const record = await authoring.publish(id, { person: await isPersonRequest(req, container) });
+      const record = await authoring.publish(id, { person: await isPersonRequest(req, container), canEditCommands: canEditCommands(req) });
       logger.info(`[WorkflowDefRoutes] Published definition ${id} as version ${record.currentVersionId}`, {
         requestId: req.requestId,
       });

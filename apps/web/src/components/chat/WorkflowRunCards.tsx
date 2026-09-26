@@ -9,8 +9,9 @@
 //                 answered here (Approve / Request changes / Reject — the
 //                 run page's `approve` command); any other decision links
 //                 to the run page, where its full card lives.
-//   ▸ draft card  under `create_workflow_draft`: open it in the builder (the
-//                 agent-draft banner is there), or publish it.
+//   ▸ draft card  under `create_workflow_draft`: its risk flags; open it in
+//                 the builder (the agent-draft banner is there), or publish
+//                 it after a confirmation that repeats the risks.
 //
 // The run card's live state is the chat's run list (`useChatWorkflowRuns`,
 // folded live from `chat.workflow_run.*`), so it survives a reload; the
@@ -18,10 +19,11 @@
 // whole story in a transcript with no chat, a stage's).
 // ────────────────────────────────────────────────────────────────
 
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Check, ExternalLink, FileJson2, GitPullRequest, Hand, MessageSquare, Upload, Workflow, X } from 'lucide-react';
+import { AlertTriangle, Check, ExternalLink, FileJson2, GitPullRequest, Hand, MessageSquare, ShieldAlert, Upload, Workflow, X } from 'lucide-react';
+import { riskFlags } from '@generatorai/workflow-spec';
 import {
   appPath,
   decisionLabel,
@@ -31,7 +33,8 @@ import {
   type WorkflowRunPendingApproval,
   type WorkflowRunToolCard,
 } from '@generatorai/client-core';
-import { Badge, Button, StatusBadge, Textarea } from '@/components/ui/index.js';
+import { Badge, Button, StatusBadge, Textarea, useConfirm } from '@/components/ui/index.js';
+import { DANGER, RISK_LABELS } from '@/components/workflow/builder/AgentDraftBanner.js';
 import {
   useChatWorkflowRuns,
   usePublishDefinition,
@@ -298,16 +301,43 @@ export function WorkflowDraftCard({ draft, className }: { draft: WorkflowDraftTo
   const navigate = useNavigate();
   const { data: record, isError } = useWorkflowDefinition(draft.workflowId);
   const publish = usePublishDefinition();
+  const { confirm: askConfirm, dialog } = useConfirm();
+  // A draft that replaces a workflow is published into it and deleted.
+  const [publishedInto, setPublishedInto] = useState<string | null>(null);
   const builder = appPath(draft.reviewLink) ?? `/workflows/${draft.workflowId}/edit`;
-  const published = record?.status === 'published';
+  const published = record?.status === 'published' || publishedInto !== null;
   const name = record?.graph.workflow.name ?? draft.name;
+  const risks = useMemo(() => (record ? riskFlags(record.graph) : []), [record]);
+
+  const handlePublish = async () => {
+    if (!record) return;
+    const replaces = record.authoredBy?.replacesWorkflowId;
+    const ok = await askConfirm({
+      title: `Publish "${name}"?`,
+      description:
+        `An agent wrote this workflow; once published it can run. ` +
+        (risks.length > 0 ? `A run may: ${risks.map((f) => RISK_LABELS[f] ?? f).join(', ')}. ` : 'It declares no risky effects. ') +
+        (replaces ? 'It replaces an existing workflow, which is published with this graph; the draft is deleted. ' : '') +
+        'Open it in the builder to review the stages first.',
+      confirmLabel: 'Publish',
+    });
+    if (!ok) return;
+    try {
+      const out = await publish.mutateAsync(draft.workflowId);
+      if (out.id !== draft.workflowId) setPublishedInto(out.id);
+    } catch {
+      /* toasted by the global handler */
+    }
+  };
 
   return (
     <div className={cn(CARD, className)} data-testid="workflow-draft-card" data-workflow-id={draft.workflowId}>
       <div className="flex items-center gap-2 px-2.5 py-2">
         <FileJson2 className="h-3.5 w-3.5 shrink-0 text-primary" />
         <span className="min-w-0 truncate font-medium text-foreground" title={name}>{name}</span>
-        {isError ? (
+        {publishedInto ? (
+          <Badge tone="success" size="sm">published</Badge>
+        ) : isError ? (
           <Badge tone="neutral" size="sm">discarded</Badge>
         ) : published ? (
           <Badge tone="success" size="sm">published</Badge>
@@ -315,6 +345,17 @@ export function WorkflowDraftCard({ draft, className }: { draft: WorkflowDraftTo
           <Badge tone="warning" size="sm">agent draft</Badge>
         )}
       </div>
+
+      {risks.length > 0 && !publishedInto && (
+        <div className="flex flex-wrap items-center gap-1 px-2.5 pb-2" data-testid="workflow-draft-risks">
+          <ShieldAlert className="h-3 w-3 text-warning" aria-label="What a run may do" />
+          {risks.map((flag) => (
+            <Badge key={flag} tone={DANGER.has(flag) ? 'danger' : 'warning'} size="sm">
+              {RISK_LABELS[flag] ?? flag}
+            </Badge>
+          ))}
+        </div>
+      )}
 
       {draft.warnings.length > 0 && (
         <ul className="space-y-0.5 px-2.5 pb-2 text-[11px] text-warning">
@@ -330,15 +371,15 @@ export function WorkflowDraftCard({ draft, className }: { draft: WorkflowDraftTo
         </ul>
       )}
 
-      {!isError && (
+      {(!isError || publishedInto) && (
         <div className="flex flex-wrap items-center gap-1.5 border-t border-border px-2.5 py-2">
           <Button
             size="sm"
-            onClick={() => navigate(builder)}
+            onClick={() => navigate(publishedInto ? `/workflows/${publishedInto}/edit` : builder)}
             leftIcon={<Workflow className="h-3.5 w-3.5" />}
             data-testid="workflow-draft-open"
           >
-            Open in builder (agent draft)
+            {publishedInto ? 'Open the workflow' : 'Open in builder (agent draft)'}
           </Button>
           {!published && (
             <Button
@@ -346,7 +387,7 @@ export function WorkflowDraftCard({ draft, className }: { draft: WorkflowDraftTo
               variant="primary"
               loading={publish.isPending}
               disabled={publish.isPending || !record}
-              onClick={() => publish.mutate(draft.workflowId)}
+              onClick={() => void handlePublish()}
               leftIcon={<Upload className="h-3.5 w-3.5" />}
               data-testid="workflow-draft-publish"
             >
@@ -355,6 +396,7 @@ export function WorkflowDraftCard({ draft, className }: { draft: WorkflowDraftTo
           )}
         </div>
       )}
+      {dialog}
     </div>
   );
 }
