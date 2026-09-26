@@ -42,10 +42,10 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-13 | Project summaries (Projects columns, tab counts) — **built (P2-05)** | P5 | P2 | S–M |
 | G-14 | ProjectDetail Chats tab (project filter on the client) — **built (P2-02)** | P5 | P2 (via G-02) | S |
 | G-15 | ProjectDetail Runs tab (`projectId` filter on runs) — **built (P2-05)** | P5 | P2 | S |
-| G-16 | Codebase fetch/clone logs and live status | P5 | P2 | M |
-| G-17 | Worktree size, linked entity, reclaimable space | P5 | P2 | M |
-| G-18 | Palette entity search (+ recents) | P5 | P2 | M |
-| G-19 | Per-project customization enable/disable on the server | P5 | P2 | M |
+| G-16 | Codebase fetch/clone logs and live status — **built (P2-06)** | P5 | P2 | M |
+| G-17 | Worktree size, linked entity, reclaimable space — **built (P2-06)** | P5 | P2 | M |
+| G-18 | Palette entity search (+ recents) — **built (P2-06)** | P5 | P2 | M |
+| G-19 | Per-project customization enable/disable on the server — **built (P2-06)** | P5 | P2 | M |
 | G-20 | Background-task cancel attribution — **built (P2-04)** | P4 (optional) | P2 | S |
 | G-21 … G-29 | Workflow, automation and script engine features | PW | PW | — |
 
@@ -479,6 +479,8 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 
 ### G-16 — Codebase fetch/clone logs and live status
 
+**Status: built in P2-06.**
+
 **Elements & boards.**
 - ProjectDetail: status "Ready / Fetching", "Last fetched 4m ago", Fetch, **Logs**, "Cloning runs in the background; progress shows in Logs".
 - CodebaseDetail: the Logs button and Last fetched.
@@ -496,7 +498,16 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 
 **Owner / phase / effort.** P2 · P5 · **M**.
 
+**As built.**
+- `POST /projects/:id/codebases/:cid/fetch` → `202 { jobId }` exactly as specified; `GET /projects/:id/codebases/:cid/logs?limit=` → `{ lines, job? }` from a new `CodebaseLogService` (in-memory ring buffer, 500 lines, process lifetime — a restart has no in-flight job to resume either, so nothing is persisted beyond the codebase row's existing `lastError`). `packages/git`'s `GitClient.bareClone`/`fetchAll` take an optional `{ streamTo }` (threaded through the existing `IGitProcessRunner` `streamTo` already used elsewhere) and now pass `--progress`, so a local/loopback fetch actually writes something to tail.
+- **Deviation — no new `CodebaseStatus` value.** The in-flight fetch reuses `'cloning'` rather than adding `'fetching'`: every existing legacy-page consumer (`ProjectDetailPage`/`CodebaseDetailPage`'s `status === 'cloning' || 'pending'` polling and copy) already treats `'cloning'` as "an async git operation is in progress" and keeps working unchanged; `job.kind === 'fetch'` (from `GET .../logs`) is what a future UI reads to say "Fetching" instead of "Cloning" for the same status value.
+- `CodebaseService.setStatus` centralises every status write and emits `codebase.status_changed` on the `global` scope when an event bus is wired (optional constructor param, so every existing unit test that built the service directly keeps compiling). `codebase.status_changed` was added as a proper `AgentEvent` union member (classified `'item'` in `EVENT_CLASS`) — both exhaustive maps, so it is checked, not just fanned out.
+- **Client:** `HttpPlatformClient.fetchCodebase` now returns `{ jobId }` (was `void`); `useFetchCodebase` already ignored the resolved value, so the legacy page is unaffected. New `getCodebaseLogs` / client-core `projects.codebaseLogs` / web `useCodebaseLogs`.
+- **Tests:** `CodebaseLogService` (pure), a REAL-git `CodebaseService` test against `scripts/redesign/make-dummy-repo.mjs` (tails actual git stdout/stderr, verifies the `ready`/`stale` transitions and the emitted event, never this checkout), server route contract test, client-core wire-contract cases, web hook test.
+
 ### G-17 — Worktree enrichment
+
+**Status: built in P2-06.**
 
 **Elements & boards.** CodebaseDetail: Size column, "1.27 GB on disk · frees 385 MB", "Linked to" (chat or run title with status), "removes in 26h".
 
@@ -507,7 +518,18 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 
 **Owner / phase / effort.** P2 · P5 · **M**.
 
+**As built.**
+- `?include=usage,link` on the existing `GET /projects/:id/codebases/:cid/worktrees` — bare (no `include`) is byte-for-byte unchanged, so the legacy `CodebaseDetailPage` keeps calling it exactly as before (same precedent as G-13's additive query param; no OpenAPI entry either, since the base route was never documented there).
+- New `packages/core` `WorktreeSizeService`: async, cached (10-minute TTL default), bounded concurrency (default 2 in-flight walks; a request beyond the limit is simply skipped this round rather than queued — the next list poll retries it), recursive size via plain `fs.promises` (never `du` — cross-platform on Windows/macOS/Linux), never follows symlinks. `getCachedSizeBytes` never blocks and returns `undefined` (never a fake `0`) until a measurement has actually completed.
+- `link` resolution: `runType: 'manual'` → `runId` is a chatId (`chatEntityRepo.getById`); otherwise `runId` is a `WorkflowRun` id (`workflowRunRepo.getById`, covers automation-triggered runs too), title preferring the definition's CURRENT name over the run's frozen one (same "live name wins" rule as G-13's `lastRun`). An owner that no longer exists omits `link` entirely — never invented.
+- `expiresAt`: `WorktreeCleanupService.expiresAt(wt, retention)` is now a public static export, reusing the EXACT retention math (`RETENTION_MS`, "since `cleanedUpAt` else `createdAt`") the background sweep uses to decide when to actually delete — the list and the sweep can never disagree about "when does this expire". Omitted under `manual` retention.
+- `reclaimableBytes` sums `sizeBytes` for non-`active` items only; `totalBytes`/`reclaimableBytes` are both omitted entirely (not `0`) while nothing in the response has been measured yet.
+- **Client:** `HttpPlatformClient.listCodebaseWorktrees` gains a TS overload for `{ include }` (bare call's return type is unchanged); client-core `projects.codebaseWorktrees`, web `useCodebaseWorktreesUsage` (additive alongside the existing `useCodebaseWorktrees`).
+- **Tests:** `WorktreeSizeService` against real temp directories (real byte counts, symlink-skip, TTL expiry, bounded-concurrency skip, missing directory), server route test (link resolution for both entity kinds, expiresAt math, omission rules, usage+link combined), client-core wire-contract cases, web hook tests.
+
 ### G-18 — Palette entity search
+
+**Status: built in P2-06.**
 
 **Elements & boards.** CommandPalette: typing "run nig" yields a Workflows group with an inline "Run '…'" action and "Automations › Nightly audit" under Go to, plus Recent chats with status.
 
@@ -522,7 +544,19 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 
 **Owner / phase / effort.** P2 · P5 · **M**.
 
+**As built.**
+- `apps/server/src/routes/search.ts`, new `/search` route + `routePolicy.ts` entry (`read:activity`, same bar as `/attention`/`/stats`/`/activity`). Every source is an EXISTING read-only call already on `Container`: chats via `chatEntityRepo.listPage({ filter: { q } })` (real SQL `q=` match, G-02's substring-over-name/description/tag); projects via `projectService.listProjects()` filtered/ranked in memory (the project repo has no query support, and project counts are always small — adding one purely for this **M**-effort gap was out of scope); agents via `agentRepo.list({ query })` (its own case-insensitive SQL match, no new method needed). `workflowDefinitionService`/`automationService`/`workflowScriptLoader` are Workflow-Overhaul-owned engine code: only their existing `listDefinitions()`/`listAutomations()`/`getAllMetadata()` are called, read-only; matching and ranking happen here, in memory (same pattern G-10/G-11/G-13/G-15 used for engine-owned data).
+- **Scoring:** title-prefix/exact match beats title-substring beats description/tag-only match; a small recency bonus (linear decay over 30 days) breaks ties. Per-type candidates are capped at 25 before the final global rank + `limit` trim.
+- **Scope filtering (deviation from "SQL LIKE... respect each type's read scope" as a single mechanism):** `types` is filtered down to what the calling principal can actually read BEFORE any query runs — `chat`→`read:chats`, `project`→`read:projects`, `agent`/`workflow`/`automation`/`script`→`read:workflows` — using the same `req.principal.scopes` / `null`-means-unauthenticated-loopback-dev-mode convention `attention.ts` already uses. A type the caller can't read is simply absent from the results, never a 403.
+- Scripts disabled (`scripts.workflowScriptsEnabled: false`, `ScriptSecurityError`) reads as "no scripts to search" rather than failing the whole request.
+- A live chat's `needs_you`/`running` state (G-01's `attentionService`, when available) overrides its finished-turn status mapping in the results.
+- **Client:** `HttpPlatformClient.search`, client-core's `search(query)` (top-level, alongside `stats`/`activity`), web `useSearch(q, opts)` in `hooks/searchQueries.ts` — `q` is debounced 120ms via a small local `useDebouncedValue` before it reaches the platform client; `enabled: false` and an empty/whitespace-only `q` both hold off the request.
+- OpenAPI documents `/api/search`.
+- **Tests:** `apps/server/src/__tests__/searchRoute.test.ts` (per-type matching incl. scripts-disabled fallback, title-prefix vs substring ranking, `types=` filtering, `limit` default/clamp, scope filtering incl. the null/unauthenticated-loopback case), client-core wire-contract cases, web hook test (debounce, burst coalescing to one request, `enabled: false`).
+
 ### G-19 — Per-project customization enablement on the server
+
+**Status: built in P2-06.**
 
 **Elements & boards.** ProjectCustomization: per-item enable switches and "5 of 8 enabled".
 
@@ -537,6 +571,14 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 - Delete `projectCatalogPrefsStore.ts`.
 
 **Owner / phase / effort.** P2 · P5 · **M**. Until it lands, the switches keep working device-locally with a "This device" note.
+
+**As built — one deletion deliberately deferred.**
+- `GET`/`PUT /projects/:id/artifact-prefs` exactly as specified, stored inline on the project's existing JSON `settings` column (`disabledArtifacts`) — no migration, same precedent as G-13. `PUT` replaces the whole set (not a merge); body validation 400s on an unknown `type` or a missing/empty `id`.
+- **Enforcement at the source, one choke point:** `ArtifactCatalog.listSkills`/`listMcpServers` take an optional `getDisabledArtifactIds(projectId, type)` callback and filter the merged (system + project) list by it. This is the SAME catalog `AgentResolver` calls to resolve a chat/stage's actual skills and MCP servers, so a project-disabled entry becomes simply absent from both live resolution AND `AgentService`'s save-time validation of an agent's declared skills/MCP ids — not a second, independently-maintained enforcement path. `GET /projects/:id/available-artifacts` (agent/prompt/skill pickers) filters by the same disabled set independently, since it doesn't route through `ArtifactCatalog`.
+- **Deferred: deleting `projectCatalogPrefsStore.ts`.** This gap's task explicitly built data/API + client-core read models + web hooks only, no UI (P5 builds the pages). `ProjectDetailPage`'s Customization tab still reads/writes the device-local store; deleting it now with no replacement wired up would break that currently-working legacy page (D-01, "old pages must keep working"). Left in place until P5 rebuilds that tab against `useProjectArtifactPrefs`/`useUpdateProjectArtifactPrefs`.
+- **Client:** `HttpPlatformClient.getProjectArtifactPrefs`/`updateProjectArtifactPrefs`, client-core's `projects.artifactPrefs.get`/`update`, web's `useProjectArtifactPrefs`/`useUpdateProjectArtifactPrefs`.
+- OpenAPI documents `/api/projects/{id}/artifact-prefs` (a genuinely new path).
+- **Tests:** `ArtifactCatalog` filtering (skills/MCP, cross-project isolation, no-callback-wired backward compatibility), server route tests (GET/PUT round-trip, replace-not-merge, validation, available-artifacts filtering), client-core wire-contract cases, web hook tests.
 
 ### G-20 — Background-task cancel attribution
 
