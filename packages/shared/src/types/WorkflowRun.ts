@@ -219,6 +219,15 @@ export interface MapItemView {
   pr: { url: string | null; branch: string } | null;
 }
 
+/** A winner merge after a map completed (P08): `phase` waiting, merging, done; `outcome` merged, none, failed. */
+export interface MapWinnerView {
+  phase: string;
+  index: number | null;
+  key: string | null;
+  outcome: string | null;
+  error: string | null;
+}
+
 /** A map instance's state (`stage_runs.loop_state` of a map). `phase`: snapshotting, running, done. */
 export interface MapStateView {
   kind: 'map';
@@ -226,6 +235,7 @@ export interface MapStateView {
   count: number;
   snapshot: Record<string, string> | null;
   items: MapItemView[];
+  winner?: MapWinnerView | null;
 }
 
 /** A sub-workflow instance's state. `phase`: starting, running, done. */

@@ -30,7 +30,7 @@ container. A container with no body is `empty-body`.
 | `retry.backoffMultiplier` | number (≥1, ≤10) |  | `2` | Delay multiplier per retry |
 | `retry.maxDelayMs` | integer (≥0, ≤3600000) |  | `60000` | Upper bound on one delay |
 | `retry.jitter` | 'full' \| 'equal' \| 'none' |  | `"full"` | full: random 0..delay; equal: delay/2 plus random 0..delay/2; none: exact delay |
-| `retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'loop_body_failed' \| 'loop_exit_fail' \| 'loop_limit' \| 'loop_wall_clock' \| 'loop_carry_too_large' \| 'restore_failed' \| 'map_items_invalid' \| 'map_too_large' \| 'map_duplicate_item_key' \| 'map_tolerance_exceeded' \| 'mount_fork_failed' \| 'item_setup_failed' \| 'merge_conflict' \| 'merge_failed' \| 'subworkflow_start_failed' \| 'subworkflow_output_drift' \| 'subworkflow_failed' \| 'wait_timeout' \| 'output_schema' \| 'validation_rule' \| 'judge_below_threshold' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
+| `retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'loop_body_failed' \| 'loop_exit_fail' \| 'loop_limit' \| 'loop_wall_clock' \| 'loop_carry_too_large' \| 'restore_failed' \| 'map_items_invalid' \| 'map_too_large' \| 'map_duplicate_item_key' \| 'map_tolerance_exceeded' \| 'mount_fork_failed' \| 'item_setup_failed' \| 'merge_conflict' \| 'merge_failed' \| 'map_winner_failed' \| 'subworkflow_start_failed' \| 'subworkflow_output_drift' \| 'subworkflow_failed' \| 'wait_timeout' \| 'output_schema' \| 'validation_rule' \| 'judge_below_threshold' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
 | `retry.mode` | 'resume' \| 'restart' |  | `"resume"` | resume continues the same conversation; restart begins again from the first prompt |
 | `retry.restoreCheckpointOnRestart` | boolean |  | `true` | Restore the workspace to the first attempt checkpoint before a restart |
 | `timeouts` | object |  |  | Timeouts of a check stage: only the admission wait (the command has check.timeoutMs) |
@@ -138,7 +138,9 @@ Which iteration each place sees:
 | `map.concurrency` | integer (≥1, ≤16) |  | `4` | Items whose body runs at the same time |
 | `map.toleratedFailurePercent` | number (≥0, ≤100) |  | `0` | Failed items tolerated, in percent of all items; above it the map fails |
 | `map.workspace` | 'shared' \| 'mount_per_item' |  | `"shared"` | shared: every item works in the run's mounts; mount_per_item: each item gets its own git worktree cut from a snapshot of the run mounts |
-| `map.merge` | 'none' \| 'sequential' \| 'pr_per_item' |  | `"none"` | How item mounts come back (mount_per_item only): none keeps them; sequential merges each into the run mount; pr_per_item pushes a branch per item |
+| `map.merge` | one of |  | `"none"` | How item mounts come back (mount_per_item only): none keeps them; sequential merges each into the run mount; pr_per_item pushes a branch per item; {mode: winner, key} merges the one item a later stage picks |
+| `map.merge.mode` | "winner" | yes |  | Merge only the winning item into the run mount; the other item mounts are kept |
+| `map.merge.key` | string (1..2000 chars) | yes |  | The winner's item key, read from a stage after the map (for example stages.judge.output.winner); null merges nothing. Stages after that stage wait for the merge |
 | `map.itemSetup` | object[] (≤5) |  |  | Commands run in each item mount before its body (for example pnpm install --offline); a failure fails the item |
 | `map.itemSetup[].command` | string `^(?!.*\.\.)[A-Za-z0-9_][A-Za-z0-9_.+-]{0,99}$` | yes |  | Executable to run: a bare name on the command allow-list (a literal; templates are rejected) |
 | `map.itemSetup[].args` | string (≤4000 chars)[] (≤64) |  | `[]` | Literal arguments; a template is rejected (check-args-literal): pass values through env |
@@ -473,6 +475,32 @@ Pursue an objective with an evidence audit after every round, until it is met, i
 }
 ```
 
+### Judge panel (best of N) (`examples/template-judge-panel.json`)
+
+Three agents solve a task from different angles in their own worktrees; a read-only judge scores them, and only the winner is merged into the run mount.
+
+- `panel` (map)
+  - `attempt` (agent)
+- `judge` (agent)
+- edges: `panel` → `judge`
+
+`panel`:
+
+```jsonc
+{
+  "map": {
+    "items": "['minimal', 'thorough', 'idiomatic']",
+    "itemKey": "item",
+    "maxItems": 3,
+    "concurrency": 3,
+    "toleratedFailurePercent": 50,
+    "workspace": "mount_per_item",
+    "merge": { "mode": "winner", "key": "stages.judge.output.winner" },
+    "output": {}
+  }
+}
+```
+
 ### Migrate until clean (`examples/template-migrate-until-clean.json`)
 
 Plan, migrate the files in parallel (a worktree per file, merged back), typecheck; repeat until the typecheck passes.
@@ -726,6 +754,7 @@ Fix and re-run the test suite until it passes; exhausts when the number of faili
 | `migrateUntilClean` | Migrate until clean | Each round plans the files that still need changes, migrates them in parallel (a worktree per file, merged back one by one) and runs the typecheck, until it passes. |
 | `multiSourceResearch` | Multi-source research | Research each source of a list in parallel with a read-only agent, then synthesize the findings. |
 | `adversarialVerify` | Adversarial verification | An audit lists findings; each finding is verified independently from three angles by read-only agents that default to "not real", and is confirmed only when two of three agree. |
+| `judgePanel` | Judge panel (best of N) | Several agents solve the same task from different angles, each in its own worktree; a read-only judge compares them, and only the winner it picks is merged into the run mount. |
 | `approvalGatedRelease` | Approval-gated release | Prepare a release, wait for a person to approve it and pick the environment (a form); deploy on approval, escalate when nobody answers in time. |
 | `ciGatedDeploy` | CI-gated deploy | Push a change, wait for the CI result of that commit (CI posts to the wait’s callback URL), then deploy. |
 | `cooldownThenVerify` | Cool down, then verify | Deploy, wait a fixed time for metrics to settle, then verify the deployment. |
@@ -751,6 +780,7 @@ Fix and re-run the test suite until it passes; exhausts when the number of faili
 | `examples/template-e2e-testing.json` | E2E Testing & Debugging Workflow | agent | End-to-end browser testing, debugging, and issue fix automation powered by playwright-cli — Microsoft's CLI tool designed for AI coding agents. Uses session-based browser automation via shell commands (open, goto, click, fill, snapshot, screenshot) for interactive browser control with persistent state. |
 | `examples/template-fix-review-loop.json` | Fix and review until approved | agent, loop | Triage an issue, then fix and review in a loop until the reviewer approves, then open a pull request. |
 | `examples/template-goal-loop.json` | Goal loop | loop, agent | Pursue an objective with an evidence audit after every round, until it is met, impossible or blocked, within a budget. |
+| `examples/template-judge-panel.json` | Judge panel (best of N) | map, agent | Three agents solve a task from different angles in their own worktrees; a read-only judge scores them, and only the winner is merged into the run mount. |
 | `examples/template-migrate-until-clean.json` | Migrate until clean | loop, agent, map, check | Plan, migrate the files in parallel (a worktree per file, merged back), typecheck; repeat until the typecheck passes. |
 | `examples/template-multi-source-research.json` | Multi-source research | map, agent | Research a topic in several sources in parallel (read-only), then synthesize what they say. |
 | `examples/template-per-file-migration.json` | Per-file migration | agent, map | Scan for the files a change touches, then migrate each file in its own worktree and open one pull request per file. |

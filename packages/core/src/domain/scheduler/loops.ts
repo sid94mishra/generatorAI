@@ -35,6 +35,7 @@ import { canonicalJson, evaluate, isTerminalStageRunState, MAX_LOOP_CARRY_BYTES,
 import { classified } from '../errors/StageError.js';
 import type { CompiledExpr, CompiledLoop, CompiledNode } from '../workflow-graph/compile.js';
 import { instanceId } from './ids.js';
+import { winnerPending } from './maps.js';
 import { carryAt, isWrapUp, iterationStages, loopSettingsScope, WRAP_UP_SEGMENT, type CurrentIteration } from './scope.js';
 import { computeScopeOutcome } from './terminal.js';
 import type { InstanceState, LoopIterationRecord, LoopSignals, LoopState, RunOutcome, Usage } from './types.js';
@@ -575,7 +576,7 @@ export function settleLoops(w: Working): boolean {
     const ls = inst.loopState;
     if (ls.phase === 'running') {
       const scope = w.scopeInstances(inst.id, ls.k);
-      if (scope.length > 0 && scope.every((i) => isTerminalStageRunState(i.status))) {
+      if (scope.length > 0 && scope.every((i) => isTerminalStageRunState(i.status)) && !winnerPending(scope)) {
         settleIteration(w, inst, node);
         changed = true;
       }

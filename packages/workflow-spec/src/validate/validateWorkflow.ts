@@ -31,6 +31,7 @@ import { WorkflowGraphSchema, type WorkflowGraph } from '../schemas/graph.js';
 import {
   TimeoutsSchema,
   kindFields,
+  mapMergeMode,
   stageTemplateFields,
   STAGE_KINDS,
   type LoopStage,
@@ -902,15 +903,31 @@ function mapIssues(
   const out: ValidationIssue[] = [];
   const k = s.key;
   const spec = s.map;
-  if (spec.merge !== 'none' && spec.workspace !== 'mount_per_item') {
+  const mode = mapMergeMode(spec.merge);
+  if (mode !== 'none' && spec.workspace !== 'mount_per_item') {
     out.push({
       code: 'map-merge-needs-mount',
       severity: 'error',
       path: `${p}/map/merge`,
       stageKey: k,
-      message: `merge ${spec.merge} brings item mounts back: it needs workspace mount_per_item`,
+      message: `merge ${mode} brings item mounts back: it needs workspace mount_per_item`,
       hint: 'Set workspace to mount_per_item, or merge to none',
     });
+  }
+  if (typeof spec.merge === 'object') {
+    // The winner is picked after the map: the key must read a stage that runs after it (the judge).
+    const after = new Set(ctx.types.downstream(k));
+    const parsed = parseExpression(spec.merge.key);
+    if (parsed.ok && !stagesRead(parsed.ast).some((r) => after.has(r))) {
+      out.push({
+        code: 'map-winner-unbound',
+        severity: 'error',
+        path: `${p}/map/merge/key`,
+        stageKey: k,
+        message: "The winner key reads no stage that runs after the map: nothing would pick the winner",
+        hint: `Read the judge's output, for example stages.<judge>.output.winner, with an edge from '${k}' to the judge`,
+      });
+    }
   }
   if (spec.itemSetup?.length && spec.workspace !== 'mount_per_item') {
     out.push({
@@ -936,7 +953,7 @@ function mapIssues(
       });
     }
   }
-  const builtIn = new Set(['index', 'key', 'item', 'status', 'error', 'stages', 'pr']);
+  const builtIn = new Set(['index', 'key', 'item', 'status', 'error', 'stages', 'pr', 'branch', 'workdir']);
   for (const name of Object.keys(spec.output.select ?? {})) {
     if (builtIn.has(name)) {
       out.push({
@@ -1044,6 +1061,15 @@ function readsIteration(ast: ExprNode, bodyKeys: ReadonlySet<string>): boolean {
     if (obj.name === 'loop' && ITERATION_LOOP_FIELDS.has(n.property)) found = true;
   });
   return found;
+}
+
+/** The stage keys an expression reads (`stages.<key>`). */
+export function stagesRead(ast: ExprNode): string[] {
+  const out = new Set<string>();
+  walkExpr(ast, (n) => {
+    if (n.type === 'member' && n.object.type === 'ident' && n.object.name === 'stages') out.add(n.property);
+  });
+  return [...out];
 }
 
 // ── 4. Expressions and templates ─────────────────────────────────
@@ -1158,6 +1184,7 @@ function expressionIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIs
       if (s.map.itemKey !== undefined) expr(s.map.itemKey, env({ kind: 'map', key: s.key, context: 'item' }), `${mp}/itemKey`, 'scalar', s.key);
       const sel = env({ kind: 'map', key: s.key, context: 'select' });
       for (const [name, src] of Object.entries(s.map.output.select ?? {})) expr(src, sel, `${mp}/output/select/${pointerToken(name)}`, 'any', s.key);
+      if (typeof s.map.merge === 'object') expr(s.map.merge.key, env({ kind: 'map', key: s.key, context: 'winner' }), `${mp}/merge/key`, 'scalar', s.key);
     }
     if (s.kind === 'wait' && s.wait.type === 'event') expr(s.wait.eventKey, stageEnv, `${p}/wait/eventKey`, 'scalar', s.key);
     if (s.kind === 'subworkflow') {

@@ -53,7 +53,7 @@ import {
   settleLoops,
   wrapUpAllowance,
 } from './loops.js';
-import { mapBusy, mapScopes, onMapItemMerged, onMapItemPrepared, onMapSnapshotTaken, settleMaps } from './maps.js';
+import { failedWinner, mapBusy, mapScopes, onMapItemMerged, onMapItemPrepared, onMapSnapshotTaken, settleMaps, winnerGate, winnerPending } from './maps.js';
 import { evalCondition, predState, readiness, type PredState } from './readiness.js';
 import {
   onChildSettled,
@@ -610,6 +610,16 @@ function resolveReadiness(w: Working): boolean {
       if (inst.status !== 'pending') continue;
       const node = w.node(inst);
       if (!node) continue;
+      // After a judge: the winner it picked is merged first (P08 §7).
+      const gate = winnerGate(w, inst, node);
+      if (gate?.kind === 'wait') continue;
+      if (gate?.kind === 'fail') {
+        changed = true;
+        any = true;
+        w.transition(inst, 'ready');
+        failInstance(w, inst, classified('map_winner_failed', gate.message));
+        continue;
+      }
       const preds: Array<{ instance: InstanceState; state: PredState; error?: string }> = [];
       for (const e of node.incoming) {
         const p = w.sibling(inst, e.from);
@@ -712,8 +722,17 @@ function settle(w: Working): void {
   }
 
   const roots = w.roots();
-  if (roots.every((i) => isTerminalStageRunState(i.status))) {
-    const outcome = computeScopeOutcome(w.graph, roots, w.scopeFor);
+  if (roots.every((i) => isTerminalStageRunState(i.status)) && !winnerPending(roots)) {
+    let outcome = computeScopeOutcome(w.graph, roots, w.scopeFor);
+    // A winner that could not be merged fails the run, even with no stage after its judge.
+    const lostWinner = outcome === 'completed' ? failedWinner(w) : null;
+    if (lostWinner) {
+      outcome = 'failed';
+      w.runTransition('finalizing', { outcome, statusReason: 'map_winner_failed', error: lostWinner.error });
+      w.push({ t: 'cancel_timer' });
+      w.push({ t: 'finalize', outcome, compensate: compensationOrder(w, outcome) });
+      return;
+    }
     if (outcome === 'cancelled') {
       w.runTransition('cancelling', { outcome });
       w.push({ t: 'cancel_timer' });

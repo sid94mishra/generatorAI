@@ -14,7 +14,7 @@ import type {
   WorkflowRunWithStages, StageRun, StageRunStatus, WorkflowRunStatus,
   WorkflowRunPermissionMode,
 } from '@generatorai/shared';
-import type { EdgeSpec, StageSpec } from '@generatorai/workflow-spec';
+import { mapMergeMode, type EdgeSpec, type StageSpec } from '@generatorai/workflow-spec';
 import { interpolateVariables } from '@generatorai/shared';
 import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
@@ -518,8 +518,9 @@ export function deriveMapView(sr: StageRun, def: StageSpec | undefined): MapView
     count: ms?.count ?? 0,
     done: items.filter((i) => i.phase === 'done').length,
     failed: items.filter((i) => i.status === 'failed' || i.status === 'cancelled').length,
-    ...(spec ? { concurrency: spec.concurrency, workspace: spec.workspace, merge: spec.merge, toleratedFailurePercent: spec.toleratedFailurePercent } : {}),
+    ...(spec ? { concurrency: spec.concurrency, workspace: spec.workspace, merge: mapMergeMode(spec.merge), toleratedFailurePercent: spec.toleratedFailurePercent } : {}),
     items,
+    ...(ms?.winner ? { winner: ms.winner } : {}),
   };
 }
 

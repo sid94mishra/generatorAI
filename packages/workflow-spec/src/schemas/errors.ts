@@ -49,6 +49,7 @@ export const STAGE_ERROR_CODE_CLASS = {
   item_setup_failed: 'deterministic',
   merge_conflict: 'deterministic',
   merge_failed: 'deterministic',
+  map_winner_failed: 'deterministic',
   subworkflow_start_failed: 'deterministic',
   subworkflow_output_drift: 'deterministic',
   subworkflow_failed: 'deterministic',

@@ -19,10 +19,18 @@
 //                    run mount under the exclusive lease, or a branch + PR);
 //                    a conflict fails the item (merge_conflict)
 //   all items done   results[i] = {index, key, item, status, error, stages,
-//                    pr, ...select (per item scope)}; failures = the failed
+//                    pr, branch, workdir, ...select (per item scope)}; failures = the failed
 //                    ones; failed% ≤ toleratedFailurePercent → completed,
 //                    else failed (map_tolerance_exceeded); effect
 //                    map_release
+//   winner merge     (P08 §7, merge {mode: winner, key}) no item merges
+//                    while the map runs; once it completed and the stages
+//                    its key reads (the judge, after the map) settled, the
+//                    key is evaluated and the item it names is merged
+//                    (map_merge_item, sequential). Stages after the judge
+//                    wait for that merge, and their scope does not end
+//                    before it; a key naming no completed item, or a failed
+//                    merge, fails them and the run (map_winner_failed)
 //
 // Item scopes are keyed by the item index (`item_index`); the key is kept
 // in `item_key` and the map state. A cancelled map takes its items with it
@@ -33,7 +41,7 @@ import { evaluate, isTerminalStageRunState } from '@generatorai/workflow-spec';
 import { classified } from '../errors/StageError.js';
 import type { CompiledExpr, CompiledNode } from '../workflow-graph/compile.js';
 import { instanceId } from './ids.js';
-import { instanceScope, mapItemScope, mapStateOf } from './scope.js';
+import { instanceScope, mapItemScope, mapStateOf, scopeIndexOf } from './scope.js';
 import { computeScopeOutcome } from './terminal.js';
 import type { InstanceState, MapItemState, MapState, Usage } from './types.js';
 import { failInstance, stageEvent, type Working } from './working.js';
@@ -228,7 +236,15 @@ export function onMapItemPrepared(
 
 export function onMapItemMerged(w: Working, msg: { stageRunId: string; index: number; ok: boolean; code?: string; error?: string; pr?: { url: string | null; branch: string } | null }): void {
   const inst = w.get(msg.stageRunId);
-  if (!inst || !isMap(inst) || inst.status !== 'running') return;
+  if (!inst || !isMap(inst)) return;
+  const win = inst.containerState.winner;
+  if (inst.status === 'completed' && win?.phase === 'merging' && win.index === msg.index) {
+    const error = msg.ok ? null : `The winner '${win.key}' could not be merged (${msg.code ?? 'merge_failed'}): ${msg.error ?? 'the merge failed'}`;
+    setMap(w, inst, { winner: { ...win, phase: 'done', outcome: msg.ok ? 'merged' : 'failed', error } });
+    mapEvent(w, 'map.winner_settled', inst, { index: win.index, key: win.key, outcome: msg.ok ? 'merged' : 'failed', ...(error ? { error } : {}) });
+    return;
+  }
+  if (inst.status !== 'running') return;
   const it = inst.containerState.items[msg.index];
   if (!it || it.phase !== 'merging') return;
   if (msg.ok) return finishItem(w, inst, it, 'completed', null, null, { pr: msg.pr ?? null });
@@ -242,10 +258,11 @@ function settleItems(w: Working, inst: MapInstance, node: CompiledNode): boolean
   for (const it of inst.containerState.items) {
     if (it.phase !== 'running') continue;
     const scope = w.scopeInstances(inst.id, it.index);
-    if (scope.length === 0 || !scope.every((i) => isTerminalStageRunState(i.status))) continue;
+    if (scope.length === 0 || !scope.every((i) => isTerminalStageRunState(i.status)) || winnerPending(scope)) continue;
     changed = true;
     const outcome = computeScopeOutcome(w.graph, scope, w.scopeFor);
-    if (outcome === 'completed' && map.merge !== 'none' && map.workspace === 'mount_per_item') {
+    // A winner merge brings no item back while the map runs (its judge runs after the map).
+    if (outcome === 'completed' && (map.merge === 'sequential' || map.merge === 'pr_per_item') && map.workspace === 'mount_per_item') {
       setItem(w, inst, it.index, { phase: 'merge_queued' });
       continue;
     }
@@ -288,6 +305,9 @@ function mapOutput(w: Working, inst: MapInstance, node: CompiledNode): Record<st
       error: it.error,
       stages,
       pr: it.pr,
+      // mount_per_item: the item's branch and primary worktree (a judge reads the candidates there).
+      branch: it.branch,
+      workdir: it.primaryDir,
     };
     if (map.select.length > 0) {
       const scope = mapItemScope(ix, inst, it.index);
@@ -308,9 +328,12 @@ function completeMap(w: Working, inst: MapInstance, node: CompiledNode): void {
   const failures = (output['failures'] as unknown[]).length;
   const count = inst.containerState.count;
   const failedPct = count === 0 ? 0 : (failures / count) * 100;
-  setMap(w, inst, { phase: 'done' });
+  const failing = failedPct > map.toleratedFailurePercent;
+  // A winner merge waits for its judge; the item mounts stay until then.
+  const winner = map.winner && map.workspace === 'mount_per_item' && !failing ? { winner: { phase: 'waiting' as const, index: null, key: null, outcome: null, error: null } } : {};
+  setMap(w, inst, { phase: 'done', ...winner });
   if (map.workspace === 'mount_per_item') w.push({ t: 'map_release', stageRunId: inst.id });
-  if (failedPct > map.toleratedFailurePercent) {
+  if (failing) {
     w.instancePatch(inst, { outputData: output });
     const first = inst.containerState.items.find((i) => i.status !== 'completed');
     const err = classified(
@@ -331,6 +354,72 @@ function completeMap(w: Working, inst: MapInstance, node: CompiledNode): void {
   stageEvent(w, 'stage_run.completed', inst, { count, failures });
 }
 
+// ── The winner merge (P08 §7) ─────────────────────────────────────
+
+/** A completed map's winner: once the stages its key reads settled, merge the item it names (or settle without one). */
+function settleWinner(w: Working, inst: MapInstance, node: CompiledNode): boolean {
+  const win = inst.containerState.winner;
+  const spec = node.map!.winner;
+  if (!win || win.phase !== 'waiting' || !spec) return false;
+  const reads = spec.after.map((k) => w.sibling(inst, k)).filter((i): i is InstanceState => i !== undefined);
+  if (reads.some((i) => !isTerminalStageRunState(i.status))) return false;
+  const settle = (outcome: 'none' | 'failed', error: string | null) => {
+    setMap(w, inst, { winner: { ...win, phase: 'done', outcome, error } });
+    mapEvent(w, 'map.winner_settled', inst, { outcome, ...(error ? { error } : {}) });
+    return true;
+  };
+  const unfinished = reads.find((i) => i.status !== 'completed');
+  if (unfinished) return settle('none', `'${unfinished.stageKey}' ${unfinished.status}: no winner was picked`);
+  const r = evalExpr(spec.key, instanceScope(w.ix(), inst));
+  if (!r.ok) return settle('failed', `The winner key could not be evaluated: ${r.message}`);
+  if (r.value === null) return settle('none', null);
+  if (typeof r.value !== 'string' && typeof r.value !== 'number') return settle('failed', `The winner key is not a string (${typeof r.value})`);
+  const key = String(r.value);
+  const it = inst.containerState.items.find((i) => i.key === key);
+  if (!it) return settle('failed', `No item of '${inst.stageKey}' has the key '${key}' (the items: ${inst.containerState.items.map((i) => i.key).join(', ')})`);
+  if (it.status !== 'completed') return settle('failed', `The winner '${key}' did not complete (${it.status ?? it.phase})`);
+  setMap(w, inst, { winner: { ...win, phase: 'merging', index: it.index, key } });
+  mapEvent(w, 'map.winner_selected', inst, { index: it.index, key });
+  w.push({ t: 'map_merge_item', stageRunId: inst.id, index: it.index, strategy: 'sequential' });
+  return true;
+}
+
+/** A scope with a winner merge still to settle has not ended (its judge's successors see the merged winner). */
+export function winnerPending(scope: readonly InstanceState[]): boolean {
+  return scope.some((i) => {
+    const phase = mapStateOf(i)?.winner?.phase;
+    return phase === 'waiting' || phase === 'merging';
+  });
+}
+
+/** A failed winner merge of the run (it fails the run: its outcome would silently lack the winner). */
+export function failedWinner(w: Working): { inst: InstanceState; error: string } | null {
+  for (const i of w.sorted()) {
+    const win = mapStateOf(i)?.winner;
+    if (win?.outcome === 'failed') return { inst: i, error: win.error ?? `The winner merge of '${i.stageKey}' failed` };
+  }
+  return null;
+}
+
+/**
+ * Whether a pending instance waits for a winner merge: an edge into it
+ * comes from a stage a sibling map's winner key reads (the judge). `fail`
+ * once that merge failed.
+ */
+export function winnerGate(w: Working, inst: InstanceState, node: CompiledNode): { kind: 'wait' } | { kind: 'fail'; message: string } | null {
+  if (node.incoming.length === 0) return null;
+  const from = new Set(node.incoming.map((e) => e.from));
+  for (const s of w.ix().scope(inst.scopeId, scopeIndexOf(inst))) {
+    const win = mapStateOf(s)?.winner;
+    if (!win) continue;
+    const reads = w.node(s)?.map?.winner?.after ?? [];
+    if (!reads.some((k) => from.has(k))) continue;
+    if (win.phase !== 'done') return { kind: 'wait' };
+    if (win.outcome === 'failed') return { kind: 'fail', message: win.error ?? `The winner merge of '${s.stageKey}' failed` };
+  }
+  return null;
+}
+
 // ── Settle ────────────────────────────────────────────────────────
 
 /** Maps that can move without a message: ready ones start, finished items settle, free slots start items, the last item completes the map. */
@@ -339,6 +428,10 @@ export function settleMaps(w: Working): boolean {
   for (const inst of w.sorted()) {
     const node = w.node(inst);
     if (!node?.map) continue;
+    if (isMap(inst) && inst.status === 'completed') {
+      if (settleWinner(w, inst, node)) changed = true;
+      continue;
+    }
     if (inst.status === 'ready' && inst.containerState == null) {
       startMap(w, inst, node);
       changed = true;
@@ -370,6 +463,7 @@ export function mapScopes(w: Working): Array<{ containerId: string; iteration: n
 /** A map with an effect in flight (the snapshot, an item's preparation, a merge) keeps the run busy. */
 export function mapBusy(i: InstanceState): boolean {
   const ms = mapStateOf(i);
+  if (ms?.winner?.phase === 'merging') return true;
   if (!ms || i.status !== 'running') return false;
   return ms.phase === 'snapshotting' || ms.items.some((it) => it.phase === 'preparing' || it.phase === 'merging');
 }

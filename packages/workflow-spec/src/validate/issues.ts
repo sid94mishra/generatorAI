@@ -112,7 +112,8 @@ export const VALIDATION_CODES = {
     description: 'loop.wrapUp.stage is not a body agent stage with sessionReuse continue (a warning when the loop has no budget)',
   },
   'check-command': { layer: 'references', severity: 'error', description: 'A check (or map itemSetup) command that is not on the command allow-list' },
-  'map-merge-needs-mount': { layer: 'references', severity: 'error', description: 'A map merge (sequential, pr_per_item) without workspace mount_per_item' },
+  'map-merge-needs-mount': { layer: 'references', severity: 'error', description: 'A map merge (sequential, pr_per_item, winner) without workspace mount_per_item' },
+  'map-winner-unbound': { layer: 'references', severity: 'error', description: "A winner merge whose key reads no stage after the map (nothing picks the winner)" },
   'map-item-setup-needs-mount': { layer: 'references', severity: 'error', description: 'map.itemSetup without workspace mount_per_item' },
   'map-shared-write-concurrency': {
     layer: 'references',

@@ -169,6 +169,20 @@ export interface MapItemState {
   pr: { url: string | null; branch: string } | null;
 }
 
+/**
+ * A winner merge after the map completed (P08 §7):
+ *   waiting  the stages the key reads (the judge) have not settled
+ *   merging  the winner's merge (`map_merge_item`, sequential) is in flight
+ *   done     settled: `outcome` merged, none (no winner picked) or failed
+ */
+export interface MapWinnerState {
+  phase: 'waiting' | 'merging' | 'done';
+  index: number | null;
+  key: string | null;
+  outcome: 'merged' | 'none' | 'failed' | null;
+  error: string | null;
+}
+
 /** A map instance's state (`stage_runs.loop_state`, the container-state column). */
 export interface MapState {
   kind: 'map';
@@ -178,6 +192,8 @@ export interface MapState {
   /** mount_per_item: the snapshot commit of every run mount (alias → sha). */
   snapshot: Record<string, string> | null;
   items: MapItemState[];
+  /** A winner merge's progress once the map completed (merge `{mode: winner}` only). */
+  winner?: MapWinnerState | null;
 }
 
 /** A sub-workflow instance's state. */

@@ -509,16 +509,22 @@ export function reduceEvent(
     // Maps and sub-workflows (P05 §4.1, §4.2): progress notices.
     case 'map.started':
     case 'map.item_completed':
+    case 'map.winner_selected':
+    case 'map.winner_settled':
     case 'subworkflow.child_started': {
       const stageRunId = str(data['stageRunId']);
       const key = str(data['stageKey'] ?? data['instancePath'] ?? stageRunId);
-      const failed = kind === 'map.item_completed' && data['status'] !== 'completed';
+      const failed = (kind === 'map.item_completed' && data['status'] !== 'completed') || (kind === 'map.winner_settled' && data['outcome'] === 'failed');
       const text =
         kind === 'map.started'
           ? `${key}: fanning out over ${num(data['count']) ?? 0} item(s)${data['workspace'] === 'mount_per_item' ? ' (a worktree per item)' : ''}`
           : kind === 'map.item_completed'
             ? `${key}: item ${str(data['key'] ?? data['index'])} ${str(data['status'])}${data['error'] ? ` — ${str(data['error'])}` : ''}`
-            : `${key}: child run ${str(data['childRunId'])} started`;
+            : kind === 'map.winner_selected'
+              ? `${key}: merging the winner ${str(data['key'])}`
+              : kind === 'map.winner_settled'
+                ? `${key}: winner ${str(data['outcome'])}${data['key'] ? ` (${str(data['key'])})` : ''}${data['error'] ? ` — ${str(data['error'])}` : ''}`
+                : `${key}: child run ${str(data['childRunId'])} started`;
       return push(
         base,
         { id: itemId(), kind: 'notice', text, complete: true, at: now, ...(stageRunId ? { stageRunId } : {}), level: failed ? 'warn' : 'info' },

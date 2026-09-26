@@ -16,7 +16,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import {
+  mapMergeMode,
   parseExpression,
+  stagesRead,
   RepairPolicySchema,
   RetryPolicySchema,
   STAGE_DEFAULTS,
@@ -26,6 +28,7 @@ import {
   type ExprNode,
   type JoinPolicy,
   type LoopSpec,
+  type MapMergeMode,
   type MapSpec,
   type PromptDefinition,
   type RepairPolicy,
@@ -85,7 +88,13 @@ export interface CompiledMap {
   concurrency: number;
   toleratedFailurePercent: number;
   workspace: 'shared' | 'mount_per_item';
-  merge: 'none' | 'sequential' | 'pr_per_item';
+  merge: MapMergeMode;
+  /**
+   * A winner merge (P08 §7): the key, and the stages of the map's scope it
+   * reads — once they settled the key is evaluated and the winner merged;
+   * the stages after them wait for that merge.
+   */
+  winner?: { key: CompiledExpr; after: string[] };
   itemSetup: CheckSpec[];
   select: Array<[string, CompiledExpr]>;
 }
@@ -185,7 +194,8 @@ const exprs = (rec: Record<string, string> | undefined): Array<[string, Compiled
     .sort(byKey)
     .map((name) => [name, compileExpr(rec![name])!]);
 
-function compileMap(spec: MapSpec): CompiledMap {
+function compileMap(spec: MapSpec, siblings: ReadonlySet<string>): CompiledMap {
+  const winner = typeof spec.merge === 'object' ? compileExpr(spec.merge.key)! : undefined;
   return {
     items: compileExpr(spec.items)!,
     ...(spec.itemKey !== undefined ? { itemKey: compileExpr(spec.itemKey)! } : {}),
@@ -193,7 +203,8 @@ function compileMap(spec: MapSpec): CompiledMap {
     concurrency: spec.concurrency,
     toleratedFailurePercent: spec.toleratedFailurePercent,
     workspace: spec.workspace,
-    merge: spec.merge,
+    merge: mapMergeMode(spec.merge),
+    ...(winner ? { winner: { key: winner, after: 'ast' in winner ? stagesRead(winner.ast).filter((k) => siblings.has(k)).sort(byKey) : [] } } : {}),
     itemSetup: spec.itemSetup ?? [],
     select: exprs(spec.output.select),
   };
@@ -233,6 +244,8 @@ export function compile(graph: WorkflowGraph): CompiledWorkflow {
     if (!s.parentKey) continue;
     bodies.set(s.parentKey, [...(bodies.get(s.parentKey) ?? []), s.key]);
   }
+  const siblingsOf = (key: string, parentKey: string | undefined) =>
+    new Set(graph.stages.filter((s) => s.parentKey === parentKey && s.key !== key).map((s) => s.key));
   graph.stages.forEach((stage, ordinal) => {
     // Per-kind fields (P05 §1.3): only agent and check stages run attempts.
     const agent = stage.kind === 'agent' ? stage : undefined;
@@ -263,7 +276,7 @@ export function compile(graph: WorkflowGraph): CompiledWorkflow {
       outgoing: [],
       body: [...(bodies.get(stage.key) ?? [])].sort(byKey),
       ...(stage.kind === 'loop' ? { loop: compileLoop(stage.loop) } : {}),
-      ...(stage.kind === 'map' ? { map: compileMap(stage.map) } : {}),
+      ...(stage.kind === 'map' ? { map: compileMap(stage.map, siblingsOf(stage.key, stage.parentKey)) } : {}),
       ...(stage.kind === 'wait' ? { wait: compileWait(stage.wait) } : {}),
       ...(stage.kind === 'subworkflow' ? { subworkflow: compileSubworkflow(stage.subworkflow) } : {}),
     });
@@ -285,6 +298,19 @@ export function compile(graph: WorkflowGraph): CompiledWorkflow {
   for (const n of nodes.values()) {
     n.incoming.sort((a, b) => byKey(a.from, b.from));
     n.outgoing.sort((a, b) => byKey(a.to, b.to));
+  }
+  // A winner key waits only for the stages it reads AFTER the map (upstream ones have settled).
+  for (const n of nodes.values()) {
+    if (!n.map?.winner) continue;
+    const after = new Set<string>();
+    const frontier = n.outgoing.map((e) => e.to);
+    while (frontier.length > 0) {
+      const k = frontier.pop()!;
+      if (after.has(k)) continue;
+      after.add(k);
+      frontier.push(...(nodes.get(k)?.outgoing.map((e) => e.to) ?? []));
+    }
+    n.map.winner.after = n.map.winner.after.filter((k) => after.has(k));
   }
   const rootKeys = [...nodes.values()].filter((n) => !n.parentKey).map((n) => n.key).sort(byKey);
   return {

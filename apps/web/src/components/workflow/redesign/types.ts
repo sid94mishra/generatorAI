@@ -3,7 +3,7 @@
 // Preview only. Feed mock data at /__redesign/workflow-run.
 // ────────────────────────────────────────────────────────────────
 
-import type { MapItemView, StageRunStatus } from '@generatorai/shared';
+import type { MapItemView, MapWinnerView, StageRunStatus } from '@generatorai/shared';
 import type { TimelineStep, UsageInfo } from '@/components/chat/redesign/types.js';
 import type { ContextUsageSnapshot } from '@generatorai/client-core';
 import type { StreamSegment } from '@/components/agent/deriveTimeline.js';
@@ -174,6 +174,8 @@ export interface MapView {
   merge?: string;
   toleratedFailurePercent?: number;
   items: MapItemView[];
+  /** A winner merge (P08) once the map completed: the judge's pick and how its merge went. */
+  winner?: MapWinnerView | null;
 }
 
 /** A wait instance: its question while it waits, its outcome once resolved. */

@@ -436,6 +436,26 @@ export type LoopStage = z.infer<typeof LoopStageSchema>;
 export const MAP_WORKSPACES = ['shared', 'mount_per_item'] as const;
 export const MAP_MERGES = ['none', 'sequential', 'pr_per_item'] as const;
 
+/** P08 §7: only the winning item comes back, picked by a stage after the map (the judge). */
+export const MapWinnerMergeSchema = z
+  .object({
+    mode: z.literal('winner').describe('Merge only the winning item into the run mount; the other item mounts are kept'),
+    key: ExprSchema.describe(
+      "The winner's item key, read from a stage after the map (for example stages.judge.output.winner); null merges nothing. Stages after that stage wait for the merge",
+    ),
+  })
+  .strict()
+  .describe('Winner merge (judge panel, best-of-N)');
+export type MapWinnerMerge = z.infer<typeof MapWinnerMergeSchema>;
+
+/** Every merge mode of a map: the string modes and `winner`. */
+export type MapMergeMode = (typeof MAP_MERGES)[number] | 'winner';
+
+/** The mode of a map's `merge` setting. */
+export function mapMergeMode(merge: MapSpec['merge']): MapMergeMode {
+  return typeof merge === 'string' ? merge : merge.mode;
+}
+
 export const MapSpecSchema = z
   .object({
     items: ExprSchema.describe('The list to fan out over (evaluated when the map starts, context T of its enclosing loops)'),
@@ -457,10 +477,10 @@ export const MapSpecSchema = z
         "shared: every item works in the run's mounts; mount_per_item: each item gets its own git worktree cut from a snapshot of the run mounts",
       ),
     merge: z
-      .enum(MAP_MERGES)
+      .union([z.enum(MAP_MERGES), MapWinnerMergeSchema])
       .default('none')
       .describe(
-        'How item mounts come back (mount_per_item only): none keeps them; sequential merges each into the run mount; pr_per_item pushes a branch per item',
+        'How item mounts come back (mount_per_item only): none keeps them; sequential merges each into the run mount; pr_per_item pushes a branch per item; {mode: winner, key} merges the one item a later stage picks',
       ),
     itemSetup: z
       .array(CheckSpecSchema)

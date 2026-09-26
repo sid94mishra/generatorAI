@@ -20,7 +20,8 @@
 // `maps.<key>` is `{item, index, key, count}` of every enclosing map (the
 // outer item of a nested map, M3). A map's `items` reads the map's own
 // place; its `itemKey` also sees `item`; its `output.select` also sees the
-// item's body stages. `child` stays unavailable.
+// item's body stages; a winner merge's `key` (P08) also sees the map and
+// the stages after it in its scope (the judge). `child` stays unavailable.
 // ────────────────────────────────────────────────────────────────
 
 import { checkExpression, type TypeEnv } from '../expr/typecheck.js';
@@ -152,8 +153,8 @@ export type ExprPlace =
   | { kind: 'edge'; from: string }
   /** A loop's settings: exits/score/select (E), carry (C), carryInit (before the first iteration). */
   | { kind: 'loop'; key: string; context: 'E' | 'C' | 'init' }
-  /** A map's settings: `items` (the map's place), `itemKey` (plus `item`), `output.select` (plus the item's body). */
-  | { kind: 'map'; key: string; context: 'items' | 'item' | 'select' }
+  /** A map's settings: `items` (the map's place), `itemKey` (plus `item`), `output.select` (plus the item's body), a winner merge's `key` (plus the map and the stages after it). */
+  | { kind: 'map'; key: string; context: 'items' | 'item' | 'select' | 'winner' }
   /** Workflow outputs and post-processing: every top-level stage. */
   | { kind: 'workflow' }
   /** Preprocessing: no stage has run. */
@@ -299,6 +300,8 @@ export class GraphTypes {
       error: nullable(T.string),
       stages: { kind: 'object', fields: stages, unknown: { code: 'expr-unknown-stage', noun: 'body stage' } },
       pr: nullable(T.object({ url: nullable(T.string), branch: T.string })),
+      branch: nullable(T.string),
+      workdir: nullable(T.string),
     };
     const select = map.map.output.select ?? {};
     if (Object.keys(select).length > 0) {
@@ -533,11 +536,22 @@ export class GraphTypes {
     });
   }
 
-  /** The environment of a map's own settings (`items`, `itemKey`, `output.select`). */
-  private mapEnv(map: MapStage, context: 'items' | 'item' | 'select'): TypeEnv {
+  /** Stages of the same scope that run after `key` (its descendants by edges). */
+  downstream(key: string): string[] {
+    const parent = this.byKey.get(key)?.parentKey;
+    return this.ctx.graph.stages.filter((s) => s.key !== key && s.parentKey === parent && this.ctx.upstream(s.key).has(key)).map((s) => s.key);
+  }
+
+  /** The environment of a map's own settings (`items`, `itemKey`, `output.select`, a winner merge's `key`). */
+  private mapEnv(map: MapStage, context: 'items' | 'item' | 'select' | 'winner'): TypeEnv {
     const outer = this.containerRoots(this.containersOf(map.key));
     if (context === 'items') {
       return this.rootsWith(this.stagesRoot(new Set(this.ctx.upstream(map.key)), this.insideOf(map.key)), outer);
+    }
+    if (context === 'winner') {
+      // Evaluated once the stages it reads after the map settled: the map and those stages are visible.
+      const visible = new Set([...this.ctx.upstream(map.key), map.key, ...this.downstream(map.key)]);
+      return this.rootsWith(this.stagesRoot(visible, this.insideOf(map.key)), outer);
     }
     const mapsField = outer['maps'] as Extract<ExprType, { kind: 'object' }> | undefined;
     const own = {

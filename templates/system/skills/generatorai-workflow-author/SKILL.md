@@ -3,7 +3,7 @@ name: generatorai-workflow-author
 description: Author GeneratorAI workflows, the multi-stage agent pipelines stored as one WorkflowGraph JSON document, through the validate, plan and draft pipeline. Use when the user asks to create, change, fix or explain a GeneratorAI workflow, pipeline or multi-stage automation (plan-implement-review, fix/review loops, test until green, fan-out over files, approval-gated releases, CI waits, sub-workflows), or to make a repeated task into a workflow. Covers the schema, stage kinds, edges, Expression v2 templates, loops and maps, agents and models, codebases, commits and pull requests, and handing the result to a person as a draft to publish.
 metadata:
   schemaVersion: "2"
-  schemaHash: "ffff579e1a770fb4"
+  schemaHash: "390bc95bf2e67b64"
 ---
 
 # GeneratorAI workflow author
@@ -13,7 +13,7 @@ metadata:
 A GeneratorAI workflow is ONE JSON document, a `WorkflowGraph`: `{"formatVersion": 2, "workflow": {…}, "stages": […], "edges": […]}`.
 Stages are the nodes of a DAG; edges connect stage **keys**. A person reviews and publishes what you write.
 
-This copy of the skill matches schema version 2, hash `ffff579e1a770fb4`. Pass the hash as `schemaHash` to
+This copy of the skill matches schema version 2, hash `390bc95bf2e67b64`. Pass the hash as `schemaHash` to
 `validate_workflow`: when the server answers with `schemaDrift`, your copy is stale, so read the server's
 `get_workflow_authoring_guide` topics (or the MCP resources) instead of these files.
 

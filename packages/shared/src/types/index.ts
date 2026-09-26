@@ -156,6 +156,7 @@ export type {
   LoopStateView,
   MapItemView,
   MapStateView,
+  MapWinnerView,
   SubworkflowStateView,
   PendingDecisionView,
   WorkflowRunPermissionMode,

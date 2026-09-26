@@ -852,6 +852,106 @@ export const adversarialVerify = define({
   }),
 });
 
+// P08 §7 judge panel / best-of-N: candidates from several angles, a judge, only the winner merged.
+export const judgePanel = define({
+  name: 'judgePanel',
+  title: 'Judge panel (best of N)',
+  description:
+    'Several agents solve the same task from different angles, each in its own worktree; a read-only judge compares them, and only the winner it picks is merged into the run mount.',
+  params: z
+    .object({
+      key: key.default('panel').describe('Key of the map stage'),
+      parentKey: key.optional().describe('Container the panel sits in'),
+      attemptKey: key.default('attempt'),
+      judgeKey: key.default('judge'),
+      angles: z
+        .array(z.string().regex(/^[a-z][a-z0-9_-]{0,39}$/, 'lower case, digits, - and _'))
+        .min(2)
+        .max(8)
+        .default(['minimal', 'thorough', 'idiomatic'])
+        .describe('One candidate per angle; the angle is its item key'),
+      toleratedFailurePercent: z.number().min(0).max(100).default(50).describe('Candidates that may fail before the panel fails'),
+      itemSetup: z.array(setupCommand).max(5).default([]),
+      attemptPrompt: z
+        .string()
+        .min(1)
+        .default(
+          'Solve this task: {{variables.task}}\nTake the {{item}} approach. Work only in this worktree, run the relevant tests, then report a summary, the files you changed and the risks you see.',
+        ),
+    })
+    .strict()
+    .refine((v) => new Set(v.angles).size === v.angles.length, { message: 'angles must be unique', path: ['angles'] }),
+  make: (v) => ({
+    stages: [
+      {
+        key: v.key,
+        name: 'Candidates',
+        kind: 'map',
+        ...parent(v),
+        map: {
+          items: `[${v.angles.map((a) => `'${a}'`).join(', ')}]`,
+          itemKey: 'item',
+          maxItems: v.angles.length,
+          concurrency: v.angles.length,
+          toleratedFailurePercent: v.toleratedFailurePercent,
+          workspace: 'mount_per_item',
+          merge: { mode: 'winner', key: `stages.${v.judgeKey}.output.winner` },
+          ...(v.itemSetup.length > 0 ? { itemSetup: v.itemSetup.map((c) => ({ command: c.command, args: c.args })) } : {}),
+        },
+      },
+      {
+        key: v.attemptKey,
+        name: 'Candidate',
+        kind: 'agent',
+        parentKey: v.key,
+        prompts: [{ label: 'attempt', text: v.attemptPrompt }],
+        output: {
+          format: 'json',
+          schema: {
+            type: 'object',
+            required: ['summary', 'files'],
+            properties: {
+              summary: { type: 'string' },
+              files: { type: 'array', items: { type: 'string' } },
+              risks: { type: 'array', items: { type: 'string' } },
+            },
+          },
+        },
+      },
+      {
+        key: v.judgeKey,
+        name: 'Judge',
+        kind: 'agent',
+        ...parent(v),
+        // Read-only: the judge compares; the engine merges the winner it picks.
+        session: { permissionMode: 'plan' },
+        prompts: [
+          {
+            label: 'judge',
+            text: `Task: {{variables.task}}\nIndependent candidates solved it, one per angle, each in its own git worktree (its \`workdir\` below). Compare them for correctness, completeness, test results and risk; read their changed files in their workdirs where you need to. Score every candidate 0-10 and pick the best one as \`winner\` (its key).\n{{ stages.${v.key}.output.results | json }}`,
+          },
+        ],
+        output: {
+          format: 'json',
+          schema: {
+            type: 'object',
+            required: ['winner', 'scores', 'rationale'],
+            properties: {
+              winner: { enum: v.angles },
+              scores: {
+                type: 'array',
+                items: { type: 'object', required: ['candidate', 'score'], properties: { candidate: { enum: v.angles }, score: { type: 'number', minimum: 0, maximum: 10 }, notes: { type: 'string' } } },
+              },
+              rationale: { type: 'string' },
+            },
+          },
+        },
+      },
+    ],
+    edges: [{ from: v.key, to: v.judgeKey }],
+  }),
+});
+
 // ── Wait presets (P05 §4.3) ──────────────────────────────────────
 
 // W1: a person approves the release and picks the environment; a timeout escalates.
@@ -1087,6 +1187,7 @@ export const PRESETS = {
   migrateUntilClean,
   multiSourceResearch,
   adversarialVerify,
+  judgePanel,
   approvalGatedRelease,
   ciGatedDeploy,
   cooldownThenVerify,
@@ -1277,6 +1378,16 @@ const TEMPLATE_SOURCES: TemplateSource[] = [
         ],
       },
     ],
+  },
+  {
+    id: 'judge-panel',
+    category: 'code-generation',
+    name: 'Judge panel (best of N)',
+    description: 'Three agents solve a task from different angles in their own worktrees; a read-only judge scores them, and only the winner is merged into the run mount.',
+    tags: ['map', 'judge-panel'],
+    variables: [{ name: 'task', type: 'text', label: 'Task' }],
+    lifecycle: { requiresCodebase: true },
+    fragment: judgePanel.build(),
   },
   {
     id: 'approval-gated-release',

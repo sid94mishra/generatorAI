@@ -20,7 +20,7 @@ import { buildScopeModel, type ExprPlace, type ScopeModel } from './scopeModel.j
 export type PlaceHint =
   | ExprPlace
   | { kind: 'loop'; context: 'E' | 'C' | 'init' }
-  | { kind: 'map'; context: 'items' | 'item' | 'select' };
+  | { kind: 'map'; context: 'items' | 'item' | 'select' | 'winner' };
 
 function resolvePlace(hint: PlaceHint | undefined): ExprPlace | null {
   if (!hint) return inferPlace();

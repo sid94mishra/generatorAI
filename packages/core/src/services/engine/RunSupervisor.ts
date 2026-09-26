@@ -559,8 +559,13 @@ export class RunSupervisor {
       // Maps and sub-workflows whose effect died with the process (P05 §4.1, §4.2).
       for (const inst of state.instances) {
         const cs = inst.containerState;
-        if (!cs || inst.status !== 'running' || cs.phase === 'done') continue;
         const again = (d: Parameters<EffectsDispatcher['dispatch']>[1]['effects'][number]) => this.effects.dispatch(runId, { effects: [d], timers: [], outbox: [] });
+        // A completed map's winner merge (P08 §7) in flight.
+        if (cs?.kind === 'map' && cs.winner?.phase === 'merging' && cs.winner.index !== null) {
+          again({ t: 'map_merge_item', stageRunId: inst.id, index: cs.winner.index, strategy: 'sequential' });
+          continue;
+        }
+        if (!cs || inst.status !== 'running' || cs.phase === 'done') continue;
         if (cs.kind === 'map') {
           if (cs.phase === 'snapshotting') again({ t: 'map_snapshot', stageRunId: inst.id });
           else if (cs.snapshot) await this.maps.reacquire(runId, inst.id);

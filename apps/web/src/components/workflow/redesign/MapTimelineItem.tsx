@@ -53,6 +53,27 @@ export function MapHeaderBadges({ map }: { map: MapView }) {
           {map.failed} failed{map.toleratedFailurePercent ? ` (tolerated ${map.toleratedFailurePercent}%)` : ''}
         </span>
       )}
+      {map.winner && (
+        <span
+          className={cn(
+            CHIP,
+            map.winner.outcome === 'failed'
+              ? 'bg-[var(--color-danger)]/10 text-[var(--color-danger)]'
+              : 'bg-[var(--color-success)]/10 text-[var(--color-success)]',
+          )}
+          title={map.winner.error ?? undefined}
+        >
+          {map.winner.phase === 'waiting'
+            ? 'waiting for the judge'
+            : map.winner.phase === 'merging'
+              ? `merging winner ${map.winner.key ?? ''}`
+              : map.winner.outcome === 'merged'
+                ? `winner ${map.winner.key ?? ''} merged`
+                : map.winner.outcome === 'none'
+                  ? 'no winner'
+                  : 'winner merge failed'}
+        </span>
+      )}
     </>
   );
 }

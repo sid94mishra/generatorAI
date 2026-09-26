@@ -27,7 +27,7 @@ A map evaluates its list when it starts and runs its body once per item, at most
 
 - **Shared workspace** — every item works in the run's own mounts. Parallel items that write can collide; make the body read-only or run one item at a time.
 - **A worktree per item** (`mount_per_item`) — the map snapshots the run's repositories (uncommitted changes included) and gives each item its own git worktree on its own branch. Setup commands (for example installing dependencies) run in each item's worktree first. Other stages that write to the run's repositories wait while the map runs.
-- **Merges** — `sequential` merges each item back into the run's repositories one at a time; a conflicting item fails and its worktree is kept for inspection. `pr_per_item` pushes each item's branch and opens a pull request when the workflow's post-processing settings allow it.
+- **Merges** — `sequential` merges each item back into the run's repositories one at a time; a conflicting item fails and its worktree is kept for inspection. `pr_per_item` pushes each item's branch and opens a pull request when the workflow's post-processing settings allow it. **Merge the winner** brings back only the item a later stage picks: a judge after the map compares the candidates (each result names its worktree) and outputs the winner's key; stages after the judge wait until that one item is merged.
 
 The map fails when more items fail than `toleratedFailurePercent` allows. Its output lists every item with its status, its body stages' results and the fields of the map's per-item `select`.
 
@@ -63,6 +63,7 @@ Every scenario is an ordinary, editable workflow generated from a preset. The sy
 | Per-file migration | Migrate each file in its own worktree with its own pull request |
 | Multi-source research | Research several sources in parallel, then synthesize |
 | Adversarial verification | Verify each finding from three angles; confirm on two of three |
+| Judge panel (best of N) | Solve a task from three angles in separate worktrees; a read-only judge picks the winner, and only the winner is merged |
 | Approval-gated release | Deploy after an approval that picks the environment; escalate on timeout |
 | CI-gated deploy | Push, wait for CI to report on the commit, deploy |
 | Cool down, then verify | Deploy, wait, verify |

@@ -130,7 +130,8 @@ map: {
   concurrency: 1..16 = 4,
   toleratedFailurePercent: 0..100 = 0,
   workspace: 'shared' | 'mount_per_item' = 'shared',
-  merge: 'none' | 'sequential' | 'pr_per_item' = 'none',   // mount_per_item only
+  merge: 'none' | 'sequential' | 'pr_per_item'             // mount_per_item only
+       | { mode: 'winner', key: Expr } = 'none',            // P08: only the item a later stage picks
   itemSetup?: CheckSpec[],            // mount_per_item only: run in each item mount first
   output: { select?: Record<name, Expr> },                  // evaluated per item
 }
@@ -152,7 +153,8 @@ map: {
   toleratedFailurePercent` completes the map; otherwise it fails with `map_tolerance_exceeded`
   (its output is still set). The output is `{count, results, failures}` where
   `results[i] = {index, key, item, status, error, stages: {<bodyKey>: {status, output,
-  summary}}, pr, …select}` and `failures` is the entries that did not complete.
+  summary}}, pr, branch, workdir, …select}` (`branch` and `workdir`: a mount_per_item item's
+  branch and primary worktree) and `failures` is the entries that did not complete.
 - **`shared`.** Every item works in the run's mounts. Several items writing at once is only a
   warning (`map-shared-write-concurrency`, at save and in the invocation plan): make the body
   read-only (`session.permissionMode: plan`), set `concurrency: 1`, or use `mount_per_item`.
@@ -177,6 +179,18 @@ map: {
   `lifecycle.postProcessing.autoPush` / `autoCreatePR`, pushed and given a pull request; the
   entry's `pr` is `{url, branch}`. With `merge: none` the item mounts stay until workspace
   retention reclaims them.
+- **Winner merge** (P08, judge panel / best-of-N): `merge: {mode: 'winner', key}`. No item comes
+  back while the map runs. The key reads a stage that runs **after** the map (the judge, for
+  example `stages.judge.output.winner`; `map-winner-unbound` otherwise) and is typed in the map's
+  scope plus the map and its successors. Once the map completed and every stage the key reads
+  after it settled, the key is evaluated: `null`, or a judge that did not complete, merges
+  nothing; a key naming a completed item merges that item (the `sequential` merge above), and
+  the other item mounts stay (the judge reads them through `results[i].workdir`). Stages after
+  the judge wait for that merge, and the judge's scope (the top level, a loop iteration, a map
+  item) does not end before it. A key naming no completed item, or a merge conflict, fails those
+  stages and the run with `map_winner_failed`. The map's state keeps the pick
+  (`winner: {phase, index, key, outcome, error}`), and the events `map.winner_selected` /
+  `map.winner_settled` report it.
 
 ---
 
@@ -310,6 +324,7 @@ name or a template id appears in the scheduler or the engine.
 | `per-file-migration` | `perFileMigration` | M1 | scan → map(migrate, itemKey `item.path`, mount_per_item, pr_per_item) |
 | `multi-source-research` | `multiSourceResearch` | M2 | map over the `list` variable `sources` (read-only, shared) → synthesize |
 | `adversarial-verify` | `adversarialVerify` | M3 | audit → map(findings) of map(three angles, read-only verify); `confirmed` when 2 of 3 agree → report |
+| `judge-panel` | `judgePanel` | P08 judge panel | map(three angles, mount_per_item, merge winner) → read-only judge `{winner, scores, rationale}`; only the winner is merged |
 | `approval-gated-release` | `approvalGatedRelease` | W1 | prepare → approval wait (form: environment, notes; timeout completes) → deploy on approved, escalate on timeout |
 | `ci-gated-deploy` | `ciGatedDeploy` | W2 | push (sha) → event wait `concat('ci:', sha)` (CI posts to its callback URL) → deploy |
 | `cooldown-then-verify` | `cooldownThenVerify` | W3 | deploy → timer wait → verify |
@@ -342,6 +357,20 @@ The examples, as graphs:
 { "key": "verify", "parentKey": "verify_map", "kind": "agent", "session": { "permissionMode": "plan" },
   "prompts": [{ "label": "verify", "text": "Independently verify this finding from the {{item}} angle. Default to real=false unless you can demonstrate it:\n{{maps.verify_findings.item | json}}" }],
   "output": { "format": "json", "schema": { "type": "object", "required": ["real", "evidence"], "properties": { "real": { "type": "boolean" }, "evidence": { "type": "string" } } } } }
+```
+
+```jsonc
+// Judge panel — best of N; only the judge's pick is merged (edge panel -> judge)
+{ "key": "panel", "kind": "map",
+  "map": { "items": "['minimal', 'thorough', 'idiomatic']", "itemKey": "item", "maxItems": 3, "concurrency": 3, "toleratedFailurePercent": 50,
+           "workspace": "mount_per_item", "merge": { "mode": "winner", "key": "stages.judge.output.winner" } } },
+{ "key": "attempt", "parentKey": "panel", "kind": "agent", "prompts": [{ "label": "attempt", "text": "Solve this task: {{variables.task}}
+Take the {{item}} approach." }] },
+{ "key": "judge", "kind": "agent", "session": { "permissionMode": "plan" },
+  "prompts": [{ "label": "judge", "text": "Score every candidate and pick the best as `winner`.
+{{ stages.panel.output.results | json }}" }],
+  "output": { "format": "json", "schema": { "type": "object", "required": ["winner", "scores", "rationale"],
+    "properties": { "winner": { "enum": ["minimal", "thorough", "idiomatic"] }, "scores": { "type": "array" }, "rationale": { "type": "string" } } } } }
 ```
 
 ```jsonc

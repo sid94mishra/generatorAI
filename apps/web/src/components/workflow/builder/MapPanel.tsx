@@ -12,7 +12,7 @@
 
 import React from 'react';
 import { GitMerge, Layers3, ListChecks, Package, Plus, SquareTerminal, Trash2, Wand2 } from 'lucide-react';
-import { MAP_MERGES, type CheckSpec, type MapSpec, type MapStage } from '@generatorai/workflow-spec';
+import { MAP_MERGES, mapMergeMode, type CheckSpec, type MapMergeMode, type MapSpec, type MapStage } from '@generatorai/workflow-spec';
 import type { BuilderIssue, StageUpdate } from '@/stores/workflowBuilderStore.js';
 import { Button, Select } from '@/components/ui/index.js';
 import { CollapsibleSection } from '../CollapsibleSection.js';
@@ -27,11 +27,13 @@ interface MapPanelProps {
   issues: readonly BuilderIssue[];
 }
 
-const MERGE_LABELS: Record<(typeof MAP_MERGES)[number], { label: string; description: string }> = {
+const MERGE_LABELS: Record<MapMergeMode, { label: string; description: string }> = {
   none: { label: 'Keep the item mounts', description: 'Nothing comes back: each item keeps its worktree until the run ends' },
   sequential: { label: 'Merge each item', description: 'A 3-way merge into the run mount, one item at a time; a conflict fails that item' },
   pr_per_item: { label: 'A branch (and PR) per item', description: 'Push each item on its own branch; PRs follow the post-processing settings' },
+  winner: { label: 'Merge the winner', description: 'A stage after the map (a judge) picks one item; only that item is merged into the run mount' },
 };
+const MERGE_MODES: readonly MapMergeMode[] = [...MAP_MERGES, 'winner'];
 
 /** A new item setup step (an install that needs no network by default). */
 function blankSetup(): CheckSpec {
@@ -47,6 +49,7 @@ export function MapPanel({ stage, onUpdate, issues }: MapPanelProps) {
     onUpdate({ map: next as MapSpec });
   };
   const perItem = map.workspace === 'mount_per_item';
+  const winner = typeof map.merge === 'object' ? map.merge : undefined;
   const setup = map.itemSetup ?? [];
   const setSetup = (next: CheckSpec[]) => setMap({ itemSetup: next.length > 0 ? next : undefined });
 
@@ -138,14 +141,33 @@ export function MapPanel({ stage, onUpdate, issues }: MapPanelProps) {
           <label className="mb-1.5 block text-xs font-medium text-foreground">When an item finishes</label>
           <Select
             aria-label="Map merge"
-            value={map.merge}
-            onChange={(v) => setMap({ merge: v as MapSpec['merge'] })}
+            value={mapMergeMode(map.merge)}
+            onChange={(v) =>
+              setMap({ merge: v === 'winner' ? { mode: 'winner', key: winner?.key ?? '' } : (v as Exclude<MapMergeMode, 'winner'>) })
+            }
             disabled={!perItem}
-            options={MAP_MERGES.map((m) => ({ value: m, label: MERGE_LABELS[m].label, description: MERGE_LABELS[m].description }))}
+            options={MERGE_MODES.map((m) => ({ value: m, label: MERGE_LABELS[m].label, description: MERGE_LABELS[m].description }))}
           />
           {!perItem && <p className="mt-1 text-[10px] text-muted-foreground">Merges need a worktree per item.</p>}
           <FieldIssues issues={issuesAt(issues, '/map/merge')} />
         </div>
+        {winner && (
+          <div>
+            <label htmlFor="map-winner-key" className="mb-1.5 block text-xs font-medium text-foreground">Winner</label>
+            <ExpressionField
+              id="map-winner-key"
+              place={{ kind: 'map', context: 'winner' }}
+              value={winner.key}
+              onChange={(key) => setMap({ merge: { mode: 'winner', key } })}
+              placeholder="e.g. stages.judge.output.winner"
+              issues={issuesAt(issues, '/map/merge/key')}
+              ariaLabel="Map winner key expression"
+            />
+            <p className="mt-1 text-[10px] text-muted-foreground">
+              The winning item&apos;s key, read from a stage after the map (the judge). Stages after the judge wait until the winner is merged; null merges nothing.
+            </p>
+          </div>
+        )}
       </CollapsibleSection>
 
       <CollapsibleSection

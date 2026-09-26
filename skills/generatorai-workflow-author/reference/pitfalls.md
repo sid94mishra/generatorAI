@@ -168,7 +168,8 @@ not, but read them.
 | `carry-type` | references | error | A carried value whose type disagrees with its carryInit or carrySchema |
 | `wrapup-stage` | references | error | loop.wrapUp.stage is not a body agent stage with sessionReuse continue (a warning when the loop has no budget) |
 | `check-command` | references | error | A check (or map itemSetup) command that is not on the command allow-list |
-| `map-merge-needs-mount` | references | error | A map merge (sequential, pr_per_item) without workspace mount_per_item |
+| `map-merge-needs-mount` | references | error | A map merge (sequential, pr_per_item, winner) without workspace mount_per_item |
+| `map-winner-unbound` | references | error | A winner merge whose key reads no stage after the map (nothing picks the winner) |
 | `map-item-setup-needs-mount` | references | error | map.itemSetup without workspace mount_per_item |
 | `map-shared-write-concurrency` | references | warning | A map running several items at once in one shared workspace with body stages that may write |
 | `wait-form` | references | error | An approval wait's form that is not a usable JSON Schema object |

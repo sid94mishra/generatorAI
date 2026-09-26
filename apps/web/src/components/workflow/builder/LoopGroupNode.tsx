@@ -13,7 +13,7 @@ import React, { memo, useCallback } from 'react';
 import { Handle, Position, type Node, type NodeProps } from '@xyflow/react';
 import { useShallow } from 'zustand/react/shallow';
 import { AlertCircle, Plus, Trash2, Ungroup } from 'lucide-react';
-import type { StageKind } from '@generatorai/workflow-spec';
+import { mapMergeMode, type MapMergeMode, type StageKind } from '@generatorai/workflow-spec';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import {
@@ -27,6 +27,9 @@ import { useWorkflowBuilderStore, type StageNodeData } from '@/stores/workflowBu
 import { useCanvasReadonly } from '../canvasContext.js';
 import { GROUP_HEADER } from './containerLayout.js';
 import { ADDABLE_KINDS, KIND_META } from './kindMeta.js';
+
+/** How a map's item mounts come back, as its header chip says it. */
+const MERGE_CHIP: Record<MapMergeMode, string> = { none: '', sequential: ' · merge', pr_per_item: ' · PR per item', winner: ' · merge the winner' };
 
 /** Short label of an exit action, as the quick rows name them. */
 const ACTION_LABELS: Record<string, string> = {
@@ -118,7 +121,7 @@ function LoopGroupNodeComponent({ id, data, selected }: NodeProps<Node<StageNode
                 </Tooltip>
                 {map.workspace === 'mount_per_item' && (
                   <span className="rounded bg-[var(--color-subtle)] px-1 py-px">
-                    mount per item{map.merge !== 'none' ? ` · ${map.merge === 'pr_per_item' ? 'PR per item' : 'merge'}` : ''}
+                    mount per item{MERGE_CHIP[mapMergeMode(map.merge)]}
                   </span>
                 )}
                 {map.toleratedFailurePercent > 0 && <span>tolerates {map.toleratedFailurePercent}% failed</span>}
