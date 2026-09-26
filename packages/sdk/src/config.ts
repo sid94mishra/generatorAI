@@ -71,6 +71,15 @@ export interface GeneratorAIConfig {
    */
   maxConcurrentStages?: number;
 
+  /**
+   * Admission flow-key limits, merged over the defaults (P07 WP-7.2). Keys:
+   * `global` (every stage launch), `provider:<id>` (e.g. `provider:claude-agent`,
+   * default 4 — each turn is a ~250 MB CLI process), `model:<id>`, and
+   * `check:global` (validation checks, default 2). Each value is clamped to
+   * 1..256. `flowLimits.global` wins over `maxConcurrentStages` when both are given.
+   */
+  flowLimits?: Record<string, number>;
+
   /** Logger configuration. Set to false to disable. */
   logger?: LoggerConfig | false;
 
@@ -88,6 +97,7 @@ export interface ResolvedConfig {
   scriptsDir: string;
   templatesDir: string;
   maxConcurrentStages: number;
+  flowLimits: Record<string, number>;
   logger: LoggerConfig | false;
   sandbox: SandboxConfig;
 }
@@ -107,6 +117,7 @@ export function resolveConfig(config: GeneratorAIConfig): ResolvedConfig {
     scriptsDir: config.scriptsDir ?? './workflows',
     templatesDir: config.templatesDir ?? './templates',
     maxConcurrentStages: config.maxConcurrentStages ?? 8,
+    flowLimits: config.flowLimits ?? {},
     logger: config.logger ?? { level: 'info' },
     sandbox: config.sandbox ?? { enabled: false },
   };
