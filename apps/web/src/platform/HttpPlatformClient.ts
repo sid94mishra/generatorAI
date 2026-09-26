@@ -281,6 +281,7 @@ import type {
   WorkflowRun,
   WorkflowRunWithStages,
   LoopIteration,
+  PendingDecisionView,
   RunWorkspaceInfo,
   Automation,
   AutomationWithExecutions,
@@ -1158,6 +1159,10 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async listLoopIterations(runId: string, instanceId: string): Promise<LoopIteration[]> {
     return apiFetch<LoopIteration[]>(`${this.baseUrl}/api/workflow-runs/${runId}/instances/${encodeURIComponent(instanceId)}/iterations`);
+  }
+
+  async listPendingDecisions(runId: string): Promise<PendingDecisionView[]> {
+    return apiFetch<PendingDecisionView[]>(`${this.baseUrl}/api/workflow-runs/${runId}/pending-decisions`);
   }
 
   async getScriptAllowlist(): Promise<{ commands: string[]; defaults: string[]; extras: string[] }> {

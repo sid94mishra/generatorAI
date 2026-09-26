@@ -14,7 +14,7 @@ import type {
   WorkflowTemplate,
 } from '@generatorai/workflow-spec';
 import type { InvocationPlan, InvocationRequest, InvocationResult, RunCommand } from '@generatorai/workflow-spec';
-import type { LoopIteration, WorkflowRun, WorkflowRunWithStages } from './WorkflowRun.js';
+import type { LoopIteration, PendingDecisionView, WorkflowRun, WorkflowRunWithStages } from './WorkflowRun.js';
 
 /** Files a run start uploads before invoking, by category. */
 export type InvocationFiles = Partial<Record<'skills' | 'agents' | 'prompts', Array<Blob & { readonly name: string }>>>;
@@ -126,6 +126,8 @@ export interface IPlatformClient {
   runCommand(runId: string, command: RunCommand): Promise<void>;
   /** A loop instance's finished iterations, oldest first (P05). */
   listLoopIterations(runId: string, instanceId: string): Promise<LoopIteration[]>;
+  /** Every decision the run waits on, its sub-workflow children's mirrored (P05). */
+  listPendingDecisions(runId: string): Promise<PendingDecisionView[]>;
   /** The commands a check stage may run: the defaults plus the operator's extras (P05). */
   getScriptAllowlist(): Promise<{ commands: string[]; defaults: string[]; extras: string[] }>;
   deleteRun(id: string): Promise<void>;

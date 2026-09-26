@@ -23,6 +23,8 @@ export const workflowKeys = {
   /** Every loop's finished iterations of a run (the prefix the loop events invalidate). */
   loopIterationsOfRun: (runId: string) => ['loop-iterations', runId] as const,
   loopIterations: (runId: string, instanceId: string) => ['loop-iterations', runId, instanceId] as const,
+  /** The decisions a run waits on, its sub-workflow children's mirrored (P05). */
+  pendingDecisions: (runId: string) => ['pending-decisions', runId] as const,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -248,6 +250,8 @@ export function useRunCommand() {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
       queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
       queryClient.invalidateQueries({ queryKey: workflowKeys.loopIterationsOfRun(runId) });
+      // A decision of a sub-workflow child is mirrored in its parent's list too.
+      queryClient.invalidateQueries({ queryKey: ['pending-decisions'] });
     },
   });
 }
@@ -268,14 +272,16 @@ export function useLoopIterations(runId: string | undefined, instanceId: string 
   });
 }
 
-/** The run-stream events a loop emits (P05 §2.6). */
-const LOOP_EVENT_PREFIXES = ['loop.'] as const;
+/** The run-stream events of the P05 containers and waits: loops, maps, sub-workflows, waits arming. */
+const LOOP_EVENT_PREFIXES = ['loop.', 'map.', 'subworkflow.', 'stage_run.waiting', 'stage_run.awaiting_input', 'stage_run.completed'] as const;
 
 /**
- * Keep a run's loops live: on every `loop.*` event (iteration started or
- * completed, exit, parked, command applied, wrap-up, errors) the run
- * refetches (the loop instance's `loopState`) and so do the loops'
- * iteration rows. The stage events already refetch the run themselves.
+ * Keep a run's containers live: on every `loop.*` (iteration started or
+ * completed, exit, parked, command applied, wrap-up, errors), `map.*`
+ * (items started and completed) and `subworkflow.*` event, and when a wait
+ * arms or a decision appears or resolves, the run refetches (the
+ * instances' loop and map state), and so do the loops' iteration rows and
+ * the run's pending decisions.
  */
 export function useLoopEventRefetch(runId: string | undefined, enabled = true) {
   const queryClient = useQueryClient();
@@ -288,12 +294,28 @@ export function useLoopEventRefetch(runId: string | undefined, enabled = true) {
         onMessage: () => {
           void queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
           void queryClient.invalidateQueries({ queryKey: workflowKeys.loopIterationsOfRun(runId) });
+          void queryClient.invalidateQueries({ queryKey: workflowKeys.pendingDecisions(runId) });
         },
       },
       LOOP_EVENT_PREFIXES,
     );
     return () => { handle.close(); };
   }, [runId, enabled, queryClient]);
+}
+
+/**
+ * The decisions a run waits on (P05): its own and, mirrored, those of its
+ * running sub-workflow children. A child's decisions do not reach the
+ * parent's stream, so the list also polls while the run is live.
+ */
+export function usePendingDecisions(runId: string | undefined, opts: { live?: boolean } = {}) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: workflowKeys.pendingDecisions(runId ?? ''),
+    queryFn: () => platform.listPendingDecisions(runId!),
+    enabled: !!runId,
+    refetchInterval: opts.live ? 4_000 : false,
+  });
 }
 
 // ── A stage is a compact chat (P03b) ─────────────────────────────

@@ -212,6 +212,7 @@ export class MockPlatformClient implements IPlatformClient {
 
   runCommand = vi.fn(async (_runId: string, _command: RunCommand): Promise<void> => {});
   listLoopIterations = vi.fn(async (_runId: string, _instanceId: string) => [] as never[]);
+  listPendingDecisions = vi.fn(async (_runId: string) => [] as never[]);
   getScriptAllowlist = vi.fn(async () => ({ commands: [] as string[], defaults: [] as string[], extras: [] as string[] }));
   deleteRun = vi.fn(async (_id: string): Promise<void> => {});
 

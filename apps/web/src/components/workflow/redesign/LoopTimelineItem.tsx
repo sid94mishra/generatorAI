@@ -27,6 +27,7 @@ import { useLoopIterations } from '@/hooks/workflowQueries.js';
 import { useStageChatHistory } from '@/hooks/queries.js';
 import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
 import { LoopDecisionCard } from './LoopDecisionCard.js';
+import { ControlFlowNode } from './ControlFlowNode.js';
 import { loopBadge, loopExitText, loopRulesText } from './loopView.js';
 import type { LoopView, StageView } from './types.js';
 
@@ -146,7 +147,7 @@ export function LoopTimelineItem({ runId, stage, bodies, focusedId, showConnecto
 
   const renderInstances = (list: StageView[]) =>
     list.map((s, i) => (
-      <LoopBodyStage
+      <ControlFlowNode
         key={s.id}
         runId={runId}
         stage={s}
@@ -155,6 +156,7 @@ export function LoopTimelineItem({ runId, stage, bodies, focusedId, showConnecto
         showConnector={i < list.length - 1}
         renderStage={renderStage}
         onCommand={onCommand}
+        inContainer
       />
     ));
 
@@ -237,17 +239,8 @@ export function LoopTimelineItem({ runId, stage, bodies, focusedId, showConnecto
   );
 }
 
-/** One body instance: a nested loop recurses; a stage gets its loop turns above its transcript. */
-function LoopBodyStage(props: {
-  runId: string;
-  stage: StageView;
-  bodies: Record<string, StageView[]>;
-  focusedId: string | null;
-  showConnector: boolean;
-  renderStage: RenderStage;
-  onCommand: (command: RunCommand) => Promise<void>;
-}) {
-  if (props.stage.loop) return <LoopTimelineItem {...props} />;
+/** A plain body instance of a container (ControlFlowNode renders the containers and waits): its loop turns above its transcript. */
+export function LoopBodyStage(props: { stage: StageView; showConnector: boolean; renderStage: RenderStage }) {
   return <LoopTurnsStage stage={props.stage} showConnector={props.showConnector} renderStage={props.renderStage} />;
 }
 

@@ -236,6 +236,27 @@ export interface SubworkflowStateView {
   inputs: Record<string, unknown>;
 }
 
+/**
+ * A decision a run waits on (`GET /workflow-runs/:id/pending-decisions`,
+ * P05): a completion review, an in-turn gate, a parked loop, an approval or
+ * event wait — a sub-workflow child's too (`runId` is then the child run that
+ * owns the instance and `via` the sub-workflow instances it came through).
+ */
+export interface PendingDecisionView {
+  runId: string;
+  instanceId: string;
+  stageKey: string;
+  instancePath: string;
+  name: string;
+  /** `wait`, or the interrupt kind (stage_completion_review, tool_permission, question, plan_review, loop_decision). */
+  kind: string;
+  waitType?: 'approval' | 'event';
+  interruptData: unknown;
+  version: number;
+  callback?: { url: string; token: string };
+  via: Array<{ runId: string; instanceId: string; stageKey: string; name: string }>;
+}
+
 /** One finished loop iteration (`loop_iterations`, P05 §2.6). */
 export interface LoopIteration {
   k: number;

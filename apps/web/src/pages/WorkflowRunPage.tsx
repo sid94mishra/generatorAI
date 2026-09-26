@@ -37,6 +37,7 @@ import {
   useResolveStageInteraction,
   useSetRunPermissionMode,
   useLoopEventRefetch,
+  usePendingDecisions,
 } from '@/hooks/workflowQueries.js';
 import { useWorkspaceChangeSummary, useWorkspaceCheckpoints } from '@/hooks/queries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
@@ -53,7 +54,15 @@ import {
   type StageMenuActions,
 } from '@/components/workflow/redesign/StageTimelineItem.js';
 import { StageComposer } from '@/components/workflow/redesign/StageComposer.js';
-import { LoopTimelineItem, type RenderStage } from '@/components/workflow/redesign/LoopTimelineItem.js';
+import { type RenderStage } from '@/components/workflow/redesign/LoopTimelineItem.js';
+import { ControlFlowNode } from '@/components/workflow/redesign/ControlFlowNode.js';
+import {
+  CompensationBadge,
+  CompensationBanner,
+  NeedsDecisionPanel,
+  RunDecisionsContext,
+  type RunDecisionsValue,
+} from '@/components/workflow/redesign/ControlFlowCards.js';
 import { RightInspector } from '@/components/workflow/redesign/RightInspector.js';
 import { createStageViewCache, deriveRunView, pickStageStreams } from '@/components/workflow/redesign/deriveRunView.js';
 import type { FileChange, StageView } from '@/components/workflow/redesign/types.js';
@@ -281,6 +290,8 @@ export function WorkflowRunPage() {
   // Loops (P05): every `loop.*` event refetches the run and the iterations.
   // Subscribed after the run stream so it joins that scope's subscription.
   useLoopEventRefetch(runId, !!runData && !runIsTerminal);
+  // Every decision the run waits on, its sub-workflow children's mirrored (P05).
+  const { data: pendingDecisions } = usePendingDecisions(runId, { live: !!runData && !runIsTerminal });
 
   // Cleanup
   useEffect(() => () => { clearRun(); }, [clearRun]);
@@ -364,6 +375,18 @@ export function WorkflowRunPage() {
     if (!runId) return Promise.resolve();
     return runCommandAsync({ runId, command }).then(() => undefined, () => undefined);
   }, [runId, runCommandAsync]);
+  // A mirrored decision is the child run's: its command goes there.
+  const decisionsValue = useMemo<RunDecisionsValue | null>(
+    () =>
+      runId
+        ? {
+            runId,
+            decisions: pendingDecisions ?? [],
+            commandTo: (target, command) => runCommandAsync({ runId: target, command }).then(() => undefined, () => undefined),
+          }
+        : null,
+    [runId, pendingDecisions, runCommandAsync],
+  );
 
   // Pause in `interrupt` mode: in-flight stages pause too, not just new launches.
   const handlePause = useCallback(() => { void sendCommand({ command: 'pause', mode: 'interrupt' }); }, [sendCommand]);
@@ -516,9 +539,9 @@ export function WorkflowRunPage() {
   const inspectorFiles = useStageFiles(runData?.workspaceId, focusedStage, rightPaneOpen);
 
   // The focused stage's composer (a stage is a compact chat).
-  // A loop is not a conversation: its decisions are the decision card's.
+  // A loop, a map, a wait or a sub-workflow is not a conversation: its decisions are its cards'.
   const focusedComposer = useMemo(
-    () => (runId && focusedStage && focusedStage.status !== 'skipped' && focusedStage.status !== 'cancelled' && !focusedStage.loop
+    () => (runId && focusedStage && focusedStage.status !== 'skipped' && focusedStage.status !== 'cancelled' && !focusedStage.loop && !focusedStage.map && !focusedStage.wait && !focusedStage.subworkflow
       ? <StageComposer runId={runId} stage={focusedStage} workspaceId={runData?.workspaceId} />
       : null),
     [runId, focusedStage, runData?.workspaceId],
@@ -549,7 +572,9 @@ export function WorkflowRunPage() {
       onSelectFiles={selectStage}
       onSelectOutput={selectStage}
       onOpenInspector={handleOpenInspector}
-      {...(opts.headerExtra ? { headerExtra: opts.headerExtra } : {})}
+      {...(opts.headerExtra || s.compensates
+        ? { headerExtra: <>{opts.headerExtra}{s.compensates && <CompensationBadge />}</> }
+        : {})}
       {...(opts.body ? { body: opts.body } : {})}
       {...(opts.preamble ? { preamble: opts.preamble } : {})}
       {...(opts.hidePrompt ? { hidePrompt: true } : {})}
@@ -656,6 +681,14 @@ export function WorkflowRunPage() {
         />
       )}
 
+      {/* Compensation (P05 WP-5B.4): the finalize phase of a failed or cancelled run */}
+      {runView.compensation && (
+        <CompensationBanner
+          compensation={runView.compensation}
+          count={runView.stages.filter((s) => s.compensates && s.status === 'completed').length}
+        />
+      )}
+
       {/* Run-level error banner */}
       {runView.error && (
         <div className="border-b border-[var(--color-danger)]/30 bg-[var(--color-danger)]/[0.06] px-4 py-2 text-sm text-[var(--color-danger)]">
@@ -672,10 +705,14 @@ export function WorkflowRunPage() {
       <div className="relative flex flex-1 overflow-hidden">
         <div ref={scrollHostRef} className="min-w-0 flex-1 overflow-y-auto">
           <div className="relative px-6 py-4">
+            <RunDecisionsContext.Provider value={decisionsValue}>
+            {runId && (
+              <NeedsDecisionPanel decisions={pendingDecisions ?? []} runId={runId} onFocus={focusStage} />
+            )}
             {runView.topLevel.map((s, i) => {
               const showConnector = i < runView.topLevel.length - 1;
-              return s.loop && runId ? (
-                <LoopTimelineItem
+              return runId ? (
+                <ControlFlowNode
                   key={s.id}
                   runId={runId}
                   stage={s}
@@ -684,11 +721,13 @@ export function WorkflowRunPage() {
                   showConnector={showConnector}
                   renderStage={renderStage}
                   onCommand={sendCommand}
+                  openWhenFinished={i === runView.topLevel.length - 1}
                 />
               ) : (
                 renderStage(s, { showConnector, openWhenFinished: i === runView.topLevel.length - 1 })
               );
             })}
+            </RunDecisionsContext.Provider>
 
             {/* Bottom control row: timeline toggle */}
             <div className="mt-6 flex items-center justify-center gap-2 pb-6">

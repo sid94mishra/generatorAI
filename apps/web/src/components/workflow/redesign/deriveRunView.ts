@@ -18,7 +18,7 @@ import type { EdgeSpec, StageSpec } from '@generatorai/workflow-spec';
 import { interpolateVariables } from '@generatorai/shared';
 import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
-import type { RunView, StageView, StageStatus, RunStatus, HookInvocation } from './types.js';
+import type { RunView, StageView, StageStatus, RunStatus, HookInvocation, MapView, WaitView } from './types.js';
 import { deriveTimeline, deriveAnswer, deriveSegments, widgetBlocks } from '@/components/agent/deriveTimeline.js';
 import { deriveLoopView, parseLoopPath } from './loopView.js';
 
@@ -225,8 +225,10 @@ interface StageViewInputs {
   dependsOn: string;
   shared: boolean;
   vars: Record<string, unknown> | undefined;
-  /** The enclosing loop instance's id (a body instance). */
+  /** The enclosing loop or map instance's id (a body instance). */
   loopId: string | undefined;
+  /** The enclosing container's kind (`loop`, `map`). */
+  containerKind: string | undefined;
 }
 
 export type StageViewCache = Map<string, { inputs: StageViewInputs; view: StageView }>;
@@ -239,7 +241,7 @@ function sameInputs(a: StageViewInputs, b: StageViewInputs): boolean {
   return (
     a.sr === b.sr && a.stream === b.stream && a.def === b.def && a.order === b.order && a.depth === b.depth &&
     a.parallel === b.parallel && a.dependsOn === b.dependsOn && a.shared === b.shared && a.vars === b.vars &&
-    a.loopId === b.loopId
+    a.loopId === b.loopId && a.containerKind === b.containerKind
   );
 }
 
@@ -312,6 +314,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
       shared: !!sr.sessionId && (stageCountBySession.get(sr.sessionId) ?? 0) > 1,
       vars: run.variables as Record<string, unknown> | undefined,
       loopId: loopIdOf(sr),
+      containerKind: def?.parentKey ? stageDefByKey.get(def.parentKey)?.kind : undefined,
     };
     seen.add(sr.id);
     const cached = cache?.get(sr.id);
@@ -322,9 +325,10 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
   });
   if (cache) for (const id of [...cache.keys()]) if (!seen.has(id)) cache.delete(id);
 
-  // Loop body instances group under their loop (P05): the timeline lists
-  // the loop once and its iterations inside it. A body whose loop is not in
-  // the run (defensive) stays top level rather than vanishing.
+  // Loop and map body instances group under their container (P05): the
+  // timeline lists the container once and its iterations or items inside
+  // it. A body whose container is not in the run (defensive) stays top
+  // level rather than vanishing.
   const ids = new Set(stages.map((s) => s.id));
   const topLevel: StageView[] = [];
   const loopBodies: Record<string, StageView[]> = {};
@@ -343,8 +347,15 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
     stages,
     topLevel,
     loopBodies,
+    ...compensationOf(run),
     error: run.error,
   };
+}
+
+/** The finalize `compensate` phase of the run's lifecycle journal, once it ran. */
+function compensationOf(run: WorkflowRunWithStages): Pick<RunView, 'compensation'> {
+  const rec = run.systemVars?.lifecycle?.['finalize/compensate'];
+  return rec ? { compensation: { status: rec.status, at: rec.at, ...(rec.detail ? { detail: rec.detail } : {}) } } : {};
 }
 
 /** One stage's view (the cache miss path). */
@@ -447,7 +458,11 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
   };
 }
 
-/** The loop fields of a StageView: a loop's badge and rules, a body instance's loop and iteration. */
+/**
+ * The control-flow fields of a StageView (P05): a loop's badge and rules, a
+ * map's items, a wait's question or outcome, a sub-workflow's child run, and
+ * a body instance's container with its iteration or item.
+ */
 function loopFields(inputs: StageViewInputs): Partial<StageView> {
   const { sr, def } = inputs;
   const out: Partial<StageView> = { kind: sr.kind };
@@ -456,12 +471,84 @@ function loopFields(inputs: StageViewInputs): Partial<StageView> {
     out.kind = 'loop';
     out.loop = loop;
   }
+  const map = deriveMapView(sr, def);
+  if (map) {
+    out.kind = 'map';
+    out.map = map;
+  }
+  const wait = deriveWaitView(sr, def);
+  if (wait) {
+    out.kind = 'wait';
+    out.wait = wait;
+  }
+  if (sr.kind === 'subworkflow' || def?.kind === 'subworkflow') {
+    out.kind = 'subworkflow';
+    out.subworkflow = { phase: sr.subworkflowState?.phase ?? 'starting', childRunId: sr.subworkflowState?.childRunId ?? null };
+  }
+  if ((def?.compensate?.length ?? 0) > 0) out.compensates = true;
   if (inputs.loopId) {
     out.loopId = inputs.loopId;
     const parsed = parseLoopPath(sr.instancePath);
-    if (typeof sr.iterationIndex === 'number') out.iterationIndex = sr.iterationIndex;
-    else if (parsed && typeof parsed.iteration === 'number') out.iterationIndex = parsed.iteration;
-    if (parsed?.iteration === 'wrapup') out.wrapUp = true;
+    const inMap = inputs.containerKind === 'map' || typeof sr.itemIndex === 'number';
+    if (inMap) {
+      if (typeof sr.itemIndex === 'number') out.itemIndex = sr.itemIndex;
+      else if (parsed && typeof parsed.iteration === 'number') out.itemIndex = parsed.iteration;
+      if (sr.itemKey) out.itemKey = sr.itemKey;
+    } else {
+      if (typeof sr.iterationIndex === 'number') out.iterationIndex = sr.iterationIndex;
+      else if (parsed && typeof parsed.iteration === 'number') out.iterationIndex = parsed.iteration;
+      if (parsed?.iteration === 'wrapup') out.wrapUp = true;
+    }
+  }
+  return out;
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
+
+/** A map instance's view (P05 §4.1); undefined for any other kind. */
+export function deriveMapView(sr: StageRun, def: StageSpec | undefined): MapView | undefined {
+  if (sr.kind !== 'map' && def?.kind !== 'map') return undefined;
+  const spec = def?.kind === 'map' ? def.map : undefined;
+  const ms = sr.mapState;
+  const items = ms?.items ?? [];
+  return {
+    phase: ms?.phase ?? 'pending',
+    count: ms?.count ?? 0,
+    done: items.filter((i) => i.phase === 'done').length,
+    failed: items.filter((i) => i.status === 'failed' || i.status === 'cancelled').length,
+    ...(spec ? { concurrency: spec.concurrency, workspace: spec.workspace, merge: spec.merge, toleratedFailurePercent: spec.toleratedFailurePercent } : {}),
+    items,
+  };
+}
+
+/** A wait instance's view (P05 §4.3): its question while waiting, its outcome once resolved. */
+export function deriveWaitView(sr: StageRun, def: StageSpec | undefined): WaitView | undefined {
+  if (sr.kind !== 'wait' && def?.kind !== 'wait') return undefined;
+  const spec = def?.kind === 'wait' ? def.wait : undefined;
+  const d = isRecord(sr.interruptData) && sr.interruptData['kind'] === 'wait' ? sr.interruptData : undefined;
+  const type = (d?.['type'] as WaitView['type'] | undefined) ?? spec?.type ?? 'approval';
+  const out: WaitView = { type };
+  const label = typeof d?.['label'] === 'string' ? d['label'] : spec?.type === 'approval' ? spec.prompt.label : undefined;
+  if (label) out.label = label;
+  const prompt = typeof d?.['prompt'] === 'string' ? d['prompt'] : spec?.type === 'approval' ? spec.prompt.text : undefined;
+  if (prompt) out.prompt = prompt;
+  const form = isRecord(d?.['form']) ? d['form'] : spec?.type === 'approval' && spec.form ? spec.form : undefined;
+  if (form) out.form = form;
+  if (typeof d?.['eventKey'] === 'string') out.eventKey = d['eventKey'];
+  if (typeof d?.['until'] === 'number') out.until = d['until'];
+  const onTimeout = typeof d?.['onTimeout'] === 'string' ? d['onTimeout'] : spec && spec.type !== 'timer' ? spec.onTimeout : undefined;
+  if (onTimeout) out.onTimeout = onTimeout;
+  if (sr.callback) out.callback = sr.callback;
+  const o = sr.outputData;
+  if (sr.status === 'completed' && isRecord(o) && typeof o['outcome'] === 'string') {
+    out.outcome = {
+      outcome: o['outcome'],
+      data: o['data'] ?? null,
+      by: typeof o['by'] === 'string' ? o['by'] : null,
+      at: typeof o['at'] === 'number' ? o['at'] : 0,
+    };
   }
   return out;
 }

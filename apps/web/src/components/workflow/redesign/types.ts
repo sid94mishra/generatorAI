@@ -3,7 +3,7 @@
 // Preview only. Feed mock data at /__redesign/workflow-run.
 // ────────────────────────────────────────────────────────────────
 
-import type { StageRunStatus } from '@generatorai/shared';
+import type { MapItemView, StageRunStatus } from '@generatorai/shared';
 import type { TimelineStep, UsageInfo } from '@/components/chat/redesign/types.js';
 import type { ContextUsageSnapshot } from '@generatorai/client-core';
 import type { StreamSegment } from '@/components/agent/deriveTimeline.js';
@@ -149,6 +149,47 @@ export interface StageView {
   wrapUp?: boolean;
   /** A loop instance: its badge, rules, streaks and pending decision. */
   loop?: LoopView;
+  /** A map body instance: the item it belongs to (P05 §4.1). */
+  itemIndex?: number;
+  itemKey?: string;
+  /** A map instance: its items. */
+  map?: MapView;
+  /** A wait instance: what it waits for (P05 §4.3). */
+  wait?: WaitView;
+  /** A sub-workflow instance: its child run (P05 §4.2). */
+  subworkflow?: { phase: string; childRunId: string | null };
+  /** The stage declares compensation actions (run, last completed first, when the run fails or is cancelled). */
+  compensates?: boolean;
+}
+
+/** A map instance as the run page shows it (from `mapState` and the pinned spec). */
+export interface MapView {
+  phase: string;
+  count: number;
+  /** Items settled (completed, failed or cancelled). */
+  done: number;
+  failed: number;
+  concurrency?: number;
+  workspace?: string;
+  merge?: string;
+  toleratedFailurePercent?: number;
+  items: MapItemView[];
+}
+
+/** A wait instance: its question while it waits, its outcome once resolved. */
+export interface WaitView {
+  type: 'approval' | 'event' | 'timer';
+  label?: string;
+  prompt?: string;
+  /** JSON Schema of the approver's input. */
+  form?: Record<string, unknown>;
+  eventKey?: string;
+  /** When the timer or the timeout fires (epoch ms). */
+  until?: number;
+  onTimeout?: string;
+  callback?: { url: string; token: string };
+  /** The resolved wait's output. */
+  outcome?: { outcome: string; data: unknown; by: string | null; at: number };
 }
 
 /** One exit rule of a loop with its current streak. */
@@ -202,8 +243,10 @@ export interface RunView {
   stages: StageView[];
   /** The stages outside any loop, in order: what the timeline, pipeline and header list. */
   topLevel: StageView[];
-  /** A loop instance's body instances (every iteration and the wrap-up), by the loop's id. */
+  /** A loop's or a map's body instances (every iteration, the wrap-up, every item), by the container's id. */
   loopBodies: Record<string, StageView[]>;
+  /** The finalize `compensate` phase, once it ran (a failed or cancelled run). */
+  compensation?: { status: 'done' | 'failed'; detail?: string; at: number };
   /** Optional run-level error. */
   error?: string;
 }

@@ -157,6 +157,7 @@ export type {
   MapItemView,
   MapStateView,
   SubworkflowStateView,
+  PendingDecisionView,
   WorkflowRunPermissionMode,
   ArtifactManifestEntry,
 } from './WorkflowRun.js';
