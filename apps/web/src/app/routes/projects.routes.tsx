@@ -10,8 +10,8 @@ export const projectsRoutes: RouteObject[] = [
   ),
   defineRoute(
     'projects/new',
-    () => import('@/pages/CreateProjectPage.js').then((m) => ({ default: m.CreateProjectPage })),
-    { legacyHeader: true, nav: 'projects', title: 'Create Project' },
+    () => import('@/features/projects/CreateProjectPage.js').then((m) => ({ default: m.CreateProjectPage })),
+    { legacyHeader: false, nav: 'projects', title: 'New project' },
   ),
   defineRoute(
     'projects/:id',

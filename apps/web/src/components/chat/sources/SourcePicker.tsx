@@ -29,7 +29,7 @@ import { Badge, Button, Checkbox, Input, Select, Spinner, Tooltip } from '@/comp
 import { useProjects, useProjectCodebases, useCodebaseBranches } from '@/hooks/projectQueries.js';
 import { useFsGitInfo, useReadFsGitInfo } from '@/hooks/sourceQueries.js';
 import { cn } from '@/lib/utils.js';
-import { DirectoryBrowser } from './DirectoryBrowser.js';
+import { DirectoryBrowser } from '@/blocks/directory-browser/DirectoryBrowser.js';
 import {
   defaultNewBranch,
   draftFromCodebase,
@@ -313,6 +313,7 @@ export function SourcePicker({
         open={browserOpen}
         onClose={() => setBrowserOpen(false)}
         onPick={(p) => void addFolder(p)}
+        description="The agent will work in the folder you pick."
       />
     </div>
   );

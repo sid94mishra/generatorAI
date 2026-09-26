@@ -24,15 +24,17 @@ test.describe('Projects list', () => {
 });
 
 test.describe('Create project', () => {
+  // P5-03: T-03 FormWithAside — h1 "New project", Name field, ActionBar
+  // primary "Create project" (gated on a name).
   test('Create is gated on a name, then creates and navigates to detail', async ({ page, gotoApp, tracker }) => {
     await gotoApp('/projects/new');
-    await expect(page.getByRole('heading', { name: 'Create Project' })).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'New project', level: 1 })).toBeVisible();
 
-    const create = page.getByRole('button', { name: 'Create Project', exact: true });
+    const create = page.getByRole('button', { name: 'Create project', exact: true });
     await expect(create).toBeDisabled();
 
     const name = `W4 Created ${Date.now()}`;
-    await page.getByPlaceholder(/E-Commerce Platform/i).fill(name);
+    await page.getByRole('textbox', { name: 'Name' }).fill(name);
     await expect(create).toBeEnabled();
     await create.click();
 

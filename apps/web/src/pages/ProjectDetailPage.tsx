@@ -36,7 +36,7 @@ import {
   CheckCircle2,
 } from 'lucide-react';
 import { toast } from '@/components/Toast.js';
-import { DirectoryBrowser } from '@/components/chat/sources/DirectoryBrowser.js';
+import { DirectoryBrowser } from '@/blocks/directory-browser/DirectoryBrowser.js';
 
 import {
   useProject,
