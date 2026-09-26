@@ -120,9 +120,9 @@
     "passed": true
   },
   {
-    "id": "script-profile",
-    "module": "packages/workflow-spec/src/definition.ts",
-    "schema": "ScriptRunProfileSchema",
+    "id": "run-profile",
+    "module": "packages/workflow-spec/src/schemas/invocation.ts",
+    "schema": "RunProfileSchema",
     "passed": true
   },
   {

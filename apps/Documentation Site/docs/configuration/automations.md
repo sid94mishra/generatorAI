@@ -261,9 +261,10 @@ const RESERVED_FIELD_NAMES = new Set([
   'hasOwnProperty',
   'isPrototypeOf',
   'propertyIsEnumerable',
-  '__iteration_index',
-  '__iteration_total',
 ]);
+
+/** Engine-reserved variable names (`__*`, `repo_path_*`, `repo_branch_*`) never come from a dataset (C-3, W-06). */
+const ENGINE_RESERVED_FIELD = /^(__|repo_path_|repo_branch_)/;
 
 const DataFieldDefSchema = z.object({
   name: z
@@ -271,7 +272,7 @@ const DataFieldDefSchema = z.object({
     .min(1)
     .max(100)
     .regex(dataFieldNameRegex, 'Field name must be a valid identifier')
-    .refine((n) => !RESERVED_FIELD_NAMES.has(n), {
+    .refine((n) => !RESERVED_FIELD_NAMES.has(n) && !ENGINE_RESERVED_FIELD.test(n), {
       message: 'Field name is reserved and cannot be used',
     }),
   type: z.enum(['string', 'number', 'boolean', 'date', 'json']),

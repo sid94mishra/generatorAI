@@ -52,20 +52,20 @@ Source: `apps/server/src/routes/automations.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/automations` | 173 |
-| `GET` | `/api/automations` | 197 |
-| `POST` | `/api/automations/preview-iterations` | 213 |
-| `GET` | `/api/automations/:id` | 235 |
-| `PATCH` | `/api/automations/:id` | 249 |
-| `DELETE` | `/api/automations/:id` | 273 |
-| `POST` | `/api/automations/:id/enable` | 285 |
-| `POST` | `/api/automations/:id/disable` | 295 |
-| `POST` | `/api/automations/:id/rotate-webhook-token` | 313 |
-| `POST` | `/api/automations/:id/trigger` | 339 |
-| `POST` | `/api/automations/webhooks/:token` | 399 |
-| `GET` | `/api/automations/:id/executions` | 467 |
-| `GET` | `/api/automations/:id/executions/:execId` | 477 |
-| `POST` | `/api/automations/:id/executions/:execId/cancel` | 491 |
+| `POST` | `/api/automations` | 117 |
+| `GET` | `/api/automations` | 141 |
+| `POST` | `/api/automations/preview-iterations` | 157 |
+| `GET` | `/api/automations/:id` | 179 |
+| `PATCH` | `/api/automations/:id` | 193 |
+| `DELETE` | `/api/automations/:id` | 217 |
+| `POST` | `/api/automations/:id/enable` | 229 |
+| `POST` | `/api/automations/:id/disable` | 239 |
+| `POST` | `/api/automations/:id/rotate-webhook-token` | 257 |
+| `POST` | `/api/automations/:id/trigger` | 283 |
+| `POST` | `/api/automations/webhooks/:token` | 343 |
+| `GET` | `/api/automations/:id/executions` | 411 |
+| `GET` | `/api/automations/:id/executions/:execId` | 421 |
+| `POST` | `/api/automations/:id/executions/:execId/cancel` | 435 |
 
 ## browser
 
@@ -256,24 +256,6 @@ Source: `apps/server/src/routes/openapi.ts`.
 | --- | --- | --- |
 | `GET` | `/api/openapi.json` | 26 |
 | `GET` | `/api/docs` | 30 |
-
-## orchestrator
-
-Source: `apps/server/src/routes/orchestrator.ts`.
-
-| Method | Path | Source line |
-| --- | --- | --- |
-| `POST` | `/api/orchestrator/runs` | 95 |
-| `POST` | `/api/orchestrator/runs/:id/cancel` | 169 |
-| `POST` | `/api/orchestrator/workflows/:id/uploads` | 188 |
-| `GET` | `/api/orchestrator/workflows/:id/files` | 253 |
-| `GET` | `/api/orchestrator/workflows/:id/files/download` | 281 |
-| `DELETE` | `/api/orchestrator/workflows/:id/files` | 325 |
-| `POST` | `/api/orchestrator/runs/:id/uploads` | 357 |
-| `GET` | `/api/orchestrator/runs/:id/workspace` | 437 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/download` | 548 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/content` | 615 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/diff` | 675 |
 
 ## projects
 
@@ -472,25 +454,44 @@ Source: `apps/server/src/routes/workflowDefinitions.ts`.
 | `GET` | `/api/workflow-definitions/:id/export` | 166 |
 | `DELETE` | `/api/workflow-definitions/:id` | 179 |
 
+## workflowInvocations
+
+Source: `apps/server/src/routes/workflowInvocations.ts`.
+
+| Method | Path | Source line |
+| --- | --- | --- |
+| `POST` | `/api/workflow-invocations/uploads` | 99 |
+| `POST` | `/api/workflow-invocations/plan` | 111 |
+| `POST` | `/api/workflow-invocations` | 120 |
+| `GET` | `/api/workflow-invocations/:runId/digest` | 147 |
+
+## workflowRunWorkspace
+
+Source: `apps/server/src/routes/workflowRunWorkspace.ts`.
+
+| Method | Path | Source line |
+| --- | --- | --- |
+| `GET` | `/api/workflow-runs/:id/workspace` | 125 |
+| `GET` | `/api/workflow-runs/:id/workspace/download` | 151 |
+| `GET` | `/api/workflow-runs/:id/workspace/content` | 188 |
+| `GET` | `/api/workflow-runs/:id/workspace/diff` | 221 |
+
 ## workflowRuns
 
 Source: `apps/server/src/routes/workflowRuns.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/workflow-runs` | 89 |
-| `GET` | `/api/workflow-runs` | 102 |
-| `GET` | `/api/workflow-runs/:id` | 132 |
-| `POST` | `/api/workflow-runs/:id/start` | 146 |
-| `POST` | `/api/workflow-runs/:id/commands` | 160 |
-| `POST` | `/api/workflow-runs/:id/fork` | 183 |
-| `DELETE` | `/api/workflow-runs/:id` | 195 |
-| `GET` | `/api/workflow-runs/:id/stages` | 214 |
-| `POST` | `/api/workflow-runs/:id/instances/:instanceId/messages` | 233 |
-| `POST` | `/api/workflow-runs/:id/instances/:instanceId/turn/cancel` | 278 |
-| `GET` | `/api/workflow-runs/:id/instances/:instanceId/attachments/:artifactId` | 323 |
-| `GET` | `/api/workflow-runs/:id/permission-mode` | 352 |
-| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 363 |
+| `GET` | `/api/workflow-runs` | 76 |
+| `GET` | `/api/workflow-runs/:id` | 106 |
+| `POST` | `/api/workflow-runs/:id/commands` | 121 |
+| `DELETE` | `/api/workflow-runs/:id` | 143 |
+| `GET` | `/api/workflow-runs/:id/stages` | 162 |
+| `POST` | `/api/workflow-runs/:id/instances/:instanceId/messages` | 181 |
+| `POST` | `/api/workflow-runs/:id/instances/:instanceId/turn/cancel` | 226 |
+| `GET` | `/api/workflow-runs/:id/instances/:instanceId/attachments/:artifactId` | 271 |
+| `GET` | `/api/workflow-runs/:id/permission-mode` | 300 |
+| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 311 |
 
 ## workflowScripts
 
@@ -498,15 +499,14 @@ Source: `apps/server/src/routes/workflowScripts.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/workflow-scripts` | 30 |
-| `GET` | `/api/workflow-scripts/:id` | 40 |
-| `GET` | `/api/workflow-scripts/:id/profiles` | 55 |
-| `POST` | `/api/workflow-scripts/:id/materialize` | 88 |
-| `POST` | `/api/workflow-scripts/:id/run` | 117 |
-| `POST` | `/api/workflow-scripts/reload` | 174 |
-| `POST` | `/api/workflow-scripts/:id/reload` | 186 |
-| `POST` | `/api/workflow-scripts/upload` | 213 |
-| `POST` | `/api/workflow-scripts/validate` | 262 |
+| `GET` | `/api/workflow-scripts` | 31 |
+| `GET` | `/api/workflow-scripts/:id` | 41 |
+| `GET` | `/api/workflow-scripts/:id/profiles` | 56 |
+| `POST` | `/api/workflow-scripts/:id/materialize` | 89 |
+| `POST` | `/api/workflow-scripts/reload` | 118 |
+| `POST` | `/api/workflow-scripts/:id/reload` | 130 |
+| `POST` | `/api/workflow-scripts/upload` | 157 |
+| `POST` | `/api/workflow-scripts/validate` | 206 |
 
 ## workspaces
 

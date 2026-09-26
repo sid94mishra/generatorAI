@@ -8,12 +8,12 @@ Status values: `open` → `in progress` → `closed (PR #)` / `accepted (rationa
 
 | ID | Requirement | Phase / WP | Status |
 |---|---|---|---|
-| R1 | One invocation path across clients | P04 WP-4.1–4.5 | open |
+| R1 | One invocation path across clients | P04 WP-4.1–4.5 | closed (6fd9adc: `POST /api/workflow-invocations` / `WorkflowInvocationService` for web, desktop, mobile, CLI, TUI, SDK, MCP, automations, scripts, forks; one lifecycle) |
 | R2 | Streamlined creation, stages and config | P01 WP-1.5–1.8; P02 SessionSpec; P03 WP-3.1, 3.11 | in progress (P01 part done: 1d67d0f, 28f9c5e; P02 SessionSpecEditor a220bb3) |
 | R3 | A stage is a compact chat with every chat capability | P02 (all); P03b; P04 design 7 (mounts) | in progress (P02 done: one SessionComposer, binder, gates, TurnRecorder, permission source — see Phase 02 closure; P03b done: the stage conversation API and clients — see Phase 03b closure) |
 | R4 | DAG evaluation; retries; a **generic** loop (fix ↔ review is one example) with a budget | README §5.1; P03 WP-3.3–3.6; P05 §2–§3, WP-5A.1–5A.5 (tests: loop matrix, examples L1–L6, v59 migration, Windows `check`) | open |
 | R5 | Codex goals and Claude Code dynamic workflows research and support (as DAG constructs, no slash commands) | README §5.3; P05 examples L1–L6, M1–M3; P08 (judge panel + expansion; script runtime gated by PD-21) | open |
-| R6 | Remove legacy and back-compat code | P01 WP-1.1–1.4; P03 WP-3.7; P04 WP-4.1 (orchestrator, worktrees), 4.4 (MCP embedded), 4.6; `check-no-legacy` | in progress (P01 and P02 parts done; 90 bans) |
+| R6 | Remove legacy and back-compat code | P01 WP-1.1–1.4; P03 WP-3.7; P04 WP-4.1 (orchestrator, worktrees), 4.4 (MCP embedded), 4.6; `check-no-legacy` | in progress (P01–P04 parts done: orchestrator, preprocessor, run-start routes, MCP embedded mode deleted; 110 bans) |
 | R7 | Chat and the orchestrator invoke workflows | P06 WP-6.1–6.4 | open |
 | R8 | An authoring skill for any agent | P06 WP-6.5–6.8 | open |
 | R9 | Review the earlier document | README §4 | closed (this plan) |
@@ -199,6 +199,27 @@ Commits: 0254811 (3b.1), 2529558 (3b.4), 63db929 (3b.2 + 3b.3), f55692b (docs). 
 | W-24 ("…" menu) | The stage "…" menu works: every item goes through the commands API | 63db929 | `StageTimelineItem` `StageMenu` |
 | PD-3, PD-4, PD-9 | 409 STAGE_BUSY mid-turn; amend on completed; one feedback path (completion review + the conversation API; `followUpPrompt` banned) | 0254811, 63db929, 2529558 | `StageConversationService`; no-legacy ban |
 | R3 (P03b part) | A stage is a compact chat on web, mobile, TUI and CLI: send, stop, attach, gate cards, amend | 0254811, 63db929, 2529558 | see TRACKER Phase 03b |
+
+## Phase 04 closure (2026-09-26, review deferred to the final review)
+
+Commits: 6fd9adc (WP-4.1–4.5), a09e3d1 (WP-4.6 bans), the WP-4.7 docs commit. Tests for these items are deferred to the final pass (IMPLEMENTATION FIRST), except the v58 chat-safety test.
+
+| ID | What P04 closed | Commits | Evidence |
+|---|---|---|---|
+| W-06 | Engine values are never variables: `system_vars` / typed columns (working directory, codebases, uploads, trigger ceiling, workspace id); `__*` refused in request variables, stage overrides and datasets | 6fd9adc | `validateInvocation`, `IterationPlanner`, `StageExecutor` reads `run.systemVars`; P04 `__*` ban |
+| W-10 | One lifecycle for every run: prepare/finalize phases in the engine, whoever starts the run (commit/push/PR from the CLI, automations, SDK, MCP, scripts, forks too) | 6fd9adc | `engine/lifecycle/prepare.ts`, `finalize.ts`; `WorkflowOrchestrator` deleted |
+| W-22 | Codebases come from the request, else `lifecycle.codebaseAliases`, else none (CODEBASE_REQUIRED when required); never "all codebases" | 6fd9adc | `codebaseSelectionOf`, `validateInvocation`; web/mobile codebase drafts |
+| W-23 (runtime) | Explicit post-processing steps run in `postProcess`; only an explicit commit step suppresses the auto-commit | 6fd9adc | `buildPostProcessingSteps` |
+| W-27 (run launch) | A refused run start is shown in the web dialog / mobile sheet (the envelope's message + issues), never console-only | 6fd9adc | `RunDialog`, `StartRunSheet` |
+| W-37 | Profiles have one schema (`RunProfileSchema`, stage KEYS) and apply; uploads have one writer and one layout; legacy webhooks already gone | 6fd9adc | `RunProfileSchema`, `writeRunUpload`, CLI `--profile` |
+| W-56 | CLI `script run` applies the profile and reads the run id (an invocation) | 6fd9adc | `platform.ts` `script run` |
+| W-58 | The MCP server runs in remote mode only, as a paired `mcp` device; embedded mode deleted | 6fd9adc | `mcp-server/src/remote.ts`, `cli.ts` |
+| W-60 | Starting a run is one scope decision: `exec:agent` + `read:workflows` (a default phone can); script → `write:workflows`; bypass off loopback / in place → `admin:settings` | 6fd9adc | route policy `/workflow-invocations`, `checkInvocationScopes`; mobile `runStart` gate |
+| W-63 | Waiters subscribe before reading and key on `workflow_run.finalized` (after post-processing); approvals and timeouts return | 6fd9adc | `WorkflowInvocationService.waitFor`; automations; CLI `--watch` digest long-poll |
+| W-65 | The web and mobile run start set the permission mode (deployment default when untouched) | 6fd9adc | `RunDialog` run options; `StartRunSheet` Advanced |
+| C-1, C-6, C-7, C-8, C-10, C-14, C-16, C-17 | one lifecycle; workspace id a column; worktrees never removed on cancel/failure; uploads and hook attachments outside the mounts; profiles by key; legacy webhooks gone; one upload writer; hooks once per phase (journal) | 6fd9adc | see TRACKER Phase 04 |
+| PD-6, PD-22 | a paired phone may start runs; the MCP credential is device pairing with platform `mcp` | 6fd9adc | route policy; `DEFAULT_MCP_SCOPES`; v58 |
+| R1 | One invocation path across clients | 6fd9adc | above |
 
 ## Independent review findings
 

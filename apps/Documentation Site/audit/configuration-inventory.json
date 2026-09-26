@@ -2611,43 +2611,6 @@
   },
   {
     "file": "packages/shared/src/config/ChatSchemas.ts",
-    "schema": "StageReviewDecisionSchema",
-    "page": "configuration/chats",
-    "fields": [
-      {
-        "field": "outcome",
-        "type": "\"approved\" / \"changes_requested\" / \"rejected\"",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "approved",
-        "type": "boolean",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "followUpPrompt",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "max 50000"
-      },
-      {
-        "field": "reason",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "max 10000"
-      },
-      {
-        "field": "value",
-        "type": "unknown",
-        "presence": "optional",
-        "constraints": "—"
-      }
-    ]
-  },
-  {
-    "file": "packages/shared/src/config/ChatSchemas.ts",
     "schema": "SendChatPromptSchema",
     "page": "configuration/chats",
     "fields": [
@@ -5005,6 +4968,12 @@
         "field": "workflow.lifecycle.requiresCodebase",
         "type": "boolean",
         "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "workflow.lifecycle.sandbox",
+        "type": "\"required\" / \"optional\"",
+        "presence": "default \"required\"",
         "constraints": "—"
       },
       {
@@ -9819,6 +9788,12 @@
         "constraints": "—"
       },
       {
+        "field": "graph.workflow.lifecycle.sandbox",
+        "type": "\"required\" / \"optional\"",
+        "presence": "default \"required\"",
+        "constraints": "—"
+      },
+      {
         "field": "graph.workflow.lifecycle.preprocessingSteps",
         "type": "array of object",
         "presence": "default []",
@@ -11717,67 +11692,6 @@
       {
         "field": "graph.edges[].handlesFailure",
         "type": "boolean",
-        "presence": "optional",
-        "constraints": "—"
-      }
-    ]
-  },
-  {
-    "file": "packages/workflow-spec/src/definition.ts",
-    "schema": "ScriptRunProfileSchema",
-    "page": "configuration/scripts",
-    "fields": [
-      {
-        "field": "name",
-        "type": "string",
-        "presence": "required",
-        "constraints": "min 1; max 100"
-      },
-      {
-        "field": "description",
-        "type": "string",
-        "presence": "optional",
-        "constraints": "max 2000"
-      },
-      {
-        "field": "variables",
-        "type": "map of unknown",
-        "presence": "default {}",
-        "constraints": "—"
-      },
-      {
-        "field": "permissionMode",
-        "type": "\"plan\" / \"default\" / \"acceptEdits\" / \"bypassPermissions\"",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stageOverrides",
-        "type": "array of object",
-        "presence": "optional",
-        "constraints": "maxLength 100"
-      },
-      {
-        "field": "stageOverrides[]",
-        "type": "object",
-        "presence": "required",
-        "constraints": "unknown keys: strict"
-      },
-      {
-        "field": "stageOverrides[].stageKey",
-        "type": "string",
-        "presence": "required",
-        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
-      },
-      {
-        "field": "stageOverrides[].skip",
-        "type": "boolean",
-        "presence": "optional",
-        "constraints": "—"
-      },
-      {
-        "field": "stageOverrides[].variables",
-        "type": "map of unknown",
         "presence": "optional",
         "constraints": "—"
       }

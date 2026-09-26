@@ -112,11 +112,12 @@ values reach commands only through `env`, secrets only as `secretref:`); reserve
 
 An invalid graph anywhere returns **422** `{ error: { code: 'WORKFLOW_INVALID', message, issues } }`.
 
-Runs: `POST /api/workflow-runs { workflowDefinitionId, variables?, projectId?, testRun?, stageOverrides? }`,
-then `POST /api/workflow-runs/:id/start`; or `POST /api/orchestrator/runs` (lifecycle-aware start,
-same fields). `stageOverrides` is `[{ stageKey, skip?, variables? }]`. Engine-reserved variable
-names (`__*`, `repo_path_*`, `repo_branch_*`) are refused with 400: engine state comes only from
-typed fields. Stage runs carry
+Runs start through ONE route, `POST /api/workflow-invocations` (an `InvocationRequest`:
+`target`, `variables`, `codebases`, `stageOverrides: [{ stageKey, skip?, variables?, model? }]`,
+`overrides`, `uploads`, `name`, `budget`, `idempotencyKey`; see
+[feature-workflow-runs.md](./feature-workflow-runs.md) §0). Every run goes through the same
+lifecycle, whoever starts it. Engine-reserved variable names (`__*`, `repo_path_*`,
+`repo_branch_*`) are refused with 400: engine state comes only from typed fields. Stage runs carry
 `stageKey`, and `GET /api/workflow-runs/:id` orders them by the pinned graph.
 
 ### Import and export

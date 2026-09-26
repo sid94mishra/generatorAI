@@ -406,24 +406,24 @@ const SignalBodySchema = z.object({
 
 Source: `apps/server/src/routes/workflowRuns.ts`. Imported symbols retain their source names; see the linked feature/configuration guides for those values.
 
-### StageOverrideSchema
+### StageMessageSchema
 
 ```typescript
-const StageOverrideSchema = z
-  .object({ stageKey: StageKeySchema, skip: z.boolean().optional(), variables: UserVariablesSchema.optional() })
-  .strict();
+const StageMessageSchema = z.object({
+  prompt: z.string().trim().min(1).max(100_000),
+  mode: AgentModeSchema.optional(),
+});
 ```
 
-### CreateWorkflowRunSchema
+### CancelStageTurnSchema
 
 ```typescript
-const CreateWorkflowRunSchema = z.object({
-  workflowDefinitionId: z.string().uuid(),
-  // Engine-reserved names (__*, repo_path_*, repo_branch_*) are refused (R-8).
-  variables: UserVariablesSchema.default({}),
-  projectId: z.string().uuid().optional(),
-  testRun: z.boolean().optional(),
-  stageOverrides: z.array(StageOverrideSchema).max(100).optional(),
-});
+const CancelStageTurnSchema = z.object({ force: z.boolean().optional() }).strict();
+```
+
+### StagePlanDecisionSchema
+
+```typescript
+const StagePlanDecisionSchema = PlanDecisionSchema.pick({ approved: true, action: true, feedback: true });
 ```
 

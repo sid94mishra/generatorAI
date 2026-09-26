@@ -32,7 +32,7 @@ The top-level product modules exclude the separate `agent-tests` workspace and t
 | `packages/db` | `@generatorai/db` | `auth`, `core`, `checkpoints`, `review`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `packages/design-tokens` | `@generatorai/design-tokens` | — | [Architecture](/architecture/modules.md) |
 | `packages/git` | `@generatorai/git` | `shared` | [Architecture](/architecture/modules.md) |
-| `packages/mcp-server` | `@generatorai/mcp-server` | `core`, `sdk`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
+| `packages/mcp-server` | `@generatorai/mcp-server` | `client-core`, `client-runtime`, `secrets`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `packages/relay-protocol` | `@generatorai/relay-protocol` | — | [Architecture](/architecture/modules.md) |
 | `packages/review` | `@generatorai/review` | `shared` | [Architecture](/architecture/modules.md) |
 | `packages/sdk` | `@generatorai/sdk` | `agent-harness-providers`, `core`, `db`, `secrets`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |

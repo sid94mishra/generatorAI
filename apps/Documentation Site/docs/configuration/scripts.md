@@ -219,6 +219,7 @@ A template file (`templates/system/*.json`): an id, a category and a graph.
 | graph.workflow.lifecycle.codebaseAliases | array of string | `default []` | maxLength 5 |
 | graph.workflow.lifecycle.useWorktree | boolean | `default true` | — |
 | graph.workflow.lifecycle.requiresCodebase | boolean | `default false` | — |
+| graph.workflow.lifecycle.sandbox | "required" / "optional" | `default "required"` | — |
 | graph.workflow.lifecycle.preprocessingSteps | array of object | `default []` | maxLength 50 |
 | graph.workflow.lifecycle.preprocessingSteps[] | object | `required` | unknown keys: strict |
 | graph.workflow.lifecycle.preprocessingSteps[].name | string | `required` | min 1; max 200 |
@@ -537,22 +538,6 @@ A template file (`templates/system/*.json`): an id, a category and a graph.
 | graph.edges[].when | string | `optional` | min 1; max 2000 |
 | graph.edges[].handlesFailure | boolean | `optional` | — |
 
-## ScriptRunProfileSchema
-
-A named set of run inputs a `.workflow.mjs` script exports as `profiles`.
-
-| Field | Type / choices | Input / default | Constraints |
-| --- | --- | --- | --- |
-| name | string | `required` | min 1; max 100 |
-| description | string | `optional` | max 2000 |
-| variables | map of unknown | `default {}` | — |
-| permissionMode | "plan" / "default" / "acceptEdits" / "bypassPermissions" | `optional` | — |
-| stageOverrides | array of object | `optional` | maxLength 100 |
-| stageOverrides[] | object | `required` | unknown keys: strict |
-| stageOverrides[].stageKey | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
-| stageOverrides[].skip | boolean | `optional` | — |
-| stageOverrides[].variables | map of unknown | `optional` | — |
-
 ## Complete validation contract
 
 The following source snapshot contains the additional refinements, transformations, comments, and imported contract names. It is reference material, not a configuration file to paste into the app.
@@ -570,8 +555,6 @@ The following source snapshot contains the additional refinements, transformatio
 
 import { z } from 'zod';
 import { WorkflowGraphSchema, type WorkflowGraph } from './schemas/graph.js';
-import { RUN_PERMISSION_MODES } from './constants.js';
-import { StageKeySchema } from './schemas/common.js';
 
 export const DEFINITION_STATUSES = ['draft', 'published'] as const;
 export type DefinitionStatus = (typeof DEFINITION_STATUSES)[number];
@@ -683,34 +666,6 @@ export const WorkflowTemplateSchema = z
   .strict()
   .describe('A workflow template: a canonical graph with catalog metadata');
 export type WorkflowTemplate = z.infer<typeof WorkflowTemplateSchema>;
-
-// ── Script run profiles ──────────────────────────────────────────
-
-/** A named set of run inputs a `.workflow.mjs` script exports as `profiles`. */
-export const ScriptRunProfileSchema = z
-  .object({
-    name: z.string().min(1).max(100).describe('Profile name'),
-    description: z.string().max(2000).optional().describe('What the profile is for'),
-    variables: z.record(z.unknown()).default({}).describe('Variable values'),
-    permissionMode: z.enum(RUN_PERMISSION_MODES).optional().describe('Permission mode for the run'),
-    stageOverrides: z
-      .array(
-        z
-          .object({
-            stageKey: StageKeySchema,
-            skip: z.boolean().optional().describe('Skip the stage in this run'),
-            variables: z.record(z.unknown()).optional().describe('Variables for this stage only'),
-          })
-          .strict()
-          .describe('Per-stage override'),
-      )
-      .max(100)
-      .optional()
-      .describe('Per-stage overrides, by stage key'),
-  })
-  .strict()
-  .describe('A run profile exported by a workflow script');
-export type ScriptRunProfile = z.infer<typeof ScriptRunProfileSchema>;
 
 /** Look a stage up by key. */
 export function stageByKey(graph: WorkflowGraph, key: string): WorkflowGraph['stages'][number] | undefined {

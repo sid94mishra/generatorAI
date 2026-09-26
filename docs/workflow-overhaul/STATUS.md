@@ -9,7 +9,7 @@ The coding agent updates this file in every phase PR.
 | 02 SessionComposer | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-25: see "Phase 02 gate" below** | WP-2.0–2.11 (0c02b1c..a220bb3), bans/docs c35f905, gate fixes f14cf5a; v56 applied to the dev-DB copy |
 | 03 Engine v2 | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-26: see "Phase 03 gate" below** (part 1 and part 2 gates below it) | WP-3.1–3.9 (dd00852..48cc4ec); the cutover is 5dad4e7; v57 applied to the dev-DB copy |
 | 03b Stage conversation | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **phase gate 2026-09-26: see "Phase 03b gate" below** | WP-3b.1 0254811, WP-3b.4 2529558, WP-3b.2/3b.3 63db929, docs f55692b; no migration |
-| 04 Lifecycle and invocation | wf/phase-04-invocation | not started | | | |
+| 04 Lifecycle and invocation | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **phase gate 2026-09-26: see "Phase 04 gate" below** | WP-4.1–4.5 6fd9adc, bans a09e3d1, docs + tracker after it; v58 applied to the dev-DB copy |
 | 05 Control flow (5A, 5B) | wf/phase-05-control-flow | not started | | | |
 | 06 Agents and skill | wf/phase-06-agents-skill | not started | | | |
 | 07 Economy and UX | wf/phase-07-economy-ux | not started | | | |
@@ -218,6 +218,19 @@ Run at `wf/overhaul` @ f14cf5a (Windows 11, Node 26.8.2, pnpm 10.29.2).
 - **W-19 / C7:** covered at composer level (session/composer.test.ts). **Live E2E** (advisory, `P02-perm` and the other P02 scenarios): not run.
 - **Acceptance:** no session-config builders outside `services/session/` (the SES and CMS blocks are deleted and banned); chat and stage bound to one agent get the same tools, blocks and MCP servers apart from the documented owner differences (golden + composer tests); a stage widget now carries its stage run id so the run page Widget tab routes it to that stage (unit-tested; not checked in a browser); an automation cannot be saved without a permission mode (schema + route + web form).
 
+## Phase 04 gate (2026-09-26)
+
+Run at `wf/overhaul` after 6fd9adc (WP-4.1–4.5) and a09e3d1 (WP-4.6) (Windows 11, Node 26, pnpm 10). IMPLEMENTATION FIRST: one new test (the v58 chat-safety test); the per-phase gate is typecheck, lint, check-no-legacy, the affected package tests and the fresh-DB check.
+
+- **`pnpm install --frozen-lockfile`:** pass (the lockfile changed with the MCP server's dependencies: client-core, client-runtime, secrets instead of core + sdk).
+- **`pnpm turbo typecheck`:** pass, 51/51 (one task fewer: the MCP server no longer builds on the SDK).
+- **Affected package tests** (`pnpm turbo test --concurrency=2 --continue` on core, db, server, client-core, sdk, workflow-testkit, mcp-server, shared, workflow-spec, auth, client-runtime, git, cli-core, cli, tui-kit; web and mobile run separately): core 1681 pass / 9 skipped, db 153 / 4 skipped (+1 `migration58`), server 536 + the CSP-hash baseline failure (the symlink EPERM baseline did not fire), client-core 293, sdk 8, workflow-testkit 46 + T8 crash (flaked under the parallel load; 4/4 alone), mcp-server 7, shared 326, workflow-spec 364, auth 45, client-runtime 33, git 56 + the 2 baseline failures (merge/CRLF), cli-core 873, cli 318 + the 5 baseline failures (TUI on Windows), tui-kit 99, web 635, mobile 1097. Tests of deleted code were deleted (`WorkflowOrchestrator.*`, `orchestrator-uploads`, the MCP tool adapter, `workflowStart`); tests over changed shapes were updated (decide terminal events + `workflow_run.finalized`, replay fixtures regenerated with `UPDATE_FIXTURES=1`, RunStore outbox, idempotency repository, automation trigger/scheduler/resume, IterationPlanner, permission layers, goldens (byte-identical), preprocessor → `LifecycleSteps`, route/e2e, SDK smoke, client-core wire contracts, auth route policy).
+- **`pnpm lint`:** pass — turbo lint 0 errors; security, durability, docs, syncio, tokens, workflow-invariants (FAIL mode, 0), no-legacy, migrations-lock (58), db-baseline (v58), workflow-spec (JSON Schemas, FIELDS.md and the new INVOCATION.md).
+- **`check-no-legacy`:** 110 banned patterns (+9 for P04), 0 hits; legacy comments 0.
+- **Fresh DB:** `BaselineFreshDb` passes (an empty DB reaches v58 through the regenerated baseline and matches `schema.ts`); `pnpm workflow:dbcopy-upgrade` on `C:/gaiwf/dbcopy`: v52 → v58 via legacy in 3.7 s, chats 362 / chat sessions 392 / messages 841, chat rows UNCHANGED (hashes match), schema drift 0.
+- **Tests deferred to the final pass** (PHASE-04 "Tests to add"): one per entry point asserting the same plan and the same finalize behaviour (commit + PR with a mocked SCM) — the C-1 regression; hooks once per phase; idempotency (replay, 409 on another body, derived keys); security (`__*` in variables / stage overrides / datasets, the ceiling, bypass off loopback, drafts); lifecycle (crash during `worktrees` resumes there, prepare failure → `setup:<phase>`, cancel during finalizing, worktrees never deleted); `waitFor` (event between subscribe and read, stopOnApproval); the E2E set.
+- **Live E2E** (advisory): not run; `scripts/workflow-e2e` now starts runs through the invocation, but still builds definitions with the pre-P01 nested routes.
+
 ## Phase 03b gate (2026-09-26)
 
 Run at `wf/overhaul` @ f55692b (Windows 11, Node 26, pnpm 10). IMPLEMENTATION FIRST (product owner, 2026-09-26): no new tests; the per-phase gate is typecheck, lint, check-no-legacy and the affected package tests.
@@ -281,7 +294,7 @@ Reserve these numbers; do not reuse them.
 | 55 | workflow_definitions_v2 | P01 | legacy drops; definitions → v2 documents; versions table; run history purge (explicit deletes); automation legacy-mode conversion; `sessions` v1 column drops; FK fix; baseline → 55 |
 | 56 | session_parity | P02 | `chat_messages.complete`; `automations.permission_mode` |
 | 57 | workflow_engine_v2 | P03 | run tables recreated (G5 §6.2, incl. `stage_runs.loop_state`, `scope_id`, `iteration_index`, `item_index`, + invocation and ownership columns); `stage_attempts` (+ `agent_snapshot`, `judge`, `structured_output`), `run_sessions`, timers, outbox, journal, `engine_lock`; `chat_messages.turn_role`; `stage_runs.amended_at` |
-| 58 | invocation | P04 | `idempotency_keys.request_hash`; `invocation_uploads`; `mcp` device platform; run mount ownership |
+| 58 | invocation | P04 | `idempotency_keys.request_hash`; `invocation_uploads`; `auth_devices` rebuilt with the `mcp` platform (applied 6fd9adc; run mounts need no column: a run's workspace owns them) |
 | 59 | control_flow | P05 | `loop_iterations`; `stage_runs.item_key`; `workflow_run_events` (id, idempotency key, consumed_by); `stage_definitions.parent_key`, `kind` + index |
 | 60 | agent_integration | P06 | `chat_workflow_runs`; `chats.created_by_principal`; definitions `authored_by` |
 | 61 | reserved | P07 | only if needed (none planned) |

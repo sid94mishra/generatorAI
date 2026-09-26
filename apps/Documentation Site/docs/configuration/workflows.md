@@ -195,6 +195,7 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | workflow.lifecycle.codebaseAliases | array of string | `default []` | maxLength 5 |
 | workflow.lifecycle.useWorktree | boolean | `default true` | — |
 | workflow.lifecycle.requiresCodebase | boolean | `default false` | — |
+| workflow.lifecycle.sandbox | "required" / "optional" | `default "required"` | — |
 | workflow.lifecycle.preprocessingSteps | array of object | `default []` | maxLength 50 |
 | workflow.lifecycle.preprocessingSteps[] | object | `required` | unknown keys: strict |
 | workflow.lifecycle.preprocessingSteps[].name | string | `required` | min 1; max 200 |

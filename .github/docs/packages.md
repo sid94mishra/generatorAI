@@ -341,7 +341,7 @@ const ai = await createGeneratorAI({
 
 | Facade | Methods |
 |---|---|
-| `ai.workflows` | `create(graphOrBuilder, { publish? })`, `save(id, graph, expectedRevision)`, `publish(id)`, `validate(graph)`, `list()`, `get(id)`, `createRun(id, opts)`, `run(id, { variables, projectId, testRun })`, `orchestrate(id, { variables, stageOverrides, … })`, `stream(runId, { fromSequence })`, `pause/resume/cancel(runId)`, `retry(runId)`, `status(runId)`, `deleteRun(runId)` |
+| `ai.workflows` | `create(graphOrBuilder, { publish? })`, `save(id, graph, expectedRevision)`, `publish(id)`, `validate(graph)`, `list()`, `get(id)`, `invoke(request)` (the one run start, trigger `external_agent via sdk`), `run(id, { variables, codebases, stageOverrides, overrides, testRun, … })`, `plan(request)`, `fork(runId, { rerunFrom? })`, `waitFor(runId, { timeoutMs, stopOnApproval? })`, `digest(runId)`, `stream(runId, { fromSequence })` (the run scope replayed, then live, until `finalized`), `command(runId, cmd)`, `status(runId)`, `deleteRun(runId)` |
 | `ai.chat` | `create({ name, description?, model?, projectId?, tags? })`, `send(chatId, message)`, `onMessage(chatId, handler)`, `list(status?, projectId?)`, `get(chatId)`, `archive(chatId)` |
 | `ai.automations` | `create(params)`, `list(projectId?)`, `get(id)`, `trigger(id)`, `update(id, params)`, `delete(id)`, `enable/disable(id)`, `getExecution(execId)` |
 | `ai.events` | `onAll(handler)`, `onRun(runId, handler)`, `onSession(sessionId, handler)`, `replay(sessionId, afterSeq?)`, `emit(sessionId, event)` |

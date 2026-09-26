@@ -701,11 +701,11 @@ Contract: `HookDefinitionSchema` in `packages/workflow-spec/src/schemas/common.t
 
 <ExampleDownload file="stage-hook.json" />
 
-## Configure an executable workflow profile
+## Save run inputs as a profile
 
-Use with a trusted loaded workflow script. Unlike a definition run profile, this script profile does not identify a workflowDefinitionId. The loader associates it with its script.
+One profile shape for CLI profile files (run start --profile <file>) and the profiles a workflow script exports (profile on a script invocation). Stage overrides are by stage key; upload paths are local to the client that reads the profile.
 
-Contract: `ScriptRunProfileSchema` in `packages/workflow-spec/src/definition.ts`.
+Contract: `RunProfileSchema` in `packages/workflow-spec/src/schemas/invocation.ts`.
 
 ```json
 {
@@ -713,7 +713,9 @@ Contract: `ScriptRunProfileSchema` in `packages/workflow-spec/src/definition.ts`
   "variables": {
     "objective": "Inspect priority-filter compatibility"
   },
-  "permissionMode": "default",
+  "overrides": {
+    "permissionMode": "default"
+  },
   "stageOverrides": [
     {
       "stageKey": "plan",
@@ -723,9 +725,9 @@ Contract: `ScriptRunProfileSchema` in `packages/workflow-spec/src/definition.ts`
 }
 ```
 
-**Verify:** Inspect the compiled graph and selected profile before running; check the resolved variables and skipped stages.
+**Verify:** Run plan with the profile first; check the resolved variables, skipped stages and permission mode before starting.
 
-<ExampleDownload file="script-profile.json" />
+<ExampleDownload file="run-profile.json" />
 
 ## Create an instance of an installed widget
 

@@ -3,7 +3,9 @@
   "variables": {
     "objective": "Inspect priority-filter compatibility"
   },
-  "permissionMode": "default",
+  "overrides": {
+    "permissionMode": "default"
+  },
   "stageOverrides": [
     {
       "stageKey": "plan",
