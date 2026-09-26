@@ -6,7 +6,9 @@
 // becomes the accessible name. Sizes sm 24 / md 28 / lg 32 (compact −4; sm
 // then draws at 20 and keeps a 24px hit area through `hitSlop`). `pressed` is
 // the `.ib.on` selected look (dock toggle). `badge` sits in the top-right
-// corner (a StatusDot or a Count bubble for rail counters).
+// corner (a StatusDot or a Count bubble for rail counters). By default a
+// Tooltip (P-28) repeats the label (+ `shortcut`); `tooltip={false}` turns it
+// off, a string replaces the text.
 // ────────────────────────────────────────────────────────────────
 
 import type { ReactNode } from 'react';
@@ -17,6 +19,7 @@ import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { focusRing, hitSlop, HIT_ATTRS } from '../../lib/focus.js';
 import { Icon } from '../../icons/Icon.js';
+import { Tooltip } from '../Tooltip/Tooltip.js';
 
 export const iconButtonVariants = cva(
   [
@@ -53,7 +56,7 @@ export type IconButtonSize = NonNullable<VariantProps<typeof iconButtonVariants>
 
 export interface IconButtonProps extends Omit<useRender.ComponentProps<'button'>, 'children'> {
   icon: IconConcept;
-  /** Accessible name (and, from P3-02, the tooltip text). Required: the button has no visible text. */
+  /** Accessible name and tooltip text. Required: the button has no visible text. */
   label: string;
   size?: IconButtonSize;
   variant?: 'ghost' | 'primary';
@@ -62,6 +65,11 @@ export interface IconButtonProps extends Omit<useRender.ComponentProps<'button'>
   pressed?: boolean;
   /** Corner badge: a StatusDot (`ring`) or a Count bubble. */
   badge?: ReactNode;
+  /** Tooltip: `true` (default) shows `label`, a string replaces it, `false` hides it. */
+  tooltip?: boolean | string;
+  /** Shortcut chord shown in the tooltip. */
+  shortcut?: readonly string[];
+  tooltipSide?: 'top' | 'bottom' | 'left' | 'right';
 }
 
 /** A square icon-only button with a required accessible `label`. */
@@ -73,6 +81,9 @@ export function IconButton({
   tone = 'neutral',
   pressed,
   badge,
+  tooltip = true,
+  shortcut,
+  tooltipSide = 'top',
   render,
   ref,
   className,
@@ -94,5 +105,11 @@ export function IconButton({
       </>
     ),
   };
-  return useRender({ defaultTagName: 'button', render, ref, props: mergeProps<'button'>(rest, ownProps) });
+  const element = useRender({ defaultTagName: 'button', render, ref, props: mergeProps<'button'>(rest, ownProps) });
+  if (tooltip === false) return element;
+  return (
+    <Tooltip content={typeof tooltip === 'string' ? tooltip : label} shortcut={shortcut} side={tooltipSide}>
+      {element}
+    </Tooltip>
+  );
 }

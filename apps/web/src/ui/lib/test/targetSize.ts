@@ -38,7 +38,11 @@ function isVisible(el: Element): boolean {
 export function findSmallTargets(root: ParentNode): TargetSizeFailure[] {
   const failures: TargetSizeFailure[] = [];
   for (const el of Array.from(root.querySelectorAll(INTERACTIVE))) {
-    if (!isVisible(el) || el.closest('p, li > p')) continue;
+    // Skip running text, hidden form proxies (the input Base UI puts next to a
+    // checkbox or radio)
+    // and anything removed from the accessibility tree.
+    if (!isVisible(el) || el.closest('p, [aria-hidden="true"]')) continue;
+    if (el.tagName === 'INPUT' && el.getAttribute('tabindex') === '-1') continue;
     const { width, height } = hitBox(el);
     // 0.5px tolerance for sub-pixel layout.
     if (width + 0.5 < MIN || height + 0.5 < MIN) failures.push({ element: el, width, height });

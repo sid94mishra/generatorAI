@@ -193,6 +193,10 @@ export function resolveDesignTokens(theme: ThemeDef, appearance: Appearance, acc
   const lineStrong = hex(ensureContrastAll(s.border, fiveSurfaces, NON_TEXT, fg));
 
   // 9. Status: hue for glyphs and fills, a text value for coloured words.
+  //    The text is clamped on its tint over every surface AND over hovered /
+  //    selected rows (a status badge in a selected table row, ChatsList), the
+  //    same backdrops the text tiers use (steps 5–7).
+  const rowWashes = [flatten(hover, surface), flatten(hover, ground), flatten(selected, surface), flatten(selected, ground)];
   const status = {} as Record<(typeof STATUS_HUES)[number][0], { hue: string; text: string; bg: string }>;
   for (const [state, hueName] of STATUS_HUES) {
     const hue = s.hues[hueName];
@@ -203,7 +207,13 @@ export function resolveDesignTokens(theme: ThemeDef, appearance: Appearance, acc
       text: hex(
         ensureContrastAll(
           hue,
-          [flatten(bg, surface), flatten(bg, ground), flatten(bg, raised), ...fiveSurfaces],
+          [
+            flatten(bg, surface),
+            flatten(bg, ground),
+            flatten(bg, raised),
+            ...rowWashes.map((wash) => flatten(bg, wash)),
+            ...fiveSurfaces,
+          ],
           minText,
           fg,
         ),

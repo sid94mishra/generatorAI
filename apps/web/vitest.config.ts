@@ -61,6 +61,10 @@ function storybookProject(
     test: {
       name,
       setupFiles: [`${dirname}.storybook/vitest.setup.ts`],
+      // The first story of a file also pays for its module graph and the
+      // Tailwind-processed globals.css; on a loaded machine that alone passed
+      // the 15 s default (three projects run at once).
+      testTimeout: 60_000,
       browser: {
         enabled: true,
         headless: true,
