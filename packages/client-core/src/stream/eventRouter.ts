@@ -1635,7 +1635,9 @@ export class StreamEventRouter {
       case 'stage_run.cancelled':
       case 'stage_run.skipped':
       case 'stage_run.resumed': {
-        const status = kind === 'stage_run.resumed' ? 'running' : kind.replace('stage_run.', '');
+        // A resumed instance is `ready` (or back in `retry_wait`): the engine
+        // says which; its executor's claim then reports `running` (CONVINV-R20).
+        const status = kind === 'stage_run.resumed' ? (optStr(data['status']) ?? 'ready') : kind.replace('stage_run.', '');
         const stageRunId = stageRunIdOf();
         if (stageRunId) {
           out.push({ op: 'stageStatus', stageRunId, status, data });
@@ -1795,6 +1797,8 @@ export class StreamEventRouter {
         this.flushKey(key, out);
         const stageRunId = stageRunIdOf();
         const stageKey = stageRunId ? `stageRun:${stageRunId}` : key;
+        // A retry makes the instance `ready` for its next attempt, not `running`.
+        if (stageRunId) out.push({ op: 'stageStatus', stageRunId, status: 'ready', data });
         const attempt = str(data['attempt'], '?');
         out.push({
           op: 'addSystemMessage',

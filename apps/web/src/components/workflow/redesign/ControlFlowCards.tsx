@@ -407,7 +407,7 @@ export function DecisionCard({ decision }: { decision: PendingDecisionView }) {
       operatorInput: null,
       decision: loopDecision,
     };
-    return <LoopDecisionCard loopId={decision.instanceId} loop={loop} decision={loopDecision} onCommand={(c) => send(c)} />;
+    return <LoopDecisionCard loopId={decision.instanceId} loop={loop} decision={loopDecision} version={decision.version} onCommand={(c) => send(c)} />;
   }
   if (decision.kind === 'stage_completion_review') {
     const reason = typeof d['reason'] === 'string' ? d['reason'] : typeof d['prompt'] === 'string' ? d['prompt'] : 'The stage is waiting for your approval.';

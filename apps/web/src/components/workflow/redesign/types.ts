@@ -70,6 +70,8 @@ export interface StageView {
   status: StageStatus;
   /** The instance's engine state (what the commands and the stage conversation accept). */
   rawStatus: StageRunStatus;
+  /** The instance's CAS version: a decision sends it as `expectedVersion`, so it answers the gate on screen only. */
+  version?: number;
   /** `triage`, `review_loop#2/fix`: what a fork's `rerunFrom` names. */
   instancePath: string;
   /** When an operator follow-up last amended this completed stage's output (PD-4). */

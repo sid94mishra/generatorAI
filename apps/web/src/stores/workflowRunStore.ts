@@ -184,8 +184,12 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
   updateRunStatus: (status, data) => {
     const { run } = get();
     if (!run) return;
+    // D-21b: an event carries the run's CAS version; one older than the run
+    // shown is stale, and the version kept lets `mergeRun` drop a stale poll (CONVINV-R18).
+    const runVersion = typeof data?.['runVersion'] === 'number' ? data['runVersion'] : undefined;
+    if (runVersion !== undefined && run.version !== undefined && runVersion < run.version) return;
 
-    const updates: Partial<WorkflowRun> = { status, updatedAt: new Date() };
+    const updates: Partial<WorkflowRun> = { status, updatedAt: new Date(), ...(runVersion !== undefined ? { version: runVersion } : {}) };
     if (status === 'running' && !run.startedAt) {
       updates.startedAt = new Date();
     }

@@ -61,7 +61,8 @@ export function LoopDecisionCard({
   if (!view) return null;
   const name = stage.name ?? stage.stageKey;
   const busy = command.isPending;
-  const send = (body: LoopCommand) => command.mutate(body);
+  // Every decision carries the parked loop's version: a stale card never acts on a later park (LOOP-R14).
+  const send = (body: LoopCommand) => command.mutate(stage.version !== undefined ? { ...body, expectedVersion: stage.version } : body);
   const instanceId = stage.id;
   const lastK = view.k;
   const max = view.maxIterations ?? stage.loopState?.effectiveMax ?? null;

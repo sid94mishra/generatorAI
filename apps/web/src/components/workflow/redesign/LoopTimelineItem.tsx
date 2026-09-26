@@ -163,7 +163,7 @@ export function LoopTimelineItem({ runId, stage, bodies, focusedId, showConnecto
   const loopBody = (
     <div className="space-y-2.5">
       {loop.decision && (
-        <LoopDecisionCard loopId={stage.id} loop={loop} decision={loop.decision} onCommand={onCommand} />
+        <LoopDecisionCard loopId={stage.id} loop={loop} decision={loop.decision} version={stage.version} onCommand={onCommand} />
       )}
 
       {loop.operatorInput && (

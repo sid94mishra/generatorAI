@@ -209,7 +209,8 @@ export function WorkflowRunPage() {
     },
     [browserUrlScopeKey, forgetFileTab],
   );
-  const [permissionMode, setPermissionMode] = useState<WorkflowRunPermissionMode | undefined>(undefined);
+  // The run's effective permission mode as the server resolves it (re-read when the run's own mode changes).
+  const [fetchedPermissionMode, setFetchedPermissionMode] = useState<WorkflowRunPermissionMode | undefined>(undefined);
   /** The stage whose gate answer or approval is in flight (its buttons disable, D-13). */
   const [gateBusyStage, setGateBusyStage] = useState<string | null>(null);
   const scrollHostRef = useRef<HTMLDivElement>(null);
@@ -296,18 +297,23 @@ export function WorkflowRunPage() {
   // Every decision the run waits on, its sub-workflow children's mirrored (P05).
   const { data: pendingDecisions } = usePendingDecisions(runId, { live: !!runData && !runIsTerminal });
 
-  // Cleanup
-  useEffect(() => () => { clearRun(); }, [clearRun]);
+  // Cleanup: on unmount AND when the page moves to another run (a fork), so
+  // nothing of the previous run stays focused or merged (CONVINV-R20).
+  useEffect(() => () => { clearRun(); }, [clearRun, runId]);
 
-  // Fetch permission mode for HitlBanner / RunHeaderBar
+  // Permission mode for HitlBanner / RunHeaderBar: the run's own, never a
+  // local copy (another client may change it); the server's effective mode
+  // fills in when the run leaves it to its definition (CONVINV-R20).
+  const runPermissionMode = runData?.permissionMode;
   useEffect(() => {
     if (!runId) return;
     let cancelled = false;
     platform.getPermissionMode(runId).then((res) => {
-      if (!cancelled) setPermissionMode(res.mode);
+      if (!cancelled) setFetchedPermissionMode(res.mode);
     }).catch(() => { /* non-fatal */ });
     return () => { cancelled = true; };
-  }, [runId, platform]);
+  }, [runId, platform, runPermissionMode]);
+  const permissionMode = runPermissionMode ?? fetchedPermissionMode;
 
   // ── Derived RunView ──────────────────────────────────────────
 
@@ -419,7 +425,8 @@ export function WorkflowRunPage() {
   const setRunMode = setRunPermissionMode.mutateAsync;
   const handlePermissionModeChange = useCallback((mode: WorkflowRunPermissionMode) => {
     if (!runId) return;
-    void setRunMode({ runId, mode }).then(() => setPermissionMode(mode), () => undefined);
+    // The mutation refetches the run: the control shows the mode the run has.
+    void setRunMode({ runId, mode }).then(() => undefined, () => undefined);
   }, [runId, setRunMode]);
 
   // A terminal run is never mutated: "Retry failed" forks a NEW run that
@@ -462,10 +469,19 @@ export function WorkflowRunPage() {
     }
   }, []);
 
+  // An approval answers the gate on screen only: it carries the instance's
+  // version, so a stale click never approves a later round or gate (ENGINE-R11).
+  const storeRunRef = useRef(storeRun);
+  storeRunRef.current = storeRun;
+  const versionOf = useCallback((stageId: string) => {
+    const v = storeRunRef.current?.stageRuns.find((sr) => sr.id === stageId)?.version;
+    return v !== undefined ? { expectedVersion: v } : {};
+  }, []);
+
   // The completion review is the `approve` command on the parked instance.
   const handleApproveHitl = useCallback((stageId: string) => {
-    void withGateBusy(stageId, () => sendCommand({ command: 'approve', instanceId: stageId, outcome: 'approved' }));
-  }, [sendCommand, withGateBusy]);
+    void withGateBusy(stageId, () => sendCommand({ command: 'approve', instanceId: stageId, outcome: 'approved', ...versionOf(stageId) }));
+  }, [sendCommand, withGateBusy, versionOf]);
 
   // A stage's permission / question / plan-review card answers its in-turn
   // gate through the stage conversation API (the chat's body shapes).
@@ -482,8 +498,9 @@ export function WorkflowRunPage() {
       instanceId: stageId,
       outcome: 'changes_requested',
       ...(feedback ? { feedback } : {}),
+      ...versionOf(stageId),
     }));
-  }, [sendCommand, withGateBusy]);
+  }, [sendCommand, withGateBusy, versionOf]);
 
   /**
    * Terminal rejection: fails the stage so the DAG blocks every downstream
@@ -495,8 +512,9 @@ export function WorkflowRunPage() {
       instanceId: stageId,
       outcome: 'rejected',
       ...(reason ? { feedback: reason } : {}),
+      ...versionOf(stageId),
     }));
-  }, [sendCommand, withGateBusy]);
+  }, [sendCommand, withGateBusy, versionOf]);
 
   // Re-running a stage of a finished run is a fork from that instance
   // (its successors re-run too; everything else is memoized).
@@ -554,9 +572,10 @@ export function WorkflowRunPage() {
   const inspectorFiles = useStageFiles(runData?.workspaceId, focusedStage, rightPaneOpen);
 
   // The focused stage's composer (a stage is a compact chat).
-  // A loop, a map, a wait or a sub-workflow is not a conversation: its decisions are its cards'.
+  // Only an agent stage is a conversation: a loop, a map, a wait, a
+  // sub-workflow, a check or an expansion is not (their decisions are their cards').
   const focusedComposer = useMemo(
-    () => (runId && focusedStage && focusedStage.status !== 'skipped' && focusedStage.status !== 'cancelled' && !focusedStage.loop && !focusedStage.map && !focusedStage.wait && !focusedStage.subworkflow
+    () => (runId && focusedStage && focusedStage.kind === 'agent' && focusedStage.status !== 'skipped' && focusedStage.status !== 'cancelled'
       ? <StageComposer runId={runId} stage={focusedStage} workspaceId={runData?.workspaceId} />
       : null),
     [runId, focusedStage, runData?.workspaceId],

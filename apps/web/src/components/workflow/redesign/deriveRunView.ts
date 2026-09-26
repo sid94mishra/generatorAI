@@ -452,6 +452,7 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     name: sr.name,
     status,
     rawStatus: sr.status,
+    ...(sr.version !== undefined ? { version: sr.version } : {}),
     instancePath: sr.instancePath,
     stageKey: sr.stageKey,
     ...(inputs.admission && sr.status === 'ready' ? { admission: inputs.admission } : {}),

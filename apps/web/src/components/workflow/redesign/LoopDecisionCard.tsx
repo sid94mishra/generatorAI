@@ -33,6 +33,8 @@ interface LoopDecisionCardProps {
   loopId: string;
   loop: LoopView;
   decision: LoopDecisionView;
+  /** The parked loop's version: every decision carries it, so a stale card never acts on a later park (LOOP-R14). */
+  version?: number | undefined;
   /** Resolves once the command settled (applied or refused). */
   onCommand: (command: RunCommand) => Promise<void>;
 }
@@ -100,7 +102,7 @@ function positive(text: string): number | undefined {
   return text.trim() !== '' && Number.isFinite(n) && n > 0 ? n : undefined;
 }
 
-export function LoopDecisionCard({ loopId, loop, decision, onCommand }: LoopDecisionCardProps) {
+export function LoopDecisionCard({ loopId, loop, decision, version, onCommand }: LoopDecisionCardProps) {
   const [busy, setBusy] = useState(false);
   const [panel, setPanel] = useState<'none' | 'budget' | 'input'>('none');
   const [input, setInput] = useState('');
@@ -109,7 +111,7 @@ export function LoopDecisionCard({ loopId, loop, decision, onCommand }: LoopDeci
 
   const run = (command: RunCommand, after?: () => void) => {
     setBusy(true);
-    void onCommand(command).finally(() => {
+    void onCommand(version !== undefined && 'instanceId' in command ? ({ ...command, expectedVersion: version } as RunCommand) : command).finally(() => {
       setBusy(false);
       after?.();
     });
