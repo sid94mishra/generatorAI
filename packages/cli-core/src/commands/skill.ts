@@ -152,6 +152,27 @@ async function installBundle(bundle: SkillBundle, skillDir: string): Promise<{ r
   }
 }
 
+/**
+ * The copy Claude Code gets: an installed skill is also a `/` command there
+ * unless its frontmatter says `user-invocable: false`, and workflow features
+ * have no slash commands (the model loads this skill on its own).
+ */
+function claudeInstalledCopy(bundle: SkillBundle): SkillBundle {
+  return {
+    ...bundle,
+    files: bundle.files.map((f) => (f.path === 'SKILL.md' ? { ...f, text: withFrontmatterField(f.text, 'user-invocable', 'false') } : f)),
+  };
+}
+
+/** `text` with `key: value` set in its leading YAML frontmatter (unchanged when it has none). */
+function withFrontmatterField(text: string, key: string, value: string): string {
+  const m = /^---(\r?\n)([\s\S]*?)\r?\n---(?=\r?\n|$)/.exec(text);
+  if (!m) return text;
+  const eol = m[1]!;
+  const lines = m[2]!.split(/\r?\n/).filter((l) => !l.startsWith(`${key}:`));
+  return `---${eol}${[...lines, `${key}: ${value}`].join(eol)}${eol}---${text.slice(m[0].length)}`;
+}
+
 // ── Codex: where its skills live ────────────────────────────────────
 
 type SkillScope = 'user' | 'repo';
@@ -504,7 +525,7 @@ export function skillCommands(): CommandSpec[] {
         }
 
         const skillDir = path.join(root, bundle.name);
-        const { replaced } = await installBundle(bundle, skillDir);
+        const { replaced } = await installBundle(target === 'claude' ? claudeInstalledCopy(bundle) : bundle, skillDir);
 
         const snippet = target === 'claude' ? claudeMcpSnippet(project) : codexMcpSnippet();
         const lines = [
