@@ -379,6 +379,12 @@ Decided while building P1-T1…T6 where `02` was silent:
 - The Servers "popover" is the kit **Menu** (the board draws a `role="menu"` with radio rows), 280 px, controlled so it closes on switch; "Add server…" only on desktop; on web the list includes the page's own server (other origins cannot be probed from a page — no status shown for them).
 - "Restart to update" pill: title strip on Windows/Linux-custom, sidebar footer on macOS/Linux-native, a download icon in the rail; only when an update is ready; never on web. `agent-tests/mock-update-server.mjs` (`serve` / `check` / `verify-log`) drives the per-OS install run (R-10), which stays an owner action on real installers.
 
+### D-61 Composer and browser logic extraction as built (P4-02, P4-03) — Final
+- Composer state machine: pure reducer `packages/client-core/src/composer/composerMachine.ts` (+ contract types `packages/shared/src/ui-contract/composer.ts`); the two-phase stop rules (400 ms / 15 s) live once as pure functions shared by `StopController` and the reducer. Typing is never blocked (D-29).
+- The 8 composer hooks live in `components/chat/composer/hooks/` for now (they still need legacy Toast/builtins/promptHistory; `blocks/` may not import legacy code); P4-08 moves them to `blocks/composer` with the kit toast. Send eligibility copies today's behaviour (a failed prep shows its bar but does not block Send).
+- Browser logic lives in `apps/web/src/blocks/browser/` (REST, descriptor polling, stream events, screencast/live stream, viewport, input mapping, native view driver, occlusion, annotations, capture, device emulation, tab state); the interactivity setting moved to `lib/browserInteractivity.ts`. Added testids `browser-toolbar`, `browser-url`, `browser-live-view`, `browser-empty-state` (03 §6.2). Browser events accept `{kind, payload}` (and `data` until P4-10 drops it).
+- Known defects #1–#6 fixed (reviews/P4-known-defects.md).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

@@ -1,0 +1,1321 @@
+{
+  "v": 3,
+  "attachments": {},
+  "boards": {
+    "MAudit.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1600,
+      "h": 1250,
+      "title": "Mobile audit · today",
+      "page": "overview"
+    },
+    "MPrinciples.dc.html": {
+      "x": 1680,
+      "y": 0,
+      "w": 1600,
+      "h": 1310,
+      "title": "Mobile principles · IA",
+      "page": "overview"
+    },
+    "MFoundations.dc.html": {
+      "x": 3360,
+      "y": 0,
+      "w": 1600,
+      "h": 1960,
+      "title": "Mobile foundations",
+      "page": "overview"
+    },
+    "MComponents.dc.html": {
+      "x": 0,
+      "y": 2080,
+      "w": 1600,
+      "h": 3220,
+      "title": "Mobile components",
+      "page": "overview"
+    },
+    "MGestures.dc.html": {
+      "x": 1680,
+      "y": 2080,
+      "w": 1600,
+      "h": 1560,
+      "title": "Mobile gestures",
+      "page": "overview"
+    },
+    "MHome.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Home",
+      "page": "home"
+    },
+    "MHomeMore.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Home · scrolled",
+      "page": "home"
+    },
+    "MSidebar.dc.html": {
+      "x": 2160,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Sidebar · navigation drawer",
+      "page": "home"
+    },
+    "MSidebarChats.dc.html": {
+      "x": 3240,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Sidebar · open over Chats",
+      "page": "home"
+    },
+    "MSearch.dc.html": {
+      "x": 4320,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Search · command palette",
+      "page": "home"
+    },
+    "MServers.dc.html": {
+      "x": 0,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Server switcher",
+      "page": "home"
+    },
+    "MScopeRequest.dc.html": {
+      "x": 1080,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow · request edit access",
+      "page": "home"
+    },
+    "MPairing.dc.html": {
+      "x": 2160,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Pairing · first run",
+      "page": "home"
+    },
+    "MChats.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Chats · list (row mid-swipe)",
+      "page": "chat"
+    },
+    "Main.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Chat · permission request",
+      "page": "chat"
+    },
+    "MChatRunning.dc.html": {
+      "x": 2160,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Chat · orchestrator running",
+      "page": "chat"
+    },
+    "MChatToolsExpanded.dc.html": {
+      "x": 3240,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Chat · tool block expanded in place",
+      "page": "chat"
+    },
+    "MChatStepDetail.dc.html": {
+      "x": 4320,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Chat · step detail (failed command)",
+      "page": "chat"
+    },
+    "MChatNoAgent.dc.html": {
+      "x": 0,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Chat · no agent (model only)",
+      "page": "chat"
+    },
+    "MModelPicker.dc.html": {
+      "x": 1080,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Composer · model & turn sheet",
+      "page": "chat"
+    },
+    "MComposerPlus.dc.html": {
+      "x": 2160,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Composer · + menu open",
+      "page": "chat"
+    },
+    "MComposerInput.dc.html": {
+      "x": 3240,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Composer · / suggestions & attachments",
+      "page": "chat"
+    },
+    "MComposerVoice.dc.html": {
+      "x": 4320,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Composer · dictation",
+      "page": "chat"
+    },
+    "MNewChat.dc.html": {
+      "x": 0,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "New chat · task, who works, model",
+      "page": "chat"
+    },
+    "MNewChatMore.dc.html": {
+      "x": 1080,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "New chat · where, capabilities, more (scrolled)",
+      "page": "chat"
+    },
+    "MAgentPicker.dc.html": {
+      "x": 2160,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agent picker sheet",
+      "page": "chat"
+    },
+    "MAgentPickerCaps.dc.html": {
+      "x": 3240,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agent picker · customize capabilities",
+      "page": "chat"
+    },
+    "MChatWorkflowRun.dc.html": {
+      "x": 4320,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Chat · workflow run, approval and draft cards",
+      "page": "chat"
+    },
+    "MPaneOpen.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Chat · workspace pane open (Changes)",
+      "page": "pane"
+    },
+    "MPaneTabsOverview.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 1600,
+      "h": 1000,
+      "title": "Workspace pane · the seven tabs",
+      "page": "pane"
+    },
+    "MPaneChanges.dc.html": {
+      "x": 0,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workspace · Changes full screen (row menu open)",
+      "page": "pane"
+    },
+    "MPaneDiff.dc.html": {
+      "x": 1080,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workspace · file diff with inline comment",
+      "page": "pane"
+    },
+    "MPaneCommit.dc.html": {
+      "x": 2160,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workspace · Commit & pull request sheet",
+      "page": "pane"
+    },
+    "MPaneCommitDone.dc.html": {
+      "x": 3240,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workspace · Commit & PR done",
+      "page": "pane"
+    },
+    "MPaneFiles.dc.html": {
+      "x": 0,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workspace · Files full screen (long-press menu)",
+      "page": "pane"
+    },
+    "MPaneFilePreview.dc.html": {
+      "x": 1080,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workspace · file preview full screen",
+      "page": "pane"
+    },
+    "MPaneTerminal.dc.html": {
+      "x": 2160,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Chat · workspace pane open (Terminal)",
+      "page": "pane"
+    },
+    "MPaneTerminalFull.dc.html": {
+      "x": 3240,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workspace · Terminal full screen (key row + selection)",
+      "page": "pane"
+    },
+    "MPaneBrowser.dc.html": {
+      "x": 0,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Browser · full screen · comment + capture",
+      "page": "pane"
+    },
+    "MPaneBrowserStates.dc.html": {
+      "x": 1080,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Browser · session limit, load failure, empty",
+      "page": "pane"
+    },
+    "MPaneTasks.dc.html": {
+      "x": 2160,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Background tasks · full screen",
+      "page": "pane"
+    },
+    "MPaneTaskDetail.dc.html": {
+      "x": 3240,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Background task · detail",
+      "page": "pane"
+    },
+    "MPanePlan.dc.html": {
+      "x": 0,
+      "y": 4640,
+      "w": 1000,
+      "h": 1040,
+      "title": "Plan · full screen · review revision 3",
+      "page": "pane"
+    },
+    "MPaneComputer.dc.html": {
+      "x": 1080,
+      "y": 4640,
+      "w": 1000,
+      "h": 1040,
+      "title": "Computer use · full screen · live",
+      "page": "pane"
+    },
+    "MWorkflows.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflows · list",
+      "page": "workflows"
+    },
+    "MWorkflowDetail.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow detail · Nightly dependency audit",
+      "page": "workflows"
+    },
+    "MWorkflowDetailMore.dc.html": {
+      "x": 2160,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow detail · setup, variables, menu (scrolled)",
+      "page": "workflows"
+    },
+    "MWorkflowNew.dc.html": {
+      "x": 3240,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "New workflow · start from a template",
+      "page": "workflows"
+    },
+    "MWorkflowNewBasics.dc.html": {
+      "x": 4320,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "New workflow · basics (scrolled)",
+      "page": "workflows"
+    },
+    "MWorkflowLaunch.dc.html": {
+      "x": 0,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow · Run sheet · variables and stages",
+      "page": "workflows"
+    },
+    "MWorkflowLaunchAdvanced.dc.html": {
+      "x": 1080,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow · Run sheet · advanced (scrolled)",
+      "page": "workflows"
+    },
+    "MWorkflowLaunchPlan.dc.html": {
+      "x": 2160,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow · Run sheet · plan preview",
+      "page": "workflows"
+    },
+    "MWorkflowRun.dc.html": {
+      "x": 0,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow run #248 · needs you",
+      "page": "workflows"
+    },
+    "MWorkflowRunMenu.dc.html": {
+      "x": 1080,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow run #248 · run menu (pause, cancel, retry)",
+      "page": "workflows"
+    },
+    "MRunStageChat.dc.html": {
+      "x": 2160,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Run #248 · Apply upgrades as a compact chat · stage menu",
+      "page": "workflows"
+    },
+    "MWorkflowRunPane.dc.html": {
+      "x": 3240,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow run · right pane (Output)",
+      "page": "workflows"
+    },
+    "MRunApproval.dc.html": {
+      "x": 4320,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Run approval · completion review + biometric confirm",
+      "page": "workflows"
+    },
+    "MRunGraph.dc.html": {
+      "x": 5400,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow run · runtime graph (full screen)",
+      "page": "workflows"
+    },
+    "MRunLoop.dc.html": {
+      "x": 6480,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Run · loop status + Needs decision (Issue fix with review)",
+      "page": "workflows"
+    },
+    "MBuilderList.dc.html": {
+      "x": 0,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Builder · stage list (reorder)",
+      "page": "workflows"
+    },
+    "MBuilderGraph.dc.html": {
+      "x": 1080,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Builder · graph view + Add stage",
+      "page": "workflows"
+    },
+    "MBuilderLoop.dc.html": {
+      "x": 2160,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Builder · loop group + loop settings",
+      "page": "workflows"
+    },
+    "MWorkflowAgentDraft.dc.html": {
+      "x": 3240,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Builder · agent draft + version history",
+      "page": "workflows"
+    },
+    "MWorkflowSettings.dc.html": {
+      "x": 4320,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Workflow settings · Variables",
+      "page": "workflows"
+    },
+    "MWorkflowValidate.dc.html": {
+      "x": 5400,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Builder · validation results",
+      "page": "workflows"
+    },
+    "MStagePrompt.dc.html": {
+      "x": 0,
+      "y": 4640,
+      "w": 1000,
+      "h": 1040,
+      "title": "Stage editor · Prompt",
+      "page": "workflows"
+    },
+    "MStageModel.dc.html": {
+      "x": 1080,
+      "y": 4640,
+      "w": 1000,
+      "h": 1040,
+      "title": "Stage editor · Session",
+      "page": "workflows"
+    },
+    "MStageTools.dc.html": {
+      "x": 2160,
+      "y": 4640,
+      "w": 1000,
+      "h": 1040,
+      "title": "Stage editor · Tools",
+      "page": "workflows"
+    },
+    "MStageOutput.dc.html": {
+      "x": 3240,
+      "y": 4640,
+      "w": 1000,
+      "h": 1040,
+      "title": "Stage editor · Output",
+      "page": "workflows"
+    },
+    "MStagePolicy.dc.html": {
+      "x": 4320,
+      "y": 4640,
+      "w": 1000,
+      "h": 1040,
+      "title": "Stage editor · Policy",
+      "page": "workflows"
+    },
+    "MStagePolicyMore.dc.html": {
+      "x": 5400,
+      "y": 4640,
+      "w": 1000,
+      "h": 1040,
+      "title": "Stage editor · Policy (scrolled)",
+      "page": "workflows"
+    },
+    "MStageHooks.dc.html": {
+      "x": 6480,
+      "y": 4640,
+      "w": 1000,
+      "h": 1040,
+      "title": "Stage editor · Hooks",
+      "page": "workflows"
+    },
+    "MAutomations.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Automations · list (long-press menu)",
+      "page": "automations"
+    },
+    "MAutomationDetail.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Automation detail · Nightly audit",
+      "page": "automations"
+    },
+    "MAutomationExecution.dc.html": {
+      "x": 2160,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Automation execution #31",
+      "page": "automations"
+    },
+    "MAutomationWebhook.dc.html": {
+      "x": 3240,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Automation detail · webhook credentials",
+      "page": "automations"
+    },
+    "MAutomationCreate1.dc.html": {
+      "x": 0,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "New automation · 1 Basics",
+      "page": "automations"
+    },
+    "MAutomationCreate2.dc.html": {
+      "x": 1080,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "New automation · 2 Trigger",
+      "page": "automations"
+    },
+    "MAutomationCreate3.dc.html": {
+      "x": 2160,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "New automation · 3–4 Workflow, permission and dataset",
+      "page": "automations"
+    },
+    "MAutomationCreate4.dc.html": {
+      "x": 3240,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "New automation · 5–6 Variables and review",
+      "page": "automations"
+    },
+    "MScripts.dc.html": {
+      "x": 0,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Scripts · list",
+      "page": "automations"
+    },
+    "MScriptDetail.dc.html": {
+      "x": 1080,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Script detail · nightly-audit.workflow.mjs",
+      "page": "automations"
+    },
+    "MProjects.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Projects · list with long-press menu",
+      "page": "projects"
+    },
+    "MProjectCreate.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Projects · new project",
+      "page": "projects"
+    },
+    "MProjectDetail.dc.html": {
+      "x": 2160,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Project · codebases",
+      "page": "projects"
+    },
+    "MAddCodebase.dc.html": {
+      "x": 3240,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Project · add codebase",
+      "page": "projects"
+    },
+    "MProjectSettings.dc.html": {
+      "x": 4320,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Project · settings and delete",
+      "page": "projects"
+    },
+    "MCodebase.dc.html": {
+      "x": 0,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Codebase · worktrees and clean-up",
+      "page": "projects"
+    },
+    "MCodebaseFiles.dc.html": {
+      "x": 1080,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Codebase · files and preview",
+      "page": "projects"
+    },
+    "MCodebaseLogs.dc.html": {
+      "x": 2160,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Codebase · fetch logs",
+      "page": "projects"
+    },
+    "MProjectCustomization.dc.html": {
+      "x": 3240,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Project · customization",
+      "page": "projects"
+    },
+    "MSkillDetail.dc.html": {
+      "x": 4320,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Project · skill detail",
+      "page": "projects"
+    },
+    "MAgents.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agents · list, long-press menu",
+      "page": "agents"
+    },
+    "MAgentDetail.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agents · Bug Fixer detail",
+      "page": "agents"
+    },
+    "MAgentDetailOrch.dc.html": {
+      "x": 2160,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agents · Orchestrator detail (team)",
+      "page": "agents"
+    },
+    "MAgentNew.dc.html": {
+      "x": 3240,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agents · new agent — start from",
+      "page": "agents"
+    },
+    "MAgentImport.dc.html": {
+      "x": 4320,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agents · import .agent.md",
+      "page": "agents"
+    },
+    "MAgentEdit1.dc.html": {
+      "x": 0,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agents · editor — identity, instructions, role",
+      "page": "agents"
+    },
+    "MAgentEdit2.dc.html": {
+      "x": 1080,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agents · editor — runtime, team",
+      "page": "agents"
+    },
+    "MAgentEdit3.dc.html": {
+      "x": 2160,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agents · editor — skills, MCP, capabilities",
+      "page": "agents"
+    },
+    "MAgentDelete.dc.html": {
+      "x": 3240,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Agents · delete in use (force)",
+      "page": "agents"
+    },
+    "MSettings.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · root",
+      "page": "settings"
+    },
+    "MSettingsMore.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · root, scrolled",
+      "page": "settings"
+    },
+    "MSetGeneral.dc.html": {
+      "x": 2160,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · General",
+      "page": "settings"
+    },
+    "MSetAppearance.dc.html": {
+      "x": 3240,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Appearance",
+      "page": "settings"
+    },
+    "MSetProviders.dc.html": {
+      "x": 4320,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Model providers",
+      "page": "settings"
+    },
+    "MSetAgents.dc.html": {
+      "x": 5400,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Agents",
+      "page": "settings"
+    },
+    "MSetSkills.dc.html": {
+      "x": 0,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Skills",
+      "page": "settings"
+    },
+    "MSetMcp.dc.html": {
+      "x": 1080,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · MCP servers",
+      "page": "settings"
+    },
+    "MSetMcpAdd.dc.html": {
+      "x": 2160,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Add MCP server",
+      "page": "settings"
+    },
+    "MSetTemplates.dc.html": {
+      "x": 3240,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Templates",
+      "page": "settings"
+    },
+    "MSetSourceControl.dc.html": {
+      "x": 4320,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Source control",
+      "page": "settings"
+    },
+    "MSetBrowserTerminal.dc.html": {
+      "x": 5400,
+      "y": 1160,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Browser & terminal",
+      "page": "settings"
+    },
+    "MSetComputerUse.dc.html": {
+      "x": 0,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Computer use",
+      "page": "settings"
+    },
+    "MSetAudio.dc.html": {
+      "x": 1080,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Audio",
+      "page": "settings"
+    },
+    "MSetExtensions.dc.html": {
+      "x": 2160,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Extensions",
+      "page": "settings"
+    },
+    "MSetSecurity.dc.html": {
+      "x": 3240,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Security & devices",
+      "page": "settings"
+    },
+    "MSetSecurityMore.dc.html": {
+      "x": 4320,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Security & devices (lower)",
+      "page": "settings"
+    },
+    "MSetPairDevice.dc.html": {
+      "x": 5400,
+      "y": 2320,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Pair a new device",
+      "page": "settings"
+    },
+    "MSetStorage.dc.html": {
+      "x": 0,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Storage",
+      "page": "settings"
+    },
+    "MSetDiagnostics.dc.html": {
+      "x": 1080,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Diagnostics",
+      "page": "settings"
+    },
+    "MSetNotifications.dc.html": {
+      "x": 2160,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Notifications",
+      "page": "settings"
+    },
+    "MSetAppLock.dc.html": {
+      "x": 3240,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · App lock & privacy",
+      "page": "settings"
+    },
+    "MSetWidgets.dc.html": {
+      "x": 4320,
+      "y": 3480,
+      "w": 1000,
+      "h": 1040,
+      "title": "Settings · Widgets & Live Activities",
+      "page": "settings"
+    },
+    "MNotifications.dc.html": {
+      "x": 0,
+      "y": 0,
+      "w": 1000,
+      "h": 1040,
+      "title": "System · notifications",
+      "page": "system"
+    },
+    "MLiveActivity.dc.html": {
+      "x": 1080,
+      "y": 0,
+      "w": 1000,
+      "h": 1370,
+      "title": "System · Live Activity & Live Update",
+      "page": "system"
+    },
+    "MShortcuts.dc.html": {
+      "x": 2160,
+      "y": 0,
+      "w": 1920,
+      "h": 1040,
+      "title": "System · app shortcuts & share to agent",
+      "page": "system"
+    },
+    "MWidgets.dc.html": {
+      "x": 4160,
+      "y": 0,
+      "w": 1000,
+      "h": 1070,
+      "title": "System · widgets, controls & tiles",
+      "page": "system"
+    },
+    "MTabletIOS.dc.html": {
+      "x": 0,
+      "y": 1490,
+      "w": 1300,
+      "h": 960,
+      "title": "iPad · sidebar, chat & workspace pane",
+      "page": "system"
+    },
+    "MTabletAndroid.dc.html": {
+      "x": 1380,
+      "y": 1490,
+      "w": 1380,
+      "h": 920,
+      "title": "Android tablet · drawer, chat & workspace pane",
+      "page": "system"
+    },
+    "MThemesPhone.dc.html": {
+      "x": 2840,
+      "y": 1490,
+      "w": 1600,
+      "h": 1100,
+      "title": "Themes · chat on iPhone",
+      "page": "system"
+    }
+  },
+  "createdOnFiles": {
+    "at": "2026-09-23T11:33:20Z",
+    "v": 1
+  },
+  "designSystems": [],
+  "launch": {
+    "view": "canvas",
+    "page": "home"
+  },
+  "notes": {
+    "t_overview": {
+      "x": 0,
+      "y": -300,
+      "text": "Mobile audit, principles & foundations",
+      "kind": "title1",
+      "maxW": 4960,
+      "page": "overview"
+    },
+    "t_home": {
+      "x": 0,
+      "y": -300,
+      "text": "Home, sidebar navigation & search",
+      "kind": "title1",
+      "maxW": 5320,
+      "page": "home"
+    },
+    "t_chat": {
+      "x": 0,
+      "y": -300,
+      "text": "Chats, transcript & composer",
+      "kind": "title1",
+      "maxW": 5320,
+      "page": "chat"
+    },
+    "t_pane": {
+      "x": 0,
+      "y": -300,
+      "text": "Right workspace pane — every tab, full screen",
+      "kind": "title1",
+      "maxW": 4240,
+      "page": "pane"
+    },
+    "t_workflows": {
+      "x": 0,
+      "y": -300,
+      "text": "Workflows, runs & the builder",
+      "kind": "title1",
+      "maxW": 7480,
+      "page": "workflows"
+    },
+    "t_automations": {
+      "x": 0,
+      "y": -300,
+      "text": "Automations & scripts",
+      "kind": "title1",
+      "maxW": 4240,
+      "page": "automations"
+    },
+    "t_projects": {
+      "x": 0,
+      "y": -300,
+      "text": "Projects, codebases & customization",
+      "kind": "title1",
+      "maxW": 5320,
+      "page": "projects"
+    },
+    "t_agents": {
+      "x": 0,
+      "y": -300,
+      "text": "Agents",
+      "kind": "title1",
+      "maxW": 5320,
+      "page": "agents"
+    },
+    "t_settings": {
+      "x": 0,
+      "y": -300,
+      "text": "Settings — every section",
+      "kind": "title1",
+      "maxW": 6400,
+      "page": "settings"
+    },
+    "t_system": {
+      "x": 0,
+      "y": -300,
+      "text": "Notifications, Live Activities, widgets, tablets & themes",
+      "kind": "title1",
+      "maxW": 5160,
+      "page": "system"
+    }
+  },
+  "order": [
+    "MAudit.dc.html",
+    "MPrinciples.dc.html",
+    "MFoundations.dc.html",
+    "MComponents.dc.html",
+    "MGestures.dc.html",
+    "MHome.dc.html",
+    "MHomeMore.dc.html",
+    "MSidebar.dc.html",
+    "MSidebarChats.dc.html",
+    "MSearch.dc.html",
+    "MServers.dc.html",
+    "MScopeRequest.dc.html",
+    "MPairing.dc.html",
+    "MChats.dc.html",
+    "Main.dc.html",
+    "MChatRunning.dc.html",
+    "MChatToolsExpanded.dc.html",
+    "MChatStepDetail.dc.html",
+    "MChatNoAgent.dc.html",
+    "MModelPicker.dc.html",
+    "MComposerPlus.dc.html",
+    "MComposerInput.dc.html",
+    "MComposerVoice.dc.html",
+    "MNewChat.dc.html",
+    "MNewChatMore.dc.html",
+    "MAgentPicker.dc.html",
+    "MAgentPickerCaps.dc.html",
+    "MChatWorkflowRun.dc.html",
+    "MPaneOpen.dc.html",
+    "MPaneTabsOverview.dc.html",
+    "MPaneChanges.dc.html",
+    "MPaneDiff.dc.html",
+    "MPaneCommit.dc.html",
+    "MPaneCommitDone.dc.html",
+    "MPaneFiles.dc.html",
+    "MPaneFilePreview.dc.html",
+    "MPaneTerminal.dc.html",
+    "MPaneTerminalFull.dc.html",
+    "MPaneBrowser.dc.html",
+    "MPaneBrowserStates.dc.html",
+    "MPaneTasks.dc.html",
+    "MPaneTaskDetail.dc.html",
+    "MPanePlan.dc.html",
+    "MPaneComputer.dc.html",
+    "MWorkflows.dc.html",
+    "MWorkflowDetail.dc.html",
+    "MWorkflowDetailMore.dc.html",
+    "MWorkflowNew.dc.html",
+    "MWorkflowNewBasics.dc.html",
+    "MWorkflowLaunch.dc.html",
+    "MWorkflowLaunchAdvanced.dc.html",
+    "MWorkflowLaunchPlan.dc.html",
+    "MWorkflowRun.dc.html",
+    "MWorkflowRunMenu.dc.html",
+    "MRunStageChat.dc.html",
+    "MWorkflowRunPane.dc.html",
+    "MRunApproval.dc.html",
+    "MRunGraph.dc.html",
+    "MRunLoop.dc.html",
+    "MBuilderList.dc.html",
+    "MBuilderGraph.dc.html",
+    "MBuilderLoop.dc.html",
+    "MWorkflowAgentDraft.dc.html",
+    "MWorkflowSettings.dc.html",
+    "MWorkflowValidate.dc.html",
+    "MStagePrompt.dc.html",
+    "MStageModel.dc.html",
+    "MStageTools.dc.html",
+    "MStageOutput.dc.html",
+    "MStagePolicy.dc.html",
+    "MStagePolicyMore.dc.html",
+    "MStageHooks.dc.html",
+    "MAutomations.dc.html",
+    "MAutomationDetail.dc.html",
+    "MAutomationExecution.dc.html",
+    "MAutomationWebhook.dc.html",
+    "MAutomationCreate1.dc.html",
+    "MAutomationCreate2.dc.html",
+    "MAutomationCreate3.dc.html",
+    "MAutomationCreate4.dc.html",
+    "MScripts.dc.html",
+    "MScriptDetail.dc.html",
+    "MProjects.dc.html",
+    "MProjectCreate.dc.html",
+    "MProjectDetail.dc.html",
+    "MAddCodebase.dc.html",
+    "MProjectSettings.dc.html",
+    "MCodebase.dc.html",
+    "MCodebaseFiles.dc.html",
+    "MCodebaseLogs.dc.html",
+    "MProjectCustomization.dc.html",
+    "MSkillDetail.dc.html",
+    "MAgents.dc.html",
+    "MAgentDetail.dc.html",
+    "MAgentDetailOrch.dc.html",
+    "MAgentNew.dc.html",
+    "MAgentImport.dc.html",
+    "MAgentEdit1.dc.html",
+    "MAgentEdit2.dc.html",
+    "MAgentEdit3.dc.html",
+    "MAgentDelete.dc.html",
+    "MSettings.dc.html",
+    "MSettingsMore.dc.html",
+    "MSetGeneral.dc.html",
+    "MSetAppearance.dc.html",
+    "MSetProviders.dc.html",
+    "MSetAgents.dc.html",
+    "MSetSkills.dc.html",
+    "MSetMcp.dc.html",
+    "MSetMcpAdd.dc.html",
+    "MSetTemplates.dc.html",
+    "MSetSourceControl.dc.html",
+    "MSetBrowserTerminal.dc.html",
+    "MSetComputerUse.dc.html",
+    "MSetAudio.dc.html",
+    "MSetExtensions.dc.html",
+    "MSetSecurity.dc.html",
+    "MSetSecurityMore.dc.html",
+    "MSetPairDevice.dc.html",
+    "MSetStorage.dc.html",
+    "MSetDiagnostics.dc.html",
+    "MSetNotifications.dc.html",
+    "MSetAppLock.dc.html",
+    "MSetWidgets.dc.html",
+    "MNotifications.dc.html",
+    "MLiveActivity.dc.html",
+    "MShortcuts.dc.html",
+    "MWidgets.dc.html",
+    "MTabletIOS.dc.html",
+    "MTabletAndroid.dc.html",
+    "MThemesPhone.dc.html"
+  ],
+  "pages": [
+    {
+      "id": "overview",
+      "name": "Audit & system"
+    },
+    {
+      "id": "home",
+      "name": "Home & navigation"
+    },
+    {
+      "id": "chat",
+      "name": "Chats & composer"
+    },
+    {
+      "id": "pane",
+      "name": "Workspace pane"
+    },
+    {
+      "id": "workflows",
+      "name": "Workflows"
+    },
+    {
+      "id": "automations",
+      "name": "Automations & scripts"
+    },
+    {
+      "id": "projects",
+      "name": "Projects"
+    },
+    {
+      "id": "agents",
+      "name": "Agents"
+    },
+    {
+      "id": "settings",
+      "name": "Settings"
+    },
+    {
+      "id": "system",
+      "name": "System & tablets"
+    }
+  ],
+  "title": "GeneratorAI Redesign – Mobile (iOS & Android)"
+}
