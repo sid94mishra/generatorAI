@@ -4,7 +4,12 @@
 // their P6-05…P6-10 task replaces the entry here — the contract is in
 // features/settings/settingsSections.ts.
 
-import { AppearanceSection, registerSettingsSection, type SettingsSectionDefinition } from '@/features/settings/index.js';
+import {
+  AppearanceSection,
+  SecuritySection,
+  registerSettingsSection,
+  type SettingsSectionDefinition,
+} from '@/features/settings/index.js';
 import { SettingsStatusFooter } from '@/ui/patterns/SettingsSection/SettingsSection.js';
 import { GeneralSection } from '@/components/settings/sections/General.js';
 import { ProvidersSection } from '@/components/settings/sections/Providers.js';
@@ -14,7 +19,6 @@ import { SourceControlSection } from '@/components/settings/sections/SourceContr
 import { BrowserTerminalSection } from '@/components/settings/sections/BrowserTerminal.js';
 import { ComputerUseSection } from '@/components/settings/sections/ComputerUse.js';
 import { ExtensionsSection } from '@/components/settings/sections/Extensions.js';
-import { SecuritySection } from '@/components/settings/sections/Security.js';
 import { DiagnosticsSection } from '@/components/settings/sections/Diagnostics.js';
 import { WorkspaceRetentionSection } from '@/components/settings/sections/WorkspaceRetention.js';
 import { AudioSection } from '@/components/settings/sections/Audio.js';
@@ -36,7 +40,11 @@ const SECTIONS: SettingsSectionDefinition[] = [
   { id: 'computer-use', render: () => <ComputerUseSection /> },
   { id: 'audio', render: () => <AudioSection /> },
   { id: 'extensions', render: () => <ExtensionsSection /> },
-  { id: 'security', render: () => <SecuritySection /> },
+  {
+    id: 'security',
+    render: () => <SecuritySection />,
+    footer: <SettingsStatusFooter icon="shield">Saved to this server · devices need a pairing code to connect</SettingsStatusFooter>,
+  },
   { id: 'storage', render: () => <WorkspaceRetentionSection /> },
   { id: 'diagnostics', render: () => <DiagnosticsSection /> },
 ];

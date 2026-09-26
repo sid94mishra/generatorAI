@@ -23,6 +23,7 @@ import { probeServer } from '@generatorai/client-runtime';
 import type { DesktopServerEntry, ServerReachability } from '@generatorai/shared';
 import { desktopServers, isDesktop } from '@/lib/desktop.js';
 import {
+  forgetConnection,
   getActiveConnection,
   listConnections,
   switchConnection as switchWebConnection,
@@ -176,4 +177,27 @@ export function canAddServer(): boolean {
 /** Opens the "Add server" flow (the shell's prompt). A no-op where `canAddServer()` is false. */
 export function addServer(): void {
   if (canAddServer()) desktopServers.add();
+}
+
+/**
+ * Whether this client can forget a server here: a plain web tab's paired
+ * catalog entries. Desktop forgets through the native `Server ▸ Forget
+ * Server` menu, which owns that list.
+ */
+export function canForgetServer(item: ServerListItem): boolean {
+  if (isDesktop && desktopServers.isAvailable()) return false;
+  return listConnections().some((c) => c.serverId === item.id);
+}
+
+/**
+ * Deletes this client's credential for a paired server (web); a new pairing
+ * code is needed to return. Forgetting the active server reloads onto the
+ * pairing screen.
+ */
+export function useForgetServer(): (id: string) => void {
+  const queryClient = useQueryClient();
+  return (id) => {
+    forgetConnection(id);
+    void queryClient.invalidateQueries({ queryKey: serverKeys.all });
+  };
 }

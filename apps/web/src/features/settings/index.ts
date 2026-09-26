@@ -8,3 +8,4 @@ export {
   type RegisterSettingsSectionOptions,
 } from './settingsSections.js';
 export { AppearanceSection } from './appearance/AppearanceSection.js';
+export { SecuritySection } from './security/SecuritySection.js';
