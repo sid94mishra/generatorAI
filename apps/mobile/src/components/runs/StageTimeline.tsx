@@ -22,6 +22,10 @@ import { formatDuration, runElapsed } from './formatTime';
 import {
   checkLabel,
   checkResultOf,
+  isMapStage,
+  itemLabel,
+  mapBadge,
+  waitOf,
   isLoopStage,
   isParkedLoop,
   loopBadge,
@@ -42,7 +46,21 @@ import { useTheme } from '../../theme/ThemeProvider';
 export function stageSubtitle(stage: StageRunSummary): string {
   const s = stage as RunStage;
   const check = checkResultOf(s);
-  const parts: string[] = [check ? checkLabel(check) : statusLabel(stage.status)];
+  const wait = waitOf(s);
+  const parts: string[] = [
+    check
+      ? checkLabel(check)
+      : wait && stage.status === 'waiting'
+        ? wait.type === 'approval'
+          ? 'Needs approval'
+          : wait.type === 'event'
+            ? `Waiting for ${wait.eventKey ?? 'an event'}`
+            : 'Timer'
+        : wait?.outcome
+          ? `Wait: ${wait.outcome}`
+          : statusLabel(stage.status),
+  ];
+  if (s.kind === 'subworkflow' && s.subworkflowState?.childRunId) parts.push('sub-workflow');
   const exit = loopExitLabel(s);
   if (exit) parts.push(exit);
   // Retries are the attempts beyond the first.
@@ -79,7 +97,8 @@ function flatten(
         out.push({ type: 'iterations', loop: node.stage, ks: iterations.map((i) => i.k), selected, depth: depth + 1 });
       }
       const iteration = iterations.find((i) => i.k === selected);
-      if (iteration) flatten(iteration.nodes, depth + 1, selectedIteration, folded, out, `Iteration ${selected + 1}`);
+      const context = isMapStage(node.stage) ? `Item ${itemLabel(node.stage, selected)}` : `Iteration ${selected + 1}`;
+      if (iteration) flatten(iteration.nodes, depth + 1, selectedIteration, folded, out, context);
     }
     flatten(loop.wrapUp, depth + 1, selectedIteration, folded, out, 'Wrap-up');
   }
@@ -146,11 +165,11 @@ export function StageTimeline({
                 {row.ks.map((k) => (
                   <Chip
                     key={k}
-                    label={`${k + 1}`}
+                    label={isMapStage(row.loop) ? itemLabel(row.loop, k) : `${k + 1}`}
                     size="sm"
                     tone="tab"
                     selected={k === row.selected}
-                    accessibilityLabel={`Iteration ${k + 1}`}
+                    accessibilityLabel={isMapStage(row.loop) ? `Item ${itemLabel(row.loop, k)}` : `Iteration ${k + 1}`}
                     onPress={() => setSelectedIteration((prev) => ({ ...prev, [row.loop.id]: k }))}
                   />
                 ))}
@@ -164,8 +183,8 @@ export function StageTimeline({
         const elapsed = runElapsed(stage, isActive(stage.status) ? null : stage.completedAt);
         const controls = stageControlsFor(stage.status, runStatus);
         const quick = controls.retry ? 'retry' : controls.resume ? 'resume' : null;
-        const isLoop = row.loop === true || isLoopStage(stage);
-        const badge = isLoop ? loopBadge(stage) : null;
+        const isLoop = row.loop === true || isLoopStage(stage) || isMapStage(stage);
+        const badge = isMapStage(stage) ? mapBadge(stage) : isLoop ? loopBadge(stage) : null;
         const parked = isParkedLoop(stage);
         const isFolded = folded.has(stage.id);
         const subtitle = row.context ? `${row.context} · ${stageSubtitle(stage)}` : stageSubtitle(stage);
@@ -206,7 +225,7 @@ export function StageTimeline({
                     <Text numberOfLines={1} className="flex-1 text-md font-medium text-foreground">
                       {stage.name ?? stage.stageKey}
                     </Text>
-                    {badge ? <Badge label={`loop ${badge}`} tone={parked ? 'warning' : 'neutral'} /> : null}
+                    {badge ? <Badge label={`${isMapStage(stage) ? 'map' : 'loop'} ${badge}`} tone={parked ? 'warning' : 'neutral'} /> : null}
                     {elapsed != null ? (
                       <Text className="text-sm text-muted-foreground">{formatDuration(elapsed)}</Text>
                     ) : null}

@@ -18,12 +18,14 @@ import { ChevronLeft, Lock, MoreHorizontal, Trash2, Workflow as WorkflowIcon } f
 import { queryKeys, type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
+import { useAdminApi } from '../../src/api/useAdminApi';
 import { useRunMutations, useRunPermissionMode, type RunAction } from '../../src/api/useRunControl';
 import { useRunStream } from '../../src/stream/useRunStream';
 import { StageGateCard } from '../../src/components/runs/StageGateCard';
 import { LoopDecisionCard } from '../../src/components/runs/LoopDecisionCard';
 import { CheckOutput } from '../../src/components/runs/CheckOutput';
-import { isCheckStage, isParkedLoop, type RunStage } from '../../src/components/runs/loopModel';
+import { isCheckStage, isParkedLoop, waitOf, type RunStage } from '../../src/components/runs/loopModel';
+import { WaitDecisionCard, type WaitDecision } from '../../src/components/runs/WaitDecisionCard';
 import { formatDuration, relativeTime, runElapsed } from '../../src/components/runs/formatTime';
 import { StageTimeline } from '../../src/components/runs/StageTimeline';
 import { StageTranscriptInline } from '../../src/components/runs/StageTranscriptInline';
@@ -67,6 +69,7 @@ export default function RunDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const runId = String(id);
   const api = useApi();
+  const admin = useAdminApi();
   const navigation = useNavigation();
   const focused = useIsFocused();
   const { colors } = useTheme();
@@ -108,6 +111,49 @@ export default function RunDetailScreen(): React.ReactElement {
     [stages],
   );
   const loopDecisions = useMemo(() => stages.filter((s) => isParkedLoop(s as RunStage)) as RunStage[], [stages]);
+  // Waits (P05 §4.3) and the decisions of sub-workflow children, mirrored here (P05 §4.2).
+  const hasChildren = stages.some((s) => (s as RunStage).kind === 'subworkflow' && s.status === 'running');
+  const pending = useQuery({
+    queryKey: [...queryKeys.run(runId), 'pending-decisions'],
+    queryFn: () => admin.runs.pendingDecisions(runId),
+    enabled: hasChildren,
+    refetchInterval: focused && hasChildren ? 5_000 : false,
+  });
+  const waitDecisions = useMemo<WaitDecision[]>(() => {
+    const out: WaitDecision[] = [];
+    for (const s of stages as RunStage[]) {
+      const w = waitOf(s);
+      if (!w || s.status !== 'waiting' || w.type === 'timer') continue;
+      out.push({
+        runId,
+        instanceId: s.id,
+        name: w.label ?? s.name ?? s.stageKey,
+        type: w.type,
+        prompt: w.prompt,
+        form: w.form,
+        eventKey: w.eventKey,
+        callbackUrl: s.callback?.url ?? null,
+      });
+    }
+    for (const d of pending.data ?? []) {
+      if (d.runId === runId) continue;
+      const i = (d.interruptData && typeof d.interruptData === 'object' ? d.interruptData : {}) as Record<string, unknown>;
+      const type = d.kind === 'wait' ? (d.waitType === 'event' ? 'event' : 'approval') : d.kind === 'stage_completion_review' ? 'completion_review' : null;
+      if (!type) continue;
+      out.push({
+        runId,
+        instanceId: d.instanceId,
+        name: d.name,
+        via: d.via.map((v) => v.name).join(' › '),
+        type,
+        prompt: typeof i['prompt'] === 'string' ? i['prompt'] : typeof i['reason'] === 'string' ? i['reason'] : null,
+        form: i['form'] && typeof i['form'] === 'object' ? (i['form'] as Record<string, unknown>) : null,
+        eventKey: typeof i['eventKey'] === 'string' ? i['eventKey'] : null,
+        callbackUrl: d.callback?.url ?? null,
+      });
+    }
+    return out;
+  }, [stages, pending.data, runId]);
   const controls = runControlsFor(runStatus ?? '');
 
   const doRunAction = useCallback(
@@ -321,17 +367,21 @@ export default function RunDetailScreen(): React.ReactElement {
           ) : null}
         </Card>
 
-        {approvals.length + loopDecisions.length > 0 ? (
+        {approvals.length + loopDecisions.length + waitDecisions.length > 0 ? (
           <>
             <SectionHeader title="Waiting for you" />
+            {/* A loop decision is a run-time act, like an approval (exec:agent, P05). */}
             {loopDecisions.map((stage) => (
               <LoopDecisionCard
                 key={stage.id}
                 runId={runId}
                 stage={stage}
-                canControl={runControl.available}
-                onRequestAccess={runControl.requestAccess}
+                canControl={runStart.available}
+                onRequestAccess={runStart.requestAccess}
               />
+            ))}
+            {waitDecisions.map((d) => (
+              <WaitDecisionCard key={`${d.via ?? ''}:${d.instanceId}`} decision={d} canDecide={runStart.available} />
             ))}
             {/* A tool permission, question or plan inside a stage's turn is the
                 chat's card; the completion review is the approval card. */}

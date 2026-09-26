@@ -7,6 +7,11 @@
 // `awaiting_input` with `interruptData.kind === 'loop_decision'` and is
 // answered with the loop run commands (`run command`), not with approve.
 //
+// Maps, waits and sub-workflows (P05 5B) render here too: a map's items
+// (`itemIndex`) under it, a wait's type and its approval (answered with the
+// `approve` run command, form data as JSON), a sub-workflow's child run and
+// the decisions of its children mirrored from `runs.pendingDecisions`.
+//
 // Pure: the run pane renders `stageLines`, `App.tsx` builds the decision
 // overlay from `loopDecisionOptions` and turns a choice into a command with
 // `loopCommandFor`. Stages are trimmed (`toLoopStages`) before they go into
@@ -34,6 +39,45 @@ export interface LoopStage {
   loop?: { k: number; phase: string; effectiveMax: number; exitReason: string | null; exitAction: string | null };
   decision?: LoopDecision;
   check?: { passed: boolean; exitCode: number | null; timedOut: boolean };
+  /** A map body instance's item, and a map's progress (P05 §4.1). */
+  itemIndex?: number;
+  itemKey?: string;
+  map?: { count: number; done: number; failed: number; keys: string[] };
+  /** A wait (P05 §4.3): its type, and while waiting its question. */
+  wait?: { type: string; label?: string; prompt?: string; eventKey?: string; hasForm: boolean; outcome?: string };
+  /** A sub-workflow's child run (P05 §4.2). */
+  childRunId?: string;
+}
+
+/** A decision of a sub-workflow child, mirrored into its parent's pane. */
+export interface MirroredDecision {
+  runId: string;
+  instanceId: string;
+  name: string;
+  kind: string;
+  waitType?: string;
+  via: string;
+  hasForm: boolean;
+}
+
+/** The mirrored decisions (children's) of `runs.pendingDecisions`, trimmed. */
+export function toMirroredDecisions(runId: string, rows: readonly unknown[]): MirroredDecision[] {
+  return rows.flatMap((raw) => {
+    const d = rec(raw);
+    if (d['runId'] === runId) return [];
+    const via = Array.isArray(d['via']) ? (d['via'] as unknown[]).map((v) => str(rec(v)['stageKey']) ?? '').join(' > ') : '';
+    return [
+      {
+        runId: String(d['runId'] ?? ''),
+        instanceId: String(d['instanceId'] ?? ''),
+        name: String(d['name'] ?? d['stageKey'] ?? ''),
+        kind: String(d['kind'] ?? ''),
+        ...(str(d['waitType']) ? { waitType: str(d['waitType'])! } : {}),
+        via,
+        hasForm: Object.keys(rec(rec(d['interruptData'])['form'])).length > 0,
+      },
+    ];
+  });
 }
 
 const num = (v: unknown): number | null => (typeof v === 'number' && Number.isFinite(v) ? v : null);
@@ -95,13 +139,46 @@ export function toLoopStages(stages: readonly unknown[]): LoopStage[] {
         out.check = { passed: o['passed'], exitCode: num(o['exitCode']), timedOut: o['timedOut'] === true };
       }
     }
+    const item = num(s['itemIndex']);
+    if (item !== null) out.itemIndex = item;
+    const itemKey = str(s['itemKey']);
+    if (itemKey) out.itemKey = itemKey;
+    const ms = rec(s['mapState']);
+    if (Array.isArray(ms['items'])) {
+      const items = (ms['items'] as unknown[]).map(rec);
+      out.map = {
+        count: num(ms['count']) ?? items.length,
+        done: items.filter((i) => i['phase'] === 'done').length,
+        failed: items.filter((i) => i['status'] === 'failed' || i['status'] === 'cancelled').length,
+        keys: items.map((i) => String(i['key'] ?? '')),
+      };
+    }
+    if (kind === 'wait') {
+      const d = rec(s['interruptData']);
+      const o = rec(s['outputData']);
+      out.wait = {
+        type: str(d['type']) ?? 'approval',
+        ...(str(d['label']) ? { label: str(d['label'])! } : {}),
+        ...(str(d['prompt']) ? { prompt: str(d['prompt'])! } : {}),
+        ...(str(d['eventKey']) ? { eventKey: str(d['eventKey'])! } : {}),
+        hasForm: Object.keys(rec(d['form'])).length > 0,
+        ...(str(o['outcome']) ? { outcome: str(o['outcome'])! } : {}),
+      };
+    }
+    const child = str(rec(s['subworkflowState'])['childRunId']);
+    if (child) out.childRunId = child;
     return out;
   });
 }
 
-/** Whether the run has anything the plain event timeline cannot show: a loop or a check. */
+/** Whether the run has anything the plain event timeline cannot show: a loop, a map, a check, a wait or a sub-workflow. */
 export function hasControlFlow(stages: readonly LoopStage[]): boolean {
-  return stages.some((s) => s.kind === 'loop' || s.kind === 'check');
+  return stages.some((s) => s.kind === 'loop' || s.kind === 'check' || s.kind === 'map' || s.kind === 'wait' || s.kind === 'subworkflow');
+}
+
+/** The first approval wait waiting for an answer (P05 §4.3). */
+export function waitingApproval(stages: readonly LoopStage[]): LoopStage | null {
+  return stages.find((s) => s.status === 'waiting' && s.wait?.type === 'approval') ?? null;
 }
 
 /** The first loop waiting for a decision. */
@@ -152,6 +229,19 @@ function lineFor(stage: LoopStage, depth: number, prefix: string): StageLine {
     } else {
       parts.push(stage.status);
     }
+  } else if (stage.kind === 'map' && stage.map) {
+    parts.push(`map ${stage.map.done}/${stage.map.count}${stage.map.failed ? ` · ${stage.map.failed} failed` : ''}`);
+    parts.push(stage.status);
+  } else if (stage.kind === 'wait' && stage.wait) {
+    const w = stage.wait;
+    if (w.outcome) parts.push(`wait: ${w.outcome}`);
+    else if (stage.status === 'waiting') {
+      parts.push(w.type === 'approval' ? `needs approval${w.label ? ` (${w.label})` : ''}` : w.type === 'event' ? `waiting for event ${w.eventKey ?? ''}` : 'timer');
+      if (w.type !== 'timer') tone = 'warning';
+    } else parts.push(`${w.type} wait · ${stage.status}`);
+  } else if (stage.kind === 'subworkflow') {
+    parts.push(stage.childRunId ? `sub-workflow · child ${stage.childRunId.slice(0, 8)}` : 'sub-workflow');
+    parts.push(stage.status);
   } else if (stage.check) {
     const code = stage.check.exitCode !== null ? ` (exit ${stage.check.exitCode})` : '';
     parts.push(stage.check.timedOut ? 'check timed out' : `check ${stage.check.passed ? 'passed' : 'failed'}${code}`);
@@ -196,6 +286,15 @@ export function stageLines(stages: readonly LoopStage[]): StageLine[] {
       out.push(lineFor(stage, depth, prefix));
       const kids = children.get(stage.id);
       if (!kids?.length) continue;
+      if (stage.kind === 'map') {
+        // A map lists every started item with its body (item keys as labels).
+        const items = [...new Set(kids.map((c) => c.itemIndex).filter((i): i is number => i !== undefined))].sort((a, b) => a - b);
+        for (const i of items) {
+          const key = stage.map?.keys[i] ?? kids.find((c) => c.itemIndex === i)?.itemKey ?? String(i);
+          walk(kids.filter((c) => c.itemIndex === i), depth + 1, `[${key}] `);
+        }
+        continue;
+      }
       const ks = [...new Set(kids.map((c) => c.iterationIndex).filter((k): k is number => k !== undefined))].sort((a, b) => a - b);
       const latest = ks[ks.length - 1];
       if (latest !== undefined && ks.length > 1) {

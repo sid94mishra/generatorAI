@@ -78,6 +78,9 @@ import {
   decisionHeadline,
   loopDecisionOptions,
   parkedLoop,
+  toMirroredDecisions,
+  waitingApproval,
+  type MirroredDecision,
   parseBudget,
   toLoopStages,
   type LoopStage,
@@ -646,14 +649,21 @@ export function App({
       const stages = await withTimeout(api.runs.stages(runId), 8000).catch(() => null);
       if (!stages) return null;
       const loopStages = toLoopStages(stages as unknown[]);
+      // A sub-workflow's child decisions are mirrored into the parent's pane (P05 §4.2).
+      const childDecisions = loopStages.some((st) => st.kind === 'subworkflow')
+        ? toMirroredDecisions(runId, ((await withTimeout(api.runs.pendingDecisions(runId), 8000).catch(() => null)) ?? []) as unknown[])
+        : [];
       const pane = getStoreApi()
         .getState()
         .workbench.tabs.flatMap((t) => paneLeaves(t.root))
         .find((leaf) => leaf.id === paneId);
       if (!pane || pane.content.kind !== 'run' || pane.content.entityId !== runId) return loopStages;
-      const prior = (pane.content.state ?? {}) as { loopStages?: LoopStage[] };
-      if (JSON.stringify(prior.loopStages ?? []) !== JSON.stringify(loopStages)) {
-        actions.patchPane(paneId, { state: { ...(pane.content.state ?? {}), loopStages } });
+      const prior = (pane.content.state ?? {}) as { loopStages?: LoopStage[]; childDecisions?: MirroredDecision[] };
+      if (
+        JSON.stringify(prior.loopStages ?? []) !== JSON.stringify(loopStages) ||
+        JSON.stringify(prior.childDecisions ?? []) !== JSON.stringify(childDecisions)
+      ) {
+        actions.patchPane(paneId, { state: { ...(pane.content.state ?? {}), loopStages, childDecisions } });
       }
       // The timeline reducer clears a gate only on `stage_run.input_received`,
       // which a loop decision never emits: once the loop has moved on, clear
@@ -3289,10 +3299,51 @@ export function App({
   function approveGate(approve: boolean): void {
     // A parked loop (P05) is answered with the loop decisions: `a` opens
     // them, `x` fails the loop after a confirm.
-    const loop = parkedLoop(((content?.state ?? {}) as { loopStages?: LoopStage[] }).loopStages ?? []);
+    const paneState = (content?.state ?? {}) as { loopStages?: LoopStage[]; childDecisions?: MirroredDecision[] };
+    const loop = parkedLoop(paneState.loopStages ?? []);
     if (loop?.decision && content?.kind === 'run' && content.entityId) {
       if (approve) decideLoop(content.entityId, loop);
       else confirmFailLoop(content.entityId, loop);
+      return;
+    }
+    // An approval wait (P05 §4.3), this run's or a sub-workflow child's
+    // (answered through this run: the server routes it to the child).
+    const wait = waitingApproval(paneState.loopStages ?? []);
+    const mirrored = (paneState.childDecisions ?? []).find((d) => d.kind === 'wait' ? d.waitType === 'approval' : d.kind === 'stage_completion_review');
+    const target = wait
+      ? { instanceId: wait.id, hasForm: wait.wait?.hasForm === true, name: wait.name || wait.stageKey }
+      : mirrored
+        ? { instanceId: mirrored.instanceId, hasForm: mirrored.hasForm, name: `${mirrored.name} (via ${mirrored.via})` }
+        : null;
+    if (target && content?.kind === 'run' && content.entityId) {
+      const runId = content.entityId;
+      const paneId = focusedPane?.id ?? '';
+      const send = (fields: Record<string, unknown>) =>
+        void runner
+          .run('run.command', { run: runId, instance: target.instanceId, command: 'approve' }, { json: JSON.stringify(fields) })
+          .then(() => (paneId ? refreshRunStages(paneId, runId) : null));
+      if (!approve) {
+        send({ outcome: 'rejected' });
+        return;
+      }
+      if (!target.hasForm) {
+        send({ outcome: 'approved' });
+        return;
+      }
+      actions.showOverlay({
+        kind: 'input',
+        message: `${target.name}: the approval form as JSON (e.g. {"environment":"staging"})`,
+        initial: '{}',
+        onSubmit: (text) => {
+          try {
+            const data: unknown = JSON.parse(text || '{}');
+            if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('not an object');
+            send({ outcome: 'approved', data });
+          } catch (err) {
+            actions.toast(`The form is not a JSON object: ${err instanceof Error ? err.message : String(err)}`, 'warning');
+          }
+        },
+      });
       return;
     }
     // A tool permission, question or plan review inside a stage's turn is a

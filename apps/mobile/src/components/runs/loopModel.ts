@@ -10,13 +10,18 @@
 // commands (grant, raise budget, continue with input, accept, accept an
 // iteration, fail) — never with the approval card.
 //
+// Maps, waits and sub-workflows (P05 5B): a map's items group under it like
+// iterations (by `itemIndex`, labelled with their key); a wait reads its type
+// and, as an approval, is answered with the `approve` command and its form;
+// a sub-workflow names its child run.
+//
 // Pure, so the grouping and the decision options are testable without React
 // Native. The run query's rows carry these fields (the server sends the full
 // stage run); `StageRunSummary` only lacks their declarations.
 // ────────────────────────────────────────────────────────────────
 
 import type { StageRunSummary } from '@generatorai/client-core';
-import type { LoopStateView } from '@generatorai/shared';
+import type { LoopStateView, MapStateView, SubworkflowStateView } from '@generatorai/shared';
 
 /** A stage run with the P05 control-flow fields the server sends. */
 export type RunStage = StageRunSummary & {
@@ -24,7 +29,78 @@ export type RunStage = StageRunSummary & {
   scopeId?: string | null;
   iterationIndex?: number | null;
   loopState?: Partial<LoopStateView> | null;
+  itemIndex?: number | null;
+  itemKey?: string | null;
+  mapState?: MapStateView | null;
+  subworkflowState?: SubworkflowStateView | null;
+  callback?: { url: string; token: string } | null;
 };
+
+export function isMapStage(stage: RunStage): boolean {
+  return stage.kind === 'map';
+}
+
+/** A map's progress, "3/7" (items settled of all). */
+export function mapBadge(stage: RunStage): string | null {
+  const ms = stage.mapState;
+  if (!ms) return null;
+  return `${ms.items.filter((i) => i.phase === 'done').length}/${ms.count}`;
+}
+
+/** An item's label: its key. */
+export function itemLabel(map: RunStage, index: number): string {
+  return map.mapState?.items[index]?.key ?? String(index + 1);
+}
+
+export interface WaitView {
+  type: 'approval' | 'event' | 'timer';
+  label: string | null;
+  prompt: string | null;
+  form: Record<string, unknown> | null;
+  eventKey: string | null;
+  until: number | null;
+  outcome: string | null;
+}
+
+/** A wait instance's question (while waiting) and outcome (once resolved). */
+export function waitOf(stage: RunStage): WaitView | null {
+  if (stage.kind !== 'wait') return null;
+  const d = rec(stage.interruptData);
+  const o = rec(stage.outputData);
+  const type = d['type'] === 'event' || d['type'] === 'timer' ? d['type'] : 'approval';
+  const form = rec(d['form']);
+  return {
+    type,
+    label: typeof d['label'] === 'string' ? d['label'] : null,
+    prompt: typeof d['prompt'] === 'string' ? d['prompt'] : null,
+    form: Object.keys(form).length > 0 ? form : null,
+    eventKey: typeof d['eventKey'] === 'string' ? d['eventKey'] : null,
+    until: num(d['until']),
+    outcome: typeof o['outcome'] === 'string' ? o['outcome'] : null,
+  };
+}
+
+/** A waiting approval wait (answered with `approve`, P05 §4.3). */
+export function isApprovalWait(stage: RunStage): boolean {
+  return stage.status === 'waiting' && waitOf(stage)?.type === 'approval';
+}
+
+/** The flat string / number / boolean / enum fields of a wait form; null when the form needs raw JSON. */
+export function formFields(form: Record<string, unknown> | null): Array<{ name: string; type: 'string' | 'number' | 'boolean'; options: string[] | null; required: boolean }> | null {
+  if (!form) return [];
+  const props = rec(form['properties']);
+  if (Object.keys(props).length === 0) return null;
+  const required = new Set(Array.isArray(form['required']) ? (form['required'] as unknown[]).map(String) : []);
+  const out: Array<{ name: string; type: 'string' | 'number' | 'boolean'; options: string[] | null; required: boolean }> = [];
+  for (const [name, raw] of Object.entries(props)) {
+    const p = rec(raw);
+    const options = Array.isArray(p['enum']) && p['enum'].every((x) => typeof x === 'string') ? (p['enum'] as string[]) : null;
+    const type = options ? 'string' : p['type'] === 'number' || p['type'] === 'integer' ? 'number' : p['type'] === 'boolean' ? 'boolean' : p['type'] === 'string' ? 'string' : null;
+    if (!type) return null;
+    out.push({ name, type, options, required: required.has(name) });
+  }
+  return out;
+}
 
 export function isLoopStage(stage: RunStage): boolean {
   return stage.kind === 'loop';
@@ -229,11 +305,12 @@ export function stageTree(stages: readonly RunStage[]): StageNode[] {
   const build = (stage: RunStage): StageNode => {
     seen.add(stage.id);
     const kids = (children.get(stage.id) ?? []).filter((c) => !seen.has(c.id));
-    if (kids.length === 0 && !isLoopStage(stage)) return { stage };
+    if (kids.length === 0 && !isLoopStage(stage) && !isMapStage(stage)) return { stage };
     const byK = new Map<number, RunStage[]>();
     const wrap: RunStage[] = [];
     for (const kid of kids) {
-      const k = typeof kid.iterationIndex === 'number' ? kid.iterationIndex : null;
+      // A loop's body by iteration; a map's by item (P05 §4.1).
+      const k = typeof kid.iterationIndex === 'number' ? kid.iterationIndex : typeof kid.itemIndex === 'number' ? kid.itemIndex : null;
       if (k === null) wrap.push(kid);
       else {
         const list = byK.get(k);

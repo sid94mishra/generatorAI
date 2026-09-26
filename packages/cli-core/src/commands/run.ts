@@ -1007,14 +1007,24 @@ export function runCommands(): CommandSpec[] {
         'generatorai run command @last fix_review continue_with_input --json \'{"text":"Focus on the failing parser test"}\'',
         'generatorai run command @last fix_review accept_iteration --json \'{"k":1}\'',
         'generatorai run command @last - pause --json \'{"mode":"interrupt"}\'',
+        'generatorai run command @last - deliver_event --eventKey ci:4f2a --idempotencyKey build-77 --data @result.json',
+        'generatorai run command @last approve_release approve --json \'{"outcome":"approved","data":{"environment":"prod"}}\'',
       ],
       args: [
         { name: 'run', description: 'Run reference', required: true, completes: 'run' },
         { name: 'instance', description: 'Stage key, instance path (fix_review#2/fix) or id; - for the run itself', required: true, completes: 'stage' },
         { name: 'command', description: 'The command (grant_iterations, raise_budget, continue_with_input, accept, accept_iteration, fail, pause, …)', required: true },
       ],
-      flags: [{ name: 'json', description: "The command's fields as a JSON object", type: 'string' }],
-      schema: inputSchema({ run: z.string(), instance: z.string(), command: z.string() }, { json: z.string().optional() }),
+      flags: [
+        { name: 'json', description: "The command's fields as a JSON object", type: 'string' },
+        { name: 'eventKey', description: 'deliver_event: the event key (P05 wait)', type: 'string' },
+        { name: 'idempotencyKey', description: 'deliver_event: the delivery key (a repeat with the same data is a replay)', type: 'string' },
+        { name: 'data', description: 'deliver_event / approve: the data as JSON, or @file to read it from a file', type: 'string', completes: 'file' },
+      ],
+      schema: inputSchema(
+        { run: z.string(), instance: z.string(), command: z.string() },
+        { json: z.string().optional(), eventKey: z.string().optional(), idempotencyKey: z.string().optional(), data: z.string().optional() },
+      ),
       output: { kind: 'record' },
       async handler(ctx, { args, flags }) {
         const run = await findRun(ctx, args.run);
@@ -1028,6 +1038,17 @@ export function runCommands(): CommandSpec[] {
             throw CliError.usage(`--json is not a JSON object: ${err instanceof Error ? err.message : String(err)}`);
           }
         }
+        // P5-42: the fields of an event (and an approval's form data) as flags.
+        if (flags.eventKey !== undefined) fields['eventKey'] = flags.eventKey;
+        if (flags.idempotencyKey !== undefined) fields['idempotencyKey'] = flags.idempotencyKey;
+        if (flags.data !== undefined) {
+          const raw = flags.data.startsWith('@') ? await fs.readFile(flags.data.slice(1), 'utf8') : flags.data;
+          try {
+            fields['data'] = JSON.parse(raw) as unknown;
+          } catch (err) {
+            throw CliError.usage(`--data is not JSON: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
         const stage = args.instance === '-' ? undefined : await findStage(ctx, run.id, args.instance);
         const parsed = RunCommandSchema.safeParse({ ...fields, command: args.command, ...(stage ? { instanceId: stage.id } : {}) });
         if (!parsed.success) {
@@ -1035,10 +1056,63 @@ export function runCommands(): CommandSpec[] {
             hint: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; '),
           });
         }
-        await ctx.api.runs.command(run.id, parsed.data);
+        const reply = await ctx.api.runs.command(run.id, parsed.data);
+        const replayed = (reply as { replayed?: boolean } | undefined)?.replayed === true;
         return record(
-          { runId: run.id, instanceId: stage?.id ?? null, command: args.command },
-          `${args.command} sent to ${stage ? (stage.instancePath ?? stage.name ?? stage.id) : `run ${run.id}`}.`,
+          { runId: run.id, instanceId: stage?.id ?? null, command: args.command, ...(replayed ? { replayed: true } : {}) },
+          `${args.command} ${replayed ? 'was already delivered (a replay)' : 'sent'} to ${stage ? (stage.instancePath ?? stage.name ?? stage.id) : `run ${run.id}`}.`,
+        );
+      },
+    }),
+
+    // The decisions a run waits on (P05): its own and its sub-workflow
+    // children's, mirrored. Answer any of them with `run command` on this run
+    // (an approval reaches the child); a mirrored loop decision or event goes
+    // to the child run (its id is in the `run` column).
+    defineCommand({
+      id: 'run.pending',
+      group: 'run',
+      verb: 'pending',
+      summary: 'The decisions a run waits on: reviews, gates, parked loops, approval and event waits (sub-workflow children included)',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      examples: ['generatorai run pending @last', 'generatorai run pending a3f2 --output json'],
+      args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
+      flags: [],
+      schema: inputSchema({ run: z.string() }, {}),
+      output: {
+        kind: 'list',
+        columns: [
+          { key: 'stage', header: 'Stage', priority: 0 },
+          { key: 'kind', header: 'Kind', priority: 0 },
+          { key: 'via', header: 'Via', priority: 1 },
+          { key: 'detail', header: 'Detail', priority: 2 },
+          { key: 'run', header: 'Run', priority: 3 },
+        ],
+      },
+      async handler(ctx, { args }) {
+        const run = await findRun(ctx, args.run);
+        const rows = await ctx.api.runs.pendingDecisions(run.id);
+        return list(
+          rows.map((d) => {
+            const i = (d.interruptData && typeof d.interruptData === 'object' ? d.interruptData : {}) as Record<string, unknown>;
+            const detail =
+              d.kind === 'wait'
+                ? d.waitType === 'event'
+                  ? `event ${String(i['eventKey'] ?? '')}${d.callback ? ` · callback ${d.callback.url}` : ''}`
+                  : String(i['prompt'] ?? i['label'] ?? '')
+                : d.kind === 'loop_decision'
+                  ? `${String(i['action'] ?? '')}: ${String(i['reason'] ?? '')}`
+                  : String(i['reason'] ?? i['prompt'] ?? '');
+            return {
+              stage: d.instancePath,
+              kind: d.kind === 'wait' ? `${d.waitType ?? 'approval'} wait` : d.kind,
+              via: d.via.map((v) => v.stageKey).join(' > '),
+              detail: detail.length > 120 ? `${detail.slice(0, 117)}...` : detail,
+              run: d.runId,
+              instanceId: d.instanceId,
+            };
+          }),
         );
       },
     }),

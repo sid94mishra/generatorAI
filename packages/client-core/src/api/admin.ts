@@ -34,6 +34,7 @@ import type {
   ProjectConfig,
   StageRun,
   LoopIteration,
+  PendingDecisionView,
   TerminalSessionDescriptor,
   UpdateAgentParams,
   UpdateAutomationParams,
@@ -323,6 +324,23 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       /** A loop instance's finished iterations, oldest first (P05). */
       iterations: (id: string, instanceId: string) =>
         req<LoopIteration[]>(`/api/workflow-runs/${id}/instances/${encodeURIComponent(instanceId)}/iterations`),
+      /**
+       * Every decision the run waits on (completion reviews, gates, parked
+       * loops, approval and event waits), its sub-workflow children's
+       * mirrored with the chain they came through (P05). Answer them with
+       * THIS run's `command` (an approval reaches the owning child).
+       */
+      pendingDecisions: (id: string) => req<PendingDecisionView[]>(`/api/workflow-runs/${id}/pending-decisions`),
+      /**
+       * Deliver an external event to the run (P05 §4.3): the oldest waiting
+       * event wait with the key takes it. A replay (same key and data) answers
+       * `{replayed: true}`; the same key with other data is refused (409).
+       */
+      deliverEvent: (id: string, e: { eventKey: string; idempotencyKey: string; data?: unknown }) =>
+        req<{ runId: string; command: string; replayed?: boolean }>(
+          `/api/workflow-runs/${id}/commands`,
+          json({ command: 'deliver_event', eventKey: e.eventKey, idempotencyKey: e.idempotencyKey, ...(e.data !== undefined ? { data: e.data } : {}) }),
+        ),
 
       permissionMode: {
         get: (id: string) =>

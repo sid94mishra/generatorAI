@@ -403,6 +403,8 @@ export function reduceEvent(
       const stageName = str(data['stageName'] ?? data['name'] ?? base.currentStage);
       return {
         ...base,
+        // A resolved approval wait (P05) completes its instance: its card goes.
+        ...(stageRunId && base.pendingApproval?.stageId === stageRunId ? { pendingApproval: null } : {}),
         items: base.items.map((item) => {
           if (item.kind !== 'stage') return item;
           // Prefer matching by the stage run's own id — a name match is
@@ -477,6 +479,52 @@ export function reduceEvent(
     // A loop decision (P05) answers the loop's parked card: no stage_run.input_received follows.
     case 'loop.command_applied':
       return { ...base, pendingApproval: null };
+
+    // A wait armed (P05 §4.3): an approval wait is an approval card; an event
+    // or timer wait is a notice (an event arrives with `run command … deliver_event`
+    // or the wait's callback URL).
+    case 'stage_run.waiting': {
+      const stageRunId = str(data['stageRunId']);
+      const stageName = str(data['name'] ?? data['stageKey'] ?? stageRunId);
+      const wait = (data['interruptData'] ?? {}) as { type?: unknown; prompt?: unknown; label?: unknown; eventKey?: unknown; until?: unknown };
+      const type = typeof wait.type === 'string' ? wait.type : 'approval';
+      const text =
+        type === 'approval'
+          ? `${stageName} is waiting for an approval${typeof wait.label === 'string' ? `: ${wait.label}` : ''}`
+          : type === 'event'
+            ? `${stageName} is waiting for the event ${str(wait.eventKey)}`
+            : `${stageName} waits${typeof wait.until === 'number' ? ` until ${new Date(wait.until).toLocaleTimeString()}` : ''}`;
+      return push(
+        type === 'approval'
+          ? {
+              ...base,
+              pendingApproval: { stageId: stageRunId, stageName, ...(typeof wait.prompt === 'string' ? { prompt: wait.prompt } : {}) },
+            }
+          : base,
+        { id: itemId(), kind: 'notice', text, complete: true, at: now, stageName, ...(stageRunId ? { stageRunId } : {}), level: type === 'timer' ? 'info' : 'warn' },
+        options,
+      );
+    }
+
+    // Maps and sub-workflows (P05 §4.1, §4.2): progress notices.
+    case 'map.started':
+    case 'map.item_completed':
+    case 'subworkflow.child_started': {
+      const stageRunId = str(data['stageRunId']);
+      const key = str(data['stageKey'] ?? data['instancePath'] ?? stageRunId);
+      const failed = kind === 'map.item_completed' && data['status'] !== 'completed';
+      const text =
+        kind === 'map.started'
+          ? `${key}: fanning out over ${num(data['count']) ?? 0} item(s)${data['workspace'] === 'mount_per_item' ? ' (a worktree per item)' : ''}`
+          : kind === 'map.item_completed'
+            ? `${key}: item ${str(data['key'] ?? data['index'])} ${str(data['status'])}${data['error'] ? ` — ${str(data['error'])}` : ''}`
+            : `${key}: child run ${str(data['childRunId'])} started`;
+      return push(
+        base,
+        { id: itemId(), kind: 'notice', text, complete: true, at: now, ...(stageRunId ? { stageRunId } : {}), level: failed ? 'warn' : 'info' },
+        options,
+      );
+    }
 
     // The stage conversation (P03b): what an operator sent, a stopped turn,
     // an amendment of a completed stage.

@@ -13,9 +13,9 @@ same promise as one that does not.
 
 | Measure | Count |
 |---|---:|
-| Commands | 216 |
+| Commands | 217 |
 | Groups | 23 |
-| Server-backed commands | 189 |
+| Server-backed commands | 190 |
 | Destructive commands | 32 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
@@ -159,6 +159,7 @@ same promise as one that does not.
 | `run.list` | `run list` | yes | no | yes | yes | — | — |
 | `run.messages` | `run messages` | yes | no | yes | yes | run | — |
 | `run.pause` | `run pause` | yes | no | yes | yes | run | — |
+| `run.pending` | `run pending` | yes | no | yes | yes | run | — |
 | `run.plan` | `run plan` | yes | no | yes | yes | — | — |
 | `run.profile.generate` | `run profile generate` | yes | no | yes | yes | workflow | — |
 | `run.profile.list` | `run profile list` | no | no | yes | yes | — | — |

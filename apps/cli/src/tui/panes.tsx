@@ -44,7 +44,16 @@ import { dashboardRows, NO_ROWS, useActions, useTui, type DataKey } from './stor
 import { TerminalScreen, useTerminalScreen, type TerminalLine } from './terminalRender.js';
 import { buildWorkspaceTree, type TreeRow } from './workspaceTree.js';
 import type { WorkflowPaneState } from './open.js';
-import { decisionHeadline, hasControlFlow, parkedLoop, stageLines, type LoopStage, type StageLine } from './loopRows.js';
+import {
+  decisionHeadline,
+  hasControlFlow,
+  parkedLoop,
+  stageLines,
+  waitingApproval,
+  type LoopStage,
+  type MirroredDecision,
+  type StageLine,
+} from './loopRows.js';
 
 export interface PaneProps {
   paneId: string;
@@ -719,8 +728,12 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
   const items = timeline?.items ?? [];
   // Loops and checks (P05): the pane's fetched stage list (`App.tsx`
   // refreshes it as the run's stage and loop events arrive).
-  const loopStages = ((content.state ?? {}) as { loopStages?: LoopStage[] }).loopStages ?? [];
+  const paneState = (content.state ?? {}) as { loopStages?: LoopStage[]; childDecisions?: MirroredDecision[] };
+  const loopStages = paneState.loopStages ?? [];
   const parked = parkedLoop(loopStages);
+  // An approval wait of this run, else the decisions of its sub-workflow children (P05).
+  const approvalWait = waitingApproval(loopStages);
+  const childDecisions = paneState.childDecisions ?? [];
   const lines = hasControlFlow(loopStages) ? stageLines(loopStages) : [];
   const maxLines = Math.max(3, Math.floor(height / 3));
   const shownLines = lines.length > maxLines ? lines.slice(0, maxLines - 1) : lines;
@@ -729,7 +742,12 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
   // A parked loop is answered with the loop decisions, never approve/reject:
   // the generic banner is for any other stage gate.
   const loopIds = new Set(loopStages.filter((s) => s.kind === 'loop').map((s) => s.id));
-  const pending = timeline?.pendingApproval && !loopIds.has(timeline.pendingApproval.stageId) ? timeline.pendingApproval : null;
+  const pending =
+    timeline?.pendingApproval && !loopIds.has(timeline.pendingApproval.stageId)
+      ? timeline.pendingApproval
+      : approvalWait
+        ? { stageId: approvalWait.id, stageName: approvalWait.name || approvalWait.stageKey, ...(approvalWait.wait?.prompt ? { prompt: approvalWait.wait.prompt } : {}) }
+        : null;
   // A tool permission, question or plan inside a stage's turn (P03b).
   const stageGate = timeline?.pendingInteraction ?? null;
 
@@ -753,6 +771,19 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
           </Text>
           {pending.prompt ? <Text wrap="wrap">{pending.prompt}</Text> : null}
           <Text color={theme.c('muted')}>a approve {theme.glyphs.neutral} x reject</Text>
+        </Box>
+      ) : null}
+      {!pending && childDecisions.length > 0 ? (
+        <Box borderStyle={theme.borderStyle} borderColor={theme.c('warning')} paddingX={1} marginBottom={1} flexDirection="column">
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning} {childDecisions.length} decision(s) in a sub-workflow
+          </Text>
+          {childDecisions.slice(0, 3).map((d) => (
+            <Text key={`${d.runId}:${d.instanceId}`} wrap="truncate-end">
+              {d.name} · {d.kind === 'wait' ? `${d.waitType ?? 'approval'} wait` : d.kind.replace(/_/g, ' ')} · via {d.via}
+            </Text>
+          ))}
+          <Text color={theme.c('muted')}>a approve {theme.glyphs.neutral} x reject (approvals; other decisions: generatorai run pending)</Text>
         </Box>
       ) : null}
       {parked?.decision ? (
