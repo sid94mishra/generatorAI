@@ -22,8 +22,9 @@
 // (`item_index`), a loop scope by the iteration (`iteration_index`).
 // ────────────────────────────────────────────────────────────────
 
-import type { CompiledWorkflow } from '../workflow-graph/compile.js';
-import type { InstanceState, LoopIterationRecord, LoopSignals, MapState, RunRecord, RunState, Usage } from './types.js';
+import { plannerKeyOf } from '@generatorai/workflow-spec';
+import { compileNodes, type CompiledNode, type CompiledWorkflow } from '../workflow-graph/compile.js';
+import type { ExpansionState, InstanceState, LoopIterationRecord, LoopSignals, MapState, RunRecord, RunState, Usage } from './types.js';
 
 /** The marker of a loop's wrap-up instance in its path: `<loop>#wrapup/<stage>`. */
 export const WRAP_UP_SEGMENT = '#wrapup/';
@@ -97,6 +98,23 @@ function scopeKey(containerId: string | null, iteration: number | null): string 
 /** The scope index of an instance inside its container: a loop iteration or a map item (never both). */
 export function scopeIndexOf(i: Pick<InstanceState, 'iterationIndex' | 'itemIndex'>): number | null {
   return i.iterationIndex ?? i.itemIndex ?? null;
+}
+
+/** An expansion node's state (P08 §8), when it is one. */
+export function expansionStateOf(i: InstanceState): ExpansionState | null {
+  return i.containerState?.kind === 'expansion' ? i.containerState : null;
+}
+
+const expansionCache = new WeakMap<ExpansionState, Map<string, CompiledNode>>();
+
+/** The nodes of an expansion's stored plan (memoised per state object). */
+export function expansionNodes(state: ExpansionState): Map<string, CompiledNode> {
+  let nodes = expansionCache.get(state);
+  if (!nodes) {
+    nodes = compileNodes(state.stages, state.edges.map((e) => ({ from: e.from, to: e.to, on: 'success' as const })));
+    expansionCache.set(state, nodes);
+  }
+  return nodes;
 }
 
 /** A map instance's state, when it is one. */
@@ -230,13 +248,29 @@ export function loopRoot(ix: StateIndex, loop: InstanceState, context: LoopConte
 /** `stages`: the top level plus the same iteration (item) of every enclosing loop (map). */
 function stagesFor(ix: StateIndex, chain: Array<{ container: InstanceState; iteration: number | null }>): Record<string, unknown> {
   const stages: Record<string, unknown> = {};
-  for (const i of ix.scope(null, null)) stages[i.stageKey] = stageView(i);
+  const add = (scope: readonly InstanceState[]) => {
+    for (const i of scope) stages[i.stageKey] = stageView(i);
+    addExpansionViews(stages, scope);
+  };
+  add(ix.scope(null, null));
   for (let n = chain.length - 1; n >= 0; n--) {
     const { container, iteration } = chain[n]!;
-    if (iteration === null) continue;
-    for (const i of ix.scope(container.id, iteration)) stages[i.stageKey] = stageView(i);
+    // An expansion's planned stages (P08 §8) see each other: its scope has no index.
+    if (iteration === null && !expansionStateOf(container)) continue;
+    add(ix.scope(container.id, iteration));
   }
   return stages;
+}
+
+/** `stages.<planner>.expansion` (P08 §8): its expansion node's status and results, for the planners of a scope. */
+export function addExpansionViews(stages: Record<string, unknown>, scope: readonly InstanceState[]): void {
+  for (const i of scope) {
+    const planner = plannerKeyOf(i.stageKey);
+    const view = planner === null ? undefined : stages[planner];
+    if (!view || typeof view !== 'object') continue;
+    const out = i.output as { results?: unknown } | null;
+    stages[planner!] = { ...view, expansion: { status: i.status, results: Array.isArray(out?.results) ? out.results : [] } };
+  }
 }
 
 function baseScope(run: RunRecord, variables?: Record<string, unknown>): Record<string, unknown> {

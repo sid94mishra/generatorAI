@@ -1,4 +1,4 @@
-# Control flow: check, loop, map, sub-workflow, wait
+# Control flow: check, loop, map, sub-workflow, wait, plan-then-execute
 
 <!-- generated:generated-note -->
 
@@ -82,11 +82,15 @@ Which iteration each place sees:
   `concurrency: 1`: parallel writers in one worktree is the warning `map-shared-write-concurrency`.
 - `workspace: "mount_per_item"`: each item gets its own git worktree cut from a snapshot of the run mounts;
   `merge` brings them back: `none`, `sequential` (a conflict fails that item with `merge_conflict`), or
-  `pr_per_item` (a branch per item; the push and PR follow `lifecycle.postProcessing`). `merge` and `itemSetup`
-  need `mount_per_item`. `itemSetup` commands are command-bearing.
+  `pr_per_item` (a branch per item; the push and PR follow `lifecycle.postProcessing`), or
+  `{"mode": "winner", "key": "stages.judge.output.winner"}` (only the item a stage AFTER the map picks is
+  merged: a judge panel / best-of-N; the key must read such a stage, `map-winner-unbound`; stages after the judge
+  wait for the merge; a key naming no completed item fails the run with `map_winner_failed`). `merge` and
+  `itemSetup` need `mount_per_item`. `itemSetup` commands are command-bearing.
 - `toleratedFailurePercent` lets some items fail without failing the map.
 - The map's output: `{count, results, failures}`; each entry is `{index, key, item, status, error, stages: {<bodyKey>:
-  {status, output, summary}}, pr, …select}`.
+  {status, output, summary}}, pr, branch, workdir, …select}` (`workdir`: a mount_per_item item's worktree, where a
+  judge reads the candidate's changes).
 
 ## subworkflow: run another published workflow as a stage
 
@@ -117,10 +121,43 @@ Which iteration each place sees:
 - `onTimeout: "complete"` completes with `outcome: "timeout"` (route on it); `"fail"` fails with `wait_timeout`.
   An unattended run's wait without `timeoutMs` expires after 72 h.
 
+## Plan-then-execute: an agent plans the stages that run next
+
+An agent stage with `expands` is a **planner**. Its output is a plan (the schema is fixed: do NOT set
+`output.schema`, `expansion-output-schema`):
+
+```jsonc
+{ "stages": [{ "key": "api", "name": "API", "prompt": "…", "agentRef": "…", "model": "…", "readOnly": true }],
+  "edges": [{ "from": "api", "to": "docs" }], "summary": "…" }
+```
+
+- `expands: {maxStages (1-20, default 8), allowedAgentRefs, allowedModels, join: "all" | "tolerate"}`. A planned
+  stage may only name agents and models from the allow-lists (empty: the defaults only). Planned stages are agent
+  stages with one prompt: no hooks, tools, MCP servers, checks or containers; `readOnly` runs one in plan mode; the
+  run's permission ceiling applies.
+- The engine validates the plan (keys unique and not keys of the workflow, edges between planned keys, no cycle)
+  when the planner completes, stores it, and runs the planned stages right after the planner. The stages after the
+  planner (its success edges) wait for them and read `stages.<planner>.expansion.results` (each
+  `{key, name, status, output, summary, error}`). `join: "all"` fails on a failed planned stage
+  (`expansion_failed`); an invalid plan is `expansion_invalid`. A restart never re-asks the planner.
+- Add `approval` to the planner to let a person review the plan before it runs. The workflow carries the risk flag
+  `plans_stages_at_run_time`.
+
+```jsonc
+{ "key": "plan", "name": "Plan", "kind": "agent",
+  "prompts": [{ "label": "plan", "text": "Goal: {{variables.goal}}
+Plan it as a few steps, each with a precise prompt." }],
+  "expands": { "maxStages": 6 } },
+{ "key": "report", "name": "Report", "kind": "agent",
+  "prompts": [{ "label": "report", "text": "Report per stage:
+{{ stages.plan.expansion.results | json }}" }] }
+// edge: plan -> report
+```
+
 ## The shipped templates
 
 Every shipped template is in `examples/` as `template-<name>.json`. The ones that use control flow, with the settings
-of their non-agent stages:
+of their non-agent stages (and of their planners):
 
 <!-- generated:control-flow-templates -->
 

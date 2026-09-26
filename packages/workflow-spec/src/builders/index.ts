@@ -31,6 +31,7 @@ import type {
   WorkflowHookPhase,
 } from '../schemas/common.js';
 import type { EdgeSpec } from '../schemas/edge.js';
+import type { DynamicExpansion } from '../schemas/expansion.js';
 import type { WorkflowGraph, WorkflowGraphInput } from '../schemas/graph.js';
 import type { AgentOverrides, SessionSpec } from '../schemas/session.js';
 import type {
@@ -193,6 +194,11 @@ export class StageBuilder {
   }
   approval(spec: In<ApprovalSpec> = {}): this {
     this.spec.approval = spec as ApprovalSpec;
+    return this;
+  }
+  /** Plan-then-execute (P08): this stage's output is a plan of agent stages the engine runs after it. */
+  expands(spec: In<DynamicExpansion> = {}): this {
+    this.spec.expands = spec as DynamicExpansion;
     return this;
   }
   /** Add a hook definition, or an inline handler for a phase. */

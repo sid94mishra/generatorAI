@@ -40,6 +40,8 @@ import * as path from 'node:path';
 import type { AgentEvent, ExecutionWorkspace, ILogger, ResolvedAgentProjection, Session, WorkflowRun } from '@generatorai/shared';
 import { DEFAULT_AGENT_MODE, generateId } from '@generatorai/shared';
 import {
+  expansionNodeKey,
+  expansionPlanJsonSchema,
   renderTemplate,
   resolveSessionSpec,
   STAGE_DEFAULTS,
@@ -86,6 +88,7 @@ import { StageConversationError } from './StageConversationError.js';
 import { runCheck } from './CheckRunner.js';
 import { compile, type CompiledNode, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import { isWrapUp, templateScope } from '../../domain/scheduler/scope.js';
+import { graphForInstance, validateExpansion } from '../../domain/scheduler/expansion.js';
 import {
   checkOutputContract,
   chooseStrategies,
@@ -670,10 +673,11 @@ export class StageExecutor {
     const { stores } = this.deps;
     const { runId, stageRunId } = frame.req;
     const run = await this.deps.runRepo.getById(runId);
-    const graph = await this.deps.definitions.get(run.definitionVersionId);
     const state = stores.runStore.loadRunState(runId);
     const instance = state?.instances.find((i) => i.id === stageRunId);
     if (!state || !instance) throw new StageError('config_invalid', `Instance ${stageRunId} of run ${runId} does not exist`);
+    // A planned stage (P08 §8) lives in its expansion's stored plan, next to the pinned version.
+    const graph = graphForInstance(await this.deps.definitions.get(run.definitionVersionId), state, instance);
     const stage = graph.stages.find((s) => s.key === instance.stageKey) as AgentStage | undefined;
     if (!stage || stage.kind !== 'agent') throw new StageError('config_invalid', `Stage ${instance.stageKey} is not an agent stage of the pinned version`);
     const compiled = compile(graph);
@@ -723,8 +727,9 @@ export class StageExecutor {
       contract: wrapUp
         ? { format: 'text', schema: undefined, extraction: 'auto', rules: [] }
         : {
-            format: stage.output.format,
-            schema: stage.output.schema,
+            // A planner's output is its plan (P08 §8): json, against the plan schema of its `expands`.
+            format: stage.expands ? 'json' : stage.output.format,
+            schema: stage.expands ? expansionPlanJsonSchema(stage.expands) : stage.output.schema,
             extraction: stage.output.extraction,
             rules: stage.output.rules,
           },
@@ -1252,6 +1257,12 @@ export class StageExecutor {
       if (mode === 'output') body = text || inst.summary || '';
       else if (mode === 'structured') body = `${inst.summary ?? ''}${inst.output !== null && typeof inst.output === 'object' ? `\n\n\`\`\`json\n${JSON.stringify(inst.output, null, 2)}\n\`\`\`` : ''}`;
       else body = inst.summary ?? (text.length > 3000 ? `${text.slice(0, 3000)}\n… (truncated)` : text);
+      // A planner's context carries what its planned stages did (P08 §8).
+      const x = ctx.state.instances.find(
+        (i) => i.scopeId === ctx.instance.scopeId && i.iterationIndex === ctx.instance.iterationIndex && i.stageKey === expansionNodeKey(key),
+      );
+      const planned = (x?.output as { results?: Array<{ name: string; status: string; summary: string | null }> } | null)?.results;
+      if (planned?.length) body += `\n\nPlanned stages:\n${planned.map((r) => `- ${r.name} (${r.status})${r.summary ? `: ${r.summary}` : ''}`).join('\n')}`;
       blocks.push(`## Completed stage "${name}"\n${body}`);
     }
     return blocks;
@@ -1396,14 +1407,17 @@ export class StageExecutor {
         scope: this.scopeOf(ctx),
       });
       this.recheck(ctx, 'validating');
+      // A plan must also hold as a graph (P08 §8): a repair turn can fix it here; the expansion node checks it again.
+      const plan = check.ok && ctx.stage.expands ? validateExpansion(check.data, ctx.stage.expands, new Set(ctx.graph.stages.map((s) => s.key))) : null;
+      const planIssue = plan && !plan.ok ? plan.message : null;
       // The hard rules held: the judge rules score the output (P05 §4.4).
-      const verdict = check.ok ? await this.judge(ctx, check.data) : null;
-      if (check.ok && verdict === null) {
+      const verdict = check.ok && !planIssue ? await this.judge(ctx, check.data) : null;
+      if (check.ok && !planIssue && verdict === null) {
         if (check.data !== undefined) stores.attempts.update(stageRunId, attemptNo, { structuredOutput: check.data });
         return check.data !== undefined ? { data: check.data } : {};
       }
-      const failures = check.ok ? verdict!.failures : check.failures;
-      const error = check.ok ? verdict!.error : check.error;
+      const failures = planIssue ? [planIssue] : check.ok ? verdict!.failures : check.failures;
+      const error = planIssue ? classified('output_schema', planIssue) : check.ok ? verdict!.error : check.error;
       const used = stores.attempts.get(stageRunId, attemptNo)?.repairCount ?? 0;
       if (used >= maxRepairs) throw new AttemptStop({ kind: 'failed', error });
       // validating → running with repair_count + 1, then the repair turn.

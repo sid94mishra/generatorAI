@@ -142,6 +142,8 @@ export interface StageRun {
   mapState?: MapStateView;
   /** A sub-workflow instance's state: its child run (P05 §4.2). */
   subworkflowState?: SubworkflowStateView;
+  /** A planner's expansion node's state (P08, `<planner>~x`): the planned stages it runs. */
+  expansionState?: ExpansionStateView;
   /** A waiting event wait's callback (P05 §4.3): external systems POST the event here without a credential. */
   callback?: { url: string; token: string };
   /** The conversation of the current attempt. */
@@ -236,6 +238,18 @@ export interface MapStateView {
   snapshot: Record<string, string> | null;
   items: MapItemView[];
   winner?: MapWinnerView | null;
+}
+
+/** An expansion node's state (P08 plan-then-execute). `phase`: running, done. */
+export interface ExpansionStateView {
+  kind: 'expansion';
+  phase: string;
+  /** The planner instance whose output is the plan. */
+  plannerId: string;
+  /** The planned agent stages (full stage specs) and their edges. */
+  stages: Array<{ key: string; name: string; prompts?: Array<{ label: string; text: string }> }>;
+  edges: Array<{ from: string; to: string }>;
+  join: string;
 }
 
 /** A sub-workflow instance's state. `phase`: starting, running, done. */

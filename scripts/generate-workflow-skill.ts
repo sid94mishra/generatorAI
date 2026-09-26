@@ -305,7 +305,7 @@ function compactJson(value: unknown, indent = '', width = 110): string {
   return `{\n${entries.map(([k, v]) => `${inner}${JSON.stringify(k)}: ${compactJson(v, inner, width)}`).join(',\n')}\n${indent}}`;
 }
 
-/** The control-flow settings of a stage (the loop, map, wait or sub-workflow block) as JSON. */
+/** The control-flow settings of a stage (the loop, map, wait, sub-workflow or check block, a planner's expands) as JSON. */
 function controlBlock(s: WorkflowGraph['stages'][number]): unknown {
   switch (s.kind) {
     case 'loop':
@@ -318,6 +318,8 @@ function controlBlock(s: WorkflowGraph['stages'][number]): unknown {
       return { subworkflow: s.subworkflow };
     case 'check':
       return { check: s.check };
+    case 'agent':
+      return s.expands ? { expands: s.expands } : undefined;
     default:
       return undefined;
   }
@@ -325,11 +327,12 @@ function controlBlock(s: WorkflowGraph['stages'][number]): unknown {
 
 function controlFlowTemplates(examples: Example[]): string {
   const out: string[] = [];
-  for (const ex of examples.filter((e) => e.templateId && e.graph.stages.some((s) => s.kind !== 'agent'))) {
+  const controls = (s: WorkflowGraph['stages'][number]) => s.kind !== 'agent' || s.expands !== undefined;
+  for (const ex of examples.filter((e) => e.templateId && e.graph.stages.some(controls))) {
     const g = ex.graph;
     out.push(`### ${g.workflow.name} (\`examples/${ex.file}\`)`, '', g.workflow.description ?? '', '', stageOutline(g), '');
     if (g.workflow.outputs) out.push(`Declared outputs: ${Object.entries(g.workflow.outputs).map(([k, v]) => `\`${k}\` = \`${v}\``).join(', ')}`, '');
-    for (const s of g.stages.filter((st) => st.kind !== 'agent')) {
+    for (const s of g.stages.filter(controls)) {
       out.push(`\`${s.key}\`:`, '', '```jsonc', compactJson(controlBlock(s)), '```', '');
     }
   }

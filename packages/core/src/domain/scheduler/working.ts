@@ -12,7 +12,7 @@ import type { ClassifiedError } from '../errors/StageError.js';
 import type { CompiledNode, CompiledWorkflow } from '../workflow-graph/compile.js';
 import { timerId } from './ids.js';
 import { expressionScope } from './readiness.js';
-import { StateIndex, instanceScope, scopeIndexOf } from './scope.js';
+import { StateIndex, expansionNodes, expansionStateOf, instanceScope, scopeIndexOf } from './scope.js';
 import type {
   AttemptMode,
   AttemptStatus,
@@ -100,8 +100,13 @@ export class Working {
     return [...this.instances.values()].find((i) => i.scopeId === null && i.stageKey === key);
   }
 
+  /** The compiled node of an instance: the workflow's, or a planned stage's from its expansion's stored plan (P08 §8). */
   node(inst: InstanceState): CompiledNode | undefined {
-    return this.graph.nodes.get(inst.stageKey);
+    const base = this.graph.nodes.get(inst.stageKey);
+    if (base || inst.scopeId === null) return base;
+    const container = this.instances.get(inst.scopeId);
+    const xs = container ? expansionStateOf(container) : null;
+    return xs ? expansionNodes(xs).get(inst.stageKey) : undefined;
   }
 
   /** The index over the current working copy (P05 scopes). */
@@ -375,6 +380,8 @@ export function stopContainer(w: Working, inst: InstanceState): void {
     w.instancePatch(inst, { containerState: { ...cs, phase: 'done' } });
   } else if (cs.kind === 'subworkflow' && cs.phase !== 'done') {
     if (cs.childRunId) w.push({ t: 'child_command', stageRunId: inst.id, childRunId: cs.childRunId, command: 'cancel' });
+    w.instancePatch(inst, { containerState: { ...cs, phase: 'done' } });
+  } else if (cs.kind === 'expansion' && cs.phase !== 'done') {
     w.instancePatch(inst, { containerState: { ...cs, phase: 'done' } });
   }
 }

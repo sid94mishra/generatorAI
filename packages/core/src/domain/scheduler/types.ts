@@ -11,6 +11,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
+  AgentStage,
   RunCommand,
   StageRunState,
   WorkflowRunState,
@@ -206,7 +207,25 @@ export interface SubworkflowState {
   inputs: Record<string, unknown>;
 }
 
-export type ContainerState = MapState | SubworkflowState;
+/**
+ * An expansion node's state (P08 §8, `<planner>~x`): the planner's plan as
+ * validated and compiled when the node started, in the same transaction as
+ * the planner's completion. Recovery and replay read it; the planner is never
+ * asked again.
+ */
+export interface ExpansionState {
+  kind: 'expansion';
+  /** running: the planned stages run in the node's scope; done: settled. */
+  phase: 'running' | 'done';
+  /** The planner instance whose output is the plan. */
+  plannerId: string;
+  /** The planned stages as full agent stages (clamped), and their edges. */
+  stages: AgentStage[];
+  edges: Array<{ from: string; to: string }>;
+  join: 'all' | 'tolerate';
+}
+
+export type ContainerState = MapState | SubworkflowState | ExpansionState;
 
 /** An event delivered to a run and not consumed yet (`workflow_run_events`, P05 §4.3). */
 export interface RunEventRecord {

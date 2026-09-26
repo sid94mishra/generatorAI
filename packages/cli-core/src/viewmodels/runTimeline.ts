@@ -511,6 +511,7 @@ export function reduceEvent(
     case 'map.item_completed':
     case 'map.winner_selected':
     case 'map.winner_settled':
+    case 'expansion.started':
     case 'subworkflow.child_started': {
       const stageRunId = str(data['stageRunId']);
       const key = str(data['stageKey'] ?? data['instancePath'] ?? stageRunId);
@@ -524,7 +525,9 @@ export function reduceEvent(
               ? `${key}: merging the winner ${str(data['key'])}`
               : kind === 'map.winner_settled'
                 ? `${key}: winner ${str(data['outcome'])}${data['key'] ? ` (${str(data['key'])})` : ''}${data['error'] ? ` — ${str(data['error'])}` : ''}`
-                : `${key}: child run ${str(data['childRunId'])} started`;
+                : kind === 'expansion.started'
+                  ? `${key}: the plan adds ${num(data['count']) ?? 0} stage(s)${Array.isArray(data['keys']) ? ` (${(data['keys'] as unknown[]).map(str).join(', ')})` : ''}`
+                  : `${key}: child run ${str(data['childRunId'])} started`;
       return push(
         base,
         { id: itemId(), kind: 'notice', text, complete: true, at: now, ...(stageRunId ? { stageRunId } : {}), level: failed ? 'warn' : 'info' },

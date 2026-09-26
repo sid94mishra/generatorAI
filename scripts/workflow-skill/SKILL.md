@@ -145,7 +145,7 @@ Limits:
 - `reference/stages.md`: agent stages, prompts, output contracts, rules and the judge, context, sessions,
   retries, repair, approval.
 - `reference/edges-and-expressions.md`: edges, joins, failure routing, guards, the Expression v2 grammar and templates.
-- `reference/control-flow.md`: `loop`, `map`, `subworkflow`, `wait` and `check`, with the shipped templates.
+- `reference/control-flow.md`: `loop`, `map` (winner merges), `subworkflow`, `wait`, `check` and plan-then-execute (`expands`), with the shipped templates.
 - `reference/agents-and-models.md`: `session`, agents, tool groups, providers and the capability matrix.
 - `reference/lifecycle.md`: variables, codebases, worktrees, pre- and post-processing, hooks, budgets.
 - `reference/pitfalls.md`: mistakes that validate but misbehave, old field names, every validation code.

@@ -13,6 +13,7 @@ export * from './schemas/common.js';
 export * from './schemas/errors.js';
 export * from './schemas/session.js';
 export * from './schemas/stage.js';
+export * from './schemas/expansion.js';
 export * from './schemas/edge.js';
 export * from './schemas/workflow.js';
 export * from './schemas/graph.js';

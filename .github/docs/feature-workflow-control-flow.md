@@ -20,7 +20,7 @@ differs from it, [DEVIATIONS.md](../../docs/workflow-overhaul/DEVIATIONS.md) (P0
 
 | Kind | What it is | Fields beyond the common ones | Output (`stages.<key>.output`) |
 |---|---|---|---|
-| `agent` | An LLM stage (a compact chat) | `prompts`, `followUpPrompts`, `session`, `sessionReuse`, `compactAfter`, `sessionGroup`, `context`, `output`, `retry`, `repair`, `onExhausted`, `timeouts`, `budget`, `approval`, `hooks` | its structured output, else its text |
+| `agent` | An LLM stage (a compact chat) | `prompts`, `followUpPrompts`, `session`, `sessionReuse`, `compactAfter`, `sessionGroup`, `context`, `output`, `retry`, `repair`, `onExhausted`, `timeouts`, `budget`, `approval`, `hooks`, `expands` (a planner, §5b) | its structured output, else its text (a planner: its plan) |
 | `check` | One deterministic command, no LLM | `check`, `retry`, `timeouts.queueMs` | `{exitCode, passed, timedOut, stdoutTail, stderrTail, durationMs, json?, jsonError?}` |
 | `loop` | Repeats its body until an exit rule fires | `loop`, `budget` (cumulative) | `{iterations, exitReason, exitAction, last, wrapUp, carry, history, …select}` |
 | `map` | Runs its body once per item of a runtime list | `map`, `budget` (cumulative) | `{count, results, failures}` |
@@ -274,6 +274,57 @@ run is `waiting`, not `running`, while nothing else works. Its output is
 
 ---
 
+## 5b. Plan-then-execute (dynamic expansion)
+
+An agent stage with `expands` is a **planner**: its output is a plan — a small graph of agent
+stages — and the engine runs that plan after it (P08 WP-8.4, G5 §4.7). There is no command for
+it: the planner is an ordinary stage, and the planned stages are ordinary stage instances.
+
+```ts
+expands: {
+  maxStages: 1..20 = 8,              // a larger plan is refused
+  allowedAgentRefs: string[] = [],   // agents a planned stage may name; empty: the default agent only
+  allowedModels: string[] = [],      // models a planned stage may name; empty: the default model only
+  join: 'all' | 'tolerate' = 'all',  // all: a failed planned stage fails the expansion
+}
+// the planner's output (its contract; output.schema is refused: expansion-output-schema)
+{ stages: [{ key, name, prompt, agentRef?, model?, readOnly? }], edges: [{ from, to }], summary? }
+```
+
+- **The expansion node.** The engine adds an implicit container `<planner>~x` right after the
+  planner, in the planner's scope. The planner's **success** edges leave from it, so the stages
+  after the planner wait for the planned stages; its failure, completion and always edges stay
+  on the planner. The run page shows it as a dashed group "planned by <planner>", the builder
+  shows the planner with its dashed "planned by" placeholder, and its instance path is
+  `<planner path>~x`.
+- **Validation, in the planner's transaction.** The executor validates the plan against the plan
+  schema (the allow-lists are enums, `maxStages` is `maxItems`) and against the graph rules
+  below; a plan that fails either gets a repair turn like any output contract. When the planner
+  completes, the expansion node becomes ready in the same `decide()` call — the same store
+  transaction — checks the plan again (`validateExpansion`), compiles it into full agent stages
+  and stores it in its state. A plan that still does not hold fails the node with
+  `expansion_invalid`. Rules: at most `maxStages` stages; unique keys that are not keys of the
+  workflow; `agentRef` and `model` from the allow-lists; edges between planned keys, no
+  self-edge, no cycle.
+- **The clamp.** A planned stage is always an agent stage with one prompt: the plan's shape has
+  no hooks, MCP servers, tools, checks, loops, maps or custom-script rules. `readOnly` runs it in
+  plan mode; nothing in the plan can raise its permission, and the run's permission ceiling
+  applies as to every stage. The workflow's session settings apply as defaults.
+- **Running.** Each planned stage gets its instance `<planner path>~x/<key>` (deterministic
+  ids). Planned stages see each other (`stages.<key>`) and the stages visible to the planner;
+  their context is their planned predecessors' summaries. Recovery and replay read the stored
+  plan: the planner is never asked again.
+- **Outcome.** When every planned stage ended: `join: all` fails the node with
+  `expansion_failed` if one failed (and no edge handled it); `tolerate` completes it. Its output
+  is `{count, results, failures}`, `results[i] = {key, name, status, output, summary, error}`,
+  and the stages after the planner read it as `stages.<planner>.expansion.results`; their
+  context block for the planner also lists what each planned stage did. `cancel` on the node
+  cancels the planned stages. The plan is `stages.<planner>.output`.
+- **Risk flag.** A workflow with a planner carries `plans_stages_at_run_time` (describe_workflow,
+  the agent-draft banner).
+
+---
+
 ## 6. Operator commands and decisions
 
 All operator actions are run commands: `POST /api/workflow-runs/:id/commands` with a
@@ -289,7 +340,7 @@ All operator actions are run commands: `POST /api/workflow-runs/:id/commands` wi
 | `accept`, `accept_iteration {k}` | a parked loop (`accept_iteration` of an earlier iteration needs its checkpoint) | `exec:agent` |
 | `deliver_event {eventKey, idempotencyKey, data?}` | the run | `exec:agent` |
 | `fail` | a paused instance, a parked loop | `write:workflows` |
-| `pause`, `resume`, `cancel`, `retry`, `skip` | the run or an instance (a sub-workflow: cancel, pause, resume its child; a map or a wait: cancel) | `write:workflows` |
+| `pause`, `resume`, `cancel`, `retry`, `skip` | the run or an instance (a sub-workflow: cancel, pause, resume its child; a map, a wait or an expansion node: cancel) | `write:workflows` |
 
 Decisions (the `exec:agent` rows) are run-time acts on a run the caller may start, so a default
 paired phone can take them; steering a run needs `write:workflows`.
@@ -325,6 +376,7 @@ name or a template id appears in the scheduler or the engine.
 | `multi-source-research` | `multiSourceResearch` | M2 | map over the `list` variable `sources` (read-only, shared) → synthesize |
 | `adversarial-verify` | `adversarialVerify` | M3 | audit → map(findings) of map(three angles, read-only verify); `confirmed` when 2 of 3 agree → report |
 | `judge-panel` | `judgePanel` | P08 judge panel | map(three angles, mount_per_item, merge winner) → read-only judge `{winner, scores, rationale}`; only the winner is merged |
+| `plan-then-execute` | `planThenExecute` | P08 plan-then-execute | planner (`expands`, at most 6 stages) → its planned stages → read-only report over `stages.plan.expansion.results` |
 | `approval-gated-release` | `approvalGatedRelease` | W1 | prepare → approval wait (form: environment, notes; timeout completes) → deploy on approved, escalate on timeout |
 | `ci-gated-deploy` | `ciGatedDeploy` | W2 | push (sha) → event wait `concat('ci:', sha)` (CI posts to its callback URL) → deploy |
 | `cooldown-then-verify` | `cooldownThenVerify` | W3 | deploy → timer wait → verify |
@@ -360,6 +412,17 @@ The examples, as graphs:
 ```
 
 ```jsonc
+// Plan-then-execute — the planner's success edge to report leaves from its expansion node plan~x
+{ "key": "plan", "kind": "agent", "prompts": [{ "label": "plan", "text": "Goal: {{variables.goal}}
+Plan it as a few steps, each with a precise prompt." }],
+  "expands": { "maxStages": 6, "allowedAgentRefs": [], "allowedModels": [], "join": "all" } },
+{ "key": "report", "kind": "agent", "session": { "permissionMode": "plan" },
+  "prompts": [{ "label": "report", "text": "Report per stage:
+{{ stages.plan.expansion.results | json }}" }] }
+// edge: plan -> report. A plan the planner outputs:
+// { "stages": [{ "key": "api", "name": "API", "prompt": "…" }, { "key": "docs", "name": "Docs", "prompt": "…", "readOnly": false }],
+//   "edges": [{ "from": "api", "to": "docs" }] }
+
 // Judge panel — best of N; only the judge's pick is merged (edge panel -> judge)
 { "key": "panel", "kind": "map",
   "map": { "items": "['minimal', 'thorough', 'idiomatic']", "itemKey": "item", "maxItems": 3, "concurrency": 3, "toleratedFailurePercent": 50,
@@ -406,7 +469,8 @@ the generated templates carry each of them with complete output schemas.
 |---|---|
 | Schemas, scope typing, validator | `packages/workflow-spec/src/schemas/stage.ts`, `validate/scope.ts`, `validate/validateWorkflow.ts` |
 | Presets | `packages/workflow-spec/src/presets/index.ts` |
-| Loop, map, wait, sub-workflow decisions | `packages/core/src/domain/scheduler/{loops,maps,waits,subworkflows}.ts` |
+| Loop, map, wait, sub-workflow, expansion decisions | `packages/core/src/domain/scheduler/{loops,maps,waits,subworkflows,expansion}.ts` |
+| The plan schema and its JSON Schema | `packages/workflow-spec/src/schemas/expansion.ts` |
 | Effects | `packages/core/src/services/engine/{LoopEffects,MapEffects,SubworkflowEffects,WorktreeLeases,WorkflowCallbacks}.ts` |
 | Item mounts | `MountService.forkFromSnapshot` (`packages/core/src/services/MountService.ts`) |
 | Decisions | `packages/core/src/services/WorkflowApprovalService.ts` |

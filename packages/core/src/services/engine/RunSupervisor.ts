@@ -575,6 +575,9 @@ export class RunSupervisor {
             if (it.phase === 'preparing') again({ t: 'map_prepare_item', stageRunId: inst.id, index: it.index });
             else if (it.phase === 'merging') again({ t: 'map_merge_item', stageRunId: inst.id, index: it.index, strategy: merge === 'pr_per_item' ? 'pr_per_item' : 'sequential' });
           }
+        } else if (cs.kind !== 'subworkflow') {
+          // An expansion has no effect of its own: its planned stages recover as stages.
+          continue;
         } else if (cs.phase === 'starting') {
           again({ t: 'start_child', stageRunId: inst.id, inputs: cs.inputs });
         } else if (cs.childRunId) {

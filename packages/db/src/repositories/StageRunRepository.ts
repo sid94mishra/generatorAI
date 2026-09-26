@@ -16,7 +16,7 @@ import type {
   TransitionResult,
 } from '@generatorai/core';
 import type { StageRunState } from '@generatorai/workflow-spec';
-import type { LoopIteration, LoopStateView, MapStateView, StageRun, StageRunStatus, SubworkflowStateView } from '@generatorai/shared';
+import type { ExpansionStateView, LoopIteration, LoopStateView, MapStateView, StageRun, StageRunStatus, SubworkflowStateView } from '@generatorai/shared';
 import { NotFoundError } from '@generatorai/shared';
 import { loopIterations, stageRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
@@ -119,6 +119,7 @@ export function mapStageRun(row: typeof stageRuns.$inferSelect): StageRun {
     ...(row.loopState && row.kind === 'loop' ? { loopState: row.loopState as LoopStateView } : {}),
     ...(row.loopState && row.kind === 'map' ? { mapState: row.loopState as MapStateView } : {}),
     ...(row.loopState && row.kind === 'subworkflow' ? { subworkflowState: row.loopState as SubworkflowStateView } : {}),
+    ...(row.loopState && row.kind === 'expansion' ? { expansionState: row.loopState as ExpansionStateView } : {}),
     sessionId: row.sessionId ?? undefined,
     name: row.name,
     status: row.status,

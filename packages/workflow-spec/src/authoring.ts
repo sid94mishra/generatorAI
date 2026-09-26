@@ -91,6 +91,7 @@ export const RISK_FLAGS = [
   'runs_repo_code',
   'starts_other_workflows',
   'worktree_per_item',
+  'plans_stages_at_run_time',
 ] as const;
 export type RiskFlag = (typeof RISK_FLAGS)[number];
 
@@ -112,5 +113,6 @@ export function riskFlags(graph: WorkflowGraph): RiskFlag[] {
   }
   if (graph.stages.some((s) => s.kind === 'subworkflow')) flags.add('starts_other_workflows');
   if (graph.stages.some((s) => s.kind === 'map' && s.map.workspace === 'mount_per_item')) flags.add('worktree_per_item');
+  if (graph.stages.some((s) => s.kind === 'agent' && s.expands)) flags.add('plans_stages_at_run_time');
   return [...flags];
 }

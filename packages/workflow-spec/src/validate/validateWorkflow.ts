@@ -688,7 +688,22 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext, opts: Validate
           });
         }
       });
-      if (s.output.schema !== undefined) {
+      if (s.expands) {
+        // A planner's output is its plan (P08 §8): the engine fixes its contract.
+        if (s.output.schema !== undefined) {
+          out.push({
+            code: 'expansion-output-schema',
+            severity: 'error',
+            path: `${p}/output/schema`,
+            stageKey: k,
+            message: "A planner's output is its plan: expands fixes its schema",
+            hint: 'Remove output.schema; describe what to plan in the prompt or output.instructions',
+          });
+        }
+        if (s.expands.allowedAgentRefs.length !== new Set(s.expands.allowedAgentRefs).size) {
+          out.push({ code: 'expansion-allow-list', severity: 'warning', path: `${p}/expands/allowedAgentRefs`, stageKey: k, message: 'allowedAgentRefs lists an agent twice' });
+        }
+      } else if (s.output.schema !== undefined) {
         if (s.output.format !== 'json') {
           out.push({ code: 'schema-requires-json', severity: 'error', path: `${p}/output/schema`, stageKey: k, message: 'output.schema needs output.format json' });
         }

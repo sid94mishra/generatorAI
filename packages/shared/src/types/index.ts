@@ -158,6 +158,7 @@ export type {
   MapStateView,
   MapWinnerView,
   SubworkflowStateView,
+  ExpansionStateView,
   PendingDecisionView,
   WorkflowRunPermissionMode,
   ArtifactManifestEntry,

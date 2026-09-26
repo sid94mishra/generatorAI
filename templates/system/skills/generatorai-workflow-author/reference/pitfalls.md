@@ -169,6 +169,8 @@ not, but read them.
 | `wrapup-stage` | references | error | loop.wrapUp.stage is not a body agent stage with sessionReuse continue (a warning when the loop has no budget) |
 | `check-command` | references | error | A check (or map itemSetup) command that is not on the command allow-list |
 | `map-merge-needs-mount` | references | error | A map merge (sequential, pr_per_item, winner) without workspace mount_per_item |
+| `expansion-output-schema` | references | error | output.schema on a planner (expands): its output is the plan, whose schema is fixed |
+| `expansion-allow-list` | references | warning | An expands allow-list that names an agent twice |
 | `map-winner-unbound` | references | error | A winner merge whose key reads no stage after the map (nothing picks the winner) |
 | `map-item-setup-needs-mount` | references | error | map.itemSetup without workspace mount_per_item |
 | `map-shared-write-concurrency` | references | warning | A map running several items at once in one shared workspace with body stages that may write |

@@ -1,5 +1,5 @@
 ---
-description: Repeat work with loops, fan out with maps, wait for approvals, events and timers, and compose workflows with sub-workflows — all as ordinary stages of the graph.
+description: Repeat work with loops, fan out with maps, plan stages at run time, wait for approvals, events and timers, and compose workflows with sub-workflows — all as ordinary stages of the graph.
 ---
 # Workflow control flow
 
@@ -30,6 +30,10 @@ A map evaluates its list when it starts and runs its body once per item, at most
 - **Merges** — `sequential` merges each item back into the run's repositories one at a time; a conflicting item fails and its worktree is kept for inspection. `pr_per_item` pushes each item's branch and opens a pull request when the workflow's post-processing settings allow it. **Merge the winner** brings back only the item a later stage picks: a judge after the map compares the candidates (each result names its worktree) and outputs the winner's key; stages after the judge wait until that one item is merged.
 
 The map fails when more items fail than `toleratedFailurePercent` allows. Its output lists every item with its status, its body stages' results and the fields of the map's per-item `select`.
+
+## Plan, then execute
+
+An agent stage can be a **planner** (`expands`): its output is a plan of a few agent stages — each with a key, a name and a prompt, and the order between them. When the planner completes, the engine validates the plan (at most `maxStages` stages, agents and models only from the allow-lists, no cycle, no hooks or tools of their own, never more permission than the run allows), stores it, and runs the planned stages right after the planner; the stages after the planner wait for them and read their results as `stages.<planner>.expansion.results`. The run page shows them in a dashed group “planned by …”. A plan that does not hold is repaired by the planner, and a restart never asks the planner again. The planned stages can fail the expansion (`join: all`) or be tolerated (`join: tolerate`).
 
 ## Sub-workflows
 
@@ -64,6 +68,7 @@ Every scenario is an ordinary, editable workflow generated from a preset. The sy
 | Multi-source research | Research several sources in parallel, then synthesize |
 | Adversarial verification | Verify each finding from three angles; confirm on two of three |
 | Judge panel (best of N) | Solve a task from three angles in separate worktrees; a read-only judge picks the winner, and only the winner is merged |
+| Plan, then execute | A planner breaks a goal into a few agent stages; they run, then a report summarises them |
 | Approval-gated release | Deploy after an approval that picks the environment; escalate on timeout |
 | CI-gated deploy | Push, wait for CI to report on the commit, deploy |
 | Cool down, then verify | Deploy, wait, verify |

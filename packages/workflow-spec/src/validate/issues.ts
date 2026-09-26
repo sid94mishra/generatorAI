@@ -113,6 +113,8 @@ export const VALIDATION_CODES = {
   },
   'check-command': { layer: 'references', severity: 'error', description: 'A check (or map itemSetup) command that is not on the command allow-list' },
   'map-merge-needs-mount': { layer: 'references', severity: 'error', description: 'A map merge (sequential, pr_per_item, winner) without workspace mount_per_item' },
+  'expansion-output-schema': { layer: 'references', severity: 'error', description: "output.schema on a planner (expands): its output is the plan, whose schema is fixed" },
+  'expansion-allow-list': { layer: 'references', severity: 'warning', description: 'An expands allow-list that names an agent twice' },
   'map-winner-unbound': { layer: 'references', severity: 'error', description: "A winner merge whose key reads no stage after the map (nothing picks the winner)" },
   'map-item-setup-needs-mount': { layer: 'references', severity: 'error', description: 'map.itemSetup without workspace mount_per_item' },
   'map-shared-write-concurrency': {

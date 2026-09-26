@@ -27,6 +27,7 @@ import {
   TemplateSchema,
 } from './common.js';
 import { StageErrorCodeSchema } from './errors.js';
+import { DynamicExpansionSchema } from './expansion.js';
 import { SessionSpecSchema } from './session.js';
 
 export const JoinPolicySchema = z
@@ -239,6 +240,7 @@ export const AgentStageSchema = z
     budget: BudgetSchema.optional(),
     approval: ApprovalSpecSchema.optional(),
     hooks: z.array(HookDefinitionSchema).max(50).default([]).describe('Stage lifecycle hooks'),
+    expands: DynamicExpansionSchema.optional(),
   })
   .strict()
   .describe('Agent stage');

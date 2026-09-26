@@ -1,0 +1,103 @@
+{
+  "id": "plan-then-execute",
+  "category": "code-generation",
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Plan, then execute",
+      "description": "A planner breaks a goal into up to six agent stages; the engine validates the plan and runs it, then a report summarises what each stage did.",
+      "session": {},
+      "variables": [
+        {
+          "name": "goal",
+          "type": "text",
+          "label": "Goal",
+          "required": true
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": false,
+        "sandbox": "required",
+        "preprocessingSteps": [],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
+      },
+      "tags": [
+        "plan-then-execute"
+      ]
+    },
+    "stages": [
+      {
+        "key": "plan",
+        "name": "Plan",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "plan",
+            "text": "Goal: {{variables.goal}}\nPlan how to reach it as a few independent or ordered steps. Each step is a stage run by its own agent in this workspace: give it a short key, a name and a precise, self-contained prompt; mark read-only steps readOnly. Add an edge from a step to every step that needs its result; steps without edges between them run in parallel."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": [],
+        "expands": {
+          "maxStages": 6,
+          "allowedAgentRefs": [],
+          "allowedModels": [],
+          "join": "all"
+        }
+      },
+      {
+        "key": "report",
+        "name": "Report",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "report",
+            "text": "Goal: {{variables.goal}}\nThe planned stages ran. Report what was done, what failed and what is left, per stage:\n{{ stages.plan.expansion.results | json }}"
+          }
+        ],
+        "session": {
+          "permissionMode": "plan"
+        },
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "plan",
+        "to": "report",
+        "on": "success"
+      }
+    ]
+  }
+}

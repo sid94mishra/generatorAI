@@ -46,6 +46,7 @@ export function engineIssues(graph: WorkflowGraph, engine: EngineLevel): Validat
       return;
     }
     if (s.repair !== undefined) add(`${p}/repair`, 'repair', s.key);
+    if (s.expands !== undefined) add(`${p}/expands`, 'expands (plan-then-execute)', s.key);
     if (s.onExhausted === 'pause') add(`${p}/onExhausted`, "onExhausted 'pause'", s.key);
     if (s.sessionReuse === 'continue') add(`${p}/sessionReuse`, "sessionReuse 'continue'", s.key);
     if (s.sessionGroup !== undefined) add(`${p}/sessionGroup`, 'sessionGroup', s.key);

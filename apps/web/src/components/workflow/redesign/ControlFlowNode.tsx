@@ -1,6 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // ControlFlowNode — one instance of the run timeline, by kind (P05):
-// a loop (LoopTimelineItem), a map (MapTimelineItem), a wait (its card),
+// a loop (LoopTimelineItem), a map (MapTimelineItem), a planner's expansion
+// (ExpansionTimelineItem, P08), a wait (its card),
 // a sub-workflow (its child run and mirrored decisions), or a plain stage
 // (inside a container: with its loop turns above the transcript). The top
 // level and every container body render through here, so any nesting of
@@ -11,6 +12,7 @@ import React from 'react';
 import type { RunCommand } from '@generatorai/workflow-spec';
 import { LoopBodyStage, LoopTimelineItem, type RenderStage } from './LoopTimelineItem.js';
 import { MapTimelineItem } from './MapTimelineItem.js';
+import { ExpansionTimelineItem } from './ExpansionTimelineItem.js';
 import { SubworkflowCard, WaitBadge, WaitCard, useRunDecisions } from './ControlFlowCards.js';
 import type { StageView } from './types.js';
 
@@ -34,6 +36,7 @@ export function ControlFlowNode(props: ControlFlowNodeProps) {
   const decisions = useRunDecisions();
   if (stage.loop) return <LoopTimelineItem {...props} />;
   if (stage.map) return <MapTimelineItem {...props} />;
+  if (stage.expansion) return <ExpansionTimelineItem {...props} />;
   if (stage.wait) {
     const commandTo = decisions?.commandTo ?? ((_runId: string, c: RunCommand) => onCommand(c));
     return (

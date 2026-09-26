@@ -16,6 +16,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import {
+  expansionNodeKey,
   mapMergeMode,
   parseExpression,
   stagesRead,
@@ -24,7 +25,9 @@ import {
   STAGE_DEFAULTS,
   type Budget,
   type CheckSpec,
+  type DynamicExpansion,
   type EdgeOn,
+  type EdgeSpec,
   type ExprNode,
   type JoinPolicy,
   type LoopSpec,
@@ -34,6 +37,7 @@ import {
   type RepairPolicy,
   type RetryPolicy,
   type StageNodeClass,
+  type StageSpec,
   type SubworkflowSpec,
   type WaitSpec,
   type WorkflowGraph,
@@ -145,6 +149,10 @@ export interface CompiledNode {
   subworkflow?: CompiledSubworkflow;
   /** A container's direct body stages, in key order. */
   body: readonly string[];
+  /** A planner's plan-then-execute settings (P08 §8). */
+  expands?: DynamicExpansion;
+  /** The implicit expansion node of this planner (kind `expansion`, key `<planner>~x`). */
+  plannerKey?: string;
 }
 
 export interface CompiledWorkflow {
@@ -238,6 +246,26 @@ function compileSubworkflow(spec: SubworkflowSpec): CompiledSubworkflow {
 
 /** Compile a parsed (defaults-applied) `WorkflowGraph`. Pure. */
 export function compile(graph: WorkflowGraph): CompiledWorkflow {
+  const nodes = compileNodes(graph.stages, graph.edges);
+  const rootKeys = [...nodes.values()].filter((n) => !n.parentKey).map((n) => n.key).sort(byKey);
+  return {
+    nodes,
+    rootKeys,
+    maxParallel: graph.workflow.maxParallel ?? STAGE_DEFAULTS.maxParallel,
+    ...(graph.workflow.budget ? { budget: graph.workflow.budget } : {}),
+  };
+}
+
+/**
+ * The nodes of a set of stages and edges: a workflow's, or a planner's
+ * stored expansion (P08 §8). A planner gets its implicit expansion node
+ * `<planner>~x` (a container in the planner's scope): the edge planner →
+ * `~x` is added and the planner's SUCCESS edges leave from `~x` instead, so
+ * its successors wait for the planned stages; its failure, completion and
+ * always edges stay on the planner.
+ */
+export function compileNodes(stages: readonly StageSpec[], edgeSpecs: readonly EdgeSpec[]): Map<string, CompiledNode> {
+  const graph = { stages, edges: edgeSpecs };
   const nodes = new Map<string, CompiledNode>();
   const bodies = new Map<string, string[]>();
   for (const s of graph.stages) {
@@ -281,7 +309,30 @@ export function compile(graph: WorkflowGraph): CompiledWorkflow {
       ...(stage.kind === 'subworkflow' ? { subworkflow: compileSubworkflow(stage.subworkflow) } : {}),
     });
   });
-  for (const e of graph.edges) {
+  // Plan-then-execute (P08 §8): each planner's implicit expansion node.
+  const planners = new Set<string>();
+  for (const stage of graph.stages) {
+    if (stage.kind !== 'agent' || !stage.expands) continue;
+    const planner = nodes.get(stage.key)!;
+    planner.expands = stage.expands;
+    planners.add(stage.key);
+    const key = expansionNodeKey(stage.key);
+    nodes.set(key, {
+      ...containerDefaults(key, `Planned by ${stage.name}`, planner.ordinal + 0.5),
+      kind: 'expansion',
+      ...(stage.parentKey ? { parentKey: stage.parentKey } : {}),
+      plannerKey: stage.key,
+    });
+    if (stage.parentKey) bodies.set(stage.parentKey, [...(bodies.get(stage.parentKey) ?? []), key]);
+  }
+  const edges: EdgeSpec[] = [];
+  for (const e of graph.edges) edges.push(planners.has(e.from) && e.on === 'success' ? { ...e, from: expansionNodeKey(e.from) } : e);
+  for (const p of [...planners].sort(byKey)) edges.push({ from: p, to: expansionNodeKey(p), on: 'success' });
+  for (const [parent, keys] of bodies) {
+    const n = nodes.get(parent);
+    if (n) n.body = [...keys].sort(byKey);
+  }
+  for (const e of edges) {
     const from = nodes.get(e.from);
     const to = nodes.get(e.to);
     if (!from || !to) continue; // validateWorkflow rejects dangling edges before a version exists
@@ -312,11 +363,25 @@ export function compile(graph: WorkflowGraph): CompiledWorkflow {
     }
     n.map.winner.after = n.map.winner.after.filter((k) => after.has(k));
   }
-  const rootKeys = [...nodes.values()].filter((n) => !n.parentKey).map((n) => n.key).sort(byKey);
+  return nodes;
+}
+
+/** A node with the engine defaults and no settings: an implicit container. */
+function containerDefaults(key: string, name: string, ordinal: number): CompiledNode {
   return {
-    nodes,
-    rootKeys,
-    maxParallel: graph.workflow.maxParallel ?? STAGE_DEFAULTS.maxParallel,
-    ...(graph.workflow.budget ? { budget: graph.workflow.budget } : {}),
+    key,
+    kind: 'expansion',
+    class: 'container',
+    name,
+    ordinal,
+    join: { mode: 'all' },
+    retry: DEFAULT_RETRY,
+    repair: DEFAULT_REPAIR,
+    onExhausted: STAGE_DEFAULTS.onExhausted,
+    timeouts: { queueMs: STAGE_DEFAULTS.timeouts.queueMs, idleMs: STAGE_DEFAULTS.timeouts.idleMs },
+    compensates: false,
+    incoming: [],
+    outgoing: [],
+    body: [],
   };
 }

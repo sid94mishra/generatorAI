@@ -9,10 +9,11 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   X, Settings2, FileText, Layers, Cpu, Zap, Shield, Bot, Server, Wand2, Webhook, Plus, Trash2,
-  CheckCircle2, Clock, Braces, UserCheck, GitMerge, AlertCircle, Repeat, Undo2,
+  CheckCircle2, Clock, Braces, UserCheck, GitMerge, AlertCircle, Repeat, Undo2, ListTree,
 } from 'lucide-react';
 import {
   ApprovalSpecSchema,
+  DynamicExpansionSchema,
   EDGE_ON_VALUES,
   RepairPolicySchema,
   RetryPolicySchema,
@@ -454,6 +455,58 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
           </div>
         )}
         <FieldIssues issues={issuesAt(issues, '/approval')} />
+      </CollapsibleSection>
+
+      <CollapsibleSection title="Plan, then execute" icon={<ListTree className="h-3.5 w-3.5" />} defaultOpen={!!stage.expands}>
+        <ToggleSwitch
+          checked={!!stage.expands}
+          onChange={(checked) => onUpdate({ expands: checked ? DynamicExpansionSchema.parse({}) : undefined })}
+          label="This stage plans stages"
+          description="Its output is a plan of agent stages, which the engine validates and runs after it; the stages after this one wait for them."
+        />
+        {stage.expands && (
+          <div className="mt-3 space-y-3">
+            <NumberStepper
+              label="Planned stages at most"
+              value={stage.expands.maxStages}
+              onChange={(maxStages) => onUpdate({ expands: { ...stage.expands!, maxStages } })}
+              min={1}
+              max={20}
+              step={1}
+            />
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-foreground">When a planned stage fails</label>
+              <Select
+                aria-label="Expansion join"
+                value={stage.expands.join}
+                onChange={(v) => onUpdate({ expands: { ...stage.expands!, join: v as 'all' | 'tolerate' } })}
+                options={[
+                  { value: 'all', label: 'Fail the expansion', description: 'Every planned stage must complete' },
+                  { value: 'tolerate', label: 'Continue', description: 'The expansion completes and lists the failed stages' },
+                ]}
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-foreground">Agents a planned stage may use</label>
+              <ArgsEditor
+                args={stage.expands.allowedAgentRefs}
+                onChange={(allowedAgentRefs) => onUpdate({ expands: { ...stage.expands!, allowedAgentRefs } })}
+                ariaLabel="Allowed agents"
+                placeholder={'One scope:slug per line\n(empty: the default agent only)'}
+              />
+            </div>
+            <div>
+              <label className="mb-1.5 block text-xs font-medium text-foreground">Models a planned stage may use</label>
+              <ArgsEditor
+                args={stage.expands.allowedModels}
+                onChange={(allowedModels) => onUpdate({ expands: { ...stage.expands!, allowedModels } })}
+                ariaLabel="Allowed models"
+                placeholder={'One model id per line\n(empty: the default model only)'}
+              />
+            </div>
+          </div>
+        )}
+        <FieldIssues issues={issuesAt(issues, '/expands')} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Timeouts" icon={<Clock className="h-3.5 w-3.5" />} defaultOpen={false}>

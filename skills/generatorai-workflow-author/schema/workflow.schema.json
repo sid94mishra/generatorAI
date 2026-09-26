@@ -2265,6 +2265,8 @@
                             "merge_conflict",
                             "merge_failed",
                             "map_winner_failed",
+                            "expansion_invalid",
+                            "expansion_failed",
                             "subworkflow_start_failed",
                             "subworkflow_output_drift",
                             "subworkflow_failed",
@@ -2451,6 +2453,51 @@
                     "maxItems": 50,
                     "default": [],
                     "description": "Stage lifecycle hooks"
+                  },
+                  "expands": {
+                    "type": "object",
+                    "properties": {
+                      "maxStages": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 20,
+                        "default": 8,
+                        "description": "Planned stages allowed; a larger plan fails the expansion"
+                      },
+                      "allowedAgentRefs": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 128
+                        },
+                        "maxItems": 20,
+                        "default": [],
+                        "description": "Agents a planned stage may name (scope:slug); empty: the planned stages use the default agent only"
+                      },
+                      "allowedModels": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200
+                        },
+                        "maxItems": 20,
+                        "default": [],
+                        "description": "Models a planned stage may name; empty: the planned stages use the default model only"
+                      },
+                      "join": {
+                        "type": "string",
+                        "enum": [
+                          "all",
+                          "tolerate"
+                        ],
+                        "default": "all",
+                        "description": "all: a failed planned stage fails the expansion; tolerate: the expansion completes and lists the failures"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Plan-then-execute: this stage outputs a plan of agent stages, which the engine validates and runs after it"
                   }
                 },
                 "required": [

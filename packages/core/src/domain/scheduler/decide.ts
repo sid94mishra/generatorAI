@@ -34,8 +34,10 @@
 // The P05 kinds settle in the same fixed point as readiness: loops
 // (loops.ts), maps (maps.ts: item scopes, merges), waits (waits.ts: no
 // executor, no admission slot) and sub-workflows (subworkflows.ts: a child
-// run). Their effects follow the same shape: a decision dispatched after
-// the commit, answered by a message.
+// run); P08 adds a planner's expansion (expansion.ts: the plan validated
+// and instantiated in the transaction that completes the planner). Their
+// effects follow the same shape: a decision dispatched after the commit,
+// answered by a message.
 // ────────────────────────────────────────────────────────────────
 
 import { isTerminalStageRunState, type RunCommand, type WorkflowRunState } from '@generatorai/workflow-spec';
@@ -53,6 +55,7 @@ import {
   settleLoops,
   wrapUpAllowance,
 } from './loops.js';
+import { expansionScopes, settleExpansions } from './expansion.js';
 import { failedWinner, mapBusy, mapScopes, onMapItemMerged, onMapItemPrepared, onMapSnapshotTaken, settleMaps, winnerGate, winnerPending } from './maps.js';
 import { evalCondition, predState, readiness, type PredState } from './readiness.js';
 import {
@@ -437,6 +440,10 @@ function onCommand(w: Working, command: RunCommand, actor?: string): void {
     if (command.command === 'cancel') return isTerminalStageRunState(inst.status) ? refuse() : cancelInstance(w, inst, 'user_cancel');
     return w.reject('invalid_command', `${command.command} does not apply to a map; act on its items, or cancel it`);
   }
+  if (node?.kind === 'expansion') {
+    if (command.command === 'cancel') return isTerminalStageRunState(inst.status) ? refuse() : cancelInstance(w, inst, 'user_cancel');
+    return w.reject('invalid_command', `${command.command} does not apply to an expansion; act on its planned stages, or cancel it`);
+  }
   if (node?.subworkflow) {
     if (command.command === 'cancel') return isTerminalStageRunState(inst.status) ? refuse() : cancelInstance(w, inst, 'user_cancel');
     if (command.command === 'pause' || command.command === 'resume') {
@@ -604,7 +611,7 @@ function resolveReadiness(w: Working): boolean {
   let changed = true;
   while (changed) {
     changed = false;
-    const scopes = [...activeScopes(w), ...mapScopes(w)];
+    const scopes = [...activeScopes(w), ...mapScopes(w), ...expansionScopes(w)];
     const pending = scopes.flatMap((s) => w.scopeInstances(s.containerId, s.iteration).filter((i) => i.status === 'pending'));
     for (const inst of pending) {
       if (inst.status !== 'pending') continue;
@@ -718,7 +725,8 @@ function settle(w: Working): void {
     const c = settleMaps(w);
     const d = settleWaits(w);
     const e = settleSubworkflows(w);
-    if (!a && !b && !c && !d && !e) break;
+    const f = settleExpansions(w);
+    if (!a && !b && !c && !d && !e && !f) break;
   }
 
   const roots = w.roots();

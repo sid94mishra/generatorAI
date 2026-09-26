@@ -952,6 +952,59 @@ export const judgePanel = define({
   }),
 });
 
+// P08 §8 plan-then-execute: a planner outputs a plan of agent stages; the engine validates and runs it.
+export const planThenExecute = define({
+  name: 'planThenExecute',
+  title: 'Plan, then execute',
+  description:
+    'A planner breaks a goal into a small graph of agent stages (at most maxStages, agents and models from allow-lists); the engine validates the plan, runs it after the planner, and a report summarises the results.',
+  params: z
+    .object({
+      key: key.default('plan').describe('Key of the planner stage'),
+      parentKey: key.optional().describe('Container the planner sits in'),
+      reportKey: key.default('report'),
+      maxStages: z.number().int().min(1).max(20).default(6),
+      allowedAgentRefs: z.array(z.string().min(1).max(128)).max(20).default([]),
+      allowedModels: z.array(z.string().min(1).max(200)).max(20).default([]),
+      join: z.enum(['all', 'tolerate']).default('all'),
+      approvePlan: z.boolean().default(false).describe('A person reviews the plan before it runs'),
+      planPrompt: z
+        .string()
+        .min(1)
+        .default(
+          'Goal: {{variables.goal}}\nPlan how to reach it as a few independent or ordered steps. Each step is a stage run by its own agent in this workspace: give it a short key, a name and a precise, self-contained prompt; mark read-only steps readOnly. Add an edge from a step to every step that needs its result; steps without edges between them run in parallel.',
+        ),
+    })
+    .strict(),
+  make: (v) => ({
+    stages: [
+      {
+        key: v.key,
+        name: 'Plan',
+        kind: 'agent',
+        ...parent(v),
+        prompts: [{ label: 'plan', text: v.planPrompt }],
+        expands: { maxStages: v.maxStages, allowedAgentRefs: v.allowedAgentRefs, allowedModels: v.allowedModels, join: v.join },
+        ...(v.approvePlan ? { approval: { prompt: 'Review the plan before its stages run.' } } : {}),
+      },
+      {
+        key: v.reportKey,
+        name: 'Report',
+        kind: 'agent',
+        ...parent(v),
+        session: { permissionMode: 'plan' },
+        prompts: [
+          {
+            label: 'report',
+            text: `Goal: {{variables.goal}}\nThe planned stages ran. Report what was done, what failed and what is left, per stage:\n{{ stages.${v.key}.expansion.results | json }}`,
+          },
+        ],
+      },
+    ],
+    edges: [{ from: v.key, to: v.reportKey }],
+  }),
+});
+
 // ── Wait presets (P05 §4.3) ──────────────────────────────────────
 
 // W1: a person approves the release and picks the environment; a timeout escalates.
@@ -1188,6 +1241,7 @@ export const PRESETS = {
   multiSourceResearch,
   adversarialVerify,
   judgePanel,
+  planThenExecute,
   approvalGatedRelease,
   ciGatedDeploy,
   cooldownThenVerify,
@@ -1388,6 +1442,15 @@ const TEMPLATE_SOURCES: TemplateSource[] = [
     variables: [{ name: 'task', type: 'text', label: 'Task' }],
     lifecycle: { requiresCodebase: true },
     fragment: judgePanel.build(),
+  },
+  {
+    id: 'plan-then-execute',
+    category: 'code-generation',
+    name: 'Plan, then execute',
+    description: 'A planner breaks a goal into up to six agent stages; the engine validates the plan and runs it, then a report summarises what each stage did.',
+    tags: ['plan-then-execute'],
+    variables: [{ name: 'goal', type: 'text', label: 'Goal' }],
+    fragment: planThenExecute.build(),
   },
   {
     id: 'approval-gated-release',

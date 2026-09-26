@@ -14,7 +14,7 @@ import type {
   WorkflowRunWithStages, StageRun, StageRunStatus, WorkflowRunStatus,
   WorkflowRunPermissionMode,
 } from '@generatorai/shared';
-import { mapMergeMode, type EdgeSpec, type StageSpec } from '@generatorai/workflow-spec';
+import { mapMergeMode, plannerKeyOf, type EdgeSpec, type StageSpec } from '@generatorai/workflow-spec';
 import { interpolateVariables } from '@generatorai/shared';
 import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
@@ -229,6 +229,8 @@ interface StageViewInputs {
   loopId: string | undefined;
   /** The enclosing container's kind (`loop`, `map`). */
   containerKind: string | undefined;
+  /** An expansion node's planner name (P08 plan-then-execute). */
+  plannerName: string | undefined;
 }
 
 export type StageViewCache = Map<string, { inputs: StageViewInputs; view: StageView }>;
@@ -241,7 +243,7 @@ function sameInputs(a: StageViewInputs, b: StageViewInputs): boolean {
   return (
     a.sr === b.sr && a.stream === b.stream && a.def === b.def && a.order === b.order && a.depth === b.depth &&
     a.parallel === b.parallel && a.dependsOn === b.dependsOn && a.shared === b.shared && a.vars === b.vars &&
-    a.loopId === b.loopId && a.containerKind === b.containerKind
+    a.loopId === b.loopId && a.containerKind === b.containerKind && a.plannerName === b.plannerName
   );
 }
 
@@ -266,9 +268,14 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
   // Sort stage runs by (graph order, startedAt). Graph order gives us a
   // stable spine that matches the DAG; startedAt is a tie-breaker for
   // parallel siblings so they render in the order they fired.
+  // An expansion node (`<planner>~x`, P08) sorts right after its planner.
+  const orderOf = (key: string) => {
+    const planner = plannerKeyOf(key);
+    return planner !== null ? (orderByKey.get(planner) ?? Infinity) + 0.5 : (orderByKey.get(key) ?? Infinity);
+  };
   const sorted = [...run.stageRuns].sort((a, b) => {
-    const orderA = orderByKey.get(a.stageKey) ?? Infinity;
-    const orderB = orderByKey.get(b.stageKey) ?? Infinity;
+    const orderA = orderOf(a.stageKey);
+    const orderB = orderOf(b.stageKey);
     if (orderA !== orderB) return orderA - orderB;
     if (a.startedAt && b.startedAt) {
       return new Date(a.startedAt).getTime() - new Date(b.startedAt).getTime();
@@ -297,9 +304,13 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
     return parsed ? idByPath.get(parsed.loopPath) : undefined;
   };
 
+  // A planned stage (P08 plan-then-execute) reads its spec from its expansion's stored plan.
+  const plannedDefs = new Map<string, StageSpec>();
+  for (const sr of run.stageRuns) for (const s of sr.expansionState?.stages ?? []) plannedDefs.set(`${sr.id}/${s.key}`, s as unknown as StageSpec);
+
   const seen = new Set<string>();
   const stages: StageView[] = sorted.map((sr, idx) => {
-    const def = stageDefByKey.get(sr.stageKey);
+    const def = stageDefByKey.get(sr.stageKey) ?? (sr.scopeId ? plannedDefs.get(`${sr.scopeId}/${sr.stageKey}`) : undefined);
     const stream = streams[`stageRun:${sr.id}`];
     const parallelIds = parallelPeers.get(sr.id) ?? [];
     const dependsOn = dependsOnByKey.get(sr.stageKey) ?? [];
@@ -315,6 +326,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
       vars: run.variables as Record<string, unknown> | undefined,
       loopId: loopIdOf(sr),
       containerKind: def?.parentKey ? stageDefByKey.get(def.parentKey)?.kind : undefined,
+      plannerName: sr.kind === 'expansion' ? stageDefByKey.get(plannerKeyOf(sr.stageKey) ?? '')?.name : undefined,
     };
     seen.add(sr.id);
     const cached = cache?.get(sr.id);
@@ -480,6 +492,16 @@ function loopFields(inputs: StageViewInputs): Partial<StageView> {
   if (wait) {
     out.kind = 'wait';
     out.wait = wait;
+  }
+  if (sr.kind === 'expansion') {
+    out.kind = 'expansion';
+    const xs = sr.expansionState;
+    out.expansion = {
+      plannedBy: inputs.plannerName ?? sr.name,
+      phase: xs?.phase ?? 'pending',
+      count: xs?.stages.length ?? 0,
+      join: xs?.join ?? 'all',
+    };
   }
   if (sr.kind === 'subworkflow' || def?.kind === 'subworkflow') {
     out.kind = 'subworkflow';

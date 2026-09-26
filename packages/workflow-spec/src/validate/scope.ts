@@ -28,6 +28,7 @@ import { checkExpression, type TypeEnv } from '../expr/typecheck.js';
 import { T, kindsOf, nullable, typeFromJsonSchema, typeToString, union, withoutNull, type ExprType } from '../expr/types.js';
 import { STAGE_RUN_STATES } from '../state/stageRun.js';
 import type { VariableDefinition } from '../schemas/common.js';
+import { expansionPlanJsonSchema } from '../schemas/expansion.js';
 import {
   CONTAINER_STAGE_KINDS,
   LOOP_EXIT_ACTIONS,
@@ -108,11 +109,30 @@ export function stageOutputType(stage: StageSpec): ExprType {
   if (stage.kind === 'check') return checkOutputType(stage);
   if (stage.kind === 'wait') return waitOutputType(stage);
   if (stage.kind === 'agent') {
+    // A planner's output is its plan (P08 §8): the contract is fixed by `expands`.
+    if (stage.expands) return typeFromJsonSchema(expansionPlanJsonSchema(stage.expands));
     if (stage.output.format === 'json') return stage.output.schema ? typeFromJsonSchema(stage.output.schema) : T.any;
     return T.string;
   }
   return T.any;
 }
+
+/** `stages.<planner>.expansion` (P08 §8): its planned stages' results once they ran. */
+export const EXPANSION_VIEW_TYPE: ExprType = nullable(
+  T.object({
+    status: T.enumOf(STAGE_RUN_STATES),
+    results: T.list(
+      T.object({
+        key: T.string,
+        name: T.string,
+        status: T.enumOf(STAGE_RUN_STATES),
+        output: T.any,
+        summary: nullable(T.string),
+        error: nullable(T.string),
+      }),
+    ),
+  }),
+);
 
 export function stageTypeOf(output: ExprType, extra: Record<string, ExprType> = {}): ExprType {
   return T.object({
@@ -125,9 +145,10 @@ export function stageTypeOf(output: ExprType, extra: Record<string, ExprType> = 
   });
 }
 
-/** Fields of `stages.<key>` beyond the common ones: an event wait's callback (P05 §4.3). */
+/** Fields of `stages.<key>` beyond the common ones: an event wait's callback (P05 §4.3), a planner's expansion (P08). */
 function stageExtras(stage: StageSpec | undefined): Record<string, ExprType> {
   if (stage?.kind === 'wait' && stage.wait.type === 'event') return { callbackUrl: nullable(T.string), callbackToken: nullable(T.string) };
+  if (stage?.kind === 'agent' && stage.expands) return { expansion: EXPANSION_VIEW_TYPE };
   return {};
 }
 

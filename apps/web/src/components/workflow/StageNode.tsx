@@ -6,7 +6,7 @@
 import React, { memo, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { Node } from '@xyflow/react';
-import { Box, Play, Pause, Check, X, AlertTriangle, AlertCircle, SkipForward, Clock, Copy, Trash2, Cpu, Sparkles, Server, ShieldCheck, Bot, Filter, UserCheck, SquareTerminal, MessagesSquare } from 'lucide-react';
+import { Box, Play, Pause, Check, X, AlertTriangle, AlertCircle, SkipForward, Clock, Copy, Trash2, Cpu, Sparkles, Server, ShieldCheck, Bot, Filter, UserCheck, SquareTerminal, MessagesSquare, ListTree } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { Button } from '@/components/ui/index.js';
@@ -351,6 +351,24 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
         <p className="mt-2 truncate text-xs text-[var(--color-muted-foreground)] leading-relaxed">
           {stage.description}
         </p>
+      )}
+
+      {/* Plan-then-execute (P08): the stages this planner adds at run time, as a dashed group. */}
+      {agent?.expands && (
+        <div
+          role="group"
+          aria-label={`Planned by ${label}`}
+          className="mt-2.5 rounded-md border-2 border-dashed border-[var(--color-border)] bg-[var(--color-primary)]/[0.03] px-2.5 py-2 text-[11px] text-[var(--color-muted-foreground)]"
+        >
+          <div className="flex items-center gap-1.5 font-medium text-[var(--color-card-foreground)]">
+            <ListTree className="h-3 w-3 shrink-0 text-[var(--color-primary)]" />
+            <span className="truncate">planned by {label}</span>
+          </div>
+          <div className="mt-0.5">
+            up to {agent.expands.maxStages} agent stage{agent.expands.maxStages !== 1 ? 's' : ''} at run time
+            {agent.expands.join === 'tolerate' ? ' · tolerates failures' : ''}
+          </div>
+        </div>
       )}
     </div>
   );

@@ -29,6 +29,7 @@ const RISK_LABELS: Record<RiskFlag, string> = {
   runs_repo_code: "Runs the repository's code",
   starts_other_workflows: 'Starts other workflows',
   worktree_per_item: 'A worktree per item',
+  plans_stages_at_run_time: 'An agent plans stages at run time',
 };
 
 const DANGER: ReadonlySet<RiskFlag> = new Set<RiskFlag>(['pushes', 'opens_pr', 'bypass_permissions']);

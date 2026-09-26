@@ -170,7 +170,7 @@ export class RunStore implements IRunStore {
         itemIndex: (s['item_index'] as number | null) ?? null,
         itemKey: (s['item_key'] as string | null) ?? null,
         loopState: kind === 'loop' ? (state as LoopState | null) : null,
-        containerState: kind === 'map' || kind === 'subworkflow' ? (state as ContainerState | null) : null,
+        containerState: kind === 'map' || kind === 'subworkflow' || kind === 'expansion' ? (state as ContainerState | null) : null,
         startedAt: (s['first_started_at'] as number | null) ?? null,
         completedAt: (s['completed_at'] as number | null) ?? null,
       };

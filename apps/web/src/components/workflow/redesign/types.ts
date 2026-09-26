@@ -154,12 +154,24 @@ export interface StageView {
   itemKey?: string;
   /** A map instance: its items. */
   map?: MapView;
+  /** A planner's expansion node (P08 plan-then-execute): its planned stages render in a dashed group. */
+  expansion?: ExpansionView;
   /** A wait instance: what it waits for (P05 §4.3). */
   wait?: WaitView;
   /** A sub-workflow instance: its child run (P05 §4.2). */
   subworkflow?: { phase: string; childRunId: string | null };
   /** The stage declares compensation actions (run, last completed first, when the run fails or is cancelled). */
   compensates?: boolean;
+}
+
+/** A planner's expansion node as the run page shows it (from `expansionState`). */
+export interface ExpansionView {
+  /** The planner's name ("planned by …"). */
+  plannedBy: string;
+  phase: string;
+  /** Planned stages (0 until the plan is accepted). */
+  count: number;
+  join: string;
 }
 
 /** A map instance as the run page shows it (from `mapState` and the pinned spec). */

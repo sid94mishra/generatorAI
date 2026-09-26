@@ -19,6 +19,7 @@
 
 import { evaluate, isTerminalStageRunState, type EdgeOn } from '@generatorai/workflow-spec';
 import type { CompiledEdge, CompiledExpr, CompiledNode } from '../workflow-graph/compile.js';
+import { addExpansionViews } from './scope.js';
 import type { InstanceState, RunRecord, SkipReason } from './types.js';
 
 export type PredState = 'pending' | 'active' | 'dead' | 'neutral';
@@ -51,10 +52,9 @@ export function expressionScope(
   parent?: Pick<InstanceState, 'status'>,
 ): Record<string, unknown> {
   const stages: Record<string, unknown> = {};
-  for (const i of instances) {
-    if (i.scopeId !== null) continue;
-    stages[i.stageKey] = { status: i.status, output: i.output ?? null, summary: i.summary };
-  }
+  const top = instances.filter((i) => i.scopeId === null);
+  for (const i of top) stages[i.stageKey] = { status: i.status, output: i.output ?? null, summary: i.summary };
+  addExpansionViews(stages, top);
   return {
     variables: run.variables,
     run: { id: run.id, name: run.name, codebases: run.codebases },
