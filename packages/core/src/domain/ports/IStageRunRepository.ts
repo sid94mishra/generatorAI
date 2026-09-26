@@ -5,7 +5,7 @@
 // (`IStageRunCas.transition`, applied by `RunStore`); this port reads.
 // ────────────────────────────────────────────────────────────────
 
-import type { StageRun, StageRunStatus } from '@generatorai/shared';
+import type { LoopIteration, StageRun, StageRunStatus } from '@generatorai/shared';
 
 export interface IStageRunRepository {
   getById(id: string): Promise<StageRun>;
@@ -13,4 +13,6 @@ export interface IStageRunRepository {
   getByRunId(workflowRunId: string): Promise<StageRun[]>;
   getByStatus(workflowRunId: string, statuses: StageRunStatus[]): Promise<StageRun[]>;
   deleteByRunId(workflowRunId: string): Promise<void>;
+  /** A loop instance's finished iterations, oldest first (P05 §2.6). */
+  getLoopIterations(stageRunId: string): Promise<LoopIteration[]>;
 }

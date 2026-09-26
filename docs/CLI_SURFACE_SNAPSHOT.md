@@ -13,9 +13,9 @@ same promise as one that does not.
 
 | Measure | Count |
 |---|---:|
-| Commands | 214 |
+| Commands | 216 |
 | Groups | 23 |
-| Server-backed commands | 187 |
+| Server-backed commands | 189 |
 | Destructive commands | 32 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
@@ -147,6 +147,7 @@ same promise as one that does not.
 | `review.submit` | `review submit` | yes | no | yes | yes | workspace | — |
 | `review.unresolve` | `review unresolve` | yes | no | yes | yes | workspace, thread | — |
 | `run.cancel` | `run cancel` | yes | yes | yes | yes | run | — |
+| `run.command` | `run command` | yes | no | yes | yes | run, instance, command | — |
 | `run.delete` | `run delete` | yes | yes | yes | yes | run | — |
 | `run.diff` | `run diff` | yes | no | yes | yes | run | — |
 | `run.hitl.approve` | `run hitl approve` | yes | no | yes | yes | run, stage | — |
@@ -154,6 +155,7 @@ same promise as one that does not.
 | `run.hitl.mode` | `run hitl mode` | yes | no | yes | yes | run | — |
 | `run.hitl.pending` | `run hitl pending` | yes | no | yes | yes | run | — |
 | `run.hitl.reject` | `run hitl reject` | yes | yes | yes | yes | run, stage | — |
+| `run.iterations` | `run iterations` | yes | no | yes | yes | run, loop | — |
 | `run.list` | `run list` | yes | no | yes | yes | — | — |
 | `run.messages` | `run messages` | yes | no | yes | yes | run | — |
 | `run.pause` | `run pause` | yes | no | yes | yes | run | — |

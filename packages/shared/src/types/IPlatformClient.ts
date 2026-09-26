@@ -14,7 +14,7 @@ import type {
   WorkflowTemplate,
 } from '@generatorai/workflow-spec';
 import type { InvocationPlan, InvocationRequest, InvocationResult, RunCommand } from '@generatorai/workflow-spec';
-import type { WorkflowRun, WorkflowRunWithStages } from './WorkflowRun.js';
+import type { LoopIteration, WorkflowRun, WorkflowRunWithStages } from './WorkflowRun.js';
 
 /** Files a run start uploads before invoking, by category. */
 export type InvocationFiles = Partial<Record<'skills' | 'agents' | 'prompts', Array<Blob & { readonly name: string }>>>;
@@ -124,6 +124,10 @@ export interface IPlatformClient {
    * command rejects with the server's 409/400/404 error.
    */
   runCommand(runId: string, command: RunCommand): Promise<void>;
+  /** A loop instance's finished iterations, oldest first (P05). */
+  listLoopIterations(runId: string, instanceId: string): Promise<LoopIteration[]>;
+  /** The commands a check stage may run: the defaults plus the operator's extras (P05). */
+  getScriptAllowlist(): Promise<{ commands: string[]; defaults: string[]; extras: string[] }>;
   deleteRun(id: string): Promise<void>;
 
   // ── HITL — permission mode + interrupt resume (HITL-04) ──

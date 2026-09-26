@@ -152,6 +152,8 @@ export type {
   StageRun,
   StageRunStatus,
   WorkflowRunWithStages,
+  LoopIteration,
+  LoopStateView,
   WorkflowRunPermissionMode,
   ArtifactManifestEntry,
 } from './WorkflowRun.js';

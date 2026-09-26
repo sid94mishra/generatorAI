@@ -13,6 +13,7 @@ import { z } from 'zod';
 import {
   REASONING_EFFORTS,
   RUN_PERMISSION_MODES,
+  RunCommandSchema,
   RunProfileSchema,
   type InvocationIssue,
   type InvocationPlan,
@@ -989,6 +990,102 @@ export function runCommands(): CommandSpec[] {
         },
       }),
     ),
+
+    // Any operator command, as data (P05): a loop's decisions (grant
+    // iterations, raise the budget, continue with input, accept, accept an
+    // iteration, fail) and every other RunCommand. Operator decisions are run
+    // commands, never chat commands.
+    defineCommand({
+      id: 'run.command',
+      group: 'run',
+      verb: 'command',
+      summary: 'Send an operator command to a run or one of its instances (any run command, fields as JSON)',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      examples: [
+        'generatorai run command @last fix_review grant_iterations --json \'{"n":2}\'',
+        'generatorai run command @last fix_review continue_with_input --json \'{"text":"Focus on the failing parser test"}\'',
+        'generatorai run command @last fix_review accept_iteration --json \'{"k":1}\'',
+        'generatorai run command @last - pause --json \'{"mode":"interrupt"}\'',
+      ],
+      args: [
+        { name: 'run', description: 'Run reference', required: true, completes: 'run' },
+        { name: 'instance', description: 'Stage key, instance path (fix_review#2/fix) or id; - for the run itself', required: true, completes: 'stage' },
+        { name: 'command', description: 'The command (grant_iterations, raise_budget, continue_with_input, accept, accept_iteration, fail, pause, …)', required: true },
+      ],
+      flags: [{ name: 'json', description: "The command's fields as a JSON object", type: 'string' }],
+      schema: inputSchema({ run: z.string(), instance: z.string(), command: z.string() }, { json: z.string().optional() }),
+      output: { kind: 'record' },
+      async handler(ctx, { args, flags }) {
+        const run = await findRun(ctx, args.run);
+        let fields: Record<string, unknown> = {};
+        if (flags.json !== undefined) {
+          try {
+            const parsed: unknown = JSON.parse(flags.json);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+            fields = parsed as Record<string, unknown>;
+          } catch (err) {
+            throw CliError.usage(`--json is not a JSON object: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        const stage = args.instance === '-' ? undefined : await findStage(ctx, run.id, args.instance);
+        const parsed = RunCommandSchema.safeParse({ ...fields, command: args.command, ...(stage ? { instanceId: stage.id } : {}) });
+        if (!parsed.success) {
+          throw CliError.usage(`Invalid ${args.command} command.`, {
+            hint: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; '),
+          });
+        }
+        await ctx.api.runs.command(run.id, parsed.data);
+        return record(
+          { runId: run.id, instanceId: stage?.id ?? null, command: args.command },
+          `${args.command} sent to ${stage ? (stage.instancePath ?? stage.name ?? stage.id) : `run ${run.id}`}.`,
+        );
+      },
+    }),
+
+    defineCommand({
+      id: 'run.iterations',
+      group: 'run',
+      verb: 'iterations',
+      summary: "A loop's finished iterations: exit-rule values, streaks, score, workspace change, carried state",
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        { name: 'run', description: 'Run reference', required: true, completes: 'run' },
+        { name: 'loop', description: 'The loop stage (key, instance path or id)', required: true, completes: 'stage' },
+      ],
+      flags: [],
+      schema: inputSchema({ run: z.string(), loop: z.string() }, {}),
+      output: {
+        kind: 'list',
+        columns: [
+          { key: 'iteration', header: '#', format: 'number', priority: 0 },
+          { key: 'outcome', header: 'Outcome', priority: 0 },
+          { key: 'rules', header: 'Rules', priority: 1 },
+          { key: 'score', header: 'Score', priority: 2 },
+          { key: 'changed', header: 'Changed', priority: 2 },
+          { key: 'checkpoint', header: 'Ckpt', format: 'boolean', priority: 3 },
+        ],
+      },
+      async handler(ctx, { args }) {
+        const run = await findRun(ctx, args.run);
+        const loop = await findStage(ctx, run.id, args.loop);
+        const rows = await ctx.api.runs.iterations(run.id, loop.id);
+        return list(
+          rows.map((r) => ({
+            iteration: r.k + 1,
+            outcome: r.outcome,
+            rules: Object.entries(r.exitValues)
+              .map(([name, v]) => `${name}=${v === null ? '?' : v}`)
+              .join(' '),
+            score: r.score ?? '',
+            changed: r.signals?.workspaceChanged === null || r.signals === null ? '?' : String(r.signals.workspaceChanged),
+            checkpoint: r.checkpointTurnId !== null,
+            carry: r.carry,
+          })),
+        );
+      },
+    }),
 
     // A stage is a compact chat (P03b): message it, stop its turn.
     defineCommand({

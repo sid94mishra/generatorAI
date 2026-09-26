@@ -127,8 +127,14 @@ export interface StageRun {
   stageKey: string;
   /** `triage`, `review_loop#2/fix`: unique per run; the stage key at the top level. */
   instancePath: string;
-  /** The node kind (`agent` until P05). */
+  /** The node kind: agent, check, loop (P05). */
   kind: string;
+  /** The enclosing container instance (a loop body stage); absent at the top level. */
+  scopeId?: string;
+  /** The iteration of the enclosing loop this instance belongs to (absent for a wrap-up). */
+  iterationIndex?: number;
+  /** A loop instance's state (P05 §2.6). */
+  loopState?: LoopStateView;
   /** The conversation of the current attempt. */
   sessionId?: string;
   name: string;
@@ -166,6 +172,47 @@ export interface StageRun {
   completedAt?: Date;
   /** When an operator follow-up last amended this completed stage's output (PD-4). */
   amendedAt?: Date;
+}
+
+/**
+ * A loop instance's state as the clients read it (`stage_runs.loop_state`).
+ * `phase`: starting, running, settling, wrapping_up, restoring, parked, done.
+ */
+export interface LoopStateView {
+  k: number;
+  phase: string;
+  effectiveMax: number;
+  budgetDelta: { maxTurns?: number; maxCostUsd?: number; maxTokens?: number; maxWallClockMs?: number };
+  /** Streak per exit rule, by rule index. */
+  streaks: number[];
+  exitReason: string | null;
+  exitAction: string | null;
+  operatorInput: { text: string; forIteration: number } | null;
+  startedAt: number;
+  parkedMs: number;
+  parkedSince: number | null;
+  wrappedUp: boolean;
+}
+
+/** One finished loop iteration (`loop_iterations`, P05 §2.6). */
+export interface LoopIteration {
+  k: number;
+  carry: Record<string, unknown>;
+  /** Each exit rule's value, by reason. */
+  exitValues: Record<string, boolean | null>;
+  streaks: number[];
+  signals: {
+    toolCalls: number | null;
+    workspaceChanged: boolean | null;
+    stages: Record<string, { toolCalls: number | null; outputHash: string | null; status: string | null }>;
+  } | null;
+  score: number | null;
+  /** Set when the iteration's workspace was checkpointed (accept_iteration can restore it). */
+  checkpointTurnId: string | null;
+  usage: Record<string, unknown>;
+  outcome: string;
+  startedAt: number | null;
+  endedAt: number | null;
 }
 
 /** Compound type: WorkflowRun with all its StageRuns */

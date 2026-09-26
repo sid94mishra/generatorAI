@@ -78,11 +78,12 @@ generatorai
 │     · stage hook list · stage hook remove · stage list · stage remove ·
 │     stage update · update · validate · versions
 ├── run                   # Workflow run lifecycle, stage controls and human-in-the-loop gates
-│     cancel · delete · diff · hitl approve · hitl changes-request · hitl
-│     mode · hitl pending · hitl reject · list · messages · pause · plan ·
-│     profile generate · profile list · profile validate · resume · retry
-│     · show · stage cancel · stage list · stage pause · stage resume ·
-│     stage retry · stage send · stage stop · start · watch · workspace
+│     cancel · command · delete · diff · hitl approve · hitl
+│     changes-request · hitl mode · hitl pending · hitl reject ·
+│     iterations · list · messages · pause · plan · profile generate ·
+│     profile list · profile validate · resume · retry · show · stage
+│     cancel · stage list · stage pause · stage resume · stage retry ·
+│     stage send · stage stop · start · watch · workspace
 ├── automation (auto)     # Scheduled, webhook and manual triggers that fan out into runs
 │     create · delete · disable · enable · execution cancel · execution
 │     list · execution show · list · rotate-webhook-token · show · trigger
@@ -231,6 +232,7 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 | Command | What | Flags |
 |---|---|---|
 | `run cancel <run>` | Cancel a run | — |
+| `run command <run> <instance> <command> [options]` | Send an operator command to a run or one of its instances (any run command, fields as JSON) | `--json` |
 | `run delete <run>` | Delete a run record | — |
 | `run diff <run>` | Unified diff of everything a run changed, per mounted codebase | — |
 | `run hitl approve <run> <stage> [options]` | Approve a waiting stage | `--value` `--feedback` |
@@ -238,6 +240,7 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 | `run hitl mode <run> [mode]` | Show or set the run permission mode | — |
 | `run hitl pending <run>` | Gates waiting for a human decision | — |
 | `run hitl reject <run> <stage> [options]` | Reject a waiting stage and fail the run | `--value` `--feedback` |
+| `run iterations <run> <loop>` | A loop's finished iterations: exit-rule values, streaks, score, workspace change, carried state | — |
 | `run list [options]` | List workflow runs | `--status` `--definition` `--limit` |
 | `run messages <run> [options]` | Messages recorded for a run, optionally one stage | `--stage` |
 | `run pause <run>` | Pause a run | — |

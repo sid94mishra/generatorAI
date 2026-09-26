@@ -33,6 +33,7 @@ import type {
   ProjectCodebase,
   ProjectConfig,
   StageRun,
+  LoopIteration,
   TerminalSessionDescriptor,
   UpdateAgentParams,
   UpdateAutomationParams,
@@ -319,6 +320,9 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       remove: (id: string) => req<void>(`/api/workflow-runs/${id}`, { method: 'DELETE' }),
 
       stages: (id: string) => req<StageRun[]>(`/api/workflow-runs/${id}/stages`),
+      /** A loop instance's finished iterations, oldest first (P05). */
+      iterations: (id: string, instanceId: string) =>
+        req<LoopIteration[]>(`/api/workflow-runs/${id}/instances/${encodeURIComponent(instanceId)}/iterations`),
 
       permissionMode: {
         get: (id: string) =>

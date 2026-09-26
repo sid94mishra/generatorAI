@@ -280,6 +280,7 @@ import type {
   CreateChatParams,
   WorkflowRun,
   WorkflowRunWithStages,
+  LoopIteration,
   RunWorkspaceInfo,
   Automation,
   AutomationWithExecutions,
@@ -1153,6 +1154,14 @@ export class HttpPlatformClient implements IPlatformClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(command),
     });
+  }
+
+  async listLoopIterations(runId: string, instanceId: string): Promise<LoopIteration[]> {
+    return apiFetch<LoopIteration[]>(`${this.baseUrl}/api/workflow-runs/${runId}/instances/${encodeURIComponent(instanceId)}/iterations`);
+  }
+
+  async getScriptAllowlist(): Promise<{ commands: string[]; defaults: string[]; extras: string[] }> {
+    return apiFetch<{ commands: string[]; defaults: string[]; extras: string[] }>(`${this.baseUrl}/api/settings/script-allowlist`);
   }
 
   // ── A stage is a compact chat (P03b, the stage conversation API) ──

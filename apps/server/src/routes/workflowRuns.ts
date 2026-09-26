@@ -169,6 +169,23 @@ export function createWorkflowRunRoutes(container: Container): Router {
     }
   });
 
+  // GET /workflow-runs/:id/instances/:instanceId/iterations — a loop's
+  // finished iterations (carry, exit-rule values, streaks, signals, score,
+  // checkpoint, usage), oldest first (P05).
+  router.get('/:id/instances/:instanceId/iterations', async (req, res, next) => {
+    try {
+      const runId = String(req.params['id']);
+      const inst = await stageRunRepo.getById(String(req.params['instanceId']));
+      if (inst.workflowRunId !== runId) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `No instance ${inst.id} in run ${runId}` } });
+        return;
+      }
+      res.json(await stageRunRepo.getLoopIterations(inst.id));
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // ═══════════════════════════════════════════════════════════
   // The stage conversation (P03b): a stage is a compact chat.
   // ═══════════════════════════════════════════════════════════

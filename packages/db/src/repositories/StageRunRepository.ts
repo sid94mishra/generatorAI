@@ -6,7 +6,7 @@
 // reads the instances for the run page, the commands API and forks.
 // ────────────────────────────────────────────────────────────────
 
-import { eq, and, inArray } from 'drizzle-orm';
+import { eq, and, asc, inArray } from 'drizzle-orm';
 import type {
   IStageRunCas,
   IStageRunRepository,
@@ -16,9 +16,9 @@ import type {
   TransitionResult,
 } from '@generatorai/core';
 import type { StageRunState } from '@generatorai/workflow-spec';
-import type { StageRun, StageRunStatus } from '@generatorai/shared';
+import type { LoopIteration, LoopStateView, StageRun, StageRunStatus } from '@generatorai/shared';
 import { NotFoundError } from '@generatorai/shared';
-import { stageRuns } from '../schema.js';
+import { loopIterations, stageRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { sqliteHandle } from './AuthRepositories.js';
 import { amendStageOutput, getInstanceRow, markStageProgress, renewStageLease, stageTransition } from './engineCas.js';
@@ -81,6 +81,24 @@ export class DrizzleStageRunRepository implements IStageRunRepository, IStageRun
     return rows.map(mapStageRun);
   }
 
+  /** A loop instance's finished iterations, oldest first (P05). */
+  async getLoopIterations(stageRunId: string): Promise<LoopIteration[]> {
+    const rows = await this.db.select().from(loopIterations).where(eq(loopIterations.stageRunId, stageRunId)).orderBy(asc(loopIterations.k));
+    return rows.map((r) => ({
+      k: r.k,
+      carry: (r.carry as Record<string, unknown> | null) ?? {},
+      exitValues: (r.exitValues as Record<string, boolean | null> | null) ?? {},
+      streaks: (r.streaks as number[] | null) ?? [],
+      signals: (r.signals as LoopIteration['signals']) ?? null,
+      score: r.score ?? null,
+      checkpointTurnId: r.checkpointTurnId ?? null,
+      usage: r.usage ?? {},
+      outcome: r.outcome ?? 'completed',
+      startedAt: r.startedAt ? r.startedAt.getTime() : null,
+      endedAt: r.endedAt ? r.endedAt.getTime() : null,
+    }));
+  }
+
   async deleteByRunId(workflowRunId: string): Promise<void> {
     await this.db.delete(stageRuns).where(eq(stageRuns.workflowRunId, workflowRunId));
   }
@@ -93,6 +111,9 @@ export function mapStageRun(row: typeof stageRuns.$inferSelect): StageRun {
     stageKey: row.stageKey,
     instancePath: row.instancePath,
     kind: row.kind,
+    ...(row.scopeId ? { scopeId: row.scopeId } : {}),
+    ...(row.iterationIndex !== null && row.iterationIndex !== undefined ? { iterationIndex: row.iterationIndex } : {}),
+    ...(row.loopState ? { loopState: row.loopState as LoopStateView } : {}),
     sessionId: row.sessionId ?? undefined,
     name: row.name,
     status: row.status,
