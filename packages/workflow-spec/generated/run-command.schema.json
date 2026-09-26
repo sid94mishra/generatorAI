@@ -175,7 +175,7 @@
             "command": {
               "type": "string",
               "const": "fail",
-              "description": "Fail a paused instance"
+              "description": "Fail a paused instance or a parked loop"
             },
             "instanceId": {
               "$ref": "#/definitions/RunCommand/anyOf/0/properties/instanceId"
@@ -230,6 +230,156 @@
           ],
           "additionalProperties": false,
           "description": "Approve"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "const": "grant_iterations",
+              "description": "Allow a loop more iterations; a parked loop continues when it can"
+            },
+            "instanceId": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/instanceId"
+            },
+            "expectedVersion": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/expectedVersion"
+            },
+            "n": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "description": "Iterations to add to the maximum"
+            }
+          },
+          "required": [
+            "command",
+            "n"
+          ],
+          "additionalProperties": false,
+          "description": "Grant iterations"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "const": "raise_budget",
+              "description": "Raise a loop's cumulative budget; a parked loop continues when it can"
+            },
+            "instanceId": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/instanceId"
+            },
+            "expectedVersion": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/expectedVersion"
+            },
+            "maxTurns": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100000,
+              "description": "Turns to add"
+            },
+            "maxCostUsd": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 100000,
+              "description": "Cost (USD) to add"
+            },
+            "maxTokens": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000000000,
+              "description": "Tokens to add"
+            },
+            "maxWallClockMs": {
+              "type": "integer",
+              "minimum": 1000,
+              "maximum": 604800000,
+              "description": "Wall-clock time to add"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": false,
+          "description": "Raise budget"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "const": "continue_with_input",
+              "description": "Continue a loop with an operator message: sent as an operator turn to the next iteration's first stages (loop.operatorInput)"
+            },
+            "instanceId": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/instanceId"
+            },
+            "expectedVersion": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/expectedVersion"
+            },
+            "text": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100000,
+              "description": "The message"
+            }
+          },
+          "required": [
+            "command",
+            "text"
+          ],
+          "additionalProperties": false,
+          "description": "Continue with input"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "const": "accept",
+              "description": "Complete a parked loop with its last iteration"
+            },
+            "instanceId": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/instanceId"
+            },
+            "expectedVersion": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/expectedVersion"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "additionalProperties": false,
+          "description": "Accept"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "const": "accept_iteration",
+              "description": "Complete a parked loop with an earlier iteration (its workspace checkpoint is restored; needs per-iteration checkpoints)"
+            },
+            "instanceId": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/instanceId"
+            },
+            "expectedVersion": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/expectedVersion"
+            },
+            "k": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 1000,
+              "description": "The iteration (0-based)"
+            }
+          },
+          "required": [
+            "command",
+            "k"
+          ],
+          "additionalProperties": false,
+          "description": "Accept an iteration"
         }
       ],
       "description": "An operator command on a run"

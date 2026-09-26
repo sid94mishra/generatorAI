@@ -31,6 +31,8 @@ import {
   type Decision,
   type InstanceState,
   type IRunStore,
+  type LoopIterationRecord,
+  type LoopState,
   type RunRecord,
   type RunState,
   type SkipReason,
@@ -39,7 +41,7 @@ import {
 import type { StageRunState, WorkflowRunState } from '@generatorai/workflow-spec';
 import type { AppDatabase } from '../index.js';
 import { sqliteHandle } from './AuthRepositories.js';
-import { runPatchSets, runTransition, stageTransition } from './engineCas.js';
+import { runPatchSets, runTransition, stagePatchSets, stageTransition } from './engineCas.js';
 import {
   addUsage,
   SchedulerJournalRepository,
@@ -151,11 +153,35 @@ export class RunStore implements IRunStore {
         errorCode: (s['error_code'] as string | null) ?? null,
         usage: parse<Usage>(s['usage'], {}),
         leaseOwner: (s['lease_owner'] as string | null) ?? null,
+        error: (s['error'] as string | null) ?? null,
+        iterationIndex: (s['iteration_index'] as number | null) ?? null,
+        loopState: parse<LoopState | null>(s['loop_state'], null),
         startedAt: (s['first_started_at'] as number | null) ?? null,
         completedAt: (s['completed_at'] as number | null) ?? null,
       };
     });
-    return { run, instances };
+    const iterations: LoopIterationRecord[] = (
+      this.sqlite
+        .prepare(
+          `SELECT li.* FROM loop_iterations li JOIN stage_runs s ON s.id = li.stage_run_id
+            WHERE s.workflow_run_id = ? ORDER BY li.stage_run_id, li.k`,
+        )
+        .all(runId) as Row[]
+    ).map((r) => ({
+      stageRunId: r['stage_run_id'] as string,
+      k: r['k'] as number,
+      carry: parse<Record<string, unknown>>(r['carry'], {}),
+      exitValues: parse<Record<string, boolean | null>>(r['exit_values'], {}),
+      streaks: parse<number[]>(r['streaks'], []),
+      signals: parse<LoopIterationRecord['signals']>(r['signals'], null),
+      score: (r['score'] as number | null) ?? null,
+      checkpointTurnId: (r['checkpoint_turn_id'] as string | null) ?? null,
+      usage: parse<Usage>(r['usage'], {}),
+      outcome: ((r['outcome'] as string | null) ?? 'completed') as LoopIterationRecord['outcome'],
+      startedAt: (r['started_at'] as number | null) ?? null,
+      endedAt: (r['ended_at'] as number | null) ?? null,
+    }));
+    return { run, instances, iterations };
   }
 
   // ── apply ────────────────────────────────────────────────────
@@ -196,11 +222,11 @@ export class RunStore implements IRunStore {
           }
           case 'create_instances': {
             const ins = sql.prepare(
-              `INSERT INTO stage_runs (id, workflow_run_id, stage_key, kind, name, instance_path, scope_id, iteration_index, item_index, status, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT DO NOTHING`,
+              `INSERT INTO stage_runs (id, workflow_run_id, stage_key, kind, name, instance_path, scope_id, iteration_index, item_index, item_key, status, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT DO NOTHING`,
             );
             for (const row of d.rows) {
-              ins.run(row.id, runId, row.stageKey, row.kind, row.name, row.instancePath, row.scopeId, row.iterationIndex ?? null, row.itemIndex ?? null, now, now);
+              ins.run(row.id, runId, row.stageKey, row.kind, row.name, row.instancePath, row.scopeId, row.iterationIndex ?? null, row.itemIndex ?? null, row.itemKey ?? null, now, now);
             }
             break;
           }
@@ -251,10 +277,44 @@ export class RunStore implements IRunStore {
             const inst = sql.prepare(`SELECT usage, current_attempt FROM stage_runs WHERE id = ? AND workflow_run_id = ?`).get(d.stageRunId, runId) as Row | undefined;
             if (inst) {
               sql.prepare(`UPDATE stage_runs SET usage = ? WHERE id = ?`).run(JSON.stringify(addUsage(parse<Usage>(inst['usage'], {}), d.usage)), d.stageRunId);
-              if ((inst['current_attempt'] as number) > 0) this.attempts.addUsage(d.stageRunId, inst['current_attempt'] as number, d.usage);
+              if (!d.scopeOnly && (inst['current_attempt'] as number) > 0) this.attempts.addUsage(d.stageRunId, inst['current_attempt'] as number, d.usage);
             }
+            // A container's roll-up of its body: the run already counted it.
+            if (d.scopeOnly) break;
             const run = sql.prepare(`SELECT usage FROM workflow_runs WHERE id = ?`).get(runId) as Row;
             fencedRun(['usage = ?'], [JSON.stringify(addUsage(parse<Usage>(run['usage'], {}), d.usage))], 'usage_rollup');
+            break;
+          }
+          case 'instance_patch': {
+            const p = stagePatchSets(d.patch);
+            const changed = sql
+              .prepare(`UPDATE stage_runs SET ${[...p.sets, 'version = version + 1', 'updated_at = ?'].join(', ')} WHERE id = ? AND workflow_run_id = ? AND status = ?`)
+              .run(...p.args, now, d.id, runId, d.status).changes;
+            if (changed === 0) throw new ApplyAbort('conflict', `instance ${d.id}: not ${d.status}`);
+            break;
+          }
+          case 'record_iteration': {
+            const r = d.row;
+            sql
+              .prepare(
+                `INSERT INTO loop_iterations (stage_run_id, k, carry, exit_values, streaks, signals, score, checkpoint_turn_id, usage, outcome, started_at, ended_at)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON CONFLICT (stage_run_id, k) DO NOTHING`,
+              )
+              .run(
+                r.stageRunId,
+                r.k,
+                JSON.stringify(r.carry),
+                JSON.stringify(r.exitValues),
+                JSON.stringify(r.streaks),
+                r.signals ? JSON.stringify(r.signals) : null,
+                r.score,
+                r.checkpointTurnId,
+                JSON.stringify(r.usage),
+                r.outcome,
+                r.startedAt,
+                r.endedAt,
+              );
             break;
           }
           case 'emit': {

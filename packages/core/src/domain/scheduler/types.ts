@@ -47,6 +47,8 @@ export interface Usage {
   costUsd?: number;
   inputTokens?: number;
   outputTokens?: number;
+  /** Tool calls the agent made (a loop signal, P05 §2.5). */
+  toolCalls?: number;
 }
 
 /** A human verdict on an `awaiting_input` instance (the `approve` command). */
@@ -64,6 +66,75 @@ export interface OperatorTurn {
   prompt: string;
   attachmentIds?: string[];
   agentMode?: 'auto' | 'plan';
+}
+
+// ── Loops (P05 §2) ────────────────────────────────────────────────
+
+/**
+ * Where a loop instance is in its cycle:
+ *   starting    the tree hashes of the loop start are being captured
+ *   running     iteration k's scope runs
+ *   settling    scope k is terminal; `capture_iteration` is in flight
+ *   wrapping_up the budget ran out; the wrap-up instance runs
+ *   restoring   an accepted earlier iteration's checkpoint is being restored
+ *   parked      awaiting an operator decision (the instance is awaiting_input)
+ *   done        terminal
+ */
+export type LoopPhase = 'starting' | 'running' | 'settling' | 'wrapping_up' | 'restoring' | 'parked' | 'done';
+
+/** How a loop exhausted (the `exhaust` action's reason is its rule's). */
+export type LoopLimitReason = 'max_iterations' | 'budget' | string;
+
+/** `stage_runs.loop_state` of a loop instance (P05 §2.6). */
+export interface LoopState {
+  k: number;
+  phase: LoopPhase;
+  /** maxIterations plus every grant. */
+  effectiveMax: number;
+  /** Budget raises, added to the loop budget. */
+  budgetDelta: { maxTurns?: number; maxCostUsd?: number; maxTokens?: number; maxWallClockMs?: number };
+  /** Streak per exit rule (by index). */
+  streaks: number[];
+  exitReason: string | null;
+  exitAction: string | null;
+  /** carry(-1): the carryInit values. */
+  carryInit: Record<string, unknown>;
+  /** A continue_with_input message and the iteration it is for. */
+  operatorInput: { text: string; forIteration: number } | null;
+  /** The loop's start (wall clock) and the time parked since, excluded from it. */
+  startedAt: number;
+  parkedMs: number;
+  parkedSince: number | null;
+  /** Tree hash per mount when the loop started (the baseline of workspaceChanged). */
+  startHashes: Record<string, string | null> | null;
+  /** The wrap-up ran (it runs once). */
+  wrappedUp: boolean;
+  /** What happens once the wrap-up or the restore settles. */
+  pending: { kind: 'limit'; reason: string } | { kind: 'accept'; k: number; action: string; reason: string } | null;
+}
+
+/** One `loop_iterations` row. */
+export interface LoopIterationRecord {
+  stageRunId: string;
+  k: number;
+  carry: Record<string, unknown>;
+  exitValues: Record<string, boolean | null>;
+  streaks: number[];
+  signals: LoopSignals | null;
+  score: number | null;
+  checkpointTurnId: string | null;
+  usage: Usage;
+  outcome: RunOutcome;
+  startedAt: number | null;
+  endedAt: number | null;
+}
+
+/** Per-iteration progress signals (P05 §2.5); a signal that cannot be computed is null. */
+export interface LoopSignals {
+  toolCalls: number | null;
+  workspaceChanged: boolean | null;
+  treeHashes: Record<string, string | null> | null;
+  stages: Record<string, { toolCalls: number | null; outputHash: string | null; status: string | null }>;
 }
 
 // ── State ─────────────────────────────────────────────────────────
@@ -94,6 +165,12 @@ export interface InstanceState {
   errorCode: string | null;
   usage: Usage;
   leaseOwner: string | null;
+  /** The error message of a failed instance (loop.last.failures). */
+  error?: string | null;
+  /** The iteration of the enclosing loop this instance belongs to (null at the top level and for a wrap-up). */
+  iterationIndex: number | null;
+  /** A loop instance's state. */
+  loopState: LoopState | null;
   /** When the first attempt started (the `timeouts.totalMs` deadline runs from it). */
   startedAt: number | null;
   completedAt: number | null;
@@ -130,6 +207,8 @@ export interface RunState {
   run: RunRecord;
   /** Every instance of the run, any order (decide sorts by `instancePath`). */
   instances: InstanceState[];
+  /** Every finished loop iteration of the run (`loop_iterations`). */
+  iterations: LoopIterationRecord[];
 }
 
 // ── Messages ──────────────────────────────────────────────────────
@@ -167,6 +246,13 @@ export type RunMessage =
    */
   | { type: 'frame_lost'; stageRunId: string; attemptNo: number }
   | { type: 'command'; command: RunCommand }
+  /**
+   * The `capture_iteration` effect is done: the tree hash of every mount
+   * (null when it could not be computed) and the iteration checkpoint.
+   */
+  | { type: 'iteration_captured'; stageRunId: string; k: number; at: 'start' | 'end'; treeHashes: Record<string, string | null> | null; checkpointTurnId?: string | null }
+  /** The `restore_iteration` effect is done (every mount restored, or rolled back). */
+  | { type: 'iteration_restored'; stageRunId: string; k: number; ok: boolean; error?: string }
   /** The `finalize` effect is done (compensation, onExit/onFailure, post-processing). */
   | { type: 'finalized'; ok: boolean; error?: string }
   /** Backstop and recovery: re-derive what to do from the state alone. */
@@ -188,6 +274,7 @@ export interface InstancePatch {
   error?: string | null;
   errorClass?: string | null;
   errorCode?: string | null;
+  loopState?: LoopState | null;
 }
 
 export interface RunPatch {
@@ -206,6 +293,7 @@ export interface NewInstance {
   scopeId: string | null;
   iterationIndex?: number;
   itemIndex?: number;
+  itemKey?: string;
 }
 
 export interface OutboxEvent {
@@ -236,8 +324,16 @@ export type Decision =
   | { t: 'run_transition'; from: WorkflowRunState[]; to: WorkflowRunState; expectedVersion?: number; patch?: RunPatch }
   /** Run columns without a status change (the outcome of a cancelling run). */
   | { t: 'run_patch'; patch: RunPatch }
-  /** Add usage to the instance and the run. */
-  | { t: 'usage_rollup'; stageRunId: string; usage: Usage }
+  /** Add usage to the instance and the run (`scopeOnly`: to an enclosing container, not the run again). */
+  | { t: 'usage_rollup'; stageRunId: string; usage: Usage; scopeOnly?: boolean }
+  /** Columns of an instance without a status change (a loop's state); a CAS on the status. */
+  | { t: 'instance_patch'; id: string; status: StageRunState; patch: InstancePatch }
+  /** Persist a finished loop iteration (same transaction as the next scope's instances). */
+  | { t: 'record_iteration'; row: LoopIterationRecord }
+  /** Effect: the tree hash of every mount (and, at an iteration's end, its checkpoint); posts `iteration_captured`. */
+  | { t: 'capture_iteration'; stageRunId: string; k: number; at: 'start' | 'end'; checkpoint: boolean }
+  /** Effect: restore every mount to an iteration's checkpoint, all or nothing; posts `iteration_restored`. */
+  | { t: 'restore_iteration'; stageRunId: string; k: number; checkpointTurnId: string }
   /** Persisted in the same transaction, dispatched after commit. */
   | { t: 'emit'; event: OutboxEvent }
   /** Effect: the run's prepare phases (P04 lifecycle); posts `prepared` or `prepare_failed`. */
@@ -257,4 +353,6 @@ export const EFFECT_DECISIONS: ReadonlySet<DecisionType> = new Set<DecisionType>
   'prepare',
   'finalize',
   'reject',
+  'capture_iteration',
+  'restore_iteration',
 ]);

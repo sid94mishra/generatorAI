@@ -60,7 +60,7 @@ export const RunCommandSchema = z
       })
       .strict()
       .describe('Skip'),
-    z.object({ command: z.literal('fail').describe('Fail a paused instance'), ...target }).strict().describe('Fail'),
+    z.object({ command: z.literal('fail').describe('Fail a paused instance or a parked loop'), ...target }).strict().describe('Fail'),
     z
       .object({
         command: z.literal('approve').describe('Resolve a pending approval'),
@@ -71,6 +71,47 @@ export const RunCommandSchema = z
       })
       .strict()
       .describe('Approve'),
+    // ── Loop decisions (P05 §2.3). Every one resets the exit-rule streaks. ──
+    z
+      .object({
+        command: z.literal('grant_iterations').describe('Allow a loop more iterations; a parked loop continues when it can'),
+        ...target,
+        n: z.number().int().min(1).max(50).describe('Iterations to add to the maximum'),
+      })
+      .strict()
+      .describe('Grant iterations'),
+    z
+      .object({
+        command: z.literal('raise_budget').describe("Raise a loop's cumulative budget; a parked loop continues when it can"),
+        ...target,
+        maxTurns: z.number().int().min(1).max(100_000).optional().describe('Turns to add'),
+        maxCostUsd: z.number().positive().max(100_000).optional().describe('Cost (USD) to add'),
+        maxTokens: z.number().int().min(1).max(10_000_000_000).optional().describe('Tokens to add'),
+        maxWallClockMs: z.number().int().min(1000).max(604_800_000).optional().describe('Wall-clock time to add'),
+      })
+      .strict()
+      .describe('Raise budget'),
+    z
+      .object({
+        command: z
+          .literal('continue_with_input')
+          .describe("Continue a loop with an operator message: sent as an operator turn to the next iteration's first stages (loop.operatorInput)"),
+        ...target,
+        text: z.string().min(1).max(100_000).describe('The message'),
+      })
+      .strict()
+      .describe('Continue with input'),
+    z.object({ command: z.literal('accept').describe('Complete a parked loop with its last iteration'), ...target }).strict().describe('Accept'),
+    z
+      .object({
+        command: z
+          .literal('accept_iteration')
+          .describe('Complete a parked loop with an earlier iteration (its workspace checkpoint is restored; needs per-iteration checkpoints)'),
+        ...target,
+        k: z.number().int().min(0).max(1000).describe('The iteration (0-based)'),
+      })
+      .strict()
+      .describe('Accept an iteration'),
   ])
   .describe('An operator command on a run');
 export type RunCommand = z.infer<typeof RunCommandSchema>;

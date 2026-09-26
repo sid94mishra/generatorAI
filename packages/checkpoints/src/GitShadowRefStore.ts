@@ -29,6 +29,8 @@ export const CHECKPOINT_REF_PREFIX = 'refs/generatorai/checkpoints';
 
 /** Name of the throwaway index file kept inside the repo's git dir. */
 const SNAPSHOT_INDEX_FILE = 'generatorai-snapshot.index';
+/** A second throwaway index: a tree hash never races a snapshot's index. */
+const TREE_HASH_INDEX_FILE = 'generatorai-treehash.index';
 /** Separate index for restores so a concurrent capture can't observe it. */
 const RESTORE_INDEX_FILE = 'generatorai-restore.index';
 
@@ -106,6 +108,17 @@ export class GitShadowRefStore implements ISnapshotStore {
     await this.gitFor(repoDir).updateRef(repoDir, refName, refValue);
 
     return { refValue, treeSha };
+  }
+
+  /**
+   * The tree the working tree snapshots to (`git add -A` into a private
+   * index + `write-tree`), without writing a ref: a cheap "did anything
+   * change" signal (P05 loop signals).
+   */
+  async treeHash(repoDir: string): Promise<string | null> {
+    const indexFile = await this.indexPath(repoDir, TREE_HASH_INDEX_FILE);
+    if (!indexFile) return null;
+    return (await this.gitFor(repoDir).writeTreeFromWorktree(repoDir, indexFile)) ?? null;
   }
 
   async diff(

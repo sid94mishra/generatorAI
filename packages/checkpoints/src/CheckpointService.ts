@@ -137,6 +137,17 @@ export class CheckpointService {
     }
   }
 
+  /** The tree hash of a repository's working tree (no ref, no record); null when it cannot be computed. */
+  async treeHash(repoDir: string): Promise<string | null> {
+    try {
+      if (!(await this.store.prepare(repoDir))) return null;
+      return await this.store.treeHash(repoDir);
+    } catch (err) {
+      this.logger.warn(`[Checkpoints] tree hash failed for ${repoDir}: ${err}`);
+      return null;
+    }
+  }
+
   // ── Read ────────────────────────────────────────────────────
 
   async list(filters: CheckpointFilters): Promise<CheckpointRecord[]> {

@@ -46,6 +46,7 @@ import {
   templateVariableNames,
   type AgentMode,
   type AgentStage,
+  type PromptDefinition,
   type SessionSpec,
   type WorkflowGraph,
 } from '@generatorai/workflow-spec';
@@ -56,7 +57,6 @@ import type { ISessionRepository } from '../../domain/ports/IRepositories.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
 import type { HostToolsLevel, StructuredOutputLevel } from '../../domain/ports/IProviderInstance.js';
-import { expressionScope } from '../../domain/scheduler/readiness.js';
 import type { ApprovalVerdict, AttemptMode, AttemptOutcome, InstanceState, OperatorTurn, RunMessage, RunState, StageOutput, Usage } from '../../domain/scheduler/types.js';
 import type { EventBus } from '../../events/EventBus.js';
 import type { AdmissionTicket } from '../AdmissionController.js';
@@ -81,8 +81,8 @@ import type { SessionOwner, TurnContext } from '../session/types.js';
 import { runWorkspace, workspaceExposure } from '../session/workspaceExposure.js';
 import { StageConversationError } from './StageConversationError.js';
 import { runCheck } from './CheckRunner.js';
-import { compile } from '../../domain/workflow-graph/compile.js';
-import { templateScope } from '../../domain/scheduler/scope.js';
+import { compile, type CompiledNode, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
+import { isWrapUp, templateScope } from '../../domain/scheduler/scope.js';
 import {
   checkOutputContract,
   chooseStrategies,
@@ -225,6 +225,14 @@ interface AttemptContext {
   stage: AgentStage;
   state: RunState;
   instance: InstanceState;
+  /** The pinned version, compiled (loop settings and bodies). */
+  compiled: CompiledWorkflow;
+  /** The nearest enclosing loop instance (P05), and the iteration this instance belongs to. */
+  loop?: { inst: InstanceState; node: CompiledNode; k: number };
+  /** This instance is its loop's wrap-up (`<loop>#wrapup/<stage>`). */
+  wrapUp: boolean;
+  /** The prompt turns of this attempt: `prompts`, `followUpPrompts` from iteration 1, or the wrap-up prompt. */
+  prompts: PromptDefinition[];
   mode: AttemptMode;
   /** The attempt whose journal this one continues: its own number unless it resumes. */
   epoch: number;
@@ -584,6 +592,7 @@ export class StageExecutor {
 
     await this.preRunHooks(ctx);
     await this.bindSession(ctx);
+    await this.seedDigest(ctx);
     await this.captureCheckpoint(ctx);
 
     // starting → running: the session is ready.
@@ -659,6 +668,17 @@ export class StageExecutor {
     if (!state || !instance) throw new StageError('config_invalid', `Instance ${stageRunId} of run ${runId} does not exist`);
     const stage = graph.stages.find((s) => s.key === instance.stageKey) as AgentStage | undefined;
     if (!stage || stage.kind !== 'agent') throw new StageError('config_invalid', `Stage ${instance.stageKey} is not an agent stage of the pinned version`);
+    const compiled = compile(graph);
+    const loopInst = instance.scopeId ? state.instances.find((i) => i.id === instance.scopeId && i.loopState != null) : undefined;
+    const loopNode = loopInst ? compiled.nodes.get(loopInst.stageKey) : undefined;
+    const wrapUp = isWrapUp(instance);
+    const k = loopInst ? (instance.iterationIndex ?? loopInst.loopState!.k + 1) : 0;
+    const prompts: PromptDefinition[] =
+      wrapUp && loopNode?.loop?.wrapUp
+        ? [loopNode.loop.wrapUp.prompt]
+        : k >= 1 && stage.followUpPrompts?.length
+          ? stage.followUpPrompts
+          : stage.prompts;
 
     const spec = stageSessionSpec(graph, stage, run).merged;
     const workspace = await runWorkspace(this.deps.workspaceManager, run);
@@ -671,6 +691,10 @@ export class StageExecutor {
       stage,
       state,
       instance,
+      compiled,
+      ...(loopInst && loopNode ? { loop: { inst: loopInst, node: loopNode, k } } : {}),
+      wrapUp,
+      prompts,
       mode,
       epoch,
       agentMode: spec.defaultAgentMode ?? DEFAULT_AGENT_MODE,
@@ -682,12 +706,15 @@ export class StageExecutor {
       recorder: new TurnRecorder(),
       replayPolicy: 'never',
       strategies: [],
-      contract: {
-        format: stage.output.format,
-        schema: stage.output.schema,
-        extraction: stage.output.extraction,
-        rules: stage.output.rules,
-      },
+      // A wrap-up is free text: its loop exposes it as output.wrapUp.
+      contract: wrapUp
+        ? { format: 'text', schema: undefined, extraction: 'auto', rules: [] }
+        : {
+            format: stage.output.format,
+            schema: stage.output.schema,
+            extraction: stage.output.extraction,
+            rules: stage.output.rules,
+          },
       outputs: { native: [], submitted: [], texts: [] },
       outputText: '',
       submittedThisTurn: [],
@@ -701,6 +728,12 @@ export class StageExecutor {
   /** `run_sessions.session_key`: a session group's, else this instance's for the journal epoch. */
   private sessionKey(ctx: AttemptContext): string {
     if (ctx.stage.sessionGroup) return `group:${ctx.stage.sessionGroup}`;
+    // A continuing body stage keeps one conversation across its loop's
+    // iterations (its wrap-up included), replaced every `compactAfter`
+    // iterations by a fresh one seeded with a digest (P05 §2.3).
+    if (ctx.loop && (ctx.stage.sessionReuse === 'continue' || ctx.wrapUp)) {
+      return `loop:${ctx.loop.inst.id}/${ctx.stage.key}#c${compactionGeneration(ctx)}`;
+    }
     return `instance:${ctx.instance.instancePath}@${ctx.epoch}`;
   }
 
@@ -853,7 +886,7 @@ export class StageExecutor {
   /** What the settled turns of this epoch said, for a conversation that lost its history. */
   private async recapOf(ctx: AttemptContext): Promise<string | undefined> {
     const lines: string[] = [];
-    for (let i = 0; i < ctx.stage.prompts.length; i++) {
+    for (let i = 0; i < ctx.prompts.length; i++) {
       const e = this.deps.stores.turns.get(ctx.frame.req.stageRunId, `a${ctx.epoch}/prompt/${i}`);
       if (e?.state === 'settled') lines.push(`## Step ${i + 1}\n${e.turn.content}`);
     }
@@ -876,6 +909,10 @@ export class StageExecutor {
       // An amendment has no attempt to roll its usage into.
       if (event.kind === 'harness.usage' && !frame.amend) {
         this.deps.post(runId, { type: 'usage_tick', stageRunId, attemptNo, usage: asUsage((event.data ?? {}) as Record<string, unknown>) });
+      }
+      // Tool calls are a loop signal (P05 §2.5): counted where they start.
+      if (event.kind === 'harness.tool_start' && !frame.amend) {
+        this.deps.post(runId, { type: 'usage_tick', stageRunId, attemptNo, usage: { toolCalls: 1 } });
       }
       const data = { ...((event.data as Record<string, unknown> | undefined) ?? {}), stageRunId, workflowRunId: runId, attemptNo };
       await this.deps.eventBus.emit(ctx.session!.id, { kind: event.kind, data } as AgentEvent).catch(() => undefined);
@@ -1158,8 +1195,13 @@ export class StageExecutor {
     if (turn.content.trim().length > 0 || ctx.outputText.length === 0) ctx.outputText = turn.content;
   }
 
+  /** What the stage's templates read: context T of its enclosing loops (P05 §2.2). */
+  private scopeOf(ctx: AttemptContext): Record<string, unknown> {
+    return templateScope(ctx.compiled, ctx.state, ctx.instance, userVariables(ctx.variables));
+  }
+
   private render(ctx: AttemptContext, text: string): { rendered: string; unresolved: string[] } {
-    const scope = { ...expressionScope({ ...ctx.state.run, variables: userVariables(ctx.variables) }, ctx.state.instances) };
+    const scope = this.scopeOf(ctx);
     const vars = scope['variables'] as Record<string, unknown>;
     const unresolved = templateVariableNames(text).filter((n) => vars[n] === undefined || vars[n] === null);
     const r = renderTemplate(text, scope);
@@ -1173,7 +1215,9 @@ export class StageExecutor {
     const from = ctx.stage.context.from ?? ctx.graph.edges.filter((e) => e.to === ctx.stage.key).map((e) => e.from);
     const blocks: string[] = [];
     for (const key of [...new Set(from)]) {
-      const inst = ctx.state.instances.find((i) => i.scopeId === null && i.stageKey === key);
+      const inst = ctx.state.instances.find(
+        (i) => i.scopeId === ctx.instance.scopeId && i.iterationIndex === ctx.instance.iterationIndex && i.stageKey === key,
+      );
       if (!inst || inst.status !== 'completed') continue;
       const name = ctx.graph.stages.find((s) => s.key === key)?.name ?? key;
       const text = typeof inst.output === 'string' ? inst.output : inst.output !== null && inst.output !== undefined ? JSON.stringify(inst.output, null, 2) : '';
@@ -1201,11 +1245,14 @@ export class StageExecutor {
 
   private async promptTurns(ctx: AttemptContext): Promise<void> {
     this.armWatchdog(ctx);
-    const { stage } = ctx;
     const context = [...this.contextBlocks(ctx), ...ctx.hookContext];
-    const last = stage.prompts.length - 1;
+    await this.loopInputTurn(ctx);
+    const prompts = ctx.prompts;
+    // From the second iteration a body stage's turns are its iteration inputs (the run page shows each).
+    const role: TurnRole = ctx.wrapUp ? 'wrap_up' : ctx.loop && ctx.loop.k >= 1 ? 'iteration_input' : 'prompt';
+    const last = prompts.length - 1;
     for (let i = 0; i <= last; i++) {
-      const prompt = stage.prompts[i]!;
+      const prompt = prompts[i]!;
       const r = this.render(ctx, prompt.text);
       if (r.unresolved.length > 0) {
         await this.emitSession(ctx, 'harness.session_info', {
@@ -1219,7 +1266,7 @@ export class StageExecutor {
       if (i === last) text += this.outputInstructions(ctx);
       const turn = await this.turn(ctx, {
         opId: `a${ctx.epoch}/prompt/${i}`,
-        role: 'prompt',
+        role,
         text,
         prepare: true,
         ...(i === last && ctx.strategies[0] === 'native' ? { outputSchema: ctx.contract.schema ?? { type: 'object' } } : {}),
@@ -1228,6 +1275,64 @@ export class StageExecutor {
       // A message the operator sent meanwhile is the next turn (PD-3: never mid-turn).
       await this.operatorTurns(ctx, `a${ctx.epoch}`);
     }
+  }
+
+  /**
+   * `continue_with_input` (P05 §2.3): the operator's message is sent, as an
+   * operator turn, to every root stage of the iteration it is for, before
+   * the stage's own prompts.
+   */
+  private async loopInputTurn(ctx: AttemptContext): Promise<void> {
+    const loop = ctx.loop;
+    const input = loop?.inst.loopState?.operatorInput;
+    if (!loop || ctx.wrapUp || !input || input.forIteration !== loop.k) return;
+    if (ctx.graph.edges.some((e) => e.to === ctx.stage.key)) return; // not a root of the body
+    const turn = await this.turn(ctx, { opId: `a${ctx.epoch}/loop-input/${loop.k}`, role: 'operator', text: input.text, prepare: true });
+    this.recordOutput(ctx, turn);
+  }
+
+  /**
+   * `compactAfter` (P05 §2.3): the first turn of a new conversation
+   * generation is seeded with a deterministic digest — the stage's first
+   * prompt, one line per finished iteration, and its own last output, at
+   * most 8 KB — recorded as a `digest` turn. No model call.
+   */
+  private async seedDigest(ctx: AttemptContext): Promise<void> {
+    const loop = ctx.loop;
+    const n = ctx.stage.compactAfter;
+    if (!loop || !n || loop.k === 0 || loop.k % n !== 0 || ctx.stage.sessionReuse !== 'continue' || ctx.wrapUp) return;
+    const opId = `a${ctx.epoch}/digest/${loop.k}`;
+    if (this.deps.stores.turns.get(ctx.frame.req.stageRunId, opId)?.state === 'settled') return;
+    const rows = ctx.state.iterations.filter((r) => r.stageRunId === loop.inst.id).sort((a, b) => a.k - b.k);
+    const previous = ctx.state.instances.find((i) => i.scopeId === loop.inst.id && i.iterationIndex === loop.k - 1 && i.stageKey === ctx.stage.key);
+    const lastOutput = previous ? (typeof previous.output === 'string' ? previous.output : JSON.stringify(previous.output ?? null)) : '';
+    const first = ctx.stage.prompts[0] ? this.render(ctx, ctx.stage.prompts[0].text).rendered : '';
+    const lines = rows.map((r) => {
+      const held = Object.entries(r.exitValues)
+        .filter(([, v]) => v === true)
+        .map(([name]) => name);
+      return `- iteration ${r.k + 1}: ${r.outcome}${held.length ? `, rules held: ${held.join(', ')}` : ''}${r.signals?.workspaceChanged === false ? ', no workspace change' : ''}`;
+    });
+    let digest = `## Conversation digest (the earlier conversation was compacted)\n### Task\n${first}\n### Iterations so far\n${lines.join('\n')}\n### Your last output\n${lastOutput}`;
+    if (digest.length > 8192) digest = `${digest.slice(0, 8180)}\n… (cut)`;
+    const now = this.now();
+    this.deps.stores.turns.intent(ctx.frame.req.stageRunId, opId, {
+      role: 'digest',
+      policy: ctx.replayPolicy,
+      now,
+      message: {
+        id: generateId(),
+        sessionId: ctx.session!.id,
+        role: 'user',
+        content: digest,
+        turnRole: 'digest',
+        metadata: { stageRunId: ctx.frame.req.stageRunId, workflowRunId: ctx.frame.req.runId, opId, turnRole: 'digest' },
+        complete: true,
+      },
+    });
+    this.deps.stores.turns.settle(ctx.frame.req.stageRunId, opId, { role: 'digest', content: '' }, { now });
+    ctx.recap = `${digest}\n\n---\n\n${ctx.recap ?? ''}`;
+    await this.emitSession(ctx, 'harness.session_info', { infoType: 'conversation_compacted', message: `Conversation compacted at iteration ${loop.k + 1}` });
   }
 
   // ── Output contract, repairs, approval ───────────────────────
@@ -1261,7 +1366,7 @@ export class StageExecutor {
         scriptRunner: this.deps.scriptRunner,
         workspacePath: ctx.workDir,
         stageRunId,
-        scope: expressionScope({ ...ctx.state.run, variables: userVariables(ctx.variables) }, ctx.state.instances),
+        scope: this.scopeOf(ctx),
       });
       this.recheck(ctx, 'validating');
       if (check.ok) {
@@ -1300,6 +1405,7 @@ export class StageExecutor {
 
   private async summary(ctx: AttemptContext, data: unknown): Promise<string | undefined> {
     const name = ctx.stage.name;
+    if (ctx.wrapUp) return undefined;
     if (ctx.contract.format === 'json') {
       const keys = data && typeof data === 'object' && !Array.isArray(data) ? Object.keys(data) : [];
       return keys.length > 0 ? `Stage "${name}" completed. Produced structured output with keys: ${keys.join(', ')}.` : `Stage "${name}" completed.`;
@@ -1341,7 +1447,7 @@ export class StageExecutor {
   private async validateAndReviewOnce(ctx: AttemptContext): Promise<StageOutput> {
     let checked = await this.validate(ctx);
     let summary = await this.summary(ctx, checked.data);
-    const approval = ctx.stage.approval;
+    const approval = ctx.wrapUp ? undefined : ctx.stage.approval;
     if (approval) {
       const maxRounds = approval.maxRounds;
       for (let round = 1; ; round++) {
@@ -1494,7 +1600,7 @@ export class StageExecutor {
         scriptRunner: this.deps.scriptRunner,
         workspacePath: ctx.workDir,
         stageRunId,
-        scope: expressionScope({ ...ctx.state.run, variables: userVariables(ctx.variables) }, ctx.state.instances),
+        scope: this.scopeOf(ctx),
       });
       this.recheck(ctx, 'running');
       if (check.ok) {
@@ -1549,7 +1655,7 @@ export class StageExecutor {
       workflowRunId: ctx.frame.req.runId,
       stageRunId: ctx.frame.req.stageRunId,
       abortSignal: ctx.frame.ac.signal,
-      templateScope: expressionScope({ ...ctx.state.run, variables: userVariables(ctx.variables) }, ctx.state.instances),
+      templateScope: this.scopeOf(ctx),
     };
   }
 
@@ -1616,6 +1722,12 @@ export class StageExecutor {
  * sub-agents, then the stage's own, then the run's per-stage model. The
  * binding-site layer (runtime scalars) is everything but the workflow's.
  */
+/** Which conversation generation a continuing body stage is on (a new one every `compactAfter` iterations). */
+function compactionGeneration(ctx: Pick<AttemptContext, 'loop' | 'stage'>): number {
+  const n = ctx.stage.compactAfter;
+  return ctx.loop && n ? Math.floor(ctx.loop.k / n) : 0;
+}
+
 export function stageSessionSpec(
   graph: WorkflowGraph,
   stage: Pick<AgentStage, 'key' | 'session'>,

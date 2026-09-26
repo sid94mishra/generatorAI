@@ -24,6 +24,7 @@ import {
   type EdgeOn,
   type ExprNode,
   type JoinPolicy,
+  type LoopSpec,
   type RepairPolicy,
   type RetryPolicy,
   type StageNodeClass,
@@ -49,6 +50,27 @@ export interface CompiledTimeouts {
   totalMs?: number;
 }
 
+export interface CompiledExitRule {
+  when: CompiledExpr;
+  action: 'complete' | 'fail' | 'pause' | 'exhaust';
+  consecutive: number;
+  reason: string;
+}
+
+/** A loop's settings, defaults applied and expressions parsed (P05 §2.1). */
+export interface CompiledLoop {
+  maxIterations: number;
+  exits: CompiledExitRule[];
+  carryInit: Array<[string, CompiledExpr]>;
+  carry: Array<[string, CompiledExpr]>;
+  onLimit: { mode: 'pause' | 'fail' | 'accept_last' } | { mode: 'accept_best'; score: CompiledExpr };
+  wrapUp?: { stage: string; prompt: { label: string; text: string }; maxTurns: number; maxCostShare: number };
+  onBodyFailure: 'fail' | 'next_iteration';
+  /** Checkpoint every iteration (default: on with accept_best). */
+  checkpointEachIteration: boolean;
+  select: Array<[string, CompiledExpr]>;
+}
+
 export interface CompiledNode {
   key: string;
   kind: string;
@@ -71,6 +93,10 @@ export interface CompiledNode {
   incoming: CompiledEdge[];
   /** Edges out of the node, sorted by target key. */
   outgoing: CompiledEdge[];
+  /** A loop container's settings. */
+  loop?: CompiledLoop;
+  /** A container's direct body stages, in key order. */
+  body: readonly string[];
 }
 
 export interface CompiledWorkflow {
@@ -99,9 +125,34 @@ function nodeClass(kind: string): StageNodeClass {
 
 const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
+function compileLoop(spec: LoopSpec): CompiledLoop {
+  const exprs = (rec: Record<string, string> | undefined): Array<[string, CompiledExpr]> =>
+    Object.keys(rec ?? {})
+      .sort(byKey)
+      .map((name) => [name, compileExpr(rec![name])!]);
+  return {
+    maxIterations: spec.maxIterations,
+    exits: spec.exits.map((r) => ({ when: compileExpr(r.when)!, action: r.action, consecutive: r.consecutive, reason: r.reason })),
+    carryInit: exprs(spec.carryInit),
+    carry: exprs(spec.carry),
+    onLimit: spec.onLimit.mode === 'accept_best' ? { mode: 'accept_best', score: compileExpr(spec.onLimit.score)! } : { mode: spec.onLimit.mode },
+    ...(spec.wrapUp
+      ? { wrapUp: { stage: spec.wrapUp.stage, prompt: spec.wrapUp.prompt, maxTurns: spec.wrapUp.maxTurns, maxCostShare: spec.wrapUp.maxCostShare } }
+      : {}),
+    onBodyFailure: spec.onBodyFailure,
+    checkpointEachIteration: spec.checkpointEachIteration ?? spec.onLimit.mode === 'accept_best',
+    select: exprs(spec.output.select),
+  };
+}
+
 /** Compile a parsed (defaults-applied) `WorkflowGraph`. Pure. */
 export function compile(graph: WorkflowGraph): CompiledWorkflow {
   const nodes = new Map<string, CompiledNode>();
+  const bodies = new Map<string, string[]>();
+  for (const s of graph.stages) {
+    if (!s.parentKey) continue;
+    bodies.set(s.parentKey, [...(bodies.get(s.parentKey) ?? []), s.key]);
+  }
   graph.stages.forEach((stage, ordinal) => {
     // Per-kind fields (P05 §1.3): only agent and check stages run attempts.
     const agent = stage.kind === 'agent' ? stage : undefined;
@@ -130,6 +181,8 @@ export function compile(graph: WorkflowGraph): CompiledWorkflow {
       compensates: (stage.compensate?.length ?? 0) > 0,
       incoming: [],
       outgoing: [],
+      body: [...(bodies.get(stage.key) ?? [])].sort(byKey),
+      ...(stage.kind === 'loop' ? { loop: compileLoop(stage.loop) } : {}),
     });
   });
   for (const e of graph.edges) {

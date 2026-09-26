@@ -32,55 +32,54 @@
 //   A human rejection skips 2 and the pause of 5: it fails (and routes).
 // ────────────────────────────────────────────────────────────────
 
-import { isTerminalStageRunState, type RunCommand, type StageRunState, type WorkflowRunState } from '@generatorai/workflow-spec';
+import { isTerminalStageRunState, type RunCommand, type WorkflowRunState } from '@generatorai/workflow-spec';
 import { classified, type ClassifiedError } from '../errors/StageError.js';
 import type { CompiledNode, CompiledWorkflow } from '../workflow-graph/compile.js';
-import { instanceId, timerId } from './ids.js';
-import { evalCondition, expressionScope, predState, readiness, type PredState } from './readiness.js';
+import { instanceId } from './ids.js';
+import {
+  activeScopes,
+  enforceLoopBudgets,
+  isLoopCommand,
+  loopCommand,
+  onIterationCaptured,
+  onIterationRestored,
+  onLoopWallClock,
+  settleLoops,
+  wrapUpAllowance,
+} from './loops.js';
+import { evalCondition, predState, readiness, type PredState } from './readiness.js';
+import { isWrapUp } from './scope.js';
 import { computeScopeOutcome } from './terminal.js';
 import type {
   ApprovalVerdict,
   AttemptMode,
   AttemptOutcome,
-  AttemptStatus,
   Decision,
-  InstancePatch,
   InstanceState,
   NewInstance,
   OperatorTurn,
   RunMessage,
   RunOutcome,
-  RunPatch,
   RunRecord,
   RunState,
-  SkipReason,
-  TimerKind,
-  Usage,
 } from './types.js';
+import {
+  addUsage,
+  applyPatch,
+  ATTEMPT_STATES,
+  byPath,
+  cancelInstance,
+  failInstance,
+  inAttempt,
+  overBudget,
+  PAUSE_TTL_MS,
+  pauseInstance,
+  stageEvent,
+  stopInstance,
+  Working,
+} from './working.js';
 
-/** An attempt is in flight in these states (the executor owns them). */
-export const ATTEMPT_STATES: readonly StageRunState[] = ['starting', 'running', 'validating'];
-/** PD-2: an unattended pause expires after 72 h. */
-export const PAUSE_TTL_MS = 72 * 3_600_000;
-
-const inAttempt = (s: StageRunState) => ATTEMPT_STATES.includes(s);
-const byPath = (a: InstanceState, b: InstanceState) => (a.instancePath < b.instancePath ? -1 : a.instancePath > b.instancePath ? 1 : 0);
-
-function addUsage(a: Usage, b: Usage): Usage {
-  const out: Usage = { ...a };
-  for (const k of ['turns', 'costUsd', 'inputTokens', 'outputTokens'] as const) {
-    if (b[k] !== undefined) out[k] = (out[k] ?? 0) + b[k]!;
-  }
-  return out;
-}
-
-function overBudget(usage: Usage, budget: { maxTurns?: number; maxCostUsd?: number } | undefined | null): boolean {
-  if (!budget) return false;
-  return (
-    (budget.maxTurns !== undefined && (usage.turns ?? 0) >= budget.maxTurns) ||
-    (budget.maxCostUsd !== undefined && (usage.costUsd ?? 0) >= budget.maxCostUsd)
-  );
-}
+export { ATTEMPT_STATES, PAUSE_TTL_MS } from './working.js';
 
 /** The verdict a relaunched attempt carries (an approval that arrived with no live frame). */
 function verdictOf(interruptData: unknown): ApprovalVerdict | undefined {
@@ -109,231 +108,6 @@ function carriedOverrides(interruptData: unknown): { verdict?: ApprovalVerdict; 
 /** Retry delay before jitter for the n-th retry (n ≥ 1), G5 §3.2. */
 export function retryBaseDelayMs(policy: { initialDelayMs: number; backoffMultiplier: number; maxDelayMs: number }, n: number): number {
   return Math.min(policy.maxDelayMs, Math.round(policy.initialDelayMs * policy.backoffMultiplier ** Math.max(0, n - 1)));
-}
-
-class Working {
-  readonly decisions: Decision[] = [];
-  readonly run: RunRecord;
-  private readonly instances = new Map<string, InstanceState>();
-  rejected = false;
-
-  constructor(
-    readonly graph: CompiledWorkflow,
-    state: RunState,
-    readonly now: number,
-  ) {
-    this.run = { ...state.run, usage: { ...state.run.usage } };
-    for (const i of state.instances) this.instances.set(i.id, { ...i, usage: { ...i.usage } });
-  }
-
-  // ── reads ──
-
-  sorted(): InstanceState[] {
-    return [...this.instances.values()].sort(byPath);
-  }
-
-  roots(): InstanceState[] {
-    return this.sorted().filter((i) => i.scopeId === null);
-  }
-
-  get(id: string): InstanceState | undefined {
-    return this.instances.get(id);
-  }
-
-  /** By id, or by instance path (commands may name either). */
-  find(ref: string): InstanceState | undefined {
-    return this.instances.get(ref) ?? [...this.instances.values()].find((i) => i.instancePath === ref);
-  }
-
-  rootByKey(key: string): InstanceState | undefined {
-    return [...this.instances.values()].find((i) => i.scopeId === null && i.stageKey === key);
-  }
-
-  node(inst: InstanceState): CompiledNode | undefined {
-    return this.graph.nodes.get(inst.stageKey);
-  }
-
-  scopeFor = (parent?: InstanceState): Record<string, unknown> => expressionScope(this.run, [...this.instances.values()], parent);
-
-  /** Has a live attempt: claimed (in an attempt state) or admitted and waiting to be claimed. */
-  admitted(i: InstanceState): boolean {
-    return i.attemptStatus === 'running' && (inAttempt(i.status) || i.status === 'ready');
-  }
-
-  // ── writes (decision + working copy) ──
-
-  push(d: Decision): void {
-    this.decisions.push(d);
-  }
-
-  transition(inst: InstanceState, to: StageRunState, patch?: InstancePatch, expectedVersion?: number): void {
-    this.push({
-      t: 'transition',
-      id: inst.id,
-      from: [inst.status],
-      to,
-      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
-      ...(patch ? { patch } : {}),
-    });
-    inst.status = to;
-    inst.version += 1;
-    if (patch) {
-      if (patch.statusReason !== undefined) inst.statusReason = patch.statusReason;
-      if (patch.skipReason !== undefined) inst.skipReason = patch.skipReason;
-      if (patch.skipCauseId !== undefined) inst.skipCauseId = patch.skipCauseId;
-      if (patch.gateAs !== undefined) inst.gateAs = patch.gateAs;
-      if (patch.outputData !== undefined || patch.outputText !== undefined) inst.output = patch.outputData ?? patch.outputText ?? null;
-      if (patch.summary !== undefined) inst.summary = patch.summary;
-      if (patch.interruptData !== undefined) inst.interruptData = patch.interruptData;
-      if (patch.errorCode !== undefined) inst.errorCode = patch.errorCode;
-    }
-    if (isTerminalStageRunState(to) && inst.completedAt === null) inst.completedAt = this.now;
-    if (!(ATTEMPT_STATES as readonly string[]).includes(to)) inst.leaseOwner = null;
-  }
-
-  runTransition(to: WorkflowRunState, patch?: RunPatch, expectedVersion?: number): void {
-    this.push({
-      t: 'run_transition',
-      from: [this.run.status],
-      to,
-      ...(expectedVersion !== undefined ? { expectedVersion } : {}),
-      ...(patch ? { patch } : {}),
-    });
-    this.run.status = to;
-    this.run.version += 1;
-    if (patch?.statusReason !== undefined) this.run.statusReason = patch.statusReason;
-    if (patch?.outcome !== undefined) this.run.outcome = patch.outcome;
-    if (to === 'running' && this.run.startedAt === null) this.run.startedAt = this.now;
-  }
-
-  runPatch(patch: RunPatch): void {
-    this.push({ t: 'run_patch', patch });
-    if (patch.statusReason !== undefined) this.run.statusReason = patch.statusReason;
-    if (patch.outcome !== undefined) this.run.outcome = patch.outcome;
-  }
-
-  settleAttempt(inst: InstanceState, status: Exclude<AttemptStatus, 'running'>, error?: ClassifiedError): void {
-    if (inst.attemptStatus !== 'running') return;
-    this.push({ t: 'settle_attempt', stageRunId: inst.id, attemptNo: inst.currentAttempt, status, ...(error ? { error } : {}) });
-    inst.attemptStatus = status;
-    if (status === 'failed' || status === 'interrupted') inst.failedAttempts += 1;
-  }
-
-  createAttempt(inst: InstanceState, mode: AttemptMode, overrides?: unknown): void {
-    const attemptNo = inst.currentAttempt + 1;
-    this.push({ t: 'create_attempt', stageRunId: inst.id, attemptNo, mode, ...(overrides !== undefined ? { overrides } : {}) });
-    inst.currentAttempt = attemptNo;
-    inst.attemptStatus = 'running';
-    inst.version += 1;
-    if (inst.startedAt === null) inst.startedAt = this.now;
-  }
-
-  usage(inst: InstanceState, usage: Usage): void {
-    this.push({ t: 'usage_rollup', stageRunId: inst.id, usage });
-    inst.usage = addUsage(inst.usage, usage);
-    this.run.usage = addUsage(this.run.usage, usage);
-  }
-
-  timer(kind: TimerKind, inst: InstanceState | null, baseDelayMs: number, discriminator: number, extra: { jitter?: 'full' | 'equal' | 'none'; minDelayMs?: number } = {}): void {
-    this.push({
-      t: 'timer',
-      id: timerId(this.run.id, inst?.id ?? null, kind, discriminator),
-      kind,
-      stageRunId: inst?.id ?? null,
-      baseDelayMs,
-      ...(extra.jitter ? { jitter: extra.jitter } : {}),
-      ...(extra.minDelayMs !== undefined ? { minDelayMs: extra.minDelayMs } : {}),
-    });
-  }
-
-  emit(kind: string, data: Record<string, unknown>): void {
-    this.push({ t: 'emit', event: { kind, data: { workflowRunId: this.run.id, ...data } } });
-  }
-
-  reject(code: Extract<Decision, { t: 'reject' }>['code'], message: string): void {
-    this.decisions.length = 0;
-    this.push({ t: 'reject', code, message });
-    this.rejected = true;
-  }
-
-  addInstances(rows: NewInstance[]): void {
-    if (rows.length === 0) return;
-    this.push({ t: 'create_instances', rows });
-    for (const r of rows) {
-      this.instances.set(r.id, {
-        id: r.id,
-        stageKey: r.stageKey,
-        instancePath: r.instancePath,
-        scopeId: r.scopeId,
-        status: 'pending',
-        statusReason: null,
-        version: 0,
-        currentAttempt: 0,
-        attemptStatus: null,
-        failedAttempts: 0,
-        skipReason: null,
-        skipCauseId: null,
-        gateAs: null,
-        output: null,
-        summary: null,
-        interruptData: null,
-        errorCode: null,
-        usage: {},
-        leaseOwner: null,
-        startedAt: null,
-        completedAt: null,
-      });
-    }
-  }
-}
-
-// ── Instance-level building blocks ────────────────────────────────
-
-/**
- * A `stage_run.*` event. It carries the instance's identity and its CAS
- * `version` after the batch's transition, so a client inserts an instance it
- * has not seen and drops a status older than the one it shows (D-21b).
- */
-function stageEvent(w: Working, kind: string, inst: InstanceState, data: Record<string, unknown> = {}): void {
-  w.emit(kind, {
-    stageRunId: inst.id,
-    name: w.node(inst)?.name ?? inst.stageKey,
-    stageKey: inst.stageKey,
-    instancePath: inst.instancePath,
-    version: inst.version,
-    ...data,
-  });
-}
-
-/** Stop an instance: its live attempt is aborted AFTER the desired state is written. */
-function stopInstance(w: Working, inst: InstanceState, to: 'paused' | 'cancelled' | 'skipped' | 'failed', patch: InstancePatch, reason: 'cancel' | 'pause' | 'loser' | 'queue_timeout'): void {
-  // A frame may be running (an attempt state) or parked (awaiting_input); a
-  // `ready` instance's attempt is only a queued launch.
-  const live = inst.attemptStatus === 'running';
-  const claimed = inst.status !== 'ready';
-  w.transition(inst, to, patch);
-  w.push({ t: 'cancel_timer', stageRunId: inst.id });
-  if (!live) return;
-  // An admitted launch nobody claimed yet has no executor to report back.
-  if (!claimed) w.settleAttempt(inst, 'aborted');
-  w.push({ t: 'abort', stageRunId: inst.id, attemptNo: inst.currentAttempt, reason });
-}
-
-function pauseInstance(w: Working, inst: InstanceState, statusReason: string, ttl = true): void {
-  stopInstance(w, inst, 'paused', { statusReason }, 'pause');
-  stageEvent(w, 'stage_run.paused', inst, { reason: statusReason });
-  if (ttl && w.run.unattended) w.timer('pause_ttl', inst, PAUSE_TTL_MS, inst.version);
-}
-
-function cancelInstance(w: Working, inst: InstanceState, statusReason: string, skipReason: SkipReason | null = null): void {
-  stopInstance(w, inst, 'cancelled', { statusReason, ...(skipReason ? { skipReason } : {}) }, skipReason === 'cancelled_loser' ? 'loser' : 'cancel');
-  stageEvent(w, 'stage_run.cancelled', inst);
-}
-
-function failInstance(w: Working, inst: InstanceState, err: ClassifiedError, statusReason: string | null = null): void {
-  w.transition(inst, 'failed', { statusReason, error: err.message, errorClass: err.class, errorCode: err.code });
-  w.push({ t: 'cancel_timer', stageRunId: inst.id });
-  stageEvent(w, 'stage_run.failed', inst, { error: err.message });
 }
 
 /** A failure-handler edge out of the instance is active for it (G5 §3.5 ROUTE). */
@@ -517,7 +291,13 @@ function onUsage(w: Working, msg: Extract<RunMessage, { type: 'usage_tick' }>): 
   w.usage(inst, msg.usage);
   const node = w.node(inst);
   if (!node || !inAttempt(inst.status) || msg.attemptNo !== inst.currentAttempt || inst.attemptStatus !== 'running') return;
-  if (overBudget(inst.usage, node.budget)) {
+  // A wrap-up spends its own allowance, outside its loop's cap (P05 §2.3).
+  const loopNode = isWrapUp(inst) && inst.scopeId ? w.node(w.get(inst.scopeId)!) : undefined;
+  const loopState = inst.scopeId ? w.get(inst.scopeId)?.loopState : null;
+  const budget = loopNode?.loop && loopState ? wrapUpAllowance(loopNode.loop, loopNode, loopState) : node.budget;
+  if (!loopNode) enforceLoopBudgets(w, inst);
+  if (!inAttempt(inst.status)) return; // the loop's hard cap stopped it
+  if (overBudget(inst.usage, budget)) {
     const err = classified('budget_exceeded', 'The stage budget is exhausted');
     w.settleAttempt(inst, 'failed', err);
     const attemptNo = inst.currentAttempt;
@@ -544,7 +324,11 @@ function onTimer(w: Working, msg: Extract<RunMessage, { type: 'timer_fired' }>):
       return;
     case 'pause_ttl': {
       if (inst) {
-        if (inst.status === 'paused') failInstance(w, inst, classified('pause_expired', 'Paused longer than the unattended pause limit'), 'pause_expired');
+        const parkedLoop = inst.status === 'awaiting_input' && inst.loopState?.phase === 'parked';
+        if (inst.status === 'paused' || parkedLoop) {
+          failInstance(w, inst, classified('pause_expired', 'Paused longer than the unattended pause limit'), 'pause_expired');
+          if (parkedLoop) w.instancePatch(inst, { loopState: { ...inst.loopState!, phase: 'done', exitAction: 'fail', exitReason: 'pause_expired', parkedSince: null } });
+        }
         return;
       }
       if (w.run.status !== 'paused') return;
@@ -561,7 +345,8 @@ function onTimer(w: Working, msg: Extract<RunMessage, { type: 'timer_fired' }>):
       if (!inst && (w.run.status === 'running' || w.run.status === 'waiting')) pauseWholeRun(w, 'drain', 'budget_exhausted');
       return;
     default:
-      return; // wait / loop timers arrive with their node kinds (P05)
+      if (msg.kind === 'loop_wall_clock' && inst) onLoopWallClock(w, inst);
+      return; // wait timers arrive with their node kind (P05 5B)
   }
 }
 
@@ -607,6 +392,21 @@ function onCommand(w: Working, command: RunCommand): void {
     return w.reject('version_conflict', `instance version is ${inst.version}, not ${command.expectedVersion}`);
   }
   const refuse = () => w.reject('invalid_state', `cannot ${command.command} a ${inst.status} instance`);
+
+  // A loop takes its own decisions (P05 §2.3); a work node takes none of them.
+  const node = w.node(inst);
+  if (node?.loop) {
+    if (command.command === 'cancel') {
+      if (isTerminalStageRunState(inst.status)) return refuse();
+      return cancelInstance(w, inst, 'user_cancel');
+    }
+    if (!isLoopCommand(command.command)) return w.reject('invalid_command', `${command.command} does not apply to a loop; use its decisions (grant iterations, raise budget, continue, accept, fail)`);
+    const refusal = loopCommand(w, inst, command);
+    return refusal ? w.reject('invalid_state', refusal) : undefined;
+  }
+  if (isLoopCommand(command.command) && command.command !== 'fail') {
+    return w.reject('invalid_command', `${command.command} applies to a loop stage only`);
+  }
 
   switch (command.command) {
     case 'pause':
@@ -710,7 +510,7 @@ function onFinalized(w: Working, msg: Extract<RunMessage, { type: 'finalized' }>
 function ensureRootInstances(w: Working): void {
   const rows: NewInstance[] = [];
   for (const key of w.graph.rootKeys) {
-    if (w.rootByKey(key)) continue;
+    if (w.sibling({ scopeId: null, iterationIndex: null }, key)) continue;
     const node = w.graph.nodes.get(key)!;
     rows.push({ id: instanceId(w.run.id, key), stageKey: key, kind: node.kind, name: node.name, instancePath: key, scopeId: null });
   }
@@ -742,23 +542,31 @@ function failConditionError(w: Working, inst: InstanceState, message: string): v
   failInstance(w, inst, classified('condition_error', message));
 }
 
-function resolveReadiness(w: Working): void {
+/**
+ * Readiness to a fixed point in every active scope: the top level and the
+ * current iteration of every running loop (edges never cross a scope, so a
+ * predecessor is the same key in the same scope).
+ */
+function resolveReadiness(w: Working): boolean {
+  let any = false;
   let changed = true;
   while (changed) {
     changed = false;
-    for (const inst of w.roots()) {
+    const pending = activeScopes(w).flatMap((s) => w.scopeInstances(s.containerId, s.iteration).filter((i) => i.status === 'pending'));
+    for (const inst of pending) {
       if (inst.status !== 'pending') continue;
       const node = w.node(inst);
       if (!node) continue;
       const preds: Array<{ instance: InstanceState; state: PredState; error?: string }> = [];
       for (const e of node.incoming) {
-        const p = w.rootByKey(e.from);
+        const p = w.sibling(inst, e.from);
         if (!p) continue;
         preds.push({ instance: p, ...predState(p, e, w.scopeFor) });
       }
       const r = readiness(node, preds);
       if (r.kind === 'blocked') continue;
       changed = true;
+      any = true;
       if (r.kind === 'skip') {
         w.transition(inst, 'skipped', { skipReason: r.reason, skipCauseId: r.causeId });
         stageEvent(w, 'stage_run.skipped', inst, { reason: r.reason });
@@ -769,7 +577,7 @@ function resolveReadiness(w: Working): void {
         continue;
       }
       if (node.guard) {
-        const g = evalCondition(node.guard, w.scopeFor());
+        const g = evalCondition(node.guard, w.guardScope(inst));
         if (!g.ok) {
           failConditionError(w, inst, g.message);
           continue;
@@ -788,12 +596,13 @@ function resolveReadiness(w: Working): void {
       w.transition(inst, 'ready', { statusReason: null });
       if (node.join.mode !== 'all' && node.join.cancelRemaining) {
         for (const key of exclusiveLosers(w, node)) {
-          const loser = w.rootByKey(key);
+          const loser = w.sibling(inst, key);
           if (loser && !isTerminalStageRunState(loser.status)) cancelInstance(w, loser, 'cancelled_loser', 'cancelled_loser');
         }
       }
     }
   }
+  return any;
 }
 
 function attemptModeFor(inst: InstanceState): AttemptMode {
@@ -815,7 +624,8 @@ function admit(w: Working): void {
     if (capacity <= 0) break;
     if (inst.status !== 'ready' || w.admitted(inst)) continue;
     const node = w.node(inst);
-    if (!node) continue;
+    // Only work nodes run attempts; a container starts its scopes (P05).
+    if (!node || node.class !== 'work') continue;
     if (node.sessionGroup && busyGroups.has(node.sessionGroup)) continue;
     w.createAttempt(inst, attemptModeFor(inst), carriedOverrides(inst.interruptData));
     w.push({ t: 'launch', stageRunId: inst.id, attemptNo: inst.currentAttempt });
@@ -836,7 +646,13 @@ function settle(w: Working): void {
   if (!RUN_LIVE.includes(w.run.status)) return;
 
   ensureRootInstances(w);
-  resolveReadiness(w);
+  // Readiness and the loops feed each other (a new scope has ready roots; a
+  // finished scope settles its loop): run both to a fixed point.
+  for (let i = 0; i < 64; i++) {
+    const a = resolveReadiness(w);
+    const b = settleLoops(w);
+    if (!a && !b) break;
+  }
 
   const roots = w.roots();
   if (roots.every((i) => isTerminalStageRunState(i.status))) {
@@ -862,7 +678,12 @@ function settle(w: Working): void {
 
   admit(w);
 
-  const busy = roots.some((i) => inAttempt(i.status) || i.status === 'ready');
+  // Busy: a work node in an attempt or admitted, or a loop with an effect in flight.
+  const busy = w.sorted().some((i) => {
+    const node = w.node(i);
+    if (node?.class === 'work') return inAttempt(i.status) || i.status === 'ready';
+    return i.status === 'running' && i.loopState != null && ['starting', 'settling', 'restoring'].includes(i.loopState.phase);
+  });
   if (busy && w.run.status === 'waiting') w.runTransition('running');
   else if (!busy && w.run.status === 'running') w.runTransition('waiting');
 }
@@ -915,6 +736,12 @@ export function decide(graph: CompiledWorkflow, state: RunState, msg: RunMessage
     case 'command':
       onCommand(w, msg.command);
       break;
+    case 'iteration_captured':
+      onIterationCaptured(w, msg);
+      break;
+    case 'iteration_restored':
+      onIterationRestored(w, msg);
+      break;
     case 'finalized':
       onFinalized(w, msg);
       break;
@@ -938,6 +765,7 @@ export function stateAfter(graph: CompiledWorkflow, state: RunState, msg: RunMes
 export function applyDecisions(state: RunState, decisions: readonly Decision[], now: number): RunState {
   const run: RunRecord = { ...state.run, usage: { ...state.run.usage } };
   const instances = new Map(state.instances.map((i) => [i.id, { ...i, usage: { ...i.usage } }]));
+  const iterations = [...(state.iterations ?? [])];
   for (const d of decisions) {
     switch (d.t) {
       case 'transition': {
@@ -945,17 +773,7 @@ export function applyDecisions(state: RunState, decisions: readonly Decision[], 
         if (!i) break;
         i.status = d.to;
         i.version += 1;
-        const p = d.patch;
-        if (p) {
-          if (p.statusReason !== undefined) i.statusReason = p.statusReason;
-          if (p.skipReason !== undefined) i.skipReason = p.skipReason;
-          if (p.skipCauseId !== undefined) i.skipCauseId = p.skipCauseId;
-          if (p.gateAs !== undefined) i.gateAs = p.gateAs;
-          if (p.outputData !== undefined || p.outputText !== undefined) i.output = p.outputData ?? p.outputText ?? null;
-          if (p.summary !== undefined) i.summary = p.summary;
-          if (p.interruptData !== undefined) i.interruptData = p.interruptData;
-          if (p.errorCode !== undefined) i.errorCode = p.errorCode;
-        }
+        if (d.patch) applyPatch(i, d.patch);
         if (isTerminalStageRunState(d.to) && i.completedAt === null) i.completedAt = now;
         if (!(ATTEMPT_STATES as readonly string[]).includes(d.to)) i.leaseOwner = null;
         break;
@@ -966,7 +784,8 @@ export function applyDecisions(state: RunState, decisions: readonly Decision[], 
           instances.set(r.id, {
             id: r.id, stageKey: r.stageKey, instancePath: r.instancePath, scopeId: r.scopeId, status: 'pending', statusReason: null,
             version: 0, currentAttempt: 0, attemptStatus: null, failedAttempts: 0, skipReason: null, skipCauseId: null, gateAs: null,
-            output: null, summary: null, interruptData: null, errorCode: null, usage: {}, leaseOwner: null, startedAt: null, completedAt: null,
+            output: null, summary: null, interruptData: null, errorCode: null, error: null, usage: {}, leaseOwner: null,
+            iterationIndex: r.iterationIndex ?? null, loopState: null, startedAt: null, completedAt: null,
           });
         }
         break;
@@ -989,9 +808,19 @@ export function applyDecisions(state: RunState, decisions: readonly Decision[], 
       case 'usage_rollup': {
         const i = instances.get(d.stageRunId);
         if (i) i.usage = addUsage(i.usage, d.usage);
-        run.usage = addUsage(run.usage, d.usage);
+        if (!d.scopeOnly) run.usage = addUsage(run.usage, d.usage);
         break;
       }
+      case 'instance_patch': {
+        const i = instances.get(d.id);
+        if (!i || i.status !== d.status) break;
+        i.version += 1;
+        applyPatch(i, d.patch);
+        break;
+      }
+      case 'record_iteration':
+        if (!iterations.some((r) => r.stageRunId === d.row.stageRunId && r.k === d.row.k)) iterations.push(d.row);
+        break;
       case 'run_transition':
         run.status = d.to;
         run.version += 1;
@@ -1007,5 +836,5 @@ export function applyDecisions(state: RunState, decisions: readonly Decision[], 
         break;
     }
   }
-  return { run, instances: [...instances.values()] };
+  return { run, instances: [...instances.values()], iterations };
 }

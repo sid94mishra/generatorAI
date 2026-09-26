@@ -424,7 +424,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stages[].retry.backoffMultiplier` | number (≥1, ≤10) |  | `2` | Delay multiplier per retry |
 | `stages[].retry.maxDelayMs` | integer (≥0, ≤3600000) |  | `60000` | Upper bound on one delay |
 | `stages[].retry.jitter` | 'full' \| 'equal' \| 'none' |  | `"full"` | full: random 0..delay; equal: delay/2 plus random 0..delay/2; none: exact delay |
-| `stages[].retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'output_schema' \| 'validation_rule' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
+| `stages[].retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'loop_body_failed' \| 'loop_exit_fail' \| 'loop_limit' \| 'loop_wall_clock' \| 'loop_carry_too_large' \| 'restore_failed' \| 'output_schema' \| 'validation_rule' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
 | `stages[].retry.mode` | 'resume' \| 'restart' |  | `"resume"` | resume continues the same conversation; restart begins again from the first prompt |
 | `stages[].retry.restoreCheckpointOnRestart` | boolean |  | `true` | Restore the workspace to the first attempt checkpoint before a restart |
 | `stages[].repair` | object |  |  | Repair turns sent when the output fails its contract |
@@ -522,7 +522,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stages[].retry.backoffMultiplier` | number (≥1, ≤10) |  | `2` | Delay multiplier per retry |
 | `stages[].retry.maxDelayMs` | integer (≥0, ≤3600000) |  | `60000` | Upper bound on one delay |
 | `stages[].retry.jitter` | 'full' \| 'equal' \| 'none' |  | `"full"` | full: random 0..delay; equal: delay/2 plus random 0..delay/2; none: exact delay |
-| `stages[].retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'output_schema' \| 'validation_rule' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
+| `stages[].retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'loop_body_failed' \| 'loop_exit_fail' \| 'loop_limit' \| 'loop_wall_clock' \| 'loop_carry_too_large' \| 'restore_failed' \| 'output_schema' \| 'validation_rule' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
 | `stages[].retry.mode` | 'resume' \| 'restart' |  | `"resume"` | resume continues the same conversation; restart begins again from the first prompt |
 | `stages[].retry.restoreCheckpointOnRestart` | boolean |  | `true` | Restore the workspace to the first attempt checkpoint before a restart |
 | `stages[].timeouts` | object |  |  | Timeouts of a check stage: only the admission wait (the command has check.timeoutMs) |
@@ -881,7 +881,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
 | `as` | 'completed' \| 'skipped' |  | `"skipped"` | completed lets on-success successors run; skipped is neutral to joins |
 | `output` | any |  |  | Output to record when skipping as completed; validated against the output schema |
-| `command` | "fail" | yes |  | Fail a paused instance |
+| `command` | "fail" | yes |  | Fail a paused instance or a parked loop |
 | `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
 | `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
 | `command` | "approve" | yes |  | Resolve a pending approval |
@@ -890,6 +890,28 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `outcome` | 'approved' \| 'rejected' \| 'changes_requested' | yes |  | The decision |
 | `feedback` | string (≤20000 chars) |  |  | Reviewer feedback, sent to the stage on changes_requested |
 | `data` | record<string, any> |  |  | Structured reviewer input |
+| `command` | "grant_iterations" | yes |  | Allow a loop more iterations; a parked loop continues when it can |
+| `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
+| `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
+| `n` | integer (≥1, ≤50) | yes |  | Iterations to add to the maximum |
+| `command` | "raise_budget" | yes |  | Raise a loop's cumulative budget; a parked loop continues when it can |
+| `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
+| `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
+| `maxTurns` | integer (≥1, ≤100000) |  |  | Turns to add |
+| `maxCostUsd` | number (>0, ≤100000) |  |  | Cost (USD) to add |
+| `maxTokens` | integer (≥1, ≤10000000000) |  |  | Tokens to add |
+| `maxWallClockMs` | integer (≥1000, ≤604800000) |  |  | Wall-clock time to add |
+| `command` | "continue_with_input" | yes |  | Continue a loop with an operator message: sent as an operator turn to the next iteration's first stages (loop.operatorInput) |
+| `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
+| `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
+| `text` | string (1..100000 chars) | yes |  | The message |
+| `command` | "accept" | yes |  | Complete a parked loop with its last iteration |
+| `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
+| `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
+| `command` | "accept_iteration" | yes |  | Complete a parked loop with an earlier iteration (its workspace checkpoint is restored; needs per-iteration checkpoints) |
+| `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
+| `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
+| `k` | integer (≥0, ≤1000) | yes |  | The iteration (0-based) |
 
 ## Fork request
 

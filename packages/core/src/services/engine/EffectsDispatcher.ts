@@ -14,13 +14,16 @@
 //   - `deliver_input` hands a verdict to a parked frame (with no frame left,
 //     the attempt is settled and the approval is posted again, so it takes
 //     the no-frame path);
-//   - `prepare` and `finalize` run the run lifecycle and post their result.
+//   - `prepare` and `finalize` run the run lifecycle and post their result;
+//   - `capture_iteration` / `restore_iteration` (P05 loops) run the loop
+//     effects and post `iteration_captured` / `iteration_restored`.
 // ────────────────────────────────────────────────────────────────
 
 import type { ILogger } from '@generatorai/shared';
 import type { ArmedTimer } from '../../domain/ports/IRunStore.js';
 import type { Decision, RunMessage, RunOutcome } from '../../domain/scheduler/types.js';
 import type { AdmissionController, AdmissionTicket } from '../AdmissionController.js';
+import type { LoopEffects } from './LoopEffects.js';
 import type { OutboxDispatcher } from './OutboxDispatcher.js';
 import { PrepareError, type RunLifecycle } from './RunLifecycle.js';
 import type { StageExecutor } from './StageExecutor.js';
@@ -33,6 +36,8 @@ export interface EffectsDispatcherDeps {
   outbox: OutboxDispatcher;
   lifecycle: RunLifecycle;
   post: (runId: string, msg: RunMessage) => void;
+  /** The loop effects (tree hashes, iteration checkpoints and restores). */
+  loops?: LoopEffects | undefined;
   /** The stage kind of an instance (a check is admitted on its flow key). */
   kindOf?: ((stageRunId: string) => string | undefined) | undefined;
   logger?: ILogger | undefined;
@@ -91,6 +96,12 @@ export class EffectsDispatcher {
         case 'finalize':
           this.track(this.finalize(runId, d.outcome, d.compensate));
           break;
+        case 'capture_iteration':
+          this.track(this.captureIteration(runId, d.stageRunId, d.k, d.at, d.checkpoint));
+          break;
+        case 'restore_iteration':
+          this.track(this.restoreIteration(runId, d.stageRunId, d.k, d.checkpointTurnId));
+          break;
         default:
           break; // `reject` is the actor's reply to its command
       }
@@ -138,6 +149,20 @@ export class EffectsDispatcher {
         error: err instanceof Error ? err.message : String(err),
       });
     }
+  }
+
+  private async captureIteration(runId: string, stageRunId: string, k: number, at: 'start' | 'end', checkpoint: boolean): Promise<void> {
+    const r = this.deps.loops
+      ? await this.deps.loops.capture(runId, stageRunId, k, checkpoint && at === 'end')
+      : { treeHashes: null, checkpointTurnId: null };
+    this.deps.post(runId, { type: 'iteration_captured', stageRunId, k, at, treeHashes: r.treeHashes, checkpointTurnId: r.checkpointTurnId });
+  }
+
+  private async restoreIteration(runId: string, stageRunId: string, k: number, checkpointTurnId: string): Promise<void> {
+    const r = this.deps.loops
+      ? await this.deps.loops.restore(runId, stageRunId, k, checkpointTurnId)
+      : { ok: false, error: 'Checkpoints are not available on this server' };
+    this.deps.post(runId, { type: 'iteration_restored', stageRunId, k, ok: r.ok, ...(r.error ? { error: r.error } : {}) });
   }
 
   private async finalize(runId: string, outcome: RunOutcome, compensate: readonly string[]): Promise<void> {

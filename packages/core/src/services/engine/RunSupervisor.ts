@@ -55,6 +55,7 @@ import type { SessionComposer } from '../session/SessionComposer.js';
 import type { WorkspaceCheckpointService } from '../WorkspaceCheckpointService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
 import { EffectsDispatcher } from './EffectsDispatcher.js';
+import { LoopEffects } from './LoopEffects.js';
 import { inFlightIsSafe, LeaseReaper } from './LeaseReaper.js';
 import { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
 import { RunActor, type DecideRecord, type ProcessResult } from './RunActor.js';
@@ -142,6 +143,7 @@ export class RunSupervisor {
   readonly effects: EffectsDispatcher;
   readonly reaper: LeaseReaper;
   readonly lifecycle: RunLifecycle;
+  readonly loops: LoopEffects;
   private readonly actors = new Map<string, Promise<RunActor | null>>();
   private readonly timing: SupervisorTiming;
   private readonly now: () => number;
@@ -199,6 +201,7 @@ export class RunSupervisor {
         logger: deps.logger,
         now: this.now,
       });
+    this.loops = new LoopEffects({ runRepo: deps.runRepo, workspaceManager: deps.workspaceManager, checkpoints: deps.checkpoints, logger: deps.logger });
     this.effects = new EffectsDispatcher({
       executor: this.executor,
       admission: deps.admission,
@@ -207,6 +210,7 @@ export class RunSupervisor {
       lifecycle: this.lifecycle,
       post,
       kindOf: (id) => deps.stores.stages.getInstance(id)?.kind,
+      loops: this.loops,
       logger: deps.logger,
     });
     this.reaper = new LeaseReaper({
@@ -233,6 +237,7 @@ export class RunSupervisor {
   /** Late wiring: checkpoints are built after the engine (composition root). */
   setCheckpoints(checkpoints: WorkspaceCheckpointService): void {
     this.executor.setCheckpoints(checkpoints);
+    this.loops.setCheckpoints(checkpoints);
     if (this.lifecycle instanceof DefaultRunLifecycle) this.lifecycle.setCheckpoints(checkpoints);
   }
 
@@ -293,7 +298,10 @@ export class RunSupervisor {
 
   /** Deliver a message to a run's actor (created and the run claimed on first use). */
   post(runId: string, msg: RunMessage): void {
-    void this.send(runId, msg);
+    // A message that arrives after the engine stopped (a late harness event) is dropped;
+    // the next process's recovery re-derives what it meant.
+    if (this.stopped) return;
+    this.send(runId, msg).catch((err: unknown) => this.deps.logger?.warn(`[RunSupervisor] ${runId}: ${msg.type} was not delivered: ${String(err)}`));
   }
 
   private async send(runId: string, msg: RunMessage): Promise<ProcessResult> {
@@ -430,6 +438,25 @@ export class RunSupervisor {
         } else if (inst.status === 'awaiting_input') {
           interrupted += 1;
           await actor.post({ type: 'frame_lost', stageRunId: inst.id, attemptNo });
+        }
+      }
+      // A loop whose effect died with the process: dispatch it again (both are idempotent).
+      for (const inst of state.instances) {
+        const ls = inst.loopState;
+        if (!ls || inst.status !== 'running') continue;
+        if (ls.phase === 'starting') this.effects.dispatch(runId, { effects: [{ t: 'capture_iteration', stageRunId: inst.id, k: 0, at: 'start', checkpoint: false }], timers: [], outbox: [] });
+        else if (ls.phase === 'settling') {
+          const node = (await this.compiled(runId)).nodes.get(inst.stageKey);
+          this.effects.dispatch(runId, {
+            effects: [{ t: 'capture_iteration', stageRunId: inst.id, k: ls.k, at: 'end', checkpoint: node?.loop?.checkpointEachIteration ?? false }],
+            timers: [],
+            outbox: [],
+          });
+        } else if (ls.phase === 'restoring' && ls.pending?.kind === 'accept') {
+          const row = state.iterations.find((r) => r.stageRunId === inst.id && r.k === (ls.pending as { k: number }).k);
+          if (row?.checkpointTurnId) {
+            this.effects.dispatch(runId, { effects: [{ t: 'restore_iteration', stageRunId: inst.id, k: row.k, checkpointTurnId: row.checkpointTurnId }], timers: [], outbox: [] });
+          }
         }
       }
       this.timers.loadRun(runId);

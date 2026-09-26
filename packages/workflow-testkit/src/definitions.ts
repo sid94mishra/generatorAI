@@ -62,6 +62,8 @@ export function toGraph(spec: WorkflowSpecJson): WorkflowGraphInput {
     const stageKey = key ?? stageKeyFor(stageName, taken);
     taken.add(stageKey);
     keyByName.set(stageName, stageKey);
+    // Check and loop stages (P05) carry their own fields and no prompts.
+    if (fields['kind'] !== undefined && fields['kind'] !== 'agent') return { ...fields, key: stageKey, name: stageName };
     return {
       kind: 'agent' as const,
       ...fields,

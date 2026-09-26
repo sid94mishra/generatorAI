@@ -176,7 +176,7 @@ describe('other shapes', () => {
 
   it('RunCommand is a discriminated union with defaults', () => {
     expect(RunCommandSchema.parse({ command: 'pause' })).toEqual({ command: 'pause', mode: 'drain' });
-    expect(RunCommandSchema.safeParse({ command: 'grant_iterations', n: 2 }).success).toBe(false);
+    expect(RunCommandSchema.safeParse({ command: 'deliver_event', eventKey: 'x' }).success).toBe(false);
     expect(RunCommandSchema.parse({ command: 'approve', outcome: 'approved', instanceId: 'x' }).command).toBe('approve');
   });
 });

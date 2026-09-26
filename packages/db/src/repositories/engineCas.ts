@@ -95,7 +95,21 @@ const STAGE_PATCH_COLUMNS: ReadonlyArray<[keyof StageRunCasPatch, string, boolea
   ['sessionId', 'session_id', false],
   ['sessionKey', 'session_key', false],
   ['amendedAt', 'amended_at', false],
+  ['loopState', 'loop_state', true],
 ];
+
+/** SET clauses of a patch without a status change (a loop's state, P05). */
+export function stagePatchSets(patch: StageRunCasPatch): { sets: string[]; args: unknown[] } {
+  const sets: string[] = [];
+  const args: unknown[] = [];
+  for (const [key, column, isJson] of STAGE_PATCH_COLUMNS) {
+    const v = patch[key];
+    if (v === undefined) continue;
+    sets.push(`${column} = ?`);
+    args.push(isJson ? json(v) : v);
+  }
+  return { sets, args };
+}
 
 export function stageTransition(
   sqlite: BetterSqlite3.Database,
