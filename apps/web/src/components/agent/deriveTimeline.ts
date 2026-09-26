@@ -760,7 +760,9 @@ export type StreamSegment =
   | { type: 'plan'; id: string; plan: Extract<StreamBlock, { type: 'plan' }> }
   | { type: 'question'; id: string; question: Extract<StreamBlock, { type: 'question' }> }
   | { type: 'permission'; id: string; permission: Extract<StreamBlock, { type: 'permission' }> }
-  | { type: 'scm_result'; id: string; scmResult: Extract<StreamBlock, { type: 'scm_result' }> };
+  | { type: 'scm_result'; id: string; scmResult: Extract<StreamBlock, { type: 'scm_result' }> }
+  /** A message an operator sent into a workflow stage (the stage conversation). */
+  | { type: 'operator'; id: string; text: string };
 
 /** Walk stream blocks in order and produce interleaved step / answer /
  *  inline-widget segments that preserve the temporal sequence in which
@@ -838,6 +840,11 @@ export function deriveSegments(
       flushSteps();
       flushText();
       segments.push({ type: 'permission', id: `permission-${b.interactionId}`, permission: b });
+    } else if (b.type === 'system' && b.category === 'operator') {
+      // The operator's own message: a user bubble in the stage transcript.
+      flushSteps();
+      flushText();
+      segments.push({ type: 'operator', id: `operator-${b.blockId}`, text: b.message });
     } else {
       // thinking / tool_call / system → activity-timeline step block.
       flushText();

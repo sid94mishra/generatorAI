@@ -289,8 +289,20 @@ class Working {
 
 // ── Instance-level building blocks ────────────────────────────────
 
+/**
+ * A `stage_run.*` event. It carries the instance's identity and its CAS
+ * `version` after the batch's transition, so a client inserts an instance it
+ * has not seen and drops a status older than the one it shows (D-21b).
+ */
 function stageEvent(w: Working, kind: string, inst: InstanceState, data: Record<string, unknown> = {}): void {
-  w.emit(kind, { stageRunId: inst.id, name: w.node(inst)?.name ?? inst.stageKey, ...data });
+  w.emit(kind, {
+    stageRunId: inst.id,
+    name: w.node(inst)?.name ?? inst.stageKey,
+    stageKey: inst.stageKey,
+    instancePath: inst.instancePath,
+    version: inst.version,
+    ...data,
+  });
 }
 
 /** Stop an instance: its live attempt is aborted AFTER the desired state is written. */

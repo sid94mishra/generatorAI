@@ -3,9 +3,11 @@
 // Preview only. Feed mock data at /__redesign/workflow-run.
 // ────────────────────────────────────────────────────────────────
 
+import type { StageRunStatus } from '@generatorai/shared';
 import type { TimelineStep, UsageInfo } from '@/components/chat/redesign/types.js';
 import type { ContextUsageSnapshot } from '@generatorai/client-core';
 import type { StreamSegment } from '@/components/agent/deriveTimeline.js';
+import type { StreamBlock } from '@/stores/streamStore.js';
 
 /**
  * The run page's visual stage states, normalized from the v2 instance states:
@@ -66,6 +68,14 @@ export interface StageView {
   dependsOn: string[];
   name: string;
   status: StageStatus;
+  /** The instance's engine state (what the commands and the stage conversation accept). */
+  rawStatus: StageRunStatus;
+  /** `triage`, `review_loop#2/fix`: what a fork's `rerunFrom` names. */
+  instancePath: string;
+  /** When an operator follow-up last amended this completed stage's output (PD-4). */
+  amendedAt?: number;
+  /** A turn of this stage is streaming now (including an amendment of a completed stage). */
+  streaming?: boolean;
   /** Optional short prompt to show at the top of the card. */
   prompt?: string;
   /** Steps for the ActivityTimeline (chat primitive). */
@@ -77,9 +87,11 @@ export interface StageView {
   /** Ordered steps ↔ answer ↔ widget segments preserving the temporal
    *  sequence the agent emitted them (interleaved prose + tool calls). */
   segments: StreamSegment[];
+  /** The stage's widget blocks (inline ones render in its transcript; `stageRun:<id>` owns them). */
+  widgets: Array<Extract<StreamBlock, { type: 'widget' }>>;
   /** Currently-running-with (parallel batch peer stage ids). */
   parallelWith?: string[];
-  /** Ms since started; live-updated by the preview. */
+  /** How long a finished stage ran (running stages have none: the run header holds the one clock). */
   durationMs?: number;
   /** Interrupt payload when status = awaiting_input. */
   interrupt?: {
@@ -94,13 +106,14 @@ export interface StageView {
   /** Structured output JSON. */
   outputData?: Record<string, unknown>;
   /**
-   * Full stage output text sourced from the run scratchpad
-   * (`scratchpad.json` on disk). This is the substantive Claude
-   * response for the stage; `summary` is only a one-line reduction and
-   * `outputData` only exists when the stage emitted a structured block.
+   * The stage's output text (`stage_runs.output_text`): the latest answer
+   * of its prompt, repair and revision turns, or of an amendment.
    */
   outputText?: string;
-  /** Files this stage touched. */
+  /**
+   * Files this stage changed, from its checkpoint to the next one (D-22).
+   * Only the focused stage's are fetched.
+   */
   files?: FileChange[];
   /** Hook invocations. */
   hooks?: HookInvocation[];
@@ -126,8 +139,6 @@ export interface StageView {
    * stage alone filled it.
    */
   sharedContext?: boolean;
-  /** Model used. */
-  model?: string;
 }
 
 export interface RunView {
@@ -135,7 +146,8 @@ export interface RunView {
   name: string;
   status: RunStatus;
   startedAt: number;
-  elapsedMs: number;
+  /** Set once the run is terminal; the header's clock stops here. */
+  completedAt?: number;
   permissionMode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan';
   stages: StageView[];
   /** Optional run-level error. */

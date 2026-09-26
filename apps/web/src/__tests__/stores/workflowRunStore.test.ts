@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // workflowRunStore tests — Run monitoring state management
-// Status updates, stage tracking, timeline events, duration timer
+// Status updates, stage tracking, focus
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -83,17 +83,6 @@ describe('workflowRunStore', () => {
       expect(state.selectedStageRunId).toBeTruthy();
     });
 
-    it('computes elapsed time', () => {
-      const now = new Date();
-      const run = makeRun({
-        status: 'running',
-        startedAt: new Date(now.getTime() - 5000),
-      });
-      useWorkflowRunStore.getState().setRun(run);
-
-      const state = useWorkflowRunStore.getState();
-      expect(state.elapsedMs).toBeGreaterThanOrEqual(4500);
-    });
   });
 
   // ══════════════════════════════════════════
@@ -108,7 +97,6 @@ describe('workflowRunStore', () => {
       expect(state.run).toBeNull();
       expect(state.stageSessionMap).toEqual({});
       expect(state.selectedStageRunId).toBeNull();
-      expect(state.elapsedMs).toBe(0);
     });
   });
 
@@ -330,54 +318,6 @@ describe('workflowRunStore', () => {
       const state = useWorkflowRunStore.getState();
       expect(state.error).toBe('Something broke');
       expect(state.isLoading).toBe(false);
-    });
-  });
-
-  // ══════════════════════════════════════════
-  // Duration timer
-  // ══════════════════════════════════════════
-  describe('startDurationTimer / stopDurationTimer', () => {
-    it('starts and updates elapsed', () => {
-      const run = makeRun({
-        status: 'running',
-        startedAt: new Date(Date.now() - 10_000),
-      });
-      useWorkflowRunStore.getState().setRun(run);
-
-      // Timer should have started since status is 'running'
-      const ref = useWorkflowRunStore.getState().durationTimerRef;
-      expect(ref).toBeTruthy();
-
-      // Advance and check elapsed increases
-      vi.advanceTimersByTime(2000);
-      expect(useWorkflowRunStore.getState().elapsedMs).toBeGreaterThan(10_000);
-    });
-
-    it('stops timer on terminal status', () => {
-      const run = makeRun({
-        status: 'running',
-        startedAt: new Date(Date.now() - 5000),
-      });
-      useWorkflowRunStore.getState().setRun(run);
-
-      // Running — timer should be active
-      expect(useWorkflowRunStore.getState().durationTimerRef).toBeTruthy();
-
-      // Complete the run
-      useWorkflowRunStore.getState().updateRunStatus('completed');
-
-      expect(useWorkflowRunStore.getState().durationTimerRef).toBeNull();
-    });
-
-    it('does not start timer on terminal status', () => {
-      const run = makeRun({
-        status: 'completed',
-        startedAt: new Date(Date.now() - 30_000),
-        completedAt: new Date(Date.now() - 1000),
-      });
-      useWorkflowRunStore.getState().setRun(run);
-
-      expect(useWorkflowRunStore.getState().durationTimerRef).toBeNull();
     });
   });
 });

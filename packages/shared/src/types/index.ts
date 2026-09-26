@@ -155,8 +155,6 @@ export type {
   CreateWorkflowRunParams,
   WorkflowRunPermissionMode,
   ArtifactManifestEntry,
-  RunScratchpad,
-  RunScratchpadEntry,
 } from './WorkflowRun.js';
 export type { RunProfile, StageRunOverride } from './RunProfile.js';
 

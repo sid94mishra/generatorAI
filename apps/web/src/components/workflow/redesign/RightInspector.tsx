@@ -21,6 +21,11 @@ interface RightInspectorProps {
   defaultTab?: Tab;
   /** Optional run id — enables click-to-open file modal in the Files tab. */
   runId?: string;
+  /**
+   * What the Files tab lists (D-22): the files THIS stage changed, from its
+   * checkpoint to the next one. Says so, or says why there is nothing.
+   */
+  filesNote?: string;
 }
 
 const KIND_ICON: Record<FileChange['kind'], { icon: React.ReactNode; label: string; classes: string }> = {
@@ -30,11 +35,11 @@ const KIND_ICON: Record<FileChange['kind'], { icon: React.ReactNode; label: stri
   renamed:  { icon: <ArrowRight className="h-2.5 w-2.5" />, label: 'R', classes: 'bg-[var(--color-info)]/12 text-[var(--color-info)]' },
 };
 
-export function RightInspector({ stage, defaultTab = 'files', runId }: RightInspectorProps) {
+export function RightInspector({ stage, defaultTab = 'files', runId, filesNote }: RightInspectorProps) {
   const [tab, setTab] = useState<Tab>(defaultTab);
   const [openFile, setOpenFile] = useState<FileChange | null>(null);
 
-  // If summary duplicates the scratchpad text, only count it once.
+  // If the summary duplicates the output text, only count it once.
   const summaryDupOfText = !!stage?.outputText && !!stage?.summary && stage.summary.trim() === stage.outputText.trim();
   const outputCount = (stage?.outputData ? 1 : 0) + (stage?.outputText ? 1 : 0) + (stage?.summary && !summaryDupOfText ? 1 : 0);
   const tabs: Array<{ id: Tab; label: string; icon: React.ReactNode; count?: number }> = [
@@ -93,7 +98,10 @@ export function RightInspector({ stage, defaultTab = 'files', runId }: RightInsp
         )}
 
         {stage && tab === 'files' && (
-          <FilesTab files={stage.files ?? []} onOpen={runId ? setOpenFile : undefined} />
+          <>
+            {filesNote && <p className="mb-2 text-[10.5px] text-[var(--color-muted-foreground)]">{filesNote}</p>}
+            <FilesTab files={stage.files ?? []} onOpen={runId ? setOpenFile : undefined} />
+          </>
         )}
         {stage && tab === 'output' && (
           <OutputTab data={stage.outputData} summary={stage.summary} text={stage.outputText} />
@@ -127,10 +135,8 @@ function FileViewerModalConnected({
   file: FileChange;
   onClose: () => void;
 }) {
-  // Files in a run can live in the workspace OR the artifacts dir (stage
-  // response .md files); pick the right endpoint based on what
-  // `workspaceFilesFromRun` / manifest attached. Default to workspace for
-  // legacy manifest entries that don't carry a source.
+  // A stage's files come from its checkpoints in the run workspace
+  // (`source: 'workspace'`); the endpoint follows the entry's source.
   const source = file.source ?? 'workspace';
   const { data, isLoading, error } = useRunFileContent(runId, file.path, source);
   return (
@@ -192,9 +198,8 @@ function OutputTab({ data, summary, text }: { data?: Record<string, unknown>; su
   if (!data && !summary && !text) {
     return <p className="text-[11.5px] text-[var(--color-muted-foreground)]">No structured output or summary.</p>;
   }
-  // When the workflow uses the harness summary path, the on-disk scratchpad
-  // entry and the DB `summary` field are the same string. Don't render the
-  // same wall of text twice — prefer the scratchpad text, hide the summary.
+  // A text stage whose summary IS its output would render the same wall of
+  // text twice — prefer the output text, hide the summary.
   const summaryMatchesText = !!text && !!summary && summary.trim() === text.trim();
   const showSummary = !!summary && !summaryMatchesText;
   return (

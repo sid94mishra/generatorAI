@@ -924,7 +924,6 @@ export const queryKeys = {
     workflowId ? (['runs', 'by-workflow', workflowId] as const) : (['runs'] as const),
   run: (runId: string) => ['runs', 'detail', runId] as const,
   runStages: (runId: string) => ['runs', 'detail', runId, 'stages'] as const,
-  runScratchpad: (runId: string) => ['runs', 'detail', runId, 'scratchpad'] as const,
   /** One stage session's persisted transcript. */
   stageTranscript: (runId: string, stageRunId: string) =>
     ['runs', 'detail', runId, 'stage', stageRunId, 'transcript'] as const,

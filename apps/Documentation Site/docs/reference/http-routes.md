@@ -324,13 +324,13 @@ Source: `apps/server/src/routes/review.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/workspaces/:id/review/threads` | 52 |
-| `POST` | `/api/workspaces/:id/review/threads` | 88 |
-| `POST` | `/api/workspaces/:id/review/threads/:threadId/comments` | 142 |
-| `PATCH` | `/api/workspaces/:id/review/threads/:threadId` | 164 |
-| `DELETE` | `/api/workspaces/:id/review/threads/:threadId` | 186 |
-| `PATCH` | `/api/workspaces/:id/review/threads/:threadId/comments/:commentId` | 200 |
-| `POST` | `/api/workspaces/:id/review/submit` | 237 |
+| `GET` | `/api/workspaces/:id/review/threads` | 55 |
+| `POST` | `/api/workspaces/:id/review/threads` | 91 |
+| `POST` | `/api/workspaces/:id/review/threads/:threadId/comments` | 145 |
+| `PATCH` | `/api/workspaces/:id/review/threads/:threadId` | 167 |
+| `DELETE` | `/api/workspaces/:id/review/threads/:threadId` | 189 |
+| `PATCH` | `/api/workspaces/:id/review/threads/:threadId/comments/:commentId` | 203 |
+| `POST` | `/api/workspaces/:id/review/submit` | 240 |
 
 ## scopeRequests
 
@@ -478,17 +478,19 @@ Source: `apps/server/src/routes/workflowRuns.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/workflow-runs` | 62 |
-| `GET` | `/api/workflow-runs` | 75 |
-| `GET` | `/api/workflow-runs/:id` | 105 |
-| `GET` | `/api/workflow-runs/:id/scratchpad` | 118 |
-| `POST` | `/api/workflow-runs/:id/start` | 148 |
-| `POST` | `/api/workflow-runs/:id/commands` | 162 |
-| `POST` | `/api/workflow-runs/:id/fork` | 185 |
-| `DELETE` | `/api/workflow-runs/:id` | 197 |
-| `GET` | `/api/workflow-runs/:id/stages` | 216 |
-| `GET` | `/api/workflow-runs/:id/permission-mode` | 231 |
-| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 242 |
+| `POST` | `/api/workflow-runs` | 89 |
+| `GET` | `/api/workflow-runs` | 102 |
+| `GET` | `/api/workflow-runs/:id` | 132 |
+| `POST` | `/api/workflow-runs/:id/start` | 146 |
+| `POST` | `/api/workflow-runs/:id/commands` | 160 |
+| `POST` | `/api/workflow-runs/:id/fork` | 183 |
+| `DELETE` | `/api/workflow-runs/:id` | 195 |
+| `GET` | `/api/workflow-runs/:id/stages` | 214 |
+| `POST` | `/api/workflow-runs/:id/instances/:instanceId/messages` | 233 |
+| `POST` | `/api/workflow-runs/:id/instances/:instanceId/turn/cancel` | 278 |
+| `GET` | `/api/workflow-runs/:id/instances/:instanceId/attachments/:artifactId` | 323 |
+| `GET` | `/api/workflow-runs/:id/permission-mode` | 352 |
+| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 363 |
 
 ## workflowScripts
 

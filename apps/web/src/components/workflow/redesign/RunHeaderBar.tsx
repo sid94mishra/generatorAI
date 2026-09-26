@@ -1,21 +1,34 @@
 // ────────────────────────────────────────────────────────────────
 // RunHeaderBar — 54px sticky bar. Status pill, name, progress, controls.
-// Single source of truth for run-level state (replaced the legacy V1
-// header + activity-bar + status-strip trio).
+// Single source of truth for run-level state (replaced the V1 header,
+// activity bar and status strip).
+//
+// It owns the run's ONE ticking clock (D-24): nothing else on the run page
+// re-renders every second. The permission-mode control is the run row's
+// layer (W-65); stages read it from their next turn.
 // ────────────────────────────────────────────────────────────────
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Pause, Play, Square, RefreshCw, Hand, Zap, CheckCircle2, AlertTriangle, Clock,
   Network, ChevronDown, GitBranch, FolderOpen,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { Button, Spinner } from '@/components/ui/index.js';
+import { Button, Select, Spinner } from '@/components/ui/index.js';
+import type { WorkflowRunPermissionMode } from '@generatorai/shared';
 import type { RunView } from './types.js';
 import { runTitle } from '@generatorai/client-core';
 
+/** The chat's permission-mode wording (SessionSpecEditor), for the run row's layer. */
+const PERMISSION_OPTIONS: Array<{ value: WorkflowRunPermissionMode; label: string }> = [
+  { value: 'default', label: 'Ask before tools run' },
+  { value: 'acceptEdits', label: 'Accept edits, ask for the rest' },
+  { value: 'plan', label: 'Plan only (no changes)' },
+  { value: 'bypassPermissions', label: 'Full access (never ask)' },
+];
+
 interface RunHeaderBarProps {
-  run: RunView;
+  run: Pick<RunView, 'name' | 'status' | 'startedAt' | 'completedAt' | 'permissionMode' | 'stages'>;
   awaitingCount: number;
   parallelCount: number;
   onPause?: () => void;
@@ -31,6 +44,21 @@ interface RunHeaderBarProps {
   /** Toggle the run-scoped Files & artifacts side pane (git-style diff + tree). */
   onOpenFiles?: () => void;
   filesOpen?: boolean;
+  /** Change the run's permission mode (omit to show it read-only). */
+  onPermissionModeChange?: (mode: WorkflowRunPermissionMode) => void;
+  /** A permission-mode change is in flight. */
+  permissionBusy?: boolean;
+}
+
+/** Elapsed run time, ticking once a second while the run is live — in this component only. */
+function useElapsed(startedAt: number, completedAt: number | undefined, live: boolean): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!live) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [live]);
+  return Math.max(0, (completedAt ?? (live ? now : Date.now())) - startedAt);
 }
 
 function formatDuration(ms: number): string {
@@ -72,9 +100,9 @@ function StatusPill({ status }: { status: RunView['status'] }) {
   );
 }
 
-export function RunHeaderBar({
+export const RunHeaderBar = React.memo(function RunHeaderBar({
   run, awaitingCount, parallelCount, onPause, onResume, onCancel, onRetry, onOpenGraph, graphOpen,
-  pipelineOpen, onTogglePipeline, onOpenFiles, filesOpen,
+  pipelineOpen, onTogglePipeline, onOpenFiles, filesOpen, onPermissionModeChange, permissionBusy,
 }: RunHeaderBarProps) {
   const total = run.stages.length;
   const done = run.stages.filter((s) => s.status === 'completed' || s.status === 'skipped').length;
@@ -84,6 +112,7 @@ export function RunHeaderBar({
   const isRunning = run.status === 'running' || run.status === 'starting' || run.status === 'waiting';
   const isPaused = run.status === 'paused';
   const isTerminal = run.status === 'completed' || run.status === 'failed' || run.status === 'cancelled';
+  const elapsedMs = useElapsed(run.startedAt, run.completedAt, !isTerminal && run.status !== 'pending');
 
   return (
     <header className="flex items-center gap-3 border-b border-[var(--color-border)] bg-[var(--color-card)] px-4 py-2.5">
@@ -107,7 +136,7 @@ export function RunHeaderBar({
           />
         </span>
         <span className="font-mono text-[11px] tabular-nums text-[var(--color-muted-foreground)]">
-          {formatDuration(run.elapsedMs)}
+          {formatDuration(elapsedMs)}
         </span>
       </div>
 
@@ -127,6 +156,16 @@ export function RunHeaderBar({
 
       {/* Controls */}
       <div className="ml-auto flex items-center gap-1.5">
+        {/* Permission mode — the run row's layer (W-65); stages read it on their next turn. */}
+        <div className="hidden w-[210px] md:block" title="Tool approvals for this run's stages (from their next turn)">
+          <Select
+            aria-label="Run permission mode"
+            value={run.permissionMode}
+            disabled={isTerminal || !onPermissionModeChange || permissionBusy}
+            onChange={(v) => onPermissionModeChange?.(v as WorkflowRunPermissionMode)}
+            options={PERMISSION_OPTIONS}
+          />
+        </div>
         {isRunning && (
           <Button
             onClick={onPause}
@@ -228,4 +267,4 @@ export function RunHeaderBar({
       </div>
     </header>
   );
-}
+});

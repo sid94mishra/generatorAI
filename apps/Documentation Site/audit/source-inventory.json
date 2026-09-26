@@ -1861,49 +1861,49 @@
       "method": "GET",
       "path": "/api/workspaces/:id/review/threads",
       "source": "apps/server/src/routes/review.ts",
-      "line": 52,
+      "line": 55,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workspaces/:id/review/threads",
       "source": "apps/server/src/routes/review.ts",
-      "line": 88,
+      "line": 91,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workspaces/:id/review/threads/:threadId/comments",
       "source": "apps/server/src/routes/review.ts",
-      "line": 142,
+      "line": 145,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/workspaces/:id/review/threads/:threadId",
       "source": "apps/server/src/routes/review.ts",
-      "line": 164,
+      "line": 167,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/workspaces/:id/review/threads/:threadId",
       "source": "apps/server/src/routes/review.ts",
-      "line": 186,
+      "line": 189,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/workspaces/:id/review/threads/:threadId/comments/:commentId",
       "source": "apps/server/src/routes/review.ts",
-      "line": 200,
+      "line": 203,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workspaces/:id/review/submit",
       "source": "apps/server/src/routes/review.ts",
-      "line": 237,
+      "line": 240,
       "mounted": true
     },
     {
@@ -2400,77 +2400,91 @@
       "method": "POST",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 62,
+      "line": 89,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 75,
+      "line": 102,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 105,
-      "mounted": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/workflow-runs/:id/scratchpad",
-      "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 118,
+      "line": 132,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/start",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 148,
+      "line": 146,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/commands",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 162,
+      "line": 160,
       "mounted": true
     },
     {
       "method": "POST",
       "path": "/api/workflow-runs/:id/fork",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 185,
+      "line": 183,
       "mounted": true
     },
     {
       "method": "DELETE",
       "path": "/api/workflow-runs/:id",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 197,
+      "line": 195,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/stages",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 216,
+      "line": 214,
+      "mounted": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-runs/:id/instances/:instanceId/messages",
+      "source": "apps/server/src/routes/workflowRuns.ts",
+      "line": 233,
+      "mounted": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/workflow-runs/:id/instances/:instanceId/turn/cancel",
+      "source": "apps/server/src/routes/workflowRuns.ts",
+      "line": 278,
+      "mounted": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/workflow-runs/:id/instances/:instanceId/attachments/:artifactId",
+      "source": "apps/server/src/routes/workflowRuns.ts",
+      "line": 323,
       "mounted": true
     },
     {
       "method": "GET",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 231,
+      "line": 352,
       "mounted": true
     },
     {
       "method": "PATCH",
       "path": "/api/workflow-runs/:id/permission-mode",
       "source": "apps/server/src/routes/workflowRuns.ts",
-      "line": 242,
+      "line": 363,
       "mounted": true
     },
     {
@@ -3239,12 +3253,15 @@
     "apps/mobile/src/api/scopeRequests.ts",
     "apps/mobile/src/api/sendChatPrompt.native.ts",
     "apps/mobile/src/api/sendChatPrompt.ts",
+    "apps/mobile/src/api/sendStageMessage.native.ts",
+    "apps/mobile/src/api/sendStageMessage.ts",
     "apps/mobile/src/api/useActivity.ts",
     "apps/mobile/src/api/useAdminApi.ts",
     "apps/mobile/src/api/useApi.ts",
     "apps/mobile/src/api/useChatBranching.ts",
     "apps/mobile/src/api/useModels.ts",
     "apps/mobile/src/api/useRunControl.ts",
+    "apps/mobile/src/api/useStageConversation.ts",
     "apps/mobile/src/auth/AppLock.tsx",
     "apps/mobile/src/auth/appLockState.ts",
     "apps/mobile/src/auth/AuthProvider.tsx",
@@ -3407,6 +3424,9 @@
     "apps/mobile/src/components/runs/PermissionModeSheet.tsx",
     "apps/mobile/src/components/runs/runModel.ts",
     "apps/mobile/src/components/runs/RunRow.tsx",
+    "apps/mobile/src/components/runs/StageComposer.tsx",
+    "apps/mobile/src/components/runs/stageGate.ts",
+    "apps/mobile/src/components/runs/StageGateCard.tsx",
     "apps/mobile/src/components/runs/StageTimeline.tsx",
     "apps/mobile/src/components/runs/stageTranscript.ts",
     "apps/mobile/src/components/runs/StageTranscriptInline.tsx",
@@ -3848,6 +3868,7 @@
     "apps/web/src/components/workflow/redesign/PipelineFlow.tsx",
     "apps/web/src/components/workflow/redesign/RightInspector.tsx",
     "apps/web/src/components/workflow/redesign/RunHeaderBar.tsx",
+    "apps/web/src/components/workflow/redesign/StageComposer.tsx",
     "apps/web/src/components/workflow/redesign/StageTimelineItem.tsx",
     "apps/web/src/components/workflow/redesign/types.ts",
     "apps/web/src/components/workflow/RuntimeDAGCanvas.tsx",
@@ -4256,6 +4277,8 @@
     "packages/core/src/services/engine/RunActor.ts",
     "packages/core/src/services/engine/RunLifecycle.ts",
     "packages/core/src/services/engine/RunSupervisor.ts",
+    "packages/core/src/services/engine/StageConversationError.ts",
+    "packages/core/src/services/engine/StageConversationService.ts",
     "packages/core/src/services/engine/StageExecutor.ts",
     "packages/core/src/services/engine/TimerService.ts",
     "packages/core/src/services/ErrorHandler.ts",

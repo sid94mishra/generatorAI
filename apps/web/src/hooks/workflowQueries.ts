@@ -6,7 +6,7 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
-import type { CreateWorkflowRunParams } from '@generatorai/shared';
+import type { CreateWorkflowRunParams, WorkflowRunPermissionMode } from '@generatorai/shared';
 import type { ForkRunRequest, RunCommand, WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
 import type { StageOverrideWire } from '@generatorai/client-core';
 
@@ -19,7 +19,6 @@ export const workflowKeys = {
   runsByDefinition: (defId: string) => ['workflow-runs', 'by-definition', defId] as const,
   run: (id: string) => ['workflow-run', id] as const,
   runWorkspace: (runId: string) => ['run-workspace', runId] as const,
-  runScratchpad: (runId: string) => ['run-scratchpad', runId] as const,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -233,6 +232,8 @@ export function useRunCommand() {
   return useMutation({
     mutationFn: ({ runId, command }: { runId: string; command: RunCommand }) =>
       platform.runCommand(runId, command),
+    // D-13: a refused command is toasted by the global handler with the server's reason.
+    meta: { errorTitle: 'Run command not applied' },
     onSettled: (_data, _err, { runId }) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
       queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
@@ -252,6 +253,7 @@ export function useForkRun() {
   return useMutation({
     mutationFn: ({ runId, request }: { runId: string; request?: ForkRunRequest }) =>
       platform.forkRun(runId, request ?? {}),
+    meta: { errorTitle: 'Could not re-run' },
     onSuccess: (_fork, { runId }) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
       queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
@@ -284,14 +286,75 @@ export function useStartOrchestratedRun() {
   });
 }
 
-/** Get workspace/artifact files for a run */
-export function useRunWorkspace(runId: string | undefined) {
+// ── A stage is a compact chat (P03b) ─────────────────────────────
+
+/**
+ * Send an operator message to a stage instance: queued between turns, an
+ * amendment of a completed stage, a retry of a paused one. A refusal (409
+ * STAGE_BUSY mid-turn, INTERACTION_PENDING, …) is toasted as "Message not
+ * sent", like a chat's.
+ */
+export function useSendStageMessage() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { runId: string; instanceId: string; prompt: string; files?: File[]; mode?: 'auto' | 'plan' }) =>
+      platform.sendStageMessage(p.runId, p.instanceId, p.prompt, p.files, p.mode),
+    meta: { errorTitle: 'Message not sent' },
+    onSettled: (_data, _err, { runId }) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
+    },
+  });
+}
+
+/** Stop a stage's turn in flight; the stage carries on. */
+export function useCancelStageTurn() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useMutation({
+    mutationFn: (p: { runId: string; instanceId: string; force?: boolean }) =>
+      platform.cancelStageTurn(p.runId, p.instanceId, p.force ? { force: true } : {}),
+    meta: { errorTitle: 'Could not stop the turn' },
+  });
+}
+
+/** Answer a stage's in-turn gate (tool permission, question, plan review). */
+export function useResolveStageInteraction() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { runId: string; instanceId: string; interactionId: string; answer: Parameters<HttpPlatformClient['resolveStageInteraction']>[3] }) =>
+      platform.resolveStageInteraction(p.runId, p.instanceId, p.interactionId, p.answer),
+    meta: { errorTitle: 'Answer not sent' },
+    onSettled: (_data, _err, { runId }) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
+    },
+  });
+}
+
+/** Change the run row's permission mode (W-65); stages read it from their next turn. */
+export function useSetRunPermissionMode() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (p: { runId: string; mode: WorkflowRunPermissionMode }) => platform.setPermissionMode(p.runId, p.mode),
+    meta: { errorTitle: 'Permission mode not changed' },
+    onSettled: (_data, _err, { runId }) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
+    },
+  });
+}
+
+/**
+ * Get workspace/artifact files for a run. Polled while the run is live
+ * only: a finished run's workspace no longer changes (D-24).
+ */
+export function useRunWorkspace(runId: string | undefined, opts: { live?: boolean } = {}) {
   const platform = usePlatform() as HttpPlatformClient;
   return useQuery({
     queryKey: workflowKeys.runWorkspace(runId ?? ''),
     queryFn: () => platform.getRunWorkspace(runId!),
     enabled: !!runId,
-    refetchInterval: 10_000,
+    refetchInterval: opts.live ? 10_000 : false,
   });
 }
 
@@ -308,26 +371,6 @@ export function useRunFileContent(
     queryFn: () => platform.getRunFileContent(runId!, filePath!, source, worktreeAlias),
     enabled: !!runId && !!filePath,
     staleTime: 60_000,
-  });
-}
-
-/**
- * Read the aggregated per-run scratchpad. Each stage's full output text
- * (Claude's response, or a structured JSON block) is aggregated here by
- * `stageRunId`. Used to populate the Inspector's Output tab with the
- * substantive stage output that isn't stored on the DB StageRun row.
- *
- * While the run is active we poll every 3 s so live output shows up in
- * the panel. Terminal runs cache for a minute.
- */
-export function useRunScratchpad(runId: string | undefined, opts?: { isRunning?: boolean }) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.runScratchpad(runId ?? ''),
-    queryFn: () => platform.getRunScratchpad(runId!),
-    enabled: !!runId,
-    staleTime: opts?.isRunning ? 0 : 60_000,
-    refetchInterval: opts?.isRunning ? 3_000 : false,
   });
 }
 

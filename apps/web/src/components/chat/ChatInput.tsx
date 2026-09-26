@@ -71,6 +71,13 @@ interface ChatInputProps {
   placeholder: string;
   onBeforeSend?: () => Promise<void>;
   customSendFn?: (args: { prompt: string; attachments: File[]; mode?: AgentMode }) => Promise<void>;
+  /**
+   * Whether the composer starts the optimistic turn on `sessionId`'s stream
+   * (and clears it when the send fails). Default true. A workflow stage's
+   * composer sets it false: its stream is the stage's whole transcript, and
+   * the server echoes the operator's message into it.
+   */
+  manageStream?: boolean;
   selectedModel?: string;
   onModelChange?: (model: string) => void;
   /** Currently selected reasoning-effort level (bound to model capability) */
@@ -193,6 +200,7 @@ export function ChatInput({
   placeholder,
   onBeforeSend,
   customSendFn,
+  manageStream = true,
   selectedModel,
   onModelChange,
   reasoningEffort,
@@ -786,7 +794,7 @@ export function ChatInput({
         return;
       }
 
-      startPending(sessionId, prompt);
+      if (manageStream) startPending(sessionId, prompt);
       const files = currentAttachments.map((a) => a.file);
 
       // Built-in commands (`/browser`, `/terminal`) surface their integrated
@@ -816,7 +824,7 @@ export function ChatInput({
       setText(rawInput);
       setActiveCommand(cmd);
       setAttachments(currentAttachments);
-      clearStream(sessionId);
+      if (manageStream) clearStream(sessionId);
     } finally {
       sendingRef.current = false;
     }
@@ -831,6 +839,7 @@ export function ChatInput({
     clearStream,
     onBeforeSend,
     customSendFn,
+    manageStream,
     onBuiltinCommand,
     activeAgentMode,
     pendingCaptures,

@@ -232,6 +232,15 @@ export function StreamPanel({
               />
             );
           }
+          if (seg.type === 'operator') {
+            return (
+              <div key={seg.id} className="flex justify-end">
+                <p className="max-w-[85%] whitespace-pre-wrap rounded-2xl rounded-br-sm border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/[0.08] px-3 py-2 text-[12.5px] leading-relaxed text-[var(--color-foreground)]/90">
+                  {seg.text}
+                </p>
+              </div>
+            );
+          }
           if (seg.type === 'permission') {
             return (
               <PermissionCard

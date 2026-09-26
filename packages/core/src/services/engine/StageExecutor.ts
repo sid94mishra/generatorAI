@@ -587,7 +587,14 @@ export class StageExecutor {
       now: this.now(),
     });
     if (!running.ok) throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
-    await this.emitSession(ctx, 'stage_run.running', { sessionId: ctx.session!.id, name: stage.name, attemptNo });
+    await this.emitSession(ctx, 'stage_run.running', {
+      sessionId: ctx.session!.id,
+      name: stage.name,
+      stageKey: stage.key,
+      instancePath: ctx.instance.instancePath,
+      attemptNo,
+      version: running.row.version,
+    });
 
     await this.promptTurns(ctx);
     const output = await this.validateAndReview(ctx);
@@ -1361,7 +1368,7 @@ export class StageExecutor {
       now: this.now(),
     });
     if (!r.ok) throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
-    await this.emitSession(ctx, 'stage_run.awaiting_input', { interruptData });
+    await this.emitSession(ctx, 'stage_run.awaiting_input', { interruptData, version: r.row.version });
     frame.parkedSince = this.now();
     frame.ticket?.pause();
     let verdict: ApprovalVerdict | null;

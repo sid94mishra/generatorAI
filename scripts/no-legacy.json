@@ -800,9 +800,9 @@
     }
   ],
   "comments": {
-    "phase": "03",
+    "phase": "03b",
     "failFromPhase": null,
-    "baseline": 5,
+    "baseline": 0,
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",

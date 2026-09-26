@@ -141,35 +141,6 @@ export function createWorkflowRunRoutes(container: Container): Router {
     }
   });
 
-  // GET /workflow-runs/:id/scratchpad — Read the per-run scratchpad JSON file
-  router.get('/:id/scratchpad', async (req, res, next) => {
-    try {
-      const runId = String(req.params['id']);
-      const run = await workflowRunRepo.getById(runId);
-
-      // Resolve scratchpad path from run variables
-      const artifactsDir = run.variables?.['__artifactsDirectory'];
-      if (typeof artifactsDir !== 'string') {
-        res.json({ workflowRunId: runId, entries: [], lastUpdated: null });
-        return;
-      }
-
-      const { readFile } = await import('node:fs/promises');
-      const { join } = await import('node:path');
-      const scratchpadPath = join(artifactsDir, '..', 'scratchpad.json');
-
-      try {
-        const content = await readFile(scratchpadPath, 'utf-8');
-        res.json(JSON.parse(content));
-      } catch {
-        // File doesn't exist yet — return empty scratchpad
-        res.json({ workflowRunId: runId, entries: [], lastUpdated: null });
-      }
-    } catch (err) {
-      next(err);
-    }
-  });
-
   // POST /workflow-runs/:id/start — Start a created run (202 Accepted). The
   // PD-17 check refuses it synchronously; the prepare phases run in the engine.
   router.post('/:id/start', async (req, res, next) => {

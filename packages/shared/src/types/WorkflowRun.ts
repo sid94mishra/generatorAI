@@ -188,27 +188,3 @@ export interface CreateWorkflowRunParams {
   triggerPermissionMode?: WorkflowRunPermissionMode;
 }
 
-// ────────────────────────────────────────────────────────────────
-// RunScratchpad — Aggregate output file for a workflow run
-// Written to disk as JSON at: {executionDir}/scratchpad.json
-// ────────────────────────────────────────────────────────────────
-
-/** A single stage's output entry in the scratchpad */
-export interface RunScratchpadEntry {
-  stageName: string;
-  stageKey: string;
-  stageRunId: string;
-  status: 'pending' | 'completed' | 'failed' | 'skipped';
-  outputFormat: 'text' | 'json';
-  /** The stage output: text summary or structured JSON object */
-  output: string | Record<string, unknown> | null;
-  completedAt?: string;
-}
-
-/** Per-run scratchpad tracking all stages' outputs in a single file */
-export interface RunScratchpad {
-  workflowRunId: string;
-  workflowName: string;
-  entries: RunScratchpadEntry[];
-  lastUpdated: string;
-}

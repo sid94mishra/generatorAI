@@ -7,9 +7,9 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 
 | Measure | Count |
 |---|---:|
-| Commands | 212 |
+| Commands | 214 |
 | Groups | 24 |
-| Server-backed commands | 185 |
+| Server-backed commands | 187 |
 | Destructive commands | 33 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
@@ -163,6 +163,8 @@ This is a documentation-local copy of the repository’s registry/keymap snapsho
 | `run.stage.pause` | `run stage pause` | yes | no | yes | yes | run, stage | — |
 | `run.stage.resume` | `run stage resume` | yes | no | yes | yes | run, stage | — |
 | `run.stage.retry` | `run stage retry` | yes | no | yes | yes | run, stage | — |
+| `run.stage.send` | `run stage send` | yes | no | yes | yes | run, stage, text | — |
+| `run.stage.stop` | `run stage stop` | yes | no | yes | yes | run, stage | — |
 | `run.start` | `run start` | yes | no | yes | yes | workflow | — |
 | `run.watch` | `run watch` | yes | no | yes | yes | run | — |
 | `run.workspace` | `run workspace` | yes | no | yes | yes | run | — |

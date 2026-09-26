@@ -511,7 +511,8 @@ function applyHostEffect(
       return;
 
     case 'selectStageRun':
-      useWorkflowRunStore.getState().selectStageRun(effect.stageRunId);
+      // A stage started: a suggestion only — a stage the user focused stays focused (D-20).
+      useWorkflowRunStore.getState().suggestStageRun(effect.stageRunId);
       return;
 
     case 'stageSettled': {

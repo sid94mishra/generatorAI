@@ -315,8 +315,6 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       remove: (id: string) => req<void>(`/api/workflow-runs/${id}`, { method: 'DELETE' }),
 
       stages: (id: string) => req<StageRun[]>(`/api/workflow-runs/${id}/stages`),
-      scratchpad: (id: string) =>
-        req<Record<string, unknown>>(`/api/workflow-runs/${id}/scratchpad`),
 
       permissionMode: {
         get: (id: string) =>

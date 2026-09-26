@@ -4,7 +4,10 @@
 // stream state into the RunView our redesigned UI consumes.
 //
 // This module is pure: no queries/subscriptions. All inputs are
-// passed in. Called from a page-level useMemo.
+// passed in. Called from a page-level useMemo. The run clock is not an
+// input (it lives in the run header, D-24), and a `StageViewCache` hands
+// back the SAME StageView object for a stage whose inputs did not change,
+// so the memoised timeline rows re-render only when their stage changed.
 // ────────────────────────────────────────────────────────────────
 
 import type {
@@ -15,8 +18,8 @@ import type { EdgeSpec, StageSpec } from '@generatorai/workflow-spec';
 import { interpolateVariables } from '@generatorai/shared';
 import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
-import type { RunView, StageView, StageStatus, RunStatus, FileChange, HookInvocation } from './types.js';
-import { deriveTimeline, deriveAnswer, deriveSegments, countTools } from '@/components/agent/deriveTimeline.js';
+import type { RunView, StageView, StageStatus, RunStatus, HookInvocation } from './types.js';
+import { deriveTimeline, deriveAnswer, deriveSegments, widgetBlocks } from '@/components/agent/deriveTimeline.js';
 
 // ── Status normalizers ────────────────────────────────────────
 
@@ -147,32 +150,12 @@ function computeDependsOn(
   return map;
 }
 
-// ── File change from stage artifactManifest ────────────────────
+// ── Duration of a finished stage ───────────────────────────────
 
-function mapFile(entry: { path: string; action: string; sizeBytes: number }): FileChange {
-  const kind: FileChange['kind'] =
-    entry.action === 'created' ? 'added' :
-    entry.action === 'deleted' ? 'deleted' :
-    entry.action === 'renamed' ? 'renamed' :
-    'modified';
-  const size = entry.sizeBytes < 1024
-    ? `${entry.sizeBytes}B`
-    : entry.sizeBytes < 1024 * 1024
-      ? `${(entry.sizeBytes / 1024).toFixed(1)}KB`
-      : `${(entry.sizeBytes / (1024 * 1024)).toFixed(1)}MB`;
-  // artifactManifest entries come from persistStageArtifacts' fenced-code
-  // extraction which writes to the run workspace — surface that so the file
-  // viewer modal hits the right endpoint.
-  return { path: entry.path, kind, size, source: 'workspace' };
-}
-
-// ── Live duration for a stage ──────────────────────────────────
-
+/** Finished stages only: a live duration would need a clock per row (the run header has the one clock, D-24). */
 function stageDuration(sr: StageRun): number | undefined {
-  if (!sr.startedAt) return undefined;
-  const start = new Date(sr.startedAt).getTime();
-  const end = sr.completedAt ? new Date(sr.completedAt).getTime() : Date.now();
-  return end - start;
+  if (!sr.startedAt || !sr.completedAt) return undefined;
+  return new Date(sr.completedAt).getTime() - new Date(sr.startedAt).getTime();
 }
 
 const HOOK_TYPES = new Set<HookInvocation['type']>(['script', 'http', 'function']);
@@ -222,16 +205,51 @@ export interface DeriveRunViewInput {
   stageDefs: StageSpec[];
   /** Edges of the run's pinned graph. */
   edges: EdgeSpec[];
-  /** Live elapsed ms for the run (from workflowRunStore). */
-  elapsedMs: number;
   /** streamStore state keyed by "stageRun:<id>" (subset selector). */
   streams: Record<string, StreamState | undefined>;
   /** Effective permission mode (from HitlPanel or run). */
   permissionMode?: WorkflowRunPermissionMode;
+  /** Per-stage memo (one per mounted page): unchanged stages keep their StageView object. */
+  cache?: StageViewCache;
+}
+
+/** What a StageView was derived from; an unchanged tuple returns the cached view. */
+interface StageViewInputs {
+  sr: StageRun;
+  stream: StreamState | undefined;
+  def: StageSpec | undefined;
+  order: number;
+  depth: number;
+  parallel: string;
+  dependsOn: string;
+  shared: boolean;
+  vars: Record<string, unknown> | undefined;
+}
+
+export type StageViewCache = Map<string, { inputs: StageViewInputs; view: StageView }>;
+
+export function createStageViewCache(): StageViewCache {
+  return new Map();
+}
+
+function sameInputs(a: StageViewInputs, b: StageViewInputs): boolean {
+  return (
+    a.sr === b.sr && a.stream === b.stream && a.def === b.def && a.order === b.order && a.depth === b.depth &&
+    a.parallel === b.parallel && a.dependsOn === b.dependsOn && a.shared === b.shared && a.vars === b.vars
+  );
+}
+
+/** Whether a stage's stream holds a conversation the user had with it in this tab (operator messages). */
+function hasConversation(stream: StreamState | undefined): boolean {
+  return !!stream?.blocks.some((b) => b.type === 'system' && b.category === 'operator');
+}
+
+function isLive(stream: StreamState | undefined): boolean {
+  return !!stream && (stream.status === 'pending' || stream.status === 'streaming' || stream.status === 'thinking');
 }
 
 export function deriveRunView(input: DeriveRunViewInput): RunView {
-  const { run, stageDefs, edges, elapsedMs, streams, permissionMode } = input;
+  const { run, stageDefs, edges, streams, permissionMode, cache } = input;
 
   const stageDefByKey = new Map(stageDefs.map((s) => [s.key, s]));
   const orderByKey = new Map(stageDefs.map((s, i) => [s.key, i]));
@@ -264,112 +282,140 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
     stageCountBySession.set(sr.sessionId, (stageCountBySession.get(sr.sessionId) ?? 0) + 1);
   }
 
+  const seen = new Set<string>();
   const stages: StageView[] = sorted.map((sr, idx) => {
     const def = stageDefByKey.get(sr.stageKey);
     const stream = streams[`stageRun:${sr.id}`];
-    const status = STAGE_STATUS_MAP[sr.status] ?? 'pending';
-    const isTerminal = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'skipped';
-
-    const steps = deriveTimeline(stream?.blocks, { active: status === 'running' });
-    const stepsDone = steps.filter((s) => s.status === 'done' || s.status === 'failed').length;
-    const stepsTotal = steps.length;
-
-    // The stream store only holds blocks THIS browser session actually
-    // received. After a reload it is empty, so a completed stage derived an
-    // empty answer and the timeline rendered nothing — even though the text
-    // was sitting in the database the whole time, reachable only by digging
-    // through Details → Inspector → Output. Fall back to the persisted output
-    // once the stage is terminal so a finished run replays inline.
-    //
-    // Approval gates persist the completed output before parking. A route
-    // revisit may have only the first few stream blocks, so prefer that
-    // persisted result for both completed and approval-waiting stages.
-    // Partial ordered segments must not hide the final answer in StreamPanel.
-    const streamedAnswer = deriveAnswer(stream?.blocks);
-    const persistedAnswer = (isTerminal || status === 'awaiting_input') ? sr.outputText?.trim() : undefined;
-    const answer = persistedAnswer || streamedAnswer;
-    const segments = persistedAnswer ? [] : deriveSegments(stream?.blocks, { active: status === 'running' });
     const parallelIds = parallelPeers.get(sr.id) ?? [];
-
-    // Interrupt data → InlineHitlControls props
-    let interrupt: StageView['interrupt'];
-    if (status === 'awaiting_input' && sr.interruptData !== undefined && sr.interruptData !== null) {
-      const raw = sr.interruptData;
-      if (typeof raw === 'object' && raw != null && !Array.isArray(raw)) {
-        const r = raw as Record<string, unknown>;
-        interrupt = {
-          reason:
-            (typeof r.reason === 'string' && r.reason) ||
-            (typeof r.message === 'string' && r.message) ||
-            (typeof r.prompt === 'string' && r.prompt) ||
-            'The stage is waiting for your approval.',
-          tool: typeof r.tool === 'string' ? r.tool : (typeof r.toolName === 'string' ? r.toolName : undefined),
-          args: (typeof r.args === 'object' && r.args !== null) ? (r.args as Record<string, unknown>) : undefined,
-        };
-      } else {
-        interrupt = {
-          reason: typeof raw === 'string' ? raw : 'The stage is waiting for your approval.',
-        };
-      }
-    }
-
-    // Files from stage's artifactManifest. Filter out legacy `unnamed.<ext>`
-    // entries — historical runs (pre-fix) recorded every fenced code block
-    // in the manifest even when the block had no filename, producing phantom
-    // files that don't exist on disk.
-    const files: FileChange[] | undefined =
-      sr.artifactManifest && sr.artifactManifest.length > 0
-        ? sr.artifactManifest
-            .filter((e) => !/^unnamed\.[A-Za-z0-9]+$/.test(e.path))
-            .map(mapFile)
-        : undefined;
-
-    // Prompt from definition (first prompt's text). Interpolate `{{var}}`
-    // placeholders against the run variables so the UI matches what actually
-    // reached the model. Unresolved placeholders are left as-is on purpose so
-    // authors can spot missing variables at a glance.
-    const runVars = (run.variables ?? {}) as Record<string, unknown>;
-    const rawPrompt = def?.prompts?.[0]?.text?.trim();
-    const prompt = rawPrompt ? interpolateVariables(rawPrompt, runVars) : undefined;
-
-    return {
-      id: sr.id,
-      // Definition order is a zero-based sorting key, not a user-facing number.
+    const dependsOn = dependsOnByKey.get(sr.stageKey) ?? [];
+    const inputs: StageViewInputs = {
+      sr,
+      stream,
+      def,
       order: idx + 1,
       depth: depths.get(sr.stageKey) ?? 0,
-      dependsOn: dependsOnByKey.get(sr.stageKey) ?? [],
-      name: sr.name,
-      status,
-      prompt,
-      steps,
-      stepsDone,
-      stepsTotal,
-      answer,
-      segments,
-      parallelWith: parallelIds.length > 0 ? parallelIds : undefined,
-      durationMs: stageDuration(sr),
-      interrupt,
-      error: sr.error,
-      summary: sr.summary,
-      outputData: sr.outputData,
-      files,
-      hooks: hooksFrom(stream, sr.id),
-      usage: usageFrom(stream),
-      contextUsage: stream?.contextUsage ?? undefined,
-      sharedContext: !!sr.sessionId && (stageCountBySession.get(sr.sessionId) ?? 0) > 1,
-      model: undefined,
+      parallel: parallelIds.join(','),
+      dependsOn: dependsOn.join(','),
+      shared: !!sr.sessionId && (stageCountBySession.get(sr.sessionId) ?? 0) > 1,
+      vars: run.variables as Record<string, unknown> | undefined,
     };
+    seen.add(sr.id);
+    const cached = cache?.get(sr.id);
+    if (cached && sameInputs(cached.inputs, inputs)) return cached.view;
+    const view = stageView(inputs, parallelIds, dependsOn);
+    cache?.set(sr.id, { inputs, view });
+    return view;
   });
+  if (cache) for (const id of [...cache.keys()]) if (!seen.has(id)) cache.delete(id);
 
   return {
     id: run.id,
     name: run.name,
     status: RUN_STATUS_MAP[run.status] ?? 'pending',
     startedAt: run.startedAt ? new Date(run.startedAt).getTime() : new Date(run.createdAt).getTime(),
-    elapsedMs,
-    permissionMode: permissionMode ?? run.permissionMode ?? 'bypassPermissions',
+    ...(run.completedAt ? { completedAt: new Date(run.completedAt).getTime() } : {}),
+    permissionMode: permissionMode ?? run.effectivePermissionMode ?? run.permissionMode ?? 'default',
     stages,
     error: run.error,
+  };
+}
+
+/** One stage's view (the cache miss path). */
+function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: string[]): StageView {
+  const { sr, stream, def } = inputs;
+  const status = STAGE_STATUS_MAP[sr.status] ?? 'pending';
+  const isTerminal = status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'skipped';
+
+  const steps = deriveTimeline(stream?.blocks, { active: status === 'running' });
+  const stepsDone = steps.filter((s) => s.status === 'done' || s.status === 'failed').length;
+  const stepsTotal = steps.length;
+
+  // The stream store only holds blocks THIS browser session actually
+  // received. After a reload it is empty, so a completed stage derived an
+  // empty answer and the timeline rendered nothing — even though the text
+  // was sitting in the database the whole time, reachable only by digging
+  // through Details → Inspector → Output. Fall back to the persisted output
+  // once the stage is terminal so a finished run replays inline.
+  //
+  // Approval gates persist the completed output before parking. A route
+  // revisit may have only the first few stream blocks, so prefer that
+  // persisted result for both completed and approval-waiting stages.
+  // Partial ordered segments must not hide the final answer in StreamPanel.
+  //
+  // A stage the user is talking to in this tab (an operator message, or a
+  // turn streaming now — an amendment runs on a completed stage) shows its
+  // live conversation instead. An in-turn gate (tool permission, question,
+  // plan) renders as its card from the stream, so only a completion review
+  // prefers the persisted output.
+  const raw = sr.interruptData && typeof sr.interruptData === 'object' && !Array.isArray(sr.interruptData)
+    ? (sr.interruptData as Record<string, unknown>)
+    : undefined;
+  const completionReview = status === 'awaiting_input' && (raw?.['kind'] === undefined || raw['kind'] === 'stage_completion_review');
+  const conversing = isLive(stream) || hasConversation(stream);
+  const streamedAnswer = deriveAnswer(stream?.blocks);
+  const persistedAnswer = (isTerminal || completionReview) && !conversing ? sr.outputText?.trim() : undefined;
+  const answer = persistedAnswer || streamedAnswer;
+  const segments = persistedAnswer ? [] : deriveSegments(stream?.blocks, { active: status === 'running' || isLive(stream) });
+
+  // A completion review → InlineHitlControls props (in-turn gates are stream cards).
+  let interrupt: StageView['interrupt'];
+  if (completionReview && sr.interruptData !== undefined && sr.interruptData !== null) {
+    if (raw) {
+      const r = raw;
+      interrupt = {
+        reason:
+          (typeof r.reason === 'string' && r.reason) ||
+          (typeof r.message === 'string' && r.message) ||
+          (typeof r.prompt === 'string' && r.prompt) ||
+          'The stage is waiting for your approval.',
+        tool: typeof r.tool === 'string' ? r.tool : (typeof r.toolName === 'string' ? r.toolName : undefined),
+        args: (typeof r.args === 'object' && r.args !== null) ? (r.args as Record<string, unknown>) : undefined,
+      };
+    } else {
+      interrupt = {
+        reason: typeof sr.interruptData === 'string' ? sr.interruptData : 'The stage is waiting for your approval.',
+      };
+    }
+  }
+
+  // Prompt from definition (first prompt's text). Interpolate `{{var}}`
+  // placeholders against the run variables so the UI matches what actually
+  // reached the model. Unresolved placeholders are left as-is on purpose so
+  // authors can spot missing variables at a glance.
+  const runVars = inputs.vars ?? {};
+  const rawPrompt = def?.prompts?.[0]?.text?.trim();
+  const prompt = rawPrompt ? interpolateVariables(rawPrompt, runVars) : undefined;
+
+  return {
+    id: sr.id,
+    // Definition order is a zero-based sorting key, not a user-facing number.
+    order: inputs.order,
+    depth: inputs.depth,
+    dependsOn,
+    name: sr.name,
+    status,
+    rawStatus: sr.status,
+    instancePath: sr.instancePath,
+    ...(sr.amendedAt ? { amendedAt: new Date(sr.amendedAt).getTime() } : {}),
+    prompt,
+    steps,
+    stepsDone,
+    stepsTotal,
+    answer,
+    segments,
+    widgets: widgetBlocks(stream?.blocks),
+    parallelWith: parallelIds.length > 0 ? parallelIds : undefined,
+    durationMs: stageDuration(sr),
+    interrupt,
+    error: sr.error,
+    summary: sr.summary,
+    outputData: sr.outputData,
+    ...(sr.outputText ? { outputText: sr.outputText } : {}),
+    streaming: isLive(stream),
+    hooks: hooksFrom(stream, sr.id),
+    usage: usageFrom(stream),
+    contextUsage: stream?.contextUsage ?? undefined,
+    sharedContext: inputs.shared,
   };
 }
 

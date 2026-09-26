@@ -4,6 +4,16 @@
 // Drives the run data sources (useWorkflowRun, useWorkflowDefinition,
 // useWorkflowRunStore, useStreamStore, connectWorkflowRun) and feeds
 // the run components through the pure `deriveRunView`.
+//
+// A stage is a compact chat (P03b): the focused stage gets the shared
+// composer, its gates the chat's cards, and a "…" menu whose items go
+// through the commands API. No control fails silently (D-13): every
+// mutation toasts its refusal, and destructive ones ask first.
+//
+// Cost (D-21, D-24): every stage stream of the mounted run is protected
+// from eviction; the one ticking clock is the header's; unchanged stages
+// keep their StageView (memoised rows); the workspace is polled only while
+// the run is live, and the Inspector's files are the focused stage's own.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -12,19 +22,22 @@ import { ReactFlowProvider } from '@xyflow/react';
 import {
   AlertCircle, ListTree, FolderOpen, FileText, TerminalSquare, LayoutGrid,
 } from 'lucide-react';
-import { Modal, EmptyState, Button, Spinner } from '@/components/ui/index.js';
+import { Modal, EmptyState, Button, Spinner, useConfirm } from '@/components/ui/index.js';
+import { toast } from '@/components/Toast.js';
 
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { useEditorTarget } from '@/stores/editorTargetStore.js';
 import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
-import { useStreamStore } from '@/stores/streamStore.js';
+import { protectStream, useStreamStore } from '@/stores/streamStore.js';
 import { useShallow } from 'zustand/react/shallow';
 import {
   useWorkflowRun, useWorkflowDefinition, useWorkflowDefinitionVersion,
   useRunCommand, useForkRun,
   useRunWorkspace,
-  useRunScratchpad,
+  useResolveStageInteraction,
+  useSetRunPermissionMode,
 } from '@/hooks/workflowQueries.js';
+import { useWorkspaceChangeSummary, useWorkspaceCheckpoints } from '@/hooks/queries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { connectWorkflowRun } from '@/stores/sseManager.js';
 import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
@@ -33,11 +46,15 @@ import type { RunCommand } from '@generatorai/workflow-spec';
 
 import { RunHeaderBar } from '@/components/workflow/redesign/RunHeaderBar.js';
 import { PipelineFlow } from '@/components/workflow/redesign/PipelineFlow.js';
-import { StageTimelineItem, type StageGateResolution } from '@/components/workflow/redesign/StageTimelineItem.js';
+import {
+  StageTimelineItem,
+  type StageGateResolution,
+  type StageMenuActions,
+} from '@/components/workflow/redesign/StageTimelineItem.js';
+import { StageComposer } from '@/components/workflow/redesign/StageComposer.js';
 import { RightInspector } from '@/components/workflow/redesign/RightInspector.js';
-import { deriveRunView, pickStageStreams } from '@/components/workflow/redesign/deriveRunView.js';
-import type { FileChange } from '@/components/workflow/redesign/types.js';
-import type { RunWorkspaceInfo } from '@generatorai/shared';
+import { createStageViewCache, deriveRunView, pickStageStreams } from '@/components/workflow/redesign/deriveRunView.js';
+import type { FileChange, StageView } from '@/components/workflow/redesign/types.js';
 
 // Re-use existing panels behind the new chrome
 import { RuntimeDAGCanvas } from '@/components/workflow/RuntimeDAGCanvas.js';
@@ -68,21 +85,22 @@ export function WorkflowRunPage() {
   const { data: pinnedVersion } = useWorkflowDefinitionVersion(definitionId, runData?.definitionVersionId);
   const pinnedGraph = pinnedVersion?.graph;
   const definitionName = definition?.graph.workflow.name;
-  const { data: workspace } = useRunWorkspace(runId);
-  // Per-run scratchpad — full stage output text lives here (the DB StageRun
-  // only stores `summary` and `outputData`). Poll while the run is active.
   // NOTE: `awaiting_input` is a *StageRun* status, not a WorkflowRunStatus —
-  // a run whose stage is parked on a HITL gate stays `running`, so it is
-  // already covered by the `running` check below.
+  // a run whose stage is parked on a HITL gate stays `running`.
   const runIsActive = runData?.status === 'running' || runData?.status === 'starting' || runData?.status === 'created';
-  const { data: scratchpad } = useRunScratchpad(runId, { isRunning: runIsActive });
+  const runIsTerminal =
+    runData?.status === 'failed' || runData?.status === 'cancelled' || runData?.status === 'completed';
+  // A finished run's workspace no longer changes: stop polling it (D-24).
+  const { data: workspace } = useRunWorkspace(runId, { live: !!runData && !runIsTerminal });
 
   // ── Store bindings ───────────────────────────────────────────
 
   const storeRun = useWorkflowRunStore((s) => s.run);
-  const elapsedMs = useWorkflowRunStore((s) => s.elapsedMs);
   const setRun = useWorkflowRunStore((s) => s.setRun);
   const clearRun = useWorkflowRunStore((s) => s.clearRun);
+  // ONE focus for the page, the graph and the event timeline (D-20).
+  const focusedStageId = useWorkflowRunStore((s) => s.selectedStageRunId);
+  const setFocusedStageId = useWorkflowRunStore((s) => s.selectStageRun);
 
   // P0-49 fix: Subscribe ONLY to the stage streams for this run — not the
   // whole `streams` record. Without this, ANY change to ANY chat's stream
@@ -102,14 +120,24 @@ export function WorkflowRunPage() {
     useShallow((s) => pickStageStreams(s.streams, stageRunIds)),
   );
 
+  // D-21: the stage streams of the run on screen are exempt from the
+  // stream store's LRU eviction while the page is mounted.
+  const stageRunIdsKey = stageRunIds.join(',');
+  useEffect(() => {
+    const releases = stageRunIdsKey ? stageRunIdsKey.split(',').map((id) => protectStream(`stageRun:${id}`)) : [];
+    return () => { for (const release of releases) release(); };
+  }, [stageRunIdsKey]);
+
   // ── Mutations ────────────────────────────────────────────────
 
   const runCommand = useRunCommand();
   const forkRun = useForkRun();
+  const resolveGate = useResolveStageInteraction();
+  const setRunPermissionMode = useSetRunPermissionMode();
+  const { confirm, dialog: confirmDialog } = useConfirm();
 
   // ── UI state ─────────────────────────────────────────────────
 
-  const [focusedStageId, setFocusedStageId] = useState<string | null>(null);
   const [graphOpen, setGraphOpen] = useState(false);
   const [pipelineOpen, setPipelineOpen] = useState(true);
   const [timelineOpen, setTimelineOpen] = useState(false);
@@ -168,7 +196,10 @@ export function WorkflowRunPage() {
     [browserUrlScopeKey, forgetFileTab],
   );
   const [permissionMode, setPermissionMode] = useState<WorkflowRunPermissionMode | undefined>(undefined);
+  /** The stage whose gate answer or approval is in flight (its buttons disable, D-13). */
+  const [gateBusyStage, setGateBusyStage] = useState<string | null>(null);
   const scrollHostRef = useRef<HTMLDivElement>(null);
+  const viewCache = useRef(createStageViewCache());
 
   // Draggable right pane width is managed by `RightPane` itself.
 
@@ -266,11 +297,11 @@ export function WorkflowRunPage() {
       run: storeRun,
       stageDefs: pinnedGraph?.stages ?? [],
       edges: pinnedGraph?.edges ?? [],
-      elapsedMs,
       streams,
       permissionMode,
+      cache: viewCache.current,
     });
-  }, [storeRun, pinnedGraph, elapsedMs, streams, permissionMode]);
+  }, [storeRun, pinnedGraph, streams, permissionMode]);
 
   // Breadcrumb label for this run. Once the epoch suffix is stripped a run is
   // usually named exactly like its definition, which would render the trail as
@@ -288,25 +319,8 @@ export function WorkflowRunPage() {
     return title;
   }, [runView?.name, runView?.startedAt, definitionName]);
 
-  // Focused stage — auto-select awaiting > running > first
-  useEffect(() => {
-    if (!runView || focusedStageId) return;
-    const next =
-      runView.stages.find((s) => s.status === 'awaiting_input')?.id ??
-      runView.stages.find((s) => s.status === 'running')?.id ??
-      runView.stages[0]?.id ??
-      null;
-    if (next) setFocusedStageId(next);
-  }, [runView, focusedStageId]);
-
-  // If focused stage disappears (retry sequence, etc.)
-  useEffect(() => {
-    if (!runView || !focusedStageId) return;
-    if (!runView.stages.some((s) => s.id === focusedStageId)) {
-      setFocusedStageId(runView.stages[0]?.id ?? null);
-    }
-  }, [runView, focusedStageId]);
-
+  // The store picks the initial focus (awaiting > running > first) and keeps
+  // it valid when a poll brings the stages in; the page only reads it.
   const focusedStage = useMemo(
     () => (runView && focusedStageId) ? (runView.stages.find((s) => s.id === focusedStageId) ?? null) : null,
     [runView, focusedStageId],
@@ -335,19 +349,34 @@ export function WorkflowRunPage() {
    *  disorienting. */
   const selectStage = useCallback((id: string) => {
     setFocusedStageId(id);
-  }, []);
+  }, [setFocusedStageId]);
 
+  // D-13: a refused command is toasted by the mutation (`useRunCommand`'s
+  // meta) with the server's reason; the promise settles either way.
+  const runCommandAsync = runCommand.mutateAsync;
   const sendCommand = useCallback((command: RunCommand) => {
     if (!runId) return Promise.resolve();
-    return runCommand.mutateAsync({ runId, command }).catch((e: unknown) => {
-      console.error(`Run command "${command.command}" failed:`, e);
-    });
-  }, [runId, runCommand]);
+    return runCommandAsync({ runId, command }).then(() => undefined, () => undefined);
+  }, [runId, runCommandAsync]);
 
   // Pause in `interrupt` mode: in-flight stages pause too, not just new launches.
   const handlePause = useCallback(() => { void sendCommand({ command: 'pause', mode: 'interrupt' }); }, [sendCommand]);
   const handleResume = useCallback(() => { void sendCommand({ command: 'resume' }); }, [sendCommand]);
-  const handleCancel = useCallback(() => { void sendCommand({ command: 'cancel' }); }, [sendCommand]);
+  const handleCancel = useCallback(() => {
+    void confirm({
+      title: 'Cancel this run?',
+      description: 'Every stage still running or waiting is cancelled. A cancelled run can only be re-run as a new run.',
+      confirmLabel: 'Cancel run',
+      cancelLabel: 'Keep running',
+      variant: 'destructive',
+    }).then((ok) => { if (ok) void sendCommand({ command: 'cancel' }); });
+  }, [confirm, sendCommand]);
+
+  const setRunMode = setRunPermissionMode.mutateAsync;
+  const handlePermissionModeChange = useCallback((mode: WorkflowRunPermissionMode) => {
+    if (!runId) return;
+    void setRunMode({ runId, mode }).then(() => setPermissionMode(mode), () => undefined);
+  }, [runId, setRunMode]);
 
   // A terminal run is never mutated: "Retry failed" forks a NEW run that
   // re-runs every instance that did not complete (completed ones are
@@ -355,66 +384,127 @@ export function WorkflowRunPage() {
   // Follow the user to the fork — staying on the ancestor looks inert.
   const forkAndOpen = useCallback((rerunFrom?: string[]) => {
     if (!runId) return;
+    // A refusal is toasted by the mutation (`useForkRun`'s meta).
     void forkRun.mutateAsync({ runId, request: rerunFrom ? { rerunFrom } : {} }).then(
       (fork) => {
         const defId = fork.workflowDefinitionId ?? definitionId;
         if (fork.id !== runId && defId) navigate(`/workflows/${defId}/runs/${fork.id}`);
       },
-      (e: unknown) => console.error('Fork failed:', e),
+      () => undefined,
     );
   }, [runId, forkRun, navigate, definitionId]);
   const handleRetry = useCallback(() => forkAndOpen(), [forkAndOpen]);
 
-  // Every gate answer is the `approve` command on the parked instance.
-  const handleApproveHitl = useCallback(async (stageId: string, followUp?: string) => {
-    await sendCommand({
-      command: 'approve',
-      instanceId: stageId,
-      outcome: 'approved',
-      ...(followUp ? { feedback: followUp } : {}),
-    });
-  }, [sendCommand]);
+  /** One verdict at a time per stage; its buttons stay disabled until it settles. */
+  const withGateBusy = useCallback(async (stageId: string, work: () => Promise<unknown>) => {
+    setGateBusyStage(stageId);
+    try {
+      await work();
+    } catch {
+      /* toasted by the mutation */
+    } finally {
+      setGateBusyStage((cur) => (cur === stageId ? null : cur));
+    }
+  }, []);
 
-  // R7 — a stage's permission / question / plan-review card answers its gate.
-  const handleResolveGate = useCallback(async (stageId: string, resolution: StageGateResolution) => {
-    await sendCommand({
-      command: 'approve',
-      instanceId: stageId,
-      outcome: resolution.outcome,
-      data: resolution.data,
-      ...(resolution.feedback ? { feedback: resolution.feedback } : {}),
-    });
-  }, [sendCommand]);
+  // The completion review is the `approve` command on the parked instance.
+  const handleApproveHitl = useCallback((stageId: string) => {
+    void withGateBusy(stageId, () => sendCommand({ command: 'approve', instanceId: stageId, outcome: 'approved' }));
+  }, [sendCommand, withGateBusy]);
 
-  const handleRejectHitl = useCallback(async (stageId: string, feedback?: string) => {
-    await sendCommand({
+  // A stage's permission / question / plan-review card answers its in-turn
+  // gate through the stage conversation API (the chat's body shapes).
+  const resolveGateAsync = resolveGate.mutateAsync;
+  const handleResolveGate = useCallback((stageId: string, resolution: StageGateResolution) => {
+    if (!runId) return;
+    const { interactionId, ...answer } = resolution;
+    void withGateBusy(stageId, () => resolveGateAsync({ runId, instanceId: stageId, interactionId, answer }));
+  }, [runId, resolveGateAsync, withGateBusy]);
+
+  const handleRejectHitl = useCallback((stageId: string, feedback?: string) => {
+    void withGateBusy(stageId, () => sendCommand({
       command: 'approve',
       instanceId: stageId,
       outcome: 'changes_requested',
       ...(feedback ? { feedback } : {}),
-    });
-  }, [sendCommand]);
+    }));
+  }, [sendCommand, withGateBusy]);
 
   /**
    * Terminal rejection: fails the stage so the DAG blocks every downstream
    * stage and the run stops. Distinct from "request changes", which loops.
    */
-  const handleTerminalRejectHitl = useCallback(async (stageId: string, reason?: string) => {
-    await sendCommand({
+  const handleTerminalRejectHitl = useCallback((stageId: string, reason?: string) => {
+    void withGateBusy(stageId, () => sendCommand({
       command: 'approve',
       instanceId: stageId,
       outcome: 'rejected',
       ...(reason ? { feedback: reason } : {}),
-    });
-  }, [sendCommand]);
+    }));
+  }, [sendCommand, withGateBusy]);
 
-  // A failed stage of a finished run re-runs from that stage in a fork.
-  const runIsTerminal =
-    runData?.status === 'failed' || runData?.status === 'cancelled' || runData?.status === 'completed';
+  // Re-running a stage of a finished run is a fork from that instance
+  // (its successors re-run too; everything else is memoized).
+  const stageRunsRef = useRef(runData?.stageRuns);
+  stageRunsRef.current = runData?.stageRuns;
   const handleRetryStage = useCallback((stageId: string) => {
-    const instancePath = runData?.stageRuns.find((sr) => sr.id === stageId)?.instancePath;
+    const instancePath = stageRunsRef.current?.find((sr) => sr.id === stageId)?.instancePath;
     if (instancePath) forkAndOpen([instancePath]);
-  }, [runData?.stageRuns, forkAndOpen]);
+  }, [forkAndOpen]);
+
+  const handleOpenInspector = useCallback((id: string) => {
+    setFocusedStageId(id);
+    setRightPaneOpen(true);
+    // Ask RightPane to switch to the Inspector tab so the user actually sees
+    // the stage's Output / Files / Timeline.
+    setBrowserTabFocusRequest({ type: 'inspector', token: Date.now() });
+  }, [setFocusedStageId, setRightPaneOpen]);
+
+  // The stage "…" menu (D-18): commands through the commands API; a stage
+  // cancel asks first.
+  const handleStageCommand = useCallback((stageId: string, command: RunCommand) => {
+    if (command.command !== 'cancel') {
+      void sendCommand(command);
+      return;
+    }
+    const name = stageRunsRef.current?.find((sr) => sr.id === stageId)?.name ?? 'this stage';
+    void confirm({
+      title: `Cancel ${name}?`,
+      description: 'The stage stops and ends cancelled; routing decides what the run does next.',
+      confirmLabel: 'Cancel stage',
+      cancelLabel: 'Keep it',
+      variant: 'destructive',
+    }).then((ok) => { if (ok) void sendCommand(command); });
+  }, [confirm, sendCommand]);
+
+  const handleCopyOutput = useCallback((stageId: string) => {
+    const sr = stageRunsRef.current?.find((s) => s.id === stageId);
+    const text = sr?.outputText ?? (sr?.outputData ? JSON.stringify(sr.outputData, null, 2) : '');
+    if (!text) return;
+    void navigator.clipboard.writeText(text).then(
+      () => toast({ variant: 'success', title: 'Output copied' }),
+      () => toast({ variant: 'error', title: 'Could not copy the output' }),
+    );
+  }, []);
+
+  const stageMenu = useMemo<StageMenuActions>(() => ({
+    runLive: !runIsTerminal,
+    onCommand: handleStageCommand,
+    onCopyOutput: handleCopyOutput,
+    onRerunFrom: handleRetryStage,
+  }), [runIsTerminal, handleStageCommand, handleCopyOutput, handleRetryStage]);
+
+  // D-22: the Inspector's Files are the focused stage's own changes, from
+  // its checkpoint to the next checkpoint of the run (or the workspace now).
+  const inspectorFiles = useStageFiles(runData?.workspaceId, focusedStage, rightPaneOpen);
+
+  // The focused stage's composer (a stage is a compact chat).
+  const focusedComposer = useMemo(
+    () => (runId && focusedStage && focusedStage.status !== 'skipped' && focusedStage.status !== 'cancelled'
+      ? <StageComposer runId={runId} stage={focusedStage} workspaceId={runData?.workspaceId} />
+      : null),
+    [runId, focusedStage, runData?.workspaceId],
+  );
 
   // ── Loading / error ─────────────────────────────────────────
 
@@ -446,37 +536,21 @@ export function WorkflowRunPage() {
 
   const awaitingCount = runView.stages.filter((s) => s.status === 'awaiting_input').length;
   /**
-   * The stage a review batch can be delivered to. A run only accepts
-   * feedback while a stage is parked in `awaiting_input` (HITL); at any other
-   * time comments are still recorded, but there is no live conversation to
-   * inject them into.
+   * The stage a review batch goes to: a stage parked on its completion
+   * review (the batch requests changes), else the focused stage when it can
+   * take a message (the stage conversation API: its next turn, an amendment
+   * of a completed stage, a retry of a paused one).
    */
-  const awaitingStageId =
-    runView.stages.find((s) => s.status === 'awaiting_input')?.id ?? null;
+  const conversable = (s: StageView) =>
+    ['starting', 'running', 'validating', 'completed', 'paused'].includes(s.rawStatus);
+  const reviewStageId =
+    runView.stages.find((s) => s.status === 'awaiting_input' && !!s.interrupt)?.id ??
+    (focusedStage && conversable(focusedStage) ? focusedStage.id : null);
   const parallelCount = runView.stages.filter((s) => (s.parallelWith?.length ?? 0) > 0 && s.status === 'running').length;
 
-  // Enrich focused stage with global workspace files if it has none of its own
-  // AND with the scratchpad's stage-output text (which lives on disk, not on
-  // the DB StageRun row). The scratchpad is keyed by `stageRunId` and
-  // `StageView.id === stageRun.id`.
-  const scratchpadForFocused = focusedStage && scratchpad
-    ? scratchpad.entries.find((e) => e.stageRunId === focusedStage.id)
-    : undefined;
-  const focusedStageEnriched = focusedStage ? {
-    ...focusedStage,
-    // If this stage has no artifactManifest, fall back to run-level workspace
-    // so the Files tab shows *something* useful when the SDK didn't emit
-    // per-stage manifests.
-    files: focusedStage.files ?? workspaceFilesFromRun(workspace),
-    outputText: typeof scratchpadForFocused?.output === 'string'
-      ? scratchpadForFocused.output
-      : undefined,
-    outputData: focusedStage.outputData ?? (
-      scratchpadForFocused && typeof scratchpadForFocused.output === 'object' && scratchpadForFocused.output !== null
-        ? (scratchpadForFocused.output as Record<string, unknown>)
-        : undefined
-    ),
-  } : null;
+  const focusedStageEnriched = focusedStage
+    ? { ...focusedStage, ...(inspectorFiles.files ? { files: inspectorFiles.files } : {}) }
+    : null;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -500,6 +574,8 @@ export function WorkflowRunPage() {
         onResume={handleResume}
         onCancel={handleCancel}
         onRetry={handleRetry}
+        onPermissionModeChange={handlePermissionModeChange}
+        permissionBusy={setRunPermissionMode.isPending}
         onOpenGraph={() => setGraphOpen((v) => !v)}
         graphOpen={graphOpen}
         pipelineOpen={pipelineOpen}
@@ -556,18 +632,13 @@ export function WorkflowRunPage() {
                 onRejectHitl={handleRejectHitl}
                 onTerminalRejectHitl={handleTerminalRejectHitl}
                 onResolveGate={handleResolveGate}
+                gateBusy={gateBusyStage === s.id}
+                menu={stageMenu}
+                composer={focusedStageId === s.id ? focusedComposer : undefined}
                 onRetry={runIsTerminal ? handleRetryStage : undefined}
                 onSelectFiles={selectStage}
                 onSelectOutput={selectStage}
-                onOpenInspector={(id) => {
-                  setFocusedStageId(id);
-                  setRightPaneOpen(true);
-                  // Ask RightPane to switch to the Inspector tab so the user
-                  // actually sees the stage's Output / Files / Timeline. Without
-                  // this, the pane stays on whatever tab was previously active
-                  // (usually Changes) and clicking Details appears to do nothing.
-                  setBrowserTabFocusRequest({ type: 'inspector', token: Date.now() });
-                }}
+                onOpenInspector={handleOpenInspector}
               />
             ))}
 
@@ -608,20 +679,19 @@ export function WorkflowRunPage() {
                     {...(runData.name ? { scmHint: runData.name } : {})}
                     enableReview
                     reviewScope={{ scope: 'run', scopeId: runId ?? '' }}
-                    // A run only accepts feedback while a stage is parked in
-                    // `awaiting_input`; otherwise comments are recorded but
-                    // there is nowhere to deliver them.
-                    {...(runId && awaitingStageId
+                    // A review batch goes to the stage parked on its review, or
+                    // to the focused stage as a message (W-55).
+                    {...(runId && reviewStageId
                       ? {
                           reviewTarget: {
                             kind: 'stage_followup' as const,
                             runId,
-                            stageId: awaitingStageId,
+                            stageId: reviewStageId,
                           },
                         }
                       : {
                           reviewDisabledReason:
-                            'Comments are saved. Sending requires a stage awaiting input.',
+                            'Comments are saved. Focus a running, paused or completed stage to send them to it.',
                         })}
                   />
                 ) : (
@@ -648,7 +718,7 @@ export function WorkflowRunPage() {
               label: 'Inspector',
               description: 'Per-stage files, output, hooks & tools',
               icon: <FileText className="h-3.5 w-3.5" />,
-              render: () => <RightInspector stage={focusedStageEnriched} runId={runId} />,
+              render: () => <RightInspector stage={focusedStageEnriched} runId={runId} filesNote={inspectorFiles.note} />,
             },
             browser: {
               label: 'Browser',
@@ -747,52 +817,58 @@ export function WorkflowRunPage() {
         </Modal>
       )}
 
-      {/* Run settings dialog removed — permission mode is always
-          bypassPermissions and the per-stage `approval` setting drives
-          the only HITL flow that remains. */}
+      {confirmDialog}
     </div>
   );
 }
 
-/** Map a run workspace listing → generic FileChange rows so the inspector
- *  can show something useful when a stage doesn't ship its own manifest.
- *  Filters out generated / vendored noise (node_modules, .git, dist, build,
- *  stream logs) so the file list stays a curated view of what the run
- *  actually produced. */
-function workspaceFilesFromRun(workspace: RunWorkspaceInfo | undefined): FileChange[] | undefined {
-  if (!workspace) return undefined;
-  const isNoise = (p: string) => {
-    const norm = p.replace(/\\/g, '/');
-    return (
-      /(^|\/)node_modules\//.test(norm) ||
-      /(^|\/)\.git\//.test(norm) ||
-      /(^|\/)(dist|build|coverage|\.next|\.turbo|\.cache)\//.test(norm) ||
-      // Legacy fabricated files from pre-fix runs — kept out of the file list
-      // so they don't pollute the Inspector view.
-      /(^|\/)extracted\//.test(norm) ||
-      /\.workspace\.json$/.test(norm)
-    );
+/**
+ * The focused stage's own file changes (D-22): its "before" checkpoint to
+ * the next checkpoint of another stage (the state it left behind), or to
+ * the workspace now when nothing ran after it. Fetched only while the pane
+ * is open.
+ */
+function useStageFiles(
+  workspaceId: string | undefined,
+  stage: StageView | null,
+  paneOpen: boolean,
+): { files?: FileChange[]; note?: string } {
+  const enabled = paneOpen && !!workspaceId && !!stage;
+  const { data: cps } = useWorkspaceCheckpoints(workspaceId, {}, enabled);
+  const own = useMemo(() => {
+    if (!stage || !cps) return undefined;
+    const mine = cps.checkpoints
+      .filter((c) => c.stageRunId === stage.id && c.phase !== 'after')
+      .sort((a, b) => a.seq - b.seq)[0];
+    if (!mine) return null;
+    const next = cps.checkpoints
+      .filter((c) => c.repoAlias === mine.repoAlias && c.seq > mine.seq && c.stageRunId && c.stageRunId !== stage.id)
+      .sort((a, b) => a.seq - b.seq)[0];
+    return { base: `stage:${stage.id}`, head: next ? `checkpoint:${next.id}` : 'working', toNext: !!next };
+  }, [stage, cps]);
+  const { data: summary } = useWorkspaceChangeSummary(
+    workspaceId,
+    own ? { base: own.base, head: own.head } : {},
+    enabled && !!own,
+  );
+  if (!stage) return {};
+  if (own === null) {
+    return { files: [], note: 'This stage has no checkpoint: it cannot change files, or it has not started.' };
+  }
+  if (!own || !summary) return {};
+  const multi = summary.repos.length > 1;
+  const files: FileChange[] = summary.repos.flatMap((r) =>
+    r.files.map((f) => ({
+      path: multi && r.alias !== '.' ? `${r.alias}/${f.path}` : f.path,
+      kind: f.status,
+      source: 'workspace' as const,
+    })),
+  );
+  const parallel = (stage.parallelWith?.length ?? 0) > 0 ? ' Stages that ran alongside it are included.' : '';
+  return {
+    files,
+    note: `Changed from this stage’s checkpoint to ${own.toNext ? 'the next stage’s' : 'the workspace now'}.${parallel}`,
   };
-  const seen = new Set<string>();
-  const out: FileChange[] = [];
-  for (const p of workspace.workspaceFiles ?? []) {
-    if (seen.has(p) || isNoise(p)) continue;
-    seen.add(p);
-    out.push({ path: p, kind: 'added', source: 'workspace' });
-  }
-  for (const p of workspace.artifactFiles ?? []) {
-    if (seen.has(p) || isNoise(p)) continue;
-    seen.add(p);
-    out.push({ path: p, kind: 'added', source: 'artifacts' });
-  }
-  // Sort by depth (shallow first) then alpha for a stable, readable listing.
-  out.sort((a, b) => {
-    const da = a.path.split(/[\\/]/).length;
-    const db = b.path.split(/[\\/]/).length;
-    if (da !== db) return da - db;
-    return a.path.localeCompare(b.path);
-  });
-  return out.length > 0 ? out : undefined;
 }
 
 export default WorkflowRunPage;

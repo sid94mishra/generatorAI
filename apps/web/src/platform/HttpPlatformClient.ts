@@ -275,7 +275,6 @@ import type {
   OrchestratorContext,
   RunWorkspaceInfo,
   RunUploadResult,
-  RunScratchpad,
   Automation,
   AutomationWithExecutions,
   AutomationExecution,
@@ -1180,15 +1179,6 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  /**
-   * Read the on-disk scratchpad for a run. This is where each stage's
-   * full output text (or structured JSON) is aggregated, keyed by
-   * `stageRunId`. Returns `{ entries: [] }` for runs that haven't
-   * written any output yet.
-   */
-  async getRunScratchpad(runId: string): Promise<RunScratchpad> {
-    return apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/scratchpad`);
-  }
 
   // ── Copilot-specific API calls (not in IPlatformClient but useful for web) ──
 
