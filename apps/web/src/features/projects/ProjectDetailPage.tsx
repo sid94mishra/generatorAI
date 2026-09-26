@@ -10,9 +10,8 @@
 // 1,389-line legacy page is split one file per tab).
 // ────────────────────────────────────────────────────────────────
 
-import { useState } from 'react';
 import { Link as RouterLink, useNavigate, useParams } from 'react-router';
-import { CreateChatDialog } from '@/components/chat/CreateChatDialog.js';
+import { useNewChatStore } from '@/stores/newChatStore.js';
 import { useAttention } from '@/hooks/attentionQueries.js';
 import { useDeleteProject, useProject, useUpdateProject } from '@/hooks/projectQueries.js';
 import { usePageTitle } from '@/hooks/usePageTitle.js';
@@ -64,7 +63,7 @@ export function ProjectDetailPage() {
   const updateProject = useUpdateProject();
   const deleteProject = useDeleteProject();
   const confirmer = useConfirm();
-  const [newChatOpen, setNewChatOpen] = useState(false);
+  const openNewChat = useNewChatStore((s) => s.open);
   usePageTitle(project?.name);
 
   if (!id) return null;
@@ -116,7 +115,7 @@ export function ProjectDetailPage() {
       content = <CodebasesTab projectId={id} codebases={codebases.data} isLoading={codebases.isLoading} error={codebases.error} />;
       break;
     case 'chats':
-      content = <ChatsTab projectId={id} projectName={project.name} onNewChat={() => setNewChatOpen(true)} />;
+      content = <ChatsTab projectId={id} projectName={project.name} onNewChat={() => openNewChat({ projectId: id })} />;
       break;
     case 'runs':
       content = <RunsTab projectId={id} />;
@@ -141,7 +140,7 @@ export function ProjectDetailPage() {
             status={archived ? <Badge tone="neutral">Archived</Badge> : undefined}
             actions={
               <>
-                <Button icon="chats" onClick={() => setNewChatOpen(true)}>
+                <Button icon="chats" onClick={() => openNewChat({ projectId: id })}>
                   New chat
                 </Button>
                 <MenuButton
@@ -214,7 +213,6 @@ export function ProjectDetailPage() {
         }
         content={content}
       />
-      <CreateChatDialog open={newChatOpen} onOpenChange={setNewChatOpen} projectId={id} />
       {confirmer.dialog}
     </>
   );

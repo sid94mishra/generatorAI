@@ -11,7 +11,7 @@
 import { useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
 import type { Project } from '@generatorai/shared';
-import { CreateChatDialog } from '@/components/chat/CreateChatDialog.js';
+import { useNewChatStore } from '@/stores/newChatStore.js';
 import { useDeleteProject, useProjects, useUpdateProject } from '@/hooks/projectQueries.js';
 import { copyTextToClipboard } from '@/utils/copyToClipboard.js';
 import { formatRelativeTime } from '@/utils/formatRelativeTime.js';
@@ -55,7 +55,7 @@ export function ProjectsListPage() {
   const [search, setSearch] = useState('');
   const [scope, setScope] = useState<Scope>('active');
   const [view, setView] = useState<ViewMode>(readView);
-  const [newChatProjectId, setNewChatProjectId] = useState<string | null>(null);
+  const openNewChat = useNewChatStore((s) => s.open);
 
   const setViewMode = (next: ViewMode) => {
     setView(next);
@@ -81,7 +81,7 @@ export function ProjectsListPage() {
 
   const actions: ProjectRowActions = {
     onOpen: (p) => navigate(`/projects/${p.id}`),
-    onNewChat: (p) => setNewChatProjectId(p.id),
+    onNewChat: (p) => openNewChat({ projectId: p.id }),
     onAddCodebase: (p) => navigate(`/projects/${p.id}/codebases?add=1`),
     onCopyRootPath: (p) => {
       copyTextToClipboard(p.rootPath).catch((err: unknown) => toast.error("Couldn't copy the root path", { description: String(err) }));
@@ -233,13 +233,6 @@ export function ProjectsListPage() {
           )
         }
         footer={rows.length > 0 ? 'Sorted by last update. Archived projects keep their codebases and worktrees until deleted.' : undefined}
-      />
-      <CreateChatDialog
-        open={newChatProjectId !== null}
-        onOpenChange={(open) => {
-          if (!open) setNewChatProjectId(null);
-        }}
-        projectId={newChatProjectId ?? undefined}
       />
       {confirmer.dialog}
     </>
