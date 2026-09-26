@@ -27,6 +27,7 @@
 
 import type { ComponentProps, ReactNode } from 'react';
 import { cn } from '../../lib/cn.js';
+import { focusRing } from '../../lib/focus.js';
 import { workspaceMainMaxWidth, workspaceNarrowPadding } from '../../lib/popup.js';
 import { SplitPane } from '../../patterns/SplitPane/SplitPane.js';
 
@@ -66,8 +67,13 @@ export function Workspace({
   const mainColumn = (
     <div className={cn('flex min-h-0 flex-1 flex-col', narrow && !dockClosed && workspaceNarrowPadding)}>
       <div
+        // The transcript scrolls independently of the page; tabIndex keeps a keyboard user able
+        // to reach it directly (axe scrollable-region-focusable — real content overflows here,
+        // e.g. narrow mode's extra right padding wraps the transcript onto more lines).
+        tabIndex={0}
         className={cn(
-          'flex min-h-0 flex-1 flex-col gap-4.5 overflow-y-auto px-7 pt-5',
+          'flex min-h-0 flex-1 flex-col gap-4.5 overflow-y-auto px-7 pt-5 -outline-offset-2',
+          focusRing,
           dockClosed && cn('mx-auto w-full', workspaceMainMaxWidth),
         )}
       >

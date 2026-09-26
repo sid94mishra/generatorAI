@@ -2,11 +2,11 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent, within } from 'storybook/test';
 import { SplitPane } from './SplitPane.js';
 
-// Demo frame height (a fixed value, not a design token — arbitrary story
-// scaffolding); kept as a named constant, not a literal in `style={{}}`, so
-// the design-system ratchet's `literalInlineStyle` ("computed geometry only")
-// check does not treat it as a hard-coded style value.
-const DEMO_FRAME_HEIGHT = 400;
+// Fixed-pixel demo frame (arbitrary story scaffolding, D-45) — matches
+// ListPage.stories.tsx's FRAME_1440 convention: Storybook's preview root
+// does not reliably stretch a `w-full` child to the viewport, so demo
+// containers here use an explicit box instead.
+const FRAME = 'h-[400px] w-[900px]';
 
 const meta = {
   component: SplitPane,
@@ -19,7 +19,7 @@ type Story = StoryObj<typeof meta>;
 
 function Demo(props: { collapsed?: boolean }) {
   return (
-    <div className="w-full border border-line-soft" style={{ height: DEMO_FRAME_HEIGHT }}>
+    <div className={`${FRAME} flex border border-line-soft`}>
       <SplitPane id="storybook-split" defaultSize={320} minSize={200} maxSize="70%" collapsed={props.collapsed}>
         <div className="flex h-full items-center justify-center bg-surface text-ui text-fg-2">Main</div>
         <div className="flex h-full items-center justify-center bg-raised text-ui text-fg-2">Side (dock)</div>
@@ -58,7 +58,7 @@ export const KeyboardResize: Story = {
 /** Vertical orientation (stacked main/side). */
 export const Vertical: Story = {
   render: () => (
-    <div className="w-full border border-line-soft" style={{ height: DEMO_FRAME_HEIGHT }}>
+    <div className={`${FRAME} flex border border-line-soft`}>
       <SplitPane id="storybook-split-v" orientation="vertical" defaultSize={120} minSize={60}>
         <div className="flex h-full items-center justify-center bg-surface text-ui text-fg-2">Main</div>
         <div className="flex h-full items-center justify-center bg-raised text-ui text-fg-2">Side</div>

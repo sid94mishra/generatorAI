@@ -69,7 +69,17 @@ export function SplitPane({
   const [sidePanel, setSidePanel] = usePanelCallbackRef();
   const wasCollapsed = useRef(collapsed);
 
-  const { defaultLayout, onLayoutChanged } = useDefaultLayout({ id, panelIds: ['main', 'side'] });
+  // `onlySaveAfterUserInteractions`: without it, ANY layout computation gets persisted —
+  // including a transient one measured before the container has its final size (a flex
+  // ancestor still settling, a route transition). That would silently corrupt the saved
+  // split ratio to something degenerate (found via a Storybook demo: an early 0-width
+  // render saved `{main:100,side:0}`, which then pinned the side pane to 0 forever).
+  // Only a real drag or arrow-key resize should be remembered.
+  const { defaultLayout, onLayoutChanged } = useDefaultLayout({
+    id,
+    panelIds: ['main', 'side'],
+    onlySaveAfterUserInteractions: true,
+  });
 
   useEffect(() => {
     if (collapsed === wasCollapsed.current) return;
