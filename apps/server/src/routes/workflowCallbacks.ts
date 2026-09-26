@@ -71,6 +71,15 @@ function clientAddress(req: { socket: { remoteAddress?: string | undefined }; he
   return forwarded ? `fwd:${forwarded}` : peer;
 }
 
+/**
+ * The idempotency key of a delivery that brings none: per wait and data, so
+ * a retried POST replays but a second wait on the same event key still gets
+ * its own delivery (MAPWAIT-R4).
+ */
+export function defaultDeliveryKey(instanceId: string, data: unknown): string {
+  return `callback:${instanceId}:${createHash('sha256').update(canonicalJson(data)).digest('hex').slice(0, 32)}`;
+}
+
 export function createWorkflowCallbackRoutes(container: Container): Router {
   const router = Router();
   const { workflowCallbacks, workflowRunService, stageRunRepo, logger } = container;
@@ -114,7 +123,7 @@ export function createWorkflowCallbackRoutes(container: Container): Router {
       const header = req.header('idempotency-key')?.trim();
       const idempotencyKey =
         parsed.data.idempotencyKey ??
-        (header && header.length <= 200 ? header : `callback:${parts.instanceId}:${createHash('sha256').update(canonicalJson(data)).digest('hex').slice(0, 32)}`);
+        (header && header.length <= 200 ? header : defaultDeliveryKey(parts.instanceId, data));
       const r = await workflowRunService.command(parts.runId, { command: 'deliver_event', eventKey: wait.eventKey, idempotencyKey, data }, { actor: 'callback' });
       if (!r.ok) {
         const status = r.code === 'version_conflict' ? 409 : r.code === 'not_found' ? 404 : r.code === 'engine_unavailable' ? 503 : 409;
