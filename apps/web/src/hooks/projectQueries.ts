@@ -17,6 +17,7 @@ import type {
   McpServerEntry,
   SystemConfig,
   FileEntry,
+  ProjectArtifactPrefs,
 } from '@generatorai/shared';
 
 // ── Query Keys ──
@@ -41,6 +42,8 @@ export const projectKeys = {
   systemMcpServers: ['system-mcp-servers'] as const,
   // G-16 — codebase clone/fetch logs.
   codebaseLogs: (projectId: string, codebaseId: string) => ['codebase-logs', projectId, codebaseId] as const,
+  // G-19 — per-project artifact enable/disable.
+  artifactPrefs: (projectId: string) => ['project-artifact-prefs', projectId] as const,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -397,6 +400,31 @@ export function useCodebaseLogs(
     queryFn: () => platform.getCodebaseLogs(projectId!, codebaseId!, { limit: options?.limit }),
     enabled: !!projectId && !!codebaseId,
     refetchInterval: options?.isLive ? 2_000 : false,
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// Per-project artifact customization (G-19)
+// ════════════════════════════════════════════════════════════════
+
+export function useProjectArtifactPrefs(projectId: string | undefined) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: projectKeys.artifactPrefs(projectId ?? ''),
+    queryFn: () => platform.getProjectArtifactPrefs(projectId!),
+    enabled: !!projectId,
+  });
+}
+
+export function useUpdateProjectArtifactPrefs() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ projectId, prefs }: { projectId: string; prefs: ProjectArtifactPrefs }) =>
+      platform.updateProjectArtifactPrefs(projectId, prefs),
+    onSuccess: (data, vars) => {
+      queryClient.setQueryData(projectKeys.artifactPrefs(vars.projectId), data);
+    },
   });
 }
 

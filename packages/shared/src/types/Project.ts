@@ -55,6 +55,26 @@ export interface ProjectSettings {
   worktreeRetention?: WorktreeRetentionPolicy;
   autoFetchInterval?: number;
   harnessConfig?: Partial<HarnessConfig>;
+  /**
+   * G-19 — per-project artifact enable/disable, server-side. Stored inline
+   * on the project's existing JSON `settings` column: no migration, same
+   * precedent as G-13 (`05-gap-matrix.md` §G-19). Replaces the device-local
+   * `projectCatalogPrefsStore.ts` once the ProjectCustomization page (P5)
+   * reads/writes this instead.
+   */
+  disabledArtifacts?: ProjectArtifactPrefEntry[];
+}
+
+// ── Per-project artifact customization (G-19) ──
+
+export interface ProjectArtifactPrefEntry {
+  type: ConfigType;
+  id: string;
+}
+
+/** `GET`/`PUT /projects/:id/artifact-prefs`. */
+export interface ProjectArtifactPrefs {
+  disabled: ProjectArtifactPrefEntry[];
 }
 
 export type WorktreeRetentionPolicy = 'immediate' | 'hours-24' | 'hours-72' | 'manual';

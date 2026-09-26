@@ -1244,6 +1244,20 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // doc) — without this a project MCP server's file never resolved and
       // the server was silently dropped from the catalog.
       resolveProjectConfigPath: (c) => path.join(projectService.getProjectConfigTypeDir(c.projectId, c.type), c.filePath),
+      // G-19 — per-project artifact enable/disable, stored on the project's
+      // existing JSON `settings` column (no migration, D-58 §G-13 precedent).
+      getDisabledArtifactIds: async (projectId, type) => {
+        try {
+          const project = await projectService.getProject(projectId);
+          return new Set(
+            (project.settings.disabledArtifacts ?? [])
+              .filter((d) => d.type === type)
+              .map((d) => d.id),
+          );
+        } catch {
+          return new Set();
+        }
+      },
     },
   );
   const agentRepo = new DrizzleAgentRepository(db);

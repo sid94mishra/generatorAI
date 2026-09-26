@@ -2496,6 +2496,79 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
     },
 
+    // ── Per-project artifact customization (G-19) ──
+
+    '/api/projects/{id}/artifact-prefs': {
+      get: {
+        tags: ['Projects'],
+        summary: 'Per-project skill/prompt/agent/MCP enable-disable (G-19)',
+        description:
+          'Stored inline on the project\'s existing JSON `settings` column — no migration. Applied by ' +
+          '`ArtifactCatalog` when resolving skills/MCP servers for a chat or stage in this project, and by ' +
+          '`GET .../available-artifacts` for skill/prompt/agent pickers.',
+        parameters: [idParam],
+        responses: {
+          '200': {
+            description: 'Disabled artifact ids',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    disabled: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          type: { type: 'string', enum: ['skill', 'prompt', 'agent', 'mcp'] },
+                          id: { type: 'string' },
+                        },
+                        required: ['type', 'id'],
+                      },
+                    },
+                  },
+                  required: ['disabled'],
+                },
+              },
+            },
+          },
+        },
+      },
+      put: {
+        tags: ['Projects'],
+        summary: 'Replace the disabled set (G-19)',
+        parameters: [idParam],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  disabled: {
+                    type: 'array',
+                    items: {
+                      type: 'object',
+                      properties: {
+                        type: { type: 'string', enum: ['skill', 'prompt', 'agent', 'mcp'] },
+                        id: { type: 'string' },
+                      },
+                      required: ['type', 'id'],
+                    },
+                  },
+                },
+                required: ['disabled'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': { description: 'The saved set', content: { 'application/json': { schema: { type: 'object' } } } },
+          '400': { description: 'Malformed entry', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
     // ── Source control: pull requests under a project (doc §6) ──
 
     '/api/projects/{id}/pull-requests': {

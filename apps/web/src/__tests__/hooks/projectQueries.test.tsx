@@ -20,6 +20,8 @@ import {
   useCodebaseWorktreesUsage,
   useCodebaseLogs,
   useFetchCodebase,
+  useProjectArtifactPrefs,
+  useUpdateProjectArtifactPrefs,
 } from '@/hooks/projectQueries.js';
 
 const PROJECT: Project = {
@@ -47,6 +49,8 @@ function setup() {
     listCodebaseWorktrees: vi.fn().mockResolvedValue([]),
     getCodebaseLogs: vi.fn().mockResolvedValue({ lines: [] }),
     fetchCodebase: vi.fn().mockResolvedValue({ jobId: 'job-1' }),
+    getProjectArtifactPrefs: vi.fn().mockResolvedValue({ disabled: [] }),
+    updateProjectArtifactPrefs: vi.fn().mockResolvedValue({ disabled: [{ type: 'skill', id: 's1' }] }),
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -143,5 +147,29 @@ describe('useFetchCodebase (G-16)', () => {
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(platform.fetchCodebase).toHaveBeenCalledWith('proj-1', 'cb-1');
     expect(result.current.data).toEqual({ jobId: 'job-1' });
+  });
+});
+
+describe('useProjectArtifactPrefs / useUpdateProjectArtifactPrefs (G-19)', () => {
+  it('fetches the prefs for a project', async () => {
+    const { platform, wrapper } = setup();
+    const { result } = renderHook(() => useProjectArtifactPrefs('proj-1'), { wrapper });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(platform.getProjectArtifactPrefs).toHaveBeenCalledWith('proj-1');
+    expect(result.current.data).toEqual({ disabled: [] });
+  });
+
+  it('is disabled without a projectId', () => {
+    const { platform, wrapper } = setup();
+    renderHook(() => useProjectArtifactPrefs(undefined), { wrapper });
+    expect(platform.getProjectArtifactPrefs).not.toHaveBeenCalled();
+  });
+
+  it('the mutation writes the response into the query cache', async () => {
+    const { platform, wrapper } = setup();
+    const { result } = renderHook(() => useUpdateProjectArtifactPrefs(), { wrapper });
+    result.current.mutate({ projectId: 'proj-1', prefs: { disabled: [{ type: 'skill', id: 's1' }] } });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(platform.updateProjectArtifactPrefs).toHaveBeenCalledWith('proj-1', { disabled: [{ type: 'skill', id: 's1' }] });
   });
 });

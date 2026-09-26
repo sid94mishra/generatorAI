@@ -317,6 +317,7 @@ import type {
   WorktreeInfo,
   WorktreeListEnriched,
   ProjectSettings,
+  ProjectArtifactPrefs,
   CodebaseType,
   CodebaseSettings,
   CodebaseLogsResponse,
@@ -2131,6 +2132,19 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async deleteProject(id: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/projects/${id}?force=true`, { method: 'DELETE' });
+  }
+
+  /** G-19 — per-project skill/prompt/agent/MCP enable-disable, server-side. */
+  async getProjectArtifactPrefs(projectId: string): Promise<ProjectArtifactPrefs> {
+    return apiFetch<ProjectArtifactPrefs>(`${this.baseUrl}/api/projects/${projectId}/artifact-prefs`);
+  }
+
+  async updateProjectArtifactPrefs(projectId: string, prefs: ProjectArtifactPrefs): Promise<ProjectArtifactPrefs> {
+    return apiFetch<ProjectArtifactPrefs>(`${this.baseUrl}/api/projects/${projectId}/artifact-prefs`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(prefs),
+    });
   }
 
   // ── Project Codebase API ──

@@ -20,6 +20,9 @@ import type {
   PullRequestRef,
 } from '@generatorai/core';
 import type {
+  ConfigType,
+  ProjectArtifactPrefEntry,
+  ProjectArtifactPrefs,
   ProjectCodebase,
   ProjectPullRequest,
   ProjectRunListItem,
@@ -66,6 +69,20 @@ export function createProjectRoutes(container: Container): Router {
   } = container;
 
   const mcpVault = new McpCredentialVault(security.secretStore);
+
+  /**
+   * G-19 — the project's disabled-artifact prefs, as a `${type}:${id}` set.
+   * Stored on the project's existing JSON `settings` column (no migration,
+   * G-13 precedent). A deleted project reads as "nothing disabled".
+   */
+  async function getDisabledArtifactIds(projectId: string): Promise<Set<string>> {
+    try {
+      const project = await projectService.getProject(projectId);
+      return new Set((project.settings.disabledArtifacts ?? []).map((d) => `${d.type}:${d.id}`));
+    } catch {
+      return new Set();
+    }
+  }
 
   // G-13 — `?include=summary` on GET /projects and GET /projects/:id.
   const wantsSummary = (req: { query: Record<string, unknown> }): boolean =>
@@ -597,7 +614,58 @@ export function createProjectRoutes(container: Container): Router {
       const configType = type && validTypes.includes(type) ? type as 'agent' | 'prompt' | 'skill' : undefined;
       const projectConfigs = await projectConfigService.listConfigs(projectId, configType);
       const merged = await systemArtifactService.getAvailableArtifacts(projectConfigs, configType);
-      res.json(merged);
+      // G-19 — a project-disabled entry is hidden from pickers, same as it
+      // is from `ArtifactCatalog` (skills/MCP). 'mcp' is not one of this
+      // route's types, so filtering only needs 'agent' | 'prompt' | 'skill'.
+      const disabled = await getDisabledArtifactIds(projectId);
+      const visible = disabled.size ? merged.filter((a) => !disabled.has(`${a.type}:${a.id}`)) : merged;
+      res.json(visible);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  const ARTIFACT_PREF_TYPES: readonly ConfigType[] = ['skill', 'prompt', 'agent', 'mcp'];
+
+  // GET /projects/:id/artifact-prefs — Per-project artifact enable/disable (G-19).
+  router.get('/:id/artifact-prefs', async (req, res, next) => {
+    try {
+      const project = await projectService.getProject(String(req.params['id']));
+      const body: ProjectArtifactPrefs = { disabled: project.settings.disabledArtifacts ?? [] };
+      res.json(body);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // PUT /projects/:id/artifact-prefs — Replace the disabled set (G-19).
+  router.put('/:id/artifact-prefs', async (req, res, next) => {
+    try {
+      const raw = req.body?.disabled;
+      if (!Array.isArray(raw)) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: '`disabled` must be an array' } });
+        return;
+      }
+      const disabled: ProjectArtifactPrefEntry[] = [];
+      for (const entry of raw) {
+        const type = entry?.type;
+        const id = entry?.id;
+        if (typeof id !== 'string' || !id || !ARTIFACT_PREF_TYPES.includes(type)) {
+          res.status(400).json({
+            error: {
+              code: 'VALIDATION_ERROR',
+              message: `Each entry needs a non-empty \`id\` and \`type\` in ${ARTIFACT_PREF_TYPES.join('|')}`,
+            },
+          });
+          return;
+        }
+        disabled.push({ type, id });
+      }
+      const updated = await projectService.updateProject(String(req.params['id']), {
+        settings: { disabledArtifacts: disabled },
+      });
+      const body: ProjectArtifactPrefs = { disabled: updated.settings.disabledArtifacts ?? [] };
+      res.json(body);
     } catch (err) {
       next(err);
     }

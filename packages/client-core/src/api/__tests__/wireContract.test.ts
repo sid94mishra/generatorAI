@@ -739,3 +739,22 @@ describe('G-17 worktree enrichment wire contract', () => {
     expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/worktrees?include=usage,link');
   });
 });
+
+describe('G-19 per-project artifact prefs wire contract', () => {
+  it('GETs the prefs route', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.artifactPrefs.get('p1');
+    expect(calls[0]?.path).toBe('/api/projects/p1/artifact-prefs');
+    expect(calls[0]?.method).toBe('GET');
+  });
+
+  it('PUTs `disabled` verbatim, which is what the route reads', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.artifactPrefs.update('p1', {
+      disabled: [{ type: 'skill', id: 's1' }],
+    });
+    expect(calls[0]?.path).toBe('/api/projects/p1/artifact-prefs');
+    expect(calls[0]?.method).toBe('PUT');
+    expect(calls[0]?.body).toEqual({ disabled: [{ type: 'skill', id: 's1' }] });
+  });
+});

@@ -31,6 +31,7 @@ import {
   type FetchCodebaseResult,
   type WorktreeInfo,
   type WorktreeListEnriched,
+  type ProjectArtifactPrefs,
 } from '@generatorai/shared';
 
 export interface ApiFetch {
@@ -1625,6 +1626,13 @@ export function createApiClient(fetchImpl: ApiFetch) {
           fetchImpl,
           `/api/projects/${id}/codebases/${codebaseId}/worktrees${suffix}`,
         );
+      },
+
+      /** G-19 — per-project skill/prompt/agent/MCP enable-disable, server-side. */
+      artifactPrefs: {
+        get: (id: string) => request<ProjectArtifactPrefs>(fetchImpl, `/api/projects/${id}/artifact-prefs`),
+        update: (id: string, prefs: ProjectArtifactPrefs) =>
+          request<ProjectArtifactPrefs>(fetchImpl, `/api/projects/${id}/artifact-prefs`, jsonWith('PUT', prefs)),
       },
     },
 

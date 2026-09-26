@@ -292,6 +292,9 @@ export type {
   WorktreeLink,
   WorktreeListItem,
   WorktreeListEnriched,
+  // G-19 — per-project artifact customization
+  ProjectArtifactPrefEntry,
+  ProjectArtifactPrefs,
 } from './Project.js';
 
 // ── MCP servers (config forwarding, credentials, startup status) ──
