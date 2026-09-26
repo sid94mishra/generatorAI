@@ -52,7 +52,7 @@ export { DrizzleWorkspaceFileReviewRepository } from './repositories/WorkspaceFi
 export { DrizzleChatRepository } from './repositories/ChatRepository.js';
 export { DrizzleAgentRepository } from './repositories/AgentRepository.js';
 export { SqliteWorkflowDefinitionStore } from './repositories/WorkflowDefinitionStore.js';
-export { DrizzleWorkflowRunRepository } from './repositories/WorkflowRunRepository.js';
+export { DrizzleWorkflowRunRepository, type WorkflowRunSearch } from './repositories/WorkflowRunRepository.js';
 export { DrizzleStageRunRepository } from './repositories/StageRunRepository.js';
 
 // Engine v2 (P03 WP-3.1): CAS, run-side repositories, RunStore

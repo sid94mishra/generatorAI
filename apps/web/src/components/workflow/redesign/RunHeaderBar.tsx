@@ -11,11 +11,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   Pause, Play, Square, RefreshCw, Hand, Zap, CheckCircle2, AlertTriangle, Clock,
-  Network, ChevronDown, GitBranch, FolderOpen,
+  Network, ChevronDown, GitBranch, FolderOpen, Gauge,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button, Select, Spinner } from '@/components/ui/index.js';
-import type { WorkflowRunPermissionMode } from '@generatorai/shared';
+import type { RunUsage, WorkflowRunPermissionMode } from '@generatorai/shared';
 import type { RunView } from './types.js';
 import { runTitle } from '@generatorai/client-core';
 
@@ -46,6 +46,12 @@ interface RunHeaderBarProps {
   filesOpen?: boolean;
   /** Change the run's permission mode (omit to show it read-only). */
   onPermissionModeChange?: (mode: WorkflowRunPermissionMode) => void;
+  /** The run's rolled-up usage (P07 WP-7.3); `costUsd` only when a provider reported it. */
+  usage?: RunUsage;
+  /** The run's effective budget (`maxTurns`, `maxTokens`, `maxWallClockMs`, `maxCostUsd`). */
+  budget?: Record<string, unknown>;
+  /** Why the run is in its status (`budget_exhausted`, …). */
+  statusReason?: string;
   /** A permission-mode change is in flight. */
   permissionBusy?: boolean;
 }
@@ -69,6 +75,66 @@ function formatDuration(ms: number): string {
   if (m < 60) return `${m}m ${rs.toString().padStart(2, '0')}s`;
   const h = Math.floor(m / 60);
   return `${h}h ${(m % 60).toString().padStart(2, '0')}m`;
+}
+
+/** A count for the header: 950, 12.3k, 1.2M. */
+export function compactCount(n: number): string {
+  if (n < 1000) return String(Math.round(n));
+  if (n < 1_000_000) return `${(n / 1000).toFixed(n < 10_000 ? 1 : 0)}k`;
+  return `${(n / 1_000_000).toFixed(1)}M`;
+}
+
+/** A dollar amount as a provider reported it (never estimated: there is no pricing table). */
+export function formatUsd(n: number): string {
+  return `$${n < 1 ? n.toFixed(3) : n.toFixed(2)}`;
+}
+
+function limitOf(budget: Record<string, unknown> | undefined, key: string): number | undefined {
+  const v = budget?.[key];
+  return typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+}
+
+/**
+ * Usage against the run budget (WP-7.3): turns, tokens and wall clock, each
+ * "used / limit" when the budget sets one. Dollars appear only when a
+ * provider reported cost; otherwise the tokens are the spend.
+ */
+function BudgetCluster({ usage, budget, elapsedMs }: { usage?: RunUsage; budget?: Record<string, unknown>; elapsedMs: number }) {
+  const turns = usage?.turns ?? 0;
+  const tokens = (usage?.inputTokens ?? 0) + (usage?.outputTokens ?? 0);
+  const maxTurns = limitOf(budget, 'maxTurns');
+  const maxTokens = limitOf(budget, 'maxTokens');
+  const maxWall = limitOf(budget, 'maxWallClockMs');
+  const maxCost = limitOf(budget, 'maxCostUsd');
+  const cost = typeof usage?.costUsd === 'number' ? usage.costUsd : undefined;
+  const items: Array<{ key: string; label: string; used: string; limit?: string; over: boolean }> = [
+    { key: 'turns', label: 'Turns', used: String(turns), ...(maxTurns !== undefined ? { limit: String(maxTurns) } : {}), over: maxTurns !== undefined && turns >= maxTurns },
+    { key: 'tokens', label: 'Tokens', used: compactCount(tokens), ...(maxTokens !== undefined ? { limit: compactCount(maxTokens) } : {}), over: maxTokens !== undefined && tokens >= maxTokens },
+    ...(maxWall !== undefined
+      ? [{ key: 'wall', label: 'Wall clock', used: formatDuration(elapsedMs), limit: formatDuration(maxWall), over: elapsedMs >= maxWall }]
+      : []),
+    ...(cost !== undefined
+      ? [{ key: 'cost', label: 'Cost (reported by the provider)', used: formatUsd(cost), ...(maxCost !== undefined ? { limit: formatUsd(maxCost) } : {}), over: maxCost !== undefined && cost >= maxCost }]
+      : []),
+  ];
+  return (
+    <div className="hidden items-center gap-2 md:flex" data-testid="run-budget">
+      {items.map((i) => (
+        <span
+          key={i.key}
+          title={i.limit ? `${i.label}: ${i.used} of ${i.limit}` : `${i.label}: ${i.used}`}
+          className={cn(
+            'font-mono text-[11px] tabular-nums',
+            i.over ? 'text-[var(--color-danger)]' : 'text-[var(--color-muted-foreground)]',
+          )}
+        >
+          <span className="font-sans">{i.key === 'cost' ? '' : `${i.label.toLowerCase()} `}</span>
+          {i.used}
+          {i.limit && <span className="opacity-70">/{i.limit}</span>}
+        </span>
+      ))}
+    </div>
+  );
 }
 
 function StatusPill({ status }: { status: RunView['status'] }) {
@@ -103,6 +169,7 @@ function StatusPill({ status }: { status: RunView['status'] }) {
 export const RunHeaderBar = React.memo(function RunHeaderBar({
   run, awaitingCount, parallelCount, onPause, onResume, onCancel, onRetry, onOpenGraph, graphOpen,
   pipelineOpen, onTogglePipeline, onOpenFiles, filesOpen, onPermissionModeChange, permissionBusy,
+  usage, budget, statusReason,
 }: RunHeaderBarProps) {
   const total = run.stages.length;
   const done = run.stages.filter((s) => s.status === 'completed' || s.status === 'skipped').length;
@@ -135,10 +202,13 @@ export const RunHeaderBar = React.memo(function RunHeaderBar({
             style={{ width: `${pct}%` }}
           />
         </span>
-        <span className="font-mono text-[11px] tabular-nums text-[var(--color-muted-foreground)]">
-          {formatDuration(elapsedMs)}
-        </span>
+        {limitOf(budget, 'maxWallClockMs') === undefined && (
+          <span className="font-mono text-[11px] tabular-nums text-[var(--color-muted-foreground)]">
+            {formatDuration(elapsedMs)}
+          </span>
+        )}
       </div>
+      <BudgetCluster usage={usage} budget={budget} elapsedMs={elapsedMs} />
 
       {/* Live badges */}
       {parallelCount > 0 && (
@@ -176,6 +246,16 @@ export const RunHeaderBar = React.memo(function RunHeaderBar({
             <Pause className="h-3.5 w-3.5" />
             Pause
           </Button>
+        )}
+        {statusReason === 'budget_exhausted' && (
+          <span
+            role="status"
+            title="The run spent its budget (turns, tokens, wall clock or reported cost) and paused before launching more work. While it is over budget, a resume pauses it again."
+            className="inline-flex items-center gap-1 rounded-full bg-[var(--color-warning)]/12 px-2 py-0.5 text-[10.5px] font-medium text-[var(--color-warning)]"
+          >
+            <Gauge className="h-3 w-3" />
+            Budget exhausted{isPaused ? ' · paused' : ''}
+          </span>
         )}
         {isPaused && (
           <Button

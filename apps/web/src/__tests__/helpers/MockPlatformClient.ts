@@ -13,6 +13,7 @@ import type {
   WorkflowRun,
   WorkflowRunWithStages,
   InvocationFiles,
+  WorkflowRunListFilter,
 } from '@generatorai/shared';
 import type {
   InvocationPlan,
@@ -203,7 +204,7 @@ export class MockPlatformClient implements IPlatformClient {
     throw new Error('Not implemented in mock');
   });
 
-  listRuns = vi.fn(async (_filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]> => {
+  listRuns = vi.fn(async (_filter?: WorkflowRunListFilter): Promise<WorkflowRun[]> => {
     return [];
   });
 

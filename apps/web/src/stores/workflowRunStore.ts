@@ -24,6 +24,15 @@ import { globalSingleton } from '../lib/globalSingleton.js';
 
 // ── Types ──
 
+/** What a `ready` instance waits on: a flow key at its limit (`provider claude-agent`, 4/4). */
+export interface AdmissionWait {
+  flowKey: string;
+  label: string;
+  running: number;
+  limit: number | null;
+  queued: number;
+}
+
 interface RunMonitorState {
   /** Currently monitored workflow run (full entity with stage runs) */
   run: WorkflowRunWithStages | null;
@@ -33,6 +42,8 @@ interface RunMonitorState {
   selectedStageRunId: string | null;
   /** The user picked the focused stage: a stage starting elsewhere no longer moves the focus. */
   focusPinned: boolean;
+  /** `ready` instances waiting for an admission slot, by instance id (P07 WP-7.2). */
+  admission: Record<string, AdmissionWait>;
   /** Whether the run data is loading */
   isLoading: boolean;
   /** Error message if run load failed */
@@ -54,6 +65,8 @@ interface RunMonitorActions {
   updateStageRun: (stageRunId: string, updates: Partial<StageRun>) => void;
   /** Update stage run status from SSE event (inserts an instance the store does not know yet). */
   updateStageRunStatus: (stageRunId: string, status: StageRunStatus, data?: Record<string, unknown>) => void;
+  /** A `ready` instance waits for a flow key's slot (`wait`), or got it (null). */
+  setAdmission: (stageRunId: string, wait: AdmissionWait | null, runId?: string) => void;
   /** Register a stage → session mapping for SSE routing */
   registerStageSession: (stageRunId: string, sessionId: string) => void;
   /** Get sessionId for a stage run */
@@ -75,6 +88,7 @@ const initialState: RunMonitorState = {
   stageSessionMap: {},
   selectedStageRunId: null,
   focusPinned: false,
+  admission: {},
   isLoading: false,
   error: null,
 };
@@ -129,6 +143,15 @@ function mergeRun(local: WorkflowRunWithStages | null, polled: WorkflowRunWithSt
   return runIsOlder ? { ...polled, status: local.status, stageRuns } : { ...polled, stageRuns };
 }
 
+/** The admission waits still true of `stageRuns`: a wait ends when its instance leaves `ready`. */
+function liveAdmission(admission: Record<string, AdmissionWait>, stageRuns: readonly StageRun[]): Record<string, AdmissionWait> {
+  const ids = Object.keys(admission);
+  if (ids.length === 0) return admission;
+  const ready = new Set(stageRuns.filter((sr) => sr.status === 'ready').map((sr) => sr.id));
+  if (ids.every((id) => ready.has(id))) return admission;
+  return Object.fromEntries(Object.entries(admission).filter(([id]) => ready.has(id)));
+}
+
 // ── Store ──
 
 const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set, get) => ({
@@ -138,6 +161,7 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
     const run = mergeRun(get().run, incoming);
     set({
       run,
+      admission: liveAdmission(get().admission, run.stageRuns),
       stageSessionMap: sessionMapOf(run.stageRuns),
       isLoading: false,
       error: null,
@@ -274,8 +298,25 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
 
     set({
       run: { ...run, stageRuns },
+      admission: liveAdmission(get().admission, stageRuns),
       stageSessionMap,
     });
+  },
+
+  setAdmission: (stageRunId, wait, runId) => {
+    const { run, admission } = get();
+    if (!run || (runId !== undefined && runId !== run.id)) return;
+    if (wait) {
+      // Only a `ready` instance queues for a slot; no status event says so
+      // before the next poll, so the queue event does.
+      const stageRuns = run.stageRuns.map((sr) => (sr.id === stageRunId && sr.status === 'pending' ? { ...sr, status: 'ready' as const } : sr));
+      set({ run: { ...run, stageRuns }, admission: { ...admission, [stageRunId]: wait } });
+      return;
+    }
+    if (!(stageRunId in admission)) return;
+    const next = { ...admission };
+    delete next[stageRunId];
+    set({ admission: next });
   },
 
   registerStageSession: (stageRunId, sessionId) => {

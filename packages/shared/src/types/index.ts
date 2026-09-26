@@ -148,6 +148,7 @@ export {
 } from './AgentMode.js';
 export type {
   WorkflowRun,
+  RunUsage,
   WorkflowRunStatus,
   StageRun,
   StageRunStatus,
@@ -165,6 +166,7 @@ export type {
 export type {
   IPlatformClient,
   InvocationFiles,
+  WorkflowRunListFilter,
   PlatformType,
   PaginatedResult,
   EventSubscriptionOptions,

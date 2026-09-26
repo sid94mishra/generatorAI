@@ -12,6 +12,8 @@
 // child's decision is answered through its parent). The pending decisions
 // are `GET /:id/pending-decisions` (the children's mirrored). The run's
 // workspace is read under `/:id/workspace*` (workflowRunWorkspace.ts).
+// `GET /` searches runs (status, trigger, dates, text, variables) and
+// `GET /stage-history` lists one stage's executions across runs (P07).
 //
 // A stage is a compact chat (P03b, `StageConversationService`):
 // `/:id/instances/:instanceId/messages` sends an operator message (queued
@@ -36,7 +38,8 @@ import type { Container } from '../composition-root.js';
 import { z } from 'zod';
 import { RunCommandSchema, WORKFLOW_RUN_STATES, type RunCommand } from '@generatorai/workflow-spec';
 import { RunCommandRefusedError, type StageGateAnswer } from '@generatorai/core';
-import { AgentModeSchema, AnswerQuestionSchema, PlanDecisionSchema, ResolveToolPermissionSchema } from '@generatorai/shared';
+import { AgentModeSchema, AnswerQuestionSchema, PlanDecisionSchema, ResolveToolPermissionSchema, type WorkflowRunStatus } from '@generatorai/shared';
+import type { WorkflowRunSearch } from '@generatorai/db';
 import multer from 'multer';
 import { validate } from '../middleware/validate.js';
 
@@ -74,6 +77,73 @@ const DECISION_COMMANDS: ReadonlySet<RunCommand['command']> = new Set([
   'deliver_event',
 ]);
 
+const RUN_LIST_MAX = 1000;
+const STAGE_HISTORY_DEFAULT = 20;
+const STAGE_HISTORY_MAX = 200;
+const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+type Query = Record<string, unknown>;
+
+/** A query value as a list of strings (a repeated parameter arrives as an array). */
+function queryList(value: unknown): string[] {
+  const all = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  return all.filter((v): v is string => typeof v === 'string');
+}
+
+/** A comma list parameter: its trimmed, non-empty entries. */
+function commaList(value: unknown): string[] {
+  return queryList(value).flatMap((v) => v.split(',')).map((s) => s.trim()).filter(Boolean);
+}
+
+/** `?limit`: undefined when absent, null when not an integer in [1, max]. */
+function boundedLimit(value: unknown, max: number): number | null | undefined {
+  if (value === undefined) return undefined;
+  const n = typeof value === 'string' ? Number(value) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= max ? n : null;
+}
+
+/** A time bound: epoch milliseconds or an ISO date. */
+function timeBound(value: unknown): Date | null | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (typeof value !== 'string') return null;
+  const date = /^\d+$/.test(value) ? new Date(Number(value)) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** The run list's query parameters as a repository search, or what is wrong with them. */
+function parseRunSearch(query: Query): { search: WorkflowRunSearch } | { error: string } {
+  const statuses = commaList(query['status']);
+  const invalid = statuses.filter((s) => !(WORKFLOW_RUN_STATES as readonly string[]).includes(s));
+  if (invalid.length > 0) return { error: `Invalid status values: ${invalid.join(', ')}` };
+  const from = timeBound(query['from']);
+  const to = timeBound(query['to']);
+  if (from === null || to === null) return { error: 'from and to are ISO dates or epoch milliseconds' };
+  const variables: Array<{ name: string; value: string }> = [];
+  for (const entry of queryList(query['var'])) {
+    const eq = entry.indexOf('=');
+    const name = eq > 0 ? entry.slice(0, eq).trim() : '';
+    if (!VARIABLE_NAME.test(name)) return { error: `var '${entry}' is not name=value` };
+    variables.push({ name, value: entry.slice(eq + 1) });
+  }
+  const limit = boundedLimit(query['limit'], RUN_LIST_MAX);
+  if (limit === null) return { error: `limit must be an integer from 1 to ${RUN_LIST_MAX}` };
+  const definitionId = typeof query['definitionId'] === 'string' ? query['definitionId'] : undefined;
+  const text = typeof query['q'] === 'string' ? query['q'].trim() : '';
+  const triggerKinds = commaList(query['trigger']);
+  return {
+    search: {
+      ...(definitionId ? { definitionId } : {}),
+      ...(statuses.length > 0 ? { statuses: statuses as WorkflowRunStatus[] } : {}),
+      ...(triggerKinds.length > 0 ? { triggerKinds } : {}),
+      ...(from ? { createdFrom: from } : {}),
+      ...(to ? { createdTo: to } : {}),
+      ...(text ? { text } : {}),
+      ...(variables.length > 0 ? { variables } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    },
+  };
+}
+
 function mayControlRuns(req: { principal?: { scopes?: readonly string[] } }): boolean {
   const scopes = req.principal?.scopes;
   return !scopes || scopes.includes('write:workflows');
@@ -98,31 +168,40 @@ export function createWorkflowRunRoutes(container: Container): Router {
   // WorkflowRun CRUD + Lifecycle
   // ═══════════════════════════════════════════════════════════
 
-  // GET /workflow-runs — List runs with optional ?status and ?definitionId filters
+  // GET /workflow-runs — List runs, oldest first. Every filter narrows:
+  // ?status and ?trigger (comma lists), ?definitionId, ?from and ?to (the
+  // creation time, ISO or epoch ms), ?q (part of the name, or the start of
+  // the id), ?var=name=value (repeatable) and ?limit (the newest N).
   router.get('/', async (req, res, next) => {
     try {
-      const statusFilter = req.query['status'] as string | undefined;
-      const definitionIdFilter = req.query['definitionId'] as string | undefined;
-
-      let runs;
-      if (definitionIdFilter) {
-        runs = await workflowRunRepo.getByDefinitionId(definitionIdFilter);
-      } else if (statusFilter) {
-        const validStatuses: readonly string[] = WORKFLOW_RUN_STATES;
-        const statuses = statusFilter.split(',').map((s) => s.trim());
-        const invalidStatuses = statuses.filter((s) => !validStatuses.includes(s));
-        if (invalidStatuses.length > 0) {
-          res.status(400).json({
-            error: { code: 'VALIDATION_ERROR', message: `Invalid status values: ${invalidStatuses.join(', ')}` },
-          });
-          return;
-        }
-        runs = await workflowRunRepo.getByStatus(statuses as Array<(typeof WORKFLOW_RUN_STATES)[number]>);
-      } else {
-        runs = await workflowRunRepo.getAll();
+      const parsed = parseRunSearch(req.query);
+      if ('error' in parsed) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: parsed.error } });
+        return;
       }
+      res.json(await workflowRunRepo.search(parsed.search));
+    } catch (err) {
+      next(err);
+    }
+  });
 
-      res.json(runs);
+  // GET /workflow-runs/stage-history?definitionId&stageKey&limit — the newest
+  // executions of one stage across the definition's runs (every instance:
+  // loop iterations and map items included), each with its run.
+  router.get('/stage-history', async (req, res, next) => {
+    try {
+      const definitionId = typeof req.query['definitionId'] === 'string' ? req.query['definitionId'] : '';
+      const stageKey = typeof req.query['stageKey'] === 'string' ? req.query['stageKey'] : '';
+      if (!definitionId || !stageKey) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'definitionId and stageKey are required' } });
+        return;
+      }
+      const limit = boundedLimit(req.query['limit'], STAGE_HISTORY_MAX);
+      if (limit === null) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: `limit must be an integer from 1 to ${STAGE_HISTORY_MAX}` } });
+        return;
+      }
+      res.json(await stageRunRepo.getStageHistory(definitionId, stageKey, limit ?? STAGE_HISTORY_DEFAULT));
     } catch (err) {
       next(err);
     }

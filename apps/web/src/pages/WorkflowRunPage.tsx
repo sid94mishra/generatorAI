@@ -20,7 +20,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
-  AlertCircle, ListTree, FolderOpen, FileText, TerminalSquare, LayoutGrid,
+  AlertCircle, ListTree, FolderOpen, FileText, TerminalSquare, LayoutGrid, Gauge,
 } from 'lucide-react';
 import { Modal, EmptyState, Button, Spinner, useConfirm } from '@/components/ui/index.js';
 import { toast } from '@/components/Toast.js';
@@ -64,6 +64,7 @@ import {
   type RunDecisionsValue,
 } from '@/components/workflow/redesign/ControlFlowCards.js';
 import { RightInspector } from '@/components/workflow/redesign/RightInspector.js';
+import { RunUsagePanel } from '@/components/workflow/redesign/RunUsagePanel.js';
 import { createStageViewCache, deriveRunView, pickStageStreams } from '@/components/workflow/redesign/deriveRunView.js';
 import type { FileChange, StageView } from '@/components/workflow/redesign/types.js';
 
@@ -112,6 +113,8 @@ export function WorkflowRunPage() {
   // ONE focus for the page, the graph and the event timeline (D-20).
   const focusedStageId = useWorkflowRunStore((s) => s.selectedStageRunId);
   const setFocusedStageId = useWorkflowRunStore((s) => s.selectStageRun);
+  // Instances waiting for a launch slot (P07 WP-7.2), from the run stream.
+  const admission = useWorkflowRunStore((s) => s.admission);
 
   // P0-49 fix: Subscribe ONLY to the stage streams for this run — not the
   // whole `streams` record. Without this, ANY change to ANY chat's stream
@@ -316,9 +319,10 @@ export function WorkflowRunPage() {
       edges: pinnedGraph?.edges ?? [],
       streams,
       permissionMode,
+      admission,
       cache: viewCache.current,
     });
-  }, [storeRun, pinnedGraph, streams, permissionMode]);
+  }, [storeRun, pinnedGraph, streams, permissionMode, admission]);
 
   // Breadcrumb label for this run. Once the epoch suffix is stripped a run is
   // usually named exactly like its definition, which would render the trail as
@@ -656,6 +660,9 @@ export function WorkflowRunPage() {
         onRetry={handleRetry}
         onPermissionModeChange={handlePermissionModeChange}
         permissionBusy={setRunPermissionMode.isPending}
+        usage={runData.usage}
+        budget={runData.budget}
+        statusReason={runData.statusReason}
         onOpenGraph={() => setGraphOpen((v) => !v)}
         graphOpen={graphOpen}
         pipelineOpen={pipelineOpen}
@@ -750,7 +757,7 @@ export function WorkflowRunPage() {
           storageKey={rightPaneStorageKey}
           widthStorageKey="generatorai:rightPane:workflow-run:width"
           defaultTabType="changes"
-            addableTabTypes={['files', 'inspector', 'browser', 'terminal', 'widget']}
+            addableTabTypes={['files', 'inspector', 'usage', 'browser', 'terminal', 'widget']}
           focusTabRequest={browserTabFocusRequest}
           onTabClose={handleRightPaneTabClose}
           tabs={{
@@ -805,7 +812,20 @@ export function WorkflowRunPage() {
               label: 'Inspector',
               description: 'Per-stage files, output, hooks & tools',
               icon: <FileText className="h-3.5 w-3.5" />,
-              render: () => <RightInspector stage={focusedStageEnriched} runId={runId} filesNote={inspectorFiles.note} />,
+              render: () => (
+                <RightInspector
+                  stage={focusedStageEnriched}
+                  runId={runId}
+                  definitionId={runData.workflowDefinitionId}
+                  filesNote={inspectorFiles.note}
+                />
+              ),
+            },
+            usage: {
+              label: 'Usage',
+              description: 'Turns, tokens and reported cost, per stage',
+              icon: <Gauge className="h-3.5 w-3.5" />,
+              render: () => <RunUsagePanel run={runData} onFocusStage={focusStage} />,
             },
             browser: {
               label: 'Browser',

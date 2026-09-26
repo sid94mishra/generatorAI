@@ -4,11 +4,11 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import { openMultiplexedStream } from '../platform/muxStream.js';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
-import type { InvocationFiles, WorkflowRunPermissionMode } from '@generatorai/shared';
+import type { InvocationFiles, WorkflowRunListFilter, WorkflowRunPermissionMode } from '@generatorai/shared';
 import type { InvocationRequest, RunCommand, WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
 
 // ── Query Keys ──
@@ -18,6 +18,11 @@ export const workflowKeys = {
   definitionVersion: (id: string, versionId: string) => ['workflow-definition', id, 'version', versionId] as const,
   runs: ['workflow-runs'] as const,
   runsByDefinition: (defId: string) => ['workflow-runs', 'by-definition', defId] as const,
+  runSearch: (filter: WorkflowRunListFilter) => ['workflow-runs', 'search', filter] as const,
+  /** A definition's versions (the builder's history). */
+  definitionVersions: (id: string) => ['workflow-definition', id, 'versions'] as const,
+  /** One stage's executions across the definition's runs. */
+  stageHistory: (definitionId: string, stageKey: string, limit: number) => ['stage-history', definitionId, stageKey, limit] as const,
   run: (id: string) => ['workflow-run', id] as const,
   runWorkspace: (runId: string) => ['run-workspace', runId] as const,
   /** Every loop's finished iterations of a run (the prefix the loop events invalidate). */
@@ -161,24 +166,38 @@ export function useBulkDeleteWorkflowDefinitions() {
 // Workflow Run Queries & Mutations
 // ════════════════════════════════════════════════════════════════
 
-/** List all workflow runs, optionally filtered by definition or status */
-export function useWorkflowRuns(filter?: { definitionId?: string; status?: string }) {
+/** Search workflow runs (every filter narrows; none lists them all). */
+export function useWorkflowRuns(filter?: WorkflowRunListFilter, opts: { enabled?: boolean } = {}) {
   const platform = usePlatform();
   return useQuery({
-    queryKey: [...workflowKeys.runs, filter?.definitionId ?? 'all', filter?.status ?? 'all'],
+    queryKey: workflowKeys.runSearch(filter ?? {}),
     queryFn: () => platform.listRuns(filter),
+    enabled: opts.enabled ?? true,
+    // A changed filter keeps the previous rows on screen until the new ones arrive.
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
 }
 
-/** List workflow runs for a specific definition */
-export function useWorkflowRunsByDefinition(definitionId: string | undefined) {
+/** One stage's newest executions across a definition's runs; fetched only while `enabled`. */
+export function useStageHistory(definitionId: string | undefined, stageKey: string | undefined, opts: { enabled?: boolean; limit?: number } = {}) {
   const platform = usePlatform();
   return useQuery({
-    queryKey: workflowKeys.runsByDefinition(definitionId ?? ''),
-    queryFn: () => platform.listRuns({ definitionId: definitionId! }),
-    enabled: !!definitionId,
-    refetchInterval: 15_000,
+    queryKey: workflowKeys.stageHistory(definitionId ?? '', stageKey ?? '', opts.limit ?? 20),
+    queryFn: () => platform.getStageHistory(definitionId!, stageKey!, opts.limit ?? 20),
+    enabled: !!definitionId && !!stageKey && (opts.enabled ?? true),
+    staleTime: 10_000,
+  });
+}
+
+/** A definition's published and test versions, newest first; fetched only while `enabled`. */
+export function useDefinitionVersions(id: string | undefined, opts: { enabled?: boolean } = {}) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: workflowKeys.definitionVersions(id ?? ''),
+    queryFn: async () => (await platform.listDefinitionVersions(id!)).sort((a, b) => b.version - a.version),
+    enabled: !!id && (opts.enabled ?? true),
+    staleTime: 10_000,
   });
 }
 

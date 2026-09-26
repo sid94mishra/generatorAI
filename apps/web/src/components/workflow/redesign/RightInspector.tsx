@@ -1,24 +1,29 @@
 // ────────────────────────────────────────────────────────────────
 // RightInspector — tabbed side panel for the focused stage.
-// Tabs: Files · Output · Hooks · Tools.
+// Tabs: Files · Output · Hooks · Tools · History (the stage across runs)
+// · Events (the instance's raw run-scope events).
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
 import {
   FileText, FileCode, Database, Webhook, Wrench, CheckCircle2, AlertTriangle,
-  Plus, Pencil, Minus, ArrowRight,
+  Plus, Pencil, Minus, ArrowRight, History, ScrollText,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/index.js';
 import { useRunFileContent } from '@/hooks/workflowQueries.js';
 import { FileViewerModal } from '@/components/shared/FileViewerComponents.js';
 import type { StageView, FileChange } from './types.js';
+import { StageHistoryTab } from './StageHistoryTab.js';
+import { StageEventsTab } from './StageEventsTab.js';
 
-type Tab = 'files' | 'output' | 'hooks' | 'tools';
+type Tab = 'files' | 'output' | 'hooks' | 'tools' | 'history' | 'events';
 
 interface RightInspectorProps {
   stage: StageView | null;
   defaultTab?: Tab;
+  /** The run's definition: the History tab lists the stage's executions across its runs. */
+  definitionId?: string;
   /** Optional run id — enables click-to-open file modal in the Files tab. */
   runId?: string;
   /**
@@ -35,7 +40,7 @@ const KIND_ICON: Record<FileChange['kind'], { icon: React.ReactNode; label: stri
   renamed:  { icon: <ArrowRight className="h-2.5 w-2.5" />, label: 'R', classes: 'bg-[var(--color-info)]/12 text-[var(--color-info)]' },
 };
 
-export function RightInspector({ stage, defaultTab = 'files', runId, filesNote }: RightInspectorProps) {
+export function RightInspector({ stage, defaultTab = 'files', runId, definitionId, filesNote }: RightInspectorProps) {
   const [tab, setTab] = useState<Tab>(defaultTab);
   const [openFile, setOpenFile] = useState<FileChange | null>(null);
 
@@ -47,6 +52,8 @@ export function RightInspector({ stage, defaultTab = 'files', runId, filesNote }
     { id: 'output', label: 'Output', icon: <Database className="h-3.5 w-3.5" />, count: outputCount },
     { id: 'hooks',  label: 'Hooks',  icon: <Webhook className="h-3.5 w-3.5" />, count: stage?.hooks?.length },
     { id: 'tools',  label: 'Tools',  icon: <Wrench   className="h-3.5 w-3.5" />, count: stage?.steps.filter((s) => s.kind === 'tool' || s.kind === 'run' || s.kind === 'search' || s.kind === 'read' || s.kind === 'edit').length },
+    ...(definitionId ? [{ id: 'history' as const, label: 'History', icon: <History className="h-3.5 w-3.5" /> }] : []),
+    ...(runId ? [{ id: 'events' as const, label: 'Events', icon: <ScrollText className="h-3.5 w-3.5" /> }] : []),
   ];
 
   return (
@@ -62,7 +69,7 @@ export function RightInspector({ stage, defaultTab = 'files', runId, filesNote }
       </div>
 
       {/* Tabs */}
-      <div role="tablist" className="flex shrink-0 items-center gap-0.5 border-b border-[var(--color-border)] px-2 pt-1.5">
+      <div role="tablist" className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-[var(--color-border)] px-2 pt-1.5">
         {tabs.map((t) => (
           <Button
             key={t.id}
@@ -111,6 +118,17 @@ export function RightInspector({ stage, defaultTab = 'files', runId, filesNote }
         )}
         {stage && tab === 'tools' && (
           <ToolsTab stage={stage} />
+        )}
+        {stage && tab === 'history' && definitionId && (
+          <StageHistoryTab
+            definitionId={definitionId}
+            stageKey={stage.stageKey}
+            currentStageRunId={stage.id}
+            {...(runId ? { currentRunId: runId } : {})}
+          />
+        )}
+        {stage && tab === 'events' && runId && (
+          <StageEventsTab key={stage.id} runId={runId} stageRunId={stage.id} />
         )}
       </div>
 

@@ -18,6 +18,7 @@ import type { BuilderIssue } from '@/stores/workflowBuilderStore.js';
 import { PlatformContext } from '@/providers/PlatformProvider.js';
 import { cn } from '@/lib/utils.js';
 import { builderScopeModel, lastRunValue, type PlaceHint } from './expression/builderScope.js';
+import { IssueFixButton } from './builder/issueFixes.js';
 
 /** The CodeMirror editor, in its own lazy chunk (with CodeMirror itself). */
 const CodeExpressionEditor = React.lazy(() => import('./expression/CodeExpressionEditor.js'));
@@ -46,6 +47,7 @@ export function FieldIssues({ issues }: { issues: readonly BuilderIssue[] }) {
           <span>
             {issue.message}
             {issue.hint && <span className="text-muted-foreground"> — {issue.hint}</span>}
+            <IssueFixButton issue={issue} className="ml-1 inline-flex items-center gap-0.5 font-medium text-primary underline-offset-2 hover:underline" />
           </span>
         </li>
       ))}

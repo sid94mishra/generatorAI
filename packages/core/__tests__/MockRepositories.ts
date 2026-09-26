@@ -429,6 +429,10 @@ export class MockStageRunRepository implements IStageRunRepository {
     return [];
   }
 
+  async getStageHistory(): Promise<never[]> {
+    return [];
+  }
+
   async deleteByRunId(workflowRunId: string): Promise<void> {
     for (const [id, sr] of this.store) {
       if (sr.workflowRunId === workflowRunId) {

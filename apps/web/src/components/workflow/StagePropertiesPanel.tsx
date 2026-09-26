@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   X, Settings2, FileText, Layers, Cpu, Zap, Shield, Bot, Server, Wand2, Webhook, Plus, Trash2,
-  CheckCircle2, Clock, Braces, UserCheck, GitMerge, AlertCircle, Repeat, Undo2,
+  CheckCircle2, Clock, Braces, UserCheck, GitMerge, Repeat, Undo2,
 } from 'lucide-react';
 import {
   ApprovalSpecSchema,
@@ -38,6 +38,7 @@ import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { cn } from '@/lib/utils.js';
 import { StageKindPanel } from './StageKindPanels.js';
 import { ArgsEditor, CompensationEditor, JoinFields, JsonObjectEditor, ParentField, StageKeyField } from './builder/fields.js';
+import { StageIssueList } from './builder/issueFixes.js';
 
 interface StagePropertiesPanelProps {
   onClose: () => void;
@@ -100,7 +101,6 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
     return <StageKindPanel stage={stage} onUpdate={handleUpdate} issues={stageIssues} onClose={onClose} />;
   }
 
-  const errorCount = stageIssues.filter((i) => i.severity === 'error').length;
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
@@ -133,12 +133,7 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
           </Button>
         </div>
 
-        {errorCount > 0 && (
-          <p className="mx-4 mb-2 flex items-center gap-1.5 rounded-md bg-danger-muted px-2 py-1 text-[11px] text-danger">
-            <AlertCircle className="h-3 w-3 shrink-0" />
-            {errorCount} {errorCount === 1 ? 'issue' : 'issues'} in this stage (shown next to each field)
-          </p>
-        )}
+        <StageIssueList issues={stageIssues} />
 
         {/* Tab bar */}
         <div className="flex px-4 gap-1" role="tablist">
@@ -426,13 +421,14 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
           <div className="mt-3 space-y-3">
             <div>
               <label htmlFor="stage-approval-prompt" className="mb-1.5 block text-xs font-medium text-foreground">Reviewer prompt</label>
-              <Textarea
+              <ExpressionField
+                mode="template"
                 id="stage-approval-prompt"
                 value={stage.approval.prompt ?? ''}
-                onChange={(e) => onUpdate({ approval: { ...stage.approval!, prompt: e.target.value || undefined } })}
+                onChange={(prompt) => onUpdate({ approval: { ...stage.approval!, prompt: prompt || undefined } })}
                 rows={2}
-                className="resize-none"
-                placeholder="What should the reviewer check?"
+                placeholder="What should the reviewer check? {{ }} completes"
+                issues={issuesAt(issues, '/approval/prompt')}
               />
             </div>
             <ToggleSwitch
@@ -733,15 +729,15 @@ function OutputSection({ stage, onUpdate, issues }: SectionProps) {
       </div>
       <div>
         <label htmlFor="stage-output-instructions" className="mb-1.5 block text-xs font-medium text-foreground">Instructions</label>
-        <Textarea
+        <ExpressionField
+          mode="template"
           id="stage-output-instructions"
           value={output.instructions ?? ''}
-          onChange={(e) => setOutput({ instructions: e.target.value || undefined })}
+          onChange={(instructions) => setOutput({ instructions: instructions || undefined })}
           rows={2}
-          className="resize-none"
           placeholder="Describe the expected output; appended to the final prompt"
+          issues={issuesAt(issues, '/output/instructions')}
         />
-        <FieldIssues issues={issuesAt(issues, '/output/instructions')} />
       </div>
       <div>
         <label className="mb-1.5 block text-xs font-medium text-foreground">Rules</label>

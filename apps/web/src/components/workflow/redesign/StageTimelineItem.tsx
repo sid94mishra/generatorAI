@@ -327,8 +327,12 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
           v.tone === 'danger'  && 'bg-[var(--color-danger)]/12  text-[var(--color-danger)]',
           v.tone === 'indigo'  && 'bg-indigo-500/12 text-indigo-400',
           v.tone === 'muted'   && 'bg-[var(--color-muted-foreground)]/10 text-[var(--color-muted-foreground)]',
-        )}>
-          {v.label}
+        )}
+          {...(stage.admission ? { title: `${stage.admission.queued} launch${stage.admission.queued === 1 ? '' : 'es'} queued on ${stage.admission.flowKey}` } : {})}
+        >
+          {stage.admission
+            ? `ready · waiting for ${stage.admission.label} (${stage.admission.limit !== null ? `${stage.admission.running}/${stage.admission.limit}` : `${stage.admission.running} running`})`
+            : v.label}
         </span>
 
         {headerExtra}

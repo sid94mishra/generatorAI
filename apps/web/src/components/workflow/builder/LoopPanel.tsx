@@ -21,7 +21,7 @@ import {
   type LoopStage,
 } from '@generatorai/workflow-spec';
 import { useWorkflowBuilderStore, type BuilderIssue, type StageUpdate } from '@/stores/workflowBuilderStore.js';
-import { Button, Input, Select, Textarea, ToggleSwitch } from '@/components/ui/index.js';
+import { Button, Input, Select, ToggleSwitch } from '@/components/ui/index.js';
 import { CollapsibleSection } from '../CollapsibleSection.js';
 import { NumberStepper } from '../NumberStepper.js';
 import { ExpressionField, FieldIssues, issuesAt } from '../engineGate.js';
@@ -684,15 +684,15 @@ function WrapUpEditor({ stage, setLoop, issues }: { stage: LoopStage; setLoop: (
               className="mb-1.5 h-8 text-xs"
               placeholder="Label"
             />
-            <Textarea
+            <ExpressionField
+              mode="template"
               value={wrapUp.prompt.text}
-              onChange={(e) => setWrapUp({ prompt: { ...wrapUp.prompt, text: e.target.value } })}
+              onChange={(text) => setWrapUp({ prompt: { ...wrapUp.prompt, text } })}
               rows={3}
-              aria-label="Wrap-up prompt"
-              className="resize-y text-xs"
-              placeholder="What the agent should write in its last turn"
+              ariaLabel="Wrap-up prompt"
+              placeholder="What the agent should write in its last turn; {{ }} completes"
+              issues={issuesAt(issues, '/loop/wrapUp/prompt')}
             />
-            <FieldIssues issues={issuesAt(issues, '/loop/wrapUp/prompt')} />
           </div>
           <div className="grid grid-cols-2 gap-2">
             <NumberStepper label="Max turns" value={wrapUp.maxTurns} onChange={(maxTurns) => setWrapUp({ maxTurns })} min={1} max={5} />

@@ -22,6 +22,7 @@ import {
   ArrowLeft,
   Download,
   Upload,
+  History,
 } from 'lucide-react';
 import type {
   InvocationRequest,
@@ -29,6 +30,7 @@ import type {
   StageKind,
   ValidationIssue,
   WorkflowDefinitionRecord,
+  WorkflowDefinitionVersionSummary,
   WorkflowGraph,
 } from '@generatorai/workflow-spec';
 
@@ -36,6 +38,9 @@ import { DAGCanvas } from '@/components/workflow/DAGCanvas.js';
 import { StagePropertiesPanel } from '@/components/workflow/StagePropertiesPanel.js';
 import { WorkflowConfigPanel } from '@/components/workflow/WorkflowConfigPanel.js';
 import { RunDialog } from '@/components/workflow/RunDialog.js';
+import { AddStageMenu } from '@/components/workflow/builder/AddStageMenu.js';
+import { VersionHistoryModal } from '@/components/workflow/builder/VersionHistoryModal.js';
+import { IssueFixButton } from '@/components/workflow/builder/issueFixes.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import {
@@ -47,7 +52,7 @@ import {
 } from '@/hooks/workflowQueries.js';
 import { useScriptAllowlist } from '@/hooks/scriptQueries.js';
 import { cn } from '@/lib/utils.js';
-import { Badge, Button, Modal, Spinner } from '@/components/ui/index.js';
+import { Badge, Button, Modal, Spinner, toast, useConfirm } from '@/components/ui/index.js';
 import { useResizable } from '@/hooks/useResizable.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 import { usePageTitle } from '@/hooks/usePageTitle.js';
@@ -115,6 +120,8 @@ export function WorkflowBuilderPage() {
       resetBuilder: s.resetBuilder,
       addStage: s.addStage,
       selectNode: s.selectNode,
+      selectEdge: s.selectEdge,
+      focusStage: s.focusStage,
       setName: s.setName,
       undo: s.undo,
       redo: s.redo,
@@ -135,6 +142,8 @@ export function WorkflowBuilderPage() {
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true);
   const [configPanelOpen, setConfigPanelOpen] = useState(false);
   const [runDialogOpen, setRunDialogOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const { confirm: askToConfirm, dialog: confirmDialog } = useConfirm();
   const [isPublishing, setIsPublishing] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -212,6 +221,33 @@ export function WorkflowBuilderPage() {
     };
   }, []);
 
+  // The server's validation (agents, models, capabilities, child workflows):
+  // a while after the document settles, its own findings join the live ones.
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let latest = 0;
+    const check = () => {
+      const graph = useWorkflowBuilderStore.getState().toGraph();
+      const mine = ++latest;
+      platform.validateDefinitionGraph(graph).then(
+        (result) => {
+          if (mine === latest) useWorkflowBuilderStore.getState().setServerIssues(result.issues, graph);
+        },
+        () => undefined,
+      );
+    };
+    const unsubscribe = useWorkflowBuilderStore.subscribe((s, prev) => {
+      if (s.nodes === prev.nodes && s.edges === prev.edges && s.workflow === prev.workflow) return;
+      clearTimeout(timer);
+      timer = setTimeout(check, 1500);
+    });
+    return () => {
+      unsubscribe();
+      clearTimeout(timer);
+      latest++;
+    };
+  }, [platform]);
+
   useEffect(() => {
     const commands = scriptAllowlist?.commands;
     const store = useWorkflowBuilderStore.getState();
@@ -249,6 +285,32 @@ export function WorkflowBuilderPage() {
     const key = actions.addStage(undefined, { kind });
     actions.selectNode(key);
   }, [actions]);
+
+  const handleAddedTemplate = useCallback((key: string) => {
+    actions.selectNode(key);
+    setPropertiesPanelOpen(true);
+  }, [actions]);
+
+  // ── Version history: restore a version as the draft ──
+  const handleRestoreVersion = useCallback((graph: WorkflowGraph, version: WorkflowDefinitionVersionSummary) => {
+    const restore = () => {
+      useWorkflowBuilderStore.getState().replaceGraph(graph);
+      setHistoryOpen(false);
+      toast.success(`Version ${version.version} is in the editor`, { description: 'Save to make it the draft; nothing is published.' });
+    };
+    if (!useWorkflowBuilderStore.getState().isDirty) {
+      restore();
+      return;
+    }
+    void askToConfirm({
+      title: `Restore version ${version.version}?`,
+      description: 'It replaces what the editor holds now, unsaved changes included. Undo brings the stages back; save to keep the restored version.',
+      confirmLabel: 'Restore',
+      variant: 'destructive',
+    }).then((ok) => {
+      if (ok) restore();
+    });
+  }, [askToConfirm]);
 
   // ── Validate ──
   /** Validate the current graph; true when there is no error-severity issue. */
@@ -601,6 +663,8 @@ export function WorkflowBuilderPage() {
 
           <div className="h-5 w-px bg-border" />
 
+          <AddStageMenu onAddKind={handleAddStage} onAddedTemplate={handleAddedTemplate} />
+
           {/* Config */}
           <Button
             variant="ghost"
@@ -619,6 +683,18 @@ export function WorkflowBuilderPage() {
             leftIcon={<AlertTriangle className="h-4 w-4" />}
           >
             Validate
+          </Button>
+
+          {/* Version history: list, diff, restore as the draft */}
+          <Button
+            variant="ghost"
+            size="icon-sm"
+            onClick={() => setHistoryOpen(true)}
+            disabled={!definitionId}
+            title="Version history"
+            aria-label="Version history"
+          >
+            <History className="h-4 w-4" />
           </Button>
 
           {/* Export — the canonical document of the SAVED graph */}
@@ -710,24 +786,31 @@ export function WorkflowBuilderPage() {
               <ul className="mt-1 max-h-40 space-y-0.5 overflow-y-auto text-warning">
                 {errorIssues.map((issue, i) => {
                   const stageName = issue.stageKey ? stages.find((s) => s.key === issue.stageKey)?.name : undefined;
+                  // An issue goes to its node, else to its edge.
+                  const focus = issue.stageKey
+                    ? () => actions.focusStage(issue.stageKey!)
+                    : issue.edgeId
+                      ? () => actions.selectEdge(issue.edgeId!)
+                      : undefined;
                   return (
-                    <li key={i} className="flex items-center gap-1.5">
+                    <li key={i} className="flex flex-wrap items-center gap-1.5">
                       <ChevronRight className="h-3 w-3 shrink-0" />
-                      {issue.stageKey ? (
+                      {focus ? (
                         <Button
                           variant="unstyled"
                           className="text-left underline-offset-2 hover:underline"
                           onClick={() => {
-                            actions.selectNode(issue.stageKey!);
+                            focus();
                             setPropertiesPanelOpen(true);
                           }}
                         >
-                          {stageName ?? issue.stageKey}: {issue.message}
+                          {issue.stageKey ? `${stageName ?? issue.stageKey}: ` : ''}{issue.message}
                         </Button>
                       ) : (
                         <span>{issue.message}</span>
                       )}
                       {issue.hint && <span className="text-xs opacity-80">— {issue.hint}</span>}
+                      <IssueFixButton issue={issue} />
                     </li>
                   );
                 })}
@@ -808,6 +891,17 @@ export function WorkflowBuilderPage() {
 
       {/* ── Modals ── */}
       <WorkflowConfigPanel open={configPanelOpen} onClose={() => setConfigPanelOpen(false)} />
+
+      {definitionId && (
+        <VersionHistoryModal
+          open={historyOpen}
+          onClose={() => setHistoryOpen(false)}
+          definitionId={definitionId}
+          currentGraph={() => useWorkflowBuilderStore.getState().toGraph()}
+          onRestore={handleRestoreVersion}
+        />
+      )}
+      {confirmDialog}
 
       <RunDialog
         open={runDialogOpen}

@@ -1648,10 +1648,33 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     '/api/workflow-runs': {
       get: {
         tags: ['Runs'],
-        summary: 'List runs (?status, ?definitionId)',
+        summary: 'Search runs, oldest first; every filter narrows',
+        parameters: [
+          { in: 'query', name: 'status', schema: { type: 'string' }, description: 'Comma list of run states' },
+          { in: 'query', name: 'definitionId', schema: { type: 'string' } },
+          { in: 'query', name: 'trigger', schema: { type: 'string' }, description: 'Comma list of trigger kinds (user, automation, fork, stage, …); a run without a trigger is user' },
+          { in: 'query', name: 'from', schema: { type: 'string' }, description: 'Created at or after (ISO date or epoch ms)' },
+          { in: 'query', name: 'to', schema: { type: 'string' }, description: 'Created at or before (ISO date or epoch ms)' },
+          { in: 'query', name: 'q', schema: { type: 'string' }, description: 'Part of the run name, or the start of its id' },
+          { in: 'query', name: 'var', schema: { type: 'array', items: { type: 'string' } }, style: 'form', explode: true, description: 'name=value (repeatable): a variable with that value' },
+          { in: 'query', name: 'limit', schema: { type: 'integer', minimum: 1, maximum: 1000 }, description: 'Only the newest N matches' },
+        ],
         responses: {
           '200': { description: 'Runs', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/WorkflowRun' } } } } },
+          '400': { description: 'VALIDATION_ERROR (an unknown status, a bad date, var or limit)' },
         },
+      },
+    },
+    '/api/workflow-runs/stage-history': {
+      get: {
+        tags: ['Runs'],
+        summary: "One stage's newest executions across the definition's runs (every instance), newest first: `[{stageRun, run: {id, name, status, createdAt}}]`",
+        parameters: [
+          { in: 'query', name: 'definitionId', required: true, schema: { type: 'string' } },
+          { in: 'query', name: 'stageKey', required: true, schema: { type: 'string' } },
+          { in: 'query', name: 'limit', schema: { type: 'integer', minimum: 1, maximum: 200, default: 20 } },
+        ],
+        responses: { '200': { description: 'The executions' }, '400': { description: 'VALIDATION_ERROR' } },
       },
     },
     '/api/workflow-invocations': {
