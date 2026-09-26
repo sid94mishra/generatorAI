@@ -346,3 +346,204 @@ Bundled server (`pnpm --filter @generatorai/server bundle`), `PORT=3381`, bare `
 ### Verification
 
 `pnpm typecheck` (all packages), `pnpm turbo lint --force` on every touched package (0 errors), tests: shared 391, db 137, changes 46, core 1888 (the 8 `PtyHostAdapter` failures in a fresh worktree need `apps/pty-host` built; green after building it), client-core 321+, client-runtime 45, cli-core 904+, server 589, desktop 336, web `vitest related` on every touched file, `pnpm --filter @generatorai/web check:design --strict`, `pnpm exec vitest run --project node scripts/__tests__` (57). No Electron, e2e or `mock-update-server` run (the lead's, once).
+
+---
+
+## Round 2 review
+
+- **Range:** `42ff689..HEAD` (HEAD `8b3c2c8`): a83a230 (P1-fix), be62544, 656509e, cc866b6, 8b3c2c8 (P2-fix). 121 files, +4,384 / −1,118.
+- **Reviewer:** a fresh, independent adversarial review. I edited no code and started no server, Electron, Storybook or e2e. Two read-only sub-reviews covered (a) the desktop updater, quit, probe and badge work and (b) the attention, chat-list and git work. I re-read the code, or the `node_modules` source, behind every Major before including it. Probes (scratch SQLite DBs, one temporary vitest file, a real electron-updater 6.8.9 probe) ran in temp dirs and were deleted. `git status` is clean apart from this file.
+
+### Commands and results
+
+| Command | Result |
+|---|---|
+| `pnpm typecheck` | green, but 49/49 were cache hits, so I re-ran it as `pnpm turbo typecheck --force`: 49/49 green, 0 cached |
+| `pnpm turbo lint --force` | 26/26 green, 0 cached, 0 errors (web 311 warnings, as before) |
+| `pnpm --filter @generatorai/web check:design --strict` | OK |
+| `pnpm check:tokens` | OK on all targets |
+| `pnpm --filter @generatorai/shared test` | 19 files, 392 passed |
+| `pnpm --filter @generatorai/client-core test` | 22 files, 321 passed |
+| `pnpm --filter @generatorai/core test` | 141 files passed, 2 skipped; 1879 tests passed, 9 skipped |
+| `pnpm --filter @generatorai/db test` | 20 files passed, 1 skipped; 137 tests passed, 4 skipped |
+| `pnpm --filter @generatorai/server test` | 59 files, 589 passed |
+| `pnpm --filter @generatorai/web test` | 82 files, 918 passed. The `ECONNREFUSED ::1:3000` noise is still there; it predates this range |
+| `pnpm --filter @generatorai/desktop test` | 27 files, 340 passed |
+| `pnpm exec vitest run --project node scripts/__tests__` | 4 files, 57 passed on macOS. **The same run with a non-symlinked `TMPDIR` (as on Linux) fails 1 of 3 tests in `main-module-guard.test.mjs`** (P2-R29) |
+
+### Round-1 fixes: are they real?
+
+- **P1-R1:** fixed. I read `installWebKeyHandler` directly:
+  - `isKeyOwnerTarget` runs first and returns without calling `preventDefault`.
+  - A matched chord in a typing target returns un-prevented unless `firesInEditable`.
+  - Only `palette.toggle` carries the flag.
+  - The terminal container has `data-gai-keys="own"`.
+  - The web app has no other code editor (no CodeMirror or Monaco) that would need the attribute.
+  - The rule is the same on every OS.
+- **P1-R2 … R6, R8 … R11:** fixed or documented as stated.
+  - For P1-R4, the terminal now opens asynchronously after `document.fonts.load`. I checked every path that reads `term.cols`/`rows` or sends a resize. A fit before open is a no-op, and `ws.onopen` sends the dimensions after the fit, so there is no regression.
+  - For P1-R5, `ACCENT_IDS` is theme-independent, so ignoring unknown ids loses nothing.
+- **P1-R7:** still an owner action.
+- **Docs:**
+  - Every `D-xx` referenced anywhere (docs, code, CLAUDE.md) resolves; they are D-01…D-54.
+  - README says "D-01…D-54".
+  - D-40 is under F and D-46…D-54 are under G.
+  - `.claude/CLAUDE.md` is 85 lines.
+  - Two content inaccuracies remain (P1-R12, P2-R42).
+- **P2-R1:** fixed. `runChatBulk` is correct, and every consumer goes through it: web `HttpPlatformClient.archiveChats/deleteChats`, and client-core `archiveMany/removeMany` (used by mobile). No other capped bulk route exists.
+- **P2-R2:** mostly fixed. `model` and indirect writes are missed (P2-R33).
+- **P2-R3:** fixed. The dialog still shows (no web subscriber yet), and the watcher count is clamped and cleared on reset.
+- **P2-R4:** fixed as described, but the new order spawns the installer **before** the shutdown, and that is a regression on Windows and AppImage (P2-R28). A second install call is not latched either (P2-R27).
+- **P2-R5:** the correction is right. electron-updater 6.8.9:
+  - `ElectronAppAdapter.onQuit` is `app.once("quit", (_, exitCode) => handler(exitCode))`.
+  - `BaseUpdater.addQuitHandler` installs only when `exitCode === 0` and `!quitAndInstallCalled`, and is registered only after a download.
+  - One `quitAndInstall` therefore does not install twice.
+  - The one naming slip is in P2-R42.
+- **P2-R6, R7, R8:** fixed.
+  - The probe URLs come from stored, normalised origins, never from the renderer.
+  - Same-document navigations do not clear the badge.
+- **P2-R9:** fixed.
+  - The FIFO queue caps concurrency at 3.
+  - Errors free their slot.
+  - `freshWorkingTree` drops exactly that repo's memo keys.
+  - The `checkpoint.created` path at `composition-root.ts:1492` still clears every workspace's memo. That is minor and outside R9's scope.
+- **P2-R10:** fixed. No `.cmd` is spawned, and `execFileSync(process.execPath, [script])` is safe on paths with spaces. See P2-R43 for the fallback.
+- **P2-R11:** the seed fix is right, but its new test is wrong on Linux (P2-R29).
+- **P2-R12:** fixed.
+  - Held deltas are replayed past `seq`, duplicates are ignored, and a hole triggers a refetch.
+  - The buffer is capped at 500.
+  - The web wrapper is ref-counted, survives StrictMode, and its snapshot is a stable reference.
+  - Retry after an error is weak (P2-R31).
+- **P2-R13 … R19, R21 … R23, R25, R26:** fixed as stated, with residual edges in P2-R32 and P2-R37 … R39.
+- **P2-R20:** the cursor type check and the v55 rewrite are correct. The "index-served" claim is not (P2-R30).
+- **P2-R24:** the five payload types are single-sourced, but other bridge types are still duplicated (P2-R41).
+- **v55 edited in place:**
+  - The runner stores only the version and name (no checksum), and the name is unchanged.
+  - I ran the old and new SQL on identical random data (300 chats, mixed metadata) and got identical results.
+  - So a DB that ran the earlier v55 is in the same state as a fresh one.
+  - The earlier v55 only ever existed on dev machines, and the no-backward-compatibility rule applies anyway. Safe.
+- **One-shutdown quit:** every path I traced reaches `before-quit` → `quitApp` → `app.exit(0)`: menu Quit, Cmd+Q, tray, `window-all-closed`, vault Quit, electron-updater's `app.quit` and Squirrel's terminate. The embedded server is stopped inside the 20 s bound on each of them. Nothing else calls `app.exit` or `app.relaunch`.
+  - Pre-existing gaps, not counted here: nothing handles Windows `session-end`, so a logoff skips the graceful stop; the debounced bounds save and the logger stream are not flushed before `app.exit`.
+
+### Critical
+None.
+
+### Major
+
+**P2-R27. A second `installUpdate` after the install is committed installs the update twice.**
+- **Where:** `apps/desktop/src/main/updater.ts:299-307`. `installInFlight` is cleared in `.finally` even when the outcome is `'quitting'`. `downloadedVersion` and `updaterRef` are still set, so the next call runs `runInstall` again and calls `quitAndInstall()` a second time.
+- **What electron-updater 6.8.9 then does:**
+  - `install()` sees `quitAndInstallCalled` and returns false, with no error (`BaseUpdater.js:42-46`).
+  - `quitAndInstall` then **resets the flag** (`BaseUpdater.js:24-26`: `else { this.quitAndInstallCalled = false; }`).
+  - On `app.exit(0)` the quit handler finds the flag false and exit code 0, and calls `install(true, false)` again (`:74-88`).
+  - Sub-review probe against the real module: `installs = 1` after two calls, then `installs = 2` after the quit handler.
+- **Impact:**
+  - AppImage: the second run unlinks `$APPIMAGE`, which is the freshly installed file when the name carries no version. `mv` then fails, and no AppImage is left on disk.
+  - deb/rpm: a second pkexec prompt.
+  - NSIS: a second installer.
+- **Reachability:** any `IPC.installUpdate` during the shutdown window, which is up to 20 s with the window still up. Latent until the P3-06 pill exists, but a "nothing happened, click again" is exactly what a pill invites.
+- **Fix:** latch it. Once the outcome is `'quitting'`, keep the settled promise, or return `'quitting'` whenever `machine.installing || isQuitting()`. Never call `quitAndInstall` twice. Add a test that calls `installUpdate` twice after the handoff.
+
+**P2-R28. The install now starts before the graceful shutdown, and the installer can kill the app mid-shutdown.** This regression comes from the P2-R4 reordering in cc866b6. Confidence: medium-high for Windows, medium for AppImage. Not verified on real installers.
+- **What changed:** before cc866b6, the shutdown ran first and `quitAndInstall` came after. Now `quitAndInstall()` spawns the installer, and the bounded shutdown (up to 20 s) runs afterwards in `before-quit`.
+- **Windows NSIS:**
+  - The installer runs with `--updated`. `app-builder-lib/templates/nsis/include/allowOnlyOneInstallerInstance.nsh:106-150` waits `Sleep 300` → `FIND_PROCESS` → `Sleep 1000` → `KILL_PROCESS`.
+  - With PowerShell, `KILL_PROCESS` is `Stop-Process` on every process whose path is under `$INSTDIR`, then a forced retry.
+  - That includes the embedded server, which runs as `process.execPath` with `ELECTRON_RUN_AS_NODE` (`server-manager.ts:420,533`).
+  - So the graceful stop (close the DB, flush events, stop the agent CLIs) is cut off after roughly 1.5–3 s, and the agent CLIs are orphaned.
+- **AppImage:**
+  - `quitAndInstall()` passes `autoRunAppAfterInstall` (default true) as `isForceRunAfter`.
+  - `AppImageUpdater.doInstall` then `spawnLog(destination)` **immediately** (`AppImageUpdater.js:106-109`).
+  - The new process fails `requestSingleInstanceLock()` (`index.ts:50-51`) while the old one is still shutting down, and quits. The update installs, but the app does not come back.
+  - deb/rpm are unaffected: they use `app.relaunch()`, which runs at exit.
+- **Fix (BaseUpdater path):**
+  - Check that the install can go ahead before stopping anything: installer file present, `APPIMAGE` set.
+  - Then run the shutdown.
+  - Then call `quitAndInstall()` immediately before `exit(0)`.
+  - If it declines at that point, `app.relaunch(); app.exit(0)`, the round-1 fallback.
+  - Keep today's order on macOS, where ShipIt waits for the process to exit.
+- Also: the 06 §8 `mock-update-server` run should include "server stopped gracefully" and "app relaunched" checks per OS.
+
+**P2-R29. `scripts/__tests__/main-module-guard.test.mjs` fails on Linux, so CI's "Root script tests" step goes red on ubuntu.**
+- **Where:** the test "the old `file://${argv[1]}` template comparison is not a reliable…" (`:73-79`) asserts `oldGuard === false`.
+- **Why it only passes on macOS:** it depends on `os.tmpdir()` going through a symlink (`/var` → `/private/var`). On Linux `/tmp` is a real directory. The old template comparison is then *true* for a plain path, and the assertion fails.
+- **Reproduced here** with `TMPDIR=<realpath dir> pnpm exec vitest run --project node scripts/__tests__/main-module-guard.test.mjs`: `expected true to be false`, 1 failed / 2 passed.
+- **Scope:** CI runs this step on all three OSes (`.github/workflows/ci.yml:120-126`).
+- **Fix:** assert only the positive properties of the new guard, which already hold on every OS (space in path, imported-not-run). If the old-guard demonstration stays, build the mismatch explicitly, e.g. a directory whose name contains a space or `%`, or a symlinked directory created by the test, and skip where symlinks are unavailable.
+
+### Minor
+
+- **P1-R12. D-24 still describes the planned registry, not the built one.**
+  - It names the registry `SHORTCUTS` and gives `C` as the new-chat key (`01-decisions.md:142`).
+  - As built, the registry is `COMMANDS` (`packages/shared/src/ui-contract/commands.ts`) and `chat.new` is `N` on the web.
+  - Amend D-24 or point it at D-46.
+- **P2-R30. The activity sort still is not index-served** (P2-R20 is not effective).
+  - `ChatRepository.ts:418` now sorts on the bare column, but the list query always has `parent_chat_id IS NULL` and usually `status = ?`.
+  - `EXPLAIN QUERY PLAN` on a migrated 5,000-chat DB: `SEARCH chats USING INDEX idx_chats_parent_chat_id | USE TEMP B-TREE FOR ORDER BY`.
+  - Only after `ANALYZE` does it use `idx_chats_last_activity`, and even then with a temp B-tree for the `id` tie-break. Nothing runs `ANALYZE` or `PRAGMA optimize`.
+  - **Fix:** a composite index `(parent_chat_id, last_activity_at, id)` or `(last_activity_at DESC, id DESC)`, or `PRAGMA optimize` at open.
+  - The column is also nullable. A NULL row would now sort last, and its cursor `{v:null}` would be rejected with a 400. Only `create` inserts today.
+- **P2-R31. The attention store never retries on its own after a failed snapshot** (`packages/client-core/src/attention/store.ts:92,103`).
+  - When the first fetch fails (e.g. the new 503), the store has `snapshot: null` and `needsResync: false`, and later deltas are only buffered. Probe: 20 deltas → 1 request, still no snapshot.
+  - Web recovers only through its 60 s safety refresh. Mobile would not.
+  - While `needsResync` is set and the server keeps failing, every delta fires a request with no backoff (probe: 11 deltas → 12 requests).
+  - **Fix:** retry with backoff inside the store, and treat "no snapshot" like `needsResync`.
+- **P2-R32. A computer-use consent raised by a worker chat stays in Needs you after it is answered.**
+  - `computer.consent_resolved` carries no `chatId` (`ComputerService.ts:1466-1469`).
+  - The P2-R19 resolve path re-reads only top-level chats that own the workspace (`AttentionService.ts:514-525`), so an ask keyed on the worker lingers until expiry or `harness.idle`.
+  - **Fix:** add `chatId` to the payload, or re-read every item whose `ask.id` equals the request id.
+- **P2-R33. `chat.updated` still misses list-visible writes.**
+  - `model` is not in `LIST_VISIBLE_CHAT_FIELDS` (`apps/server/src/routes/chats.ts:328`), yet web (`ChatsListPage.tsx:423`) and mobile (`chats.tsx:568`) render it, and `ChatPage` PATCHes it.
+  - Deleting a project nulls `chats.project_id` (`ProjectRepository.ts:79`) with no event, and attention items keep the deleted project.
+  - Renaming or deleting an agent changes `summary.agent` with no event.
+  - **Fix:** add `model`; emit per affected chat, or a coarse list invalidation, from project delete and agent rename.
+- **P2-R34. A coalesced list refetch can piggyback on an older request** (`apps/web/src/hooks/chatListQueries.ts:89`).
+  - With `cancelRefetch: false`, TanStack returns whatever fetch is already in flight, including `fetchNextPage` on the infinite query, which reloads only the next page. An event that lands during a foreign fetch is then lost until the next event.
+  - **Fix:** if `fetchStatus === 'fetching'`, mark dirty and refetch after it settles. Medium-high confidence.
+- **P2-R35. CLI ref resolution regressions** (`packages/cli-core/src/commands/chat.ts` `findChat`).
+  - Name refs go through `q=`, which compares with SQLite `lower()`, and that folds only ASCII. `"Über plan"` is now NOT_FOUND, even with the exact case; the old in-JS match found it. The seed's `findChatIdByName` has the same problem.
+  - An unmatched ref says "No chats exist yet." (`resolveRef.ts:86-89`).
+  - `#n`, `@last` and `@active` see only the newest page.
+  - **Fix:** fall back to a paged scan when `q=` finds nothing, and correct the message.
+- **P2-R36. Bulk failure UX.**
+  - Mobile `removeMany` (`apps/mobile/app/(tabs)/chats.tsx:178-191`) has no `onError`, and there is no global mutation handler, so a thrown "nothing succeeded" is silent.
+  - Web `confirmBulkDelete` (`ChatsListPage.tsx:173-177`) keeps the dialog open after a partial failure, with the ids already deleted still selected, so a retry reports them as NOT_FOUND.
+- **P2-R37. Update install UX and state edges** (`updater.ts`).
+  - A `'failed'` outcome after "Restart Now" is silent (`:139`). After "Later" there is no way to install: `offerInstall` fires only on the transition to ready, and Check for Updates shows nothing once an update is downloaded (`:247-249`).
+  - `confirmDiscard` sets `discardConfirmed` only when there was unsaved work, so `quitApp` asks again at `before-quit`. Declining there leaves `status: installing` and `wm.quitting` true, while NSIS may already be running.
+  - `win.isVisible()` is true for a minimised window (`:128`). This is latent until a renderer subscribes.
+  - On macOS, the cached-download path re-runs `nativeUpdater.checkForUpdates()` after ready, and every `error` clears `awaitingNativeVersion` (`:201-222`). So `ready` plus a bogus error, or a lost native `update-downloaded`, is possible. Low-medium confidence.
+- **P2-R38. Quit-flag leaks.**
+  - Tray Quit (`tray.ts:137`) and the vault prompt's Quit (`index.ts:295`) set the quitting flag *before* the discard prompt. Declining leaves it set, which suppresses `showError`, stops close-to-tray and suppresses the vault prompt for the rest of the session. A prevented `before-quit` closes nothing, so the pre-set is unnecessary.
+  - If `confirmDiscard` throws, `quitApp`'s `inFlight` (`quit-coordinator.ts:83-86`) stays a rejected promise, and the app can never quit again. Add a `.catch` that resets it.
+- **P2-R39. The badge can be cleared by a navigation that never commits.**
+  - `onRendererReset` runs on `did-start-navigation` (`window-manager.ts:249`), which fires before `will-navigate` blocks an external link. The same happens for a download or a 204.
+  - Counts and update watchers are then dropped while the page lives on. The renderer re-pushes counts only when they change, so the badge stays blank until then.
+  - **Fix:** use `did-navigate` (committed), or a per-document token. The preload's `updates.onChange` unsubscribe (`preload/index.ts:136-139`) is also not idempotent: a double call sends two `false`s.
+- **P2-R40. Probe details** (`packages/client-runtime/src/connections.ts:286-296`).
+  - `fetch` follows redirects, so a stored server can bounce main's request elsewhere and its `serverName` reaches the renderer. Use `redirect: 'manual'`.
+  - A body read cut by the timeout maps to `unpaired`, not `offline`/`error`.
+  - Node `fetch` ignores the system proxy and Chromium's certificate policy, so the status can disagree with what the window can load. Consider passing Electron's `net.fetch`.
+- **P2-R41. Bridge types are still partly duplicated** (P2-R24).
+  - `WindowChrome` is declared in `apps/desktop/src/shared/ipc.ts:66` (`platform: NodeJS.Platform`) and in `apps/web/src/types/desktop-bridge.d.ts:130` (a three-OS union), so the two have already drifted.
+  - `WindowStateChange`, `FindInPageResult` and the browser-IPC shapes are also still duplicated.
+- **P2-R42. Doc and comment accuracy.**
+  - D-54, 05 G-04, `updater.ts:292` and `quit-coordinator.ts:12` say `Browser::ExitWithCode`. `app.exit` binds to `Browser::Exit` → `DestroyAllWindows`, which is how the round-1 fix notes above describe it. The conclusion stands.
+  - `updater.ts` and 05 say electron-updater "runs the installer synchronously". That is false for NSIS: spawn errors are dispatched asynchronously (`NsisUpdater.js:131-147`) after `app.quit()` has already been scheduled, so the error path cannot catch them.
+  - "Squirrel rejecting the signature" can now only happen before `ready`.
+  - D-49 says "mobile wraps [`createAttentionStore`] in its own container", but nothing in `apps/mobile` imports it. Say "will wrap".
+- **P2-R43. `pnpmCommand` trusts any `npm_execpath`** (`scripts/redesign/lib/spawn-node-bin.mjs:100-105`).
+  - Under `npm run`/`npm exec` or yarn, it points at npm's or yarn's JS entry. The sandbox would then run `npm --filter @generatorai/server bundle`.
+  - **Fix:** also require `/pnpm/i` in the path.
+  - The `shell: true` fallback passes an args array, which Node 24 deprecates (DEP0190). Join the fixed string instead.
+- **P2-R44. `isolatedProfile()` can leak or pull the profile out from under Electron** (`agent-tests/helpers/desktop-profile.mjs`).
+  - Cleanup hangs off process `exit`, so SIGINT or SIGTERM (Ctrl-C) leaves the directory behind.
+  - The hook is registered before `electron.launch` (e.g. `desktop-security-smoke.mjs:29-30`), so after a throw it can run while Electron and the embedded server still hold files. The resulting Windows EBUSY is swallowed.
+  - Windows does not clean `%TEMP%` by default.
+  - **Fix:** add SIGINT/SIGTERM handlers, close the app before removing the directory, and have the sandbox's `--clean` also sweep `gai-*-smoke-*`.
+
+### Verdict
+
+The round-1 fixes are real for P1 and for most of P2. The three Majors are in new code: the reordered update install (P2-R27, P2-R28) and a new root test that only passes on macOS (P2-R29). P2-R29 will fail CI on ubuntu on the next push.
+
+Critical: 0, Major: 3, Minor: 16
