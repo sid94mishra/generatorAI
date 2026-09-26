@@ -46,6 +46,14 @@ export interface InvocationContext {
    * skipped (the parent commits).
    */
   inheritWorkspace?: { fromRunId: string; workspaceId: string };
+  /**
+   * Who may answer the run's completion reviews (P06, G4 §2.3): `human`
+   * (default) or `invoker` — the agent that started it, through
+   * `respond_workflow_approval`. In-process callers only; never from a body.
+   */
+  approvalDelegate?: 'human' | 'invoker';
+  /** The chat workspace a `from_chat_branch` run was cut from (G4 §2.6). */
+  parentWorkspaceId?: string;
 }
 
 const HTTP_STATUS: Record<InvocationErrorCode, number> = {

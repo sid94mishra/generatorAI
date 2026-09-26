@@ -211,6 +211,43 @@ export type AgentEvent =
         startedAt: number;
       };
     }
+  // ── Workflow runs started by the chat's workflow tools (P06 WP-6.2; on the chat's session scope) ──
+  | {
+      kind: 'chat.workflow_run.linked';
+      data: { chatId: string; runId: string; workflowId: string; workflowName: string; toolCallId?: string; status: string; link: string };
+    }
+  // Throttled to one per 500 ms per run; stage transitions are not throttled.
+  | {
+      kind: 'chat.workflow_run.progress';
+      data: {
+        chatId: string;
+        runId: string;
+        status: string;
+        /** The stage running (or last to change) now. */
+        currentStage?: string;
+        stagesDone: number;
+        stagesTotal: number;
+      };
+    }
+  | {
+      kind: 'chat.workflow_run.awaiting_approval';
+      data: {
+        chatId: string;
+        runId: string;
+        instanceId: string;
+        stageKey: string;
+        stageName: string;
+        /** `stage_completion_review`, `tool_permission`, `question`, `plan_review`, `loop_decision`, `wait`. */
+        decision: string;
+        /** A completion review on a run whose invocation delegated approvals to the invoking agent. */
+        answerableByAgent: boolean;
+        link: string;
+      };
+    }
+  | {
+      kind: 'chat.workflow_run.finalized';
+      data: { chatId: string; runId: string; status: 'completed' | 'failed' | 'cancelled'; summary?: string; prUrl?: string; link: string };
+    }
   // ── Rewind / fork (chat-scoped) ──
   | {
       kind: 'chat.rewound';

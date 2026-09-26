@@ -1265,7 +1265,14 @@ export class ChatManagementService {
   /**
    * Create a new Chat with its backing Session and Copilot conversation.
    */
-  async createChat(params: CreateChatParams & InternalCreateChatExtras): Promise<Chat> {
+  async createChat(input: CreateChatParams & InternalCreateChatExtras): Promise<Chat> {
+    // PD-23 — an orchestrator chat gets the workflow tools unless it says
+    // otherwise. The default is written onto the chat, so a resume composes
+    // the same tools and chats created before it keep theirs (R-10).
+    const params: CreateChatParams & InternalCreateChatExtras =
+      input.orchestratorMode && !input.parentChatId && input.agentOverrides?.tools?.workflows === undefined
+        ? { ...input, agentOverrides: { ...(input.agentOverrides ?? {}), tools: { ...(input.agentOverrides?.tools ?? {}), workflows: true } } }
+        : input;
     const chatId = generateId();
     const sessionId = generateId();
     const conversationId = `chat-${chatId}-${Date.now()}`;
@@ -1466,6 +1473,7 @@ export class ChatManagementService {
       ...(agentProjection.agentVersion ? { agentVersion: agentProjection.agentVersion } : {}),
       ...(params.agentOverrides ? { agentOverrides: params.agentOverrides } : {}),
       ...(agentProjection.driving ? { agentSnapshot: redactProjection(agentProjection) } : {}),
+      ...(params.createdByPrincipal ? { createdByPrincipal: params.createdByPrincipal } : {}),
       createdAt: now,
       updatedAt: now,
     };
@@ -2617,6 +2625,7 @@ export class ChatManagementService {
       ...(source.permissionMode ? { permissionMode: source.permissionMode } : {}),
       ...(source.agentRef ? { agentRef: source.agentRef } : {}),
       ...(source.agentOverrides ? { agentOverrides: source.agentOverrides } : {}),
+      ...(source.createdByPrincipal ? { createdByPrincipal: source.createdByPrincipal } : {}),
       forkedFromChatId: chatId,
       ...(cutTurnId ? { forkedAtTurnId: cutTurnId } : {}),
     };

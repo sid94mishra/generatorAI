@@ -33,6 +33,17 @@ export type { StageProviderResolver, NewRunRecord } from './WorkflowRunService.j
 export { WorkflowApprovalService, type PendingDecision, type ApprovalVerdictInput, type WorkflowApprovalServiceDeps } from './WorkflowApprovalService.js';
 export * from './workflow-invocation/index.js';
 export {
+  WorkflowAuthoringService,
+  AGENT_AUTHORED_TAG,
+  AUTHORING_GUIDE_TOPICS,
+  schemaHashOf,
+  type AuthoringGuideTopic,
+  type AuthoringPlan,
+  type AuthoringValidation,
+  type DraftResult,
+  type WorkflowAuthoringDeps,
+} from './WorkflowAuthoringService.js';
+export {
   IdempotencyService,
   IdempotencyKeyReusedError,
   assertIdempotencyKey,

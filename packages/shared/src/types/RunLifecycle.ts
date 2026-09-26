@@ -74,6 +74,10 @@ export interface RunSystemVars {
    * post-processing and workspace release are skipped: the parent commits.
    */
   inheritedWorkspace?: { fromRunId: string; workspaceId: string };
+  /** Who may answer the run's completion reviews: the invoking agent when `invoker` (P06); a person otherwise. */
+  approvalDelegate?: 'human' | 'invoker';
+  /** The chat workspace a run started with `workspace: from_chat_branch` was cut from (P06, G4 §2.6). */
+  parentWorkspaceId?: string;
 }
 
 /** Workspace/artifact info for a workflow run (`GET /workflow-runs/:id/workspace`). */

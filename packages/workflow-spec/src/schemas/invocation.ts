@@ -187,6 +187,7 @@ export const InvocationTriggerSchema = z
         kind: z.literal('orchestrator').describe('An orchestrator chat'),
         chatId: z.string().max(100).describe('Orchestrator chat id'),
         taskId: z.string().max(100).optional().describe('Orchestrator task'),
+        toolCallId: z.string().max(200).optional().describe('Tool call'),
       })
       .strict()
       .describe('Orchestrator trigger'),

@@ -18,7 +18,7 @@ import type { IAgentHarness, HarnessModel } from '../../domain/ports/IAgentHarne
 import type { EventBus } from '../../events/EventBus.js';
 import type { ChatManagementService } from '../ChatManagementService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
-import type { Agent, Chat, HarnessConfig } from '@generatorai/shared';
+import type { Agent, AgentOverrides, AgentToolPolicy, Chat, HarnessConfig } from '@generatorai/shared';
 import { WORKER_SYSTEM_PROMPT, renderBriefMessage } from './prompts.js';
 
 /**
@@ -184,6 +184,13 @@ const PROGRESS_TEXT_TAIL = 240;
 /** What a worker inherits from the orchestrator that spawned it (G15). */
 export interface InheritedWorkerCapabilities {
   harnessConfig: Partial<HarnessConfig>;
+  /**
+   * The clamp as resolver input (C-15): the parent's built-in denials as
+   * `extraDeny` (the resolver turns them into `excludedBuiltinTools`, which
+   * Copilot enforces on built-ins, unlike `excludedTools`), every group the
+   * parent had off, and the workflow groups off (workers never fan out).
+   */
+  agentOverrides: AgentOverrides;
   permissionMode?: Chat['permissionMode'];
   defaultAgentMode?: Chat['defaultAgentMode'];
   browserConfig?: Chat['browserConfig'];
@@ -226,6 +233,7 @@ export function inheritWorkerCapabilities(parent: Chat): InheritedWorkerCapabili
   return inheritWorkerCapabilitiesFrom({
     harnessConfig: parent.harnessConfig ?? {},
     ...(parent.agentSnapshot?.toolPolicy ? { toolPolicy: parent.agentSnapshot.toolPolicy } : {}),
+    ...(parent.agentOverrides ? { agentOverrides: parent.agentOverrides } : {}),
     ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
     ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
     ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
@@ -239,7 +247,9 @@ export function inheritWorkerCapabilities(parent: Chat): InheritedWorkerCapabili
  */
 export function inheritWorkerCapabilitiesFrom(parent: {
   harnessConfig: Partial<HarnessConfig>;
-  toolPolicy?: { allow: string[]; deny: string[] };
+  toolPolicy?: { allow: string[]; deny: string[]; groups?: AgentToolPolicy };
+  /** The parent's own capability delta (a chat's `agentOverrides`). */
+  agentOverrides?: AgentOverrides;
   permissionMode?: Chat['permissionMode'];
   defaultAgentMode?: Chat['defaultAgentMode'];
   browserConfig?: Chat['browserConfig'];
@@ -277,8 +287,21 @@ export function inheritWorkerCapabilitiesFrom(parent: {
         : {}),
   };
 
+  // C-15 — the same clamp as resolver input, so it lands in the worker's
+  // `excludedBuiltinTools` on every provider.
+  const extraDeny = [...new Set([...(snapshotPolicy?.deny ?? []), ...(parent.agentOverrides?.extraDeny ?? [])])];
+  const off: Partial<AgentToolPolicy> = {};
+  for (const [group, on] of Object.entries({ ...(snapshotPolicy?.groups ?? {}), ...(parent.agentOverrides?.tools ?? {}) })) {
+    if (on === false) off[group as keyof AgentToolPolicy] = false;
+  }
+  const agentOverrides: AgentOverrides = {
+    ...(extraDeny.length > 0 ? { extraDeny } : {}),
+    tools: { ...off, workflows: false, workflowAuthoring: false },
+  };
+
   return {
     harnessConfig,
+    agentOverrides,
     ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
     ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
     ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
@@ -435,6 +458,18 @@ export class OrchestratorService {
   /** A stage whose agent is an orchestrator can now spawn workers (T6). */
   registerStageParent(parent: StageOrchestratorParent): void {
     this.stageParents.set(parent.stageRunId, parent);
+  }
+
+  /**
+   * When an orchestrator's current episode runs out of time (P06 WP-6.3):
+   * the workflow tools cap `waitSeconds` and a child run's `maxDurationMs`
+   * with it. Before the first wave (or after an episode ended) a new
+   * episode would start now.
+   */
+  episodeDeadline(parentChatId: string): number | undefined {
+    if (this.config.timeBudgetMs <= 0) return undefined;
+    const startedAt = this.episodeEnded.has(parentChatId) ? undefined : this.orchestrationStartedAt.get(parentChatId);
+    return (startedAt ?? Date.now()) + this.config.timeBudgetMs;
   }
 
   /** The stage's session is gone; its workers keep their records. */
@@ -601,7 +636,9 @@ export class OrchestratorService {
         // The agent instructions are appended AFTER the constant worker prompt, so
         // the shared cache prefix survives for workers that share an agent.
         ...(workerAgentRef ? { agentRef: workerAgentRef } : {}),
-        // G15 — capability inheritance (see `inheritWorkerCapabilities`).
+        // G15 — capability inheritance (see `inheritWorkerCapabilities`),
+        // the built-in clamp through the resolver (C-15).
+        agentOverrides: inherited.agentOverrides,
         ...(inherited.permissionMode ? { permissionMode: inherited.permissionMode } : {}),
         ...(inherited.defaultAgentMode ? { defaultAgentMode: inherited.defaultAgentMode } : {}),
         ...(inherited.browserConfig ? { browserConfig: inherited.browserConfig } : {}),

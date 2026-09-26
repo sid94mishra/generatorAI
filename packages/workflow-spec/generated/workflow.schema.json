@@ -184,6 +184,14 @@
                         "web": {
                           "type": "boolean",
                           "description": "Web fetch and search tools"
+                        },
+                        "workflows": {
+                          "type": "boolean",
+                          "description": "Workflow tools: list, describe, run, check, respond to an approval, cancel"
+                        },
+                        "workflowAuthoring": {
+                          "type": "boolean",
+                          "description": "Workflow authoring tools: guide, validate, plan, create a draft"
                         }
                       },
                       "additionalProperties": false,

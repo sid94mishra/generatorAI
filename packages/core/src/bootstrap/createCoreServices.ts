@@ -82,6 +82,10 @@ import type { AgentResolver } from '../services/AgentResolver.js';
 import type { AgentStagingService } from '../services/AgentStagingService.js';
 import type { IPlanRepository, IAgentInteractionRepository } from '../domain/ports/IPlanRepository.js';
 import type { GitManager } from '../infrastructure/GitManager.js';
+import type { IChatWorkflowRunRepository } from '../domain/ports/IInvocationStores.js';
+import { WorkflowAuthoringService } from '../services/WorkflowAuthoringService.js';
+import { ChatWorkflowRunBridge } from '../services/workflow-invocation/ChatWorkflowRunBridge.js';
+import { DEFAULT_WORKFLOW_TOOL_LIMITS, WorkflowToolHost } from '../tools/workflows/WorkflowToolHost.js';
 
 /**
  * Inputs that both composition-roots already have by the time they wire
@@ -120,6 +124,12 @@ export interface CoreServicesInputs {
   invocationUploadRepo?: IInvocationUploadRepository;
   /** Project codebases: invocations check the aliases a run mounts. */
   projectCodebaseRepo?: IProjectCodebaseRepository;
+  /** The runs chats started through their workflow tools (v60; P06). Without it chats get no run cards or nudges. */
+  chatWorkflowRunRepo?: IChatWorkflowRunRepository;
+  /** The generated `generatorai-workflow-author` skill bundle (the authoring guide, the schema hash). */
+  workflowSkillDir?: string;
+  /** PD-14 — the operator lets agents publish workflows (default off). */
+  allowAgentPublish?: boolean;
   /** The web app origin, for invocation result links. */
   appUrl?: string;
   /**
@@ -250,6 +260,12 @@ export interface CoreServices {
   workflowApprovalService: WorkflowApprovalService;
   /** Per-wait callback tokens (P05 §4.3). */
   workflowCallbacks: WorkflowCallbacks;
+  /** How agents author workflows: validate, plan, draft, publish (P06 WP-6.5). */
+  workflowAuthoringService: WorkflowAuthoringService;
+  /** The workflow tools' one implementation (P06 WP-6.1): chats, stages and the MCP tool route. */
+  workflowToolHost: WorkflowToolHost;
+  /** Runs a chat started, mirrored onto the chat (P06 WP-6.2); null without the link store. */
+  chatWorkflowRunBridge: ChatWorkflowRunBridge | null;
   /** Claim-then-finalize idempotency keys (null without an idempotency store). */
   idempotencyService: IdempotencyService | null;
   /** The lifecycle's pre- and post-processing steps (commit/push/PR through the source-control flow). */
@@ -545,6 +561,60 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   // A sub-workflow stage invokes its child through the same path (P05 §4.2).
   engine.subworkflows.setInvocation(workflowInvocationService, workflowDefinitionService);
 
+  // ── Agents and workflows (P06) ──
+  const workflowAuthoringService = new WorkflowAuthoringService({
+    definitions: workflowDefinitionService,
+    invocation: workflowInvocationService,
+    ...(inputs.agentService ? { agents: inputs.agentService } : {}),
+    models: () => harness.getModels(),
+    ...(inputs.workflowSkillDir ? { skillDir: inputs.workflowSkillDir } : {}),
+    allowAgentPublish: () => inputs.allowAgentPublish === true,
+    ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+  });
+  const chatWorkflowRunBridge = inputs.chatWorkflowRunRepo
+    ? new ChatWorkflowRunBridge({
+        eventBus,
+        links: inputs.chatWorkflowRunRepo,
+        runs: workflowRunRepo,
+        stageRuns: stageRunRepo,
+        chats: chatEntityRepo,
+        approvals: workflowApprovalService,
+        nudge: {
+          isTurnActive: (chatId) => chatManagementService.isTurnActive(chatId),
+          sendPrompt: (chatId, prompt) => chatManagementService.sendPrompt(chatId, prompt),
+        },
+        ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+        logger,
+      })
+    : null;
+  chatWorkflowRunBridge?.start();
+  const workflowToolHost = new WorkflowToolHost({
+    invocation: workflowInvocationService,
+    definitions: workflowDefinitionService,
+    approvals: workflowApprovalService,
+    authoring: workflowAuthoringService,
+    runs: workflowRunRepo,
+    stageRuns: stageRunRepo,
+    chats: chatEntityRepo,
+    ...(inputs.chatWorkflowRunRepo ? { links: inputs.chatWorkflowRunRepo } : {}),
+    ...(chatWorkflowRunBridge ? { linker: chatWorkflowRunBridge } : {}),
+    command: (runId, command, opts) => engine.command(runId, command, opts),
+    orchestratorDeadline: (chatId) => orchestratorService.episodeDeadline(chatId),
+    chatMounts: async (workspaceId) => {
+      const mounts = sessionExtensions.mountService;
+      if (!mounts) return [];
+      await mounts.refreshStatus(workspaceId).catch(() => undefined);
+      return mounts.list(workspaceId);
+    },
+    limits: {
+      maxChildRunsPerRoot: envInt('GENERATORAI_WORKFLOW_MAX_CHILD_RUNS', DEFAULT_WORKFLOW_TOOL_LIMITS.maxChildRunsPerRoot),
+      maxConcurrentPerChat: envInt('GENERATORAI_WORKFLOW_CHAT_CONCURRENCY', DEFAULT_WORKFLOW_TOOL_LIMITS.maxConcurrentPerChat),
+    },
+    ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+  });
+  // Chats and stages bind the tools through the composer (by reference).
+  sessionExtensions.workflowTools = workflowToolHost;
+
   // ── Automation ──
   const automationService = new AutomationService(
     automationRepo,
@@ -602,6 +672,9 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     workflowInvocationService,
     workflowApprovalService,
     workflowCallbacks,
+    workflowAuthoringService,
+    workflowToolHost,
+    chatWorkflowRunBridge,
     idempotencyService,
     lifecycleSteps,
     ...(planService ? { planService } : {}),

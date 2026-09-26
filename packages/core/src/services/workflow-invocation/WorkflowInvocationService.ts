@@ -154,6 +154,19 @@ export class WorkflowInvocationService {
     return this.planOf(target, v);
   }
 
+  /**
+   * The plan of a graph that is not saved (an agent's draft, P06 WP-6.5):
+   * the same validation and planner as `plan`, over the graph as given.
+   * `request` is an invocation request without its target.
+   */
+  async planGraph(target: { workflowDefinitionId: string; graph: WorkflowGraph }, request: Record<string, unknown>, ctx: InvocationContext): Promise<InvocationPlan> {
+    const req = parseRequest({ ...request, target: { kind: 'definition', workflowDefinitionId: '00000000-0000-4000-8000-000000000000' } });
+    checkInvocationScopes(req, ctx);
+    const resolved: ResolvedTarget = { workflowDefinitionId: target.workflowDefinitionId, definitionVersionId: null, graph: target.graph };
+    const v = await this.validate(req, ctx, resolved);
+    return this.planOf(resolved, v);
+  }
+
   private async execute(req: InvocationRequest, ctx: InvocationContext, key: string | undefined): Promise<InvocationResult> {
     const target = await this.resolve(req, ctx, { materialize: true });
     const v = await this.validate(req, ctx, target);
@@ -199,6 +212,8 @@ export class WorkflowInvocationService {
           ...(v.permissionCeiling ? { triggerPermissionMode: v.permissionCeiling } : {}),
           ...(v.uploads.length > 0 ? { uploads: v.uploads } : {}),
           ...(ctx.inheritWorkspace ? { inheritedWorkspace: ctx.inheritWorkspace } : {}),
+          ...(ctx.approvalDelegate ? { approvalDelegate: ctx.approvalDelegate } : {}),
+          ...(ctx.parentWorkspaceId ? { parentWorkspaceId: ctx.parentWorkspaceId } : {}),
         },
         ...(ctx.inheritWorkspace ? { workspaceId: ctx.inheritWorkspace.workspaceId } : {}),
         ...(v.budget ? { budget: v.budget } : {}),
@@ -564,7 +579,7 @@ function isPersonPrincipal(ctx: InvocationContext): boolean {
 /** The key an in-process caller that may retry gets without asking (G4 §1.3.5). */
 function derivedKey(ctx: InvocationContext): string | undefined {
   const t = ctx.trigger;
-  if (t.kind === 'chat' && t.toolCallId) return `chat:${t.chatId}:${t.toolCallId}`;
+  if ((t.kind === 'chat' || t.kind === 'orchestrator') && t.toolCallId) return `chat:${t.chatId}:${t.toolCallId}`;
   if (t.kind === 'stage' && t.toolCallId) return `stage:${t.stageRunId}:${t.toolCallId}`;
   if (t.kind === 'automation') return `auto:${t.executionId}:${t.iterationIndex ?? 0}:${ctx.attempt ?? 1}`;
   return undefined;

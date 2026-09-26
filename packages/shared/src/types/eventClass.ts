@@ -103,6 +103,14 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   // carries its settled state, so it is kept an item like its siblings: a
   // dropped final tick would leave a finished worker spinning in the transcript.
   'chat.background_task.progress': 'item',
+  // chat.workflow_run — a run the chat started through its workflow tools
+  // (P06 WP-6.2), mirrored onto the chat scope. Items like the background
+  // tasks: the run card is the chat's only view of it, and the last progress
+  // tick carries the settled state.
+  'chat.workflow_run.linked': 'item',
+  'chat.workflow_run.progress': 'item',
+  'chat.workflow_run.awaiting_approval': 'item',
+  'chat.workflow_run.finalized': 'item',
   // Rewind/fork move the transcript itself — every viewer must refetch.
   'chat.rewound': 'item',
   'chat.forked': 'item',

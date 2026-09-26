@@ -20,6 +20,7 @@ import type {
 } from '@generatorai/core';
 import type { ProjectCodebase, ProjectPullRequest, ScmPullRequestState } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
+import { chatPrincipalOf } from './permissionScope.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -837,6 +838,7 @@ export function createProjectRoutes(container: Container): Router {
 
       const chat = await chatManagementService.createChat({
         name: `Review PR #${detail.number}: ${detail.title}`,
+        createdByPrincipal: chatPrincipalOf(req),
         projectId,
         sources: [
           {

@@ -4,7 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
-import { canBypassPermissions, canSetSessionProvider } from './permissionScope.js';
+import { canBypassPermissions, canSetSessionProvider, chatPrincipalOf } from './permissionScope.js';
 import multer from 'multer';
 import { z } from 'zod';
 import type { Container } from '../composition-root.js';
@@ -310,7 +310,7 @@ export function createChatApiRoutes(container: Container): Router {
         params.permissionMode = 'default';
       }
 
-      const chat = await chatManagementService.createChat(params);
+      const chat = await chatManagementService.createChat({ ...params, createdByPrincipal: chatPrincipalOf(req) });
       logger.info(`[ChatRoutes] Created chat ${chat.id}`, { requestId: req.requestId });
       res.status(201).json(await withWorkspacePrep(container, chat));
     } catch (err) {

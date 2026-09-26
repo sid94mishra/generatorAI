@@ -252,6 +252,28 @@ export class SessionComposer {
           }
         : {}),
     });
+    // P06 — the workflow tools, after every other tool (R-10). Workers never
+    // (they must not fan out); opt-in for plain chats (PD-23); stages when
+    // their agent grants them and the provider takes host tools (RV-9).
+    const groups = projection.toolPolicy.groups;
+    const wantsWorkflows = !isWorker && (groups.workflows === true || groups.workflowAuthoring === true);
+    if (wantsWorkflows && i.owner.kind === 'stage' && levels?.hostTools === 'none') {
+      warnings.push({
+        code: 'workflow_tools_unsupported',
+        message: `The ${provider} provider does not take host tools: this stage gets no workflow tools (use a subworkflow stage instead)`,
+        params: { provider },
+      });
+    } else if (wantsWorkflows) {
+      this.binder.workflows(cfg, target, {
+        run: groups.workflows === true,
+        authoring: groups.workflowAuthoring === true,
+        orchestrator: i.owner.kind === 'chat' && orchestrator,
+        turnOf: () => {
+          const turn = this.turns.get(i.conversationId);
+          return turn ? { turnId: turn.turnId, permissionMode: turn.permissionMode } : undefined;
+        },
+      });
+    }
     this.binder.hooks(cfg, target);
     if (levels && toolCount(cfg) > toolsBefore) {
       if (levels.hostTools === 'none') {

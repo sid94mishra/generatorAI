@@ -93,6 +93,9 @@ const GROUP_TOOL_NAMES: Record<keyof AgentToolPolicy, { copilot: string[]; claud
     copilot: ['fetch', 'web_search', 'web_fetch'],
     claude: ['WebFetch', 'WebSearch'],
   },
+  // Platform tool sets: bound by the session composer, never built-ins.
+  workflows: { copilot: [], claude: [] },
+  workflowAuthoring: { copilot: [], claude: [] },
 };
 
 export class AgentResolver {
@@ -400,7 +403,11 @@ export class AgentResolver {
         if (typeof v === 'boolean') out[group] = v;
       }
     }
-    if (forceOrchestration) out.orchestration = true;
+    if (forceOrchestration) {
+      out.orchestration = true;
+      // An orchestrator runs workflows by default (PD-23) unless a level says no.
+      if (!levels.some((l) => typeof l?.workflows === 'boolean')) out.workflows = true;
+    }
     return out;
   }
 

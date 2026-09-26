@@ -1,6 +1,9 @@
 // ────────────────────────────────────────────────────────────────
-// Who may turn tool approvals OFF (chats, runs, automations).
+// Who may turn tool approvals OFF (chats, runs, automations), and who a
+// chat acts for.
 // ────────────────────────────────────────────────────────────────
+
+import type { ChatPrincipal } from '@generatorai/shared';
 
 /**
  * May this caller set `bypassPermissions` — on a chat, a live run, or an
@@ -28,4 +31,25 @@ export function canBypassPermissions(req: { principal?: { scopes?: readonly stri
  */
 export function canSetSessionProvider(req: { principal?: { scopes?: readonly string[] } }): boolean {
   return canBypassPermissions(req);
+}
+
+/**
+ * The principal a chat is created by (P06 WP-6.2): its in-process workflow
+ * tools act with these scopes. No principal is unauthenticated loopback
+ * development: the local owner.
+ */
+export function chatPrincipalOf(req: {
+  principal?: { type: string; id: string; deviceId?: string; scopes: readonly string[] } | undefined;
+}): ChatPrincipal {
+  const p = req.principal;
+  if (!p) return { kind: 'local', id: 'local', scopes: [] };
+  const kind: ChatPrincipal['kind'] =
+    p.type === 'service-account'
+      ? 'service_account'
+      : p.type === 'paired-device' || p.type === 'user-session'
+        ? 'device'
+        : p.type === 'internal-service'
+          ? 'system'
+          : 'local';
+  return { kind, id: p.deviceId ?? p.id, scopes: [...p.scopes] };
 }

@@ -80,6 +80,7 @@ automations, chats, orchestrators, stages and forks build their own trigger in p
 | `kind` | "orchestrator" | yes |  | An orchestrator chat |
 | `chatId` | string (≤100 chars) | yes |  | Orchestrator chat id |
 | `taskId` | string (≤100 chars) |  |  | Orchestrator task |
+| `toolCallId` | string (≤200 chars) |  |  | Tool call |
 | `kind` | "stage" | yes |  | A sub-workflow stage or a stage tool call |
 | `runId` | string (≤100 chars) | yes |  | Parent run |
 | `stageRunId` | string (≤100 chars) | yes |  | Parent stage instance |

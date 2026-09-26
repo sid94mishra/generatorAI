@@ -5,8 +5,10 @@
 // tool set and the hook bridge, for either owner (chat or stage). The chat
 // create path is the canonical order and must stay byte-identical (R-10):
 // browser → computer → widgets → SCM hint → [MCP] → custom → orchestrator →
-// hooks. The composer calls the methods in that order; each one appends
-// its tools and system block and nothing else.
+// workflows → hooks. The composer calls the methods in that order; each one
+// appends its tools and system block and nothing else. The workflow tools
+// (P06) come after every existing tool, so a session without them keeps
+// its tool prefix byte-identical.
 // ────────────────────────────────────────────────────────────────
 
 import { COMPUTER_USE_SKILL_ID, COMPUTER_USE_SKILL_NAME } from '@generatorai/shared';
@@ -16,6 +18,8 @@ import { buildComputerToolSet } from '../../tools/computer/index.js';
 import { buildWidgetTools } from '../../tools/widgetTools.js';
 import { buildOrchestratorToolSet } from '../../tools/orchestrator/index.js';
 import { isExtensionAuthorToolName } from '../../tools/extensionAuthorTools.js';
+import { buildWorkflowToolSet, WORKFLOW_AUTHORING_HINT, type WorkflowToolCaller, type WorkflowToolTurn } from '../../tools/workflows/index.js';
+import type { ToolCallContext } from '../../domain/ports/IAgentHarness.js';
 import { ORCHESTRATOR_SYSTEM_PROMPT } from '../orchestrator/prompts.js';
 import type { StageOrchestratorParent } from '../orchestrator/OrchestratorService.js';
 import {
@@ -121,10 +125,10 @@ export class PlatformToolBinder {
       const tools = refusal
         ? built.map((tool) => ({
             ...tool,
-            handler: async (args: Record<string, unknown>) => {
+            handler: async (args: Record<string, unknown>, callCtx?: ToolCallContext) => {
               const reason = refusal();
               if (reason) throw new Error(reason);
-              return tool.handler(args);
+              return tool.handler(args, callCtx);
             },
           }))
         : built;
@@ -225,6 +229,29 @@ export class PlatformToolBinder {
     appendTools(cfg, tools);
     appendSystemBlock(cfg, `\n\n${ORCHESTRATOR_SYSTEM_PROMPT}`);
     unionList(cfg, 'excludedBuiltinTools', ['Agent', 'Task']);
+  }
+
+  /**
+   * The workflow tools (P06 WP-6.1): the run group (list, describe, run,
+   * check, respond, cancel) and the authoring group (guide, validate, plan,
+   * draft), each when the owner's group is on; the authoring hint rides
+   * along with the authoring tools. Appended LAST (R-10).
+   */
+  workflows(
+    cfg: ConversationConfig,
+    t: BindTarget,
+    opts: { run: boolean; authoring: boolean; orchestrator: boolean; turnOf: () => WorkflowToolTurn | undefined },
+  ): void {
+    const host = this.deps.workflowTools;
+    if (!host || (!opts.run && !opts.authoring)) return;
+    const caller: WorkflowToolCaller =
+      t.owner.kind === 'chat'
+        ? { kind: 'chat', chatId: t.owner.chatId, sessionId: t.sessionId, conversationId: t.conversationId, orchestrator: opts.orchestrator }
+        : { kind: 'stage', runId: t.owner.workflowRunId, stageRunId: t.owner.stageRunId, conversationId: t.conversationId };
+    const tools = buildWorkflowToolSet(host, caller, { run: opts.run, authoring: opts.authoring }, { turnOf: opts.turnOf, owner: ownerTag(t.owner) });
+    if (tools.length === 0) return;
+    appendTools(cfg, tools);
+    if (opts.authoring && host.hasAuthoring) appendSystemBlock(cfg, WORKFLOW_AUTHORING_HINT);
   }
 
   /** The synchronous hook bridge (HKS-01), one factory for both owners. */

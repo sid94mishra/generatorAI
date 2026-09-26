@@ -43,6 +43,8 @@ export const AgentToolPolicySchema = z
     fileWrite: z.boolean().optional().describe('File write tools'),
     shell: z.boolean().optional().describe('Shell tools'),
     web: z.boolean().optional().describe('Web fetch and search tools'),
+    workflows: z.boolean().optional().describe('Workflow tools: list, describe, run, check, respond to an approval, cancel'),
+    workflowAuthoring: z.boolean().optional().describe('Workflow authoring tools: guide, validate, plan, create a draft'),
   })
   .strict()
   .describe('Tool-group delta over the bound agent');

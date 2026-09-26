@@ -19,6 +19,7 @@ import {
   commandFingerprint,
   exportGraph,
   validateWorkflow,
+  type DefinitionAuthor,
   type DefinitionStatus,
   type ResolvedWorkflowRef,
   type ValidateOptions,
@@ -61,6 +62,8 @@ export interface DefinitionWriteOptions {
 
 export interface CreateDefinitionOptions extends DefinitionWriteOptions {
   status?: DefinitionStatus;
+  /** An agent-authored draft's author (P06 WP-6.5). */
+  authoredBy?: DefinitionAuthor | undefined;
 }
 
 export type DeleteOutcome = { deleted: true } | { archived: true; runs: number };
@@ -225,7 +228,7 @@ export class WorkflowDefinitionService {
   async createFromSpec(input: unknown, opts: CreateDefinitionOptions): Promise<WorkflowDefinitionRecord> {
     const graph = assertValidGraph(input, undefined, this.allowlist, { resolveWorkflowRef: await this.refResolver(input) });
     if (collectCommandFields(graph).length > 0) this.assertCommandEdit('', commandFingerprint(graph), opts);
-    const record = await this.store.insert({ id: generateId(), status: 'draft', graph });
+    const record = await this.store.insert({ id: generateId(), status: 'draft', graph, ...(opts.authoredBy ? { authoredBy: opts.authoredBy } : {}) });
     return opts.status === 'published' ? this.publish(record.id) : record;
   }
 

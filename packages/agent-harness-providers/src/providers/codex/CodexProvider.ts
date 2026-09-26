@@ -2823,12 +2823,15 @@ export class CodexProvider implements IAgentHarness {
     conv: ConversationState | undefined,
     params: unknown,
   ): Promise<{ success: boolean; contentItems: Array<{ type: 'inputText'; text: string }> }> {
-    const { tool, arguments: args } = (params ?? {}) as { tool?: string; arguments?: unknown };
+    const { tool, arguments: args, callId } = (params ?? {}) as { tool?: string; arguments?: unknown; callId?: unknown };
     const text = (v: string) => [{ type: 'inputText' as const, text: v }];
     const def = conv?.params.tools?.find((t) => t.name === tool);
     if (!def) return { success: false, contentItems: text(`Tool "${String(tool)}" is not available in this conversation.`) };
     try {
-      const out = await def.handler((args && typeof args === 'object' ? args : {}) as Record<string, unknown>);
+      const out = await def.handler(
+        (args && typeof args === 'object' ? args : {}) as Record<string, unknown>,
+        typeof callId === 'string' && callId ? { toolCallId: callId } : {},
+      );
       return { success: true, contentItems: text(typeof out === 'string' ? out : JSON.stringify(out ?? null)) };
     } catch (err) {
       return { success: false, contentItems: text(err instanceof Error ? err.message : String(err)) };

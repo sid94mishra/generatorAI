@@ -23,6 +23,7 @@ import type { AgentStagingService } from '../AgentStagingService.js';
 import type { SystemArtifactService } from '../SystemArtifactService.js';
 import type { AgentInteractionService } from '../AgentInteractionService.js';
 import type { PlanService } from '../PlanService.js';
+import type { WorkflowToolHost } from '../../tools/workflows/WorkflowToolHost.js';
 
 /** Who a session belongs to. */
 export type SessionOwner =
@@ -86,6 +87,8 @@ export interface SessionComposerDeps {
   systemArtifacts?: SystemArtifactService;
   agentInteractionService?: AgentInteractionService;
   planService?: PlanService;
+  /** The workflow tools (P06 WP-6.1): bound when the owner's `workflows` / `workflowAuthoring` groups are on. */
+  workflowTools?: WorkflowToolHost;
 }
 
 /**
@@ -102,6 +105,7 @@ export interface ComposeWarning {
     | 'permission_gating_exec_and_patch'
     | 'host_tools_start_only'
     | 'host_tools_unsupported'
+    | 'workflow_tools_unsupported'
     | 'agent_resolution';
   message: string;
   params?: Record<string, unknown>;

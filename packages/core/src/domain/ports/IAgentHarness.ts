@@ -344,11 +344,22 @@ export function takeToolBinaries(result: unknown): { text: unknown; binaries: To
   return { text: rest, binaries: raw as ToolBinaryAttachment[] };
 }
 
+/**
+ * What a provider knows about one tool call (P06 WP-6.1), passed as the
+ * handler's second argument. `toolCallId` is the provider's own id for the
+ * call (Claude's tool_use id, Copilot's toolCallId, Codex's callId) when it
+ * gives one: a replayed call carries the same id, so handlers that start
+ * work key their idempotency on it.
+ */
+export interface ToolCallContext {
+  toolCallId?: string;
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
   parametersSchema: Record<string, unknown>;
-  handler: (args: Record<string, unknown>) => Promise<unknown>;
+  handler: (args: Record<string, unknown>, ctx?: ToolCallContext) => Promise<unknown>;
   /**
    * TOL-02 — if true, the harness skips its permission prompt for this
    * tool (use for inherently safe tools). Copilot SDK honours this

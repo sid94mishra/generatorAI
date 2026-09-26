@@ -22,6 +22,7 @@ export type {
   PermissionRequest,
   PermissionResponse,
   ToolDefinition,
+  ToolCallContext,
   McpServerConfig,
   AttachmentRef,
   CreateConversationParams,

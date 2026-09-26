@@ -69,6 +69,8 @@ function composedConfig(calls: string[]): CreateConversationParams {
       fileWrite: true,
       shell: true,
       web: true,
+      workflows: false,
+      workflowAuthoring: false,
     },
   };
   binder.custom(cfg, target);
