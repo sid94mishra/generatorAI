@@ -444,6 +444,15 @@ Decided while building P1-T1…T6 where `02` was silent:
 - Kill confirmation names the tab/shell only and the agent console shows no durations (nothing reports them); browser "pool full"/"page failed" show the error + Dismiss only (no data for Retry/Open Terminal).
 - The legacy run page imports these blocks (mechanical swap; its Files tab is now single).
 
+### D-72 Chat page on T-04 and the handoff (P4-12) — Final
+- `features/chat/ChatPage.tsx` on T-04 (new `bare`/`dockHost` options let the dock keep control of split/sheet/Maximize) with its own ChatHeader (breadcrumb, status badge — nothing while idle, neutral "Archived" chip —, More menu: Open in editor via `blocks/editor` `useEditorActions`, Copy path, Rename…, Copy transcript, Fork, Archive… with confirm), dock toggle `dock-toggle` ("Show side pane"/"Hide side pane"; `header-toggle-right-pane` retired, specs updated), FindBar on FindWidget, status line "Processing… / Generating response… / Paused — waiting for your input". `pages/ChatPage.tsx`, the legacy FindBar, ChatChangesTray, LiveActivityStrip, ScmResultCard, SourcesPanel deleted; the legacy Header lost its chat branch.
+- `rightPaneStore` → `stores/dockStore` (still backs `dock.toggle`, the desktop menu checkmark and the legacy run page). `RightPane.tsx`/`useResizablePane` remain only for the legacy workflow run page until PW or the D-35 fallback. "Edit sources" opens through a small store with the dialog mounted in `app/shell`.
+- `docs/redesign/HANDOFF.md` is published: the Workflow Overhaul builds its screens on the kit from here.
+
+### D-73 Home and palette search as built (P5-10, P5-12) — Final
+- `features/home` on L-01 replaces the Dashboard ("Dashboard" renamed to Home everywhere): H1 "N need you · N running", quick composer (blocks/composer; "More options" carries a shared `CreateChatDraft`), Needs you with inline actions limited to chat tool permission (Allow once), chat plan review (Approve) and workflow stage approval — questions, stage inputs, computer consent and paused runs navigate —, Running (Stop/Cancel), Recently finished (Retry; PR link only when the server sends one), This week (G-10), System (G-12), shortcuts. No automation re-trigger/cancel on Home (no API). Recently finished / This week refetch when an item leaves the attention feed.
+- Palette entity search (G-18): entity groups above Go to, ordered by each type's best hit; server-matched hits are `preMatched` (not re-filtered locally); chats already in Recent are not repeated; Recent chats sort by activity.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
