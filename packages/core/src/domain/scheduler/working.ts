@@ -274,7 +274,10 @@ export class Working {
     this.rejected = true;
   }
 
-  addInstances(rows: NewInstance[]): void {
+  addInstances(all: NewInstance[]): void {
+    // An instance that exists already (a fork copied it into a scope it
+    // re-seeds) is kept, as the store's ON CONFLICT DO NOTHING keeps its row.
+    const rows = all.filter((r) => !this.instances.has(r.id));
     if (rows.length === 0) return;
     this.push({ t: 'create_instances', rows });
     for (const r of rows) {

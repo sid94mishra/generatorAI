@@ -69,7 +69,7 @@ export type {
   NewVersion,
   ReplaceGraphResult,
 } from './IWorkflowDefinitionStore.js';
-export type { IWorkflowRunRepository, MemoizedInstance, WorkflowRunUpdate } from './IWorkflowRunRepository.js';
+export type { IWorkflowRunRepository, MemoizedInstance, MemoizedIteration, WorkflowRunUpdate } from './IWorkflowRunRepository.js';
 export type { IStageRunRepository } from './IStageRunRepository.js';
 export type { ISequenceAllocator } from './ISequenceAllocator.js';
 

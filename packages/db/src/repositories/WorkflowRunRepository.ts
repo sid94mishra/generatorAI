@@ -17,6 +17,7 @@ import type {
   IWorkflowRunCas,
   IWorkflowRunRepository,
   MemoizedInstance,
+  MemoizedIteration,
   RunTransitionOptions,
   TransitionResult,
   WorkflowRunRow,
@@ -25,7 +26,7 @@ import type {
 import type { WorkflowRunState } from '@generatorai/workflow-spec';
 import type { WorkflowRun, WorkflowRunStatus, WorkflowRunPermissionMode } from '@generatorai/shared';
 import { StorageError, NotFoundError } from '@generatorai/shared';
-import { stageRuns, workflowRuns } from '../schema.js';
+import { loopIterations, stageRuns, workflowRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { sqliteHandle } from './AuthRepositories.js';
 import { claimRunOwnership, getRunRow, renewRunOwnership, runTransition } from './engineCas.js';
@@ -92,6 +93,11 @@ function memoizedValues(runId: string, m: MemoizedInstance, now: Date): typeof s
     errorCode: m.errorCode,
     usage: m.usage,
     copiedFromStageRunId: m.copiedFromStageRunId,
+    ...(m.scopeId ? { scopeId: m.scopeId } : {}),
+    ...(m.iterationIndex !== undefined && m.iterationIndex !== null ? { iterationIndex: m.iterationIndex } : {}),
+    ...(m.itemIndex !== undefined && m.itemIndex !== null ? { itemIndex: m.itemIndex } : {}),
+    ...(m.itemKey ? { itemKey: m.itemKey } : {}),
+    ...(m.containerState !== undefined ? { loopState: m.containerState } : {}),
     createdAt: now,
     updatedAt: now,
     startedAt: m.startedAt,
@@ -134,12 +140,32 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
   }
 
   /** A fork and its memoized instances in ONE synchronous transaction (A-34). */
-  async createFork(run: WorkflowRun, memoized: readonly MemoizedInstance[]): Promise<void> {
+  async createFork(run: WorkflowRun, memoized: readonly MemoizedInstance[], iterations: readonly MemoizedIteration[] = []): Promise<void> {
     validateJsonColumn(run.variables, jsonRecord, { column: 'variables', table: 'workflow_runs' });
+    // A container before its body (scope_id references it): shorter paths first.
+    const ordered = [...memoized].sort((a, b) => a.instancePath.split('/').length - b.instancePath.split('/').length || (a.instancePath < b.instancePath ? -1 : 1));
     try {
       this.db.transaction((tx) => {
         tx.insert(workflowRuns).values(runInsertValues(run)).run();
-        for (const m of memoized) tx.insert(stageRuns).values(memoizedValues(run.id, m, run.createdAt)).run();
+        for (const m of ordered) tx.insert(stageRuns).values(memoizedValues(run.id, m, run.createdAt)).run();
+        for (const r of iterations) {
+          tx.insert(loopIterations)
+            .values({
+              stageRunId: r.stageRunId,
+              k: r.k,
+              carry: r.carry,
+              exitValues: r.exitValues,
+              streaks: r.streaks,
+              signals: r.signals,
+              score: r.score,
+              checkpointTurnId: r.checkpointTurnId,
+              usage: r.usage,
+              outcome: r.outcome,
+              startedAt: r.startedAt !== null ? new Date(r.startedAt) : null,
+              endedAt: r.endedAt !== null ? new Date(r.endedAt) : null,
+            })
+            .run();
+        }
       });
     } catch (err) {
       throw new StorageError(`Failed to create the fork: ${err instanceof Error ? err.message : String(err)}`, err instanceof Error ? err : undefined);

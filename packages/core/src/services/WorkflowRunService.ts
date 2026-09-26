@@ -28,7 +28,7 @@ import {
   type RunCommand,
   type WorkflowGraph,
 } from '@generatorai/workflow-spec';
-import type { IWorkflowRunRepository, MemoizedInstance } from '../domain/ports/IWorkflowRunRepository.js';
+import type { IWorkflowRunRepository, MemoizedInstance, MemoizedIteration } from '../domain/ports/IWorkflowRunRepository.js';
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import { instanceId } from '../domain/scheduler/ids.js';
 import type { EventBus } from '../events/EventBus.js';
@@ -245,11 +245,16 @@ export class WorkflowRunService {
       const sourceInstances = await this.stageRunRepo.getByRunId(sourceRunId);
       const topLevel = sourceInstances.filter((i) => i.instancePath === i.stageKey);
       const rerunFrom = opts.rerunFrom ?? topLevel.filter((i) => i.status !== 'completed' && i.status !== 'skipped').map((i) => i.instancePath);
-      const unknown = rerunFrom.filter((p) => !graph.stages.some((s) => s.key === p));
+      // A path inside a container (`<loop>#k/…`, `<map>#i/…` or `<map>#<key>/…`,
+      // P05 WP-5B.4) re-seeds that top-level container from inside; a plain
+      // key re-runs the stage (and a container with all of its body).
+      const plain = rerunFrom.filter((p) => !p.includes('#'));
+      const nested = rerunFrom.filter((p) => p.includes('#') && !plain.includes(p.split('#')[0]!));
+      const unknown = [...plain, ...nested.map((p) => p.split('#')[0]!)].filter((k) => !graph.stages.some((s) => s.key === k && !s.parentKey));
       if (unknown.length > 0) {
         throw new ValidationError(`rerunFrom: ${unknown.map((p) => `"${p}"`).join(', ')} is not a top-level stage of the forked version`);
       }
-      const rerun = downstreamOf(graph, rerunFrom);
+      const rerun = downstreamOf(graph, [...plain, ...nested.map((p) => p.split('#')[0]!)]);
       // `latest`: an instance whose stage changed is not memoized either.
       if (graph !== sourceGraph) {
         for (const stage of graph.stages) {
@@ -304,10 +309,24 @@ export class WorkflowRunService {
         if (inst.status !== 'completed' && inst.status !== 'skipped' && inst.status !== 'failed') continue;
         memoized.push(memoize(run.id, inst));
       }
+      // Containers re-seeded from inside keep what ran before the path (P05 WP-5B.4).
+      const seeding: Seeding = { runId: run.id, graph, source: sourceInstances, memoized, iterations: [], rerunSourceIds: new Set(), now: now.getTime() };
+      for (const path of nested) {
+        const [head, ...rest] = path.split('/');
+        const [key, idx] = head!.split('#');
+        const src = topLevel.find((i) => i.stageKey === key);
+        if (!src) throw new ValidationError(`rerunFrom: "${path}" names the container "${key}", which did not run in run ${sourceRunId}`);
+        if (memoized.some((m) => m.instancePath === src.instancePath)) continue;
+        await this.seedContainer(seeding, src, { scopeId: null }, idx ?? '', rest, path);
+      }
+      for (const inst of sourceInstances) {
+        const top = inst.instancePath.split(/[#/]/)[0]!;
+        if (plain.includes(top) || (rerun.has(top) && !nested.some((p) => p.split('#')[0] === top))) seeding.rerunSourceIds.add(inst.id);
+      }
 
-      if (opts.workspace === 'restore_checkpoint') await this.restoreForFork(source, sourceInstances, rerun);
+      if (opts.workspace === 'restore_checkpoint') await this.restoreForFork(source, sourceInstances, seeding.rerunSourceIds);
 
-      await this.runRepo.createFork(run, memoized);
+      await this.runRepo.createFork(run, memoized, seeding.iterations);
       await this.eventBus.emitGlobal({
         kind: 'workflow_run.created',
         data: { workflowRunId: run.id, name: run.name, workflowDefinitionId: run.workflowDefinitionId },
@@ -322,11 +341,150 @@ export class WorkflowRunService {
     });
   }
 
+  /**
+   * Re-seed a container from inside (P05 WP-5B.4). A loop re-run from
+   * `<loop>#k/<key>…` keeps iterations 0..k-1 (their instances and their
+   * `loop_iterations` rows, so carry(k-1) seeds iteration k) and restarts in
+   * iteration k: the body stages not downstream of `<key>` are copied, the
+   * rest run again. A map re-run from `<map>#<index or key>/<key>…` keeps
+   * every other item as it ended and runs that item again (its body stages
+   * upstream of `<key>` copied). A deeper path re-seeds the nested
+   * container the same way.
+   */
+  private async seedContainer(
+    s: Seeding,
+    src: StageRun,
+    placement: { scopeId: string | null; iterationIndex?: number; itemIndex?: number; itemKey?: string },
+    idx: string,
+    rest: readonly string[],
+    path: string,
+  ): Promise<void> {
+    const stage = s.graph.stages.find((x) => x.key === src.stageKey);
+    if (!stage || (stage.kind !== 'loop' && stage.kind !== 'map')) throw new ValidationError(`rerunFrom: "${path}": "${src.stageKey}" is not a loop or a map`);
+    const bodyKeys = s.graph.stages.filter((x) => x.parentKey === stage.key).map((x) => x.key);
+    const next = rest[0]?.split('#')[0];
+    if (!next || !bodyKeys.includes(next)) throw new ValidationError(`rerunFrom: "${path}": "${next ?? ''}" is not in the body of "${stage.key}"`);
+    const newId = instanceId(s.runId, src.instancePath);
+    const bodyGraph = { ...s.graph, edges: s.graph.edges.filter((e) => bodyKeys.includes(e.from) && bodyKeys.includes(e.to)) };
+    const rerunBody = downstreamOf(bodyGraph, [next]);
+    const scopeOf = (i: StageRun) => (i.instancePath.startsWith(`${src.instancePath}#`) ? Number(i.instancePath.slice(src.instancePath.length + 1).split('/')[0]) : NaN);
+    const below = s.source.filter((i) => i.instancePath.startsWith(`${src.instancePath}#`));
+    const copyTree = (root: StageRun) => {
+      for (const i of s.source) if (i.id === root.id || i.instancePath.startsWith(`${root.instancePath}#`)) s.memoized.push(memoizeNested(s.runId, s.source, i));
+    };
+
+    let index: number;
+    let containerState: unknown;
+    let bodyPlacement: { iterationIndex?: number; itemIndex?: number; itemKey?: string };
+    if (stage.kind === 'loop') {
+      index = Number(idx);
+      const rows = await this.stageRunRepo.getLoopIterations(src.id);
+      if (!Number.isInteger(index) || index < 0 || index > rows.length) throw new ValidationError(`rerunFrom: "${path}": iteration ${idx} of "${stage.key}" did not run`);
+      for (const r of rows.filter((x) => x.k < index)) {
+        s.iterations.push({ ...r, stageRunId: newId, carry: r.carry, exitValues: r.exitValues, streaks: r.streaks, signals: r.signals, usage: r.usage });
+      }
+      const ls = src.loopState;
+      const prior = rows.find((x) => x.k === index - 1);
+      containerState = {
+        ...(ls ?? {}),
+        k: index,
+        phase: 'running',
+        effectiveMax: Math.max(ls?.effectiveMax ?? stage.loop.maxIterations, index + 1),
+        streaks: prior?.streaks ?? stage.loop.exits.map(() => 0),
+        exitReason: null,
+        exitAction: null,
+        operatorInput: null,
+        startedAt: s.now,
+        parkedMs: 0,
+        parkedSince: null,
+        wrappedUp: false,
+        pending: null,
+      };
+      for (const i of below) if (scopeOf(i) < index) s.memoized.push(memoizeNested(s.runId, s.source, i));
+      bodyPlacement = { iterationIndex: index };
+    } else {
+      const ms = src.mapState;
+      if (!ms) throw new ValidationError(`rerunFrom: "${path}": the map "${stage.key}" did not start`);
+      const byIndex = /^\d+$/.test(idx) ? ms.items.find((it) => it.index === Number(idx)) : undefined;
+      const item = byIndex ?? ms.items.find((it) => it.key === idx);
+      if (!item) throw new ValidationError(`rerunFrom: "${path}": the map "${stage.key}" has no item "${idx}"`);
+      index = item.index;
+      containerState = {
+        ...ms,
+        phase: 'running',
+        items: ms.items.map((it) =>
+          it.index === index
+            ? { ...it, phase: 'pending', status: null, errorCode: null, error: null, workspaceId: null, mounts: null, primaryDir: null, branch: null, pr: null }
+            : it,
+        ),
+      };
+      for (const i of below) if (scopeOf(i) !== index) s.memoized.push(memoizeNested(s.runId, s.source, i));
+      bodyPlacement = { itemIndex: index, itemKey: item.key };
+    }
+    s.memoized.push({
+      ...memoize(s.runId, src),
+      status: 'running',
+      statusReason: 'fork',
+      outputData: null,
+      outputText: null,
+      summary: null,
+      error: null,
+      errorClass: null,
+      errorCode: null,
+      completedAt: null,
+      ...placementFields(placement),
+      containerState,
+    });
+
+    // The re-run scope: copied upstream of the path, re-seeded along it, fresh after it.
+    for (const key of bodyKeys) {
+      const bodyPath = `${src.instancePath}#${index}/${key}`;
+      const prev = s.source.find((i) => i.instancePath === bodyPath);
+      const inScope = { scopeId: newId, ...bodyPlacement };
+      if (prev && !rerunBody.has(key) && (prev.status === 'completed' || prev.status === 'skipped')) {
+        copyTree(prev);
+        continue;
+      }
+      if (prev) for (const i of s.source) if (i.id === prev.id || i.instancePath.startsWith(`${prev.instancePath}#`)) s.rerunSourceIds.add(i.id);
+      if (key === next && rest[0]!.includes('#') && prev) {
+        await this.seedContainer(s, prev, inScope, rest[0]!.split('#')[1] ?? '', rest.slice(1), path);
+        continue;
+      }
+      // A loop scope is complete up front; a map item's rows are created when it starts.
+      if (stage.kind === 'loop') {
+        const body = s.graph.stages.find((x) => x.key === key)!;
+        s.memoized.push({
+          id: instanceId(s.runId, bodyPath),
+          copiedFromStageRunId: prev?.id ?? '',
+          stageKey: key,
+          kind: body.kind,
+          name: body.name,
+          instancePath: bodyPath,
+          status: 'pending',
+          statusReason: null,
+          skipReason: null,
+          gateAs: null,
+          outputData: null,
+          outputText: null,
+          summary: null,
+          artifactManifest: null,
+          error: null,
+          errorClass: null,
+          errorCode: null,
+          usage: {},
+          startedAt: null,
+          completedAt: null,
+          ...placementFields(inScope),
+        });
+      }
+    }
+  }
+
   /** Roll the source workspace back to the checkpoint taken before the earliest re-run instance's first attempt. */
-  private async restoreForFork(source: WorkflowRun, instances: readonly StageRun[], rerun: ReadonlySet<string>): Promise<void> {
+  private async restoreForFork(source: WorkflowRun, instances: readonly StageRun[], rerunIds: ReadonlySet<string>): Promise<void> {
     const workspaceId = source.workspaceId;
     const earliest = instances
-      .filter((i) => rerun.has(i.stageKey) && i.startedAt)
+      .filter((i) => rerunIds.has(i.id) && i.startedAt)
       .sort((a, b) => a.startedAt!.getTime() - b.startedAt!.getTime())[0];
     if (!workspaceId || !earliest) return;
     if (!this.checkpoints) throw new ValidationError('restore_checkpoint: checkpoints are not available in this process');
@@ -435,6 +593,42 @@ function stageHash(stage: WorkflowGraph['stages'][number]): string {
         ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, stable((v as Record<string, unknown>)[k])]))
         : v;
   return JSON.stringify(stable(stage));
+}
+
+/** What a fork builds while re-seeding containers from inside (P05 WP-5B.4). */
+interface Seeding {
+  runId: string;
+  graph: WorkflowGraph;
+  source: readonly StageRun[];
+  memoized: MemoizedInstance[];
+  iterations: MemoizedIteration[];
+  /** Source instances that run again (the `restore_checkpoint` workspace rolls back to before the earliest). */
+  rerunSourceIds: Set<string>;
+  now: number;
+}
+
+function placementFields(p: { scopeId?: string | null; iterationIndex?: number; itemIndex?: number; itemKey?: string }): Partial<MemoizedInstance> {
+  return {
+    ...(p.scopeId ? { scopeId: p.scopeId } : {}),
+    ...(p.iterationIndex !== undefined ? { iterationIndex: p.iterationIndex } : {}),
+    ...(p.itemIndex !== undefined ? { itemIndex: p.itemIndex } : {}),
+    ...(p.itemKey !== undefined ? { itemKey: p.itemKey } : {}),
+  };
+}
+
+/** A copied instance inside a container: its scope is the fork's copy of its source container (paths are kept). */
+function memoizeNested(runId: string, source: readonly StageRun[], inst: StageRun): MemoizedInstance {
+  const parent = inst.scopeId ? source.find((i) => i.id === inst.scopeId) : undefined;
+  return {
+    ...memoize(runId, inst),
+    ...placementFields({
+      scopeId: parent ? instanceId(runId, parent.instancePath) : null,
+      ...(inst.iterationIndex !== undefined ? { iterationIndex: inst.iterationIndex } : {}),
+      ...(inst.itemIndex !== undefined ? { itemIndex: inst.itemIndex } : {}),
+      ...(inst.itemKey !== undefined ? { itemKey: inst.itemKey } : {}),
+    }),
+    ...(inst.loopState ? { containerState: inst.loopState } : inst.mapState ? { containerState: inst.mapState } : inst.subworkflowState ? { containerState: inst.subworkflowState } : {}),
+  };
 }
 
 function memoize(runId: string, inst: StageRun): MemoizedInstance {
