@@ -411,6 +411,12 @@ Decided while building P1-T1…T6 where `02` was silent:
 - Browser-host overlays receive an `AnnotationPalette` derived from tokens (in design-tokens to avoid a package cycle); main validates every value before `executeJavaScript`.
 - The legacy run page keeps `RightPane` until PW; its panel-import swap moves to P4-12.
 
+### D-66 Composer as built (P4-08) — Final
+- `apps/web/src/blocks/composer/` hosts a `chat` and a compact `stage` variant; the 8 hooks moved to `blocks/composer/hooks/` (kit toast, errors only — two former warning toasts are now error toasts per D-30). Slash-command builtins, types and fuzzy matcher live in `packages/client-core/src/composer/slashCommands.ts`; `formatTokenLimit` in client-core. `ChatInput.tsx`, `VoiceRecorder.tsx`, `ComposerMenu.tsx`, `WorkspacePrepBar.tsx` deleted; legacy ModelPicker/AgentPicker/ContextUsageGauge stay while workflow-owned files import them.
+- `blocks/model-picker` (ready providers first, never defaults to an unready one) and `blocks/agent-picker`; `ui/primitives/Popover` and a Textarea `inline` variant.
+- Composer tool-toggle registry (`blocks/composer/toolToggles.ts`: `registerComposerTool`, `useComposerTools`, `listComposerTools`) ships empty: chat capability overrides freeze at session start, so no toggle is rendered until one can take effect (the Workflow Overhaul registers Workflows).
+- Typing is never disabled during a turn (D-29; ChatPage passes `disabled={false}`); ↑ recalls the typed text, not the formatted slash prompt. Per-turn chip menus are hand-built panels (their listbox/option roles and capture-phase Escape are pinned by tests).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
