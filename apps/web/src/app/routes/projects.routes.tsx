@@ -21,9 +21,9 @@ export const projectsRoutes: RouteObject[] = [
     { legacyHeader: false, nav: 'projects', title: 'Project' },
   ),
   defineRoute(
-    'projects/:id/codebases/:cid',
-    () => import('@/pages/CodebaseDetailPage.js').then((m) => ({ default: m.CodebaseDetailPage })),
-    { legacyHeader: true, nav: 'projects', title: 'Codebase' },
+    'projects/:id/codebases/:cid/:tab?',
+    () => import('@/features/projects/CodebaseDetailPage.js').then((m) => ({ default: m.CodebaseDetailPage })),
+    { legacyHeader: false, nav: 'projects', title: 'Codebase' },
   ),
   defineRoute(
     'projects/:id/codebases/:cid/pull-requests/:number',
