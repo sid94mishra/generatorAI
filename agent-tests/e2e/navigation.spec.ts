@@ -9,8 +9,9 @@ import { test, expect } from '../helpers/test';
 //     (`sidebar-nav`) holds exactly seven React Router links, in D-22 order:
 //     Home, Chats, Projects, Agents, Workflows, Automations, Scripts — each
 //     also carrying `sidebar-nav-<id>`.
-//   • Page titles are the <h1> inside <main> (`main-card`). `/` is still
-//     DashboardPage ("Mission Control") until the P5 Home port.
+//   • Page titles are the <h1> inside <main> (`main-card`). `/` is Home
+//     (P5-10): its H1 is the live headline ("2 need you · 1 running",
+//     "Nothing needs you"), matched by HOME_HEADING.
 //   • Pages not yet ported render the old Header inside `legacy-header`
 //     (the old `app-header` lives on inside it until P7). /chats is being
 //     ported to its own PageHeader (P3-07), so it is not asserted either way.
@@ -20,8 +21,11 @@ import { test, expect } from '../helpers/test';
 //     (`sidebar-toggle`, "Hide sidebar") and the rail's Expand (`rail-expand`,
 //     "Show sidebar") are the pair. Below 1200px the rail is forced and
 //     Expand opens the `sidebar-flyout` overlay instead.
-const PAGES: Array<{ id: string; nav: string; urlRe: RegExp; heading: string; legacyHeader: boolean }> = [
-  { id: 'home', nav: 'Home', urlRe: /\/$/, heading: 'Mission Control', legacyHeader: true },
+/** Home's H1 — the attention headline (features/home/homeModel.ts `homeHeadline`). */
+const HOME_HEADING = /^(Nothing needs you|\d+ needs? you)( · \d+ running)?$/;
+
+const PAGES: Array<{ id: string; nav: string; urlRe: RegExp; heading: string | RegExp; legacyHeader: boolean }> = [
+  { id: 'home', nav: 'Home', urlRe: /\/$/, heading: HOME_HEADING, legacyHeader: false },
   { id: 'chats', nav: 'Chats', urlRe: /\/chats$/, heading: 'Chats', legacyHeader: false /* P3-07 port: not asserted */ },
   { id: 'projects', nav: 'Projects', urlRe: /\/projects$/, heading: 'Projects', legacyHeader: true },
   { id: 'agents', nav: 'Agents', urlRe: /\/agents$/, heading: 'Agents', legacyHeader: true },
@@ -175,7 +179,7 @@ test.describe('Navigation & layout', () => {
       .or(main.getByRole('button', { name: 'Go home', exact: true }));
     await home.click();
     await expect(page).toHaveURL(/\/$/);
-    await expect(main.getByRole('heading', { name: 'Mission Control', exact: true, level: 1 })).toBeVisible();
+    await expect(main.getByRole('heading', { name: HOME_HEADING, level: 1 })).toBeVisible();
     await expect(page.getByTestId('app-sidebar')).toBeVisible();
   });
 });

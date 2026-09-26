@@ -6,6 +6,8 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router';
 import { useCreateChat } from '@/hooks/queries.js';
+import { usePlatform } from '@/providers/PlatformProvider.js';
+import { chatNameFromPrompt, type CreateChatDraft } from '@generatorai/shared/ui-contract';
 import { X, MessageSquarePlus, Tag, Plus, Boxes, Bot, Network } from 'lucide-react';
 import { Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';
 import { SourcePicker } from '@/components/chat/sources/SourcePicker.js';
@@ -37,11 +39,19 @@ import {
 interface CreateChatDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /**
+   * A draft handed over by another create surface (Home's quick composer
+   * "More options", 04 R-1): seeds the name, project, agent and model on open,
+   * and its prompt is sent as the chat's first message after it is created.
+   */
+  initialDraft?: CreateChatDraft;
 }
 
-export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) {
+export function CreateChatDialog({ open, onOpenChange, initialDraft }: CreateChatDialogProps) {
   const navigate = useNavigate();
+  const platform = usePlatform();
   const createMutation = useCreateChat();
+  const draftPrompt = initialDraft?.prompt?.trim() ?? '';
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -90,9 +100,12 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
   // Settings takes effect on the very next chat creation.
   useEffect(() => {
     if (open) {
-      setModel(getDefaultChatModel());
+      setModel(initialDraft?.model || getDefaultChatModel());
+      if (initialDraft?.prompt?.trim()) setName(chatNameFromPrompt(initialDraft.prompt));
+      if (initialDraft?.projectId) setSelectedProjectId(initialDraft.projectId);
+      if (initialDraft?.agentRef) setAgentRef(initialDraft.agentRef);
     }
-  }, [open]);
+  }, [open, initialDraft]);
 
   // No saved preference → start on the first model that can actually run.
   // The field used to open on "Select a model…" every single time, and Create
@@ -211,12 +224,13 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
       if (bc) params.browserConfig = bc;
 
       const chat = await createMutation.mutateAsync(params);
+      if (draftPrompt) await platform.sendChatPrompt(chat.id, draftPrompt);
       onOpenChange(false);
       navigate(`/chats/${chat.id}`);
     } catch (err) {
       setSourceError(err instanceof Error ? err.message : 'Could not create the chat.');
     }
-  }, [name, description, model, tags, selectedProjectId, sourceDrafts, primaryAlias, browserPicker, orchestratorMode, agentRef, agentOverrides, sourceControl, createMutation, onOpenChange, navigate]);
+  }, [name, description, model, tags, selectedProjectId, sourceDrafts, primaryAlias, browserPicker, orchestratorMode, agentRef, agentOverrides, sourceControl, createMutation, onOpenChange, navigate, draftPrompt, platform]);
 
   return (
     <Modal
@@ -244,6 +258,11 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
     >
       {/* Form */}
       <div className="space-y-4">
+          {draftPrompt ? (
+            <p className="text-sm text-muted-foreground" data-testid="create-chat-draft-prompt">
+              Your task is sent as the first message once the chat is created.
+            </p>
+          ) : null}
           {/* Name */}
           <div>
             <label htmlFor="chat-name" className="mb-1.5 block text-sm font-medium text-foreground">

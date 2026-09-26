@@ -21,7 +21,7 @@ import { addServer, canAddServer, switchServer, useServers, type ServerListItem 
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { Menu } from '@/ui/primitives/Menu/Menu.js';
 import { StatusDot, type DotTone } from '@/ui/primitives/StatusDot/StatusDot.js';
-import { displayAddress } from './useShellStatus.js';
+import { displayAddress } from '@/hooks/useShellStatus.js';
 
 /** A server's reachability as the menu shows it: dot + word, or nothing when unknown (never invented). */
 const STATUS: Record<ServerReachability, { label: string; tone: DotTone | null }> = {

@@ -9,10 +9,10 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { useLocation, useSearchParams } from 'react-router';
 import { chatLiveSets, toChatRowModel } from '@generatorai/client-core';
 import type { ChatBulkResult, ChatListSort, ChatListState } from '@generatorai/shared';
-import type { ChatRowModel } from '@generatorai/shared/ui-contract';
+import type { ChatRowModel, CreateChatDraft } from '@generatorai/shared/ui-contract';
 import { CreateChatDialog } from '@/components/chat/CreateChatDialog.js';
 import { useBulkArchiveChats, useBulkDeleteChats, ChatBulkError, useChatPages } from '@/hooks/chatListQueries.js';
 import { useArchiveChat, useDeleteChat, useUnarchiveChat } from '@/hooks/queries.js';
@@ -50,14 +50,19 @@ const SCOPE_ITEMS: readonly Omit<SegmentedItem<Scope>, 'count'>[] = [
 
 export function ChatsListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const location = useLocation();
   const [createChatOpen, setCreateChatOpen] = useState(false);
+  // `?new=1` opens the dialog; Home's "More options" also hands over its draft
+  // in the navigation state (04 R-1). Kept until the dialog closes.
+  const [createDraft, setCreateDraft] = useState<CreateChatDraft | undefined>(undefined);
   useEffect(() => {
     if (searchParams.get('new') !== '1') return;
+    setCreateDraft((location.state as { draft?: CreateChatDraft } | null)?.draft);
     setCreateChatOpen(true);
     const next = new URLSearchParams(searchParams);
     next.delete('new');
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams]);
+  }, [searchParams, setSearchParams, location.state]);
 
   // ── Filters ──
   const [search, setSearch] = useState('');
@@ -335,7 +340,14 @@ export function ChatsListPage() {
           />
         }
       />
-      <CreateChatDialog open={createChatOpen} onOpenChange={setCreateChatOpen} />
+      <CreateChatDialog
+        open={createChatOpen}
+        onOpenChange={(next) => {
+          setCreateChatOpen(next);
+          if (!next) setCreateDraft(undefined);
+        }}
+        initialDraft={createDraft}
+      />
       {confirmer.dialog}
     </>
   );

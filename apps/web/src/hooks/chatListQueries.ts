@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // Chat list hooks (G-02 / G-14) — `GET /api/chats`, paged and live.
 //
-//   useChats(query)       one page (default 50 rows): the dashboard, the
+//   useChats(query)       one page (default 50 rows): the
 //                         ProjectDetail Chats tab (`useChats({ projectId })`,
 //                         G-14), the palette's recent chats.
 //   useChatPages(query)   every page loaded so far, for the list's infinite

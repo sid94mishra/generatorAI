@@ -33,9 +33,11 @@ import {
   type AttentionStreamEvent,
   type AttentionStreamPort,
 } from '@generatorai/client-core';
-import type { AttentionCounts, AttentionSnapshot, IPlatformClient } from '@generatorai/shared';
+import { useMutation, useQueryClient } from '@tanstack/react-query';
+import type { AttentionCounts, AttentionItem, AttentionSnapshot, IPlatformClient } from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import { openMultiplexedStream } from '../platform/muxStream.js';
+import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
 
 export interface UseAttentionOptions {
   /** Only this project's items; counts follow the filter. */
@@ -175,4 +177,61 @@ export function useAttention(options: UseAttentionOptions = {}): AttentionResult
  */
 export function useAttentionCounts(options: UseAttentionOptions = {}): AttentionCounts | undefined {
   return useAttention(options).data?.counts;
+}
+
+// ── Inline actions (Home "Needs you" / "Running", D-22) ─────────────
+//
+// Every action calls an EXISTING endpoint (05 §G-01 "Quick actions"); the
+// feed's own `attention.remove` delta then drops the row, and a refetch after
+// the call covers a missed delta. Kinds without an inline form (a question, a
+// stage input, computer consent — its answer needs the app identity only the
+// computer panel holds — and a paused run) are opened, never answered here.
+
+/** An inline action Home can run on an attention item. */
+export type AttentionInlineAction = 'allow_once' | 'approve' | 'stop';
+
+export interface AttentionActionInput {
+  item: Pick<AttentionItem, 'entity' | 'entityId' | 'ask'>;
+  action: AttentionInlineAction;
+}
+
+/** Runs one inline action on an attention item, then refetches the feed. */
+export function useAttentionAction() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  const { refetch } = useAttention();
+  return useMutation({
+    mutationFn: async ({ item, action }: AttentionActionInput): Promise<void> => {
+      const { entity, entityId, ask } = item;
+      if (action === 'stop') {
+        if (entity === 'chat') {
+          await platform.cancelChat(entityId);
+          return;
+        }
+        if (entity === 'workflow_run') return platform.cancelRun(entityId);
+        throw new Error('This item cannot be stopped from here.');
+      }
+      if (!ask) throw new Error('Nothing is waiting on this item.');
+      if (action === 'allow_once' && entity === 'chat' && ask.kind === 'tool_permission') {
+        return platform.respondToChatPermission(entityId, ask.id, { behavior: 'allow' });
+      }
+      if (action === 'approve' && entity === 'chat' && ask.kind === 'plan_review') {
+        // The ask is the gate; the decision route is keyed by the plan the gate carries.
+        const gates = await platform.getChatInteractions(entityId);
+        const planId = gates.find((g) => g.interactionId === ask.id)?.payload?.['planId'];
+        if (typeof planId !== 'string') throw new Error('This plan is no longer awaiting review.');
+        return platform.decideChatPlan(entityId, planId, { approved: true });
+      }
+      if (action === 'approve' && entity === 'workflow_run' && ask.kind === 'stage_approval') {
+        const result = await platform.resumeStage(entityId, ask.id, { approved: true, outcome: 'approved' });
+        if (!result.ok) throw new Error(result.reason ?? 'This stage is no longer waiting for approval.');
+        return;
+      }
+      throw new Error('This request has to be answered where it was asked.');
+    },
+    onSettled: (_data, _error, { item }) => {
+      void refetch();
+      if (item.entity === 'chat') void queryClient.invalidateQueries({ queryKey: ['chat', item.entityId, 'interactions'] });
+    },
+  });
 }

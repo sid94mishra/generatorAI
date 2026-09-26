@@ -54,7 +54,6 @@ Guide: [Web page components](/clients/web.md).
 - `apps/web/src/pages/CodebaseDetailPage.tsx`
 - `apps/web/src/pages/CreateAutomationPage.tsx`
 - `apps/web/src/pages/CreateProjectPage.tsx`
-- `apps/web/src/pages/DashboardPage.tsx`
 - `apps/web/src/pages/ProjectDetailPage.tsx`
 - `apps/web/src/pages/ProjectsListPage.tsx`
 - `apps/web/src/pages/PullRequestPage.tsx`

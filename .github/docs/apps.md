@@ -108,7 +108,7 @@ Vite-bundled SPA served by Vite in dev and statically from server in prod (`/web
 
 | Route | Component |
 |---|---|
-| `/` | `DashboardPage` — 4 stat cards + 3 quick actions + 3 recent panels |
+| `/` | `HomePage` (`features/home`) — quick-start composer, Needs you / Running / Recently finished, This week, System, shortcuts |
 | `/projects`, `/projects/new`, `/projects/:id`, `/projects/:id/codebases/:cid` | `ProjectsListPage`, `CreateProjectPage`, `ProjectDetailPage`, `CodebaseDetailPage` |
 | `/chats`, `/chats/new`, `/chats/:id` | `ChatsListPage`, `CreateChatDialog` (modal in ChatsList), `ChatPage` |
 | `/workflows`, `/workflows/new`, `/workflows/:id` (read-only), `/workflows/:id/edit` (builder), `/workflows/:id/runs/:rid` | `WorkflowListPage`, `WorkflowBuilderPage`, `WorkflowDefinitionPage`, `WorkflowRunPage` |

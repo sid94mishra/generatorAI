@@ -571,20 +571,18 @@ test.describe('Stream spine', () => {
 // ── Charts / context-usage instrumentation ──────────────────────
 
 test.describe('Charts and usage instrumentation', () => {
-  test('the dashboard renders its live metric tiles', async ({ gotoApp, page }) => {
+  test('Home renders its live System card', async ({ gotoApp, page }) => {
     await gotoApp('/');
-    await expect(page.getByRole('heading', { name: /Mission Control/i })).toBeVisible();
-    // These are fed by /api/health + list endpoints; a broken gateway shows
-    // as blank tiles rather than an error, so assert on the values.
-    //
-    // Case-insensitive on purpose: the tiles render as "CHATS" via CSS
-    // `text-transform: uppercase`, but the DOM text — which is what Playwright
-    // matches — is "Chats". An exact 'CHATS' matcher fails against a page that
-    // is working perfectly.
-    for (const label of [/^chats$/i, /^workflows$/i, /^automations$/i]) {
-      await expect(page.getByText(label).first()).toBeVisible();
-    }
-    await expect(page.getByText(/Connected|Degraded/i).first()).toBeVisible();
+    const main = page.getByRole('main');
+    await expect(main.getByRole('heading', { name: /^(Nothing needs you|\d+ needs? you)( · \d+ running)?$/, level: 1 })).toBeVisible();
+    // Fed by /api/system/info (G-12) and the stream's connection state; a
+    // broken gateway shows as missing rows rather than an error, so assert
+    // on the values.
+    const system = page.getByTestId('home-system');
+    await expect(system.getByText(/^(Connected|Reconnecting…)$/)).toBeVisible();
+    await expect(system.getByText(/^\d+ running$/)).toBeVisible();
+    await expect(system.getByText(/^max \d+$/)).toBeVisible();
+    await expect(system.getByText('Version', { exact: true })).toBeVisible();
   });
 
   test('the context-usage gauge renders and opens its breakdown', async ({ seed, gotoApp, page }) => {

@@ -19,7 +19,6 @@ export { Badge, type BadgeProps, type BadgeTone, type BadgeSize } from './Badge.
 export { Input, Textarea, type InputProps, type TextareaProps } from './Input.js';
 export { Modal, type ModalProps, type ModalSize } from './Modal.js';
 export { Select, type SelectOption, type SelectProps } from './Select.js';
-export { StatCard, type StatCardProps } from './StatCard.js';
 export { StatusBadge, type StatusBadgeProps } from './StatusBadge.js';
 export { PageHeader, type PageHeaderProps } from './PageHeader.js';
 export { SearchInput, type SearchInputProps } from './SearchInput.js';

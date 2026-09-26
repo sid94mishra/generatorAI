@@ -2,7 +2,7 @@
 // Browser UI End-to-End Tests — Playwright
 //
 // Tests ALL web UI pages and user interactions:
-//   - Dashboard, Sidebar navigation
+//   - Home, Sidebar navigation
 //   - Workflow builder (create, edit, stages, edges, canvas)
 //   - Workflow run page (streaming, messages, timeline)
 //   - Chat page (create, send, streaming, history)
@@ -50,7 +50,7 @@ test.describe('1. Navigation & Layout', () => {
   // P3 shell: the sidebar <nav> (`sidebar-nav`) holds React Router links
   // (Home … Scripts); Settings is the footer gear (`sidebar-settings`); there
   // is no Templates entry or /templates route (Settings ▸ Templates).
-  test('dashboard loads', async ({ page }) => {
+  test('home loads', async ({ page }) => {
     await page.goto(WEB_URL);
     await page.waitForLoadState('load');
     const nav = page.getByTestId('sidebar-nav');

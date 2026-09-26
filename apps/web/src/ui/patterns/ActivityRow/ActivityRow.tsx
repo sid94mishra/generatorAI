@@ -6,7 +6,9 @@
 // `line-soft`: the state glyph (D-18 shared map, 16px) · `title` (500, grows
 // or a fixed column) · `context` (`font-mono text-micro text-fg-3`) · `detail`
 // (`text-small text-fg-2`, grows; may hold InlineCode/DiffStat) · `time`
-// (`font-mono text-micro text-fg-3`, right) · one ib-sm `actions` node.
+// (`font-mono text-micro text-fg-3`, right) · one ib-sm `actions` node,
+// revealed on hover/focus unless `persistentActions` (Home "Needs you", whose
+// Review / Approve buttons are the point of the row).
 // ────────────────────────────────────────────────────────────────
 
 import type { ComponentProps, ReactNode } from 'react';
@@ -25,10 +27,23 @@ export interface ActivityRowProps extends Omit<ComponentProps<'div'>, 'title'> {
   actions?: ReactNode;
   /** 56h with room for two lines of `detail` under the title. */
   twoLine?: boolean;
+  /** Always show `actions` (default: revealed on row hover or focus). */
+  persistentActions?: boolean;
 }
 
 /** One activity list row: status glyph, title, live detail, timer, actions. */
-export function ActivityRow({ status, title, context, detail, time, actions, twoLine = false, className, ...rest }: ActivityRowProps) {
+export function ActivityRow({
+  status,
+  title,
+  context,
+  detail,
+  time,
+  actions,
+  twoLine = false,
+  persistentActions = false,
+  className,
+  ...rest
+}: ActivityRowProps) {
   const def = STATUS_STATE_DEFS[status];
   return (
     <div
@@ -52,7 +67,14 @@ export function ActivityRow({ status, title, context, detail, time, actions, two
       {!twoLine && detail != null ? <div className="min-w-0 flex-1 truncate text-small text-fg-2">{detail}</div> : null}
       {time != null ? <div className="w-10 shrink-0 text-right font-mono text-micro text-fg-3">{time}</div> : null}
       {actions != null ? (
-        <div className="shrink-0 opacity-0 transition-control group-hover/row:opacity-100 group-focus-within/row:opacity-100">{actions}</div>
+        <div
+          className={cn(
+            'flex shrink-0 items-center gap-1.5',
+            !persistentActions && 'opacity-0 transition-control group-hover/row:opacity-100 group-focus-within/row:opacity-100',
+          )}
+        >
+          {actions}
+        </div>
       ) : null}
     </div>
   );

@@ -39,7 +39,7 @@ The embedded server normally listens on loopback. LAN access and pairing are man
 
 ## Navigation and workbench
 
-The sidebar, command palette and native menus expose Home, Chats, Projects, Agents, Workflows, Automations, Scripts and Settings (the web sidebar still labels Home "Dashboard" until the new app shell lands). Detailed route coverage is in the [web client](./web.md), because both clients use the same router: `apps/web/src/app/router.tsx` with one route module per area in `apps/web/src/app/routes/`.
+The sidebar, command palette and native menus expose Home, Chats, Projects, Agents, Workflows, Automations, Scripts and Settings. Detailed route coverage is in the [web client](./web.md), because both clients use the same router: `apps/web/src/app/router.tsx` with one route module per area in `apps/web/src/app/routes/`.
 
 A typical development session is:
 

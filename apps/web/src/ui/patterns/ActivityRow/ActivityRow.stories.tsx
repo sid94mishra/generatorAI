@@ -35,6 +35,16 @@ export const Matrix: Story = {
         twoLine
         actions={<IconButton icon="more" label="More" size="sm" />}
       />
+      <ActivityRow
+        status="needs_you"
+        title="Fix flaky checkout test"
+        context="payments-service"
+        detail="Allow Bash? · git push -u origin fix/checkout-flake"
+        time="3m"
+        twoLine
+        persistentActions
+        actions={<IconButton icon="check" label="Allow once" size="sm" />}
+      />
     </div>
   ),
 };

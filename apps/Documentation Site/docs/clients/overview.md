@@ -25,7 +25,7 @@ This documentation describes the checked-out source. A screen or command existin
 
 | Capability | Desktop / web | Mobile | CLI / TUI |
 | --- | --- | --- | --- |
-| Dashboard and current activity | Dashboard with navigation and summaries | Home with attention queue and active work | Dashboard pane and diagnostic commands |
+| Home and current activity | Home: quick-start composer, Needs you with inline answers, Running, Recently finished, this week's stats, system card | Home with attention queue and active work | Dashboard pane and diagnostic commands |
 | Projects and codebases | Create/edit projects; local paths or Git remotes; repository detail | Create/edit with `write:projects`; add Git URL; cannot browse a host folder picker | Project/codebase commands and panes |
 | Agent definitions | Dedicated list/editor and settings catalogue | Agent detail/catalogue; selected administration requires `admin:settings` | List/show/import/export/delete/resolve/usage; administration views |
 | Chat | Streaming composer, configuration, attachments, questions and plans | Streaming composer, model/options sheets, captures, voice, attachments with scope | Chat commands and interactive transcript/composer |

@@ -133,7 +133,7 @@ export function useCopilotState() {
 }
 
 /**
- * System health snapshot — polled every 5s to drive the dashboard heartbeat
+ * System health snapshot — polled every 5s to drive the Diagnostics heartbeat
  * card. A successful fetch means the server is reachable ("connected"); a
  * failed fetch flips the connection indicator to "disconnected". Keeps the
  * last good value so counts don't flicker between polls.
@@ -814,6 +814,18 @@ export function useSendChatPrompt(chatId: string) {
     // (still generating, waiting on a review) never reached the user.
     meta: { errorTitle: 'Message not sent' },
     // Fire-and-forget: SSE events handle chatMessages invalidation
+  });
+}
+
+/**
+ * Send a prompt to a chat named per call — Home's quick composer sends the
+ * task to the chat it just created (the chat page keeps `useSendChatPrompt`).
+ */
+export function useSendChatPromptTo() {
+  const platform = usePlatform();
+  return useMutation({
+    mutationFn: ({ chatId, prompt }: { chatId: string; prompt: string }) => platform.sendChatPrompt(chatId, prompt),
+    meta: { errorTitle: 'Message not sent' },
   });
 }
 

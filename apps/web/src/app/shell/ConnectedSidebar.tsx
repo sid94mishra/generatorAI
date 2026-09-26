@@ -45,9 +45,9 @@ import {
 import { useShellActions } from './shellActions.js';
 import { ConnectedUpdatePill } from './ConnectedUpdatePill.js';
 import { ServersMenu } from './ServersMenu.js';
-import { formatElapsed, useNow } from './elapsed.js';
+import { formatElapsed, useNow } from '@/lib/elapsed.js';
 import { useNavHistory } from './useNavHistory.js';
-import { shortcutFor, useShellStatus } from './useShellStatus.js';
+import { shortcutFor, useShellStatus } from '@/hooks/useShellStatus.js';
 
 export interface ConnectedSidebarProps {
   layout: ShellLayout;

@@ -30,7 +30,7 @@ This guide describes the current implementation in this repository. It is a sour
 
 | Module | Included surfaces and controls |
 | --- | --- |
-| Home | Mission Control, live activity, running chat/workflow/automation summaries, system health, quick creation |
+| Home | Quick-start composer, Needs you with inline answers, Running with Stop, Recently finished with Retry, this week's stats, system card |
 | Projects | Creation, linked remote Git/local Git/local directories, aliases, branch selection, clone/fetch status, worktrees, file preview, project customization, pull requests, retention |
 | Chats | Create, name/tag search, active/archived filters, bulk deletion, source selection, model and reasoning choice, Auto/Plan modes, attachments, slash commands, mentions, dictation, streaming, stop/reset, message actions, fork and rewind |
 | Human interaction | Durable permission requests, structured questions, plan revisions/editing/comments/approval, stage approval and changes requested |

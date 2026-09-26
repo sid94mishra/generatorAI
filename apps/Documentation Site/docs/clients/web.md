@@ -31,7 +31,7 @@ A production server can serve `apps/web/dist`; hosting only the static SPA does 
 
 | Route | Screen and main responsibility |
 | --- | --- |
-| `/` | Dashboard: recent/active work and navigation |
+| `/` | Home: quick-start composer, what needs you (answer inline), what is running (Stop), recently finished (Retry), this week's stats, system card |
 | `/chats` | Chat catalogue and creation |
 | `/chats/:id` | Streaming conversation and workspace workbench |
 | `/agents` | Agent catalogue |

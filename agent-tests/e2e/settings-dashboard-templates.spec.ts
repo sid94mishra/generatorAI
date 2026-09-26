@@ -1,7 +1,7 @@
 import { test, expect } from '../helpers/test';
 import { apiRequest } from '../helpers/api';
 
-// Phase W1 — Settings, Dashboard, Templates.
+// Phase W1 — Settings, Home, Templates.
 // Authored from a playwright-cli exploration session (codegen + trace).
 // Fully deterministic: no AI runs, no seeded data required.
 
@@ -213,54 +213,48 @@ test.describe('Settings', () => {
   });
 });
 
-test.describe('Dashboard', () => {
-  // The dashboard's own heading is 'Mission Control' — 'Dashboard' is only the
-  // sidebar entry and the header breadcrumb (a <span>, not a heading). The
-  // shipped page has no 'Recent Chats' / 'Recent Runs' panels either: the two
-  // lists were replaced by a single 'Activity' panel with Today / Running /
-  // Needs attention tabs. All three names were asserting a UI that never
-  // shipped, so they are retargeted at what actually renders.
-  test('renders header, quick actions, stat cards and the activity panel', async ({ page, gotoApp }) => {
+test.describe('Home', () => {
+  // `/` is Home (P5-10, L-01) — it replaced the Dashboard "Mission Control".
+  // Its H1 is the live attention headline ("2 need you · 1 running",
+  // "Nothing needs you"); sections without items are not drawn (D-36), so
+  // only the always-present parts are asserted here.
+  const HOME_HEADING = /^(Nothing needs you|\d+ needs? you)( · \d+ running)?$/;
+
+  test('renders the headline, quick composer, header actions and the aside cards', async ({ page, gotoApp }) => {
     await gotoApp('/');
     const main = page.getByRole('main');
-    await expect(main.getByRole('heading', { name: 'Mission Control', exact: true, level: 1 })).toBeVisible();
+    await expect(main.getByRole('heading', { name: HOME_HEADING, level: 1 })).toBeVisible();
+    await expect(page.getByTestId('legacy-header')).toHaveCount(0);
 
-    await expect(main.getByRole('button', { name: /New Chat/ })).toBeVisible();
-    await expect(main.getByRole('button', { name: /New Workflow/ })).toBeVisible();
+    await expect(main.getByRole('button', { name: 'Run workflow', exact: true })).toBeVisible();
+    await expect(main.getByRole('button', { name: 'New workflow', exact: true })).toBeVisible();
 
-    // Stat cards — the row that replaced the old "Browse …" quick actions.
-    // Matched on the label <p> specifically so a chat in the activity feed
-    // that happens to be called "Workflows" can't satisfy (or break) this.
-    for (const label of ['Chats', 'Workflows', 'Automations', 'System Health']) {
-      await expect(main.locator('p').filter({ hasText: new RegExp(`^${label}$`) })).toBeVisible();
-    }
+    await expect(main.getByRole('textbox', { name: 'New chat task' })).toBeVisible();
+    await expect(main.getByRole('button', { name: 'Start chat' })).toBeDisabled();
+    await expect(main.getByRole('button', { name: 'More options', exact: true })).toBeVisible();
 
-    await expect(main.getByRole('heading', { name: 'Activity', exact: true, level: 2 })).toBeVisible();
-    const tabs = main.getByRole('tablist').getByRole('tab');
-    await expect(tabs).toHaveCount(3);
-    for (const t of ['Today', 'Running', 'Needs attention']) {
-      await expect(main.getByRole('tab', { name: new RegExp(`^${t}`) })).toBeVisible();
+    const system = page.getByTestId('home-system');
+    await expect(system.getByText('System', { exact: true })).toBeVisible();
+    await expect(system.getByRole('button', { name: 'Diagnostics', exact: true })).toBeVisible();
+    await expect(page.getByTestId('home-this-week').getByText('This week', { exact: true })).toBeVisible();
+
+    const shortcuts = main.getByRole('navigation', { name: 'Shortcuts' });
+    for (const label of ['Projects', 'Agents', 'Automations', 'Scripts']) {
+      await expect(shortcuts.getByRole('link', { name: new RegExp(`^${label}`) })).toBeVisible();
     }
   });
 
-  test('quick action "New Workflow" navigates to the builder', async ({ page, gotoApp }) => {
+  test('header action "New workflow" navigates to the builder', async ({ page, gotoApp }) => {
     await gotoApp('/');
-    await page.getByRole('button', { name: /New Workflow/ }).click();
+    await page.getByRole('main').getByRole('button', { name: 'New workflow', exact: true }).click();
     await expect(page).toHaveURL(/\/workflows\/new/);
   });
 
-  // There is no 'Browse Workflows' button — that quick action was never built.
-  // The dashboard affordance that actually reaches the workflow list is the
-  // 'Workflows' stat card (DashboardPage.tsx -> navigate('/workflows')), so
-  // the test is retargeted there rather than dropped.
-  //
-  // NOTE (app issue, not fixed here): StatCard renders a plain <div> with an
-  // onClick — no role="button", no tabindex, no key handler — so the card is
-  // unreachable by role and by keyboard. Hence the click goes through the
-  // label text, which bubbles to the card's handler.
-  test('the "Workflows" stat card navigates to the workflow list', async ({ page, gotoApp }) => {
+  // "Run workflow" opens the workflow list until the Workflow Overhaul's
+  // RunDialog exists (F-home-01, 04 R-5).
+  test('header action "Run workflow" navigates to the workflow list', async ({ page, gotoApp }) => {
     await gotoApp('/');
-    await page.getByRole('main').locator('p').filter({ hasText: /^Workflows$/ }).click();
+    await page.getByRole('main').getByRole('button', { name: 'Run workflow', exact: true }).click();
     await expect(page).toHaveURL(/\/workflows$/);
     await expect(page.getByRole('main').getByRole('heading', { name: 'Workflows', exact: true, level: 1 })).toBeVisible();
   });

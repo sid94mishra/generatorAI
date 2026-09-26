@@ -4,8 +4,8 @@
 
 import { beforeEach, describe, expect, it } from 'vitest';
 import { sidebarModeFor } from '@/app/shell/useSidebarMode.js';
-import { formatElapsed } from '@/app/shell/elapsed.js';
-import { displayAddress } from '@/app/shell/useShellStatus.js';
+import { formatElapsed } from '@/lib/elapsed.js';
+import { displayAddress } from '@/hooks/useShellStatus.js';
 import { useShellStore } from '@/stores/shellStore.js';
 
 describe('sidebarModeFor', () => {

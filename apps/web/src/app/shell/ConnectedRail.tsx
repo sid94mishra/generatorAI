@@ -33,7 +33,7 @@ import {
 import { useShellActions } from './shellActions.js';
 import { ConnectedUpdatePill } from './ConnectedUpdatePill.js';
 import { ServersMenu } from './ServersMenu.js';
-import { shortcutFor, useShellStatus } from './useShellStatus.js';
+import { shortcutFor, useShellStatus } from '@/hooks/useShellStatus.js';
 
 export function ConnectedRail({ layout, covered = false }: { layout: ShellLayout; covered?: boolean }) {
   const actions = useShellActions();
