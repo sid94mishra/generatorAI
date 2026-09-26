@@ -5,6 +5,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate, useBlocker } from 'react-router';
+import { isOverlayNavigation } from '@/lib/overlayNavigation.js';
 import { useShallow } from 'zustand/react/shallow';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
@@ -216,9 +217,13 @@ export function WorkflowBuilderPage() {
   // Read isDirty directly from Zustand getState() to avoid stale closure
   // values — the save handler calls markSaved() + navigate() in the same
   // tick, so the blocker callback must see the latest store state.
+  // Opening Settings over the builder (and closing it again) keeps the builder
+  // mounted, so it is not a navigation away (D-26).
   const blocker = useBlocker(
     ({ currentLocation, nextLocation }) =>
-      useWorkflowBuilderStore.getState().isDirty && currentLocation.pathname !== nextLocation.pathname,
+      useWorkflowBuilderStore.getState().isDirty &&
+      currentLocation.pathname !== nextLocation.pathname &&
+      !isOverlayNavigation(currentLocation, nextLocation),
   );
 
   useEffect(() => {

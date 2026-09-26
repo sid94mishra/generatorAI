@@ -15,8 +15,8 @@ import { test, expect } from '../helpers/test';
 //   • Pages not yet ported render the old Header inside `legacy-header`
 //     (the old `app-header` lives on inside it until P7). /chats is being
 //     ported to its own PageHeader (P3-07), so it is not asserted either way.
-//   • Settings is the footer gear (`sidebar-settings`, outside the <nav>) and
-//     a routed page (`/settings/<section>`) until the P6 modal.
+//   • Settings is the footer gear (`sidebar-settings`, outside the <nav>): a
+//     modal addressed by URL (`/settings/<section>`) over the current page (D-26).
 //   • The sidebar's own Collapse
 //     (`sidebar-toggle`, "Hide sidebar") and the rail's Expand (`rail-expand`,
 //     "Show sidebar") are the pair. Below 1200px the rail is forced and
@@ -77,11 +77,12 @@ test.describe('Navigation & layout', () => {
     }
   });
 
-  // Settings is a routed page (router: `settings`, `settings/:section`;
-  // SettingsPage.tsx) until P6 turns it into the D-26 modal. The gear sits in
-  // the sidebar footer, outside the routed <nav>, and its Back control
-  // returns to wherever the user came from.
-  test('Settings opens the settings page and Back returns to the previous page', async ({ page, gotoApp }) => {
+  // Settings is a modal addressed by URL (D-26, P6-02): the URL now changes to
+  // `/settings/<section>` — the pre-P6 "URL untouched" assertion was changed on
+  // purpose — while the page it was opened over stays behind it. The gear sits
+  // in the sidebar footer, outside the routed <nav>; Close and Escape return to
+  // the page.
+  test('Settings opens as a modal over the current page and Close returns to it', async ({ page, gotoApp }) => {
     await gotoApp('/chats');
     const nav = page.getByTestId('sidebar-nav');
     await expect(nav.getByRole('button', { name: 'Settings', exact: true })).toHaveCount(0);
@@ -92,13 +93,21 @@ test.describe('Navigation & layout', () => {
     await gear.click();
 
     await expect(page).toHaveURL(/\/settings\/[^/]+$/);
-    await expect(page.getByTestId('legacy-header')).toBeVisible();
-    const settings = page.getByTestId('settings-page');
-    await expect(settings.getByRole('heading', { name: 'Settings', exact: true, level: 2 })).toBeVisible();
-    await expect(page.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
+    const dialog = page.getByRole('dialog', { name: 'Settings' });
+    await expect(dialog).toBeVisible();
+    await expect(dialog.getByRole('navigation', { name: 'Settings sections' })).toBeVisible();
+    // The Chats page is still mounted behind the modal.
+    await expect(page.getByRole('heading', { name: 'Chats', includeHidden: true }).first()).toBeAttached();
 
-    await settings.getByRole('button', { name: 'Back', exact: true }).click();
-    await expect(page.getByTestId('settings-page')).toHaveCount(0);
+    await page.getByTestId('settings-modal-close').click();
+    await expect(dialog).toHaveCount(0);
+    await expect(page).toHaveURL(/\/chats$/);
+
+    // Escape closes it the same way.
+    await gear.click();
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('dialog', { name: 'Settings' })).toHaveCount(0);
     await expect(page).toHaveURL(/\/chats$/);
   });
 

@@ -25,15 +25,16 @@ import {
   trackWindowControlsOverlay,
   windowChrome,
 } from '@/lib/desktop.js';
-import { navDestinationFor } from '@generatorai/shared/ui-contract';
+import { isSettingsPath, navDestinationFor, settingsSectionFromPath } from '@generatorai/shared/ui-contract';
 import { useDockStore } from '@/stores/dockStore.js';
+import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { usePageTitleStore } from '@/stores/pageTitleStore.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 import { useAttentionCounts } from '@/hooks/attentionQueries.js';
 
 /** `File ▸ Open Recent` label for a route without a page title: its section (D-22). */
 function routeLabel(pathname: string): string {
-  if (pathname === '/settings' || pathname.startsWith('/settings/')) return 'Settings';
+  if (isSettingsPath(pathname)) return 'Settings';
   return navDestinationFor(pathname)?.label ?? pathname;
 }
 
@@ -89,7 +90,12 @@ export function useDesktopBridge({ sidebarExpanded }: DesktopBridgeOptions): voi
   useEffect(() => {
     if (!isDesktop) return undefined;
     return onDesktopNavigate((path) => {
-      if (typeof path === 'string' && path.startsWith('/')) void navigate(path);
+      if (typeof path !== 'string' || !path.startsWith('/')) return;
+      // `generatorai://settings/<section>` opens the modal over the current
+      // page (D-26); on a cold start that page is Home.
+      const section = settingsSectionFromPath(path.split(/[?#]/)[0]!);
+      if (section) useSettingsUiStore.getState().openSettings(section);
+      else void navigate(path);
     });
   }, [navigate]);
 
