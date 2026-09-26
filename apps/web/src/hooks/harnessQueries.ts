@@ -17,7 +17,7 @@
 import { useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
 import { buildModelPickerCatalog, readyCatalogModels, type ModelPickerCatalog } from '@generatorai/client-core';
-import type { HarnessProvidersResponse } from '@generatorai/shared';
+import type { HarnessProvidersResponse, HarnessProviderStatus } from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
 
 export const HARNESS_PROVIDERS_KEY = ['harness-providers'] as const;
@@ -113,5 +113,77 @@ export function useSetDefaultProvider() {
   return useMutation({
     mutationFn: (type: string) => platform.setDefaultProvider(type),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: HARNESS_PROVIDERS_KEY }),
+  });
+}
+
+/** Outcome of a "Test connection" / sign-in action (Settings › Model providers, F-settings-04). */
+export interface ProviderActionResult {
+  ok: boolean;
+  message: string;
+}
+
+/** Re-probe every provider and report how many are now ready ("Test all connections"). */
+export function useTestAllProviders() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (): Promise<ProviderActionResult> => {
+      const fresh = await platform.getHarnessProviders({ refresh: true });
+      storeProviders(queryClient, fresh);
+      const ready = fresh.providers.filter((p) => p.ready);
+      return {
+        ok: true,
+        message:
+          ready.length > 0
+            ? `${ready.length} provider${ready.length === 1 ? '' : 's'} connected: ${ready.map((p) => p.label).join(', ')}`
+            : 'No providers are currently connected.',
+      };
+    },
+  });
+}
+
+/** Re-probe one provider ("Test connection" on its row). */
+export function useTestProviderConnection() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (provider: HarnessProviderStatus): Promise<ProviderActionResult> => {
+      const fresh = await platform.getHarnessProviders({ refresh: true });
+      storeProviders(queryClient, fresh);
+      const me = fresh.providers.find((p) => p.type === provider.type);
+      if (me?.ready) return { ok: true, message: `${me.label} connected — ${me.modelCount} model${me.modelCount === 1 ? '' : 's'} available.` };
+      return { ok: false, message: `${provider.label} is not connected${me?.error ? `: ${me.error}` : '.'}` };
+    },
+  });
+}
+
+/**
+ * Start a provider's sign-in and poll until it reports authenticated (≤ 3
+ * minutes) or, for a CLI-only provider with no browser step, give up after
+ * one probe (D-55, G-09).
+ */
+export function useSignInProvider() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (provider: HarnessProviderStatus): Promise<ProviderActionResult> => {
+      const body = await platform.loginProvider(provider.type);
+      if (body.authUrl) window.open(body.authUrl, '_blank', 'noopener,noreferrer');
+      const deadline = Date.now() + 180_000;
+      while (Date.now() < deadline) {
+        await new Promise((r) => setTimeout(r, body.authUrl ? 4_000 : 1_000));
+        const fresh = await platform.getHarnessProviders({ refresh: true }).catch(() => null);
+        if (!fresh) continue;
+        const me = fresh.providers.find((p) => p.type === provider.type);
+        if (me?.authenticated) {
+          storeProviders(queryClient, fresh);
+          return { ok: true, message: `${provider.label} signed in — ${me.modelCount} model${me.modelCount === 1 ? '' : 's'} available.` };
+        }
+        if (!body.authUrl) break;
+      }
+      return body.authUrl
+        ? { ok: false, message: `${provider.label} did not report a completed sign-in. Finish the browser flow and press Test connection.` }
+        : { ok: false, message: `${provider.label} could not be signed in.` };
+    },
   });
 }

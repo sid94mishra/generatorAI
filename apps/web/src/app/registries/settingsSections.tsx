@@ -5,17 +5,19 @@
 // features/settings/settingsSections.ts.
 
 import {
+  AgentsSection,
   AppearanceSection,
+  GeneralSection,
+  McpSection,
+  ProvidersSection,
   SecuritySection,
+  SkillsSection,
+  SourceControlSection,
+  TemplatesSection,
   registerSettingsSection,
   type SettingsSectionDefinition,
 } from '@/features/settings/index.js';
 import { SettingsStatusFooter } from '@/ui/patterns/SettingsSection/SettingsSection.js';
-import { GeneralSection } from '@/components/settings/sections/General.js';
-import { ProvidersSection } from '@/components/settings/sections/Providers.js';
-import { SkillsSection, McpSection, TemplatesSection } from '@/components/settings/sections/Catalogs.js';
-import { AgentsSection } from '@/components/settings/sections/Agents.js';
-import { SourceControlSection } from '@/components/settings/sections/SourceControl.js';
 import { BrowserTerminalSection } from '@/components/settings/sections/BrowserTerminal.js';
 import { ComputerUseSection } from '@/components/settings/sections/ComputerUse.js';
 import { ExtensionsSection } from '@/components/settings/sections/Extensions.js';
@@ -24,7 +26,11 @@ import { WorkspaceRetentionSection } from '@/components/settings/sections/Worksp
 import { AudioSection } from '@/components/settings/sections/Audio.js';
 
 const SECTIONS: SettingsSectionDefinition[] = [
-  { id: 'general', render: () => <GeneralSection /> },
+  {
+    id: 'general',
+    render: () => <GeneralSection />,
+    footer: <SettingsStatusFooter icon="check">Changes apply instantly · Saved on this device</SettingsStatusFooter>,
+  },
   {
     id: 'appearance',
     render: () => <AppearanceSection />,
@@ -32,10 +38,18 @@ const SECTIONS: SettingsSectionDefinition[] = [
   },
   { id: 'providers', render: () => <ProvidersSection /> },
   { id: 'agents', render: () => <AgentsSection /> },
-  { id: 'skills', render: () => <SkillsSection /> },
+  {
+    id: 'skills',
+    render: () => <SkillsSection />,
+    footer: <SettingsStatusFooter icon="check">Disabled skills are excluded on this device only</SettingsStatusFooter>,
+  },
   { id: 'mcp', render: () => <McpSection /> },
   { id: 'templates', render: () => <TemplatesSection /> },
-  { id: 'source-control', render: () => <SourceControlSection /> },
+  {
+    id: 'source-control',
+    render: () => <SourceControlSection />,
+    footer: <SettingsStatusFooter icon="server">Accounts and defaults are saved to the server</SettingsStatusFooter>,
+  },
   { id: 'browser-terminal', render: () => <BrowserTerminalSection /> },
   { id: 'computer-use', render: () => <ComputerUseSection /> },
   { id: 'audio', render: () => <AudioSection /> },
