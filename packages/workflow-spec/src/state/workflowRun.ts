@@ -56,14 +56,6 @@ export const WORKFLOW_RUN_TRANSITIONS: readonly WorkflowRunTransition[] = Object
   ...rows('cancelling', 'cancelled', 'sys:all_stopped', 'executors acknowledged or leases expired; compensation and onExit ran'),
 ]);
 
-export function isTerminalWorkflowRunState(s: string): boolean {
-  return (TERMINAL_WORKFLOW_RUN_STATES as readonly string[]).includes(s);
-}
-
 export function isLegalWorkflowRunTransition(from: WorkflowRunState, to: WorkflowRunState): boolean {
   return WORKFLOW_RUN_TRANSITIONS.some((t) => t.from === from && t.to === to);
-}
-
-export function workflowRunTransitionsFrom(from: WorkflowRunState): WorkflowRunTransition[] {
-  return WORKFLOW_RUN_TRANSITIONS.filter((t) => t.from === from);
 }

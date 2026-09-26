@@ -200,7 +200,7 @@ read-only. Variables named `repo_path_*` / `repo_branch_*` are rejected; migrati
 | stage `order` / `id` in edges | stage `key`; edges `{ from, to, on, when? }` |
 | edge `edgeType: on_success/on_failure/on_completion/always` | edge `on: success/failure/completion/always` |
 | `condition` | stage `guard` or edge `when` |
-| `/import-json`, `/from-template/:id`, nested stage/edge routes, `PATCH /:id` | the routes in §3 |
+| the v1 JSON import and template-clone routes, nested stage/edge routes, `PATCH /:id` | the routes in §3 |
 
 ---
 

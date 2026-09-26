@@ -1,11 +1,10 @@
 export type { ExprNode, ExprDiagnostic, Span, ComparisonOp, LiteralValue } from './ast.js';
 export { pathOf, walkExpr } from './ast.js';
-export { parseExpression, parseExpressionOrThrow, type ParseResult } from './parse.js';
+export { parseExpression, type ParseResult } from './parse.js';
 export { typecheckExpression, checkExpression, type TypeEnv, type TypeCheckResult } from './typecheck.js';
 export {
   evaluate,
   evaluateSource,
-  conditionHolds,
   DEFAULT_STEP_BUDGET,
   MAX_LIST_LENGTH,
   type EvalScope,
@@ -18,7 +17,6 @@ export {
   checkTemplate,
   renderTemplate,
   templateVariableNames,
-  hasPlaceholder,
   type TemplateNode,
   type ParsedTemplate,
   type RenderResult,

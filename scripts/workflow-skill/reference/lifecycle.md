@@ -23,8 +23,12 @@ A run goes through one lifecycle, whoever starts it (the app, the CLI, an automa
 - `required: true` with no `defaultValue` means every run must supply it; a variable that is neither required nor
   defaulted is nullable in expressions (test it with `exists(variables.x)` or `coalesce`).
 - A `choice` variable needs `options`; `list` is a list of strings (a map can fan out over it); `json` is any JSON.
-- Never ask for secrets as variables. Tokens and keys are `secretref:<name>` references in the fields that take
-  them (MCP headers and env, hook env, `session.provider.apiKey`).
+- Never ask for secrets as variables. Tokens and keys are `secretref:` references in the fields that take them,
+  each into its own namespace (`secret-namespace` otherwise): `secretref:workflow/<name>` in check, hook and
+  `custom_script` env and http hook headers; `secretref:mcp/<system|project|custom>/<server id>/<name>` (that
+  server's own credentials, the server keyed by its catalog id) in MCP headers and env;
+  `secretref:provider/<name>` in `session.provider.apiKey`. A remote MCP server or http hook carrying one needs
+  admin rights to add or change (a command-bearing field).
 
 ## Codebases and worktrees
 

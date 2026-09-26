@@ -1,6 +1,6 @@
 {
   "tag": "T7",
-  "description": "context filters, contextSources, variable interpolation (F T7)",
+  "description": "context modes, context.from, variable interpolation (F T7)",
   "timeoutMs": 900000,
   "variables": {
     "topic": "otters",
@@ -8,70 +8,144 @@
       "inner": "deep"
     }
   },
-  "def": {
-    "name": "e2e-t7-context",
-    "sessionMode": "auto"
-  },
-  "stages": [
-    {
-      "name": "A",
-      "prompt": "Invent a single made-up codeword and write one line containing it."
-    },
-    {
-      "name": "B_summary",
-      "prompt": "Write one line containing the codeword from the previous stage."
-    },
-    {
-      "name": "B_full",
-      "prompt": "Write one line containing the codeword from the previous stage.",
-      "contextFilter": "full"
-    },
-    {
-      "name": "B_none",
-      "prompt": "Write one line containing the token NONE.",
-      "contextFilter": "none"
-    },
-    {
-      "name": "B_struct",
-      "prompt": "Write one line containing the codeword from the previous stage.",
-      "contextFilter": "structured"
-    },
-    {
-      "name": "B_srcs",
-      "prompt": "Write one line containing the codeword from stage A.",
-      "contextSources": [
-        "A"
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "e2e-t7-context",
+      "variables": [
+        {
+          "name": "topic",
+          "type": "string",
+          "label": "topic"
+        },
+        {
+          "name": "obj",
+          "type": "json",
+          "label": "obj"
+        }
       ]
     },
-    {
-      "name": "V_interp",
-      "prompt": "TOPIC={{topic}} NESTED={{obj.inner}} MISSING={{missing_var}} — write one line containing the word otters."
-    }
-  ],
-  "edges": [
-    [
-      "A",
-      "B_summary"
+    "stages": [
+      {
+        "key": "a",
+        "name": "A",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "A",
+            "text": "Invent a single made-up codeword and write one line containing it."
+          }
+        ]
+      },
+      {
+        "key": "b_summary",
+        "name": "B_summary",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B_summary",
+            "text": "Write one line containing the codeword from the previous stage."
+          }
+        ]
+      },
+      {
+        "key": "b_full",
+        "name": "B_full",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B_full",
+            "text": "Write one line containing the codeword from the previous stage."
+          }
+        ],
+        "context": {
+          "mode": "output"
+        }
+      },
+      {
+        "key": "b_none",
+        "name": "B_none",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B_none",
+            "text": "Write one line containing the token NONE."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "b_struct",
+        "name": "B_struct",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B_struct",
+            "text": "Write one line containing the codeword from the previous stage."
+          }
+        ],
+        "context": {
+          "mode": "structured"
+        }
+      },
+      {
+        "key": "b_srcs",
+        "name": "B_srcs",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B_srcs",
+            "text": "Write one line containing the codeword from stage A."
+          }
+        ],
+        "context": {
+          "from": [
+            "a"
+          ]
+        }
+      },
+      {
+        "key": "v_interp",
+        "name": "V_interp",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "V_interp",
+            "text": "TOPIC={{topic}} NESTED={{variables.obj.inner}} MISSING={{variables.obj.missing}} — write one line containing the word otters."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      }
     ],
-    [
-      "A",
-      "B_full"
-    ],
-    [
-      "A",
-      "B_none"
-    ],
-    [
-      "A",
-      "B_struct"
-    ],
-    [
-      "B_none",
-      "B_srcs"
-    ],
-    [
-      "A",
-      "V_interp"
+    "edges": [
+      {
+        "from": "a",
+        "to": "b_summary"
+      },
+      {
+        "from": "a",
+        "to": "b_full"
+      },
+      {
+        "from": "a",
+        "to": "b_none"
+      },
+      {
+        "from": "a",
+        "to": "b_struct"
+      },
+      {
+        "from": "b_none",
+        "to": "b_srcs"
+      },
+      {
+        "from": "a",
+        "to": "v_interp"
+      }
     ]
-  ]
+  }
 }

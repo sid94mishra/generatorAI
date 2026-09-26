@@ -22,8 +22,10 @@
 //      `git -c core.sshCommand=…` (and friends), `git --upload-pack/
 //      --receive-pack`, and `npx`/`npm exec`/`pnpm dlx` of a package that is
 //      not itself allow-listed. A confined run (a `check` stage, P05 §1.2)
-//      also refuses `pwsh -Command/-c/-EncodedCommand` and `pwsh -File`
-//      outside its mount.
+//      accepts pwsh only as `-File <script of its mount>` plus a few inert
+//      switches. Every run refuses `pwsh -EncodedCommand`. pwsh switches are
+//      matched the way pwsh matches them (any unambiguous prefix, any case,
+//      `-`/`--`/`/`), so `-Comm` or `-enc` cannot slip past.
 //
 // Windows launch (P05 P5-4). An extensionless PATH entry is a POSIX shim
 // (`…\npm\pnpm`) and never spawnable, so only PATHEXT candidates count. A
@@ -91,8 +93,70 @@ const GIT_DANGEROUS_CONFIG_KEYS = [
   'ssh.variant',
 ];
 const GIT_DANGEROUS_FLAGS = ['--upload-pack', '--receive-pack', '--exec-path'];
-const PWSH_ENCODED_FLAGS = new Set(['-encodedcommand', '-ec', '-e']);
-const PWSH_INLINE_FLAGS = new Set(['-command', '-c', '-commandwithargs', '-cwa']);
+
+/**
+ * pwsh's own command-line switches, in the order its parser tries them (first
+ * match wins). pwsh accepts any prefix of a name at least `min` characters
+ * long, plus the listed aliases, case-insensitively, after `-`, `--`, `/` or a
+ * Unicode dash. `kind` says what the switch does to the rest of the line:
+ * `value` takes the next argument, `command`/`file` end switch parsing (the
+ * rest is the code or the script's arguments), `encoded` runs base64 code.
+ */
+type PwshSwitchKind = 'switch' | 'value' | 'command' | 'file' | 'encoded';
+const PWSH_SWITCHES: ReadonlyArray<{ name: string; min: number; aliases?: readonly string[]; kind: PwshSwitchKind }> = [
+  { name: 'help', min: 1, aliases: ['?'], kind: 'switch' },
+  { name: 'login', min: 1, kind: 'switch' },
+  { name: 'noexit', min: 3, kind: 'switch' },
+  { name: 'noprofile', min: 3, kind: 'switch' },
+  { name: 'nologo', min: 3, kind: 'switch' },
+  { name: 'noninteractive', min: 4, kind: 'switch' },
+  { name: 'socketservermode', min: 2, kind: 'switch' },
+  { name: 'servermode', min: 1, kind: 'switch' },
+  { name: 'namedpipeservermode', min: 3, kind: 'switch' },
+  { name: 'sshservermode', min: 4, kind: 'switch' },
+  { name: 'noprofileloadtime', min: 17, kind: 'switch' },
+  { name: 'interactive', min: 1, kind: 'switch' },
+  { name: 'configurationfile', min: 17, kind: 'value' },
+  { name: 'configurationname', min: 6, kind: 'value' },
+  { name: 'custompipename', min: 14, kind: 'value' },
+  { name: 'command', min: 1, kind: 'command' },
+  { name: 'commandwithargs', min: 15, aliases: ['cwa'], kind: 'command' },
+  { name: 'windowstyle', min: 1, kind: 'value' },
+  { name: 'file', min: 1, kind: 'file' },
+  { name: 'outputformat', min: 1, aliases: ['of'], kind: 'value' },
+  { name: 'inputformat', min: 2, aliases: ['if'], kind: 'value' },
+  { name: 'executionpolicy', min: 2, aliases: ['ep'], kind: 'value' },
+  { name: 'encodedcommand', min: 1, aliases: ['ec'], kind: 'encoded' },
+  { name: 'encodedarguments', min: 8, aliases: ['ea'], kind: 'encoded' },
+  { name: 'settingsfile', min: 8, kind: 'value' },
+  { name: 'sta', min: 3, kind: 'switch' },
+  { name: 'mta', min: 3, kind: 'switch' },
+  { name: 'workingdirectory', min: 2, aliases: ['wd'], kind: 'value' },
+  { name: 'version', min: 1, kind: 'switch' },
+];
+/** The only switches a confined run (a check) may pass besides `-File`. */
+const PWSH_CONFINED_SWITCHES = new Set(['noprofile', 'nologo', 'noninteractive', 'executionpolicy', 'outputformat', 'inputformat', 'sta', 'mta']);
+const PWSH_DASHES = new Set(['-', '–', '—', '―']);
+
+/**
+ * Parse one pwsh argument as a switch. `null` = not a switch (a positional
+ * script path). `name` is `undefined` for a switch pwsh would not recognise.
+ */
+function pwshSwitch(arg: string): { name: string | undefined; kind: PwshSwitchKind | undefined; attached: boolean } | null {
+  const trimmed = arg.trim();
+  const first = trimmed[0];
+  if (first === undefined || (!PWSH_DASHES.has(first) && first !== '/')) return null;
+  let key = trimmed.slice(1);
+  if (PWSH_DASHES.has(first) && key[0] === first) key = key.slice(1);
+  const sep = key.search(/[:=]/);
+  const attached = sep >= 0;
+  if (attached) key = key.slice(0, sep);
+  key = key.toLowerCase();
+  const hit = key.length === 0 ? undefined : PWSH_SWITCHES.find((s) => s.aliases?.includes(key) || (key.length >= s.min && s.name.startsWith(key)));
+  // A `/…` that names no switch is a path (POSIX absolute), not a switch.
+  if (!hit && first === '/') return null;
+  return { name: hit?.name, kind: hit?.kind, attached };
+}
 
 function flagName(arg: string): string {
   const eq = arg.indexOf('=');
@@ -415,19 +479,27 @@ export class SandboxedScriptRunner implements IScriptRunner {
       case 'pwsh': {
         for (let i = 0; i < args.length; i++) {
           const arg = args[i]!;
-          const flag = flagName(arg);
-          if (PWSH_ENCODED_FLAGS.has(flag)) {
-            return `"pwsh ${arg}" runs an encoded command and is not permitted`;
+          const sw = pwshSwitch(arg);
+          if (sw?.kind === 'encoded') return `"pwsh ${arg}" runs an encoded command and is not permitted`;
+          if (!confineTo) {
+            if (!sw || sw.kind === 'command' || sw.kind === 'file') break; // the rest is the code or the script's arguments
+            if (sw.kind === 'value' && !sw.attached) i++;
+            continue;
           }
-          if (!confineTo) continue;
           // A confined run (a check) executes files of its mount only, never inline code.
-          if (PWSH_INLINE_FLAGS.has(flag)) return `"pwsh ${arg}" runs inline code and is not permitted in a check; run a script file of the mount`;
-          const file = flag === '-file' || flag === '-f' ? args[i + 1] : !arg.startsWith('-') ? arg : undefined;
-          if (file !== undefined) {
-            const rel = path.relative(path.resolve(confineTo), path.resolve(confineTo, file));
-            if (rel.startsWith('..') || path.isAbsolute(rel)) return `"pwsh -File ${file}" is outside the mount`;
-            break; // the rest belongs to the script
+          if (sw?.kind === 'command') return `"pwsh ${arg}" runs inline code and is not permitted in a check; run a script file of the mount`;
+          let file: string | undefined;
+          if (!sw) file = arg;
+          else if (sw.kind === 'file' && !sw.attached) file = args[i + 1] ?? '';
+          else if (!sw.name || sw.attached || !PWSH_CONFINED_SWITCHES.has(sw.name)) {
+            return `"pwsh ${arg}" is not permitted in a check; use -File <script of the mount>`;
+          } else {
+            if (sw.kind === 'value') i++;
+            continue;
           }
+          const rel = path.relative(path.resolve(confineTo), path.resolve(confineTo, file));
+          if (!file || file === '-' || rel.startsWith('..') || path.isAbsolute(rel)) return `"pwsh -File ${file}" is outside the mount`;
+          break; // the rest belongs to the script
         }
         return null;
       }

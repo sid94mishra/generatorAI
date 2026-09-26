@@ -58,7 +58,7 @@ function main(argv: string[]): number {
     process.stderr.write(`Cannot read ${source === '-' ? 'stdin' : source}: ${(err as Error).message}\n`);
     return 2;
   }
-  const result = importGraph(text.replace(/^﻿/, ''), { engine: 'v2' });
+  const result = importGraph(text.replace(/^﻿/, ''));
   process.stdout.write(`${JSON.stringify({ valid: result.valid, issues: result.issues }, null, 2)}\n`);
   return result.valid ? 0 : 1;
 }

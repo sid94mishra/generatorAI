@@ -18,7 +18,11 @@
 //     with `check_failed` under `failOnNonZero`;
 //   - NO_COLOR=1 / FORCE_COLOR=0 are set and ANSI escapes stripped from the tails;
 //   - `env` is the only templated field (context T of its enclosing loops);
-//     args are literals (the validator refuses a template there);
+//     args are literals (the validator refuses a template there). A
+//     `secretref:workflow/<name>` env value is resolved through the vault;
+//     an unresolved pointer or a failed render is `check_launch_failed`
+//     (never passed on verbatim), and the secret values are masked in the
+//     output (final review PLATFORM R2 / LOOP R11);
 //   - the command runs in the mount (`check.mount`, else the primary mount),
 //     `cwd` inside it, with a child environment built by `buildChildEnv`.
 // ────────────────────────────────────────────────────────────────
@@ -28,6 +32,8 @@ import { renderTemplate, type CheckStage } from '@generatorai/workflow-spec';
 import type { WorkflowRun } from '@generatorai/shared';
 import { StageError, classified } from '../../domain/errors/StageError.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
+import type { WorkflowSecretResolver } from '../../mcp/McpCredentialVault.js';
+import { redactSecrets, resolveSecretMap } from '../../mcp/workflowSecrets.js';
 import type { AttemptOutcome } from '../../domain/scheduler/types.js';
 
 export interface CheckOutput {
@@ -64,6 +70,8 @@ export interface CheckRunInput {
   /** The template scope (context T of the enclosing loops). */
   scope: Record<string, unknown>;
   scriptRunner: IScriptRunner | undefined;
+  /** Resolves `secretref:workflow/<name>` env values; without it such a check cannot launch. */
+  secrets?: WorkflowSecretResolver | undefined;
   signal: AbortSignal;
 }
 
@@ -99,11 +107,13 @@ export async function runCheck(input: CheckRunInput): Promise<AttemptOutcome> {
     return fail('check_launch_failed', (err as Error).message);
   }
 
-  const env: Record<string, string> = { NO_COLOR: '1', FORCE_COLOR: '0' };
-  for (const [name, text] of Object.entries(check.env ?? {})) {
+  const resolved = await resolveSecretMap(check.env, input.secrets, 'check.env', (text) => {
     const r = renderTemplate(text, input.scope);
-    env[name] = r.ok ? r.text : text;
-  }
+    return r.ok ? r : { ok: false, error: r.error.message };
+  });
+  if (!resolved.ok) return fail('check_launch_failed', resolved.error);
+  const env: Record<string, string> = { NO_COLOR: '1', FORCE_COLOR: '0', ...resolved.values };
+  const redact = (text: string) => redactSecrets(text, resolved.secrets);
 
   let result;
   try {
@@ -123,7 +133,7 @@ export async function runCheck(input: CheckRunInput): Promise<AttemptOutcome> {
     if (TRANSIENT_SPAWN.has(result.launchError)) {
       return { kind: 'failed', error: classified('transport', `The command could not start yet (${result.launchError})`) };
     }
-    return fail('check_launch_failed', `The command could not start (${result.launchError}): ${result.stderr}`);
+    return fail('check_launch_failed', `The command could not start (${result.launchError}): ${redact(result.stderr)}`);
   }
   if (input.signal.aborted) return { kind: 'aborted', reason: 'cancel' };
 
@@ -133,13 +143,13 @@ export async function runCheck(input: CheckRunInput): Promise<AttemptOutcome> {
     exitCode: result.exitCode,
     passed,
     timedOut,
-    stdoutTail: tail(result.stdout, check.tailBytes),
-    stderrTail: tail(result.stderr, check.tailBytes),
+    stdoutTail: tail(redact(result.stdout), check.tailBytes),
+    stderrTail: tail(redact(result.stderr), check.tailBytes),
     durationMs: result.durationMs,
   };
   if (check.parseJson) {
     try {
-      output.json = JSON.parse(stripAnsi(result.stdout));
+      output.json = JSON.parse(stripAnsi(redact(result.stdout)));
     } catch (err) {
       output.jsonError = (err as Error).message;
     }

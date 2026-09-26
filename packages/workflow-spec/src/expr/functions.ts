@@ -17,6 +17,14 @@ export interface LambdaValue {
   apply(arg: Value): Value;
 }
 
+/** The evaluator's work budget, charged by functions for work the node count misses. */
+export interface EvalMeter {
+  /** Spend work units; throws (a budget error) when the budget is exhausted. */
+  charge(units: number): void;
+  /** Logical node count of a value (memoised; measuring it is charged). */
+  nodes(v: Value): number;
+}
+
 export interface CheckContext {
   report(code: string, message: string, node: ExprNode, hint?: string): void;
 }
@@ -32,8 +40,8 @@ export interface ExprFunction {
   lambdaArgs?: readonly number[];
   /** Result type. `args[i]` of a lambda position is the lambda body's type. */
   check(args: ExprType[], nodes: ExprNode[], ctx: CheckContext): ExprType;
-  /** Result value. Lambda positions receive a LambdaValue. */
-  call(args: Array<Value | LambdaValue>): Value;
+  /** Result value. Lambda positions receive a LambdaValue. Work beyond the lambda calls is charged to `meter`. */
+  call(args: Array<Value | LambdaValue>, meter: EvalMeter): Value;
 }
 
 function isLambda(v: Value | LambdaValue): v is LambdaValue {
@@ -114,8 +122,10 @@ const lower: ExprFunction = {
     if (a!.kind !== 'any' && !k.has('string')) ctx.report('expr-type', `lower() expects a string, got ${typeToString(a!)}`, n!);
     return isNullable(a!) ? nullable(T.string) : T.string;
   },
-  call([a]) {
-    return typeof a === 'string' ? a.toLowerCase() : null;
+  call([a], meter) {
+    if (typeof a !== 'string') return null;
+    meter.charge(Math.ceil(a.length / 64));
+    return a.toLowerCase();
   },
 };
 
@@ -164,19 +174,25 @@ function kindOfValue(v: Value): string {
   return typeof v === 'object' ? 'object' : typeof v;
 }
 
-/** Total order for sort keys: by JSON type, numbers numerically, strings by UTF-16 code units. */
-export function compareValues(a: Value, b: Value): number {
-  const ka = kindOfValue(a);
-  const kb = kindOfValue(b);
-  if (ka !== kb) return TYPE_ORDER[ka]! - TYPE_ORDER[kb]!;
-  if (ka === 'number' || ka === 'string' || ka === 'boolean') {
-    const x = a as number | string | boolean;
-    const y = b as number | string | boolean;
-    return x < y ? -1 : x > y ? 1 : 0;
-  }
-  if (ka === 'null') return 0;
-  const x = canonicalJson(a);
-  const y = canonicalJson(b);
+/** Canonical JSON of a key, with the walk charged to the budget. */
+function chargedCanonical(v: Value, meter: EvalMeter): string {
+  meter.charge(meter.nodes(v));
+  return canonicalJson(v);
+}
+
+/** A sort key with its kind and, for a list or object, its canonical JSON computed once. */
+interface SortKey {
+  kind: string;
+  value: Value;
+  canonical?: string;
+}
+
+/** Total order for sort keys: by JSON type, numbers numerically, strings by UTF-16 code units, lists and objects by canonical JSON. */
+export function compareValues(a: SortKey, b: SortKey): number {
+  if (a.kind !== b.kind) return TYPE_ORDER[a.kind]! - TYPE_ORDER[b.kind]!;
+  if (a.kind === 'null') return 0;
+  const x = a.canonical ?? (a.value as number | string | boolean);
+  const y = b.canonical ?? (b.value as number | string | boolean);
   return x < y ? -1 : x > y ? 1 : 0;
 }
 
@@ -296,10 +312,11 @@ const concat: ExprFunction = {
     }
     return T.any;
   },
-  call([a, b]) {
+  call([a, b], meter) {
     const x = a as Value;
     const y = b as Value;
     if (x === null && y === null) return null;
+    if (Array.isArray(x) || Array.isArray(y)) meter.charge((Array.isArray(x) ? x.length : 0) + (Array.isArray(y) ? y.length : 0));
     if ((Array.isArray(x) || x === null) && (Array.isArray(y) || y === null)) return [...(x ?? []), ...(y ?? [])];
     if ((typeof x === 'string' || x === null) && (typeof y === 'string' || y === null)) return `${x ?? ''}${y ?? ''}`;
     return null;
@@ -317,12 +334,12 @@ const unique: ExprFunction = {
     listArg(list!, ln!, 'unique', ctx);
     return listLike(list!, elementOf(list!));
   },
-  call([list, fn]) {
+  call([list, fn], meter) {
     if (!Array.isArray(list)) return null;
     const seen = new Set<string>();
     const out: Value[] = [];
     for (const x of list) {
-      const k = canonicalJson(keyOf(fn, x));
+      const k = chargedCanonical(keyOf(fn, x), meter);
       if (seen.has(k)) continue;
       seen.add(k);
       out.push(x);
@@ -343,10 +360,10 @@ const diff: ExprFunction = {
     if (b!.kind !== 'null') listArg(b!, bn!, 'diff', ctx);
     return listLike(a!, elementOf(a!));
   },
-  call([a, b, fn]) {
+  call([a, b, fn], meter) {
     if (!Array.isArray(a)) return null;
-    const other = new Set<string>(Array.isArray(b) ? b.map((x) => canonicalJson(keyOf(fn, x))) : []);
-    return a.filter((x) => !other.has(canonicalJson(keyOf(fn, x))));
+    const other = new Set<string>(Array.isArray(b) ? b.map((x) => chargedCanonical(keyOf(fn, x), meter)) : []);
+    return a.filter((x) => !other.has(chargedCanonical(keyOf(fn, x), meter)));
   },
 };
 
@@ -408,10 +425,17 @@ const sort: ExprFunction = {
     listArg(list!, ln!, 'sort', ctx);
     return listLike(list!, elementOf(list!));
   },
-  call([list, fn]) {
+  call([list, fn], meter) {
     if (!Array.isArray(list)) return null;
+    meter.charge(list.length * Math.ceil(Math.log2(list.length + 1)));
     return list
-      .map((x, i) => ({ x, i, k: keyOf(fn, x) }))
+      .map((x, i) => {
+        const value = keyOf(fn, x);
+        const kind = kindOfValue(value);
+        const k: SortKey = { kind, value };
+        if (kind === 'list' || kind === 'object') k.canonical = chargedCanonical(value, meter);
+        return { x, i, k };
+      })
       .sort((p, q) => compareValues(p.k, q.k) || p.i - q.i)
       .map((e) => e.x);
   },

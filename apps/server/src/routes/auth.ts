@@ -17,6 +17,7 @@ import {
   AuditAction,
   DEFAULT_CLI_SCOPES,
   DEFAULT_DEVICE_SCOPES,
+  DEFAULT_MCP_SCOPES,
   DEFAULT_MOBILE_SCOPES,
   DpopError,
   isNonceChallenge,
@@ -683,6 +684,8 @@ function defaultScopesFor(platform: DevicePlatform): Scope[] {
       return [...DEFAULT_MOBILE_SCOPES];
     case 'cli':
       return [...DEFAULT_CLI_SCOPES];
+    case 'mcp':
+      return [...DEFAULT_MCP_SCOPES];
     default:
       return [...DEFAULT_DEVICE_SCOPES];
   }

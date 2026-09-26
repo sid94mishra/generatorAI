@@ -7,7 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
-import { MAX_TEMPLATE_LENGTH, MAX_VARIABLES } from '../constants.js';
+import { MAX_TEMPLATE_LENGTH, MAX_VARIABLES, VARIABLE_NAME_PATTERN } from '../constants.js';
 import {
   ActionDefinitionSchema,
   CodebaseAliasSchema,
@@ -15,9 +15,20 @@ import {
   TemplateSchema,
   VariableDefinitionSchema,
   WorkflowHookDefinitionSchema,
+  reservedVariableName,
 } from './common.js';
 import { SessionSpecSchema } from './session.js';
 import { BudgetSchema } from './stage.js';
+
+/** A variable a preprocessing step reads or writes: an identifier that is not reserved. */
+const stepVariableName = (description: string) =>
+  z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(VARIABLE_NAME_PATTERN, 'Variable names are identifiers')
+    .superRefine((name, ctx) => reservedVariableName(name, ctx))
+    .describe(description);
 
 const InputRuleSchema = z
   .discriminatedUnion('type', [
@@ -97,7 +108,7 @@ export const PreprocessingStepSchema: z.ZodType<PreprocessingStep, z.ZodTypeDef,
           z
             .object({
               type: z.literal('validate_input').describe('Check an input variable'),
-              variableName: z.string().min(1).max(64).describe('Variable to check'),
+              variableName: stepVariableName('Variable to check'),
               rules: z.array(InputRuleSchema).min(1).max(20).describe('Rules, all of which must pass'),
             })
             .strict()
@@ -105,7 +116,7 @@ export const PreprocessingStepSchema: z.ZodType<PreprocessingStep, z.ZodTypeDef,
           z
             .object({
               type: z.literal('set_variable').describe('Set a variable for the rest of the run'),
-              variableName: z.string().min(1).max(64).describe('Variable to set (a declared or a new one)'),
+              variableName: stepVariableName('Variable to set (a declared or a new one)'),
               value: TemplateSchema.describe('Value, a template'),
             })
             .strict()

@@ -21,10 +21,12 @@
 //
 // An agent (a service account, an MCP device) that creates or imports a
 // definition gets an agent-authored DRAFT (tagged, its author recorded);
-// only a person publishes, unless the operator allows agents to.
+// only a person publishes, unless the operator allows agents to. An agent
+// saves or deletes only its own drafts, never a published definition or a
+// person's.
 // ────────────────────────────────────────────────────────────────
 
-import { Router, type Request } from 'express';
+import { Router, type Request, type Response } from 'express';
 import {
   ImportTemplateRequestSchema,
   SaveGraphRequestSchema,
@@ -33,21 +35,24 @@ import {
 } from '@generatorai/workflow-spec';
 import { COMMAND_EDIT_SCOPE, InvocationError } from '@generatorai/core';
 import type { Container } from '../composition-root.js';
-import { invocationPrincipal, invocationTrigger } from './workflowInvocations.js';
-import { isLoopbackRequest } from '../middleware/auth.js';
+import { invocationContext, isPersonRequest } from './workflowInvocations.js';
 
 /**
- * Whether a person made the request (PD-14): the local owner, a signed-in
- * user, a paired device that is not an MCP server (its device record says
- * which). Service accounts, internal services and MCP devices are agents.
+ * An agent may change or delete only a draft an agent authored (AGENT-R7):
+ * a published definition, or a person's, changes through a proposal (a
+ * draft with `replacesWorkflowId`) that a person publishes.
  */
-export async function isPersonRequest(req: Request, container: Container): Promise<boolean> {
-  const p = req.principal;
-  if (!p) return true; // unauthenticated loopback development: the owner
-  if (p.type === 'local-desktop' || p.type === 'user-session') return true;
-  if (p.type !== 'paired-device') return false;
-  const device = p.deviceId ? await container.security.devices.getDevice(p.deviceId).catch(() => null) : null;
-  return device?.platform !== 'mcp';
+async function refuseAgentEdit(req: Request, res: Response, container: Container, id: string, action: string): Promise<boolean> {
+  if (await isPersonRequest(req, container)) return false;
+  const record = await container.workflowDefinitionService.get(id);
+  if (record.status === 'draft' && record.authoredBy) return false;
+  res.status(403).json({
+    error: {
+      code: 'AGENT_EDIT_NOT_ALLOWED',
+      message: `An agent cannot ${action} ${record.status === 'published' ? 'a published workflow' : "a person's workflow"}; submit a draft with replacesWorkflowId for a person to review.`,
+    },
+  });
+  return true;
 }
 
 /** The agent author of a definition an agent principal submits over HTTP. */
@@ -132,7 +137,6 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
         codebases?: unknown;
         projectId?: unknown;
       };
-      const principal = invocationPrincipal(req);
       const result = await authoring.plan(
         {
           ...(body.graph !== undefined ? { graph: body.graph } : {}),
@@ -142,7 +146,7 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
           ...(Array.isArray(body.codebases) ? { codebases: body.codebases } : {}),
           ...(typeof body.projectId === 'string' ? { projectId: body.projectId } : {}),
         },
-        { principal, trigger: invocationTrigger(req, principal, undefined), loopback: isLoopbackRequest(req) },
+        await invocationContext(req, container, undefined),
       );
       res.json(result);
     } catch (err) {
@@ -204,7 +208,7 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
         // An agent's import is an agent-authored draft (published only when the operator allows it).
         const draft = await authoring.createDraft(req.body, { authoredBy: author, canEditCommands: opts.canEditCommands });
         const record = wantsPublish
-          ? await authoring.publish(draft.workflowId, { person: false })
+          ? await authoring.publish(draft.workflowId, { person: false, canEditCommands: opts.canEditCommands })
           : await workflowDefinitionService.get(draft.workflowId);
         logger.info(`[WorkflowDefRoutes] Imported agent draft ${record.id}`, { requestId: req.requestId });
         res.status(201).json(record);
@@ -242,6 +246,7 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
         return;
       }
       const id = String(req.params['id']);
+      if (await refuseAgentEdit(req, res, container, id, 'overwrite')) return;
       const record = await workflowDefinitionService.saveGraph(id, parsed.data.graph, parsed.data.expectedRevision, {
         canEditCommands: canEditCommands(req),
       });
@@ -255,7 +260,7 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
   router.post('/:id/publish', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
-      const record = await authoring.publish(id, { person: await isPersonRequest(req, container) });
+      const record = await authoring.publish(id, { person: await isPersonRequest(req, container), canEditCommands: canEditCommands(req) });
       logger.info(`[WorkflowDefRoutes] Published definition ${id} as version ${record.currentVersionId}`, {
         requestId: req.requestId,
       });
@@ -297,6 +302,7 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
   router.delete('/:id', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
+      if (await refuseAgentEdit(req, res, container, id, 'delete')) return;
       const outcome = await workflowDefinitionService.delete(id);
       logger.info(`[WorkflowDefRoutes] ${'deleted' in outcome ? 'Deleted' : 'Archived'} definition ${id}`, {
         requestId: req.requestId,

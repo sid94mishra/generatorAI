@@ -400,8 +400,3 @@ export function templateVariableNames(text: string): string[] {
   visit(nodes);
   return [...names];
 }
-
-/** Whether a string contains any template placeholder or block. */
-export function hasPlaceholder(text: string): boolean {
-  return parseTemplate(text).nodes.some((n) => n.type !== 'text') || /(^|[^\\])\{\{/.test(text);
-}

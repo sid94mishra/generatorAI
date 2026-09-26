@@ -9,11 +9,12 @@
 // with it. A refusal (mid-turn, an open gate) is toasted like a chat's.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useState } from 'react';
+import React, { useCallback, useState } from 'react';
 import type { AgentMode } from '@generatorai/shared';
 import { ChatInput } from '@/components/chat/ChatInput.js';
 import { toast } from '@/components/Toast.js';
 import { useCancelStageTurn, useSendStageMessage } from '@/hooks/workflowQueries.js';
+import { useTwoPhaseStop } from '@/hooks/useTwoPhaseStop.js';
 import type { StageView } from './types.js';
 
 interface StageComposerProps {
@@ -60,13 +61,7 @@ export function StageComposer({ runId, stage, workspaceId }: StageComposerProps)
   const send = useSendStageMessage();
   const cancel = useCancelStageTurn();
   const [agentMode, setAgentMode] = useState<AgentMode>('auto');
-  const [stopPressed, setStopPressed] = useState(false);
   const streaming = stage.streaming === true;
-
-  // A new turn gets a fresh, graceful Stop.
-  useEffect(() => {
-    if (!streaming) setStopPressed(false);
-  }, [streaming]);
 
   const customSendFn = useCallback(
     async ({ prompt, attachments, mode }: { prompt: string; attachments: File[]; mode?: AgentMode }) => {
@@ -76,11 +71,12 @@ export function StageComposer({ runId, stage, workspaceId }: StageComposerProps)
     [send, runId, stage.id],
   );
 
-  // Stop ends the turn (the stage carries on); a second press forces it.
-  const onStop = useCallback(() => {
-    cancel.mutate({ runId, instanceId: stage.id, ...(stopPressed ? { force: true } : {}) });
-    setStopPressed(true);
-  }, [cancel, runId, stage.id, stopPressed]);
+  // Stop ends the turn (the stage carries on). The shared two-phase machine
+  // decides when a press may force it, so a double-click cannot (CONVINV-R11).
+  const stop = useTwoPhaseStop({
+    isLive: streaming,
+    onCancel: ({ force }) => cancel.mutate({ runId, instanceId: stage.id, ...(force ? { force: true } : {}) }),
+  });
 
   const closed = closedReason(stage);
   const pending =
@@ -102,8 +98,8 @@ export function StageComposer({ runId, stage, workspaceId }: StageComposerProps)
         showGitConnector={false}
         {...(workspaceId ? { workspaceId } : {})}
         isStreaming={streaming}
-        stopState={{ label: stopPressed ? 'Force stop' : 'Stop', enabled: !cancel.isPending, forceAvailable: stopPressed }}
-        onStop={onStop}
+        stopState={stop}
+        onStop={stop.press}
         agentMode={agentMode}
         onAgentModeChange={setAgentMode}
         pendingInteractionLabel={pending}

@@ -8,6 +8,9 @@
 // (Pike, without captures), so `test` is O(input × pattern) whatever the
 // pattern is. It is pure TypeScript: it runs in the browser (save-time
 // validation in the builder) and on the server, with no native build.
+// Linear is not cheap when both sides are large, so the NFA size, the input
+// length and the simulation work (states visited) are all capped: a `test`
+// that would exceed them throws instead of stalling the event loop.
 //
 // Supported: literals, `.`, classes `[a-z]` `[^…]`, escapes \d \D \w \W \s
 // \S \b \B \n \r \t \f \v \0 \xHH \uHHHH, anchors ^ $, groups ( ) (?: )
@@ -20,7 +23,11 @@
 export interface SafeRegex {
   readonly source: string;
   readonly flags: string;
-  /** Whether the pattern matches anywhere in `input`. Linear time. */
+  /**
+   * Whether the pattern matches anywhere in `input`. Linear time. Throws when
+   * the input is longer than SAFE_REGEX_MAX_INPUT or the match would visit
+   * more than SAFE_REGEX_MAX_WORK states; callers treat that as a failed rule.
+   */
   test(input: string): boolean;
 }
 
@@ -28,7 +35,11 @@ export type SafeRegexResult = { ok: true; regex: SafeRegex } | { ok: false; erro
 
 /** Largest `{n,m}` bound, and the NFA size cap. */
 export const SAFE_REGEX_MAX_REPEAT = 1000;
-export const SAFE_REGEX_MAX_STATES = 20_000;
+export const SAFE_REGEX_MAX_STATES = 5_000;
+/** Longest input `test` accepts (UTF-16 code units). */
+const SAFE_REGEX_MAX_INPUT = 1_000_000;
+/** Most NFA states one `test` may visit (about a quarter of a second of work). */
+const SAFE_REGEX_MAX_WORK = 5_000_000;
 
 type Matcher = (c: number) => boolean;
 type AssertKind = '^' | '$' | 'b' | 'B';
@@ -382,6 +393,16 @@ function makeMatcher(states: State[], start: number, multiline: boolean): (input
 
   return (input: string) => {
     const n = input.length;
+    if (n > SAFE_REGEX_MAX_INPUT) {
+      throw new Error(`Input is too long for a regex rule (${n} characters; the limit is ${SAFE_REGEX_MAX_INPUT})`);
+    }
+    let work = 0;
+    const spend = (units: number): void => {
+      work += units;
+      if (work > SAFE_REGEX_MAX_WORK) {
+        throw new Error(`Regex rule is too expensive for this input (${n} characters): shorten the pattern's repetitions or the input`);
+      }
+    };
     const holds = (kind: AssertKind, pos: number): boolean => {
       const prev = pos > 0 ? input.charCodeAt(pos - 1) : -1;
       const next = pos < n ? input.charCodeAt(pos) : -1;
@@ -401,6 +422,7 @@ function makeMatcher(states: State[], start: number, multiline: boolean): (input
       const stack = [s0];
       while (stack.length) {
         const s = stack.pop()!;
+        spend(1);
         if (mark[s] === gen) continue;
         mark[s] = gen;
         const st = states[s]!;
@@ -428,6 +450,7 @@ function makeMatcher(states: State[], start: number, multiline: boolean): (input
       const c = input.charCodeAt(pos);
       gen++;
       const nlist: number[] = [];
+      spend(clist.length);
       for (const s of clist) {
         const st = states[s] as Extract<State, { k: 'm' }>;
         if (st.m(c) && add(nlist, st.out, pos + 1)) return true;

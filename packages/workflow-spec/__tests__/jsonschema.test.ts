@@ -51,6 +51,6 @@ describe('generated JSON Schema', () => {
       expect(md).toContain(heading);
     }
     expect(md).toContain('`count(list, x => condition) → number`');
-    expect(md).toContain('| `engine-unsupported` |');
+    expect(md).toContain('| `secret-literal` |');
   });
 });

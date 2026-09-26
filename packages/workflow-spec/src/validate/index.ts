@@ -15,7 +15,6 @@ export {
   GraphTypes,
   checkOutputType,
   isContainerKind,
-  stageType,
   stageTypeOf,
   stageOutputType,
   variableType,
@@ -25,5 +24,4 @@ export {
   type ScopeContext,
 } from './scope.js';
 export { literalSecretReason } from './security.js';
-export { engineIssues } from './capability.js';
 export { RENAMED_FIELDS, unknownFieldHint } from './hints.js';

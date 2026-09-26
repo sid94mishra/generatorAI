@@ -136,8 +136,3 @@ export function isTerminalStageRunState(s: string): boolean {
 export function isLegalStageRunTransition(from: StageRunState, to: StageRunState, cls?: StageNodeClass): boolean {
   return STAGE_RUN_TRANSITIONS.some((t) => t.from === from && t.to === to && (!cls || t.applies.includes(cls)));
 }
-
-/** Rows leaving a state, optionally for one node class. */
-export function stageRunTransitionsFrom(from: StageRunState, cls?: StageNodeClass): StageRunTransition[] {
-  return STAGE_RUN_TRANSITIONS.filter((t) => t.from === from && (!cls || t.applies.includes(cls)));
-}

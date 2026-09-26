@@ -40,7 +40,8 @@
 - **Templates in commands.** `check.args`, hook `command` and `args`, and `run_script` scripts are literals
   (`check-args-literal`, `template-in-command`). Pass values through `env`.
 - **Literal secrets.** A token or password in a header, env or key field is `secret-literal` or
-  `secret-not-secretref`. Use `secretref:<name>`.
+  `secret-not-secretref`. Use a `secretref:` into the field's namespace (`secretref:workflow/<name>` for
+  commands and hooks), or it is `secret-namespace`.
 - **A map merge without per-item mounts.** `merge: "sequential" | "pr_per_item"` and `itemSetup` need
   `workspace: "mount_per_item"`.
 

@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // engineGate — builder helpers shared by the stage panel, the edge
-// editor and the workflow settings. The engine runs every v2 field
-// (ENGINE_LEVEL v2), so no control is gated any more:
+// editor and the workflow settings. The engine runs every v2 field, so
+// no control is gated:
 //   • `FieldIssues` shows the validator's issues next to the field they
 //     point at (D-25);
 //   • `ExpressionField` is the Expression v2 editor (P05 WP-5B.5): a lazy

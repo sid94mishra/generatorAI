@@ -9,6 +9,9 @@
 //   what changed   against the workflow it proposes to replace, by stage key
 //                  and edge;
 //   the decision   Publish (the page's own publish: saves first) / Discard.
+//                  A draft that replaces a workflow publishes INTO it (the
+//                  server saves it onto that definition and deletes the
+//                  draft), after a confirmation naming it.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo } from 'react';
@@ -20,7 +23,7 @@ import { useDeleteWorkflowDefinition, useWorkflowDefinition, useWorkflowRun } fr
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { diffWorkflowGraphs, isEmptyDiff } from '@/lib/workflowGraphDiff.js';
 
-const RISK_LABELS: Record<RiskFlag, string> = {
+export const RISK_LABELS: Record<RiskFlag, string> = {
   writes_files: 'Writes files',
   commits: 'Commits',
   pushes: 'Pushes',
@@ -28,11 +31,12 @@ const RISK_LABELS: Record<RiskFlag, string> = {
   bypass_permissions: 'Bypasses permission prompts',
   runs_repo_code: "Runs the repository's code",
   starts_other_workflows: 'Starts other workflows',
+  uses_workflow_tools: 'An agent can run or author workflows',
   worktree_per_item: 'A worktree per item',
   plans_stages_at_run_time: 'An agent plans stages at run time',
 };
 
-const DANGER: ReadonlySet<RiskFlag> = new Set<RiskFlag>(['pushes', 'opens_pr', 'bypass_permissions']);
+export const DANGER: ReadonlySet<RiskFlag> = new Set<RiskFlag>(['pushes', 'opens_pr', 'bypass_permissions']);
 
 export interface AgentDraftBannerProps {
   record: WorkflowDefinitionRecord;
@@ -58,6 +62,18 @@ export function AgentDraftBanner({ record, graph, onPublish, publishing }: Agent
 
   const draft = record.status === 'draft';
   const canPublish = draft || record.hasUnpublishedChanges;
+
+  const handlePublish = async () => {
+    if (replacesId && draft) {
+      const ok = await askConfirm({
+        title: `Publish into "${replaced?.graph.workflow.name ?? 'the workflow it replaces'}"?`,
+        description: "This draft's graph replaces that workflow's and is published there; the draft is then deleted.",
+        confirmLabel: 'Publish',
+      });
+      if (!ok) return;
+    }
+    onPublish();
+  };
 
   const handleDiscard = async () => {
     const ok = await askConfirm({
@@ -96,7 +112,7 @@ export function AgentDraftBanner({ record, graph, onPublish, publishing }: Agent
             variant="primary"
             loading={publishing}
             disabled={publishing || discard.isPending}
-            onClick={onPublish}
+            onClick={() => void handlePublish()}
             leftIcon={<Upload className="h-3.5 w-3.5" />}
             data-testid="agent-draft-publish"
           >

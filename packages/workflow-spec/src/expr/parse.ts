@@ -407,10 +407,3 @@ export function parseExpression(src: string): ParseResult {
     };
   }
 }
-
-/** Parse, throwing an Error with the located message on failure. */
-export function parseExpressionOrThrow(src: string): ExprNode {
-  const r = parseExpression(src);
-  if (!r.ok) throw new Error(`${r.error.message} (at ${r.error.start})`);
-  return r.ast;
-}

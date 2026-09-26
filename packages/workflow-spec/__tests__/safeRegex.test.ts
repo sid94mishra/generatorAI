@@ -83,6 +83,18 @@ describe('compileSafeRegex: linear time', () => {
   });
 });
 
+describe('compileSafeRegex: bounded work', () => {
+  it('refuses large repetitions on large inputs quickly instead of stalling', () => {
+    const text = (n: number) => 'lorem ipsum dolor sit amet '.repeat(Math.ceil(n / 27)).slice(0, n);
+    expect(compileSafeRegex('[a-z]{0,1000}[0-9]{0,1000}[a-z]{0,1000}Z').ok).toBe(false);
+    const r = re('[A-Za-z0-9 ]{1,500}DONE');
+    const start = Date.now();
+    expect(() => r.test(text(100_000))).toThrow(/too expensive/);
+    expect(Date.now() - start).toBeLessThan(1000);
+    expect(r.test(`${text(2_000)}DONE`)).toBe(true);
+  });
+});
+
 describe('compileSafeRegex: rejected patterns', () => {
   it.each<[string, string, RegExp]>([
     ['(a)\\1', '', /Backreferences/],

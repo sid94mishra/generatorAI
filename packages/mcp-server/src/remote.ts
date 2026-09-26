@@ -3,13 +3,14 @@
 // paired device of platform `mcp` (P04 WP-4.4; PD-22).
 //
 // Pairing reuses device pairing (no service-account issuance): an operator
-// runs `generatorai device invite --platform mcp --scopes exec:agent,
-// read:workflows[,write:workflows]`, then `generatorai-mcp pair <code>`
-// redeems it here. The device key and session live in the OS-backed vault
-// of `@generatorai/secrets` (namespace `mcp/<serverId>`), never in a
-// plaintext file; `mcp-connection.json` only remembers which server was
-// paired. The device is listed and revocable in Settings → Devices like any
-// other.
+// runs `generatorai device invite --platform mcp` (the mcp default grant:
+// read:status, read:workflows, stream:events, exec:agent, read:chats,
+// write:chats; add `--scopes …,write:workflows` to let it draft), then
+// `generatorai-mcp pair <code>` redeems it here. The device key and session
+// live in the encrypted vault of `@generatorai/secrets` (namespace
+// `mcp/<serverId>`), never in a plaintext file; `mcp-connection.json`
+// remembers which server was paired and which key backend sealed the vault.
+// The device is listed and revocable in Settings → Devices like any other.
 // ────────────────────────────────────────────────────────────────
 
 import * as fs from 'node:fs';
@@ -25,7 +26,7 @@ import {
   type SecretSink,
 } from '@generatorai/client-runtime';
 import { createAdminApi, createApiClient } from '@generatorai/client-core';
-import { createSecretStore, type SecretStore } from '@generatorai/secrets';
+import { createSecretStore, EnvKeyProvider, type SecretStore } from '@generatorai/secrets';
 import { isPairingCode } from '@generatorai/shared';
 import type { AiFacade } from './server.js';
 
@@ -35,6 +36,36 @@ export interface McpConnection {
   endpoints?: string[];
   serverId: string;
   serverName?: string;
+  /**
+   * The key backend that sealed the vault at pairing (`env-key`,
+   * `env-passphrase` or `local-file-key`). An MCP client spawns this process
+   * with its own environment, so a pairing made in a shell that had
+   * `GENERATORAI_SECRET_KEY` set cannot be opened from one that has not
+   * (and vice versa): pinned here so that is a clear error, not INTEGRITY.
+   */
+  secretBackend: string;
+}
+
+/** The key backend `createSecretStore` picks in this environment (its selection order, minus the desktop-only OS hooks). */
+export function secretBackendKind(): string {
+  return EnvKeyProvider.isConfigured() ? new EnvKeyProvider('').info().kind : 'local-file-key';
+}
+
+/** Refuses to open the vault with a different key backend than the one that sealed it. */
+export function assertSecretBackend(connection: McpConnection): void {
+  const current = secretBackendKind();
+  if (connection.secretBackend === current) return;
+  const envHint = (kind: string | undefined): string =>
+    kind === 'env-key'
+      ? 'GENERATORAI_SECRET_KEY set'
+      : kind === 'env-passphrase'
+        ? 'GENERATORAI_SECRET_PASSPHRASE set'
+        : 'neither GENERATORAI_SECRET_KEY nor GENERATORAI_SECRET_PASSPHRASE set';
+  throw new Error(
+    `This MCP server was paired with ${envHint(connection.secretBackend)} (secret backend "${connection.secretBackend ?? 'unknown'}"), ` +
+      `but runs with ${envHint(current)} ("${current}"). Give the MCP client's server config the same environment ` +
+      '(its `env` block), or pair again in this environment with `generatorai-mcp pair <code>`.',
+  );
 }
 
 /** `GENERATORAI_MCP_CONFIG_DIR`, else `~/.generatorai/mcp`. */
@@ -81,8 +112,10 @@ class VaultSink implements SecretSink {
 
 /** The authenticated runtime of a paired MCP server (DPoP, refresh, endpoint pinning). */
 export function createMcpRuntime(connection: McpConnection, endpoint = connection.endpoint): AuthenticatedClientRuntime {
-  // An MCP server may run where no OS secret service exists; the encrypted
-  // file backend still protects the key at rest (0600).
+  // Node has no OS-keychain backend here (only the desktop shell's
+  // safeStorage hooks), the same as the CLI's own device key: the vault is
+  // sealed by GENERATORAI_SECRET_KEY/PASSPHRASE when set, else by a 0600 key
+  // file. Which one is pinned in the connection (`assertSecretBackend`).
   const store = createSecretStore({ dataDir: mcpConfigDir(), requireSecure: false });
   const sink = new VaultSink(store, `mcp/${connection.serverId}`);
   return new AuthenticatedClientRuntime({
@@ -147,6 +180,7 @@ export async function pairMcp(code: string, opts: { name?: string } = {}): Promi
     endpoints: consent.endpoints.map((e) => e.origin),
     serverId: consent.serverId,
     serverName: consent.serverName,
+    secretBackend: secretBackendKind(),
   };
   const runtime = createMcpRuntime(connection);
   const session = await runtime.completePairing({

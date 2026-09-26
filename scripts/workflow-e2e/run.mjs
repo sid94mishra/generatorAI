@@ -2,8 +2,12 @@
 // ────────────────────────────────────────────────────────────────
 // Live workflow E2E runner (P00 WP-0.3).
 //
-//   pnpm workflow:e2e --phase 00 [--provider claude-agent|faux] [--only T1,T5]
-//                     [--retries 2] [--fresh] [--no-server] [--keep-server]
+//   pnpm workflow:e2e --phase 00|smoke|all [--provider claude-agent|faux]
+//                     [--only T1,T5] [--retries 2] [--fresh] [--no-server]
+//                     [--keep-server] [--model <catalog id>]
+//
+// `--phase smoke` is the credential-free smoke (check stages only: create a
+// v2 graph, publish, invoke, wait); `--phase all` runs every listed scenario.
 //
 // 1. starts the isolated server on :3111 (server.mjs), unless --no-server;
 // 2. pairs ONE device into a fresh creds file under C:/gaiwf/creds/ (deleted
@@ -58,9 +62,6 @@ export function judge(result, expect) {
   if (expect.runStatus && result.runStatus !== expect.runStatus) {
     failures.push(`run status ${result.runStatus} (expected ${expect.runStatus})${result.runError ? `: ${result.runError}` : ''}`);
   }
-  if (expect.sessionMode && result.sessionMode !== expect.sessionMode) {
-    failures.push(`sessionMode ${result.sessionMode} (expected ${expect.sessionMode})`);
-  }
   for (const [name, want] of Object.entries(expect.stages ?? {})) {
     const got = byName.get(name)?.status;
     const ok = Array.isArray(want) ? want.includes(got) : got === want;
@@ -71,8 +72,11 @@ export function judge(result, expect) {
       if (s.status !== expect.allStages) failures.push(`stage ${s.name} ${s.status} (expected ${expect.allStages})`);
     }
   }
-  for (const [name, n] of Object.entries(expect.retryCount ?? {})) {
-    if (byName.get(name)?.retryCount !== n) failures.push(`stage ${name} retryCount ${byName.get(name)?.retryCount} (expected ${n})`);
+  for (const [name, n] of Object.entries(expect.attempts ?? {})) {
+    if (byName.get(name)?.attempts !== n) failures.push(`stage ${name} attempts ${byName.get(name)?.attempts} (expected ${n})`);
+  }
+  for (const { stage, text } of expect.outputContains ?? []) {
+    if (!JSON.stringify(byName.get(stage)?.output ?? null).includes(text)) failures.push(`stage ${stage} output lacks ${JSON.stringify(text)}`);
   }
   for (const stage of expect.hasContext ?? []) {
     if (contextOf(stage).length === 0) failures.push(`stage ${stage} received no context message`);
@@ -96,11 +100,12 @@ export function judge(result, expect) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const phase = String(args.phase ?? '00').padStart(2, '0');
+  const phase = args.phase === 'all' || args.phase === 'smoke' ? args.phase : String(args.phase ?? '00').padStart(2, '0');
   const provider = typeof args.provider === 'string' ? args.provider : 'claude-agent';
   const retries = args.retries !== undefined ? Number(args.retries) : 2;
   const registry = JSON.parse(readFileSync(path.join(HERE, 'scenarios.json'), 'utf8'));
-  let ids = registry.phases[phase];
+  // `all`: every scenario any phase lists, once, in registry order.
+  let ids = phase === 'all' ? [...new Set(Object.values(registry.phases).flat())] : registry.phases[phase];
   if (!ids) throw new Error(`scenarios.json has no phase "${phase}" (known: ${Object.keys(registry.phases).join(', ')})`);
   if (typeof args.only === 'string') {
     const only = new Set(args.only.split(',').map((s) => s.trim()));
@@ -111,7 +116,7 @@ async function main() {
   const outDir = path.join(HERE, 'out', ts);
   mkdirSync(outDir, { recursive: true });
   const creds = path.join(E2E_ROOT, 'creds', `e2e-${ts}.json`);
-  const env = { ...process.env, CREDS: creds, E2E_DATA_DIR: path.join(E2E_ROOT, 'data'), E2E_DB_PATH: path.join(E2E_ROOT, 'data', 'data.db') };
+  const env = { ...process.env, ...(typeof args.model === 'string' ? { E2E_MODEL: args.model } : {}), CREDS: creds, E2E_DATA_DIR: path.join(E2E_ROOT, 'data'), E2E_DB_PATH: path.join(E2E_ROOT, 'data', 'data.db') };
 
   const report = {
     phase,
@@ -175,7 +180,7 @@ async function main() {
           a.runId = result.runId;
           a.runStatus = result.runStatus;
           a.wallMs = result.wallMs;
-          a.stages = Object.fromEntries(result.stages.map((s) => [s.name, `${s.status}/r${s.retryCount}`]));
+          a.stages = Object.fromEntries(result.stages.map((s) => [s.name, `${s.status}/a${s.attempts}`]));
           a.failures = judge(result, expect);
         }
         entry.attempts.push(a);

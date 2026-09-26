@@ -65,18 +65,18 @@ function full() {
 
 describe('builders', () => {
   it('emit a canonical WorkflowGraph that round-trips', () => {
-    const g = full().build({ engine: 'v2' });
+    const g = full().build();
     expect(g.formatVersion).toBe(2);
     expect(g.stages.map((s) => s.key)).toEqual(['fix', 'review', 'merge']);
     expect(g.workflow.session).toMatchObject({ model: 'claude-sonnet-4.6', agentRef: 'global:coder', permissionMode: 'acceptEdits' });
     expect(g.stages[1]!.session).toEqual({ agentRef: 'global:reviewer' });
-    const back = importGraph(exportGraph(g), { engine: 'v2' });
+    const back = importGraph(exportGraph(g));
     expect(back.valid).toBe(true);
     expect(back.graph).toEqual(g);
   });
 
   it('reach every stage and workflow field', () => {
-    const g = full().build({ engine: 'v2' });
+    const g = full().build();
     const stageKeys = new Set(g.stages.flatMap((s) => Object.keys(s)));
     for (const k of Object.keys(AgentStageSchema.shape)) {
       if (k === 'parentKey') continue; // needs a container kind (P05); set with .parent()
@@ -86,14 +86,13 @@ describe('builders', () => {
   });
 
   it('turn inline handlers into function hooks and return them', () => {
-    const { graph, handlers } = full().buildWithHandlers({ engine: 'v2' });
+    const { graph, handlers } = full().buildWithHandlers();
     expect([...handlers.keys()]).toEqual(['script:fix_and_review:workflow:on_run_complete:0', 'script:fix_and_review:fix:pre_run:0']);
     const stageHook = graph.stages[0]!.hooks.find((h) => h.config.type === 'function')!;
     expect(stageHook).toMatchObject({ phase: 'pre_run', type: 'function', config: { handlerName: 'script:fix_and_review:fix:pre_run:0' } });
   });
 
   it('throw WorkflowBuildError with the validator issues', () => {
-    expect(() => full().build({ engine: 'v1' })).toThrow(WorkflowBuildError);
     try {
       workflow('bad').stage('a', (s) => s.prompt('{{nope}}')).edge('a', 'b').build();
     } catch (err) {
@@ -110,8 +109,8 @@ describe('builders', () => {
   });
 
   it('validate without throwing', () => {
-    const r = workflow('w').stage('a', (s) => s.prompt('x').repair()).validate({ engine: 'v1' });
+    const r = workflow('w').stage('a', (s) => s.prompt('{{nope}}')).validate();
     expect(r.valid).toBe(false);
-    expect(r.issues.map((i) => i.code)).toEqual(['engine-unsupported']);
+    expect(r.issues.map((i) => i.code)).toEqual(['template-unknown-variable']);
   });
 });

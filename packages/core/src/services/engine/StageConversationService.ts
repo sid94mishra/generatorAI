@@ -87,15 +87,56 @@ export class StageConversationService {
   }
 
   /**
-   * The session an attachment is stored under (artifacts belong to a
-   * session). A stage that never started has none.
+   * Would `send` take a message now? Throws its refusal, without acting;
+   * answers the session attachments are stored under. The message route
+   * asks first, so a refused message leaves no attachments behind.
    */
-  attachmentSession(runId: string, instanceId: string): string {
+  assertSendable(runId: string, instanceId: string): string {
     const row = this.instance(runId, instanceId);
+    const refusal = this.refusal(row.status, instanceId);
+    if (refusal) throw refusal;
     if (!row.sessionId) {
       throw new StageConversationError('STAGE_NOT_STARTED', 'Files can be attached once the stage has started its conversation');
     }
     return row.sessionId;
+  }
+
+  /** Why a stage in `status` takes no message now, or undefined when it does. */
+  private refusal(status: string, instanceId: string): StageConversationError | undefined {
+    switch (status) {
+      case 'awaiting_input':
+        return new StageConversationError(
+          'INTERACTION_PENDING',
+          'This stage is waiting on your response. Answer or cancel it before sending a new message.',
+        );
+      case 'starting':
+      case 'running':
+      case 'validating': {
+        const state = this.engine.executor.frameState(instanceId);
+        if (state === 'between_turns') return undefined;
+        return new StageConversationError(
+          'STAGE_BUSY',
+          state === 'mid_turn'
+            ? 'This stage is still generating a response. Wait for it to finish, or stop it first.'
+            : state === 'closing'
+              ? 'This stage is finishing its attempt. Send the message again once it completes (it then amends the output).'
+              : 'This stage is running in another process.',
+        );
+      }
+      case 'completed':
+      case 'paused':
+        return undefined;
+      case 'pending':
+      case 'ready':
+      case 'retry_wait':
+      case 'waiting':
+        return new StageConversationError('STAGE_NOT_STARTED', `The stage has not started its conversation yet (it is ${status})`);
+      default:
+        return new StageConversationError(
+          'STAGE_NOT_CONVERSABLE',
+          `A ${status} stage is final. Re-run it from here (a fork of the run) to continue its work.`,
+        );
+    }
   }
 
   /** Send an operator message to the stage (the table in the header). */
@@ -109,25 +150,14 @@ export class StageConversationService {
       ...(msg.agentMode ? { agentMode: msg.agentMode } : {}),
     };
     const executor = this.engine.executor;
+    const refusal = this.refusal(row.status, instanceId);
+    if (refusal) throw refusal;
     switch (row.status) {
-      case 'awaiting_input':
-        throw new StageConversationError(
-          'INTERACTION_PENDING',
-          'This stage is waiting on your response. Answer or cancel it before sending a new message.',
-        );
       case 'starting':
       case 'running':
       case 'validating': {
-        const state = executor.frameState(instanceId);
-        if (state === 'between_turns' && executor.enqueueOperatorTurn(instanceId, turn)) return { outcome: 'queued' };
-        throw new StageConversationError(
-          'STAGE_BUSY',
-          state === 'mid_turn'
-            ? 'This stage is still generating a response. Wait for it to finish, or stop it first.'
-            : state === 'closing'
-              ? 'This stage is finishing its attempt. Send the message again once it completes (it then amends the output).'
-              : 'This stage is running in another process.',
-        );
+        if (executor.enqueueOperatorTurn(instanceId, turn)) return { outcome: 'queued' };
+        throw new StageConversationError('STAGE_BUSY', 'This stage is still generating a response. Wait for it to finish, or stop it first.');
       }
       case 'completed': {
         const { done } = await executor.amend(runId, instanceId, turn);
@@ -146,16 +176,9 @@ export class StageConversationService {
         if (!r.ok) throw refused(r);
         return { outcome: 'retrying' };
       }
-      case 'pending':
-      case 'ready':
-      case 'retry_wait':
-      case 'waiting':
-        throw new StageConversationError('STAGE_NOT_STARTED', `The stage has not started its conversation yet (it is ${row.status})`);
       default:
-        throw new StageConversationError(
-          'STAGE_NOT_CONVERSABLE',
-          `A ${row.status} stage is final. Re-run it from here (a fork of the run) to continue its work.`,
-        );
+        // `refusal` answered every other status.
+        throw new StageConversationError('STAGE_NOT_CONVERSABLE', `A ${row.status} stage takes no message`);
     }
   }
 

@@ -1120,6 +1120,10 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.3.6)
+    devDependencies:
+      esbuild:
+        specifier: ^0.25.0
+        version: 0.25.12
 
   packages/relay-protocol:
     dependencies:

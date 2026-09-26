@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { conditionHolds, evaluate, evaluateSource, parseExpression } from '../src/index.js';
+import { evaluate, evaluateSource, parseExpression } from '../src/index.js';
 
 const scope = {
   variables: { env: 'prod', count: 5, flag: false, sflag: 'false', zip: '02134', tags: ['a', 'b'], nested: { deep: { x: 1 } } },
@@ -94,20 +94,6 @@ describe('evaluate: table', () => {
   });
 });
 
-describe('conditionHolds', () => {
-  it('holds only for exactly true', () => {
-    expect(conditionHolds("variables.env == 'prod'", scope)).toBe(true);
-    expect(conditionHolds('variables.missing', scope)).toBe(false);
-    expect(conditionHolds('variables.count', scope)).toBe(false);
-    expect(conditionHolds('((( variables.x ==', scope)).toBe(false);
-  });
-
-  it('accepts a parsed AST', () => {
-    const r = parseExpression('variables.count == 5');
-    expect(r.ok && conditionHolds(r.ast, scope)).toBe(true);
-  });
-});
-
 describe('evaluate: bounds', () => {
   it('stops at the step budget', () => {
     const src = `count(variables.big, x => count(variables.big, y => x == y) > 0) > 0`;
@@ -116,6 +102,20 @@ describe('evaluate: bounds', () => {
     expect(r.ok).toBe(false);
     if (!r.ok) expect(r.error.code).toBe('expr_budget_exceeded');
     const ok = evaluateSource(src, { variables: { big: [1, 2, 3] } });
+    expect(ok.ok && ok.value).toBe(true);
+  });
+
+  it('charges produced and compared values, failing a blow-up fast', () => {
+    const L = '[' + Array(100).fill(0).join(',') + ']';
+    let expr = `map(${L}, a => ${L})`;
+    for (let k = 0; k < 2; k++) expr = `map([${expr}], b => map(${L}, a => b))`;
+    const t = Date.now();
+    const r = evaluateSource(`len(unique(map([${expr}], c => map(${L}, a => c))[0])) > 0`, {});
+    expect(Date.now() - t).toBeLessThan(1000);
+    expect(r.ok).toBe(false);
+    if (!r.ok) expect(r.error.code).toBe('expr_budget_exceeded');
+    const items = Array.from({ length: 500 }, (_, i) => ({ id: i % 50, tags: ['a', 'b'] }));
+    const ok = evaluateSource('len(unique(sort(variables.items, x => [x.id]), x => x.id)) == 50', { variables: { items } });
     expect(ok.ok && ok.value).toBe(true);
   });
 

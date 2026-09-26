@@ -289,15 +289,28 @@ export class WorkflowAuthoringService {
   /**
    * Publish (PD-14): a person may; an agent (a chat, a stage, an external
    * agent or a service account) only when the operator allows it.
+   *
+   * A draft that proposes to replace a workflow (`replacesWorkflowId`)
+   * publishes INTO it: the draft's graph is saved onto the replaced
+   * definition at the revision read now (a concurrent edit conflicts), that
+   * definition is published, and the draft is deleted. The result is the
+   * replaced definition's record.
    */
-  async publish(id: string, by: { person: boolean }): Promise<WorkflowDefinitionRecord> {
+  async publish(id: string, by: { person: boolean; canEditCommands: boolean }): Promise<WorkflowDefinitionRecord> {
     if (!by.person && !this.agentsMayPublish()) {
       throw new InsufficientScopeError(
         'Only a person publishes a workflow: an agent submits drafts, and a person reviews and publishes them (the operator setting allowAgentPublish is off)',
         'publish',
       );
     }
-    return this.deps.definitions.publish(id);
+    const record = await this.deps.definitions.get(id);
+    const replacesId = record.status === 'draft' ? record.authoredBy?.replacesWorkflowId : undefined;
+    if (!replacesId || replacesId === id) return this.deps.definitions.publish(id);
+    const target = await this.deps.definitions.get(replacesId);
+    await this.deps.definitions.saveGraph(replacesId, record.graph, target.revision, { canEditCommands: by.canEditCommands });
+    const published = await this.deps.definitions.publish(replacesId);
+    await this.deps.definitions.delete(id);
+    return published;
   }
 
   // ── schema and guide ────────────────────────────────────────

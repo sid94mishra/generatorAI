@@ -6,7 +6,7 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "bin": {
-    "generatorai-mcp": "./src/cli.ts"
+    "generatorai-mcp": "./dist-bundle/generatorai-mcp.mjs"
   },
   "exports": {
     ".": {
@@ -16,6 +16,7 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "bundle": "node esbuild.config.mjs",
     "typecheck": "tsc --build --force",
     "test": "vitest run",
     "lint": "eslint src/"
@@ -27,5 +28,8 @@
     "@generatorai/shared": "workspace:*",
     "@generatorai/workflow-spec": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.0"
   }
 }

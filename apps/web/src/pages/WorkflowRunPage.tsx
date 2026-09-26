@@ -81,7 +81,7 @@ import { RightPane, useRightPaneOpen } from '@/components/layout/RightPane.js';
 import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
 import { openMultiplexedStream } from '@/platform/muxStream.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
-import { runTitle } from '@generatorai/client-core';
+import { newIdempotencyKey, runTitle } from '@generatorai/client-core';
 
 export function WorkflowRunPage() {
   const { id: definitionId, runId } = useParams<{ id: string; runId: string }>();
@@ -435,10 +435,16 @@ export function WorkflowRunPage() {
   // re-runs every instance that did not complete (completed ones are
   // memoized), and `rerunFrom` re-runs one stage and everything downstream.
   // Follow the user to the fork — staying on the ancestor looks inert.
+  // One fork per action at a time, under its own key: a double click is one run (CONVINV-R17).
+  const forksInFlight = useRef(new Set<string>());
   const forkAndOpen = useCallback((rerunFrom?: string[]) => {
     if (!runId) return;
+    const action = (rerunFrom ?? []).join('\n');
+    if (forksInFlight.current.has(action)) return;
+    forksInFlight.current.add(action);
     // A refusal is toasted by the mutation (`useInvokeWorkflow`'s meta).
     void invokeWorkflow.mutateAsync({
+      idempotencyKey: newIdempotencyKey(),
       request: {
         target: {
           kind: 'fork',
@@ -455,7 +461,7 @@ export function WorkflowRunPage() {
         if (fork.runId !== runId) navigate(`/workflows/${fork.workflowDefinitionId}/runs/${fork.runId}`);
       },
       () => undefined,
-    );
+    ).finally(() => forksInFlight.current.delete(action));
   }, [runId, invokeWorkflow, navigate]);
   const handleRetry = useCallback(() => forkAndOpen(), [forkAndOpen]);
 
@@ -690,6 +696,7 @@ export function WorkflowRunPage() {
         onResume={handleResume}
         onCancel={handleCancel}
         onRetry={handleRetry}
+        retryBusy={invokeWorkflow.isPending}
         onPermissionModeChange={handlePermissionModeChange}
         permissionBusy={setRunPermissionMode.isPending}
         usage={runData.usage}

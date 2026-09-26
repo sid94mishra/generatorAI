@@ -2,8 +2,9 @@
 // ScriptsListPage — Grid of discovered .workflow.mjs scripts
 // ────────────────────────────────────────────────────────────────
 
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { newIdempotencyKey } from '@generatorai/client-core';
 import {
   FileCode2,
   Play,
@@ -36,6 +37,9 @@ export function ScriptsListPage() {
   const { data: scripts, isLoading, error } = useScripts();
   const reloadScripts = useReloadScripts();
   const invokeWorkflow = useInvokeWorkflow();
+  // One start per script at a time: a double click is one run (CONVINV-R17).
+  const [starting, setStarting] = useState<string | null>(null);
+  const inFlight = useRef(new Set<string>());
 
   const [search, setSearch] = useState('');
 
@@ -116,12 +120,26 @@ export function ScriptsListPage() {
                 <Button
                   variant="ghost"
                   size="icon-sm"
+                  disabled={starting === script.id}
                   onClick={(e) => {
                     e.stopPropagation();
-                    invokeWorkflow.mutate(
-                      { request: { target: { kind: 'script', scriptId: script.id }, variables: {}, client: 'web' } },
-                      { onSuccess: (result) => navigate(`/workflows/${result.workflowDefinitionId}/runs/${result.runId}`) },
-                    );
+                    if (inFlight.current.has(script.id)) return;
+                    inFlight.current.add(script.id);
+                    setStarting(script.id);
+                    // A refusal is toasted by the mutation (`useInvokeWorkflow`'s meta).
+                    void invokeWorkflow
+                      .mutateAsync({
+                        request: { target: { kind: 'script', scriptId: script.id }, variables: {}, client: 'web' },
+                        idempotencyKey: newIdempotencyKey(),
+                      })
+                      .then(
+                        (result) => navigate(`/workflows/${result.workflowDefinitionId}/runs/${result.runId}`),
+                        () => undefined,
+                      )
+                      .finally(() => {
+                        inFlight.current.delete(script.id);
+                        setStarting((current) => (current === script.id ? null : current));
+                      });
                   }}
                   className="h-auto w-auto rounded-lg bg-success-muted p-2 text-success transition-colors hover:bg-success/20 hover:text-success"
                   title="Run with defaults"

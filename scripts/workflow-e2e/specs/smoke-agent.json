@@ -1,0 +1,41 @@
+{
+  "tag": "SMOKE-agent",
+  "description": "agent smoke: two agent stages, the second receives the first as context",
+  "timeoutMs": 300000,
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "e2e-smoke-agent"
+    },
+    "stages": [
+      {
+        "key": "first",
+        "name": "first",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "first",
+            "text": "Write one line containing the token FIRST."
+          }
+        ]
+      },
+      {
+        "key": "second",
+        "name": "second",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "second",
+            "text": "Write one line containing the token SECOND."
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "first",
+        "to": "second"
+      }
+    ]
+  }
+}

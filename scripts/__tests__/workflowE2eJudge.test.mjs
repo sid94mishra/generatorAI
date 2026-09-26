@@ -7,11 +7,10 @@ import { judge } from '../workflow-e2e/run.mjs';
 
 const result = {
   runStatus: 'completed',
-  sessionMode: 'per-stage',
   stages: [
-    { name: 'A', status: 'completed', retryCount: 0 },
-    { name: 'B', status: 'skipped', retryCount: 0 },
-    { name: 'C', status: 'failed', retryCount: 2 },
+    { name: 'A', status: 'completed', attempts: 1, output: { exitCode: 0, passed: true, stdoutTail: 'v26.0.0' } },
+    { name: 'B', status: 'skipped', attempts: 0 },
+    { name: 'C', status: 'failed', attempts: 2 },
   ],
   messages: {
     A: [{ role: 'user', content: 'TOPIC=x rest', flags: [] }],
@@ -25,9 +24,9 @@ describe('workflow-e2e judge', () => {
     expect(
       judge(result, {
         runStatus: 'completed',
-        sessionMode: 'per-stage',
         stages: { A: 'completed', B: ['skipped', 'completed'], C: 'failed' },
-        retryCount: { C: 2 },
+        attempts: { C: 2 },
+        outputContains: [{ stage: 'A', text: '"passed":true' }],
         hasContext: ['C'],
         noContext: ['A'],
         contextContains: [{ stage: 'C', text: '"A"' }],
@@ -55,13 +54,17 @@ describe('workflow-e2e judge', () => {
     ]);
   });
 
-  it('every scenario a phase lists is defined and has a spec file', () => {
+  it('every scenario a phase lists is defined and has a spec file holding a valid v2 graph', async () => {
+    const { validateWorkflow } = await import('../../packages/workflow-spec/src/index.ts');
     const reg = JSON.parse(readFileSync(new URL('../workflow-e2e/scenarios.json', import.meta.url), 'utf8'));
+    expect(reg.phases.smoke?.length).toBeGreaterThan(0);
     for (const ids of Object.values(reg.phases)) {
       for (const id of ids) {
         expect(reg.scenarios[id], id).toBeDefined();
         const spec = JSON.parse(readFileSync(new URL(`../workflow-e2e/${reg.scenarios[id].spec}`, import.meta.url), 'utf8'));
         expect(spec.tag).toBe(id);
+        const errors = validateWorkflow(spec.graph).issues.filter((i) => i.severity === 'error');
+        expect(errors, `${id}: ${JSON.stringify(errors)}`).toEqual([]);
       }
     }
   });

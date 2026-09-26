@@ -50,12 +50,6 @@ export const TemplateSchema = z
   .max(MAX_TEMPLATE_LENGTH)
   .describe('Template text: {{ expression }} placeholders, {{#if expr}}…{{/if}} blocks; a bare {{name}} means {{variables.name}}');
 
-/** A `secretref:` reference into the secret store. Literal secrets are never accepted. */
-export const SecretRefSchema = z
-  .string()
-  .regex(/^secretref:[A-Za-z0-9_.:/-]{1,200}$/, 'Secrets must be secretref: references')
-  .describe('A secretref: reference into the secret store (literal secrets are rejected)');
-
 export const PositionSchema = z
   .object({
     x: z.number().finite().describe('Canvas x coordinate'),
@@ -76,6 +70,20 @@ export const PromptDefinitionSchema = z
 export type PromptDefinition = z.infer<typeof PromptDefinitionSchema>;
 
 // ── Variables ────────────────────────────────────────────────────
+
+/** Report a name that is an expression root or a system name (`__*`, `repo_path_*`, `repo_branch_*`). */
+export function reservedVariableName(name: string, ctx: z.RefinementCtx, path: (string | number)[] = []): void {
+  if ((RESERVED_ROOTS as readonly string[]).includes(name)) {
+    customIssue(ctx, 'reserved-variable-name', `'${name}' is a reserved expression root and cannot be a variable name`, path);
+  } else if (FORBIDDEN_VARIABLE_NAME_PATTERN.test(name)) {
+    customIssue(
+      ctx,
+      'reserved-variable-name',
+      `'${name}' is reserved: names starting with __, repo_path_ or repo_branch_ are system values (use run.codebases.<alias>)`,
+      path,
+    );
+  }
+}
 
 /** `list` is a list of strings; `json` is any JSON value (P05, P5-23). */
 export const VARIABLE_TYPES = ['string', 'number', 'boolean', 'choice', 'text', 'list', 'json'] as const;
@@ -103,18 +111,7 @@ export const VariableDefinitionSchema = z
       .describe('Allowed values of a choice variable'),
   })
   .strict()
-  .superRefine((v, ctx) => {
-    if ((RESERVED_ROOTS as readonly string[]).includes(v.name)) {
-      customIssue(ctx, 'reserved-variable-name', `'${v.name}' is a reserved expression root and cannot be a variable name`, ['name']);
-    } else if (FORBIDDEN_VARIABLE_NAME_PATTERN.test(v.name)) {
-      customIssue(
-        ctx,
-        'reserved-variable-name',
-        `'${v.name}' is reserved: names starting with __, repo_path_ or repo_branch_ are system values (use run.codebases.<alias>)`,
-        ['name'],
-      );
-    }
-  })
+  .superRefine((v, ctx) => reservedVariableName(v.name, ctx, ['name']))
   .describe('A workflow input variable');
 export type VariableDefinition = z.infer<typeof VariableDefinitionSchema>;
 
@@ -210,7 +207,7 @@ const ScriptHookConfigSchema = z
     env: z
       .record(z.string().max(4000))
       .optional()
-      .describe('Environment variables; values may be templates of non-secret values or secretref: references'),
+      .describe('Environment variables; values may be templates of non-secret values or secretref:workflow/<name> references'),
   })
   .strict()
   .describe('Script hook configuration');
@@ -223,7 +220,7 @@ const HttpHookConfigSchema = z
     headers: z
       .record(z.string().max(4000))
       .optional()
-      .describe('Request headers; secret values must be secretref: references'),
+      .describe('Request headers; secret values must be secretref:workflow/<name> references'),
     bodyTemplate: z.string().max(100_000).optional().describe('Request body template'),
   })
   .strict()
@@ -380,7 +377,7 @@ export const ResultValidationRuleSchema = z
         env: z
           .record(z.string().max(4000))
           .optional()
-          .describe('Environment; templates of non-secret values or secretref: references. STAGE_OUTPUT is always set'),
+          .describe('Environment; templates of non-secret values or secretref:workflow/<name> references. STAGE_OUTPUT is always set'),
         timeoutMs: z.number().int().min(1000).max(600_000).default(60_000).describe('Timeout for the command'),
         message: ruleMessage,
       })

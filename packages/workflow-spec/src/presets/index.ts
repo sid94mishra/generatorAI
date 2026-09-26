@@ -1529,5 +1529,3 @@ export function presetTemplates(): WorkflowTemplate[] {
   });
 }
 
-/** Template ids generated from presets (the invariants lint keeps them out of the engine). */
-export const PRESET_TEMPLATE_IDS: readonly string[] = TEMPLATE_SOURCES.map((t) => t.id);

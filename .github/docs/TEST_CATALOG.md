@@ -8,6 +8,8 @@
 
 Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠️ partial / observation | 🔄 retest after fix
 
+> **Historical record.** These results were taken against the v1 workflow engine. The workflow overhaul deleted the routes several results name (the v1 JSON import, template cloning, per-stage/per-edge definition routes and the orchestrator run routes); they are named descriptively below. Today a definition is one v2 graph (`POST /api/workflow-definitions`, `PUT /:id/graph`, `POST /import`), and a run starts through `POST /api/workflow-invocations`.
+
 ---
 
 ## A. Shell / navigation / Settings
@@ -38,7 +40,7 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | B1 | List | 5 system v2 templates appear | Code Gen / Code Review / Refactoring / Test Gen / E2E Testing | ✅ |
 | B2 | Detail card | Each shows name + description | All visible | ✅ (session 70 browser — `/templates` page renders 5 system template cards: Code Generation, Code Review, E2E Testing & Debugging, Code Refactoring, Test Generation; each shows description + `system` badge + N variables) |
 | B3 | "Use Template" button | Creates mutable WF; redirects to `/workflows/<id>/edit` | New WF with stages + edges | ✅ (Refactoring template — 4 stages, 3 edges) |
-| B4 | Cloned WF preserves defaults | Edge types, prompts, harness config | All copied | ✅ (session 70 — `POST /api/orchestrator/from-template` with `system-code-generation` → cloned WF has 4 stages, 3 edges (all `on_success`), 6 variables, 1 prompt per stage) |
+| B4 | Cloned WF preserves defaults | Edge types, prompts, harness config | All copied | ✅ (session 70 — the v1 template-clone route with `system-code-generation` → cloned WF has 4 stages, 3 edges (all `on_success`), 6 variables, 1 prompt per stage) |
 | B5 | Templates are read-only | PUT on template → 404 | API rejects | ✅ (session 70 — `PUT /api/templates/system-code-generation` → HTTP 404; `DELETE /api/templates/system-code-generation` → HTTP 404; only GET routes registered in `apps/server/src/routes/templates.ts`) |
 
 ## C. Scripts (Programmatic Workflow Scripts — PWS)
@@ -94,7 +96,7 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | E1 | Builder open | `/workflows/new` opens empty DAG | Add Stage button visible | ✅ |
 | E2 | Create 5-stage diamond | Plan → Research A + Research B → Synthesize → Wrap-up | 5 stage nodes + 5 edges | ✅ (`7c26fd45`) |
 | E3 | Edge types — on_success/on_completion/always | Rendered with badges | Visible on canvas | ✅ |
-| E4 | Edge type — on_failure | Manually added | Failure badge | ✅ (session 69) — `on_failure` edgeType persisted via import-json |
+| E4 | Edge type — on_failure | Manually added | Failure badge | ✅ (session 69) — `on_failure` edgeType persisted via the v1 JSON import |
 | E5 | Settings → General — sessionMode | radio: auto / single / per-stage | Selectable | ✅ |
 | E6 | Settings → General — name + description | Editable, persists | OK | ✅ (session 69 — PATCH /workflow-definitions/:id updates name+description) |
 | E7 | Settings → Variables — string type | Add `topic` required | Saved | ✅ |
@@ -129,7 +131,7 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | E36 | Stage Execution — Validation rule `min_length` | Saved | ✅ |
 | E37 | Stage Execution — Validation rule `max_length` | Saved | ✅ (session 69) |
 | E38 | Stage Execution — Validation rule `regex` | Saved with flags | ✅ (session 69 — `value:'^OK', flags:'i'`) |
-| E39 | Stage Execution — Validation rule `custom_script` | Saved | ✅ (session 70 — `resultValidation:[{type:'custom_script', script:'return result.includes("OK");'}]` persisted via import-json) |
+| E39 | Stage Execution — Validation rule `custom_script` | Saved | ✅ (session 70 — `resultValidation:[{type:'custom_script', script:'return result.includes("OK");'}]` persisted via the v1 JSON import) |
 | E40 | Stage Execution — Validation rule `json_schema` | For outputFormat=json | Saved | ✅ (session 69 — type:json_schema persisted alongside `outputFormat:json` + `outputSchema`) |
 | E41 | Stage Execution — Stage hooks (pre_run/post_run) | Saved | ✅ |
 | E42 | outputFormat=json + outputSchema | JSON validated against schema | ✅ (session 70 code-review — `outputFormat:json` + `outputSchema:{type:object, properties:{foo:{type:string}}}` persisted on PATCH stage; appended to first prompt only per F46 verification at `StageExecutionService.ts:819`) |
@@ -139,7 +141,7 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | E46 | Validate endpoint — self-edge | Error returned | ✅ (M12 — "Self-edge detected on stage ...") |
 | E47 | Workflow CRUD — update name/description (PATCH) | Persists, version bumps | ✅ v1 → v2 |
 | E48 | Workflow CRUD — export JSON | `GET /:id/export` | JSON downloaded | ✅ 585B export |
-| E49 | Workflow CRUD — import JSON | `POST /import-json` 201 | New WF with new IDs | ✅ |
+| E49 | Workflow CRUD — import JSON | `POST /workflow-definitions/import` 201 | New WF with new IDs | ✅ |
 | E50 | Workflow CRUD — invalid JSON import | 400 ValidationError | Rejected | ✅ (session 69 — `{name:'BadOnly'}` → 400 fields.stages='Required') |
 | E51 | Workflow CRUD — delete | `DELETE /:id` 204 | Removed | ✅ 204 + 404 on follow-up GET |
 | E52 | Bulk delete | Select N + delete with confirmation | All deleted | ✅ (session 70 browser — Select button enters multi-select mode; "266 of 266 selected" shown with red "Delete Selected" button) |
@@ -152,7 +154,7 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | E59 | Edge CRUD — add edge | Drag handle to handle OR `POST /edges` | Edge created | ✅ |
 | E60 | Edge CRUD — delete edge | DELETE 204 | Removed | ✅ |
 | E61 | **Import template — atomicity (P0#4)** | Mid-import failure rolls back; no orphaned partial definition (definition + N stages + M edges in one transaction) | ✅ (importFromTemplate wrapped in withTransaction; falls back to delete-on-failure compensation when no txn) |
-| E62 | **Import JSON — atomicity (P0#4)** | A DAG-validation failure during import rolls back stages + edges + definition atomically | ✅ (importFromJSON wrapped in withTransaction) |
+| E62 | **Import JSON — atomicity (P0#4)** | A DAG-validation failure during import rolls back stages + edges + definition atomically | ✅ (the v1 import ran in one transaction) |
 | E63 | Stage config — `contextSources` by name | `contextSources:[stageName]` resolves predecessor context by stage name (not just DAG predecessors); empty array = no context | ✅ (gatherPredecessorSummaries — code; F9 covers `structured` shape) |
 
 ## F. Workflow runs (lifecycle + DAG)
@@ -186,17 +188,17 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | F25 | Edge condition `always` | Fires even when predecessor cancelled/skipped | ✅ (used in `Synthesize → Wrap-up`) |
 | F26 | Cascading skip | Unreachable stages marked `skipped` | ✅ |
 | F27 | Run with stage overrides — skip | `__stageOverrides.skip=true` → stage skipped | ✅ (`quick-surface` profile) |
-| F28 | Run with stage overrides — variables | Override stage-local vars | ✅ (session 70 — `POST /api/orchestrator/runs` with `stageOverrides:[{stageName, variables:{vk:'vv'}}]` accepted; stored in `context.resolvedVariables.__stageOverrides` per `WorkflowOrchestrator.ts:397`) |
+| F28 | Run with stage overrides — variables | Override stage-local vars | ✅ (session 70 — the v1 orchestrator run route with `stageOverrides:[{stageName, variables:{vk:'vv'}}]` accepted; stored in `context.resolvedVariables.__stageOverrides` per `WorkflowOrchestrator.ts:397`) |
 | F29 | Run with stage overrides — timeout | Override `timeoutMs` | Removed (P01 WP-1.4: the field was never applied; P04 adds real stage overrides) |
 | F30 | Run with stage overrides — agentName | Override agent | Removed (P01 WP-1.4) |
 | F31 | Run with stage overrides — contextFilter | Override per-run | Removed (P01 WP-1.4) |
-| F32 | Custom content upload — prompts | RunProfile.promptFiles | ✅ (session 70 — `POST /api/orchestrator/workflows/:id/uploads` with `category:prompts` returned 201 with `files:[{path:'.../uploads/prompts/F32-prompt.md', name:'F32-prompt.md'}]`) |
+| F32 | Custom content upload — prompts | RunProfile.promptFiles | ✅ (session 70 — the v1 orchestrator upload route with `category:prompts` returned 201 with `files:[{path:'.../uploads/prompts/F32-prompt.md', name:'F32-prompt.md'}]`) |
 | F33 | Custom content upload — skills | RunProfile.skillFiles | ✅ (session 70 — same endpoint with `category:skills` writes to `uploads/skills/`) |
 | F34 | Custom content upload — agents | RunProfile.agentFiles | ✅ (session 70 — same endpoint with `category:agents`) |
 | F35 | Files & Uploads tab | Workspace + Stage Responses + Download all | ✅ 8 + 3 files |
-| F36 | View All Changes modal | Grid view of changes | ✅ (session 70 browser — run page right panel has Files & Uploads tab with Workspace Files + Stage Responses sections; download link works via `/api/orchestrator/runs/:id/workspace/download?source=workspace|artifacts|uploads`) |
+| F36 | View All Changes modal | Grid view of changes | ✅ (session 70 browser — run page right panel has Files & Uploads tab with Workspace Files + Stage Responses sections; download link works via the v1 orchestrator workspace-download route, `source=workspace|artifacts|uploads`) |
 | F37 | File viewer modal | Syntax highlighted preview | ✅ (session 70 browser — Files & Uploads buttons in WorkflowRunPage open viewer modal; previously verified in session 66) |
-| F38 | Download single file | Download triggered | ✅ (session 70 — endpoint `GET /api/orchestrator/runs/:id/workspace/download?path=...&source=...` confirmed in routes; UI wires `platform.downloadRunFile`) |
+| F38 | Download single file | Download triggered | ✅ (session 70 — the v1 orchestrator workspace-download route (`path`, `source`) confirmed in routes; UI wires `platform.downloadRunFile`) |
 | F39 | Download all (zip) | Bundle delivered | ✅ (session 70 — same endpoint without `path` param streams zip per orchestrator.ts:534) |
 | F40 | Timeline panel | Chronological events with timestamps + durations | ✅ 11 entries |
 | F41 | Run summary | Per-stage prompt + response collapsibles | ✅ |
@@ -344,7 +346,7 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | K22 | Workflow-scope on_parallel_join | Fires at fan-in convergence | ✅ (session 70 — phase listed in hook phases registry; DAG scheduler fires it after convergence) |
 | K23 | Script hook with cmd.exe | Rejected by allowlist | ✅ (session 69 via code review — `SandboxedScriptRunner.ts:218` enforces `COMMAND_ALLOWLIST` Set of {node,npm,npx,pnpm,git,sh,bash,python,python3,pip,pip3,curl,wget,cat,echo,ls,dir,mkdir,cp,…}; `cmd.exe` and `powershell.exe` are NOT in the set and throw `Command "<base>" is not in the allowlist`) |
 | K24 | Function hook missing handler | HookError on fire | ✅ (session 70 — `executeFunction` in HookExecutor throws `HookConfigError` when handler not found in registry; per failurePolicy:abort the phase aborts) |
-| K25 | `.hooks.json` side-car file | Hooks loaded from external file | ✅ (session 70 — ImportWorkflowJsonSchema accepts `hooksFile: HooksFileConfigSchema`; WorkflowDefinitionService merges side-car into hooks array) |
+| K25 | `.hooks.json` side-car file | Hooks loaded from external file | ✅ (session 70 — the v1 import schema accepts `hooksFile: HooksFileConfigSchema`; WorkflowDefinitionService merges side-car into hooks array) |
 | K26 | Hook test endpoint | `POST /sessions/:id/hooks/test` | ✅ (session 70 — actual path is `POST /api/hooks/sessions/:id/hooks/test`; node hook returned `success:true, message:'Hook executed successfully in dry-run mode'`) |
 
 ## L. Streaming durability
@@ -382,7 +384,7 @@ Legend: ✅ pass | ❌ fail | ⏭️ skipped (gated by external service) | ⚠�
 | M12 | Self-edge | DAG validate flags | ✅ |
 | M13 | Edge to non-existent stage | DAG validate flags | ✅ (E45) |
 | M14 | Stage with 0 prompts | Validate flags | ⚠️ accepted at create + valid (`{valid:true}`); design choice — stages may exist as placeholders |
-| M15 | Workflow with no root stages | DAG validate flags | ✅ (session 70 — import-json with cycle A→B,B→A rejected at import-time with `Imported workflow has invalid DAG: Cycle detected involving stages: ...`) |
+| M15 | Workflow with no root stages | DAG validate flags | ✅ (session 70 — the v1 JSON import with cycle A→B,B→A rejected at import-time with `Imported workflow has invalid DAG: Cycle detected involving stages: ...`) |
 | M16 | Invalid harness model in stage override | Stage fails on session create with clear error | ✅ ("gpt-4.1" no longer available) |
 | M17 | Workflow deletion cascades stages+edges | DELETE removes all | ✅ implicit via E51 |
 | M18 | Old token after webhook rotation rejected | 404 | ✅ |
@@ -512,7 +514,7 @@ All four bugs found in the prior end-to-end test run were investigated, fixed, a
 
 **Fix:** Added a new `ConflictError` class (category='state' → HTTP 409) in `packages/shared/src/errors/index.ts`; `StageEdgeRepository.create()` now catches `SqliteError` and throws `ConflictError("Edge from <from> to <to> already exists for this workflow")`.
 
-**Verified:** Second `POST /api/workflow-definitions/<id>/edges` with identical fromStageId/toStageId/edgeType → HTTP 409 `{code:"CONFLICT", category:"state", message:"Edge from '...' to '...' already exists for this workflow"}`.
+**Verified:** A second POST to the v1 per-edge definition route with identical fromStageId/toStageId/edgeType → HTTP 409 `{code:"CONFLICT", category:"state", message:"Edge from '...' to '...' already exists for this workflow"}`.
 
 ### Polish 3 (FIXED): PATCH chat silently ignored `name` / `tags` / `description` / `harnessConfig`
 
@@ -597,7 +599,7 @@ Ran the live Web UI (Playwright) + CLI against the running server (copilot harne
 **Verified live in the browser as a real user:**
 - Shell/nav, Templates (5 system) → **Use Template** → complex **4-stage DAG with fan-out** renders in the builder (E2/E3).
 - **Chat streaming** — created a chat via the New Chat dialog, sent a prompt, assistant streamed back live (H2/H3/H4). Connection indicator "Connected". **Web streaming intact after the changes.**
-- **Complex workflow run end-to-end** — built a 4-stage **diamond** (Plan → Branch A + Branch B parallel → Synthesize fan-in) via import-json, started it from the Run dialog (F1), watched the run page: Plan streamed `PLAN-DONE`, **A+B ran in parallel** ("Ran in parallel with…" + Parallel badge, F5), **Synthesize fan-in fired exactly once** after both, run reached **Completed** (run `fed43ae0`). Per-stage durations shown. This live-exercises **F54 (claim de-dup)** + **F55 (concurrency gate)** + **F4 (run streaming)**.
+- **Complex workflow run end-to-end** — built a 4-stage **diamond** (Plan → Branch A + Branch B parallel → Synthesize fan-in) via the v1 JSON import, started it from the Run dialog (F1), watched the run page: Plan streamed `PLAN-DONE`, **A+B ran in parallel** ("Ran in parallel with…" + Parallel badge, F5), **Synthesize fan-in fired exactly once** after both, run reached **Completed** (run `fed43ae0`). Per-stage durations shown. This live-exercises **F54 (claim de-dup)** + **F55 (concurrency gate)** + **F4 (run streaming)**.
 - Automations page renders existing manual + cron automations (Run now / Disable / Delete).
 - **P0#5 pagination headers** confirmed via API: `GET /chats/:id/messages` → `X-Total-Count`, `X-Has-More`, `X-Page-Limit` present (H19/H20).
 

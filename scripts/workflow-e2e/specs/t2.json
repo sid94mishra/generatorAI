@@ -1,170 +1,213 @@
 {
   "tag": "T2",
-  "description": "conditional routing (F T2)",
+  "description": "conditional routing: guards, an edge `when` on parent.status, an any-join, an always edge (F T2)",
   "timeoutMs": 900000,
   "variables": {
     "env": "prod",
     "count": 5,
-    "flag": false,
-    "sflag": "false"
+    "flag": false
   },
-  "def": {
-    "name": "e2e-t2-conditions",
-    "sessionMode": "auto",
-    "variables": [
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "e2e-t2-conditions",
+      "variables": [
+        {
+          "name": "env",
+          "type": "string",
+          "label": "env"
+        },
+        {
+          "name": "count",
+          "type": "number",
+          "label": "count"
+        },
+        {
+          "name": "flag",
+          "type": "boolean",
+          "label": "flag"
+        }
+      ]
+    },
+    "stages": [
       {
-        "name": "env",
-        "type": "string",
-        "label": "env"
+        "key": "r",
+        "name": "R",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "R",
+            "text": "Write one line containing the token ROOT."
+          }
+        ]
       },
       {
-        "name": "count",
-        "type": "number",
-        "label": "count"
+        "key": "c_and",
+        "name": "C_and",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "C_and",
+            "text": "Write one line containing the token C_AND."
+          }
+        ],
+        "guard": "variables.env == 'prod' and variables.count > 3"
       },
       {
-        "name": "flag",
-        "type": "boolean",
-        "label": "flag"
+        "key": "c_or_false",
+        "name": "C_or_false",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "C_or_false",
+            "text": "Write one line containing the token C_OR."
+          }
+        ],
+        "guard": "variables.env == 'dev' or variables.count < 2"
       },
       {
-        "name": "sflag",
-        "type": "string",
-        "label": "sflag"
+        "key": "c_not",
+        "name": "C_not",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "C_not",
+            "text": "Write one line containing the token C_NOT."
+          }
+        ],
+        "guard": "not variables.flag"
+      },
+      {
+        "key": "c_amp",
+        "name": "C_amp",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "C_amp",
+            "text": "Write one line containing the token C_AMP."
+          }
+        ]
+      },
+      {
+        "key": "c_paren",
+        "name": "C_paren",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "C_paren",
+            "text": "Write one line containing the token C_PAREN."
+          }
+        ],
+        "guard": "(variables.env == 'prod' || variables.env == 'staging') && !(variables.count == 5)"
+      },
+      {
+        "key": "c_lower",
+        "name": "C_lower",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "C_lower",
+            "text": "Write one line containing the token C_LOWER."
+          }
+        ],
+        "guard": "variables.env == 'prod' and variables.count > 3"
+      },
+      {
+        "key": "c_stageref",
+        "name": "C_stageref",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "C_stageref",
+            "text": "Write one line containing the token C_STAGEREF."
+          }
+        ],
+        "guard": "stages.r.status == 'completed'"
+      },
+      {
+        "key": "d_after_skip",
+        "name": "D_after_skip",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "D_after_skip",
+            "text": "Write one line containing the token D."
+          }
+        ]
+      },
+      {
+        "key": "j",
+        "name": "J",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "J",
+            "text": "Write one line containing the token JOIN."
+          }
+        ],
+        "join": {
+          "mode": "any"
+        }
+      },
+      {
+        "key": "j_always",
+        "name": "J_always",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "J_always",
+            "text": "Write one line containing the token JALWAYS."
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "r",
+        "to": "c_and"
+      },
+      {
+        "from": "r",
+        "to": "c_or_false"
+      },
+      {
+        "from": "r",
+        "to": "c_not"
+      },
+      {
+        "from": "r",
+        "to": "c_amp",
+        "when": "parent.status == 'completed' && variables.count >= 5"
+      },
+      {
+        "from": "r",
+        "to": "c_paren"
+      },
+      {
+        "from": "r",
+        "to": "c_lower"
+      },
+      {
+        "from": "r",
+        "to": "c_stageref"
+      },
+      {
+        "from": "c_or_false",
+        "to": "d_after_skip"
+      },
+      {
+        "from": "c_and",
+        "to": "j"
+      },
+      {
+        "from": "c_or_false",
+        "to": "j"
+      },
+      {
+        "from": "c_or_false",
+        "to": "j_always",
+        "on": "always"
       }
     ]
-  },
-  "stages": [
-    {
-      "name": "R",
-      "prompt": "Write one line containing the token ROOT."
-    },
-    {
-      "name": "C_and",
-      "prompt": "Write one line containing the token C_AND.",
-      "condition": {
-        "type": "expression",
-        "expression": "variables.env == 'prod' and variables.count > 3"
-      }
-    },
-    {
-      "name": "C_or_false",
-      "prompt": "Write one line containing the token C_OR.",
-      "condition": {
-        "type": "expression",
-        "expression": "variables.env == 'dev' or variables.count < 2"
-      }
-    },
-    {
-      "name": "C_not",
-      "prompt": "Write one line containing the token C_NOT.",
-      "condition": {
-        "type": "expression",
-        "expression": "not variables.flag"
-      }
-    },
-    {
-      "name": "C_bang_str",
-      "prompt": "Write one line containing the token C_BANG.",
-      "condition": {
-        "type": "expression",
-        "expression": "!variables.sflag"
-      }
-    },
-    {
-      "name": "C_amp",
-      "prompt": "Write one line containing the token C_AMP.",
-      "condition": {
-        "type": "expression",
-        "expression": "parent.status == 'completed' && variables.count >= 5"
-      }
-    },
-    {
-      "name": "C_paren",
-      "prompt": "Write one line containing the token C_PAREN.",
-      "condition": {
-        "type": "expression",
-        "expression": "(variables.env == 'prod' || variables.env == 'staging') && !(variables.count == 5)"
-      }
-    },
-    {
-      "name": "C_lower",
-      "prompt": "Write one line containing the token C_LOWER.",
-      "condition": {
-        "type": "expression",
-        "expression": "variables.env == 'prod' and variables.count > 3"
-      }
-    },
-    {
-      "name": "C_stageref",
-      "prompt": "Write one line containing the token C_STAGEREF.",
-      "condition": {
-        "type": "expression",
-        "expression": "stages.R.status == 'completed'"
-      }
-    },
-    {
-      "name": "D_after_skip",
-      "prompt": "Write one line containing the token D."
-    },
-    {
-      "name": "J",
-      "prompt": "Write one line containing the token JOIN."
-    },
-    {
-      "name": "J_always",
-      "prompt": "Write one line containing the token JALWAYS."
-    }
-  ],
-  "edges": [
-    [
-      "R",
-      "C_and"
-    ],
-    [
-      "R",
-      "C_or_false"
-    ],
-    [
-      "R",
-      "C_not"
-    ],
-    [
-      "R",
-      "C_bang_str"
-    ],
-    [
-      "R",
-      "C_amp"
-    ],
-    [
-      "R",
-      "C_paren"
-    ],
-    [
-      "R",
-      "C_lower"
-    ],
-    [
-      "R",
-      "C_stageref"
-    ],
-    [
-      "C_or_false",
-      "D_after_skip"
-    ],
-    [
-      "C_and",
-      "J"
-    ],
-    [
-      "C_or_false",
-      "J"
-    ],
-    [
-      "C_or_false",
-      "J_always",
-      "always"
-    ]
-  ]
+  }
 }

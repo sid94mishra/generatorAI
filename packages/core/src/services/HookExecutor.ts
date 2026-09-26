@@ -32,6 +32,8 @@ import type { IHttpClient } from '../domain/ports/IHttpClient.js';
 import type { EventBus } from '../events/EventBus.js';
 import { renderTemplate } from '@generatorai/workflow-spec';
 import { userVariables } from './definitions/runScope.js';
+import type { WorkflowSecretResolver } from '../mcp/McpCredentialVault.js';
+import { redactSecrets, resolveSecretMap } from '../mcp/workflowSecrets.js';
 
 export interface HookContext {
   sessionId: string;
@@ -153,6 +155,12 @@ export class HookExecutor {
     private scriptRunner: IScriptRunner,
     private httpClient: IHttpClient,
     private eventBus: EventBus,
+    /**
+     * Resolves `secretref:workflow/<name>` values in script `env` and http
+     * `headers` (final review PLATFORM R2). Without it a hook carrying one
+     * fails instead of sending the pointer.
+     */
+    private secrets?: WorkflowSecretResolver,
   ) {}
 
   /**
@@ -512,10 +520,14 @@ export class HookExecutor {
     const scope = hookScope(context);
     const { cmd, args, cwd } = HookExecutor.resolveScriptInvocation(config, context.workspacePath, scope);
     // Templated values reach commands only through env (command and args are
-    // literals); a secretref: value has no template and passes through.
-    const env = Object.fromEntries(
-      Object.entries(config.env ?? {}).map(([k, v]) => [k, renderHookField(v, scope, `env.${k}`)]),
-    );
+    // literals); a secretref: value is resolved from the vault's workflow
+    // namespace, never passed on verbatim.
+    const resolved = await resolveSecretMap(config.env, this.secrets, 'env', (text) => {
+      const r = renderTemplate(text, scope);
+      return r.ok ? r : { ok: false, error: r.error.message };
+    });
+    if (!resolved.ok) throw new HookConfigError(`Hook ${resolved.error}`);
+    const env = resolved.values;
 
     // ORC-01 — forward the hook-level AbortSignal into the script runner
     // so SIGKILL fires the moment the hook times out, instead of the
@@ -532,12 +544,12 @@ export class HookExecutor {
 
     if (result.exitCode !== 0) {
       throw new HookScriptError(
-        `Script exited with code ${result.exitCode}: ${result.stderr}`,
+        `Script exited with code ${result.exitCode}: ${redactSecrets(result.stderr, resolved.secrets)}`,
       );
     }
 
     // Parse stdout as HookResult JSON if it looks like JSON
-    return HookExecutor.tryParseHookResult(result.stdout);
+    return HookExecutor.tryParseHookResult(redactSecrets(result.stdout, resolved.secrets));
   }
 
   /**
@@ -587,7 +599,12 @@ export class HookExecutor {
     context: HookContext,
     abortSignal: AbortSignal,
   ): Promise<HookResult | void> {
-    const { url, headers, body } = this.renderHttpRequest(config, context);
+    const { url, headers: rendered, body } = this.renderHttpRequest(config, context);
+    // Pointers are resolved here, not in renderHttpRequest: the dry run shows
+    // the rendered request and must never hold a secret value.
+    const resolved = await resolveSecretMap(rendered, this.secrets, 'headers');
+    if (!resolved.ok) throw new HookConfigError(`Hook ${resolved.error}`);
+    const headers = rendered ? resolved.values : undefined;
 
     // ORC-01 — forward the AbortSignal to fetch so the socket is closed
     // on hook timeout. The HTTP client already honours `signal`.
@@ -601,7 +618,7 @@ export class HookExecutor {
 
     if (response.status >= 400) {
       throw new HookHttpError(
-        `HTTP hook returned ${response.status}: ${response.body}`,
+        `HTTP hook returned ${response.status}: ${redactSecrets(response.body, resolved.secrets)}`,
       );
     }
 

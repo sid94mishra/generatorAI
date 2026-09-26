@@ -1,67 +1,117 @@
 {
   "tag": "T3",
-  "description": "failure paths + edge types: F times out (1 s) with 2 retries (F T3)",
+  "description": "failure paths + edge kinds: F times out (1 s) on each of 3 attempts, then fails (F T3)",
   "timeoutMs": 900000,
-  "def": {
-    "name": "e2e-t3-failure-edges",
-    "sessionMode": "auto"
-  },
-  "stages": [
-    {
-      "name": "F",
-      "prompt": "Write one line containing the token F.",
-      "timeoutMs": 1000,
-      "retryPolicy": {
-        "maxRetries": 2,
-        "backoffMs": 2000,
-        "backoffMultiplier": 2
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "e2e-t3-failure-edges"
+    },
+    "stages": [
+      {
+        "key": "f",
+        "name": "F",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "F",
+            "text": "Write one line containing the token F."
+          }
+        ],
+        "timeouts": {
+          "attemptMs": 1000
+        },
+        "retry": {
+          "maxAttempts": 3,
+          "initialDelayMs": 2000,
+          "backoffMultiplier": 2,
+          "jitter": "none",
+          "retryOn": [
+            "attempt_timeout"
+          ]
+        },
+        "onExhausted": "fail"
+      },
+      {
+        "key": "s",
+        "name": "S",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "S",
+            "text": "Write one line containing the token S."
+          }
+        ]
+      },
+      {
+        "key": "rec",
+        "name": "Rec",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Rec",
+            "text": "Write one line containing the token REC."
+          }
+        ]
+      },
+      {
+        "key": "oc",
+        "name": "OC",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "OC",
+            "text": "Write one line containing the token OC."
+          }
+        ]
+      },
+      {
+        "key": "al",
+        "name": "AL",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "AL",
+            "text": "Write one line containing the token AL."
+          }
+        ]
+      },
+      {
+        "key": "z",
+        "name": "Z",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Z",
+            "text": "Write one line containing the token Z."
+          }
+        ]
       }
-    },
-    {
-      "name": "S",
-      "prompt": "Write one line containing the token S."
-    },
-    {
-      "name": "Rec",
-      "prompt": "Write one line containing the token REC."
-    },
-    {
-      "name": "OC",
-      "prompt": "Write one line containing the token OC."
-    },
-    {
-      "name": "AL",
-      "prompt": "Write one line containing the token AL."
-    },
-    {
-      "name": "Z",
-      "prompt": "Write one line containing the token Z."
-    }
-  ],
-  "edges": [
-    [
-      "F",
-      "S",
-      "on_success"
     ],
-    [
-      "F",
-      "Rec",
-      "on_failure"
-    ],
-    [
-      "F",
-      "OC",
-      "on_completion"
-    ],
-    [
-      "F",
-      "AL",
-      "always"
-    ],
-    [
-      "Rec",
-      "Z"
+    "edges": [
+      {
+        "from": "f",
+        "to": "s"
+      },
+      {
+        "from": "f",
+        "to": "rec",
+        "on": "failure"
+      },
+      {
+        "from": "f",
+        "to": "oc",
+        "on": "completion"
+      },
+      {
+        "from": "f",
+        "to": "al",
+        "on": "always"
+      },
+      {
+        "from": "rec",
+        "to": "z"
+      }
     ]
-  ]
+  }
 }

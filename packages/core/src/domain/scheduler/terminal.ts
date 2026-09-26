@@ -14,15 +14,9 @@
 // `paused` is not terminal: a scope with a paused instance has no outcome.
 // ────────────────────────────────────────────────────────────────
 
-import { isTerminalStageRunState } from '@generatorai/workflow-spec';
 import type { CompiledWorkflow } from '../workflow-graph/compile.js';
 import { edgeOnMatches, evalCondition } from './readiness.js';
 import type { InstanceState, RunOutcome } from './types.js';
-
-/** Whether every instance of the scope is terminal. */
-export function scopeTerminal(instances: readonly InstanceState[]): boolean {
-  return instances.every((i) => isTerminalStageRunState(i.status));
-}
 
 /**
  * The outcome of a terminal scope. `instances` are the scope's instances;

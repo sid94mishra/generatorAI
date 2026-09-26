@@ -13,13 +13,12 @@
 //      references when a resolver is given);
 //   4. expressions and templates (parse and type-check, per evaluation
 //      context: P05 §2.2);
-//   5. security (literal commands, secretref-only secrets);
-//   6. the engine capability gate.
+//   5. security (literal commands, secretref-only secrets).
 // A schema failure stops validation: later layers need a parsed document.
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
-import { COST_REPORTING_PROVIDERS, DEFAULT_COMMAND_ALLOWLIST, ENGINE_LEVEL, MAX_CONTAINER_DEPTH, type EngineLevel } from '../constants.js';
+import { COST_REPORTING_PROVIDERS, DEFAULT_COMMAND_ALLOWLIST, MAX_CONTAINER_DEPTH } from '../constants.js';
 import { MAX_INVOCATION_DEPTH } from '../schemas/invocation.js';
 import { walkExpr, type ExprDiagnostic, type ExprNode } from '../expr/ast.js';
 import { parseExpression } from '../expr/parse.js';
@@ -42,7 +41,6 @@ import {
 } from '../schemas/stage.js';
 import type { PreprocessingStep } from '../schemas/workflow.js';
 import { unwrap } from '../util/zodWalk.js';
-import { engineIssues } from './capability.js';
 import { analyzeGraph, ancestorsOf, type GraphAnalysis } from './dag.js';
 import { unknownFieldHint } from './hints.js';
 import { pointerToken, toPointer, type ValidationIssue } from './issues.js';
@@ -50,8 +48,6 @@ import { GraphTypes, isContainerKind, preprocessingVariableNames, type ExprPlace
 import { securityIssues } from './security.js';
 
 export interface ValidateOptions {
-  /** Engine whose capabilities gate the document (default: ENGINE_LEVEL). */
-  engine?: EngineLevel;
   /**
    * Commands a `check` stage may run (default: DEFAULT_COMMAND_ALLOWLIST).
    * The server passes its effective list (the defaults plus the operator's
@@ -89,7 +85,6 @@ export interface ValidationResult {
 }
 
 export function validateWorkflow(input: unknown, opts: ValidateOptions = {}): ValidationResult {
-  const engine = opts.engine ?? ENGINE_LEVEL;
   const parsed = WorkflowGraphSchema.safeParse(input);
   if (!parsed.success) {
     return { valid: false, issues: schemaIssues(parsed.error, input) };
@@ -101,7 +96,6 @@ export function validateWorkflow(input: unknown, opts: ValidateOptions = {}): Va
   issues.push(...referenceIssues(graph, ctx, opts));
   issues.push(...expressionIssues(graph, ctx));
   issues.push(...securityIssues(graph));
-  issues.push(...engineIssues(graph, engine));
   return { valid: !issues.some((i) => i.severity === 'error'), issues, graph };
 }
 

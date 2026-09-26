@@ -8,13 +8,16 @@
 // The hard limits live HERE, not in the approval prompt: on Claude or Codex
 // under bypass the prompt is never consulted (C-5).
 //   - the permission ceiling: a run never gets more than its caller's mode
+//     (a stage's own mode; an external caller: the deployment posture, at
+//     most acceptEdits without `admin:settings`)
 //   - depth ≤ 3 and no recursion (the invocation lineage)
 //   - `maxChildRuns` per run tree (default 10) and concurrent runs per chat
-//     (default 3)
+//     (default 3), checked and taken under a per-tree / per-chat lock
 //   - budget and deadline caps derived from the caller (an orchestrator's
 //     episode, a stage's own timeouts)
 //   - idempotency from the tool call id: a replayed call answers the same run
-//   - scopes: in-process tools act for the chat's creating principal
+//   - scopes: in-process tools act for the chat's creating principal (a
+//     chat that records none: the local owner with a device's default grant)
 //   - approvals: an agent answers only a COMPLETION REVIEW, only on a run it
 //     started whose invocation delegated approvals to it; tool-permission
 //     gates and every other decision need a person
@@ -41,6 +44,9 @@ import type { WorkflowAuthoringService } from '../../services/WorkflowAuthoringS
 import type { WorkflowDefinitionService } from '../../services/WorkflowDefinitionService.js';
 import type { WorkflowInvocationService } from '../../services/workflow-invocation/WorkflowInvocationService.js';
 import { InvocationError, type InvocationContext, type InvocationPrincipal } from '../../services/workflow-invocation/types.js';
+import { minMode } from '../../services/workflow-invocation/validateInvocation.js';
+import { runPermissionMode } from '../../services/session/permissionSource.js';
+import { getDefaultChatPermissionMode } from '../../services/agentModePolicy.js';
 import type { WorkspaceMount } from '@generatorai/shared';
 import { INVOCATION_IDEMPOTENCY_TTL_MS, type IdempotencyService } from '../../services/IdempotencyService.js';
 
@@ -127,13 +133,39 @@ export class WorkflowToolRefusal extends Error {
   }
 }
 
-/** Chats created before v60 carry no principal: the local owner created them. */
-const LOCAL_OWNER: ChatPrincipal = { kind: 'local', id: 'local', scopes: [] };
+/**
+ * The grant of a chat that records no principal (created before v60, over
+ * ACP or the SDK, or with auth off): the local owner made it, and it acts
+ * with a paired device's default grant (the auth package's
+ * DEFAULT_DEVICE_SCOPES), never `admin:*`.
+ */
+const UNRECORDED_OWNER_SCOPES: readonly string[] = [
+  'read:status',
+  'read:projects',
+  'read:workspaces',
+  'read:chats',
+  'read:workflows',
+  'read:files',
+  'read:reviews',
+  'read:activity',
+  'write:chats',
+  'write:workflows',
+  'write:reviews',
+  'stream:events',
+  'exec:agent',
+];
+
+/** Who a chat's tools act for: its recorded principal, else the local owner with the default grant. */
+function chatPrincipal(p: ChatPrincipal | undefined): InvocationPrincipal {
+  if (!p || (p.kind === 'local' && p.scopes.length === 0)) return { kind: 'local', id: 'local', scopes: [...UNRECORDED_OWNER_SCOPES] };
+  return { kind: p.kind, id: p.id, scopes: [...p.scopes] };
+}
 /** The engine's principal (stage callers): scopes are not the limit, the lineage and ceiling are. */
 const ENGINE_PRINCIPAL: InvocationPrincipal = { kind: 'system', id: 'engine', scopes: [] };
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 const RUN_MODES = new Set<string>(['plan', 'default', 'acceptEdits', 'bypassPermissions']);
+const asRunMode = (m: string | null | undefined): RunPermissionMode | undefined => (m && RUN_MODES.has(m) ? (m as RunPermissionMode) : undefined);
 
 /** The trusted side of one call: who, as what trigger, under which limits. */
 interface ResolvedCaller {
@@ -143,7 +175,8 @@ interface ResolvedCaller {
   trigger: InvocationTrigger;
   lineage?: InvocationContext['lineage'];
   ceiling?: RunPermissionMode;
-  remainingChildRuns?: number;
+  /** A stage's run tree and how many child runs it may start (counted under the tree's lock). */
+  childRuns?: { rootRunId: string; cap: number };
   deadlineAt?: number;
   projectId?: string;
   chat?: { id: string; sessionId: string; workspaceId?: string };
@@ -169,6 +202,8 @@ export interface RunToolArgs {
 export class WorkflowToolHost {
   readonly limits: WorkflowToolLimits;
   private readonly now: () => number;
+  /** Per chat and per run tree: a run start holds the key from its cap check until the run is linked (counted). */
+  private readonly locks = new Map<string, Promise<void>>();
 
   constructor(private readonly deps: WorkflowToolHostDeps) {
     this.limits = { ...DEFAULT_WORKFLOW_TOOL_LIMITS, ...(deps.limits ?? {}) };
@@ -194,34 +229,39 @@ export class WorkflowToolHost {
         principalId: caller.principal.id,
         ...(caller.clientName ? { clientName: caller.clientName } : {}),
       };
+      const scopes: ResolvedCaller['scopes'] = caller.principal.kind === 'system' ? 'all' : new Set(caller.principal.scopes);
+      // No turn to inherit a mode from: the deployment posture, and at most
+      // acceptEdits unless the principal may change settings.
+      const posture = getDefaultChatPermissionMode() as RunPermissionMode;
       return {
         principal: caller.principal,
-        scopes: caller.principal.kind === 'system' ? 'all' : new Set(caller.principal.scopes),
+        scopes,
         trigger,
+        ceiling: scopes === 'all' || scopes.has('admin:settings') ? posture : minMode(posture, 'acceptEdits'),
         actor: `agent:${caller.via}:${caller.principal.id}`,
         loopback: caller.loopback === true,
       };
     }
 
     if (caller.kind === 'chat') {
-      const chat = this.deps.chats ? await this.deps.chats.getById(caller.chatId).catch(() => null) : null;
-      if (chat?.parentChatId) throw new WorkflowToolRefusal('FORBIDDEN', 'Orchestrator workers cannot start workflows');
-      const p = chat?.createdByPrincipal ?? LOCAL_OWNER;
-      const principal: InvocationPrincipal = { kind: p.kind, id: p.id, scopes: p.scopes };
-      const mode = turn?.permissionMode ?? chat?.permissionMode;
+      if (!this.deps.chats) throw new WorkflowToolRefusal('UNAVAILABLE', 'Chats are not available in this process');
+      const chat = await this.deps.chats.getById(caller.chatId).catch(() => null);
+      if (!chat) throw new WorkflowToolRefusal('NOT_FOUND', `No chat ${caller.chatId}`);
+      if (chat.parentChatId) throw new WorkflowToolRefusal('FORBIDDEN', 'Orchestrator workers cannot start workflows');
+      const principal = chatPrincipal(chat.createdByPrincipal);
+      const mode = asRunMode(turn?.permissionMode) ?? asRunMode(chat.permissionMode) ?? (getDefaultChatPermissionMode() as RunPermissionMode);
       const deadlineAt = caller.orchestrator ? this.deps.orchestratorDeadline?.(caller.chatId) : undefined;
       const trigger: InvocationTrigger = caller.orchestrator
         ? { kind: 'orchestrator', chatId: caller.chatId, ...(toolCallId ? { toolCallId } : {}) }
         : { kind: 'chat', chatId: caller.chatId, ...(turn?.turnId ? { turnId: turn.turnId } : {}), ...(toolCallId ? { toolCallId } : {}) };
       return {
         principal,
-        // The local owner (and pre-v60 chats) hold every scope.
-        scopes: p.kind === 'local' || p.kind === 'system' ? 'all' : new Set(p.scopes),
+        scopes: principal.kind === 'system' ? 'all' : new Set(principal.scopes),
         trigger,
-        ...(mode && RUN_MODES.has(mode) ? { ceiling: mode as RunPermissionMode } : {}),
+        ceiling: mode,
         ...(deadlineAt !== undefined ? { deadlineAt } : {}),
-        ...(chat?.projectId ? { projectId: chat.projectId } : {}),
-        chat: { id: caller.chatId, sessionId: caller.sessionId, ...(chat?.workspaceId ? { workspaceId: chat.workspaceId } : {}) },
+        ...(chat.projectId ? { projectId: chat.projectId } : {}),
+        chat: { id: caller.chatId, sessionId: caller.sessionId, ...(chat.workspaceId ? { workspaceId: chat.workspaceId } : {}) },
         actor: `agent:chat:${caller.chatId}`,
         loopback: true,
       };
@@ -233,9 +273,8 @@ export class WorkflowToolHost {
     const rootRunId = run.rootRunId ?? run.id;
     const root = rootRunId === run.id ? run : await this.deps.runs.getById(rootRunId).catch(() => run);
     const cap = Number((root.budget as { maxChildRuns?: unknown } | undefined)?.maxChildRuns ?? this.limits.maxChildRunsPerRoot);
-    const used = await this.deps.runs.countDescendantsOfRoot(rootRunId);
     const deadlineAt = await this.stageDeadline(run, stage);
-    const ceiling = (run.effectivePermissionMode ?? run.permissionMode ?? 'default') as RunPermissionMode;
+    const ceiling = minMode(await this.stageMode(run, stage), asRunMode(turn?.permissionMode));
     return {
       principal: ENGINE_PRINCIPAL,
       scopes: 'all',
@@ -248,12 +287,25 @@ export class WorkflowToolHost {
         ancestryDefinitionIds: await this.ancestry(run),
       },
       ceiling,
-      remainingChildRuns: Math.max(0, cap - used),
+      childRuns: { rootRunId, cap },
       ...(deadlineAt !== undefined ? { deadlineAt } : {}),
       ...(run.projectId ? { projectId: run.projectId } : {}),
       actor: `agent:stage:${caller.stageRunId}`,
       loopback: true,
     };
+  }
+
+  /** The mode the stage runs under: the run row, the stage's own session, the workflow's, the trigger's; else the run's resolved mode. */
+  private async stageMode(run: WorkflowRun, stage: { stageKey: string } | null): Promise<RunPermissionMode> {
+    let layered: string | undefined;
+    try {
+      const graph = await this.definitionGraphOf(run);
+      const spec = stage ? graph.stages.find((s) => s.key === stage.stageKey) : undefined;
+      layered = runPermissionMode(run, spec && spec.kind === 'agent' ? spec.session : undefined, graph.workflow.session);
+    } catch {
+      layered = run.permissionMode ?? undefined;
+    }
+    return asRunMode(layered) ?? asRunMode(run.effectivePermissionMode) ?? (getDefaultChatPermissionMode() as RunPermissionMode);
   }
 
   /** What is left of a stage's own time: its attempt budget from the attempt start, capped by the run's deadline. */
@@ -443,22 +495,6 @@ export class WorkflowToolHost {
       });
     }
 
-    // Per-chat concurrency (a replayed call is not a new run).
-    if (c.chat && this.deps.links) {
-      const linked = await this.deps.links.listByChat(c.chat.id);
-      const replay = call.toolCallId ? linked.some((l) => l.toolCallId === call.toolCallId) : false;
-      if (!replay) {
-        let active = 0;
-        for (const l of linked) {
-          const r = await this.deps.runs.getById(l.runId).catch(() => null);
-          if (r && !TERMINAL.has(r.status)) active += 1;
-        }
-        if (active >= this.limits.maxConcurrentPerChat) {
-          throw new WorkflowToolRefusal('CONCURRENCY_LIMIT', `This chat already has ${active} workflow runs going (at most ${this.limits.maxConcurrentPerChat}); wait for one with check_workflow_run`);
-        }
-      }
-    }
-
     // The workspace (G4 §2.6): isolated worktrees, or cut from the chat's branches.
     let codebases = args.codebases?.map((cb) => ({ alias: cb.alias, mode: 'worktree' as const, ...(cb.baseRef ? { baseRef: cb.baseRef } : {}) }));
     let parentWorkspaceId: string | undefined;
@@ -495,32 +531,42 @@ export class WorkflowToolHost {
         : {}),
       ...(remainingMs !== undefined ? { budget: { maxDurationMs: Math.min(86_400_000, Math.floor(remainingMs)) } } : {}),
     } as InvocationRequest;
-    const ctx: InvocationContext = {
-      principal: c.principal,
-      trigger: c.trigger,
-      ...(c.lineage ? { lineage: c.lineage } : {}),
-      ...(c.ceiling ? { callerPermissionCeiling: c.ceiling } : {}),
-      ...(c.remainingChildRuns !== undefined ? { budget: { remainingChildRuns: c.remainingChildRuns } } : {}),
-      loopback: c.loopback,
-      approvalDelegate: args.approvalDelegate === 'invoker' ? 'invoker' : 'human',
-      ...(parentWorkspaceId ? { parentWorkspaceId } : {}),
-      // External callers bring their own key (MCP `idempotencyKey`).
-      ...(caller.kind === 'external' && call.toolCallId ? { idempotencyKey: call.toolCallId } : {}),
-    };
-    const result = await this.deps.invocation.invoke(request, ctx);
-    if (c.chat) {
-      await this.deps.linker
-        ?.link({
-          chatId: c.chat.id,
-          sessionId: c.chat.sessionId,
-          runId: result.runId,
-          toolCallId: call.toolCallId ?? null,
-          workflowId: result.workflowDefinitionId,
-          workflowName: result.plan.workflowName,
-          link: result.links.app,
-        })
-        .catch(() => undefined);
-    }
+    // The per-chat cap and the run tree's child-run cap are checked and taken
+    // under one lock (released once the run is linked, so the next check
+    // counts it): parallel calls in one turn cannot all pass the check.
+    const chat = c.chat;
+    const lockKey = chat ? `chat:${chat.id}` : c.childRuns ? `root:${c.childRuns.rootRunId}` : undefined;
+    const result = await this.exclusive(lockKey, async () => {
+      if (chat && this.deps.links) await this.checkChatConcurrency(chat.id, call.toolCallId);
+      const remainingChildRuns = c.childRuns ? Math.max(0, c.childRuns.cap - (await this.deps.runs.countDescendantsOfRoot(c.childRuns.rootRunId))) : undefined;
+      const ctx: InvocationContext = {
+        principal: c.principal,
+        trigger: c.trigger,
+        ...(c.lineage ? { lineage: c.lineage } : {}),
+        ...(c.ceiling ? { callerPermissionCeiling: c.ceiling } : {}),
+        ...(remainingChildRuns !== undefined ? { budget: { remainingChildRuns } } : {}),
+        loopback: c.loopback,
+        approvalDelegate: args.approvalDelegate === 'invoker' ? 'invoker' : 'human',
+        ...(parentWorkspaceId ? { parentWorkspaceId } : {}),
+        // External callers bring their own key (MCP `idempotencyKey`).
+        ...(caller.kind === 'external' && call.toolCallId ? { idempotencyKey: call.toolCallId } : {}),
+      };
+      const r = await this.deps.invocation.invoke(request, ctx);
+      if (chat) {
+        await this.deps.linker
+          ?.link({
+            chatId: chat.id,
+            sessionId: chat.sessionId,
+            runId: r.runId,
+            toolCallId: call.toolCallId ?? null,
+            workflowId: r.workflowDefinitionId,
+            workflowName: r.plan.workflowName,
+            link: r.links.app,
+          })
+          .catch(() => undefined);
+      }
+      return r;
+    });
     const out: Record<string, unknown> = {
       runId: result.runId,
       status: result.status,
@@ -535,6 +581,37 @@ export class WorkflowToolHost {
       if (!digest.finalized) out['hint'] = 'The run is still going: call check_workflow_run with wait to follow it';
     }
     return out;
+  }
+
+  /** Runs one chat has going (a replayed call is not a new run). */
+  private async checkChatConcurrency(chatId: string, toolCallId: string | undefined): Promise<void> {
+    const linked = await this.deps.links!.listByChat(chatId);
+    if (toolCallId && linked.some((l) => l.toolCallId === toolCallId)) return;
+    let active = 0;
+    for (const l of linked) {
+      const r = await this.deps.runs.getById(l.runId).catch(() => null);
+      if (r && !TERMINAL.has(r.status)) active += 1;
+    }
+    if (active >= this.limits.maxConcurrentPerChat) {
+      throw new WorkflowToolRefusal('CONCURRENCY_LIMIT', `This chat already has ${active} workflow runs going (at most ${this.limits.maxConcurrentPerChat}); wait for one with check_workflow_run`);
+    }
+  }
+
+  /** Runs `fn` after every earlier holder of `key` is done (no key: at once). */
+  private async exclusive<T>(key: string | undefined, fn: () => Promise<T>): Promise<T> {
+    if (!key) return fn();
+    const prev = this.locks.get(key) ?? Promise.resolve();
+    let release!: () => void;
+    const mine = new Promise<void>((resolve) => (release = resolve));
+    const tail = prev.then(() => mine);
+    this.locks.set(key, tail);
+    await prev;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (this.locks.get(key) === tail) this.locks.delete(key);
+    }
   }
 
   /**

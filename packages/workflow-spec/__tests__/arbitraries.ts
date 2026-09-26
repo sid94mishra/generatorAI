@@ -28,8 +28,6 @@ const retry = fc.record(
     maxAttempts: fc.integer({ min: 1, max: 10 }),
     initialDelayMs: fc.integer({ min: 0, max: 5000 }),
     backoffMultiplier: fc.integer({ min: 1, max: 5 }),
-    // maxDelayMs, jitter, retryOn, mode and restoreCheckpointOnRestart are
-    // engine-gated on v1 unless they keep their defaults.
   },
   { requiredKeys: [] },
 );
@@ -49,7 +47,7 @@ const session = fc.record(
   { requiredKeys: [] },
 );
 
-/** A graph that validates with no errors on engine v1. Edges go from lower to higher index (acyclic). */
+/** A graph that validates with no errors. Edges go from lower to higher index (acyclic). */
 export const validGraph: fc.Arbitrary<WorkflowGraphInput> = fc
   .uniqueArray(key, { minLength: 1, maxLength: 8 })
   .chain((keys) => {

@@ -372,7 +372,7 @@ export interface BlockedWorkItem {
   tabTitle: string;
   paneTitle: string;
   kind: PaneContent['kind'];
-  /** 'approval' = a workflow stage gate (`pendingApproval`); 'interaction' = a chat-scoped plan/question gate (`pendingInteraction`). */
+  /** 'approval' = a workflow stage gate (`pendingApproval`); 'interaction' = a plan/question/permission gate (`pendingInteractions`). */
   gate: 'approval' | 'interaction';
   summary: string;
 }
@@ -382,7 +382,7 @@ export interface BlockedWorkItem {
  * precedent existed anywhere in this codebase (or `apps/web`) for
  * aggregating pending HITL gates across panes/tabs; this is a plain scan
  * over every open pane's timeline rather than a second, separately-tracked
- * copy of "what's blocked" — `pendingApproval`/`pendingInteraction` on
+ * copy of "what's blocked" — `pendingApproval`/`pendingInteractions` on
  * `TimelineState` (`runTimeline.ts`) already are that state, so there is
  * nothing else to keep in sync.
  *
@@ -411,8 +411,8 @@ export function blockedWorkItems(
           summary: `Stage awaiting input: ${timeline.pendingApproval.stageName}`,
         });
       }
-      if (timeline.pendingInteraction) {
-        const pending = timeline.pendingInteraction;
+      // Every open gate, not just the answerable one: parallel stages can each park one.
+      for (const pending of timeline.pendingInteractions) {
         items.push({
           paneId: leaf.id,
           tabId: tab.id,

@@ -12,7 +12,7 @@
 
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { ENGINE_LEVEL, WORKFLOW_FORMAT_VERSION } from './constants.js';
+import { WORKFLOW_FORMAT_VERSION } from './constants.js';
 import { EXPRESSION_GRAMMAR, grammarFilters, grammarFunctions, type GrammarRow } from './expr/grammar.js';
 import {
   FINALIZE_PHASES,
@@ -154,7 +154,7 @@ export function renderFieldsMarkdown(): string {
     '',
     `> ${GENERATED_NOTE}`,
     '',
-    `Document format version: ${WORKFLOW_FORMAT_VERSION}. Engine level: \`${ENGINE_LEVEL}\` (fields the engine cannot execute yet are rejected with \`engine-unsupported\`).`,
+    `Document format version: ${WORKFLOW_FORMAT_VERSION}.`,
     '',
     '## WorkflowGraph',
     '',
@@ -275,7 +275,11 @@ export function renderInvocationMarkdown(): string {
     '',
     '- Starting a run: `exec:agent` + `read:workflows`.',
     '- A `script` target: also `write:workflows` (it materializes a definition, once per script content).',
-    '- `overrides.permissionMode: bypassPermissions` off loopback, or a codebase with `mode: in_place`: also `admin:settings`.',
+    '- The resolved run (request, profile, fork source, definition and posture) running `bypassPermissions`, or any codebase',
+    '  mounted `in_place` (including a definition with `useWorktree: false`): also `admin:settings`. A person on loopback',
+    '  is exempt from the bypass rule; an external agent (MCP device, service account) never is.',
+    '- A caller without `admin:settings` (other than a person on loopback) runs under an `acceptEdits` ceiling: a declared',
+    '  bypass is capped, and an explicit or fork-inherited bypass is refused (`PERMISSION_ESCALATION`).',
     '',
     `Nested runs are at most ${MAX_INVOCATION_DEPTH} deep; a workflow that is its own ancestor is refused (\`RECURSION\`).`,
     '',

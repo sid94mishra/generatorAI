@@ -1,29 +1,56 @@
 {
-  "$comment": "Live E2E scenario registry (P00 WP-0.3). `phases.NN` lists the scenarios `pnpm workflow:e2e --phase NN` runs; each phase APPENDS its own. `expect` is judged for claude-agent, `expectFaux` (when present) for --provider faux. `knownBugs` records the register items whose current behaviour the expectation deliberately encodes (from docs/workflow-audit/evidence/F_live_tests.md §1); a later phase that fixes one updates the expectation in the same commit.",
+  "$comment": "Live E2E scenario registry. `phases.NN` lists the scenarios `pnpm workflow:e2e --phase NN` runs (`--phase all` runs every listed scenario once; `--phase smoke` is the credential-free smoke). Every spec holds a v2 workflow document under `graph`, created and published through the definition API, then started through POST /workflow-invocations. `expect` is judged for claude-agent, `expectFaux` (when present) for --provider faux. `knownBugs` records register items whose current behaviour an expectation deliberately encodes; a later phase that fixes one updates the expectation in the same commit.",
   "phases": {
-    "00": ["T1", "T2", "T3", "T7", "T10-small"]
+    "smoke": ["SMOKE-check"],
+    "00": ["T1", "T2", "T3", "T7", "T10-small"],
+    "01": ["SMOKE-check", "T1"],
+    "03": ["T1", "T3", "T10-small"],
+    "04": ["SMOKE-check", "SMOKE-agent"],
+    "05": ["SMOKE-check", "T2"],
+    "07": ["T7"]
   },
   "scenarios": {
+    "SMOKE-check": {
+      "spec": "specs/smoke-check.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": { "version": "completed", "again": "completed", "on_failure": "skipped" },
+        "outputContains": [
+          { "stage": "version", "text": "\"passed\":true" },
+          { "stage": "again", "text": "\"stdoutTail\":\"v" }
+        ]
+      }
+    },
+    "SMOKE-agent": {
+      "spec": "specs/smoke-agent.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": { "first": "completed", "second": "completed" },
+        "hasContext": ["second"],
+        "contextContains": [{ "stage": "second", "text": "## Completed stage \"first\"" }]
+      },
+      "expectFaux": {
+        "runStatus": "completed",
+        "stages": { "first": "completed", "second": "completed" }
+      }
+    },
     "T1": {
       "spec": "specs/t1.json",
       "expect": {
         "runStatus": "completed",
-        "sessionMode": "per-stage",
         "stages": {
           "start": "completed", "B1": "completed", "B2": "completed", "B3": "completed",
           "B4": "completed", "B5": "completed", "join": "completed", "final": "completed"
         },
-        "contextContains": [{ "stage": "join", "text": "## Completed Stage: \"B5\"" }]
+        "contextContains": [{ "stage": "join", "text": "## Completed stage \"B5\"" }]
       },
       "expectFaux": {
         "runStatus": "completed",
-        "sessionMode": "per-stage",
         "stages": {
           "start": "completed", "B1": "completed", "B2": "completed", "B3": "completed",
           "B4": "completed", "B5": "completed", "join": "completed", "final": "completed"
         }
-      },
-      "knownBugs": ["W-49 (3 model turns per non-root stage; branch launches serialized by the checkpoint lock)"]
+      }
     },
     "T2": {
       "spec": "specs/t2.json",
@@ -31,28 +58,22 @@
         "runStatus": "completed",
         "stages": {
           "R": "completed", "C_and": "completed", "C_not": "completed", "C_amp": "completed", "C_lower": "completed",
-          "J": "completed", "J_always": "completed",
-          "C_or_false": "skipped", "C_paren": "skipped", "D_after_skip": "skipped",
-          "C_stageref": "skipped", "C_bang_str": "skipped"
+          "C_stageref": "completed", "J": "completed", "J_always": "completed",
+          "C_or_false": "skipped", "C_paren": "skipped", "D_after_skip": "skipped"
         }
-      },
-      "knownBugs": [
-        "W-31 C_stageref skipped: `stages.R.status` cannot resolve and silently evaluates false",
-        "W-31 C_bang_str skipped: `!variables.sflag` on the string 'false' is not a boolean (null); the v2 validator rejects it at save time (WP-1.7)"
-      ]
+      }
     },
     "T3": {
       "spec": "specs/t3.json",
       "expect": {
         "runStatus": "completed",
         "stages": { "F": "failed", "S": "skipped", "Rec": "completed", "OC": "completed", "AL": "completed", "Z": "completed" },
-        "retryCount": { "F": 2 }
+        "attempts": { "F": 3 }
       },
       "expectFaux": {
         "runStatus": "completed",
         "stages": { "F": "completed", "S": "completed", "Rec": "skipped", "OC": "completed", "AL": "completed", "Z": "skipped" }
-      },
-      "knownBugs": ["W-15 timeoutMs bounds only the prompt turn (a context/summary turn is unbounded)", "W-39 retries unclassified; attempt history not kept"]
+      }
     },
     "T7": {
       "spec": "specs/t7.json",
@@ -64,17 +85,15 @@
         },
         "hasContext": ["B_summary", "B_full", "B_struct", "B_srcs"],
         "noContext": ["B_none"],
-        "contextContains": [{ "stage": "B_srcs", "text": "## Completed Stage: \"A\"" }],
-        "promptStartsWith": [{ "stage": "V_interp", "text": "TOPIC=otters NESTED=deep MISSING={{missing_var}}" }],
-        "sessionInfo": ["unresolved_variables"]
+        "contextContains": [{ "stage": "B_srcs", "text": "## Completed stage \"A\"" }],
+        "promptStartsWith": [{ "stage": "V_interp", "text": "TOPIC=otters NESTED=deep MISSING=" }]
       },
       "expectFaux": {
         "runStatus": "completed",
         "noContext": ["B_none"],
-        "promptStartsWith": [{ "stage": "V_interp", "text": "TOPIC=otters NESTED=deep MISSING={{missing_var}}" }],
-        "sessionInfo": ["unresolved_variables"]
+        "promptStartsWith": [{ "stage": "V_interp", "text": "TOPIC=otters NESTED=deep MISSING=" }]
       },
-      "knownBugs": ["W-49 context is delivered as an extra model turn", "W-48 prompt boilerplate provokes refusals (content checks are advisory)"]
+      "knownBugs": ["W-48 prompt boilerplate provokes refusals (content checks are advisory)"]
     },
     "T10-small": {
       "spec": "specs/t10-small.json",
@@ -82,8 +101,7 @@
         "runStatus": "completed",
         "allStages": "completed",
         "noContext": ["join1", "join2", "final"]
-      },
-      "knownBugs": ["W-49 per-stage turn overhead dominates wall time", "W-42 write amplification (stream_cursors written twice per event)"]
+      }
     }
   }
 }

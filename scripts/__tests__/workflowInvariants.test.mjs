@@ -1,9 +1,10 @@
 // P00 WP-0.6 — check-workflow-invariants.mjs and check-no-legacy.mjs.
 // Runs under the root vitest "node" project (`pnpm test:scripts`).
 
+import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { BASELINE, MODE, scanSource, secondArg } from '../check-workflow-invariants.mjs';
-import { commentText, commentVerdict, findLegacy, findLegacyComments } from '../check-no-legacy.mjs';
+import { commentText, commentVerdict, configErrors, findLegacy, findLegacyComments } from '../check-no-legacy.mjs';
 
 describe('no-direct-stage-status-write', () => {
   it('flags every status-writing call shape and raw SQL', () => {
@@ -32,6 +33,33 @@ describe('no-direct-stage-status-write', () => {
       '13:updateStatus',
       '8:SQL UPDATE stage_runs SET status',
     ]);
+  });
+
+  it('flags status writes on every workflow table, through any receiver, Drizzle or quoted SQL', () => {
+    const cases = {
+      'renamed receiver (stageRuns)': "await this.stageRuns.update(id, { status: 'failed' });",
+      'renamed receiver (stageRunRepository)': "await deps.stageRunRepository.update(id, { status: 'failed' });",
+      'drizzle update(stageRuns).set': "await db.update(stageRuns).set({ status: 'failed' }).where(eq(stageRuns.id, id));",
+      'raw SQL with a column before status': "sqlite.prepare(`UPDATE stage_runs SET error = 'x', status = ? WHERE id = ?`).run('failed', id);",
+      'raw SQL, table quoted': 'sqlite.exec(`UPDATE "stage_runs" SET status = \'failed\'`);',
+      'workflow_runs raw SQL': "sqlite.prepare(`UPDATE workflow_runs SET status = ? WHERE id = ?`).run('failed', id);",
+      'drizzle update(workflowRuns)': "await db.update(workflowRuns).set({ status: 'failed' });",
+      'workflowRunRepo.updateStatus': "await this.workflowRunRepo.updateStatus(id, 'failed');",
+      'stage_attempts raw SQL': "sqlite.prepare(`UPDATE stage_attempts SET status = ? WHERE id = ?`).run('failed', id);",
+    };
+    const missed = Object.entries(cases)
+      .filter(([, src]) => scanSource('x.ts', src).length === 0)
+      .map(([name]) => name);
+    expect(missed).toEqual([]);
+  });
+
+  it('does not flag writes that leave status alone', () => {
+    const src = [
+      "sqlite.prepare(`UPDATE stage_attempts SET repair_count = repair_count + 1 WHERE id = ? AND status = 'running'`).run(id);",
+      "await db.update(workflowRuns).set({ name: 'x' }).where(eq(workflowRuns.id, id));",
+      'await this.stageRuns.update(id, { summary: s });',
+    ].join('\n');
+    expect(scanSource('x.ts', src)).toEqual([]);
   });
 
   it('splits top-level arguments', () => {
@@ -63,6 +91,25 @@ describe('check-no-legacy: banned identifiers', () => {
     expect(hits).toEqual([
       { file: 'packages/core/src/a.ts', line: 1, phase: '01', pattern: '\\bLegacyThing\\b', text: 'const x = new LegacyThing();' },
     ]);
+  });
+
+  it('checks the docs only against the entries marked docs', () => {
+    const docs = { '.github/docs/x.md': 'POST /api/old-route and LegacyThing' };
+    const banned = [
+      { phase: '01', pattern: '\\bLegacyThing\\b', reason: 'code only' },
+      { phase: '01', pattern: 'old-route', docs: true, reason: 'a deleted route' },
+    ];
+    expect(findLegacy(banned, Object.keys(docs), (f) => docs[f]).map((h) => h.pattern)).toEqual(['old-route']);
+  });
+
+  it('rejects a config pattern with a control character (a JSON "\\b" is U+0008)', () => {
+    expect(configErrors({ banned: [{ phase: '01', pattern: '\bfoo\b' }] })).toHaveLength(1);
+    expect(configErrors({ banned: [{ phase: '01', pattern: '\\bfoo\\b' }], comments: { paths: ['^packages/'] } })).toEqual([]);
+  });
+
+  it('the shipped config is valid', () => {
+    const config = JSON.parse(readFileSync(new URL('../no-legacy.json', import.meta.url), 'utf8'));
+    expect(configErrors(config)).toEqual([]);
   });
 });
 

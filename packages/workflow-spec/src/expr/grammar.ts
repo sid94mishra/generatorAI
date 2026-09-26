@@ -45,7 +45,7 @@ export const EXPRESSION_GRAMMAR = {
     { syntax: 'equality', meaning: "Strict: '3' == 3 is false (and a type error at save time)" },
     { syntax: 'arithmetic', meaning: 'None; use functions' },
     { syntax: 'keywords', meaning: 'Lower case: and, or, not, in, true, false, null' },
-    { syntax: 'bounds', meaning: 'Lists of at most 10,000 elements; 100,000 evaluation steps per expression' },
+    { syntax: 'bounds', meaning: 'Lists of at most 10,000 elements; values of at most 1 MB; 1,000,000 work units per expression (steps, produced elements, compared values)' },
   ] satisfies GrammarRow[],
   roots: [
     { syntax: 'variables.<name>', meaning: 'Workflow input variables (typed by their declaration)' },

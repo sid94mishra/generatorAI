@@ -1,5 +1,5 @@
 {
-  "$comment": "Workflow overhaul no-legacy guard (README §7 step 6, R-1). `banned`: identifiers each phase removed, APPENDED in the same commit that deletes them; a regex `pattern` matched per line against packages/** and apps/** source (tests, dist, node_modules excluded), optional `paths` prefixes; any hit fails. `comments`: `@deprecated` / `legacy` / `backward compat` / `fallback for old` inside comments of the workflow-module files matched by `paths` (regex sources). Report-only while `phase` < `failFromPhase` (null = not scheduled), but the count may never exceed `baseline`. Each phase bumps `phase` and lowers `baseline`; the phase that clears the module sets `failFromPhase` to itself.",
+  "$comment": "Workflow overhaul no-legacy guard (README §7 step 6, R-1). `banned`: identifiers each phase removed, APPENDED in the same commit that deletes them; a regex `pattern` matched per line against packages/** and apps/** source (tests, dist, node_modules excluded), optional `paths` prefixes; any hit fails. The scan also covers agent-tests/** (its specs included) and scripts/**; `.github/docs/**` is checked only against entries marked `\"docs\": true` (deleted routes a reader could still call). `comments`: `@deprecated` / `legacy` / `backward compat` / `fallback for old` inside comments of the workflow-module files matched by `paths` (regex sources). Report-only while `phase` < `failFromPhase` (null = not scheduled), but the count may never exceed `baseline`. Each phase bumps `phase` and lowers `baseline`; the phase that clears the module sets `failFromPhase` to itself.",
   "banned": [
     {
       "phase": "07",
@@ -99,7 +99,8 @@
     {
       "phase": "01",
       "pattern": "\\b(getOrchestratorContext|activeContexts)\\b|orchestrator/runs/\\$\\{[^}]+\\}/context|'/runs/:id/context'|orchestrator\\.context",
-      "reason": "WP-1.1: in-memory orchestrator context view deleted"
+      "reason": "WP-1.1: in-memory orchestrator context view deleted",
+      "docs": true
     },
     {
       "phase": "01",
@@ -203,12 +204,14 @@
     {
       "phase": "01",
       "pattern": "/api/webhooks|system-workflows|/orchestrator/from-template|getOrchestratorTemplates?\\b|platform\\.createFromTemplate|async createFromTemplate|orchestrator\\.(templates|template|fromTemplate)\\b",
-      "reason": "WP-1.2: legacy webhook routes, orchestrator template list/import routes deleted"
+      "reason": "WP-1.2: legacy webhook routes, orchestrator template list/import routes deleted",
+      "docs": true
     },
     {
       "phase": "01",
       "pattern": "'/sessions/:id/hooks'|sessions/\\$\\{\\w+\\}/hooks`",
-      "reason": "WP-1.2: GET /hooks/sessions/:id/hooks deleted"
+      "reason": "WP-1.2: GET /hooks/sessions/:id/hooks deleted",
+      "docs": true
     },
     {
       "phase": "01",
@@ -604,7 +607,7 @@
     },
     {
       "phase": "01",
-      "pattern": "\bwaitForCompletion\b",
+      "pattern": "\\bwaitForCompletion\\b",
       "reason": "WP-1.4: every prompt turn is awaited; the fire-and-forget branch and the Wait checkbox are gone"
     },
     {
@@ -620,7 +623,8 @@
     {
       "phase": "01",
       "pattern": "stages/:stageId/interrupt|/stages/\\$\\{stageId\\}/interrupt|stages/s1/interrupt",
-      "reason": "WP-1.4: the test-only interrupt route is deleted; the testkit `interrupt` command replaces it"
+      "reason": "WP-1.4: the test-only interrupt route is deleted; the testkit `interrupt` command replaces it",
+      "docs": true
     },
     {
       "phase": "01",
@@ -666,7 +670,8 @@
     {
       "phase": "01",
       "pattern": "\\bimportFromJSON\\b|import-json|ImportWorkflowJson|exportAsTemplate",
-      "reason": "WP-1.7: one canonical import/export (POST /workflow-definitions/import, GET /:id/export)"
+      "reason": "WP-1.7: one canonical import/export (POST /workflow-definitions/import, GET /:id/export)",
+      "docs": true
     },
     {
       "phase": "01",
@@ -844,7 +849,7 @@
     },
     {
       "phase": "03b",
-      "pattern": "\b(followUpPrompt|STAGE_NOT_AWAITING_REVIEW)\b|HITL panel",
+      "pattern": "\\b(followUpPrompt|STAGE_NOT_AWAITING_REVIEW)\\b|HITL panel",
       "reason": "WP-3b.1 (PD-9): no approve-with-follow-up; a stage takes messages through the stage conversation API"
     },
     {
@@ -870,7 +875,8 @@
     {
       "phase": "04",
       "pattern": "orchestrator/runs|orchestrator/workflows/|\\borchestrator\\.(startRun|uploadRunFiles|runWorkspace|runWorkspaceContent|runDiff|workflowFiles|cancel)\\b",
-      "reason": "WP-4.3: the /orchestrator routes are deleted; a run starts through /workflow-invocations and its workspace is /workflow-runs/:id/workspace*"
+      "reason": "WP-4.3: the /orchestrator routes are deleted; a run starts through /workflow-invocations and its workspace is /workflow-runs/:id/workspace*",
+      "docs": true
     },
     {
       "phase": "04",
@@ -880,7 +886,8 @@
     {
       "phase": "04",
       "pattern": "workflow-runs/\\$\\{[^}]+\\}/(start|fork|retry)|'/workflow-runs/:id/(start|fork|retry)'|workflow-scripts/\\$\\{[^}]+\\}/run|'/workflow-scripts/:id/run'|['\"`]/api/workflow-runs['\"`], json",
-      "reason": "WP-4.3: the run-start routes are deleted (POST /workflow-runs, /:id/start, /:id/fork, /workflow-scripts/:id/run)"
+      "reason": "WP-4.3: the run-start routes are deleted (POST /workflow-runs, /:id/start, /:id/fork, /workflow-scripts/:id/run)",
+      "docs": true
     },
     {
       "phase": "04",
@@ -902,7 +909,7 @@
     },
     {
       "phase": "05",
-      "pattern": "\bllm_validation\b",
+      "pattern": "\\bllm_validation\\b",
       "paths": [
         "apps/",
         "packages/core/src/",
@@ -916,7 +923,7 @@
     },
     {
       "phase": "05",
-      "pattern": "\b(pauseWhen|failWhen|onBudget|maxIterationsOverride)\b",
+      "pattern": "\\b(pauseWhen|failWhen|onBudget|maxIterationsOverride)\\b",
       "paths": [
         "apps/",
         "packages/core/src/",
@@ -929,7 +936,7 @@
     },
     {
       "phase": "05",
-      "pattern": "\bFUTURE_KINDS\b|is not available yet; the kinds are",
+      "pattern": "\\bFUTURE_KINDS\\b|is not available yet; the kinds are",
       "paths": [
         "apps/",
         "packages/core/src/",
@@ -943,7 +950,7 @@
     },
     {
       "phase": "05",
-      "pattern": "\b(budgetShare|itemLabel|results_and_failures|child_run_settled)\b",
+      "pattern": "\\b(budgetShare|results_and_failures|child_run_settled)\\b|\\bitemLabel\\??\\s*:",
       "paths": [
         "apps/",
         "packages/core/src/",
@@ -953,11 +960,11 @@
         "packages/cli-core/",
         "packages/sdk/"
       ],
-      "reason": "WP-5B.1/5B.2: the G5 draft shapes of map (itemLabel, output enum) and sub-workflow (budgetShare, child_run_settled) are not shapes: map.output.select, the stage budget, the child_settled message"
+      "reason": "WP-5B.1/5B.2: the G5 draft shapes of map (itemLabel, output enum) and sub-workflow (budgetShare, child_run_settled) are not shapes: map.output.select, the stage budget, the child_settled message. itemLabel is banned as a field only (the mobile run view's itemLabel() helper is not the draft shape)"
     },
     {
       "phase": "06",
-      "pattern": "\bHUMAN_PRINCIPALS\b",
+      "pattern": "\\bHUMAN_PRINCIPALS\\b",
       "paths": [
         "apps/server/"
       ],
@@ -965,7 +972,7 @@
     },
     {
       "phase": "06",
-      "pattern": "\b(dry_run_workflow|author_workflow)\b",
+      "pattern": "\\b(dry_run_workflow|author_workflow)\\b",
       "paths": [
         "apps/",
         "packages/"
@@ -974,7 +981,7 @@
     },
     {
       "phase": "06",
-      "pattern": "\b(ListPromptsRequestSchema|GetPromptRequestSchema)\b",
+      "pattern": "\\b(ListPromptsRequestSchema|GetPromptRequestSchema)\\b",
       "paths": [
         "packages/mcp-server/"
       ],
@@ -1012,6 +1019,18 @@
         "packages/db/src/"
       ],
       "reason": "P08 final review MAPWAIT-R18: stage_runs.expansion is a dead column (an expansion keeps its state in container state); it is not declared in schema.ts and the next migration drops it"
+    },
+    {
+      "phase": "01",
+      "pattern": "workflow-definitions/(\\$\\{[^}]+\\}|:\\w+|<\\w+>|[\\w-]+)/(stages|edges)\\b",
+      "docs": true,
+      "reason": "WP-1.7: the nested per-stage and per-edge definition routes are deleted; a client saves the whole v2 graph (POST /workflow-definitions, PUT /:id/graph)"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\bPOST\\s+(/api)?/workflow-runs(\\s|$|`)|workflow-runs/(:\\w+|<\\w+>)/(start|fork|retry)\\b|workflow-scripts/:\\w+/run\\b",
+      "docs": true,
+      "reason": "WP-4.3: the run-start routes are deleted, in their documented form too (POST /workflow-runs, /:id/start, /:id/fork, /workflow-scripts/:id/run); a run starts through POST /workflow-invocations"
     }
   ],
   "comments": {
@@ -1021,6 +1040,9 @@
     "paths": [
       "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
       "^packages/core/src/services/(workflow|automation)[^/]*/",
+      "^packages/core/src/services/(engine|session|definitions)/",
+      "^packages/core/src/domain/scheduler/",
+      "^packages/workflow-spec/src/",
       "^packages/core/src/domain/.*(Workflow|Stage|DAG)[^/]*\\.ts$",
       "^packages/db/src/repositories/(Workflow|Stage|Automation)[^/]*\\.ts$",
       "^packages/shared/src/.*(Workflow|Stage|Automation)[^/]*\\.ts$",

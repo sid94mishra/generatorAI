@@ -7,6 +7,10 @@
 // winner executes and rewrites the placeholder to the real id; a failed
 // execution releases the key. With a request hash (invocations), a replay
 // whose request differs is refused (`IDEMPOTENCY_KEY_REUSED`).
+// A placeholder a crashed process left behind is not a 409 for the whole
+// TTL (CONVINV-R7): the caller's `recover` finds what that execution
+// created and the replay answers it; with nothing to find, a claim older
+// than `staleAfterMs` is freed and claimed again.
 // Automation triggers and webhooks keep their 5-minute window; invocations
 // use 24 hours.
 // ────────────────────────────────────────────────────────────────
@@ -54,8 +58,18 @@ export class IdempotencyService {
    * executes. A replay answers the first execution's id without executing.
    */
   async run<T>(
-    opts: { key: string | undefined; scope: string; ttlMs: number; requestHash?: string },
+    opts: {
+      key: string | undefined;
+      scope: string;
+      ttlMs: number;
+      requestHash?: string;
+      /** A pending claim was hit: the id of what its execution created, if anything. */
+      recover?: () => Promise<string | undefined>;
+      /** A pending claim older than this, with nothing recovered, is freed and claimed again. */
+      staleAfterMs?: number;
+    },
     execute: () => Promise<{ executionId: string; value: T }>,
+    reclaimed = false,
   ): Promise<IdempotentOutcome<T>> {
     const key = opts.key?.trim();
     if (!key) {
@@ -65,7 +79,7 @@ export class IdempotencyService {
     assertIdempotencyKey(key);
     const now = new Date(this.now());
     const placeholder = `pending-${opts.scope}-${key}`.slice(0, 200);
-    let claim: { executionId: string; replay: boolean; requestHash: string | null };
+    let claim: { executionId: string; replay: boolean; requestHash: string | null; createdAt?: Date };
     try {
       claim = await this.store.claim({
         key,
@@ -83,7 +97,21 @@ export class IdempotencyService {
     }
     if (claim.replay) {
       if (opts.requestHash && claim.requestHash && claim.requestHash !== opts.requestHash) throw new IdempotencyKeyReusedError(key);
-      if (claim.executionId === placeholder) throw new ConflictError(`A request with idempotency key "${key}" is still in progress`);
+      if (claim.executionId === placeholder) {
+        const found = await opts.recover?.().catch(() => undefined);
+        if (found) {
+          await this.store.updateExecutionId(key, opts.scope, found).catch(() => undefined);
+          return { replayed: true, executionId: found };
+        }
+        const staleBefore = opts.staleAfterMs !== undefined ? now.getTime() - opts.staleAfterMs : undefined;
+        if (!reclaimed && staleBefore !== undefined && claim.createdAt && claim.createdAt.getTime() < staleBefore) {
+          this.logger?.warn(`[Idempotency] ${opts.scope}/${key} was left pending since ${claim.createdAt.toISOString()}; claiming it again`);
+          // Only the stale row goes: a claim another caller just re-made stays.
+          await this.store.release(key, opts.scope, { createdBefore: new Date(staleBefore) });
+          return this.run(opts, execute, true);
+        }
+        throw new ConflictError(`A request with idempotency key "${key}" is still in progress`);
+      }
       return { replayed: true, executionId: claim.executionId };
     }
     let r: { executionId: string; value: T };

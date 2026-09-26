@@ -157,7 +157,12 @@ export interface TimelineState {
     totalContextWindow?: number;
     compactionThreshold?: number;
   } | null;
-  /** The chat-scoped HITL gate currently blocking the turn, if any. See `PendingChatInteraction`. */
+  /**
+   * Every open HITL gate, oldest first, keyed by `interactionId`. A chat has
+   * at most one; a run's parallel stages can each park one (CONVINV-R12).
+   */
+  pendingInteractions: PendingChatInteraction[];
+  /** The gate the key bindings answer: the oldest of `pendingInteractions`. See `PendingChatInteraction`. */
   pendingInteraction: PendingChatInteraction | null;
   /**
    * Bumped every time a `workspace.changed` / `checkpoint.restored` event
@@ -186,6 +191,7 @@ export function emptyTimeline(): TimelineState {
     runStatus: null,
     pendingApproval: null,
     contextUsage: null,
+    pendingInteractions: [],
     pendingInteraction: null,
     workspaceRevision: 0,
   };
@@ -226,6 +232,38 @@ function stageOf(data: Record<string, unknown>): { stageRunId?: string } {
   return id ? { stageRunId: id } : {};
 }
 
+/** Opens a gate after any still open (a re-delivered one keeps its place). */
+function openInteraction(base: TimelineState, pending: PendingChatInteraction): TimelineState {
+  const list = base.pendingInteractions.some((p) => p.interactionId === pending.interactionId)
+    ? base.pendingInteractions.map((p) => (p.interactionId === pending.interactionId ? pending : p))
+    : [...base.pendingInteractions, pending];
+  return { ...base, pendingInteractions: list, pendingInteraction: list[0] ?? null };
+}
+
+/** Closes the gates `drop` matches; the next open one becomes the answerable one. */
+function closeInteractions(base: TimelineState, drop: (p: PendingChatInteraction) => boolean): TimelineState {
+  const list = base.pendingInteractions.filter((p) => !drop(p));
+  if (list.length === base.pendingInteractions.length) return base;
+  return { ...base, pendingInteractions: list, pendingInteraction: list[0] ?? null };
+}
+
+/**
+ * Stage lifecycle kinds that end whatever gate the stage had open. A gate
+ * whose frame died with the process gets no resolved/expired event (the
+ * resume re-asks under a new id), so it would otherwise linger forever.
+ */
+const STAGE_GATE_ENDING_KINDS: ReadonlySet<string> = new Set([
+  'stage_run.running',
+  'stage_run.paused',
+  'stage_run.resumed',
+  'stage_run.retrying',
+  'stage_run.completed',
+  'stage_run.failed',
+  'stage_run.cancelled',
+  'stage_run.skipped',
+  'stage_run.turn_cancelled',
+]);
+
 /**
  * Folds one event into the timeline.
  *
@@ -244,7 +282,11 @@ export function reduceEvent(
   // Re-delivered events after a reconnect must not duplicate output.
   if (event.sequence !== undefined && event.sequence <= state.lastSequence) return state;
 
-  const base = { ...state, lastSequence: Math.max(state.lastSequence, sequence) };
+  let base = { ...state, lastSequence: Math.max(state.lastSequence, sequence) };
+  if (STAGE_GATE_ENDING_KINDS.has(kind) && str(data['stageRunId'])) {
+    const stageRunId = str(data['stageRunId']);
+    base = closeInteractions(base, (p) => p.stageRunId === stageRunId);
+  }
   const isInternal = Boolean(data['__isInternalTurn']);
 
   switch (kind) {
@@ -695,19 +737,16 @@ export function reduceEvent(
     case 'chat.plan.review_requested':
     case 'stage.plan.review_requested': {
       const rawActions = data['actions'];
-      return {
-        ...base,
-        pendingInteraction: {
-          ...stageOf(data),
-          kind: 'plan',
-          interactionId: str(data['interactionId']),
-          planId: str(data['planId']),
-          title: str(data['title']),
-          summary: str(data['summary']),
-          actions: Array.isArray(rawActions) ? rawActions.map(str) : [],
-          ...(data['recommendedAction'] ? { recommendedAction: str(data['recommendedAction']) } : {}),
-        },
-      };
+      return openInteraction(base, {
+        ...stageOf(data),
+        kind: 'plan',
+        interactionId: str(data['interactionId']),
+        planId: str(data['planId']),
+        title: str(data['title']),
+        summary: str(data['summary']),
+        actions: Array.isArray(rawActions) ? rawActions.map(str) : [],
+        ...(data['recommendedAction'] ? { recommendedAction: str(data['recommendedAction']) } : {}),
+      });
     }
 
     // `chat.plan.decided` (the user answered) and `chat.plan.expired` (the
@@ -717,49 +756,44 @@ export function reduceEvent(
     case 'chat.plan.decided':
     case 'chat.plan.expired':
     case 'stage.plan.decided': {
-      if (base.pendingInteraction?.kind !== 'plan') return base;
-      if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
-      return { ...base, pendingInteraction: null };
+      const interactionId = str(data['interactionId']);
+      return closeInteractions(base, (p) => p.kind === 'plan' && p.interactionId === interactionId);
     }
 
     case 'chat.question.asked':
     case 'stage.question.asked': {
       const rawQuestions = Array.isArray(data['questions']) ? data['questions'] : [];
-      return {
-        ...base,
-        pendingInteraction: {
-          ...stageOf(data),
-          kind: 'question',
-          interactionId: str(data['interactionId']),
-          questions: rawQuestions.map((raw) => {
-            const q = (raw ?? {}) as Record<string, unknown>;
-            const rawOptions = Array.isArray(q['options']) ? q['options'] : [];
-            return {
-              id: str(q['id']),
-              header: str(q['header']),
-              question: str(q['question']),
-              options: rawOptions.map((raw2) => {
-                const o = (raw2 ?? {}) as Record<string, unknown>;
-                return {
-                  label: str(o['label']),
-                  ...(o['description'] ? { description: str(o['description']) } : {}),
-                };
-              }),
-              multiSelect: Boolean(q['multiSelect']),
-              allowFreeform: Boolean(q['allowFreeform']),
-            };
-          }),
-        },
-      };
+      return openInteraction(base, {
+        ...stageOf(data),
+        kind: 'question',
+        interactionId: str(data['interactionId']),
+        questions: rawQuestions.map((raw) => {
+          const q = (raw ?? {}) as Record<string, unknown>;
+          const rawOptions = Array.isArray(q['options']) ? q['options'] : [];
+          return {
+            id: str(q['id']),
+            header: str(q['header']),
+            question: str(q['question']),
+            options: rawOptions.map((raw2) => {
+              const o = (raw2 ?? {}) as Record<string, unknown>;
+              return {
+                label: str(o['label']),
+                ...(o['description'] ? { description: str(o['description']) } : {}),
+              };
+            }),
+            multiSelect: Boolean(q['multiSelect']),
+            allowFreeform: Boolean(q['allowFreeform']),
+          };
+        }),
+      });
     }
 
     case 'chat.question.answered':
     case 'chat.question.expired':
     case 'stage.question.answered':
     case 'stage.question.expired': {
-      if (base.pendingInteraction?.kind !== 'question') return base;
-      if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
-      return { ...base, pendingInteraction: null };
+      const interactionId = str(data['interactionId']);
+      return closeInteractions(base, (p) => p.kind === 'question' && p.interactionId === interactionId);
     }
 
     // Review finding 5.1 — a chat set to "ask me before each tool"
@@ -770,28 +804,24 @@ export function reduceEvent(
     // shapes verified against `packages/shared/src/types/AgentEvent.ts`.
     case 'chat.permission.requested':
     case 'stage.permission.requested': {
-      return {
-        ...base,
-        pendingInteraction: {
-          ...stageOf(data),
-          kind: 'permission',
-          interactionId: str(data['interactionId']),
-          toolName: str(data['toolName']),
-          permissionType: str(data['type']),
-          description: str(data['description']),
-          inputSummary: str(data['inputSummary']),
-          permissionMode: str(data['permissionMode']),
-        },
-      };
+      return openInteraction(base, {
+        ...stageOf(data),
+        kind: 'permission',
+        interactionId: str(data['interactionId']),
+        toolName: str(data['toolName']),
+        permissionType: str(data['type']),
+        description: str(data['description']),
+        inputSummary: str(data['inputSummary']),
+        permissionMode: str(data['permissionMode']),
+      });
     }
 
     case 'chat.permission.resolved':
     case 'chat.permission.expired':
     case 'stage.permission.resolved':
     case 'stage.permission.expired': {
-      if (base.pendingInteraction?.kind !== 'permission') return base;
-      if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
-      return { ...base, pendingInteraction: null };
+      const interactionId = str(data['interactionId']);
+      return closeInteractions(base, (p) => p.kind === 'permission' && p.interactionId === interactionId);
     }
 
     // Phase 6 item 3 — background-task visibility. Real producer:
@@ -995,7 +1025,8 @@ export function reduceEvent(
       //
       // `base` is still returned when it carries a real cursor advance, so
       // resume-after-reconnect does not stall on a run of unmodelled events.
-      return base.lastSequence === state.lastSequence ? state : base;
+      // Likewise when a lifecycle event closed a stage's gates (above).
+      return base.lastSequence === state.lastSequence && base.pendingInteractions === state.pendingInteractions ? state : base;
   }
 }
 

@@ -273,7 +273,7 @@ export function EnvTable({
   return (
     <div className="space-y-2">
       <p className="text-[10px] text-muted-foreground">
-        Values are templates, e.g. <code>{'{{variables.target}}'}</code>, or a <code>secretref:</code> reference.
+        Values are templates, e.g. <code>{'{{variables.target}}'}</code>, or a <code>secretref:workflow/&lt;name&gt;</code> reference.
       </p>
       {names.map((name) => (
         <div key={name}>

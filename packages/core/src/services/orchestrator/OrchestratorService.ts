@@ -19,6 +19,7 @@ import type { EventBus } from '../../events/EventBus.js';
 import type { ChatManagementService } from '../ChatManagementService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
 import type { Agent, AgentOverrides, AgentToolPolicy, Chat, HarnessConfig } from '@generatorai/shared';
+import type { TurnPolicy } from '../session/types.js';
 import { WORKER_SYSTEM_PROMPT, renderBriefMessage } from './prompts.js';
 
 /**
@@ -194,6 +195,11 @@ export interface InheritedWorkerCapabilities {
   permissionMode?: Chat['permissionMode'];
   defaultAgentMode?: Chat['defaultAgentMode'];
   browserConfig?: Chat['browserConfig'];
+  /**
+   * PD-5 — the parent's computer-use decision, which the worker is composed
+   * and judged under: a chat's `switch`, a stage's `opted_in` or `off`.
+   */
+  computerUse: TurnPolicy['computerUse'];
 }
 
 /**
@@ -237,6 +243,7 @@ export function inheritWorkerCapabilities(parent: Chat): InheritedWorkerCapabili
     ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
     ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
     ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
+    computerUse: 'switch',
   });
 }
 
@@ -253,6 +260,7 @@ export function inheritWorkerCapabilitiesFrom(parent: {
   permissionMode?: Chat['permissionMode'];
   defaultAgentMode?: Chat['defaultAgentMode'];
   browserConfig?: Chat['browserConfig'];
+  computerUse: TurnPolicy['computerUse'];
 }): InheritedWorkerCapabilities {
   const parentConfig = parent.harnessConfig;
   const snapshotPolicy = parent.toolPolicy;
@@ -305,6 +313,7 @@ export function inheritWorkerCapabilitiesFrom(parent: {
     ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
     ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
     ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
+    computerUse: parent.computerUse,
   };
 }
 
@@ -475,6 +484,19 @@ export class OrchestratorService {
   /** The stage's session is gone; its workers keep their records. */
   unregisterStageParent(stageRunId: string): void {
     this.stageParents.delete(stageRunId);
+  }
+
+  /**
+   * PD-5 — the computer-use decision a worker of `parentId` runs under: a
+   * registered stage's own, a chat's deployment switch, and none for a parent
+   * that is gone (a stage whose session ended, or not yet re-bound after a
+   * restart). Read at every compose and turn of the worker (review R5).
+   */
+  async workerComputerUse(parentId: string): Promise<TurnPolicy['computerUse']> {
+    const stage = this.stageParents.get(parentId);
+    if (stage) return stage.inherited.computerUse;
+    const chat = await this.chatRepo.getById(parentId).catch(() => null);
+    return chat ? 'switch' : 'off';
   }
 
   /** The parent a worker is spawned for: a registered stage, else a chat. */

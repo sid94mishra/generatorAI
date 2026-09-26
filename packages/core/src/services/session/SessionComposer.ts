@@ -46,7 +46,7 @@ import { applyModeConfig, planPromptPrefix } from './modeConfig.js';
 import { checkPermissionGating, turnOptionsFrom, type PermissionModeSource } from './permissionSource.js';
 import { PlatformToolBinder, type BindTarget } from './PlatformToolBinder.js';
 import { resolveMcp } from './resolveMcp.js';
-import { ComposeError, type ComposeWarning, type SessionComposerDeps, type SessionOwner, type TurnContext, type TurnPolicy } from './types.js';
+import { ComposeError, ownerTag, type ComposeWarning, type SessionComposerDeps, type SessionOwner, type TurnContext, type TurnPolicy } from './types.js';
 import { applyWorkspaceExposure } from './workspaceExposure.js';
 import { buildWorkspaceHint } from '../chatSystemHints.js';
 
@@ -91,8 +91,12 @@ export interface ComposeInput {
   };
   platform: {
     browser: { autoStart: boolean; reattach?: boolean; config?: Record<string, unknown> | undefined };
-    /** Chat: the deployment switch decides. Stage: opt-in (`spec.computerUse`), refused on bypass (PD-5). */
-    computerUse: 'switch' | 'opt_in';
+    /**
+     * Chat: the deployment switch decides. Stage: opt-in (`spec.computerUse`),
+     * refused on bypass (PD-5). An orchestrator worker passes its parent's
+     * decision: `opted_in` (refused on bypass) or `off` (review R5).
+     */
+    computerUse: 'switch' | 'opt_in' | 'opted_in' | 'off';
     /** Orchestrator tool set requested by the owner (a chat's `orchestratorMode`). */
     orchestrator: boolean;
     sourceControl?: ChatSourceControlOptions | undefined;
@@ -202,11 +206,17 @@ export class SessionComposer {
     const levels = capabilityLevelsFor(provider);
     const mode = (await i.permission.source.read()) ?? getDefaultChatPermissionMode();
 
-    // PD-17 — a stage whose run mode its provider cannot hold is refused.
+    const defaultMode = i.spec.defaultAgentMode ?? DEFAULT_AGENT_MODE;
+
+    // PD-17 — a stage whose run mode its provider cannot hold is refused, and
+    // so is one whose turns run under a mode it cannot hold (a `plan` default
+    // agent mode runs `plan` turns whatever the run mode; review R6).
     if (i.owner.kind === 'stage') {
       const gating = checkPermissionGating(provider, mode);
       if (gating.warning) warnings.push(gating.warning);
+      checkPermissionGating(provider, resolveTurnPermissionMode(defaultMode, mode));
     }
+    const computerUse = computerUsePolicy(i);
 
     // 7. platform tools, in the canonical order
     const sessionId = i.owner.sessionId;
@@ -224,7 +234,7 @@ export class SessionComposer {
       ...(i.platform.browser.config ? { browserConfig: i.platform.browser.config } : {}),
     });
     await this.binder.computer(cfg, target, {
-      enabled: this.computerUseAllowed(i, mode, warnings),
+      enabled: this.computerUseAllowed(computerUse, mode, warnings),
       refusal: () => this.computerRefusal(i.conversationId),
     });
     this.binder.widgets(cfg, target, { enabled: i.spec.widgets !== false });
@@ -263,6 +273,7 @@ export class SessionComposer {
                 },
                 toolPolicy: projection.toolPolicy,
                 permissionMode: mode as NonNullable<Parameters<typeof inheritWorkerCapabilitiesFrom>[0]['permissionMode']>,
+                computerUse,
               }),
             },
           }
@@ -334,21 +345,27 @@ export class SessionComposer {
       computerUseEnabled: this.deps.computerService?.isEnabled() ?? false,
     });
 
-    const defaultMode = i.spec.defaultAgentMode ?? DEFAULT_AGENT_MODE;
     return {
       params: cfg as unknown as CreateConversationParams,
       projection,
       provider,
       bindingKey,
       warnings,
-      turnPolicy: {
-        computerUse: i.platform.computerUse === 'switch' ? 'switch' : i.spec.computerUse === true ? 'opted_in' : 'off',
-        groups: projection.toolPolicy.groups,
+      turnPolicy: { computerUse, groups: projection.toolPolicy.groups },
+      turnOptions: async (agentMode) => {
+        const options = await turnOptionsFrom(agentMode ?? defaultMode, i.permission.source);
+        // PD-17 per turn: an operator's `plan` turn, or a mode switched mid-run.
+        if (i.owner.kind === 'stage') checkPermissionGating(provider, options.permissionMode);
+        return options;
       },
-      turnOptions: (agentMode) => turnOptionsFrom(agentMode ?? defaultMode, i.permission.source),
       preparePrompt: (prompt, agentMode) =>
         this.preparePrompt(i.owner, i.conversationId, cfg['harnessType'] as string | undefined, prompt, agentMode),
-      dispose: () => this.binder.dispose(i.owner),
+      dispose: () => {
+        this.binder.dispose(i.owner);
+        // The owner's turn context goes with it; a later owner's on a shared conversation stays (review R17).
+        const turn = this.turns.get(i.conversationId);
+        if (turn && ownerTag(turn.owner) === ownerTag(i.owner)) this.turns.delete(i.conversationId);
+      },
     };
   }
 
@@ -407,10 +424,10 @@ export class SessionComposer {
     return null;
   }
 
-  /** Chats follow the deployment switch; a stage must opt in, and never on a bypass run (PD-5). */
-  private computerUseAllowed(i: ComposeInput, mode: string, warnings: ComposeWarning[]): boolean {
-    if (i.platform.computerUse === 'switch') return true;
-    if (i.spec.computerUse !== true) return false;
+  /** Chats follow the deployment switch; a stage (or its worker) must opt in, and never on a bypass run (PD-5). */
+  private computerUseAllowed(policy: TurnPolicy['computerUse'], mode: string, warnings: ComposeWarning[]): boolean {
+    if (policy === 'switch') return true;
+    if (policy === 'off') return false;
     if (mode === 'bypassPermissions') {
       warnings.push({
         code: 'computer_use_blocked_bypass',
@@ -454,6 +471,13 @@ export class SessionComposer {
     }
     cfg['provider'] = { ...provider, apiKey: value };
   }
+}
+
+/** The owner's computer-use decision: a stage's from its spec, a worker's from its parent. */
+function computerUsePolicy(i: ComposeInput): TurnPolicy['computerUse'] {
+  const requested = i.platform.computerUse;
+  if (requested !== 'opt_in') return requested;
+  return i.spec.computerUse === true ? 'opted_in' : 'off';
 }
 
 function toolCount(cfg: ConversationConfig): number {

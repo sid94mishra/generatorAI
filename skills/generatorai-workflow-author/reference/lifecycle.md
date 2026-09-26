@@ -41,8 +41,12 @@ A run goes through one lifecycle, whoever starts it (the app, the CLI, an automa
 - `required: true` with no `defaultValue` means every run must supply it; a variable that is neither required nor
   defaulted is nullable in expressions (test it with `exists(variables.x)` or `coalesce`).
 - A `choice` variable needs `options`; `list` is a list of strings (a map can fan out over it); `json` is any JSON.
-- Never ask for secrets as variables. Tokens and keys are `secretref:<name>` references in the fields that take
-  them (MCP headers and env, hook env, `session.provider.apiKey`).
+- Never ask for secrets as variables. Tokens and keys are `secretref:` references in the fields that take them,
+  each into its own namespace (`secret-namespace` otherwise): `secretref:workflow/<name>` in check, hook and
+  `custom_script` env and http hook headers; `secretref:mcp/<system|project|custom>/<server id>/<name>` (that
+  server's own credentials, the server keyed by its catalog id) in MCP headers and env;
+  `secretref:provider/<name>` in `session.provider.apiKey`. A remote MCP server or http hook carrying one needs
+  admin rights to add or change (a command-bearing field).
 
 ## Codebases and worktrees
 
@@ -63,7 +67,7 @@ A run goes through one lifecycle, whoever starts it (the app, the CLI, an automa
 | `preprocessingSteps[].config.cwd` | string (≤1000 chars) |  |  | Working directory, relative to the run workspace |
 | `preprocessingSteps[].config.timeoutMs` | integer (≥1000, ≤3600000) |  |  | Timeout (default 60 s) |
 | `preprocessingSteps[].config.type` | "validate_input" | yes |  | Check an input variable |
-| `preprocessingSteps[].config.variableName` | string (1..64 chars) | yes |  | Variable to check |
+| `preprocessingSteps[].config.variableName` | string `^[A-Za-z_][A-Za-z0-9_]*$` (1..64 chars) | yes |  | Variable to check |
 | `preprocessingSteps[].config.rules` | one of (by `type`)[] (≤20) | yes |  | Rules, all of which must pass |
 | `preprocessingSteps[].config.rules[].type` | "required" | yes |  | The variable has a non-empty value |
 | `preprocessingSteps[].config.rules[].message` | string (1..1000 chars) | yes |  | Error shown when the rule fails |
@@ -75,7 +79,7 @@ A run goes through one lifecycle, whoever starts it (the app, the CLI, an automa
 | `preprocessingSteps[].config.rules[].type` | "max_length" | yes |  | The value has at most `value` characters |
 | `preprocessingSteps[].config.rules[].value` | integer (≥0, ≤1000000) | yes |  | Maximum length |
 | `preprocessingSteps[].config.type` | "set_variable" | yes |  | Set a variable for the rest of the run |
-| `preprocessingSteps[].config.variableName` | string (1..64 chars) | yes |  | Variable to set (a declared or a new one) |
+| `preprocessingSteps[].config.variableName` | string `^[A-Za-z_][A-Za-z0-9_]*$` (1..64 chars) | yes |  | Variable to set (a declared or a new one) |
 | `preprocessingSteps[].config.value` | string (≤100000 chars) | yes |  | Value, a template |
 | `preprocessingSteps[].config.type` | "conditional" | yes |  | Run steps depending on an expression |
 | `preprocessingSteps[].config.condition` | string (1..2000 chars) | yes |  | Boolean expression over variables |

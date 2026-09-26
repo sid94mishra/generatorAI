@@ -305,7 +305,7 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
     if (updates.startedAt !== undefined) values['startedAt'] = updates.startedAt;
     if (updates.completedAt !== undefined) values['completedAt'] = updates.completedAt;
     values['updatedAt'] = new Date();
-    await this.db.update(workflowRuns).set(values).where(eq(workflowRuns.id, id));
+    await this.db.update(workflowRuns).set(values).where(eq(workflowRuns.id, id)); // workflow-invariant-ok: `values` never carries status
     return this.getById(id);
   }
 

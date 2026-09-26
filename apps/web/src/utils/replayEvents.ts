@@ -7,7 +7,49 @@
 import { useStreamStore } from '../stores/streamStore.js';
 import type { PersistedEvent, ScmFlowResult } from '@generatorai/shared';
 import type { SystemCategory, QuestionBlock } from '../stores/streamStore.js';
+import { StreamEventRouter, partitionEffects } from '@generatorai/client-core';
 import type { ContextUsageSnapshot, StreamEffect, ToolFileOp } from '@generatorai/client-core';
+
+/**
+ * Stage-conversation kinds replayed through the live router (CONVINV-R10):
+ * the in-turn gate cards (`stage.*`), the operator's bubbles and the
+ * turn-stopped / amended notices. Folding them with the router itself keeps a
+ * reload rendering exactly what the live stream rendered.
+ */
+const STAGE_ROUTED_KINDS: ReadonlySet<string> = new Set([
+  'stage.plan.created',
+  'stage.plan.review_requested',
+  'stage.plan.decided',
+  'stage.question.asked',
+  'stage.question.answered',
+  'stage.question.expired',
+  'stage.permission.requested',
+  'stage.permission.resolved',
+  'stage.permission.expired',
+  'stage_run.operator_message',
+  'stage_run.operator_message_dropped',
+  'stage_run.turn_cancelled',
+  'stage_run.amended',
+  'stage_run.amend_failed',
+]);
+
+/**
+ * Stage lifecycle kinds that end any gate still open in the replayed history.
+ * A gate whose frame died with the process never gets a resolved/expired
+ * event (the resume re-asks under a new id), so without this its old card
+ * would come back as pending on every reload.
+ */
+const STAGE_GATE_ENDING_KINDS: ReadonlySet<string> = new Set([
+  'stage_run.running',
+  'stage_run.paused',
+  'stage_run.resumed',
+  'stage_run.retrying',
+  'stage_run.completed',
+  'stage_run.failed',
+  'stage_run.cancelled',
+  'stage_run.skipped',
+  'stage_run.turn_cancelled',
+]);
 
 /** Apply a persisted `harness.context_usage` payload to the stream store. */
 function applyContextUsage(
@@ -385,12 +427,50 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
     flushTokens();
   };
 
+  // Stage gates and conversation notices: a throwaway router (none of the
+  // live router's buffering is shared) whose block-model effects are applied.
+  let stageRouter: StreamEventRouter | undefined;
+  // Stage gates still open at this point of the history, by interaction id.
+  const openStageGates = new Map<string, { key: string; gate: 'permission' | 'question' | 'plan'; planId?: string }>();
+
   for (const event of replayEvents) {
     const data = (event.data ?? {}) as Record<string, unknown>;
 
     // Skip all stream-affecting events from internal turns (context, summary).
     // These should not affect the stream blocks during replay either.
     const isInternal = !!data['__isInternalTurn'];
+
+    if (STAGE_GATE_ENDING_KINDS.has(event.kind) && openStageGates.size > 0) {
+      const ended: StreamEffect[] = [];
+      for (const [interactionId, g] of openStageGates) {
+        if (g.gate === 'permission') ended.push({ op: 'expirePermission', key: g.key, interactionId });
+        else if (g.gate === 'question') ended.push({ op: 'expireQuestion', key: g.key, interactionId });
+        else if (g.planId) ended.push({ op: 'setPlanStatus', key: g.key, planId: g.planId, status: 'expired' });
+      }
+      openStageGates.clear();
+      flushAll();
+      store.applyEffects(ended);
+    }
+
+    if (STAGE_ROUTED_KINDS.has(event.kind)) {
+      flushAll();
+      stageRouter ??= new StreamEventRouter();
+      const effects = partitionEffects(stageRouter.handle(event.sessionId, { kind: event.kind, data })).store;
+      store.applyEffects(effects);
+      const interactionId = typeof data['interactionId'] === 'string' ? data['interactionId'] : '';
+      const key = typeof data['stageRunId'] === 'string' && data['stageRunId'] ? `stageRun:${data['stageRunId']}` : streamKey;
+      if (interactionId) {
+        if (event.kind === 'stage.permission.requested') openStageGates.set(interactionId, { key, gate: 'permission' });
+        else if (event.kind === 'stage.question.asked') openStageGates.set(interactionId, { key, gate: 'question' });
+        else if (event.kind === 'stage.plan.review_requested') {
+          openStageGates.set(interactionId, {
+            key,
+            gate: 'plan',
+            ...(typeof data['planId'] === 'string' ? { planId: data['planId'] } : {}),
+          });
+        } else openStageGates.delete(interactionId);
+      }
+    }
 
     switch (event.kind) {
       // ── Streaming tokens (batched) ──

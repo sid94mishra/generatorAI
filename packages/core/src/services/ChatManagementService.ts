@@ -58,7 +58,7 @@ import { withDeadline } from '../utils/withDeadline.js';
 import type { PlatformToolBinder } from './session/PlatformToolBinder.js';
 import { formatConversationBindingKey } from './session/bindingKey.js';
 import { workspaceExposure } from './session/workspaceExposure.js';
-import type { ComposeWarning, SessionComposerDeps, TurnContext } from './session/types.js';
+import type { ComposeWarning, SessionComposerDeps, TurnContext, TurnPolicy } from './session/types.js';
 import { stampCardSequence, TurnContextRegistry, type GatePort } from './session/gates.js';
 import { SessionComposer, type ComposeInput } from './session/SessionComposer.js';
 import { chatSessionSpec } from './session/chatSpec.js';
@@ -714,6 +714,16 @@ export class ChatManagementService {
       // with (the WS-A new-chat default debt), or the first turn would rebind.
       bindingMode: chat.permissionMode ?? 'bypassPermissions', // security-ok: key label, grants nothing
     };
+  }
+
+  /**
+   * PD-5 — a chat's computer use follows the deployment switch; an
+   * orchestrator worker's follows its parent (a stage orchestrator's opt-in,
+   * refused on bypass), and a worker whose parent is gone gets none (review R5).
+   */
+  private async chatComputerUse(chat: { parentChatId?: string | undefined }): Promise<TurnPolicy['computerUse']> {
+    if (!chat.parentChatId) return 'switch';
+    return (await this.extensions.orchestratorService?.workerComputerUse(chat.parentChatId)) ?? 'off';
   }
 
   /**
@@ -1383,7 +1393,7 @@ export class ChatManagementService {
       permission: this.chatPermissionPolicy(params),
       platform: {
         browser: { autoStart: true, config: params.browserConfig as Record<string, unknown> | undefined },
-        computerUse: 'switch',
+        computerUse: await this.chatComputerUse(params),
         orchestrator: params.orchestratorMode ?? false,
         sourceControl: params.sourceControl,
       },
@@ -1610,7 +1620,7 @@ export class ChatManagementService {
       platform: {
         // A resumed conversation re-boots Chromium lazily on its first browser call.
         browser: { autoStart: false },
-        computerUse: 'switch',
+        computerUse: await this.chatComputerUse(chat),
         orchestrator: !!chat.orchestratorMode,
         sourceControl: chat.sourceControl,
       },
@@ -1893,6 +1903,8 @@ export class ChatManagementService {
 
     // PLN-01 — refresh the context the plan/question gates report against.
     this.chatConversations.set(chatId, session.conversationId);
+    // A worker's turns are judged under its parent's computer-use decision (PD-5).
+    const workerPolicy: TurnPolicy | undefined = chat.parentChatId ? { computerUse: await this.chatComputerUse(chat) } : undefined;
     this.turns.set(session.conversationId, {
       owner: { kind: 'chat', chatId, sessionId: chat.sessionId, ...(chat.parentChatId ? { parentChatId: chat.parentChatId } : {}) },
       sessionId: chat.sessionId,
@@ -1906,6 +1918,7 @@ export class ChatManagementService {
       interactionIds: [],
       nextSequence: 0,
       cardSequence: new Map(),
+      ...(workerPolicy ? { policy: workerPolicy } : {}),
     });
 
     if (agentMode === 'plan') {
