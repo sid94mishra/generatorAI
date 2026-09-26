@@ -35,7 +35,6 @@ This lists static environment reads in runtime source, including platform, provi
 | `EXTENSIONS_DIR` | `apps/server/src/index.ts:241` |
 | `GENERATORAI_ACP_HARNESS_TYPE` | `apps/server/src/acp-entry.ts:67` |
 | `GENERATORAI_ACP_MODEL` | `apps/server/src/acp-entry.ts:73` |
-| `GENERATORAI_ADMISSION_QUEUE_WAIT_MS` | `apps/server/src/composition-root.ts:768` |
 | `GENERATORAI_ADVERTISED_URL` | `apps/server/src/index.ts:727`<br>`apps/server/src/routes/auth.ts:733` |
 | `GENERATORAI_ADVERTISED_URLS` | `apps/server/src/index.ts:726`<br>`apps/server/src/routes/auth.ts:732` |
 | `GENERATORAI_AGENT_HOST` | `apps/server/src/composition-root.ts:485` |

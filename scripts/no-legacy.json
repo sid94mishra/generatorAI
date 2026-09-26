@@ -990,6 +990,28 @@
         "packages/mcp-server/"
       ],
       "reason": "P06: definitions import through /workflow-definitions/import (drafts); there is no import-json route or command"
+    },
+    {
+      "phase": "07",
+      "pattern": "GENERATORAI_((INTERACTIVE|ORDINARY|BULK)_CONCURRENCY|ADMISSION_QUEUE_WAIT_MS)",
+      "reason": "P07 final review ECON-R9: the admission lanes are deleted; concurrency limits are the flow keys of Settings → Workflow engine (the server logs these variables as ignored)"
+    },
+    {
+      "phase": "07",
+      "pattern": "\\b(laneFor|AdmissionTimeoutError|sizeLane|AdmissionLane|LaneSnapshot|acquireSlot|acquireWithTimeout)\\b",
+      "paths": [
+        "packages/",
+        "apps/"
+      ],
+      "reason": "P07 final review ECON-R9: the admission lanes are deleted; stage launches and provider turns are admitted on flow keys only"
+    },
+    {
+      "phase": "08",
+      "pattern": "text\\('expansion'",
+      "paths": [
+        "packages/db/src/"
+      ],
+      "reason": "P08 final review MAPWAIT-R18: stage_runs.expansion is a dead column (an expansion keeps its state in container state); it is not declared in schema.ts and the next migration drops it"
     }
   ],
   "comments": {
