@@ -144,6 +144,16 @@ function parseRunSearch(query: Query): { search: WorkflowRunSearch } | { error: 
   };
 }
 
+/**
+ * A callback token lets its holder deliver the wait's event with no other
+ * credential: only a principal that may drive runs (`exec:agent`) reads it,
+ * not every `read:workflows` viewer (MAPWAIT-R13).
+ */
+function maySeeCallbacks(req: { principal?: { scopes?: readonly string[] } }): boolean {
+  const scopes = req.principal?.scopes;
+  return !scopes || scopes.includes('exec:agent');
+}
+
 function mayControlRuns(req: { principal?: { scopes?: readonly string[] } }): boolean {
   const scopes = req.principal?.scopes;
   return !scopes || scopes.includes('write:workflows');
@@ -158,11 +168,13 @@ export function createWorkflowRunRoutes(container: Container): Router {
   const router = Router();
   const { workflowRunService, workflowApprovalService, stageConversationService, artifactService, stageRunRepo, workflowRunRepo, runDefinitionReader, logger } = container;
 
-  /** An event wait's callback on its row (P05 §4.3). */
-  const withCallback = <S extends Parameters<typeof workflowApprovalService.callbackFor>[0]>(s: S): S & { callback?: { url: string; token: string } } => {
-    const callback = workflowApprovalService.callbackFor(s);
-    return callback ? { ...s, callback } : s;
-  };
+  /** An event wait's callback on its row (P05 §4.3), for a principal that may see it. */
+  const withCallback =
+    (req: { principal?: { scopes?: readonly string[] } }) =>
+    <S extends Parameters<typeof workflowApprovalService.callbackFor>[0]>(s: S): S & { callback?: { url: string; token: string } } => {
+      const callback = maySeeCallbacks(req) ? workflowApprovalService.callbackFor(s) : undefined;
+      return callback ? { ...s, callback } : s;
+    };
 
   // ═══════════════════════════════════════════════════════════
   // WorkflowRun CRUD + Lifecycle
@@ -212,7 +224,7 @@ export function createWorkflowRunRoutes(container: Container): Router {
     try {
       const runId = String(req.params['id']);
       const run = await workflowRunRepo.getById(runId);
-      const stageRuns = (await stageRunRepo.getByRunId(runId)).map(withCallback);
+      const stageRuns = (await stageRunRepo.getByRunId(runId)).map(withCallback(req));
       const graph = await runDefinitionReader.get(run.definitionVersionId);
       res.json({ ...run, stageRuns: orderStageRuns(stageRuns, graph.stages.map((s) => s.key)) });
     } catch (err) {
@@ -290,7 +302,8 @@ export function createWorkflowRunRoutes(container: Container): Router {
     try {
       const runId = String(req.params['id']);
       await workflowRunRepo.getById(runId);
-      res.json(await workflowApprovalService.listPending(runId));
+      const pending = await workflowApprovalService.listPending(runId);
+      res.json(maySeeCallbacks(req) ? pending : pending.map(({ callback: _callback, ...d }) => d));
     } catch (err) {
       next(err);
     }
@@ -300,7 +313,7 @@ export function createWorkflowRunRoutes(container: Container): Router {
   router.get('/:id/stages', async (req, res, next) => {
     try {
       const runId = String(req.params['id']);
-      const stages = (await stageRunRepo.getByRunId(runId)).map(withCallback);
+      const stages = (await stageRunRepo.getByRunId(runId)).map(withCallback(req));
       res.json(stages);
     } catch (err) {
       next(err);
