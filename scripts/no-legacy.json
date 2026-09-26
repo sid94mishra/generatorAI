@@ -411,13 +411,22 @@
     },
     {
       "phase": "01",
-      "pattern": "iterationIndex|parentStageRunId",
+      "pattern": "iterationIndex",
       "paths": [
         "packages/shared/src/types/WorkflowRun.ts",
         "packages/db/src/repositories/StageRunRepository.ts",
         "apps/server/src/routes/workflowRunOrder.ts"
       ],
       "reason": "WP-1.4: stage-run iteration index / parent link deleted (never set)"
+    },
+    {
+      "phase": "01",
+      "pattern": "parentStageRunId",
+      "paths": [
+        "packages/db/src/repositories/StageRunRepository.ts",
+        "apps/server/src/routes/workflowRunOrder.ts"
+      ],
+      "reason": "WP-1.4: stage-run iteration index / parent link deleted (never set) (P04: a RUN's parentStageRunId is its lineage, v57 column parent_stage_run_id)"
     },
     {
       "phase": "01",
@@ -797,6 +806,59 @@
       "phase": "03b",
       "pattern": "\b(followUpPrompt|STAGE_NOT_AWAITING_REVIEW)\b|HITL panel",
       "reason": "WP-3b.1 (PD-9): no approve-with-follow-up; a stage takes messages through the stage conversation API"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\b(startOrchestratedRun|WorkflowOrchestrator|WorkflowPreprocessor|useStartOrchestratedRun|OrchestratedRunParams|OrchestratorContext|OrchestratorSandbox|reArmPendingPostProcessing|setupCompletionCleanup|handleRunTerminal|scanAndWireUploads|copyWorkflowUploadsToRun|getWorkflowUploadsDir)\\b",
+      "reason": "WP-4.1: the run orchestrator is deleted; the engine's lifecycle phases (starting/finalizing) own workspace, mounts, uploads, preprocessing, sandbox and post-processing"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\b(setupProjectWorktrees|createRunWorktrees|setWorktrees|failSetup)\\b",
+      "reason": "WP-4.1: runs mount their codebases through MountService; a setup failure is a failed prepare phase"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\b(encodeStageOverrides|needsOrchestratedStart|uploadRunFiles|useUploadRunFiles|stripExecutionContext|waitForRunCompletion|TRIGGER_PERMISSION_MODE_KEY|ScriptRunProfile|ScriptRunProfileSchema|CreateWorkflowRunParams|RunUploadResult)\\b",
+      "reason": "WP-4.2/4.3/4.4: one invocation request, one upload writer, waitFor on finalized, one run profile schema"
+    },
+    {
+      "phase": "04",
+      "pattern": "__(stageOverrides|workingDirectory|artifactsDirectory|workspaceId|skillDirectories|customAgents|promptDirectories|projectId|triggeredBy|workflowRunId|triggerPermissionMode|postProcessingIntent|sandboxName|sandboxCliUrl|sandboxEnabled|iteration_index|iteration_total)\\b",
+      "reason": "WP-4.1 design decision 3 (W-06): engine values are typed run columns (system_vars, stage_overrides, trigger, workspace_id), never variables"
+    },
+    {
+      "phase": "04",
+      "pattern": "orchestrator/runs|orchestrator/workflows/|\\borchestrator\\.(startRun|uploadRunFiles|runWorkspace|runWorkspaceContent|runDiff|workflowFiles|cancel)\\b",
+      "reason": "WP-4.3: the /orchestrator routes are deleted; a run starts through /workflow-invocations and its workspace is /workflow-runs/:id/workspace*"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\bruns\\.(create|start|retry|fork)\\(|\\bscripts\\.run\\(",
+      "reason": "WP-4.3: client-core run starts are workflows.invoke (a fork is an invocation target)"
+    },
+    {
+      "phase": "04",
+      "pattern": "workflow-runs/\\$\\{[^}]+\\}/(start|fork|retry)|'/workflow-runs/:id/(start|fork|retry)'|workflow-scripts/\\$\\{[^}]+\\}/run|'/workflow-scripts/:id/run'|['\"`]/api/workflow-runs['\"`], json",
+      "reason": "WP-4.3: the run-start routes are deleted (POST /workflow-runs, /:id/start, /:id/fork, /workflow-scripts/:id/run)"
+    },
+    {
+      "phase": "04",
+      "pattern": "workflow_run\\.(orchestration_(started|completed|failed)|worktree_creating|worktree_created|preprocessing_started|preprocessing_completed|postprocessing_started|postprocessing_completed|stage_validation)\\b",
+      "reason": "WP-4.1: replaced by workflow_run.phase_started/phase_completed/phase_failed and workflow_run.finalized"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\borchestratorConfig\\b",
+      "paths": [
+        "apps/web/",
+        "apps/mobile/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/shared/",
+        "packages/db/src/repositories/"
+      ],
+      "reason": "WP-4.6: the definition-level orchestrator config is gone (lifecycle in the spec)"
     }
   ],
   "comments": {
