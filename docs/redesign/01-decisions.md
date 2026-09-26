@@ -360,6 +360,14 @@ Decided while building P1-T1…T6 where `02` was silent:
 - Needs you / Running sections render only when they have items (D-36). The server switcher and title-strip server chip are static until P3-06 adds the Servers popover (no dead buttons). The legacy header is 44 px on the card background.
 - Window chrome (per-OS layout, insets) reaches the renderer through the preload before first paint (launch argument); the `getWindowChrome` IPC is gone; `--titlebar-*` → `--gai-titlebar-*` everywhere; both CSP hashes regenerated.
 
+### D-58 Home and Projects read models (G-10…G-13, G-15) as built — Final
+- `GET /system/info` (G-12): server name/version, platform, uptime, running/max agents, database size (main + WAL + SHM) and disk (`fs.promises.statfs`); size/disk are **omitted** when unmeasurable, never 0.
+- `GET /projects[/:id]?include=summary` (G-13): `summary { codebases, activeChats, needsYou?, running?, worktrees:{active,orphaned}, runs, lastRun? }`, composed from existing read-only service calls (no SQL, no migration).
+- **G-15 moved off the workflow-owned route:** project runs are `GET /projects/:id/runs?status=&cursor=&limit=` on the redesign-owned `projects.ts` (joins definitions → runs read-only), not `GET /workflow-runs?projectId=`, so `workflowRuns.ts` stays untouched.
+- `GET /stats/summary` (G-10): aggregated in memory; `successRate` over terminal runs only; rates and durations omitted when their denominator is zero; no `chats.turns` (no data source).
+- `GET /activity/recent` (G-11): finished chat turns + terminal runs + terminal automation executions, newest first; pull-request items deferred (the only PR source is a live git-host call per codebase) — revisit with G-16.
+- These read models are not added to `IPlatformClient` (precedent: `listProjects`); CLI and mobile use client-core's `api.*`. All tolerate empty run history (the Workflow Overhaul's run-history migration).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
