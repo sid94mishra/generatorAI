@@ -8,7 +8,11 @@
 //       --scopes exec:agent,read:workflows[,write:workflows]` (or Settings →
 //       Devices → Pair a device). The device key goes to the OS-backed vault.
 //   generatorai-mcp [serve]
-//       Serve over stdio, the way a bundled MCP server is spawned.
+//       Serve over stdio, the way a bundled MCP server is spawned: the
+//       server's workflow tools, two chat tools and the authoring skill as
+//       resources (P06 WP-6.8). Wire it into a client with
+//       `generatorai skill install --target claude|codex`, which prints the
+//       config snippet.
 //
 // Env vars:
 //   GENERATORAI_URL             the server (default: the one paired with); a

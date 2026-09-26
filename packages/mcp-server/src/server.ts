@@ -1,28 +1,45 @@
 // ────────────────────────────────────────────────────────────────
 // GeneratorAiMcpServer — an MCP server exposing a RUNNING GeneratorAI
-// server to external MCP clients (Claude Desktop, another agent, …) over
-// stdio (P04 WP-4.4, RV-23, W-58).
+// server to external MCP clients (Claude Code, Codex, Claude Desktop, …)
+// over stdio (P04 WP-4.4, RV-23, W-58; P06 WP-6.8).
 //
-// Remote mode only: the tools act on the server at `GENERATORAI_URL`
+// Remote mode only: everything acts on the server at `GENERATORAI_URL`
 // through `@generatorai/client-core`, authenticated as a paired device of
 // platform `mcp` (PD-22). There is no embedded core: a second engine on a
 // second database is exactly what W-58 removed.
 //
-// Three built-in tools, minimal on purpose (the full tool set, resources and
-// prompts arrive in P06):
+// Tools:
+//   generatorai_<name>        — every workflow tool the server lists
+//                               (`GET /workflow-tools`: list, describe, run,
+//                               check, respond, cancel, the authoring guide,
+//                               validate, plan, create a draft). The server
+//                               runs the same handlers an in-app agent gets,
+//                               so descriptions, limits and refusals match.
 //   generatorai_list_chats    — chats.list
 //   generatorai_send_prompt   — chats.create + chats.send
-//   generatorai_run_workflow  — workflows.invoke (THE invocation; the server
-//                               derives the trigger `external_agent via mcp`)
 //
-// `AiFacade` is the narrow slice of the remote API the tools need, so the
-// server can be unit-tested with a fake instead of a live server.
+// Resources: the workflow authoring skill bundle, one resource per file,
+// `generatorai://workflow-author/<path>` (SKILL.md, reference/*, schema/*,
+// examples/*). There are NO prompts: an MCP prompt appears as a slash
+// command in Claude Code, and the product has no slash commands.
+//
+// `AiFacade` is the narrow slice of the remote API the server needs, so it
+// can be unit-tested with a fake instead of a live server.
 // ────────────────────────────────────────────────────────────────
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
 import type { Transport } from '@modelcontextprotocol/sdk/shared/transport.js';
-import { CallToolRequestSchema, ListToolsRequestSchema } from '@modelcontextprotocol/sdk/types.js';
-import type { InvocationRequest, InvocationResult } from '@generatorai/workflow-spec';
+import {
+  CallToolRequestSchema,
+  ListResourcesRequestSchema,
+  ListToolsRequestSchema,
+  ReadResourceRequestSchema,
+} from '@modelcontextprotocol/sdk/types.js';
+import {
+  WORKFLOW_AUTHOR_RESOURCE_PREFIX,
+  type AuthoringSkillIndex,
+  type WorkflowToolAdvert,
+} from '@generatorai/workflow-spec';
 
 /** Minimal MCP tool advertisement shape (MCP spec 2025-06-18). */
 export interface McpAdvertisedTool {
@@ -35,6 +52,13 @@ export interface McpAdvertisedTool {
     idempotentHint?: boolean;
     openWorldHint?: boolean;
   };
+}
+
+/** One skill file as an MCP resource. */
+export interface McpAdvertisedResource {
+  uri: string;
+  name: string;
+  mimeType: string;
 }
 
 export interface AiChatSummary {
@@ -51,17 +75,43 @@ export interface AiChatApi {
   send(chatId: string, message: string): Promise<void>;
 }
 
-/** The workflow half: the one invocation. */
-export interface AiWorkflowApi {
-  invoke(request: InvocationRequest, opts?: { idempotencyKey?: string }): Promise<InvocationResult>;
+/** The server's workflow tools (`GET /workflow-tools`, `POST /workflow-tools/:name`). */
+export interface AiWorkflowToolApi {
+  list(): Promise<WorkflowToolAdvert[]>;
+  call(name: string, args: Record<string, unknown>, opts: { idempotencyKey?: string; clientName?: string }): Promise<unknown>;
+}
+
+/** The authoring skill bundle the server serves. */
+export interface AiSkillApi {
+  index(): Promise<AuthoringSkillIndex>;
+  file(path: string): Promise<string>;
 }
 
 export interface AiFacade {
   chat: AiChatApi;
-  workflows: AiWorkflowApi;
+  workflowTools: AiWorkflowToolApi;
+  skill: AiSkillApi;
 }
 
-const BUILTIN_TOOLS: McpAdvertisedTool[] = [
+/** Every server tool is advertised under this prefix. */
+export const TOOL_PREFIX = 'generatorai_';
+
+/**
+ * Tools that start or create something: their MCP schema gains an
+ * `idempotencyKey`, sent as the call's key (an MCP call has no headers), so
+ * a retried call answers the same run or draft.
+ */
+const KEYED_TOOLS = new Set(['run_workflow', 'create_workflow_draft']);
+
+const IDEMPOTENCY_KEY_PROPERTY = {
+  type: 'string',
+  description: 'Any unique string for this call (e.g. a UUID). A retried call with the same key returns the same result instead of doing it twice.',
+};
+
+/** How long the server's tool list is reused before it is fetched again. */
+const TOOL_CACHE_MS = 30_000;
+
+const CHAT_TOOLS: McpAdvertisedTool[] = [
   {
     name: 'generatorai_list_chats',
     description: 'List GeneratorAI chats, optionally filtered by status and/or project id.',
@@ -90,30 +140,29 @@ const BUILTIN_TOOLS: McpAdvertisedTool[] = [
       required: ['message'],
     },
   },
-  {
-    name: 'generatorai_run_workflow',
-    description:
-      'Start a run of a GeneratorAI workflow definition. Returns the run id, its plan (stages, codebases, ' +
-      'post-processing, permission mode) and links. A repeated idempotencyKey returns the same run.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        definitionId: { type: 'string' },
-        variables: { type: 'object', description: 'Input variable values by name' },
-        projectId: { type: 'string' },
-        codebases: {
-          type: 'array',
-          description: 'Project codebases to mount: [{alias, baseRef?}]',
-          items: { type: 'object', properties: { alias: { type: 'string' }, baseRef: { type: 'string' } }, required: ['alias'] },
-        },
-        name: { type: 'string', description: 'Run name' },
-        testRun: { type: 'boolean', description: 'Run the working graph as a test run (the only way to run a draft)' },
-        idempotencyKey: { type: 'string', description: 'A retried call with the same key returns the same run' },
-      },
-      required: ['definitionId'],
-    },
-  },
 ];
+
+/** The MCP advertisement of one server workflow tool. */
+export function toMcpTool(advert: WorkflowToolAdvert): McpAdvertisedTool {
+  const schema = { type: 'object', ...advert.parametersSchema } as Record<string, unknown>;
+  const inputSchema = KEYED_TOOLS.has(advert.name)
+    ? { ...schema, properties: { ...((schema['properties'] as Record<string, unknown> | undefined) ?? {}), idempotencyKey: IDEMPOTENCY_KEY_PROPERTY } }
+    : schema;
+  return {
+    name: `${TOOL_PREFIX}${advert.name}`,
+    description: advert.description,
+    inputSchema,
+    annotations: advert.readOnly ? { readOnlyHint: true } : { readOnlyHint: false },
+  };
+}
+
+/** A sensible media type for a bundle file. */
+export function skillMimeType(path: string): string {
+  if (path.endsWith('.md')) return 'text/markdown';
+  if (path.endsWith('.json')) return 'application/json';
+  if (path.endsWith('.mjs') || path.endsWith('.js')) return 'text/javascript';
+  return 'text/plain';
+}
 
 export interface McpServerOptions {
   ai: AiFacade;
@@ -124,92 +173,110 @@ export interface McpServerOptions {
 
 export class GeneratorAiMcpServer {
   private readonly server: Server;
+  private toolCache: { at: number; adverts: WorkflowToolAdvert[] } | null = null;
 
   constructor(private readonly opts: McpServerOptions) {
     this.server = new Server(
       { name: opts.name ?? 'generatorai', version: opts.version ?? '0.1.0' },
-      { capabilities: { tools: {} } },
+      { capabilities: { tools: {}, resources: {} } },
     );
 
-    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: this.listTools() }));
+    this.server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: await this.listTools() }));
 
     this.server.setRequestHandler(CallToolRequestSchema, async (request) => {
       const { name, arguments: args } = request.params;
       try {
-        const result = await this.dispatch(name, (args ?? {}) as Record<string, unknown>);
-        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }] };
+        const result = await this.callTool(name, (args ?? {}) as Record<string, unknown>);
+        return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], ...(isRefusal(result) ? { isError: true } : {}) };
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
         this.opts.log?.(`[GeneratorAiMcpServer] tool '${name}' failed`, { error: message });
         return { content: [{ type: 'text' as const, text: `Error: ${message}` }], isError: true };
       }
     });
+
+    this.server.setRequestHandler(ListResourcesRequestSchema, async () => ({ resources: await this.listResources() }));
+
+    this.server.setRequestHandler(ReadResourceRequestSchema, async (request) => {
+      const { uri } = request.params;
+      return { contents: [{ uri, mimeType: skillMimeType(uri), text: await this.readResource(uri) }] };
+    });
   }
 
-  private async dispatch(name: string, args: Record<string, unknown>): Promise<unknown> {
+  private async serverTools(): Promise<WorkflowToolAdvert[]> {
+    if (this.toolCache && Date.now() - this.toolCache.at < TOOL_CACHE_MS) return this.toolCache.adverts;
+    const adverts = await this.opts.ai.workflowTools.list();
+    this.toolCache = { at: Date.now(), adverts };
+    return adverts;
+  }
+
+  /** The name of the MCP client, from the initialize handshake. */
+  private clientName(): string | undefined {
+    return this.server.getClientVersion()?.name || undefined;
+  }
+
+  private async dispatchChatTool(name: string, args: Record<string, unknown>): Promise<unknown> {
     const str = (k: string) => (typeof args[k] === 'string' ? (args[k] as string) : undefined);
-    switch (name) {
-      case 'generatorai_list_chats':
-        return this.opts.ai.chat.list(str('status'), str('projectId'));
+    if (name === 'generatorai_list_chats') return this.opts.ai.chat.list(str('status'), str('projectId'));
 
-      case 'generatorai_send_prompt': {
-        const message = str('message');
-        if (!message) throw new Error('"message" is required');
-        let chatId = str('chatId');
-        let created = false;
-        if (!chatId) {
-          const projectId = str('projectId');
-          const chat = await this.opts.ai.chat.create({
-            name: str('name') ?? `MCP chat ${new Date().toISOString()}`,
-            ...(projectId ? { projectId } : {}),
-          });
-          chatId = chat.id;
-          created = true;
-        }
-        await this.opts.ai.chat.send(chatId, message);
-        return { chatId, created };
-      }
-
-      case 'generatorai_run_workflow': {
-        const definitionId = str('definitionId');
-        if (!definitionId) throw new Error('"definitionId" is required');
-        const projectId = str('projectId');
-        const name = str('name');
-        const key = str('idempotencyKey');
-        const codebases = Array.isArray(args['codebases'])
-          ? (args['codebases'] as Array<{ alias: string; baseRef?: string }>).map((c) => ({
-              alias: c.alias,
-              mode: 'worktree' as const,
-              ...(c.baseRef ? { baseRef: c.baseRef } : {}),
-            }))
-          : undefined;
-        const result = await this.opts.ai.workflows.invoke(
-          {
-            target: { kind: 'definition', workflowDefinitionId: definitionId, ...(args['testRun'] === true ? { testRun: true } : {}) },
-            variables: (args['variables'] as Record<string, unknown> | undefined) ?? {},
-            ...(projectId ? { projectId } : {}),
-            ...(codebases ? { codebases } : {}),
-            ...(name ? { name } : {}),
-            client: 'mcp',
-          },
-          key ? { idempotencyKey: key } : {},
-        );
-        return { runId: result.runId, status: result.status, replayed: result.replayed, links: result.links, plan: result.plan };
-      }
-
-      default:
-        throw new Error(`Unknown tool: "${name}"`);
+    const message = str('message');
+    if (!message) throw new Error('"message" is required');
+    let chatId = str('chatId');
+    let created = false;
+    if (!chatId) {
+      const projectId = str('projectId');
+      const chat = await this.opts.ai.chat.create({
+        name: str('name') ?? `MCP chat ${new Date().toISOString()}`,
+        ...(projectId ? { projectId } : {}),
+      });
+      chatId = chat.id;
+      created = true;
     }
+    await this.opts.ai.chat.send(chatId, message);
+    return { chatId, created };
   }
 
-  /** Advertised tool list — exposed for callers that want it without a transport (tests, `--list-tools`). */
-  listTools(): McpAdvertisedTool[] {
-    return [...BUILTIN_TOOLS];
+  /** Advertised tool list: the chat tools, then every server workflow tool. */
+  async listTools(): Promise<McpAdvertisedTool[]> {
+    return [...CHAT_TOOLS, ...(await this.serverTools()).map(toMcpTool)];
   }
 
-  /** Call a tool directly — exposed for tests and non-MCP callers. */
+  /** Call a tool — the MCP handler's path, also exposed for tests and non-MCP callers. */
   async callTool(name: string, args: Record<string, unknown>): Promise<unknown> {
-    return this.dispatch(name, args);
+    if (CHAT_TOOLS.some((t) => t.name === name)) return this.dispatchChatTool(name, args);
+    const serverName = name.startsWith(TOOL_PREFIX) ? name.slice(TOOL_PREFIX.length) : '';
+    if (!serverName || !(await this.serverTools()).some((t) => t.name === serverName)) throw new Error(`Unknown tool: "${name}"`);
+
+    let forwarded = args;
+    let idempotencyKey: string | undefined;
+    if (KEYED_TOOLS.has(serverName)) {
+      const { idempotencyKey: key, ...rest } = args;
+      forwarded = rest;
+      if (typeof key === 'string' && key) idempotencyKey = key;
+    }
+    const clientName = this.clientName();
+    return this.opts.ai.workflowTools.call(serverName, forwarded, {
+      ...(idempotencyKey ? { idempotencyKey } : {}),
+      ...(clientName ? { clientName } : {}),
+    });
+  }
+
+  /** Every skill bundle file as a resource. */
+  async listResources(): Promise<McpAdvertisedResource[]> {
+    const index = await this.opts.ai.skill.index();
+    return index.files.map((file) => ({
+      uri: `${WORKFLOW_AUTHOR_RESOURCE_PREFIX}${file}`,
+      name: file,
+      mimeType: skillMimeType(file),
+    }));
+  }
+
+  /** One skill file's text, by its resource URI. */
+  async readResource(uri: string): Promise<string> {
+    if (!uri.startsWith(WORKFLOW_AUTHOR_RESOURCE_PREFIX)) throw new Error(`Unknown resource: "${uri}"`);
+    const file = uri.slice(WORKFLOW_AUTHOR_RESOURCE_PREFIX.length);
+    if (!file) throw new Error(`Unknown resource: "${uri}"`);
+    return this.opts.ai.skill.file(file);
   }
 
   async connect(transport: Transport): Promise<void> {
@@ -220,4 +287,9 @@ export class GeneratorAiMcpServer {
   async close(): Promise<void> {
     await this.server.close();
   }
+}
+
+/** A tool refusal (`{ok: false, code, error}`) is a normal result the model should see as an error. */
+function isRefusal(result: unknown): boolean {
+  return !!result && typeof result === 'object' && (result as { ok?: unknown }).ok === false;
 }

@@ -1,11 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { WorkflowToolAdvert } from '@generatorai/workflow-spec';
 import { GeneratorAiMcpServer, type AiFacade, type AiChatSummary } from '../server.js';
 
-// This exercises the real dispatch path (`callTool`) without a live stdio
-// transport or a running server — `AiFacade` is the narrow slice of the
-// remote API (P04 remote mode) a fake can satisfy directly.
+// This exercises the real dispatch path (`callTool`, `listTools`,
+// `listResources`, `readResource`) without a live stdio transport or a
+// running server — `AiFacade` is the narrow slice of the remote API (P04
+// remote mode) a fake can satisfy directly.
 
-function fakeAi(overrides: Partial<AiFacade> = {}): AiFacade {
+const ADVERTS: WorkflowToolAdvert[] = [
+  {
+    name: 'list_workflows',
+    description: 'List workflows',
+    parametersSchema: { type: 'object', properties: { query: { type: 'string' } } },
+    readOnly: true,
+  },
+  {
+    name: 'run_workflow',
+    description: 'Run a workflow',
+    parametersSchema: { type: 'object', properties: { workflowId: { type: 'string' }, reason: { type: 'string' } }, required: ['workflowId', 'reason'] },
+    readOnly: false,
+  },
+];
+
+function fakeAi(): AiFacade {
   const chats: AiChatSummary[] = [{ id: 'c1', name: 'Existing chat', status: 'active' }];
   return {
     chat: {
@@ -13,30 +30,33 @@ function fakeAi(overrides: Partial<AiFacade> = {}): AiFacade {
       create: vi.fn(async (opts) => ({ id: 'new-chat-id', ...opts })),
       send: vi.fn(async () => undefined),
     },
-    workflows: {
-      invoke: vi.fn(async () => ({
-        invocationId: 'inv-1',
-        runId: 'run-1',
-        workflowDefinitionId: 'def-1',
-        status: 'starting' as const,
-        replayed: false,
-        trigger: { kind: 'external_agent' as const, via: 'mcp' as const, principalId: 'd1' },
-        links: { app: '/workflows/def-1/runs/run-1', api: '/api/workflow-runs/run-1', stream: '/api/stream?scope=run&id=run-1' },
-        plan: {} as never,
-        warnings: [],
-      })),
+    workflowTools: {
+      list: vi.fn(async () => ADVERTS),
+      call: vi.fn(async (name: string) => (name === 'run_workflow' ? { runId: 'run-1', status: 'starting' } : { workflows: [] })),
     },
-    ...overrides,
-  } as AiFacade;
+    skill: {
+      index: vi.fn(async () => ({ name: 'generatorai-workflow-author', schemaHash: 'h1', files: ['SKILL.md', 'schema/workflow.schema.json', 'scripts/validate.mjs'] })),
+      file: vi.fn(async (path: string) => `contents of ${path}`),
+    },
+  };
 }
 
 describe('GeneratorAiMcpServer', () => {
-  it('advertises the three built-in tools', () => {
+  it('advertises the chat tools and every server workflow tool under the generatorai_ prefix', async () => {
     const server = new GeneratorAiMcpServer({ ai: fakeAi() });
-    const names = server.listTools().map((t) => t.name);
-    expect(names).toEqual(
-      expect.arrayContaining(['generatorai_list_chats', 'generatorai_send_prompt', 'generatorai_run_workflow']),
-    );
+    const tools = await server.listTools();
+    expect(tools.map((t) => t.name)).toEqual([
+      'generatorai_list_chats',
+      'generatorai_send_prompt',
+      'generatorai_list_workflows',
+      'generatorai_run_workflow',
+    ]);
+    const run = tools.find((t) => t.name === 'generatorai_run_workflow')!;
+    expect(run.annotations).toEqual({ readOnlyHint: false });
+    expect((run.inputSchema['properties'] as Record<string, unknown>)['idempotencyKey']).toBeDefined();
+    const list = tools.find((t) => t.name === 'generatorai_list_workflows')!;
+    expect(list.annotations).toEqual({ readOnlyHint: true });
+    expect((list.inputSchema['properties'] as Record<string, unknown>)['idempotencyKey']).toBeUndefined();
   });
 
   it('generatorai_list_chats forwards to ai.chat.list', async () => {
@@ -70,23 +90,34 @@ describe('GeneratorAiMcpServer', () => {
     await expect(server.callTool('generatorai_send_prompt', {})).rejects.toThrow('"message" is required');
   });
 
-  it('generatorai_run_workflow starts the run through the one invocation', async () => {
+  it('a workflow tool is called on the server, with the idempotencyKey lifted out of the arguments', async () => {
     const ai = fakeAi();
     const server = new GeneratorAiMcpServer({ ai });
     const result = await server.callTool('generatorai_run_workflow', {
-      definitionId: 'def-1',
-      variables: { foo: 'bar' },
+      workflowId: 'def-1',
+      reason: 'test',
       idempotencyKey: 'k1',
     });
-    expect(ai.workflows.invoke).toHaveBeenCalledWith(
-      { target: { kind: 'definition', workflowDefinitionId: 'def-1' }, variables: { foo: 'bar' }, client: 'mcp' },
-      { idempotencyKey: 'k1' },
-    );
+    expect(ai.workflowTools.call).toHaveBeenCalledWith('run_workflow', { workflowId: 'def-1', reason: 'test' }, { idempotencyKey: 'k1' });
     expect(result).toMatchObject({ runId: 'run-1', status: 'starting' });
+  });
+
+  it('serves the skill bundle as resources', async () => {
+    const ai = fakeAi();
+    const server = new GeneratorAiMcpServer({ ai });
+    expect(await server.listResources()).toEqual([
+      { uri: 'generatorai://workflow-author/SKILL.md', name: 'SKILL.md', mimeType: 'text/markdown' },
+      { uri: 'generatorai://workflow-author/schema/workflow.schema.json', name: 'schema/workflow.schema.json', mimeType: 'application/json' },
+      { uri: 'generatorai://workflow-author/scripts/validate.mjs', name: 'scripts/validate.mjs', mimeType: 'text/javascript' },
+    ]);
+    expect(await server.readResource('generatorai://workflow-author/SKILL.md')).toBe('contents of SKILL.md');
+    expect(ai.skill.file).toHaveBeenCalledWith('SKILL.md');
+    await expect(server.readResource('file:///etc/passwd')).rejects.toThrow('Unknown resource');
   });
 
   it('an unknown tool throws', async () => {
     const server = new GeneratorAiMcpServer({ ai: fakeAi() });
     await expect(server.callTool('not_a_real_tool', {})).rejects.toThrow('Unknown tool');
+    await expect(server.callTool('generatorai_not_a_tool', {})).rejects.toThrow('Unknown tool');
   });
 });

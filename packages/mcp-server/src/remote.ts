@@ -92,7 +92,7 @@ export function createMcpRuntime(connection: McpConnection, endpoint = connectio
   });
 }
 
-/** The tools' slice of the remote API, over client-core. */
+/** The MCP server's slice of the remote API, over client-core: chats, the workflow tools, the skill bundle. */
 export function remoteFacade(runtime: AuthenticatedClientRuntime): AiFacade {
   const fetchImpl = (p: string, init?: RequestInit) => runtime.fetch(p, init);
   const api = createApiClient(fetchImpl);
@@ -116,8 +116,13 @@ export function remoteFacade(runtime: AuthenticatedClientRuntime): AiFacade {
         await api.chats.send(chatId, { message });
       },
     },
-    workflows: {
-      invoke: (request, opts) => admin.workflows.invoke({ ...request, client: 'mcp' }, opts ?? {}),
+    workflowTools: {
+      list: async () => (await admin.workflowTools.list()).tools,
+      call: async (name, args, opts) => (await admin.workflowTools.call(name, args, opts)).result,
+    },
+    skill: {
+      index: () => admin.definitions.skill(),
+      file: (file) => admin.definitions.skillFile(file),
     },
   };
 }
