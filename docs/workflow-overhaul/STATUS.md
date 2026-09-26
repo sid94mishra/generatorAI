@@ -8,7 +8,7 @@ The coding agent updates this file in every phase PR.
 | 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass ; part B gate 2026-09-25: typecheck 52/52; workflow-spec 359/359; lint green; no-legacy 72 bans, 0 hits; generate:workflow-spec --check clean; **phase gate 2026-09-25 (part C): see "Phase 01 gate" below** | WP-1.6–1.9 done (1d67d0f, 28f9c5e, 9c61ec6, ebb4e82); v55 applied to the dev-DB copy |
 | 02 SessionComposer | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-25: see "Phase 02 gate" below** | WP-2.0–2.11 (0c02b1c..a220bb3), bans/docs c35f905, gate fixes f14cf5a; v56 applied to the dev-DB copy |
 | 03 Engine v2 | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-26: see "Phase 03 gate" below** (part 1 and part 2 gates below it) | WP-3.1–3.9 (dd00852..48cc4ec); the cutover is 5dad4e7; v57 applied to the dev-DB copy |
-| 03b Stage conversation | wf/phase-03b-stage-conversation | not started | | | |
+| 03b Stage conversation | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **phase gate 2026-09-26: see "Phase 03b gate" below** | WP-3b.1 0254811, WP-3b.4 2529558, WP-3b.2/3b.3 63db929, docs f55692b; no migration |
 | 04 Lifecycle and invocation | wf/phase-04-invocation | not started | | | |
 | 05 Control flow (5A, 5B) | wf/phase-05-control-flow | not started | | | |
 | 06 Agents and skill | wf/phase-06-agents-skill | not started | | | |
@@ -217,6 +217,18 @@ Run at `wf/overhaul` @ f14cf5a (Windows 11, Node 26.8.2, pnpm 10.29.2).
 - **`pnpm workflow:dbcopy-upgrade`** (`C:/gaiwf/dbcopy/generatorai.db`; the real DB was not opened): v52 → v56 via the legacy route in 2.7 s. Chat rows **UNCHANGED** (362 chats, 392 chat sessions, 841 messages); drift 0. Found and fixed on the way: with the baseline at 56 a v55 database took the legacy route and failed (`VERSIONED_ONLY_FROM = 55`, DEVIATIONS).
 - **W-19 / C7:** covered at composer level (session/composer.test.ts). **Live E2E** (advisory, `P02-perm` and the other P02 scenarios): not run.
 - **Acceptance:** no session-config builders outside `services/session/` (the SES and CMS blocks are deleted and banned); chat and stage bound to one agent get the same tools, blocks and MCP servers apart from the documented owner differences (golden + composer tests); a stage widget now carries its stage run id so the run page Widget tab routes it to that stage (unit-tested; not checked in a browser); an automation cannot be saved without a permission mode (schema + route + web form).
+
+## Phase 03b gate (2026-09-26)
+
+Run at `wf/overhaul` @ f55692b (Windows 11, Node 26, pnpm 10). IMPLEMENTATION FIRST (product owner, 2026-09-26): no new tests; the per-phase gate is typecheck, lint, check-no-legacy and the affected package tests.
+
+- **`pnpm turbo typecheck`:** pass, 52/52 (one earlier run hit a transient `changes` error while `workflow-spec` was rebuilding concurrently; re-run clean).
+- **Affected package tests** (`pnpm turbo test --concurrency=2 --continue` on core, db, workflow-testkit, client-core, shared, server, web, sdk, workflow-spec, auth; mobile, cli, cli-core, tui-kit run with WP-3b.4): core 1687 pass / 9 skipped, db 152, workflow-testkit 47, client-core 297, shared 326, workflow-spec 364, auth 45, sdk 8, web 635 (the store's clock tests were removed with the clock), server 543 + the 2 baseline failures (symlink EPERM, CSP hash), mobile 1098, cli-core 873, tui-kit 99, cli 318 + the 5 baseline failures (TUI on Windows). The scheduler replay fixtures were regenerated (`UPDATE_FIXTURES=1`) because `stage_run.*` events now carry `stageKey`, `instancePath` and `version`. The web task's `check-bundle-size` "FAIL" lines are the script's own fixtures.
+- **`pnpm lint`:** pass (exit 0) — turbo lint 0 errors, security, durability, docs, syncio, tokens, workflow-invariants (FAIL mode, 0 direct stage status writes; `IStageRunCas.amend` lives in `engineCas.ts`), no-legacy, migrations-lock (57), db-baseline (v57), workflow-spec (run-command schema + FIELDS.md regenerated for the retry's `promptOverride`).
+- **`check-no-legacy`:** 100 banned patterns (+1 for P03b: `followUpPrompt`, `STAGE_NOT_AWAITING_REVIEW`, "HITL panel"), 0 hits; legacy comments 0 (baseline lowered 5 → 0, phase 03b).
+- **Fresh DB:** no migration in P03b (baseline v57 unchanged).
+- **Tests deferred to the final pass** (PHASE-03b "Tests"): server (send while running → 409; send to completed → amend, successors untouched, `stage_run.amended`; send between turns queued; turn cancel; attachments persisted and served; each gate type; review batch delivered only on success), web Playwright (composer, Stop, permission/question cards, "…" menu, permission control, error toast on a forced 409), store tests for D-19/D-20/D-21/D-21b.
+- **Live E2E** (advisory): not run (the P03 note stands: `scripts/workflow-e2e` needs a port to the v2 document API).
 
 ## Phase 03 gate (2026-09-26, after part 3: the cutover)
 

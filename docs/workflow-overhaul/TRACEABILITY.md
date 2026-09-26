@@ -10,7 +10,7 @@ Status values: `open` → `in progress` → `closed (PR #)` / `accepted (rationa
 |---|---|---|---|
 | R1 | One invocation path across clients | P04 WP-4.1–4.5 | open |
 | R2 | Streamlined creation, stages and config | P01 WP-1.5–1.8; P02 SessionSpec; P03 WP-3.1, 3.11 | in progress (P01 part done: 1d67d0f, 28f9c5e; P02 SessionSpecEditor a220bb3) |
-| R3 | A stage is a compact chat with every chat capability | P02 (all); P03b; P04 design 7 (mounts) | in progress (P02 done: one SessionComposer, binder, gates, TurnRecorder, permission source — see Phase 02 closure) |
+| R3 | A stage is a compact chat with every chat capability | P02 (all); P03b; P04 design 7 (mounts) | in progress (P02 done: one SessionComposer, binder, gates, TurnRecorder, permission source — see Phase 02 closure; P03b done: the stage conversation API and clients — see Phase 03b closure) |
 | R4 | DAG evaluation; retries; a **generic** loop (fix ↔ review is one example) with a budget | README §5.1; P03 WP-3.3–3.6; P05 §2–§3, WP-5A.1–5A.5 (tests: loop matrix, examples L1–L6, v59 migration, Windows `check`) | open |
 | R5 | Codex goals and Claude Code dynamic workflows research and support (as DAG constructs, no slash commands) | README §5.3; P05 examples L1–L6, M1–M3; P08 (judge panel + expansion; script runtime gated by PD-21) | open |
 | R6 | Remove legacy and back-compat code | P01 WP-1.1–1.4; P03 WP-3.7; P04 WP-4.1 (orchestrator, worktrees), 4.4 (MCP embedded), 4.6; `check-no-legacy` | in progress (P01 and P02 parts done; 90 bans) |
@@ -51,13 +51,13 @@ Status values: `open` → `in progress` → `closed (PR #)` / `accepted (rationa
 | W-24 | P1 | Controls with no reader (variables, files, templates, iteration, sleep, widgets, "…") | P01 WP-1.4 (delete); P02 WP-2.2 (widgets); P03b WP-3b.2 (menu); P05 (loop, subworkflow, wait) |
 | W-25 | P1 | Lossy export/import; broken template; lossy script materializers | P01 WP-1.5, 1.7 |
 | W-26 | P1 | Empty prompt unsaveable; duplicate definitions; weak client validation | P01 WP-1.8 |
-| W-27 | P1 | Silent UI failures; lost uploads; overrides dropped | P01 WP-1.8 (delete); P03b WP-3b.2 (controls); P04 WP-4.5 |
+| W-27 | P1 | Silent UI failures; lost uploads; overrides dropped | P01 WP-1.8 (delete); P03b WP-3b.2 (controls, closed 63db929); P04 WP-4.5 |
 | W-28 | P1 | Variables tab focus and choice options | P01 WP-1.8 |
 | W-29 | P2 | Failure masking by always/on_completion | P03 WP-3.3 |
 | W-30 | P2 | Unsatisfiable fan-ins and contradictory conditions accepted | P01 WP-1.5; P03 WP-3.1 |
 | W-31 | P2 | Condition evaluator not fail-safe; no output routing | P03 WP-3.1 (Expression v2) |
 | W-32 | P2 | Lifecycle hygiene (dedup, leaks, boot order, CAS finalize, 24 h listener) | P03 WP-3.6; P04 WP-4.1 |
-| W-33 | P2 | Run page stream and UI correctness and cost | P03 WP-3.6 (outbox); P03b WP-3b.3 |
+| W-33 | P2 | Run page stream and UI correctness and cost | P03 WP-3.6 (outbox); P03b WP-3b.3 (closed 63db929) |
 | W-34 | P2 | Command-bearing fields need only write scope; plaintext secrets | P01 WP-1.7; P03 WP-3.5 (fencing); P09 WP-9.2 |
 | W-35 | P2 | Name/order-based references fragile | P01 design 1 (keys) |
 | W-36 | P2 | Worktree rm -rf; skills committed into PRs; silent capability loss; missing agent widens | P02 WP-2.4, 2.8; P04 design 7 (mounts), WP-4.1 |
@@ -86,7 +86,7 @@ Status values: `open` → `in progress` → `closed (PR #)` / `accepted (rationa
 | W-52 | P1 | Stage team mapping drops restrictions | P02 WP-2.4 |
 | W-53 | P1 | Chat does not enforce agent tool groups | P02 WP-2.6 |
 | W-54 | P2 | HookBridge never wired | P02 WP-2.2 step 7 |
-| W-55 | P2 | Completed-stage follow-up dropped but marked delivered | P03b WP-3b.1 |
+| W-55 | P2 | Completed-stage follow-up dropped but marked delivered | P03b WP-3b.1 (closed 0254811) |
 | W-56 | P2 | CLI `script run` field bugs | P04 WP-4.4 |
 | W-57 | P3 | CLI `--session-mode` rejected | P01 WP-1.1 |
 | W-58 | P1 | MCP server runs its own engine on another DB | P04 WP-4.4 |
@@ -96,7 +96,7 @@ Status values: `open` → `in progress` → `closed (PR #)` / `accepted (rationa
 | W-62 | P3 | Orchestrator validation report always empty | P01 WP-1.1 |
 | W-63 | P2 | Automation wait misses events and ignores approvals | P04 WP-4.2 |
 | W-64 | P1 | Non-strict lossy import; no validate/plan/JSON Schema | P01 WP-1.5, 1.7; P06 WP-6.5 |
-| W-65 | P2 | No permission mode at run start (web) | P03b WP-3b.2; P04 WP-4.5 |
+| W-65 | P2 | No permission mode at run start (web) | P03b WP-3b.2 (run page, closed 63db929); P04 WP-4.5 |
 | W-66 | P2 | Two concurrency gates plus a hidden 4-turn cap | P03 WP-3.5; P07 WP-7.2 |
 
 ## Phase 01 closure (2026-09-25, review pending)
@@ -185,6 +185,20 @@ The P03 plan's **Closes** list, with the commits and the tests that pin each ite
 | RV-1, RV-5, RV-9, RV-10, RV-17, RV-20, RV-27 | v57 explicit purge; RV-5 terminal events from the outbox; output strategies; turn settlement with the message; migration numbers; rebind; engine lock + fencing | dd00852..5dad4e7 | migration57, RunStore, T8 lock refusal |
 
 Not closed by P03 (with the phase that owns them): the fast-check model test over the G5 §7.2 invariants, T10 (25 stages) and the hop-latency p95 assertion (DEVIATIONS / handoff), the run-page correctness work (P03b), clone/preprocess/post-processing in the lifecycle (P04).
+
+## Phase 03b closure (2026-09-26, review deferred to the final review)
+
+Commits: 0254811 (3b.1), 2529558 (3b.4), 63db929 (3b.2 + 3b.3), f55692b (docs). Tests for these items are deferred to the final pass (IMPLEMENTATION FIRST).
+
+| ID | What P03b closed | Commits | Evidence |
+|---|---|---|---|
+| W-27 (run controls) | Every run-page control reports a refusal (toasts with the server's reason), cancel asks first, gate buttons disable while a verdict is in flight | 63db929 | `useRunCommand`/`useForkRun`/stage mutations `meta.errorTitle`; `useConfirm` in the run page |
+| W-33 | interruptData with the status (D-19), one focus field (D-20), protected stage streams (D-21), per-instance version merge (D-21b), stage-own Inspector files (D-22), header-only clock, memoised stage views, no dead scratchpad/terminal polling (D-24) | 63db929 | `workflowRunStore.ts`, `deriveRunView.ts`, `WorkflowRunPage.tsx`; events carry `version` |
+| W-55 | A follow-up on a completed stage amends its output (PD-4) through the stage conversation API; the review batch is marked delivered only when the stage took it | 0254811 | `StageConversationService.send`, `StageExecutor.amend`, `routes/review.ts` |
+| W-65 (run page) | The run page has a permission-mode control (the run row's layer); run start is P04 WP-4.5 | 63db929 | `RunHeaderBar` |
+| W-24 ("…" menu) | The stage "…" menu works: every item goes through the commands API | 63db929 | `StageTimelineItem` `StageMenu` |
+| PD-3, PD-4, PD-9 | 409 STAGE_BUSY mid-turn; amend on completed; one feedback path (completion review + the conversation API; `followUpPrompt` banned) | 0254811, 63db929, 2529558 | `StageConversationService`; no-legacy ban |
+| R3 (P03b part) | A stage is a compact chat on web, mobile, TUI and CLI: send, stop, attach, gate cards, amend | 0254811, 63db929, 2529558 | see TRACKER Phase 03b |
 
 ## Independent review findings
 
