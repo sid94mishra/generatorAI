@@ -152,17 +152,12 @@ Update in every PR (task ID, PR link, date).
 | P5 Fan-out | done | P5-01 ✓ kit D + T-02/T-03/L-01 · P5-02…P5-06 ✓ Projects area · P5-10 ✓ Home · P5-12 ✓ palette entity search · P5-11 ✓ pairing gate + static pages · P5-09 ✓ New chat dialog + /chats/new · P5-07/08 ✓ Agents list + editor · P5-13 ✓ WF pieces + Workflow Overhaul screens on the kit (PW-a…d, D-82: Workflows list/detail/new + Run dialog, builder + stage editors, run page on T-04 + dock, Automations, Scripts; `pages/` deleted) |
 | P6 Settings | done | P6-01 ✓ settings kit (NumberField, SettingsSection, ListPane, SettingsModalFrame, MasterDetail) · P6-02 ✓ modal route · P6-03 ✓ Appearance · P6-04 ✓ Security & devices · P6-05…P6-11 ✓ all 15 sections on the recipe; legacy settings deleted |
 | PW Workflow surfaces | owned by the Workflow Overhaul Plan | |
-| P7 Lockdown | not started | |
+| P7 Lockdown | in progress | P7-01 ✓ legacy `components/**`, `pages/`, LegacyHeader + `legacyHeader` handle deleted (toast → kit ToasterRegion, page fallbacks, Edit sources, Shortcuts sheet on the kit); ratchet at 0 · next: P7-02 legacy token layer + `@radix-ui/*`/`cmdk` removal, P7-03 stale docs paths |
 | P8 Deferred platform | not started | |
 | Mobile pass (M0–M4, D-80) | planned | after the Workflow Overhaul merge; decisions MD-1…MD-8 settled |
 
-## Resume point (2026-09-26)
+## Resume point (2026-09-27)
 
-Work paused when the account hit its weekly usage limit (resets 2026-09-28 02:30 IST). State:
-- `desktop_redesign` @ `7725941` is green (typecheck, lint, check:design, 955 unit + 508 story tests, build, check:css).
-- Done: P0; P1 (review rounds 1–2 fixed; its e2e + Electron re-run is folded into the P3+P4 batch-end run); P2-00…P2-04; P3-01…P3-03.
-- Unverified partial work (WIP commits — review, finish and verify before merging; never merge as-is):
-  - `wip/P3-04` — app frame + desktop chrome: desktop IPC/platform/window-manager edits, `--gai-titlebar-*` work started.
-  - `wip/P3-05` — Dialog, CommandList, early ui/shell pieces, Autocomplete edits for the palette.
-  - `wip/P2-05` — G-12 system info (route, types, client, hook, tests) nearly complete.
-- Next, in order: finish P3-04 (from `wip/P3-04`), P3-05 (from `wip/P3-05`), P3-07; then P3-06; then P4-01…P4-12; P2-05/P2-06 alongside; then the P3+P4 batch-end run (sandbox e2e, Electron smokes incl. the P1 re-run, board comparison) and one combined review; HANDOFF.md; then P5+P6 as the next batch, P7+P8 last.
+- `desktop_redesign` @ `fc4aac9c` (180 commits ahead of origin, not pushed): redesign P0–P6 + the Workflow Overhaul merge (D-81) + its screens on the kit (D-82) + P7-01. Gates green (typecheck, lint 0 errors, check:design --strict, build). Known failures (pre-existing): design-tokens `scales.test.ts`, cli `tui-e2e` cursor test, web `ChangesSurface` characterization "choosing an option refetches…".
+- Basic sanity (sandbox :3197/:5197, headed Chrome, dark + light): every route renders with a clean console and no failed API calls; chat send/reply, Run dialog → run page (Succeeded), palette work. Found and fixed: builder canvas rendered light in dark mode.
+- Waiting for the owner's direction. Open: P7-02/03, P8, one full review of all phases + fix pass + e2e/desktop smokes/board comparison, mobile pass (D-80).
