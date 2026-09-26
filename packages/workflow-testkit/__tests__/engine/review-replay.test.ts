@@ -152,6 +152,30 @@ describe('the journal replay of a resumed attempt', () => {
     expect(snap.stages['triage']!.outputData).toEqual({ severity: 'high' });
   });
 
+  it('R9: a revision is judged again, never passed on the verdict of the output before it', async () => {
+    const judge = (score: number) => ({ text: `\`\`\`json\n{"score": ${score}, "reasons": ["r${score}"]}\n\`\`\`` });
+    engine = await createTestEngine({
+      script: (key) =>
+        key.stageName.startsWith('judge-')
+          ? [judge(9), judge(2), judge(9)]
+          : [
+              { text: 'VERSION ONE of the answer, complete and correct.' },
+              { on: 'approval_feedback', text: 'VERSION TWO of the answer, sloppy.' },
+              { on: 'repair', text: 'VERSION THREE of the answer, repaired.' },
+            ],
+    });
+    const run = await engine.runWorkflow({
+      name: 'judge-revision',
+      stages: [{ name: 'j1', prompt: 'Answer.', output: { rules: [{ type: 'judge', rubric: 'Is it good?', threshold: 5 }] }, approval: {} }],
+      edges: [],
+    });
+    await run.waitForStage('j1', 'awaiting_input');
+    const id = run.stageRunId('j1');
+    expect((await engine.commands.approve(run.runId, id, { outcome: 'changes_requested', followUpPrompt: 'Make it version two.' })).status).toBe(202);
+    const snap = await run.waitFor((s) => reviewRound(s, 'j1') === 2 && s.stages['j1']!.status === 'awaiting_input', 10_000, 'round 2');
+    expect((snap.stages['j1']!.interruptData as { output?: string }).output).toBe('VERSION THREE of the answer, repaired.');
+  });
+
   it('R10: the summary after a revision describes the revised output', async () => {
     const LONG_V1 = 'VERSION-ONE ' + 'x'.repeat(7000);
     const LONG_V2 = 'VERSION-TWO ' + 'y'.repeat(7000);
