@@ -990,6 +990,7 @@ const VALIDATION_RULE_TYPES = [
   { value: 'regex', label: 'Regex Match', description: 'Output must match this pattern' },
   { value: 'json_schema', label: 'JSON Schema', description: 'Output must be JSON matching this schema' },
   { value: 'custom_script', label: 'Custom Script', description: 'A command validates the output (exit 0 passes)' },
+  { value: 'judge', label: 'Judge', description: 'A model scores the output 0-10 against a rubric; below the threshold the stage repairs' },
 ] as const;
 
 /** A fresh rule of `type`, keeping the failure message. */
@@ -1008,6 +1009,8 @@ function blankRule(type: ResultValidationRule['type'], message?: string): Result
       return { type, schema: { type: 'object' }, ...m };
     case 'custom_script':
       return { type, command: '', args: [], timeoutMs: 60_000, ...m };
+    case 'judge':
+      return { type, rubric: '', threshold: 7, ...m };
   }
 }
 
@@ -1157,6 +1160,46 @@ function ValidationRuleEditor({
               />
               <ArgsEditor args={rule.args} onChange={(args) => replaceRule(idx, { ...rule, args })} />
               <p className="text-[10px] text-muted-foreground">The output arrives in the STAGE_OUTPUT environment variable.</p>
+            </div>
+          )}
+          {rule.type === 'judge' && (
+            <div className="space-y-1.5">
+              <Textarea
+                value={rule.rubric}
+                onChange={(e) => replaceRule(idx, { ...rule, rubric: e.target.value })}
+                rows={3}
+                className="resize-y text-xs"
+                placeholder="What a good output is (the judge scores 0-10 against it)"
+                aria-label={`Rule ${idx + 1} rubric`}
+              />
+              <div className="grid grid-cols-[5rem_1fr] items-center gap-2">
+                <Input
+                  type="number"
+                  min={0}
+                  max={10}
+                  step={0.5}
+                  value={rule.threshold}
+                  onChange={(e) => replaceRule(idx, { ...rule, threshold: Math.max(0, Math.min(10, Number(e.target.value) || 0)) })}
+                  className="h-auto rounded-lg px-2 py-1.5 text-xs"
+                  aria-label={`Rule ${idx + 1} threshold`}
+                />
+                <Input
+                  type="text"
+                  value={rule.model ?? ''}
+                  onChange={(e) => replaceRule(idx, { ...rule, model: e.target.value || undefined })}
+                  className="h-auto rounded-lg px-2 py-1.5 text-xs font-mono"
+                  placeholder="Judge model (default: the stage's)"
+                  aria-label={`Rule ${idx + 1} judge model`}
+                />
+              </div>
+              <label className="flex items-center gap-1.5 text-[11px] text-foreground">
+                <Checkbox
+                  checked={rule.include?.includes('diff') ?? false}
+                  onCheckedChange={(next) => replaceRule(idx, { ...rule, include: next === true ? ['diff'] : undefined })}
+                  className="h-3.5 w-3.5"
+                />
+                Show the judge the working-tree diff
+              </label>
             </div>
           )}
           <Input

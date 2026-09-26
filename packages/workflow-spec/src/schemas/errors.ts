@@ -43,6 +43,7 @@ export const STAGE_ERROR_CODE_CLASS = {
   restore_failed: 'deterministic',
   output_schema: 'repairable',
   validation_rule: 'repairable',
+  judge_below_threshold: 'repairable',
   missing_artifact: 'repairable',
   process_restart_unsafe: 'interrupted',
   lease_expired: 'interrupted',

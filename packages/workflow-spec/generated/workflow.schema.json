@@ -2111,6 +2111,55 @@
                               ],
                               "additionalProperties": false,
                               "description": "JSON Schema rule"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "type": {
+                                  "type": "string",
+                                  "const": "judge",
+                                  "description": "A model scores the output 0-10 against a rubric, in a fresh session without tools, after the hard rules; below the threshold the stage repairs with the reasons"
+                                },
+                                "rubric": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 10000,
+                                  "description": "What a good output is: the criteria the judge scores against"
+                                },
+                                "threshold": {
+                                  "type": "number",
+                                  "minimum": 0,
+                                  "maximum": 10,
+                                  "description": "The lowest passing score (0-10)"
+                                },
+                                "model": {
+                                  "type": "string",
+                                  "minLength": 1,
+                                  "maxLength": 200,
+                                  "description": "Catalog id of the judge's model; omitted uses the stage's"
+                                },
+                                "include": {
+                                  "type": "array",
+                                  "items": {
+                                    "type": "string",
+                                    "enum": [
+                                      "diff"
+                                    ]
+                                  },
+                                  "maxItems": 1,
+                                  "description": "Extra evidence for the judge: diff = the working-tree diff of the stage mount"
+                                },
+                                "message": {
+                                  "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/output/properties/rules/items/anyOf/0/properties/message"
+                                }
+                              },
+                              "required": [
+                                "type",
+                                "rubric",
+                                "threshold"
+                              ],
+                              "additionalProperties": false,
+                              "description": "Judge rule (use a judge STAGE with a score schema when a loop should decide instead)"
                             }
                           ],
                           "description": "A hard rule the stage output must satisfy before the stage completes"
@@ -2201,6 +2250,7 @@
                             "restore_failed",
                             "output_schema",
                             "validation_rule",
+                            "judge_below_threshold",
                             "missing_artifact",
                             "process_restart_unsafe",
                             "lease_expired"

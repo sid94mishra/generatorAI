@@ -394,6 +394,23 @@ export const ResultValidationRuleSchema = z
       })
       .strict()
       .describe('JSON Schema rule'),
+    z
+      .object({
+        type: z
+          .literal('judge')
+          .describe('A model scores the output 0-10 against a rubric, in a fresh session without tools, after the hard rules; below the threshold the stage repairs with the reasons'),
+        rubric: z.string().min(1).max(10_000).describe('What a good output is: the criteria the judge scores against'),
+        threshold: z.number().min(0).max(10).describe('The lowest passing score (0-10)'),
+        model: z.string().min(1).max(200).optional().describe("Catalog id of the judge's model; omitted uses the stage's"),
+        include: z
+          .array(z.enum(['diff']))
+          .max(1)
+          .optional()
+          .describe('Extra evidence for the judge: diff = the working-tree diff of the stage mount'),
+        message: ruleMessage,
+      })
+      .strict()
+      .describe('Judge rule (use a judge STAGE with a score schema when a loop should decide instead)'),
   ])
   .describe('A hard rule the stage output must satisfy before the stage completes');
 export type ResultValidationRule = z.infer<typeof ResultValidationRuleSchema>;

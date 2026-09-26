@@ -27,6 +27,8 @@ export function describeRule(rule: ResultValidationRule): string {
       return `Validation script '${rule.command}' failed`;
     case 'json_schema':
       return 'Output must be JSON matching the schema';
+    case 'judge':
+      return `A judge must score the output at least ${rule.threshold}/10`;
   }
 }
 
@@ -107,6 +109,10 @@ export async function evaluateOutputRule(rule: ResultValidationRule, output: str
         return false;
       }
     }
+
+    // A judge is not a hard rule: the executor runs it after the hard rules pass (P05 §4.4).
+    case 'judge':
+      return true;
 
     case 'json_schema': {
       const parsed = extractJsonValue(output);

@@ -50,7 +50,7 @@ import {
   type SessionSpec,
   type WorkflowGraph,
 } from '@generatorai/workflow-spec';
-import { classifyStageError, classified, StageError } from '../../domain/errors/StageError.js';
+import { classifyStageError, classified, StageError, type ClassifiedError } from '../../domain/errors/StageError.js';
 import type { EngineStores, SettledTurn, TurnReplayPolicy, TurnRole } from '../../domain/ports/IEngineStore.js';
 import type { AttachmentRef, IAgentHarness, SendPromptOptions } from '../../domain/ports/IAgentHarness.js';
 import type { ISessionRepository } from '../../domain/ports/IRepositories.js';
@@ -1369,25 +1369,117 @@ export class StageExecutor {
         scope: this.scopeOf(ctx),
       });
       this.recheck(ctx, 'validating');
-      if (check.ok) {
+      // The hard rules held: the judge rules score the output (P05 §4.4).
+      const verdict = check.ok ? await this.judge(ctx, check.data) : null;
+      if (check.ok && verdict === null) {
         if (check.data !== undefined) stores.attempts.update(stageRunId, attemptNo, { structuredOutput: check.data });
         return check.data !== undefined ? { data: check.data } : {};
       }
+      const failures = check.ok ? verdict!.failures : check.failures;
+      const error = check.ok ? verdict!.error : check.error;
       const used = stores.attempts.get(stageRunId, attemptNo)?.repairCount ?? 0;
-      if (used >= maxRepairs) throw new AttemptStop({ kind: 'failed', error: check.error });
+      if (used >= maxRepairs) throw new AttemptStop({ kind: 'failed', error });
       // validating → running with repair_count + 1, then the repair turn.
       this.backToRunning(ctx, 'validating');
       const n = stores.attempts.incrementRepair(stageRunId, attemptNo);
       if (n === null) throw new AttemptStop(ctx.frame.stop ?? { kind: 'aborted', reason: 'superseded' });
-      await this.emitSession(ctx, 'stage_run.repairing', { repair: n, failures: check.failures });
+      await this.emitSession(ctx, 'stage_run.repairing', { repair: n, failures });
       const turn = await this.turn(ctx, {
         opId: `a${ctx.epoch}/repair/${n - 1}`,
         role: 'repair',
-        text: repairMessage(check.failures, ctx.strategies, ctx.contract.format),
+        text: repairMessage(failures, ctx.strategies, ctx.contract.format),
         prepare: true,
       });
       this.recordOutput(ctx, turn);
       this.toValidating(ctx);
+    }
+  }
+
+  /**
+   * The judge rules (P05 §4.4): each scores the output 0-10 against its
+   * rubric in a fresh, tool-less, single-turn conversation (the stage's
+   * model unless the rule names one; the working-tree diff with
+   * `include: ['diff']`). Every verdict is kept on the attempt
+   * (`stage_attempts.judge`, one entry per rule per repair round) and its
+   * usage counts toward the stage budget. Null when every judge passed.
+   */
+  private async judge(ctx: AttemptContext, data: unknown): Promise<{ failures: string[]; error: ClassifiedError } | null> {
+    const rules = ctx.contract.rules.filter((r): r is Extract<(typeof ctx.contract.rules)[number], { type: 'judge' }> => r.type === 'judge');
+    if (rules.length === 0) return null;
+    const { stores } = this.deps;
+    const { stageRunId, attemptNo, runId } = ctx.frame.req;
+    const round = stores.attempts.get(stageRunId, attemptNo)?.repairCount ?? 0;
+    const recorded = (stores.attempts.get(stageRunId, attemptNo)?.judge as JudgeRecord[] | null | undefined) ?? [];
+    const failures: string[] = [];
+    const verdicts: JudgeRecord[] = [];
+    const output = data !== undefined ? JSON.stringify(data, null, 2) : ctx.outputText;
+    for (const [index, rule] of rules.entries()) {
+      // A verdict of this round already recorded (a resumed attempt) is not asked again.
+      const prior = recorded.find((v) => v.round === round && v.rule === index);
+      const v = prior ?? (await this.askJudge(ctx, rule, index, round, output));
+      verdicts.push(v);
+      if (!v.passed) {
+        const why = v.reasons.length ? v.reasons.join('; ') : 'no reasons given';
+        failures.push(rule.message ?? `The judge scored the output ${v.score ?? 'unreadable'}/10 (needs ${rule.threshold}): ${why}`);
+      }
+    }
+    stores.attempts.update(stageRunId, attemptNo, { judge: [...recorded.filter((v) => v.round !== round), ...verdicts] });
+    await this.emitSession(ctx, 'stage_run.judged', { round, verdicts, workflowRunId: runId });
+    if (failures.length === 0) return null;
+    return { failures, error: classified('judge_below_threshold', `The judge did not pass the output: ${failures.join('; ')}`, { details: { failures } }) };
+  }
+
+  private async askJudge(
+    ctx: AttemptContext,
+    rule: { rubric: string; threshold: number; model?: string | undefined; include?: Array<'diff'> | undefined },
+    index: number,
+    round: number,
+    output: string,
+  ): Promise<JudgeRecord> {
+    const { harness } = this.deps;
+    const { stageRunId, attemptNo, runId } = ctx.frame.req;
+    const spec = stageSessionSpec(ctx.graph, ctx.stage, ctx.run).merged;
+    const conversationId = `judge-${stageRunId}-${attemptNo}-${round}-${index}`;
+    let diff = '';
+    if (rule.include?.includes('diff') && this.deps.scriptRunner) {
+      const r = await this.deps.scriptRunner.run('git', ['diff', 'HEAD'], { cwd: ctx.workDir, timeout: 30_000 }).catch(() => null);
+      diff = r && r.exitCode === 0 ? r.stdout.slice(0, 20_000) : '';
+    }
+    const prompt =
+      `You are a strict reviewer. Score the output below from 0 to 10 against the rubric. Uncertain means a lower score.\n\n` +
+      `## Rubric\n${this.render(ctx, rule.rubric).rendered}\n\n## Output\n${output.slice(0, 50_000)}\n` +
+      (diff ? `\n## Working-tree diff\n\`\`\`diff\n${diff}\n\`\`\`\n` : '') +
+      `\nAnswer with one \`\`\`json block: {"score": <0-10>, "reasons": ["<what falls short>", ...]}`;
+    let unsubscribe: (() => void) | undefined;
+    try {
+      await harness.createConversation({
+        conversationId,
+        ...((rule.model ?? spec.model) ? { model: rule.model ?? spec.model } : {}),
+        ...(spec.harnessType ? { harnessType: spec.harnessType } : {}),
+        workingDirectory: ctx.workDir,
+        streaming: false,
+        permissionMode: 'plan',
+        availableTools: [],
+        excludedTools: ['*'],
+        maxTurns: 1,
+        systemMessage: { mode: 'append', content: 'You judge the output of an automated workflow stage. You have no tools.' },
+      });
+      // Its spend is the stage's (the budget counts it).
+      unsubscribe = harness.onConversationEvent(conversationId, (event: AgentEvent) => {
+        if (event.kind === 'harness.usage') {
+          this.deps.post(runId, { type: 'usage_tick', stageRunId, attemptNo, usage: asUsage((event.data ?? {}) as Record<string, unknown>) });
+        }
+      });
+      const response = await harness.sendPromptAndWait(conversationId, prompt, undefined, ctx.frame.ac.signal);
+      const parsed = parseJudgeReply(response?.content ?? '');
+      const score = parsed?.score ?? null;
+      return { round, rule: index, score, threshold: rule.threshold, reasons: parsed?.reasons ?? ['The judge answer could not be read'], passed: score !== null && score >= rule.threshold };
+    } catch (err) {
+      if (ctx.frame.stop) throw new AttemptStop(ctx.frame.stop);
+      throw this.harnessFailure(ctx, err);
+    } finally {
+      unsubscribe?.();
+      await harness.deleteConversation(conversationId).catch(() => undefined);
     }
   }
 
@@ -1722,6 +1814,33 @@ export class StageExecutor {
  * sub-agents, then the stage's own, then the run's per-stage model. The
  * binding-site layer (runtime scalars) is everything but the workflow's.
  */
+/** One judge verdict (`stage_attempts.judge` holds them, per rule per repair round). */
+interface JudgeRecord {
+  round: number;
+  rule: number;
+  score: number | null;
+  threshold: number;
+  reasons: string[];
+  passed: boolean;
+}
+
+/** The judge's final JSON block: {score, reasons}. */
+export function parseJudgeReply(text: string): { score: number | null; reasons: string[] } | null {
+  const blocks = [...text.matchAll(/```(?:json)?\s*([\s\S]*?)```/g)].map((m) => m[1]!);
+  const candidates = blocks.length ? blocks.reverse() : [text.slice(text.indexOf('{'), text.lastIndexOf('}') + 1)];
+  for (const c of candidates) {
+    try {
+      const v = JSON.parse(c) as { score?: unknown; reasons?: unknown };
+      const score = typeof v.score === 'number' && Number.isFinite(v.score) ? Math.max(0, Math.min(10, v.score)) : null;
+      const reasons = Array.isArray(v.reasons) ? v.reasons.filter((r): r is string => typeof r === 'string') : [];
+      return { score, reasons };
+    } catch {
+      /* the next candidate */
+    }
+  }
+  return null;
+}
+
 /** Which conversation generation a continuing body stage is on (a new one every `compactAfter` iterations). */
 function compactionGeneration(ctx: Pick<AttemptContext, 'loop' | 'stage'>): number {
   const n = ctx.stage.compactAfter;
