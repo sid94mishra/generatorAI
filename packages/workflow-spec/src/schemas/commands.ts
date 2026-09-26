@@ -83,7 +83,9 @@ export const RunCommandSchema = z
       .describe('Grant iterations'),
     z
       .object({
-        command: z.literal('raise_budget').describe("Raise a loop's cumulative budget; a parked loop continues when it can"),
+        command: z
+          .literal('raise_budget')
+          .describe("Raise a loop's cumulative budget (a parked loop continues when it can), or, without instanceId, the run budget (a run paused by its exhausted budget resumes)"),
         ...target,
         maxTurns: z.number().int().min(1).max(100_000).optional().describe('Turns to add'),
         maxCostUsd: z.number().positive().max(100_000).optional().describe('Cost (USD) to add'),

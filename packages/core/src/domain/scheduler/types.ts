@@ -264,7 +264,7 @@ export interface RunRecord {
   codebases: Record<string, CodebaseScopeState>;
   usage: Usage;
   /** The effective run budget (invocation override, else the workflow's). */
-  budget: { maxTurns?: number; maxCostUsd?: number; maxWallClockMs?: number } | null;
+  budget: { maxTurns?: number; maxCostUsd?: number; maxTokens?: number; maxWallClockMs?: number } | null;
   /** Started by something other than a person (automation, schedule, webhook, agent): pauses expire (PD-2). */
   unattended: boolean;
   startedAt: number | null;
@@ -387,6 +387,8 @@ export interface RunPatch {
   outcome?: RunOutcome | null;
   error?: string | null;
   errorCode?: string | null;
+  /** The run budget after a run-level `raise_budget` (P07 WP-7.3). */
+  budget?: RunRecord['budget'];
 }
 
 export interface NewInstance {

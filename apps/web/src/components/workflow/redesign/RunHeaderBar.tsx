@@ -52,6 +52,8 @@ interface RunHeaderBarProps {
   budget?: Record<string, unknown>;
   /** Why the run is in its status (`budget_exhausted`, …). */
   statusReason?: string;
+  /** Raise the run budget by half of each limit (a run-level `raise_budget`); shown while the budget is exhausted. */
+  onRaiseBudget?: () => void;
   /** A permission-mode change is in flight. */
   permissionBusy?: boolean;
 }
@@ -169,7 +171,7 @@ function StatusPill({ status }: { status: RunView['status'] }) {
 export const RunHeaderBar = React.memo(function RunHeaderBar({
   run, awaitingCount, parallelCount, onPause, onResume, onCancel, onRetry, onOpenGraph, graphOpen,
   pipelineOpen, onTogglePipeline, onOpenFiles, filesOpen, onPermissionModeChange, permissionBusy,
-  usage, budget, statusReason,
+  usage, budget, statusReason, onRaiseBudget,
 }: RunHeaderBarProps) {
   const total = run.stages.length;
   const done = run.stages.filter((s) => s.status === 'completed' || s.status === 'skipped').length;
@@ -256,6 +258,16 @@ export const RunHeaderBar = React.memo(function RunHeaderBar({
             <Gauge className="h-3 w-3" />
             Budget exhausted{isPaused ? ' · paused' : ''}
           </span>
+        )}
+        {statusReason === 'budget_exhausted' && onRaiseBudget && (
+          <Button
+            onClick={onRaiseBudget}
+            variant="secondary"
+            size="sm"
+            title="Add half of each limit to the run budget (turns, tokens, wall clock, cost); the run resumes when it is under the new budget"
+          >
+            Raise budget 50%
+          </Button>
         )}
         {isPaused && (
           <Button

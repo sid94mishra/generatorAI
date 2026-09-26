@@ -265,7 +265,7 @@
             "command": {
               "type": "string",
               "const": "raise_budget",
-              "description": "Raise a loop's cumulative budget; a parked loop continues when it can"
+              "description": "Raise a loop's cumulative budget (a parked loop continues when it can), or, without instanceId, the run budget (a run paused by its exhausted budget resumes)"
             },
             "instanceId": {
               "$ref": "#/definitions/RunCommand/anyOf/0/properties/instanceId"

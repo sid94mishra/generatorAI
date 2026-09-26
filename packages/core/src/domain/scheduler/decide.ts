@@ -203,6 +203,26 @@ function pauseWholeRun(w: Working, mode: 'drain' | 'interrupt', statusReason: st
   if (w.run.unattended) w.timer('pause_ttl', null, PAUSE_TTL_MS, w.run.version);
 }
 
+/**
+ * A run-level `raise_budget` (P07 WP-7.3): the deltas are added to the run
+ * budget; a run paused by its exhausted budget resumes once it is under the
+ * raised one. A raised wall clock re-arms the run's wall-clock timer.
+ */
+function raiseRunBudget(w: Working, command: Extract<RunCommand, { command: 'raise_budget' }>): void {
+  if (!['running', 'waiting', 'paused'].includes(w.run.status)) return w.reject('invalid_state', `cannot raise the budget of a ${w.run.status} run`);
+  const budget = { ...(w.run.budget ?? {}) };
+  for (const k of ['maxTurns', 'maxCostUsd', 'maxTokens', 'maxWallClockMs'] as const) {
+    if (command[k] !== undefined) budget[k] = (budget[k] ?? 0) + command[k]!;
+  }
+  w.runPatch({ budget });
+  w.emit('workflow_run.budget_raised', { budget });
+  if (command.maxWallClockMs !== undefined && budget.maxWallClockMs !== undefined && w.run.startedAt !== null) {
+    const left = budget.maxWallClockMs - (w.now - w.run.startedAt);
+    if (left > 0) w.timer('run_budget_wall_clock', null, left, w.run.version, { jitter: 'none' });
+  }
+  if (w.run.status === 'paused' && w.run.statusReason === 'budget_exhausted' && !overBudget(w.run.usage, budget)) resumeWholeRun(w);
+}
+
 function resumeWholeRun(w: Working): void {
   w.runTransition('running', { statusReason: null });
   propagateToChildren(w, 'resume');
@@ -412,6 +432,8 @@ function onCommand(w: Working, command: RunCommand, actor?: string): void {
           return w.reject('invalid_state', `cannot cancel a ${w.run.status} run`);
         }
         return cancelWholeRun(w, 'user_cancel');
+      case 'raise_budget':
+        return raiseRunBudget(w, command);
       default:
         return w.reject('invalid_command', `${command.command} needs an instanceId`);
     }
@@ -947,6 +969,7 @@ export function applyDecisions(state: RunState, decisions: readonly Decision[], 
       case 'run_patch':
         if (d.patch.statusReason !== undefined) run.statusReason = d.patch.statusReason;
         if (d.patch.outcome !== undefined) run.outcome = d.patch.outcome;
+        if (d.patch.budget !== undefined) run.budget = d.patch.budget;
         break;
       default:
         break;

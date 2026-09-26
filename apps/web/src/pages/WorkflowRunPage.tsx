@@ -395,6 +395,17 @@ export function WorkflowRunPage() {
   // Pause in `interrupt` mode: in-flight stages pause too, not just new launches.
   const handlePause = useCallback(() => { void sendCommand({ command: 'pause', mode: 'interrupt' }); }, [sendCommand]);
   const handleResume = useCallback(() => { void sendCommand({ command: 'resume' }); }, [sendCommand]);
+  // A run paused by its exhausted budget: add half of each limit (WP-7.3); the engine resumes it when it is under.
+  const runBudget = runData?.budget;
+  const handleRaiseBudget = useCallback(() => {
+    const half = (k: string) => {
+      const v = runBudget?.[k];
+      return typeof v === 'number' && v > 0 ? Math.ceil(v / 2) : undefined;
+    };
+    const deltas = { maxTurns: half('maxTurns'), maxTokens: half('maxTokens'), maxCostUsd: half('maxCostUsd'), maxWallClockMs: half('maxWallClockMs') };
+    const command = { command: 'raise_budget' as const, ...Object.fromEntries(Object.entries(deltas).filter(([, v]) => v !== undefined)) };
+    void sendCommand(command as RunCommand);
+  }, [runBudget, sendCommand]);
   const handleCancel = useCallback(() => {
     void confirm({
       title: 'Cancel this run?',
@@ -663,6 +674,7 @@ export function WorkflowRunPage() {
         usage={runData.usage}
         budget={runData.budget}
         statusReason={runData.statusReason}
+        onRaiseBudget={handleRaiseBudget}
         onOpenGraph={() => setGraphOpen((v) => !v)}
         graphOpen={graphOpen}
         pipelineOpen={pipelineOpen}

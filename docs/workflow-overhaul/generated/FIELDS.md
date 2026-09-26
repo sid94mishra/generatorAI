@@ -1075,7 +1075,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
 | `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
 | `n` | integer (≥1, ≤50) | yes |  | Iterations to add to the maximum |
-| `command` | "raise_budget" | yes |  | Raise a loop's cumulative budget; a parked loop continues when it can |
+| `command` | "raise_budget" | yes |  | Raise a loop's cumulative budget (a parked loop continues when it can), or, without instanceId, the run budget (a run paused by its exhausted budget resumes) |
 | `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
 | `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
 | `maxTurns` | integer (≥1, ≤100000) |  |  | Turns to add |
