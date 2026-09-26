@@ -8,11 +8,9 @@
 // is a 304 on the wire and a cache hit in the render worker.
 
 import { useCallback, useMemo, useState } from 'react';
-import { useQueries } from '@tanstack/react-query';
-import { usePlatform } from '@/providers/PlatformProvider.js';
-import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
+import { useWorkspaceChangeFileBodies } from '@/hooks/changesQueries.js';
 import type { ChangeSummary, ChangeSummaryFile } from '@/types/changes.js';
-import type { DiffSource } from './DiffCodeView.js';
+import type { DiffSource } from './diffTypes.js';
 
 export interface UseDiffSourcesOptions {
   workspaceId: string | undefined;
@@ -41,8 +39,6 @@ export function useDiffSources({
   head = 'working',
   expandedIds,
 }: UseDiffSourcesOptions) {
-  const platform = usePlatform() as HttpPlatformClient;
-
   /** Flatten every repo's files into one ordered list. */
   const entries = useMemo<DiffSourceEntry[]>(() => {
     if (!summary) return [];
@@ -67,44 +63,7 @@ export function useDiffSources({
     [entries, expandedIds],
   );
 
-  const results = useQueries({
-    queries: fetchable.map((entry) => ({
-      queryKey: [
-        'workspace-change-file',
-        workspaceId ?? '',
-        entry.alias,
-        entry.file.path,
-        base,
-        head,
-        // The blob pair MUST be part of the key. A file's content is immutable
-        // for a given pair, but the path is not: when the agent edits a file
-        // the summary reports new blobs while the path/base/head stay the
-        // same. Without this the key is unchanged, and `staleTime` below
-        // serves the pre-edit body for five minutes.
-        `${entry.file.oldBlob ?? 'none'}:${entry.file.newBlob ?? 'none'}`,
-      ],
-      queryFn: () =>
-        platform.getWorkspaceChangeFile(workspaceId!, entry.file.path, {
-          alias: entry.alias,
-          base,
-          head,
-          // The summary already resolved both sides' objects. Handing them
-          // back lets the server read exactly those blobs rather than
-          // re-deriving them, which is what makes expanding a file feel
-          // instant instead of taking a couple of seconds.
-          ...(entry.file.oldBlob ? { oldBlob: entry.file.oldBlob } : {}),
-          ...(entry.file.newBlob ? { newBlob: entry.file.newBlob } : {}),
-          // A renamed file is stored under its OLD name on the base side;
-          // without this the server finds nothing there and the diff renders
-          // as a pure addition.
-          ...(entry.file.oldPath ? { oldPath: entry.file.oldPath } : {}),
-        }),
-      enabled: !!workspaceId,
-      // Safe precisely because the blob pair is in the key: the content behind
-      // a given key genuinely cannot change.
-      staleTime: 5 * 60_000,
-    })),
-  });
+  const results = useWorkspaceChangeFileBodies(workspaceId, fetchable, base, head);
 
   const bodies = useMemo(() => {
     const map = new Map<string, (typeof results)[number]['data']>();

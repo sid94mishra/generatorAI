@@ -13,7 +13,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useInvalidateWorkspaceChangeSummary } from '@/hooks/changesQueries.js';
 import { CheckCheck, ChevronRight, FileDiff, Undo2 } from 'lucide-react';
 import {
   useDiscardWorkspaceChanges,
@@ -24,7 +24,7 @@ import { useConfirm } from '@/components/ui/index.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { Button } from '@/components/ui/index.js';
 import { FileTypeIcon, FolderTypeIcon } from '@/components/shared/fileIcons.js';
-import { splitWorkspaceChanges } from '@/components/diff/changeVisibility.js';
+import { splitWorkspaceChanges } from '@/blocks/changes/changeVisibility.js';
 import { cn } from '@/lib/utils.js';
 import {
   shouldPrefixAlias,
@@ -33,7 +33,7 @@ import {
   usePathRoots,
   withAliasPrefix,
   type ChangeStatusLetter,
-} from './changes/changePaths.js';
+} from '@/blocks/changes/changePaths.js';
 
 export interface ChatChangesTrayProps {
   workspaceId?: string | undefined;
@@ -145,7 +145,7 @@ export const ChatChangesTray = React.memo(function ChatChangesTray({
   className,
 }: ChatChangesTrayProps) {
   const roots = usePathRoots();
-  const queryClient = useQueryClient();
+  const invalidateSummary = useInvalidateWorkspaceChangeSummary(workspaceId);
   const summaryQuery = useWorkspaceChangeSummary(workspaceId, { base: 'baseline', head: 'working' });
   // Same two endpoints the Changes tab uses — the tray is a shortcut to them,
   // not a second implementation.
@@ -218,21 +218,21 @@ export const ChatChangesTray = React.memo(function ChatChangesTray({
     if (!workspaceId || !liveKey) return;
     if (refetchTimer.current) clearTimeout(refetchTimer.current);
     refetchTimer.current = setTimeout(() => {
-      void queryClient.invalidateQueries({ queryKey: ['workspace-change-summary', workspaceId] });
+      invalidateSummary();
     }, 1500);
     return () => {
       if (refetchTimer.current) clearTimeout(refetchTimer.current);
     };
-  }, [liveKey, workspaceId, queryClient]);
+  }, [liveKey, workspaceId, invalidateSummary]);
   const wasStreaming = useRef(streaming);
   const settledAt = useRef<number>(0);
   useEffect(() => {
     if (wasStreaming.current && !streaming && workspaceId) {
       settledAt.current = Date.now();
-      void queryClient.invalidateQueries({ queryKey: ['workspace-change-summary', workspaceId] });
+      invalidateSummary();
     }
     wasStreaming.current = streaming;
-  }, [streaming, workspaceId, queryClient]);
+  }, [streaming, workspaceId, invalidateSummary]);
 
   // The live blocks are cleared the moment the persisted turn lands, which is
   // before the post-turn summary refetch resolves. Carry the live entries

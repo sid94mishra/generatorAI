@@ -12,7 +12,7 @@ import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelCh
 import { useModels } from '@/hooks/harnessQueries.js';
 import { ChatChangesTray } from '@/components/chat/ChatChangesTray.js';
 import { LiveActivityStrip, useRunningBackgroundTaskCount } from '@/components/agent/LiveActivityStrip.js';
-import { PathRootsContext, toDisplayPath, type PathRoot } from '@/components/chat/changes/changePaths.js';
+import { PathRootsContext, toDisplayPath, type PathRoot } from '@/blocks/changes/changePaths.js';
 import { useWorkspaceInfo, usePrepareChatWorkspace } from '@/hooks/sourceQueries.js';
 import { useEditorTarget } from '@/stores/editorTargetStore.js';
 import { EditSourcesDialog } from '@/components/chat/sources/EditSourcesDialog.js';

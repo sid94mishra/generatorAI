@@ -238,7 +238,7 @@ describe('New threads', () => {
     expect(cs.submitReview.mutateAsync).not.toHaveBeenCalled();
   });
 
-  it('with several mounts a thread anchors to the RESPONSE-LEVEL base/head (the first mount’s), not its own mount’s', async () => {
+  it('with several mounts a thread anchors to ITS OWN mount’s base/head, not the response-level (first mount’s) pair', async () => {
     cs.mounts = [mount('api'), mount('web')];
     cs.summary = summaryOf([repo('api', [file('src/a.ts')]), repo('web', [file('src/b.ts')])]);
     const user = userEvent.setup();
@@ -249,17 +249,18 @@ describe('New threads', () => {
     await user.type(await screen.findByRole('textbox', { name: 'Review comment' }), 'x');
     await user.click(screen.getByRole('button', { name: 'Add comment' }));
 
-    // DISCREPANCY (03 §6.3 "new threads anchor to the current base/head
-    // checkpoint ids"): the ids come from `summary.base/head`, which the code
-    // itself documents as the FIRST mount's resolution (ChangesSurface.tsx:
-    // 436-445, 623-624); `repos[].base` is ignored here. Suspected defect for
-    // threads on any mount but the first — pinned as-is.
+    // Discrepancy resolved as a defect in P4-04 (03 §6.3 "new threads anchor
+    // to the current base/head checkpoint ids"): the ids used to come from the
+    // response-level `summary.base/head`, the FIRST mount's resolution. A
+    // checkpoint id belongs to one mount, and the server resolves an id from
+    // another mount as that mount's baseline (ChangeSummaryService
+    // `resolveRevision`), so re-anchoring measured from the wrong revision.
     expect(cs.createThread.mutateAsync).toHaveBeenCalledWith(
       expect.objectContaining({
         alias: 'web',
         path: 'src/b.ts',
-        baseCheckpointId: 'cp-base-api',
-        headCheckpointId: 'cp-head-api',
+        baseCheckpointId: 'cp-base-web',
+        headCheckpointId: 'cp-head-web',
       }),
     );
   });
@@ -353,11 +354,10 @@ describe('Threads in the diff', () => {
     expect(isExpanded('app::src/c.ts')).toBe(true);
   });
 
-  // DEFECT: 03 §6.3 says jump-to-thread "opens Kept if needed", and the
-  // focusFile / tree paths do exactly that (ChangesSurface.tsx:803, 813) — but
-  // `jumpToThread` never calls `setShowKept(true)` (706-717), so jumping to a
-  // comment on a kept file highlights a row inside a collapsed group.
-  it.fails('jumping to a thread on a KEPT file opens the Kept group (DEFECT: group stays collapsed)', async () => {
+  // Known defect #9, fixed in P4-04: 03 §6.3 says jump-to-thread "opens Kept if
+  // needed", as the focusFile / tree paths always did; all three now share
+  // `reveal` (blocks/changes/useChangesNavigation.ts).
+  it('jumping to a thread on a KEPT file opens the Kept group', async () => {
     singleMount([file('src/a.ts', { kept: true }), file('src/b.ts')]);
     cs.threads = [thread('t1', { path: 'src/a.ts' })];
     const user = userEvent.setup();

@@ -27,6 +27,7 @@ import {
 import { toast } from '@/components/Toast.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { cn } from '@/lib/utils.js';
+import { joinPath } from '@/blocks/changes/changePaths.js';
 import {
   useGenerateScmText,
   useRunScmFlow,
@@ -483,14 +484,6 @@ export function SourceControlPanel({
       )}
     </div>
   );
-}
-
-/** Join a repo directory and a repo-relative path without assuming a separator. */
-export function joinPath(dir: string, relative: string): string {
-  if (!dir) return relative;
-  const sep = dir.includes('\\') && !dir.includes('/') ? '\\' : '/';
-  const trimmed = dir.endsWith('/') || dir.endsWith('\\') ? dir.slice(0, -1) : dir;
-  return `${trimmed}${sep}${relative.replace(/^[\\/]+/, '')}`;
 }
 
 function StepIcon({ status }: { status: ScmFlowStep['status'] }) {

@@ -112,19 +112,15 @@ export function toDisplayPath(raw: string, roots: readonly PathRoot[] = []): str
 }
 
 /**
- * The path a checkpoint restore takes: REPO-RELATIVE, never alias-prefixed.
- *
- * A checkpoint belongs to exactly one mount and its git tree IS that mount's
- * tree, so `<alias>/<path>` names a file that does not exist in it — a
- * discard sent that way restored nothing at all, silently. Callers that hold
- * a display path (the tray, the transcript) get the prefix stripped here
- * rather than each having to know the rule.
+ * An absolute path for a repo-relative file inside a mount, in the mount's
+ * own separator style (a Windows mount path gets `\`, everything else `/`).
+ * Hands "Open in editor" a real path on the server host.
  */
-export function toRestorePath(pathOrDisplayPath: string, alias: string): string {
-  if (!alias || alias === '.') return pathOrDisplayPath;
-  return pathOrDisplayPath.startsWith(`${alias}/`)
-    ? pathOrDisplayPath.slice(alias.length + 1)
-    : pathOrDisplayPath;
+export function joinPath(dir: string, relative: string): string {
+  if (!dir) return relative;
+  const sep = dir.includes('\\') && !dir.includes('/') ? '\\' : '/';
+  const trimmed = dir.endsWith('/') || dir.endsWith('\\') ? dir.slice(0, -1) : dir;
+  return `${trimmed}${sep}${relative.replace(/^[\\/]+/, '')}`;
 }
 
 export interface InlineHunks {

@@ -468,12 +468,11 @@ describe('Focus', () => {
     expect(treeItem('web/src/x.ts')).toHaveAttribute('aria-selected', 'false');
   });
 
-  // DEFECT: the mount-group click parks the scroll in `pendingScrollRef` and
-  // relies on `setActivePath(null)` to re-render and flush it
-  // (ChangesSurface.tsx:1533-1534, 498-504). With no active row that setState
-  // is a no-op, React bails out, and the scroll never happens (or happens on
-  // some unrelated later render).
-  it.fails('with no active row, clicking a mount group still scrolls to its first file (DEFECT: no re-render, scroll lost)', async () => {
+  // Known defect #8, fixed in P4-04: the mount-group click parked the scroll
+  // and relied on `setActivePath(null)` to re-render and flush it; with no
+  // active row React bailed out and the scroll was lost. A scroll request now
+  // always commits a render (blocks/changes/useChangesNavigation.ts).
+  it('with no active row, clicking a mount group still scrolls to its first file', async () => {
     twoMounts();
     const user = userEvent.setup();
     await renderReady();

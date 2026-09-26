@@ -265,12 +265,11 @@ describe('Undo one file', () => {
     });
   });
 
-  // DEFECT: `revertFile` / `keepFile` / `unkeepFile` run `toRestorePath` over a
-  // path that is ALREADY repo-relative (`item.path`, ChangesSurface.tsx:869,
-  // 898, 915). `toRestorePath` strips a leading `<alias>/`, so a file whose
-  // repo-relative path happens to start with its mount's alias — `api/handler.ts`
-  // inside the mount `api` — is sent as `handler.ts`, a different file.
-  it.fails('a repo-relative path that starts with the mount alias is sent unchanged (DEFECT: alias prefix stripped twice)', async () => {
+  // Known defect #7, fixed in P4-04: Undo/Keep/Unkeep used to strip a leading
+  // `<alias>/` from a path that is ALREADY repo-relative, so `api/handler.ts`
+  // inside the mount `api` was sent as `handler.ts`, a different file. The
+  // summary's path is now sent as-is (blocks/changes/useFileActions.ts).
+  it('a repo-relative path that starts with the mount alias is sent unchanged', async () => {
     cs.mounts = [mount('api'), mount('web')];
     cs.summary = summaryOf([
       repo('api', [file('api/handler.ts')]),

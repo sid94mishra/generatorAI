@@ -17,7 +17,7 @@
 
 import type { StreamBlock } from '@/stores/streamStore.js';
 import type { TimelineStep, StepKind, StepStatus } from '@/components/chat/redesign/types.js';
-import { resolveInlineHunks } from '@/components/chat/changes/changePaths.js';
+import { resolveInlineHunks } from '@/blocks/changes/changePaths.js';
 
 // ── Step identity ────────────────────────────────────────────────
 //

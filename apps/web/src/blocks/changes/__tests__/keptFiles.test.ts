@@ -1,7 +1,7 @@
 // Kept-file grouping for the Changes tab.
 
 import { describe, it, expect } from 'vitest';
-import { splitKeptFiles } from '../ChangesSurface.js';
+import { splitKeptFiles } from '../useKeptFiles.js';
 import type { ChangeSummary, ChangeSummaryFile } from '@/types/changes.js';
 
 const file = (path: string, kept?: boolean): ChangeSummaryFile => ({

@@ -6,7 +6,7 @@ import {
   shouldPrefixAlias,
   statusFromOpKind,
   toDisplayPath,
-  toRestorePath,
+  joinPath,
   withAliasPrefix,
 } from '../changePaths.js';
 
@@ -89,19 +89,18 @@ describe('toDisplayPath with mounts', () => {
   });
 });
 
-describe('toRestorePath', () => {
-  it('strips an alias prefix — a checkpoint tree is repo-relative', () => {
-    expect(toRestorePath('frontend/src/a.ts', 'frontend')).toBe('src/a.ts');
+describe('joinPath', () => {
+  it('joins with the mount’s own separator', () => {
+    expect(joinPath('/repo/app', 'src/a.ts')).toBe('/repo/app/src/a.ts');
+    expect(joinPath('C:\\repo\\app', 'src/a.ts')).toBe('C:\\repo\\app\\src/a.ts');
   });
 
-  it('leaves an already repo-relative path alone', () => {
-    expect(toRestorePath('src/a.ts', 'frontend')).toBe('src/a.ts');
-    // A directory that merely starts with the alias is not a prefix.
-    expect(toRestorePath('frontend-utils/a.ts', 'frontend')).toBe('frontend-utils/a.ts');
+  it('drops a trailing separator and a leading one on the file', () => {
+    expect(joinPath('/repo/app/', '/src/a.ts')).toBe('/repo/app/src/a.ts');
   });
 
-  it('is a no-op for the workspace root', () => {
-    expect(toRestorePath('notes.md', '.')).toBe('notes.md');
+  it('returns the relative path when there is no root', () => {
+    expect(joinPath('', 'src/a.ts')).toBe('src/a.ts');
   });
 });
 
