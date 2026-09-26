@@ -145,6 +145,8 @@ const UI_CONCEPTS = {
   minus: { lucide: 'minus' },
   mention: { lucide: 'at-sign' },
   pin: { lucide: 'pin' },
+  /** Keyboard shortcuts (the palette's and help menu's `shortcuts.show`). */
+  keyboard: { lucide: 'keyboard' },
   /** The Spinner glyph (P-12): the same drawing as status-running, but not a status. */
   loader: { lucide: 'loader-circle' },
 } as const satisfies Record<string, IconConceptDef>;

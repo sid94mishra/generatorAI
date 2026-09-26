@@ -9,11 +9,15 @@
 // listbox anchored to the input (`data-gai-overlay="combobox"`, dropdown
 // layer). `inline`: the list renders in place and stays open (the palette
 // dialog owns the overlay attribute then).
+// `variant="palette"` (with `inline`) is the command palette body (C-21): a
+// borderless 48h query row (`text-body`, bottom line-soft rule, optional
+// trailing slot for the result count) over a list that scrolls in place.
 // Items are data: `{ value, label, … }`; `renderItem` replaces the row body.
 // ────────────────────────────────────────────────────────────────
 
-import type { ReactNode } from 'react';
+import type { KeyboardEvent, ReactNode, Ref } from 'react';
 import { Autocomplete as BaseAutocomplete } from '@base-ui/react/autocomplete';
+import type { BaseUIEvent } from '@base-ui/react/types';
 import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { fieldFocus } from '../../lib/focus.js';
@@ -66,9 +70,27 @@ export interface AutocompleteProps<T extends AutocompleteItem = AutocompleteItem
   density?: 'menu' | 'palette';
   /** Leading glyph in the input. Default `search`. */
   icon?: IconConcept | null;
+  /** `field` (default): a bordered input. `palette`: the palette's borderless query row + scrolling list. */
+  variant?: 'field' | 'palette';
+  /** Trailing content of the input row (the palette's result count). */
+  inputTrailing?: ReactNode;
+  /** Called when the highlighted item changes (keyboard, pointer or filtering). */
+  onItemHighlighted?: (item: T | undefined) => void;
+  /**
+   * Runs before the built-in key handling of the input. Call
+   * `event.preventBaseUIHandler()` to take a key over (the palette's Tab).
+   */
+  onInputKeyDown?: (event: BaseUIEvent<KeyboardEvent<HTMLInputElement>>) => void;
+  inputRef?: Ref<HTMLInputElement>;
   className?: string;
   listClassName?: string;
 }
+
+/**
+ * Secondary text inside an option (meta, "then" between chords): fg-3, raised
+ * to fg-2 while the row is highlighted — fg-3 on `selected` is below 4.5:1.
+ */
+export const optionSecondaryText = 'text-fg-3 group-data-highlighted/option:text-fg-2';
 
 /** Case-insensitive match on label and keywords (Base UI filter signature). */
 export function matchesQuery(item: AutocompleteItem, query: string): boolean {
@@ -107,10 +129,16 @@ export function Autocomplete<T extends AutocompleteItem = AutocompleteItem>({
   onOpenChange,
   density = 'menu',
   icon = 'search',
+  variant = 'field',
+  inputTrailing,
+  onItemHighlighted,
+  onInputKeyDown,
+  inputRef,
   className,
   listClassName,
 }: AutocompleteProps<T>) {
   const query = value ?? '';
+  const palette = variant === 'palette';
   const row = (item: T) => (
     <BaseAutocomplete.Item
       key={item.value}
@@ -118,7 +146,7 @@ export function Autocomplete<T extends AutocompleteItem = AutocompleteItem>({
       disabled={item.disabled}
       onClick={() => onSelect?.(item)}
       className={cn(
-        'flex cursor-default items-center gap-2 rounded-control-sm px-2 text-ui text-fg-2 outline-none select-none',
+        'group/option flex cursor-default items-center gap-2 rounded-control-sm px-2 text-ui text-fg-2 outline-none select-none',
         'data-highlighted:bg-selected data-highlighted:text-fg data-disabled:text-fg-3',
         density === 'palette' ? 'mx-1.5 min-h-9 gap-3 rounded-control px-3' : 'min-h-item',
       )}
@@ -131,7 +159,7 @@ export function Autocomplete<T extends AutocompleteItem = AutocompleteItem>({
           <span className="min-w-0 flex-1 truncate">
             <HighlightMatch text={item.label} query={query} />
           </span>
-          {item.meta != null ? <span className="shrink-0 truncate text-small text-fg-3">{item.meta}</span> : null}
+          {item.meta != null ? <span className={cn('shrink-0 truncate text-small', optionSecondaryText)}>{item.meta}</span> : null}
           {item.shortcut ? <Kbd keys={item.shortcut} aria-hidden /> : null}
         </>
       )}
@@ -140,7 +168,9 @@ export function Autocomplete<T extends AutocompleteItem = AutocompleteItem>({
 
   const list = (
     <>
-      <BaseAutocomplete.Empty className="px-3 py-2 text-small text-fg-3 empty:hidden">{emptyText}</BaseAutocomplete.Empty>
+      <BaseAutocomplete.Empty className={cn('text-small text-fg-3 empty:hidden', palette ? 'px-4 py-3' : 'px-3 py-2')}>
+        {emptyText}
+      </BaseAutocomplete.Empty>
       <BaseAutocomplete.List className={cn('outline-none', listClassName)}>
         {groups
           ? (group: AutocompleteGroup<T>) => (
@@ -165,29 +195,41 @@ export function Autocomplete<T extends AutocompleteItem = AutocompleteItem>({
       filter={(item: T, q: string) => matchesQuery(item, q)}
       value={value}
       onValueChange={(next) => onValueChange?.(next)}
-      {...(open !== undefined ? { open } : {})}
+      // Inline lists are always open: Base UI's Enter-to-choose only runs while the list is open.
+      {...(open !== undefined ? { open } : inline ? { open: true } : {})}
       {...(onOpenChange ? { onOpenChange: (next: boolean) => onOpenChange(next) } : {})}
       inline={inline}
       autoHighlight={inline ? 'always' : true}
       keepHighlight={inline}
       openOnInputClick={!inline}
+      {...(onItemHighlighted ? { onItemHighlighted: (item: T | undefined) => onItemHighlighted(item) } : {})}
     >
       <BaseAutocomplete.InputGroup
         className={cn(
-          'flex h-control-lg items-center gap-2 rounded-control border border-line-strong bg-sunken px-2.5 text-fg transition-control',
-          fieldFocus,
+          palette
+            ? 'flex h-dialog-bar shrink-0 items-center gap-2.5 border-b border-line-soft pr-3.5 pl-4 text-fg'
+            : cn(
+                'flex h-control-lg items-center gap-2 rounded-control border border-line-strong bg-sunken px-2.5 text-fg transition-control',
+                fieldFocus,
+              ),
           className,
         )}
       >
         {icon ? <Icon concept={icon} size={16} className="text-fg-3" /> : null}
         <BaseAutocomplete.Input
+          ref={inputRef}
           aria-label={label}
           placeholder={placeholder}
-          className="h-full min-w-0 flex-1 bg-transparent text-ui outline-none placeholder:text-fg-3"
+          onKeyDown={onInputKeyDown}
+          className={cn(
+            'h-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-fg-3',
+            palette ? 'text-body' : 'text-ui',
+          )}
         />
+        {inputTrailing != null ? <span className="shrink-0 text-small text-fg-3">{inputTrailing}</span> : null}
       </BaseAutocomplete.InputGroup>
       {inline ? (
-        <div className="py-1">{list}</div>
+        <div className={palette ? 'min-h-0 flex-1 overflow-y-auto pt-1 pb-2' : 'py-1'}>{list}</div>
       ) : (
         <BaseAutocomplete.Portal>
           <BaseAutocomplete.Positioner sideOffset={4} align="start" className="z-dropdown outline-none" {...overlayProps('combobox')}>

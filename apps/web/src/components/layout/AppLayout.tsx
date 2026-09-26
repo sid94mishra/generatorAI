@@ -14,9 +14,9 @@ import { Outlet, useLocation, useNavigate } from 'react-router';
 import { Sidebar } from './Sidebar.js';
 import { Header } from './Header.js';
 import { TitleBar } from './TitleBar.js';
-import { CommandPalette } from './CommandPalette.js';
 import { FindBar } from './FindBar.js';
 import { ShortcutsSheet } from './ShortcutsSheet.js';
+import { CommandPalette } from '@/features/palette/index.js';
 import { Drawer } from '@/components/ui/Drawer.js';
 import { useUiStore } from '@/stores/uiStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
@@ -113,7 +113,7 @@ export function AppLayout() {
         </div>
       </div>
 
-      {/* Global ⌘K command palette */}
+      {/* Global command palette (palette.toggle: Mod+K, menu, Search button) */}
       <CommandPalette />
       <FindBar />
       <ShortcutsSheet />

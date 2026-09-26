@@ -63,6 +63,7 @@ import {
   HouseIcon,
   InfoIcon,
   KeyRoundIcon,
+  KeyboardIcon,
   LayersIcon,
   LayoutGridIcon,
   LinkIcon,
@@ -233,6 +234,7 @@ export const ICON_REGISTRY = {
   minus: MinusIcon,
   mention: AtSignIcon,
   pin: PinIcon,
+  keyboard: KeyboardIcon,
   loader: LoaderCircleIcon,
 } as const satisfies Record<IconConcept, LucideIcon>;
 

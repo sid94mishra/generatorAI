@@ -30,3 +30,19 @@ export const anchorWidth =
  * `100vh − 44`). Viewport arithmetic has no token, so it lives here.
  */
 export const dialogClamp = 'max-h-[calc(100vh-44px)] max-w-[calc(100vw-64px)]';
+
+/**
+ * Dialog `placement="top"` (03 §2 P-31, the command palette): 120px below the
+ * top of a 900px window ≈ 13vh, and never closer than 22px to the bottom edge
+ * (the clamp's bottom margin). Viewport arithmetic has no token.
+ */
+export const dialogTop = 'top-[13vh] max-h-[calc(87vh-22px)]';
+
+/**
+ * Fixed dialog boxes without a height/width token (`SHELL.dialogWidth` in
+ * packages/design-tokens chrome.ts): `lg` Settings 960×640 (the width is the
+ * `w-dialog-lg` token), `xl` Run dialog 1040×856. `dialogClamp` still wins on
+ * a smaller window.
+ */
+export const dialogHeightLg = 'h-[640px]';
+export const dialogBoxXl = 'h-[856px] w-[1040px]';

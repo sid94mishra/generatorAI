@@ -37,6 +37,7 @@ import {
   type RendererCommandId,
 } from '@generatorai/shared/ui-contract';
 import { commandHost, isMacOS, onDesktopCommand } from '@/lib/desktop.js';
+import { registerCommandRunner } from '@/lib/commandRunner.js';
 import { useUiStore } from '@/stores/uiStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
@@ -188,7 +189,12 @@ export function useCommandHost(): void {
 
   useEffect(() => {
     const run = (id: RendererCommandId) => HANDLERS[id](ctxRef.current);
-    if (commandHost !== 'web') return onDesktopCommand(run);
-    return installWebKeyHandler(window, run, { mac: isMacOS });
+    // The palette (and any other caller) runs commands through the same table.
+    const unregister = registerCommandRunner(run);
+    const uninstall = commandHost !== 'web' ? onDesktopCommand(run) : installWebKeyHandler(window, run, { mac: isMacOS });
+    return () => {
+      unregister();
+      uninstall();
+    };
   }, []);
 }

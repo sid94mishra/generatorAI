@@ -85,7 +85,7 @@ export const COMMANDS = {
   'find.open': { label: 'Find…', group: 'edit', scope: 'global', runsIn: 'renderer', web: null, desktopMac: 'Cmd+F', desktopWinLinux: 'Ctrl+F', icon: 'search' },
   'find.next': { label: 'Find next', group: 'edit', scope: 'global', runsIn: 'renderer', web: null, desktopMac: 'Cmd+G', desktopWinLinux: 'Ctrl+G' },
   'find.previous': { label: 'Find previous', group: 'edit', scope: 'global', runsIn: 'renderer', web: null, desktopMac: 'Cmd+Shift+G', desktopWinLinux: 'Ctrl+Shift+G' },
-  'shortcuts.show': { label: 'Keyboard shortcuts', group: 'help', scope: 'global', runsIn: 'renderer', web: 'Shift+/', desktopMac: 'Cmd+/', desktopWinLinux: 'Ctrl+/', palette: true },
+  'shortcuts.show': { label: 'Keyboard shortcuts', group: 'help', scope: 'global', runsIn: 'renderer', web: 'Shift+/', desktopMac: 'Cmd+/', desktopWinLinux: 'Ctrl+/', icon: 'keyboard', palette: true },
   'scripts.reload': { label: 'Reload scripts', group: 'app', scope: 'global', runsIn: 'renderer', web: null, desktopMac: null, desktopWinLinux: null, icon: 'refresh', palette: true },
   'window.reload': { label: 'Reload', group: 'view', scope: 'global', runsIn: 'main', web: null, desktopMac: 'Cmd+R', desktopWinLinux: 'Ctrl+R', icon: 'refresh' },
   'devtools.toggle': { label: 'Toggle developer tools', group: 'view', scope: 'global', runsIn: 'main', web: null, desktopMac: 'Alt+Cmd+I', desktopWinLinux: 'Ctrl+Shift+I' },
