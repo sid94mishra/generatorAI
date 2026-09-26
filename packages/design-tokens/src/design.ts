@@ -340,6 +340,8 @@ export const HEIGHTS = {
     'dialog-bar': 48,
     footer: 56,
     strip: CHROME.strip.height,
+    meter: 4,
+    tile: 96,
   },
   compact: {
     'control-sm': 20,
@@ -358,6 +360,8 @@ export const HEIGHTS = {
     'dialog-bar': 48,
     footer: 56,
     strip: CHROME.strip.height,
+    meter: 4,
+    tile: 96,
   },
 } as const satisfies Record<Density, Record<HeightName, number>>;
 
@@ -399,6 +403,9 @@ export const CONTAINER_WIDTHS = {
   dock: SHELL.dockWidth,
   'dock-run': SHELL.dockWidthRun,
   sheet: SHELL.dockSheetWidth,
+  aside: SHELL.summaryAsideWidth,
+  'side-rail': SHELL.detailRailWidth,
+  inspector: SHELL.inspectorWidth,
   'dialog-sm': SHELL.dialogWidth.sm,
   dialog: SHELL.dialogWidth.md,
   'dialog-lg': SHELL.dialogWidth.lg,

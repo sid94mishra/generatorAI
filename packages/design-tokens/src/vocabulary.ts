@@ -88,6 +88,12 @@ export const HEIGHT_NAMES = [
   'footer',
   // Windows / Linux-custom title strip (D-23): fixed, never density-shrunk.
   'strip',
+  // P-38 ProgressBar/Meter track (P5-01, 03 §2 P-38): 4px at both densities —
+  // a progress bar does not get smaller hit targets, it has none.
+  'meter',
+  // P-24 RadioCard `variant="tile"` (P5-01, 03 §2 P-24): 96px at both
+  // densities, like `badge`/`kbd`/`panel-bar` — a fixed picker tile, not a row.
+  'tile',
 ] as const;
 export type HeightName = (typeof HEIGHT_NAMES)[number];
 
@@ -98,8 +104,26 @@ export const SIZE_NAMES = ['control-sm', 'control', 'control-lg'] as const satis
 export const Z_NAMES = ['base', 'sticky', 'dock', 'rail', 'sidebar', 'dialog', 'dropdown', 'popover', 'toast', 'tooltip'] as const;
 export type ZName = (typeof Z_NAMES)[number];
 
-/** Shell widths (D-15, 02 §8): `w-sidebar`, `max-w-dialog` … via `--container-*`. */
-export const CONTAINER_NAMES = ['sidebar', 'rail', 'dock', 'dock-run', 'sheet', 'dialog-sm', 'dialog', 'dialog-lg'] as const;
+/**
+ * Shell widths (D-15, 02 §8): `w-sidebar`, `max-w-dialog` … via `--container-*`.
+ * `aside`/`side-rail`/`inspector` added in P5-01 (03 §1.4 "needed beyond the
+ * original D-08 list") for C-15 SummaryAside (320), T-02 DetailPage rail
+ * (360) and C-18 Inspector (400); the numbers already lived in `SHELL`
+ * (chrome.ts) as `summaryAsideWidth`/`detailRailWidth`/`inspectorWidth`.
+ */
+export const CONTAINER_NAMES = [
+  'sidebar',
+  'rail',
+  'dock',
+  'dock-run',
+  'sheet',
+  'aside',
+  'side-rail',
+  'inspector',
+  'dialog-sm',
+  'dialog',
+  'dialog-lg',
+] as const;
 export type ContainerName = (typeof CONTAINER_NAMES)[number];
 
 /** Easing curves: `ease-standard`. */

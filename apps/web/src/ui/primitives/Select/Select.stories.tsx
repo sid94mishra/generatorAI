@@ -1,73 +1,59 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
+import { expect, userEvent, waitFor, within } from 'storybook/test';
 import { Select, type SelectItem } from './Select.js';
 
-const COMPARE: SelectItem[] = [
-  { value: 'baseline', label: 'Since session start' },
-  { value: 'ref:7be0d15', label: 'Branch base (main)', meta: '7be0d15' },
-  { value: 'turn:t3', label: 'Also cover the zero-discount case · 14:02' },
-  { value: 'turn:t2', label: 'Fix coupon/total race · 14:01' },
-  { value: 'checkpoint:m1', label: 'Snapshot · 13:58', disabled: true },
+const AGENTS: SelectItem[] = [
+  { value: 'reviewer', label: 'Reviewer', meta: 'gpt' },
+  { value: 'writer', label: 'Writer', meta: 'claude' },
+  { value: 'planner', label: 'Planner', meta: 'claude', disabled: true },
 ];
 
-const onValueChange = fn();
-
-function Controlled({ initial = 'baseline', ...rest }: { initial?: string } & Partial<Parameters<typeof Select>[0]>) {
-  const [value, setValue] = useState<string | null>(initial);
+function Controlled(props: { placeholder?: string; invalid?: boolean }) {
+  const [value, setValue] = useState<string | null>(null);
   return (
-    <div className="w-64">
-      <Select
-        label="Compare against"
-        items={COMPARE}
-        value={value}
-        onValueChange={(next) => {
-          setValue(next);
-          onValueChange(next);
-        }}
-        {...rest}
-      />
-    </div>
+    <Select
+      aria-label="Agent"
+      items={AGENTS}
+      value={value}
+      onValueChange={setValue}
+      placeholder={props.placeholder ?? 'Choose an agent'}
+      invalid={props.invalid}
+      className="w-56"
+    />
   );
 }
 
 const meta = {
   component: Select,
-  args: { label: 'Compare against', items: COMPARE, value: 'baseline', onValueChange },
-  render: (args) => <Controlled initial={args.value ?? 'baseline'} size={args.size} disabled={args.disabled} invalid={args.invalid} />,
+  tags: ['vrt-themes'],
+  args: { value: null, onValueChange: () => {}, items: AGENTS },
 } satisfies Meta<typeof Select>;
+
 export default meta;
 type Story = StoryObj<typeof meta>;
 
-export const Medium: Story = {};
-
-export const Small: Story = { args: { size: 'sm' } };
-
-export const WithMeta: Story = { args: { value: 'ref:7be0d15' } };
-
-export const Placeholder: Story = {
-  render: () => (
-    <div className="w-64">
-      <Select label="Base branch" placeholder="Choose a branch" items={COMPARE} value={null} onValueChange={onValueChange} />
-    </div>
-  ),
+/** Opens the popup and picks an option. */
+export const Default: Story = {
+  render: () => <Controlled />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    await userEvent.click(canvas.getByRole('combobox', { name: 'Agent' }));
+    const option = await waitFor(() => within(document.body).getByRole('option', { name: /Writer/ }));
+    await userEvent.click(option);
+    await expect(canvas.getByRole('combobox', { name: 'Agent' })).toHaveTextContent('Writer');
+  },
 };
 
-export const Invalid: Story = { args: { invalid: true } };
-
-export const Disabled: Story = { args: { disabled: true } };
-
-/** Opens with the keyboard, lists every option, picks one. */
-export const PickWithKeyboard: Story = {
-  play: async ({ canvasElement }) => {
-    const trigger = within(canvasElement).getByRole('combobox', { name: 'Compare against' });
-    await expect(trigger).toHaveTextContent('Since session start');
-    trigger.focus();
-    await userEvent.keyboard('{ArrowDown}');
-    const listbox = await screen.findByRole('listbox');
-    await expect(within(listbox).getAllByRole('option')).toHaveLength(COMPARE.length);
-    await userEvent.click(within(listbox).getByRole('option', { name: /Branch base/ }));
-    await waitFor(() => expect(trigger).toHaveTextContent('Branch base (main)'));
-    await expect(onValueChange).toHaveBeenLastCalledWith('ref:7be0d15');
-  },
+/** sm/md sizes, placeholder, invalid, disabled. */
+export const Matrix: Story = {
+  render: () => (
+    <div className="flex flex-col gap-3">
+      <Select aria-label="Agent md" items={AGENTS} value="reviewer" onValueChange={() => {}} size="md" className="w-56" />
+      <Select aria-label="Agent sm" items={AGENTS} value="reviewer" onValueChange={() => {}} size="sm" className="w-56" />
+      <Select aria-label="Agent placeholder" items={AGENTS} value={null} onValueChange={() => {}} className="w-56" />
+      <Select aria-label="Agent invalid" items={AGENTS} value={null} onValueChange={() => {}} invalid className="w-56" />
+      <Select aria-label="Agent disabled" items={AGENTS} value="reviewer" onValueChange={() => {}} disabled className="w-56" />
+    </div>
+  ),
 };

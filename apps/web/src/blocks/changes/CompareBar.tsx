@@ -75,10 +75,10 @@ export function CompareBar({ base, onBaseChange, options }: CompareBarProps) {
       />
       <Select
         size="sm"
-        label="Compare against"
+        aria-label="Compare against"
         value={base}
         items={options}
-        onValueChange={onBaseChange}
+        onValueChange={(v) => { if (v !== null) onBaseChange(v as typeof base & string); }}
         className="max-w-60 min-w-32 flex-1"
       />
     </div>

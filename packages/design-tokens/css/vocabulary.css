@@ -85,6 +85,8 @@
   --height-dialog-bar: var(--gai-h-dialog-bar);
   --height-footer: var(--gai-h-footer);
   --height-strip: var(--gai-h-strip);
+  --height-meter: var(--gai-h-meter);
+  --height-tile: var(--gai-h-tile);
   --size-control-sm: var(--gai-h-control-sm);
   --size-control: var(--gai-h-control);
   --size-control-lg: var(--gai-h-control-lg);
@@ -110,6 +112,9 @@
   --container-dock: var(--gai-w-dock);
   --container-dock-run: var(--gai-w-dock-run);
   --container-sheet: var(--gai-w-sheet);
+  --container-aside: var(--gai-w-aside);
+  --container-side-rail: var(--gai-w-side-rail);
+  --container-inspector: var(--gai-w-inspector);
   --container-dialog-sm: var(--gai-w-dialog-sm);
   --container-dialog: var(--gai-w-dialog);
   --container-dialog-lg: var(--gai-w-dialog-lg);

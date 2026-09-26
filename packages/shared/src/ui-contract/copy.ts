@@ -140,3 +140,44 @@ export const TRANSCRIPT_COPY = {
 /** The three transcript view modes (G-06; client-only). */
 export const TRANSCRIPT_VIEW_MODES = ['normal', 'verbose', 'summary'] as const;
 export type TranscriptViewMode = (typeof TRANSCRIPT_VIEW_MODES)[number];
+
+// ── Empty-state copy (M-13, P5-01) ─────────────────────────────────────────
+// ────────────────────────────────────────────────────────────────
+// Shared empty-state copy (M-13, `08-mobile-readiness.md`). One icon/title/
+// description per "nothing here" state, so web (P-41 EmptyState) and, next
+// pass, mobile show the exact same sentence for the exact same reason
+// instead of each inventing its own (D-40). Status labels live with the
+// status map (`packages/shared/src/status`, P1-T10) and gate-card action
+// copy lands with the transcript kit (P4-07); this file is P5-01's slice:
+// the list/grid empty states the kit's EntityRow, EntityCard/CardGrid, and
+// the Home sections (L-01 Dashboard) need.
+//
+// `icon` is an `IconConcept` id (`packages/design-tokens`) kept as a plain
+// string — this module stays free of that package's dependency, the same
+// reason `StatusStateDef.glyph` (status/states.ts) is `status-${string}`
+// rather than a typed import.
+// ────────────────────────────────────────────────────────────────
+
+export interface EmptyStateCopy {
+  icon: string;
+  title: string;
+  description: string;
+}
+
+export const EMPTY_STATE_COPY = {
+  chats: { icon: 'chats', title: 'No chats yet', description: 'Start a chat to see it here.' },
+  projects: { icon: 'projects', title: 'No projects yet', description: 'Create a project to group codebases and chats.' },
+  codebases: { icon: 'projects', title: 'No codebases yet', description: 'Add a codebase to give agents something to work on.' },
+  agents: { icon: 'agents', title: 'No agents yet', description: 'Create an agent to give it a name, a model and a job.' },
+  workflows: { icon: 'workflows', title: 'No workflows yet', description: 'Build a workflow to automate a repeatable task.' },
+  automations: { icon: 'automations', title: 'No automations yet', description: 'Schedule a workflow to run automatically.' },
+  scripts: { icon: 'scripts', title: 'No scripts yet', description: 'Add a script to run repeatable commands.' },
+  runs: { icon: 'activity', title: 'No runs yet', description: 'Runs appear here once a workflow starts.' },
+  pullRequests: { icon: 'pr', title: 'No pull requests yet', description: 'Pull requests opened from a chat appear here.' },
+  needsYou: { icon: 'hand', title: 'Nothing needs you', description: 'You are all caught up.' },
+  running: { icon: 'status-running', title: 'Nothing running', description: 'Started chats and runs appear here.' },
+  recentlyFinished: { icon: 'status-succeeded', title: 'Nothing finished yet', description: 'Completed chats and runs appear here.' },
+  searchResults: { icon: 'search', title: 'No results', description: 'Try a different search.' },
+} as const satisfies Record<string, EmptyStateCopy>;
+
+export type EmptyStateKey = keyof typeof EMPTY_STATE_COPY;

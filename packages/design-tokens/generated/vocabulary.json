@@ -231,7 +231,9 @@
         "panel-bar",
         "dialog-bar",
         "footer",
-        "strip"
+        "strip",
+        "meter",
+        "tile"
       ]
     },
     {
@@ -276,6 +278,9 @@
         "dock",
         "dock-run",
         "sheet",
+        "aside",
+        "side-rail",
+        "inspector",
         "dialog-sm",
         "dialog",
         "dialog-lg"

@@ -8709,6 +8709,8 @@
   --gai-h-dialog-bar: 48px;
   --gai-h-footer: 56px;
   --gai-h-strip: 36px;
+  --gai-h-meter: 4px;
+  --gai-h-tile: 96px;
   /* Type — interface font size 13 (D-13) */
   --gai-text-micro: 11px;
   --gai-leading-micro: 1.45;
@@ -8760,6 +8762,9 @@
   --gai-w-dock: 480px;
   --gai-w-dock-run: 440px;
   --gai-w-sheet: 380px;
+  --gai-w-aside: 320px;
+  --gai-w-side-rail: 360px;
+  --gai-w-inspector: 400px;
   --gai-w-dialog-sm: 420px;
   --gai-w-dialog: 640px;
   --gai-w-dialog-lg: 960px;
@@ -8782,6 +8787,8 @@
   --gai-h-dialog-bar: 48px;
   --gai-h-footer: 56px;
   --gai-h-strip: 36px;
+  --gai-h-meter: 4px;
+  --gai-h-tile: 96px;
 }
 
 [data-font-size="12"] {
