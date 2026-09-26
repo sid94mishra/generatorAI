@@ -19,7 +19,7 @@ registerTasksSection(
 );
 
 // Workflow Overhaul P06 WP-6.2: the runs this chat started through its
-// workflow tools (the legacy BackgroundTasksPanel's "Workflow runs" list).
+// workflow tools (the former BackgroundTasksPanel's "Workflow runs" list).
 registerTasksSection(
   {
     id: 'workflow-runs',

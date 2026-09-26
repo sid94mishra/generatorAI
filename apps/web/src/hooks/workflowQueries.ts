@@ -7,7 +7,7 @@ import { useEffect } from 'react';
 import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import { openMultiplexedStream } from '../platform/muxStream.js';
-import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
+import type { HttpPlatformClient, WorkflowEngineSettingsUpdate } from '../platform/HttpPlatformClient.js';
 import type { InvocationFiles, WorkflowRunListFilter, WorkflowRunPermissionMode } from '@generatorai/shared';
 import type { InvocationRequest, RunCommand, WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
 import { mergeWorkflowRunCards, type WorkflowRunCardView } from '@generatorai/client-core';
@@ -448,5 +448,43 @@ export function useRunFileContent(
     queryFn: () => platform.getRunFileContent(runId!, filePath!, source, worktreeAlias),
     enabled: !!runId && !!filePath,
     staleTime: 60_000,
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// Workflow engine settings (Settings → Workflow engine, P07 WP-7.2)
+// ════════════════════════════════════════════════════════════════
+
+export type {
+  WorkflowEngineFlow,
+  WorkflowEngineSettings,
+  WorkflowEngineSettingsUpdate,
+} from '../platform/HttpPlatformClient.js';
+
+export const workflowEngineKeys = {
+  settings: ['settings', 'workflow-engine'] as const,
+};
+
+/** How often the flow table's live running/queued counts refresh while the section is open. */
+const WORKFLOW_ENGINE_REFRESH_MS = 3000;
+
+/** The engine's flow limits, summary model and trigger debounce, plus each flow key's live load. */
+export function useWorkflowEngineSettings() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: workflowEngineKeys.settings,
+    queryFn: () => platform.getWorkflowEngineSettings(),
+    // Live running/queued counts while the section is on screen.
+    refetchInterval: WORKFLOW_ENGINE_REFRESH_MS,
+  });
+}
+
+/** Write engine settings; `flowLimits` replaces the whole configured map (a key left out is back on its default). */
+export function useUpdateWorkflowEngineSettings() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (update: WorkflowEngineSettingsUpdate) => platform.setWorkflowEngineSettings(update),
+    onSuccess: (next) => queryClient.setQueryData(workflowEngineKeys.settings, next),
   });
 }

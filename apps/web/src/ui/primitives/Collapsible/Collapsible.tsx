@@ -64,14 +64,25 @@ const CHEVRON: Record<CollapsibleVariant, { concept: IconConcept; className: str
   section: { concept: 'chevron-down', className: 'ml-auto text-fg-3 group-data-panel-open:rotate-180' },
 };
 
-function TriggerContent({ variant, icon, children }: { variant: CollapsibleVariant; icon?: IconConcept; children: ReactNode }) {
+function TriggerContent({
+  variant,
+  icon,
+  richContent = false,
+  children,
+}: {
+  variant: CollapsibleVariant;
+  icon?: IconConcept;
+  /** The trigger holds multi-line content (a CatalogRow), so it is not clamped to one truncated line. */
+  richContent?: boolean;
+  children: ReactNode;
+}) {
   const chevron = CHEVRON[variant];
   const glyph = variant === 'disclosure' ? 14 : 16;
   return (
     <>
       {icon ? <Icon concept={icon} size={glyph} /> : null}
-      <span className="min-w-0 truncate text-start">{children}</span>
-      <Icon concept={chevron.concept} size={variant === 'disclosure' ? 12 : 14} className={chevron.className} />
+      <span className={cn('min-w-0 flex-1 text-start', richContent ? 'py-0.5' : 'truncate')}>{children}</span>
+      <Icon concept={chevron.concept} size={variant === 'disclosure' ? 12 : 14} className={cn('shrink-0', chevron.className)} />
     </>
   );
 }
@@ -91,9 +102,18 @@ export interface CollapsibleProps
   className?: string;
   triggerClassName?: string;
   panelClassName?: string;
+  /**
+   * A control that sits OUTSIDE the trigger, on the same row (a Switch, a
+   * busy Spinner) — never nested inside it, so an interactive control is
+   * never a button inside a button (the settings CatalogRow: Skills, MCP
+   * servers, Model providers).
+   */
+  endSlot?: ReactNode;
+  /** The trigger holds multi-line content instead of one truncated label (a CatalogRow). */
+  richContent?: boolean;
 }
 
-/** One show/hide region with its trigger. */
+/** One show/hide region with its trigger, and an optional external control on the trigger's row. */
 export function Collapsible({
   trigger,
   variant = 'disclosure',
@@ -102,18 +122,37 @@ export function Collapsible({
   className,
   triggerClassName,
   panelClassName,
+  endSlot,
+  richContent = false,
   ...rest
 }: CollapsibleProps) {
+  const triggerNode = (
+    <BaseCollapsible.Trigger
+      className={cn(
+        TRIGGER[variant],
+        variant === 'disclosure' && 'self-start',
+        endSlot != null && 'min-w-0 flex-1',
+        richContent && 'items-start',
+        focusRing,
+        triggerClassName,
+      )}
+      {...triggerAttrs(variant)}
+    >
+      <TriggerContent variant={variant} icon={icon} richContent={richContent}>
+        {trigger}
+      </TriggerContent>
+    </BaseCollapsible.Trigger>
+  );
   return (
     <BaseCollapsible.Root className={cn('flex min-w-0 flex-col items-stretch', className)} {...rest}>
-      <BaseCollapsible.Trigger
-        className={cn(TRIGGER[variant], variant === 'disclosure' && 'self-start', focusRing, triggerClassName)}
-        {...triggerAttrs(variant)}
-      >
-        <TriggerContent variant={variant} icon={icon}>
-          {trigger}
-        </TriggerContent>
-      </BaseCollapsible.Trigger>
+      {endSlot != null ? (
+        <div className="flex items-center gap-2">
+          {triggerNode}
+          <div className="shrink-0">{endSlot}</div>
+        </div>
+      ) : (
+        triggerNode
+      )}
       <BaseCollapsible.Panel className={cn(PANEL[variant], panelClassName)}>{children}</BaseCollapsible.Panel>
     </BaseCollapsible.Root>
   );

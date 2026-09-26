@@ -407,7 +407,7 @@ export function WorkflowDraftCard({ draft, className }: { draft: WorkflowDraftTo
  * Workflow runs the orchestrator started (`run_workflow`, P06 WP-6.2): the
  * same cards the transcript shows under each call, as one list. Registered
  * as the chat dock's "Workflow runs" Tasks section (app/registries/
- * tasksSections.tsx); ported from the legacy BackgroundTasksPanel.
+ * tasksSections.tsx); moved here from the former BackgroundTasksPanel.
  */
 export function ChatWorkflowRunsSection({ chatId, stacked }: { chatId: string; stacked: boolean }) {
   const navigate = useNavigate();

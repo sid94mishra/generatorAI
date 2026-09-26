@@ -5,27 +5,33 @@
 // features/settings/settingsSections.ts.
 
 import {
+  AgentsSection,
   AppearanceSection,
+  GeneralSection,
+  McpSection,
+  ProvidersSection,
+  AudioSection,
+  BrowserTerminalSection,
+  ComputerUseSection,
+  DiagnosticsSection,
+  ExtensionsSection,
   SecuritySection,
+  SkillsSection,
+  SourceControlSection,
+  TemplatesSection,
+  StorageSection,
+  WorkflowEngineSection,
   registerSettingsSection,
   type SettingsSectionDefinition,
 } from '@/features/settings/index.js';
 import { SettingsStatusFooter } from '@/ui/patterns/SettingsSection/SettingsSection.js';
-import { GeneralSection } from '@/components/settings/sections/General.js';
-import { ProvidersSection } from '@/components/settings/sections/Providers.js';
-import { SkillsSection, McpSection, TemplatesSection } from '@/components/settings/sections/Catalogs.js';
-import { AgentsSection } from '@/components/settings/sections/Agents.js';
-import { SourceControlSection } from '@/components/settings/sections/SourceControl.js';
-import { BrowserTerminalSection } from '@/components/settings/sections/BrowserTerminal.js';
-import { ComputerUseSection } from '@/components/settings/sections/ComputerUse.js';
-import { ExtensionsSection } from '@/components/settings/sections/Extensions.js';
-import { DiagnosticsSection } from '@/components/settings/sections/Diagnostics.js';
-import { WorkspaceRetentionSection } from '@/components/settings/sections/WorkspaceRetention.js';
-import { AudioSection } from '@/components/settings/sections/Audio.js';
-import { WorkflowEngineSection } from '@/components/settings/sections/WorkflowEngine.js';
 
 const SECTIONS: SettingsSectionDefinition[] = [
-  { id: 'general', render: () => <GeneralSection /> },
+  {
+    id: 'general',
+    render: () => <GeneralSection />,
+    footer: <SettingsStatusFooter icon="check">Changes apply instantly · Saved on this device</SettingsStatusFooter>,
+  },
   {
     id: 'appearance',
     render: () => <AppearanceSection />,
@@ -33,20 +39,48 @@ const SECTIONS: SettingsSectionDefinition[] = [
   },
   { id: 'providers', render: () => <ProvidersSection /> },
   { id: 'agents', render: () => <AgentsSection /> },
-  { id: 'skills', render: () => <SkillsSection /> },
+  {
+    id: 'skills',
+    render: () => <SkillsSection />,
+    footer: <SettingsStatusFooter icon="check">Disabled skills are excluded on this device only</SettingsStatusFooter>,
+  },
   { id: 'mcp', render: () => <McpSection /> },
   { id: 'templates', render: () => <TemplatesSection /> },
-  { id: 'source-control', render: () => <SourceControlSection /> },
-  { id: 'browser-terminal', render: () => <BrowserTerminalSection /> },
-  { id: 'computer-use', render: () => <ComputerUseSection /> },
-  { id: 'audio', render: () => <AudioSection /> },
-  { id: 'extensions', render: () => <ExtensionsSection /> },
+  {
+    id: 'source-control',
+    render: () => <SourceControlSection />,
+    footer: <SettingsStatusFooter icon="server">Accounts and defaults are saved to the server</SettingsStatusFooter>,
+  },
+  {
+    id: 'browser-terminal',
+    render: () => <BrowserTerminalSection />,
+    footer: <SettingsStatusFooter icon="check">Changes apply instantly · Saved on this device</SettingsStatusFooter>,
+  },
+  {
+    id: 'computer-use',
+    render: () => <ComputerUseSection />,
+    footer: <SettingsStatusFooter icon="shield">Saved to the server</SettingsStatusFooter>,
+  },
+  {
+    id: 'audio',
+    render: () => <AudioSection />,
+    footer: <SettingsStatusFooter icon="check">Saved to the server · the microphone choice stays on this device</SettingsStatusFooter>,
+  },
+  {
+    id: 'extensions',
+    render: () => <ExtensionsSection />,
+    footer: <SettingsStatusFooter icon="check">Saved to the server</SettingsStatusFooter>,
+  },
   {
     id: 'security',
     render: () => <SecuritySection />,
     footer: <SettingsStatusFooter icon="shield">Saved to this server · devices need a pairing code to connect</SettingsStatusFooter>,
   },
-  { id: 'storage', render: () => <WorkspaceRetentionSection /> },
+  {
+    id: 'storage',
+    render: () => <StorageSection />,
+    footer: <SettingsStatusFooter icon="check">Saved to the server</SettingsStatusFooter>,
+  },
   { id: 'workflow-engine', render: () => <WorkflowEngineSection /> },
   { id: 'diagnostics', render: () => <DiagnosticsSection /> },
 ];

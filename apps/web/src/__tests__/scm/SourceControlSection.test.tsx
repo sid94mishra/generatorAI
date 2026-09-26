@@ -14,7 +14,7 @@ import { render, screen, fireEvent, waitFor, act } from '@testing-library/react'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { PlatformContext } from '@/providers/PlatformProvider.js';
-import { SourceControlSection } from '@/components/settings/sections/SourceControl.js';
+import { SourceControlSection } from '@/features/settings/source-control/SourceControlSection.js';
 import type { IPlatformClient } from '@generatorai/shared';
 
 // The model picker's catalog comes from `platform.getHarnessProviders()` (G-09).
