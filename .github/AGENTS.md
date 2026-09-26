@@ -70,6 +70,7 @@ GeneratorAI/
 | **Stage definitions** (every config / option / edge case) | [docs/feature-stages.md](./docs/feature-stages.md) |
 | **Workflow runs** (state machine, DAG scheduling, profiles, HITL, retries, validation, predecessor summaries) | [docs/feature-workflow-runs.md](./docs/feature-workflow-runs.md) |
 | **Workflow control flow** (check, loop, map, sub-workflow, wait; decision commands; callbacks; generated templates) | [docs/feature-workflow-control-flow.md](./docs/feature-workflow-control-flow.md) |
+| **Workflows from agents** (the workflow tools for chats, orchestrators, stages and MCP; limits; approval delegation; drafts and publishing; the `generatorai-workflow-author` skill; Claude Code / Codex setup) | [docs/feature-workflows-from-agents.md](./docs/feature-workflows-from-agents.md) |
 | **Automations** (triggers, input modes, data sources, concurrency, error policy) | [docs/feature-automations.md](./docs/feature-automations.md) |
 | **Projects + codebases** (git-remote / git-local / local-dir, link / fetch / branches / files) | [docs/feature-projects-codebases.md](./docs/feature-projects-codebases.md) |
 | **Workspaces + file management** (execution workspaces, worktrees, artifacts at run/stage/project/global level) | [docs/feature-workspaces-files.md](./docs/feature-workspaces-files.md) |

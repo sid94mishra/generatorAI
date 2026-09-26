@@ -921,6 +921,42 @@
         "packages/sdk/"
       ],
       "reason": "WP-5B.1/5B.2: the G5 draft shapes of map (itemLabel, output enum) and sub-workflow (budgetShare, child_run_settled) are not shapes: map.output.select, the stage budget, the child_settled message"
+    },
+    {
+      "phase": "06",
+      "pattern": "\bHUMAN_PRINCIPALS\b",
+      "paths": [
+        "apps/server/"
+      ],
+      "reason": "P06 WP-6.5: who publishes is isPersonRequest (a paired device is a person unless it is an MCP device); the principal-type set is gone"
+    },
+    {
+      "phase": "06",
+      "pattern": "\b(dry_run_workflow|author_workflow)\b",
+      "paths": [
+        "apps/",
+        "packages/"
+      ],
+      "reason": "P06: the G4 draft names; the tools are plan_workflow and create_workflow_draft, and there are no MCP prompts (no slash commands)"
+    },
+    {
+      "phase": "06",
+      "pattern": "\b(ListPromptsRequestSchema|GetPromptRequestSchema)\b",
+      "paths": [
+        "packages/mcp-server/"
+      ],
+      "reason": "P06 WP-6.8: the MCP server has tools and resources only; an MCP prompt is a slash command in Claude Code"
+    },
+    {
+      "phase": "06",
+      "pattern": "import-json",
+      "paths": [
+        "apps/server/src/",
+        "packages/cli-core/",
+        "packages/client-core/",
+        "packages/mcp-server/"
+      ],
+      "reason": "P06: definitions import through /workflow-definitions/import (drafts); there is no import-json route or command"
     }
   ],
   "comments": {

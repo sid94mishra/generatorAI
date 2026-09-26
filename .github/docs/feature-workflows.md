@@ -10,6 +10,8 @@ generated [FIELDS.md](../../docs/workflow-overhaul/generated/FIELDS.md); the JSO
 Stage configuration is covered in [feature-stages.md](./feature-stages.md). The control-flow
 kinds — `check`, `loop`, `map`, `subworkflow`, `wait` — their semantics, the operator commands
 and the generated templates are in [feature-workflow-control-flow.md](./feature-workflow-control-flow.md).
+Agents author workflows (validate → plan → draft → a person publishes) and run them through the
+workflow tools: [feature-workflows-from-agents.md](./feature-workflows-from-agents.md).
 
 ---
 
