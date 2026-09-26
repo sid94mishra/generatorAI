@@ -1,8 +1,9 @@
 // ────────────────────────────────────────────────────────────────
 // useServers / switchServer / addServer — the G-03 web hooks.
 //
-// Pinned: desktop picks the IPC list + probes it; plain web falls back to the
-// client-runtime catalog; `onChanged` invalidates the query on desktop only;
+// Pinned: desktop takes the IPC list with the status main probed; plain web
+// falls back to the client-runtime catalog and probes only its own origin
+// (P1-review P2-R6); `onChanged` invalidates the query on desktop only;
 // switching/adding delegate to the right side depending on platform.
 // ────────────────────────────────────────────────────────────────
 
@@ -10,11 +11,12 @@ import React from 'react';
 import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { DesktopServerEntry } from '@generatorai/shared';
 
 const state = vi.hoisted(() => ({
   isDesktop: false,
   serversAvailable: true,
-  list: vi.fn(async () => [] as Array<{ id: string; label: string; url: string; kind: 'embedded' | 'remote'; active: boolean }>),
+  list: vi.fn(async (): Promise<DesktopServerEntry[]> => []),
   switchTo: vi.fn(),
   add: vi.fn(),
   onChangedHandlers: [] as Array<() => void>,
@@ -73,62 +75,54 @@ afterEach(() => {
 });
 
 describe('useServers', () => {
-  it('is undefined until loaded, then desktop entries probed for reachability', async () => {
+  it('is undefined until loaded, then the desktop entries with the status main probed (R6)', async () => {
     state.isDesktop = true;
-    state.list.mockResolvedValue([
-      { id: 'embedded', label: 'This computer (GeneratorAI)', url: 'http://127.0.0.1:3100', kind: 'embedded', active: true },
-      { id: 'srv-1', label: 'studio', url: 'https://studio.example:3100', kind: 'remote', active: false },
-    ]);
+    const entries: DesktopServerEntry[] = [
+      { id: 'embedded', label: 'This computer (GeneratorAI)', url: 'http://127.0.0.1:3100', kind: 'embedded', active: true, status: 'connected', serverName: 'Mine', latencyMs: 3 },
+      { id: 'srv-1', label: 'studio', url: 'https://studio.example:3100', kind: 'remote', active: false, status: 'offline' },
+    ];
+    state.list.mockResolvedValue(entries);
 
     const { result } = renderHook(() => useServers(), { wrapper });
     expect(result.current.data).toBeUndefined();
     await waitFor(() => expect(result.current.data).toHaveLength(2));
 
-    expect(result.current.data).toEqual([
-      {
-        id: 'embedded',
-        label: 'This computer (GeneratorAI)',
-        url: 'http://127.0.0.1:3100',
-        kind: 'embedded',
-        active: true,
-        status: 'connected',
-        serverName: 'Studio',
-        latencyMs: 12,
-      },
-      {
-        id: 'srv-1',
-        label: 'studio',
-        url: 'https://studio.example:3100',
-        kind: 'remote',
-        active: false,
-        status: 'connected',
-        serverName: 'Studio',
-        latencyMs: 12,
-      },
-    ]);
-    expect(probeServer).toHaveBeenCalledWith('http://127.0.0.1:3100', { timeoutMs: 2500 });
+    expect(result.current.data).toEqual(entries);
+    // The renderer never probes on desktop: its CSP only allows its own origin.
+    expect(probeServer).not.toHaveBeenCalled();
   });
 
-  it('falls back to the client-runtime catalog off desktop', async () => {
+  it('surfaces a failed desktop list as a query error, not an empty list (R23)', async () => {
+    state.isDesktop = true;
+    state.list.mockRejectedValue(new Error('ipc failed'));
+    const { result } = renderHook(() => useServers(), { wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.data).toBeUndefined();
+  });
+
+  it("off desktop: the catalog, probing only the entry on this page's own origin (R6)", async () => {
     state.isDesktop = false;
+    const here = window.location.origin;
     webAuth.listConnections.mockReturnValue([
+      { serverId: 'srv-here', label: 'This server', endpoint: here, kind: 'local' },
       { serverId: 'srv-a', label: 'Home server', endpoint: 'https://home.example', kind: 'remote' },
     ]);
-    webAuth.getActiveConnection.mockReturnValue({ serverId: 'srv-a' });
+    webAuth.getActiveConnection.mockReturnValue({ serverId: 'srv-here' });
 
     const { result } = renderHook(() => useServers(), { wrapper });
-    await waitFor(() => expect(result.current.data).toHaveLength(1));
-    expect(result.current.data![0]).toMatchObject({ id: 'srv-a', kind: 'remote', active: true, status: 'connected' });
+    await waitFor(() => expect(result.current.data).toHaveLength(2));
+    expect(result.current.data![0]).toMatchObject({ id: 'srv-here', active: true, status: 'connected', serverName: 'Studio' });
+    expect(result.current.data![1]).toEqual({
+      id: 'srv-a',
+      label: 'Home server',
+      url: 'https://home.example',
+      kind: 'remote',
+      active: false,
+      status: 'unknown',
+    });
+    expect(probeServer).toHaveBeenCalledTimes(1);
+    expect(probeServer).toHaveBeenCalledWith(here, { timeoutMs: 2500, expectedServerId: 'srv-here' });
     expect(state.list).not.toHaveBeenCalled();
-  });
-
-  it('reports offline without probing when a server has no url', async () => {
-    state.isDesktop = true;
-    state.list.mockResolvedValue([{ id: 'embedded', label: 'This computer', url: '', kind: 'embedded', active: true }]);
-    const { result } = renderHook(() => useServers(), { wrapper });
-    await waitFor(() => expect(result.current.data).toHaveLength(1));
-    expect(result.current.data![0]?.status).toBe('offline');
-    expect(probeServer).not.toHaveBeenCalled();
   });
 
   it('invalidates the query when the desktop bridge reports a change', async () => {

@@ -11,15 +11,15 @@ import {
   IPC_EVENT,
   type AppInfo,
   type ServerStatus,
-  type AppearancePush,
-  type AppearanceRequest,
+  type DesktopAppearancePush,
+  type DesktopAppearanceRequest,
   type SaveFileOptions,
   type DesktopCommand,
   type DesktopPairingCode,
   type DesktopServerEntry,
-  type ShellState,
+  type DesktopShellStatePush,
   type FindInPageResult,
-  type UpdateState,
+  type DesktopUpdateState,
   type WindowChrome,
   type WindowStateChange,
 } from '../shared/ipc';
@@ -66,14 +66,14 @@ const api = {
   },
 
   /** A mode picked in the native View ▸ Appearance menu; ThemeProvider applies it (D-25). */
-  onAppearanceRequest: (cb: (request: AppearanceRequest) => void): (() => void) => {
-    const handler = (_e: unknown, r: AppearanceRequest) => cb(r);
+  onAppearanceRequest: (cb: (request: DesktopAppearanceRequest) => void): (() => void) => {
+    const handler = (_e: unknown, r: DesktopAppearanceRequest) => cb(r);
     ipcRenderer.on(IPC_EVENT.appearanceRequest, handler);
     return () => ipcRenderer.removeListener(IPC_EVENT.appearanceRequest, handler);
   },
 
   /** The renderer's appearance, mirrored by main (background, caption glyphs, themeSource). */
-  setAppearance: (appearance: AppearancePush): Promise<void> =>
+  setAppearance: (appearance: DesktopAppearancePush): Promise<void> =>
     ipcRenderer.invoke(IPC.setAppearance, appearance),
 
   showItemInFolder: (fullPath: string): Promise<boolean> =>
@@ -105,7 +105,7 @@ const api = {
    * Mirrors renderer UI state into the native menu, so `View ▸ Toggle
    * Sidebar` shows a real checkmark and `Back` greys out when it would no-op.
    */
-  setMenuState: (state: Partial<ShellState>): Promise<void> =>
+  setMenuState: (state: Partial<DesktopShellStatePush>): Promise<void> =>
     ipcRenderer.invoke(IPC.setMenuState, state),
 
   // ── Server switcher (G-03) ──
@@ -122,12 +122,21 @@ const api = {
 
   // ── Updater (G-04) ──
   updates: {
-    getState: (): Promise<UpdateState> => ipcRenderer.invoke(IPC.getUpdateState),
+    getState: (): Promise<DesktopUpdateState> => ipcRenderer.invoke(IPC.getUpdateState),
     install: (): Promise<void> => ipcRenderer.invoke(IPC.installUpdate),
-    onChange: (cb: (state: UpdateState) => void): Unsubscribe => {
-      const handler = (_e: unknown, state: UpdateState) => cb(state);
+    /**
+     * Also tells main someone is listening: main skips its native "update
+     * ready" dialog only while a renderer has subscribed and the window is
+     * visible (P1-review P2-R3).
+     */
+    onChange: (cb: (state: DesktopUpdateState) => void): Unsubscribe => {
+      const handler = (_e: unknown, state: DesktopUpdateState) => cb(state);
       ipcRenderer.on(IPC_EVENT.updateStateChanged, handler);
-      return () => ipcRenderer.removeListener(IPC_EVENT.updateStateChanged, handler);
+      void ipcRenderer.invoke(IPC.watchUpdates, true).catch(() => undefined);
+      return () => {
+        ipcRenderer.removeListener(IPC_EVENT.updateStateChanged, handler);
+        void ipcRenderer.invoke(IPC.watchUpdates, false).catch(() => undefined);
+      };
     },
   },
 

@@ -487,6 +487,17 @@ export {
   compareAttentionItems,
 } from './Attention.js';
 
+// ── Desktop shell IPC payloads (G-03…G-05, D-25) ──
+export type {
+  DesktopThemePreference,
+  DesktopAppearancePush,
+  DesktopAppearanceRequest,
+  DesktopShellStatePush,
+  ServerReachability,
+  DesktopServerEntry,
+  DesktopUpdateState,
+} from './DesktopShell.js';
+
 // ── Chat list v2 (G-02) ──
 export type {
   ChatTurnStatus,

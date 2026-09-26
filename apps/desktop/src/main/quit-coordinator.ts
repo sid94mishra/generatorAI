@@ -1,36 +1,30 @@
 // ────────────────────────────────────────────────────────────────
-// The one bounded shutdown sequence, shared by every path that ends the
-// process: the normal `before-quit` handler (index.ts) and the update
-// install path (`updater.ts` `installUpdate`, 06-desktop-and-shell.md §11
-// risk R5).
+// The one bounded shutdown sequence that ends the process.
 //
-// Why this has to be shared rather than duplicated: `before-quit` always
-// finishes in `app.exit(0)`, because a shutdown step that hangs must not hang
-// the whole app with it (that happened once in a shipped build — see the
-// comment on `runQuitShutdown`). But `app.exit()` skips `before-quit` and
-// `will-quit` entirely, which is exactly what `electron-updater`'s
-// `autoInstallOnAppQuit` listens for (`app.once('quit', …)`) — so an update
-// quit that went through the *same* forced exit would spawn the installer
-// but then race it against a process teardown that never told anything the
-// quit was "real". `installUpdate` instead runs this same routine and then
-// calls `quitAndInstall()`, whose own `app.quit()` is left to finish
-// normally: `runQuitShutdown` already marked the quit handled, so
-// `before-quit` no-ops instead of intercepting it a second time.
+// `before-quit` (index.ts) cancels Electron's own quit and calls `quitApp`,
+// which asks about unsaved work, stops what this shell owns, and finishes in
+// `app.exit(0)`. Every quit goes through here, including an update install:
+// `quitAndInstall()`'s `app.quit()` reaches `before-quit` like any other quit
+// (updater.ts `installUpdate`).
+//
+// `app.exit(0)` is not a problem for installing updates (06 §11 R5, P1-review
+// P2-R5). Electron documents that `app.exit` skips `before-quit` and
+// `will-quit`; it does not skip `quit`. `Browser::ExitWithCode` destroys the
+// windows and runs `Browser::Shutdown`, which notifies `OnQuit`, and
+// `App::OnQuit` emits `quit` with the exit code. electron-updater's
+// `autoInstallOnAppQuit` hook is `app.once('quit', …)` and installs when that
+// code is 0. Still to be confirmed per OS with `mock-update-server` (07 R-10).
 // ────────────────────────────────────────────────────────────────
 
+import { app } from 'electron';
 import { disposeComputerHost } from './computer-host-registry';
 import { getServerManager } from './server-manager';
 import { getWindowManager } from './window-manager';
 import { destroyTray } from './tray';
 import { log } from './logger';
 
-let quitHandled = false;
 let quitting = false;
-
-/** True once `runQuitShutdown` has run (or is running) to completion. */
-export function isQuitHandled(): boolean {
-  return quitHandled;
-}
+let inFlight: Promise<boolean> | null = null;
 
 /** True from the moment a quit was accepted, for callers that must stop starting new work. */
 export function isQuitting(): boolean {
@@ -40,12 +34,6 @@ export function isQuitting(): boolean {
 /** Lets `promptVaultReset`'s "Quit" choice mark the same flag without going through the full sequence. */
 export function markQuitting(value: boolean): void {
   quitting = value;
-}
-
-/** Test-only: resets module state between cases. Never called from production code. */
-export function __resetQuitStateForTests(): void {
-  quitHandled = false;
-  quitting = false;
 }
 
 /**
@@ -74,26 +62,34 @@ async function withDeadline(work: Promise<void>, ms: number, message: string): P
 }
 
 /**
- * Runs the bounded shutdown sequence exactly once: confirms discard, stops
- * the computer host and (in standalone mode) the embedded server, and tears
- * down the tray.
+ * Confirms discard, stops the computer host and (in standalone mode) the
+ * embedded server, tears down the tray, then exits.
  *
- * Bounded, because whatever the caller does after this returns (`app.exit(0)`
- * for a normal quit, `quitAndInstall()` for an update) is the only thing that
- * actually ends the process — a step that will not drain or release here
- * takes the whole quit with it, and the user is left with a window that
- * closed and an application that did not, still holding the database and the
- * port. That happened once in a shipped build and had to be killed from the
- * task manager, which is why this has its own deadline rather than the
- * caller's.
+ * Bounded, because `app.exit(0)` at the end is the only thing that actually
+ * ends the process once `before-quit` has been cancelled. A step that will not
+ * drain or release here takes the whole quit with it, and the user is left
+ * with a window that closed and an application that did not, still holding
+ * the database and the port. That happened once in a shipped build and had to
+ * be killed from the task manager, which is why this has its own deadline.
  *
- * Returns false when the user declined (unsaved work) or a shutdown is
- * already under way — the caller must not proceed to exit/install in that case.
+ * One quit at a time: a second call while one is running (Cmd+Q pressed again
+ * while the discard prompt is open, the tray's Quit, an update install) gets
+ * the same promise instead of a second prompt and a second shutdown
+ * (P1-review P2-R23). Resolves false when the user kept their unsaved work;
+ * a later quit may then ask again.
  */
-export async function runQuitShutdown(mode: 'dev' | 'standalone'): Promise<boolean> {
-  if (quitHandled) return false;
+export function quitApp(mode: 'dev' | 'standalone', exit: (code: number) => void = (code) => app.exit(code)): Promise<boolean> {
+  if (!inFlight) {
+    inFlight = runQuit(mode, exit).then((proceeded) => {
+      if (!proceeded) inFlight = null;
+      return proceeded;
+    });
+  }
+  return inFlight;
+}
+
+async function runQuit(mode: 'dev' | 'standalone', exit: (code: number) => void): Promise<boolean> {
   if (!(await getWindowManager().confirmDiscard())) return false;
-  quitHandled = true;
   quitting = true;
   getWindowManager().setQuitting(true);
   log.info('Quitting — shutting down embedded server');
@@ -123,5 +119,7 @@ export async function runQuitShutdown(mode: 'dev' | 'standalone'): Promise<boole
       log.warn('Error destroying tray during quit', e);
     }
   }
+  log.info('Exiting');
+  exit(0);
   return true;
 }

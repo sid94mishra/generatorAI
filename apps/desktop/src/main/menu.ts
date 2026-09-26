@@ -36,7 +36,7 @@ import {
   switchToEmbedded,
   switchToRemote,
 } from './backend-switcher';
-import type { MenuState, ThemePreference } from '../shared/ipc';
+import type { MenuState, DesktopThemePreference } from '../shared/ipc';
 
 export interface MenuActions {
   showAbout: () => void;
@@ -54,15 +54,9 @@ let menuState: MenuState = {
   rightPaneOpen: false,
   mode: 'dark',
   recent: [],
-  attention: null,
 };
 
 let cachedActions: MenuActions | null = null;
-
-/** Latest renderer-pushed state, for `tray.ts` (G-05: "Server running · N agents", the Home badge). */
-export function getMenuState(): Readonly<MenuState> {
-  return menuState;
-}
 
 /**
  * Whether Back/Forward can move, asked of the thing that actually knows.
@@ -101,8 +95,27 @@ export function updateMenuState(patch: Partial<MenuState>): void {
   if (cachedActions) buildMenu(cachedActions);
 }
 
+/** What the last build showed, so a renderer push that changes nothing does not rebuild. */
+let builtFrom = '';
+
+function buildKey(): string {
+  return JSON.stringify([menuState, navHistory()]);
+}
+
+/**
+ * A renderer push (`setMenuState`): rebuilds only when it changes something
+ * the menu shows, including Back/Forward. A rebuild can close a menu the user
+ * has open (macOS), and the renderer re-sends every field whenever its
+ * attention counts move (P1-review P2-R16).
+ */
+export function applyMenuPush(patch: Partial<MenuState>): void {
+  menuState = { ...menuState, ...patch };
+  if (cachedActions && buildKey() !== builtFrom) buildMenu(cachedActions);
+}
+
 export function buildMenu(actions: MenuActions): void {
   cachedActions = actions;
+  builtFrom = buildKey();
   const wm = getWindowManager();
   const sm = getServerManager();
   const paths = resolvePaths();
@@ -291,7 +304,7 @@ export function buildMenu(actions: MenuActions): void {
       { type: 'separator' },
       {
         label: 'Appearance',
-        submenu: (['light', 'dark', 'system'] as ThemePreference[]).map((t) => ({
+        submenu: (['light', 'dark', 'system'] as DesktopThemePreference[]).map((t) => ({
           label: t === 'system' ? 'Follow System' : t === 'dark' ? 'Dark' : 'Light',
           type: 'radio' as const,
           checked: menuState.mode === t,
@@ -384,8 +397,11 @@ export function buildMenu(actions: MenuActions): void {
  * moves this radio. Writing themeSource here made "System" lie whenever the
  * renderer disagreed.
  */
-function requestAppearance(mode: ThemePreference): void {
-  getWindowManager().sendAppearanceRequest(mode);
+function requestAppearance(mode: DesktopThemePreference): void {
+  // Electron has already moved the radio. With no window to apply the mode,
+  // nothing will push it back, so rebuild to put the radio back on the mode
+  // that is actually in effect (P1-review P2-R23).
+  if (!getWindowManager().sendAppearanceRequest(mode)) updateMenuState({});
 }
 
 /** Re-reads the persisted appearance mode into the menu. Called once at startup. */

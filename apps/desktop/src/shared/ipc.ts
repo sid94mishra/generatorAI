@@ -4,30 +4,18 @@
 // drift between the two sides.
 // ────────────────────────────────────────────────────────────────
 
-import type { AttentionCounts } from '@generatorai/shared';
-
-export type ThemePreference = 'light' | 'dark' | 'system';
-
-/**
- * What the renderer pushes on every appearance change (D-25; 06 §6.1–§6.4).
- * The renderer owns appearance; main only mirrors it: the chrome colours are
- * `#rrggbb` literals from the token package for BOTH appearances, so the next
- * launch paints the right window background even if the OS flipped between
- * light and dark while the app was closed.
- */
-export interface AppearancePush {
-  mode: ThemePreference;
-  themeId: string;
-  groundLight: string;
-  groundDark: string;
-  fgLight: string;
-  fgDark: string;
-}
-
-/** Payload of {@link IPC_EVENT.appearanceRequest}. */
-export interface AppearanceRequest {
-  mode: ThemePreference;
-}
+// The payloads that cross the bridge live in `@generatorai/shared`
+// (`types/DesktopShell.ts`), so the renderer's `desktop-bridge.d.ts` uses the
+// same declarations (P1-review P2-R24). Type-only: erased from both bundles.
+export type {
+  DesktopAppearancePush,
+  DesktopAppearanceRequest,
+  DesktopServerEntry,
+  DesktopShellStatePush,
+  DesktopThemePreference,
+  DesktopUpdateState,
+} from '@generatorai/shared';
+import type { DesktopShellStatePush, DesktopThemePreference } from '@generatorai/shared';
 
 export type ServerState =
   | 'idle'
@@ -97,49 +85,15 @@ export interface WindowChrome {
  * Renderer-owned UI state mirrored into the native menu.
  *
  * A native menu that never reflects the app is decoration; this is what makes
- * `View ▸ Toggle Sidebar` show a real checkmark and `Back` grey out.
+ * `View ▸ Toggle Sidebar` show a real checkmark and `Back` grey out. Back and
+ * Forward are deliberately absent: Chromium's own navigation history is the
+ * authority for those (see `menu.ts`). The attention counts are not menu
+ * state either: they feed the tray and the badge (`attention-state.ts`), and
+ * the menu does not show them.
  */
-export interface MenuState {
-  sidebarOpen: boolean;
-  rightPaneOpen: boolean;
+export interface MenuState extends Pick<DesktopShellStatePush, 'sidebarOpen' | 'rightPaneOpen' | 'recent'> {
   /** Radio state of View ▸ Appearance; set from the renderer's appearance push only. */
-  mode: ThemePreference;
-  /** Most recently visited routes, newest first. */
-  recent: { label: string; route: string }[];
-  /**
-   * Needs-you / running totals from the D-36 attention feed (G-01), pushed by
-   * the renderer's own live subscription (`useAttentionCounts`) — main holds
-   * no server connection of its own, so it never fetches these directly (05
-   * §G-05). `null` until the renderer has a first snapshot; the tray and menu
-   * degrade to today's server-only text while it is null, and also once the
-   * main window is destroyed (a dead renderer cannot refresh a stale count).
-   *
-   * `byEntity.chat.running` is what the tray calls "agents" (DesktopMac
-   * board: "Server running · 3 agents").
-   */
-  attention: AttentionCounts | null;
-}
-
-/** One entry in the desktop server switcher (G-03). */
-export interface DesktopServerEntry {
-  /** `'embedded'` for this machine's own server; a connection id otherwise. */
-  id: string;
-  label: string;
-  url: string;
-  kind: 'embedded' | 'remote';
-  active: boolean;
-}
-
-/**
- * Everything the renderer mirrors into the native shell.
- *
- * Back/Forward are deliberately absent: Chromium's own navigation history is
- * the authority for those (see `menu.ts`), and the renderer's guess left
- * `View ▸ Forward` permanently disabled.
- */
-export interface ShellState extends MenuState {
-  /** True while the renderer holds edits that closing would discard. */
-  hasUnsavedWork: boolean;
+  mode: DesktopThemePreference;
 }
 
 // Renderer → main (invoke/handle)
@@ -152,7 +106,7 @@ export const IPC = {
   saveFile: 'desktop:saveFile',
   openExternal: 'desktop:openExternal',
   /**
-   * The renderer's appearance ({@link AppearancePush}). Main persists it,
+   * The renderer's appearance ({@link DesktopAppearancePush}). Main persists it,
    * mirrors `nativeTheme.themeSource`, repaints the window background and the
    * caption glyphs, and updates the View ▸ Appearance radio.
    */
@@ -188,6 +142,13 @@ export const IPC = {
   /** Updater state, for the renderer's "Restart to update" pill (G-04). */
   getUpdateState: 'desktop:getUpdateState',
   installUpdate: 'desktop:installUpdate',
+  /**
+   * The preload's `updates.onChange` reports each subscribe (`true`) and
+   * unsubscribe (`false`). Main suppresses the native "update ready" dialog
+   * only while a renderer is actually listening and the window is visible
+   * (P1-review P2-R3).
+   */
+  watchUpdates: 'desktop:watchUpdates',
 } as const;
 
 /** Result of {@link IPC.requestPairingCode}. */
@@ -217,14 +178,14 @@ export const IPC_EVENT = {
   foundInPage: 'desktop:found-in-page',
   /**
    * The user picked a mode in the native View ▸ Appearance menu
-   * ({@link AppearanceRequest}). Main does not apply it: the renderer's
+   * ({@link DesktopAppearanceRequest}). Main does not apply it: the renderer's
    * ThemeProvider is the only appearance writer (D-25), applies the mode and
    * pushes the result back through {@link IPC.setAppearance}.
    */
   appearanceRequest: 'desktop:appearance-request',
   /** The known-servers list changed (switched, added, forgotten) — G-03. */
   serversChanged: 'desktop:servers-changed',
-  /** Updater state changed (checking/downloading/ready/error) — G-04. */
+  /** Updater state changed (checking/downloading/ready/installing) — G-04. */
   updateStateChanged: 'desktop:update-state-changed',
 } as const;
 
@@ -233,21 +194,6 @@ export interface WindowStateChange {
   maximized: boolean;
   fullScreen: boolean;
   focused: boolean;
-}
-
-/**
- * Auto-updater state, mirrored to the renderer for the "Restart to update"
- * pill (G-04, 06-desktop-and-shell.md §8). `currentVersion` is always the
- * running build's version, even while `status` is `'idle'`; `nextVersion`
- * and `percent` are only meaningful once a check has found something.
- */
-export interface UpdateState {
-  status: 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
-  currentVersion: string;
-  nextVersion?: string;
-  /** 0–100, while `status === 'downloading'`. */
-  percent?: number;
-  error?: string;
 }
 
 /** Result of one find-in-page pass, as Chromium reports it. */

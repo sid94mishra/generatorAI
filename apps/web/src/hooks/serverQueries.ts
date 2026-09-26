@@ -3,18 +3,23 @@
 // Windows title-strip server chip consume this once they land (P3); no UI
 // lives here.
 //
-// The desktop shell holds one list (main process, `servers.ts` IPC — see
-// `@/lib/desktop.js` `desktopServers`); a plain browser tab has no shell, so
-// it falls back to the client-runtime connection catalog (`authRuntime.ts`,
-// one entry per server this client has paired with). Either way the result is
-// probed for live reachability with the same `probeServer` call — "the same
-// code runs on every OS" (05-gap-matrix.md §G-03).
+// Desktop: the shell holds the list (main process, `IPC.getServers` — see
+// `@/lib/desktop.js` `desktopServers`) and main probes every entry's
+// reachability with Node `fetch`.
+//
+// Plain browser tab: the client-runtime connection catalog (`authRuntime.ts`,
+// one entry per server this client has paired with). The page may only probe
+// its own origin: the app's CSP is `connect-src 'self'` and other servers send
+// no CORS headers for it, so probing them from here would log a CSP violation
+// and report a false "offline" (P1-review P2-R6). Every other entry is
+// `unknown`.
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect } from 'react';
 import { useQuery, useQueryClient, type UseQueryResult } from '@tanstack/react-query';
-import { probeServer, type ServerProbeResult } from '@generatorai/client-runtime';
-import { desktopServers, isDesktop, type DesktopServerEntry } from '@/lib/desktop.js';
+import { probeServer } from '@generatorai/client-runtime';
+import type { DesktopServerEntry, ServerReachability } from '@generatorai/shared';
+import { desktopServers, isDesktop } from '@/lib/desktop.js';
 import {
   getActiveConnection,
   listConnections,
@@ -28,7 +33,8 @@ export interface ServerListItem {
   url: string;
   kind: 'embedded' | 'local' | 'remote';
   active: boolean;
-  status: ServerProbeResult['status'];
+  /** `unknown`: not probed, because a web page cannot reach another origin. */
+  status: ServerReachability | 'unknown';
   serverName?: string;
   latencyMs?: number;
 }
@@ -37,55 +43,69 @@ export const serverKeys = {
   all: ['desktop-servers'] as const,
 };
 
-interface BaseEntry {
-  id: string;
-  label: string;
-  url: string;
-  kind: 'embedded' | 'local' | 'remote';
-  active: boolean;
+/** Per-probe budget for the one probe a web page may run. */
+const WEB_PROBE_TIMEOUT_MS = 2500;
+
+function fromDesktopEntry(entry: DesktopServerEntry): ServerListItem {
+  return {
+    id: entry.id,
+    label: entry.label,
+    url: entry.url,
+    kind: entry.kind,
+    active: entry.active,
+    status: entry.status,
+    ...(entry.serverName !== undefined ? { serverName: entry.serverName } : {}),
+    ...(entry.latencyMs !== undefined ? { latencyMs: entry.latencyMs } : {}),
+  };
 }
 
-function fromDesktopEntry(entry: DesktopServerEntry): BaseEntry {
-  return { id: entry.id, label: entry.label, url: entry.url, kind: entry.kind, active: entry.active };
-}
-
-async function loadBaseList(): Promise<BaseEntry[]> {
-  if (isDesktop && desktopServers.isAvailable()) {
-    return (await desktopServers.list()).map(fromDesktopEntry);
+function originOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
   }
-  // Plain web (browser tab): the client-runtime catalog — one entry per
-  // server this client holds a credential for. There is no "This computer"
-  // entry here; a browser tab has no embedded server of its own.
-  const active = getActiveConnection();
-  return listConnections().map((c) => ({
-    id: c.serverId,
-    label: c.label,
-    url: c.endpoint,
-    kind: c.kind,
-    active: active?.serverId === c.serverId,
-  }));
 }
 
-async function withProbes(base: BaseEntry[]): Promise<ServerListItem[]> {
+/** Plain web: the paired-server catalog, probing only the entry on this page's own origin. */
+async function loadWebList(): Promise<ServerListItem[]> {
+  const active = getActiveConnection();
+  const here = typeof window === 'undefined' ? null : window.location.origin;
   return Promise.all(
-    base.map(async (entry): Promise<ServerListItem> => {
-      if (!entry.url) return { ...entry, status: 'offline' };
-      const probe = await probeServer(entry.url, { timeoutMs: 2500 });
-      return { ...entry, ...probe };
+    listConnections().map(async (c): Promise<ServerListItem> => {
+      const base = {
+        id: c.serverId,
+        label: c.label,
+        url: c.endpoint,
+        kind: c.kind,
+        active: active?.serverId === c.serverId,
+      };
+      const origin = originOf(c.endpoint);
+      if (!here || origin !== here) return { ...base, status: 'unknown' };
+      const probe = await probeServer(origin, { timeoutMs: WEB_PROBE_TIMEOUT_MS, expectedServerId: c.serverId });
+      return { ...base, ...probe };
     }),
   );
 }
 
+async function loadServers(): Promise<ServerListItem[]> {
+  if (isDesktop && desktopServers.isAvailable()) {
+    return (await desktopServers.list()).map(fromDesktopEntry);
+  }
+  return loadWebList();
+}
+
 /**
- * Known servers with live reachability, for the switcher. `undefined` until
- * the first list has loaded — never an invented empty list (D-36).
+ * Known servers with reachability, for the switcher. `undefined` until the
+ * first list has loaded, and the query's `error` when the shell could not
+ * list them — never an invented empty list (D-36).
  */
 export function useServers(): UseQueryResult<ServerListItem[]> {
   const queryClient = useQueryClient();
 
   const query = useQuery({
     queryKey: serverKeys.all,
-    queryFn: async () => withProbes(await loadBaseList()),
+    queryFn: loadServers,
     staleTime: 10_000,
     refetchInterval: 30_000,
   });

@@ -17,7 +17,7 @@ import {
   TITLE_BAR_HEIGHT,
   useCustomTitleBar,
 } from './platform';
-import type { AppearanceRequest, DesktopCommand, ThemePreference } from '../shared/ipc';
+import type { DesktopAppearanceRequest, DesktopCommand, DesktopThemePreference } from '../shared/ipc';
 import { IPC_EVENT } from '../shared/ipc';
 import { appearanceMirror } from './appearance';
 import { appRouteOf, isAppOrigin, isExternalUrlAllowed } from './navigation-guard';
@@ -49,9 +49,33 @@ export class WindowManager {
   /** Set once the user has agreed to lose unsaved work, so the retried close
    *  does not ask again. */
   private discardConfirmed = false;
+  private readonly rendererResetListeners = new Set<() => void>();
 
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
+  }
+
+  /**
+   * Subscribe to "the page that pushed renderer state is gone": the main
+   * window closed, its renderer process died, or its top frame started loading
+   * a new document (a backend switch, a server restart repoint, a reload, the
+   * error page). Whatever that page reported (attention counts, update
+   * subscriptions) no longer has anyone keeping it current, so listeners drop
+   * it. Same-document navigations (SPA route changes) do not fire this.
+   */
+  onRendererReset(listener: () => void): () => void {
+    this.rendererResetListeners.add(listener);
+    return () => this.rendererResetListeners.delete(listener);
+  }
+
+  private emitRendererReset(): void {
+    for (const listener of this.rendererResetListeners) {
+      try {
+        listener();
+      } catch (e) {
+        log.warn('renderer-reset listener failed', e);
+      }
+    }
   }
 
   /** The URL the main window is meant to be showing. */
@@ -66,6 +90,9 @@ export class WindowManager {
    */
   setQuitting(value: boolean): void {
     this.quitting = value;
+    // A quit that was abandoned (an update install that did not start)
+    // must ask about unsaved work again next time.
+    if (!value) this.discardConfirmed = false;
   }
 
   /**
@@ -216,6 +243,11 @@ export class WindowManager {
 
     win.on('closed', () => {
       this.mainWindow = null;
+      this.emitRendererReset();
+    });
+    win.webContents.on('render-process-gone', () => this.emitRendererReset());
+    win.webContents.on('did-start-navigation', (details) => {
+      if (details.isMainFrame && !details.isSameDocument) this.emitRendererReset();
     });
 
     // Security: open external links in the OS browser, never new Electron windows.
@@ -303,6 +335,9 @@ export class WindowManager {
    */
   repointMainWindow(url: string): void {
     this.appUrl = url;
+    // The new origin's page reports its own state; the old one's is stale now
+    // (also covered by `did-start-navigation`, but not when a window is created).
+    this.emitRendererReset();
     const win = this.mainWindow;
     if (!win || win.isDestroyed()) {
       this.createMainWindow(url);
@@ -368,6 +403,7 @@ export class WindowManager {
     this.mainWindow = win;
     win.on('closed', () => {
       this.mainWindow = null;
+      this.emitRendererReset();
     });
     return win;
   }
@@ -493,13 +529,15 @@ export class WindowManager {
   /**
    * Asks the renderer to apply a mode picked in View ▸ Appearance. Main does
    * not apply it itself: ThemeProvider is the only appearance writer (D-25)
-   * and pushes the result back through IPC.setAppearance.
+   * and pushes the result back through IPC.setAppearance. Returns false when
+   * there is no window to ask.
    */
-  sendAppearanceRequest(mode: ThemePreference): void {
+  sendAppearanceRequest(mode: DesktopThemePreference): boolean {
     const win = this.mainWindow;
-    if (!win || win.isDestroyed()) return;
-    const request: AppearanceRequest = { mode };
+    if (!win || win.isDestroyed()) return false;
+    const request: DesktopAppearanceRequest = { mode };
     win.webContents.send(IPC_EVENT.appearanceRequest, request);
+    return true;
   }
 
   openExternalSafely(url: string): void {

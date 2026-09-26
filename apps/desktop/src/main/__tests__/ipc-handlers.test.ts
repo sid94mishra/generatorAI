@@ -1,12 +1,11 @@
-// ipc.ts's new G-03/G-04/G-05 IPC handlers, exercised directly against the
+// ipc.ts's G-03/G-04/G-05 IPC handlers, exercised directly against the
 // registered handler functions (the sender-trust check itself is
 // `ipc-guard.test.ts`'s job — this file mocks it away to a passthrough so it
-// can focus on the new handler logic: argument validation, delegation to
-// backend-switcher/updater, and the tray/badge side effects G-05 wires
-// through `setMenuState`).
+// can focus on the handler logic: argument validation, delegation to
+// backend-switcher/updater/attention-state, and the rebuilds a change needs).
 
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { IPC, IPC_EVENT, type UpdateState } from '../../shared/ipc';
+import { describe, expect, it, vi } from 'vitest';
+import { IPC, IPC_EVENT, type DesktopUpdateState } from '../../shared/ipc';
 
 type Handler = (event: unknown, ...args: unknown[]) => unknown;
 
@@ -15,15 +14,21 @@ const handlers = vi.hoisted(() => new Map<string, Handler>());
 const state = vi.hoisted(() => ({
   mainWindow: null as { isDestroyed: () => boolean; webContents: { send: ReturnType<typeof vi.fn> } } | null,
   listServers: vi.fn(() => [] as unknown[]),
+  probeKnownServers: vi.fn(async (list: unknown[]) => list),
   switchServerById: vi.fn(async () => undefined),
   promptForRemoteServer: vi.fn(async () => undefined),
   onServersChangedListener: null as (() => void) | null,
-  getUpdateState: vi.fn((): UpdateState => ({ status: 'idle', currentVersion: '1.0.0' })),
-  installUpdate: vi.fn(async () => undefined),
+  onRendererResetListener: null as (() => void) | null,
+  getUpdateState: vi.fn((): DesktopUpdateState => ({ status: 'idle', currentVersion: '1.0.0' })),
+  installUpdate: vi.fn(async () => 'quitting'),
+  setUpdateWatch: vi.fn(),
+  clearUpdateWatchers: vi.fn(),
   onUpdateStateChangeListener: null as ((s: unknown) => void) | null,
   refreshTrayMenu: vi.fn(),
-  applyAttentionBadge: vi.fn(),
+  setAttention: vi.fn(),
+  clearAttention: vi.fn(),
   updateMenuState: vi.fn(),
+  applyMenuPush: vi.fn(),
   setUnsavedWork: vi.fn(),
 }));
 
@@ -51,6 +56,10 @@ vi.mock('../window-manager', () => ({
     getMainWindow: () => state.mainWindow,
     getAppUrl: () => 'http://127.0.0.1:3100',
     refreshTitleBarTheme: vi.fn(),
+    onRendererReset: (listener: () => void) => {
+      state.onRendererResetListener = listener;
+      return () => (state.onRendererResetListener = null);
+    },
   }),
 }));
 
@@ -71,15 +80,18 @@ vi.mock('../backend-switcher', () => ({
   },
 }));
 
+vi.mock('../server-probe', () => ({ probeKnownServers: state.probeKnownServers }));
 vi.mock('../paths', () => ({ resolvePaths: () => ({ dataDir: '/tmp/data' }) }));
 vi.mock('../config', () => ({ loadSettings: () => ({}), saveSettings: vi.fn() }));
 vi.mock('../platform', () => ({ windowChrome: () => ({}) }));
-vi.mock('../menu', () => ({ updateMenuState: state.updateMenuState }));
+vi.mock('../menu', () => ({ updateMenuState: state.updateMenuState, applyMenuPush: state.applyMenuPush }));
 vi.mock('../tray', () => ({ refreshTrayMenu: state.refreshTrayMenu }));
-vi.mock('../badge', () => ({ applyAttentionBadge: state.applyAttentionBadge }));
+vi.mock('../attention-state', () => ({ setAttention: state.setAttention, clearAttention: state.clearAttention }));
 vi.mock('../updater', () => ({
   getUpdateState: state.getUpdateState,
   installUpdate: state.installUpdate,
+  setUpdateWatch: state.setUpdateWatch,
+  clearUpdateWatchers: state.clearUpdateWatchers,
   onUpdateStateChange: (listener: (s: unknown) => void) => {
     state.onUpdateStateChangeListener = listener;
     return () => (state.onUpdateStateChangeListener = null);
@@ -105,16 +117,21 @@ async function setup() {
   vi.clearAllMocks();
   state.mainWindow = { isDestroyed: () => false, webContents: { send: vi.fn() } };
   state.listServers.mockReturnValue([]);
+  state.probeKnownServers.mockImplementation(async (list: unknown[]) => list);
   state.getUpdateState.mockReturnValue({ status: 'idle', currentVersion: '1.0.0' });
   const { registerIpc } = await import('../ipc');
   registerIpc('standalone');
   return handlers;
 }
 
-function call(h: Map<string, Handler>, channel: string, ...args: unknown[]) {
+function callFrom(h: Map<string, Handler>, event: unknown, channel: string, ...args: unknown[]) {
   const handler = h.get(channel);
   if (!handler) throw new Error(`no handler registered for ${channel}`);
-  return handler({}, ...args);
+  return handler(event, ...args);
+}
+
+function call(h: Map<string, Handler>, channel: string, ...args: unknown[]) {
+  return callFrom(h, {}, channel, ...args);
 }
 
 const attentionPatch = (over: Partial<{ needsYou: number; running: number }> = {}) => ({
@@ -129,11 +146,13 @@ const attentionPatch = (over: Partial<{ needsYou: number; running: number }> = {
 });
 
 describe('IPC.getServers / switchServer / addServer (G-03)', () => {
-  it('getServers returns backend-switcher\'s list verbatim', async () => {
+  it("getServers returns backend-switcher's list with main-process reachability (R6)", async () => {
     const h = await setup();
-    const entries = [{ id: 'embedded', label: 'This computer', url: 'http://127.0.0.1:3100', kind: 'embedded' as const, active: true }];
-    state.listServers.mockReturnValue(entries);
-    expect(await call(h, IPC.getServers)).toEqual(entries);
+    const known = { id: 'embedded', label: 'This computer', url: 'http://127.0.0.1:3100', kind: 'embedded' as const, active: true };
+    state.listServers.mockReturnValue([known]);
+    state.probeKnownServers.mockResolvedValue([{ ...known, status: 'connected', latencyMs: 4 }]);
+    expect(await call(h, IPC.getServers)).toEqual([{ ...known, status: 'connected', latencyMs: 4 }]);
+    expect(state.probeKnownServers).toHaveBeenCalledWith([known]);
   });
 
   it('switchServer delegates to switchServerById for a valid string id', async () => {
@@ -156,26 +175,30 @@ describe('IPC.getServers / switchServer / addServer (G-03)', () => {
     expect(state.promptForRemoteServer).toHaveBeenCalled();
   });
 
-  it('relays onServersChanged to the renderer as IPC_EVENT.serversChanged', async () => {
-    const h = await setup();
+  it('a servers change reaches the renderer, the native Server menu and the tray (R23)', async () => {
+    await setup();
     expect(state.onServersChangedListener).toBeTypeOf('function');
     state.onServersChangedListener!();
     expect(state.mainWindow!.webContents.send).toHaveBeenCalledWith(IPC_EVENT.serversChanged);
+    expect(state.updateMenuState).toHaveBeenCalledWith({});
+    expect(state.refreshTrayMenu).toHaveBeenCalled();
   });
 
-  it('does not send to a destroyed window', async () => {
-    const h = await setup();
+  it('does not send to a destroyed window, but still rebuilds the menu', async () => {
+    await setup();
     state.mainWindow!.isDestroyed = () => true;
     state.onServersChangedListener!();
     expect(state.mainWindow!.webContents.send).not.toHaveBeenCalled();
+    expect(state.updateMenuState).toHaveBeenCalledWith({});
   });
 });
 
-describe('IPC.getUpdateState / installUpdate (G-04)', () => {
+describe('IPC.getUpdateState / installUpdate / watchUpdates (G-04)', () => {
   it('getUpdateState returns the updater module state verbatim', async () => {
     const h = await setup();
-    state.getUpdateState.mockReturnValue({ status: 'ready', currentVersion: '1.0.0', nextVersion: '1.1.0' });
-    expect(await call(h, IPC.getUpdateState)).toEqual({ status: 'ready', currentVersion: '1.0.0', nextVersion: '1.1.0' });
+    const ready: DesktopUpdateState = { status: 'ready', currentVersion: '1.0.0', nextVersion: '1.1.0', downloadedVersion: '1.1.0' };
+    state.getUpdateState.mockReturnValue(ready);
+    expect(await call(h, IPC.getUpdateState)).toEqual(ready);
   });
 
   it('installUpdate delegates to the updater module', async () => {
@@ -185,29 +208,37 @@ describe('IPC.getUpdateState / installUpdate (G-04)', () => {
   });
 
   it('relays onUpdateStateChange to the renderer as IPC_EVENT.updateStateChanged', async () => {
-    const h = await setup();
+    await setup();
     const next = { status: 'downloading', currentVersion: '1.0.0', percent: 10 };
     state.onUpdateStateChangeListener!(next);
     expect(state.mainWindow!.webContents.send).toHaveBeenCalledWith(IPC_EVENT.updateStateChanged, next);
   });
+
+  it('watchUpdates records subscriptions per sender and ignores non-boolean payloads (R3)', async () => {
+    const h = await setup();
+    await callFrom(h, { sender: { id: 7 } }, IPC.watchUpdates, true);
+    await callFrom(h, { sender: { id: 7 } }, IPC.watchUpdates, false);
+    await callFrom(h, { sender: { id: 7 } }, IPC.watchUpdates, 'yes');
+    expect(state.setUpdateWatch.mock.calls).toEqual([
+      [7, true],
+      [7, false],
+    ]);
+  });
 });
 
-describe('IPC.setMenuState — attention (G-05)', () => {
-  it('accepts null (no snapshot yet) and refreshes the tray/badge', async () => {
+describe('IPC.setMenuState (G-05, R16)', () => {
+  it('accepts null (no snapshot yet) and hands it to attention-state', async () => {
     const h = await setup();
     await call(h, IPC.setMenuState, { attention: null });
-    expect(state.updateMenuState).toHaveBeenCalledWith(expect.objectContaining({ attention: null }));
-    expect(state.refreshTrayMenu).toHaveBeenCalled();
-    expect(state.applyAttentionBadge).toHaveBeenCalledWith(0, expect.anything());
+    expect(state.setAttention).toHaveBeenCalledWith(null);
   });
 
-  it('accepts a well-formed AttentionCounts and forwards needsYou to the badge', async () => {
+  it('hands a well-formed AttentionCounts to attention-state, never to the menu', async () => {
     const h = await setup();
-    await call(h, IPC.setMenuState, { attention: attentionPatch({ needsYou: 4 }) });
-    expect(state.updateMenuState).toHaveBeenCalledWith(
-      expect.objectContaining({ attention: expect.objectContaining({ needsYou: 4 }) }),
-    );
-    expect(state.applyAttentionBadge).toHaveBeenCalledWith(4, expect.anything());
+    await call(h, IPC.setMenuState, { sidebarOpen: true, attention: attentionPatch({ needsYou: 4 }) });
+    expect(state.setAttention).toHaveBeenCalledWith(expect.objectContaining({ needsYou: 4 }));
+    expect(state.applyMenuPush).toHaveBeenCalledWith({ sidebarOpen: true });
+    expect(state.updateMenuState).not.toHaveBeenCalled();
   });
 
   it('clamps counts to [0, 999] and fills in missing byEntity rows as zero', async () => {
@@ -215,8 +246,7 @@ describe('IPC.setMenuState — attention (G-05)', () => {
     await call(h, IPC.setMenuState, {
       attention: { needsYou: -5, running: 5000, byEntity: { chat: { needsYou: 1, running: 2 } } },
     });
-    const pushed = state.updateMenuState.mock.calls.at(-1)![0];
-    expect(pushed.attention).toEqual({
+    expect(state.setAttention).toHaveBeenCalledWith({
       needsYou: 0,
       running: 999,
       byEntity: {
@@ -227,19 +257,16 @@ describe('IPC.setMenuState — attention (G-05)', () => {
     });
   });
 
-  it('drops a malformed attention value (no byEntity) and never touches the tray/badge', async () => {
+  it('drops a malformed attention value (no byEntity)', async () => {
     const h = await setup();
     await call(h, IPC.setMenuState, { attention: { needsYou: 1, running: 1 } });
-    expect(state.updateMenuState).toHaveBeenCalledWith(expect.not.objectContaining({ attention: expect.anything() }));
-    expect(state.refreshTrayMenu).not.toHaveBeenCalled();
-    expect(state.applyAttentionBadge).not.toHaveBeenCalled();
+    expect(state.setAttention).not.toHaveBeenCalled();
   });
 
-  it('does not refresh the tray/badge when the patch carries no attention key at all', async () => {
+  it('does not touch the counts when the patch carries no attention key at all', async () => {
     const h = await setup();
     await call(h, IPC.setMenuState, { sidebarOpen: true });
-    expect(state.refreshTrayMenu).not.toHaveBeenCalled();
-    expect(state.applyAttentionBadge).not.toHaveBeenCalled();
+    expect(state.setAttention).not.toHaveBeenCalled();
   });
 
   it('still validates the pre-existing fields (sidebarOpen, recent, hasUnsavedWork)', async () => {
@@ -251,8 +278,20 @@ describe('IPC.setMenuState — attention (G-05)', () => {
       recent: [{ label: 'Home', route: '/' }, { notAnEntry: true }],
     });
     expect(state.setUnsavedWork).toHaveBeenCalledWith(true);
-    expect(state.updateMenuState).toHaveBeenCalledWith(
-      expect.objectContaining({ sidebarOpen: true, rightPaneOpen: false, recent: [{ label: 'Home', route: '/' }] }),
-    );
+    expect(state.applyMenuPush).toHaveBeenCalledWith({
+      sidebarOpen: true,
+      rightPaneOpen: false,
+      recent: [{ label: 'Home', route: '/' }],
+    });
+  });
+});
+
+describe('renderer reset (R8, R3)', () => {
+  it('clears the attention counts and the update subscriptions', async () => {
+    await setup();
+    expect(state.onRendererResetListener).toBeTypeOf('function');
+    state.onRendererResetListener!();
+    expect(state.clearAttention).toHaveBeenCalled();
+    expect(state.clearUpdateWatchers).toHaveBeenCalled();
   });
 });

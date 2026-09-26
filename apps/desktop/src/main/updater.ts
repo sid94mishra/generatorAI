@@ -1,58 +1,142 @@
 // ────────────────────────────────────────────────────────────────
-// Auto-update scaffold (electron-updater). No-op when unpackaged or when no
-// update feed is configured, so it is safe to call unconditionally.
+// Auto-update (electron-updater). A no-op when unpackaged or when no update
+// feed is configured, so it is safe to call unconditionally.
 //
 // State (G-04, 05-gap-matrix.md §G-04, 06-desktop-and-shell.md §8): every
-// updater event is folded into one `UpdateState` and pushed to the renderer
-// (`ipc.ts` relays `onUpdateStateChange` as `IPC_EVENT.updateStateChanged`),
-// so the "Restart to update" pill can be built once P3 lands, instead of the
-// native dialog this file used to show unconditionally.
+// updater event is folded into one `DesktopUpdateState` and pushed to the
+// renderer (`ipc.ts` relays `onUpdateStateChange` as
+// `IPC_EVENT.updateStateChanged`). The downloaded version is kept apart from
+// the check/download phase, so a later check or a failed one cannot hide an
+// update that is ready to install (P1-review P2-R7).
 //
-// Install path (06 §11 risk R5): see `installUpdate` below for what was
-// verified and fixed.
+// The native "update ready" dialog stays until the renderer can tell the
+// user itself: it is skipped only while a renderer has subscribed to
+// `updateStateChanged` AND the window is visible (P2-R3). Nothing in the web
+// app subscribes before the P3-06 pill, so until then the dialog always shows.
+//
+// Install: see `installUpdate`.
 // ────────────────────────────────────────────────────────────────
 
-import { app, dialog } from 'electron';
+import { app, autoUpdater as nativeAutoUpdater, dialog } from 'electron';
 import type { AppUpdater } from 'electron-updater';
 import { log } from './logger';
 import { getWindowManager } from './window-manager';
-import { runQuitShutdown } from './quit-coordinator';
-import type { UpdateState } from '../shared/ipc';
+import { updaterHasNativeInstallStage } from './platform';
+import type { DesktopUpdateState } from '../shared/ipc';
 
 let initialized = false;
-let mode: 'dev' | 'standalone' = 'standalone';
 let updaterRef: AppUpdater | null = null;
 
-/** Everything but `currentVersion`, which is read live from `app.getVersion()`. */
-let state: Omit<UpdateState, 'currentVersion'> = { status: 'idle' };
+interface Machine {
+  /** What the updater is doing right now; independent of whether something is downloaded. */
+  phase: 'idle' | 'checking' | 'downloading';
+  /** The version the current check/download is about. */
+  nextVersion?: string;
+  percent?: number;
+  /** Installable. Survives later checks and failures (R7). */
+  downloadedVersion?: string;
+  /** macOS: downloaded by electron-updater, not yet by Squirrel.Mac. */
+  awaitingNativeVersion?: string;
+  /** macOS: Squirrel.Mac has reported an installable update. */
+  nativeDownloaded: boolean;
+  installing: boolean;
+  error?: string;
+}
 
-const listeners = new Set<(state: UpdateState) => void>();
+const INITIAL: Machine = { phase: 'idle', nativeDownloaded: false, installing: false };
+let machine: Machine = { ...INITIAL };
+
+const listeners = new Set<(state: DesktopUpdateState) => void>();
 
 function currentVersion(): string {
   try {
     return app.getVersion();
   } catch {
-    // `app` is not ready yet — should not happen in practice (this module is
-    // only driven from `onReady`), but a blank version beats a crash.
+    // `app` is not ready yet. Should not happen (this module is only driven
+    // from `onReady`), but a blank version beats a crash.
     return '';
   }
 }
 
 /** Current updater state, for `IPC.getUpdateState`. */
-export function getUpdateState(): UpdateState {
-  return { ...state, currentVersion: currentVersion() };
+export function getUpdateState(): DesktopUpdateState {
+  const m = machine;
+  const status: DesktopUpdateState['status'] = m.installing ? 'installing' : m.downloadedVersion ? 'ready' : m.phase;
+  const nextVersion = m.downloadedVersion ?? (m.phase === 'idle' ? undefined : m.nextVersion);
+  return {
+    status,
+    currentVersion: currentVersion(),
+    ...(nextVersion ? { nextVersion } : {}),
+    ...(m.downloadedVersion ? { downloadedVersion: m.downloadedVersion } : {}),
+    ...(status === 'downloading' && m.percent !== undefined ? { percent: m.percent } : {}),
+    ...(m.error ? { error: m.error } : {}),
+  };
 }
 
 /** Subscribe to state changes, for `IPC_EVENT.updateStateChanged`. Returns an unsubscribe function. */
-export function onUpdateStateChange(listener: (state: UpdateState) => void): () => void {
+export function onUpdateStateChange(listener: (state: DesktopUpdateState) => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
 }
 
-function setState(patch: Partial<Omit<UpdateState, 'currentVersion'>>): void {
-  state = { ...state, ...patch };
+function update(patch: Partial<Machine>): void {
+  const wasReady = Boolean(machine.downloadedVersion);
+  machine = { ...machine, ...patch };
   const snapshot = getUpdateState();
   for (const listener of listeners) listener(snapshot);
+  if (!wasReady && machine.downloadedVersion) void offerInstall();
+}
+
+function message(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+// ── Renderer subscriptions (R3) ────────────────────────────────
+
+/** Live `updates.onChange` subscriptions, per renderer (webContents id). */
+const watchers = new Map<number, number>();
+
+/** Records one subscribe (`true`) or unsubscribe (`false`) from renderer `ownerId`. */
+export function setUpdateWatch(ownerId: number, watching: boolean): void {
+  const next = (watchers.get(ownerId) ?? 0) + (watching ? 1 : -1);
+  if (next > 0) watchers.set(ownerId, next);
+  else watchers.delete(ownerId);
+}
+
+/**
+ * Forgets every subscription: the page that made them navigated away,
+ * reloaded, died or closed (`WindowManager.onRendererReset`), and its
+ * listeners went with it without unsubscribing.
+ */
+export function clearUpdateWatchers(): void {
+  watchers.clear();
+}
+
+/** True while some renderer is listening for update state and can tell the user itself. */
+export function rendererWatchesUpdates(): boolean {
+  return watchers.size > 0;
+}
+
+/**
+ * Tells the user an update is ready. The native dialog is skipped only when a
+ * subscribed renderer is on screen to show it instead; with no window, a
+ * hidden one (minimised to the tray) or no subscriber, the dialog is the only
+ * way the user learns about it.
+ */
+async function offerInstall(): Promise<void> {
+  const win = getWindowManager().getMainWindow();
+  const hasVisibleWindow = Boolean(win && !win.isDestroyed() && win.isVisible());
+  if (hasVisibleWindow && rendererWatchesUpdates()) return;
+  const version = machine.downloadedVersion;
+  const res = await dialog.showMessageBox({
+    type: 'info',
+    buttons: ['Restart Now', 'Later'],
+    defaultId: 0,
+    cancelId: 1,
+    message: version ? `GeneratorAI ${version} has been downloaded.` : 'A new version of GeneratorAI has been downloaded.',
+    detail: 'Restart the app to apply the update.',
+  });
+  if (res.response === 0) await installUpdate();
 }
 
 async function getUpdater(): Promise<AppUpdater | null> {
@@ -76,8 +160,7 @@ async function getUpdater(): Promise<AppUpdater | null> {
   }
 }
 
-export async function initAutoUpdates(appMode: 'dev' | 'standalone'): Promise<void> {
-  mode = appMode;
+export async function initAutoUpdates(): Promise<void> {
   if (initialized || !app.isPackaged) return;
   initialized = true;
   const updater = await getUpdater();
@@ -91,41 +174,60 @@ export async function initAutoUpdates(appMode: 'dev' | 'standalone'): Promise<vo
     debug: (m: unknown) => log.debug(String(m)),
   } as never;
 
-  updater.on('checking-for-update', () => setState({ status: 'checking' }));
-  updater.on('update-not-available', () => setState({ status: 'idle', nextVersion: undefined, percent: undefined }));
-  updater.on('update-available', (info: { version?: string }) =>
-    setState({ status: 'downloading', nextVersion: info?.version, percent: 0 }),
+  updater.on('checking-for-update', () => update({ phase: 'checking', error: undefined }));
+  updater.on('update-not-available', () =>
+    update({ phase: 'idle', nextVersion: undefined, percent: undefined, error: undefined }),
   );
-  updater.on('download-progress', (p: { percent?: number }) =>
-    setState({ status: 'downloading', percent: p?.percent }),
-  );
-  updater.on('error', (err: unknown) =>
-    setState({ status: 'error', error: err instanceof Error ? err.message : String(err) }),
-  );
-
-  updater.on('update-downloaded', async (info: { version?: string }) => {
-    setState({ status: 'ready', nextVersion: info?.version, percent: 100 });
-    // The renderer shows a pill once one exists (P3); until it does — and
-    // whenever there is genuinely no window to show it in, e.g. the shell was
-    // minimised to the tray on every OS — a native dialog is the only way the
-    // user ever learns an update is ready at all.
-    const win = getWindowManager().getMainWindow();
-    const hasVisibleWindow = Boolean(win && !win.isDestroyed() && win.isVisible());
-    if (hasVisibleWindow) return;
-    const res = await dialog.showMessageBox({
-      type: 'info',
-      buttons: ['Restart Now', 'Later'],
-      defaultId: 0,
-      message: 'A new version of GeneratorAI has been downloaded.',
-      detail: 'Restart the app to apply the update.',
+  updater.on('update-available', (info: { version?: string }) => {
+    // A newer build than the one already downloaded replaces it: electron-updater
+    // downloads it over the cached one.
+    const replaces = Boolean(machine.downloadedVersion && info?.version !== machine.downloadedVersion);
+    update({
+      phase: 'downloading',
+      nextVersion: info?.version,
+      percent: 0,
+      error: undefined,
+      ...(replaces ? { downloadedVersion: undefined, nativeDownloaded: false } : {}),
     });
-    if (res.response === 0) await installUpdate();
   });
+  updater.on('download-progress', (p: { percent?: number }) =>
+    update({ phase: 'downloading', percent: p?.percent, error: undefined }),
+  );
+  updater.on('update-cancelled', () =>
+    update({ phase: 'idle', percent: undefined, awaitingNativeVersion: undefined, error: undefined }),
+  );
+  // A failed check, download or Squirrel.Mac hand-over: back to idle with the
+  // reason. A version that was already downloaded stays installable.
+  updater.on('error', (err: unknown) =>
+    update({ phase: 'idle', percent: undefined, awaitingNativeVersion: undefined, error: message(err) }),
+  );
+  updater.on('update-downloaded', (info: { version?: string }) => {
+    const version = info?.version;
+    if (updaterHasNativeInstallStage && !machine.nativeDownloaded) {
+      // Squirrel.Mac still has to fetch and verify it; `quitAndInstall` before
+      // then waits forever. Stay "downloading" until it reports.
+      update({ phase: 'downloading', nextVersion: version, percent: 100, awaitingNativeVersion: version, error: undefined });
+      return;
+    }
+    update({ phase: 'idle', nextVersion: version, percent: undefined, downloadedVersion: version, error: undefined });
+  });
+  if (updaterHasNativeInstallStage) {
+    nativeAutoUpdater.on('update-downloaded', () => {
+      const version = machine.awaitingNativeVersion;
+      update({
+        nativeDownloaded: true,
+        ...(version
+          ? { phase: 'idle', percent: undefined, awaitingNativeVersion: undefined, downloadedVersion: version, error: undefined }
+          : {}),
+      });
+    });
+  }
 
   try {
     await updater.checkForUpdates();
   } catch (e) {
-    // A missing/invalid feed is expected in unconfigured builds.
+    // A missing/invalid feed is expected in unconfigured builds; the `error`
+    // event has already recorded it as idle + error.
     log.debug('checkForUpdates skipped', e);
   }
 }
@@ -138,7 +240,7 @@ export async function checkForUpdatesInteractive(): Promise<void> {
     });
     return;
   }
-  const updater = await getUpdater();
+  const updater = updaterRef ?? (await getUpdater());
   if (!updater) return;
   try {
     const result = await updater.checkForUpdates();
@@ -150,50 +252,109 @@ export async function checkForUpdatesInteractive(): Promise<void> {
   }
 }
 
+// ── Install (R4, R5) ───────────────────────────────────────────
+
+/** How long the installer hand-over may take before the attempt counts as failed. */
+export const INSTALL_HANDOFF_DEADLINE_MS = 60_000;
+
+export type InstallOutcome = 'not-ready' | 'declined' | 'quitting' | 'failed';
+
+let installInFlight: Promise<InstallOutcome> | null = null;
+
 /**
- * Installs a downloaded update (`IPC.installUpdate`, the future "Restart to
- * update" pill's action).
+ * Installs the downloaded update (`IPC.installUpdate`, the native dialog's
+ * "Restart Now", and the P3-06 pill).
  *
- * **06-desktop-and-shell.md §11 risk R5, verified**: `before-quit` (index.ts)
- * always finishes in `app.exit(0)` once its own bounded shutdown is done —
- * Electron's docs state plainly that `app.exit()` "will not emit the
- * `before-quit` and `will-quit` events". `electron-updater`'s `BaseUpdater`
- * (`node_modules/electron-updater/out/BaseUpdater.js`) has two install paths:
+ * Nothing is stopped until the install is committed (P1-review P2-R4). The
+ * order is:
+ *   1. Ask about unsaved work (`confirmDiscard`). Declining changes nothing.
+ *   2. Mark the window manager as quitting, so the windows `quitAndInstall`
+ *      closes are closed rather than hidden to the tray.
+ *   3. `quitAndInstall()`. On Windows/Linux (`BaseUpdater`) it runs the
+ *      installer synchronously (`install()`): NSIS/AppImage spawn it
+ *      detached, deb/rpm run the package manager through pkexec. Only if that
+ *      returns true does it call `app.quit()`. On macOS (`MacUpdater`) Squirrel
+ *      closes every window and then terminates the app, and ShipIt installs
+ *      once the process has exited.
+ *   4. The resulting `before-quit` is the commit point. index.ts's normal
+ *      handler then runs the one bounded shutdown (`quit-coordinator.ts`:
+ *      computer host, embedded server, tray) and `app.exit(0)`, exactly like
+ *      any other quit. The installer is already running or queued by then.
+ *   5. If electron-updater reports `error` instead (no installer file, pkexec
+ *      cancelled, AppImage without `APPIMAGE`, Squirrel rejecting the
+ *      signature), or nothing happens within the deadline, the attempt
+ *      failed: the state goes back to `ready` with the error, the quitting
+ *      flag is cleared and the window is restored. Nothing was stopped, so the
+ *      app simply keeps running.
  *
- *   1. `quitAndInstall()` itself: it calls `this.install()` — which spawns
- *      the platform installer as a **detached, unref'd** child process —
- *      SYNCHRONOUSLY, and only after that (`setImmediate`) calls
- *      `this.app.quit()`. So calling `quitAndInstall()` and then letting our
- *      own `app.exit(0)` run is not actually broken: the installer is
- *      already launched, and a detached child survives its parent exiting.
- *   2. `autoInstallOnAppQuit` (the "user just quit normally with an update
- *      already downloaded" case): it installs from an `app.once('quit', …)`
- *      listener registered via `ElectronAppAdapter.onQuit`. `app.exit()`
- *      never emits `'quit'` either (it bypasses the whole quit sequence), so
- *      **this path is silently skipped** by our shutdown — an update
- *      downloaded in the background and never explicitly installed would
- *      never install itself on quit.
- *
- * The fix applies to both paths at once: run the SAME bounded shutdown
- * (`runQuitShutdown`, shared with `before-quit`) here, then call
- * `quitAndInstall()` instead of `app.exit(0)`. `runQuitShutdown` marks the
- * quit handled, so when `quitAndInstall()`'s own `app.quit()` fires
- * `before-quit`, index.ts's handler no-ops instead of intercepting it again —
- * Electron's default quit then completes normally, `will-quit`/`quit` fire,
- * and `autoInstallOnAppQuit`'s listener sees `quitAndInstallCalled` already
- * true and no-ops harmlessly (the installer was already spawned by our own
- * `quitAndInstall()` call). Neither path depends on `app.exit(0)` any more.
- *
- * Not yet run against a real installer on each OS — 06 §8 calls for that with
- * `mock-update-server`, which is a manual/CI verification step, not one this
- * change can exercise from a unit test.
+ * On the R5 question (does `app.exit(0)` in `before-quit` break
+ * `autoInstallOnAppQuit`?): no. `app.exit` skips only `before-quit` and
+ * `will-quit`; Electron's `Browser::ExitWithCode` → `Shutdown()` still
+ * notifies `OnQuit`, and `App::OnQuit` emits `quit` with the exit code (0),
+ * which is what electron-updater's `addQuitHandler` listens for. So a
+ * downloaded update also installs on an ordinary quit. That reading of
+ * Electron's source still has to be confirmed per OS with
+ * `mock-update-server` (06 §8, 07 R-10).
  */
-export async function installUpdate(): Promise<void> {
-  if (state.status !== 'ready') return;
-  const updater = updaterRef ?? (await getUpdater());
-  if (!updater) return;
-  const proceeded = await runQuitShutdown(mode);
-  if (!proceeded) return;
-  log.info('Installing update — quitAndInstall');
-  updater.quitAndInstall();
+export function installUpdate(): Promise<InstallOutcome> {
+  if (!machine.downloadedVersion || !updaterRef) return Promise.resolve('not-ready');
+  if (!installInFlight) {
+    const updater = updaterRef;
+    installInFlight = runInstall(updater).finally(() => {
+      installInFlight = null;
+    });
+  }
+  return installInFlight;
+}
+
+async function runInstall(updater: AppUpdater): Promise<InstallOutcome> {
+  const wm = getWindowManager();
+  if (!(await wm.confirmDiscard())) return 'declined';
+  update({ installing: true, error: undefined });
+  wm.setQuitting(true);
+  log.info('Installing update: quitAndInstall', { version: machine.downloadedVersion });
+  const handoff = await waitForInstallHandoff(updater, () => updater.quitAndInstall());
+  if (handoff.ok) return 'quitting';
+
+  log.error('Update install did not start; the app keeps running', { error: handoff.error });
+  wm.setQuitting(false);
+  update({ installing: false, error: handoff.error });
+  // Squirrel.Mac closes every window before it installs; bring one back.
+  wm.restoreFromTray();
+  return 'failed';
+}
+
+/**
+ * Starts the install and resolves once the app starts quitting (committed)
+ * or electron-updater reports an error / the deadline passes (failed).
+ */
+function waitForInstallHandoff(
+  updater: AppUpdater,
+  start: () => void,
+): Promise<{ ok: true } | { ok: false; error: string }> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (result: { ok: true } | { ok: false; error: string }) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      app.removeListener('before-quit', onQuit);
+      updater.removeListener('error', onError);
+      resolve(result);
+    };
+    const onQuit = () => finish({ ok: true });
+    const onError = (err: unknown) => finish({ ok: false, error: message(err) });
+    const timer = setTimeout(
+      () => finish({ ok: false, error: `The installer did not start within ${INSTALL_HANDOFF_DEADLINE_MS / 1000}s.` }),
+      INSTALL_HANDOFF_DEADLINE_MS,
+    );
+    timer.unref?.();
+    app.on('before-quit', onQuit);
+    updater.on('error', onError);
+    try {
+      start();
+    } catch (err) {
+      onError(err);
+    }
+  });
 }

@@ -30,7 +30,7 @@ import {
 } from './deep-link';
 import { initAutoUpdates, checkForUpdatesInteractive } from './updater';
 import { repointTarget } from './repoint';
-import { isQuitHandled, isQuitting, markQuitting, runQuitShutdown } from './quit-coordinator';
+import { isQuitting, markQuitting, quitApp } from './quit-coordinator';
 
 const DEV_SERVER_URL = process.env['DESKTOP_DEV_SERVER_URL'] || null;
 const mode: 'dev' | 'standalone' = DEV_SERVER_URL ? 'dev' : 'standalone';
@@ -96,24 +96,14 @@ function main(): void {
     }
   });
 
-  app.on('before-quit', async (event) => {
-    // Already run — either this handler ran it, or `installUpdate` did on the
-    // update-install path (quit-coordinator.ts). Returning without
-    // `preventDefault()` lets Electron's own quit sequence finish normally,
-    // which matters for `quitAndInstall()`: it needs `will-quit`/`quit` to
-    // actually fire, and `app.exit(0)` below never emits them.
-    if (isQuitHandled()) return;
+  app.on('before-quit', (event) => {
+    // Every quit, an update install's included, is cancelled here and
+    // finished by `quitApp`: it asks before discarding unsaved edits (Cmd+Q
+    // and the Dock's Quit reach here without the window's close handler ever
+    // running), runs the bounded shutdown and ends in `app.exit(0)`, which
+    // still emits `quit` for electron-updater (quit-coordinator.ts).
     event.preventDefault();
-    // Ask before discarding unsaved edits — Cmd+Q and the Dock's Quit reach
-    // here without the window's close handler ever running.
-    const proceeded = await runQuitShutdown(mode);
-    if (!proceeded) return;
-    // Bounded shutdown already ran inside `runQuitShutdown`; `app.exit(0)` is
-    // the only thing that actually ends the process once `preventDefault()`
-    // has been called. Anything that could still hang belongs in that
-    // routine's own deadline, not here.
-    log.info('Exiting');
-    app.exit(0);
+    void quitApp(mode);
   });
 }
 
@@ -256,7 +246,7 @@ async function onReady(): Promise<void> {
   const initialLink = findDeepLinkInArgv(process.argv);
   if (initialLink) handleDeepLink(initialLink);
 
-  void initAutoUpdates(mode);
+  void initAutoUpdates();
 }
 
 /**

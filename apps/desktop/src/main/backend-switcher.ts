@@ -18,7 +18,7 @@ import { log } from './logger';
 import { showPrompt } from './prompt-window';
 import { getServerManager } from './server-manager';
 import { getWindowManager } from './window-manager';
-import type { DesktopServerEntry } from '../shared/ipc';
+import type { KnownServer } from './server-probe';
 import {
   activateConnection,
   activateEmbedded,
@@ -37,8 +37,8 @@ export function connectionState(): ServerConnectionState {
 /**
  * Fires whenever `connectionState()` changes — switched, added or forgotten a
  * server. `ipc.ts` relays this to the renderer as `IPC_EVENT.serversChanged`
- * (G-03); the native Server menu rebuilds on the next `updateMenuState` call
- * regardless, since `buildMenu` reads `connectionState()` fresh every time.
+ * (G-03) and rebuilds the native menu, whose Server submenu reads
+ * `connectionState()` fresh on every build.
  */
 const serverEvents = new EventEmitter();
 
@@ -62,9 +62,10 @@ function embeddedLabel(): string {
  * Every server this shell knows about — the embedded one plus every saved
  * remote — for the sidebar switcher and its popover (G-03). The desktop is
  * the source of truth here (`localStorage` is per-origin, so the renderer
- * cannot hold this list itself; see `serverConnections.ts`).
+ * cannot hold this list itself; see `serverConnections.ts`). Unprobed:
+ * `IPC.getServers` adds reachability through `probeKnownServers`.
  */
-export function listServers(): DesktopServerEntry[] {
+export function listServers(): KnownServer[] {
   const state = connectionState();
   const sm = getServerManager();
   return [
@@ -76,12 +77,13 @@ export function listServers(): DesktopServerEntry[] {
       active: state.serverMode === 'embedded',
     },
     ...state.connections.map(
-      (c): DesktopServerEntry => ({
+      (c): KnownServer => ({
         id: c.id,
         label: c.label,
         url: c.url,
         kind: 'remote',
         active: state.serverMode === 'remote' && state.activeConnectionId === c.id,
+        ...(c.serverId ? { expectedServerId: c.serverId } : {}),
       }),
     ),
   ];

@@ -21,6 +21,9 @@
 // means "which credential do I present?" and "am I talking to who I think?"
 // are answered by the same value, so they cannot disagree.
 
+// Type-only (erased): this file must stay free of runtime imports, see the probe section.
+import type { ServerReachability } from '@generatorai/shared';
+
 const CATALOG_KEY = 'generatorai.connections';
 
 /** Storage key holding the pre-catalog single session, migrated on first read. */
@@ -238,27 +241,35 @@ export function clearConnectionCredentials(storage: Storage, serverId: string): 
 //
 // `GET /api/auth/server-info` is deliberately public (see `auth.ts`'s own
 // comment): a device that has not paired yet still needs to identify the
-// server it is about to pair with. That makes it exactly the right endpoint
-// for a reachability probe too — it works for every entry in the switcher,
-// paired or not, on every OS (desktop main via Node's global `fetch`, or the
-// browser via the same code path — "the same code runs on every OS", 05
-// §G-03).
+// server it is about to pair with. That makes it the right endpoint for a
+// reachability probe too.
+//
+// Where it may run: anywhere a cross-origin request is allowed. The desktop
+// main process probes every known server with Node's `fetch`
+// (`apps/desktop/src/main/server-probe.ts`, imported through the
+// dependency-free `@generatorai/client-runtime/connections` subpath). A page
+// may only probe its OWN origin: the app's CSP is `connect-src 'self'` and the
+// server sends no CORS headers for other origins, so a renderer probing
+// another server gets a CSP violation and a false "offline"
+// (P1-review P2-R6). Keep this file free of runtime imports so the desktop
+// bundle can take it without pulling the package root in (06 §3.2).
 
 export interface ServerProbeResult {
-  /**
-   * `offline` — the request could not complete at all (timeout, DNS, refused
-   * connection). `unpaired` — something answered, but not with a recognisable
-   * GeneratorAI identity (non-2xx, or a body with no `serverId`): reachable,
-   * but not something this client can treat as a known server yet. `connected`
-   * — it identified itself.
-   */
-  status: 'connected' | 'offline' | 'unpaired';
+  /** See {@link ServerReachability}. */
+  status: ServerReachability;
   serverName?: string;
   latencyMs?: number;
 }
 
 export interface ProbeServerOptions {
   timeoutMs?: number;
+  /**
+   * The `serverId` this client expects at `endpoint`, when it knows one (a
+   * paired connection's host fingerprint). A different server answering at
+   * that address is reported as `unpaired`: the credential held for this
+   * entry is not for it.
+   */
+  expectedServerId?: string;
 }
 
 const DEFAULT_PROBE_TIMEOUT_MS = 2500;
@@ -274,6 +285,9 @@ export async function probeServer(
   try {
     const response = await fetch(`${endpoint}/api/auth/server-info`, { signal: controller.signal });
     const latencyMs = Date.now() - startedAt;
+    // Throttled or failing: something is there, but this probe could not
+    // confirm what. Not `unpaired`, which would tell the user to pair again.
+    if (response.status === 429 || response.status >= 500) return { status: 'error', latencyMs };
     if (!response.ok) return { status: 'unpaired', latencyMs };
     const body = (await response.json().catch(() => null)) as
       | { serverId?: unknown; serverName?: unknown }
@@ -281,11 +295,11 @@ export async function probeServer(
     if (!body || typeof body.serverId !== 'string' || !body.serverId) {
       return { status: 'unpaired', latencyMs };
     }
-    return {
-      status: 'connected',
-      latencyMs,
-      ...(typeof body.serverName === 'string' ? { serverName: body.serverName } : {}),
-    };
+    const serverName = typeof body.serverName === 'string' ? { serverName: body.serverName } : {};
+    if (options.expectedServerId && body.serverId !== options.expectedServerId) {
+      return { status: 'unpaired', latencyMs, ...serverName };
+    }
+    return { status: 'connected', latencyMs, ...serverName };
   } catch {
     return { status: 'offline' };
   } finally {

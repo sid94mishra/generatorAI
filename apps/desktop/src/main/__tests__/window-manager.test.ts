@@ -372,3 +372,66 @@ describe('appearance mirror (D-25)', () => {
     expect(win.webContents.send).toHaveBeenCalledWith('desktop:appearance-request', { mode: 'light' });
   });
 });
+
+describe('onRendererReset (P1-review P2-R8)', () => {
+  function watch(wm: WindowManager) {
+    const reset = vi.fn();
+    wm.onRendererReset(reset);
+    return reset;
+  }
+
+  it('fires when the main window closes', () => {
+    const { wm, win } = makeWindow();
+    const reset = watch(wm);
+    win.emit('closed');
+    expect(reset).toHaveBeenCalledTimes(1);
+    expect(wm.getMainWindow()).toBeNull();
+  });
+
+  it('fires when the renderer process dies', () => {
+    const { wm, win } = makeWindow();
+    const reset = watch(wm);
+    win.webContents.emit('render-process-gone', {}, { reason: 'crashed' });
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires on a repoint, including one that has to create the window', () => {
+    const { wm, win } = makeWindow();
+    const reset = watch(wm);
+    wm.repointMainWindow('http://127.0.0.1:4200');
+    expect(reset).toHaveBeenCalledTimes(1);
+    win.destroyed = true;
+    win.emit('closed');
+    reset.mockClear();
+    wm.repointMainWindow('http://127.0.0.1:4300');
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('fires on a new top-level document, not on SPA route changes or subframes', () => {
+    const { wm, win } = makeWindow();
+    const reset = watch(wm);
+    win.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true });
+    win.webContents.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false });
+    expect(reset).not.toHaveBeenCalled();
+    win.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('a throwing listener does not stop the others', () => {
+    const { wm, win } = makeWindow();
+    wm.onRendererReset(() => {
+      throw new Error('boom');
+    });
+    const reset = watch(wm);
+    win.emit('closed');
+    expect(reset).toHaveBeenCalledTimes(1);
+  });
+
+  it('sendAppearanceRequest reports whether a window was there to ask', () => {
+    const { wm, win } = makeWindow();
+    expect(wm.sendAppearanceRequest('dark')).toBe(true);
+    win.destroyed = true;
+    win.emit('closed');
+    expect(wm.sendAppearanceRequest('dark')).toBe(false);
+  });
+});

@@ -33,6 +33,7 @@
     "zod": "^3.24.0"
   },
   "devDependencies": {
+    "@generatorai/client-runtime": "workspace:*",
     "@generatorai/design-tokens": "workspace:*",
     "@generatorai/shared": "workspace:*",
     "@types/better-sqlite3": "^7.6.11",

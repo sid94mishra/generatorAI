@@ -18,7 +18,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { nativeTheme } from 'electron';
-import type { AppearancePush, ThemePreference } from '../shared/ipc';
+import type { DesktopAppearancePush, DesktopThemePreference } from '../shared/ipc';
 import { loadSettings, type AppearanceSettings } from './config';
 import { validateSettingValue } from './settings-schema';
 
@@ -31,7 +31,7 @@ export interface MirroredAppearance {
 }
 
 /** Whether `mode` resolves to dark, given what the OS prefers. */
-export function isDarkMode(mode: ThemePreference, systemDark: boolean): boolean {
+export function isDarkMode(mode: DesktopThemePreference, systemDark: boolean): boolean {
   return mode === 'system' ? systemDark : mode === 'dark';
 }
 
@@ -51,10 +51,10 @@ export function appearanceMirror(
 
 export interface CommitAppearanceDeps {
   save: (appearance: AppearanceSettings) => void;
-  setThemeSource: (mode: ThemePreference) => void;
+  setThemeSource: (mode: DesktopThemePreference) => void;
   /** setBackgroundColor on open windows + repaint the WCO caption glyphs. */
   repaint: () => void;
-  updateMenu: (mode: ThemePreference) => void;
+  updateMenu: (mode: DesktopThemePreference) => void;
 }
 
 export type CommitResult = { ok: true; appearance: AppearanceSettings } | { ok: false; error: string };
@@ -67,7 +67,7 @@ export type CommitResult = { ok: true; appearance: AppearanceSettings } | { ok: 
 export function commitAppearance(payload: unknown, deps: CommitAppearanceDeps): CommitResult {
   const checked = validateSettingValue('appearance', payload);
   if (!checked.ok) return { ok: false, error: checked.error };
-  const appearance: AppearancePush = checked.value;
+  const appearance: DesktopAppearancePush = checked.value;
   deps.save(appearance);
   // themeSource drives prefers-color-scheme in the renderer and the native
   // chrome (menus, dialogs, WCO), so it must equal the app's own mode or

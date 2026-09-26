@@ -118,6 +118,22 @@ export function windowChrome(): WindowChrome {
 }
 
 /**
+ * Whether a downloaded update must also pass through Electron's native
+ * `autoUpdater` before it can be installed.
+ *
+ * True on macOS only, and not as a workaround: it is which updater backend
+ * `electron-updater` uses there. Its `MacUpdater` downloads the zip, emits its
+ * own `update-downloaded`, and only THEN serves the file to Squirrel.Mac,
+ * which downloads and verifies it again (code signature included) and signals
+ * Electron's native `autoUpdater` `update-downloaded` when it is installable.
+ * `quitAndInstall` before that point waits for Squirrel indefinitely.
+ * The Windows (NSIS) and Linux (AppImage/deb/rpm) updaters install straight
+ * from the downloaded file, so their `update-downloaded` already means ready
+ * (`electron-updater` 6.8.9, `MacUpdater.js` / `BaseUpdater.js`).
+ */
+export const updaterHasNativeInstallStage = isMac;
+
+/**
  * Adds an `&` mnemonic to a Windows/Linux menu label.
  *
  * The `&` makes the following letter underlined and generates the `Alt+<key>`

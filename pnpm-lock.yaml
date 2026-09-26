@@ -278,6 +278,9 @@ importers:
         specifier: ^3.24.0
         version: 3.25.76
     devDependencies:
+      '@generatorai/client-runtime':
+        specifier: workspace:*
+        version: link:../../packages/client-runtime
       '@generatorai/design-tokens':
         specifier: workspace:*
         version: link:../../packages/design-tokens

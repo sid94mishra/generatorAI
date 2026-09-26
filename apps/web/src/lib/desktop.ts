@@ -6,14 +6,16 @@
 // `window.generatoraiDesktop?.…` guards.
 // ────────────────────────────────────────────────────────────────
 
+import type {
+  DesktopAppearancePush,
+  DesktopServerEntry,
+  DesktopShellStatePush,
+  DesktopUpdateState,
+} from '@generatorai/shared';
+
 export type DesktopWindowChrome = GeneratorAIDesktopWindowChrome;
-export type DesktopMenuState = GeneratorAIDesktopMenuState;
 export type DesktopWindowState = GeneratorAIDesktopWindowStateChange;
 export type DesktopCommand = GeneratorAIDesktopCommand;
-export type DesktopAppearance = GeneratorAIDesktopAppearance;
-export type DesktopAttentionCounts = GeneratorAIDesktopAttentionCounts;
-export type DesktopServerEntry = GeneratorAIDesktopServerEntry;
-export type DesktopUpdateState = GeneratorAIDesktopUpdateState;
 
 /** True only inside the Electron shell. */
 export const isDesktop: boolean =
@@ -66,7 +68,7 @@ export async function readWindowChrome(): Promise<DesktopWindowChrome> {
  * enablement on `Back`, the Appearance radio group, `Open Recent`).
  * Fire-and-forget: a failure here must never break the UI.
  */
-export function pushMenuState(patch: Partial<DesktopMenuState>): void {
+export function pushMenuState(patch: Partial<DesktopShellStatePush>): void {
   const api = bridge()?.setMenuState;
   if (!api) return;
   void api(patch).catch(() => undefined);
@@ -101,7 +103,7 @@ export function onDesktopAppearanceRequest(cb: (mode: 'light' | 'dark' | 'system
  * `nativeTheme.themeSource`, repaints the window background and the caption
  * glyphs, so the next launch opens in the right colour. Fire-and-forget.
  */
-export function pushDesktopAppearance(appearance: DesktopAppearance): void {
+export function pushDesktopAppearance(appearance: DesktopAppearancePush): void {
   const api = bridge()?.setAppearance;
   if (!api) return;
   void api(appearance).catch(() => undefined);
@@ -114,17 +116,18 @@ export function onWindowStateChanged(cb: (state: DesktopWindowState) => void): (
   return api(cb);
 }
 
-/** The desktop server switcher bridge (G-03). Every member no-ops in a plain browser tab. */
+/** The desktop server switcher bridge (G-03). Every member but `list` no-ops in a plain browser tab. */
 export const desktopServers = {
   isAvailable: (): boolean => Boolean(bridge()?.servers),
+  /**
+   * Every server the shell knows, with the reachability main probed. Rejects
+   * when there is no shell or the call fails: an empty list would read as "no
+   * servers", which is not what happened (D-36; P1-review P2-R23).
+   */
   list: async (): Promise<DesktopServerEntry[]> => {
     const api = bridge()?.servers?.list;
-    if (!api) return [];
-    try {
-      return await api();
-    } catch {
-      return [];
-    }
+    if (!api) throw new Error('The desktop server list is only available in the desktop app.');
+    return api();
   },
   switchTo: (id: string): void => {
     const api = bridge()?.servers?.switchTo;
@@ -145,32 +148,34 @@ export const desktopServers = {
   },
 };
 
-/** The desktop updater bridge (G-04). Every member no-ops/resolves-null in a plain browser tab. */
+/** The desktop updater bridge (G-04). */
 export const desktopUpdates = {
   isAvailable: (): boolean => Boolean(bridge()?.updates),
+  /**
+   * The shell's updater state; `null` in a plain browser tab (there is no
+   * updater). A failed call rejects rather than pretending to be `null`
+   * (P1-review P2-R23).
+   */
   getState: async (): Promise<DesktopUpdateState | null> => {
     const api = bridge()?.updates?.getState;
     if (!api) return null;
-    try {
-      return await api();
-    } catch {
-      return null;
-    }
+    return api();
   },
+  /** Subscribing also tells the shell a renderer can show update state, so it skips its native dialog. */
   onChange: (cb: (state: DesktopUpdateState) => void): (() => void) => {
     const api = bridge()?.updates?.onChange;
     if (!api) return () => undefined;
     return api(cb);
   },
-  /** Runs the shell's bounded shutdown and `quitAndInstall()` (06 §11 R5). */
+  /**
+   * Installs the downloaded update: the shell hands over to the installer and
+   * quits (06 §11 R5). A failed install leaves the app running and comes back
+   * through `onChange` as `status: 'ready'` with `error` set.
+   */
   restartToUpdate: async (): Promise<void> => {
     const api = bridge()?.updates?.install;
     if (!api) return;
-    try {
-      await api();
-    } catch {
-      // Surfaced through the next `onChange` push (status: 'error'), not here.
-    }
+    await api();
   },
 };
 

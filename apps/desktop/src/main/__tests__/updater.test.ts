@@ -1,25 +1,41 @@
-// updater.ts (G-04): the state machine pushed to the renderer, the
-// no-window-visible fallback dialog, and the R5 install-path fix — running
-// the shared bounded shutdown and calling `quitAndInstall()` instead of the
-// forced `app.exit(0)` `before-quit` uses, which never emits the events
-// `electron-updater`'s own quit-time install depends on.
+// updater.ts (G-04): the state machine pushed to the renderer (P1-review
+// P2-R7), when the native "update ready" dialog shows (P2-R3), and the
+// install hand-over that stops nothing until the install is committed (P2-R4).
+//
+// The fakes model electron-updater 6.8.9 as read in its source:
+// - `BaseUpdater.quitAndInstall()` (Windows/Linux) runs `install()`
+//   synchronously; on success it `setImmediate`s `app.quit()` (→ `before-quit`);
+//   on failure it dispatches `error` and does not quit.
+// - `MacUpdater` emits its own `update-downloaded` before Squirrel.Mac has the
+//   update; Electron's native `autoUpdater` emits `update-downloaded` when it
+//   does.
 
 import { EventEmitter } from 'node:events';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const state = vi.hoisted(() => ({
   isPackaged: true,
   version: '1.0.0',
+  nativeStage: false,
   showMessageBox: vi.fn(async () => ({ response: 1 })),
   mainWindow: null as { isDestroyed: () => boolean; isVisible: () => boolean } | null,
-  runQuitShutdown: vi.fn(async () => true),
+  confirmDiscard: vi.fn(async () => true),
+  setQuitting: vi.fn(),
+  restoreFromTray: vi.fn(),
 }));
+
+// Read by the `electron` mock factory below only when `../updater` is
+// imported (after this module's top level has run), so no hoisting is needed.
+const fakes = { app: new EventEmitter(), native: new EventEmitter() };
 
 class FakeUpdater extends EventEmitter {
   autoDownload = false;
   logger: unknown = null;
   checkForUpdates = vi.fn(async () => ({ updateInfo: { version: '1.0.0' } }));
-  quitAndInstall = vi.fn();
+  /** Default: a successful BaseUpdater hand-over. */
+  quitAndInstall = vi.fn(() => {
+    setImmediate(() => fakes.app.emit('before-quit'));
+  });
 }
 
 vi.mock('electron', () => ({
@@ -28,25 +44,30 @@ vi.mock('electron', () => ({
       return state.isPackaged;
     },
     getVersion: () => state.version,
+    on: (event: string, fn: (...a: unknown[]) => void) => fakes.app.on(event, fn),
+    removeListener: (event: string, fn: (...a: unknown[]) => void) => fakes.app.removeListener(event, fn),
   },
+  autoUpdater: fakes.native,
   dialog: { showMessageBox: state.showMessageBox },
 }));
 
 vi.mock('../window-manager', () => ({
-  getWindowManager: () => ({ getMainWindow: () => state.mainWindow }),
+  getWindowManager: () => ({
+    getMainWindow: () => state.mainWindow,
+    confirmDiscard: state.confirmDiscard,
+    setQuitting: state.setQuitting,
+    restoreFromTray: state.restoreFromTray,
+  }),
 }));
 
-vi.mock('../quit-coordinator', () => ({ runQuitShutdown: state.runQuitShutdown }));
+vi.mock('../platform', () => ({
+  get updaterHasNativeInstallStage() {
+    return state.nativeStage;
+  },
+}));
 vi.mock('../logger', () => ({ log: { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } }));
 
-// A dynamic `import('electron-updater')` (inside `getUpdater()`) is not
-// guaranteed to re-run this factory on every `vi.resetModules()` the way a
-// fresh `import('../updater')` re-runs THAT module's own top-level code —
-// confirmed by a first version of this file, where listeners piled up on one
-// shared `FakeUpdater` across tests. A getter sidesteps the question
-// entirely: whichever way the factory itself is cached, reading
-// `autoUpdater` always returns whatever `updaterInstance` currently points
-// to, and `beforeEach` below replaces it with a clean emitter every time.
+// A getter, so each test's fresh `FakeUpdater` is what `import('electron-updater')` yields.
 let updaterInstance = new FakeUpdater();
 vi.mock('electron-updater', () => ({
   get autoUpdater() {
@@ -56,125 +77,299 @@ vi.mock('electron-updater', () => ({
 
 async function loadUpdater() {
   vi.resetModules();
-  return import('../updater');
+  const mod = await import('../updater');
+  return mod;
+}
+
+async function initialised() {
+  const updater = await loadUpdater();
+  await updater.initAutoUpdates();
+  return updater;
 }
 
 function visibleWindow() {
   return { isDestroyed: () => false, isVisible: () => true };
 }
 
-/** Yields the event loop enough times for the `update-downloaded` listener's own await chain (dialog → installUpdate → runQuitShutdown → quitAndInstall) to finish. */
+/** Lets pending promise chains and `setImmediate` callbacks run. */
 async function flush(times = 4): Promise<void> {
   for (let i = 0; i < times; i++) {
-    await new Promise((resolve) => setTimeout(resolve, 0));
+    await new Promise((resolve) => setImmediate(resolve));
   }
+}
+
+async function downloaded(updater: Awaited<ReturnType<typeof loadUpdater>>, version = '1.1.0') {
+  updaterInstance.emit('update-available', { version });
+  updaterInstance.emit('update-downloaded', { version });
+  await flush();
+  return updater;
 }
 
 beforeEach(() => {
   state.isPackaged = true;
   state.version = '1.0.0';
+  state.nativeStage = false;
   state.showMessageBox.mockReset().mockResolvedValue({ response: 1 });
   state.mainWindow = null;
-  state.runQuitShutdown.mockReset().mockResolvedValue(true);
+  state.confirmDiscard.mockReset().mockResolvedValue(true);
+  state.setQuitting.mockReset();
+  state.restoreFromTray.mockReset();
+  fakes.app.removeAllListeners();
+  fakes.native.removeAllListeners();
   updaterInstance = new FakeUpdater();
 });
 
-describe('getUpdateState / initAutoUpdates', () => {
-  it('starts idle, with the running build version, and does nothing when unpackaged', async () => {
+afterEach(() => {
+  vi.useRealTimers();
+});
+
+describe('state machine (R7)', () => {
+  it('starts idle with the running version, and does nothing when unpackaged', async () => {
     state.isPackaged = false;
     const updater = await loadUpdater();
     expect(updater.getUpdateState()).toEqual({ status: 'idle', currentVersion: '1.0.0' });
-    await updater.initAutoUpdates('standalone');
+    await updater.initAutoUpdates();
     expect(updater.getUpdateState().status).toBe('idle');
+    expect(updaterInstance.checkForUpdates).not.toHaveBeenCalled();
   });
 
   it('follows checking → downloading → ready through the real event names', async () => {
-    const updater = await loadUpdater();
-    state.mainWindow = visibleWindow();
+    const updater = await initialised();
     const pushed: unknown[] = [];
     updater.onUpdateStateChange((s) => pushed.push(s));
 
-    await updater.initAutoUpdates('standalone');
     updaterInstance.emit('checking-for-update');
-    expect(updater.getUpdateState().status).toBe('checking');
+    expect(updater.getUpdateState()).toEqual({ status: 'checking', currentVersion: '1.0.0' });
 
     updaterInstance.emit('update-available', { version: '1.1.0' });
-    expect(updater.getUpdateState()).toMatchObject({ status: 'downloading', nextVersion: '1.1.0', percent: 0 });
+    expect(updater.getUpdateState()).toEqual({ status: 'downloading', currentVersion: '1.0.0', nextVersion: '1.1.0', percent: 0 });
 
     updaterInstance.emit('download-progress', { percent: 42 });
     expect(updater.getUpdateState()).toMatchObject({ status: 'downloading', percent: 42 });
 
     updaterInstance.emit('update-downloaded', { version: '1.1.0' });
     await flush();
-    expect(updater.getUpdateState()).toMatchObject({ status: 'ready', nextVersion: '1.1.0', percent: 100 });
-
-    expect(pushed.length).toBeGreaterThan(0);
+    expect(updater.getUpdateState()).toEqual({
+      status: 'ready',
+      currentVersion: '1.0.0',
+      nextVersion: '1.1.0',
+      downloadedVersion: '1.1.0',
+    });
+    expect(pushed).toHaveLength(4);
   });
 
-  it('reports an error state', async () => {
-    const updater = await loadUpdater();
-    await updater.initAutoUpdates('standalone');
+  it('a check that fails before any download is idle + error, not a stuck error state', async () => {
+    const updater = await initialised();
+    updaterInstance.emit('checking-for-update');
     updaterInstance.emit('error', new Error('feed unreachable'));
-    expect(updater.getUpdateState()).toMatchObject({ status: 'error', error: 'feed unreachable' });
+    expect(updater.getUpdateState()).toEqual({ status: 'idle', currentVersion: '1.0.0', error: 'feed unreachable' });
   });
 
-  it('shows the native dialog on update-downloaded only when there is no visible window', async () => {
-    const updater = await loadUpdater();
-    state.mainWindow = null; // no window at all
-    await updater.initAutoUpdates('standalone');
-    updaterInstance.emit('update-downloaded', { version: '1.1.0' });
-    await flush();
-    expect(state.showMessageBox).toHaveBeenCalled();
+  it('the next successful transition clears a stale error', async () => {
+    const updater = await initialised();
+    updaterInstance.emit('error', new Error('feed unreachable'));
+    updaterInstance.emit('checking-for-update');
+    expect(updater.getUpdateState().error).toBeUndefined();
+    updaterInstance.emit('error', new Error('again'));
+    updaterInstance.emit('update-not-available');
+    expect(updater.getUpdateState()).toEqual({ status: 'idle', currentVersion: '1.0.0' });
   });
 
-  it('does not show the native dialog when a visible window exists', async () => {
-    const updater = await loadUpdater();
-    state.mainWindow = visibleWindow();
-    await updater.initAutoUpdates('standalone');
-    updaterInstance.emit('update-downloaded', { version: '1.1.0' });
-    await flush();
-    expect(state.showMessageBox).not.toHaveBeenCalled();
+  it('a later check or error does not hide a downloaded update (Help ▸ Check for Updates while offline)', async () => {
+    const updater = await downloaded(await initialised());
+    updaterInstance.emit('checking-for-update');
+    expect(updater.getUpdateState()).toMatchObject({ status: 'ready', downloadedVersion: '1.1.0' });
+    updaterInstance.emit('error', new Error('offline'));
+    expect(updater.getUpdateState()).toEqual({
+      status: 'ready',
+      currentVersion: '1.0.0',
+      nextVersion: '1.1.0',
+      downloadedVersion: '1.1.0',
+      error: 'offline',
+    });
+    // …and it can still be installed.
+    expect(await updater.installUpdate()).toBe('quitting');
   });
 
-  it('installs when the user picks Restart Now on the fallback dialog', async () => {
-    const updater = await loadUpdater();
-    state.mainWindow = null;
-    state.showMessageBox.mockResolvedValue({ response: 0 });
-    await updater.initAutoUpdates('standalone');
+  it('a newer version found later replaces the downloaded one', async () => {
+    const updater = await downloaded(await initialised(), '1.1.0');
+    updaterInstance.emit('update-available', { version: '1.2.0' });
+    expect(updater.getUpdateState()).toMatchObject({ status: 'downloading', nextVersion: '1.2.0' });
+    expect(updater.getUpdateState().downloadedVersion).toBeUndefined();
+  });
+
+  it('update-cancelled returns to idle and drops the progress', async () => {
+    const updater = await initialised();
+    updaterInstance.emit('update-available', { version: '1.1.0' });
+    updaterInstance.emit('download-progress', { percent: 30 });
+    updaterInstance.emit('update-cancelled', { version: '1.1.0' });
+    expect(updater.getUpdateState()).toEqual({ status: 'idle', currentVersion: '1.0.0' });
+  });
+
+  it('with a native install stage (Squirrel.Mac), ready only once Electron’s autoUpdater has the update', async () => {
+    state.nativeStage = true;
+    const updater = await initialised();
+    updaterInstance.emit('update-available', { version: '1.1.0' });
     updaterInstance.emit('update-downloaded', { version: '1.1.0' });
     await flush();
-    expect(state.runQuitShutdown).toHaveBeenCalledWith('standalone');
-    expect(updaterInstance.quitAndInstall).toHaveBeenCalled();
+    expect(updater.getUpdateState()).toMatchObject({ status: 'downloading', percent: 100 });
+    expect(await updater.installUpdate()).toBe('not-ready');
+
+    fakes.native.emit('update-downloaded');
+    await flush();
+    expect(updater.getUpdateState()).toMatchObject({ status: 'ready', downloadedVersion: '1.1.0' });
+  });
+
+  it('with a native install stage, a Squirrel failure before it has the update is idle + error', async () => {
+    state.nativeStage = true;
+    const updater = await initialised();
+    updaterInstance.emit('update-downloaded', { version: '1.1.0' });
+    updaterInstance.emit('error', new Error('Code signature did not match'));
+    expect(updater.getUpdateState()).toEqual({ status: 'idle', currentVersion: '1.0.0', error: 'Code signature did not match' });
+    fakes.native.emit('update-downloaded');
+    expect(updater.getUpdateState().status).toBe('idle');
   });
 });
 
-describe('installUpdate — R5 install path', () => {
-  it('does nothing when no update is ready', async () => {
-    const updater = await loadUpdater();
-    await updater.installUpdate();
-    expect(state.runQuitShutdown).not.toHaveBeenCalled();
+describe('the native "update ready" dialog (R3)', () => {
+  it('shows with a visible window while no renderer has subscribed (today, until the P3-06 pill)', async () => {
+    state.mainWindow = visibleWindow();
+    await downloaded(await initialised());
+    expect(state.showMessageBox).toHaveBeenCalledWith(expect.objectContaining({ message: 'GeneratorAI 1.1.0 has been downloaded.' }));
   });
 
-  it('runs the shared bounded shutdown and calls quitAndInstall — never app.exit', async () => {
-    const updater = await loadUpdater();
-    await updater.initAutoUpdates('standalone');
-    updaterInstance.emit('update-downloaded', { version: '1.1.0' });
-    await flush();
+  it('shows when there is no window at all, even with a stale subscription', async () => {
+    const updater = await initialised();
+    updater.setUpdateWatch(7, true);
+    await downloaded(updater);
+    expect(state.showMessageBox).toHaveBeenCalledTimes(1);
+  });
 
-    await updater.installUpdate();
-    expect(state.runQuitShutdown).toHaveBeenCalledWith('standalone');
+  it('is skipped only while a subscribed renderer is on screen', async () => {
+    state.mainWindow = visibleWindow();
+    const updater = await initialised();
+    updater.setUpdateWatch(7, true);
+    expect(updater.rendererWatchesUpdates()).toBe(true);
+    await downloaded(updater);
+    expect(state.showMessageBox).not.toHaveBeenCalled();
+  });
+
+  it('counts subscriptions per renderer, and a renderer reset forgets them', async () => {
+    const updater = await loadUpdater();
+    updater.setUpdateWatch(7, true);
+    updater.setUpdateWatch(7, true);
+    updater.setUpdateWatch(7, false);
+    expect(updater.rendererWatchesUpdates()).toBe(true);
+    updater.setUpdateWatch(7, false);
+    expect(updater.rendererWatchesUpdates()).toBe(false);
+    updater.setUpdateWatch(7, true);
+    updater.clearUpdateWatchers();
+    expect(updater.rendererWatchesUpdates()).toBe(false);
+  });
+
+  it('offers once per download, not again when a later check keeps it ready', async () => {
+    const updater = await downloaded(await initialised());
+    updaterInstance.emit('checking-for-update');
+    updaterInstance.emit('update-not-available');
+    await flush();
+    expect(updater.getUpdateState().status).toBe('ready');
+    expect(state.showMessageBox).toHaveBeenCalledTimes(1);
+  });
+
+  it('"Restart Now" installs', async () => {
+    state.showMessageBox.mockResolvedValue({ response: 0 });
+    await downloaded(await initialised());
+    await flush();
+    expect(updaterInstance.quitAndInstall).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('installUpdate (R4)', () => {
+  it('does nothing when no update is ready', async () => {
+    const updater = await initialised();
+    expect(await updater.installUpdate()).toBe('not-ready');
+    expect(state.confirmDiscard).not.toHaveBeenCalled();
+    expect(updaterInstance.quitAndInstall).not.toHaveBeenCalled();
+  });
+
+  it('asks about unsaved work first; declining changes nothing', async () => {
+    const updater = await downloaded(await initialised());
+    state.confirmDiscard.mockResolvedValue(false);
+    expect(await updater.installUpdate()).toBe('declined');
+    expect(updaterInstance.quitAndInstall).not.toHaveBeenCalled();
+    expect(state.setQuitting).not.toHaveBeenCalled();
+    expect(updater.getUpdateState().status).toBe('ready');
+  });
+
+  it('hands over to quitAndInstall and is committed once the app starts quitting (the normal quit path then shuts down)', async () => {
+    const updater = await downloaded(await initialised());
+    const order: string[] = [];
+    state.confirmDiscard.mockImplementation(async () => (order.push('confirm'), true));
+    state.setQuitting.mockImplementation((v: boolean) => void order.push(`quitting:${v}`));
+    updaterInstance.quitAndInstall.mockImplementation(() => {
+      order.push('quitAndInstall');
+      setImmediate(() => fakes.app.emit('before-quit'));
+    });
+
+    const pushed: string[] = [];
+    updater.onUpdateStateChange((s) => pushed.push(s.status));
+    expect(await updater.installUpdate()).toBe('quitting');
+    expect(order).toEqual(['confirm', 'quitting:true', 'quitAndInstall']);
+    expect(pushed).toContain('installing');
+    expect(state.restoreFromTray).not.toHaveBeenCalled();
+    // The hand-over listener is gone once settled.
+    expect(fakes.app.listenerCount('before-quit')).toBe(0);
+  });
+
+  it('a second request while one is in flight shares it', async () => {
+    const updater = await downloaded(await initialised());
+    const a = updater.installUpdate();
+    const b = updater.installUpdate();
+    expect(await a).toBe('quitting');
+    expect(await b).toBe('quitting');
     expect(updaterInstance.quitAndInstall).toHaveBeenCalledTimes(1);
   });
 
-  it('does not install when the shutdown was declined (unsaved work)', async () => {
-    const updater = await loadUpdater();
-    await updater.initAutoUpdates('standalone');
-    updaterInstance.emit('update-downloaded', { version: '1.1.0' });
-    await flush();
+  it('install failure (install() false → error, e.g. pkexec cancelled): back to ready + error, app left running', async () => {
+    const updater = await downloaded(await initialised());
+    updaterInstance.quitAndInstall.mockImplementation(() => {
+      updaterInstance.emit('error', new Error('Command pkexec exited with code 126'));
+    });
+    expect(await updater.installUpdate()).toBe('failed');
+    expect(updater.getUpdateState()).toMatchObject({
+      status: 'ready',
+      downloadedVersion: '1.1.0',
+      error: 'Command pkexec exited with code 126',
+    });
+    expect(state.setQuitting).toHaveBeenLastCalledWith(false);
+    expect(state.restoreFromTray).toHaveBeenCalled();
+    expect(fakes.app.listenerCount('before-quit')).toBe(0);
+  });
 
-    state.runQuitShutdown.mockResolvedValue(false);
-    await updater.installUpdate();
-    expect(updaterInstance.quitAndInstall).not.toHaveBeenCalled();
+  it('quitAndInstall throwing counts as a failure too', async () => {
+    const updater = await downloaded(await initialised());
+    updaterInstance.quitAndInstall.mockImplementation(() => {
+      throw new Error('APPIMAGE env is not defined');
+    });
+    expect(await updater.installUpdate()).toBe('failed');
+    expect(updater.getUpdateState()).toMatchObject({ status: 'ready', error: 'APPIMAGE env is not defined' });
+  });
+
+  it('fails after the deadline when nothing happens, and can be retried', async () => {
+    const updater = await downloaded(await initialised());
+    vi.useFakeTimers();
+    updaterInstance.quitAndInstall.mockImplementation(() => undefined);
+    const pending = updater.installUpdate();
+    await vi.advanceTimersByTimeAsync(updater.INSTALL_HANDOFF_DEADLINE_MS);
+    expect(await pending).toBe('failed');
+    expect(updater.getUpdateState()).toMatchObject({ status: 'ready', error: expect.stringContaining('did not start') });
+    expect(state.setQuitting).toHaveBeenLastCalledWith(false);
+    vi.useRealTimers();
+
+    updaterInstance.quitAndInstall.mockImplementation(() => {
+      setImmediate(() => fakes.app.emit('before-quit'));
+    });
+    expect(await updater.installUpdate()).toBe('quitting');
   });
 });
 

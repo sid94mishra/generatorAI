@@ -12,9 +12,9 @@ import {
   type DesktopPairingCode,
   type DesktopServerEntry,
   type MenuState,
-  type ShellState,
+  type DesktopShellStatePush,
   type SaveFileOptions,
-  type UpdateState,
+  type DesktopUpdateState,
   type WindowChrome,
 } from '../shared/ipc';
 import { BROWSER_IPC, BROWSER_IPC_EVENT, type BrowserBounds, type NativeBrowserEvent } from '../shared/browser-ipc';
@@ -31,10 +31,17 @@ import {
 import { resolvePaths } from './paths';
 import { loadSettings, saveSettings } from './config';
 import { windowChrome } from './platform';
-import { updateMenuState } from './menu';
+import { applyMenuPush, updateMenuState } from './menu';
 import { refreshTrayMenu } from './tray';
-import { applyAttentionBadge } from './badge';
-import { getUpdateState, installUpdate, onUpdateStateChange } from './updater';
+import { clearAttention, setAttention } from './attention-state';
+import { probeKnownServers } from './server-probe';
+import {
+  clearUpdateWatchers,
+  getUpdateState,
+  installUpdate,
+  onUpdateStateChange,
+  setUpdateWatch,
+} from './updater';
 import { setUnsavedWork } from './unsaved-work';
 import { log } from './logger';
 import { createIpcGuard, defaultFromWebContents } from './ipc-guard';
@@ -254,7 +261,7 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   // checkmark, `Back` greys out, and `Open Recent` lists real routes.
   guardedHandle(IPC.setMenuState, (_e, patch: unknown) => {
     if (!patch || typeof patch !== 'object') return;
-    const p = patch as Partial<ShellState>;
+    const p = patch as Partial<DesktopShellStatePush>;
     const safe: Partial<MenuState> = {};
     if (typeof p.sidebarOpen === 'boolean') safe.sidebarOpen = p.sidebarOpen;
     if (typeof p.rightPaneOpen === 'boolean') safe.rightPaneOpen = p.rightPaneOpen;
@@ -273,16 +280,24 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
         .slice(0, 10)
         .map((r) => ({ label: r.label.slice(0, 80), route: r.route.slice(0, 300) }));
     }
-    const attention = sanitizeAttention((p as { attention?: unknown }).attention);
-    if (attention !== undefined) safe.attention = attention;
-    updateMenuState(safe);
+    // Rebuilding the whole application menu can close a menu the user has
+    // open (macOS), so only for pushes that change something it shows. The
+    // renderer re-sends every field whenever the attention counts move, and
+    // the counts are not in the menu (P1-review P2-R16).
+    applyMenuPush(safe);
     // Only when this push actually carried attention data: G-05's badge and
     // tray text follow the D-36 feed, which is optional right up until the
     // renderer has a first snapshot.
-    if (attention !== undefined) {
-      refreshTrayMenu();
-      applyAttentionBadge(attention?.needsYou ?? 0, { getMainWindow: () => wm.getMainWindow() });
-    }
+    const attention = sanitizeAttention(p.attention);
+    if (attention !== undefined) setAttention(attention);
+  });
+
+  // The page that pushed the counts and subscribed to updates is gone
+  // (closed, crashed, reloaded, or moved to another server): its counts are
+  // stale and its update listeners are dead (P1-review P2-R8, P2-R3).
+  wm.onRendererReset(() => {
+    clearAttention();
+    clearUpdateWatchers();
   });
 
   // ── Appearance (D-25) ──────────────────────────────────────────
@@ -329,8 +344,10 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   //
   // The desktop is the source of truth for "which servers does this shell
   // know about" — `localStorage` is per-origin, so the renderer cannot hold
-  // this list itself once it has navigated to a server's own origin.
-  guardedHandle(IPC.getServers, (): DesktopServerEntry[] => listServers());
+  // this list itself once it has navigated to a server's own origin. Main
+  // also probes reachability: the renderer's CSP and CORS allow it to reach
+  // only its own origin (P1-review P2-R6). Bounded by the probe timeout.
+  guardedHandle(IPC.getServers, (): Promise<DesktopServerEntry[]> => probeKnownServers(listServers()));
 
   guardedHandle(IPC.switchServer, async (_e, id: unknown) => {
     if (typeof id !== 'string' || !id) return;
@@ -341,16 +358,28 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     await promptForRemoteServer();
   });
 
+  // Every switch, add or forget, wherever it came from (this IPC, the menu,
+  // the tray): the renderer refetches, the Server submenu's radio and list are
+  // rebuilt, and the tray's status lines follow the active server
+  // (P1-review P2-R23).
   onServersChanged(() => {
     const win = wm.getMainWindow();
     if (win && !win.isDestroyed()) win.webContents.send(IPC_EVENT.serversChanged);
+    updateMenuState({});
+    refreshTrayMenu();
   });
 
   // ── Updates (G-04) ─────────────────────────────────────────────
-  guardedHandle(IPC.getUpdateState, (): UpdateState => getUpdateState());
+  guardedHandle(IPC.getUpdateState, (): DesktopUpdateState => getUpdateState());
 
   guardedHandle(IPC.installUpdate, async () => {
+    // A failure is reported through the state (`ready` + `error`), not here.
     await installUpdate();
+  });
+
+  guardedHandle(IPC.watchUpdates, (e, watching: unknown) => {
+    if (typeof watching !== 'boolean') return;
+    setUpdateWatch(e.sender.id, watching);
   });
 
   onUpdateStateChange((state) => {

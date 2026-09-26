@@ -139,33 +139,25 @@ interface GeneratorAIDesktopWindowChrome {
   isWayland: boolean;
 }
 
-/** Needs-you / running totals from the D-36 attention feed (G-01), mirrored into the native menu (G-05). */
-interface GeneratorAIDesktopAttentionCounts {
-  needsYou: number;
-  running: number;
-  byEntity: Record<'chat' | 'workflow_run' | 'automation_execution', { needsYou: number; running: number }>;
-}
-
-/** Renderer UI state mirrored into the native menu (checkmarks, enablement). */
-interface GeneratorAIDesktopMenuState {
-  sidebarOpen: boolean;
-  rightPaneOpen: boolean;
-  hasUnsavedWork: boolean;
-  recent: Array<{ label: string; route: string }>;
-  /** `null` until the renderer's own attention subscription has a first snapshot. */
-  attention: GeneratorAIDesktopAttentionCounts | null;
-}
-
-/** One known server (G-03): this machine or a paired remote. */
-interface GeneratorAIDesktopServerEntry {
-  id: string;
-  label: string;
-  url: string;
-  kind: 'embedded' | 'remote';
-  active: boolean;
-}
+// The IPC payloads (menu state and attention counts, servers, updates,
+// appearance) are declared once in `@generatorai/shared` (`DesktopShell.ts`)
+// and used by the desktop main process and preload too (P1-review P2-R24).
+// This file is ambient (no top-level import/export; an `import type` would
+// make it a module and drop every global it declares), so they are referenced
+// through inline `import()` types. Through the `/client` entry (same types):
+// the root specifier is path-mapped to shared's sources, which the
+// `.storybook` typecheck (it includes this file, without project references)
+// rejects as outside its rootDir.
+/* eslint-disable @typescript-eslint/consistent-type-imports */
+type GeneratorAIDesktopShellStatePush = import('@generatorai/shared/client').DesktopShellStatePush;
+type GeneratorAIDesktopServerEntry = import('@generatorai/shared/client').DesktopServerEntry;
+type GeneratorAIDesktopUpdateState = import('@generatorai/shared/client').DesktopUpdateState;
+type GeneratorAIDesktopAppearancePush = import('@generatorai/shared/client').DesktopAppearancePush;
+type GeneratorAIDesktopAppearanceRequest = import('@generatorai/shared/client').DesktopAppearanceRequest;
+/* eslint-enable @typescript-eslint/consistent-type-imports */
 
 interface GeneratorAIDesktopServersApi {
+  /** Every known server with its reachability, probed by the main process. */
   list: () => Promise<GeneratorAIDesktopServerEntry[]>;
   switchTo: (id: string) => Promise<void>;
   /** Opens the shell's own "Connect to a server" prompt window. */
@@ -173,29 +165,11 @@ interface GeneratorAIDesktopServersApi {
   onChanged: (cb: () => void) => () => void;
 }
 
-/** Auto-updater state (G-04), for the future "Restart to update" pill. */
-interface GeneratorAIDesktopUpdateState {
-  status: 'idle' | 'checking' | 'downloading' | 'ready' | 'error';
-  currentVersion: string;
-  nextVersion?: string;
-  percent?: number;
-  error?: string;
-}
-
 interface GeneratorAIDesktopUpdatesApi {
   getState: () => Promise<GeneratorAIDesktopUpdateState>;
   install: () => Promise<void>;
+  /** Subscribing also tells the shell a renderer can show update state (it then skips its native dialog). */
   onChange: (cb: (state: GeneratorAIDesktopUpdateState) => void) => () => void;
-}
-
-/** The renderer's appearance, mirrored by the shell (D-25): `#rrggbb` chrome colours for both appearances. */
-interface GeneratorAIDesktopAppearance {
-  mode: 'system' | 'light' | 'dark';
-  themeId: string;
-  groundLight: string;
-  groundDark: string;
-  fgLight: string;
-  fgDark: string;
 }
 
 interface GeneratorAIDesktopWindowStateChange {
@@ -229,7 +203,7 @@ interface GeneratorAIDesktopBridge {
   // ── Window chrome / native menu integration ──
   getWindowChrome?: () => Promise<GeneratorAIDesktopWindowChrome>;
   window?: GeneratorAIDesktopWindowApi;
-  setMenuState?: (state: Partial<GeneratorAIDesktopMenuState>) => Promise<void>;
+  setMenuState?: (state: Partial<GeneratorAIDesktopShellStatePush>) => Promise<void>;
   servers?: GeneratorAIDesktopServersApi;
   updates?: GeneratorAIDesktopUpdatesApi;
   onWindowStateChanged?: (
@@ -238,9 +212,9 @@ interface GeneratorAIDesktopBridge {
   onCommand?: (cb: (command: GeneratorAIDesktopCommand) => void) => () => void;
   onNavigate?: (cb: (path: string) => void) => () => void;
   /** A mode picked in the native View ▸ Appearance menu; ThemeProvider applies it. */
-  onAppearanceRequest?: (cb: (request: { mode: 'light' | 'dark' | 'system' }) => void) => () => void;
+  onAppearanceRequest?: (cb: (request: GeneratorAIDesktopAppearanceRequest) => void) => () => void;
   /** Mirror the applied appearance into the shell (background, caption glyphs, themeSource). */
-  setAppearance?: (appearance: GeneratorAIDesktopAppearance) => Promise<void>;
+  setAppearance?: (appearance: GeneratorAIDesktopAppearancePush) => Promise<void>;
 
   // ── OS file manager ──
   /** Reveals a path in Finder / File Explorer. False when it is not on this machine. */

@@ -9,7 +9,7 @@ import { app } from 'electron';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { CHROME_FALLBACK_COLORS } from '@generatorai/design-tokens/chrome';
-import type { AppearancePush } from '../shared/ipc';
+import type { DesktopAppearancePush } from '../shared/ipc';
 import { log } from './logger';
 import { DEFAULT_CONNECTION_STATE, type ServerConnectionState } from './serverConnections';
 import { sanitizeSettings, type SanitizeReport } from './settings-schema';
@@ -27,7 +27,7 @@ export interface WindowState {
  * colours for both appearances. Main never chooses these; it mirrors them so
  * the next launch paints the right background before the renderer exists.
  */
-export type AppearanceSettings = AppearancePush;
+export type AppearanceSettings = DesktopAppearancePush;
 
 /**
  * Before any push: the web app's own defaults (dark, Instrument). The colours

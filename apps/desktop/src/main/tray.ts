@@ -3,12 +3,16 @@
 // ────────────────────────────────────────────────────────────────
 
 import { app, Tray, Menu, nativeImage, type MenuItemConstructorOptions, type NativeImage } from 'electron';
+import type { AttentionCounts } from '@generatorai/shared';
 import { NAV_DESTINATIONS } from '@generatorai/shared/ui-contract';
 import * as path from 'node:path';
 import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { log } from './logger';
-import { accel, getMenuState } from './menu';
+import { accel } from './menu';
+import { getAttention } from './attention-state';
+import { connectionState } from './backend-switcher';
+import { activeConnection } from './serverConnections';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
 
@@ -55,15 +59,36 @@ export function createTray(): void {
 }
 
 /**
- * The live attention counts, or `null` when there is nothing to show yet —
- * either the renderer has not pushed a snapshot, or (05 §G-05: "if the window
- * has been destroyed, the counts are omitted") the main window that would
- * refresh them no longer exists, so a stale count could never be corrected.
+ * "· 3 agents" is running CHATS specifically (DesktopMac board: "Server
+ * running · 3 agents"); workflow runs and automations do not count here.
+ * Empty while there are no live counts (`attention-state.ts`).
  */
-function liveAttention() {
-  const win = getWindowManager().getMainWindow();
-  if (!win || win.isDestroyed()) return null;
-  return getMenuState().attention;
+function agentsSuffix(attention: AttentionCounts | null): string {
+  if (!attention) return '';
+  const running = attention.byEntity.chat.running;
+  return ` · ${running} agent${running === 1 ? '' : 's'}`;
+}
+
+/**
+ * The disabled status line(s) at the top of the tray menu.
+ *
+ * The attention counts belong to whichever server the window shows. In
+ * remote mode that is not the embedded server, so the counts go next to the
+ * remote server's name, and the embedded server (still running, and what
+ * "Restart Server" restarts) gets its own line with its own state and port.
+ * One line used to mix them: "Server: ready · 3 agents (:3100)", where the 3
+ * came from another machine (P1-review P2-R23).
+ */
+export function trayStatusLines(input: {
+  embedded: { state: string; port: number | null };
+  remoteLabel: string | null;
+  attention: AttentionCounts | null;
+}): string[] {
+  const port = input.embedded.port ? ` (:${input.embedded.port})` : '';
+  if (input.remoteLabel === null) {
+    return [`Server: ${input.embedded.state}${agentsSuffix(input.attention)}${port}`];
+  }
+  return [`${input.remoteLabel}${agentsSuffix(input.attention)}`, `This computer: ${input.embedded.state}${port}`];
 }
 
 export function refreshTrayMenu(): void {
@@ -71,16 +96,15 @@ export function refreshTrayMenu(): void {
   const sm = getServerManager();
   const wm = getWindowManager();
   const status = sm.getStatus();
-  const attention = liveAttention();
-  // "3 agents" is running CHATS specifically (DesktopMac board: "Server
-  // running · 3 agents") — workflow runs and automations do not count here.
-  const runningChats = attention?.byEntity.chat.running ?? 0;
-  const agentsLabel = attention ? ` · ${runningChats} agent${runningChats === 1 ? '' : 's'}` : '';
+  const attention = getAttention();
+  const remote = activeConnection(connectionState());
+  const statusLines = trayStatusLines({
+    embedded: { state: status.state, port: status.port },
+    remoteLabel: remote ? remote.label : null,
+    attention,
+  });
   const menu = Menu.buildFromTemplate([
-    {
-      label: `Server: ${status.state}${agentsLabel}${status.port ? ` (:${status.port})` : ''}`,
-      enabled: false,
-    },
+    ...statusLines.map<MenuItemConstructorOptions>((label) => ({ label, enabled: false })),
     { type: 'separator' },
     { label: 'Open GeneratorAI', click: () => wm.restoreFromTray() },
     {

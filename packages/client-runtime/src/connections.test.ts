@@ -247,10 +247,35 @@ describe('probeServer', () => {
     );
   });
 
-  it('reports unpaired on a non-2xx response', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 503 })));
+  it('reports unpaired on a 4xx response (something else answers at this address)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 404 })));
     const result = await probeServer('https://studio.example:3100');
     expect(result).toMatchObject({ status: 'unpaired' });
+  });
+
+  it.each([429, 500, 502, 503])('reports error, not unpaired, on HTTP %i (reachable but failing or throttled)', async (status) => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('busy', { status })));
+    const result = await probeServer('https://studio.example:3100');
+    expect(result.status).toBe('error');
+    expect(typeof result.latencyMs).toBe('number');
+  });
+
+  it('reports connected when the serverId matches the expected one', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ serverId: 'srv-1', serverName: 'Studio' }), { status: 200 })),
+    );
+    const result = await probeServer('https://studio.example:3100', { expectedServerId: 'srv-1' });
+    expect(result).toMatchObject({ status: 'connected', serverName: 'Studio' });
+  });
+
+  it('reports unpaired when a different server answers at the address', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ serverId: 'srv-2', serverName: 'Laptop' }), { status: 200 })),
+    );
+    const result = await probeServer('https://studio.example:3100', { expectedServerId: 'srv-1' });
+    expect(result).toMatchObject({ status: 'unpaired', serverName: 'Laptop' });
   });
 
   it('reports unpaired when the body has no serverId', async () => {
