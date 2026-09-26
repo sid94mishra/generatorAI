@@ -167,7 +167,7 @@ export function switchServer(id: string): void {
 /**
  * Whether this client can add a server from the switcher. Desktop only: a
  * plain web tab pairs with a new server through the pairing screen, not a
- * switcher action — see `AuthGate.tsx` — so the switcher offers no "Add
+ * switcher action — see `features/pairing/PairingGate.tsx` — so the switcher offers no "Add
  * server…" there (never a menu item that does nothing).
  */
 export function canAddServer(): boolean {

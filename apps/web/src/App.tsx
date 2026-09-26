@@ -7,7 +7,7 @@ import { RouterProvider } from 'react-router/dom';
 import { QueryProvider } from '@/providers/QueryProvider.js';
 import { PlatformProvider } from '@/providers/PlatformProvider.js';
 import { ThemeProvider } from '@/providers/ThemeProvider.js';
-import { AuthGate } from '@/components/AuthGate.js';
+import { AuthGate } from '@/app/shell/AuthGate.js';
 import { Toaster } from '@/components/Toast.js';
 import { router } from '@/app/router.js';
 

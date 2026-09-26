@@ -98,18 +98,25 @@ await page.waitForLoadState('domcontentloaded').catch(() => {});
 // Auto-pairing is a round trip through the shell, so give it room.
 await page
   .waitForFunction(
-    () => !document.body.innerText.includes('Pair this device') &&
+    () => !document.querySelector('[data-testid="pairing-gate"]') &&
       document.querySelector('#root')?.children.length > 0,
     { timeout: 60_000 },
   )
   .catch(() => {});
 await page.waitForTimeout(2500);
 
-// ── 1. The renderer paired itself; no pairing wall ──
-const bodyText = await page.evaluate(() => document.body.innerText.slice(0, 400));
+// ── 1. The renderer paired itself; no pairing wall (P5-11: the pairing
+//      screen is `features/pairing/PairingGate`, `data-testid="pairing-gate"`
+//      on its Gate root — checked by presence, not by copy, since "Connect to
+//      a GeneratorAI server" / "This device was revoked" are two different
+//      titles on the same screen) ──
+const [hasPairingGate, bodyText] = await page.evaluate(() => [
+  Boolean(document.querySelector('[data-testid="pairing-gate"]')),
+  document.body.innerText.slice(0, 400),
+]);
 record(
   'renderer auto-paired (no pairing screen)',
-  !bodyText.includes('Pair this device'),
+  !hasPairingGate,
   bodyText.slice(0, 60).replace(/\n/g, ' '),
 );
 

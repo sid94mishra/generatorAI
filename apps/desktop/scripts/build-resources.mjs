@@ -6,11 +6,42 @@
 import zlib from 'node:zlib';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const RES = path.resolve(__dirname, '..', 'resources');
 fs.mkdirSync(RES, { recursive: true });
+
+/**
+ * Copies the two bundled fonts' latin woff2 file into resources/fonts/ (06
+ * §7) so splash.html / error.html / prompt.html can `@font-face` them without
+ * ever fetching from the network. Web owns the `@fontsource-variable`
+ * dependency (D-16); resolved through web's package.json so this script does
+ * not need its own copy of it.
+ */
+function copyFonts() {
+  const requireFromWeb = createRequire(path.resolve(__dirname, '..', '..', 'web', 'package.json'));
+  const fontsDir = path.join(RES, 'fonts');
+  fs.mkdirSync(fontsDir, { recursive: true });
+  const files = [
+    ['@fontsource-variable/instrument-sans/files/instrument-sans-latin-wght-normal.woff2', 'instrument-sans-latin-wght-normal.woff2'],
+    ['@fontsource-variable/jetbrains-mono/files/jetbrains-mono-latin-wght-normal.woff2', 'jetbrains-mono-latin-wght-normal.woff2'],
+  ];
+  for (const [specifier, name] of files) {
+    const src = requireFromWeb.resolve(specifier);
+    const dest = path.join(fontsDir, name);
+    const srcBytes = fs.readFileSync(src);
+    if (fs.existsSync(dest) && Buffer.compare(fs.readFileSync(dest), srcBytes) === 0) {
+      console.log('keep', `fonts/${name}`);
+      continue;
+    }
+    fs.writeFileSync(dest, srcBytes);
+    console.log('wrote', `fonts/${name}`, `${srcBytes.length} bytes`);
+  }
+}
+
+copyFonts();
 
 const crcTable = (() => {
   const t = new Uint32Array(256);

@@ -1,59 +1,228 @@
 <!doctype html>
-<meta charset="utf-8" />
-<title>GeneratorAI</title>
-<style>
-  :root { color-scheme: dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0; padding: 18px 18px 14px;
-    font: 13px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Ubuntu, sans-serif;
-    background: #0d1117; color: #e6edf3;
-  }
-  h1 { margin: 0 0 4px; font-size: 13.5px; font-weight: 600; }
-  p { margin: 0 0 12px; font-size: 12px; color: #8b949e; white-space: pre-line; }
-  input {
-    width: 100%; height: 30px; padding: 0 9px;
-    border: 1px solid #30363d; border-radius: 6px;
-    background: #010409; color: inherit; font: inherit; outline: none;
-  }
-  input:focus { border-color: #1f6feb; }
-  .row { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-  button {
-    height: 28px; padding: 0 14px; border-radius: 6px; font: inherit; font-weight: 500;
-    border: 1px solid #30363d; background: transparent; color: inherit; cursor: pointer;
-  }
-  button.primary { background: #1f6feb; border-color: #1f6feb; color: #fff; }
-  button:disabled { opacity: .5; cursor: default; }
-</style>
-<h1 id="title"></h1>
-<p id="message"></p>
-<input id="value" autofocus />
-<div class="row">
-  <button id="cancel">Cancel</button>
-  <button id="ok" class="primary">Connect</button>
-</div>
-<script>
-  (() => {
-    const params = new URLSearchParams(location.search);
-    document.getElementById('title').textContent = params.get('title') || '';
-    document.getElementById('message').textContent = params.get('message') || '';
-    const input = document.getElementById('value');
-    const ok = document.getElementById('ok');
-    input.placeholder = params.get('placeholder') || '';
-    input.value = params.get('value') || '';
-    if (params.get('confirm')) ok.textContent = params.get('confirm');
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src file:; img-src data:;" />
+    <title>GeneratorAI</title>
+    <style>
+      /* @generated-tokens:start — regenerate with `pnpm tokens:write`; do not edit by hand */
 
-    const sync = () => { ok.disabled = input.value.trim().length === 0; };
-    const submit = () => { if (!ok.disabled) window.generatoraiPrompt.submit(input.value.trim()); };
+:root {
+  color-scheme: light dark;
+  --gai-ground: #f1f1ef;
+  --gai-surface: #ffffff;
+  --gai-raised: #fafaf9;
+  --gai-overlay: #ffffff;
+  --gai-sunken: #f6f6f4;
+  --gai-hover: #18181b0a;
+  --gai-selected: #18181b14;
+  --gai-line-soft: #ecece9;
+  --gai-line: #dcdcd7;
+  --gai-line-strong: #8a8a88;
+  --gai-fg: #18181b;
+  --gai-fg-2: #55555d;
+  --gai-fg-3: #63636a;
+  --gai-accent: #18181b;
+  --gai-on-accent: #ffffff;
+  --gai-focus: #18181b;
+  --gai-run: #1d6ae5;
+  --gai-run-text: #1b55b1;
+  --gai-run-bg: #1d6ae520;
+  --gai-ok: #16804c;
+  --gai-ok-text: #166640;
+  --gai-ok-bg: #16804c20;
+  --gai-warn: #935f00;
+  --gai-warn-text: #795006;
+  --gai-warn-bg: #935f0020;
+  --gai-err: #d1242f;
+  --gai-err-text: #a7222b;
+  --gai-err-bg: #d1242f20;
+  --gai-add-bg: #16804c14;
+  --gai-del-bg: #d1242f14;
+  --gai-scrim: #1414184d;
+  --gai-shadow-pop: 0 16px 40px #14141e24, 0 0 0 1px #18181b0f;
+  /* Radius scale (D-14) */
+  --gai-radius-badge: 4px;
+  --gai-radius-control-sm: 5px;
+  --gai-radius-control: 6px;
+  --gai-radius-seg: 7px;
+  --gai-radius-card: 8px;
+  --gai-radius-panel: 10px;
+  --gai-radius-dialog: 12px;
+  /* Type scale (D-13) */
+  --gai-text-micro: 11px;
+  --gai-leading-micro: 1.45;
+  --gai-weight-micro: 400;
+  --gai-tracking-micro: 0em;
+  --gai-text-small: 12px;
+  --gai-leading-small: 1.45;
+  --gai-weight-small: 400;
+  --gai-tracking-small: 0em;
+  --gai-text-ui: 13px;
+  --gai-leading-ui: 1.45;
+  --gai-weight-ui: 400;
+  --gai-tracking-ui: 0em;
+  --gai-text-body: 14px;
+  --gai-leading-body: 1.6;
+  --gai-weight-body: 400;
+  --gai-tracking-body: 0em;
+  --gai-text-title: 16px;
+  --gai-leading-title: 1.3;
+  --gai-weight-title: 600;
+  --gai-tracking-title: 0em;
+  --gai-text-heading: 20px;
+  --gai-leading-heading: 1.3;
+  --gai-weight-heading: 600;
+  --gai-tracking-heading: -0.01em;
+  --gai-text-display: 28px;
+  --gai-leading-display: 1.2;
+  --gai-weight-display: 600;
+  --gai-tracking-display: -0.02em;
+  /* Control heights, comfortable density (D-15) */
+  --gai-h-control-sm: 24px;
+  --gai-h-control: 28px;
+  --gai-h-control-lg: 32px;
+  --gai-h-nav: 30px;
+  --gai-h-item: 30px;
+  --gai-h-step: 28px;
+  --gai-h-th: 32px;
+  --gai-h-row: 44px;
+  --gai-h-tab: 36px;
+  --gai-h-bar: 44px;
+  --gai-h-badge: 20px;
+  --gai-h-kbd: 18px;
+  --gai-h-panel-bar: 40px;
+  --gai-h-dialog-bar: 48px;
+  --gai-h-footer: 56px;
+  --gai-h-strip: 36px;
+  --gai-h-meter: 4px;
+  --gai-h-tile: 96px;
+  --font-sans: "Instrument Sans Variable", "Instrument Sans", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono: "JetBrains Mono Variable", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --gai-ground: #0b0b0c;
+    --gai-surface: #111113;
+    --gai-raised: #17171a;
+    --gai-overlay: #1d1d21;
+    --gai-sunken: #0d0d0f;
+    --gai-hover: #ededef0a;
+    --gai-selected: #ededef14;
+    --gai-line-soft: #1c1c20;
+    --gai-line: #2c2c31;
+    --gai-line-strong: #68686c;
+    --gai-fg: #ededef;
+    --gai-fg-2: #a1a1aa;
+    --gai-fg-3: #898991;
+    --gai-accent: #ededef;
+    --gai-on-accent: #111113;
+    --gai-focus: #ededef;
+    --gai-run: #6aa6ff;
+    --gai-run-text: #6aa6ff;
+    --gai-run-bg: #6aa6ff26;
+    --gai-ok: #4cc38a;
+    --gai-ok-text: #4cc38a;
+    --gai-ok-bg: #4cc38a26;
+    --gai-warn: #f0b429;
+    --gai-warn-text: #f0b429;
+    --gai-warn-bg: #f0b42926;
+    --gai-err: #ff6369;
+    --gai-err-text: #fe696e;
+    --gai-err-bg: #ff636926;
+    --gai-add-bg: #4cc38a1a;
+    --gai-del-bg: #ff63691a;
+    --gai-scrim: #0000009e;
+    --gai-shadow-pop: 0 16px 40px #0000008c, 0 0 0 1px #ededef0f;
+  }
+}
+@font-face {
+  font-family: 'Instrument Sans Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 400 700;
+  src: url('./fonts/instrument-sans-latin-wght-normal.woff2') format('woff2-variations');
+}
+@font-face {
+  font-family: 'JetBrains Mono Variable';
+  font-style: normal;
+  font-display: swap;
+  font-weight: 100 800;
+  src: url('./fonts/jetbrains-mono-latin-wght-normal.woff2') format('woff2-variations');
+}
 
-    input.addEventListener('input', sync);
-    ok.addEventListener('click', submit);
-    document.getElementById('cancel').addEventListener('click', () => window.generatoraiPrompt.cancel());
-    document.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') submit();
-      if (e.key === 'Escape') window.generatoraiPrompt.cancel();
-    });
-    sync();
-    input.focus();
-  })();
-</script>
+/* @generated-tokens:end */
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 18px 18px 14px;
+        font: var(--gai-text-ui)/var(--gai-leading-ui) var(--font-sans);
+        background: var(--gai-surface);
+        color: var(--gai-fg);
+      }
+      h1 {
+        margin: 0 0 4px;
+        font-size: var(--gai-text-ui);
+        font-weight: var(--gai-weight-title);
+      }
+      p {
+        margin: 0 0 12px;
+        font-size: var(--gai-text-small);
+        color: var(--gai-fg-3);
+        white-space: pre-line;
+      }
+      input {
+        width: 100%;
+        height: 28px;
+        padding: 0 9px;
+        border: 1px solid var(--gai-line-strong);
+        border-radius: var(--gai-radius-control);
+        background: var(--gai-sunken);
+        color: inherit;
+        font: inherit;
+        outline: none;
+      }
+      input:focus {
+        border-color: var(--gai-accent);
+        outline: 2px solid var(--gai-accent);
+        outline-offset: 1px;
+      }
+      .row {
+        display: flex;
+        justify-content: flex-end;
+        gap: 8px;
+        margin-top: 14px;
+      }
+      button {
+        height: 28px;
+        padding: 0 14px;
+        border-radius: var(--gai-radius-control);
+        font: inherit;
+        font-weight: 500;
+        border: 1px solid var(--gai-line);
+        background: var(--gai-raised);
+        color: var(--gai-fg);
+        cursor: pointer;
+      }
+      button.primary {
+        background: var(--gai-accent);
+        border-color: var(--gai-accent);
+        color: var(--gai-on-accent);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: default;
+      }
+    </style>
+  </head>
+  <body>
+    <h1 id="title"></h1>
+    <p id="message"></p>
+    <input id="value" autofocus />
+    <div class="row">
+      <button id="cancel">Cancel</button>
+      <button id="ok" class="primary">Connect</button>
+    </div>
+  </body>
+</html>
