@@ -6,31 +6,35 @@
 // inherits currentColor; tone it with a text utility (`text-fg-3`, `text-run`).
 // With `label` the glyph is an image with that name; without, it is hidden
 // from assistive tech (the surrounding control carries the name).
+// Other SVG attributes (`data-testid`, `aria-*` …) pass through to the <svg>.
 // ────────────────────────────────────────────────────────────────
 
+import type { SVGProps } from 'react';
 import { ICON, type IconConcept, type IconSize } from '@generatorai/design-tokens';
 
+import { cn } from '../lib/cn.js';
 import { ICON_REGISTRY } from './registry.js';
 
-export interface IconProps {
+export interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'ref' | 'children'> {
   concept: IconConcept;
   /** px; 16 by default. */
   size?: IconSize;
   /** Accessible name. Omit for decorative glyphs. */
   label?: string;
-  className?: string;
 }
 
-export function Icon({ concept, size = ICON.defaultSize, label, className }: IconProps) {
+/** Draws one icon concept from the registry (D-17). Decorative unless `label` is given. */
+export function Icon({ concept, size = ICON.defaultSize, label, className, ...rest }: IconProps) {
   const Glyph = ICON_REGISTRY[concept];
   const a11y = label ? { role: 'img', 'aria-label': label } : { 'aria-hidden': true };
   return (
     <Glyph
       size={size}
       strokeWidth={ICON.strokeWidth}
-      className={className ? `shrink-0 ${className}` : 'shrink-0'}
+      className={cn('shrink-0', className)}
       data-icon={concept}
       {...a11y}
+      {...rest}
     />
   );
 }

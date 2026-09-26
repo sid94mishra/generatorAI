@@ -3,3 +3,4 @@
 // Safe for the Electron main bundle: nothing here imports the shared root.
 export * from './commands.js';
 export * from './keys.js';
+export * from './status.js';

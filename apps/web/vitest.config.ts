@@ -2,6 +2,7 @@ import { fileURLToPath } from 'node:url';
 import { defineConfig, type TestProjectInlineConfiguration } from 'vitest/config';
 import { storybookTest } from '@storybook/addon-vitest/vitest-plugin';
 import { playwright } from '@vitest/browser-playwright';
+import tailwindcss from '@tailwindcss/vite';
 
 /**
  * The single Vitest config for the web app (docs/redesign/09-verification.md
@@ -46,6 +47,10 @@ function storybookProject(
   return {
     extends: true,
     plugins: [
+      // A vitest.config.ts replaces vite.config.ts, so the app's Tailwind
+      // pipeline must be added here: without it globals.css reaches the browser
+      // unprocessed, every utility is missing and axe checks unstyled markup.
+      tailwindcss(),
       storybookTest({
         configDir: `${dirname}.storybook`,
         storybookScript: 'pnpm storybook --ci',
