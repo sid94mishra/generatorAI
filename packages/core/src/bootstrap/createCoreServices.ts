@@ -62,7 +62,7 @@ import { OrchestratorService, DEFAULT_ORCHESTRATOR_CONFIG } from '../services/or
 import type { OrchestratorConfig } from '../services/orchestrator/OrchestratorService.js';
 import { WorkflowDefinitionService } from '../services/WorkflowDefinitionService.js';
 import { RunDefinitionReader } from '../services/definitions/RunDefinitionReader.js';
-import { WorkflowRunService } from '../services/WorkflowRunService.js';
+import { WorkflowRunService, type StageProviderResolver } from '../services/WorkflowRunService.js';
 import { RunSupervisor, type SupervisorTiming } from '../services/engine/RunSupervisor.js';
 import { StageConversationService } from '../services/engine/StageConversationService.js';
 import type { OutboxPublisher } from '../services/engine/OutboxDispatcher.js';
@@ -165,7 +165,7 @@ export interface CoreServicesInputs {
   /** Every run gets an execution workspace. */
   workspaceManager: WorkspaceManager;
 
-  /** W18 — the lane every stage launch is admitted through. */
+  /** The flow keys every stage launch is admitted on (P07 WP-7.2). */
   admissionController: AdmissionController;
 
   /**
@@ -508,8 +508,9 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
 
   // PD-17 — which provider a stage would run on, for the run-start and
   // mode-change checks: the bound agent's runtime (read through the same
-  // resolver the composer uses), then routing by model (review R8).
-  workflowRunService.setProviderResolver(async ({ session, projectId }) => {
+  // resolver the composer uses), then routing by model (review R8). The
+  // engine admits a launch on the same provider's flow key (ECON-R3).
+  const stageProvider: StageProviderResolver = async ({ session, projectId }) => {
     let harnessType: string | undefined = session.harnessType;
     let model = session.model;
     const agentResolver = sessionExtensions.agentResolver;
@@ -529,7 +530,9 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     }
     if (harnessType) return harnessType;
     return harness.resolveProvider?.({ ...(model ? { model } : {}) });
-  });
+  };
+  workflowRunService.setProviderResolver(stageProvider);
+  engine.setProviderResolver(stageProvider);
 
   // HITL — the operator side of parked instances: resolutions and cancels are run commands.
   const hitlService = new HitlService(stageRunRepo, engine);

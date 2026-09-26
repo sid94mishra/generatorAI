@@ -13,7 +13,9 @@
 //     claim ends it. A wait is announced (`stage_run.admission_queued`,
 //     then `stage_run.admission_granted`) so the run page can say what the
 //     stage waits for;
-//   - `abort` drops a launch still queued for its slot, or stops the frame;
+//   - `abort` withdraws a launch still queued for its slot (it leaves the
+//     admission queue and the worktree lease queue at once), or stops the
+//     frame;
 //   - `deliver_input` hands a verdict to a parked frame (with no frame left,
 //     the attempt is settled and the approval is posted again, so it takes
 //     the no-frame path);
@@ -80,6 +82,8 @@ export function flowLabel(flowKey: string): string {
 interface QueuedLaunch {
   attemptNo: number;
   dropped: boolean;
+  /** Withdraws the launch from the admission and lease queues. */
+  ac: AbortController;
 }
 
 export class EffectsDispatcher {
@@ -100,8 +104,10 @@ export class EffectsDispatcher {
           break;
         case 'abort': {
           const q = this.queued.get(d.stageRunId);
-          if (q && q.attemptNo === d.attemptNo) q.dropped = true;
-          else this.deps.executor.abort(d.stageRunId, d.attemptNo, d.reason);
+          if (q && q.attemptNo === d.attemptNo) {
+            q.dropped = true;
+            q.ac.abort();
+          } else this.deps.executor.abort(d.stageRunId, d.attemptNo, d.reason);
           break;
         }
         case 'deliver_input':
@@ -143,7 +149,7 @@ export class EffectsDispatcher {
           this.track(this.mapMergeItem(runId, d.stageRunId, d.index, d.strategy));
           break;
         case 'map_release':
-          this.deps.maps?.release(d.stageRunId);
+          this.track(this.deps.maps?.release(runId, d.stageRunId) ?? Promise.resolve());
           break;
         case 'start_child':
           this.track(this.startChild(runId, d.stageRunId, d.inputs));
@@ -162,7 +168,7 @@ export class EffectsDispatcher {
 
   /** Queue a launch behind the admission gate; the executor claims the instance once a slot is free. */
   launch(runId: string, stageRunId: string, attemptNo: number): void {
-    const entry: QueuedLaunch = { attemptNo, dropped: false };
+    const entry: QueuedLaunch = { attemptNo, dropped: false, ac: new AbortController() };
     this.queued.set(stageRunId, entry);
     let waited: FlowState | undefined;
     const body = async (ticket: AdmissionTicket): Promise<void> => {
@@ -173,24 +179,29 @@ export class EffectsDispatcher {
     };
     const admitted = async (): Promise<void> => {
       const keys = this.deps.flowKeysOf ? await this.deps.flowKeysOf(runId, stageRunId) : [GLOBAL_FLOW_KEY];
-      return this.deps.admission.admitFlows(keys, body, (blocking) => {
-        waited = blocking;
-        this.deps.notify?.('stage_run.admission_queued', {
-          stageRunId,
-          workflowRunId: runId,
-          flowKey: blocking.flowKey,
-          label: flowLabel(blocking.flowKey),
-          running: blocking.running,
-          limit: blocking.limit ?? null,
-          queued: blocking.queued,
-        });
+      if (entry.dropped) return;
+      return this.deps.admission.admitFlows(keys, body, {
+        signal: entry.ac.signal,
+        onQueued: (blocking) => {
+          waited = blocking;
+          this.deps.notify?.('stage_run.admission_queued', {
+            stageRunId,
+            workflowRunId: runId,
+            flowKey: blocking.flowKey,
+            label: flowLabel(blocking.flowKey),
+            running: blocking.running,
+            limit: blocking.limit ?? null,
+            queued: blocking.queued,
+          });
+        },
       });
     };
     // A writer outside a mount_per_item map waits while a map holds the run mounts (P05 §4.1).
     const leased = async (): Promise<void> => {
       const keys = this.deps.leases && this.deps.writerLeaseKeys ? await this.deps.writerLeaseKeys(runId, stageRunId) : [];
       if (keys.length === 0) return admitted();
-      const release = await this.deps.leases!.acquire(keys, 'write', stageRunId);
+      if (entry.dropped) return;
+      const release = await this.deps.leases!.acquire(keys, 'write', stageRunId, entry.ac.signal);
       try {
         if (entry.dropped) return;
         await admitted();
@@ -201,6 +212,7 @@ export class EffectsDispatcher {
     const run = leased()
       .catch((err: unknown) => {
         if (this.queued.get(stageRunId) === entry) this.queued.delete(stageRunId);
+        if (entry.dropped) return; // withdrawn by its abort
         // The instance stays `ready`: its queue_timeout timer decides (G5 §5.11).
         this.deps.logger?.warn(`[EffectsDispatcher] launch of ${stageRunId} was not admitted: ${String(err)}`);
       });

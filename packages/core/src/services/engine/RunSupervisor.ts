@@ -53,7 +53,7 @@ import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
 import type { RunMessage, RunOutcome } from '../../domain/scheduler/types.js';
 import { graphForInstance } from '../../domain/scheduler/expansion.js';
-import { expansionNodes, expansionStateOf, mapStateOf, StateIndex } from '../../domain/scheduler/scope.js';
+import { expansionNodes, expansionStateOf } from '../../domain/scheduler/scope.js';
 import { compile, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import type { EventBus } from '../../events/EventBus.js';
 import { CHECK_FLOW_KEY, GLOBAL_FLOW_KEY, modelFlowKey, providerFlowKey, type AdmissionController } from '../AdmissionController.js';
@@ -61,6 +61,7 @@ import type { RunDefinitionReader } from '../definitions/RunDefinitionReader.js'
 import type { HookExecutor } from '../HookExecutor.js';
 import type { PlanService } from '../PlanService.js';
 import type { SessionComposer } from '../session/SessionComposer.js';
+import type { StageProviderResolver } from '../WorkflowRunService.js';
 import type { WorkspaceCheckpointService } from '../WorkspaceCheckpointService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
 import { EffectsDispatcher } from './EffectsDispatcher.js';
@@ -176,6 +177,7 @@ export class RunSupervisor {
   private readonly timing: SupervisorTiming;
   private readonly now: () => number;
   private lockTimer: ReturnType<typeof setInterval> | undefined;
+  private providerResolver?: StageProviderResolver;
   private started = false;
   private stopped = false;
 
@@ -231,6 +233,7 @@ export class RunSupervisor {
         hookExecutor: deps.hookExecutor,
         checkpoints: deps.checkpoints,
         permissionCheck: deps.permissionCheck,
+        subworkflowPins: (run, graph) => this.subworkflows.pinsAtRunStart(run, graph),
         ...(deps.lifecyclePlatform ?? {}),
         logger: deps.logger,
         now: this.now,
@@ -256,6 +259,8 @@ export class RunSupervisor {
       runRepo: deps.runRepo,
       definitions: deps.definitions,
       command: (runId, command) => this.command(runId, command).then((r) => (r.ok ? { ok: true } : { ok: false, message: r.message })),
+      leases: this.leases,
+      writerLeaseKeys: (runId, stageRunId) => this.writerLeaseKeys(runId, stageRunId),
       logger: deps.logger,
     });
     this.summaries = new SummaryEffects({
@@ -310,6 +315,16 @@ export class RunSupervisor {
     this.executor.setCheckpoints(checkpoints);
     this.loops.setCheckpoints(checkpoints);
     if (this.lifecycle instanceof DefaultRunLifecycle) this.lifecycle.setCheckpoints(checkpoints);
+  }
+
+  /**
+   * Late wiring: which provider a stage runs on — the PD-17 resolver (the
+   * bound agent's runtime, then routing by model), the same one the run
+   * start check uses. Unset, the session's harness type or its model's
+   * routed provider.
+   */
+  setProviderResolver(fn: StageProviderResolver): void {
+    this.providerResolver = fn;
   }
 
   /** Late wiring: the lifecycle's mounts, uploads, project configs and sandbox (composition root, SDK). */
@@ -418,22 +433,15 @@ export class RunSupervisor {
   }
 
   /**
-   * The run-mount leases a launch must hold `write` on (P05 §4.1): none
-   * for a stage inside a mount_per_item map item (it writes its own
-   * worktrees), none while the run has no map; else every run mount.
+   * The mount leases a launch must hold `write` on (P05 §4.1): none while
+   * the run has no mount_per_item map; else the mounts it works in — the
+   * run mounts, or inside a mount_per_item item that item's own worktrees
+   * (where a nested map may hold them).
    */
   private async writerLeaseKeys(runId: string, stageRunId: string): Promise<string[]> {
     const compiled = this.compiledByRun.get(runId);
     if (!compiled || ![...compiled.nodes.values()].some((n) => n.map?.workspace === 'mount_per_item')) return [];
-    const state = this.deps.stores.runStore.loadRunState(runId);
-    const inst = state?.instances.find((i) => i.id === stageRunId);
-    if (!state || !inst) return [];
-    const ix = new StateIndex(state.run, state.instances, state.iterations ?? []);
-    const inItem = ix.chain(inst).some(({ container, iteration }) => {
-      const ms = mapStateOf(container);
-      return !!ms && iteration !== null && compiled.nodes.get(container.stageKey)?.map?.workspace === 'mount_per_item';
-    });
-    return inItem ? [] : this.maps.leaseKeys(runId);
+    return this.maps.leaseKeys(runId, stageRunId);
   }
 
   private unavailable(): CommandResult {
@@ -609,6 +617,7 @@ export class RunSupervisor {
         } else if (cs.childRunId) {
           const settled = await this.subworkflows.settledMessage(cs.childRunId);
           if (settled) await actor.post(settled.msg);
+          else if (this.compiledByRun.get(runId)?.nodes.get(inst.stageKey)?.subworkflow?.workspace === 'inherit') this.subworkflows.reacquire(runId, inst.id);
         }
       }
       // An `llm` summary that died with the process is written again (P07 WP-7.1).
@@ -636,8 +645,10 @@ export class RunSupervisor {
   /**
    * The flow keys a launch is admitted on (P07 WP-7.2): `check:global` for
    * a check; else `global`, the stage's provider and — when the operator
-   * configured it — its model. The provider is the session's harness type,
-   * else the one its model routes to.
+   * configured it — its model. The provider is the PD-17 resolver's (a
+   * bound agent's runtime counts), else the session's harness type, else
+   * the one its model routes to. A provider that cannot be resolved leaves
+   * `provider:` out: the stage's turns then take their own per-turn permit.
    */
   private async flowKeysOf(runId: string, stageRunId: string): Promise<string[]> {
     const inst = this.deps.stores.stages.getInstance(stageRunId);
@@ -653,7 +664,10 @@ export class RunSupervisor {
       const stage = graph.stages.find((s) => s.key === inst?.stageKey);
       if (stage?.kind !== 'agent') return keys;
       const spec = stageSessionSpec(graph, stage, run).merged;
-      const provider = spec.harnessType ?? (await this.deps.harness.resolveProvider?.({ ...(spec.model ? { model: spec.model } : {}) }));
+      const projectId = run.projectId ?? graph.workflow.projectId ?? undefined;
+      const provider = this.providerResolver
+        ? await this.providerResolver({ session: spec, ...(projectId ? { projectId } : {}) })
+        : (spec.harnessType ?? (await this.deps.harness.resolveProvider?.({ ...(spec.model ? { model: spec.model } : {}) })));
       if (provider) keys.push(providerFlowKey(provider));
       if (spec.model && this.deps.admission.currentFlowLimits()[modelFlowKey(spec.model)] !== undefined) keys.push(modelFlowKey(spec.model));
     } catch (err) {

@@ -88,12 +88,7 @@ export function createHealthRoutes(container: Container): Router {
       // stalling" that the RSS number above cannot give.
       slowStatements: getSlowStatementStats(),
       // W18 — "Publish depth in the health endpoint: makes throttling visible
-      // instead of mysterious." Each lane reports its cap alongside running,
-      // queued and parked counts. `parked` is the load-bearing one: work
-      // waiting on a human approval has given its permit back, so a lane
-      // showing `parked: 8, running: 0` is idle and healthy, whereas the same
-      // number under `running` would mean genuinely saturated.
-      admission: container.admissionController?.snapshot() ?? [],
+      // instead of mysterious."
       // P07 WP-7.2 — the flow keys (the engine's one gate and the providers'
       // turn permits): running, queued and limit per key.
       flows: container.admissionController?.flowSnapshot() ?? [],

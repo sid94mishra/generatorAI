@@ -90,12 +90,17 @@ interface HostSession {
   terminalDelivered: boolean;
   /** The `provider:<id>` flow permit the turn in flight holds (P07 WP-7.2). */
   releasePermit?: () => void;
+  /** Withdraws a turn still queued for its permit (`abortConversation`, ECON-R6). */
+  permitWait?: AbortController;
+  /** Bumped whenever the turn's permit is released at a turn boundary (a yielded permit taken back after one is let go). */
+  permitEpoch?: number;
 }
 
 /** A flow key as a permit gate (the AdmissionController's `flowGate`). */
 export interface HostTurnGate {
   tryAcquire(): (() => void) | undefined;
-  acquire(): Promise<() => void>;
+  /** Rejects when `signal` aborts before a permit is free. */
+  acquire(signal?: AbortSignal): Promise<() => void>;
 }
 
 export class AgentHostClient implements IAgentHarness {
@@ -126,6 +131,8 @@ export class AgentHostClient implements IAgentHarness {
   private droppedEventCount = 0;
   /** The gateway's flow gate of a provider (P07 WP-7.2): every turn over IPC is admitted here. */
   private gateFor: ((provider: string) => HostTurnGate | undefined) | undefined;
+  /** The provider a model routes to (the gateway's model catalog), for a session with no harness type. */
+  private providerForModel: ((model: string) => Promise<string | null | undefined>) | undefined;
 
   constructor(
     private readonly supervisor: HostSupervisor,
@@ -312,16 +319,63 @@ export class AgentHostClient implements IAgentHarness {
    * already holds it: a workflow stage), is sent `admitted`, and gives the
    * permit back at the turn's terminal event.
    */
-  useTurnGates(gateFor: (provider: string) => HostTurnGate | undefined): void {
+  useTurnGates(gateFor: (provider: string) => HostTurnGate | undefined, providerForModel?: (model: string) => Promise<string | null | undefined>): void {
     this.gateFor = gateFor;
+    this.providerForModel = providerForModel;
+  }
+
+  /**
+   * The provider that runs (or would run) a conversation: an explicit
+   * harness type, else the one its model routes to. `undefined` when it
+   * cannot be told (the host then runs its default provider).
+   */
+  async resolveProvider(params: { conversationId?: string; harnessType?: string; model?: string }): Promise<string | undefined> {
+    const spawned = params.conversationId ? this.sessions.get(params.conversationId)?.params : undefined;
+    const harnessType = params.harnessType ?? spawned?.harnessType;
+    if (harnessType) return String(harnessType);
+    const model = params.model ?? spawned?.model;
+    if (model && this.providerForModel) return (await this.providerForModel(model).catch(() => undefined)) ?? undefined;
+    return undefined;
   }
 
   private releaseTurnPermit(conversationId: string): void {
     const session = this.sessions.get(conversationId);
+    if (session) session.permitEpoch = (session.permitEpoch ?? 0) + 1;
     const release = session?.releasePermit;
     if (!session || !release) return;
     delete session.releasePermit;
     release();
+  }
+
+  /**
+   * ECON-R7 — the turn in flight gives its permit back while one of its
+   * tools blocks on other work; the returned function takes one again. A
+   * turn that ended meanwhile takes none (its permit would be held idle).
+   */
+  yieldTurnPermit(conversationId: string): (() => Promise<void>) | undefined {
+    const session = this.sessions.get(conversationId);
+    const release = session?.releasePermit;
+    if (!session || !release) return undefined;
+    delete session.releasePermit;
+    release();
+    const epoch = session.permitEpoch ?? 0;
+    return async () => {
+      if (this.sessions.get(conversationId) !== session || (session.permitEpoch ?? 0) !== epoch || session.releasePermit) return;
+      const provider = (await this.resolveProvider({ conversationId })) ?? 'claude-agent';
+      const gate = this.gateFor?.(provider);
+      if (!gate) return;
+      const wait = new AbortController();
+      session.permitWait = wait;
+      try {
+        const permit = gate.tryAcquire() ?? (await gate.acquire(wait.signal));
+        if (this.sessions.get(conversationId) !== session || (session.permitEpoch ?? 0) !== epoch || session.releasePermit) permit();
+        else session.releasePermit = permit;
+      } catch {
+        /* withdrawn: the turn was stopped */
+      } finally {
+        if (session.permitWait === wait) delete session.permitWait;
+      }
+    };
   }
 
   // ── IHarnessMessaging ─────────────────────────────────────────────────────
@@ -333,9 +387,22 @@ export class AgentHostClient implements IAgentHarness {
     options?: SendPromptOptions,
   ): Promise<void> {
     const session = this.sessions.get(conversationId);
-    const gate = options?.admitted ? undefined : this.gateFor?.(String(session?.params.harnessType ?? 'claude-agent'));
+    // The turn's own provider (a session routed by model is not claude-agent's).
+    const provider = options?.admitted ? undefined : ((await this.resolveProvider({ conversationId })) ?? 'claude-agent');
+    const gate = provider ? this.gateFor?.(provider) : undefined;
     if (session && gate && !session.releasePermit) {
-      session.releasePermit = gate.tryAcquire() ?? (await gate.acquire());
+      const wait = new AbortController();
+      session.permitWait = wait;
+      try {
+        session.releasePermit = gate.tryAcquire() ?? (await gate.acquire(wait.signal));
+      } catch (err) {
+        if (!wait.signal.aborted) throw err;
+        // Stopped while it waited for a slot: the turn never starts, and ends as cancelled.
+        this.deliver(conversationId, { kind: 'harness.cancelled', data: { reason: 'user_abort' }, timestamp: new Date().toISOString() } as AgentEvent);
+        return;
+      } finally {
+        if (session.permitWait === wait) delete session.permitWait;
+      }
     }
     const turnReq: Omit<SendTurnRequest, 'reqId'> = {
       type: 'send_turn',
@@ -461,6 +528,8 @@ export class AgentHostClient implements IAgentHarness {
   }
 
   async abortConversation(conversationId: string): Promise<void> {
+    // A turn still queued for its permit is withdrawn (it never reaches the host).
+    this.sessions.get(conversationId)?.permitWait?.abort();
     const abortReq: Omit<AbortSessionRequest, 'reqId'> = { type: 'abort_session', sessionId: conversationId };
     await this.supervisor.send(abortReq).catch((err: unknown) => {
       this.logger.warn(`[AgentHostClient] abortConversation error: ${String(err)}`);

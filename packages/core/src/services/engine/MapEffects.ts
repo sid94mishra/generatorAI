@@ -1,7 +1,9 @@
 // ────────────────────────────────────────────────────────────────
 // MapEffects — the effects of a `mount_per_item` map (P05 §4.1).
 //
-//   snapshot      take the map's SHARED lease on every run mount
+//   base          what the map forks from: the run mounts, or — a map
+//                 nested in another map's item — that item's mounts
+//   snapshot      take the map's SHARED lease on every base mount
 //                 (`worktree:<mountId>`: writers outside the map wait),
 //                 then snapshot each mount into a commit — the working tree
 //                 as it is, uncommitted upstream changes included (`git add
@@ -19,19 +21,32 @@
 //                 any conflict fails the item (merge_conflict) with nothing
 //                 applied and its mount kept; otherwise each run mount is
 //                 moved to its merged tree (a two-way read-tree, only the
-//                 changed paths), and the item mounts are released.
+//                 changed paths), and the item mounts are released. A map
+//                 cancelled before the merge applies aborts it; one cancelled
+//                 while it applied rolls it back.
 //                 pr_per_item: the item branch is committed and — following
 //                 lifecycle.postProcessing.autoPush / autoCreatePR — pushed
 //                 and a PR opened, through the one source-control flow.
-//   release       the map's leases (map settled, cancelled or failed).
+//   release       the map's shared lease (map settled, cancelled or
+//                 failed; a merge in flight keeps its exclusive lease until
+//                 it ends), then the item worktrees nobody reads any more:
+//                 kept are the completed items of `merge: none` (later
+//                 stages read their `workdir`), a conflicting item, a failed
+//                 winner, every item while its winner is still to be picked,
+//                 and the branches of `pr_per_item` (their commits); the rest
+//                 go with their branches, and the snapshot refs with them.
+//                 The run's finalize releases what was kept
+//                 (`releaseRunMapItems`).
 //
 // Every effect answers with a message and never throws; a re-dispatch after
 // a crash (RunSupervisor.recover) repeats idempotent steps.
 // ────────────────────────────────────────────────────────────────
 
+import { execFile } from 'node:child_process';
 import * as path from 'node:path';
+import { promisify } from 'node:util';
 import type { ILogger, RunCodebase, WorkflowRun, WorkspaceMount } from '@generatorai/shared';
-import type { CheckStage, Lifecycle, PostProcessingStep } from '@generatorai/workflow-spec';
+import type { CheckStage, Lifecycle, PostProcessingStep, WorkflowGraph } from '@generatorai/workflow-spec';
 import type { EngineStores } from '../../domain/ports/IEngineStore.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
@@ -76,6 +91,44 @@ interface MapContext {
 
 const refSafe = (s: string) => s.replace(/[^A-Za-z0-9._-]/g, '_');
 
+/** Where a map forks from: a workspace and its mounts, in position order. */
+interface MapBase {
+  workspaceId: string;
+  workspaceRoot: string;
+  mounts: WorkspaceMount[];
+}
+
+/** The map's snapshot refs of a run (under one mount's repository). */
+const snapshotRefPrefix = (runId: string, stageRunId?: string) => `refs/generatorai/maps/${refSafe(runId)}/${stageRunId ? `${refSafe(stageRunId)}/` : ''}`;
+
+/** Delete every ref under `prefix` in a repository (best effort). */
+async function deleteRefs(repoDir: string, prefix: string): Promise<void> {
+  const run = promisify(execFile);
+  try {
+    const { stdout } = await run('git', ['for-each-ref', '--format=%(refname)', prefix], { cwd: repoDir, timeout: 15_000 });
+    for (const ref of stdout.split('\n').map((l) => l.trim()).filter(Boolean)) {
+      await run('git', ['update-ref', '-d', ref], { cwd: repoDir, timeout: 15_000 }).catch(() => undefined);
+    }
+  } catch {
+    /* a repository that is gone has no refs left */
+  }
+}
+
+/**
+ * Whether an item's worktrees stay after its map settled (see `release`):
+ * `'all'` keeps them, `'branch'` removes the worktrees but keeps the
+ * branches, `'none'` removes both.
+ */
+function itemKept(map: MapState, merge: string, it: MapItemState): 'all' | 'branch' | 'none' {
+  if (map.winner && map.winner.phase !== 'done') return 'all';
+  if (it.phase === 'merging') return 'all'; // its merge is still in flight (a cancel): finalize releases it
+  if (merge === 'pr_per_item') return 'branch';
+  if (merge === 'none' && it.status === 'completed') return 'all';
+  if (it.errorCode === 'merge_conflict') return 'all';
+  if (map.winner?.outcome === 'failed' && map.winner.index === it.index) return 'all';
+  return 'none';
+}
+
 export class MapEffects {
   constructor(private readonly deps: MapEffectsDeps) {}
 
@@ -94,23 +147,42 @@ export class MapEffects {
     return { run, inst, state, item: index !== undefined ? state.items[index] : undefined, node, graphName: graph.workflow.name, lifecycle: graph.workflow.lifecycle };
   }
 
-  /** The run's mounts, in position order. */
-  private async runMounts(run: WorkflowRun): Promise<{ workspaceRoot: string; mounts: WorkspaceMount[] }> {
+  /**
+   * Where an instance works, as a map base: the nearest enclosing
+   * mount_per_item item's workspace, else the run's. A map forks from its
+   * own placement (a nested map from its item's mounts).
+   */
+  private async baseOf(run: WorkflowRun, runState: RunState | null, inst: InstanceState | undefined): Promise<MapBase> {
     const svc = this.mounts;
     if (!svc) throw new Error('Mounts are not available in this process (no mount service)');
-    const ws = await runWorkspace(this.deps.workspaceManager, run);
+    const item = runState && inst ? mapItemPlacement(runState, inst) : null;
+    const ws = item ? await this.deps.workspaceManager.getExecutionWorkspace(item.workspaceId!) : await runWorkspace(this.deps.workspaceManager, run);
+    if (!ws) throw new Error(`The workspace ${item?.workspaceId ?? '?'} of the enclosing map item is gone`);
     const mounts = (await svc.list(ws.id)).filter((m) => m.status !== 'removed').sort((a, b) => a.position - b.position);
-    return { workspaceRoot: ws.rootPath, mounts };
+    return { workspaceId: ws.id, workspaceRoot: ws.rootPath, mounts };
   }
 
-  /** The run-mount lease keys of a run (for writers outside a map, and the map's own leases). */
-  async leaseKeys(runId: string): Promise<string[]> {
+  /**
+   * The mount lease keys of an instance's placement: a writer outside a
+   * map takes `write` on them, a map its shared and exclusive leases.
+   */
+  async leaseKeys(runId: string, stageRunId: string): Promise<string[]> {
     try {
       const run = await this.deps.runRepo.getById(runId);
-      return (await this.runMounts(run)).mounts.map((m) => worktreeLeaseKey(m.id));
+      const runState = this.deps.stores.runStore.loadRunState(runId);
+      const inst = runState?.instances.find((i) => i.id === stageRunId);
+      return (await this.baseOf(run, runState, inst)).mounts.map((m) => worktreeLeaseKey(m.id));
     } catch {
       return [];
     }
+  }
+
+  /** Whether the run is being cancelled, or the map itself was (a merge must not change the mount any more). */
+  private cancelled(runId: string, stageRunId: string): boolean {
+    const st = this.deps.stores.runStore.loadRunState(runId);
+    if (!st) return true;
+    if (st.run.status === 'cancelling' || st.run.status === 'cancelled') return true;
+    return st.instances.find((i) => i.id === stageRunId)?.status === 'cancelled';
   }
 
   // ── snapshot ──────────────────────────────────────────────────
@@ -118,8 +190,8 @@ export class MapEffects {
   async snapshot(runId: string, stageRunId: string): Promise<{ snapshot: Record<string, string> | null; error?: string }> {
     let release: (() => void) | undefined;
     try {
-      const { run } = await this.context(runId, stageRunId);
-      const { workspaceRoot, mounts } = await this.runMounts(run);
+      const { run, inst } = await this.context(runId, stageRunId);
+      const { workspaceRoot, mounts } = await this.baseOf(run, this.deps.stores.runStore.loadRunState(runId), inst);
       if (mounts.length === 0) return { snapshot: null, error: 'the run has no mounts' };
       release = await this.deps.leases.acquire(mounts.map((m) => worktreeLeaseKey(m.id)), 'shared', stageRunId);
       const git = this.mounts!.git;
@@ -131,7 +203,7 @@ export class MapEffects {
         if (!tree) throw new Error(`mount "${m.alias}" could not be snapshotted`);
         const head = await git.revParse(m.path, 'HEAD');
         const sha = await git.commitTree(m.path, tree, `GeneratorAI map snapshot (run ${runId}, ${stageRunId})`, head ?? undefined);
-        await git.updateRef(m.path, `refs/generatorai/maps/${refSafe(runId)}/${refSafe(stageRunId)}/${refSafe(m.alias)}`, sha);
+        await git.updateRef(m.path, `${snapshotRefPrefix(runId, stageRunId)}${refSafe(m.alias)}`, sha);
         out[m.alias] = sha;
       }
       return { snapshot: out };
@@ -145,12 +217,40 @@ export class MapEffects {
 
   /** Re-take a running map's shared leases (recovery: leases are process-local). */
   async reacquire(runId: string, stageRunId: string): Promise<void> {
-    const keys = await this.leaseKeys(runId);
+    const keys = await this.leaseKeys(runId, stageRunId);
     await this.deps.leases.acquire(keys, 'shared', stageRunId);
   }
 
-  release(stageRunId: string): void {
-    this.deps.leases.release(stageRunId);
+  /**
+   * The map settled (completed, failed, cancelled) or its winner did: its
+   * shared lease goes at once (a queued snapshot is withdrawn; a merge in
+   * flight keeps its exclusive lease until it ends), then the item
+   * worktrees and snapshot refs nobody needs any more (`itemKept`).
+   */
+  async release(runId: string, stageRunId: string): Promise<void> {
+    this.deps.leases.release(stageRunId, 'shared');
+    let ctx: MapContext;
+    try {
+      ctx = await this.context(runId, stageRunId);
+    } catch {
+      return;
+    }
+    const { run, inst, state, node } = ctx;
+    if (node.map!.workspace !== 'mount_per_item') return;
+    for (const it of state.items) {
+      if (!it.workspaceId) continue;
+      const kept = itemKept(state, node.map!.merge, it);
+      if (kept !== 'all') await this.releaseItem(it.workspaceId, { deleteBranch: kept === 'none' });
+    }
+    // The snapshot is the merge base: its refs go once no merge can come.
+    if (state.winner && state.winner.phase !== 'done') return;
+    if (state.items.some((it) => it.phase === 'merging')) return;
+    try {
+      const base = await this.baseOf(run, this.deps.stores.runStore.loadRunState(runId), inst);
+      for (const m of base.mounts) await deleteRefs(m.path, snapshotRefPrefix(runId, stageRunId));
+    } catch {
+      /* the base is gone: so are its refs */
+    }
   }
 
   // ── items ─────────────────────────────────────────────────────
@@ -165,7 +265,7 @@ export class MapEffects {
     const { run, inst, state, item, node } = ctx;
     const svc = this.mounts;
     if (!item || !state.snapshot || !svc) return { ok: false, code: 'mount_fork_failed', error: 'The map has no snapshot to cut item mounts from' };
-    const runWs = await runWorkspace(this.deps.workspaceManager, run);
+    const base = await this.baseOf(run, this.deps.stores.runStore.loadRunState(runId), inst);
     const ownerId = `${run.id}~${inst.id.slice(0, 8)}-${index}`;
     let where: Omit<Extract<PrepareItemResult, { ok: true }>, 'ok'>;
     try {
@@ -182,10 +282,11 @@ export class MapEffects {
       let rows = (await svc.list(ws.id)).filter((m) => m.status === 'ready');
       if (rows.length === 0) {
         const aliases = Object.keys(state.snapshot);
+        // Per map instance: a map inside a loop or another map cuts new branches each time.
         const branch = (alias: string) =>
-          `generatorai/${run.id.slice(0, 8)}-${inst.stageKey}-${index}${aliases.length > 1 ? `-${refSafe(alias)}` : ''}`;
+          `generatorai/${run.id.slice(0, 8)}-${inst.stageKey}-${inst.id.slice(0, 8)}-${index}${aliases.length > 1 ? `-${refSafe(alias)}` : ''}`;
         try {
-          rows = await svc.forkFromSnapshot(runWs.id, state.snapshot, ws, { branchFor: branch });
+          rows = await svc.forkFromSnapshot(base.workspaceId, state.snapshot, ws, { branchFor: branch });
         } catch (err) {
           await this.deps.workspaceManager.deleteWorkspace(ws.id).catch(() => undefined);
           return { ok: false, code: 'mount_fork_failed', error: `The item's mounts could not be cut from the snapshot: ${err instanceof Error ? err.message : String(err)}` };
@@ -206,7 +307,7 @@ export class MapEffects {
     if (setup.length > 0) {
       const runState = this.deps.stores.runStore.loadRunState(runId);
       const scope = runState ? mapItemScope(new StateIndex(runState.run, runState.instances, runState.iterations ?? []), inst, index) : {};
-      const codebases = this.itemCodebases(run, where.mounts);
+      const codebases = this.itemCodebases(this.enclosingRun(run, inst), where.mounts);
       for (const [j, spec] of setup.entries()) {
         const outcome = await runCheck({
           stage: { check: spec } as Pick<CheckStage, 'check'>,
@@ -229,6 +330,13 @@ export class MapEffects {
       }
     }
     return { ok: true, ...where };
+  }
+
+  /** The run as the map sees it: inside an enclosing item, its codebases are that item's. */
+  private enclosingRun(run: WorkflowRun, inst: InstanceState): WorkflowRun {
+    const runState = this.deps.stores.runStore.loadRunState(run.id);
+    const outer = runState ? mapItemPlacement(runState, inst) : null;
+    return outer ? runForItem(run, outer) : run;
   }
 
   /** The run's codebases with each path moved to the item's mount of the same alias. */
@@ -256,7 +364,7 @@ export class MapEffects {
     const { run, inst, state, item } = ctx;
     const svc = this.mounts!;
     const git = svc.git;
-    const { workspaceRoot, mounts } = await this.runMounts(run);
+    const { workspaceRoot, mounts } = await this.baseOf(run, this.deps.stores.runStore.loadRunState(run.id), inst);
     const release = await this.deps.leases.acquire(mounts.map((m) => worktreeLeaseKey(m.id)), 'exclusive', inst.id);
     try {
       const idx = (m: WorkspaceMount, what: string) => path.join(workspaceRoot, '.generatorai', 'map-index', `${inst.id}-${item!.index}-${refSafe(m.alias)}.${what}`);
@@ -287,19 +395,29 @@ export class MapEffects {
       if (conflicts.length > 0) {
         return { ok: false, code: 'merge_conflict', error: `Item ${item!.index} (${item!.key}) conflicts with the run mount: ${conflicts.join('; ')}; its mount is kept at ${item!.primaryDir ?? '?'}` };
       }
+      // A cancel that arrived while the merge waited or computed: nothing is applied.
+      if (this.cancelled(run.id, inst.id)) return { ok: false, code: 'cancelled', error: 'The map was cancelled before its merge applied' };
       // 2. Apply (a fast-forward of each run mount's working tree); a failure rolls the applied ones back.
       const applied: typeof plans = [];
+      const rollback = async () => {
+        for (const p of applied.reverse()) await git.checkoutTree(p.mount.path, p.to, p.from, idx(p.mount, 'undo')).catch(() => undefined);
+      };
       try {
         for (const p of plans) {
           await git.checkoutTree(p.mount.path, p.from, p.to, idx(p.mount, 'apply'));
           applied.push(p);
         }
       } catch (err) {
-        for (const p of applied.reverse()) await git.checkoutTree(p.mount.path, p.to, p.from, idx(p.mount, 'undo')).catch(() => undefined);
+        await rollback();
         throw err;
       }
+      // A cancel that arrived while it applied: the mount goes back to where it was.
+      if (this.cancelled(run.id, inst.id)) {
+        await rollback();
+        return { ok: false, code: 'cancelled', error: 'The map was cancelled while its merge applied; the merge was rolled back' };
+      }
       // Merged: the item mounts are released (worktrees and branches removed).
-      await this.releaseItem(item!.workspaceId!);
+      await this.releaseItem(item!.workspaceId!, { deleteBranch: true });
       return { ok: true };
     } finally {
       release();
@@ -350,13 +468,50 @@ export class MapEffects {
     return { ok: true, pr };
   }
 
-  /** Remove an item's worktrees (branches too) and its workspace. */
-  private async releaseItem(workspaceId: string): Promise<void> {
-    const svc = this.mounts;
-    if (!svc) return;
-    for (const m of await svc.list(workspaceId)) await svc.remove(m.id, { deleteBranch: true }).catch(() => undefined);
-    await this.deps.workspaceManager.deleteWorkspace(workspaceId).catch((err: unknown) => this.deps.logger?.warn(`[MapEffects] item workspace ${workspaceId}: ${String(err)}`));
+  /** Remove an item's worktrees (and their branches, unless kept) and its workspace. */
+  private async releaseItem(workspaceId: string, opts: { deleteBranch: boolean }): Promise<void> {
+    await releaseItemWorkspace({ mounts: this.mounts, workspaceManager: this.deps.workspaceManager, logger: this.deps.logger }, workspaceId, opts);
   }
+}
+
+async function releaseItemWorkspace(
+  deps: { mounts?: MountService | undefined; workspaceManager: WorkspaceManager; logger?: ILogger | undefined },
+  workspaceId: string,
+  opts: { deleteBranch: boolean },
+): Promise<void> {
+  const svc = deps.mounts;
+  if (!svc) return;
+  if (!(await deps.workspaceManager.getExecutionWorkspace(workspaceId).catch(() => null))) return; // released already
+  for (const m of await svc.list(workspaceId)) await svc.remove(m.id, { deleteBranch: opts.deleteBranch }).catch(() => undefined);
+  await deps.workspaceManager.deleteWorkspace(workspaceId).catch((err: unknown) => deps.logger?.warn(`[MapEffects] item workspace ${workspaceId}: ${String(err)}`));
+}
+
+/**
+ * A run finalizes: every map item worktree still kept goes (a `pr_per_item`
+ * item keeps its branch, which holds its commit), and every snapshot ref
+ * of the run's maps with it.
+ */
+export async function releaseRunMapItems(
+  deps: { stores: EngineStores; mounts?: MountService | undefined; workspaceManager: WorkspaceManager; logger?: ILogger | undefined },
+  run: WorkflowRun,
+  graph: WorkflowGraph,
+): Promise<void> {
+  const state = deps.stores.runStore.loadRunState(run.id);
+  if (!state || !deps.mounts) return;
+  const nodes = compile(graph).nodes;
+  // Innermost first: a nested map's items are worktrees of its enclosing item's.
+  const maps = state.instances.filter((i) => mapStateOf(i) !== null).sort((a, b) => b.instancePath.length - a.instancePath.length);
+  for (const inst of maps) {
+    const ms = mapStateOf(inst)!;
+    const merge = nodes.get(inst.stageKey)?.map?.merge;
+    for (const it of ms.items) {
+      if (!it.workspaceId) continue;
+      await releaseItemWorkspace(deps, it.workspaceId, { deleteBranch: merge !== 'pr_per_item' });
+    }
+  }
+  // Worktrees share their repository's refs: the run mounts hold every map's snapshot refs.
+  const ws = await runWorkspace(deps.workspaceManager, run).catch(() => null);
+  if (ws) for (const m of await deps.mounts.list(ws.id)) if (m.git?.isRepo && m.status !== 'removed') await deleteRefs(m.path, snapshotRefPrefix(run.id));
 }
 
 /**

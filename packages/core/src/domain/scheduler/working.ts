@@ -63,6 +63,8 @@ export class Working {
   readonly iterations: LoopIterationRecord[];
   /** Delivered events nobody consumed yet, oldest first (event waits take them). */
   readonly events: RunEventRecord[];
+  /** Who sent the event this batch's `deliver_event` delivered (a wait's `output.by`), by event and idempotency key. */
+  readonly eventSenders = new Map<string, string>();
   rejected = false;
   /** The index over the working copy; rebuilt after any write. */
   private index: StateIndex | null = null;

@@ -171,7 +171,7 @@ import {
   // Extension-author built-in tools
   buildWriteExtensionTool,
   buildReloadExtensionTool,
-  // M8-fix: W18 admission controller — value import (cannot be `import type`)
+  // The admission controller (flow keys) — value import (cannot be `import type`)
   AdmissionController,
   providerFlowKey,
   // Workspace mounts (chat sources → directories the agent edits)
@@ -754,36 +754,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     worktreeRepo,
   );
 
-  // M8-fix: W18 — the AdmissionController gates stage launches in
-  // the `ordinary` lane. Interactive chat turns bypass this via ChatManagementService.
-  //
-  // W18 requires configuration to be clamped on load, logged, and audited.
-  // Reading these with a bare `parseInt` was a live hang: a typo'd value
-  // parsed to NaN, which `new Semaphore(NaN)` accepted and every `acquire()`
-  // then awaited forever — no error, no log, every workflow stage stuck.
-  // `readBoundedInt` cannot produce a non-finite value, and reports whatever
-  // it had to correct. `undefined` (variable unset) is passed through so the
-  // controller can size the lane from measured machine capacity instead.
-  const laneEnv = (name: string, min: number, max: number, dflt: number): number | undefined =>
-    process.env[name] === undefined
-      ? undefined
-      : readBoundedInt(name, {
-          defaultValue: dflt,
-          min,
-          max,
-          onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-        });
-
+  // P07 WP-7.2 — the AdmissionController's flow keys are the one
+  // concurrency gate; their limits are operator settings (Settings →
+  // Workflow engine), not environment variables. The old admission-lane
+  // variables do nothing: say so rather than let an operator believe them.
+  for (const name of Object.keys(process.env).filter((k) => /^GENERATORAI_((INTERACTIVE|ORDINARY|BULK)_CONCURRENCY|ADMISSION_QUEUE_WAIT_MS)$/.test(k))) {
+    logger.warn(`[Admission] ${name} is ignored: concurrency limits are the flow keys of Settings → Workflow engine`);
+  }
   const admissionController = new AdmissionController({
-    interactiveConcurrency: laneEnv('GENERATORAI_INTERACTIVE_CONCURRENCY', 1, 64, 4),
-    ordinaryConcurrency: laneEnv('GENERATORAI_ORDINARY_CONCURRENCY', 1, 64, 8),
-    bulkConcurrency: laneEnv('GENERATORAI_BULK_CONCURRENCY', 1, 64, 2),
-    queueWaitTimeoutMs: readBoundedInt('GENERATORAI_ADMISSION_QUEUE_WAIT_MS', {
-      defaultValue: 1_800_000,
-      min: 0,
-      max: 24 * 60 * 60 * 1000,
-      onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-    }),
     logger: {
       info: (msg, meta) => logger.info(msg, meta),
       warn: (msg, meta) => logger.warn(msg, meta),
@@ -796,7 +774,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // sets every limit in Settings → Workflow engine (applied live). With the
   // agent host on, the gateway admits every turn before it crosses IPC.
   agentHostSupervisor.useExecutionGate(admissionController.flowGate(providerFlowKey('claude-agent')));
-  agentHostTurns?.useTurnGates((provider) => admissionController.flowGate(providerFlowKey(provider)));
+  agentHostTurns?.useTurnGates(
+    (provider) => admissionController.flowGate(providerFlowKey(provider)),
+    (model) => harnessRegistry.resolveProviderForModel(model),
+  );
   const workflowEngineSettings = await WorkflowEngineSettingsStore.load(dirname(resolve(config.dbPath)), (s) =>
     admissionController.setFlowLimits(s.flowLimits),
   );

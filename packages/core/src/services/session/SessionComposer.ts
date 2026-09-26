@@ -46,7 +46,7 @@ import { applyModeConfig, planPromptPrefix } from './modeConfig.js';
 import { checkPermissionGating, turnOptionsFrom, type PermissionModeSource } from './permissionSource.js';
 import { PlatformToolBinder, type BindTarget } from './PlatformToolBinder.js';
 import { resolveMcp } from './resolveMcp.js';
-import { ComposeError, type ComposeWarning, type SessionComposerDeps, type SessionOwner, type TurnPolicy } from './types.js';
+import { ComposeError, type ComposeWarning, type SessionComposerDeps, type SessionOwner, type TurnContext, type TurnPolicy } from './types.js';
 import { applyWorkspaceExposure } from './workspaceExposure.js';
 import { buildWorkspaceHint } from '../chatSystemHints.js';
 
@@ -286,7 +286,10 @@ export class SessionComposer {
         orchestrator: i.owner.kind === 'chat' && orchestrator,
         turnOf: () => {
           const turn = this.turns.get(i.conversationId);
-          return turn ? { turnId: turn.turnId, permissionMode: turn.permissionMode } : undefined;
+          if (!turn) return undefined;
+          // A stage's turn yields its attempt's flow keys; a chat's its provider turn permit.
+          const yieldKeys = turn.yieldKeys ?? (() => this.harness.yieldTurnPermit?.(i.conversationId));
+          return { turnId: turn.turnId, permissionMode: turn.permissionMode, yieldKeys };
         },
       });
     }
@@ -372,7 +375,7 @@ export class SessionComposer {
     owner: SessionOwner,
     conversationId: string,
     options: SendPromptOptions,
-    extra: { turnId?: string; policy?: TurnPolicy } = {},
+    extra: { turnId?: string; policy?: TurnPolicy; yieldKeys?: TurnContext['yieldKeys'] } = {},
   ): string {
     const turnId = extra.turnId ?? generateId();
     this.turns.set(conversationId, {
@@ -387,6 +390,7 @@ export class SessionComposer {
       nextSequence: 0,
       cardSequence: new Map(),
       ...(extra.policy ? { policy: extra.policy } : {}),
+      ...(extra.yieldKeys ? { yieldKeys: extra.yieldKeys } : {}),
     });
     return turnId;
   }

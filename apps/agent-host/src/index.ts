@@ -32,9 +32,10 @@ async function buildHarness() {
 /**
  * Concurrency bounds. Turn permits are the gateway's: it admits every turn on
  * its `provider:<id>` flow key and sends it `admitted` (P07 WP-7.2, RV-26),
- * so the host's own turn semaphore only bounds a turn sent without the flag;
- * the gateway hands it the same limit (`GENERATORAI_AGENT_HOST_TURN_LIMIT`,
- * set from Settings → Workflow engine at spawn). Cold starts stay a host bound.
+ * so the host's own turn semaphore only bounds a turn sent without the flag:
+ * a backstop of 4 (`GENERATORAI_AGENT_HOST_TURN_LIMIT` overrides it; the
+ * gateway does not set it, and Settings → Workflow engine does not reach it).
+ * Cold starts stay a host bound.
  */
 function intFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];

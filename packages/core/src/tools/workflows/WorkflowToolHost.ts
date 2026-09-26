@@ -67,6 +67,8 @@ export type WorkflowToolCaller =
 export interface WorkflowToolTurn {
   turnId?: string;
   permissionMode?: string;
+  /** Give back the caller's flow keys for a blocking wait; the returned function takes them back (ECON-R7). */
+  yieldKeys?: (() => (() => Promise<void>) | undefined) | undefined;
 }
 
 export interface WorkflowToolLimits {
@@ -527,7 +529,7 @@ export class WorkflowToolHost {
       plan: compactPlan(result.plan),
     };
     if (args.wait && args.wait !== 'none') {
-      const digest = await this.wait(result.runId, args.wait === 'until_approval_or_done', args.waitSeconds, c.deadlineAt);
+      const digest = await this.wait(result.runId, args.wait === 'until_approval_or_done', args.waitSeconds, c.deadlineAt, call.turn);
       out['status'] = digest.status;
       out['digest'] = compactDigest(digest);
       if (!digest.finalized) out['hint'] = 'The run is still going: call check_workflow_run with wait to follow it';
@@ -535,10 +537,20 @@ export class WorkflowToolHost {
     return out;
   }
 
-  private wait(runId: string, stopOnApproval: boolean, waitSeconds: number | undefined, deadlineAt: number | undefined): Promise<RunDigest> {
+  /**
+   * Block on a run. The caller's flow keys (its provider turn permit, a
+   * stage's admission) go back for the wait: the run it waits for may need
+   * the same provider, and a caller holding it would starve the run (ECON-R7).
+   */
+  private async wait(runId: string, stopOnApproval: boolean, waitSeconds: number | undefined, deadlineAt: number | undefined, turn: WorkflowToolTurn | undefined): Promise<RunDigest> {
     let ms = Math.min(Math.max(waitSeconds ?? 60, 0), this.limits.maxWaitSeconds) * 1000;
     if (deadlineAt !== undefined) ms = Math.max(0, Math.min(ms, deadlineAt - this.now()));
-    return this.deps.invocation.waitFor(runId, { timeoutMs: ms, stopOnApproval });
+    const takeBack = ms > 0 ? turn?.yieldKeys?.() : undefined;
+    try {
+      return await this.deps.invocation.waitFor(runId, { timeoutMs: ms, stopOnApproval });
+    } finally {
+      await takeBack?.();
+    }
   }
 
   // ── check / respond / cancel ─────────────────────────────────
@@ -546,7 +558,7 @@ export class WorkflowToolHost {
   async check(caller: WorkflowToolCaller, args: { runId: string; wait?: boolean; waitSeconds?: number }, call: { turn?: WorkflowToolTurn | undefined }): Promise<unknown> {
     const c = await this.resolve(caller, call.turn, undefined);
     const run = await this.runFor(c, args.runId, 'visible');
-    const digest = args.wait ? await this.wait(run.id, true, args.waitSeconds, c.deadlineAt) : await this.deps.invocation.digest(run.id);
+    const digest = args.wait ? await this.wait(run.id, true, args.waitSeconds, c.deadlineAt, call.turn) : await this.deps.invocation.digest(run.id);
     const pending = await this.deps.approvals.listPending(run.id).catch(() => []);
     const delegated = run.systemVars?.approvalDelegate === 'invoker' && (await this.startedBy(c, run));
     return {
