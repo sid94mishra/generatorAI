@@ -712,11 +712,11 @@ export function WorkflowRunPage() {
             <section aria-label="Stages" className="overflow-hidden rounded-panel border border-line bg-surface">
               <div
                 aria-hidden
-                className="flex h-th items-center gap-2 border-b border-line-soft bg-sunken pr-12 pl-13 text-small text-fg-3"
+                className="flex h-th items-center gap-1 border-b border-line-soft bg-sunken pr-8 pl-13 text-small text-fg-3"
               >
                 <span className="min-w-0 flex-1">Stage</span>
                 <span className="hidden w-32 md:inline">Key</span>
-                <span className="w-24 text-right">Time</span>
+                <span className="w-16 text-right">Time</span>
               </div>
               {runView.topLevel.map((s, i) => {
                 const showConnector = i < runView.topLevel.length - 1;

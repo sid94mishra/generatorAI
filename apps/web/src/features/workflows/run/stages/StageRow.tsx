@@ -206,31 +206,35 @@ export const StageRow = memo(function StageRow({
           onClick={toggle}
           aria-expanded={open}
           aria-label={`${stage.name}, ${word}`}
-          className="h-full min-w-0 flex-1 justify-start gap-2 border-0 bg-transparent px-1 text-left font-normal text-fg hover:not-disabled:bg-transparent"
+          className="h-full min-w-0 flex-1 justify-start border-0 bg-transparent px-1 text-left font-normal text-fg hover:not-disabled:bg-transparent"
         >
-          <Icon concept={open ? 'chevron-down' : 'chevron-right'} size={14} className="shrink-0 text-fg-3" />
-          <Icon
-            concept={def.glyph as IconConcept}
-            size={16}
-            className={cn('shrink-0', STATUS_TONE_TEXT[def.tone], def.spin && 'animate-spin reduced:animate-none')}
-          />
-          <span
-            className={cn(
-              'min-w-0 truncate text-ui',
-              isAwaiting ? 'font-semibold text-fg' : isSkippedOrCancelled ? 'text-fg-3' : 'font-medium text-fg',
-            )}
-          >
-            {stage.name}
+          <span className="inline-flex max-w-full min-w-0 items-center gap-2 align-middle">
+            <Icon concept={open ? 'chevron-down' : 'chevron-right'} size={14} className="shrink-0 text-fg-3" />
+            <Icon
+              concept={def.glyph as IconConcept}
+              size={16}
+              className={cn('shrink-0', STATUS_TONE_TEXT[def.tone], def.spin && 'animate-spin reduced:animate-none')}
+            />
+            <span
+              className={cn(
+                'min-w-0 truncate text-ui',
+                isAwaiting ? 'font-semibold text-fg' : isSkippedOrCancelled ? 'text-fg-3' : 'font-medium text-fg',
+              )}
+            >
+              {stage.name}
+            </span>
+            <span
+              className={cn('shrink-0 text-small', STATUS_TONE_TEXT[def.tone])}
+              {...(stage.admission ? { title: `${stage.admission.queued} launch${stage.admission.queued === 1 ? '' : 'es'} queued on ${stage.admission.flowKey}` } : {})}
+            >
+              {word}
+            </span>
           </span>
-          <span className="hidden w-32 shrink-0 truncate font-mono text-micro text-fg-3 md:inline">{stage.stageKey}</span>
-          <span
-            className={cn('min-w-0 shrink truncate text-small', STATUS_TONE_TEXT[def.tone])}
-            {...(stage.admission ? { title: `${stage.admission.queued} launch${stage.admission.queued === 1 ? '' : 'es'} queued on ${stage.admission.flowKey}` } : {})}
-          >
-            {word}
-          </span>
-          {stage.attempt && stage.attempt > 1 ? <span className="hidden shrink-0 text-small text-fg-3 md:inline">attempt {stage.attempt}</span> : null}
         </Button>
+        <span className="hidden w-32 shrink-0 truncate font-mono text-micro text-fg-3 md:inline" title={stage.stageKey}>
+          {stage.stageKey}
+        </span>
+        {stage.attempt && stage.attempt > 1 ? <span className="hidden shrink-0 text-small text-fg-3 md:inline">attempt {stage.attempt}</span> : null}
 
         {headerExtra}
         {parallel > 0 ? (
@@ -250,7 +254,6 @@ export const StageRow = memo(function StageRow({
               {fileCount}
             </span>
           ) : null}
-          {dur ? <span className="font-mono tabular-nums">{dur}</span> : null}
           {gauge}
           {stage.amendedAt ? (
             <Badge
@@ -262,6 +265,7 @@ export const StageRow = memo(function StageRow({
             </Badge>
           ) : null}
         </span>
+        <span className="w-16 shrink-0 text-right font-mono text-micro text-fg-2 tabular-nums">{dur ?? '—'}</span>
         {isFailed && onRetry ? (
           <IconButton icon="retry" label="Re-run from this stage" size="sm" onClick={() => onRetry(stage.id)} />
         ) : null}
