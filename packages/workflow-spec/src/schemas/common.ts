@@ -50,12 +50,6 @@ export const TemplateSchema = z
   .max(MAX_TEMPLATE_LENGTH)
   .describe('Template text: {{ expression }} placeholders, {{#if expr}}…{{/if}} blocks; a bare {{name}} means {{variables.name}}');
 
-/** A `secretref:` reference into the secret store. Literal secrets are never accepted. */
-export const SecretRefSchema = z
-  .string()
-  .regex(/^secretref:[A-Za-z0-9_.:/-]{1,200}$/, 'Secrets must be secretref: references')
-  .describe('A secretref: reference into the secret store (literal secrets are rejected)');
-
 export const PositionSchema = z
   .object({
     x: z.number().finite().describe('Canvas x coordinate'),
