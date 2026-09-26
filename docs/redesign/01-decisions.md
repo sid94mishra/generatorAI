@@ -353,6 +353,13 @@ Decided while building P1-T1…T6 where `02` was silent:
 - **Cascade fix:** three legacy `globals.css` rules (`* { border-color }`, the global focus-visible outline, the 150 ms transition) were outside any cascade layer and silently beat every layered utility; they now live in `@layer base`. Consequence: border-colour utilities in ~49 legacy files that were dead now apply as their authors wrote them — an accepted, intended visual change on legacy pages.
 - **Storybook tests** run the Tailwind plugin (the vitest config replaces vite.config, so story tests had rendered unstyled before) with a 60 s per-test timeout under load.
 
+### D-57 App shell as built (P3-04) — Final
+- `ui/shell` holds AppFrame, Sidebar (+ parts), Rail, MainCard, PageHeaderSlot/LegacyHeaderSlot, TitleStrip, MacTrafficLightRow, ToasterRegion, SidebarFlyout; `ui/templates/Gate` renders 404 and route errors. `app/shell` wires them (`ShellRoute`, `ConnectedSidebar`, `ConnectedRail`, `ConnectedTitleStrip`, `LegacyHeader`, `useSidebarMode`, `useNavHistory`, `useCommandHost`, `useDesktopBridge`); `stores/uiStore` → `stores/shellStore`; the palette mounts in `ShellRoute`.
+- Testids follow `09` §7.3 where it and `06` §2.6 disagree; rail children use `06`'s names. `header-toggle-sidebar` is removed.
+- No phone drawer: below 768 px the rail stays (`04` §4.1 wins over `06` §2.5). Workflow builder routes set `forceRail` in their route module.
+- Needs you / Running sections render only when they have items (D-36). The server switcher and title-strip server chip are static until P3-06 adds the Servers popover (no dead buttons). The legacy header is 44 px on the card background.
+- Window chrome (per-OS layout, insets) reaches the renderer through the preload before first paint (launch argument); the `getWindowChrome` IPC is gone; `--titlebar-*` → `--gai-titlebar-*` everywhere; both CSP hashes regenerated.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
