@@ -198,7 +198,7 @@ export function CreateProjectPage() {
                       </Card.Body>
                     </Card>
                   ))}
-                  <Button icon="plus" className="self-start" onClick={() => setRepos((rows) => [...rows, newRow()])}>
+                  <Button icon="plus" className="justify-self-start" onClick={() => setRepos((rows) => [...rows, newRow()])}>
                     Add repository
                   </Button>
                 </>
