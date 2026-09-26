@@ -1470,7 +1470,8 @@ export class StageExecutor {
           this.deps.post(runId, { type: 'usage_tick', stageRunId, attemptNo, usage: asUsage((event.data ?? {}) as Record<string, unknown>) });
         }
       });
-      const response = await harness.sendPromptAndWait(conversationId, prompt, undefined, ctx.frame.ac.signal);
+      // A tool-less judge turn changes nothing; its verdict is kept on the attempt and a resumed attempt reuses it.
+      const response = await harness.sendPromptAndWait(conversationId, prompt, undefined, ctx.frame.ac.signal); // durability-ok: tool-less judge, verdict journalled on stage_attempts.judge
       const parsed = parseJudgeReply(response?.content ?? '');
       const score = parsed?.score ?? null;
       return { round, rule: index, score, threshold: rule.threshold, reasons: parsed?.reasons ?? ['The judge answer could not be read'], passed: score !== null && score >= rule.threshold };

@@ -413,11 +413,9 @@
       "phase": "01",
       "pattern": "iterationIndex",
       "paths": [
-        "packages/shared/src/types/WorkflowRun.ts",
-        "packages/db/src/repositories/StageRunRepository.ts",
         "apps/server/src/routes/workflowRunOrder.ts"
       ],
-      "reason": "WP-1.4: stage-run iteration index / parent link deleted (never set)"
+      "reason": "WP-1.4: stage-run iteration index / parent link deleted (never set) (P05: the v2 instance field iterationIndex of a loop body instance is a new shape, so the ban keeps only the run-order route)"
     },
     {
       "phase": "01",
@@ -768,7 +766,16 @@
     {
       "phase": "03",
       "pattern": "pending-interrupts|/stages/[^'\"`]*/(pause|resume|retry|cancel|approve)\\b",
-      "reason": "WP-3.7: the per-action run routes are deleted; pending approvals are the awaiting_input instances of GET /workflow-runs/:id"
+      "reason": "WP-3.7: the per-action run routes are deleted; pending approvals are the awaiting_input instances of GET /workflow-runs/:id (scoped to source: the generated JSON Schema has $ref paths like /stages/items/anyOf/0/properties/retry)",
+      "paths": [
+        "apps/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/",
+        "packages/core/src/",
+        "packages/shared/src/",
+        "packages/mcp-server/"
+      ]
     },
     {
       "phase": "03",
@@ -859,6 +866,33 @@
         "packages/db/src/repositories/"
       ],
       "reason": "WP-4.6: the definition-level orchestrator config is gone (lifecycle in the spec)"
+    },
+    {
+      "phase": "05",
+      "pattern": "\bllm_validation\b",
+      "paths": [
+        "apps/",
+        "packages/core/src/",
+        "packages/workflow-spec/src/",
+        "packages/shared/src/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/"
+      ],
+      "reason": "WP-5A.6 (W-47): the judge rule (output.rules type judge) replaces llm_validation; only migration v55 names it"
+    },
+    {
+      "phase": "05",
+      "pattern": "\b(pauseWhen|failWhen|onBudget|maxIterationsOverride)\b",
+      "paths": [
+        "apps/",
+        "packages/core/src/",
+        "packages/workflow-spec/src/",
+        "packages/shared/src/",
+        "packages/client-core/",
+        "packages/cli-core/"
+      ],
+      "reason": "WP-5A.1/5A.3 (P5-13): a loop has one open exits[] list (complete, fail, pause, exhaust) and loop_state.effectiveMax; the fixed exit slots and override names of the draft are not a shape"
     }
   ],
   "comments": {

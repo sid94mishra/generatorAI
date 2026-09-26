@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // The generic loop (P05 §2.3), inside the pure decide(). The engine knows
-// only the `loop` kind: every scenario (fix/review, test-until-green, goal
-// seeking, refinement, research) is a graph of these settings.
+// only the `loop` kind: every scenario is a template graph of these
+// settings (the presets of @generatorai/workflow-spec).
 //
 //   loop ready       carry(-1) := carryInit (context before iteration 0);
 //                    capture the start tree hashes → create scope <loop>#0

@@ -12,7 +12,7 @@
 //   - a LAUNCH failure fails the stage with `check_launch_failed`: not on the
 //     allow-list, not found, ENOENT/EINVAL, a policy refusal, the run in
 //     `plan` mode (the command runs repository code: the capability `shell`).
-//     It never yields `passed: false`, so a test-until-green loop cannot spin
+//     It never yields `passed: false`, so a loop waiting for a pass cannot spin
 //     on a broken command. Only a spawn EAGAIN/EBUSY is transient;
 //   - a non-zero exit or a timeout completes with `passed: false`, or fails
 //     with `check_failed` under `failOnNonZero`;
