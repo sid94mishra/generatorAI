@@ -7,3 +7,4 @@ export {
   type SettingsSectionDefinition,
   type RegisterSettingsSectionOptions,
 } from './settingsSections.js';
+export { AppearanceSection } from './appearance/AppearanceSection.js';

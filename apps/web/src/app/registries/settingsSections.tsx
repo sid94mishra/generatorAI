@@ -4,9 +4,9 @@
 // their P6-05…P6-10 task replaces the entry here — the contract is in
 // features/settings/settingsSections.ts.
 
-import { registerSettingsSection, type SettingsSectionDefinition } from '@/features/settings/index.js';
+import { AppearanceSection, registerSettingsSection, type SettingsSectionDefinition } from '@/features/settings/index.js';
+import { SettingsStatusFooter } from '@/ui/patterns/SettingsSection/SettingsSection.js';
 import { GeneralSection } from '@/components/settings/sections/General.js';
-import { AppearanceSection } from '@/components/settings/sections/Appearance.js';
 import { ProvidersSection } from '@/components/settings/sections/Providers.js';
 import { SkillsSection, McpSection, TemplatesSection } from '@/components/settings/sections/Catalogs.js';
 import { AgentsSection } from '@/components/settings/sections/Agents.js';
@@ -21,7 +21,11 @@ import { AudioSection } from '@/components/settings/sections/Audio.js';
 
 const SECTIONS: SettingsSectionDefinition[] = [
   { id: 'general', render: () => <GeneralSection /> },
-  { id: 'appearance', render: () => <AppearanceSection /> },
+  {
+    id: 'appearance',
+    render: () => <AppearanceSection />,
+    footer: <SettingsStatusFooter icon="check">Changes apply instantly · Saved on this device</SettingsStatusFooter>,
+  },
   { id: 'providers', render: () => <ProvidersSection /> },
   { id: 'agents', render: () => <AgentsSection /> },
   { id: 'skills', render: () => <SkillsSection /> },

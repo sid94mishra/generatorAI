@@ -76,6 +76,8 @@ test.describe('Settings', () => {
     // Asserted on a resolved CSS variable, not on the attribute alone: the
     // attribute proves the provider ran, the variable proves the generated
     // CSS actually matched the selector it emitted.
+    // The gallery shows one group at a time (Product / Editor / Low glare tabs).
+    await page.getByRole('tab', { name: /^Editor/ }).click();
     await page.getByRole('radio', { name: /^Catppuccin/ }).click();
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'catppuccin');
     expect(
@@ -108,13 +110,16 @@ test.describe('Settings', () => {
     // wrong and the theme is invisible to users.
     // Wait for the picker before counting: `count()` does not auto-wait, and
     // the routed section can still be mounting right after the click.
+    // The gallery shows one group at a time: sum the tiles across the three tabs.
     const themeGroup = page.getByRole('radiogroup', { name: 'Theme', exact: true });
     await expect(themeGroup).toBeVisible();
-    const cards = themeGroup.getByRole('radio');
-    expect(await cards.count()).toBeGreaterThanOrEqual(17);
+    let tiles = 0;
     for (const group of ['Product', 'Editor', 'Low glare']) {
-      await expect(page.getByText(group, { exact: true })).toBeVisible();
+      await page.getByRole('tab', { name: new RegExp(`^${group}`) }).click();
+      await expect(themeGroup.getByRole('radio').first()).toBeVisible();
+      tiles += await themeGroup.getByRole('radio').count();
     }
+    expect(tiles).toBeGreaterThanOrEqual(17);
 
     // Walk every theme in both modes and measure the SHIPPED CSS. Contrast is
     // already unit-tested against the token data; what this adds is proof that
