@@ -78,7 +78,7 @@ describe('E2E: Workflow Definition API Flow', () => {
     const res = await request(app).post('/api/workflow-definitions/validate').send(testGraph('x'));
 
     expect(res.status).toBe(200);
-    expect(res.body).toEqual({ valid: true, issues: [] });
+    expect(res.body).toMatchObject({ valid: true, issues: [] });
   });
 
   it('DELETE /api/workflow-definitions/:id reports the outcome', async () => {

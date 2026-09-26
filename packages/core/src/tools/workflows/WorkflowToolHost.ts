@@ -566,6 +566,7 @@ export class WorkflowToolHost {
     call: { turn?: WorkflowToolTurn | undefined },
   ): Promise<unknown> {
     const c = await this.resolve(caller, call.turn, undefined);
+    this.need(c, 'exec:agent', 'Answering a run decision');
     const run = await this.runFor(c, args.runId, 'started');
     const link = this.link(run);
     const decision = (await this.deps.approvals.listPending(run.id)).find((d) => d.instanceId === args.instanceId);
@@ -587,6 +588,7 @@ export class WorkflowToolHost {
 
   async cancel(caller: WorkflowToolCaller, args: { runId: string; reason: string }, call: { turn?: WorkflowToolTurn | undefined }): Promise<unknown> {
     const c = await this.resolve(caller, call.turn, undefined);
+    this.need(c, 'exec:agent', 'Cancelling a run');
     const run = await this.runFor(c, args.runId, 'started');
     if (TERMINAL.has(run.status)) return { ok: true, status: run.status };
     const r = await this.deps.command(run.id, { command: 'cancel' }, { actor: `${c.actor} (${String(args.reason ?? '').slice(0, 200)})` });

@@ -55,6 +55,7 @@ import {
   DrizzleAutomationExecutionRepository,
   DrizzleIdempotencyKeyRepository,
   DrizzleInvocationUploadRepository,
+  DrizzleChatWorkflowRunRepository,
   // Project & Codebase Management repositories
   DrizzleProjectRepository,
   DrizzleProjectCodebaseRepository,
@@ -196,6 +197,9 @@ import type {
   WorkflowInvocationService,
   WorkflowApprovalService,
   WorkflowCallbacks,
+  WorkflowAuthoringService,
+  WorkflowToolHost,
+  ChatWorkflowRunBridge,
   IdempotencyService,
   StageConversationService,
   // automation services
@@ -825,6 +829,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // P04 — files staged before a run starts, and the codebases a run may mount.
     invocationUploadRepo: new DrizzleInvocationUploadRepository(db),
     projectCodebaseRepo,
+    // P06 — the runs chats start through their workflow tools, the generated
+    // authoring skill (guide, schema hash) and the operator's publish switch.
+    chatWorkflowRunRepo: new DrizzleChatWorkflowRunRepository(db),
+    workflowSkillDir: resolve(config.templatesDir, 'system', 'skills', 'generatorai-workflow-author'),
+    allowAgentPublish: config.workflows?.allowAgentPublish === true,
     // W22 / W47 — durable execution engine storage.
     registerRepo,
     entryRepo,
@@ -880,6 +889,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     workflowInvocationService,
     workflowApprovalService,
     workflowCallbacks,
+    workflowAuthoringService,
+    workflowToolHost,
+    chatWorkflowRunBridge,
     idempotencyService,
   } = core;
 
@@ -1553,6 +1565,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   chatExtensions.agentStaging = agentStaging;
   chatExtensions.systemArtifacts = systemArtifactService;
   orchestratorService.setAgentService(agentService);
+  // P06 — authoring validation checks that the agents a draft names exist.
+  workflowAuthoringService.setAgents(agentService);
   // Staged skill files live under `<workspace>/.generatorai`, outside every
   // worktree; drop them with the workspace (invariant §5.14).
   //
@@ -2132,6 +2146,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // P05 — pending decisions (sub-workflow children mirrored) and per-wait callbacks.
     workflowApprovalService,
     workflowCallbacks,
+    // P06 — agents and workflows: authoring, the tools' one implementation, chat run cards.
+    workflowAuthoringService,
+    workflowToolHost,
+    chatWorkflowRunBridge,
 
     gitManager,
     changeSetService,
@@ -2594,6 +2612,12 @@ export interface Container {
   workflowApprovalService: WorkflowApprovalService;
   /** Per-wait callback tokens (`/api/workflow-callbacks/:token`, P05 §4.3). */
   workflowCallbacks: WorkflowCallbacks;
+  /** How agents author workflows (P06 WP-6.5): validate, plan, drafts, publish, the skill bundle. */
+  workflowAuthoringService: WorkflowAuthoringService;
+  /** The workflow tools' one implementation (P06 WP-6.1); the MCP tool route runs it for external agents. */
+  workflowToolHost: WorkflowToolHost;
+  /** Runs chats started, mirrored onto the chats (P06 WP-6.2). */
+  chatWorkflowRunBridge: ChatWorkflowRunBridge | null;
   gitManager: GitManager;
   changeSetService: ChangeSetService;
   sourceControlService: SourceControlService;

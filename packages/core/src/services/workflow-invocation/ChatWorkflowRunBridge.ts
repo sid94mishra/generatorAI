@@ -18,6 +18,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ILogger, PersistedEvent, StageRun } from '@generatorai/shared';
+import type { ChatWorkflowRunCard } from '@generatorai/workflow-spec';
 import type { IChatRepository } from '../../domain/ports/IChatRepository.js';
 import type { IChatWorkflowRunRepository } from '../../domain/ports/IInvocationStores.js';
 import type { IStageRunRepository } from '../../domain/ports/IStageRunRepository.js';
@@ -47,20 +48,6 @@ export interface ChatWorkflowRunBridgeDeps {
   throttleMs?: number;
 }
 
-/** A run card as a client draws it (`GET /chats/:id/workflow-runs`). */
-export interface ChatWorkflowRunCard {
-  runId: string;
-  workflowId: string;
-  workflowName: string;
-  toolCallId: string | null;
-  status: string;
-  currentStage?: string;
-  stagesDone: number;
-  stagesTotal: number;
-  pendingApprovals: Array<{ instanceId: string; stageKey: string; stageName: string; decision: string; answerableByAgent: boolean }>;
-  link: string;
-  createdAt: string;
-}
 
 interface Linked {
   chatId: string;

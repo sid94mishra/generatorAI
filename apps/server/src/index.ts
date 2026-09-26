@@ -383,6 +383,9 @@ async function startServer(): Promise<void> {
         .map((s) => s.trim())
         .filter(Boolean),
     },
+    workflows: {
+      allowAgentPublish: process.env['GENERATORAI_ALLOW_AGENT_PUBLISH'] === 'true',
+    },
     otel: {
       enabled: process.env['OTEL_ENABLED'] === 'true',
       ...(process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] ? { endpoint: process.env['OTEL_EXPORTER_OTLP_ENDPOINT'] } : {}),

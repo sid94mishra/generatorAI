@@ -406,7 +406,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     getStatuses: vi.fn().mockResolvedValue([]),
   };
 
-  return {
+  const container = {
     config,
     logger,
     eventBus,
@@ -461,6 +461,22 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     initialize: vi.fn().mockResolvedValue(undefined),
     shutdown: vi.fn().mockResolvedValue(undefined),
   } as unknown as Container;
+
+  // P06 — authoring over whatever definition service the test installs.
+  const defs = () => (container as unknown as { workflowDefinitionService: Container['workflowDefinitionService'] }).workflowDefinitionService;
+  (container as { workflowAuthoringService: unknown }).workflowAuthoringService = {
+    validate: vi.fn(async (input: unknown) => ({ ...(await defs().validate(input)), schema: { version: 2, hash: null } })),
+    plan: vi.fn(),
+    createDraft: vi.fn(),
+    publish: vi.fn((id: string) => defs().publish(id)),
+    schema: vi.fn().mockResolvedValue({ version: 2, hash: null, jsonSchema: null }),
+    bundleFiles: vi.fn().mockResolvedValue([]),
+    bundleFile: vi.fn(),
+    agentsMayPublish: vi.fn().mockReturnValue(false),
+    reviewLink: vi.fn((id: string) => `/workflows/${id}/edit`),
+  };
+  (container as { chatWorkflowRunBridge: unknown }).chatWorkflowRunBridge = null;
+  return container;
 }
 
 /**

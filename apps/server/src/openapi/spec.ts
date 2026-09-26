@@ -1005,6 +1005,14 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
       },
     },
+    '/api/chats/{id}/workflow-runs': {
+      get: {
+        tags: ['Chats'],
+        summary: "The runs the chat started through its workflow tools, as run cards (status, stage n of m, pending decisions, link)",
+        parameters: [idParam],
+        responses: { '200': { description: '{runs: ChatWorkflowRunCard[]}' }, '404': { description: 'Chat not found' } },
+      },
+    },
     '/api/chats/{id}': {
       get: {
         tags: ['Chats'],
@@ -1433,7 +1441,8 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     '/api/workflow-definitions/validate': {
       post: {
         tags: ['Workflows'],
-        summary: 'Validate a graph without saving it',
+        summary: "Validate a graph without saving it: the spec's rules plus the server's (agents exist and are enabled, models, provider capabilities, command fields)",
+        description: 'Needs read:workflows only. The result carries `schema: {version, hash}`; an agent compares the hash with its skill.',
         requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowGraph' } } } },
         responses: {
           '200': {
@@ -1441,6 +1450,36 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             content: { 'application/json': { schema: { $ref: '#/components/schemas/ValidationResult' } } },
           },
         },
+      },
+    },
+    '/api/workflow-definitions/plan': {
+      post: {
+        tags: ['Workflows'],
+        summary: 'What a run of a graph (unsaved) or a saved definition would do; nothing is written',
+        description:
+          'Body `{graph | workflowId, variables?, stageOverrides?, projectId?}` → `{plan: InvocationPlan, guards, unresolved, warnings}`. Needs read:workflows only.',
+        responses: { '200': { description: 'AuthoringPlan' }, '400': { description: 'VALIDATION_ERROR' }, '422': { description: 'The graph is not valid' } },
+      },
+    },
+    '/api/workflow-definitions/schema': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'The workflow JSON Schema the server validates against: `{version, hash, jsonSchema}`',
+        responses: { '200': { description: 'The schema and its hash' } },
+      },
+    },
+    '/api/workflow-definitions/authoring/skill': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'The generated `generatorai-workflow-author` skill bundle: `{name, schemaHash, files[]}`',
+        responses: { '200': { description: 'The bundle file list' } },
+      },
+    },
+    '/api/workflow-definitions/authoring/skill/file': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'One file of the authoring skill bundle (`?path=reference/schema.md`)',
+        responses: { '200': { description: 'The file' }, '400': { description: 'Not a bundle path' } },
       },
     },
     '/api/workflow-definitions/import': {
@@ -1551,9 +1590,12 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       post: {
         tags: ['Workflows'],
         summary: 'Publish the working graph as the version new runs execute',
+        description:
+          'A person publishes (PD-14): a service account, an internal service or an MCP device gets 403 unless the operator set `GENERATORAI_ALLOW_AGENT_PUBLISH=true`.',
         parameters: [idParam],
         responses: {
           '200': { description: 'Published', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '403': { description: 'INSUFFICIENT_SCOPE: only a person publishes', content: errorContent },
           '422': { description: 'WORKFLOW_INVALID', content: errorContent },
         },
       },
@@ -1631,6 +1673,23 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           '422': { description: 'CODEBASE_REQUIRED, DEPTH_LIMIT, RECURSION, BUDGET_EXHAUSTED or PERMISSION_GATING_UNSUPPORTED' },
           '503': { description: 'ENGINE_UNAVAILABLE' },
         },
+      },
+    },
+    '/api/workflow-tools': {
+      get: {
+        tags: ['Workflows'],
+        summary: "The workflow tools of an external agent (the MCP server): `{tools: [{name, description, parametersSchema, readOnly}]}`",
+        responses: { '200': { description: 'The tool list' } },
+      },
+    },
+    '/api/workflow-tools/{name}': {
+      post: {
+        tags: ['Workflows'],
+        summary: 'Call one workflow tool as an external agent: `{arguments, idempotencyKey?, clientName?}` → `{result}`',
+        description:
+          'The same handlers as the in-app tools. Refusals come back as `result: {ok: false, code, error}`. Running, answering and cancelling need exec:agent; a draft write:workflows.',
+        parameters: [{ in: 'path', name: 'name', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{result}' }, '404': { description: 'No such tool' } },
       },
     },
     '/api/workflow-invocations/plan': {

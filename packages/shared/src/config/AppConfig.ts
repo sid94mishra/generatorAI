@@ -241,6 +241,18 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
+  // P06 — agents and workflows.
+  workflows: z
+    .object({
+      /**
+       * PD-14 — agents (chats, stages, MCP clients, service accounts) may
+       * publish the workflows they author. Off: an agent submits a draft and
+       * a person publishes it. Env: `GENERATORAI_ALLOW_AGENT_PUBLISH=true`.
+       */
+      allowAgentPublish: z.boolean().default(false),
+    })
+    .default({}),
+
   // DB-04 — retention policy for streaming + event logs. The persistent
   // `stream_cursors` log (STR-02) and the legacy `events` table both grow
   // unbounded, and downstream DB-04 payload offload (EVT-04, not yet

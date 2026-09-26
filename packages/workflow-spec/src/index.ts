@@ -49,3 +49,4 @@ export { exportGraph, importGraph, parseGraph } from './document.js';
 
 // persisted definitions, templates, script profiles
 export * from './definition.js';
+export * from './authoring.js';

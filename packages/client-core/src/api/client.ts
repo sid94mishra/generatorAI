@@ -7,6 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
+  ChatWorkflowRunCard,
   RunCommand,
   StageRunState,
   WorkflowDefinitionRecord,
@@ -1209,6 +1210,9 @@ export function createApiClient(fetchImpl: ApiFetch) {
           fetchImpl,
           `/api/chats/${id}/background-tasks`,
         ),
+
+      /** The runs this chat started through its workflow tools, as run cards (P06). */
+      workflowRuns: (id: string) => request<{ runs: ChatWorkflowRunCard[] }>(fetchImpl, `/api/chats/${id}/workflow-runs`),
 
       respond: (
         id: string,

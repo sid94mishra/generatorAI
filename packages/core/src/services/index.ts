@@ -38,9 +38,6 @@ export {
   AUTHORING_GUIDE_TOPICS,
   schemaHashOf,
   type AuthoringGuideTopic,
-  type AuthoringPlan,
-  type AuthoringValidation,
-  type DraftResult,
   type WorkflowAuthoringDeps,
 } from './WorkflowAuthoringService.js';
 export {

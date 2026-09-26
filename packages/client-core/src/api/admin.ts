@@ -42,7 +42,11 @@ import type {
   WorktreeInfo,
 } from '@generatorai/shared';
 import type {
-  ValidationResult,
+  AuthoringPlan,
+  AuthoringSkillIndex,
+  AuthoringValidation,
+  WorkflowSchemaInfo,
+  WorkflowToolAdvert,
   WorkflowDefinitionRecord,
   WorkflowDefinitionSummary,
   WorkflowDefinitionVersionRecord,
@@ -267,8 +271,19 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       version: (id: string, versionId: string) =>
         req<WorkflowDefinitionVersionRecord>(`/api/workflow-definitions/${id}/versions/${versionId}`),
 
-      /** Stateless validation of a document (the same validator the server saves with). */
-      validate: (graph: unknown) => req<ValidationResult>('/api/workflow-definitions/validate', json(graph)),
+      /** Stateless validation of a document: the spec's rules plus the server's (agents, models, capabilities, commands). */
+      validate: (graph: unknown) => req<AuthoringValidation>('/api/workflow-definitions/validate', json(graph)),
+
+      /** What a run of a graph (unsaved) or a saved definition would do; nothing is written (P06). */
+      plan: (body: { graph?: unknown; workflowId?: string; variables?: Record<string, unknown>; stageOverrides?: unknown[]; projectId?: string }) =>
+        req<AuthoringPlan>('/api/workflow-definitions/plan', json(body)),
+
+      /** The workflow JSON Schema and its hash (a skill compares its `schemaHash`). */
+      schema: () => req<WorkflowSchemaInfo>('/api/workflow-definitions/schema'),
+
+      /** The generated authoring skill bundle: its files, and one file's text. */
+      skill: () => req<AuthoringSkillIndex>('/api/workflow-definitions/authoring/skill'),
+      skillFile: (path: string) => reqText(`/api/workflow-definitions/authoring/skill/file${qs({ path })}`),
 
       /** Import a canonical document; `publish` (people only) publishes it at once. */
       import: (graph: unknown, opts: { publish?: boolean } = {}) =>
@@ -798,6 +813,20 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       reloadAll: () => req<Record<string, unknown>>('/api/workflow-scripts/reload', json({})),
       reload: (id: string) =>
         req<Record<string, unknown>>(`/api/workflow-scripts/${id}/reload`, json({})),
+    },
+
+    // ── workflowTools.ts (P06) ──────────────────────────────────
+    //
+    // The workflow tools of an agent outside the server (the MCP server):
+    // the same handlers the in-app tools run. A refusal is a normal result
+    // `{ok: false, code, error}`; `idempotencyKey` replays the same run.
+    workflowTools: {
+      list: () => req<{ tools: WorkflowToolAdvert[] }>('/api/workflow-tools'),
+      call: (name: string, args: Record<string, unknown>, opts: { idempotencyKey?: string; clientName?: string } = {}) =>
+        req<{ result: unknown }>(
+          `/api/workflow-tools/${encodeURIComponent(name)}`,
+          json({ arguments: args, ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}), ...(opts.clientName ? { clientName: opts.clientName } : {}) }),
+        ),
     },
 
     // ── workflowInvocations.ts ──────────────────────────────────

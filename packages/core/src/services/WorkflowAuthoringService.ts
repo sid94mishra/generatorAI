@@ -30,8 +30,10 @@ import {
   collectCommandFields,
   WORKFLOW_FORMAT_VERSION,
   WorkflowGraphSchema,
+  type AuthoringPlan,
+  type AuthoringValidation,
   type DefinitionAuthor,
-  type InvocationPlan,
+  type DraftResult,
   type ValidationIssue,
   type WorkflowDefinitionRecord,
   type WorkflowGraph,
@@ -59,30 +61,8 @@ export const AUTHORING_GUIDE_TOPICS = {
 } as const;
 export type AuthoringGuideTopic = keyof typeof AUTHORING_GUIDE_TOPICS;
 
-export interface AuthoringValidation {
-  valid: boolean;
-  issues: ValidationIssue[];
-  /** The schema the server validated against; compare with the skill's `schemaHash`. */
-  schema: { version: number; hash: string | null };
-}
 
-export interface AuthoringPlan {
-  plan: InvocationPlan;
-  /** Guards decided before the run (over variables alone): stage key → true / false. Undecided guards are absent. */
-  guards: Record<string, boolean>;
-  /** `variables.<name>` read by a prompt or expression, with no value given and no default. */
-  unresolved: string[];
-  /** Validation warnings (capability conflicts and the like). */
-  warnings: ValidationIssue[];
-}
 
-export interface DraftResult {
-  workflowId: string;
-  status: 'draft';
-  name: string;
-  reviewLink: string;
-  warnings: ValidationIssue[];
-}
 
 export interface WorkflowAuthoringDeps {
   definitions: WorkflowDefinitionService;
@@ -109,6 +89,11 @@ export class WorkflowAuthoringService {
   private schemaCache: { hash: string | null; json: Record<string, unknown> | null } | undefined;
 
   constructor(private readonly deps: WorkflowAuthoringDeps) {}
+
+  /** Late wiring: the agent catalog is built after the core services. */
+  setAgents(agents: Pick<IAgentRepository, 'getByRef'>): void {
+    this.deps.agents = agents;
+  }
 
   /** Whether agents may publish (the operator's switch). */
   agentsMayPublish(): boolean {

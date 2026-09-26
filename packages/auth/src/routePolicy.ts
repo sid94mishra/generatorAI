@@ -87,6 +87,10 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/agents', read: ['read:workflows'], write: ['admin:settings'], riskLevel: 'high' },
   { prefix: '/sessions', read: ['read:chats'], write: ['write:chats'] },
 
+  // Validating and planning a document write nothing (P06): any reader may,
+  // an agent included, before it submits a draft (which needs write:workflows).
+  { prefix: '/workflow-definitions/validate', read: ['read:workflows'], write: ['read:workflows'] },
+  { prefix: '/workflow-definitions/plan', read: ['read:workflows'], write: ['read:workflows'] },
   { prefix: '/workflow-definitions', read: ['read:workflows'], write: ['write:workflows'] },
   // Answering a stage's Human-In-The-Loop gate is a RUN-TIME act — it is
   // literally "answer the agent's question", which is what `exec:agent`
@@ -125,6 +129,11 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // script target (it materializes a definition), `admin:settings` for a
   // bypass run off loopback or an in-place codebase.
   { prefix: '/workflow-invocations', read: ['read:workflows'], write: ['exec:agent', 'read:workflows'] },
+  // The workflow tools of an external agent (P06, the MCP server in remote
+  // mode): each tool checks its own scope in the handler — running,
+  // answering and cancelling need `exec:agent`, a draft `write:workflows`;
+  // listing, describing, validating and planning only read.
+  { prefix: '/workflow-tools', read: ['read:workflows'], write: ['read:workflows'] },
   // Uploading a script installs code that runs in-process with the server's
   // privileges (A-19): admin only, on top of the operator opt-in flags.
   {

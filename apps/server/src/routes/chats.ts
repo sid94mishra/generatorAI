@@ -406,6 +406,19 @@ export function createChatApiRoutes(container: Container): Router {
     }
   });
 
+  // GET /chats/:id/workflow-runs — the runs this chat started through its
+  // workflow tools, as run cards (P06 WP-6.2): a reload or another device
+  // draws them from here, then follows `chat.workflow_run.*` on the stream.
+  router.get('/:id/workflow-runs', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      await container.chatEntityRepo.getById(chatId);
+      res.json({ runs: (await container.chatWorkflowRunBridge?.cards(chatId)) ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // PUT /chats/:id/sources — replace what the chat works on.
   //
   // Validated against the filesystem and git before anything changes;
