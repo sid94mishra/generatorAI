@@ -322,17 +322,17 @@ export default [
             },
             { from: { element: { type: 'app' } }, allow: toTypes('ui', 'blocks', 'features', 'data', 'platform', 'legacy') },
             { from: { element: { type: 'data' } }, allow: toTypes('data', 'platform') },
-            // Migration scaffolding; removed in P7. The only data → legacy edges
-            // at P0 (4 imports in hooks/queries.ts, hooks/composerQueries.ts,
-            // providers/QueryProvider.tsx), allowed to these target files only so
-            // no new edge can appear. They go when Toast and the composer
-            // builtins move to ui/ and packages/client-core.
+            // Migration scaffolding; removed in P7. The only data → legacy edge
+            // left (hooks/queries.ts, providers/QueryProvider.tsx → the legacy
+            // Toast), allowed to that target file only so no new edge can
+            // appear. It goes when those callers move to the kit toast. (The
+            // composer builtins moved to packages/client-core in P4-08.)
             {
               from: { element: { type: 'data' } },
               allow: {
                 to: {
                   element: { type: 'legacy' },
-                  file: { path: ['apps/web/src/components/Toast.tsx', 'apps/web/src/components/chat/composer/{builtins,types}.ts'] },
+                  file: { path: ['apps/web/src/components/Toast.tsx'] },
                 },
               },
             },

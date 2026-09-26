@@ -26,19 +26,35 @@ export interface PromptHistoryEntry {
   /** Epoch ms — orders the merge. */
   ts: number;
   attachments: HistoryAttachment[];
+  /**
+   * Local entries only: the prompt the server actually received when it
+   * differs from what the user typed (a `/command` wraps the typed text in its
+   * template). The persisted echo of such a send carries this text, not the
+   * typed one.
+   */
+  sentAs?: string;
 }
 
 /**
  * Persisted entries win; a locally recorded send is dropped once a persisted
- * entry with the same text arrives at or after it. Result is oldest → newest.
+ * entry with the same text arrives at or after it. A `/command` send is the
+ * exception: its echo carries the formatted prompt, so the echo is dropped
+ * instead and the typed text stays recallable. Result is oldest → newest.
  */
 export function mergePromptHistory(
   persisted: readonly PromptHistoryEntry[],
   local: readonly PromptHistoryEntry[],
 ): PromptHistoryEntry[] {
-  const out = persisted.slice();
+  const echoOf = (p: PromptHistoryEntry, l: PromptHistoryEntry, text: string) => p.text === text && p.ts >= l.ts - 5_000;
+  const commandEchoes = new Set<PromptHistoryEntry>();
   for (const l of local) {
-    const echoed = persisted.some((p) => p.text === l.text && p.ts >= l.ts - 5_000);
+    if (l.sentAs === undefined || l.sentAs === l.text) continue;
+    const echo = persisted.find((p) => !commandEchoes.has(p) && echoOf(p, l, l.sentAs!));
+    if (echo) commandEchoes.add(echo);
+  }
+  const out = persisted.filter((p) => !commandEchoes.has(p));
+  for (const l of local) {
+    const echoed = persisted.some((p) => !commandEchoes.has(p) && echoOf(p, l, l.text));
     if (!echoed) out.push(l);
   }
   out.sort((a, b) => a.ts - b.ts);

@@ -22,8 +22,7 @@ import { ThinkingPlaceholder } from '@/components/chat/ThinkingPlaceholder.js';
 import { ChatMessageList } from '@/components/chat/ChatMessageList.js';
 import { StreamingMessage } from '@/components/chat/StreamingMessage.js';
 import { awaitsUserDecision } from '@/components/agent/deriveTimeline.js';
-import { ChatInput } from '@/components/chat/ChatInput.js';
-import type { ComposerAttachment } from '@/components/chat/composer/types.js';
+import { Composer, type ComposerAttachment } from '@/blocks/composer/index.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
 import { BrowserPanel, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
@@ -221,7 +220,6 @@ export function ChatPage() {
   } = transcript;
   const { stop, canRewind, restoredDraft } = stopRewind;
   const isChatActive = view.chatActive;
-  const isInputDisabled = isCopilotWorking;
   const activeHarnessLabel = workspace.harnessProvider ? providerLabel(workspace.harnessProvider) : null;
 
   // The turn is parked on a gate: the agent is idle and the ball is with the
@@ -727,13 +725,20 @@ export function ChatPage() {
       )}
       </div>
 
-      {/* Input — only for active chats (uses shared ChatInput with custom send) */}
+      {/* Input — only for active chats (the composer block with this page's send) */}
       {isChatActive && sessionId && (
         <>
-          <ChatInput
+          <Composer
             sessionId={sessionId}
-            disabled={isInputDisabled}
-            placeholder={isInputDisabled ? 'Waiting for response...' : 'What feature are you dreaming up?'}
+            chat={chat}
+            onOpenTasks={() => {
+              setRightPaneOpen(true);
+              dock.requestFocus({ type: 'background_tasks', token: Date.now() });
+            }}
+            // D-29: typing is never blocked — while a turn runs, Send is Stop
+            // and the draft simply waits (no queue).
+            disabled={false}
+            placeholder="What feature are you dreaming up?"
             selectedModel={workspace.effectiveModel}
             onModelChange={workspace.changeModel}
             reasoningEffort={workspace.reasoningEffort}
@@ -749,9 +754,6 @@ export function ChatPage() {
             workspacePrepRetrying={workspace.workspacePrepRetrying}
             onEditSources={() => setEditingSources(true)}
             showModelSelector={true}
-            showGitConnector={true}
-            onToggleFilesPanel={toggleRightPane}
-            filesPanelOpen={rightPaneOpen}
             isStreaming={isCopilotWorking}
             pendingCaptures={pendingCaptures}
             promptHistory={promptHistory}

@@ -35,7 +35,7 @@ export function useComposerModelControls({
   const contextUsage = useStreamStore((state) => state.streams[sessionId]?.contextUsage ?? null);
   const { data: models, isPending: modelsPending } = useModels();
 
-  const modelList = (models ?? []) as HarnessCatalogModel[];
+  const modelList = useMemo(() => (models ?? []) as HarnessCatalogModel[], [models]);
   // Resolve the selection against the LIVE catalog.
   //
   // A chat can carry a model id the account no longer has (a renamed or

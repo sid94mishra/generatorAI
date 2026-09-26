@@ -29,7 +29,7 @@ import {
 } from './helpers/renderComposer.js';
 
 // Import under test — the only line that changes when P4 moves the file.
-import { ChatInput } from '@/components/chat/ChatInput.js';
+import { Composer as ChatInput } from '@/blocks/composer/index.js';
 
 vi.mock('@/hooks/composerQueries.js', async (importOriginal) =>
   (await import('./helpers/composerMocks.js')).composerQueriesModule(await importOriginal()));
@@ -220,7 +220,7 @@ describe('ChatInput — recalled attachments (09 §5.1; 03 §6.1 #13)', () => {
     press('ArrowUp');
     expect(textbox()).toHaveValue('two files');
     await waitFor(() =>
-      expect(toastSpies.warning).toHaveBeenCalledWith('Could not restore attachment "bad.txt"', expect.anything()),
+      expect(toastSpies.error).toHaveBeenCalledWith('Could not restore attachment "bad.txt"', expect.anything()),
     );
     await waitFor(() => expect(chips()).toHaveLength(1));
     expect(chips()[0]).toHaveTextContent('good.txt');

@@ -74,11 +74,17 @@ export function lineHeightPx(lineHeight: string, fontSize: number): number {
 const AUTOSIZE_DEFAULTS: Record<TextareaVariant, Required<AutosizeRows>> = {
   md: { minRows: 2, maxRows: 8 },
   prose: { minRows: 3, maxRows: 12 },
+  inline: { minRows: 1, maxRows: 8 },
 };
 
 // ── Recipes ────────────────────────────────────────────────────
 
-export type TextareaVariant = 'md' | 'prose';
+/**
+ * `inline` (P4-08): the field sits inside a box that draws the chrome itself —
+ * the composer's `raised` card shows the border and the focus — so the field
+ * has no border, fill, padding or halo of its own; `text-body`.
+ */
+export type TextareaVariant = 'md' | 'prose' | 'inline';
 
 export const textareaShellVariants = cva(
   'flex min-w-0 cursor-text flex-col border border-line-strong bg-sunken text-fg transition-control',
@@ -88,6 +94,7 @@ export const textareaShellVariants = cva(
         md: 'rounded-control',
         // pad 10 8 6 12 on the box; the textarea itself has none.
         prose: 'gap-1 rounded-card pt-2.5 pr-2 pb-1.5 pl-3',
+        inline: 'border-transparent bg-transparent',
       },
       state: {
         default: fieldFocus,
@@ -96,6 +103,8 @@ export const textareaShellVariants = cva(
         disabled: 'cursor-not-allowed text-fg-3',
       },
     },
+    // The inline field's box draws focus and state; the field adds none.
+    compoundVariants: [{ variant: 'inline', className: 'ring-0 focus-within:border-transparent focus-within:ring-0' }],
     defaultVariants: { variant: 'md', state: 'default' },
   },
 );
@@ -228,7 +237,11 @@ export function Textarea({
         className={cn(
           'block w-full min-w-0 bg-transparent text-current outline-none placeholder:text-fg-3 disabled:cursor-not-allowed',
           variant === 'md' ? 'px-2.5 py-1.75 text-ui' : 'text-body',
-          enabled ? 'resize-none' : ['resize-y', variant === 'md' ? MIN_HEIGHT.md : footer != null ? MIN_HEIGHT.proseWithFooter : MIN_HEIGHT.prose],
+          variant === 'inline'
+            ? 'resize-none'
+            : enabled
+              ? 'resize-none'
+              : ['resize-y', variant === 'md' ? MIN_HEIGHT.md : footer != null ? MIN_HEIGHT.proseWithFooter : MIN_HEIGHT.prose],
           textareaClassName,
         )}
         {...rest}

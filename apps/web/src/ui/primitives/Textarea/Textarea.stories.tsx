@@ -9,7 +9,7 @@ const meta = {
   component: Textarea,
   tags: ['vrt-themes'],
   args: { 'aria-label': 'Review comment', placeholder: 'Leave a comment on this change', className: 'w-96' },
-  argTypes: { variant: { control: 'inline-radio', options: ['md', 'prose'] } },
+  argTypes: { variant: { control: 'inline-radio', options: ['md', 'prose', 'inline'] } },
 } satisfies Meta<typeof Textarea>;
 
 export default meta;
@@ -100,3 +100,17 @@ export const FocusVisible: Story = {
 };
 
 export const Compact: Story = { globals: { density: 'compact' }, render: Matrix.render };
+
+/** `inline`: the field inside a box that draws the chrome (the composer card). No border, fill or halo of its own. */
+export const Inline: Story = {
+  render: () => (
+    <div className="w-120 rounded-dialog border border-line bg-raised px-3.5 pt-3 pb-2 focus-within:border-line-strong">
+      <Controlled variant="inline" aria-label="Message" placeholder="Reply to Bug Fixer…" rows={1} />
+    </div>
+  ),
+  play: async ({ canvas }) => {
+    const field = canvas.getByRole('textbox', { name: 'Message' });
+    await userEvent.type(field, 'Also check the rounding');
+    await expect(field).toHaveValue('Also check the rounding');
+  },
+};

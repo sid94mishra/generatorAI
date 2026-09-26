@@ -26,8 +26,8 @@ import {
 } from '@generatorai/client-core';
 import { useSendPrompt } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
-import { toast } from '@/components/Toast.js';
-import type { CaptureSource } from '../types.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
+import type { CaptureSource } from '../model/types.js';
 import type { ComposerDraft } from './useComposerDraft.js';
 import type { ComposerHistory } from './useComposerHistory.js';
 
@@ -84,7 +84,7 @@ export function useComposerSend({
   stopState,
 }: UseComposerSendOptions): ComposerSend {
   const { text, attachments, activeCommand, setText, setAttachments, setActiveCommand, setMenu } = draft;
-  const { recordSent } = history;
+  const { recordSent, markSentAs } = history;
   const sendMutation = useSendPrompt(sessionId);
   const startPending = useStreamStore((state) => state.startPending);
   const clearStream = useStreamStore((state) => state.clearStream);
@@ -141,10 +141,13 @@ export function useComposerSend({
             template = await cmd.loadTemplate();
           } catch {
             template = undefined;
-            toast({ variant: 'warning', title: `Could not load the "${cmd.name}" prompt template` });
+            toast.error(`Could not load the "${cmd.name}" prompt template`, {
+              description: 'The message was sent without the template.',
+            });
           }
         }
         prompt = cmd.format(rawInput, template);
+        markSentAs(prompt);
       }
 
       // Captures (browser comments, terminal selections) live with the page and
@@ -221,6 +224,7 @@ export function useComposerSend({
     setActiveCommand,
     setMenu,
     recordSent,
+    markSentAs,
   ]);
 
   return {

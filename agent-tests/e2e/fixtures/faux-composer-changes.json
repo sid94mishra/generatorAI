@@ -19,6 +19,14 @@
       { "type": "complete" }
     ]
   ],
+  "E2E Composer Running Faux": [
+    [
+      { "type": "text", "content": "Running the checkout suite now." },
+      { "type": "tool_call", "name": "Bash", "input": { "command": "pnpm test checkout --repeat 50" } },
+      { "type": "text", "content": "Done." },
+      { "type": "complete" }
+    ]
+  ],
   "E2E Changes Faux": [
     [
       {

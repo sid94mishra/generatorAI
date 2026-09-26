@@ -8,11 +8,15 @@
 
 import type React from 'react';
 import { useCallback, useMemo, useState } from 'react';
-import { useSlashCommands, useWorkspaceFileIndex } from '@/hooks/composerQueries.js';
-import { usePlatform } from '@/providers/PlatformProvider.js';
-import { toast } from '@/components/Toast.js';
-import { fuzzyMatch } from '../builtins.js';
-import type { MentionFile, SlashCommand } from '../types.js';
+import {
+  SLASH_COMMAND_GROUPS,
+  fuzzyMatch,
+  slashCommandGroup,
+  type MentionFile,
+  type SlashCommand,
+} from '@generatorai/client-core';
+import { useFetchMentionFileContent, useSlashCommands, useWorkspaceFileIndex } from '@/hooks/composerQueries.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
 import type { ComposerDraft } from './useComposerDraft.js';
 
 export interface UseComposerMenusOptions {
@@ -42,15 +46,20 @@ export function useComposerMenus({ projectId, workspaceId, draft, textareaRef }:
   const [mentionLoading, setMentionLoading] = useState(false);
 
   // ── Composer data (slash commands + `@` file index) ──
-  const platform = usePlatform();
+  const fetchMentionContent = useFetchMentionFileContent();
   const slashCommands = useSlashCommands(projectId);
   const { files: mentionFiles, isLoading: fileIndexLoading } = useWorkspaceFileIndex(workspaceId);
 
   const filteredCommands = useMemo(() => {
     if (!menu || menu.type !== 'slash') return [] as SlashCommand[];
     const q = menu.query;
+    // Grouped Tools → Skills → Prompts (stable within a group), so the menu's
+    // visual order and the keyboard index agree.
     return slashCommands
       .filter((c) => fuzzyMatch(q, c.name) || (c.description ? fuzzyMatch(q, c.description) : false))
+      .map((c, i) => ({ c, i, g: SLASH_COMMAND_GROUPS.indexOf(slashCommandGroup(c)) }))
+      .sort((a, b) => a.g - b.g || a.i - b.i)
+      .map(({ c }) => c)
       .slice(0, 50);
   }, [menu, slashCommands]);
 
@@ -94,13 +103,8 @@ export function useComposerMenus({ projectId, workspaceId, draft, textareaRef }:
       });
       setMentionLoading(true);
       try {
-        const res = await platform.getWorkspaceFileContent(
-          workspaceId,
-          file.path,
-          file.source,
-          file.worktreeAlias,
-        );
-        const blob = new Blob([res.content ?? ''], { type: 'text/plain' });
+        const content = await fetchMentionContent(workspaceId, file);
+        const blob = new Blob([content], { type: 'text/plain' });
         const f = new File([blob], file.label, { type: 'text/plain' });
         setAttachments((prev) => {
           if (prev.some((a) => a.source === 'mention' && a.label === file.path)) return prev;
@@ -115,12 +119,12 @@ export function useComposerMenus({ projectId, workspaceId, draft, textareaRef }:
           ];
         });
       } catch {
-        toast({ variant: 'error', title: `Could not attach ${file.label}` });
+        toast.error(`Could not attach ${file.label}`, { description: 'The file could not be read from the workspace.' });
       } finally {
         setMentionLoading(false);
       }
     },
-    [menu, workspaceId, platform, setText, setMenu, setAttachments, textareaRef],
+    [menu, workspaceId, fetchMentionContent, setText, setMenu, setAttachments, textareaRef],
   );
 
   const applyMenuSelection = useCallback(

@@ -33,7 +33,7 @@ import {
 } from './helpers/renderComposer.js';
 
 // Import under test — the only line that changes when P4 moves the file.
-import { ChatInput } from '@/components/chat/ChatInput.js';
+import { Composer as ChatInput } from '@/blocks/composer/index.js';
 
 vi.mock('@/hooks/composerQueries.js', async (importOriginal) =>
   (await import('./helpers/composerMocks.js')).composerQueriesModule(await importOriginal()));
@@ -274,7 +274,7 @@ describe('ChatInput — slash-command send (09 §5.1; 03 §6.1 #8, #11)', () => 
     await user.type(textbox(), 'the diff');
     await user.keyboard('{Enter}');
     await waitFor(() => expect(customSendFn).toHaveBeenCalled());
-    expect(toastSpies.warning).toHaveBeenCalledWith('Could not load the "review" prompt template', expect.anything());
+    expect(toastSpies.error).toHaveBeenCalledWith('Could not load the "review" prompt template', expect.anything());
     expect(customSendFn).toHaveBeenCalledWith({ prompt: '[review] the diff', attachments: [], mode: 'auto' });
   });
 

@@ -25,7 +25,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createComposerHarness, sendButton, setupComposerTest } from './helpers/renderComposer.js';
 
 // Import under test — the only lines that change when P4 moves the files.
-import { ChatInput } from '@/components/chat/ChatInput.js';
+import { Composer as ChatInput } from '@/blocks/composer/index.js';
 import { useTwoPhaseStop } from '@/hooks/useTwoPhaseStop.js';
 
 vi.mock('@/hooks/composerQueries.js', async (importOriginal) =>

@@ -7,7 +7,8 @@
 
 import type React from 'react';
 import { useCallback, useState } from 'react';
-import type { ComposerAttachment, ComposerMenuState, SlashCommand, CaptureSource } from '../types.js';
+import type { SlashCommand } from '@generatorai/client-core';
+import type { ComposerAttachment, ComposerMenuState, CaptureSource } from '../model/types.js';
 import { COMPOSER } from './affordances.js';
 
 export interface UseComposerDraftOptions {

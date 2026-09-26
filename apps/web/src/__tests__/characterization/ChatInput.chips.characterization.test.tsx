@@ -30,7 +30,7 @@ import {
 } from './helpers/renderComposer.js';
 
 // Import under test — the only line that changes when P4 moves the file.
-import { ChatInput } from '@/components/chat/ChatInput.js';
+import { Composer as ChatInput } from '@/blocks/composer/index.js';
 
 vi.mock('@/hooks/composerQueries.js', async (importOriginal) =>
   (await import('./helpers/composerMocks.js')).composerQueriesModule(await importOriginal()));

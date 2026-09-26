@@ -1,10 +1,66 @@
 // ────────────────────────────────────────────────────────────────
-// Built-in slash commands + factories that turn skills / prompts
-// (config artifacts) into slash commands. Kept pure + framework-free
-// so it is trivially unit-testable.
+// Composer slash commands and @-mention files (03 §3.2 F-composer-15/16).
+//
+// Built-in commands, the factories that turn skills / prompts (config
+// artifacts) into slash commands, and the fuzzy matcher both composer menus
+// use. Pure and framework-free so web and mobile share one list (moved from
+// the web composer in P4-08).
 // ────────────────────────────────────────────────────────────────
 
-import type { SlashCommand } from './types.js';
+export type SlashCommandKind = 'prompt' | 'skill' | 'agent' | 'command';
+
+/**
+ * A slash command surfaced in the composer's `/` menu. Prompts and skills are
+ * modeled as commands too ("prompts are also considered slash commands").
+ * Built-in commands (`/browser`, `/terminal`) wrap the user's free text into
+ * an instruction the agent can act on.
+ */
+export interface SlashCommand {
+  /** Stable id (e.g. `builtin:browser`, `system:<artifactId>`). */
+  id: string;
+  /** Trigger token without the leading slash (e.g. `browser`). */
+  name: string;
+  description?: string;
+  kind: SlashCommandKind;
+  source: 'system' | 'project' | 'builtin';
+  /** Placeholder shown in the textarea once the command is active. */
+  argHint?: string;
+  /** Whether the command accepts free-text input after selection. */
+  takesInput: boolean;
+  /**
+   * Builds the final prompt sent to the agent from the user's typed input.
+   * For prompt-template commands the resolved template text is passed as
+   * `template` (already fetched by the caller); builtins/skills ignore it.
+   */
+  format: (input: string, template?: string) => string;
+  /** Optional lazy loader for a prompt template's body (fetched on send). */
+  loadTemplate?: () => Promise<string>;
+}
+
+export type MentionFileSource = 'workspace' | 'source' | 'artifacts' | 'worktree';
+
+/** A repo/workspace file discoverable through the `@` mention menu. */
+export interface MentionFile {
+  /** Relative path within its source root. */
+  path: string;
+  source: MentionFileSource;
+  /** Worktree alias when `source === 'worktree'`. */
+  worktreeAlias?: string;
+  /** Basename used for display + fuzzy matching. */
+  label: string;
+}
+
+/** The `/` menu's groups, in the order the menu shows them (ComposerStates "Input aids"). */
+export type SlashCommandGroup = 'tools' | 'skills' | 'prompts';
+
+export const SLASH_COMMAND_GROUPS: readonly SlashCommandGroup[] = ['tools', 'skills', 'prompts'];
+
+/** Which `/` menu group a command belongs to: builtins are tools, then skills, then prompts. */
+export function slashCommandGroup(cmd: Pick<SlashCommand, 'source' | 'kind'>): SlashCommandGroup {
+  if (cmd.source === 'builtin') return 'tools';
+  if (cmd.kind === 'skill') return 'skills';
+  return 'prompts';
+}
 
 /**
  * Built-in commands that map to integrated tools. They wrap the user's free

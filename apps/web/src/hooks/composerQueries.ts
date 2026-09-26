@@ -4,8 +4,8 @@
 // the menus stay cheap even with many artifacts / files.
 // ────────────────────────────────────────────────────────────────
 
-import { useMemo } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useCallback, useMemo } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { COMPUTER_USE_SKILL_ID } from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import { useSystemArtifacts, useAvailableArtifacts } from './projectQueries.js';
@@ -15,8 +15,9 @@ import {
   computerUseSkillToCommand,
   skillToCommand,
   promptToCommand,
-} from '../components/chat/composer/builtins.js';
-import type { SlashCommand, MentionFile } from '../components/chat/composer/types.js';
+  type SlashCommand,
+  type MentionFile,
+} from '@generatorai/client-core';
 import type { ComputerUseSettings } from '../platform/HttpPlatformClient.js';
 
 interface ArtifactLike {
@@ -149,4 +150,26 @@ export function useWorkspaceFileIndex(workspaceId?: string): {
   }, [query.data]);
 
   return { files, isLoading: query.isLoading };
+}
+
+/**
+ * Fetch one mentioned file's text for the `@` menu (F-composer-16). Goes
+ * through the same `workspace-file-content` query key as
+ * `useWorkspaceFileContent`, so a file the Files dock already opened is not
+ * fetched again (and vice versa).
+ */
+export function useFetchMentionFileContent(): (workspaceId: string, file: MentionFile) => Promise<string> {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useCallback(
+    async (workspaceId: string, file: MentionFile) => {
+      const res = await queryClient.fetchQuery({
+        queryKey: ['workspace-file-content', workspaceId, file.path, file.source, file.worktreeAlias],
+        queryFn: () => platform.getWorkspaceFileContent(workspaceId, file.path, file.source, file.worktreeAlias),
+        staleTime: 60_000,
+      });
+      return res.content ?? '';
+    },
+    [platform, queryClient],
+  );
 }

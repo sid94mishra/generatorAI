@@ -15,9 +15,11 @@
 // instance, and the stream store's `startPending` / `clearStream` actions are
 // replaced with spies through the real store's `setState`.
 //
-// Toasts are observed by spying on sonner's `toast.error` / `toast.warning`
-// (what `@/components/Toast` delegates to), so `@/components/Toast` itself
-// is not mocked.
+// Toasts are observed by spying on the kit toast's `toast.error` (P4-08: the
+// composer toasts errors only, through `@/ui/primitives/Toast`, D-30 — the
+// two former warnings, a failed template load and a failed attachment
+// recall, are error toasts now). `toastSpies.warning` still watches the
+// legacy sonner warning.
 //
 // The component is NOT imported here: each test file imports it in one marked
 // line and hands it to `createComposerHarness`, so the P4 move only changes
@@ -27,6 +29,7 @@
 import type { ComponentType } from 'react';
 import { screen } from '@testing-library/react';
 import { toast as sonnerToast } from 'sonner';
+import { toast as kitToast } from '@/ui/primitives/Toast/Toast.js';
 import { vi, beforeEach, afterEach, type Mock } from 'vitest';
 import type { HarnessCatalogModel, HarnessProvidersResponse } from '@generatorai/shared';
 import { useStreamStore } from '@/stores/streamStore.js';
@@ -87,7 +90,7 @@ export function setupComposerTest(): void {
       clearStream: streamSpies.clearStream,
       streams: {},
     } as never);
-    toastSpies.error = vi.spyOn(sonnerToast, 'error').mockReturnValue('toast') as unknown as Mock;
+    toastSpies.error = vi.spyOn(kitToast, 'error').mockReturnValue('toast') as unknown as Mock;
     toastSpies.warning = vi.spyOn(sonnerToast, 'warning').mockReturnValue('toast') as unknown as Mock;
   });
   afterEach(() => {

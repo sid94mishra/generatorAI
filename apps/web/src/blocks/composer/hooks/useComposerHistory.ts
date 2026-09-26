@@ -10,15 +10,15 @@
 
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { toast } from '@/components/Toast.js';
-import type { ComposerAttachment, CaptureSource } from '../types.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
+import type { ComposerAttachment, CaptureSource } from '../model/types.js';
 import {
   caretLine,
   materializeAttachment,
   mergePromptHistory,
   stepHistory,
   type PromptHistoryEntry,
-} from '../promptHistory.js';
+} from '../model/promptHistory.js';
 import type { ComposerDraft } from './useComposerDraft.js';
 
 export interface UseComposerHistoryOptions {
@@ -37,6 +37,8 @@ export interface ComposerHistory {
   leaveHistory: () => void;
   /** Remember a sent prompt so ↑ recalls it at once; ends any browsing. */
   recordSent: (text: string, attachments: ComposerAttachment[]) => void;
+  /** The last recorded send went out as `prompt` (a `/command`'s formatted text), so its echo is recognised. */
+  markSentAs: (prompt: string) => void;
 }
 
 export function useComposerHistory({
@@ -114,7 +116,9 @@ export function useComposerHistory({
           try {
             return await materializeAttachment(att);
           } catch {
-            toast({ variant: 'warning', title: `Could not restore attachment "${att.name}"` });
+            toast.error(`Could not restore attachment "${att.name}"`, {
+              description: 'The prompt was recalled without it.',
+            });
             return null;
           }
         }),
@@ -164,5 +168,12 @@ export function useComposerHistory({
     }
   }, []);
 
-  return { navigateHistory, leaveHistory, recordSent };
+  const markSentAs = useCallback((prompt: string) => {
+    const list = localHistoryRef.current;
+    const last = list[list.length - 1];
+    if (!last || last.text === prompt) return;
+    localHistoryRef.current = [...list.slice(0, -1), { ...last, sentAs: prompt }];
+  }, []);
+
+  return { navigateHistory, leaveHistory, recordSent, markSentAs };
 }

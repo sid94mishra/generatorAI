@@ -13,7 +13,7 @@
 //      that each revision replaces (see `dictationRef`), and the region is
 //      detached the moment the user touches the field.
 //
-// `useSpeechToText` is owned HERE (not inside VoiceRecorder) because
+// `useSpeechToText` is owned HERE (not inside DictationControl) because
 // pausing on manual composer interaction (Part C.3) requires the
 // composer's own key/paste/click handlers to call `pauseVoiceIfListening()`.
 // ────────────────────────────────────────────────────────────────
@@ -24,7 +24,7 @@ import { CaretInsertionSequencer, stitchDictation, splitScratchCommand, continue
 import { useSpeechToText } from '@/hooks/useSpeechToText.js';
 import { useAudioInputDevices } from '@/hooks/useAudioInputDevices.js';
 import { resolveMicDeviceId, useMicPrefsStore } from '@/stores/micPrefsStore.js';
-import { toast } from '@/components/Toast.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
 
 export interface UseDictationOptions {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
@@ -389,7 +389,7 @@ export function useDictation({ textareaRef, text, setText }: UseDictationOptions
       shownTextRef.current = '';
       if (t) insertAtCaret(t);
     },
-    onError: (message) => toast({ variant: 'error', title: 'Voice input', description: message }),
+    onError: (message) => toast.error('Voice input', { description: message }),
     deviceId: resolvedMicId,
   });
 
