@@ -221,7 +221,7 @@ describe('design layer — WCAG suite (252 combinations)', () => {
       hover: '#ededef0a', selected: '#ededef14', lineSoft: '#1c1c20', line: '#2c2c31', lineStrong: '#68686c',
       fg: '#ededef', fg2: '#a1a1aa', fg3: '#898991', accent: '#ededef', onAccent: '#111113', focus: '#ededef',
       run: '#6aa6ff', runText: '#6aa6ff', runBg: '#6aa6ff26', ok: '#4cc38a', okText: '#4cc38a', okBg: '#4cc38a26',
-      warn: '#f0b429', warnText: '#f0b429', warnBg: '#f0b42926', err: '#ff6369', errText: '#fe676d', errBg: '#ff636926',
+      warn: '#f0b429', warnText: '#f0b429', warnBg: '#f0b42926', err: '#ff6369', errText: '#fe696e', errBg: '#ff636926',
       addBg: '#4cc38a1a', delBg: '#ff63691a', scrim: '#0000009e',
       shadowPop: '0 16px 40px #0000008c, 0 0 0 1px #ededef0f',
     });
@@ -230,8 +230,8 @@ describe('design layer — WCAG suite (252 combinations)', () => {
       ground: '#f1f1ef', surface: '#ffffff', raised: '#fafaf9', overlay: '#ffffff', sunken: '#f6f6f4',
       hover: '#18181b0a', selected: '#18181b14', lineSoft: '#ecece9', line: '#dcdcd7', lineStrong: '#8a8a88',
       fg: '#18181b', fg2: '#55555d', fg3: '#63636a', accent: '#18181b', onAccent: '#ffffff', focus: '#18181b',
-      run: '#1d6ae5', runText: '#1c56b3', runBg: '#1d6ae520', ok: '#16804c', okText: '#176640', okBg: '#16804c20',
-      warn: '#935f00', warnText: '#7a5105', warnBg: '#935f0020', err: '#d1242f', errText: '#a8212b', errBg: '#d1242f20',
+      run: '#1d6ae5', runText: '#1b55b1', runBg: '#1d6ae520', ok: '#16804c', okText: '#166640', okBg: '#16804c20',
+      warn: '#935f00', warnText: '#795006', warnBg: '#935f0020', err: '#d1242f', errText: '#a7222b', errBg: '#d1242f20',
       addBg: '#16804c14', delBg: '#d1242f14', scrim: '#1414184d',
       shadowPop: '0 16px 40px #14141e24, 0 0 0 1px #18181b0f',
     });

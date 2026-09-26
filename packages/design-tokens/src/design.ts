@@ -147,6 +147,9 @@ const minContrast = (c: string | Rgba, backs: ReadonlyArray<string | Rgba>): num
  * Takes no density or font-size input on purpose: those axes never change a
  * colour (02 §12 row 16).
  */
+/** Headroom for text on a tint over a row wash (two translucent layers, 8-bit compositing). */
+const ROW_COMPOSITE_MARGIN = 0.05;
+
 export function resolveDesignTokens(theme: ThemeDef, appearance: Appearance, accentId: AccentId): DesignTokens {
   const s = theme[appearance];
   const fg = s.foreground;
@@ -206,15 +209,11 @@ export function resolveDesignTokens(theme: ThemeDef, appearance: Appearance, acc
       hue: hex(ensureContrastAll(hue, fourSurfaces, NON_TEXT, fg)),
       text: hex(
         ensureContrastAll(
-          hue,
-          [
-            flatten(bg, surface),
-            flatten(bg, ground),
-            flatten(bg, raised),
-            ...rowWashes.map((wash) => flatten(bg, wash)),
-            ...fiveSurfaces,
-          ],
-          minText,
+          ensureContrastAll(hue, [flatten(bg, surface), flatten(bg, ground), flatten(bg, raised), ...fiveSurfaces], minText, fg),
+          rowWashes.map((wash) => flatten(bg, wash)),
+          // Two stacked translucent layers: the browser composites each in
+          // 8 bits, which measured 4.48 where the float maths said 4.50.
+          minText + ROW_COMPOSITE_MARGIN,
           fg,
         ),
       ),

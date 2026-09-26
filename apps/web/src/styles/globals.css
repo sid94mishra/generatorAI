@@ -5900,7 +5900,7 @@
   --gai-warn-text: #f0b429;
   --gai-warn-bg: #f0b42926;
   --gai-err: #ff6369;
-  --gai-err-text: #fe676d;
+  --gai-err-text: #fe696e;
   --gai-err-bg: #ff636926;
   --gai-add-bg: #4cc38a1a;
   --gai-del-bg: #ff63691a;
@@ -5935,16 +5935,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #18181b;
   --gai-run: #1d6ae5;
-  --gai-run-text: #1c56b3;
+  --gai-run-text: #1b55b1;
   --gai-run-bg: #1d6ae520;
   --gai-ok: #16804c;
-  --gai-ok-text: #176640;
+  --gai-ok-text: #166640;
   --gai-ok-bg: #16804c20;
   --gai-warn: #935f00;
-  --gai-warn-text: #7a5105;
+  --gai-warn-text: #795006;
   --gai-warn-bg: #935f0020;
   --gai-err: #d1242f;
-  --gai-err-text: #a8212b;
+  --gai-err-text: #a7222b;
   --gai-err-bg: #d1242f20;
   --gai-add-bg: #16804c14;
   --gai-del-bg: #d1242f14;
@@ -5980,7 +5980,7 @@
   --gai-warn-text: #f0b429;
   --gai-warn-bg: #f0b42926;
   --gai-err: #ff6369;
-  --gai-err-text: #fe676d;
+  --gai-err-text: #fe696e;
   --gai-err-bg: #ff636926;
   --gai-add-bg: #4cc38a1a;
   --gai-del-bg: #ff63691a;
@@ -6015,16 +6015,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #18181b;
   --gai-run: #1d6ae5;
-  --gai-run-text: #1c56b3;
+  --gai-run-text: #1b55b1;
   --gai-run-bg: #1d6ae520;
   --gai-ok: #16804c;
-  --gai-ok-text: #176640;
+  --gai-ok-text: #166640;
   --gai-ok-bg: #16804c20;
   --gai-warn: #935f00;
-  --gai-warn-text: #7a5105;
+  --gai-warn-text: #795006;
   --gai-warn-bg: #935f0020;
   --gai-err: #d1242f;
-  --gai-err-text: #a8212b;
+  --gai-err-text: #a7222b;
   --gai-err-bg: #d1242f20;
   --gai-add-bg: #16804c14;
   --gai-del-bg: #d1242f14;
@@ -6051,16 +6051,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #1f6feb;
   --gai-run: #4493f8;
-  --gai-run-text: #66a6f7;
+  --gai-run-text: #68a7f7;
   --gai-run-bg: #4493f826;
   --gai-ok: #3fb950;
-  --gai-ok-text: #47bc58;
+  --gai-ok-text: #4bbd5b;
   --gai-ok-bg: #3fb95026;
   --gai-warn: #d29922;
-  --gai-warn-text: #d39d2c;
+  --gai-warn-text: #d39e2f;
   --gai-warn-bg: #d2992226;
   --gai-err: #f85149;
-  --gai-err-text: #f37b77;
+  --gai-err-text: #f37d79;
   --gai-err-bg: #f8514926;
   --gai-add-bg: #3fb9501a;
   --gai-del-bg: #f851491a;
@@ -6095,16 +6095,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #0969da;
   --gai-run: #0969da;
-  --gai-run-text: #0d5bb6;
+  --gai-run-text: #0e5ab5;
   --gai-run-bg: #0969da20;
   --gai-ok: #1a7f37;
-  --gai-ok-text: #1b6b34;
+  --gai-ok-text: #1c6a34;
   --gai-ok-bg: #1a7f3720;
   --gai-warn: #9a6700;
-  --gai-warn-text: #7e5709;
+  --gai-warn-text: #7b560a;
   --gai-warn-bg: #9a670020;
   --gai-err: #d1242f;
-  --gai-err-text: #af242e;
+  --gai-err-text: #ae242d;
   --gai-err-bg: #d1242f20;
   --gai-add-bg: #1a7f3714;
   --gai-del-bg: #d1242f14;
@@ -6140,7 +6140,7 @@
   --gai-warn-text: #e9c46a;
   --gai-warn-bg: #e9c46a26;
   --gai-err: #ff5f57;
-  --gai-err-text: #ff635c;
+  --gai-err-text: #fe665f;
   --gai-err-bg: #ff5f5726;
   --gai-add-bg: #46d18a1a;
   --gai-del-bg: #ff5f571a;
@@ -6175,16 +6175,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #1d4ed8;
   --gai-run: #1d4ed8;
-  --gai-run-text: #1d4ed8;
+  --gai-run-text: #1d4dd6;
   --gai-run-bg: #1d4ed820;
   --gai-ok: #12794a;
-  --gai-ok-text: #116b42;
+  --gai-ok-text: #116a42;
   --gai-ok-bg: #12794a20;
   --gai-warn: #8a6100;
-  --gai-warn-text: #7c5701;
+  --gai-warn-text: #7a5601;
   --gai-warn-bg: #8a610020;
   --gai-err: #c62828;
-  --gai-err-text: #af2425;
+  --gai-err-text: #ae2424;
   --gai-err-bg: #c6282820;
   --gai-add-bg: #12794a14;
   --gai-del-bg: #c6282814;
@@ -6211,7 +6211,7 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #118756;
   --gai-run: #5b9bff;
-  --gai-run-text: #68a2fd;
+  --gai-run-text: #6aa3fd;
   --gai-run-bg: #5b9bff26;
   --gai-ok: #19c37d;
   --gai-ok-text: #19c37d;
@@ -6220,7 +6220,7 @@
   --gai-warn-text: #e3b341;
   --gai-warn-bg: #e3b34126;
   --gai-err: #f2555a;
-  --gai-err-text: #f1787c;
+  --gai-err-text: #f1797d;
   --gai-err-bg: #f2555a26;
   --gai-add-bg: #19c37d1a;
   --gai-del-bg: #f2555a1a;
@@ -6255,16 +6255,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #0d7a52;
   --gai-run: #1a5fd0;
-  --gai-run-text: #1956bb;
+  --gai-run-text: #1855b9;
   --gai-run-bg: #1a5fd020;
   --gai-ok: #0d7a52;
-  --gai-ok-text: #0d6947;
+  --gai-ok-text: #0d6746;
   --gai-ok-bg: #0d7a5220;
   --gai-warn: #8a6100;
-  --gai-warn-text: #7a5602;
+  --gai-warn-text: #795502;
   --gai-warn-bg: #8a610020;
   --gai-err: #c62b32;
-  --gai-err-text: #aa272c;
+  --gai-err-text: #aa272d;
   --gai-err-bg: #c62b3220;
   --gai-add-bg: #0d7a5214;
   --gai-del-bg: #c62b3214;
@@ -6291,16 +6291,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #b46950;
   --gai-run: #84a5d1;
-  --gai-run-text: #9cb6d7;
+  --gai-run-text: #9db7d8;
   --gai-run-bg: #84a5d126;
   --gai-ok: #84b06d;
-  --gai-ok-text: #9bbe87;
+  --gai-ok-text: #9dbf89;
   --gai-ok-bg: #84b06d26;
   --gai-warn: #d9a441;
-  --gai-warn-text: #dcae56;
+  --gai-warn-text: #ddaf59;
   --gai-warn-bg: #d9a44126;
   --gai-err: #e5786d;
-  --gai-err-text: #ea9c92;
+  --gai-err-text: #ea9e94;
   --gai-err-bg: #e5786d26;
   --gai-add-bg: #84b06d1a;
   --gai-del-bg: #e5786d1a;
@@ -6335,16 +6335,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #b0532c;
   --gai-run: #2d5f9e;
-  --gai-run-text: #2d5e9d;
+  --gai-run-text: #2d5d9a;
   --gai-run-bg: #2d5f9e20;
   --gai-ok: #4d7a3d;
-  --gai-ok-text: #456838;
+  --gai-ok-text: #446738;
   --gai-ok-bg: #4d7a3d20;
   --gai-warn: #8a6516;
-  --gai-warn-text: #785a19;
+  --gai-warn-text: #785919;
   --gai-warn-bg: #8a651620;
   --gai-err: #b3382c;
-  --gai-err-text: #a6362b;
+  --gai-err-text: #a4362c;
   --gai-err-bg: #b3382c20;
   --gai-add-bg: #4d7a3d14;
   --gai-del-bg: #b3382c14;
@@ -6371,16 +6371,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #4d81ab;
   --gai-run: #61afef;
-  --gai-run-text: #87bfed;
+  --gai-run-text: #8ac0ed;
   --gai-run-bg: #61afef26;
   --gai-ok: #98c379;
-  --gai-ok-text: #a2c789;
+  --gai-ok-text: #a3c88b;
   --gai-ok-bg: #98c37926;
   --gai-warn: #e5c07b;
   --gai-warn-text: #e5c07b;
   --gai-warn-bg: #e5c07b26;
   --gai-err: #e06c75;
-  --gai-err-text: #dea3ab;
+  --gai-err-text: #dea5ac;
   --gai-err-bg: #e06c7526;
   --gai-add-bg: #98c3791a;
   --gai-del-bg: #e06c751a;
@@ -6415,16 +6415,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #3568d4;
   --gai-run: #3568d4;
-  --gai-run-text: #3658a2;
+  --gai-run-text: #36579f;
   --gai-run-bg: #3568d420;
   --gai-ok: #3f8c3e;
-  --gai-ok-text: #3c6540;
+  --gai-ok-text: #3c6440;
   --gai-ok-bg: #3f8c3e20;
   --gai-warn: #8a6300;
-  --gai-warn-text: #725713;
+  --gai-warn-text: #715614;
   --gai-warn-bg: #8a630020;
   --gai-err: #ca3a2e;
-  --gai-err-text: #9a3a35;
+  --gai-err-text: #993a35;
   --gai-err-bg: #ca3a2e20;
   --gai-add-bg: #3f8c3e14;
   --gai-del-bg: #ca3a2e14;
@@ -6451,7 +6451,7 @@
   --gai-on-accent: #282a36;
   --gai-focus: #bd93f9;
   --gai-run: #8fa6ff;
-  --gai-run-text: #a6b8fc;
+  --gai-run-text: #a7b9fc;
   --gai-run-bg: #8fa6ff26;
   --gai-ok: #50fa7b;
   --gai-ok-text: #50fa7b;
@@ -6460,7 +6460,7 @@
   --gai-warn-text: #f1fa8c;
   --gai-warn-bg: #f1fa8c26;
   --gai-err: #ff5555;
-  --gai-err-text: #fc9592;
+  --gai-err-text: #fd9794;
   --gai-err-bg: #ff555526;
   --gai-add-bg: #50fa7b1a;
   --gai-del-bg: #ff55551a;
@@ -6498,13 +6498,13 @@
   --gai-run-text: #1d55b2;
   --gai-run-bg: #1d5cc420;
   --gai-ok: #14710a;
-  --gai-ok-text: #15680c;
+  --gai-ok-text: #15670d;
   --gai-ok-bg: #14710a20;
   --gai-warn: #846e15;
-  --gai-warn-text: #6b5a18;
+  --gai-warn-text: #6a5917;
   --gai-warn-bg: #846e1520;
   --gai-err: #cb3a2a;
-  --gai-err-text: #a03327;
+  --gai-err-text: #a13327;
   --gai-err-bg: #cb3a2a20;
   --gai-add-bg: #14710a14;
   --gai-del-bg: #cb3a2a14;
@@ -6531,7 +6531,7 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #5770b2;
   --gai-run: #7aa2f7;
-  --gai-run-text: #7da4f7;
+  --gai-run-text: #7fa5f7;
   --gai-run-bg: #7aa2f726;
   --gai-ok: #9ece6a;
   --gai-ok-text: #9ece6a;
@@ -6540,7 +6540,7 @@
   --gai-warn-text: #e0af68;
   --gai-warn-bg: #e0af6826;
   --gai-err: #f7768e;
-  --gai-err-text: #f0819b;
+  --gai-err-text: #ef839d;
   --gai-err-bg: #f7768e26;
   --gai-add-bg: #9ece6a1a;
   --gai-del-bg: #f7768e1a;
@@ -6575,16 +6575,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #2563c8;
   --gai-run: #2563c8;
-  --gai-run-text: #2e4b86;
+  --gai-run-text: #2e4a84;
   --gai-run-bg: #2563c820;
   --gai-ok: #587539;
   --gai-ok-text: #41504d;
   --gai-ok-bg: #58753920;
   --gai-warn: #8f5e15;
-  --gai-warn-text: #5b4a3b;
+  --gai-warn-text: #5a493c;
   --gai-warn-bg: #8f5e1520;
   --gai-err: #c64343;
-  --gai-err-text: #6e3e50;
+  --gai-err-text: #6c3e50;
   --gai-err-bg: #c6434320;
   --gai-add-bg: #58753914;
   --gai-del-bg: #c6434314;
@@ -6620,7 +6620,7 @@
   --gai-warn-text: #f9e2af;
   --gai-warn-bg: #f9e2af26;
   --gai-err: #f38ba8;
-  --gai-err-text: #f38ba8;
+  --gai-err-text: #f28daa;
   --gai-err-bg: #f38ba826;
   --gai-add-bg: #a6e3a11a;
   --gai-del-bg: #f38ba81a;
@@ -6655,16 +6655,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #8839ef;
   --gai-run: #1e66f5;
-  --gai-run-text: #3f5590;
+  --gai-run-text: #40558f;
   --gai-run-bg: #1e66f520;
   --gai-ok: #3c9528;
-  --gai-ok-text: #485e5b;
+  --gai-ok-text: #495d5c;
   --gai-ok-bg: #3c952820;
   --gai-warn: #b37115;
-  --gai-warn-text: #635657;
+  --gai-warn-text: #625657;
   --gai-warn-bg: #b3711520;
   --gai-err: #d20f39;
-  --gai-err-text: #9a2a4d;
+  --gai-err-text: #972b4e;
   --gai-err-bg: #d20f3920;
   --gai-add-bg: #3c952814;
   --gai-del-bg: #d20f3914;
@@ -6700,7 +6700,7 @@
   --gai-warn-text: #e6b450;
   --gai-warn-bg: #e6b45026;
   --gai-err: #f07178;
-  --gai-err-text: #ea7a7f;
+  --gai-err-text: #e87d82;
   --gai-err-bg: #f0717826;
   --gai-add-bg: #aad94c1a;
   --gai-del-bg: #f071781a;
@@ -6735,16 +6735,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #bc5b10;
   --gai-run: #1f6fb8;
-  --gai-run-text: #2a5f90;
+  --gai-run-text: #295f90;
   --gai-run-bg: #1f6fb820;
   --gai-ok: #4d8a24;
-  --gai-ok-text: #456734;
+  --gai-ok-text: #456634;
   --gai-ok-bg: #4d8a2420;
   --gai-warn: #a86e00;
-  --gai-warn-text: #765920;
+  --gai-warn-text: #745921;
   --gai-warn-bg: #a86e0020;
   --gai-err: #d33a3a;
-  --gai-err-text: #9a3d3e;
+  --gai-err-text: #993d3f;
   --gai-err-bg: #d33a3a20;
   --gai-add-bg: #4d8a2414;
   --gai-del-bg: #d33a3a14;
@@ -6780,7 +6780,7 @@
   --gai-warn-text: #ecc48d;
   --gai-warn-bg: #ecc48d26;
   --gai-err: #ef5350;
-  --gai-err-text: #ea7071;
+  --gai-err-text: #e97474;
   --gai-err-bg: #ef535026;
   --gai-add-bg: #addb671a;
   --gai-del-bg: #ef53501a;
@@ -6815,16 +6815,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #3b64c4;
   --gai-run: #3b64c4;
-  --gai-run-text: #3d589f;
+  --gai-run-text: #3d579f;
   --gai-run-bg: #3b64c420;
   --gai-ok: #0a7a5c;
-  --gai-ok-text: #1d6559;
+  --gai-ok-text: #1e6458;
   --gai-ok-bg: #0a7a5c20;
   --gai-warn: #8a6a00;
-  --gai-warn-text: #6d5920;
+  --gai-warn-text: #6c5921;
   --gai-warn-bg: #8a6a0020;
   --gai-err: #c93b39;
-  --gai-err-text: #983c42;
+  --gai-err-text: #953d43;
   --gai-err-bg: #c93b3920;
   --gai-add-bg: #0a7a5c14;
   --gai-del-bg: #c93b3914;
@@ -6851,7 +6851,7 @@
   --gai-on-accent: #191724;
   --gai-focus: #c4a7e7;
   --gai-run: #6ea9c4;
-  --gai-run-text: #7fb1cb;
+  --gai-run-text: #80b1cc;
   --gai-run-bg: #6ea9c426;
   --gai-ok: #9ccfae;
   --gai-ok-text: #9ccfae;
@@ -6860,7 +6860,7 @@
   --gai-warn-text: #f6c177;
   --gai-warn-bg: #f6c17726;
   --gai-err: #eb6f92;
-  --gai-err-text: #e88bab;
+  --gai-err-text: #e88cac;
   --gai-err-bg: #eb6f9226;
   --gai-add-bg: #9ccfae1a;
   --gai-del-bg: #eb6f921a;
@@ -6895,16 +6895,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #826e98;
   --gai-run: #286983;
-  --gai-run-text: #2d637e;
+  --gai-run-text: #2d627e;
   --gai-run-bg: #28698320;
   --gai-ok: #4f7d5e;
-  --gai-ok-text: #4b635f;
+  --gai-ok-text: #4b625f;
   --gai-ok-bg: #4f7d5e20;
   --gai-warn: #a8701c;
-  --gai-warn-text: #78593e;
+  --gai-warn-text: #76583f;
   --gai-warn-bg: #a8701c20;
   --gai-err: #b4637a;
-  --gai-err-text: #7c526d;
+  --gai-err-text: #7b516d;
   --gai-err-bg: #b4637a20;
   --gai-add-bg: #4f7d5e14;
   --gai-del-bg: #b4637a14;
@@ -6931,16 +6931,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #799292;
   --gai-run: #81a1c1;
-  --gai-run-text: #b1c4d8;
+  --gai-run-text: #b2c5d8;
   --gai-run-bg: #81a1c126;
   --gai-ok: #a3be8c;
-  --gai-ok-text: #b9cdab;
+  --gai-ok-text: #baceae;
   --gai-ok-bg: #a3be8c26;
   --gai-warn: #ebcb8b;
   --gai-warn-text: #ebcb8b;
   --gai-warn-bg: #ebcb8b26;
   --gai-err: #cf7783;
-  --gai-err-text: #deb3bc;
+  --gai-err-text: #deb4bc;
   --gai-err-bg: #cf778326;
   --gai-add-bg: #a3be8c1a;
   --gai-del-bg: #cf77831a;
@@ -6975,16 +6975,16 @@
   --gai-on-accent: #ffffff;
   --gai-focus: #3a6b6a;
   --gai-run: #3b5f87;
-  --gai-run-text: #39587b;
+  --gai-run-text: #39577a;
   --gai-run-bg: #3b5f8720;
   --gai-ok: #4a6b3c;
-  --gai-ok-text: #435d3d;
+  --gai-ok-text: #425c3d;
   --gai-ok-bg: #4a6b3c20;
   --gai-warn: #8a6516;
   --gai-warn-text: #695325;
   --gai-warn-bg: #8a651620;
   --gai-err: #a4262f;
-  --gai-err-text: #9d2730;
+  --gai-err-text: #9b2730;
   --gai-err-bg: #a4262f20;
   --gai-add-bg: #4a6b3c14;
   --gai-del-bg: #a4262f14;
@@ -7011,16 +7011,16 @@
   --gai-on-accent: #2d353b;
   --gai-focus: #a7c080;
   --gai-run: #7fbbb3;
-  --gai-run-text: #c1c4ac;
+  --gai-run-text: #c5c4ac;
   --gai-run-bg: #7fbbb326;
   --gai-ok: #a7c080;
-  --gai-ok-text: #c8c5a0;
+  --gai-ok-text: #cbc5a3;
   --gai-ok-bg: #a7c08026;
   --gai-warn: #e5b04f;
-  --gai-warn-text: #d8c091;
+  --gai-warn-text: #d7c297;
   --gai-warn-bg: #e5b04f26;
   --gai-err: #e67e80;
-  --gai-err-text: #d8b5a0;
+  --gai-err-text: #d7b7a1;
   --gai-err-bg: #e67e8026;
   --gai-add-bg: #a7c0801a;
   --gai-del-bg: #e67e801a;
@@ -7055,16 +7055,16 @@
   --gai-on-accent: #fffbef;
   --gai-focus: #4f8033;
   --gai-run: #2c6f9b;
-  --gai-run-text: #346281;
+  --gai-run-text: #34617f;
   --gai-run-bg: #2c6f9b20;
   --gai-ok: #4f8033;
-  --gai-ok-text: #486644;
+  --gai-ok-text: #476544;
   --gai-ok-bg: #4f803320;
   --gai-warn: #a8730a;
-  --gai-warn-text: #6e5e33;
+  --gai-warn-text: #6d5d34;
   --gai-warn-bg: #a8730a20;
   --gai-err: #d13c39;
-  --gai-err-text: #974344;
+  --gai-err-text: #954344;
   --gai-err-bg: #d13c3920;
   --gai-add-bg: #4f803314;
   --gai-del-bg: #d13c3914;
@@ -7091,16 +7091,16 @@
   --gai-on-accent: #1d2021;
   --gai-focus: #fe8019;
   --gai-run: #83a598;
-  --gai-run-text: #a7b8a1;
+  --gai-run-text: #a8b8a1;
   --gai-run-bg: #83a59826;
   --gai-ok: #b8bb26;
-  --gai-ok-text: #bbbd2d;
+  --gai-ok-text: #bcbe31;
   --gai-ok-bg: #b8bb2626;
   --gai-warn: #fabd2f;
   --gai-warn-text: #fabd2f;
   --gai-warn-bg: #fabd2f26;
   --gai-err: #fb4934;
-  --gai-err-text: #f39172;
+  --gai-err-text: #f39273;
   --gai-err-bg: #fb493426;
   --gai-add-bg: #b8bb261a;
   --gai-del-bg: #fb49341a;
@@ -7135,13 +7135,13 @@
   --gai-on-accent: #fbf1c7;
   --gai-focus: #af3a03;
   --gai-run: #076678;
-  --gai-run-text: #115d6b;
+  --gai-run-text: #125c6a;
   --gai-run-bg: #07667820;
   --gai-ok: #4f7a20;
-  --gai-ok-text: #475e29;
+  --gai-ok-text: #465d29;
   --gai-ok-bg: #4f7a2020;
   --gai-warn: #b57614;
-  --gai-warn-text: #715327;
+  --gai-warn-text: #705228;
   --gai-warn-bg: #b5761420;
   --gai-err: #9d0006;
   --gai-err-text: #9d0006;
@@ -7171,13 +7171,13 @@
   --gai-on-accent: #002b36;
   --gai-focus: #3995d6;
   --gai-run: #3c95d2;
-  --gai-run-text: #94bed4;
+  --gai-run-text: #95bfd3;
   --gai-run-bg: #268bd226;
   --gai-ok: #6fae3d;
-  --gai-ok-text: #a6c77e;
+  --gai-ok-text: #a7c780;
   --gai-ok-bg: #6fae3d26;
   --gai-warn: #b58900;
-  --gai-warn-text: #cfb562;
+  --gai-warn-text: #d0b665;
   --gai-warn-bg: #b5890026;
   --gai-err: #e5675f;
   --gai-err-text: #e99d90;
@@ -7215,16 +7215,16 @@
   --gai-on-accent: #fdf6e3;
   --gai-focus: #20729f;
   --gai-run: #20729f;
-  --gai-run-text: #175b7c;
+  --gai-run-text: #165b7c;
   --gai-run-bg: #20729f20;
   --gai-ok: #4d7a1f;
-  --gai-ok-text: #33612c;
+  --gai-ok-text: #33602c;
   --gai-ok-bg: #4d7a1f20;
   --gai-warn: #96730b;
   --gai-warn-text: #5a5922;
   --gai-warn-bg: #96730b20;
   --gai-err: #c0272b;
-  --gai-err-text: #9b2a30;
+  --gai-err-text: #982b30;
   --gai-err-bg: #c0272b20;
   --gai-add-bg: #4d7a1f14;
   --gai-del-bg: #c0272b14;
@@ -7251,16 +7251,16 @@
   --gai-on-accent: #100f0f;
   --gai-focus: #4385be;
   --gai-run: #4385be;
-  --gai-run-text: #7ba2c0;
+  --gai-run-text: #7da3c0;
   --gai-run-bg: #4385be26;
   --gai-ok: #879a39;
-  --gai-ok-text: #9aa85e;
+  --gai-ok-text: #9ba960;
   --gai-ok-bg: #879a3926;
   --gai-warn: #d0a215;
   --gai-warn-text: #d0a215;
   --gai-warn-bg: #d0a21526;
   --gai-err: #d14d41;
-  --gai-err-text: #d0897e;
+  --gai-err-text: #d08a7f;
   --gai-err-bg: #d14d4126;
   --gai-add-bg: #879a391a;
   --gai-del-bg: #d14d411a;
@@ -7295,16 +7295,16 @@
   --gai-on-accent: #fffcf0;
   --gai-focus: #205ea6;
   --gai-run: #205ea6;
-  --gai-run-text: #1f589b;
+  --gai-run-text: #1f5798;
   --gai-run-bg: #205ea620;
   --gai-ok: #66800b;
   --gai-ok-text: #4e600c;
   --gai-ok-bg: #66800b20;
   --gai-warn: #ad8301;
-  --gai-warn-text: #715706;
+  --gai-warn-text: #715606;
   --gai-warn-bg: #ad830120;
   --gai-err: #af3029;
-  --gai-err-text: #9f2d26;
+  --gai-err-text: #9e2c26;
   --gai-err-bg: #af302920;
   --gai-add-bg: #66800b14;
   --gai-del-bg: #af302914;
@@ -7331,7 +7331,7 @@
   --gai-on-accent: #000000;
   --gai-focus: #9dc0ff;
   --gai-run: #9dc0ff;
-  --gai-run-text: #aecbff;
+  --gai-run-text: #b0ccff;
   --gai-run-bg: #9dc0ff26;
   --gai-ok: #7bff9e;
   --gai-ok-text: #7bff9e;
@@ -7340,7 +7340,7 @@
   --gai-warn-text: #ffe066;
   --gai-warn-bg: #ffe06626;
   --gai-err: #ff8a80;
-  --gai-err-text: #ffb1aa;
+  --gai-err-text: #ffb2ac;
   --gai-err-bg: #ff8a8026;
   --gai-add-bg: #7bff9e1a;
   --gai-del-bg: #ff8a801a;
@@ -7378,13 +7378,13 @@
   --gai-run-text: #0c3286;
   --gai-run-bg: #0f3fa820;
   --gai-ok: #0a5c33;
-  --gai-ok-text: #074426;
+  --gai-ok-text: #084325;
   --gai-ok-bg: #0a5c3320;
   --gai-warn: #6b4e00;
-  --gai-warn-text: #4d3800;
+  --gai-warn-text: #4c3700;
   --gai-warn-bg: #6b4e0020;
   --gai-err: #a80710;
-  --gai-err-text: #76050b;
+  --gai-err-text: #75050b;
   --gai-err-bg: #a8071020;
   --gai-add-bg: #0a5c3314;
   --gai-del-bg: #a8071014;
@@ -9032,10 +9032,17 @@ html { scroll-behavior: smooth; }
   .app-titlebar { transition: none; }
 }
 
-* {
-  border-color: var(--color-border);
-  scrollbar-width: thin;
-  scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent) transparent;
+/* In `@layer base` (was unlayered): unlayered rules beat every Tailwind
+   utility regardless of specificity, so this silently overrode all
+   `border-*` colour utilities (legacy and kit alike). In the base layer it
+   still gives uncoloured borders their default, and utilities win again —
+   as they did under Tailwind 3. (P3-03) */
+@layer base {
+  * {
+    border-color: var(--color-border);
+    scrollbar-width: thin;
+    scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 30%, transparent) transparent;
+  }
 }
 
 ::selection {
@@ -9056,14 +9063,19 @@ body {
    container which draws the focus ring itself (`data-inline-search`: search
    fields in dialogs/popovers, chip/tag fields) — provide their own
    affordance, so they opt out of the offset ring. */
-button:focus-visible,
-a:focus-visible,
-input:not([cmdk-input]):not([data-inline-search]):focus-visible,
-/* textarea:focus-visible, */
-select:focus-visible {
-  outline: 2px solid var(--color-ring);
-  outline-offset: 2px;
-  border-radius: calc(var(--radius) + 2px);
+/* Base layer (was unlayered) so the kit's `focus-ring` utility and
+   `outline-none` on field inputs win; legacy elements without a focus
+   utility keep this ring. (P3-03) */
+@layer base {
+  button:focus-visible,
+  a:focus-visible,
+  input:not([cmdk-input]):not([data-inline-search]):focus-visible,
+  /* textarea:focus-visible, */
+  select:focus-visible {
+    outline: 2px solid var(--color-ring);
+    outline-offset: 2px;
+    border-radius: calc(var(--radius) + 2px);
+  }
 }
 
 /* == Scrollbar == */
@@ -9349,10 +9361,14 @@ pre.hljs-pre { background: var(--color-subtle); }
 .react-flow__controls button:hover { background-color: var(--color-subtle) !important; }
 
 /* == Smooth transitions == */
-button, a, input, select, textarea, [role="button"] {
-  transition-property: color, background-color, border-color, outline-color, fill, stroke, opacity, box-shadow;
-  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-  transition-duration: 150ms;
+/* Base layer (was unlayered) so the kit's `transition-control` (≤ 120 ms,
+   D-20) wins. (P3-03) */
+@layer base {
+  button, a, input, select, textarea, [role="button"] {
+    transition-property: color, background-color, border-color, outline-color, fill, stroke, opacity, box-shadow;
+    transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
+    transition-duration: 150ms;
+  }
 }
 
 /* == Cursor pointer == */

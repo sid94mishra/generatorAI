@@ -43,10 +43,13 @@ export function ScrollArea({
   const vertical = orientation !== 'horizontal';
   const horizontal = orientation !== 'vertical';
   return (
-    <BaseScrollArea.Root className={cn('relative flex min-h-0 min-w-0 flex-col overflow-hidden', className)} {...rest}>
+    // Base UI marks root and viewport `role="presentation"`; a plain generic is
+    // the same to assistive tech and may sit inside a `role="table"`, where a
+    // presentation child fails aria-required-children (DataTable body).
+    <BaseScrollArea.Root role={undefined} className={cn('relative flex min-h-0 min-w-0 flex-col overflow-hidden', className)} {...rest}>
       <BaseScrollArea.Viewport
         ref={viewportRef}
-        {...(label ? { role: 'region', 'aria-label': label } : {})}
+        {...(label ? { role: 'region', 'aria-label': label } : { role: undefined })}
         className={cn('min-h-0 flex-1 overscroll-contain rounded-card', focusRing, viewportClassName)}
       >
         {children}

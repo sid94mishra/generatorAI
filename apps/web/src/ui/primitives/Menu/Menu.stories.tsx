@@ -185,6 +185,7 @@ export const Context: Story = {
     await screen.findByRole('menu');
     await expect(document.querySelector('[data-gai-overlay="menu"]')).not.toBeNull();
     await userEvent.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('menu')).toBeNull());
   },
 };
 

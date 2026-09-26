@@ -88,7 +88,7 @@ Let `fg = s.foreground`, `minText = theme.textContrast ?? 4.5`, `ap = appearance
 9. Status, for each `(state, hue)` in `run:blue, ok:green, warn:yellow, err:red`:
    - `<state>Bg` = `toHex(withAlpha(s.hues[hue], TINT.status[ap]))` (identical to legacy `infoMuted` / `successMuted` / `warningMuted` / `dangerMuted`);
    - `<state>` (glyph, dot, bar, stroke) = `ensureContrastAll(s.hues[hue], [ground, surface, raised, overlay], 3, fg)`;
-   - `<state>Text` (coloured words) = `ensureContrastAll(s.hues[hue], [flatten(bg, surface), flatten(bg, ground), flatten(bg, raised), flatten(bg, hover∘surface), flatten(bg, hover∘ground), flatten(bg, selected∘surface), flatten(bg, selected∘ground), ground, surface, raised, overlay, sunken], minText, fg)` (`sunken` because inputs sit on it; the hovered/selected-row backdrops because status badges sit in selected table rows — added in P3-02 after axe measured 4.39–4.40:1 for light-theme badges on a selected row).
+   - `<state>Text` (coloured words) = `ensureContrastAll(s.hues[hue], [flatten(bg, surface), flatten(bg, ground), flatten(bg, raised), flatten(bg, hover∘surface), flatten(bg, hover∘ground), flatten(bg, selected∘surface), flatten(bg, selected∘ground), ground, surface, raised, overlay, sunken], minText, fg)` (`sunken` because inputs sit on it; the hovered/selected-row backdrops because status badges sit in selected table rows — added in P3-02 after axe measured 4.39–4.40:1 for light-theme badges on a selected row; the row composites are clamped to minText + 0.05 because the browser composites the two translucent layers in 8 bits — measured 4.48 where the float maths said 4.50).
 10. `addBg` = `toHex(withAlpha(s.hues.green, TINT.diff[ap]))`; `delBg` = same with `red`.
 11. `scrim` = `SCRIM[ap]`; `shadowPop` = `` `0 16px 40px ${SHADOW[ap]}, 0 0 0 1px ${toHex(withAlpha(fg, 6))}` ``.
 12. Accent: `accent` = `fg` for `ink`, else `a.primaryEmphasis`; `onAccent` = `surface` for `ink`, else `s.onAccent`; `focus` = `ensureContrastAll(accent, [ground, surface, raised, overlay, sunken], 3, fg)` (inputs sit on `sunken` and take the focus ring there).
@@ -118,11 +118,11 @@ Instrument values are the generator outputs for the ThemeDef in §4 (they are pi
 | on-accent | `--gai-on-accent` | `text-on-accent` | ink: surface; else onAccent | ink `#111113` | ink `#ffffff` | `text-primary-foreground` |
 | focus | `--gai-focus` | `outline-focus`, `ring-focus`, `border-focus` | accent → fg until ≥3:1 on 4 surfaces | ink `#ededef` | ink `#18181b` | `ring-ring` |
 | run | `--gai-run` | `bg-run` (dot/bar), `border-run`, `stroke-run` | blue, ≥3:1 on 4 surfaces | `#6aa6ff` | `#1d6ae5` | `text-info` |
-| run (text) | `--gai-run-text` | `text-run` (see §10.2: `--text-color-run`) | blue, ≥4.5 on tint over surfaces and over hovered/selected rows | `#6aa6ff` | `#1c56b3` | `text-info` |
+| run (text) | `--gai-run-text` | `text-run` (see §10.2: `--text-color-run`) | blue, ≥4.5 on tint over surfaces and over hovered/selected rows | `#6aa6ff` | `#1b55b1` | `text-info` |
 | run-bg | `--gai-run-bg` | `bg-run-bg` | blue @ 15 % / 12.5 % | `#6aa6ff26` | `#1d6ae520` | `bg-info-muted` |
-| ok / ok text / ok-bg | `--gai-ok`, `--gai-ok-text`, `--gai-ok-bg` | `bg-ok`, `text-ok`, `bg-ok-bg` | green (same rules) | `#4cc38a` / `#4cc38a` / `#4cc38a26` | `#16804c` / `#176640` / `#16804c20` | `success`, `success-muted` |
-| warn / warn text / warn-bg | `--gai-warn`, `--gai-warn-text`, `--gai-warn-bg` | `bg-warn`, `text-warn`, `bg-warn-bg` | yellow | `#f0b429` / `#f0b429` / `#f0b42926` | `#935f00` / `#7a5105` / `#935f0020` | `warning`, `warning-muted` |
-| err / err text / err-bg | `--gai-err`, `--gai-err-text`, `--gai-err-bg` | `bg-err`, `text-err`, `bg-err-bg`, `border-err` | red | `#ff6369` / `#fe676d` / `#ff636926` | `#d1242f` / `#a8212b` / `#d1242f20` | `danger`, `danger-muted`, `destructive` |
+| ok / ok text / ok-bg | `--gai-ok`, `--gai-ok-text`, `--gai-ok-bg` | `bg-ok`, `text-ok`, `bg-ok-bg` | green (same rules) | `#4cc38a` / `#4cc38a` / `#4cc38a26` | `#16804c` / `#166640` / `#16804c20` | `success`, `success-muted` |
+| warn / warn text / warn-bg | `--gai-warn`, `--gai-warn-text`, `--gai-warn-bg` | `bg-warn`, `text-warn`, `bg-warn-bg` | yellow | `#f0b429` / `#f0b429` / `#f0b42926` | `#935f00` / `#795006` / `#935f0020` | `warning`, `warning-muted` |
+| err / err text / err-bg | `--gai-err`, `--gai-err-text`, `--gai-err-bg` | `bg-err`, `text-err`, `bg-err-bg`, `border-err` | red | `#ff6369` / `#fe696e` / `#ff636926` | `#d1242f` / `#a7222b` / `#d1242f20` | `danger`, `danger-muted`, `destructive` |
 | add-bg | `--gai-add-bg` | `bg-add-bg` | green @ 10 % / 8 % | `#4cc38a1a` | `#16804c14` | `bg-success-muted` |
 | del-bg | `--gai-del-bg` | `bg-del-bg` | red @ 10 % / 8 % | `#ff63691a` | `#d1242f14` | `bg-danger-muted` |
 | scrim | `--gai-scrim` | `bg-scrim` | constant | `#0000009e` | `#1414184d` | `bg-black/50` literals |
