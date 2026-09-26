@@ -7,7 +7,8 @@ import React, { useState, useCallback } from 'react';
 import { Plus, Trash2, Eye, Edit3, ChevronUp, ChevronDown } from 'lucide-react';
 import type { PromptDefinition } from '@generatorai/workflow-spec';
 import { cn } from '@/lib/utils.js';
-import { Button, Input, Textarea } from '@/components/ui/index.js';
+import { Button, Input } from '@/components/ui/index.js';
+import { ExpressionField } from './engineGate.js';
 
 interface PromptEditorProps {
   prompts: PromptDefinition[];
@@ -200,12 +201,13 @@ export function PromptEditor({ prompts, onChange, readonly, contentLabel = 'Prom
             {/* Editing mode: textarea */}
             {editingIndex === index && (
               <div className="p-3">
-                <Textarea
+                <ExpressionField
+                  mode="template"
                   value={prompt.text}
-                  onChange={(e) => updatePrompt(index, { text: e.target.value })}
+                  onChange={(text) => updatePrompt(index, { text })}
                   rows={5}
-                  className="p-3 font-mono"
-                  placeholder="Enter prompt text... Use {{variableName}} for variable interpolation"
+                  ariaLabel={`${prompt.label} text`}
+                  placeholder="Enter prompt text... Use {{variableName}} or {{ stages.<key>.output }} (Ctrl+Space completes)"
                 />
               </div>
             )}

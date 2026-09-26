@@ -166,6 +166,7 @@ export function LoopPanel({ stage, onUpdate, issues }: LoopPanelProps) {
             <label htmlFor="loop-score" className="mb-1.5 block text-xs font-medium text-foreground">Score</label>
             <ExpressionField
               id="loop-score"
+              place={{ kind: 'loop', context: 'E' }}
               value={loop.onLimit.score}
               onChange={(score) => setLoop({ onLimit: { mode: 'accept_best', score } })}
               placeholder="e.g. stages.judge.output.score"
@@ -263,6 +264,8 @@ function ExitRules({ exits, onChange, issues }: { exits: ExitRule[]; onChange: (
             </Button>
           </div>
           <ExpressionField
+            place={{ kind: 'loop', context: 'E' }}
+            expect="boolean"
             value={rule.when}
             onChange={(when) => replace(index, { ...rule, when })}
             placeholder="A boolean evaluated after each iteration"
@@ -336,6 +339,8 @@ function QuickExitRow({
         <span className="text-[10px] text-muted-foreground">{row.hint}</span>
       </div>
       <ExpressionField
+        place={{ kind: 'loop', context: 'E' }}
+        expect="boolean"
         value={current.when}
         onChange={(when) => update({ ...current, when })}
         placeholder={row.placeholder}
@@ -470,6 +475,7 @@ function CarryTable({ loop, setLoop, issues }: { loop: LoopSpec; setLoop: (u: Pa
           <div>
             <label className="mb-1 block text-[11px] text-muted-foreground">After each iteration</label>
             <ExpressionField
+              place={{ kind: 'loop', context: 'C' }}
               value={loop.carry?.[name] ?? ''}
               onChange={(v) => setExpr('carry', name, v)}
               placeholder="e.g. stages.review.output.comments"
@@ -480,6 +486,7 @@ function CarryTable({ loop, setLoop, issues }: { loop: LoopSpec; setLoop: (u: Pa
           <div>
             <label className="mb-1 block text-[11px] text-muted-foreground">Initial value (optional; null otherwise)</label>
             <ExpressionField
+              place={{ kind: 'loop', context: 'init' }}
               value={loop.carryInit?.[name] ?? ''}
               onChange={(v) => setExpr('carryInit', name, v)}
               placeholder="e.g. []"
@@ -576,6 +583,7 @@ function SelectTable({ loop, setLoop, issues }: { loop: LoopSpec; setLoop: (u: P
             </Button>
           </div>
           <ExpressionField
+            place={{ kind: 'loop', context: 'E' }}
             value={select?.[name] ?? ''}
             onChange={(v) => setSelect(v.trim() ? { ...(select ?? {}), [name]: v } : withoutKey(select, name))}
             placeholder="e.g. loop.last.stages.review.output.summary"

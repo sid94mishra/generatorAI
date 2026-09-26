@@ -57,6 +57,7 @@ export function MapPanel({ stage, onUpdate, issues }: MapPanelProps) {
           <label htmlFor="map-items" className="mb-1.5 block text-xs font-medium text-foreground">For each item of</label>
           <ExpressionField
             id="map-items"
+            place={{ kind: 'map', context: 'items' }}
             value={map.items}
             onChange={(items) => setMap({ items })}
             placeholder="e.g. stages.plan.output.files"
@@ -72,6 +73,7 @@ export function MapPanel({ stage, onUpdate, issues }: MapPanelProps) {
           <label htmlFor="map-item-key" className="mb-1.5 block text-xs font-medium text-foreground">Item key</label>
           <ExpressionField
             id="map-item-key"
+            place={{ kind: 'map', context: 'item' }}
             value={map.itemKey ?? ''}
             onChange={(v) => setMap({ itemKey: v.trim() ? v : undefined })}
             placeholder="e.g. item.path (empty: the index)"
