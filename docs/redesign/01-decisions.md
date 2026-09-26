@@ -467,6 +467,11 @@ Decided while building P1-T1…T6 where `02` was silent:
 - The public `server-info` probe bypasses the auth fetch interceptor (`Symbol.for('generatorai.signedRequest')`) so an unpaired device can see reachability. No "Scan QR" link (no camera QR decode exists; D-36).
 - Static desktop pages (splash/error/prompt) are generated from tokens (`packages/design-tokens/src/emit/static.ts`), so they follow the persisted theme instead of GitHub dark.
 
+### D-77 Chat creation as built (P5-09) — Final
+- `features/chats/create`: `NewChatDialog` (640, mounted once in `app/shell/ShellRoute.tsx`, opened anywhere via `useNewChatStore`) and `ChatCreatePage` at `/chats/new` (T-03, TanStack Form + zod 4 — first use in the app). One canonical `CreateChatDraft` + `chatNameFromPrompt` in `packages/shared/src/ui-contract/chatCreate.ts` (Home's quick composer "More options" → `/chats/new` with the draft); `mapDraftToParams` (unit-tested) turns a draft into `CreateChatParams`. Chat creation sends the first prompt through the chat endpoint (`useSendChatPromptTo`).
+- `blocks/sources` (SourcePicker + DirectoryBrowser + model, `compact` mode for the dialog). `components/chat/CreateChatDialog.tsx` and `BrowserVisibilityPicker` deleted. B-03 capability editing is not built (static summary; D-36).
+- Known duplicate to reconcile in the final review: `blocks/directory-browser` (P5-03) vs `blocks/sources` DirectoryBrowser (P5-09).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)

@@ -17,3 +17,4 @@ Fix in the batch fix pass (after the combined review).
 - `ChangesSurface.view.characterization` "Compare against…" expects `base: turn:t1` but gets `baseline` (reported by the Home agent; fails alone) — check the CompareBar/Select merge (`blocks/changes/CompareBar.tsx` onValueChange adapter).
 - ChangesTray port: disclosure is a separate chevron; summary reads "N files changed · in this chat"; generic file icons.
 - Chat retry on Home resends the last user message without attachments; quick start is create + send (an empty chat remains if send fails).
+- Duplicate DirectoryBrowser: `blocks/directory-browser` (P5-03) vs `blocks/sources` (P5-09) — keep one.
