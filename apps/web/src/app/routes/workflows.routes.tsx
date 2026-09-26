@@ -1,26 +1,25 @@
-// docs/redesign/07-phases.md §P1-S3. Workflow-owned pages (D-35); this
-// module only wraps them with `legacyHeader: true` until PW ports them
-// (docs/redesign/04-screen-map.md §0); the builder routes force the rail
-// (06 §2.5). Logged in docs/redesign/COORDINATION.md
-// as a whole-repo mechanical change (07-phases.md §Running in parallel).
+// docs/redesign/07-phases.md §P1-S3. The Workflows list, the definition page
+// and New workflow are on the kit (PW-a: `features/workflows`, own PageHeader);
+// the builder and run pages still wear `legacyHeader: true` until their ports
+// land; the builder routes force the rail (06 §2.5).
 import type { RouteObject } from 'react-router';
 import { defineRoute } from './defineRoute.js';
 
 export const workflowsRoutes: RouteObject[] = [
   defineRoute(
     'workflows',
-    () => import('@/pages/WorkflowListPage.js').then((m) => ({ default: m.WorkflowListPage })),
-    { legacyHeader: true, nav: 'workflows', title: 'Workflows' },
+    () => import('@/features/workflows/list/WorkflowsListPage.js').then((m) => ({ default: m.WorkflowsListPage })),
+    { legacyHeader: false, nav: 'workflows', title: 'Workflows' },
   ),
   defineRoute(
     'workflows/new',
-    () => import('@/pages/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })),
-    { legacyHeader: true, forceRail: true, nav: 'workflows', title: 'Workflow Builder' },
+    () => import('@/features/workflows/create/WorkflowNewPage.js').then((m) => ({ default: m.WorkflowNewPage })),
+    { legacyHeader: false, nav: 'workflows', title: 'New workflow' },
   ),
   defineRoute(
     'workflows/:id',
-    () => import('@/pages/WorkflowDefinitionPage.js').then((m) => ({ default: m.WorkflowDefinitionPage })),
-    { legacyHeader: true, nav: 'workflows', title: 'Workflow' },
+    () => import('@/features/workflows/detail/WorkflowDetailPage.js').then((m) => ({ default: m.WorkflowDetailPage })),
+    { legacyHeader: false, nav: 'workflows', title: 'Workflow' },
   ),
   defineRoute(
     'workflows/:id/edit',

@@ -1,21 +1,37 @@
+import type { Page } from '@playwright/test';
 import { test, expect } from '../helpers/test';
-import { apiRequest } from '../helpers/api';
+import { apiRequest, type ResourceTracker } from '../helpers/api';
 
 // Phase W5 — Workflow Builder: stages, config, validation, save.
 // Loading a seeded multi-stage+edge definition in edit mode avoids the
 // timing-sensitive drag-to-connect interaction for edge coverage.
 
+/**
+ * `/workflows/new` is the New workflow page (PW-a): a blank start creates an
+ * empty draft and opens it in the builder, which is where these tests begin.
+ * The builder's name box keeps its "Untitled Workflow" accessible name.
+ */
+async function openBlankBuilder(page: Page, gotoApp: (path: string) => Promise<void>, tracker: ResourceTracker) {
+  await gotoApp('/workflows/new');
+  await page.getByRole('radio', { name: /Blank canvas/ }).check();
+  await page.getByRole('textbox', { name: 'Name', exact: true }).fill(`W5 Blank ${Date.now()}`);
+  await page.getByRole('button', { name: /Create draft and open builder/ }).click();
+  await expect(page).toHaveURL(/\/workflows\/[0-9a-f-]{36}\/edit/, { timeout: 15_000 });
+  const id = page.url().split('/workflows/')[1]?.split('/')[0];
+  if (id) tracker.track('definition', id);
+}
+
 test.describe('Workflow Builder — authoring', () => {
-  test('empty builder shows the core controls', async ({ page, gotoApp }) => {
-    await gotoApp('/workflows/new');
+  test('empty builder shows the core controls', async ({ page, gotoApp, tracker }) => {
+    await openBlankBuilder(page, gotoApp, tracker);
     await expect(page.getByRole('textbox', { name: 'Untitled Workflow' })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Save', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: 'Validate' })).toBeVisible();
     await expect(page.getByRole('button', { name: /Add (First )?Stage/ }).first()).toBeVisible();
   });
 
-  test('add a stage, name it, add a prompt', async ({ page, gotoApp }) => {
-    await gotoApp('/workflows/new');
+  test('add a stage, name it, add a prompt', async ({ page, gotoApp, tracker }) => {
+    await openBlankBuilder(page, gotoApp, tracker);
     await page.getByRole('button', { name: /Add (First )?Stage/ }).first().click();
     const nameInput = page.getByRole('textbox', { name: 'Stage Name' });
     await expect(nameInput).toBeVisible({ timeout: 10_000 });
@@ -27,8 +43,8 @@ test.describe('Workflow Builder — authoring', () => {
     await expect(page.getByText('1 prompt').first()).toBeVisible();
   });
 
-  test('run-condition dropdown offers all options incl. custom expression', async ({ page, gotoApp }) => {
-    await gotoApp('/workflows/new');
+  test('run-condition dropdown offers all options incl. custom expression', async ({ page, gotoApp, tracker }) => {
+    await openBlankBuilder(page, gotoApp, tracker);
     await page.getByRole('button', { name: /Add (First )?Stage/ }).first().click();
     await expect(page.getByRole('textbox', { name: 'Stage Name' })).toBeVisible();
     await page.getByRole('tab', { name: 'Execution' }).click();
@@ -47,8 +63,8 @@ test.describe('Workflow Builder — authoring', () => {
     await expect(page.getByRole('textbox', { name: /status == 'completed'/ })).toBeVisible();
   });
 
-  test('retry policy expands and toggles on (collapsed section must be opened first)', async ({ page, gotoApp }) => {
-    await gotoApp('/workflows/new');
+  test('retry policy expands and toggles on (collapsed section must be opened first)', async ({ page, gotoApp, tracker }) => {
+    await openBlankBuilder(page, gotoApp, tracker);
     await page.getByRole('button', { name: /Add (First )?Stage/ }).first().click();
     await expect(page.getByRole('textbox', { name: 'Stage Name' })).toBeVisible();
     await page.getByRole('tab', { name: 'Execution' }).click();
@@ -61,8 +77,8 @@ test.describe('Workflow Builder — authoring', () => {
 });
 
 test.describe('Workflow Builder — validation', () => {
-  test('Validate flags a stage with no prompts', async ({ page, gotoApp }) => {
-    await gotoApp('/workflows/new');
+  test('Validate flags a stage with no prompts', async ({ page, gotoApp, tracker }) => {
+    await openBlankBuilder(page, gotoApp, tracker);
     await page.getByRole('textbox', { name: 'Untitled Workflow' }).fill(`W5 NoPrompt ${Date.now()}`);
     await page.getByRole('button', { name: /Add (First )?Stage/ }).first().click();
     await expect(page.getByRole('textbox', { name: 'Stage Name' })).toBeVisible();
@@ -76,8 +92,8 @@ test.describe('Workflow Builder — validation', () => {
     await expect(page.getByText(/has no prompts or agent configured/i)).toBeVisible();
   });
 
-  test('Validate flags an undefined {{variable}} reference (regression for the interpolation guard)', async ({ page, gotoApp }) => {
-    await gotoApp('/workflows/new');
+  test('Validate flags an undefined {{variable}} reference (regression for the interpolation guard)', async ({ page, gotoApp, tracker }) => {
+    await openBlankBuilder(page, gotoApp, tracker);
     await page.getByRole('textbox', { name: 'Untitled Workflow' }).fill(`W5 UndefVar ${Date.now()}`);
     await page.getByRole('button', { name: /Add (First )?Stage/ }).first().click();
     await expect(page.getByRole('textbox', { name: 'Stage Name' })).toBeVisible();
@@ -90,7 +106,7 @@ test.describe('Workflow Builder — validation', () => {
 
 test.describe('Workflow Builder — save & load', () => {
   test('saving a valid single-stage workflow persists it', async ({ page, gotoApp, tracker }) => {
-    await gotoApp('/workflows/new');
+    await openBlankBuilder(page, gotoApp, tracker);
     const name = `W5 Save ${Date.now()}`;
     await page.getByRole('textbox', { name: 'Untitled Workflow' }).fill(name);
     await page.getByRole('button', { name: /Add (First )?Stage/ }).first().click();

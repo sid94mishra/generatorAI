@@ -442,8 +442,9 @@ test.describe('Workflows', () => {
 
     await gotoApp(`/workflows/${wfId}`);
     await expect(page.getByRole('heading', { name: /e2e-live-wf/ })).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByText('analyse')).toBeVisible();
-    await expect(page.getByText('report')).toBeVisible();
+    const stages = page.getByTestId('workflow-stages');
+    await expect(stages.getByText('analyse', { exact: true }).first()).toBeVisible();
+    await expect(stages.getByText('report', { exact: true }).first()).toBeVisible();
   });
 
   test('an invoked run is live (not terminal) with its stages materialised', async ({ seed }) => {

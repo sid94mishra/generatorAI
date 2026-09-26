@@ -252,7 +252,7 @@ test.describe('Home', () => {
     }
   });
 
-  test('header action "New workflow" navigates to the builder', async ({ page, gotoApp }) => {
+  test('header action "New workflow" navigates to the new-workflow page', async ({ page, gotoApp }) => {
     await gotoApp('/');
     await page.getByRole('main').getByRole('button', { name: 'New workflow', exact: true }).click();
     await expect(page).toHaveURL(/\/workflows\/new/);
@@ -335,6 +335,6 @@ test.describe('Templates (Settings → Templates tab)', () => {
     if (id) tracker.track('definition', id);
 
     await expect(settingsDialog(page)).toHaveCount(0);
-    await expect(page.getByTestId('rf__wrapper')).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByTestId('workflow-stages')).toBeVisible({ timeout: 10_000 });
   });
 });

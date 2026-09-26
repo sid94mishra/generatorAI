@@ -34,7 +34,7 @@ Tokens, spacing, radii and the Rosetta table for translating a board: `02-design
 | S-08/S-09 | `shell/DockFrame`, `shell/NarrowDockSheet` | dock chrome; used through `blocks/dock` Dock |
 | S-12 | `shell/FindBarFrame` | desktop find bar (wired once in `app/shell/FindBar`, nothing to do per page) |
 
-Not built yet (PW owns them): L-04 CanvasEditor (builder canvas), L-05 ModalWithAside (RunDialog).
+Not built yet (PW owns it): L-04 CanvasEditor (builder canvas). L-05 `templates/ModalWithAside` (the Run dialog body) landed with PW-a.
 
 ## 3. Transcript kit and the tool-card registry (P4-07)
 
@@ -183,8 +183,8 @@ One vocabulary for chats, runs, stages, automations and tasks: `@generatorai/sha
 
 | ID | Piece | Built by | State at handoff |
 |---|---|---|---|
-| WF-01 | VersionChip / DraftChip | Redesign P5 | not built yet (a `Badge` binding) |
-| WF-02 | KeyChip | Redesign P5 | not built yet (`Chip mono` exists) |
+| WF-01 | VersionChip / DraftChip | Redesign P5 | **exists** (PW-a): `blocks/workflow` `VersionChip` |
+| WF-02 | KeyChip | Redesign P5 | **exists** (PW-a): `blocks/workflow` `KeyChip` |
 | WF-03 | ProblemsPanel | Redesign P5 | not built yet |
 | WF-04 | StageTableRow | PW | **built (PW-c)**: `features/workflows/run/stages/StageRow.tsx` |
 | WF-05 | RunLifecycleCard | PW | not built; `patterns/StepRail` exists |
@@ -193,7 +193,7 @@ One vocabulary for chats, runs, stages, automations and tasks: `@generatorai/sha
 | WF-08 | DecisionCard | PW | **built (PW-c)**: `features/workflows/run/controlFlow/DecisionCard.tsx` |
 | WF-09 | ReviewCard | PW | **built (PW-c)**: `features/workflows/run/stages/ReviewCard.tsx` |
 | WF-10 | VersionHistoryPanel | PW | not built |
-| WF-11 | RunDialogPlanPreview | PW | not built; L-05 ModalWithAside not built |
+| WF-11 | RunDialogPlanPreview | PW | **exists** (PW-a): `blocks/workflow` `RunPlanPreview` inside the query-aware `RunDialog` (L-05 ModalWithAside) — the builder opens the same dialog (`prepareTarget` saves first) |
 | WF-12 | Chat run card | PW | **built (PW-c)**: `features/workflows/chat/WorkflowRunCards.tsx` via the segment-card registry |
 | WF-13 | Chat approval card | PW | **built (PW-c)**: inside the WF-12 card (GateCardFrame) |
 | WF-14 | Chat draft card | PW | **built (PW-c)**: `features/workflows/chat/WorkflowRunCards.tsx` |
@@ -202,7 +202,7 @@ One vocabulary for chats, runs, stages, automations and tasks: `@generatorai/sha
 | WF-17 | StageMessageBox | Redesign P4 | **exists**: `Composer variant="stage"` (§4); PW wires `customSendFn` |
 | WF-18 | ExitRuleTable / CarryTable | PW | not built; `NumberField`, `Table`, `SegmentedControl` exist |
 | WF-19 | IterationsTable | PW | **built (PW-c)**: `features/workflows/run/controlFlow/IterationsTable.tsx` |
-| WF-20 | TriggerChip | Redesign P5 | not built yet (a `Badge` binding) |
+| WF-20 | TriggerChip | Redesign P5 | **exists** (PW-a): `blocks/workflow` `TriggerChip` (+ `iconOnly`), `RUN_TRIGGERS` |
 
 Extension points the Overhaul plugs into without reopening chat code: tool-card registry (§3), composer tool toggles
 (§4), Tasks sections (§5).

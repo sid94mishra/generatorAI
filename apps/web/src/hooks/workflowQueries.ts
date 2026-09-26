@@ -104,7 +104,13 @@ export function useSaveDefinitionGraph() {
 /** Publish the working graph as the version runs use */
 export function usePublishDefinition() {
   const platform = usePlatform() as HttpPlatformClient;
-  return useRecordMutation((id: string) => platform.publishDefinition(id));
+  const queryClient = useQueryClient();
+  return useRecordMutation(async (id: string) => {
+    const record = await platform.publishDefinition(id);
+    // A publish adds a version: the definition page's "Published vN" and Versions read the list.
+    void queryClient.invalidateQueries({ queryKey: workflowKeys.definitionVersions(id) });
+    return record;
+  });
 }
 
 /** Import a canonical workflow document as a new draft */
@@ -119,6 +125,15 @@ export function useCreateFromTemplate() {
   return useRecordMutation((args: { templateId: string; name?: string }) =>
     platform.importTemplate(args.templateId, args.name),
   );
+}
+
+/** The canonical document text of a definition (`GET /:id/export`), for "Export JSON". */
+export function useExportWorkflowDefinition() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useMutation({
+    mutationFn: (id: string) => platform.exportDefinition(id),
+    meta: { errorTitle: 'Export failed' },
+  });
 }
 
 /**
