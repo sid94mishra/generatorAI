@@ -157,6 +157,8 @@ export interface SettledTurn {
   submitted?: unknown;
   thinkingText?: string;
   toolCalls?: unknown[];
+  /** An operator stopped the turn: its content is what it produced until then. */
+  stopped?: boolean;
 }
 
 export type TurnJournalEntry =
@@ -192,6 +194,8 @@ export interface ITurnJournal {
   recordPartial(message: JournalMessage, now: number): void;
   /** Retract an operation (its intent and any settlement): the next attempt re-runs it. */
   discard(stageRunId: string, opId: string): void;
+  /** Every operation whose op id starts with `prefix`, in the order it was issued (what a resume replays). */
+  list(stageRunId: string, prefix: string): Array<{ opId: string; entry: TurnJournalEntry }>;
   /** Turns with an intent and no settlement whose op id starts with `prefix`. */
   inFlight(stageRunId: string, prefix: string): Array<{ opId: string; role: TurnRole; policy: TurnReplayPolicy }>;
   /** Drop the stage run's journal (its run is terminal). */

@@ -74,6 +74,7 @@ import { WorktreeLeases } from './WorktreeLeases.js';
 import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
 import { inFlightIsSafe, LeaseReaper } from './LeaseReaper.js';
 import { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
+import { validateAgainstSchema } from './OutputExtractor.js';
 import { RunActor, type DecideRecord, type ProcessResult } from './RunActor.js';
 import { DefaultRunLifecycle, type LifecyclePlatform, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';
 import { journalEpoch, StageExecutor, stageSessionSpec, type ExecutorTiming, type StageArtifactReader } from './StageExecutor.js';
@@ -207,7 +208,16 @@ export class RunSupervisor {
       now: this.now,
       ...(deps.timing?.executor ? { timing: deps.timing.executor } : {}),
     });
-    this.timers = new TimerService({ timers: deps.stores.timers, post, now: this.now, logger: deps.logger });
+    this.timers = new TimerService({
+      timers: deps.stores.timers,
+      post: (runId, msg) => {
+        // A launch waiting for a map to hand the run mounts back waits for no slot: its queue timeout does not count (MAPWAIT-R9).
+        if (msg.type === 'timer_fired' && msg.kind === 'queue_timeout' && msg.stageRunId && this.effects.waitingOnLease(msg.stageRunId)) return;
+        post(runId, msg);
+      },
+      now: this.now,
+      logger: deps.logger,
+    });
     this.outbox = new OutboxDispatcher({
       outbox: deps.stores.outbox,
       // The engine's own events drive its run and container spans (P07 WP-7.4).
@@ -414,7 +424,24 @@ export class RunSupervisor {
       }
       if (d.outcome === 'replayed') return { ok: true, replayed: true };
     }
+    if (command.command === 'skip' && command.as === 'completed' && command.output !== undefined) {
+      const refused = await this.skipOutputRefusal(runId, command.instanceId, command.output);
+      if (refused) return { ok: false, code: 'invalid_command', message: refused };
+    }
     return this.result(await this.send(runId, { type: 'command', command, ...(opts.actor ? { actor: opts.actor } : {}) }));
+  }
+
+  /** An output an operator records by skipping a json stage as completed must hold its output schema (ENGINE-R14). */
+  private async skipOutputRefusal(runId: string, instanceRef: string | undefined, output: unknown): Promise<string | null> {
+    const state = this.deps.stores.runStore.loadRunState(runId);
+    const inst = state?.instances.find((i) => i.id === instanceRef || i.instancePath === instanceRef);
+    if (!state || !inst) return null; // the actor answers not_found
+    const run = await this.deps.runRepo.getById(runId);
+    const graph = graphForInstance(await this.deps.definitions.get(run.definitionVersionId), state, inst);
+    const stage = graph.stages.find((s) => s.key === inst.stageKey);
+    if (stage?.kind !== 'agent' || stage.output.format !== 'json' || !stage.output.schema) return null;
+    const r = validateAgainstSchema(stage.output.schema, output);
+    return r.ok ? null : `The output does not match the stage's output schema: ${r.errors.slice(0, 5).join('; ')}`;
   }
 
   /**
@@ -528,6 +555,16 @@ export class RunSupervisor {
     let interrupted = 0;
     let relaunched = 0;
     const runs = stores.queries.listLiveRunIds();
+    // The running maps re-take their shared worktree leases FIRST, across
+    // every run, so a relaunched writer queues behind them — and nothing here
+    // awaits a lease: a writer holds its lease for a whole attempt (MAPWAIT-R8).
+    for (const runId of runs) {
+      for (const inst of stores.runStore.loadRunState(runId)?.instances ?? []) {
+        const cs = inst.containerState;
+        if (cs?.kind !== 'map' || inst.status !== 'running' || cs.phase === 'done' || cs.phase === 'snapshotting' || !cs.snapshot) continue;
+        void this.leases.acquire(await this.maps.leaseKeys(runId), 'shared', inst.id);
+      }
+    }
     for (const runId of runs) {
       const actor = await this.actorFor(runId);
       if (!actor) continue;
@@ -561,6 +598,12 @@ export class RunSupervisor {
         } else if (inst.status === 'awaiting_input') {
           interrupted += 1;
           await actor.post({ type: 'frame_lost', stageRunId: inst.id, attemptNo });
+        } else {
+          // Its desired state was written (cancelled, paused, …) and the
+          // frame died before it reported: the attempt is settled now, so a
+          // cancelling run finalizes and a resumed stage launches (ENGINE-R3, R4).
+          interrupted += 1;
+          await actor.post({ type: 'attempt_settled', stageRunId: inst.id, attemptNo, outcome: { kind: 'aborted', reason: 'superseded' } });
         }
       }
       // A loop whose effect died with the process: dispatch it again (both are idempotent).
@@ -594,7 +637,6 @@ export class RunSupervisor {
         if (!cs || inst.status !== 'running' || cs.phase === 'done') continue;
         if (cs.kind === 'map') {
           if (cs.phase === 'snapshotting') again({ t: 'map_snapshot', stageRunId: inst.id });
-          else if (cs.snapshot) await this.maps.reacquire(runId, inst.id);
           const compiled = this.compiledByRun.get(runId);
           const merge = compiled?.nodes.get(inst.stageKey)?.map?.merge;
           for (const it of cs.items) {
@@ -619,6 +661,13 @@ export class RunSupervisor {
         }
       }
       this.timers.loadRun(runId);
+      // A retry timer marked fired whose message died with the process (ENGINE-R13): its retry is due now.
+      const retrying = new Set(stores.timers.listLive(runId).filter((t) => t.kind === 'retry').map((t) => t.stageRunId));
+      for (const inst of state.instances) {
+        if (inst.status === 'retry_wait' && !retrying.has(inst.id)) {
+          await actor.post({ type: 'timer_fired', timerId: `recovered:${inst.id}`, kind: 'retry', stageRunId: inst.id });
+        }
+      }
       const run = stores.runs.getRunRow(runId);
       if (run?.status === 'starting') this.effects.dispatch(runId, { effects: [{ t: 'prepare' }], timers: [], outbox: [] });
       else if ((run?.status === 'finalizing' || run?.status === 'cancelling') && run.outcome) {

@@ -14,8 +14,10 @@
 // Every phase is a run-scope journalled effect: its completion is recorded
 // under `system_vars.lifecycle['<stage>/<phase>']` before the next one
 // starts, so a crash resumes at the phase that did not finish, and the
-// hooks a phase fires fire once (C-17). A prepare failure fails the run
-// with `status_reason: setup:<phase>`. `workflow_run.phase_started /
+// hooks a phase fires fire once (C-17). A prepare failure finalizes the run
+// (outcome failed), which then fails with `status_reason: setup:<phase>`; a
+// cancel during setup stops the prepare before its next phase, and the
+// cancel's finalize waits for it. `workflow_run.phase_started /
 // phase_completed / phase_failed {stage, phase}` narrate it.
 //
 // A cancel while the run finalizes posts a second `finalize` (outcome
@@ -122,6 +124,8 @@ export class DefaultRunLifecycle implements RunLifecycle {
   private readonly now: () => number;
   /** Finalizes of one run, serialised. */
   private readonly finalizing = new Map<string, Promise<unknown>>();
+  /** The prepare in flight per run: a finalize waits for it. */
+  private readonly preparing = new Map<string, Promise<unknown>>();
 
   constructor(private readonly deps: RunLifecycleDeps) {
     this.now = deps.now ?? Date.now;
@@ -196,7 +200,18 @@ export class DefaultRunLifecycle implements RunLifecycle {
 
   // ── prepare ──────────────────────────────────────────────────
 
-  async prepare(runId: string): Promise<void> {
+  prepare(runId: string): Promise<void> {
+    const p = this.prepareNow(runId);
+    this.preparing.set(runId, p);
+    void p
+      .catch(() => undefined)
+      .finally(() => {
+        if (this.preparing.get(runId) === p) this.preparing.delete(runId);
+      });
+    return p;
+  }
+
+  private async prepareNow(runId: string): Promise<void> {
     const run = await this.deps.runRepo.getById(runId);
     const graph = await this.deps.definitions.get(run.definitionVersionId);
     if (this.deps.permissionCheck) {
@@ -206,6 +221,8 @@ export class DefaultRunLifecycle implements RunLifecycle {
     }
     const ctx: PrepareContext = { deps: this.deps, graph, now: this.now, hooks: (phase, r) => this.runHooks(phase, graph, r) };
     for (const [name, fn] of preparePhases) {
+      // A cancel during setup stops it before its next phase; the cancel's finalize releases what exists (CONVINV-R2).
+      if (await this.cancelled(runId)) throw new PrepareError(name, 'The run was cancelled during setup');
       try {
         await this.phase(runId, 'prepare', name, (r) => fn(ctx, r));
       } catch (err) {
@@ -217,8 +234,9 @@ export class DefaultRunLifecycle implements RunLifecycle {
   // ── finalize ─────────────────────────────────────────────────
 
   finalize(runId: string, outcome: RunOutcome, compensate: readonly string[]): Promise<{ ok: boolean; error?: string; superseded?: boolean }> {
-    const previous = this.finalizing.get(runId) ?? Promise.resolve();
-    const next = previous.catch(() => undefined).then(() => this.finalizeNow(runId, outcome, compensate));
+    // Serialised with the run's prepare too: a cancel during setup finalizes once the prepare stopped (CONVINV-R2).
+    const previous = Promise.all([this.finalizing.get(runId), this.preparing.get(runId)].map((p) => (p ?? Promise.resolve()).catch(() => undefined)));
+    const next = previous.then(() => this.finalizeNow(runId, outcome, compensate));
     this.finalizing.set(runId, next);
     void next.finally(() => {
       if (this.finalizing.get(runId) === next) this.finalizing.delete(runId);

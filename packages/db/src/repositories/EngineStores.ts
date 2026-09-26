@@ -117,6 +117,23 @@ export class StageTurnJournal implements ITurnJournal {
     this.sqlite.prepare(`DELETE FROM registers WHERE scope = 'stage_run' AND scope_id = ? AND key = ?`).run(stageRunId, TURN_KEY + opId);
   }
 
+  list(stageRunId: string, prefix: string): Array<{ opId: string; entry: TurnJournalEntry }> {
+    const full = TURN_KEY + prefix;
+    // The rowid is the intent's insert (a settlement updates the row in place): the order the turns were issued.
+    const rows = this.sqlite
+      .prepare(`SELECT key, value FROM registers WHERE scope = 'stage_run' AND scope_id = ? AND substr(key, 1, ?) = ? ORDER BY rowid`)
+      .all(stageRunId, full.length, full) as Array<{ key: string; value: string }>;
+    const out: Array<{ opId: string; entry: TurnJournalEntry }> = [];
+    for (const r of rows) {
+      try {
+        out.push({ opId: r.key.slice(TURN_KEY.length), entry: JSON.parse(r.value) as TurnJournalEntry });
+      } catch {
+        /* a torn row is not a turn */
+      }
+    }
+    return out;
+  }
+
   inFlight(stageRunId: string, prefix: string): Array<{ opId: string; role: TurnRole; policy: TurnReplayPolicy }> {
     const full = TURN_KEY + prefix;
     const rows = this.sqlite

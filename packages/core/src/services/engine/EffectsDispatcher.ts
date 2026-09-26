@@ -87,8 +87,15 @@ export class EffectsDispatcher {
   private readonly queued = new Map<string, QueuedLaunch>();
   /** Launches in flight (admitted or queued): what `idle()` waits for. */
   private readonly inflight = new Set<Promise<unknown>>();
+  /** Launches waiting for the run mounts' `write` lease (a mount_per_item map holds them). */
+  private readonly leaseWaits = new Set<string>();
 
   constructor(private readonly deps: EffectsDispatcherDeps) {}
+
+  /** Whether the instance's launch is waiting for a worktree lease (its queue_timeout does not count then). */
+  waitingOnLease(stageRunId: string): boolean {
+    return this.leaseWaits.has(stageRunId);
+  }
 
   dispatch(runId: string, batch: { effects: readonly Decision[]; timers: readonly ArmedTimer[]; outbox: readonly number[] }): void {
     for (const t of batch.timers) this.deps.timers.arm(t);
@@ -106,9 +113,11 @@ export class EffectsDispatcher {
         }
         case 'deliver_input':
           if (!this.deps.executor.deliverInput(d.stageRunId, d.attemptNo, d.verdict)) {
-            // The frame is gone (a restart): settle the attempt, then the
-            // approval takes the no-frame path (a resume attempt carries it).
-            this.deps.post(runId, { type: 'attempt_settled', stageRunId: d.stageRunId, attemptNo: d.attemptNo, outcome: { kind: 'aborted', reason: 'superseded' } });
+            // The frame is gone (a restart): the frame_lost rules apply (an
+            // in-turn gate pauses; a completion review stays parked), then
+            // the approval takes the no-frame path (a resume attempt carries
+            // it) — never into a gate it was not given for (ENGINE-R2).
+            this.deps.post(runId, { type: 'frame_lost', stageRunId: d.stageRunId, attemptNo: d.attemptNo });
             this.deps.post(runId, {
               type: 'command',
               command: {
@@ -190,7 +199,14 @@ export class EffectsDispatcher {
     const leased = async (): Promise<void> => {
       const keys = this.deps.leases && this.deps.writerLeaseKeys ? await this.deps.writerLeaseKeys(runId, stageRunId) : [];
       if (keys.length === 0) return admitted();
-      const release = await this.deps.leases!.acquire(keys, 'write', stageRunId);
+      // Waiting for a map to hand the mounts back is not waiting for a slot: no queue_timeout meanwhile (MAPWAIT-R9).
+      this.leaseWaits.add(stageRunId);
+      let release: () => void;
+      try {
+        release = await this.deps.leases!.acquire(keys, 'write', stageRunId);
+      } finally {
+        this.leaseWaits.delete(stageRunId);
+      }
       try {
         if (entry.dropped) return;
         await admitted();

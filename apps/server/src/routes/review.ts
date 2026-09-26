@@ -297,6 +297,8 @@ export function createReviewRoutes(container: Container): Router {
             instanceId: target.stageId,
             outcome: 'changes_requested',
             feedback: submission.prompt,
+            // The review round read above, never a later one (ENGINE-R11).
+            expectedVersion: stage.version,
           });
           if (!r.ok) throw new RunCommandRefusedError(r);
         } else {

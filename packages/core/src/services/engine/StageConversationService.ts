@@ -178,7 +178,8 @@ export class StageConversationService {
     if (pending.kind !== GATE_KIND[answer.kind]) {
       throw new StageConversationError('VALIDATION_ERROR', `Interaction ${interactionId} is a ${pending.kind ?? 'different'} gate, not a ${GATE_KIND[answer.kind]}`);
     }
-    const r = await this.engine.command(runId, approveCommand(instanceId, interactionId, answer));
+    // Bound to the instance version the check above read: the answer never reaches a later gate (ENGINE-R11).
+    const r = await this.engine.command(runId, { ...approveCommand(instanceId, interactionId, answer), expectedVersion: stage.version } as RunCommand);
     if (!r.ok) throw refused(r);
   }
 

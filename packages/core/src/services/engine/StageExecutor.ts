@@ -42,6 +42,7 @@ import { DEFAULT_AGENT_MODE, generateId, runInContext } from '@generatorai/share
 import {
   expansionNodeKey,
   expansionPlanJsonSchema,
+  isTerminalStageRunState,
   renderTemplate,
   resolveSessionSpec,
   STAGE_DEFAULTS,
@@ -53,7 +54,7 @@ import {
   type WorkflowGraph,
 } from '@generatorai/workflow-spec';
 import { classifyStageError, classified, StageError, type ClassifiedError } from '../../domain/errors/StageError.js';
-import type { EngineStores, SettledTurn, TurnReplayPolicy, TurnRole } from '../../domain/ports/IEngineStore.js';
+import type { EngineStores, SettledTurn, TurnJournalEntry, TurnReplayPolicy, TurnRole } from '../../domain/ports/IEngineStore.js';
 import type { AttachmentRef, IAgentHarness, SendPromptOptions } from '../../domain/ports/IAgentHarness.js';
 import type { ISessionRepository } from '../../domain/ports/IRepositories.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
@@ -89,7 +90,7 @@ import { runCheck } from './CheckRunner.js';
 import type { AttemptTrace, EngineTelemetry } from './EngineTelemetry.js';
 import { AUTO_SUMMARY_TURN_THRESHOLD, autoSummary, jsonSummary, summaryPrompt } from './summaries.js';
 import { compile, type CompiledNode, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
-import { isWrapUp, templateScope } from '../../domain/scheduler/scope.js';
+import { isWrapUp, scopeIndexOf, templateScope } from '../../domain/scheduler/scope.js';
 import { graphForInstance, validateExpansion } from '../../domain/scheduler/expansion.js';
 import {
   checkOutputContract,
@@ -221,6 +222,8 @@ interface Frame {
   turnStop?: { force: boolean };
   /** Operator messages waiting for the next turn boundary. */
   operatorQueue: OperatorTurn[];
+  /** Set while the frame waits for an operator message (its last answer was stopped). */
+  operatorWaiter?: () => void;
   /** The attempt took its last turn: new operator messages are refused. */
   closed: boolean;
   /** An amendment of a completed instance (no attempt, no lease, no status change). */
@@ -272,6 +275,17 @@ interface AttemptContext {
   hookContext: string[];
   /** The attempt's `invoke_agent` span (P07 WP-7.4). */
   trace?: AttemptTrace;
+  /**
+   * The epoch's journal when the attempt began, in issue order, and the
+   * last entry this attempt replayed: a resume replays the operator and
+   * revision turns where they were taken (ENGINE-R1, R7).
+   */
+  journal: Array<{ opId: string; entry: TurnJournalEntry }>;
+  cursor: number;
+  /** The next operator turn's number in the epoch (`a<epoch>/operator/<n>`). */
+  opSeq: number;
+  /** The latest output-producing turn was stopped by the operator: its answer is not the stage's output yet (ENGINE-R16). */
+  lastStopped: boolean;
 }
 
 const RESUME_NOTICE =
@@ -345,11 +359,21 @@ export class StageExecutor {
     });
   }
 
-  /** A verdict for a frame parked in `awaiting_input` (the `deliver_input` effect). */
+  /**
+   * A verdict for a frame parked in `awaiting_input` (the `deliver_input`
+   * effect). False only when this process has no frame for the attempt
+   * (ENGINE-R2): the waiter is in place before the instance is written
+   * `awaiting_input`, so a live frame without one has already left the gate
+   * (an operator stop) — the verdict is dropped and the next gate asks again.
+   */
   deliverInput(stageRunId: string, attemptNo: number, verdict: ApprovalVerdict): boolean {
     const f = this.frames.get(stageRunId);
-    if (!f || f.req.attemptNo !== attemptNo || !f.waiter) return false;
+    if (!f || f.req.attemptNo !== attemptNo) return false;
     const w = f.waiter;
+    if (!w) {
+      this.logger?.warn(`[StageExecutor] a verdict for ${stageRunId} arrived after its gate closed; dropped`);
+      return true;
+    }
     f.waiter = undefined;
     w.resolve(verdict);
     return true;
@@ -370,6 +394,9 @@ export class StageExecutor {
     const f = this.frames.get(stageRunId);
     if (!f || f.stop || f.closed || f.turnInFlight) return false;
     f.operatorQueue.push(turn);
+    const wake = f.operatorWaiter;
+    f.operatorWaiter = undefined;
+    wake?.();
     return true;
   }
 
@@ -446,12 +473,22 @@ export class StageExecutor {
     try {
       const attempts = this.deps.stores.attempts.listByStageRun(stageRunId);
       ctx = await this.context(frame, 'resume', journalEpoch(attempts, row.currentAttempt));
-      if (ctx.stage.sessionGroup) {
-        const key = this.sessionKey(ctx);
-        for (const other of this.frames.values()) {
-          if (other !== frame && other.req.runId === runId && other.sessionKey === key) {
-            throw new StageConversationError('STAGE_BUSY', `The stage's session group "${ctx.stage.sessionGroup}" is in use by another stage`);
-          }
+      // Inside a container that still runs (a loop iterating, a map), the
+      // stage's conversation may be the live scope's (CONVINV-R4): refused.
+      const byId = new Map(ctx.state.instances.map((i) => [i.id, i]));
+      for (let c = ctx.instance.scopeId ? byId.get(ctx.instance.scopeId) : undefined; c; c = c.scopeId ? byId.get(c.scopeId) : undefined) {
+        if (!isTerminalStageRunState(c.status)) {
+          throw new StageConversationError('STAGE_BUSY', `The stage is inside "${c.stageKey}", which is still running; amend it once that finishes`);
+        }
+      }
+      // Any live frame on the same conversation — bound, or launched with a session group not bound yet.
+      const key = this.sessionKey(ctx);
+      const group = ctx.stage.sessionGroup;
+      for (const other of this.frames.values()) {
+        if (other === frame || other.req.runId !== runId) continue;
+        const otherGroup = ctx.compiled.nodes.get(byId.get(other.req.stageRunId)?.stageKey ?? '')?.sessionGroup;
+        if (other.sessionKey === key || (other.sessionKey === undefined && !!group && otherGroup === group)) {
+          throw new StageConversationError('STAGE_BUSY', group ? `The stage's session group "${group}" is in use by another stage` : 'The stage\'s conversation is in use by another stage');
         }
       }
     } catch (err) {
@@ -502,6 +539,9 @@ export class StageExecutor {
       f.waiter = undefined;
       w.resolve(null);
     }
+    const wake = f.operatorWaiter;
+    f.operatorWaiter = undefined;
+    wake?.();
     if (f.conversationId) void this.deps.harness.abortConversation(f.conversationId).catch(() => undefined);
   }
 
@@ -738,6 +778,8 @@ export class StageExecutor {
     const workspace = itemWorkspace ?? (await runWorkspace(this.deps.workspaceManager, run));
     // The run's primary mount, pinned by the lifecycle's `worktrees` phase (system values, never variables: W-06).
     const pinned = placed.systemVars?.workingDirectory;
+    // An amendment has its own operation ids; an attempt continues its epoch's journal.
+    const journal = frame.amend ? [] : stores.turns.list(stageRunId, `a${epoch}/`);
     const ctx: AttemptContext = {
       frame,
       run: placed,
@@ -774,6 +816,10 @@ export class StageExecutor {
       outputText: '',
       submittedThisTurn: [],
       hookContext: [],
+      journal,
+      cursor: -1,
+      opSeq: 1 + Math.max(-1, ...journal.filter((j) => j.opId.startsWith(`a${epoch}/operator/`)).map((j) => Number(j.opId.slice(`a${epoch}/operator/`.length)) || 0)),
+      lastStopped: false,
     };
     return ctx;
   }
@@ -1038,6 +1084,7 @@ export class StageExecutor {
     const prior = stores.turns.get(stageRunId, t.opId);
     if (prior?.state === 'settled') {
       ctx.recorder.restore({ content: prior.turn.content });
+      ctx.cursor = Math.max(ctx.cursor, ctx.journal.findIndex((j) => j.opId === t.opId));
       return prior.turn;
     }
     let text = t.text;
@@ -1130,7 +1177,7 @@ export class StageExecutor {
       // The operator stopped this turn (chat parity): it settles with what it
       // produced, and the stage continues from the next turn boundary.
       const partial = ctx.recorder.take({ partial: true });
-      const settled: SettledTurn = { role: t.role, content: partial?.content ?? response?.content ?? '' };
+      const settled: SettledTurn = { role: t.role, content: partial?.content ?? response?.content ?? '', stopped: true };
       stores.turns.settle(stageRunId, t.opId, settled, {
         now: this.now(),
         ...(partial
@@ -1205,18 +1252,74 @@ export class StageExecutor {
    * API). The instance is `running`; each answer becomes the output text.
    */
   private async operatorTurns(ctx: AttemptContext, opPrefix: string): Promise<void> {
+    await this.replayOperatorTurns(ctx);
     const queue = ctx.frame.operatorQueue;
     while (queue.length > 0) {
       const op = queue.shift()!;
+      // A deterministic id: a later resume of the epoch replays it (ENGINE-R7).
       const turn = await this.turn(ctx, {
-        opId: `${opPrefix}/operator/${generateId()}`,
+        opId: `${opPrefix}/operator/${ctx.opSeq++}`,
         role: 'operator',
         text: op.prompt,
         prepare: true,
         attachments: await this.attachmentsOf(ctx, op.attachmentIds),
         agentMode: op.agentMode,
+        ...this.nativeSchema(ctx),
       });
       this.recordOutput(ctx, turn);
+    }
+  }
+
+  /**
+   * The operator turns the epoch took next, in journal order (a resumed
+   * attempt): a settled one replays; one that never settled died with its
+   * message, which is dropped rather than re-sent blind.
+   */
+  private async replayOperatorTurns(ctx: AttemptContext): Promise<void> {
+    const prefix = `a${ctx.epoch}/operator/`;
+    for (let next = ctx.journal[ctx.cursor + 1]; next?.opId.startsWith(prefix); next = ctx.journal[ctx.cursor + 1]) {
+      if (next.entry.state === 'settled') {
+        this.recordOutput(ctx, await this.turn(ctx, { opId: next.opId, role: 'operator', text: '' }));
+        continue;
+      }
+      this.deps.stores.turns.discard(ctx.frame.req.stageRunId, next.opId);
+      ctx.cursor += 1;
+      await this.emitSession(ctx, 'stage_run.operator_message_dropped', { count: 1, reason: 'interrupted' });
+    }
+  }
+
+  /** A native structured-output stage asks for its schema on every output-producing turn (ENGINE-R8). */
+  private nativeSchema(ctx: AttemptContext): { outputSchema?: Record<string, unknown> } {
+    return ctx.contract.format === 'json' && ctx.strategies[0] === 'native' ? { outputSchema: ctx.contract.schema ?? { type: 'object' } } : {};
+  }
+
+  /**
+   * The operator stopped the answer this stage would hand on (ENGINE-R16):
+   * it is not the output. The stage waits — its deadline paused — for the
+   * operator's next message, and carries on from its answer.
+   */
+  private async afterStoppedTurn(ctx: AttemptContext): Promise<void> {
+    const { frame } = ctx;
+    while (ctx.lastStopped) {
+      if (frame.operatorQueue.length === 0 && !ctx.journal[ctx.cursor + 1]?.opId.startsWith(`a${ctx.epoch}/operator/`)) {
+        await this.emitSession(ctx, 'harness.session_info', {
+          infoType: 'turn_stopped',
+          message: 'The answer was stopped before it finished; send a message to continue the stage.',
+        });
+        frame.parkedSince = this.now();
+        try {
+          await new Promise<void>((resolve) => {
+            if (frame.stop || frame.operatorQueue.length > 0) return resolve();
+            frame.operatorWaiter = resolve;
+          });
+        } finally {
+          frame.parkedMs += this.now() - (frame.parkedSince ?? this.now());
+          frame.parkedSince = undefined;
+          frame.lastProgressAt = this.now();
+        }
+        if (frame.stop) throw new AttemptStop(frame.stop);
+      }
+      await this.operatorTurns(ctx, `a${ctx.epoch}`);
     }
   }
 
@@ -1250,11 +1353,22 @@ export class StageExecutor {
     }
   }
 
+  /**
+   * An output-producing turn (prompt, operator, repair, revision) settled:
+   * the LATEST one is the output (ENGINE-R8) — an earlier turn's submission
+   * never outlives a revision. A turn that produced nothing keeps the one before.
+   */
   private recordOutput(ctx: AttemptContext, turn: SettledTurn): void {
-    if (turn.structuredOutput !== undefined) ctx.outputs.native.push(turn.structuredOutput);
-    if (turn.submitted !== undefined) ctx.outputs.submitted.push(turn.submitted);
-    ctx.outputs.texts.push(turn.content);
+    const produced = turn.content.trim().length > 0 || turn.structuredOutput !== undefined || turn.submitted !== undefined;
+    if (produced) {
+      ctx.outputs = {
+        native: turn.structuredOutput !== undefined ? [turn.structuredOutput] : [],
+        submitted: turn.submitted !== undefined ? [turn.submitted] : [],
+        texts: [turn.content],
+      };
+    }
     if (turn.content.trim().length > 0 || ctx.outputText.length === 0) ctx.outputText = turn.content;
+    ctx.lastStopped = turn.stopped === true;
   }
 
   /** What the stage's templates read: context T of its enclosing loops (P05 §2.2). */
@@ -1268,7 +1382,8 @@ export class StageExecutor {
         const view = stages[inst.stageKey];
         const wait = waitInterruptOf(inst);
         if (!view || inst.status !== 'waiting' || wait?.type !== 'event') continue;
-        if (inst.scopeId !== null && inst.scopeId !== ctx.instance.scopeId) continue;
+        // The wait of this stage's own scope: same container AND the same iteration or map item (MAPWAIT-R3).
+        if (inst.scopeId !== null && (inst.scopeId !== ctx.instance.scopeId || scopeIndexOf(inst) !== scopeIndexOf(ctx.instance))) continue;
         const cb = callbacks.forWait(ctx.run.id, inst.id, wait.eventKey);
         if (cb) stages[inst.stageKey] = { ...view, callbackUrl: cb.url, callbackToken: cb.token };
       }
@@ -1424,13 +1539,15 @@ export class StageExecutor {
     if (!r.ok) throw new AttemptStop(ctx.frame.stop ?? { kind: 'aborted', reason: 'superseded' });
   }
 
-  private backToRunning(ctx: AttemptContext, from: 'validating' | 'awaiting_input'): void {
+  /** Back to `running`; the instance's version after the CAS. */
+  private backToRunning(ctx: AttemptContext, from: 'validating' | 'awaiting_input'): number {
     const r = this.deps.stores.stages.transition(ctx.frame.req.stageRunId, [from], 'running', {
       lease: { owner: ctx.frame.owner, ttlMs: this.timing.leaseTtlMs },
       runId: ctx.frame.req.runId,
       now: this.now(),
     });
     if (!r.ok) throw new AttemptStop(ctx.frame.stop ?? { kind: 'aborted', reason: 'superseded' });
+    return r.row.version;
   }
 
   /**
@@ -1441,6 +1558,7 @@ export class StageExecutor {
     const { stores } = this.deps;
     const { stageRunId, attemptNo } = ctx.frame.req;
     const maxRepairs = ctx.stage.repair?.maxRepairs ?? 2;
+    await this.afterStoppedTurn(ctx);
     this.toValidating(ctx);
     for (;;) {
       const check = await checkOutputContract(ctx.contract, ctx.strategies, ctx.outputs, ctx.outputText, {
@@ -1474,8 +1592,10 @@ export class StageExecutor {
         role: 'repair',
         text: repairMessage(failures, ctx.strategies, ctx.contract.format),
         prepare: true,
+        ...this.nativeSchema(ctx),
       });
       this.recordOutput(ctx, turn);
+      await this.afterStoppedTurn(ctx);
       this.toValidating(ctx);
     }
   }
@@ -1495,20 +1615,27 @@ export class StageExecutor {
     const { stageRunId, attemptNo, runId } = ctx.frame.req;
     const round = stores.attempts.get(stageRunId, attemptNo)?.repairCount ?? 0;
     const recorded = (stores.attempts.get(stageRunId, attemptNo)?.judge as JudgeRecord[] | null | undefined) ?? [];
+    // What the epoch's earlier attempts judged (a resume replays their outputs).
+    const earlier = stores.attempts
+      .listByStageRun(stageRunId)
+      .filter((a) => a.attemptNo >= ctx.epoch && a.attemptNo < attemptNo)
+      .flatMap((a) => (a.judge as JudgeRecord[] | null | undefined) ?? []);
     const failures: string[] = [];
     const verdicts: JudgeRecord[] = [];
     const output = data !== undefined ? JSON.stringify(data, null, 2) : ctx.outputText;
+    // Verdicts are kept per judged output: a revision or an operator turn changes it, and is judged again (ENGINE-R9).
+    const outputHash = digest(output);
     for (const [index, rule] of rules.entries()) {
-      // A verdict of this round already recorded (a resumed attempt) is not asked again.
-      const prior = recorded.find((v) => v.round === round && v.rule === index);
+      // A verdict on this very output already recorded (a resumed attempt) is not asked again.
+      const prior = [...recorded, ...earlier].find((v) => v.outputHash === outputHash && v.rule === index);
       const v = prior ?? (await this.askJudge(ctx, rule, index, round, output));
-      verdicts.push(v);
+      verdicts.push({ ...v, outputHash });
       if (!v.passed) {
         const why = v.reasons.length ? v.reasons.join('; ') : 'no reasons given';
         failures.push(rule.message ?? `The judge scored the output ${v.score ?? 'unreadable'}/10 (needs ${rule.threshold}): ${why}`);
       }
     }
-    stores.attempts.update(stageRunId, attemptNo, { judge: [...recorded.filter((v) => v.round !== round), ...verdicts] });
+    stores.attempts.update(stageRunId, attemptNo, { judge: [...recorded.filter((v) => v.outputHash !== outputHash), ...verdicts] });
     await this.emitSession(ctx, 'stage_run.judged', { round, verdicts, workflowRunId: runId });
     if (failures.length === 0) return null;
     return { failures, error: classified('judge_below_threshold', `The judge did not pass the output: ${failures.join('; ')}`, { details: { failures } }) };
@@ -1595,7 +1722,8 @@ export class StageExecutor {
     if (ctx.wrapUp || policy === 'none' || policy === 'llm') return undefined;
     if (ctx.contract.format === 'json') return jsonSummary(name, data);
     if (ctx.outputText.length <= AUTO_SUMMARY_TURN_THRESHOLD || !this.successorWantsSummary(ctx)) return autoSummary(name, 'text', data, ctx.outputText);
-    const turn = await this.turn(ctx, { opId: `a${ctx.epoch}/summary`, role: 'summary', text: summaryPrompt(name), expect: 'validating' });
+    // Per output: a revised output gets its own summary, never the replay of the first one (ENGINE-R10).
+    const turn = await this.turn(ctx, { opId: `a${ctx.epoch}/summary/${digest(ctx.outputText)}`, role: 'summary', text: summaryPrompt(name), expect: 'validating' });
     return turn.content.trim().length > 0 ? turn.content : autoSummary(name, 'text', data, ctx.outputText);
   }
 
@@ -1610,7 +1738,8 @@ export class StageExecutor {
       const out = await this.validateAndReviewOnce(ctx);
       // No await between this check and `closed`: a message that arrives
       // later is refused (the stage is finishing) instead of being lost.
-      if (ctx.frame.operatorQueue.length === 0) {
+      // A resumed attempt also replays the operator turns its epoch took here.
+      if (ctx.frame.operatorQueue.length === 0 && !ctx.journal[ctx.cursor + 1]?.opId.startsWith(`a${ctx.epoch}/operator/`)) {
         ctx.frame.closed = true;
         return out;
       }
@@ -1629,36 +1758,44 @@ export class StageExecutor {
       const maxRounds = approval.maxRounds;
       for (let round = 1; ; round++) {
         this.backToRunning(ctx, 'validating');
-        const verdict = await this.awaitVerdict(ctx, {
-          kind: 'stage_completion_review',
-          stageName: ctx.stage.name,
-          reason:
-            round === 1
-              ? approval.prompt
-                ? this.render(ctx, approval.prompt).rendered
-                : `Stage "${ctx.stage.name}" completed. Approve to advance, or request changes.`
-              : `Stage "${ctx.stage.name}" updated after feedback (round ${round}). Approve or request more changes.`,
-          summary: summary ?? null,
-          output: ctx.outputText.length > 4000 ? `${ctx.outputText.slice(0, 4000)}…` : ctx.outputText,
-          reviewRound: round,
-          canRequestChanges: approval.allowChanges && round <= maxRounds,
-        });
-        if (verdict.outcome === 'approved') {
-          this.toValidating(ctx);
-          break;
+        // A round the epoch already answered with changes (a resumed attempt):
+        // its revision replays where it was taken, in journal order (ENGINE-R1).
+        let turn = await this.journalledRevision(ctx, round);
+        if (!turn) {
+          const verdict = await this.awaitVerdict(ctx, {
+            kind: 'stage_completion_review',
+            stageName: ctx.stage.name,
+            reason:
+              round === 1
+                ? approval.prompt
+                  ? this.render(ctx, approval.prompt).rendered
+                  : `Stage "${ctx.stage.name}" completed. Approve to advance, or request changes.`
+                : `Stage "${ctx.stage.name}" updated after feedback (round ${round}). Approve or request more changes.`,
+            summary: summary ?? null,
+            output: ctx.outputText.length > 4000 ? `${ctx.outputText.slice(0, 4000)}…` : ctx.outputText,
+            // The full output this gate shows: a verdict given while no frame was alive answers only this output.
+            outputHash: digest(ctx.outputText),
+            reviewRound: round,
+            canRequestChanges: approval.allowChanges && round <= maxRounds,
+          });
+          if (verdict.outcome === 'approved') {
+            this.toValidating(ctx);
+            break;
+          }
+          const feedback = (verdict.feedback ?? '').trim();
+          if (verdict.outcome !== 'changes_requested' || !feedback || !approval.allowChanges || round > maxRounds) {
+            // Nothing to revise (or the rounds are spent): ask again.
+            this.toValidating(ctx);
+            continue;
+          }
+          turn = await this.turn(ctx, {
+            opId: `a${ctx.epoch}/review/${round}/${digest(feedback)}`,
+            role: 'approval_feedback',
+            text: feedback,
+            prepare: true,
+            ...this.nativeSchema(ctx),
+          });
         }
-        const feedback = (verdict.feedback ?? '').trim();
-        if (verdict.outcome !== 'changes_requested' || !feedback || !approval.allowChanges || round > maxRounds) {
-          // Nothing to revise (or the rounds are spent): ask again.
-          this.toValidating(ctx);
-          continue;
-        }
-        const turn = await this.turn(ctx, {
-          opId: `a${ctx.epoch}/review/${round}/${digest(feedback)}`,
-          role: 'approval_feedback',
-          text: feedback,
-          prepare: true,
-        });
         this.recordOutput(ctx, turn);
         checked = await this.validate(ctx);
         summary = await this.summary(ctx, checked.data);
@@ -1672,42 +1809,75 @@ export class StageExecutor {
   }
 
   /**
+   * The revision turn of review round `round` when it is the epoch's next
+   * journalled turn: a settled one replays; one that died in flight is
+   * dropped (its feedback is not re-sent blind) and the round asks again.
+   */
+  private async journalledRevision(ctx: AttemptContext, round: number): Promise<SettledTurn | null> {
+    const next = ctx.journal[ctx.cursor + 1];
+    if (!next?.opId.startsWith(`a${ctx.epoch}/review/${round}/`)) return null;
+    if (next.entry.state === 'settled') return this.turn(ctx, { opId: next.opId, role: 'approval_feedback', text: '' });
+    this.deps.stores.turns.discard(ctx.frame.req.stageRunId, next.opId);
+    ctx.cursor += 1;
+    return null;
+  }
+
+  /**
    * Park the frame on a human (the approval gate): running → awaiting_input
    * (lease cleared, B-2), the admission slot handed back, the deadline
    * paused (B-7); the actor's `deliver_input` resumes it. A verdict carried
-   * by a resume attempt answers the first gate without parking.
+   * by a resume attempt answers the gate it was given for — the same review
+   * round showing the same output — without parking (ENGINE-R1); any other
+   * gate asks again.
    */
   private async awaitVerdict(ctx: AttemptContext, interruptData: Record<string, unknown>): Promise<ApprovalVerdict> {
     const { frame } = ctx;
-    if (frame.carriedVerdict) {
-      const v = frame.carriedVerdict;
+    const carried = frame.carriedVerdict;
+    if (carried) {
       frame.carriedVerdict = undefined;
-      return v;
+      if (carried.reviewRound === interruptData['reviewRound'] && carried.outputHash === interruptData['outputHash']) return carried;
+      await this.emitSession(ctx, 'harness.session_info', {
+        infoType: 'verdict_superseded',
+        message: 'The verdict given after the restart was for another review round or output; the stage asks again.',
+      });
     }
     const verdict = await this.parkFrame(ctx, interruptData);
-    this.backToRunning(ctx, 'awaiting_input');
+    const version = this.backToRunning(ctx, 'awaiting_input');
+    // After the transition, with its version: a client never shows the gate's buttons again for it (CONVINV-R18).
+    await this.emitSession(ctx, 'stage_run.input_received', { outcome: verdict.outcome, version });
     return verdict;
   }
 
   private async parkFrame(ctx: AttemptContext, interruptData: Record<string, unknown>): Promise<ApprovalVerdict> {
     const { frame } = ctx;
     const { stageRunId, runId } = frame.req;
+    // The waiter is in place BEFORE the instance is written `awaiting_input`:
+    // a verdict may arrive the moment it is (ENGINE-R2), and finds it.
+    let answer!: (verdict: ApprovalVerdict | null) => void;
+    const answered = new Promise<ApprovalVerdict | null>((resolve) => {
+      answer = resolve;
+    });
+    const waiter: Waiter = { resolve: answer };
+    if (frame.stop) answer(null);
+    else frame.waiter = waiter;
+    frame.parkedSince = this.now();
     const r = this.deps.stores.stages.transition(stageRunId, ['running'], 'awaiting_input', {
       patch: { interruptData },
       runId,
       now: this.now(),
     });
-    if (!r.ok) throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
+    if (!r.ok) {
+      if (frame.waiter === waiter) frame.waiter = undefined;
+      frame.parkedSince = undefined;
+      throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
+    }
     await this.emitSession(ctx, 'stage_run.awaiting_input', { interruptData, version: r.row.version });
-    frame.parkedSince = this.now();
     frame.ticket?.pause();
     let verdict: ApprovalVerdict | null;
     try {
-      verdict = await new Promise<ApprovalVerdict | null>((resolve) => {
-        if (frame.stop) return resolve(null);
-        frame.waiter = { resolve };
-      });
+      verdict = await answered;
     } finally {
+      if (frame.waiter === waiter) frame.waiter = undefined;
       frame.parkedMs += this.now() - (frame.parkedSince ?? this.now());
       frame.parkedSince = undefined;
       frame.lastProgressAt = this.now();
@@ -1720,7 +1890,6 @@ export class StageExecutor {
     }
     if (!verdict) throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
     await frame.ticket?.resume();
-    await this.emitSession(ctx, 'stage_run.input_received', { outcome: verdict.outcome });
     return verdict;
   }
 
@@ -1728,7 +1897,8 @@ export class StageExecutor {
   private async park(ctx: AttemptContext, _turn: TurnContext, data: Record<string, unknown>, prompt: string): Promise<InterruptResolution> {
     try {
       const verdict = await this.parkFrame(ctx, { ...data, prompt });
-      this.backToRunning(ctx, 'awaiting_input');
+      const version = this.backToRunning(ctx, 'awaiting_input');
+      await this.emitSession(ctx, 'stage_run.input_received', { outcome: verdict.outcome, version });
       return {
         outcome: verdict.outcome,
         ...(verdict.data !== undefined ? { value: verdict.data } : verdict.feedback !== undefined ? { value: { feedback: verdict.feedback } } : {}),
@@ -1740,6 +1910,7 @@ export class StageExecutor {
       return { outcome: 'rejected', reason: 'The stage was stopped (cancelled)' };
     }
   }
+
 
   // ── Amendment of a completed stage (PD-4) ────────────────────
 
@@ -1903,6 +2074,8 @@ export class StageExecutor {
 interface JudgeRecord {
   round: number;
   rule: number;
+  /** The digest of the output judged (what a resumed attempt matches on). */
+  outputHash?: string;
   score: number | null;
   threshold: number;
   reasons: string[];
@@ -1927,9 +2100,12 @@ export function parseJudgeReply(text: string): { score: number | null; reasons: 
 }
 
 /** Which conversation generation a continuing body stage is on (a new one every `compactAfter` iterations). */
-function compactionGeneration(ctx: Pick<AttemptContext, 'loop' | 'stage'>): number {
+function compactionGeneration(ctx: Pick<AttemptContext, 'loop' | 'stage' | 'wrapUp'>): number {
   const n = ctx.stage.compactAfter;
-  return ctx.loop && n ? Math.floor(ctx.loop.k / n) : 0;
+  if (!ctx.loop || !n) return 0;
+  // A wrap-up continues the conversation of the loop's last iteration, not a generation after it (LOOP-R8).
+  const k = ctx.wrapUp ? (ctx.loop.inst.loopState?.k ?? ctx.loop.k) : ctx.loop.k;
+  return Math.floor(k / n);
 }
 
 export function stageSessionSpec(
