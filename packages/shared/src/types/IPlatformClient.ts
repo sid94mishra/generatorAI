@@ -131,6 +131,8 @@ export interface IPlatformClient {
   getChat(chatId: string): Promise<Chat>;
   updateChat(chatId: string, updates: Partial<Pick<Chat, 'model' | 'harnessConfig'>>): Promise<Chat>;
   archiveChat(chatId: string): Promise<void>;
+  /** Restore an archived chat to Active (`PATCH { status: 'active' }`; P3-07 row action). */
+  unarchiveChat(chatId: string): Promise<void>;
   deleteChat(chatId: string): Promise<void>;
   sendChatPrompt(chatId: string, prompt: string, attachments?: Array<{ type: 'file'; path: string; displayName?: string }>): Promise<void>;
   getChatMessages(chatId: string, limit?: number, offset?: number): Promise<ChatMessage[]>;

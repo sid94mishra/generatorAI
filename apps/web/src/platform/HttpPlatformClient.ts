@@ -782,6 +782,15 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
+  /** Restore an archived chat to Active (P3-07 row action; the server has always accepted this PATCH). */
+  async unarchiveChat(chatId: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/chats/${chatId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'active' }),
+    });
+  }
+
   async deleteChat(chatId: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/chats/${chatId}`, { method: 'DELETE' });
   }

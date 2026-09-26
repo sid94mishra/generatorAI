@@ -23,12 +23,14 @@ import {
   liveChatIds,
   type AttentionSnapshot,
   type ChatListCounts,
+  type ChatListItem,
   type ChatListPage,
   type ChatListQuery,
   type ChatListState,
   type ChatListSummary,
   type StatusMapping,
 } from '@generatorai/shared';
+import type { ChatRowModel } from '@generatorai/shared/ui-contract';
 
 /** What a row's Status column says. */
 export type ChatRowState = 'needs_you' | 'running' | 'done' | 'failed' | 'cancelled' | 'archived' | 'idle';
@@ -83,6 +85,31 @@ export function chatRowStatus(state: ChatRowState): StatusMapping | null {
     default:
       return null;
   }
+}
+
+/**
+ * The row contract (`ChatRowModel`, M-11) for one `GET /api/chats` item: the
+ * Status column resolved from the row plus the live attention sets, and the
+ * project name joined in from the caller's own project cache (the list API
+ * only carries `projectId`). Pure — web (`features/chats`) and, next pass,
+ * mobile call it the same way.
+ */
+export function toChatRowModel(item: ChatListItem, live: ChatLiveSets | null, projectName?: string): ChatRowModel {
+  const state = chatRowState(item, live);
+  const mapping = chatRowStatus(state);
+  return {
+    id: item.id,
+    title: item.name,
+    projectId: item.projectId,
+    projectName,
+    agentRef: item.summary.agent?.ref,
+    agentName: item.summary.agent?.name,
+    status: mapping ? { state: mapping.state, label: mapping.label } : null,
+    archived: state === 'archived',
+    changes: item.summary.changes,
+    lastActivityAt: item.summary.lastActivityAt,
+    tags: item.tags,
+  };
 }
 
 /** Global-scope kinds after which a cached chat list is stale. */

@@ -313,6 +313,13 @@ export default [
               from: { element: { type: 'features' } },
               allow: { to: { element: { type: 'features', captured: { domain: '{{ from.element.captured.domain }}' } } } },
             },
+            // Migration scaffolding; removed in P5-09. ChatsList's "New chat"
+            // button keeps opening the legacy dialog until the new create-chat
+            // page/dialog lands (07-phases.md P3-07, 04-screen-map.md §2.1 note).
+            {
+              from: { element: { type: 'features' } },
+              allow: { to: { element: { type: 'legacy' }, file: { path: ['apps/web/src/components/chat/CreateChatDialog.tsx'] } } },
+            },
             { from: { element: { type: 'app' } }, allow: toTypes('ui', 'blocks', 'features', 'data', 'platform', 'legacy') },
             { from: { element: { type: 'data' } }, allow: toTypes('data', 'platform') },
             // Migration scaffolding; removed in P7. The only data → legacy edges

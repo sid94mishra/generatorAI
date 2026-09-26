@@ -5,8 +5,10 @@ import { defineRoute } from './defineRoute.js';
 export const chatsRoutes: RouteObject[] = [
   defineRoute(
     'chats',
-    () => import('@/pages/ChatsListPage.js').then((m) => ({ default: m.ChatsListPage })),
-    { legacyHeader: true, nav: 'chats', title: 'Chats' },
+    () => import('@/features/chats/ChatsListPage.js').then((m) => ({ default: m.ChatsListPage })),
+    // P3-07: the first page ported to the kit. It renders its own PageHeader
+    // (T-01); RouteSlot's LegacyHeader (P3-04) honours the flag.
+    { legacyHeader: false, nav: 'chats', title: 'Chats' },
   ),
   defineRoute(
     'chats/:id',

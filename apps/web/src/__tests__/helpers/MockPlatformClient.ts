@@ -23,6 +23,8 @@ import type {
   CreateWorkflowRunParams,
   AttentionFilter,
   AttentionSnapshot,
+  Agent,
+  Project,
 } from '@generatorai/shared';
 import { emptyAttentionCounts } from '@generatorai/shared';
 import type {
@@ -209,6 +211,13 @@ export class MockPlatformClient implements IPlatformClient {
     throw new Error('Not implemented in mock');
   });
 
+  // Not part of IPlatformClient (HttpPlatformClient-only, D-04's usePlatform()
+  // cast); features/chats' filter chips (P3-07) call these through
+  // useProjects()/useAgents(), so tests need them mocked too.
+  listProjects = vi.fn(async (): Promise<Project[]> => []);
+
+  listAgents = vi.fn(async (): Promise<Agent[]> => []);
+
   listChats = vi.fn(async (_query?: ChatListQuery): Promise<ChatListPage> => ({
     items: [],
     nextCursor: null,
@@ -221,6 +230,8 @@ export class MockPlatformClient implements IPlatformClient {
   });
 
   archiveChat = vi.fn(async (_chatId: string): Promise<void> => {});
+
+  unarchiveChat = vi.fn(async (_chatId: string): Promise<void> => {});
 
   updateChat = vi.fn(async (_chatId: string, _updates: Partial<Pick<Chat, 'model' | 'harnessConfig'>>): Promise<Chat> => {
     throw new Error('Not implemented in mock');

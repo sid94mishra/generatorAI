@@ -1076,6 +1076,20 @@ export function useArchiveChat() {
   });
 }
 
+/** Restore an archived chat to Active (P3-07 row action). */
+export function useUnarchiveChat() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (chatId: string) => platform.unarchiveChat(chatId),
+    onSuccess: (_data, chatId) => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.chats });
+      queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId) });
+    },
+  });
+}
+
 /** Input to `useCancelChat`: a bare chat id (graceful stop) or the two-phase Stop control's press. */
 export type CancelChatInput =
   | string
