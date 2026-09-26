@@ -13,7 +13,7 @@ The coding agent updates this file in every phase PR.
 | 05 Control flow (5A, 5B) | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **5A gate and 5B gate 2026-09-26: see "Phase 05A gate" and "Phase 05B gate" below** | 5A: WP-5A.1 0c3f4e2, 5A.4 0eb53ad, 5A.2 5861460, 5A.3 b3fae98, 5A.6 0103a4d, 5A.5 936e7a1 + 4d6ba7e, lint f7b2626; v59 applied to the dev-DB copy. 5B: spec 3eb76c9, engine 5ffd0a4, fork 1d195c3, builder 429933a, expression editor c8640ef, run page 046f193, clients dcd3b60, templates c46fe80, docs 9e41d05 + 51aee1b, fixes/bans ad2f99d; no migration. Handoffs notes/P05A-handoff.md, notes/P05B-handoff.md |
 | 06 Agents and skill | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **phase gate 2026-09-26: see "Phase 06 gate" below** | v60 21393c6; WP-6.1 a55a1bf (+a569934, 4d7869c), 6.2 52e5497/966e114/c44ba88/a7aadc2, 6.3 a55a1bf, 6.4 cf0ac96, 6.5 52e5497, 6.6 ba3759a, 6.7 e0f06ac, 6.8 fc3f9dc, 6.9 3e685fd/f1db906, deviations 59f9b29; v60 applied to the dev-DB copy |
 | 07 Economy and UX | wf/phase-07-economy-ux | not started | | | |
-| 08 Dynamic workflows | wf/phase-08-dynamic | gated (PD-21) | | | |
+| 08 Dynamic workflows | wf/overhaul (see DEVIATIONS) | WP-8.3, 8.4 done (review deferred to the final review); WP-8.1/8.2/8.8 gated (PD-21), WP-8.5–8.7 backlog | local only | **phase gate 2026-09-26: see "Phase 08 gate" below** | WP-8.3 a0c64df (judge panel, map winner merge), WP-8.4 c090f3e (plan-then-execute expansion); no migration |
 | 09 Release gate | wf/phase-09-release | not started | | | |
 
 ## Phase 00 checklist
@@ -217,6 +217,18 @@ Run at `wf/overhaul` @ f14cf5a (Windows 11, Node 26.8.2, pnpm 10.29.2).
 - **`pnpm workflow:dbcopy-upgrade`** (`C:/gaiwf/dbcopy/generatorai.db`; the real DB was not opened): v52 → v56 via the legacy route in 2.7 s. Chat rows **UNCHANGED** (362 chats, 392 chat sessions, 841 messages); drift 0. Found and fixed on the way: with the baseline at 56 a v55 database took the legacy route and failed (`VERSIONED_ONLY_FROM = 55`, DEVIATIONS).
 - **W-19 / C7:** covered at composer level (session/composer.test.ts). **Live E2E** (advisory, `P02-perm` and the other P02 scenarios): not run.
 - **Acceptance:** no session-config builders outside `services/session/` (the SES and CMS blocks are deleted and banned); chat and stage bound to one agent get the same tools, blocks and MCP servers apart from the documented owner differences (golden + composer tests); a stage widget now carries its stage run id so the run page Widget tab routes it to that stage (unit-tested; not checked in a browser); an automation cannot be saved without a permission mode (schema + route + web form).
+
+## Phase 08 gate (2026-09-26, WP-8.3 and WP-8.4)
+
+Run at `wf/overhaul` after c090f3e (Windows 11, Node 26, pnpm 10), in parallel with P07 in its own worktree (no shared file edited beyond the scheduler/map files P08 needed). IMPLEMENTATION FIRST: no new tests (P08 has no migration); the per-phase gate is typecheck, lint (the preset lint, `check:templates`, `check:workflow-skill`, `check:workflow-spec`), check-no-legacy and the affected package tests. PD-21 stays deferred: WP-8.1, 8.2 and 8.8 (the script runtime) are not implemented; WP-8.5–8.7 stay backlog.
+
+- **`pnpm turbo typecheck`:** pass, 51/51.
+- **`pnpm lint`:** pass (exit 0) — turbo lint (0 errors; warnings unchanged in kind); security, durability, docs, syncio, tokens, workflow-invariants (0 direct stage status writes; **no-preset-in-engine: 0**), no-legacy, migrations-lock (60, unchanged), db-baseline (v60 up to date), workflow-spec (JSON Schemas, FIELDS.md, INVOCATION.md regenerated), **check:templates** (17 templates generated from the presets: + `judge-panel`, `plan-then-execute`), **check:workflow-skill** (both bundles up to date; schema hash 137c7c58ad747119; 27 examples; SKILL.md 158 lines, ~2.9k tokens).
+- **`check-no-legacy`:** 118 banned patterns, 0 hits; legacy comments 0.
+- **Affected package tests** (`pnpm turbo test --concurrency=2 --continue` on workflow-spec, core, db, shared, cli-core, server, workflow-testkit, web; then sdk, client-core, mcp-server, cli): workflow-spec 364 (the builders field-coverage test updated for `expands`), core 1681 / 9 skipped, db 155 / 4 skipped (`BaselineFreshDb` included; no migration), shared 326, cli-core 887, workflow-testkit 47, web 635 (the `check-bundle-size` "FAIL" lines in the log are the script's own fixtures), server 536 + the CSP-hash baseline failure, sdk 8, client-core 293, mcp-server 8, cli 318 + the 5 baseline TUI failures, scripts 28.
+- **Manual engine checks** (throwaway scheduler-harness tests, deleted): the judge panel merges the judge's pick before the judge's successor starts, and a failed winner merge finalizes the run failed (`map_winner_failed`); a plan of three stages with an order edge runs after the planner and before the report, a cyclic plan fails the expansion node (`expansion_invalid`) and skips the report, `join: all` fails and `tolerate` completes on a failed planned stage.
+- **Tests deferred to the final pass** (PHASE-08 "Tests", ungated rows): judge panel picks and merges the winner; the stored plan is replayed after a crash (the LLM is not re-asked); plus the clamp (allow-lists, maxStages, cycles, key collisions) and the UI rendering. The script-runtime, run-diff, pinned-data and cache tests belong to gated/backlog WPs.
+- **Live E2E** (advisory): not run.
 
 ## Phase 06 gate (2026-09-26)
 
