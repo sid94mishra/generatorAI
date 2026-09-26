@@ -28,6 +28,7 @@ import { parseWindowChromeArg } from '../shared/window-chrome-arg';
 import {
   BROWSER_IPC,
   BROWSER_IPC_EVENT,
+  type AnnotationPalette,
   type BrowserBounds,
   type NativeBrowserDescriptor,
   type NativeBrowserEvent,
@@ -229,12 +230,12 @@ const api = {
       ipcRenderer.invoke(BROWSER_IPC.setEmulation, tabId, params),
     setZoom: (tabId: string, factor: number): Promise<void> =>
       ipcRenderer.invoke(BROWSER_IPC.setZoom, tabId, factor),
-    pickElement: (tabId: string): Promise<unknown> =>
-      ipcRenderer.invoke(BROWSER_IPC.pickElement, tabId),
-    captureRegion: (tabId: string): Promise<string | null> =>
-      ipcRenderer.invoke(BROWSER_IPC.captureRegion, tabId),
-    annotateStart: (tabId: string, theme?: string): Promise<void> =>
-      ipcRenderer.invoke(BROWSER_IPC.annotateStart, tabId, theme),
+    pickElement: (tabId: string, palette?: AnnotationPalette): Promise<unknown> =>
+      ipcRenderer.invoke(BROWSER_IPC.pickElement, tabId, palette),
+    captureRegion: (tabId: string, palette?: AnnotationPalette): Promise<string | null> =>
+      ipcRenderer.invoke(BROWSER_IPC.captureRegion, tabId, palette),
+    annotateStart: (tabId: string, palette: AnnotationPalette): Promise<void> =>
+      ipcRenderer.invoke(BROWSER_IPC.annotateStart, tabId, palette),
     annotateStop: (tabId: string): Promise<void> =>
       ipcRenderer.invoke(BROWSER_IPC.annotateStop, tabId),
     annotatePoll: (tabId: string): Promise<unknown> =>

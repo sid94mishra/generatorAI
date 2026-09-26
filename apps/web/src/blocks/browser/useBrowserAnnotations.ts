@@ -6,13 +6,14 @@
 // the live view (useBrowserCapture). The two are mutually exclusive.
 //
 // Native desktop: Inspect toggles in-page annotation (comment pins): a
-// theme-matched review overlay injected INTO the page (the WCV paints on top
+// review overlay coloured from the app theme's tokens (06 §4.4) injected INTO the page (the WCV paints on top
 // of the DOM, so the comment UI must live inside the page). The user drops
 // pins, types a note and presses Add; the toolbar Comments popover lists and
 // sends them. Capture there drags a region that becomes an annotation too.
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useState } from 'react';
+import type { AnnotationPalette } from '@generatorai/design-tokens';
 
 import { postBrowserAction } from './browserApi.js';
 import {
@@ -35,13 +36,13 @@ export interface BrowserAnnotationsOptions {
   workspaceId: string | undefined;
   nativeTabId: string | null;
   nativeAvailable: boolean;
-  /** Theme of the injected review overlay. */
-  theme: 'light' | 'dark';
+  /** Colours of the injected review overlay: `annotationPalette(themeId, appearance)`. */
+  palette: AnnotationPalette;
   onCapture: BrowserCaptureHandler | undefined;
   setError: (message: string | null) => void;
 }
 
-export function useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAvailable, theme, onCapture, setError }: BrowserAnnotationsOptions) {
+export function useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAvailable, palette, onCapture, setError }: BrowserAnnotationsOptions) {
   const [inspectorOn, setInspectorOn] = useState(false);
   const [captureMode, setCaptureMode] = useState(false);
   // In-page annotation (comment pins) mode + live list (native desktop).
@@ -69,7 +70,7 @@ export function useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAv
       try {
         if (next) {
           setCaptureMode(false);
-          await nb.annotateStart(nativeTabId, theme);
+          await nb.annotateStart(nativeTabId, palette);
         } else {
           await nb.annotateStop(nativeTabId);
           setAnnotateItems([]);
@@ -86,7 +87,7 @@ export function useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAv
       await postBrowserAction(workspaceId, { kind: 'inspector', on: nextI });
       setInspectorOn(nextI);
     } catch (err) { setError((err as Error).message); }
-  }, [workspaceId, inspectorOn, nativeAvailable, annotateOn, theme, nativeTabId, setError]);
+  }, [workspaceId, inspectorOn, nativeAvailable, annotateOn, palette, nativeTabId, setError]);
 
   // Poll the in-page overlay while annotate mode is on: keep the toolbar
   // count badge + Comments popover list in sync as the user adds/removes.
@@ -166,7 +167,7 @@ export function useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAv
     const nb = nativeBrowserBridge();
     if (nativeAvailable && nativeTabId && nb?.annotateRegion) {
       try {
-        if (!annotateOn) { await nb.annotateStart(nativeTabId, theme); setAnnotateOn(true); }
+        if (!annotateOn) { await nb.annotateStart(nativeTabId, palette); setAnnotateOn(true); }
         setInspectorOn(false);
         await nb.annotateRegion(nativeTabId);
       } catch (err) { setError((err as Error).message); }
@@ -181,7 +182,7 @@ export function useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAv
       }
       return next;
     });
-  }, [workspaceId, inspectorOn, nativeAvailable, annotateOn, theme, nativeTabId, setError]);
+  }, [workspaceId, inspectorOn, nativeAvailable, annotateOn, palette, nativeTabId, setError]);
 
   return {
     inspectorOn, setInspectorOn,

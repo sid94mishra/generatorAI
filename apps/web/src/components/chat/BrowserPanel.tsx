@@ -31,7 +31,8 @@
 // descriptor poll against the native probe, and that race is pinned.
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { annotationPalette } from '@generatorai/design-tokens';
 import {
   X, ArrowLeft, ArrowRight, RotateCw, Play, Square,
   MousePointerClick, AlertTriangle,
@@ -153,7 +154,9 @@ export function browserTabLabel(state: BrowserTabState | null | undefined): stri
 // ── Component ────────────────────────────────────────────────
 
 export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, embedded = false, agentBusy = false, onTabStateChange, urlScopeKey, visible = true }: BrowserPanelProps): React.JSX.Element | null {
-  const { resolvedTheme } = useTheme();
+  const { resolvedTheme, themeId } = useTheme();
+  // Colours of the overlays injected into native-browser pages (06 §4.4).
+  const overlayPalette = useMemo(() => annotationPalette(themeId, resolvedTheme), [themeId, resolvedTheme]);
   // The native browser tab id for THIS panel instance. Falls back to the
   // workspace id for legacy/non-native callers. All native `browser.*`
   // calls key off this so each RightPane Browser tab is its own WCV.
@@ -178,7 +181,7 @@ export function BrowserPanel({ workspaceId, tabId, open, onClose, onCapture, emb
     inspectorOn, setInspectorOn, captureMode, setCaptureMode,
     annotateOn, annotateItems, commentsOpen, setCommentsOpen,
     handleToggleInspector, handleToggleCapture, sendAnnotations, removeAnnotation, clearAnnotations,
-  } = useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAvailable, theme: resolvedTheme, onCapture, setError });
+  } = useBrowserAnnotations({ open, workspaceId, nativeTabId, nativeAvailable, palette: overlayPalette, onCapture, setError });
 
   // Inspector selection → hand the element to the chat composer via
   // `onCapture`. This is what makes "click to attach element" actually

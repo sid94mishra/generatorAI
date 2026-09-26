@@ -31,6 +31,11 @@ export type {
   BrowserAnnotatePollResult,
 } from '@generatorai/shared';
 
+// The overlay palette is the one browser-IPC payload declared outside shared:
+// it lives next to `annotationPalette()` in `@generatorai/design-tokens`, a
+// dependency-free leaf that shared must not depend on (06 §4.4). Type-only.
+export type { AnnotationPalette } from '@generatorai/design-tokens';
+
 /** IPC channel names — main handles, renderer invokes. */
 export const BROWSER_IPC = {
   available: 'desktop:browser:available',

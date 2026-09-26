@@ -20,6 +20,7 @@ import { BROWSER_IPC, BROWSER_IPC_EVENT, type BrowserBounds, type NativeBrowserE
 import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { getNativeBrowserHost } from './browser-host';
+import { sanitizeAnnotationPalette } from './annotation-palette';
 import {
   connectionState,
   listServers,
@@ -476,16 +477,19 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
       const f = Number(factor);
       if (Number.isFinite(f)) host.setZoom(tabId, f);
     });
-    guardedHandle(BROWSER_IPC.pickElement, async (_e, tabId: string) => {
+    // Overlay palettes are interpolated into scripts run in third-party pages:
+    // validate every value here, before anything reaches executeJavaScript;
+    // an invalid or missing palette becomes the default one (06 §4.4).
+    guardedHandle(BROWSER_IPC.pickElement, async (_e, tabId: string, palette?: unknown) => {
       if (typeof tabId !== 'string' || !tabId) return null;
-      return host.pickElement(tabId);
+      return host.pickElement(tabId, sanitizeAnnotationPalette(palette));
     });
-    guardedHandle(BROWSER_IPC.captureRegion, async (_e, tabId: string) => {
+    guardedHandle(BROWSER_IPC.captureRegion, async (_e, tabId: string, palette?: unknown) => {
       if (typeof tabId !== 'string' || !tabId) return null;
-      return host.captureRegion(tabId);
+      return host.captureRegion(tabId, sanitizeAnnotationPalette(palette));
     });
-    guardedHandle(BROWSER_IPC.annotateStart, async (_e, tabId: string, theme?: string) => {
-      if (typeof tabId === 'string' && tabId) await host.annotateStart(tabId, theme === 'light' ? 'light' : 'dark');
+    guardedHandle(BROWSER_IPC.annotateStart, async (_e, tabId: string, palette?: unknown) => {
+      if (typeof tabId === 'string' && tabId) await host.annotateStart(tabId, sanitizeAnnotationPalette(palette));
     });
     guardedHandle(BROWSER_IPC.annotateStop, async (_e, tabId: string) => {
       if (typeof tabId === 'string' && tabId) await host.annotateStop(tabId);

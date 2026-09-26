@@ -27,9 +27,9 @@ interface GeneratorAIDesktopBrowserApi {
   openDevtools: (tabId: string, panel?: GeneratorAIDesktopBrowserDevtoolsPanel) => Promise<void>;
   setEmulation: (tabId: string, params: GeneratorAIDesktopBrowserEmulationParams | null) => Promise<void>;
   setZoom: (tabId: string, factor: number) => Promise<void>;
-  pickElement: (tabId: string) => Promise<GeneratorAIDesktopBrowserPickResult | null>;
-  captureRegion: (tabId: string) => Promise<string | null>;
-  annotateStart: (tabId: string, theme?: 'light' | 'dark') => Promise<void>;
+  pickElement: (tabId: string, palette?: GeneratorAIDesktopAnnotationPalette) => Promise<GeneratorAIDesktopBrowserPickResult | null>;
+  captureRegion: (tabId: string, palette?: GeneratorAIDesktopAnnotationPalette) => Promise<string | null>;
+  annotateStart: (tabId: string, palette: GeneratorAIDesktopAnnotationPalette) => Promise<void>;
   annotateStop: (tabId: string) => Promise<void>;
   annotatePoll: (tabId: string) => Promise<GeneratorAIDesktopBrowserAnnotatePollResult>;
   annotateSend: (tabId: string, keys?: string[]) => Promise<GeneratorAIDesktopBrowserPickResult[]>;
@@ -74,6 +74,9 @@ type GeneratorAIDesktopNativeBrowserDescriptor = import('@generatorai/shared/cli
 type GeneratorAIDesktopNativeBrowserEvent = import('@generatorai/shared/client').NativeBrowserEvent;
 type GeneratorAIDesktopBrowserPickResult = import('@generatorai/shared/client').BrowserPickResult;
 type GeneratorAIDesktopBrowserAnnotatePollResult = import('@generatorai/shared/client').BrowserAnnotatePollResult;
+// The overlay palette is declared next to `annotationPalette()` in design-tokens
+// (a dependency-free leaf shared must not depend on; 06 §4.4).
+type GeneratorAIDesktopAnnotationPalette = import('@generatorai/design-tokens').AnnotationPalette;
 /* eslint-enable @typescript-eslint/consistent-type-imports */
 
 interface GeneratorAIDesktopServersApi {

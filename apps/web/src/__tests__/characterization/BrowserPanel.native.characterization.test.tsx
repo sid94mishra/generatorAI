@@ -226,11 +226,15 @@ describe('BrowserPanel native — URL bar and tab label', () => {
 // ── Annotate (Inspect) ───────────────────────────────────────
 
 describe('BrowserPanel native — annotate mode (BrowserPanel.tsx:728-824)', () => {
-  it('Inspect starts annotate in the page (theme passed), polls every 400 ms, and stops on the second click', async () => {
+  it('Inspect starts annotate in the page (palette passed), polls every 400 ms, and stops on the second click', async () => {
     await mount();
     fireEvent.click(inspectButton());
     await flush();
-    expect(bridge.api.annotateStart).toHaveBeenCalledWith('tab-1', expect.stringMatching(/^(light|dark)$/));
+    // P4-06 (06 §4.4): the injected overlay takes a token-derived palette instead of 'light' | 'dark'.
+    expect(bridge.api.annotateStart).toHaveBeenCalledWith(
+      'tab-1',
+      expect.objectContaining({ accent: expect.stringMatching(/^#[0-9a-f]{6}$/i) }),
+    );
     expect(fetchStub.count('actions')).toBe(0); // no server inspector in native mode
     expect(inspectButton()).toHaveAttribute('aria-pressed', 'true');
     expect(inspectButton()).toHaveAttribute('title', 'Commenting — click elements to leave notes; click to exit');
