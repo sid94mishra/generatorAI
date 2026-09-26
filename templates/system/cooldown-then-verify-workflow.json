@@ -1,0 +1,111 @@
+{
+  "id": "cooldown-then-verify",
+  "category": "deployment",
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Cool down, then verify",
+      "description": "Deploy, wait ten minutes for metrics to settle, then verify the deployment.",
+      "session": {},
+      "variables": [
+        {
+          "name": "service",
+          "type": "string",
+          "label": "Service",
+          "required": true
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": false,
+        "sandbox": "required",
+        "preprocessingSteps": [],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
+      },
+      "tags": [
+        "wait"
+      ]
+    },
+    "stages": [
+      {
+        "key": "deploy",
+        "name": "Deploy",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "deploy",
+            "text": "Deploy {{variables.service}} and report what changed."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "cooldown",
+        "name": "Cool down",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "wait",
+        "wait": {
+          "type": "timer",
+          "durationMs": 600000
+        }
+      },
+      {
+        "key": "verify",
+        "name": "Verify",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "verify",
+            "text": "Verify {{variables.service}} after the deploy: check its health, error rate and logs.\nDeploy report: {{stages.deploy.summary}}"
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "deploy",
+        "to": "cooldown",
+        "on": "success"
+      },
+      {
+        "from": "cooldown",
+        "to": "verify",
+        "on": "success"
+      }
+    ]
+  }
+}

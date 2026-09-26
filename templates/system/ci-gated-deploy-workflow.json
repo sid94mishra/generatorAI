@@ -1,0 +1,124 @@
+{
+  "id": "ci-gated-deploy",
+  "category": "deployment",
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "CI-gated deploy",
+      "description": "Push a change, wait for CI to report on the commit (its callback URL), then deploy.",
+      "session": {},
+      "variables": [
+        {
+          "name": "change",
+          "type": "text",
+          "label": "The change",
+          "required": true
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": false,
+        "sandbox": "required",
+        "preprocessingSteps": [],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
+      },
+      "tags": [
+        "wait"
+      ]
+    },
+    "stages": [
+      {
+        "key": "push",
+        "name": "Push",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "push",
+            "text": "Commit and push the change for {{variables.change}}. Report the pushed commit sha."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "json",
+          "schema": {
+            "type": "object",
+            "required": [
+              "sha"
+            ],
+            "properties": {
+              "sha": {
+                "type": "string"
+              }
+            }
+          },
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "wait_ci",
+        "name": "Wait for CI",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "wait",
+        "wait": {
+          "type": "event",
+          "eventKey": "concat('ci:', stages.push.output.sha)",
+          "timeoutMs": 3600000,
+          "onTimeout": "fail"
+        }
+      },
+      {
+        "key": "deploy",
+        "name": "Deploy",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "deploy",
+            "text": "CI reported on {{stages.push.output.sha}}:\n{{stages.wait_ci.output.data | json}}\nDeploy it if the build passed; otherwise explain why not."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "push",
+        "to": "wait_ci",
+        "on": "success"
+      },
+      {
+        "from": "wait_ci",
+        "to": "deploy",
+        "on": "success"
+      }
+    ]
+  }
+}
