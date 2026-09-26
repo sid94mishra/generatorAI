@@ -102,7 +102,8 @@ export interface ScopeRequestSummary {
 
 export interface CreatePairingInput {
   platform: 'mobile' | 'web' | 'cli' | 'desktop';
-  deviceName?: string;
+  /** Required by the server (1–64 characters). */
+  deviceName: string;
   scopes?: string[];
   includeRelay?: boolean;
 }

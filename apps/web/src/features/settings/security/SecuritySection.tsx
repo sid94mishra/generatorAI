@@ -8,7 +8,7 @@
 // the error callout at the top — it names the exact thing to fix.
 // ────────────────────────────────────────────────────────────────
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   securityErrorMessage,
   useDevices,
@@ -35,6 +35,11 @@ export function SecuritySection() {
   const refresh = useRefreshSecurity();
   const [actionError, setActionError] = useState<string | null>(null);
   const onError = (err: unknown) => setActionError(securityErrorMessage(err));
+  // A failed action may be far below the callout: bring the message into view.
+  const errorRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (actionError) errorRef.current?.scrollIntoView?.({ block: 'nearest' });
+  }, [actionError]);
 
   const loadError = [posture, network, devices, pending, requests].find((q) => q.error)?.error;
   const error = actionError ?? (loadError ? securityErrorMessage(loadError) : null);
@@ -46,6 +51,8 @@ export function SecuritySection() {
     >
       {error ? (
         <Callout
+          ref={errorRef}
+          role="alert"
           tone="err"
           action={actionError ? <IconButton size="sm" icon="x" label="Dismiss" onClick={() => setActionError(null)} /> : null}
         >

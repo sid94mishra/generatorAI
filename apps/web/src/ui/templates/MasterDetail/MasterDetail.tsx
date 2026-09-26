@@ -49,20 +49,18 @@ export function MasterDetail({
   className,
   'data-testid': testId,
 }: MasterDetailProps) {
+  // The container and the row/column switch are two elements: a container
+  // query never styles its own container, only descendants.
   return (
-    <div
-      className={cn(
-        '@container/master-detail flex min-h-0 min-w-0 flex-1 flex-col @4xl/master-detail:flex-row',
-        className,
-      )}
-      data-testid={testId}
-    >
-      <div className={cn('flex min-h-0 shrink-0 flex-col', LIST_WIDTH[listWidth])}>{list}</div>
-      {bareDetail ? (
-        <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">{detail}</div>
-      ) : (
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-7 py-6">{detail}</div>
-      )}
+    <div className={cn('@container/master-detail flex min-h-0 min-w-0 flex-1', className)} data-testid={testId}>
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col @4xl/master-detail:flex-row">
+        <div className={cn('flex min-h-0 shrink-0 flex-col', LIST_WIDTH[listWidth])}>{list}</div>
+        {bareDetail ? (
+          <div className="relative flex min-h-0 min-w-0 flex-1 flex-col">{detail}</div>
+        ) : (
+          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5 overflow-y-auto px-7 py-6">{detail}</div>
+        )}
+      </div>
     </div>
   );
 }

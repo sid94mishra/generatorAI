@@ -25,7 +25,8 @@
 // outer `Field` too, for the error line; `invalid` here only styles the cells.
 // `readOnly` shows a code this device generated (Settings › Security › Pair a
 // new device) in the same 3×4 cells: selectable and focusable, not editable,
-// drawn without the sunken input fill.
+// drawn without the sunken input fill, in compact 32×32 cells (`title` step)
+// so a whole code fits a settings column.
 // ────────────────────────────────────────────────────────────────
 
 import { Fragment } from 'react';
@@ -65,8 +66,8 @@ export function PairingCodeInput({ value, onValueChange, invalid = false, disabl
             <OTPField.Input
               aria-label={index === 0 ? undefined : `Character ${index + 1} of ${PAIRING_CODE_LENGTH}`}
               className={cn(
-                'h-footer w-12 rounded-control border text-center font-mono text-heading font-medium text-fg transition-control outline-none',
-                readOnly ? 'border-line bg-transparent' : 'bg-sunken',
+                'rounded-control border text-center font-mono font-medium text-fg transition-control outline-none',
+                readOnly ? 'h-control-lg w-8 border-line bg-transparent text-title' : 'h-footer w-12 bg-sunken text-heading',
                 invalid ? 'border-err' : !readOnly && 'border-line-strong',
                 fieldFocus,
               )}

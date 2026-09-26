@@ -157,7 +157,7 @@ export function PairDeviceGroup({
     create.mutate(
       {
         platform,
-        ...(deviceName.trim() ? { deviceName: deviceName.trim() } : {}),
+        deviceName: deviceName.trim(),
         ...(preset.scopes ? { scopes: preset.scopes } : {}),
         ...(includeRelay && relayOffered ? { includeRelay: true } : {}),
       },
@@ -185,7 +185,7 @@ export function PairDeviceGroup({
       ) : (
         <div className="flex flex-col gap-3 rounded-panel border border-line bg-raised p-4">
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Device name" optional>
+            <Field label="Device name">
               <Input size="sm" value={deviceName} onChange={(e) => setDeviceName(e.target.value)} placeholder="e.g. Pixel 9" />
             </Field>
             <Field label="Platform">
@@ -212,7 +212,14 @@ export function PairDeviceGroup({
               label="Include relay access — lets this device reconnect from outside your network"
             />
           ) : null}
-          <Button variant="primary" icon="scan" className="self-start" loading={create.isPending} onClick={generate}>
+          <Button
+            variant="primary"
+            icon="scan"
+            className="self-start"
+            disabled={!deviceName.trim()}
+            loading={create.isPending}
+            onClick={generate}
+          >
             Generate pairing code
           </Button>
         </div>
