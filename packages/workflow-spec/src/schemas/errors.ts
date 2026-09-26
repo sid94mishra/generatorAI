@@ -70,8 +70,3 @@ export const STAGE_ERROR_CODES = Object.keys(STAGE_ERROR_CODE_CLASS) as [StageEr
 export const StageErrorCodeSchema = z
   .enum(STAGE_ERROR_CODES)
   .describe('A classified stage error code (see the error taxonomy); its class decides the default action');
-
-/** The codes of one class, in declaration order. */
-export function errorCodesOfClass(cls: ErrorClass): StageErrorCode[] {
-  return STAGE_ERROR_CODES.filter((code) => STAGE_ERROR_CODE_CLASS[code] === cls);
-}

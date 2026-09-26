@@ -152,11 +152,6 @@ function stageExtras(stage: StageSpec | undefined): Record<string, ExprType> {
   return {};
 }
 
-/** `stages.<key>` of a stage whose output needs no graph. */
-export function stageType(stage: StageSpec): ExprType {
-  return stageTypeOf(stageOutputType(stage), stageExtras(stage));
-}
-
 const CONTAINER_ROOTS: Record<string, string> = {
   loop: 'loop is only available inside a loop body and in the loop settings',
   loops: 'loops is only available inside a loop body',

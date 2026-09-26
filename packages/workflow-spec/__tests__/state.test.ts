@@ -8,8 +8,6 @@ import {
   WORKFLOW_RUN_TRANSITIONS,
   isLegalStageRunTransition,
   isLegalWorkflowRunTransition,
-  stageRunTransitionsFrom,
-  workflowRunTransitionsFrom,
   type StageNodeClass,
   type StageRunState,
   type WorkflowRunState,
@@ -42,7 +40,7 @@ describe('stage-run transitions (G5 §5.9)', () => {
   });
 
   it('terminal states have no exits', () => {
-    for (const s of TERMINAL_STAGE_RUN_STATES) expect(stageRunTransitionsFrom(s)).toEqual([]);
+    for (const s of TERMINAL_STAGE_RUN_STATES) expect(STAGE_RUN_TRANSITIONS.filter((t) => t.from === s)).toEqual([]);
   });
 
   it.each<StageNodeClass>(['work', 'wait', 'container'])('every %s state is reachable from pending and can reach a terminal state', (cls) => {
@@ -105,7 +103,7 @@ describe('workflow-run transitions (G5 §5.10)', () => {
   });
 
   it('terminal states have no exits (a retry is a fork)', () => {
-    for (const s of TERMINAL_WORKFLOW_RUN_STATES) expect(workflowRunTransitionsFrom(s)).toEqual([]);
+    for (const s of TERMINAL_WORKFLOW_RUN_STATES) expect(WORKFLOW_RUN_TRANSITIONS.filter((t) => t.from === s)).toEqual([]);
     expect(isLegalWorkflowRunTransition('failed', 'created')).toBe(false);
   });
 

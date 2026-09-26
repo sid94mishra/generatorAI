@@ -15,7 +15,6 @@ export {
   GraphTypes,
   checkOutputType,
   isContainerKind,
-  stageType,
   stageTypeOf,
   stageOutputType,
   variableType,
