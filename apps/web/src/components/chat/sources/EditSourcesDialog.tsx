@@ -22,13 +22,13 @@ import {
   SourceControlOptionsFields,
   DEFAULT_SOURCE_CONTROL_OPTIONS,
 } from '@/components/scm/SourceControlOptionsFields.js';
-import { SourcePicker } from './SourcePicker.js';
 import {
+  SourcePicker,
   draftsFromSpecs,
   draftsToSources,
   validateDrafts,
   type DraftSource,
-} from './sourceModel.js';
+} from '@/blocks/sources/index.js';
 
 export interface EditSourcesDialogProps {
   open: boolean;

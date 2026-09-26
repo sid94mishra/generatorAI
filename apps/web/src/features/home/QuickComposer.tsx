@@ -10,8 +10,9 @@
 //
 // Start creates the chat (`useCreateChat`), sends the task as its first
 // message and opens it. "More options" hands the draft to the full New chat
-// surface (`/chats?new=1` with `{ draft }` in the navigation state until
-// P5-09's `/chats/new`, 04 R-1).
+// surface (`/chats/new` with `{ draft }` in the navigation state, 04 R-1;
+// `CreateChatDraft` — P5-09's richer shape, this composer only ever fills a
+// handful of its fields).
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useState, type KeyboardEvent } from 'react';
@@ -73,7 +74,7 @@ export function QuickComposer() {
   const busy = createChat.isPending || sendPrompt.isPending;
   const canStart = prompt.trim().length > 0 && !busy;
 
-  const draft = (): CreateChatDraft => ({
+  const draft = (): Partial<CreateChatDraft> => ({
     ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
     ...(projectId ? { projectId } : {}),
     ...(agentRef ? { agentRef } : {}),
@@ -197,7 +198,7 @@ export function QuickComposer() {
 
         <div className="flex-1" />
         <Kbd keys={SEND_KEYS} aria-hidden />
-        <Button variant="ghost" size="sm" onClick={() => navigate('/chats?new=1', { state: { draft: draft() } })}>
+        <Button variant="ghost" size="sm" onClick={() => navigate('/chats/new', { state: { draft: draft() } })}>
           More options
         </Button>
         <IconButton

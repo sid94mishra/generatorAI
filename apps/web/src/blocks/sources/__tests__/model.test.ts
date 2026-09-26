@@ -13,7 +13,7 @@ import {
   uniqueAlias,
   validateDrafts,
   type DraftSource,
-} from '../sourceModel.js';
+} from '../model.js';
 
 const CHAT = 'Cart fix!';
 

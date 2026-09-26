@@ -26,6 +26,7 @@ import { AppFrame } from '@/ui/shell/AppFrame/AppFrame.js';
 import { MainCard } from '@/ui/shell/MainCard/MainCard.js';
 import { SidebarFlyout } from '@/ui/shell/SidebarFlyout/SidebarFlyout.js';
 import { CommandPalette } from '@/features/palette/index.js';
+import { NewChatDialog } from '@/features/chats/create/NewChatDialog.js';
 import { ShortcutsSheet } from '@/components/layout/ShortcutsSheet.js';
 import { ConnectedRail } from './ConnectedRail.js';
 import { ConnectedSidebar } from './ConnectedSidebar.js';
@@ -94,6 +95,9 @@ export function ShellRoute() {
         <>
           {/* The command palette (palette.toggle: Mod+K, menu, Search buttons). */}
           <CommandPalette />
+          {/* 04 §0 cross-feature rule: mounted once here, opened from anywhere
+              via useNewChatStore (chat.new, ChatsList's header button, …). */}
+          <NewChatDialog />
           <ShortcutsSheet />
           {/* The chat workspace's "Edit sources…" dialog (editSourcesStore). */}
           <EditSourcesHost />

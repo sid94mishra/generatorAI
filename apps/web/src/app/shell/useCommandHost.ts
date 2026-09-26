@@ -40,6 +40,7 @@ import { registerCommandRunner } from '@/lib/commandRunner.js';
 import { useShellStore } from '@/stores/shellStore.js';
 import { useDockStore } from '@/stores/dockStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
+import { useNewChatStore } from '@/stores/newChatStore.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import { useReloadScripts } from '@/hooks/scriptQueries.js';
 
@@ -72,8 +73,10 @@ export const HANDLERS: Record<RendererCommandId, (ctx: CommandCtx) => void> = {
   'nav.automations': navDestination('nav.automations'),
   'nav.scripts': navDestination('nav.scripts'),
   'app.settings': () => useSettingsUiStore.getState().openSettings(),
-  // The new-chat dialog opens from the Chats list until it becomes a global overlay (P5).
-  'chat.new': navTo('/chats?new=1'),
+  // R-1 (04 §0): the sidebar icon, Ctrl/Cmd+N, and the palette action all open
+  // the 640 dialog, not the full `/chats/new` page (that is the dialog's own
+  // "More options" link, or a direct deep link).
+  'chat.new': () => useNewChatStore.getState().open(),
   'workflow.new': navTo('/workflows/new'),
   'project.new': navTo('/projects/new'),
   'automation.new': navTo('/automations/new'),

@@ -1,20 +1,20 @@
 {
   "counts": {
-    "hardcodedPaletteClass": 207,
+    "hardcodedPaletteClass": 231,
     "handRolledOverlay": 1,
-    "rawInputElement": 10,
-    "adHocSpinner": 2,
-    "defaultTextSize": 572,
-    "whiteBlackClass": 21,
-    "defaultRadius": 353,
-    "defaultShadow": 42,
-    "arbitraryValue": 967,
-    "varInClassString": 577,
-    "legacyColorVar": 606,
-    "legacyTokenUtility": 1486,
-    "lucideDirectImport": 81,
+    "rawInputElement": 14,
+    "adHocSpinner": 3,
+    "defaultTextSize": 741,
+    "whiteBlackClass": 22,
+    "defaultRadius": 461,
+    "defaultShadow": 46,
+    "arbitraryValue": 1080,
+    "varInClassString": 619,
+    "legacyColorVar": 648,
+    "legacyTokenUtility": 2115,
+    "lucideDirectImport": 100,
     "rawHeadlessImport": 1,
-    "unstyledVariant": 25
+    "unstyledVariant": 29
   },
   "locked": [
     "legacyGlassClass",

@@ -9,8 +9,11 @@
 // (absent, never invented — D-36). Web (`ui/primitives/StatusBadge` +
 // `features/chats`) and, next pass, mobile render the same shape.
 //
-// `CreateChatDraft` is the New chat draft the create surfaces hand to each
-// other (04 R-1); `chatNameFromPrompt` names a chat started from a prompt.
+// `CreateChatDraft` and `chatNameFromPrompt` moved to `chatCreate.ts` (P5-09)
+// once the New chat dialog / `/chats/new` needed a richer draft than Home's
+// quick composer alone did — same names, same barrel, so nothing importing
+// from `@generatorai/shared/ui-contract` (not this file directly) had to
+// change.
 //
 // Types and pure helpers, dependency-free: only `./status.js` (a sibling ui-contract
 // module), never the package root — safe for the Electron main bundle.
@@ -48,30 +51,4 @@ export interface ChatRowModel {
   /** ISO timestamp for the Activity column. */
   lastActivityAt: string;
   tags: readonly string[];
-}
-
-/**
- * The New chat draft one create surface hands to another (04 R-1): Home's quick
- * composer "More options" → the New chat dialog / `/chats/new`, carried in the
- * navigation state as `{ draft }`. Every field is optional; the receiver keeps
- * its own defaults for anything absent.
- */
-export interface CreateChatDraft {
-  /** The typed task; the receiver derives the chat name from it. */
-  prompt?: string;
-  projectId?: string;
-  /** Portable `scope:slug` agent ref. */
-  agentRef?: string;
-  model?: string;
-  /** How the project's codebases are mounted. */
-  sourceMode?: 'in-place' | 'worktree';
-}
-
-/** A chat name from the first line of a prompt, clipped to `max` characters at a word break. */
-export function chatNameFromPrompt(prompt: string, max = 60): string {
-  const line = prompt.trim().split('\n')[0]?.trim() ?? '';
-  if (line.length <= max) return line;
-  const cut = line.slice(0, max - 1);
-  const space = cut.lastIndexOf(' ');
-  return `${(space > max / 2 ? cut.slice(0, space) : cut).trimEnd()}…`;
 }
