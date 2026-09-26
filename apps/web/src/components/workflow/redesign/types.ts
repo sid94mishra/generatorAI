@@ -3,9 +3,9 @@
 // Preview only. Feed mock data at /__redesign/workflow-run.
 // ────────────────────────────────────────────────────────────────
 
-import type { TimelineStep, UsageInfo } from '@/components/chat/redesign/types.js';
+import type { TimelineStep, UsageInfo } from '@generatorai/client-core';
 import type { ContextUsageSnapshot } from '@generatorai/client-core';
-import type { StreamSegment } from '@/components/agent/deriveTimeline.js';
+import type { StreamSegment } from '@generatorai/client-core';
 
 export type StageStatus =
   | 'pending'

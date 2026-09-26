@@ -24,7 +24,7 @@ import {
 import { Badge, Button, Spinner, Textarea, type BadgeTone } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { PageHeader } from '@/components/ui/index.js';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { InlineDiff } from '@/components/chat/InlineDiff.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
 import { toast } from '@/components/Toast.js';
@@ -189,7 +189,7 @@ export function PullRequestPage() {
         {/* ── Description ───────────────────────────────────────── */}
         {data.body?.trim() && (
           <section className="rounded-lg border border-border bg-card p-4" data-testid="pr-body">
-            <MarkdownRenderer content={data.body} />
+            <Markdown>{data.body}</Markdown>
           </section>
         )}
 
@@ -285,7 +285,7 @@ export function PullRequestPage() {
                     )}
                     <Badge tone="neutral" size="sm">{comment.kind}</Badge>
                   </div>
-                  <MarkdownRenderer content={comment.body} />
+                  <Markdown>{comment.body}</Markdown>
                 </li>
               ))}
             </ul>

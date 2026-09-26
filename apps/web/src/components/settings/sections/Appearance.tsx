@@ -35,6 +35,10 @@ import {
 } from '@generatorai/design-tokens';
 import { SectionHeader, SettingsCard } from '../shared.js';
 import { Button } from '@/components/ui/index.js';
+import { CodeBlock } from '@/ui/patterns/CodeBlock/CodeBlock.js';
+
+/** The preview card's code sample: syntax colours come from the theme's `--syntax-*` tokens. */
+const SYNTAX_PREVIEW = '// syntax follows the theme too\nconst run = await start({ retries: 3 });';
 
 const MODE_ICONS: Record<ModeDef['icon'], React.ReactNode> = {
   Sun: <Sun className="h-4 w-4" />,
@@ -301,17 +305,7 @@ export function AppearanceSection() {
                 Failed
               </span>
             </div>
-            <pre className="overflow-x-auto rounded-md border border-border bg-background p-3 font-mono text-xs">
-              <code className="hljs">
-                <span className="hljs-comment">{'// syntax follows the theme too'}</span>
-                {'\n'}
-                <span className="hljs-keyword">const</span>{' '}
-                <span className="hljs-variable">run</span> ={' '}
-                <span className="hljs-keyword">await</span>{' '}
-                <span className="hljs-title">start</span>({'{'} retries:{' '}
-                <span className="hljs-number">3</span> {'}'});
-              </code>
-            </pre>
+            <CodeBlock lang="typescript">{SYNTAX_PREVIEW}</CodeBlock>
           </div>
         </SettingsCard>
       </div>

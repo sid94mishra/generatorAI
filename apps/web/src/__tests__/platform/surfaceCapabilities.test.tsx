@@ -34,9 +34,8 @@ import {
   liveViewTransport,
   surfaceCapabilities,
 } from '@/platform/surfaceCapabilities.js';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
-import { PlanCard } from '@/components/chat/PlanCard.js';
-import { QuestionCard } from '@/components/chat/QuestionCard.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
+import { PlanReadyCard as PlanCard, QuestionCard } from '@/blocks/transcript/index.js';
 import { WidgetFrame } from '@/components/widgets/WidgetFrame.js';
 import { openMultiplexedStream, resetMuxStreamForTests } from '@/platform/muxStream.js';
 import type { PlanBlock, QuestionBlock, WidgetBlock } from '@/stores/streamStore.js';
@@ -178,7 +177,7 @@ describe('W29 — fileAttachment / keyboardShortcuts', () => {
 describe('W29 — markdownRendering', () => {
   //   @capability-proof web/markdownRendering
   it('renders markdown structure, not the source text', () => {
-    render(<MarkdownRenderer content={'# Title\n\nsome `code` here'} />);
+    render(<Markdown>{'# Title\n\nsome `code` here'}</Markdown>);
     expect(screen.getByRole('heading', { level: 1, name: 'Title' })).toBeInTheDocument();
     // The claim is that the surface renders markdown, so the raw backticks
     // must be gone and a real <code> element must exist in their place.

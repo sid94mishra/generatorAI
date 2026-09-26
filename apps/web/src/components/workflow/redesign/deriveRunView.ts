@@ -13,9 +13,9 @@ import type {
 } from '@generatorai/shared';
 import { interpolateVariables } from '@generatorai/shared';
 import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js';
-import type { UsageInfo } from '@/components/chat/redesign/types.js';
+import type { UsageInfo } from '@generatorai/client-core';
 import type { RunView, StageView, StageStatus, RunStatus, FileChange, HookInvocation } from './types.js';
-import { deriveTimeline, deriveAnswer, deriveSegments, countTools } from '@/components/agent/deriveTimeline.js';
+import { deriveTimeline, deriveAnswer, deriveSegments, countTools } from '@generatorai/client-core';
 
 // ── Status normalizers ────────────────────────────────────────
 

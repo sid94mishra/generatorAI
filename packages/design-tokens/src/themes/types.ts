@@ -297,9 +297,9 @@ export interface TerminalPalette {
 }
 
 /**
- * Syntax roles for highlight.js. Deliberately small: a dozen roles cover every
- * `hljs-*` class we actually render, and a bigger set would mean a bigger
- * surface for six themes to disagree on.
+ * Syntax roles, emitted as `--syntax-*` and mapped from TextMate scopes by the
+ * web Shiki theme (apps/web ui/patterns/CodeBlock/highlighter.ts). Deliberately
+ * small: a bigger set would mean a bigger surface for themes to disagree on.
  */
 export interface SyntaxTokens {
   comment: string;

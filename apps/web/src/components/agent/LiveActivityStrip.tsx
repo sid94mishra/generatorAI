@@ -20,7 +20,7 @@ import {
   computeLiveCounters,
   countRunningBackgroundTasks,
   formatLiveCounters,
-} from '@/components/agent/liveCounters.js';
+} from '@generatorai/client-core';
 
 /** Running-or-pending background workers, for the Background Tasks tab badge. */
 export function useRunningBackgroundTaskCount(sessionId: string | undefined): number {

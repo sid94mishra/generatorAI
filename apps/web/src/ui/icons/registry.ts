@@ -25,6 +25,7 @@ import {
   BellIcon,
   BookOpenIcon,
   BotIcon,
+  BrainIcon,
   CalendarClockIcon,
   CalendarIcon,
   CameraIcon,
@@ -63,6 +64,7 @@ import {
   HouseIcon,
   InfoIcon,
   KeyRoundIcon,
+  ImageIcon,
   KeyboardIcon,
   LayersIcon,
   LayoutGridIcon,
@@ -236,6 +238,8 @@ export const ICON_REGISTRY = {
   pin: PinIcon,
   keyboard: KeyboardIcon,
   loader: LoaderCircleIcon,
+  think: BrainIcon,
+  image: ImageIcon,
 } as const satisfies Record<IconConcept, LucideIcon>;
 
 /** The lucide component for a concept (for APIs that take a component, e.g. a nav item). */

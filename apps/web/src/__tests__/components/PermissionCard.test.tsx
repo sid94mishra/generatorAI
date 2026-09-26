@@ -18,7 +18,7 @@ import { render, screen, cleanup, fireEvent } from '@testing-library/react';
 import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { StreamEventRouter, applyStreamEffects, type StreamsRecord } from '@generatorai/client-core';
 
-import { PermissionCard } from '@/components/chat/PermissionCard.js';
+import { PermissionCard } from '@/blocks/transcript/index.js';
 import { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import { __setAllowUnauthenticatedForTests } from '@/platform/authRuntime.js';
 

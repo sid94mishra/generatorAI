@@ -39,8 +39,8 @@ import { FileExplorer, FileExplorerEmptyState } from '@/components/shared/FileEx
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useEditorTarget } from '@/stores/editorTargetStore.js';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
-import { extToLang } from '@/components/common/SyntaxHighlightedCode.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
+import { langFromPath } from '@/ui/patterns/CodeBlock/langFromPath.js';
 import { FileCodeView } from '@/components/diff/FileCodeView.js';
 import { DiffProviders } from '@/components/diff/DiffProviders.js';
 import { toast } from '@/components/Toast.js';
@@ -439,7 +439,7 @@ function FilePreviewPanel({
 
   const ext = filePath.split('.').pop() ?? '';
   const isMarkdown = ext === 'md' || ext === 'mdx';
-  const lang = extToLang(ext);
+  const lang = langFromPath(filePath);
   const fileName = filePath.split('/').pop() ?? filePath;
   /** Markdown only: rendered preview vs. highlighted source. */
   const [markdownMode, setMarkdownMode] = useState<'preview' | 'code'>('preview');
@@ -510,7 +510,7 @@ function FilePreviewPanel({
         {content !== undefined && !isLoading && (
           isMarkdown && markdownMode === 'preview' ? (
             <div className="px-5 py-4">
-              <MarkdownRenderer content={content} className="max-w-none" />
+              <Markdown>{content}</Markdown>
             </div>
           ) : (
             // Shares the diff viewer's worker pool + Shiki theme, so a

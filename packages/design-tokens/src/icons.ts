@@ -149,6 +149,10 @@ const UI_CONCEPTS = {
   keyboard: { lucide: 'keyboard' },
   /** The Spinner glyph (P-12): the same drawing as status-running, but not a status. */
   loader: { lucide: 'loader-circle' },
+  /** Transcript reasoning (B-16 ThoughtPill, `think` steps). */
+  think: { lucide: 'brain' },
+  /** A screenshot or image a step produced. */
+  image: { lucide: 'image' },
 } as const satisfies Record<string, IconConceptDef>;
 
 export const ICON_CONCEPTS = {

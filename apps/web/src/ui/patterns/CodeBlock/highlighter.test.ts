@@ -1,5 +1,52 @@
 import { describe, expect, it } from 'vitest';
-import { highlightCode, isSupportedLang, LANG_LOADERS, withPreChrome } from './highlighter.js';
+import { highlightCode, highlightTokens, isSupportedLang, LANG_LOADERS, resolveLang, withPreChrome } from './highlighter.js';
+import { langFromPath } from './langFromPath.js';
+
+describe('resolveLang', () => {
+  it('maps fence aliases and case to a highlightable language', () => {
+    expect(resolveLang('ts')).toBe('typescript');
+    expect(resolveLang('SH')).toBe('bash');
+    expect(resolveLang('py')).toBe('python');
+    expect(resolveLang('python')).toBe('python');
+  });
+
+  it('returns undefined for plain text and unknown languages', () => {
+    expect(resolveLang('text')).toBeUndefined();
+    expect(resolveLang('cobol')).toBeUndefined();
+    expect(resolveLang(undefined)).toBeUndefined();
+  });
+});
+
+describe('langFromPath', () => {
+  it('names the language of a path by extension or well-known basename', () => {
+    expect(langFromPath('src/App.tsx')).toBe('tsx');
+    expect(langFromPath('C:\\repo\\main.py')).toBe('python');
+    expect(langFromPath('config/mcp.JSON')).toBe('json');
+    expect(langFromPath('infra/Dockerfile')).toBe('dockerfile');
+    expect(langFromPath('README.md')).toBe('markdown');
+  });
+
+  it('returns undefined for an unknown or missing extension', () => {
+    expect(langFromPath('notes.xyz')).toBeUndefined();
+    expect(langFromPath('LICENSE')).toBeUndefined();
+  });
+});
+
+describe('highlightTokens', () => {
+  it(
+    'returns one token array per line coloured by the CSS-variable theme',
+    async () => {
+      const lines = await highlightTokens('const a = 1;\nlet b = 2;', 'ts');
+      expect(lines).toHaveLength(2);
+      expect(lines![0]!.some((t) => t.color === 'var(--syntax-keyword)')).toBe(true);
+    },
+    20_000,
+  );
+
+  it('returns null for an unsupported language', async () => {
+    await expect(highlightTokens('x', 'cobol')).resolves.toBeNull();
+  });
+});
 
 describe('isSupportedLang', () => {
   it('recognizes a language with a registered loader', () => {

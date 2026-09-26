@@ -5,7 +5,8 @@
 //
 // Card: 1px `line`, `rounded-panel`, `bg-raised`, overflow hidden.
 // Header 36h (`h-tab`), pad 0 12, gap 8, tinted by `tone` (`bg-<tone>-bg`,
-// default `warn` — a gate waits on the user), bottom `line-soft` rule:
+// default `warn` — a gate waits on the user; `idle` = sunken, for a gate that
+// expired), bottom `line-soft` rule:
 // 16px tone icon · title (ui 600) · meta (small, right, truncated).
 // Body pad 12, gap 10: `children`, then the action row — explanation (small
 // fg-3, truncated) · spacer · sm Buttons, each with its keyboard default as a
@@ -19,13 +20,15 @@ import { cn } from '../../lib/cn.js';
 import { Icon } from '../../icons/Icon.js';
 import { Button, type ButtonVariant } from '../../primitives/Button/Button.js';
 
-export type GateTone = 'warn' | 'err' | 'ok' | 'run';
+/** `idle` = a gate that can no longer be answered (expired): neutral header. */
+export type GateTone = 'warn' | 'err' | 'ok' | 'run' | 'idle';
 
 const HEADER_BG: Record<GateTone, string> = {
   warn: 'bg-warn-bg',
   err: 'bg-err-bg',
   ok: 'bg-ok-bg',
   run: 'bg-run-bg',
+  idle: 'bg-sunken',
 };
 
 const ICON_TEXT: Record<GateTone, string> = {
@@ -33,6 +36,7 @@ const ICON_TEXT: Record<GateTone, string> = {
   err: 'text-err',
   ok: 'text-ok',
   run: 'text-run',
+  idle: 'text-fg-3',
 };
 
 export interface GateAction {
@@ -43,6 +47,8 @@ export interface GateAction {
   onClick?: () => void;
   disabled?: boolean;
   loading?: boolean;
+  /** Accessible name when the visible label is not specific enough ("Allow once" → "Allow Bash"). */
+  ariaLabel?: string;
   'data-testid'?: string;
 }
 
@@ -57,6 +63,8 @@ export interface GateCardFrameProps extends Omit<ComponentProps<'div'>, 'title'>
   /** Left side of the action row: what the primary action will do. */
   explanation?: ReactNode;
   actions: readonly GateAction[];
+  /** Extra controls after the actions (a split button's menu trigger). */
+  trailing?: ReactNode;
 }
 
 /** The frame of a gate card (approval, plan, question): tinted header, body, keyboard-default actions. */
@@ -68,11 +76,12 @@ export function GateCardFrame({
   children,
   explanation,
   actions,
+  trailing,
   className,
   ...rest
 }: GateCardFrameProps) {
   const titleId = useId();
-  const hasActionRow = explanation != null || actions.length > 0;
+  const hasActionRow = explanation != null || actions.length > 0 || trailing != null;
   return (
     <div
       role="group"
@@ -95,12 +104,13 @@ export function GateCardFrame({
           <div className="flex min-w-0 items-center gap-2">
             {explanation != null ? <span className="min-w-0 flex-1 truncate text-small text-fg-3">{explanation}</span> : null}
             <div className="ml-auto flex shrink-0 items-center gap-2">
-              {actions.map(({ label, variant = 'secondary', shortcut, onClick, disabled, loading, 'data-testid': testId }) => (
+              {actions.map(({ label, variant = 'secondary', shortcut, onClick, disabled, loading, ariaLabel, 'data-testid': testId }) => (
                 <Button
                   key={label}
                   size="sm"
                   variant={variant}
                   {...(shortcut ? { shortcut } : {})}
+                  {...(ariaLabel ? { 'aria-label': ariaLabel } : {})}
                   onClick={onClick}
                   disabled={disabled}
                   loading={loading}
@@ -109,6 +119,7 @@ export function GateCardFrame({
                   {label}
                 </Button>
               ))}
+              {trailing}
             </div>
           </div>
         ) : null}

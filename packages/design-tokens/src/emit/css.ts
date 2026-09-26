@@ -10,7 +10,6 @@
 //   Layer 2  `@theme inline` — makes the legacy values Tailwind utilities
 //            (the design utilities live in css/vocabulary.css)
 //   Layer 3  `--color-*` compat aliases for legacy arbitrary values
-//   Layer 4  highlight.js rules, driven by the theme's syntax tokens
 //
 // ── The specificity ladder ───────────────────────────────────────
 //
@@ -205,7 +204,7 @@ function appearanceBlock(theme: ThemeDef, appearance: Appearance, selector: stri
   lines.push('', '  /* Categorical chart ramp */');
   chart.forEach((colour, i) => lines.push(`  --chart-${i + 1}: ${colour};`));
 
-  lines.push('', '  /* Syntax (highlight.js) */');
+  lines.push('', '  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */');
   for (const role of SYNTAX_ROLES) {
     lines.push(`  --syntax-${role}: ${syntax[role]};`);
   }
@@ -275,43 +274,6 @@ function compatAliasBlock(): string {
   }
   lines.push('}');
   return lines.join('\n');
-}
-
-/**
- * highlight.js colouring, expressed against the theme's syntax tokens.
- *
- * This replaces the two imported stylesheets (github / github-dark) that used
- * to be swapped by a <link> href. Those only had two variants, so on any other
- * theme the code block was the one region of the app still rendering GitHub's
- * palette. Driving hljs from variables also removes a stylesheet fetch and the
- * flash that came with it.
- *
- * The class list is hljs's own; roles it does not distinguish (params, meta)
- * deliberately fall through to `--foreground`.
- */
-function syntaxRulesBlock(): string {
-  const rule = (selectors: string[], role: string): string =>
-    `${selectors.join(',\n')} { color: var(--syntax-${role}); }`;
-
-  return [
-    '.hljs { color: var(--foreground); background: transparent; }',
-    rule(['.hljs-comment', '.hljs-quote'], 'comment'),
-    rule(['.hljs-keyword', '.hljs-selector-tag', '.hljs-literal', '.hljs-doctag', '.hljs-formula'], 'keyword'),
-    rule(['.hljs-string', '.hljs-regexp', '.hljs-addition', '.hljs-attribute', '.hljs-meta .hljs-string'], 'string'),
-    rule(['.hljs-number', '.hljs-symbol', '.hljs-bullet', '.hljs-link'], 'number'),
-    rule(['.hljs-title', '.hljs-section', '.hljs-title.function_', '.hljs-name'], 'function'),
-    rule(['.hljs-type', '.hljs-class .hljs-title', '.hljs-title.class_', '.hljs-built_in'], 'type'),
-    rule(['.hljs-variable', '.hljs-template-variable', '.hljs-params'], 'variable'),
-    rule(['.hljs-selector-id', '.hljs-selector-class', '.hljs-selector-attr', '.hljs-selector-pseudo'], 'constant'),
-    rule(['.hljs-operator', '.hljs-meta', '.hljs-meta .hljs-keyword'], 'operator'),
-    rule(['.hljs-punctuation', '.hljs-subst'], 'punctuation'),
-    rule(['.hljs-tag', '.hljs-template-tag'], 'tag'),
-    rule(['.hljs-attr', '.hljs-property'], 'attribute'),
-    '.hljs-deletion { color: var(--syntax-deleted); }',
-    '.hljs-addition { color: var(--syntax-inserted); }',
-    '.hljs-emphasis { font-style: italic; }',
-    '.hljs-strong { font-weight: 600; }',
-  ].join('\n');
 }
 
 const designVar = (key: keyof ReturnType<typeof resolveDesignTokens>): string =>
@@ -536,16 +498,6 @@ export function emitCss(): string {
     ].join('\n'),
   );
   sections.push(compatAliasBlock());
-
-  sections.push(
-    [
-      '/* ══════════════════════════════════════════════════════════════',
-      '   Layer 4 — highlight.js, driven by the theme\'s syntax tokens',
-      '   instead of a swapped stylesheet. See emit/css.ts.',
-      '   ══════════════════════════════════════════════════════════════ */',
-    ].join('\n'),
-  );
-  sections.push(syntaxRulesBlock());
 
   return sections.join('\n\n');
 }

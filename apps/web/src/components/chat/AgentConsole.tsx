@@ -18,7 +18,7 @@ import { ArrowLeft, CircleX, SquareTerminal } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import type { ChatMessage } from '@generatorai/shared';
 import type { StreamState } from '@/stores/streamStore.js';
-import { isShellTool } from '@/components/agent/deriveTimeline.js';
+import { isShellTool } from '@generatorai/shared/ui-contract';
 import { Button, Spinner } from '@/components/ui/index.js';
 
 interface ShellEntry {

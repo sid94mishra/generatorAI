@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, waitFor } from 'storybook/test';
 import { Icon } from '../../icons/Icon.js';
 import { assertTargetSize } from '../../lib/test/targetSize.js';
+import { IconButton } from '../../primitives/IconButton/IconButton.js';
 import { Spinner } from '../../primitives/Spinner/Spinner.js';
 import { DiffStat } from '../DiffStat/DiffStat.js';
 import { StepRail, type StepRailItem } from './StepRail.js';
@@ -153,6 +154,29 @@ export const FocusVisible: Story = {
     await expect(edit).toHaveFocus();
     await userEvent.keyboard(' ');
     await expect(edit).toHaveAttribute('aria-expanded', 'true');
+  },
+};
+
+/** `actions` sit after the row, outside its toggle (never a button inside a button); `busy` marks a live row; `below` is always shown under its row. */
+export const WithActions: Story = {
+  args: {
+    items: [
+      { ...ITEMS[1]!, actions: <IconButton icon="diff" label="Show in changes" size="sm" onClick={fn()} /> },
+      { ...ITEMS[3]!, busy: true, actions: <IconButton icon="terminal" label="Open in terminal" size="sm" onClick={fn()} /> },
+      {
+        ...ITEMS[2]!,
+        id: 'below',
+        expandable: false,
+        below: <p className="rounded-control bg-sunken px-2 py-1 font-mono text-small text-err">BrowserService: max concurrent sessions (5) reached</p>,
+      },
+    ],
+  },
+  play: async ({ canvas }) => {
+    const toggle = canvas.getByRole('button', { name: /Edited/ });
+    const action = canvas.getByRole('button', { name: 'Show in changes' });
+    await expect(toggle.contains(action)).toBe(false);
+    await userEvent.click(action);
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false');
   },
 };
 

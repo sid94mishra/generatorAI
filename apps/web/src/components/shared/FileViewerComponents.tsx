@@ -19,14 +19,10 @@ import {
   Upload,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-// W-highlight-bundle — was the FULL `highlight.js` package (~190 grammars,
-// 9.4 MB raw). Use the same curated `highlight.js/lib/core` + ~25 grammar
-// registry the chat highlight worker already uses (`lib/highlight/languages.ts`).
-// A language outside the curated set falls through to `highlightAuto` in
-// `highlightCode()` below, matching the existing unknown-language behavior.
-import { hljs } from '@/lib/highlight/languages.js';
 import { Modal, Button, Spinner } from '@/components/ui/index.js';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
+import { langFromPath } from '@/ui/patterns/CodeBlock/langFromPath.js';
+import { useHighlightedLines, type HighlightedToken } from '@/ui/patterns/CodeBlock/useHighlightedLines.js';
 import { FileCodeView } from '@/components/diff/FileCodeView.js';
 import { DiffProviders } from '@/components/diff/DiffProviders.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
@@ -116,32 +112,23 @@ export function getFileIcon(name: string) {
   return <FileTypeIcon name={name} className="h-3.5 w-3.5" />;
 }
 
+/** Language of a file name (`markdown` switches the viewers to rendered preview); `text` when unknown. */
 export function getLanguage(name: string): string {
-  const lower = name.toLowerCase();
-  if (lower.endsWith('.d.ts') || lower.endsWith('.d.mts') || lower.endsWith('.d.cts')) return 'typescript';
-  const ext = lower.split('.').pop() ?? '';
-  const map: Record<string, string> = {
-    ts: 'typescript', tsx: 'tsx', js: 'javascript', jsx: 'jsx',
-    py: 'python', sh: 'bash', rs: 'rust', go: 'go', java: 'java',
-    cs: 'csharp', cpp: 'cpp', c: 'c', rb: 'ruby', php: 'php',
-    json: 'json', yaml: 'yaml', yml: 'yaml', toml: 'toml', xml: 'xml',
-    md: 'markdown', html: 'html', css: 'css', scss: 'scss',
-    sql: 'sql', graphql: 'graphql', dockerfile: 'dockerfile',
-  };
-  return map[ext] || 'text';
+  return langFromPath(name) ?? 'text';
 }
 
-/** Syntax-highlight a code string using highlight.js. Returns HTML string. */
-export function highlightCode(code: string, language: string): string {
-  if (!code || language === 'text' || language === 'markdown') return '';
-  try {
-    if (hljs.getLanguage(language)) {
-      return hljs.highlight(code, { language }).value;
-    }
-    return hljs.highlightAuto(code).value;
-  } catch {
-    return '';
-  }
+/** One highlighted source line (Shiki tokens coloured by `var(--syntax-*)`). */
+function HighlightedLine({ tokens }: { tokens: HighlightedToken[] }) {
+  return (
+    <>
+      {tokens.map((token, i) => (
+        // Tokens are positional; the whole line is replaced when it changes.
+        <span key={i} style={{ color: token.color }}>
+          {token.content}
+        </span>
+      ))}
+    </>
+  );
 }
 
 /** Parse a unified diff string into annotated lines */
@@ -186,43 +173,6 @@ export function getStatusBadge(status: string): { label: string; color: string; 
     default: return { label: 'N', color: 'bg-green-500/10 text-green-500', dotColor: 'fill-green-500 text-green-500' };
   }
 }
-
-// ── Highlighted Code Block ──
-
-export const HighlightedCodeBlock = memo(function HighlightedCodeBlock({ code, language }: { code: string; language: string }) {
-  const highlighted = useMemo(() => {
-    const html = highlightCode(code, language);
-    if (!html) return null;
-    return html.split('\n');
-  }, [code, language]);
-
-  if (!highlighted) {
-    return (
-      <pre className="p-4 text-xs leading-relaxed font-mono text-[var(--color-foreground)]">
-        <code>{code}</code>
-      </pre>
-    );
-  }
-
-  return (
-    <div className="w-full overflow-x-auto font-mono text-xs leading-relaxed">
-      <table className="w-full border-collapse">
-        <tbody>
-          {highlighted.map((lineHtml, i) => (
-            <tr key={i} className="hover:bg-[var(--color-accent-tint)]/50">
-              <td className="select-none border-r border-[var(--color-border)] px-3 py-0 text-right text-[var(--color-muted-foreground)]/60 w-10">
-                {i + 1}
-              </td>
-              <td className="px-4 py-0">
-                <span dangerouslySetInnerHTML={{ __html: lineHtml || ' ' }} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-});
 
 // ── Tree Node Component ──
 
@@ -480,7 +430,7 @@ export function FileViewerModal({ filePath, source, worktreeAlias, onClose, file
         ) : fileContent?.content != null ? (
           lang === 'markdown' ? (
             <div className="p-4">
-              <MarkdownRenderer content={fileContent.content} />
+              <Markdown>{fileContent.content}</Markdown>
             </div>
           ) : (
             // Shared viewer: virtualized + Shiki, matching the Changes panel.
@@ -629,32 +579,29 @@ export function ChangeFileContentRenderer({ entry, hasGit, fileContent, isLoadin
   const diffLines = useMemo(() => parseUnifiedDiff(entry.diff), [entry.diff]);
   const showGitDiff = hasGit && diffLines.length > 0;
 
-  // Pre-compute syntax highlighting for diff lines
+  // Syntax highlighting (lazy Shiki grammar per language; plain text until it
+  // loads, and for markdown/unknown languages). Diff rows are highlighted as one
+  // document so multi-line constructs (strings, comments) colour correctly.
+  const highlightLang = lang === 'markdown' ? undefined : lang;
+  const diffCode = useMemo(
+    () => (showGitDiff ? diffLines.filter((l) => l.type !== 'header').map((l) => l.content).join('\n') : ''),
+    [diffLines, showGitDiff],
+  );
+  const diffTokens = useHighlightedLines(diffCode, highlightLang);
   const highlightedDiffLines = useMemo(() => {
-    if (!showGitDiff || lang === 'text' || lang === 'markdown') return null;
-    const contentLines = diffLines.filter((l) => l.type !== 'header');
-    const rawCode = contentLines.map((l) => l.content).join('\n');
-    const html = highlightCode(rawCode, lang);
-    if (!html) return null;
-    const htmlLines = html.split('\n');
-    const result = new Map<number, string>();
+    if (!diffTokens) return null;
+    const result = new Map<number, HighlightedToken[]>();
     let ci = 0;
     for (let i = 0; i < diffLines.length; i++) {
       if (diffLines[i]!.type !== 'header') {
-        result.set(i, htmlLines[ci] ?? '');
+        result.set(i, diffTokens[ci] ?? []);
         ci++;
       }
     }
     return result;
-  }, [diffLines, showGitDiff, lang]);
+  }, [diffLines, diffTokens]);
 
-  // Pre-compute syntax highlighting for fallback view
-  const highlightedFallback = useMemo(() => {
-    if (!fileContent?.content || lang === 'text' || lang === 'markdown') return null;
-    const html = highlightCode(fileContent.content, lang);
-    if (!html) return null;
-    return html.split('\n');
-  }, [fileContent?.content, lang]);
+  const highlightedFallback = useHighlightedLines(showGitDiff ? '' : (fileContent?.content ?? ''), highlightLang);
 
   return (
     <>
@@ -688,7 +635,7 @@ export function ChangeFileContentRenderer({ entry, hasGit, fileContent, isLoadin
                 line.type === 'addition' ? '+' :
                 line.type === 'deletion' ? '-' : ' ';
 
-              const hlHtml = highlightedDiffLines?.get(i);
+              const hlTokens = highlightedDiffLines?.get(i);
 
               return (
                 <div key={i} className={`flex ${bgColor}`}>
@@ -699,8 +646,8 @@ export function ChangeFileContentRenderer({ entry, hasGit, fileContent, isLoadin
                     {line.newLineNo ?? ''}
                   </span>
                   <span className={`w-5 shrink-0 select-none text-center ${textColor}`}>{prefix}</span>
-                  {hlHtml ? (
-                    <pre className="flex-1 px-2 text-[var(--color-foreground)]" dangerouslySetInnerHTML={{ __html: hlHtml || ' ' }} />
+                  {hlTokens && hlTokens.length > 0 ? (
+                    <pre className="flex-1 px-2 text-[var(--color-foreground)]"><HighlightedLine tokens={hlTokens} /></pre>
                   ) : (
                     <pre className="flex-1 px-2 text-[var(--color-foreground)]">{line.content || ' '}</pre>
                   )}
@@ -719,7 +666,7 @@ export function ChangeFileContentRenderer({ entry, hasGit, fileContent, isLoadin
         ) : fileContent?.content != null ? (
           lang === 'markdown' ? (
             <div className="p-4">
-              <MarkdownRenderer content={fileContent.content} />
+              <Markdown>{fileContent.content}</Markdown>
             </div>
           ) : (
             <div className="flex w-full overflow-x-auto font-mono text-[11px] leading-5">
@@ -730,10 +677,12 @@ export function ChangeFileContentRenderer({ entry, hasGit, fileContent, isLoadin
               </div>
               <div className="flex-1 py-2">
                 {highlightedFallback ? (
-                  highlightedFallback.map((lineHtml: string, i: number) => (
+                  highlightedFallback.map((lineTokens, i) => (
                     <div key={i} className="flex">
                       <span className="w-5 shrink-0 select-none text-center text-green-500">+</span>
-                      <pre className="flex-1 px-2 text-[var(--color-foreground)] bg-green-500/5" dangerouslySetInnerHTML={{ __html: lineHtml || ' ' }} />
+                      <pre className="flex-1 px-2 text-[var(--color-foreground)] bg-green-500/5">
+                        {lineTokens.length > 0 ? <HighlightedLine tokens={lineTokens} /> : ' '}
+                      </pre>
                     </div>
                   ))
                 ) : (

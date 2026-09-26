@@ -8,5 +8,5 @@ export {
   deriveAnswer,
   countTools,
   deriveStreamView,
-} from '@/components/agent/deriveTimeline.js';
-export type { DeriveTimelineOptions, StreamView } from '@/components/agent/deriveTimeline.js';
+} from '@generatorai/client-core';
+export type { DeriveTimelineOptions, StreamView } from '@generatorai/client-core';

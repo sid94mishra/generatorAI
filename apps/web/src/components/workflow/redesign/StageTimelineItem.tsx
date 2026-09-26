@@ -24,8 +24,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/index.js';
-import { StreamPanel } from '@/components/agent/StreamPanel.js';
-import { UsageChip } from '@/components/agent/UsageChip.js';
+import { TurnBody, UsageChip } from '@/blocks/transcript/index.js';
 import { ContextUsageGauge } from '@/components/shared/ContextUsageGauge.js';
 import { InlineHitlControls } from './InlineHitlControls.js';
 import type { StageStatus, StageView } from './types.js';
@@ -305,7 +304,7 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
               already communicate the state and a shimmer there is
               misleading (the model isn't producing tokens). Usage is NOT
               rendered here — it lives in the chips row below. */}
-          <StreamPanel
+          <TurnBody
             segments={stage.segments}
             steps={stage.steps}
             answer={stage.answer}

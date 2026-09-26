@@ -9,7 +9,9 @@
 // (small, `resultTone`, or any node such as a DiffStat) · duration (mono micro
 // fg-3, pushed right) · a chevron on `expandable` rows. An expandable row is a
 // Base UI Collapsible: the row is the trigger (aria-expanded), `detail`
-// (typically a CodeBlock) opens below it indented 24.
+// (typically a CodeBlock) opens below it indented 24. `actions` (icon
+// buttons, links) sit after the row, outside the toggle, so they are never
+// nested inside the row's button.
 //
 // Expansion is controlled with `expandedIds` + `onExpandedChange`, or left to
 // the rail (`defaultExpandedIds`).
@@ -49,8 +51,19 @@ export interface StepRailItem {
   expandable?: boolean;
   /** Expanded content, indented 24 (CodeBlock, output). */
   detail?: ReactNode;
+  /**
+   * Trailing controls (icon buttons, links) drawn after the row, OUTSIDE its
+   * expand toggle so they stay separate interactive elements.
+   */
+  actions?: ReactNode;
+  /** Always-visible content under the row, indented 24 (an inline error, a tool card). */
+  below?: ReactNode;
+  /** The step is still running (`aria-busy` on the row). */
+  busy?: boolean;
   /** `data-testid` of the row. */
   testId?: string;
+  /** `data-testid` of an expandable row's toggle button. */
+  toggleTestId?: string;
 }
 
 export interface StepRailProps extends Omit<ComponentProps<'div'>, 'children'> {
@@ -122,10 +135,16 @@ export function StepRail({
       <ol aria-label={label} className="flex min-w-0 flex-col">
         {items.map((item) => {
           const expandable = Boolean(item.expandable && item.detail != null);
+          const actions =
+            item.actions != null ? <span className="flex shrink-0 items-center gap-0.5 pl-1">{item.actions}</span> : null;
           if (!expandable) {
             return (
-              <li key={item.id} className={cn(rowBase, 'pl-0.5')} data-testid={item.testId}>
-                <RowBody item={item} expandable={false} />
+              <li key={item.id} className="flex min-w-0 flex-col" data-testid={item.testId} aria-busy={item.busy || undefined}>
+                <div className={cn(rowBase, 'pl-0.5')}>
+                  <RowBody item={item} expandable={false} />
+                  {actions}
+                </div>
+                {item.below != null ? <div className="min-w-0 pb-1.5 pl-6">{item.below}</div> : null}
               </li>
             );
           }
@@ -137,16 +156,22 @@ export function StepRail({
               render={<li />}
               className="flex min-w-0 flex-col"
               data-testid={item.testId}
+              aria-busy={item.busy || undefined}
             >
-              <Collapsible.Trigger
-                className={cn(
-                  rowBase,
-                  'group cursor-pointer rounded-control-sm pl-0.5 transition-control hover:bg-hover',
-                  focusRing,
-                )}
-              >
-                <RowBody item={item} expandable />
-              </Collapsible.Trigger>
+              <div className="flex min-w-0 items-center">
+                <Collapsible.Trigger
+                  className={cn(
+                    rowBase,
+                    'group min-w-0 flex-1 cursor-pointer rounded-control-sm pl-0.5 transition-control hover:bg-hover',
+                    focusRing,
+                  )}
+                  data-testid={item.toggleTestId}
+                >
+                  <RowBody item={item} expandable />
+                </Collapsible.Trigger>
+                {actions}
+              </div>
+              {item.below != null ? <div className="min-w-0 pb-1.5 pl-6">{item.below}</div> : null}
               <Collapsible.Panel className="min-w-0 pt-1 pb-2 pl-6">{item.detail}</Collapsible.Panel>
             </Collapsible.Root>
           );

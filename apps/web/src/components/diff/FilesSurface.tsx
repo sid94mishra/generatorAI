@@ -34,7 +34,7 @@ import { ApiError } from '@/platform/apiFetch.js';
 import { useWorkspaceTree, useWorkspaceTreeFile } from '@/hooks/queries.js';
 import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { FileCodeView } from './FileCodeView.js';
 import { DiffProviders } from './DiffProviders.js';
 import { ChangesTree } from './ChangesTree.js';
@@ -489,7 +489,7 @@ function FilePreview({
   if (isMarkdown && markdownMode === 'preview') {
     return (
       <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-        <MarkdownRenderer content={file.contents} className="max-w-none" />
+        <Markdown>{file.contents}</Markdown>
       </div>
     );
   }

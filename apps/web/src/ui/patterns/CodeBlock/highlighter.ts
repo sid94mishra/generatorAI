@@ -19,7 +19,7 @@
 // without re-highlighting (replaces the old `.hljs-*` rules, D-33).
 // ────────────────────────────────────────────────────────────────
 
-import type { HighlighterCore, ThemeRegistrationRaw } from 'shiki/core';
+import type { HighlighterCore, ThemedToken, ThemeRegistrationRaw } from 'shiki/core';
 
 export const SYNTAX_THEME_NAME = 'gai-syntax';
 
@@ -88,12 +88,70 @@ export const LANG_LOADERS = {
   diff: () => import('shiki/langs/diff.mjs'),
   toml: () => import('shiki/langs/toml.mjs'),
   dockerfile: () => import('shiki/langs/dockerfile.mjs'),
+  c: () => import('shiki/langs/c.mjs'),
+  cpp: () => import('shiki/langs/cpp.mjs'),
+  csharp: () => import('shiki/langs/csharp.mjs'),
+  ini: () => import('shiki/langs/ini.mjs'),
+  kotlin: () => import('shiki/langs/kotlin.mjs'),
+  php: () => import('shiki/langs/php.mjs'),
+  ruby: () => import('shiki/langs/ruby.mjs'),
+  scss: () => import('shiki/langs/scss.mjs'),
+  swift: () => import('shiki/langs/swift.mjs'),
+  xml: () => import('shiki/langs/xml.mjs'),
 } as const;
 
 export type SupportedLang = keyof typeof LANG_LOADERS;
 
 export function isSupportedLang(lang: string | undefined): lang is SupportedLang {
   return !!lang && Object.hasOwn(LANG_LOADERS, lang);
+}
+
+/**
+ * Common short names (fence info strings like ```ts / ```sh, file-extension
+ * style names) → the `LANG_LOADERS` key that highlights them.
+ */
+const LANG_ALIASES: Readonly<Record<string, SupportedLang>> = {
+  ts: 'typescript',
+  mts: 'typescript',
+  cts: 'typescript',
+  js: 'javascript',
+  mjs: 'javascript',
+  cjs: 'javascript',
+  node: 'javascript',
+  json5: 'jsonc',
+  sh: 'bash',
+  zsh: 'bash',
+  shell: 'bash',
+  console: 'bash',
+  py: 'python',
+  python3: 'python',
+  yml: 'yaml',
+  md: 'markdown',
+  htm: 'html',
+  svg: 'xml',
+  rs: 'rust',
+  rb: 'ruby',
+  golang: 'go',
+  patch: 'diff',
+  docker: 'dockerfile',
+  cs: 'csharp',
+  'c#': 'csharp',
+  'c++': 'cpp',
+  cc: 'cpp',
+  hpp: 'cpp',
+  h: 'c',
+  kt: 'kotlin',
+  kts: 'kotlin',
+  cfg: 'ini',
+  conf: 'ini',
+};
+
+/** Resolves a language name or alias (case-insensitive) to a highlightable language, else `undefined`. */
+export function resolveLang(lang: string | undefined): SupportedLang | undefined {
+  if (!lang) return undefined;
+  const key = lang.trim().toLowerCase();
+  if (isSupportedLang(key)) return key;
+  return Object.hasOwn(LANG_ALIASES, key) ? LANG_ALIASES[key] : undefined;
 }
 
 /** Languages Shiki tokenizes without a grammar (no lazy chunk needed). */
@@ -132,10 +190,25 @@ async function ensureLanguage(highlighter: HighlighterCore, lang: SupportedLang)
  * a code block should never fail to render because a grammar is missing.
  */
 export async function highlightCode(code: string, lang: string | undefined): Promise<string> {
-  const resolvedLang = lang && (isSupportedLang(lang) || PLAIN_LANGS.has(lang)) ? lang : 'text';
+  const supported = resolveLang(lang);
+  const resolvedLang = supported ?? (lang && PLAIN_LANGS.has(lang) ? lang : 'text');
   const highlighter = await getHighlighter();
-  if (isSupportedLang(resolvedLang)) await ensureLanguage(highlighter, resolvedLang);
+  if (supported) await ensureLanguage(highlighter, supported);
   return highlighter.codeToHtml(code, { lang: resolvedLang, theme: SYNTAX_THEME_NAME });
+}
+
+/**
+ * Highlights `code` as one token array per source line (for line-oriented
+ * views such as diff rows, which lay out each line themselves). Each token's
+ * `color` is a `var(--syntax-*)` reference from `SYNTAX_THEME`. Resolves
+ * `null` for an unsupported/omitted language — callers render plain text.
+ */
+export async function highlightTokens(code: string, lang: string | undefined): Promise<ThemedToken[][] | null> {
+  const supported = resolveLang(lang);
+  if (!supported) return null;
+  const highlighter = await getHighlighter();
+  await ensureLanguage(highlighter, supported);
+  return highlighter.codeToTokens(code, { lang: supported, theme: SYNTAX_THEME_NAME }).tokens;
 }
 
 /**

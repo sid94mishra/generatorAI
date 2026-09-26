@@ -12,17 +12,14 @@
 import React from 'react';
 import { render, screen, cleanup } from '@testing-library/react';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { computeCacheMiss, estimateMissCost, promptTokensOf, type UsageInfo } from '@generatorai/client-core';
 import {
   UsageChip,
   cacheScopeKey,
-  computeCacheMiss,
-  estimateMissCost,
   hasReportedCache,
   noteCacheReport,
-  promptTokensOf,
   _resetCacheReportLedger,
-} from '@/components/agent/UsageChip.js';
-import type { UsageInfo } from '@/components/chat/redesign/types.js';
+} from '@/blocks/transcript/index.js';
 
 afterEach(cleanup);
 beforeEach(_resetCacheReportLedger);

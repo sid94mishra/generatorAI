@@ -6,3 +6,4 @@ export { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS, type DockFocusRequest } from './hoo
 export { CHAT_PAGE_SIZE, type ChatPromptHistoryEntry } from './hooks/useChatTranscript.js';
 export type { TurnUsage } from './hooks/useChatStreamState.js';
 export type { PlanImplementAction } from './hooks/useChatGates.js';
+export { ChatTranscript, type ChatTranscriptProps } from './components/ChatTranscript.js';

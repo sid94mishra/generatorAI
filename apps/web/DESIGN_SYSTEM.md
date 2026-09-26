@@ -29,7 +29,7 @@ Any mode × any theme × any accent is valid — 17 themes × 2 variants × 6 ac
 1. **Raw semantic values** — unprefixed vars (`--background`, `--primary`, `--success-muted`…) emitted per theme × appearance × accent. Components never reference these directly.
 2. **Tailwind utility bridge** — `@theme inline` maps them to `--color-*`, so semantic utilities are first-class: `bg-background`, `bg-card`, `text-foreground`, `text-muted-foreground`, `border-border`, `ring-ring`, `bg-primary`, `bg-primary-emphasis`, `bg-success-muted`, `text-danger`, `bg-sidebar`… **Use these utilities in all new code.**
 3. **Compat aliases** — `--color-*: var(--*)` keep legacy `var(--color-*)` arbitrary values resolving during migration. Don't write new code against them.
-4. **Syntax rules** — `.hljs-*` classes bound to `--syntax-*`, so code blocks follow the theme. There is no highlight.js stylesheet to swap any more.
+Syntax colours are the per-theme `--syntax-*` custom properties in layer 1; the Shiki theme in `src/ui/patterns/CodeBlock/highlighter.ts` maps TextMate scopes to them, so code blocks follow the theme without re-highlighting.
 
 > **The emission order in [`emit/css.ts`](../../packages/design-tokens/src/emit/css.ts) is load-bearing.** `.light[data-theme="x"]` and `[data-theme="x"][data-accent="a"]` tie on specificity (0,2,0) and are resolved by source order. Reordering those sections silently gives light-mode users dark-mode accents.
 

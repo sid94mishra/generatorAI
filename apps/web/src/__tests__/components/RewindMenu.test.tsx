@@ -16,13 +16,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { cleanup, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
-vi.mock('@/components/Toast.js', () => ({ toast: vi.fn() }));
+vi.mock('@/ui/primitives/Toast/Toast.js', () => ({ toast: { info: vi.fn(), error: vi.fn(), done: vi.fn() } }));
 
 import { renderWithProviders } from '../helpers/renderWithProviders.js';
-import { RewindMenu } from '@/components/chat/RewindMenu.js';
+import { RewindMenu } from '@/features/chat/components/RewindMenu.js';
 import { useRewindStore } from '@/stores/rewindStore.js';
 import { ApiError } from '@/platform/apiFetch.js';
-import { toast } from '@/components/Toast.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
 
 function renderMenu(options: {
   canRewind?: boolean;
@@ -48,7 +48,8 @@ function renderMenu(options: {
 
 beforeEach(() => {
   useRewindStore.setState({ pending: null });
-  vi.mocked(toast).mockClear();
+  vi.mocked(toast.info).mockClear();
+  vi.mocked(toast.error).mockClear();
 });
 
 afterEach(() => {
@@ -104,7 +105,7 @@ describe('RewindMenu', () => {
     await user2.click(screen.getByTestId('rewind-button'));
     await user2.click(await screen.findByTestId('rewind-option-code'));
     await waitFor(() => {
-      expect(vi.mocked(toast)).toHaveBeenCalled();
+      expect(vi.mocked(toast.info)).toHaveBeenCalled();
     });
     // Files moved; the conversation still holds the prompt, so re-offering it
     // would duplicate a message that was never removed.
@@ -127,15 +128,12 @@ describe('RewindMenu', () => {
     await user.click(await screen.findByTestId('rewind-option-all'));
 
     await waitFor(() => {
-      expect(vi.mocked(toast)).toHaveBeenCalledWith(
-        expect.objectContaining({
-          variant: 'success',
-          title: 'Rewound to before this message',
-          description: expect.stringContaining('2 files restored, 1 deleted'),
-        }),
+      expect(vi.mocked(toast.info)).toHaveBeenCalledWith(
+        'Rewound to before this message',
+        expect.objectContaining({ description: expect.stringContaining('2 files restored, 1 deleted') }),
       );
     });
-    expect(vi.mocked(toast).mock.calls[0]?.[0]?.description).toContain(
+    expect(vi.mocked(toast.info).mock.calls[0]?.[1]?.description).toContain(
       'does not support native rewind',
     );
   });
@@ -152,9 +150,7 @@ describe('RewindMenu', () => {
     await user.click(await screen.findByTestId('rewind-option-all'));
 
     await waitFor(() => {
-      expect(vi.mocked(toast)).toHaveBeenCalledWith(
-        expect.objectContaining({ variant: 'error', title: 'Nothing was rewound' }),
-      );
+      expect(vi.mocked(toast.error)).toHaveBeenCalledWith('Nothing was rewound', expect.anything());
     });
     expect(useRewindStore.getState().pending).toBeNull();
   });

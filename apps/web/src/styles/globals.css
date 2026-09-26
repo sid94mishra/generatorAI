@@ -91,7 +91,7 @@
   --chart-5: #2cc2b5;
   --chart-6: #f27aae;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #a1a1aa;
   --syntax-keyword: #a48cff;
   --syntax-string: #4cc38a;
@@ -189,7 +189,7 @@
   --chart-5: #0f7f7a;
   --chart-6: #c8325f;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #55555d;
   --syntax-keyword: #7152e0;
   --syntax-string: #16804c;
@@ -437,7 +437,7 @@
   --chart-5: #39c5cf;
   --chart-6: #f778ba;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #8b949e;
   --syntax-keyword: #a371f7;
   --syntax-string: #3fb950;
@@ -535,7 +535,7 @@
   --chart-5: #1b7c83;
   --chart-6: #bf3989;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #656d76;
   --syntax-keyword: #8250df;
   --syntax-string: #1a7f37;
@@ -633,7 +633,7 @@
   --chart-5: #3ecfcf;
   --chart-6: #ff6fb0;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #9ca1a8;
   --syntax-keyword: #b18cff;
   --syntax-string: #46d18a;
@@ -731,7 +731,7 @@
   --chart-5: #0f766e;
   --chart-6: #b3246b;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #61646a;
   --syntax-keyword: #6d28d9;
   --syntax-string: #12794a;
@@ -829,7 +829,7 @@
   --chart-5: #12a594;
   --chart-6: #f472b6;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #a4a4a4;
   --syntax-keyword: #ab7bff;
   --syntax-string: #19c37d;
@@ -927,7 +927,7 @@
   --chart-5: #0e7267;
   --chart-6: #b3246b;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5d5d5d;
   --syntax-keyword: #6d28d9;
   --syntax-string: #0d7a52;
@@ -1025,7 +1025,7 @@
   --chart-5: #6fb3a3;
   --chart-6: #dd93a6;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #b3b1a6;
   --syntax-keyword: #b79ac4;
   --syntax-string: #84b06d;
@@ -1123,7 +1123,7 @@
   --chart-5: #2d7a6c;
   --chart-6: #a63f66;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #66655c;
   --syntax-keyword: #77519c;
   --syntax-string: #4d7a3d;
@@ -1221,7 +1221,7 @@
   --chart-5: #56b6c2;
   --chart-6: #e089b0;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #a2aab8;
   --syntax-keyword: #c678dd;
   --syntax-string: #98c379;
@@ -1319,7 +1319,7 @@
   --chart-5: #0e7c8c;
   --chart-6: #b3125e;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5f626d;
   --syntax-keyword: #9127a0;
   --syntax-string: #3f8c3e;
@@ -1417,7 +1417,7 @@
   --chart-5: #5df2d6;
   --chart-6: #ff79c6;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #a4abd6;
   --syntax-keyword: #bd93f9;
   --syntax-string: #50fa7b;
@@ -1515,7 +1515,7 @@
   --chart-5: #0d7268;
   --chart-6: #a3144d;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5d5840;
   --syntax-keyword: #644ac9;
   --syntax-string: #14710a;
@@ -1613,7 +1613,7 @@
   --chart-5: #73daca;
   --chart-6: #ff7ab2;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #9aa5ce;
   --syntax-keyword: #bb9af7;
   --syntax-string: #9ece6a;
@@ -1711,7 +1711,7 @@
   --chart-5: #0f7a66;
   --chart-6: #bb4b8d;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #4c5372;
   --syntax-keyword: #7847bd;
   --syntax-string: #587539;
@@ -1809,7 +1809,7 @@
   --chart-5: #94e2d5;
   --chart-6: #f5c2e7;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #a6adc8;
   --syntax-keyword: #cba6f7;
   --syntax-string: #a6e3a1;
@@ -1907,7 +1907,7 @@
   --chart-5: #179299;
   --chart-6: #c664ab;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5c5f77;
   --syntax-keyword: #8839ef;
   --syntax-string: #3c9528;
@@ -2005,7 +2005,7 @@
   --chart-5: #95e6cb;
   --chart-6: #f29fc0;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #8a9199;
   --syntax-keyword: #d2a6ff;
   --syntax-string: #aad94c;
@@ -2103,7 +2103,7 @@
   --chart-5: #0e7f6d;
   --chart-6: #b83c74;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5f646a;
   --syntax-keyword: #7a4fc0;
   --syntax-string: #4d8a24;
@@ -2201,7 +2201,7 @@
   --chart-5: #21c7a8;
   --chart-6: #ff6b9d;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #8badc1;
   --syntax-keyword: #c792ea;
   --syntax-string: #addb67;
@@ -2299,7 +2299,7 @@
   --chart-5: #0c7a80;
   --chart-6: #b02b73;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5c5b70;
   --syntax-keyword: #8340ad;
   --syntax-string: #0a7a5c;
@@ -2397,7 +2397,7 @@
   --chart-5: #9ccfd8;
   --chart-6: #ebbcba;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #908caa;
   --syntax-keyword: #c4a7e7;
   --syntax-string: #9ccfae;
@@ -2495,7 +2495,7 @@
   --chart-5: #56949f;
   --chart-6: #c06b67;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #655f7a;
   --syntax-keyword: #907aa9;
   --syntax-string: #4f7d5e;
@@ -2593,7 +2593,7 @@
   --chart-5: #8fbcbb;
   --chart-6: #d3a0bd;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #aeb8c8;
   --syntax-keyword: #c8a2c8;
   --syntax-string: #a3be8c;
@@ -2691,7 +2691,7 @@
   --chart-5: #3a6b6a;
   --chart-6: #95446b;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #4c566a;
   --syntax-keyword: #6f4b78;
   --syntax-string: #4a6b3c;
@@ -2789,7 +2789,7 @@
   --chart-5: #83c092;
   --chart-6: #e0a3b8;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #a8b3a9;
   --syntax-keyword: #d699b6;
   --syntax-string: #a7c080;
@@ -2887,7 +2887,7 @@
   --chart-5: #237f5f;
   --chart-6: #bd4670;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5c6a72;
   --syntax-keyword: #a84a8c;
   --syntax-string: #4f8033;
@@ -2985,7 +2985,7 @@
   --chart-5: #8ec07c;
   --chart-6: #e8a0b4;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #bdae93;
   --syntax-keyword: #d3869b;
   --syntax-string: #b8bb26;
@@ -3083,7 +3083,7 @@
   --chart-5: #427b58;
   --chart-6: #b0436d;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #665c54;
   --syntax-keyword: #8f3f71;
   --syntax-string: #4f7a20;
@@ -3181,7 +3181,7 @@
   --chart-5: #2aa198;
   --chart-6: #d33682;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #93a1a1;
   --syntax-keyword: #8b90d8;
   --syntax-string: #6fae3d;
@@ -3279,7 +3279,7 @@
   --chart-5: #1f7f78;
   --chart-6: #bd2f75;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #4a6068;
   --syntax-keyword: #5a5fb0;
   --syntax-string: #48731d;
@@ -3377,7 +3377,7 @@
   --chart-5: #3aa99f;
   --chart-6: #ce5d97;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #9f9d96;
   --syntax-keyword: #8b7ec8;
   --syntax-string: #879a39;
@@ -3475,7 +3475,7 @@
   --chart-5: #24837b;
   --chart-6: #a02f6f;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #575653;
   --syntax-keyword: #5e409d;
   --syntax-string: #66800b;
@@ -3573,7 +3573,7 @@
   --chart-5: #5fead4;
   --chart-6: #ff9ecb;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #c9c9c9;
   --syntax-keyword: #d7b3ff;
   --syntax-string: #7bff9e;
@@ -3671,7 +3671,7 @@
   --chart-5: #005f57;
   --chart-6: #8f0c4d;
 
-  /* Syntax (highlight.js) */
+  /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #454545;
   --syntax-keyword: #5a1f9e;
   --syntax-string: #0a5c33;
@@ -8914,57 +8914,6 @@
   --color-canvas-dot: var(--canvas-dot);
 }
 
-/* ══════════════════════════════════════════════════════════════
-   Layer 4 — highlight.js, driven by the theme's syntax tokens
-   instead of a swapped stylesheet. See emit/css.ts.
-   ══════════════════════════════════════════════════════════════ */
-
-.hljs { color: var(--foreground); background: transparent; }
-.hljs-comment,
-.hljs-quote { color: var(--syntax-comment); }
-.hljs-keyword,
-.hljs-selector-tag,
-.hljs-literal,
-.hljs-doctag,
-.hljs-formula { color: var(--syntax-keyword); }
-.hljs-string,
-.hljs-regexp,
-.hljs-addition,
-.hljs-attribute,
-.hljs-meta .hljs-string { color: var(--syntax-string); }
-.hljs-number,
-.hljs-symbol,
-.hljs-bullet,
-.hljs-link { color: var(--syntax-number); }
-.hljs-title,
-.hljs-section,
-.hljs-title.function_,
-.hljs-name { color: var(--syntax-function); }
-.hljs-type,
-.hljs-class .hljs-title,
-.hljs-title.class_,
-.hljs-built_in { color: var(--syntax-type); }
-.hljs-variable,
-.hljs-template-variable,
-.hljs-params { color: var(--syntax-variable); }
-.hljs-selector-id,
-.hljs-selector-class,
-.hljs-selector-attr,
-.hljs-selector-pseudo { color: var(--syntax-constant); }
-.hljs-operator,
-.hljs-meta,
-.hljs-meta .hljs-keyword { color: var(--syntax-operator); }
-.hljs-punctuation,
-.hljs-subst { color: var(--syntax-punctuation); }
-.hljs-tag,
-.hljs-template-tag { color: var(--syntax-tag); }
-.hljs-attr,
-.hljs-property { color: var(--syntax-attribute); }
-.hljs-deletion { color: var(--syntax-deleted); }
-.hljs-addition { color: var(--syntax-inserted); }
-.hljs-emphasis { font-style: italic; }
-.hljs-strong { font-weight: 600; }
-
 /* @generated-tokens:end */
 
 /* == Base Styles == */
@@ -9128,9 +9077,6 @@ pre code {
 
 pre { border-radius: var(--radius); overflow-x: auto; }
 
-.hljs-pre code.hljs { background: transparent; padding: 0; }
-.dark .hljs-pre code.hljs { background: transparent; padding: 0; }
-pre.hljs-pre { background: var(--color-subtle); }
 
 /* == Markdown == */
 .markdown-content {
@@ -9199,75 +9145,12 @@ pre.hljs-pre { background: var(--color-subtle); }
 .markdown-content img { max-width: 100%; border-radius: var(--radius); }
 .markdown-content > :first-child { margin-top: 0; }
 .markdown-content > :last-child { margin-bottom: 0; }
-.message-assistant .markdown-content { line-height: 1.7; }
 
 /* == Animations == */
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 @keyframes slide-in-right { from { opacity: 0; transform: translateX(12px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes slide-in-left { from { opacity: 0; transform: translateX(-12px); } to { opacity: 1; transform: translateX(0); } }
 @keyframes slide-in-up { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
-
-/* Streaming activity indicator — polished bouncing gradient dots shown at the
-   tail of the stream while the agent is generating. Replaces the mid-stream
-   caret so the "generating" cue always sits at the end of the content. */
-@keyframes stream-dot-bounce {
-  0%, 80%, 100% { transform: translateY(0) scale(0.65); opacity: 0.35; }
-  40%           { transform: translateY(-4px) scale(1); opacity: 1; }
-}
-.streaming-indicator {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 2px 0;
-}
-.streaming-indicator .stream-dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 9999px;
-  background: linear-gradient(135deg,
-    var(--color-primary),
-    color-mix(in srgb, var(--color-primary) 55%, #a855f7)
-  );
-  box-shadow: 0 0 6px color-mix(in srgb, var(--color-primary) 45%, transparent);
-  animation: stream-dot-bounce 1.3s cubic-bezier(0.45, 0, 0.55, 1) infinite;
-}
-.streaming-indicator .stream-dot:nth-child(2) { animation-delay: 0.16s; }
-.streaming-indicator .stream-dot:nth-child(3) { animation-delay: 0.32s; }
-@media (prefers-reduced-motion: reduce) {
-  .streaming-indicator .stream-dot { animation-duration: 2.2s; }
-}
-
-/* Streaming text — smooth fade-in entrance for new content */
-@keyframes stream-fade-in {
-  from { opacity: 0.4; }
-  to { opacity: 1; }
-}
-.stream-container .markdown-content {
-  animation: stream-fade-in 0.3s ease-out;
-}
-
-/* Block entrance — smooth slide-up + fade for newly appearing blocks */
-@keyframes block-in {
-  from { opacity: 0; transform: translateY(8px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.animate-block-in { animation: block-in 0.25s cubic-bezier(0.22, 1, 0.36, 1) both; }
-
-/* Skeleton shimmer — gradient sweep for loading placeholders */
-@keyframes skeleton-shimmer {
-  0% { background-position: -200% 0; }
-  100% { background-position: 200% 0; }
-}
-.skeleton-shimmer {
-  background: linear-gradient(90deg,
-    var(--color-subtle) 25%,
-    color-mix(in srgb, var(--color-emphasis) 60%, transparent) 50%,
-    var(--color-subtle) 75%
-  );
-  background-size: 200% 100%;
-  animation: skeleton-shimmer 1.8s ease-in-out infinite;
-  border-radius: var(--radius);
-}
 
 /* Status dot indicator — subtle breathing */
 @keyframes status-breathe {
@@ -9281,87 +9164,23 @@ pre.hljs-pre { background: var(--color-subtle); }
 .animate-slide-in-left { animation: slide-in-left 200ms ease-out; }
 .animate-slide-in-up { animation: slide-in-up 150ms ease-out; }
 
-/* Timeline row entrance — a short settle, not a slide. Rows arrive several
-   times a second during a tool storm; anything longer than ~180 ms stacks
-   visibly. Animates opacity/transform only (compositor-friendly). */
-@keyframes step-in {
-  from { opacity: 0; transform: translateY(3px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-.animate-step-in { animation: step-in 180ms cubic-bezier(0.22, 1, 0.36, 1) both; }
-
-/* Running tool — one thin indeterminate bar under the row. Replaces the two
-   shimmer "paragraph" bars, which read as content about to appear. */
-@keyframes step-progress-slide {
-  0% { transform: translateX(-100%); }
-  100% { transform: translateX(300%); }
-}
-.step-progress {
-  position: relative;
-  height: 2px;
-  width: 100%;
-  overflow: hidden;
-  border-radius: 9999px;
-  background: color-mix(in srgb, var(--color-primary) 12%, transparent);
-}
-.step-progress::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  width: 33%;
-  border-radius: inherit;
-  background: linear-gradient(90deg, transparent, var(--color-primary), transparent);
-  animation: step-progress-slide 1.4s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+/* Transcript (P4-07): a long transcript that is not virtualized keeps each turn
+   in the document but lets the browser skip off-screen layout and paint
+   (find-in-page, selection and the a11y tree still see every turn). */
+@utility contain-turn {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 320px;
 }
 
-/* Expanded tool detail — capped and scrollable; slim scrollbar so the panel
-   does not grow a chunky OS bar the moment it overflows. */
-.step-detail-panel { scrollbar-width: thin; scrollbar-color: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent) transparent; }
-.step-detail-panel::-webkit-scrollbar { width: 8px; height: 8px; }
-.step-detail-panel::-webkit-scrollbar-thumb { border-radius: 9999px; background: color-mix(in srgb, var(--color-muted-foreground) 35%, transparent); border: 2px solid transparent; background-clip: padding-box; }
-
-/* "Thinking" label — a soft highlight sweeping across the text. Calmer than
-   bouncing dots and reads as activity without demanding attention. */
-@keyframes text-shimmer {
-  0% { background-position: 200% center; }
-  100% { background-position: -200% center; }
+/* App-level transcript find (D-33): matches drawn with the CSS Custom
+   Highlight API, so no DOM is rewritten. */
+::highlight(gai-find) {
+  background-color: var(--gai-warn-bg);
+  color: var(--gai-fg);
 }
-.text-shimmer {
-  background: linear-gradient(90deg,
-    var(--color-muted-foreground) 0%,
-    var(--color-muted-foreground) 35%,
-    var(--color-foreground) 50%,
-    var(--color-muted-foreground) 65%,
-    var(--color-muted-foreground) 100%);
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  animation: text-shimmer 2.4s linear infinite;
-}
-
-/* Thinking orb — a breathing gradient disc, the one "spinner" of the
-   pre-first-token state. */
-@keyframes orb-breathe {
-  0%, 100% { transform: scale(0.92); opacity: 0.75; }
-  50% { transform: scale(1.06); opacity: 1; }
-}
-.thinking-orb {
-  width: 14px;
-  height: 14px;
-  border-radius: 9999px;
-  background: radial-gradient(circle at 30% 30%,
-    color-mix(in srgb, var(--color-primary) 55%, white),
-    var(--color-primary) 55%,
-    color-mix(in srgb, var(--color-primary) 55%, #a855f7));
-  box-shadow: 0 0 0 4px color-mix(in srgb, var(--color-primary) 12%, transparent), 0 0 12px color-mix(in srgb, var(--color-primary) 45%, transparent);
-  animation: orb-breathe 1.8s ease-in-out infinite;
-}
-
-/* Streaming container — GPU-composited, no layout thrashing */
-.stream-container {
-  contain: content;
-  will-change: auto;
+::highlight(gai-find-current) {
+  background-color: var(--gai-warn);
+  color: var(--gai-ground);
 }
 
 /* == React Flow canvas == */

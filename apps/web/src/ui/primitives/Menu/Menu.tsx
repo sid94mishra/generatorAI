@@ -43,6 +43,11 @@ export const MenuTrigger = BaseMenu.Trigger;
 // ── Popup ──────────────────────────────────────────────────────
 
 export interface MenuPopupProps extends Omit<ComponentProps<typeof BaseMenu.Popup>, 'className'> {
+  /**
+   * Position against this element instead of the Trigger — a menu opened by
+   * a plain button (many rows, one lazily mounted menu).
+   */
+  anchor?: ComponentProps<typeof BaseMenu.Positioner>['anchor'];
   side?: Side;
   align?: Align;
   sideOffset?: number;
@@ -50,10 +55,17 @@ export interface MenuPopupProps extends Omit<ComponentProps<typeof BaseMenu.Popu
 }
 
 /** Portal + positioner + the styled popup box. */
-export function MenuPopup({ side = 'bottom', align = 'start', sideOffset = 4, className, children, ...rest }: MenuPopupProps) {
+export function MenuPopup({ anchor, side = 'bottom', align = 'start', sideOffset = 4, className, children, ...rest }: MenuPopupProps) {
   return (
     <BaseMenu.Portal>
-      <BaseMenu.Positioner side={side} align={align} sideOffset={sideOffset} className="z-dropdown outline-none" {...overlayProps('menu')}>
+      <BaseMenu.Positioner
+        {...(anchor !== undefined ? { anchor } : {})}
+        side={side}
+        align={align}
+        sideOffset={sideOffset}
+        className="z-dropdown outline-none"
+        {...overlayProps('menu')}
+      >
         <BaseMenu.Popup className={cn(floatSurface, listPopup, className)} {...rest}>
           {children}
         </BaseMenu.Popup>

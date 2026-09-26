@@ -46,10 +46,27 @@ test.describe('Live streaming turn', () => {
     const started = Date.now();
     let settled = false;
 
+    // P4-07: sample the transcript itself (not the page chrome — the working
+    // banner and the composer come and go with the turn), and only call the
+    // turn settled once nothing in it is still working: a model that takes
+    // longer than the stability window to send its first token must not read
+    // as "settled" while the thinking placeholder is still up.
+    const sample = () =>
+      page
+        .evaluate(() => {
+          const transcript = document.querySelector('[data-testid="transcript-scroll"]') as HTMLElement | null;
+          const busy = !!document.querySelector(
+            '[data-testid="thinking-placeholder"], [role="status"][aria-label="Generating"], [data-testid="agent-turn-header"] [aria-label="Responding"]',
+          );
+          return { length: ((transcript ?? document.body).innerText || '').length, busy };
+        })
+        .catch(() => ({ length: 0, busy: true }));
     while (Date.now() - started < 150_000) {
-      lengths.push(await page.evaluate(() => (document.body.innerText || '').length).catch(() => 0));
+      const { length, busy } = await sample();
+      lengths.push(length);
       const tail = lengths.slice(-5);
       if (
+        !busy &&
         tail.length === 5 &&
         tail.every((n) => n === tail[0]) &&
         tail[0]! > lengths[0]! + 20

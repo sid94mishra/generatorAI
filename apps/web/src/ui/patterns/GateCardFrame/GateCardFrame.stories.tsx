@@ -49,7 +49,7 @@ export const Default: Story = {
   },
 };
 
-/** tone warn · err · ok · run; with and without meta / explanation. */
+/** tone warn · err · ok · run · idle; with and without meta / explanation; an aria-labelled action and a trailing slot. */
 export const Matrix: Story = {
   render: () => (
     <div className="flex flex-col gap-4">
@@ -83,8 +83,22 @@ export const Matrix: Story = {
       <GateCardFrame icon="shield" title="Read-only notice" actions={[]}>
         <p className="text-ui text-fg-2">No action row when there are no actions or explanation.</p>
       </GateCardFrame>
+      <GateCardFrame tone="idle" icon="hand" title="Permission request expired" meta="bash" actions={[]}>
+        <p className="text-ui text-fg-2">An expired gate: neutral header, no actions.</p>
+      </GateCardFrame>
+      <GateCardFrame
+        icon="plan"
+        title="Plan ready for review"
+        actions={[{ label: 'Approve', variant: 'primary', ariaLabel: 'Approve the plan' }]}
+        trailing={<span className="text-small text-fg-3">trailing slot</span>}
+      >
+        <p className="text-ui text-fg-2">The action carries its own accessible name; a trailing slot follows the actions.</p>
+      </GateCardFrame>
     </div>
   ),
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('button', { name: 'Approve the plan' })).toBeVisible();
+  },
 };
 
 export const FocusVisible: Story = {

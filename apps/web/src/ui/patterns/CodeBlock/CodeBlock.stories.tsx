@@ -58,6 +58,15 @@ export const Wrap: Story = {
   },
 };
 
+/** A line-number gutter (file viewers); an alias (`ts`) resolves to the TypeScript grammar. */
+export const LineNumbers: Story = {
+  args: { lang: 'ts', lineNumbers: true, copy: TS_SNIPPET },
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.textContent).toContain('1\n2\n3\n4');
+    await waitFor(() => expect(canvasElement.innerHTML).toContain('--syntax-'), { timeout: 10_000 });
+  },
+};
+
 /** A second language (Python) gets its own lazy grammar chunk. */
 export const OtherLanguage: Story = {
   args: { lang: 'python', header: 'script.py', children: 'def greet(name: str) -> str:\n    return f"Hello, {name}!"' },

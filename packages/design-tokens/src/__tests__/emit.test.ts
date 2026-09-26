@@ -133,13 +133,14 @@ describe('web CSS emitter', () => {
     }
   });
 
-  it('drives highlight.js from syntax tokens rather than a bundled palette', () => {
-    expect(css).toContain('.hljs-keyword');
-    expect(css).toContain('color: var(--syntax-keyword);');
-    // A literal hex inside the syntax rules would mean one theme's colours
-    // leaked into all of them.
-    const syntaxBlock = css.slice(css.indexOf('.hljs {'));
-    expect(syntaxBlock).not.toMatch(/#[0-9a-f]{6}/i);
+  it('exposes syntax roles as per-theme custom properties, with no highlight.js rules', () => {
+    // The Shiki theme (apps/web ui/patterns/CodeBlock/highlighter.ts) colours
+    // tokens with `var(--syntax-*)`; highlight.js markup is no longer rendered.
+    for (const theme of THEMES) {
+      const block = css.slice(at(`[data-theme="${theme.id}"]`));
+      expect(block, `${theme.id} syntax roles`).toContain('--syntax-keyword:');
+    }
+    expect(css).not.toContain('.hljs');
   });
 
   it('gives every theme its own type stack and radius scale', () => {

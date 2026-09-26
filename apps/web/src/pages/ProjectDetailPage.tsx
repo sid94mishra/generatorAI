@@ -61,8 +61,9 @@ import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { ProjectPullRequestsTab } from '@/components/scm/ProjectPullRequestsTab.js';
 import { useEditorTarget } from '@/stores/editorTargetStore.js';
 import { SourceBadge } from '@/components/common/SourceBadge.js';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
-import { SyntaxHighlightedCode, extToLang } from '@/components/common/SyntaxHighlightedCode.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
+import { CodeBlock } from '@/ui/patterns/CodeBlock/CodeBlock.js';
+import { langFromPath } from '@/ui/patterns/CodeBlock/langFromPath.js';
 import { Select, Modal, Button, Input, Textarea, Tabs, Badge, Spinner, Switch, SearchInput, PageHeader, type BadgeTone } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { SectionListHeader, CatalogAccordionRow } from '@/components/settings/shared.js';
@@ -966,6 +967,15 @@ function ProjectArtifactCatalog({
 // the mcp.json view and the All / System / Project scope filter.
 // ────────────────────────────────────────────────────────────────
 
+/** The catalog JSON view: the servers as an `mcp.json` document. */
+function McpJsonBlock({ json }: { json: string }) {
+  return (
+    <CodeBlock lang="json" header="mcp.json" copy={json} lineNumbers>
+      {json}
+    </CodeBlock>
+  );
+}
+
 function ProjectMcpCatalog({
   projectId,
   onAddNew,
@@ -1063,9 +1073,7 @@ function ProjectMcpCatalog({
           </Button>
         </div>
       ) : viewMode === 'json' ? (
-        <div className="hljs overflow-hidden rounded-lg border border-border">
-          <SyntaxHighlightedCode code={JSON.stringify(toMcpJson(displayServers), null, 2)} language="json" fileName="mcp.json" showLineNumbers showCopyButton />
-        </div>
+        <McpJsonBlock json={JSON.stringify(toMcpJson(displayServers), null, 2)} />
       ) : (
         <div className="grid gap-2">
           {displayServers.map((srv) => {
@@ -1169,6 +1177,7 @@ function ArtifactPreviewModal({
 
   const ext = artifact.filePath?.split('.').pop() ?? artifact.name.split('.').pop() ?? '';
   const isMarkdown = ext === 'md' || ext === 'mdx';
+  const lang = langFromPath(artifact.filePath ?? artifact.name);
 
   return (
     <Modal
@@ -1180,9 +1189,9 @@ function ArtifactPreviewModal({
           <FileText className="h-4 w-4 shrink-0 text-primary" />
           <span className="truncate">{artifact.name}</span>
           <SourceBadge source={artifact.source} />
-          {!isMarkdown && ext && (
+          {!isMarkdown && lang && (
             <span className="rounded-full bg-subtle px-2 py-0.5 text-[9px] font-bold uppercase text-muted-foreground">
-              {extToLang(ext)}
+              {lang}
             </span>
           )}
         </span>
@@ -1238,17 +1247,17 @@ function ArtifactPreviewModal({
             />
           ) : isMarkdown ? (
             <div className="px-6 py-4">
-              <MarkdownRenderer content={content} className="max-w-none" />
+              <Markdown>{content}</Markdown>
             </div>
           ) : (
-            <div className="hljs">
-              <SyntaxHighlightedCode
-                code={content}
-                fileName={artifact.filePath ?? artifact.name}
-                showLineNumbers
-                showCopyButton
-              />
-            </div>
+            <CodeBlock
+              lang={lang}
+              copy={content}
+              lineNumbers
+              className="rounded-none border-0"
+            >
+              {content}
+            </CodeBlock>
           )
         )}
       </div>

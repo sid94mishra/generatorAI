@@ -18,12 +18,10 @@ import { PlanDocumentPanel } from '@/components/chat/PlanDocumentPanel.js';
 import type { ChatMessage } from '@generatorai/shared';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { AgentConsole } from '@/components/chat/AgentConsole.js';
-import { ThinkingPlaceholder } from '@/components/chat/ThinkingPlaceholder.js';
-import { ChatMessageList } from '@/components/chat/ChatMessageList.js';
-import { StreamingMessage } from '@/components/chat/StreamingMessage.js';
-import { awaitsUserDecision } from '@/components/agent/deriveTimeline.js';
+import { WidgetFrame } from '@/components/widgets/WidgetFrame.js';
+import { ScmResultCard } from '@/components/scm/ScmResultCard.js';
+import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
 import { Composer, type ComposerAttachment } from '@/blocks/composer/index.js';
-import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
 import { BrowserPanel, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
 import { ChatMessageSkeleton } from '@/components/Skeleton.js';
@@ -34,7 +32,7 @@ import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js'
 import { Loader2, Bot, User, Archive, ArrowDown, PauseCircle, GitFork } from 'lucide-react';
 import { defaultDockTab, dockAddableTabTypes, dockTabTypes } from '@/platform/surfaceCapabilities.js';
 import { Button } from '@/components/ui/index.js';
-import { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS, useChatView } from '@/features/chat/index.js';
+import { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS, ChatTranscript, useChatView } from '@/features/chat/index.js';
 
 // Right-pane-only surfaces, code-split out of the chat route chunk. They pull
 // in the two heaviest dependency trees in the app (xterm + its WebGL addon;
@@ -85,82 +83,6 @@ function ForkProvenanceChip({ parentChatId }: { parentChatId: string }) {
 }
 
 /**
- * The one place that subscribes to the FULL live stream record.
- *
- * ChatPage used to do this at the top level, and the record is replaced on
- * every streamed token (W27) — so the whole page (RightPane's tabs, every
- * effect) re-rendered ~60x/second during a turn. Isolating the subscription
- * here means only this leaf pays that cost; ChatPage itself now reads only
- * narrow, primitive-derived selectors that change far less often.
- */
-const LiveTranscript = React.memo(function LiveTranscript({
-  sessionId,
-  prevUsage,
-  prevCompletedAt,
-  onOpenPlan,
-  onOpenChanges,
-  onOpenShell,
-  workspaceId,
-  chatId,
-  onApprovePlan,
-  onRequestPlanChanges,
-  onAnswerQuestion,
-  onAnswerPermission,
-  planBusy,
-}: {
-  sessionId: string | undefined;
-  prevUsage: UsageInfo | null;
-  prevCompletedAt: number | null;
-  onOpenPlan: (planId: string) => void;
-  onOpenChanges: (filePath?: string) => void;
-  onOpenShell: (callId: string) => void;
-  workspaceId: string | undefined;
-  /** Owning chat — gates "Ask the agent" on a conflicting `scm_result`. */
-  chatId: string | undefined;
-  onApprovePlan: (planId: string, action: 'implement_interactive' | 'implement_autopilot') => void;
-  onRequestPlanChanges: (planId: string, feedback: string) => void;
-  onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) => void;
-  onAnswerPermission: (interactionId: string, behavior: 'allow' | 'deny', message?: string) => void;
-  planBusy: boolean;
-}) {
-  const stream = useStreamStore((state) => (sessionId ? state.streams[sessionId] : undefined));
-  // Widgets keep the transcript "active" even once the turn itself is idle —
-  // the LLM may have rendered one in an earlier turn and it stays live.
-  const hasActiveWidgetBlock = stream != null && stream.blocks.some(
-    (b) => b.type === 'widget' && b.surface === 'inline' && b.status !== 'closed',
-  );
-  // Source-control results land after the turn settles and survive the
-  // transcript cleanup; an idle stream that still holds one must render it,
-  // otherwise "Committed · PR #12" (or the conflict card) is invisible on reload.
-  const hasScmResult = stream != null && stream.blocks.some((b) => b.type === 'scm_result');
-  const showStreamingMessage =
-    stream != null &&
-    (stream.blocks.length > 0 || stream.cancelRequested) &&
-    (stream.status !== 'idle' || hasActiveWidgetBlock || hasScmResult);
-
-  if (!showStreamingMessage || !stream) return null;
-
-  return (
-    <StreamingMessage
-      stream={stream}
-      sessionId={sessionId}
-      prevUsage={prevUsage}
-      prevCompletedAt={prevCompletedAt}
-      onOpenPlan={onOpenPlan}
-      onOpenChanges={onOpenChanges}
-      onOpenShell={onOpenShell}
-      {...(workspaceId ? { workspaceId } : {})}
-      {...(chatId ? { chatId } : {})}
-      onApprovePlan={onApprovePlan}
-      onRequestPlanChanges={onRequestPlanChanges}
-      onAnswerQuestion={onAnswerQuestion}
-      onAnswerPermission={onAnswerPermission}
-      planBusy={planBusy}
-    />
-  );
-});
-
-/**
  * Same idea for the Terminal tab's agent shell console: it needs the live
  * stream to show in-progress shell blocks, but subscribing here — rather
  * than threading `stream` through the (memoised) RightPane `tabs` object —
@@ -196,28 +118,8 @@ export function ChatPage() {
     toggleDock: toggleRightPane,
   });
   const { chat, sessionId, workspace, stream, transcript, gates, stopRewind, dock } = view;
-  const {
-    isStreaming,
-    isPending,
-    isWorking: isCopilotWorking,
-    turnUserMessage,
-    pendingUserMessage,
-    hasNewTurnContent,
-    showStreamingMessage,
-    prevUsageRef,
-  } = stream;
-  const {
-    messages,
-    messagesLoading,
-    hasMoreMessages,
-    loadEarlier,
-    displayMessages,
-    promptHistory,
-    showOptimisticUserMessage,
-    scrollRef,
-    showJumpToLatest,
-    jumpToLatest,
-  } = transcript;
+  const { isStreaming, isWorking: isCopilotWorking } = stream;
+  const { messages, promptHistory } = transcript;
   const { stop, canRewind, restoredDraft } = stopRewind;
   const isChatActive = view.chatActive;
   const activeHarnessLabel = workspace.harnessProvider ? providerLabel(workspace.harnessProvider) : null;
@@ -280,11 +182,9 @@ export function ChatPage() {
 
   const {
     activePlanId,
-    openPlanTab,
     changesFocusFile,
     openChangesTab,
     agentConsoleCallId,
-    openAgentShell,
     closeAgentShell,
     openWidgetTab,
     browserUrlScopeKey,
@@ -535,6 +435,30 @@ export function ChatPage() {
     changesFocusFile,
   ]);
 
+  // Transcript slots for blocks whose renderers are still legacy parts.
+  const renderTranscriptWidget = useCallback(
+    (block: WidgetBlock, sid: string) => <WidgetFrame block={block} sessionId={sid} />,
+    [],
+  );
+  const renderTranscriptScm = useCallback(
+    (block: ScmResultBlock) => (
+      <ScmResultCard
+        result={block.result}
+        {...(chat?.workspaceId ? { workspaceId: chat.workspaceId } : {})}
+        {...(chatId ? { chatId } : {})}
+      />
+    ),
+    [chat?.workspaceId, chatId],
+  );
+  const requestDockFocus = dock.requestFocus;
+  const focusDockTab = useCallback(
+    (type: 'browser' | 'background_tasks') => {
+      setRightPaneOpen(true);
+      requestDockFocus({ type, token: Date.now() });
+    },
+    [requestDockFocus, setRightPaneOpen],
+  );
+
   // Loading
   if (!chatId) {
     navigate('/');
@@ -613,117 +537,18 @@ export function ChatPage() {
         </div>
       )}
 
-      {/* Messages */}
-      <div className="relative flex flex-1 flex-col overflow-hidden">
-      <div
-        ref={scrollRef}
-        className="flex-1 overflow-y-auto px-4 py-4"
-      >
-        <div className="mx-auto max-w-3xl">
-        {messagesLoading && <ChatMessageSkeleton />}
-        {/* P0-48 fix: "Load more" — lets the user page back through history beyond
-            the initial PAGE_SIZE. Shown only when the current fetch returned a full
-            page (meaning older messages exist server-side). */}
-        {hasMoreMessages && !messagesLoading && (
-          <div className="mb-4 flex justify-center">
-            <Button variant="unstyled"
-              type="button"
-              onClick={loadEarlier}
-              className="rounded-md border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-1.5 text-xs text-[var(--color-muted-foreground)] transition hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
-            >
-              Load earlier messages
-            </Button>
-          </div>
-        )}
-        {displayMessages.length > 0 && (
-          <ChatMessageList
-            messages={displayMessages}
-            canRewind={canRewind}
-            onOpenPlan={openPlanTab}
-            onOpenChanges={openChangesTab}
-            onOpenShell={openAgentShell}
-            {...(chat?.workspaceId ? { workspaceId: chat.workspaceId } : {})}
-            {...(chatId ? { chatId } : {})}
-            // Thread the page-level scroll ref so VirtualChatList can attach
-            // to the outer scroll container rather than creating a nested one.
-            // This avoids dual scroll bars and the 60-vh height cap (W30 fix).
-            scrollElementRef={scrollRef}
-          />
-        )}
-        {/* Optimistic user message — right-aligned bubble (matches UserMessage
-            + workflow stage prompt for a consistent stream layout). */}
-        {showOptimisticUserMessage && (
-          <div className="mt-5 flex justify-end">
-            <div className="max-w-[85%] min-w-0">
-              <div className="rounded-2xl rounded-br-sm border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/[0.08] px-3.5 py-2.5">
-                <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-primary)]/80">
-                  <User className="h-2.5 w-2.5" />
-                  You
-                  <span className="ml-auto font-normal normal-case tracking-normal text-[var(--color-muted-foreground)]">just now</span>
-                </div>
-                <p className="whitespace-pre-wrap text-[13px] leading-relaxed text-[var(--color-foreground)]/90">{turnUserMessage}</p>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Streaming message — LiveTranscript owns the per-token subscription
-            (see its definition above `ChatPage`) so this page does not. */}
-        {showStreamingMessage && (
-          <LiveTranscript
-            sessionId={sessionId}
-            prevUsage={prevUsageRef.current?.usage ?? null}
-            prevCompletedAt={prevUsageRef.current?.completedAt ?? null}
-            onOpenPlan={openPlanTab}
-            onOpenChanges={openChangesTab}
-            onOpenShell={openAgentShell}
-            workspaceId={chat?.workspaceId}
-            chatId={chatId}
-            onApprovePlan={gates.approvePlan}
-            onRequestPlanChanges={gates.requestPlanChanges}
-            onAnswerQuestion={gates.answerQuestion}
-            onAnswerPermission={gates.answerPermission}
-            planBusy={gates.decisionBusy}
-          />
-        )}
-
-        {/* Empty state */}
-        {!messagesLoading && displayMessages.length === 0 && !showStreamingMessage && !isPending && !pendingUserMessage && (
-          <div className="flex h-full flex-col items-center justify-center gap-4">
-            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-[var(--color-accent-tint)]">
-              <Bot className="h-8 w-8 text-[var(--color-primary)] opacity-60" />
-            </div>
-            <div className="text-center">
-              <p className="text-sm font-medium text-[var(--color-foreground)] opacity-70">
-                Start the conversation
-              </p>
-              <p className="mt-1 text-xs text-[var(--color-muted-foreground)]">
-                {activeHarnessLabel
-                  ? `Type a message below to chat with ${activeHarnessLabel}`
-                  : 'Type a message below to start chatting'}
-              </p>
-            </div>
-          </div>
-        )}
-
-        {/* Pending spinner — headerless (no avatar) to match the workflow
-            stage stream's loading state. Shown whenever the turn is pending
-            and hasn't produced its own content yet; carried-over widget
-            blocks (preserved across the turn barrier) must not suppress it. */}
-        {isPending && !hasNewTurnContent && (
-          <ThinkingPlaceholder label={`${activeHarnessLabel ?? 'Agent'} is thinking`} className="mt-4" />
-        )}
-        </div>
-      </div>
-      {showJumpToLatest && (
-        <Button variant="unstyled"
-          onClick={jumpToLatest}
-          className="absolute bottom-3 left-1/2 -translate-x-1/2 inline-flex items-center gap-1.5 rounded-full border border-[var(--color-border)] bg-[var(--color-card)] px-3 py-1.5 text-xs font-medium text-[var(--color-foreground)] shadow-md transition-colors hover:bg-[var(--color-subtle)]"
-        >
-          <ArrowDown className="h-3.5 w-3.5" /> Jump to latest
-        </Button>
-      )}
-      </div>
+      {/* Transcript — the transcript kit (P4-07); LiveTurn inside owns the
+          per-token subscription, so this page does not. */}
+      <ChatTranscript
+        view={view}
+        agentName={chat.agentSnapshot?.driving?.name ?? activeHarnessLabel ?? 'Agent'}
+        harnessLabel={activeHarnessLabel}
+        canRewind={canRewind}
+        loadingFallback={<ChatMessageSkeleton />}
+        renderWidget={renderTranscriptWidget}
+        renderScmResult={renderTranscriptScm}
+        focusDockTab={focusDockTab}
+      />
 
       {/* Input — only for active chats (the composer block with this page's send) */}
       {isChatActive && sessionId && (

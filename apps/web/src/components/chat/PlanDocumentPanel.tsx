@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Button, Spinner, Textarea } from '@/components/ui/index.js';
-import { MarkdownRenderer } from '@/components/chat/MarkdownRenderer.js';
+import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import {
   usePlan,
   usePlans,
@@ -324,7 +324,7 @@ export function PlanDocumentPanel({ chatId, planId }: PlanDocumentPanelProps) {
               onMouseUp={handleCaptureSelection}
               className="min-w-0 text-[13px] leading-relaxed message-assistant"
             >
-              <MarkdownRenderer content={revision.content} />
+              <Markdown>{revision.content}</Markdown>
             </div>
 
             {/* Selection → comment */}

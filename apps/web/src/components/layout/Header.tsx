@@ -12,7 +12,7 @@ import { useParams, useNavigate, useLocation } from 'react-router';
 import { useChat, useArchiveChat } from '@/hooks/queries.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useStreamStore } from '@/stores/streamStore.js';
-import { awaitsUserDecision } from '@/components/agent/deriveTimeline.js';
+import { awaitsUserDecision } from '@generatorai/client-core';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { OpenInEditorButton } from '@/components/shared/OpenInEditorButton.js';
 import { cn } from '@/lib/utils.js';
