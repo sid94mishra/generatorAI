@@ -167,54 +167,9 @@ export function safeAddColumnOn(sqlite: Database.Database, sql: string): void {
   }
 }
 
-/**
- * Versions recorded under the name of a migration that now has another
- * number are forgotten, from the first such version up, so they re-run in
- * the current order. Returns the lowest forgotten version, or undefined.
- *
- * Why: the runner keys on the version alone. The web/desktop redesign wrote
- * its chat-list and task-cancel migrations as v55–v57 on its branch; the
- * Workflow Overhaul's v55–v60 landed first on the shared branch, so the merge
- * renumbered the redesign's to v61–v63. A database migrated on the redesign
- * branch records v55–v57 under the redesign's names and, left alone, would
- * skip the Overhaul's v55–v57 forever. Forgetting those rows sends it back
- * through v55+: the Overhaul's v55 rebuilds `chats` to its v54 column set
- * (dropping the redesign's columns and triggers with the old table), and
- * v61–v63 add them back and backfill them.
- *
- * Only versions from `VERSIONED_ONLY_FROM` up are compared. A recorded name
- * that no migration in this build carries is a database from a newer or an
- * unrelated build: that fails loudly instead of guessing.
- */
-export function forgetRenumberedMigrations(sqlite: Database.Database): number | undefined {
-  const hasVersions = sqlite
-    .prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = '_schema_versions'`)
-    .get();
-  if (!hasVersions) return undefined;
-  const rows = sqlite
-    .prepare(`SELECT version, name FROM _schema_versions WHERE version >= ? ORDER BY version`)
-    .all(VERSIONED_ONLY_FROM) as Array<{ version: number; name: string | null }>;
-  const nameAt = new Map(MIGRATIONS.map((m) => [m.version, m.name]));
-  const known = new Set(MIGRATIONS.map((m) => m.name));
-  const first = rows.find((r) => r.name !== null && nameAt.get(r.version) !== undefined && nameAt.get(r.version) !== r.name);
-  if (!first) return undefined;
-  const unknown = rows.filter((r) => r.version >= first.version && r.name !== null && !known.has(r.name));
-  if (unknown.length > 0) {
-    const r = unknown[0]!;
-    throw new Error(
-      `Migration v${r.version} in this database is "${r.name}", which this build does not know — the database was migrated by another build`,
-    );
-  }
-  sqlite.prepare(`DELETE FROM _schema_versions WHERE version >= ?`).run(first.version);
-  return first.version;
-}
-
 /** Run migrations — creates tables if they don't exist */
 export function migrateDB(db: AppDatabase, opts?: MigrateOptions): void {
   const sqlite = (db as unknown as { session: { client: Database.Database } }).session.client;
-
-  // Renumbered migrations re-run in the current order (see the function).
-  forgetRenumberedMigrations(sqlite);
 
   // P00 WP-0.6b — fresh databases start from the generated baseline; ones at
   // or above it skip the legacy bootstrap (see `chooseMigrationRoute`).
