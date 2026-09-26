@@ -27,6 +27,7 @@ import {
   watchFlag,
 } from './_shared.js';
 import { findDefinition } from './workflow.js';
+import { readAttachments, readStdin } from './chat.js';
 
 export const RUN_GROUP = {
   name: 'run',
@@ -80,6 +81,36 @@ async function findStage(ctx: CliContext, runId: string, ref: string) {
   });
   const stage = stages.find((s) => s.id === hit.id);
   return stage ? view(stage) : { ...hit, stageKey: undefined, instancePath: undefined };
+}
+
+/** What each outcome of `run stage send` means, for the success line. */
+const SEND_OUTCOME: Record<'queued' | 'amending' | 'retrying', string> = {
+  queued: 'queued as the stage’s next turn',
+  amending: 'amending the completed stage’s output (later stages keep what they used; `run retry --from` re-runs them)',
+  retrying: 'the paused stage resumes with it',
+};
+
+/**
+ * A refusal of the stage conversation API, with its code up front and the
+ * next step as the hint (409 STAGE_BUSY, INTERACTION_PENDING, …).
+ */
+function stageConversationError(error: unknown, runId: string, stageRef: string): unknown {
+  const api = error as { status?: unknown; message?: unknown; body?: unknown } | null;
+  if (!api || api.status !== 409) return error;
+  const code = (api.body as { error?: { code?: unknown } } | undefined)?.error?.code;
+  const message = typeof api.message === 'string' ? api.message : 'The stage refused the request.';
+  const hint =
+    code === 'STAGE_BUSY'
+      ? `Stop the turn in flight first: generatorai run stage stop ${runId} ${stageRef}`
+      : code === 'INTERACTION_PENDING'
+        ? `Answer the stage's gate first: generatorai run hitl pending ${runId}`
+        : code === 'STAGE_NOT_CONVERSABLE'
+          ? `Re-run it in a new run: generatorai run retry ${runId} --from ${stageRef}`
+          : undefined;
+  return new CliError('CONFLICT', typeof code === 'string' ? `${code}: ${message}` : message, {
+    ...(hint ? { hint } : {}),
+    details: { runId, stage: stageRef, ...(typeof code === 'string' ? { code } : {}) },
+  });
 }
 
 /** The question an `awaiting_input` stage asks, from its interrupt payload. */
@@ -703,6 +734,78 @@ export function runCommands(): CommandSpec[] {
         },
       }),
     ),
+
+    // A stage is a compact chat (P03b): message it, stop its turn.
+    defineCommand({
+      id: 'run.stage.send',
+      group: 'run',
+      verb: 'stage send',
+      summary: 'Send a message to a stage (the next turn, an amendment of a completed stage, or a retry of a paused one)',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      examples: [
+        'generatorai run stage send @last review "also cover the empty-input case"',
+        'generatorai run stage send a3f2 implement - --attach spec.md',
+      ],
+      args: [
+        { name: 'run', description: 'Run reference', required: true, completes: 'run' },
+        { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
+        { name: 'text', description: 'Message text, or - to read stdin', required: true },
+      ],
+      flags: [
+        { name: 'mode', description: 'Agent mode of this turn (auto or plan)', type: 'string' },
+        { name: 'attach', description: 'Attach a file (repeatable)', type: 'string', variadic: true, completes: 'file' },
+      ],
+      schema: inputSchema(
+        { run: z.string(), stage: z.string(), text: z.string() },
+        { mode: z.enum(['auto', 'plan']).optional(), attach: z.array(z.string()).optional() },
+      ),
+      output: { kind: 'record' },
+      async handler(ctx, { args, flags }) {
+        const run = await findRun(ctx, args.run);
+        const stage = await findStage(ctx, run.id, args.stage);
+        const text = args.text === '-' ? await readStdin() : args.text;
+        if (!text.trim()) throw CliError.usage('The message is empty.');
+        const input = { message: text, ...(flags.mode ? { mode: flags.mode } : {}) };
+        try {
+          const result = flags.attach?.length
+            ? await ctx.api.runs.stageMessageWithAttachments(run.id, stage.id, input, await readAttachments(flags.attach))
+            : await ctx.api.runs.stageMessage(run.id, stage.id, input);
+          return record(
+            { runId: run.id, stageId: stage.id, outcome: result.outcome, attachments: result.attachmentIds.length },
+            `Sent to ${stage.name ?? stage.id}: ${SEND_OUTCOME[result.outcome]}.`,
+          );
+        } catch (error) {
+          throw stageConversationError(error, run.id, args.stage);
+        }
+      },
+    }),
+
+    defineCommand({
+      id: 'run.stage.stop',
+      group: 'run',
+      verb: 'stage stop',
+      summary: 'Stop the turn a stage is taking; the stage continues from its next step',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        { name: 'run', description: 'Run reference', required: true, completes: 'run' },
+        { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
+      ],
+      flags: [{ name: 'force', description: 'Also tear the provider conversation down (re-bound before the next turn)', type: 'boolean' }],
+      schema: inputSchema({ run: z.string(), stage: z.string() }, { force: z.boolean().optional() }),
+      output: { kind: 'void', successMessage: 'Turn stopped.' },
+      async handler(ctx, { args, flags }) {
+        const run = await findRun(ctx, args.run);
+        const stage = await findStage(ctx, run.id, args.stage);
+        try {
+          await ctx.api.runs.cancelStageTurn(run.id, stage.id, flags.force ? { force: true } : {});
+        } catch (error) {
+          throw stageConversationError(error, run.id, args.stage);
+        }
+        return ok(`Stopped the turn of ${stage.name ?? stage.id}; the stage continues from its next step.`);
+      },
+    }),
 
     defineCommand({
       id: 'run.hitl.mode',

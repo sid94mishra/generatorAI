@@ -90,8 +90,13 @@ export interface PendingQuestion {
  * Real producer for both event families: `ChatManagementService.ts`'s
  * `buildPlanReviewHandler`/`buildQuestionHandler`/`answerQuestion` — verified
  * field-by-field there, not assumed from `AgentEvent.ts`'s type names alone.
+ *
+ * A workflow stage raises the same three gates inside its turns
+ * (`StageGatePort`, `stage.permission.*` / `stage.question.*` /
+ * `stage.plan.*`, P03b): they land here too, with `stageRunId` set, so the
+ * chat's key bindings answer them — through the stage conversation API.
  */
-export type PendingChatInteraction =
+export type PendingChatInteraction = (
   | {
       kind: 'plan';
       interactionId: string;
@@ -118,7 +123,11 @@ export type PendingChatInteraction =
       /** Bounded, secret-redacted rendering of the tool input. */
       inputSummary: string;
       permissionMode: string;
-    };
+    }
+) & {
+  /** Set when a workflow stage raised the gate (answered through the stage's interaction routes). */
+  stageRunId?: string;
+};
 
 export interface TimelineState {
   items: TimelineItem[];
@@ -209,6 +218,12 @@ function str(value: unknown): string {
 
 function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
+}
+
+/** A stage gate's `stageRunId` (`stage.*` events), for `PendingChatInteraction`. */
+function stageOf(data: Record<string, unknown>): { stageRunId?: string } {
+  const id = str(data['stageRunId']);
+  return id ? { stageRunId: id } : {};
 }
 
 /**
@@ -428,6 +443,11 @@ export function reduceEvent(
     // real event — generic pause/resume, unrelated to HITL) is deliberately
     // NOT treated as clearing an approval.
     case 'stage_run.awaiting_input': {
+      // A tool permission, question or plan review inside the stage's turn
+      // is the chat-shaped `pendingInteraction` its `stage.*` event already
+      // set (P03b); only the completion review is an approval.
+      const kind = (data['interruptData'] as { kind?: unknown } | undefined)?.kind;
+      if (kind === 'tool_permission' || kind === 'question' || kind === 'plan_review') return base;
       const stageRunId = str(data['stageRunId']);
       const stageName = str(data['name'] ?? base.currentStage ?? stageRunId);
       return push(
@@ -455,6 +475,37 @@ export function reduceEvent(
 
     case 'stage_run.input_received':
       return { ...base, pendingApproval: null };
+
+    // The stage conversation (P03b): what an operator sent, a stopped turn,
+    // an amendment of a completed stage.
+    case 'stage_run.operator_message': {
+      const stageRunId = str(data['stageRunId']);
+      return push(
+        base,
+        { id: itemId(), kind: 'notice', text: `You: ${str(data['content'])}`, complete: true, at: now, ...(stageRunId ? { stageRunId } : {}), level: 'info' },
+        options,
+      );
+    }
+    case 'stage_run.turn_cancelled':
+    case 'stage_run.amended':
+    case 'stage_run.amend_failed':
+    case 'stage_run.operator_message_dropped': {
+      const stageRunId = str(data['stageRunId']);
+      const text =
+        kind === 'stage_run.turn_cancelled'
+          ? 'Turn stopped — the stage continues from its next step'
+          : kind === 'stage_run.amended'
+            ? 'Output amended — later stages keep what they already used; re-run from here to update them'
+            : kind === 'stage_run.amend_failed'
+              ? `The amendment failed: ${str(data['error'] ?? 'unknown error')} (the previous output is kept)`
+              : `${num(data['count']) ?? 1} queued message(s) not sent: the stage attempt ended first`;
+      const failed = kind === 'stage_run.amend_failed' || kind === 'stage_run.operator_message_dropped';
+      return push(
+        base,
+        { id: itemId(), kind: 'notice', text, complete: true, at: now, ...(stageRunId ? { stageRunId } : {}), level: failed ? 'warn' : 'info' },
+        options,
+      );
+    }
 
     // Hooks are correlated to the whole run (`workflowRunId`), NOT to a
     // specific stage run — `HookExecutor.ts`'s real emit calls carry no
@@ -582,11 +633,13 @@ export function reduceEvent(
     // `buildQuestionHandler`/`answerQuestion` — this whole event family had
     // never been consumed by any TUI code before this (`grep` across
     // `apps/cli/src/tui` for it returned nothing).
-    case 'chat.plan.review_requested': {
+    case 'chat.plan.review_requested':
+    case 'stage.plan.review_requested': {
       const rawActions = data['actions'];
       return {
         ...base,
         pendingInteraction: {
+          ...stageOf(data),
           kind: 'plan',
           interactionId: str(data['interactionId']),
           planId: str(data['planId']),
@@ -603,17 +656,20 @@ export function reduceEvent(
     // chat gates cannot survive a restart, unlike a workflow stage gate)
     // both clear the banner the same way.
     case 'chat.plan.decided':
-    case 'chat.plan.expired': {
+    case 'chat.plan.expired':
+    case 'stage.plan.decided': {
       if (base.pendingInteraction?.kind !== 'plan') return base;
       if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
       return { ...base, pendingInteraction: null };
     }
 
-    case 'chat.question.asked': {
+    case 'chat.question.asked':
+    case 'stage.question.asked': {
       const rawQuestions = Array.isArray(data['questions']) ? data['questions'] : [];
       return {
         ...base,
         pendingInteraction: {
+          ...stageOf(data),
           kind: 'question',
           interactionId: str(data['interactionId']),
           questions: rawQuestions.map((raw) => {
@@ -639,7 +695,9 @@ export function reduceEvent(
     }
 
     case 'chat.question.answered':
-    case 'chat.question.expired': {
+    case 'chat.question.expired':
+    case 'stage.question.answered':
+    case 'stage.question.expired': {
       if (base.pendingInteraction?.kind !== 'question') return base;
       if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
       return { ...base, pendingInteraction: null };
@@ -651,10 +709,12 @@ export function reduceEvent(
     // it. Same chat-scoped-gate family as plan/question above — real
     // producer is `ChatManagementService.buildPermissionHandler`, event
     // shapes verified against `packages/shared/src/types/AgentEvent.ts`.
-    case 'chat.permission.requested': {
+    case 'chat.permission.requested':
+    case 'stage.permission.requested': {
       return {
         ...base,
         pendingInteraction: {
+          ...stageOf(data),
           kind: 'permission',
           interactionId: str(data['interactionId']),
           toolName: str(data['toolName']),
@@ -667,7 +727,9 @@ export function reduceEvent(
     }
 
     case 'chat.permission.resolved':
-    case 'chat.permission.expired': {
+    case 'chat.permission.expired':
+    case 'stage.permission.resolved':
+    case 'stage.permission.expired': {
       if (base.pendingInteraction?.kind !== 'permission') return base;
       if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
       return { ...base, pendingInteraction: null };

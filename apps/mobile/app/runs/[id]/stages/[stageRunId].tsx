@@ -9,6 +9,11 @@
 //
 // Live through the same `run` stream scope as the run screen — its
 // invalidations cover this screen's keys, which sit under `queryKeys.run`.
+//
+// A stage is a compact chat (P03b): the chat's composer sits under the
+// transcript (send, attach, Stop), and a tool permission, question or plan
+// inside the stage's turn pins the chat's card above it. A message to a
+// completed stage amends its output; its stream stays open while it does.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
@@ -23,6 +28,8 @@ import { useAdminApi } from '../../../../src/api/useAdminApi';
 import { useRunMutations, type StageAction } from '../../../../src/api/useRunControl';
 import { useRunStream } from '../../../../src/stream/useRunStream';
 import { ApprovalCard } from '../../../../src/components/runs/ApprovalCard';
+import { StageComposer } from '../../../../src/components/runs/StageComposer';
+import { stageGateOf } from '../../../../src/components/runs/stageGate';
 import { formatDuration, relativeTime, runElapsed } from '../../../../src/components/runs/formatTime';
 import { StatusGlyph } from '../../../../src/components/runs/StatusGlyph';
 import { stageSubtitle } from '../../../../src/components/runs/StageTimeline';
@@ -72,6 +79,8 @@ export default function StageScreen(): React.ReactElement {
   const runControl = useFeature('runControl');
   const [tab, setTab] = useState<Tab>('transcript');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  // A message to a completed stage amends it: stream it until the amendment lands.
+  const [amendingSince, setAmendingSince] = useState<string | null>(null);
 
   const { connected } = useRunStream(runId, focused);
   const { stageAction, approve } = useRunMutations(runId);
@@ -100,7 +109,10 @@ export default function StageScreen(): React.ReactElement {
   }, [navigation, stage?.name]);
 
   // Nothing past the prompt is saved while the stage runs; stream it instead.
-  const liveState = useStageLive(runId, stageRunId, live);
+  const amending = amendingSince !== null && String(stage?.amendedAt ?? '') === amendingSince;
+  const liveState = useStageLive(runId, stageRunId, live || amending);
+  const streaming =
+    (live || amending) && (liveState?.status === 'pending' || liveState?.status === 'streaming' || liveState?.status === 'thinking');
   const items = useMemo(() => {
     const saved = transcriptItems(transcript.data, live);
     if (!liveState?.blocks.length) return saved;
@@ -188,7 +200,7 @@ export default function StageScreen(): React.ReactElement {
         ) : null}
       </Card>
 
-      {awaitsApproval(stage.status) ? (
+      {awaitsApproval(stage.status) && stageGateOf(stage.interruptData).kind === 'review' ? (
         <ApprovalCard
           stage={stage}
           busy={approve.isPending}
@@ -339,6 +351,7 @@ export default function StageScreen(): React.ReactElement {
 
   return (
     <TimelineActionsContext.Provider value={actions}>
+      <View className="flex-1 bg-background">
       <FlatList<ListItem>
         className="flex-1 bg-background"
         data={data}
@@ -364,6 +377,19 @@ export default function StageScreen(): React.ReactElement {
           )
         }
       />
+      <StageComposer
+        runId={runId}
+        stage={stage}
+        workspaceId={workspaceId ?? null}
+        streaming={streaming}
+        canControl={runControl.available}
+        busy={approve.isPending}
+        onDecide={(outcome: ApprovalOutcome, feedback?: string) =>
+          approve.mutate({ stageRunId, outcome, ...(feedback ? { feedback } : {}) })
+        }
+        onAmending={() => setAmendingSince(String(stage.amendedAt ?? ''))}
+      />
+      </View>
 
       <ActionSheet
         visible={confirmCancel}

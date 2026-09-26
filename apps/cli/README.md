@@ -349,7 +349,19 @@ generatorai run stage pause <runId> <stage>
 generatorai run stage resume <runId> <stage>
 generatorai run stage retry <runId> <stage>
 generatorai run stage cancel <runId> <stage>
+
+# A stage is a compact chat: message it, or stop the turn it is taking
+generatorai run stage send <runId> <stage> "<text>" [--mode auto|plan] [--attach <file>...]
+generatorai run stage stop <runId> <stage> [--force]
 ```
+
+`run stage send` answers with how the stage took the message: `queued` (its
+next turn), `amending` (a completed stage's output is amended; later stages
+keep what they used) or `retrying` (a paused stage resumes with it). A stage
+in the middle of a turn refuses with `STAGE_BUSY` — stop it first — and one
+waiting on a gate with `INTERACTION_PENDING`. In the TUI, a tool permission,
+question or plan review a stage raises inside its turn shows on the run pane
+and is answered with `a` / `x`, the same overlays as a chat's gate.
 
 **Permission modes:**
 

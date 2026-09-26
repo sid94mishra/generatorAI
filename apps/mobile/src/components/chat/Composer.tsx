@@ -252,6 +252,14 @@ export interface ComposerTurnProps {
    * transcript.
    */
   dock?: React.ReactNode;
+  /**
+   * A workflow stage's composer (P03b, a stage is a compact chat): the
+   * stage's session fixes the model, effort and permissions, so the strip
+   * holds only the agent mode of the next message.
+   */
+  compact?: boolean | undefined;
+  /** The field's placeholder; defaults to the chat's. */
+  placeholder?: string | undefined;
 
   // ── v1 compatibility ──────────────────────────────────────────
   /** v1: paths for @-mentions when no `suggestions` are supplied. */
@@ -587,7 +595,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
 
   const placeholder = disabled && !hasGate
     ? 'Waiting…'
-    : props.activeCommand?.argHint ?? 'Ask anything · / actions · @ files';
+    : props.activeCommand?.argHint ?? props.placeholder ?? 'Ask anything · / actions · @ files';
 
   return (
     // No top hairline: the changes box and the composer card are each
@@ -751,7 +759,18 @@ export function Composer(props: ComposerProps): React.ReactElement {
           >
             {/* Plan leads the strip: it changes what Send does, so it must be on
                 screen, not scrolled off behind the model name. */}
-            {turnParts.plan ? (
+            {props.compact ? (
+              <SetupChip
+                testID="composer-mode"
+                accessibilityLabel={`Mode: ${props.mode === 'plan' ? 'plan first' : 'auto'}`}
+                accessibilityHint="Choose whether the agent plans before editing"
+                icon={<ClipboardList size={13} color={props.mode === 'plan' ? colors.primary : colors['muted-foreground']} />}
+                label={props.mode === 'plan' ? 'Plan' : 'Auto'}
+                highlighted={props.mode === 'plan'}
+                onPress={() => setSheet('mode')}
+              />
+            ) : null}
+            {!props.compact && turnParts.plan ? (
               <SetupChip
                 testID="composer-mode"
                 accessibilityLabel="Mode: plan first"
@@ -762,6 +781,8 @@ export function Composer(props: ComposerProps): React.ReactElement {
                 onPress={() => setSheet('mode')}
               />
             ) : null}
+            {props.compact ? null : (
+            <>
             <SetupChip
               testID="composer-model"
               accessibilityLabel={`Model: ${model?.name ?? 'server default'}`}
@@ -797,12 +818,14 @@ export function Composer(props: ComposerProps): React.ReactElement {
               highlighted={Boolean(turnParts.effortOverride) || turnParts.permission !== null}
               onPress={() => setSheet('options')}
             />
+            </>
+            )}
           </ScrollView>
 
           <View className="shrink-0 flex-row items-center gap-1.5">
             {/* Only once something is in the window: an empty ring at 0% read
                 as a control that had failed to load. */}
-            {ratio >= 0.01 ? (
+            {ratio >= 0.01 && !props.compact ? (
               <Touchable
                 accessibilityLabel={`Context usage ${Math.round(ratio * 100)} percent`}
                 accessibilityHint="Shows where the context is going"
@@ -881,7 +904,11 @@ export function Composer(props: ComposerProps): React.ReactElement {
         visible={sheet === 'mode'}
         onClose={() => setSheet('none')}
         title="Agent mode"
-        message="Applies to this chat's next turns. Long-press Send to plan just once."
+        message={
+          props.compact
+            ? 'Applies to the messages you send this stage.'
+            : "Applies to this chat's next turns. Long-press Send to plan just once."
+        }
         actions={MODE_OPTIONS.map((option) => ({
           label: option.value === props.mode ? `${option.title} ✓` : option.title,
           icon: <Wand2 size={18} color={option.value === props.mode ? colors.primary : colors.foreground} />,

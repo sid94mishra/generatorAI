@@ -7,6 +7,9 @@
 //     never sends),
 //   • feedback text for "Request changes" (without it the agent re-runs blind),
 //   • a confirmation on Reject, which fails the stage and blocks the run.
+// It is the COMPLETION REVIEW's card: a tool permission, question or plan
+// inside a turn renders as the chat's card (`StageGateCard`). There is no
+// "approve with a note" (PD-9): a follow-up is a message to the stage.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
@@ -34,7 +37,7 @@ export function ApprovalCard({
 }): React.ReactElement {
   const entering = useCardEntering();
   const view = interruptOf(stage.interruptData);
-  const [feedback, setFeedback] = useState<'changes' | 'approve' | null>(null);
+  const [feedback, setFeedback] = useState(false);
   const [confirmReject, setConfirmReject] = useState(false);
   const name = stage.name ?? stage.stageKey;
 
@@ -68,35 +71,29 @@ export function ApprovalCard({
             variant="secondary"
             grow
             disabled={busy}
-            onPress={() => setFeedback('changes')}
+            onPress={() => setFeedback(true)}
           />
           <Button label="Reject" variant="secondary" disabled={busy} onPress={() => setConfirmReject(true)} />
         </View>
-        <View className="flex-row flex-wrap gap-x-2">
-          <Button label="Approve with note" variant="ghost" size="sm" disabled={busy} onPress={() => setFeedback('approve')} />
-          {onOpenStage ? (
+        {onOpenStage ? (
+          <View className="flex-row flex-wrap gap-x-2">
             <Button label="Open transcript" variant="ghost" size="sm" onPress={onOpenStage} />
-          ) : null}
-        </View>
+          </View>
+        ) : null}
       </View>
 
       <FeedbackSheet
-        visible={feedback !== null}
-        onClose={() => setFeedback(null)}
-        title={feedback === 'changes' ? 'Request changes' : 'Approve with follow-up'}
-        message={
-          feedback === 'changes'
-            ? `Tell the agent what to change in "${name}". It keeps working and asks again.`
-            : 'Optional instruction the stage acts on after approval.'
-        }
-        placeholder={feedback === 'changes' ? 'What should change?' : 'e.g. also handle the empty-input case'}
-        submitLabel={feedback === 'changes' ? 'Send feedback' : 'Approve'}
-        required={feedback === 'changes'}
+        visible={feedback}
+        onClose={() => setFeedback(false)}
+        title="Request changes"
+        message={`Tell the agent what to change in "${name}". It keeps working and asks again.`}
+        placeholder="What should change?"
+        submitLabel="Send feedback"
+        required
         busy={busy}
         onSubmit={(text) => {
-          const outcome: ApprovalOutcome = feedback === 'changes' ? 'changes_requested' : 'approved';
-          setFeedback(null);
-          onDecide(outcome, text || undefined);
+          setFeedback(false);
+          onDecide('changes_requested', text || undefined);
         }}
       />
 

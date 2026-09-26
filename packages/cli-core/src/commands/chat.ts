@@ -761,7 +761,7 @@ export function chatCommands(): CommandSpec[] {
  * fast with a usable message instead of hanging with no output, which is what
  * a naive read does and is indistinguishable from a broken command.
  */
-async function readStdin(): Promise<string> {
+export async function readStdin(): Promise<string> {
   if (process.stdin.isTTY) {
     throw CliError.usage('Reading the prompt from stdin, but stdin is a terminal.', {
       hint: 'Pipe the prompt in, or pass it as an argument.',
@@ -780,7 +780,7 @@ async function readStdin(): Promise<string> {
  * set — a typo'd filename should not turn into "sent the message with one
  * fewer attachment than asked for" with no indication anything was dropped.
  */
-async function readAttachments(
+export async function readAttachments(
   paths: string[],
 ): Promise<Array<{ name: string; data: Uint8Array }>> {
   return Promise.all(

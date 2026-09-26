@@ -3222,6 +3222,13 @@ export function App({
   }
 
   function approveGate(approve: boolean): void {
+    // A tool permission, question or plan review inside a stage's turn is a
+    // chat-shaped gate (P03b): the same overlays as a chat's answer it.
+    const stageGate = getStoreApi().getState().timelines[focusedPane?.id ?? '']?.pendingInteraction;
+    if (stageGate?.stageRunId) {
+      respondToChatGate();
+      return;
+    }
     const pending = getStoreApi().getState().timelines[focusedPane?.id ?? '']?.pendingApproval;
     if (!pending || !content?.entityId) {
       actions.toast('No gate is waiting.', 'warning');
@@ -3262,9 +3269,44 @@ export function App({
       return;
     }
     const chatId = content.entityId;
+    // A workflow stage's gate (P03b): the pane is the run, and the answer
+    // goes to the stage's interaction routes instead of the chat's.
+    const stage = pending.stageRunId ? { runId: content.entityId, stageRunId: pending.stageRunId } : null;
+    const reportFailure = (err: unknown): void =>
+      actions.toast(`Could not answer: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    const answerPermission = (interactionId: string, body: { behavior: 'allow' | 'deny'; message?: string }): void => {
+      if (stage) void api.runs.stagePermission(stage.runId, stage.stageRunId, interactionId, body).catch(reportFailure);
+      else void api.chats.respondPermission(chatId, interactionId, body);
+    };
 
     if (pending.kind === 'plan') {
-      const { planId, title, summary } = pending;
+      const { planId, title, summary, interactionId } = pending;
+      if (stage) {
+        actions.showOverlay({
+          kind: 'confirm',
+          message: `${title}\n\n${summary}`,
+          danger: false,
+          onAnswer: (approve) => {
+            if (approve) {
+              void api.runs.stagePlan(stage.runId, stage.stageRunId, interactionId, { approved: true }).catch(reportFailure);
+              return;
+            }
+            actions.showOverlay({
+              kind: 'input',
+              message: 'Why? (optional feedback, Enter to skip)',
+              initial: '',
+              onSubmit: (note) =>
+                void api.runs
+                  .stagePlan(stage.runId, stage.stageRunId, interactionId, {
+                    approved: false,
+                    ...(note.trim() ? { feedback: note.trim() } : {}),
+                  })
+                  .catch(reportFailure),
+            });
+          },
+        });
+        return;
+      }
       actions.showOverlay({
         kind: 'confirm',
         message: `${title}\n\n${summary}`,
@@ -3302,15 +3344,14 @@ export function App({
         danger: false,
         onAnswer: (allow) => {
           if (allow) {
-            void api.chats.respondPermission(chatId, interactionId, permissionResponseBody('allow', ''));
+            answerPermission(interactionId, permissionResponseBody('allow', ''));
             return;
           }
           actions.showOverlay({
             kind: 'input',
             message: 'Why deny? (optional, Enter to skip)',
             initial: '',
-            onSubmit: (note) =>
-              void api.chats.respondPermission(chatId, interactionId, permissionResponseBody('deny', note)),
+            onSubmit: (note) => answerPermission(interactionId, permissionResponseBody('deny', note)),
           });
         },
       });
@@ -3328,7 +3369,8 @@ export function App({
     const askNext = (index: number, answers: Record<string, string[]>): void => {
       const q = questions[index];
       if (!q) {
-        void api.chats.respond(chatId, interactionId, { answers });
+        if (stage) void api.runs.stageAnswer(stage.runId, stage.stageRunId, interactionId, { answers }).catch(reportFailure);
+        else void api.chats.respond(chatId, interactionId, { answers });
         return;
       }
       const finish = (value: string) => askNext(index + 1, { ...answers, [q.id]: [value] });

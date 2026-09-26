@@ -18,6 +18,7 @@ import {
   statusTone,
   type ColumnSpec,
   type PaneContent,
+  type PendingChatInteraction,
   type SettingRow,
   type TimelineItem,
 } from '@generatorai/cli-core';
@@ -387,44 +388,10 @@ function ChatPane({ paneId, content, focused, height }: PaneProps): React.JSX.El
       flexGrow={1}
     >
       {pendingInteraction ? (
-        <Box
-          borderStyle={theme.borderStyle}
-          borderColor={theme.c('warning')}
-          paddingX={1}
-          marginBottom={1}
-          flexDirection="column"
-        >
-          {pendingInteraction.kind === 'plan' ? (
-            <>
-              <Text bold color={theme.c('warning')}>
-                {theme.glyphs.warning} Plan review: {pendingInteraction.title}
-              </Text>
-              <Text wrap="wrap">{pendingInteraction.summary}</Text>
-            </>
-          ) : pendingInteraction.kind === 'permission' ? (
-            <>
-              <Text bold color={theme.c('warning')}>
-                {theme.glyphs.warning} Allow {pendingInteraction.toolName}?
-              </Text>
-              <Text wrap="wrap">{pendingInteraction.description}</Text>
-              {pendingInteraction.inputSummary ? (
-                <Text color={theme.c('muted')} wrap="truncate-end">
-                  {pendingInteraction.inputSummary}
-                </Text>
-              ) : null}
-            </>
-          ) : (
-            <>
-              <Text bold color={theme.c('warning')}>
-                {theme.glyphs.warning}{' '}
-                {pendingInteraction.questions.length === 1
-                  ? pendingInteraction.questions[0]?.question
-                  : `${pendingInteraction.questions.length} questions`}
-              </Text>
-            </>
-          )}
-          <Text color={theme.c('muted')}>{`${prettyChord('alt+g')} to answer ${theme.glyphs.neutral} waiting for you`}</Text>
-        </Box>
+        <PendingInteractionBanner
+          pending={pendingInteraction}
+          hint={`${prettyChord('alt+g')} to answer ${theme.glyphs.neutral} waiting for you`}
+        />
       ) : null}
 
       {items.length === 0 ? (
@@ -691,6 +658,55 @@ export function TimelineRow({
   }
 }
 
+/**
+ * A chat-shaped gate waiting for the user — a chat's, or one a workflow
+ * stage raised inside its turn (P03b): a plan review, a clarifying question
+ * or a tool permission.
+ */
+function PendingInteractionBanner({ pending, hint }: { pending: PendingChatInteraction; hint: string }): React.JSX.Element {
+  const theme = useTheme();
+  return (
+    <Box
+      borderStyle={theme.borderStyle}
+      borderColor={theme.c('warning')}
+      paddingX={1}
+      marginBottom={1}
+      flexDirection="column"
+    >
+      {pending.kind === 'plan' ? (
+        <>
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning} Plan review: {pending.title}
+          </Text>
+          <Text wrap="wrap">{pending.summary}</Text>
+        </>
+      ) : pending.kind === 'permission' ? (
+        <>
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning} Allow {pending.toolName}?
+          </Text>
+          <Text wrap="wrap">{pending.description}</Text>
+          {pending.inputSummary ? (
+            <Text color={theme.c('muted')} wrap="truncate-end">
+              {pending.inputSummary}
+            </Text>
+          ) : null}
+        </>
+      ) : (
+        <>
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning}{' '}
+            {pending.questions.length === 1
+              ? pending.questions[0]?.question
+              : `${pending.questions.length} questions`}
+          </Text>
+        </>
+      )}
+      <Text color={theme.c('muted')}>{hint}</Text>
+    </Box>
+  );
+}
+
 // ── Run ───────────────────────────────────────────────────────────
 
 function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Element {
@@ -701,6 +717,8 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
 
   const items = timeline?.items ?? [];
   const pending = timeline?.pendingApproval;
+  // A tool permission, question or plan inside a stage's turn (P03b).
+  const stageGate = timeline?.pendingInteraction ?? null;
 
   return (
     <Panel
@@ -724,11 +742,12 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
           <Text color={theme.c('muted')}>a approve {theme.glyphs.neutral} x reject</Text>
         </Box>
       ) : null}
+      {stageGate ? <PendingInteractionBanner pending={stageGate} hint={`a answer ${theme.glyphs.neutral} the stage is waiting for you`} /> : null}
 
       <VirtualList
         items={items}
         selectedIndex={items.length - 1}
-        height={Math.max(1, height - (pending ? 8 : 4))}
+        height={Math.max(1, height - (pending ? 8 : 4) - (stageGate ? 5 : 0))}
         emptyMessage="Waiting for events…"
         renderItem={(item) => <TimelineRow item={item} />}
       />

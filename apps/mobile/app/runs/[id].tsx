@@ -20,7 +20,7 @@ import { queryKeys, type ApprovalOutcome, type StageRunSummary } from '@generato
 import { useApi } from '../../src/api/useApi';
 import { useRunMutations, useRunPermissionMode, type RunAction } from '../../src/api/useRunControl';
 import { useRunStream } from '../../src/stream/useRunStream';
-import { ApprovalCard } from '../../src/components/runs/ApprovalCard';
+import { StageGateCard } from '../../src/components/runs/StageGateCard';
 import { formatDuration, relativeTime, runElapsed } from '../../src/components/runs/formatTime';
 import { StageTimeline } from '../../src/components/runs/StageTimeline';
 import { StageTranscriptInline } from '../../src/components/runs/StageTranscriptInline';
@@ -311,9 +311,12 @@ export default function RunDetailScreen(): React.ReactElement {
         {approvals.length > 0 ? (
           <>
             <SectionHeader title="Waiting for you" />
+            {/* A tool permission, question or plan inside a stage's turn is the
+                chat's card; the completion review is the approval card. */}
             {approvals.map((stage) => (
-              <ApprovalCard
+              <StageGateCard
                 key={stage.id}
+                runId={runId}
                 stage={stage}
                 busy={busyStage === stage.id}
                 onDecide={(outcome, feedback) => decide(stage, outcome, feedback)}
