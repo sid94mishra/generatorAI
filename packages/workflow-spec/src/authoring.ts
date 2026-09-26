@@ -61,6 +61,10 @@ export interface ChatWorkflowRunCard {
   stagesDone: number;
   stagesTotal: number;
   pendingApprovals: Array<{ instanceId: string; stageKey: string; stageName: string; decision: string; answerableByAgent: boolean }>;
+  /** Once finalized: the last stage summary (or the error), at most 600 characters. */
+  summary?: string;
+  /** Once finalized: the pull request post-processing opened. */
+  prUrl?: string;
   link: string;
   createdAt: string;
 }

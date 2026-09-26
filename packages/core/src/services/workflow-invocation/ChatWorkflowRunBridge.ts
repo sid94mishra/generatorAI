@@ -17,7 +17,7 @@
 // after a reload or a restart.
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger, PersistedEvent, StageRun } from '@generatorai/shared';
+import type { ILogger, PersistedEvent, StageRun, WorkflowRun } from '@generatorai/shared';
 import type { ChatWorkflowRunCard } from '@generatorai/workflow-spec';
 import type { IChatRepository } from '../../domain/ports/IChatRepository.js';
 import type { IChatWorkflowRunRepository } from '../../domain/ports/IInvocationStores.js';
@@ -227,11 +227,7 @@ export class ChatWorkflowRunBridge implements ChatRunLinker {
   private async finalized(runId: string, chat: Linked): Promise<void> {
     const run = await this.deps.runs.getById(runId);
     if (!TERMINAL.has(run.status)) return;
-    const stages = await this.deps.stageRuns.getByRunId(runId);
-    const last = [...stages].filter((s) => s.summary).sort((a, b) => (a.completedAt?.getTime() ?? 0) - (b.completedAt?.getTime() ?? 0)).at(-1);
-    const prUrl = (run.systemVars?.postProcessing ?? [])
-      .map((p) => /https?:\/\/\S+\/pull\/\d+/.exec(p.output ?? '')?.[0])
-      .find((u): u is string => !!u);
+    const { summary, prUrl } = outcomeOf(run, await this.deps.stageRuns.getByRunId(runId));
     const link = this.link_(run);
     await this.deps.eventBus.emit(chat.sessionId, {
       kind: 'chat.workflow_run.finalized',
@@ -239,7 +235,7 @@ export class ChatWorkflowRunBridge implements ChatRunLinker {
         chatId: chat.chatId,
         runId,
         status: run.status as 'completed' | 'failed' | 'cancelled',
-        ...(last?.summary ? { summary: last.summary.slice(0, 600) } : run.error ? { summary: run.error.slice(0, 600) } : {}),
+        ...(summary ? { summary } : {}),
         ...(prUrl ? { prUrl } : {}),
         link,
       },
@@ -269,6 +265,7 @@ export class ChatWorkflowRunBridge implements ChatRunLinker {
       const summary = stageSummary(stages);
       const pending = TERMINAL.has(run.status) ? [] : await this.deps.approvals.listPending(run.id).catch(() => []);
       const delegated = run.systemVars?.approvalDelegate === 'invoker';
+      const outcome = TERMINAL.has(run.status) ? outcomeOf(run, stages) : {};
       out.push({
         runId: run.id,
         workflowId: run.workflowDefinitionId,
@@ -285,6 +282,8 @@ export class ChatWorkflowRunBridge implements ChatRunLinker {
           decision: d.kind,
           answerableByAgent: delegated && d.runId === run.id && d.kind === 'stage_completion_review',
         })),
+        ...(outcome.summary ? { summary: outcome.summary } : {}),
+        ...(outcome.prUrl ? { prUrl: outcome.prUrl } : {}),
         link: this.link_(run),
         createdAt: l.createdAt.toISOString(),
       });
@@ -300,4 +299,14 @@ function stageSummary(stages: StageRun[]): { done: number; total: number; curren
   const latest = [...top].sort((a, b) => (b.updatedAt?.getTime() ?? 0) - (a.updatedAt?.getTime() ?? 0))[0];
   const current = running?.name ?? latest?.name;
   return { done: top.filter((s) => STAGE_DONE.has(s.status)).length, total: top.length, ...(current ? { current } : {}) };
+}
+
+/** A finalized run's card text: the last stage summary (else the error) and the PR post-processing opened. */
+function outcomeOf(run: WorkflowRun, stages: StageRun[]): { summary?: string; prUrl?: string } {
+  const last = [...stages].filter((s) => s.summary).sort((a, b) => (a.completedAt?.getTime() ?? 0) - (b.completedAt?.getTime() ?? 0)).at(-1);
+  const prUrl = (run.systemVars?.postProcessing ?? [])
+    .map((p) => /https?:\/\/\S+\/pull\/\d+/.exec(p.output ?? '')?.[0])
+    .find((u): u is string => !!u);
+  const summary = (last?.summary ?? run.error ?? undefined)?.slice(0, 600);
+  return { ...(summary ? { summary } : {}), ...(prUrl ? { prUrl } : {}) };
 }
