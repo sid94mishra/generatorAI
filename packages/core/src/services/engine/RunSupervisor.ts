@@ -55,7 +55,7 @@ import type { RunMessage, RunOutcome } from '../../domain/scheduler/types.js';
 import { mapStateOf, StateIndex } from '../../domain/scheduler/scope.js';
 import { compile, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import type { EventBus } from '../../events/EventBus.js';
-import type { AdmissionController } from '../AdmissionController.js';
+import { CHECK_FLOW_KEY, GLOBAL_FLOW_KEY, modelFlowKey, providerFlowKey, type AdmissionController } from '../AdmissionController.js';
 import type { RunDefinitionReader } from '../definitions/RunDefinitionReader.js';
 import type { HookExecutor } from '../HookExecutor.js';
 import type { PlanService } from '../PlanService.js';
@@ -74,7 +74,7 @@ import { inFlightIsSafe, LeaseReaper } from './LeaseReaper.js';
 import { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
 import { RunActor, type DecideRecord, type ProcessResult } from './RunActor.js';
 import { DefaultRunLifecycle, type LifecyclePlatform, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';
-import { journalEpoch, StageExecutor, type ExecutorTiming, type StageArtifactReader } from './StageExecutor.js';
+import { journalEpoch, StageExecutor, stageSessionSpec, type ExecutorTiming, type StageArtifactReader } from './StageExecutor.js';
 import { TimerService } from './TimerService.js';
 
 export interface SupervisorTiming {
@@ -265,7 +265,8 @@ export class RunSupervisor {
       outbox: this.outbox,
       lifecycle: this.lifecycle,
       post,
-      kindOf: (id) => deps.stores.stages.getInstance(id)?.kind,
+      flowKeysOf: (runId, stageRunId) => this.flowKeysOf(runId, stageRunId),
+      notify: (kind, data) => void deps.eventBus.emitGlobal({ kind, data } as never).catch(() => undefined),
       loops: this.loops,
       maps: this.maps,
       leases: this.leases,
@@ -611,6 +612,48 @@ export class RunSupervisor {
     await this.outbox.drainAll();
     this.deps.logger?.info?.(`[RunSupervisor] recovered ${runs.length} run(s): ${interrupted} interrupted attempt(s), ${relaunched} relaunch(es)`);
     return { runs: runs.length, interrupted, relaunched };
+  }
+
+  /**
+   * The flow keys a launch is admitted on (P07 WP-7.2): `check:global` for
+   * a check; else `global`, the stage's provider and — when the operator
+   * configured it — its model. The provider is the session's harness type,
+   * else the one its model routes to.
+   */
+  private async flowKeysOf(runId: string, stageRunId: string): Promise<string[]> {
+    const inst = this.deps.stores.stages.getInstance(stageRunId);
+    if (inst?.kind === 'check') return [CHECK_FLOW_KEY];
+    const keys = [GLOBAL_FLOW_KEY];
+    try {
+      const run = await this.deps.runRepo.getById(runId);
+      const graph = await this.deps.definitions.get(run.definitionVersionId);
+      const stage = graph.stages.find((s) => s.key === inst?.stageKey);
+      if (stage?.kind !== 'agent') return keys;
+      const spec = stageSessionSpec(graph, stage, run).merged;
+      const provider = spec.harnessType ?? (await this.deps.harness.resolveProvider?.({ ...(spec.model ? { model: spec.model } : {}) }));
+      if (provider) keys.push(providerFlowKey(provider));
+      if (spec.model && this.deps.admission.currentFlowLimits()[modelFlowKey(spec.model)] !== undefined) keys.push(modelFlowKey(spec.model));
+    } catch (err) {
+      this.deps.logger?.warn(`[RunSupervisor] the flow keys of ${stageRunId} could not be resolved (global only): ${String(err)}`);
+    }
+    return keys;
+  }
+
+  /**
+   * `run:<id>` of every hosted run (P07 WP-7.2): its stages in an attempt
+   * against its `maxParallel` (`decide()` enforces it; reported here).
+   */
+  runFlows(): Array<{ flowKey: string; running: number; queued: number; limit: number }> {
+    const out: Array<{ flowKey: string; running: number; queued: number; limit: number }> = [];
+    for (const [runId, compiled] of this.compiledByRun) {
+      const state = this.deps.stores.runStore.loadRunState(runId);
+      if (!state || TERMINAL.has(state.run.status)) continue;
+      const work = state.instances.filter((i) => compiled.nodes.get(i.stageKey)?.class === 'work');
+      const running = work.filter((i) => i.attemptStatus === 'running' && ['ready', 'starting', 'running', 'validating', 'awaiting_input'].includes(i.status)).length;
+      const queued = work.filter((i) => i.status === 'pending').length;
+      out.push({ flowKey: `run:${runId}`, running, queued, limit: compiled.maxParallel });
+    }
+    return out;
   }
 
   /** The compensation list `decide()` gave the lost `finalize` (completed compensating instances, last first). */

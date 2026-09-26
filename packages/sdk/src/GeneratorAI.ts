@@ -16,6 +16,7 @@ import {
   InMemoryMcpHub,
   WorkspaceManager,
   AdmissionController,
+  MAX_FLOW_LIMIT,
   EngineLockedError,
   MountService,
   runBootHousekeeping,
@@ -470,7 +471,8 @@ export class GeneratorAI {
       engineOwnerLabel: `sdk:${process.pid}`,
       workspaceManager,
       // The engine's one concurrency gate (W-66): stage launches use the ordinary lane.
-      admissionController: new AdmissionController({ ordinaryConcurrency: resolved.maxConcurrentStages }),
+      // The `global` flow key: every stage launch (P07 WP-7.2); 0 = no practical cap.
+      admissionController: new AdmissionController({ flowLimits: { global: resolved.maxConcurrentStages > 0 ? resolved.maxConcurrentStages : MAX_FLOW_LIMIT } }),
       scmFlow,
       config: {
         artifactsDir: resolved.artifactsDir,

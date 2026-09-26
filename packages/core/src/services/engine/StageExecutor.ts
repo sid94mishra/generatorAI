@@ -1047,7 +1047,12 @@ export class StageExecutor {
     }
 
     const baseOptions = await composed!.turnOptions(agentMode);
-    const options: SendPromptOptions = { ...baseOptions, ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}) };
+    // An admitted attempt holds its provider's flow key for all its turns (P07 WP-7.2); an amendment has no admission.
+    const options: SendPromptOptions = {
+      ...baseOptions,
+      ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
+      ...(frame.ticket ? { admitted: true } : {}),
+    };
     const turnId = this.deps.composer.beginTurn(owner!, frame.conversationId!, options, { policy: composed!.turnPolicy });
     ctx.recorder.begin({ turnId, agentMode: options.agentMode ?? agentMode });
     ctx.submittedThisTurn = [];
@@ -1499,7 +1504,8 @@ export class StageExecutor {
         }
       });
       // A tool-less judge turn changes nothing; its verdict is kept on the attempt and a resumed attempt reuses it.
-      const response = await harness.sendPromptAndWait(conversationId, prompt, undefined, ctx.frame.ac.signal); // durability-ok: tool-less judge, verdict journalled on stage_attempts.judge
+      // Inside the attempt's admission: the judge turn runs on the attempt's provider slot (P07 WP-7.2).
+      const response = await harness.sendPromptAndWait(conversationId, prompt, undefined, ctx.frame.ac.signal, ctx.frame.ticket ? { admitted: true } : undefined); // durability-ok: tool-less judge, verdict journalled on stage_attempts.judge
       const parsed = parseJudgeReply(response?.content ?? '');
       const score = parsed?.score ?? null;
       return { round, rule: index, score, threshold: rule.threshold, reasons: parsed?.reasons ?? ['The judge answer could not be read'], passed: score !== null && score >= rule.threshold };

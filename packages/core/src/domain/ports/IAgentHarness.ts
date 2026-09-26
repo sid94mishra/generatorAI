@@ -258,6 +258,13 @@ export interface SendPromptOptions {
    * `ConversationResponse.structuredOutput`. Other providers ignore it.
    */
   outputSchema?: Record<string, unknown>;
+  /**
+   * P07 WP-7.2 — the caller already holds this turn's `provider:<id>` flow
+   * key (a workflow stage attempt, admitted by the AdmissionController for
+   * its whole attempt): the provider takes no per-turn execution permit of
+   * its own, so the one limit is not counted twice.
+   */
+  admitted?: boolean;
 }
 
 /** What the adapter hands the host when the agent finishes planning. */

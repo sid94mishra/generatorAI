@@ -316,7 +316,7 @@ const PREWARM_INITIALIZE_TIMEOUT_MS = 30_000;
  * `claude` CLI process, so these defaults ARE the memory budget:
  *
  *   - `DEFAULT_MAX_LIVE_SESSIONS` was 32 (= 7.4 GB of processes) while the
- *     turn permit (`GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`) defaults to 4.
+ *     turn permit (the `provider:claude-agent` flow key) defaults to 4.
  *     Eight is twice the permit: enough that a user flipping between a few
  *     chats keeps them warm, small enough that a busy server tops out near
  *     1.8 GB of CLI processes.
@@ -1768,7 +1768,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // Item 4 — the chat path holds an execution permit for the whole turn,
       // exactly like `sendPromptAndWait` always did. Acquired BEFORE anything
       // is spawned or pushed, and announced to the user if it has to wait.
-      const releaseExecution = await this.acquireTurnPermit(conversationId);
+      const releaseExecution = await this.acquireTurnPermit(conversationId, turnOptions?.admitted === true);
 
       // W13-B1 — a turn starts un-truncated. Without this the latch set by a
       // previous truncated turn would persist and refuse every tool for the
@@ -1917,10 +1917,11 @@ export class ClaudeAgentProvider implements IAgentHarness {
       this.activeQueries.set(conversationId, activeQuery);
 
       // W12 / P0-14 — acquire one execution slot from the supervisor before
-      // spawning the query() process. This caps concurrent CLI spawns to
-      // `maxConcurrentExecutions` (default 4). When the semaphore is full the
-      // turn queues here — visibly, via `harness.session_info`/`queued`.
-      const releaseExecution = await this.acquireTurnPermit(conversationId);
+      // spawning the query() process: the `provider:claude-agent` flow key
+      // (default 4, P07 WP-7.2). When it is full the turn queues here —
+      // visibly, via `harness.warning`/`execution_queued`. A workflow stage
+      // admitted for its whole attempt already holds it (`admitted`).
+      const releaseExecution = await this.acquireTurnPermit(conversationId, turnOptions?.admitted === true);
 
       try {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Sending prompt to ${conversationId} (${prompt.length} chars)`);
@@ -3091,22 +3092,26 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * blocking silently is what turns "too busy" into "the prompt hangs with no
    * explanation".
    */
-  private async acquireTurnPermit(conversationId: string): Promise<() => void> {
+  private async acquireTurnPermit(conversationId: string, admitted = false): Promise<() => void> {
     const supervisor = this.supervisor;
     // No supervisor wired (embedded and test use): nothing to bound against.
-    if (!supervisor) return () => {};
+    // An admitted turn (a workflow stage) already holds the flow key.
+    if (!supervisor || admitted) return () => {};
 
     const immediate = supervisor.tryAcquireExecution();
     if (immediate) return immediate;
 
-    const ahead = supervisor.snapshot?.().executionQueueDepth ?? 0;
+    const snap = supervisor.snapshot?.();
+    const ahead = snap?.executionQueueDepth ?? 0;
     await this.emitToHandlers(conversationId, 'harness.warning', {
       code: 'execution_queued',
       message:
-        ahead > 0
-          ? `Waiting for a free agent slot — ${ahead} turn${ahead === 1 ? '' : 's'} ahead.`
-          : 'Waiting for a free agent slot.',
+        (ahead > 0
+          ? `Waiting for a free agent slot — ${ahead} turn${ahead === 1 ? '' : 's'} ahead`
+          : 'Waiting for a free agent slot') +
+        (snap ? ` (provider claude-agent ${snap.activeExecutions}/${snap.maxConcurrentExecutions}; Settings → Workflow engine).` : '.'),
       provider: 'claude-agent',
+      flowKey: 'provider:claude-agent',
     });
     return supervisor.acquireExecution();
   }

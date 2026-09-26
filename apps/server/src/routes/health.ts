@@ -94,6 +94,9 @@ export function createHealthRoutes(container: Container): Router {
       // showing `parked: 8, running: 0` is idle and healthy, whereas the same
       // number under `running` would mean genuinely saturated.
       admission: container.admissionController?.snapshot() ?? [],
+      // P07 WP-7.2 — the flow keys (the engine's one gate and the providers'
+      // turn permits): running, queued and limit per key.
+      flows: container.admissionController?.flowSnapshot() ?? [],
       // W18 — anything the numeric-config loader had to clamp or reject at
       // boot. Empty in a correctly configured process; non-empty means an env
       // var is being ignored or capped, which is otherwise invisible.

@@ -88,6 +88,14 @@ interface HostSession {
    * handlers for the current turn. Reset when `session_ended` is consumed.
    */
   terminalDelivered: boolean;
+  /** The `provider:<id>` flow permit the turn in flight holds (P07 WP-7.2). */
+  releasePermit?: () => void;
+}
+
+/** A flow key as a permit gate (the AdmissionController's `flowGate`). */
+export interface HostTurnGate {
+  tryAcquire(): (() => void) | undefined;
+  acquire(): Promise<() => void>;
 }
 
 export class AgentHostClient implements IAgentHarness {
@@ -116,6 +124,8 @@ export class AgentHostClient implements IAgentHarness {
   private callbackSeq = 0;
   /** Frames the host reported dropping, for health reporting. */
   private droppedEventCount = 0;
+  /** The gateway's flow gate of a provider (P07 WP-7.2): every turn over IPC is admitted here. */
+  private gateFor: ((provider: string) => HostTurnGate | undefined) | undefined;
 
   constructor(
     private readonly supervisor: HostSupervisor,
@@ -236,6 +246,7 @@ export class AgentHostClient implements IAgentHarness {
   }
 
   private cleanupSessionMaps(sessionId: string): void {
+    this.releaseTurnPermit(sessionId);
     this.sessions.delete(sessionId);
     this.callbacks.delete(sessionId);
     this.conversationHandlers.delete(sessionId);
@@ -295,6 +306,24 @@ export class AgentHostClient implements IAgentHarness {
     throw new Error(`AgentHostClient.listAgents: unexpected response ${resp.type}`);
   }
 
+  /**
+   * P07 WP-7.2, RV-26 — the agent host enforces the gateway's flow keys:
+   * every turn takes its provider's flow permit HERE (unless the caller
+   * already holds it: a workflow stage), is sent `admitted`, and gives the
+   * permit back at the turn's terminal event.
+   */
+  useTurnGates(gateFor: (provider: string) => HostTurnGate | undefined): void {
+    this.gateFor = gateFor;
+  }
+
+  private releaseTurnPermit(conversationId: string): void {
+    const session = this.sessions.get(conversationId);
+    const release = session?.releasePermit;
+    if (!session || !release) return;
+    delete session.releasePermit;
+    release();
+  }
+
   // ── IHarnessMessaging ─────────────────────────────────────────────────────
 
   async sendPrompt(
@@ -303,23 +332,29 @@ export class AgentHostClient implements IAgentHarness {
     attachments?: AttachmentRef[],
     options?: SendPromptOptions,
   ): Promise<void> {
+    const session = this.sessions.get(conversationId);
+    const gate = options?.admitted ? undefined : this.gateFor?.(String(session?.params.harnessType ?? 'claude-agent'));
+    if (session && gate && !session.releasePermit) {
+      session.releasePermit = gate.tryAcquire() ?? (await gate.acquire());
+    }
     const turnReq: Omit<SendTurnRequest, 'reqId'> = {
       type: 'send_turn',
       sessionId: conversationId,
       prompt,
       // AttachmentRef uses `path` as the stable identifier; the host resolves files by path
       attachments: attachments?.map((a) => ({ type: 'file', id: a.path })),
-      ...(options
-        ? {
-            options: {
-              ...(options.agentMode ? { agentMode: options.agentMode } : {}),
-              ...(options.permissionMode ? { permissionMode: options.permissionMode } : {}),
-            },
-          }
-        : {}),
+      options: {
+        ...(options?.agentMode ? { agentMode: options.agentMode } : {}),
+        ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
+        ...(options?.admitted || gate ? { admitted: true } : {}),
+      },
     };
-    const resp = await this.supervisor.send(turnReq);
+    const resp = await this.supervisor.send(turnReq).catch((err: unknown) => {
+      this.releaseTurnPermit(conversationId);
+      throw err;
+    });
     if (resp.type === 'error') {
+      this.releaseTurnPermit(conversationId);
       throw new Error(`AgentHostClient.sendPrompt failed: ${resp.message}`);
     }
   }
@@ -500,6 +535,7 @@ export class AgentHostClient implements IAgentHarness {
       const kind = (msg.event as { kind?: string }).kind ?? '';
       if (kind === 'harness.idle' || kind === 'harness.error' || kind === 'harness.cancelled') {
         session.terminalDelivered = true;
+        this.releaseTurnPermit(msg.sessionId);
       }
     }
     this.deliver(msg.sessionId, msg.event);
@@ -525,6 +561,7 @@ export class AgentHostClient implements IAgentHarness {
       this.deliver(msg.sessionId, this.synthesiseTerminalEvent(msg));
     }
     if (session) session.terminalDelivered = false;
+    this.releaseTurnPermit(msg.sessionId);
   }
 
   private synthesiseTerminalEvent(msg: SessionEndedNotification): AgentEvent {

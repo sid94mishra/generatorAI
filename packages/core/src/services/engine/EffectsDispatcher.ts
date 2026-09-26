@@ -5,11 +5,14 @@
 // Runs AFTER `RunStore.apply` committed, never inside it:
 //   - timers the batch armed go to the TimerService;
 //   - the run's outbox is drained (published and awaited, in order);
-//   - `launch` waits for a slot of the admission controller — THE one
-//     concurrency gate of the engine (W-66; there is no stage semaphore) —
-//     while the instance stays `ready`, so the wait never counts as attempt
-//     time; the executor's claim ends it. A `check` stage waits on its own
-//     flow key `check:global`, not a provider lane (P05 §1.2);
+//   - `launch` waits for the stage's flow keys of the admission controller
+//     — THE one concurrency gate of the engine (W-66, P07 WP-7.2): `global`,
+//     `provider:<id>` and a configured `model:<id>`, or `check:global` for a
+//     `check` stage (P05 §1.2) — all at once, while the instance stays
+//     `ready`, so the wait never counts as attempt time; the executor's
+//     claim ends it. A wait is announced (`stage_run.admission_queued`,
+//     then `stage_run.admission_granted`) so the run page can say what the
+//     stage waits for;
 //   - `abort` drops a launch still queued for its slot, or stops the frame;
 //   - `deliver_input` hands a verdict to a parked frame (with no frame left,
 //     the attempt is settled and the approval is posted again, so it takes
@@ -30,7 +33,7 @@
 import type { ILogger } from '@generatorai/shared';
 import type { ArmedTimer } from '../../domain/ports/IRunStore.js';
 import type { Decision, RunMessage, RunOutcome } from '../../domain/scheduler/types.js';
-import type { AdmissionController, AdmissionTicket } from '../AdmissionController.js';
+import { CHECK_FLOW_KEY, GLOBAL_FLOW_KEY, type AdmissionController, type AdmissionTicket, type FlowState } from '../AdmissionController.js';
 import type { LoopEffects } from './LoopEffects.js';
 import type { MapEffects } from './MapEffects.js';
 import type { SubworkflowEffects } from './SubworkflowEffects.js';
@@ -50,8 +53,10 @@ export interface EffectsDispatcherDeps {
   post: (runId: string, msg: RunMessage) => void;
   /** The loop effects (tree hashes, iteration checkpoints and restores). */
   loops?: LoopEffects | undefined;
-  /** The stage kind of an instance (a check is admitted on its flow key). */
-  kindOf?: ((stageRunId: string) => string | undefined) | undefined;
+  /** The flow keys a launch is admitted on (default: `global`). */
+  flowKeysOf?: ((runId: string, stageRunId: string) => Promise<string[]>) | undefined;
+  /** Where the admission wait is announced (`stage_run.admission_queued` / `_granted`). */
+  notify?: ((kind: string, data: Record<string, unknown>) => void) | undefined;
   /** The map effects (snapshots, item mounts, merges) and the run-mount leases. */
   maps?: MapEffects | undefined;
   leases?: WorktreeLeases | undefined;
@@ -64,8 +69,13 @@ export interface EffectsDispatcherDeps {
   logger?: ILogger | undefined;
 }
 
-/** The admission flow key of the `check` kind (P05 §1.2). */
-export const CHECK_FLOW_KEY = 'check:global';
+/** What a queued launch waits for, as the run page shows it: `provider claude-agent`. */
+export function flowLabel(flowKey: string): string {
+  if (flowKey === GLOBAL_FLOW_KEY) return 'the global stage limit';
+  if (flowKey === CHECK_FLOW_KEY) return 'the check limit';
+  const at = flowKey.indexOf(':');
+  return at > 0 ? `${flowKey.slice(0, at)} ${flowKey.slice(at + 1)}` : flowKey;
+}
 
 interface QueuedLaunch {
   attemptNo: number;
@@ -154,13 +164,28 @@ export class EffectsDispatcher {
   launch(runId: string, stageRunId: string, attemptNo: number): void {
     const entry: QueuedLaunch = { attemptNo, dropped: false };
     this.queued.set(stageRunId, entry);
+    let waited: FlowState | undefined;
     const body = async (ticket: AdmissionTicket): Promise<void> => {
       if (this.queued.get(stageRunId) === entry) this.queued.delete(stageRunId);
+      if (waited) this.deps.notify?.('stage_run.admission_granted', { stageRunId, workflowRunId: runId, flowKey: waited.flowKey });
       if (entry.dropped) return;
       await this.deps.executor.start({ runId, stageRunId, attemptNo }, ticket);
     };
-    const admitted = () =>
-      this.deps.kindOf?.(stageRunId) === 'check' ? this.deps.admission.admitFlow(CHECK_FLOW_KEY, body) : this.deps.admission.admit('ordinary', body);
+    const admitted = async (): Promise<void> => {
+      const keys = this.deps.flowKeysOf ? await this.deps.flowKeysOf(runId, stageRunId) : [GLOBAL_FLOW_KEY];
+      return this.deps.admission.admitFlows(keys, body, (blocking) => {
+        waited = blocking;
+        this.deps.notify?.('stage_run.admission_queued', {
+          stageRunId,
+          workflowRunId: runId,
+          flowKey: blocking.flowKey,
+          label: flowLabel(blocking.flowKey),
+          running: blocking.running,
+          limit: blocking.limit ?? null,
+          queued: blocking.queued,
+        });
+      });
+    };
     // A writer outside a mount_per_item map waits while a map holds the run mounts (P05 §4.1).
     const leased = async (): Promise<void> => {
       const keys = this.deps.leases && this.deps.writerLeaseKeys ? await this.deps.writerLeaseKeys(runId, stageRunId) : [];

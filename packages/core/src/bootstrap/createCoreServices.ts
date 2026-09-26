@@ -159,6 +159,8 @@ export interface CoreServicesInputs {
   engineTiming?: Partial<SupervisorTiming>;
   /** Every committed decision batch (the testkit's replay fixtures, G5 §7.3). */
   engineOnDecide?: (record: DecideRecord) => void;
+  /** The workflow summary model of `llm` summaries (engine settings, read per summary; P07 WP-7.1). */
+  workflowSummaryModel?: () => string | null | undefined;
 
   /** Every run gets an execution workspace. */
   workspaceManager: WorkspaceManager;
@@ -488,6 +490,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     ...(inputs.engineOwnerLabel ? { ownerLabel: inputs.engineOwnerLabel } : {}),
     ...(inputs.engineTiming ? { timing: inputs.engineTiming } : {}),
     ...(inputs.engineOnDecide ? { onDecide: inputs.engineOnDecide } : {}),
+    ...(inputs.workflowSummaryModel ? { summaryModel: inputs.workflowSummaryModel } : {}),
     logger,
   });
 

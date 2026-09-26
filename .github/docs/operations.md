@@ -486,7 +486,7 @@ Returns:
 }
 ```
 
-`harness.runtime` (and `harness.runtime.providers.<type>`) reports what the harness is holding: `liveConversations`, `liveSessions` (one CLI process each), `warmSessions`, and for providers that cap concurrent turns, `turnsInFlight` / `maxConcurrentTurns` (default 4, `GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`) / `turnsQueued`. **`turnsQueued > 0` while `turnsInFlight` is 0 means a permit leaked** — every new prompt would sit on "Waiting for a free agent slot"; `runningChatIds` lists the chats the server thinks are mid-turn.
+`harness.runtime` (and `harness.runtime.providers.<type>`) reports what the harness is holding: `liveConversations`, `liveSessions` (one CLI process each), `warmSessions`, and for providers that cap concurrent turns, `turnsInFlight` / `maxConcurrentTurns` (the `provider:claude-agent` flow key, default 4, Settings → Workflow engine) / `turnsQueued`. **`turnsQueued > 0` while `turnsInFlight` is 0 means a permit leaked** — every new prompt would sit on "Waiting for a free agent slot"; `runningChatIds` lists the chats the server thinks are mid-turn.
 
 `GET /api/health/config` returns non-sensitive resolved config (paths, models, ports, flags). Use this in CI to verify deployment.
 
