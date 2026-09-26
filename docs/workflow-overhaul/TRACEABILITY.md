@@ -11,8 +11,8 @@ Status values: `open` → `in progress` → `closed (PR #)` / `accepted (rationa
 | R1 | One invocation path across clients | P04 WP-4.1–4.5 | closed (6fd9adc: `POST /api/workflow-invocations` / `WorkflowInvocationService` for web, desktop, mobile, CLI, TUI, SDK, MCP, automations, scripts, forks; one lifecycle) |
 | R2 | Streamlined creation, stages and config | P01 WP-1.5–1.8; P02 SessionSpec; P03 WP-3.1, 3.11 | in progress (P01 part done: 1d67d0f, 28f9c5e; P02 SessionSpecEditor a220bb3) |
 | R3 | A stage is a compact chat with every chat capability | P02 (all); P03b; P04 design 7 (mounts) | in progress (P02 done: one SessionComposer, binder, gates, TurnRecorder, permission source — see Phase 02 closure; P03b done: the stage conversation API and clients — see Phase 03b closure) |
-| R4 | DAG evaluation; retries; a **generic** loop (fix ↔ review is one example) with a budget | README §5.1; P03 WP-3.3–3.6; P05 §2–§3, WP-5A.1–5A.5 (tests: loop matrix, examples L1–L6, v59 migration, Windows `check`) | open |
-| R5 | Codex goals and Claude Code dynamic workflows research and support (as DAG constructs, no slash commands) | README §5.3; P05 examples L1–L6, M1–M3; P08 (judge panel + expansion; script runtime gated by PD-21) | open |
+| R4 | DAG evaluation; retries; a **generic** loop (fix ↔ review is one example) with a budget | README §5.1; P03 WP-3.3–3.6; P05 §2–§3, WP-5A.1–5A.5 (tests: loop matrix, examples L1–L6, v59 migration, Windows `check`) | closed (P05: loop 0c3f4e2..4d6ba7e, map/sub-workflow/wait 3eb76c9..dcd3b60; tests deferred to the final pass) |
+| R5 | Codex goals and Claude Code dynamic workflows research and support (as DAG constructs, no slash commands) | README §5.3; P05 examples L1–L6, M1–M3; P08 (judge panel + expansion; script runtime gated by PD-21) | in progress (P05 done: templates L1–L6, M1–M3, W1–W3, S1, completeness critic generated from presets, c46fe80; P08 remains) |
 | R6 | Remove legacy and back-compat code | P01 WP-1.1–1.4; P03 WP-3.7; P04 WP-4.1 (orchestrator, worktrees), 4.4 (MCP embedded), 4.6; `check-no-legacy` | in progress (P01–P04 parts done: orchestrator, preprocessor, run-start routes, MCP embedded mode deleted; 110 bans) |
 | R7 | Chat and the orchestrator invoke workflows | P06 WP-6.1–6.4 | open |
 | R8 | An authoring skill for any agent | P06 WP-6.5–6.8 | open |
@@ -220,6 +220,24 @@ Commits: 6fd9adc (WP-4.1–4.5), a09e3d1 (WP-4.6 bans), 5882780 (WP-4.7 docs). T
 | C-1, C-6, C-7, C-8, C-10, C-14, C-16, C-17 | one lifecycle; workspace id a column; worktrees never removed on cancel/failure; uploads and hook attachments outside the mounts; profiles by key; legacy webhooks gone; one upload writer; hooks once per phase (journal) | 6fd9adc | see TRACKER Phase 04 |
 | PD-6, PD-22 | a paired phone may start runs; the MCP credential is device pairing with platform `mcp` | 6fd9adc | route policy; `DEFAULT_MCP_SCOPES`; v58 |
 | R1 | One invocation path across clients | 6fd9adc | above |
+
+## Phase 05 closure (2026-09-26, review deferred to the final review)
+
+Commits: 5A 0c3f4e2..4d6ba7e (see TRACKER); 5B 3eb76c9 (spec), 5ffd0a4 (engine), 1d195c3 (fork), ad2f99d, 429933a (builder), c8640ef (expression editor), 046f193 (run page), dcd3b60 (clients), c46fe80 (templates), 9e41d05 + 51aee1b (docs). Tests for these items are deferred to the final pass (IMPLEMENTATION FIRST), except the v59 chat-safety test.
+
+| ID | What P05 closed | Commits | Evidence |
+|---|---|---|---|
+| R4 | A generic loop with exit rules, carry, budgets and operator decisions; plus map, sub-workflow and wait as generic kinds | 0c3f4e2..4d6ba7e, 3eb76c9, 5ffd0a4 | `domain/scheduler/{loops,maps,waits,subworkflows}.ts`; testkit checks by hand (STATUS 05A/05B gates) |
+| W-24 (P05 part) | The old iteration/sleep controls are real stage kinds: `loop` (iterationConfig replaced), `wait` (timer/approval/event), `subworkflow` | 0c3f4e2, 3eb76c9, 5ffd0a4 | builder panels (4d6ba7e, 429933a) |
+| W-47 (judge) | `llm_validation` replaced by the judge rule (`output.rules` type judge) | 0103a4d | no-legacy ban; STATUS 05A gate |
+| P5-1..P5-19, P5-24, P5-27..P5-36, P5-38, P5-40, P5-43..P5-47 | 5A: contexts, grammar, check (Windows launch, security), loop engine, v59, judge | 5A commits | TRACKER Phase 05 |
+| P5-20..P5-23, P5-48 | Map results shape (per-item select), paths by index with the key in `item_key`, forkFromSnapshot all or nothing, git-backed mounts, itemSetup, leases, merges and conflicts, `list` variables, shared-write warning | 3eb76c9, 5ffd0a4, 1d195c3 | DEVIATIONS 5B rows |
+| P5-25 | Sub-workflow: inherit suppresses the child's mounts/post-processing, portable `workflowRef`, output drift, every child decision mirrored, draft rules | 3eb76c9, 5ffd0a4 | `WorkflowApprovalService`, `SubworkflowEffects` |
+| P5-26, P5-41 | Event table semantics (idempotency, early arrival, per instance), per-wait callback tokens, the unattended TTL for waits | 5ffd0a4 | `waits.ts`, `routes/workflowCallbacks.ts` |
+| P5-37 | Templates generated from presets (`check:templates`), adversarial-verify and completeness-critic shipped | c46fe80 | 15 templates |
+| P5-39 | CodeMirror 6 lazy chunk with a budget | c8640ef | `check-bundle-size.mjs` (104.7 KB of 250 KB) |
+| P5-42 | CLI `run command --json` (5A) plus `--eventKey/--idempotencyKey/--data @file` | 936e7a1, dcd3b60 | CLI surface snapshot |
+| Cross-file #14 | `WorkflowApprovalService` extracted in P05 (P06 reuses it) | 5ffd0a4 | notes/P05B-handoff.md |
 
 ## Independent review findings
 
