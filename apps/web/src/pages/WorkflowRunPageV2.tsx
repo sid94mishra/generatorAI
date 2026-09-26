@@ -47,7 +47,7 @@ import type { RunWorkspaceInfo } from '@generatorai/shared';
 // Re-use existing panels behind the new chrome
 import { RuntimeDAGCanvas } from '@/components/workflow/RuntimeDAGCanvas.js';
 import { RunTimeline } from '@/components/workflow/RunTimeline.js';
-import { ChangesSurface } from '@/components/diff/ChangesSurface.js';
+import { ChangesPanel } from '@/blocks/changes/ChangesPanel.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
 import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
 import { TerminalPanel, type TerminalWorktreeOption } from '@/components/terminal/TerminalPanel.js';
@@ -605,8 +605,7 @@ export function WorkflowRunPageV2() {
               icon: <FolderOpen className="h-3.5 w-3.5" />,
               render: () => (
                 runData?.workspaceId ? (
-                  <ChangesSurface
-                    embedded
+                  <ChangesPanel
                     workspaceId={runData.workspaceId}
                     {...(runData.name ? { scmHint: runData.name } : {})}
                     enableReview

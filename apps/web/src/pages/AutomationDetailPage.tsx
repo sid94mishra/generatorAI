@@ -33,7 +33,7 @@ import { ConfirmDialog, Button, Spinner, StatusBadge, PageHeader } from '@/compo
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { TriggerAutomationModal } from '@/components/automation/TriggerAutomationModal.js';
 import { WebhookCredentialsDialog, type WebhookCredentials } from '@/components/automation/WebhookCredentialsDialog.js';
-import { ChangesSurface } from '@/components/diff/ChangesSurface.js';
+import { ChangesPanel } from '@/blocks/changes/ChangesPanel.js';
 import { useWorkflowRun } from '@/hooks/workflowQueries.js';
 import { useAutomationExecutionStream } from '@/hooks/useAutomationExecutionStream.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
@@ -592,8 +592,7 @@ function IterationRow({
           {runData?.workspaceId ? (
             // Review is read-only here: a finished automation run has no live
             // conversation, so a comment would have nowhere to be delivered.
-            <ChangesSurface
-              embedded
+            <ChangesPanel
               workspaceId={runData.workspaceId}
               enableReview
               reviewScope={{ scope: 'automation', scopeId: executionId }}
