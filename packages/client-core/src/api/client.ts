@@ -47,13 +47,9 @@ export class ApiError extends Error {
  * rather than an error.
  *
  * Needed for routes that answer a legitimate question with a non-2xx status
- * and a meaningful JSON body — `POST /api/workflow-definitions/:id/validate`
- * answers 422 with `{valid:false, errors, warnings, issues}`, which is the
- * ANSWER, not a failure to deliver one. Routed through plain `request` it
- * threw `ApiError("422 Unprocessable Entity")` and the findings were
- * discarded entirely, so `generatorai workflow validate` on a genuinely
- * invalid definition reported the status line and nothing else — its own
- * `if (!result.valid)` branch was unreachable.
+ * and a meaningful JSON body, which is the ANSWER, not a failure to deliver
+ * one. Routed through plain `request`, such a response throws `ApiError`
+ * with the status line and the body's findings are discarded.
  *
  * Deliberately narrow: only the exact statuses a caller names are tolerated,
  * so a 500 or a 401 on the same route still throws like everywhere else.

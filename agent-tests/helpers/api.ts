@@ -96,11 +96,19 @@ export interface SeedEdge {
   type?: 'on_success' | 'on_failure' | 'on_completion' | 'always';
 }
 
+const EDGE_ON = { on_success: 'success', on_failure: 'failure', on_completion: 'completion', always: 'always' } as const;
+
+/** A stage key from a caller's `localId` (keys are lower snake case). */
+function stageKey(localId: string): string {
+  const k = localId.toLowerCase().replace(/[^a-z0-9_]+/g, '_').replace(/^[^a-z]+/, '');
+  return k || 'stage';
+}
+
 /**
- * Create a workflow definition with stages + edges. The server creates the
- * definition first, then stages (each returns a real UUID), then edges that
- * reference those UUIDs — so we resolve the caller's friendly `localId`s to
- * the server-assigned stage ids. Returns the created definition id.
+ * Create a workflow definition from a v2 graph (formatVersion 2) and
+ * publish it, so it can run. Stage keys come from the caller's `localId`s;
+ * a `runCondition` other than `always` becomes the `on` of the stage's
+ * incoming edges. Returns the created definition id.
  */
 export async function seedWorkflowDefinition(
   tracker: ResourceTracker,
@@ -109,64 +117,43 @@ export async function seedWorkflowDefinition(
     description?: string;
     stages: SeedStage[];
     edges?: SeedEdge[];
-    sessionMode?: 'auto' | 'single' | 'per-stage';
     tags?: string[];
   },
 ): Promise<string> {
-  const defRes = await apiRequest<{ id: string }>('POST', '/workflow-definitions', {
-    name: opts.name,
-    description: opts.description ?? `E2E seed: ${opts.name}`,
-    sessionMode: opts.sessionMode ?? 'auto',
-    tags: opts.tags ?? ['e2e-seed'],
+  const stages = opts.stages.map((s) => ({
+    key: stageKey(s.localId),
+    name: s.name,
+    kind: 'agent',
+    prompts: [{ label: 'P', text: s.prompt }],
+    ...(s.resultValidation && s.resultValidation.length > 0 ? { output: { rules: s.resultValidation } } : {}),
+    // One attempt: a validation failure fails the stage immediately.
+    ...(s.noRetry ? { retry: { maxAttempts: 1 }, onExhausted: 'fail' } : {}),
+  }));
+  const conditionOf = new Map(opts.stages.map((s) => [stageKey(s.localId), s.runCondition]));
+  const edges = (opts.edges ?? []).map((e) => {
+    const to = stageKey(e.to);
+    const cond = conditionOf.get(to);
+    const type = e.type ?? (cond && cond !== 'always' ? cond : 'on_success');
+    return { from: stageKey(e.from), to, on: EDGE_ON[type] };
   });
+  const graph = {
+    formatVersion: 2,
+    workflow: {
+      name: opts.name,
+      description: opts.description ?? `E2E seed: ${opts.name}`,
+      tags: opts.tags ?? ['e2e-seed'],
+    },
+    stages,
+    edges,
+  };
+  const defRes = await apiRequest<{ id: string }>('POST', '/workflow-definitions', graph);
   if (!defRes.ok || !defRes.data?.id) {
     throw new Error(`create definition failed (${defRes.status}): ${JSON.stringify(defRes.data)}`);
   }
   const defId = defRes.data.id;
   tracker.track('definition', defId);
-
-  // Create stages, mapping localId -> server stage id.
-  const idByLocal: Record<string, string> = {};
-  for (let i = 0; i < opts.stages.length; i++) {
-    const s = opts.stages[i]!;
-    const body: Record<string, unknown> = {
-      name: s.name,
-      order: i,
-      prompts: [{ label: 'P', text: s.prompt }],
-    };
-    if (s.runCondition && s.runCondition !== 'always') {
-      body.condition = { type: s.runCondition };
-    }
-    if (s.resultValidation && s.resultValidation.length > 0) {
-      body.resultValidation = s.resultValidation;
-    }
-    if (s.noRetry) {
-      // backoffMs has a schema floor of 100; maxRetries:0 disables retries anyway.
-      body.retryPolicy = { maxRetries: 0, backoffMs: 100, multiplier: 1 };
-    }
-    const stageRes = await apiRequest<{ id: string }>('POST', `/workflow-definitions/${defId}/stages`, body);
-    if (!stageRes.ok || !stageRes.data?.id) {
-      throw new Error(`create stage "${s.name}" failed (${stageRes.status}): ${JSON.stringify(stageRes.data)}`);
-    }
-    idByLocal[s.localId] = stageRes.data.id;
-  }
-
-  // Create edges using resolved stage ids.
-  for (const e of opts.edges ?? []) {
-    const fromStageId = idByLocal[e.from];
-    const toStageId = idByLocal[e.to];
-    if (!fromStageId || !toStageId) {
-      throw new Error(`edge references unknown stage localId: ${e.from}->${e.to}`);
-    }
-    const edgeRes = await apiRequest('POST', `/workflow-definitions/${defId}/edges`, {
-      fromStageId,
-      toStageId,
-      edgeType: e.type ?? 'on_success',
-    });
-    if (!edgeRes.ok) {
-      throw new Error(`create edge ${e.from}->${e.to} failed (${edgeRes.status}): ${JSON.stringify(edgeRes.data)}`);
-    }
-  }
+  const pubRes = await apiRequest('POST', `/workflow-definitions/${defId}/publish`);
+  if (!pubRes.ok) throw new Error(`publish definition failed (${pubRes.status}): ${JSON.stringify(pubRes.data)}`);
   return defId;
 }
 
@@ -233,27 +220,22 @@ export async function findAutomationIdByName(name: string): Promise<string | und
   return res.data.find((a) => a.name === name)?.id;
 }
 
-/** Create a workflow run (status 'created', not started). */
-export async function createRun(
+/** Start a run of a published definition through the invocation (created and started in one request). */
+export async function startRun(
   tracker: ResourceTracker,
   definitionId: string,
   variables: Record<string, unknown> = {},
 ): Promise<string> {
-  const res = await apiRequest<{ id: string }>('POST', '/workflow-runs', {
-    workflowDefinitionId: definitionId,
+  const res = await apiRequest<{ runId: string }>('POST', '/workflow-invocations', {
+    target: { kind: 'definition', workflowDefinitionId: definitionId },
     variables,
+    client: 'http',
   });
-  if (!res.ok || !res.data?.id) {
-    throw new Error(`createRun failed (${res.status}): ${JSON.stringify(res.data)}`);
+  if (!res.ok || !res.data?.runId) {
+    throw new Error(`startRun failed (${res.status}): ${JSON.stringify(res.data)}`);
   }
-  tracker.track('run', res.data.id);
-  return res.data.id;
-}
-
-/** Start a previously-created run. */
-export async function startRun(runId: string): Promise<void> {
-  const res = await apiRequest('POST', `/workflow-runs/${runId}/start`);
-  if (!res.ok) throw new Error(`startRun failed (${res.status}): ${JSON.stringify(res.data)}`);
+  tracker.track('run', res.data.runId);
+  return res.data.runId;
 }
 
 /** Fetch a run's stage runs (name → status map). */

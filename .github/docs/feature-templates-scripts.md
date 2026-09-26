@@ -135,22 +135,20 @@ GET  /api/workflow-scripts/:id               → { metadata, graph }
 GET  /api/workflow-scripts/:id/profiles      → ScriptRunProfile[]
 POST /api/workflow-scripts/:id/materialize   → 201 { definitionId, definition, stageCount, edgeCount } (a draft)
                                                 body: { name?, projectId? }
-POST /api/workflow-scripts/:id/run           → 202 { definitionId, runId, status: 'running' }
-                                                body: { profileName?, variables?, projectId? }
 POST /api/workflow-scripts/validate          → { valid, errors }   body: { path }
 POST /api/workflow-scripts/reload            → { count, scripts, scriptsEnabled }
 POST /api/workflow-scripts/:id/reload        → ScriptMetadata
 POST /api/workflow-scripts/upload            → 201 ScriptMetadata   body: { filename, source }
 ```
 
-`/:id/run` needs `write:workflows` + `exec:agent`. `upload` needs `admin:settings` **and** `GENERATORAI_ALLOW_SCRIPT_UPLOAD=true` with scripts enabled; a shipped script cannot be replaced by an upload.
+Running a script is an invocation, not a scripts route: `POST /api/workflow-invocations` with `target: { kind: 'script', scriptId }` (and `profile?`, `variables?`, `projectId?`) → 202 `{ runId, … }`. A script target needs `write:workflows` + `exec:agent`. `upload` needs `admin:settings` **and** `GENERATORAI_ALLOW_SCRIPT_UPLOAD=true` with scripts enabled; a shipped script cannot be replaced by an upload.
 
-> **Wire detail:** the run endpoint accepts `profileName` (not `profile`). The profile's `variables` are merged under the request's `variables`; its `stageOverrides` (by stage key) are applied first, then any typed `stageOverrides` from the request; its `permissionMode` is set on the run before it starts.
+> **Wire detail:** the invocation names the profile in `profile`. The profile sits under the request: its `variables` are merged under the request's `variables`, its `stageOverrides` (by stage key) come before the request's, and its run overrides (the permission mode) under the request's `overrides`.
 
 ### Materialize vs Run
 
 - **Materialize** — creates a **draft** definition from the script's graph (tagged `script:<id>`, optionally renamed and bound to a project) through the one materializer, `WorkflowDefinitionService.createFromSpec`. After this it is a normal definition: edit, publish, version.
-- **Run** — creates a **published** definition from the graph the same way, then creates and starts a run. Only `run` applies a profile.
+- **Run** — the script invocation materializes a **published** definition the same way, once per script content, then starts a run. Only a run applies a profile.
 
 ---
 
@@ -164,7 +162,7 @@ Lists all `.workflow.mjs` cards; **Reload** (top-right) hits `POST /api/workflow
 - Stages (name and key, first prompt).
 - Edges (`from → to (on)`).
 - Run Profiles (description, permission mode); click one to select it.
-- **Run Script** — `POST /api/workflow-scripts/:id/run` with the selected profile.
+- **Run Script** — `POST /api/workflow-invocations` with a script target and the selected profile.
 - **Materialize** — creates a draft definition.
 
 ---
@@ -211,7 +209,7 @@ const run = await ai.workflows.run(def.id, { variables: { topic: 'AI' } });
 const run2 = await ai.scripts.run('my-script-id', { profileName: 'fast', variables: { topic: 'AI' } });
 ```
 
-Unlike the server route, `ai.scripts.run` applies only a profile's `variables`, not its `stageOverrides` or `permissionMode`; and `ai.scripts.materialize` publishes the definition.
+`ai.scripts.run` is the same script invocation as the server's, so the whole profile applies; `ai.scripts.materialize` publishes the definition.
 
 > The SDK constructs its `WorkflowScriptLoader` without the `enabled` option, and the loader defaults to disabled, so as of this writing the SDK loads no scripts (`list()` is empty).
 
@@ -274,6 +272,6 @@ Create `templates/scripts/my.workflow.mjs` using the builder pattern above. Use 
 |---|---|---|---|---|
 | Storage | filesystem (`templates/system/*-workflow.json`) | filesystem (`templates/scripts/*.workflow.mjs`) | `workflow_definitions` table | `workflow_runs` table |
 | Mutability | read-only | read-only (file-edit then reload) | mutable (draft/published, versions) | pins a definition version |
-| Created by | repo / user-drop | repo / user-drop / upload | import (graph or `templateId`) OR materialize-from-script OR create | `createRun` / `startRun` |
+| Created by | repo / user-drop | repo / user-drop / upload | import (graph or `templateId`) OR materialize-from-script OR create | `POST /workflow-invocations` |
 | Run directly | no (import it first) | yes (`script run`) | yes (`run start`) | n/a |
 | Profiles | n/a | yes (`export const profiles`) | n/a | applied at start |
