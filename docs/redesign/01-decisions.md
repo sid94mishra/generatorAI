@@ -397,6 +397,13 @@ Decided while building P1-T1…T6 where `02` was silent:
 - Solarized `--syntax-function/-type/-string` darkened 1–8 % to reach AA as 13 px text on light ground.
 - Initial load after P3 + kit C: 435 KB gzip (budget 800 KB) while both UI layers coexist; P7 removes the legacy layer.
 
+### D-64 Codebase logs, worktree sizes, project customization and entity search (G-16…G-19) as built — Final
+- **G-16:** `POST /projects/:id/codebases/:cid/fetch` → `202 { jobId }`; `GET …/logs?limit=` → `{ lines, job? }` from an in-memory ring buffer (`CodebaseLogService`); git `bareClone`/`fetchAll` stream output. A fetch in flight reuses the existing `cloning` status (no new enum value); `codebase.status_changed` SSE (lifecycle).
+- **G-17:** `GET …/worktrees?include=usage,link` → `{ items, totalBytes?, reclaimableBytes? }`; sizes measured asynchronously with bounded concurrency and a cache using `fs.promises` only (no `du`), unknown until measured; `link` resolves a chat mount or a workflow/automation run; `expiresAt` reuses `WorktreeCleanupService`'s retention math. Chat-workspace mounts do not write `worktrees` rows today (separate mount model) — `link.entity: 'chat'` appears only once that path is reconciled (follow-up).
+- **G-19:** `GET|PUT /projects/:id/artifact-prefs` → `{ disabled: [{type,id}] }` on the project's `settings` JSON (no migration), enforced in `ArtifactCatalog.listSkills/listMcpServers` and `/available-artifacts`. The legacy client-side prefs store stays until P5 replaces the Customization tab.
+- **G-18:** `GET /search?q=&types=&limit=` across chats, projects, agents, workflows, automations, scripts — scope-filtered per type before querying, ranked by title match + recency.
+- The backend track P2-00…P2-06 is complete; G-21…G-29 belong to the Workflow Overhaul (PW).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
