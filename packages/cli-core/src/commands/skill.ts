@@ -52,7 +52,7 @@ const MCP_COMMAND = 'generatorai-mcp';
 const MCP_ARGS = ['serve'];
 const MCP_PAIRING =
   'Pair the MCP server with this GeneratorAI server once: `generatorai device invite --platform mcp --scopes ' +
-  'exec:agent,read:workflows,write:workflows`, then `generatorai-mcp pair <code>`.';
+  'exec:agent,read:workflows,write:workflows,read:chats,write:chats`, then `generatorai-mcp pair <code>`.';
 
 // ── The bundle ──────────────────────────────────────────────────────
 
