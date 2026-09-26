@@ -202,7 +202,7 @@ Commits: 0254811 (3b.1), 2529558 (3b.4), 63db929 (3b.2 + 3b.3), f55692b (docs). 
 
 ## Phase 04 closure (2026-09-26, review deferred to the final review)
 
-Commits: 6fd9adc (WP-4.1–4.5), a09e3d1 (WP-4.6 bans), the WP-4.7 docs commit. Tests for these items are deferred to the final pass (IMPLEMENTATION FIRST), except the v58 chat-safety test.
+Commits: 6fd9adc (WP-4.1–4.5), a09e3d1 (WP-4.6 bans), 5882780 (WP-4.7 docs). Tests for these items are deferred to the final pass (IMPLEMENTATION FIRST), except the v58 chat-safety test.
 
 | ID | What P04 closed | Commits | Evidence |
 |---|---|---|---|
