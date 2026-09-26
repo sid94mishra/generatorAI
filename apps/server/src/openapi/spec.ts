@@ -1677,6 +1677,22 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         responses: { '200': { description: 'The executions' }, '400': { description: 'VALIDATION_ERROR' } },
       },
     },
+    '/api/settings/workflow-engine': {
+      get: {
+        tags: ['Runs'],
+        summary: 'The workflow engine settings (P07): flow key limits, the workflow summary model, the trigger debounce, their defaults and every flow key live',
+        description:
+          '`{settings: {flowLimits, summaryModel, triggerDebounceMs}, defaults: {flowLimits, triggerDebounceMs}, flows: [{flowKey, kind, running, queued, limit, configurable, detail?}]}`. ' +
+          'Flow keys: global, provider:<id>, model:<id>, check:global (configurable), worktree:<mountId> and run:<id> (live only). Needs read:workflows.',
+        responses: { '200': { description: 'The settings and the live flow keys' } },
+      },
+      put: {
+        tags: ['Runs'],
+        summary: 'Change the workflow engine settings (applied at once); `flowLimits` is the whole set — a key left out goes back to its default',
+        description: 'Body `{flowLimits?: {<key>: 1..256}, summaryModel?: string | null, triggerDebounceMs?: 0..600000}`. Needs admin:settings.',
+        responses: { '200': { description: 'The settings and the live flow keys' }, '400': { description: 'INVALID_BODY' }, '403': { description: 'FORBIDDEN_SCOPE' } },
+      },
+    },
     '/api/workflow-invocations': {
       post: {
         tags: ['Runs'],

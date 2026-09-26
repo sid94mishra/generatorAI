@@ -2,7 +2,7 @@
 
 > A **WorkflowRun** is one execution of one pinned version of a workflow definition (a v2 `WorkflowGraph`). Every run starts through ONE invocation (`POST /api/workflow-invocations`, P04) and goes through ONE lifecycle, whoever started it. The run is driven by the workflow engine (engine v2, P03): a pure scheduler (`decide()`), one serial actor per run, a stage executor, durable timers, an outbox and crash recovery. This doc covers starting a run, the lifecycle, the run and instance states, attempts, failure precedence, recovery, ownership, the commands API and fork.
 
-For definition/stage authoring, see [feature-workflows.md](./feature-workflows.md) and [feature-stages.md](./feature-stages.md); loops, maps, waits, sub-workflows, their decision commands, `GET /workflow-runs/:id/pending-decisions` and the wait callbacks are in [feature-workflow-control-flow.md](./feature-workflow-control-flow.md). The design is G5 (`docs/workflow-audit/evidence/G5_scheduler_v2_loops.md`); the field reference is `docs/workflow-overhaul/generated/FIELDS.md`.
+For definition/stage authoring, see [feature-workflows.md](./feature-workflows.md) and [feature-stages.md](./feature-stages.md); loops, maps, waits, sub-workflows, their decision commands, `GET /workflow-runs/:id/pending-decisions` and the wait callbacks are in [feature-workflow-control-flow.md](./feature-workflow-control-flow.md). Concurrency (flow keys), budgets and cost, the stage summary policy and tracing are in [feature-workflow-operations.md](./feature-workflow-operations.md). The design is G5 (`docs/workflow-audit/evidence/G5_scheduler_v2_loops.md`); the field reference is `docs/workflow-overhaul/generated/FIELDS.md`.
 
 ---
 

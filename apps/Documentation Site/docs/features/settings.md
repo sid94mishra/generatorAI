@@ -23,6 +23,7 @@ Settings groups application preferences, provider readiness, catalogs, integrati
 | Extensions | Install, enable, reload, inspect, or uninstall hot-loaded packages |
 | Security & Devices | Connect servers, inspect posture/network exposure, pair/revoke devices, and grant scopes |
 | Storage | Configure automatic completed-workspace cleanup and retention |
+| Workflow engine | Set the flow key limits (how many stages and provider turns run at once), the workflow summary model and the trigger debounce; see [Operating the workflow engine](../operations/workflow-engine.md) |
 | Diagnostics | Inspect server health, telemetry, sandbox configuration, runtime, and running-session state |
 
 ## Three kinds of setting
