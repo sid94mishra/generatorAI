@@ -310,18 +310,19 @@ export class SqliteWorkflowDefinitionStore implements IWorkflowDefinitionStore {
       if (!keep.has(key)) this.sqlite.prepare(`DELETE FROM stage_definitions WHERE id = ?`).run(stageId);
     }
     const update = this.sqlite.prepare(
-      `UPDATE stage_definitions SET name = ?, ordinal = ?, position_x = ?, position_y = ?, spec = ?, updated_at = ? WHERE id = ?`,
+      `UPDATE stage_definitions SET name = ?, ordinal = ?, position_x = ?, position_y = ?, spec = ?, parent_key = ?, kind = ?, updated_at = ? WHERE id = ?`,
     );
     const insert = this.sqlite.prepare(
-      `INSERT INTO stage_definitions (id, workflow_definition_id, key, name, ordinal, position_x, position_y, spec, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `INSERT INTO stage_definitions (id, workflow_definition_id, key, name, ordinal, position_x, position_y, spec, parent_key, kind, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     );
     graph.stages.forEach((stage, ordinal) => {
       const { key, name, position, ...rest } = stage;
       const spec = JSON.stringify(rest);
       const stageId = existing.get(key);
-      if (stageId) update.run(name, ordinal, position?.x ?? null, position?.y ?? null, spec, now, stageId);
-      else insert.run(generateId(), id, key, name, ordinal, position?.x ?? null, position?.y ?? null, spec, now, now);
+      const parentKey = stage.parentKey ?? null;
+      if (stageId) update.run(name, ordinal, position?.x ?? null, position?.y ?? null, spec, parentKey, stage.kind, now, stageId);
+      else insert.run(generateId(), id, key, name, ordinal, position?.x ?? null, position?.y ?? null, spec, parentKey, stage.kind, now, now);
     });
     const insertEdge = this.sqlite.prepare(
       `INSERT INTO stage_edges (id, workflow_definition_id, from_key, to_key, edge_on, when_expr, handles_failure, ordinal)

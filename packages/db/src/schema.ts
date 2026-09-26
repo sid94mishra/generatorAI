@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { sql } from 'drizzle-orm';
-import { sqliteTable, text, integer, real, blob, index, uniqueIndex, primaryKey, foreignKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
+import { sqliteTable, text, integer, real, blob, index, unique, uniqueIndex, primaryKey, foreignKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 import type {
   ChatMessageMetadata,
   ProjectSettings,
@@ -347,11 +347,15 @@ export const stageDefinitions = sqliteTable(
     positionY: real('position_y'),
     /** The StageSpec without key, name and position. */
     spec: text('spec').notNull(),
+    /** P05 (v59) — the stage kind and its container (also in `spec`). */
+    parentKey: text('parent_key'),
+    kind: text('kind').notNull().default('agent'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },
   (table) => ({
     keyIdx: uniqueIndex('idx_stage_defs_key').on(table.workflowDefinitionId, table.key),
+    parentIdx: index('idx_stage_defs_parent').on(table.workflowDefinitionId, table.parentKey),
   }),
 );
 
@@ -513,6 +517,8 @@ export const stageRuns = sqliteTable(
     scopeId: text('scope_id').references((): AnySQLiteColumn => stageRuns.id, { onDelete: 'cascade' }),
     iterationIndex: integer('iteration_index'),
     itemIndex: integer('item_index'),
+    /** P05 (v59) — a map item's stable key; the instance path uses the index. */
+    itemKey: text('item_key'),
     status: text('status', {
       enum: ['pending', 'ready', 'starting', 'running', 'validating', 'awaiting_input', 'waiting', 'retry_wait', 'paused', 'completed', 'failed', 'skipped', 'cancelled'],
     }).notNull().default('pending'),
@@ -563,6 +569,56 @@ export const stageRuns = sqliteTable(
     scopeIdx: index('idx_stage_runs_scope').on(table.scopeId),
     leaseIdx: index('idx_stage_runs_lease').on(table.status, table.leaseExpiresAt).where(sql`lease_expires_at IS NOT NULL`),
     attentionIdx: index('idx_stage_runs_attention').on(table.status).where(sql`status IN ('awaiting_input', 'paused')`),
+  }),
+);
+
+// ── Loop iterations (v59, P05 §2.6): one row per finished iteration ──
+
+export const loopIterations = sqliteTable(
+  'loop_iterations',
+  {
+    stageRunId: text('stage_run_id')
+      .notNull()
+      .references(() => stageRuns.id, { onDelete: 'cascade' }),
+    k: integer('k').notNull(),
+    /** carry(k), JSON. */
+    carry: text('carry', { mode: 'json' }).$type<unknown>(),
+    exitValues: text('exit_values', { mode: 'json' }).$type<unknown>(),
+    streaks: text('streaks', { mode: 'json' }).$type<unknown>(),
+    signals: text('signals', { mode: 'json' }).$type<unknown>(),
+    score: real('score'),
+    checkpointTurnId: text('checkpoint_turn_id'),
+    usage: text('usage', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    /** The iteration scope's outcome (completed, failed, cancelled). */
+    outcome: text('outcome'),
+    startedAt: integer('started_at', { mode: 'timestamp_ms' }),
+    endedAt: integer('ended_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.stageRunId, table.k] }),
+  }),
+);
+
+// ── Run events (v59, P05 §4.3): what `wait` stages consume ──
+
+export const workflowRunEvents = sqliteTable(
+  'workflow_run_events',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    eventKey: text('event_key').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    data: text('data', { mode: 'json' }).$type<unknown>(),
+    receivedAt: integer('received_at', { mode: 'timestamp_ms' }).notNull(),
+    consumedByStageRunId: text('consumed_by_stage_run_id'),
+  },
+  (table) => ({
+    uniqueDelivery: unique().on(table.runId, table.eventKey, table.idempotencyKey),
+    pendingIdx: index('idx_workflow_run_events_pending')
+      .on(table.runId, table.eventKey, table.receivedAt)
+      .where(sql`consumed_by_stage_run_id IS NULL`),
   }),
 );
 

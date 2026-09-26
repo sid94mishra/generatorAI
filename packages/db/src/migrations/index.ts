@@ -8,6 +8,7 @@ import { BASELINE_SQL, BASELINE_VERSION } from './baseline.generated.js';
 import { runV55, V55_LOCK_FILES } from './v55_workflow_definitions_v2.js';
 import { runV57, V57_LOCK_FILES } from './v57_workflow_engine_v2.js';
 import { runV58, V58_LOCK_FILES } from './v58_invocation.js';
+import { runV59, V59_LOCK_FILES } from './v59_control_flow.js';
 
 export { BASELINE_VERSION };
 
@@ -2653,6 +2654,17 @@ export const MIGRATIONS: readonly Migration[] = [
       disableForeignKeys: true,
       run: runV58,
       lockFiles: V58_LOCK_FILES,
+    },
+    // v59 — workflow overhaul P05 WP-5A.4 `control_flow`: loop iterations,
+    // map item keys, the run event inbox of waits, and the stage kind and
+    // container as definition columns. Additive; no chat table is touched.
+    // The DDL is frozen in ./v59/ddl.ts.
+    {
+      version: 59,
+      name: 'control_flow',
+      sql: [],
+      run: runV59,
+      lockFiles: V59_LOCK_FILES,
     },
   ];
 
