@@ -4,7 +4,7 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { ChatListRow, SendMessageInput } from '@generatorai/client-core';
-import { CHAT_LIST_MAX_LIMIT } from '@generatorai/shared';
+import { CHAT_LIST_MAX_LIMIT, type ChatListQuery } from '@generatorai/shared';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError, EXIT_CODES } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
@@ -32,22 +32,58 @@ export const CHAT_GROUP = {
   order: 10,
 };
 
-/** Resolves a chat reference against the full list. */
-async function findChat(ctx: CliContext, ref: string) {
-  // `workers: true` so a ref can still resolve an orchestrator worker chat,
-  // matching the old bare-array `/api/chats`, which had no such exclusion.
-  // Every page: a ref may name a chat older than the newest page.
+/** Every page of a chat query (the server caps one page at CHAT_LIST_MAX_LIMIT). */
+async function listAllChats(ctx: CliContext, query: ChatListQuery): Promise<ChatListRow[]> {
   const items: ChatListRow[] = [];
   let cursor: string | undefined;
   do {
-    const page = await ctx.api.chats.list({
-      limit: CHAT_LIST_MAX_LIMIT,
-      workers: true,
-      ...(cursor ? { cursor } : {}),
-    });
+    const page = await ctx.api.chats.list({ ...query, limit: CHAT_LIST_MAX_LIMIT, ...(cursor ? { cursor } : {}) });
     items.push(...page.items);
     cursor = page.nextCursor ?? undefined;
   } while (cursor);
+  return items;
+}
+
+/** A ref that can only be matched by id prefix, which the server cannot filter on. */
+const ID_PREFIX = /^[0-9a-f][0-9a-f-]{3,}$/i;
+
+/**
+ * Resolves a chat reference, asking the server for as little as it can
+ * (P2-R9): listing every chat also schedules a "Changes ±" backfill for each
+ * row that never had one.
+ *
+ *   exact id            one `GET /chats/:id`
+ *   #n, @last, @active  the newest page (they are about recent chats)
+ *   a name              the server's `q=` search (a name match is always a
+ *                       substring match), every page of it
+ *   an id prefix        the only case that still needs every chat
+ *
+ * `workers: true` so a ref can still resolve an orchestrator worker chat.
+ */
+async function findChat(ctx: CliContext, ref: string) {
+  const trimmed = ref.trim();
+  if (/^[A-Za-z0-9_-]+$/.test(trimmed)) {
+    try {
+      const chat = await ctx.api.chats.get(trimmed);
+      if (chat?.id === trimmed) {
+        return { id: chat.id, name: chat.name, status: chat.status, createdAt: chat.createdAt, updatedAt: chat.updatedAt };
+      }
+    } catch {
+      // Not an id (or not visible): fall through to the list-based match.
+    }
+  }
+  let items: ChatListRow[];
+  if (/^[#@]/.test(trimmed)) {
+    items = (await ctx.api.chats.list({ limit: CHAT_LIST_MAX_LIMIT, workers: true })).items;
+  } else {
+    items = await listAllChats(ctx, { workers: true, q: trimmed });
+    if (ID_PREFIX.test(trimmed)) {
+      const byName = new Set(items.map((c) => c.id));
+      for (const chat of await listAllChats(ctx, { workers: true })) {
+        if (chat.id.startsWith(trimmed.toLowerCase()) && !byName.has(chat.id)) items.push(chat);
+      }
+    }
+  }
   return resolveRef(ref, {
     kind: 'chat',
     candidates: items.map((c) => ({
@@ -174,7 +210,9 @@ export function chatCommands(): CommandSpec[] {
           default: 'active',
         },
         projectFlag,
-        { name: 'limit', description: 'Maximum rows', type: 'number' },
+        { name: 'limit', description: 'Rows per page (default 50, max 200)', type: 'number' },
+        { name: 'cursor', description: 'Continue from the cursor a previous page printed', type: 'string' },
+        { name: 'all', description: 'Every matching chat, all pages', type: 'boolean' },
       ],
       schema: inputSchema(
         {},
@@ -182,6 +220,8 @@ export function chatCommands(): CommandSpec[] {
           status: z.enum(['active', 'archived', 'all']).default('active'),
           project: z.string().optional(),
           limit: z.coerce.number().int().positive().optional(),
+          cursor: z.string().min(1).optional(),
+          all: z.boolean().optional(),
         },
       ),
       output: {
@@ -207,8 +247,20 @@ export function chatCommands(): CommandSpec[] {
           params.projectId = project.id;
         }
 
-        const { items } = await ctx.api.chats.list(params);
-        return list(items);
+        if (flags.all) return list(await listAllChats(ctx, params));
+
+        // One page; say so when there is more, instead of silently stopping
+        // at the server's default of 50 (P2-R26). The note goes to stderr as
+        // a warning, so piped JSON stays the rows.
+        const page = await ctx.api.chats.list({ ...params, ...(flags.cursor ? { cursor: flags.cursor } : {}) });
+        if (!page.nextCursor) return list(page.items);
+        return {
+          data: page.items,
+          warnings: [
+            `Showing ${page.items.length} of ${page.total} chats. ` +
+              `Next page: --cursor ${page.nextCursor}  (or --all for every page)`,
+          ],
+        };
       },
     }),
 

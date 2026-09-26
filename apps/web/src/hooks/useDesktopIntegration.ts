@@ -53,10 +53,12 @@ export function useDesktopIntegration(): DesktopWindowChrome {
   // recent entry read as its section, so three chats were three "Chats".
   const pageTitle = usePageTitleStore((s) => s.title);
   const hasUnsavedWork = useUnsavedWorkStore((s) => s.dirtyKeys.size > 0);
-  // Undefined until the attention feed's first snapshot loads (D-36) — kept
-  // undefined here too, so main's `sanitizeAttention` sees no `attention` key
-  // at all rather than a fabricated zeroed one (G-05).
-  const attentionCounts = useAttentionCounts();
+  // Only the desktop shell has a badge/tray to feed; a plain tab must not
+  // open a feed (request, `global` stream, safety poll) nobody reads (P2-R18).
+  // Undefined until the first snapshot loads (D-36) — sent as `null`
+  // ("unknown"), never a fabricated zero, so main clears the badge and tray
+  // counts instead of keeping a previous server's numbers (G-05, P2-R8).
+  const attentionCounts = useAttentionCounts({ enabled: isDesktop });
 
   // ── 1. Publish window chrome ──
   useEffect(() => {
@@ -112,7 +114,7 @@ export function useDesktopIntegration(): DesktopWindowChrome {
       rightPaneOpen,
       recent: next,
       hasUnsavedWork,
-      ...(attentionCounts ? { attention: attentionCounts } : {}),
+      attention: attentionCounts ?? null,
     });
   }, [location.pathname, sidebarOpen, rightPaneOpen, pageTitle, hasUnsavedWork, attentionCounts]);
 

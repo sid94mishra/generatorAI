@@ -514,5 +514,6 @@ export {
   CHAT_LIST_MAX_LIMIT,
   CHAT_BULK_MAX_IDS,
   chatListSearchParams,
+  runChatBulk,
   liveChatIds,
 } from './ChatList.js';

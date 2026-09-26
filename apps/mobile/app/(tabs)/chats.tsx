@@ -250,8 +250,9 @@ export default function ChatsScreen(): React.ReactElement {
   // Server-computed across every matching chat, not just the page loaded —
   // filtering the loaded `.items` would undercount once an install has more
   // chats than the page's `limit`.
-  const activeCount = chats.data?.counts.active ?? 0;
-  const archivedCount = chats.data?.counts.archived ?? 0;
+  // Undefined until the first page lands: no count is shown rather than an
+  // invented "0" (D-36).
+  const counts = chats.data?.counts;
 
   const pull = usePullToRefresh(() => chats.refetch(), chats.isFetching);
 
@@ -260,9 +261,9 @@ export default function ChatsScreen(): React.ReactElement {
     <View className="gap-3 px-4 pb-1">
       <SegmentedControl
         segments={[
-          { value: 'all', label: 'All', count: activeCount + archivedCount },
-          { value: 'active', label: 'Active', count: activeCount },
-          { value: 'archived', label: 'Archived', count: archivedCount },
+          { value: 'all', label: 'All', count: counts?.all },
+          { value: 'active', label: 'Active', count: counts?.active },
+          { value: 'archived', label: 'Archived', count: counts?.archived },
         ]}
         value={scope}
         onChange={(next) => {

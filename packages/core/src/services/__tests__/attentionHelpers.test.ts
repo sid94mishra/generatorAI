@@ -75,6 +75,32 @@ describe('redactAttentionItem', () => {
     expect(run.ask?.detail).toBe('secret'); // the original is never mutated
   });
 
+  it('P2-R15: replaces the free-text summary of a question or plan review, keeps a tool name', () => {
+    const question: AttentionItem = {
+      ...chat,
+      key: 'chat:c1:q1',
+      state: 'needs_you',
+      ask: { kind: 'question', id: 'q1', summary: 'Delete /Users/me/.ssh/id_rsa?', actions: ['answer', 'open'] },
+    };
+    expect(redactAttentionItem(question, ['read:activity']).ask?.summary).toBe('Your agent has a question');
+    expect(redactAttentionItem(question, ['read:chats'])).toBe(question);
+    const plan: AttentionItem = {
+      ...question,
+      ask: { kind: 'plan_review', id: 'p1', summary: 'Review plan “Rotate prod keys”', actions: ['approve'] },
+    };
+    expect(redactAttentionItem(plan, ['read:activity']).ask?.summary).toBe('Review the plan');
+    const permission: AttentionItem = {
+      ...question,
+      ask: { kind: 'tool_permission', id: 't1', summary: 'Allow Bash?', detail: 'rm -rf /', actions: ['deny'] },
+    };
+    expect(redactAttentionItem(permission, ['read:activity']).ask).toEqual({
+      kind: 'tool_permission',
+      id: 't1',
+      summary: 'Allow Bash?',
+      actions: ['deny'],
+    });
+  });
+
   it('redacts only attention.upsert payloads', () => {
     const payload = { seq: 3, item: run };
     expect(redactAttentionEventPayload('attention.remove', { seq: 3, key: 'x' }, [])).toEqual({ seq: 3, key: 'x' });

@@ -145,7 +145,47 @@ export interface ChatBulkResult {
   failed: ChatBulkFailure[];
 }
 
-/** Payload of the `chat.updated` lifecycle event (summary columns moved). */
+/**
+ * The bulk contract for every client (web, mobile, CLI): the SERVER caps one
+ * request at `CHAT_BULK_MAX_IDS`, and the CLIENT splits a larger selection
+ * into sequential requests of at most that many and merges the per-id
+ * results, so "Select all" over any number of loaded rows works the same
+ * everywhere (P2-R1). Ids are de-duplicated first.
+ *
+ * A request that fails outright (network, 5xx, auth) is thrown when nothing
+ * has succeeded yet — the caller sees the same error a single request would
+ * give. Once some batch has succeeded, the rest of the ids (that batch and
+ * every later one) are reported as failed with that error instead, because
+ * throwing would hide the chats that WERE archived or deleted.
+ */
+export async function runChatBulk(
+  ids: readonly string[],
+  send: (batch: string[]) => Promise<ChatBulkResult>,
+  batchSize: number = CHAT_BULK_MAX_IDS,
+): Promise<ChatBulkResult> {
+  const unique = [...new Set(ids)];
+  const merged: ChatBulkResult = { succeeded: [], failed: [] };
+  for (let start = 0; start < unique.length; start += batchSize) {
+    const batch = unique.slice(start, start + batchSize);
+    let result: ChatBulkResult;
+    try {
+      result = await send(batch);
+    } catch (err) {
+      if (merged.succeeded.length === 0) throw err;
+      const code = (err as { code?: unknown })?.code;
+      const message = err instanceof Error ? err.message : String(err);
+      for (const id of unique.slice(start)) {
+        merged.failed.push({ id, code: typeof code === 'string' ? code : 'REQUEST_FAILED', message });
+      }
+      return merged;
+    }
+    merged.succeeded.push(...result.succeeded);
+    merged.failed.push(...result.failed);
+  }
+  return merged;
+}
+
+/** Payload of the `chat.updated` lifecycle event (list-visible fields or summary columns moved). */
 export interface ChatUpdatedEventData {
   chatId: string;
 }

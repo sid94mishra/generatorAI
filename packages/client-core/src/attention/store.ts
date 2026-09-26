@@ -2,18 +2,20 @@
 // createAttentionStore — the attention feed as a framework-free store (G-01).
 //
 // Wires `attentionReducer` to its two inputs: the snapshot endpoint and the
-// `global` stream scope. Mobile wraps it in its own state container; the web
-// uses React Query plus `applyAttentionEvent` directly
-// (`apps/web/src/hooks/attentionQueries.ts`), with the same seq rules.
+// `global` stream scope. Mobile wraps it in its own state container and the
+// web in `useSyncExternalStore` (`apps/web/src/hooks/attentionQueries.ts`):
+// one implementation of the seq rules for every client.
 //
 // Lifecycle:
 //   start()  subscribe `global` (filtered to `attention.`) FIRST, then fetch
-//            the snapshot — deltas that land while the fetch is in flight are
-//            buffered by the reducer and replayed on top of it.
+//            the snapshot — deltas that land while a fetch is in flight are
+//            held by the reducer and replayed on top of it.
 //   gap      a skipped `seq`, a stream `gap:` disconnect, or a reconnect after
 //            any disconnect marks the snapshot stale; the store refetches.
-//            One fetch at a time; a gap during a fetch triggers exactly one
-//            more.
+//            One fetch at a time and never cancelled: a delta gap during a
+//            fetch is settled by the replay (a hole there fetches again); an
+//            explicit resync during a fetch queues exactly one more, because
+//            the response in flight may predate the server's restart.
 // ────────────────────────────────────────────────────────────────
 
 import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
@@ -62,6 +64,9 @@ export interface AttentionStoreOptions {
   projectId?: string;
 }
 
+/** Back-to-back refetches before waiting for the next trigger, so a persistent loss cannot spin. */
+const MAX_CONSECUTIVE_FETCHES = 5;
+
 export function createAttentionStore(
   api: AttentionSnapshotSource,
   mux: AttentionStreamPort,
@@ -82,17 +87,21 @@ export function createAttentionStore(
       state = next;
       for (const listener of listeners) listener();
     }
-    // Also when the state did not change: a second gap during a fetch that
-    // may have been answered before it must queue one more fetch.
-    if (state.needsResync && (event.type === 'stream' || event.type === 'resync')) void refresh();
+    if (event.type === 'resync') void refresh();
+    // A gap seen while a fetch is in flight is the replay's to settle.
+    else if (event.type === 'stream' && state.needsResync && !state.fetching) void refresh();
   };
 
-  const fetchOnce = async (): Promise<void> => {
+  /** Resolves true when a snapshot landed. */
+  const fetchOnce = async (): Promise<boolean> => {
+    dispatch({ type: 'fetch' });
     try {
       const snapshot = await api.getAttention(filter.projectId ? filter : undefined);
       if (running) dispatch({ type: 'snapshot', snapshot });
+      return true;
     } catch (err) {
       if (running) dispatch({ type: 'error', message: err instanceof Error ? err.message : String(err) });
+      return false;
     }
   };
 
@@ -104,10 +113,13 @@ export function createAttentionStore(
     }
     fetching = (async () => {
       try {
+        let rounds = 0;
+        let ok = true;
         do {
           refetchQueued = false;
-          await fetchOnce();
-        } while (refetchQueued && running);
+          ok = await fetchOnce();
+          rounds += 1;
+        } while (ok && running && rounds < MAX_CONSECUTIVE_FETCHES && (refetchQueued || state.needsResync));
       } finally {
         fetching = null;
       }
@@ -137,8 +149,10 @@ export function createAttentionStore(
           }
         },
         onDisconnected: (reason) => {
-          disconnected = true;
+          // A gap is repaired right now; marking it disconnected as well would
+          // fetch a second time on the next connect.
           if (reason?.startsWith('gap')) dispatch({ type: 'resync' });
+          else disconnected = true;
         },
       });
       void refresh();

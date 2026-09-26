@@ -101,29 +101,50 @@ export interface AttentionState {
   /** Null until the first snapshot arrives. */
   snapshot: AttentionSnapshot | null;
   filter: AttentionFilter;
-  /** Deltas that arrived before the first snapshot; replayed on top of it. */
+  /**
+   * Deltas held for the next snapshot: every delta while a fetch is in
+   * flight, before the first snapshot, or while the snapshot is stale.
+   * Replayed on top of the fetched snapshot (only `seq > snapshot.seq` apply).
+   */
   buffered: AttentionStreamEvent[];
   /** A delta was missed (or the stream lost its place): refetch the snapshot. */
   needsResync: boolean;
+  /** A snapshot fetch is in flight (between `fetch` and `snapshot`/`error`). */
+  fetching: boolean;
   /** The last snapshot fetch failed. Cleared by the next snapshot. */
   error: string | null;
 }
 
 export type AttentionReducerEvent =
+  /** Dispatch immediately BEFORE requesting a snapshot, so every later delta is held for it. */
+  | { type: 'fetch' }
   | { type: 'snapshot'; snapshot: AttentionSnapshot }
   | { type: 'stream'; event: AttentionStreamEvent }
   | { type: 'resync' }
   | { type: 'error'; message: string };
 
-/** Pre-snapshot deltas worth keeping; anything older is covered by the snapshot or detected as a gap. */
+/** Deltas worth holding; anything older is covered by the snapshot or detected as a gap. */
 const MAX_BUFFERED = 500;
 
 export function initialAttentionState(filter: AttentionFilter = {}): AttentionState {
-  return { snapshot: null, filter, buffered: [], needsResync: false, error: null };
+  return { snapshot: null, filter, buffered: [], needsResync: false, fetching: false, error: null };
 }
 
+/**
+ * Why the buffer, and not "apply now, then take the snapshot":
+ *
+ * A snapshot answers for the moment the server built it, which is some time
+ * after the request left. A delta can reach the client while the request is in
+ * flight, so the response can be OLDER than the snapshot the client already
+ * holds. Replacing it would roll the view back; ignoring it would keep a stale
+ * view after a resync. Holding every delta from the moment the request is sent
+ * and replaying the ones past `snapshot.seq` makes both cases land on the
+ * newest state, and a hole in that replay is a real loss (refetch again).
+ */
 export function attentionReducer(state: AttentionState, event: AttentionReducerEvent): AttentionState {
   switch (event.type) {
+    case 'fetch':
+      return state.fetching ? state : { ...state, fetching: true };
     case 'snapshot': {
       let snapshot = event.snapshot;
       let gap = false;
@@ -135,21 +156,23 @@ export function attentionReducer(state: AttentionState, event: AttentionReducerE
         }
         snapshot = result.snapshot;
       }
-      return { ...state, snapshot, buffered: [], needsResync: gap, error: null };
+      return { ...state, snapshot, buffered: [], needsResync: gap, fetching: false, error: null };
     }
     case 'stream': {
       if (!isAttentionStreamEvent(event.event)) return state;
-      if (!state.snapshot) {
-        return { ...state, buffered: [...state.buffered, event.event].slice(-MAX_BUFFERED) };
-      }
+      const hold = state.fetching || !state.snapshot || state.needsResync;
+      const buffered = hold ? [...state.buffered, event.event].slice(-MAX_BUFFERED) : state.buffered;
+      if (!state.snapshot || state.needsResync) return { ...state, buffered };
+      // Live view: apply now (the buffer still holds it for the snapshot in flight).
       const result = applyAttentionEvent(state.snapshot, event.event, state.filter);
-      if (result.gap) return state.needsResync ? state : { ...state, needsResync: true };
-      return result.snapshot === state.snapshot ? state : { ...state, snapshot: result.snapshot };
+      if (result.gap) return { ...state, buffered, needsResync: true };
+      if (result.snapshot === state.snapshot && buffered === state.buffered) return state;
+      return { ...state, snapshot: result.snapshot, buffered };
     }
     case 'resync':
       return state.needsResync ? state : { ...state, needsResync: true };
     case 'error':
-      return { ...state, error: event.message };
+      return { ...state, fetching: false, error: event.message };
   }
 }
 

@@ -125,6 +125,7 @@ export class ChangeSummaryService {
     });
     this.registerRepos(allRepos);
     const repos = repoAlias ? allRepos.filter((r) => r.alias === repoAlias) : allRepos;
+    if (params.freshWorkingTree) for (const repo of repos) this.invalidateWorkingTree(repo.repoDir);
 
     if (repos.length === 0) {
       return {

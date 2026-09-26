@@ -58,6 +58,7 @@ export function ChatsListPage() {
   const {
     data: chatList,
     isLoading,
+    isPlaceholderData,
     hasNextPage,
     isFetchingNextPage,
     fetchNextPage,
@@ -74,6 +75,12 @@ export function ChatsListPage() {
 
   /** The rows loaded so far, already filtered and sorted by the server. */
   const filteredChats = useMemo(() => chatList?.items ?? [], [chatList]);
+
+  // A new filter or search is a new list: a selection made in the previous
+  // one must not carry over into a bulk delete (P2-R14).
+  useEffect(() => {
+    setSelectedIds(new Set());
+  }, [statusFilter, debouncedSearch]);
 
   // ── Virtualization ──
   // Measured on /chats with 359 real chats: 7,538 DOM nodes, worst long task
@@ -134,10 +141,16 @@ export function ChatsListPage() {
     });
   };
 
-  /** Select all visible (filtered) chats */
+  /**
+   * Select every LOADED row of the current list. While the previous filter's
+   * rows are still on screen as placeholder data, there is nothing of this
+   * list to select yet.
+   */
   const selectAll = () => {
-    setSelectedIds(new Set(filteredChats.map((c) => c.id)));
+    setSelectedIds(isPlaceholderData ? new Set() : new Set(filteredChats.map((c) => c.id)));
   };
+  const allLoadedSelected = filteredChats.length > 0 && selectedIds.size === filteredChats.length;
+  const total = chatList?.total;
 
   /** Deselect all */
   const deselectAll = () => {
@@ -213,20 +226,26 @@ export function ChatsListPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={selectedIds.size === filteredChats.length ? deselectAll : selectAll}
+              onClick={allLoadedSelected ? deselectAll : selectAll}
+              disabled={isPlaceholderData}
               className="text-foreground"
               leftIcon={
-                selectedIds.size === filteredChats.length ? (
+                allLoadedSelected ? (
                   <CheckSquare className="h-4 w-4 text-primary" />
                 ) : (
                   <Square className="h-4 w-4" />
                 )
               }
             >
-              {selectedIds.size === filteredChats.length ? 'Deselect All' : 'Select All'}
+              {allLoadedSelected ? 'Deselect All' : 'Select All Loaded'}
             </Button>
+            {/* "Select all" takes the rows loaded so far (a page at a time), so
+                the count says so rather than implying the whole list. */}
             <span className="text-xs text-muted-foreground">
-              {selectedIds.size} of {chatList?.total ?? filteredChats.length} selected
+              {selectedIds.size} selected
+              {total !== undefined && total > filteredChats.length
+                ? ` · ${filteredChats.length} of ${total} loaded`
+                : ''}
             </span>
             <div className="flex-1" />
             <Button

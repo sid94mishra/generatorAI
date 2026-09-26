@@ -135,6 +135,12 @@ export interface GetChangeSummaryParams {
   /** Include the full path list per repo (for the tree view). */
   includeTree?: boolean;
   autoInit?: boolean;
+  /**
+   * Drop the memoised working tree of THIS workspace's repos before reading,
+   * because the caller knows it just moved. Leaves every other workspace's
+   * memo alone (`invalidateWorkingTree()` with no argument clears them all).
+   */
+  freshWorkingTree?: boolean;
 }
 
 /** One file's content on both sides, for `parseDiffFromFile`-style rendering. */

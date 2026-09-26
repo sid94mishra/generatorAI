@@ -27,6 +27,13 @@ export function createAttentionRoutes(container: Container): Router {
       });
       return;
     }
+    // A feed that never started (or failed to) is unknown, not empty (D-36).
+    if (!container.attentionService.isAvailable()) {
+      res.status(503).set('Cache-Control', 'no-store').json({
+        error: { code: 'ATTENTION_UNAVAILABLE', message: 'The attention feed is not available on this server' },
+      });
+      return;
+    }
     const snapshot = container.attentionService.getSnapshot(raw ? { projectId: raw } : {});
     // No principal means unauthenticated loopback development mode, which
     // reads everything (see `canBypassPermissions` in chats.ts).

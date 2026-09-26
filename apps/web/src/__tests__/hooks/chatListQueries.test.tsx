@@ -116,6 +116,32 @@ describe('useChats', () => {
     expect(subs[0]!.closed).toBe(true);
   });
 
+  it('P2-R20: folds a 200-event burst into one refetch and never cancels the request in flight', async () => {
+    const { platform, wrapper } = setup();
+    const resolvers: Array<(p: ChatListPage) => void> = [];
+    platform.listChats.mockResolvedValueOnce(page(['a'], null));
+    const { result } = renderHook(() => useChats(), { wrapper });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    platform.listChats.mockImplementation(() => new Promise<ChatListPage>((r) => resolvers.push(r)));
+
+    act(() => {
+      for (let i = 0; i < 200; i++) subs[0]!.handlers.onMessage?.(frame('chat.archived'));
+    });
+    await waitFor(() => expect(platform.listChats).toHaveBeenCalledTimes(2));
+    // More events while that request is in flight: it is not cancelled …
+    act(() => {
+      for (let i = 0; i < 50; i++) subs[0]!.handlers.onMessage?.(frame('chat.archived'));
+    });
+    await new Promise((r) => setTimeout(r, 400));
+    expect(platform.listChats).toHaveBeenCalledTimes(2);
+    // … and exactly one more follows it, so the last change is not missed.
+    await act(async () => resolvers.shift()!(page(['b'], null)));
+    await waitFor(() => expect(platform.listChats).toHaveBeenCalledTimes(3));
+    await act(async () => resolvers.shift()!(page(['c'], null)));
+    await waitFor(() => expect(result.current.data?.items.map((i) => i.id)).toEqual(['c']));
+    expect(platform.listChats).toHaveBeenCalledTimes(3);
+  });
+
   it('follows the attention feed only when filtering on a live state', async () => {
     const { platform, wrapper } = setup();
     platform.listChats.mockResolvedValue(page(['a'], null));

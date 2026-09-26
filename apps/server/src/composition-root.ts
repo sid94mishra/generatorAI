@@ -85,6 +85,8 @@ import {
   // W22 / W47 — durable execution engine storage (migration v36–v37)
   RegisterRepository,
   EntryRepository,
+  // G-01 — one indexed query for the attention feed's boot rebuild (P2-R16)
+  listAutomationExecutionIdsByStatus,
 } from '@generatorai/db';
 import {
   // Bootstrap — shared core services factory
@@ -1872,7 +1874,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     stageRuns: stageRunRepo,
     definitions: workflowDefinitionRepo,
     automations: automationRepo,
-    executions: automationExecutionRepo,
+    executions: {
+      getExecutionById: (id) => automationExecutionRepo.getExecutionById(id),
+      getExecutionsByAutomationId: (id) => automationExecutionRepo.getExecutionsByAutomationId(id),
+      listIdsByStatus: (statuses) => listAutomationExecutionIdsByStatus(db, statuses),
+    },
     consent: computerConsentStore,
     logger,
   });
@@ -1888,11 +1894,12 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       const ws = await workspaceManager.getExecutionWorkspace(workspaceId);
       const info = ws ? await workspaceManager.getWorkspaceInfo(workspaceId) : null;
       if (!ws || !info) return null;
-      // Same reason as the review re-anchor below: the memoised working tree
-      // is for one panel render, and this runs because the tree just moved.
-      changeSummaryService.invalidateWorkingTree();
       const summary = await changeSummaryService.getSummary({
         workspaceId,
+        // Same reason as the review re-anchor below: the memoised working
+        // tree is for one panel render, and this runs because the tree just
+        // moved. Only this workspace's repos are dropped (P2-R9).
+        freshWorkingTree: true,
         rootPath: ws.codeRoot ?? ws.rootPath,
         worktrees: (info.worktrees ?? []).map((wt) => ({
           alias: wt.alias,
@@ -2724,6 +2731,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       try {
         await attentionService.start();
       } catch (err) {
+        // `GET /api/attention` answers 503 until it has (P2-R17).
         logger.warn(`[Container] attention feed failed to start: ${err instanceof Error ? err.message : String(err)}`);
       }
       chatChangeStatsService.start();

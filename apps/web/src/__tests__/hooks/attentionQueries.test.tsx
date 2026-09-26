@@ -2,7 +2,8 @@
 // useAttention — the G-01 web hook.
 //
 // The snapshot comes from `platform.getAttention`; `attention.*` deltas on
-// the shared `global` subscription are folded into the React Query cache.
+// the shared `global` subscription are folded in by client-core's
+// `createAttentionStore` (one store per platform + project).
 // Pinned here: the subscription shape, delta application, buffering of
 // deltas that beat the first snapshot, refetch on a seq gap / resync /
 // reconnect, the project filter, and that counts stay undefined until
@@ -151,6 +152,43 @@ describe('useAttention', () => {
     );
     await waitFor(() => expect(result.current.data?.seq).toBe(2));
     expect(result.current.data!.running.map((i) => i.key)).toEqual(['chat:a']);
+  });
+});
+
+describe('useAttention — shared store (P2-R12)', () => {
+  it('two consumers share one subscription and one request; the store stops with the last one', async () => {
+    const { platform, wrapper } = setup([snap(1, [item('chat:a')])]);
+    const a = renderHook(() => useAttention(), { wrapper });
+    const b = renderHook(() => useAttentionCounts(), { wrapper });
+    await waitFor(() => expect(b.result.current).toMatchObject({ running: 1 }));
+    expect(subs).toHaveLength(1);
+    expect(platform.getAttention).toHaveBeenCalledTimes(1);
+    a.unmount();
+    expect(subs[0]!.closed).toBe(false);
+    b.unmount();
+    expect(subs[0]!.closed).toBe(true);
+  });
+
+  it('a delta burst during a refetch neither cancels nor repeats it, and nothing is lost', async () => {
+    const resolvers: Array<(s: AttentionSnapshot) => void> = [];
+    const { platform, wrapper } = setup(() => new Promise<AttentionSnapshot>((r) => resolvers.push(r)));
+    const { result } = renderHook(() => useAttention(), { wrapper });
+    await waitFor(() => expect(resolvers).toHaveLength(1));
+    await act(async () => resolvers.shift()!(snap(1)));
+    await waitFor(() => expect(result.current.data?.seq).toBe(1));
+
+    act(() => subs[0]!.handlers.onMessage?.(frame('attention.upsert', { seq: 5, item: item('chat:gap') }))); // 2–4 lost
+    await waitFor(() => expect(platform.getAttention).toHaveBeenCalledTimes(2));
+    act(() => {
+      for (let seq = 6; seq <= 40; seq++) {
+        subs[0]!.handlers.onMessage?.(frame('attention.upsert', { seq, item: item(`chat:n${seq}`) }));
+      }
+    });
+    expect(platform.getAttention).toHaveBeenCalledTimes(2);
+    await act(async () => resolvers.shift()!(snap(5, [item('chat:gap')])));
+    await waitFor(() => expect(result.current.data?.seq).toBe(40));
+    expect(result.current.data!.running).toHaveLength(36);
+    expect(platform.getAttention).toHaveBeenCalledTimes(2);
   });
 });
 

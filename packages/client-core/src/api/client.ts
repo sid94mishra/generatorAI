@@ -8,6 +8,7 @@
 
 import {
   chatListSearchParams,
+  runChatBulk,
   type AttentionFilter,
   type AttentionSnapshot,
   type ChatBulkResult,
@@ -1003,13 +1004,17 @@ export function createApiClient(fetchImpl: ApiFetch) {
         return request<ChatListPage<ChatListRow>>(fetchImpl, `/api/chats${suffix ? `?${suffix}` : ''}`);
       },
 
-      /** Archive several chats in one request; the result is per id. */
+      /**
+       * Archive any number of chats; the result is per id. Split into
+       * requests of at most `CHAT_BULK_MAX_IDS` (the server's cap) by the
+       * shared `runChatBulk` contract.
+       */
       archiveMany: (ids: string[]) =>
-        request<ChatBulkResult>(fetchImpl, '/api/chats/archive', json({ ids })),
+        runChatBulk(ids, (batch) => request<ChatBulkResult>(fetchImpl, '/api/chats/archive', json({ ids: batch }))),
 
-      /** Permanently delete several chats in one request; the result is per id. */
+      /** Permanently delete any number of chats; batched like `archiveMany`. */
       removeMany: (ids: string[]) =>
-        request<ChatBulkResult>(fetchImpl, '/api/chats/delete', json({ ids })),
+        runChatBulk(ids, (batch) => request<ChatBulkResult>(fetchImpl, '/api/chats/delete', json({ ids: batch }))),
 
       get: (id: string) => request<ChatSummary>(fetchImpl, `/api/chats/${id}`),
 

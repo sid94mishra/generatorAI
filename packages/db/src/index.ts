@@ -63,6 +63,7 @@ export { DrizzleStageRunRepository } from './repositories/StageRunRepository.js'
 // Automation repositories
 export { DrizzleAutomationRepository } from './repositories/AutomationRepository.js';
 export { DrizzleAutomationExecutionRepository } from './repositories/AutomationExecutionRepository.js';
+export { listAutomationExecutionIdsByStatus } from './repositories/AttentionQueries.js';
 export { DrizzleIdempotencyKeyRepository } from './repositories/IdempotencyKeyRepository.js';
 export type { IdempotencyKeyRecord } from './repositories/IdempotencyKeyRepository.js';
 

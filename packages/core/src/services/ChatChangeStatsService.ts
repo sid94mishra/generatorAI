@@ -15,7 +15,10 @@
 //
 // Recomputes are coalesced per workspace: the first trigger arms a timer and
 // later triggers inside the window ride along, so a write-heavy turn costs one
-// summary per window rather than one per event. A workspace is shared by an
+// summary per window rather than one per event. Across workspaces at most
+// `maxConcurrent` (default 3) summaries run at once and the rest wait in a
+// FIFO: listing 200 never-computed rows must not start 200 git processes at
+// the same moment (P2-R9). A workspace is shared by an
 // orchestrator and its workers, so every chat on it gets the same stats. When
 // the stored values move, `chat.updated` tells list views to refetch.
 //
@@ -39,6 +42,8 @@ export interface ChatChangeStatsDeps {
   computeStats(workspaceId: string): Promise<ChatChangeStats | null>;
   /** Coalescing window in ms. Default 1500. */
   debounceMs?: number;
+  /** Summaries allowed to run at once, across all workspaces. Default 3. */
+  maxConcurrent?: number;
   logger?: Pick<ILogger, 'warn'>;
 }
 
@@ -88,12 +93,16 @@ export class ChatChangeStatsService {
   private readonly again = new Set<string>();
   /** Workspaces `ensure()` has already asked for in this process. */
   private readonly ensured = new Set<string>();
+  /** Due workspaces waiting for a free slot, oldest first (a Set keeps each once). */
+  private readonly queued = new Set<string>();
+  private readonly maxConcurrent: number;
   private readonly unsubscribers: Array<() => void> = [];
   private stopped = false;
   private readonly debounceMs: number;
 
   constructor(private readonly deps: ChatChangeStatsDeps) {
     this.debounceMs = deps.debounceMs ?? 1_500;
+    this.maxConcurrent = Math.max(1, deps.maxConcurrent ?? 3);
   }
 
   start(): void {
@@ -109,6 +118,7 @@ export class ChatChangeStatsService {
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe();
     for (const timer of this.timers.values()) clearTimeout(timer);
     this.timers.clear();
+    this.queued.clear();
   }
 
   /** Stats for these rows were never computed: compute them once, in the background. */
@@ -123,6 +133,7 @@ export class ChatChangeStatsService {
   /** Resolves when no recompute is armed or running. Tests and shutdown. */
   async settled(): Promise<void> {
     for (;;) {
+      // A queued workspace implies a running one, so `running` covers the queue.
       if (this.timers.size === 0 && this.running.size === 0) return;
       await Promise.all([...this.running.values()]);
       if (this.timers.size > 0) await new Promise((r) => setTimeout(r, this.debounceMs + 5));
@@ -165,6 +176,10 @@ export class ChatChangeStatsService {
       this.again.add(workspaceId);
       return;
     }
+    if (this.running.size >= this.maxConcurrent) {
+      this.queued.add(workspaceId);
+      return;
+    }
     const job = this.recompute(workspaceId)
       .catch((err: unknown) => {
         this.deps.logger?.warn('[ChatChangeStats] recompute failed', {
@@ -175,8 +190,18 @@ export class ChatChangeStatsService {
       .finally(() => {
         this.running.delete(workspaceId);
         if (this.again.delete(workspaceId)) this.schedule(workspaceId);
+        this.startNextQueued();
       });
     this.running.set(workspaceId, job);
+  }
+
+  private startNextQueued(): void {
+    if (this.stopped) return;
+    for (const next of this.queued) {
+      if (this.running.size >= this.maxConcurrent) return;
+      this.queued.delete(next);
+      this.run(next);
+    }
   }
 
   private async recompute(workspaceId: string): Promise<void> {

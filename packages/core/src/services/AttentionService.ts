@@ -97,7 +97,11 @@ export interface AttentionConsentEntry {
 
 export interface AttentionServiceDeps {
   eventBus: AttentionEventBus;
-  chats: { getById(id: string): Promise<Chat> };
+  chats: {
+    getById(id: string): Promise<Chat>;
+    /** The chats on a workspace — resolves a computer consent that carries no `chatId`. */
+    getByWorkspaceId(workspaceId: string): Promise<Chat[]>;
+  };
   projects: { getById(id: string): Promise<Project> };
   interactions?: {
     listPendingAll(): Promise<AgentInteraction[]>;
@@ -117,6 +121,12 @@ export interface AttentionServiceDeps {
   executions: {
     getExecutionById(id: string): Promise<AutomationExecution>;
     getExecutionsByAutomationId(automationId: string): Promise<AutomationExecution[]>;
+    /**
+     * Ids of the live executions in one query. When the store offers it (the
+     * composition root wires `listAutomationExecutionIdsByStatus`), the boot
+     * rebuild uses it instead of reading every automation's whole history.
+     */
+    listIdsByStatus?(statuses: readonly AutomationExecution['status'][]): Promise<string[]>;
   };
   consent?: { listAllPending(): AttentionConsentEntry[] };
   logger?: Pick<ILogger, 'info' | 'warn'>;
@@ -131,7 +141,8 @@ export interface AttentionServiceDeps {
 /** Runs in these statuses are live (Running or, when paused, Needs you). */
 const LIVE_RUN_STATUSES: readonly WorkflowRunStatus[] = ['running', 'starting', 'cancelling', 'paused'];
 const STOPPABLE_RUN_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['running', 'starting', 'paused']);
-const LIVE_EXECUTION_STATUSES: ReadonlySet<AutomationExecution['status']> = new Set(['pending', 'running']);
+const LIVE_EXECUTION_STATUS_LIST: readonly AutomationExecution['status'][] = ['pending', 'running'];
+const LIVE_EXECUTION_STATUSES: ReadonlySet<AutomationExecution['status']> = new Set(LIVE_EXECUTION_STATUS_LIST);
 const TERMINAL_STAGE_STATUSES: ReadonlySet<StageRun['status']> = new Set([
   'completed',
   'failed',
@@ -238,20 +249,33 @@ export function describeInteraction(
 }
 
 /**
+ * The summary shown instead of one written from the agent's own words, for a
+ * principal that may not read the entity. A tool, app or stage NAME is fine
+ * ("Allow Bash?"); a question or a plan title is free text that can quote
+ * paths and commands (P2-R15).
+ */
+const GENERIC_SUMMARY: Partial<Record<AttentionAsk['kind'], string>> = {
+  question: 'Your agent has a question',
+  plan_review: 'Review the plan',
+};
+
+/**
  * Strip the fields that can carry commands and file names (`ask.detail`,
- * `progress.label`) unless the principal may read the entity itself:
- * `read:chats` for chat items, `read:workflows` for run and automation items.
+ * `progress.label`, and the free-text `ask.summary` of a question or plan
+ * review) unless the principal may read the entity itself: `read:chats` for
+ * chat items, `read:workflows` for run and automation items.
  * `scopes === null` means unauthenticated local mode, which reads everything.
  */
 export function redactAttentionItem(item: AttentionItem, scopes: readonly string[] | null): AttentionItem {
   if (scopes === null) return item;
   const needed = item.entity === 'chat' ? 'read:chats' : 'read:workflows';
   if (scopes.includes(needed)) return item;
-  if (item.ask?.detail === undefined && item.progress === undefined) return item;
+  const genericSummary = item.ask ? GENERIC_SUMMARY[item.ask.kind] : undefined;
+  if (item.ask?.detail === undefined && item.progress === undefined && genericSummary === undefined) return item;
   const { progress, ask, ...rest } = item;
   const out: AttentionItem = { ...rest };
   if (ask) {
-    const keep = { ...ask };
+    const keep = { ...ask, ...(genericSummary ? { summary: genericSummary } : {}) };
     delete keep.detail;
     out.ask = keep;
   }
@@ -306,6 +330,8 @@ const CHAT_TRIGGER_KINDS: ReadonlySet<string> = new Set([
   'chat.plan.expired',
   'chat.archived',
   'chat.deleted',
+  // Rename, unarchive, project move: the item's title/project must follow.
+  'chat.updated',
   'harness.idle',
   'harness.error',
   'harness.turn_start',
@@ -328,6 +354,10 @@ export class AttentionService {
   private readonly unsubscribers: Array<() => void> = [];
   private readonly now: () => number;
   private stopped = false;
+  /** The last `attention.counts` payload emitted, so an unchanged total is not re-sent. */
+  private lastCounts = '';
+  /** True once `start()` has subscribed and rebuilt; until then the snapshot means nothing. */
+  private available = false;
 
   constructor(private readonly deps: AttentionServiceDeps) {
     this.now = deps.now ?? Date.now;
@@ -350,9 +380,20 @@ export class AttentionService {
       }),
     );
     await this.rebuild();
+    this.available = !this.stopped;
+  }
+
+  /**
+   * False before `start()` finished or after it failed: an empty snapshot then
+   * would read as "nothing needs you", which is invented data (D-36). The
+   * route answers 503 instead (P2-R17).
+   */
+  isAvailable(): boolean {
+    return this.available;
   }
 
   stop(): void {
+    this.available = false;
     this.stopped = true;
     for (const unsubscribe of this.unsubscribers.splice(0)) unsubscribe();
     for (const timer of this.consentTimers.values()) clearTimeout(timer);
@@ -398,8 +439,8 @@ export class AttentionService {
       logger?.warn('[Attention] could not list pending interactions', { error: errorText(err) });
     }
     for (const entry of consent?.listAllPending() ?? []) {
-      if (entry.chatId) chatIds.add(entry.chatId);
-      this.armConsentExpiry(entry.requestId, entry.chatId, entry.expiresAt);
+      for (const id of await this.consentChatIds(entry.chatId, entry.workspaceId)) chatIds.add(id);
+      this.armConsentExpiry(entry.requestId, entry.chatId, entry.workspaceId, entry.expiresAt);
     }
     for (const id of chatIds) refs.push({ entity: 'chat', id });
 
@@ -412,10 +453,16 @@ export class AttentionService {
     }
 
     try {
-      for (const automation of await automations.getAll()) {
-        for (const execution of await executions.getExecutionsByAutomationId(automation.id)) {
-          if (LIVE_EXECUTION_STATUSES.has(execution.status)) {
-            refs.push({ entity: 'automation_execution', id: execution.id });
+      if (executions.listIdsByStatus) {
+        for (const id of await executions.listIdsByStatus(LIVE_EXECUTION_STATUS_LIST)) {
+          refs.push({ entity: 'automation_execution', id });
+        }
+      } else {
+        for (const automation of await automations.getAll()) {
+          for (const execution of await executions.getExecutionsByAutomationId(automation.id)) {
+            if (LIVE_EXECUTION_STATUSES.has(execution.status)) {
+              refs.push({ entity: 'automation_execution', id: execution.id });
+            }
           }
         }
       }
@@ -449,7 +496,9 @@ export class AttentionService {
       if (kind === 'computer.consent_required') {
         const requestId = str(data['requestId']);
         const expiresAt = typeof data['expiresAt'] === 'number' ? data['expiresAt'] : undefined;
-        if (requestId && expiresAt !== undefined) this.armConsentExpiry(requestId, chatId, expiresAt);
+        if (requestId && expiresAt !== undefined) {
+          this.armConsentExpiry(requestId, chatId, str(data['workspaceId']), expiresAt);
+        }
       }
       if (
         kind.startsWith('chat.permission.') ||
@@ -458,6 +507,21 @@ export class AttentionService {
       ) {
         this.schedule({ entity: 'chat', id: chatId });
       }
+    }
+
+    // A consent prompt raised outside a chat turn carries only its workspace
+    // (P2-R19): it belongs to the chat that owns that workspace.
+    if (kind === 'computer.consent_required' || kind === 'computer.consent_resolved') {
+      const workspaceId = str(data['workspaceId']);
+      if (!chatId && workspaceId) {
+        const requestId = str(data['requestId']);
+        const expiresAt = typeof data['expiresAt'] === 'number' ? data['expiresAt'] : undefined;
+        if (kind === 'computer.consent_required' && requestId && expiresAt !== undefined) {
+          this.armConsentExpiry(requestId, undefined, workspaceId, expiresAt);
+        }
+        this.scheduleWorkspaceChats(workspaceId);
+      }
+      return;
     }
 
     if (kind.startsWith('workflow_run.') || kind.startsWith('stage_run.')) {
@@ -489,15 +553,46 @@ export class AttentionService {
     this.apply(ref, [{ ...current, progress: { ...current.progress, label } }]);
   }
 
-  private armConsentExpiry(requestId: string, chatId: string | undefined, expiresAt: number): void {
-    if (!chatId || this.consentTimers.has(requestId)) return;
+  private armConsentExpiry(
+    requestId: string,
+    chatId: string | undefined,
+    workspaceId: string | undefined,
+    expiresAt: number,
+  ): void {
+    if ((!chatId && !workspaceId) || this.consentTimers.has(requestId)) return;
     const delay = Math.max(0, expiresAt - this.now()) + 250;
     const timer = setTimeout(() => {
       this.consentTimers.delete(requestId);
-      this.schedule({ entity: 'chat', id: chatId });
+      if (chatId) this.schedule({ entity: 'chat', id: chatId });
+      else if (workspaceId) this.scheduleWorkspaceChats(workspaceId);
     }, delay);
     timer.unref?.();
     this.consentTimers.set(requestId, timer);
+  }
+
+  /**
+   * The chat a consent prompt belongs to: its own `chatId`, else the chat that
+   * OWNS the workspace — every top-level chat on it (a worker shares its
+   * orchestrator's workspace and rolls up to it anyway).
+   */
+  private async consentChatIds(chatId: string | undefined, workspaceId: string): Promise<string[]> {
+    if (chatId) return [chatId];
+    try {
+      const chats = await this.deps.chats.getByWorkspaceId(workspaceId);
+      return chats.filter((chat) => !chat.parentChatId).map((chat) => chat.id);
+    } catch (err) {
+      this.deps.logger?.warn('[Attention] could not resolve a consent prompt\'s chat', {
+        workspaceId,
+        error: errorText(err),
+      });
+      return [];
+    }
+  }
+
+  private scheduleWorkspaceChats(workspaceId: string): void {
+    void this.consentChatIds(undefined, workspaceId).then((ids) => {
+      for (const id of ids) this.schedule({ entity: 'chat', id });
+    });
   }
 
   // ── Per-entity re-read, serialised and coalesced ──
@@ -564,8 +659,14 @@ export class AttentionService {
       changed = true;
     }
     if (changed) {
-      const snapshot = this.getSnapshot();
-      this.queueEmit({ kind: 'attention.counts', data: { seq: this.seq, counts: snapshot.counts } });
+      // Counts-only consumers (the desktop badge and tray rebuild on every
+      // one) need a new value, not a new label on a running chat (P2-R16).
+      const { counts } = this.getSnapshot();
+      const key = JSON.stringify(counts);
+      if (key !== this.lastCounts) {
+        this.lastCounts = key;
+        this.queueEmit({ kind: 'attention.counts', data: { seq: this.seq, counts } });
+      }
     }
   }
 
@@ -605,7 +706,11 @@ export class AttentionService {
       this.projectRef(chat.projectId),
       this.parentRef(chat.parentChatId),
     ]);
-    const consents = (consent?.listAllPending() ?? []).filter((entry) => entry.chatId === chatId);
+    // A prompt without a chat is shown on the top-level chat that owns its workspace (P2-R19).
+    const ownsWorkspace = !chat.parentChatId && chat.workspaceId !== undefined;
+    const consents = (consent?.listAllPending() ?? []).filter(
+      (entry) => entry.chatId === chatId || (!entry.chatId && ownsWorkspace && entry.workspaceId === chat.workspaceId),
+    );
     const streamingSince = streaming.getStreamingSince().get(chatId);
 
     const base = {

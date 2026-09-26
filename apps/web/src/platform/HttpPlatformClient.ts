@@ -23,7 +23,7 @@ import type {
 } from '@generatorai/shared';
 import type { Artifact } from '@generatorai/shared';
 import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
-import { chatListSearchParams, type ChatBulkResult, type ChatListPage, type ChatListQuery } from '@generatorai/shared';
+import { chatListSearchParams, runChatBulk, type ChatBulkResult, type ChatListPage, type ChatListQuery } from '@generatorai/shared';
 // AGT-01 — first-class agents
 import type {
   Agent,
@@ -2666,21 +2666,22 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<AttentionSnapshot>(`${this.baseUrl}/api/attention${query}`);
   }
 
-  // G-02: bulk actions for the chat list's bulk bar. One request each; the
-  // server answers per id, so a partial failure is reported, not thrown.
+  // G-02: bulk actions for the chat list's bulk bar. The server answers per
+  // id, so a partial failure is reported, not thrown; any number of ids is
+  // split into requests of at most CHAT_BULK_MAX_IDS (`runChatBulk`, P2-R1).
   async archiveChats(chatIds: string[]): Promise<ChatBulkResult> {
-    return apiFetch<ChatBulkResult>(`${this.baseUrl}/api/chats/archive`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: chatIds }),
-    });
+    return runChatBulk(chatIds, (ids) => this.postChatBulk('archive', ids));
   }
 
   async deleteChats(chatIds: string[]): Promise<ChatBulkResult> {
-    return apiFetch<ChatBulkResult>(`${this.baseUrl}/api/chats/delete`, {
+    return runChatBulk(chatIds, (ids) => this.postChatBulk('delete', ids));
+  }
+
+  private postChatBulk(action: 'archive' | 'delete', ids: string[]): Promise<ChatBulkResult> {
+    return apiFetch<ChatBulkResult>(`${this.baseUrl}/api/chats/${action}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ids: chatIds }),
+      body: JSON.stringify({ ids }),
     });
   }
 }

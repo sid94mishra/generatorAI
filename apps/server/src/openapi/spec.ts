@@ -1084,7 +1084,9 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       post: {
         tags: ['Chats'],
         summary: 'Archive several chats (G-02 bulk bar)',
-        description: 'Per-id outcome; an already archived chat counts as archived.',
+        description:
+          'Per-id outcome; an already archived chat counts as archived. At most 200 ids per request: ' +
+          'clients split a larger selection into several requests and merge the results (runChatBulk).',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatBulkRequest' } } },
@@ -1102,6 +1104,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       post: {
         tags: ['Chats'],
         summary: 'Permanently delete several chats (G-02 bulk bar)',
+        description: 'Per-id outcome. At most 200 ids per request; clients batch larger selections (runChatBulk).',
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/ChatBulkRequest' } } },
@@ -2416,6 +2419,10 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           },
           '400': {
             description: 'Invalid projectId',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
+          },
+          '503': {
+            description: 'The attention feed has not started (or failed to): unknown, not empty (ATTENTION_UNAVAILABLE)',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
         },

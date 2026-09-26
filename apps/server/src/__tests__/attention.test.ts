@@ -45,6 +45,7 @@ import {
   DrizzleStageRunRepository,
   DrizzleWorkflowDefinitionRepository,
   DrizzleWorkflowRunRepository,
+  listAutomationExecutionIdsByStatus,
   type AppDatabase,
 } from '@generatorai/db';
 import type {
@@ -227,7 +228,13 @@ function startService(): AttentionService {
     stageRuns: r.stageRuns,
     definitions: r.definitions,
     automations: r.automations,
-    executions: r.executions,
+    executions: {
+      getExecutionById: (id) => r.executions.getExecutionById(id),
+      // The boot rebuild asks for live ids in one query; walking every
+      // automation's history is what P2-R16 removed.
+      getExecutionsByAutomationId: () => Promise.reject(new Error('the rebuild must not read execution history')),
+      listIdsByStatus: (statuses) => listAutomationExecutionIdsByStatus(db, statuses),
+    },
     consent: { listAllPending: () => consents },
     seqBase: 1000,
   });
@@ -409,10 +416,13 @@ describe('AttentionService — live deltas', () => {
     ]);
     expect((emitted[0]!.data['item'] as { key: string }).key).toBe('chat:c1');
 
-    // A tool step updates the label in place.
+    // A tool step updates the label in place — an upsert, but the totals did
+    // not move, so no `attention.counts` wakes the badge (P2-R16).
+    emitted = [];
     await emitChat('c1', 'harness.tool_start', { tool: 'Bash', args: { command: 'pnpm build\n--filter web' } });
     await service.settled();
     expect(service.getSnapshot().running[0]!.progress).toEqual({ label: 'Running pnpm build' });
+    expect(emitted.map((e) => e.kind)).toEqual(['attention.upsert']);
 
     // The agent asks: the chat leaves Running and appears under Needs you.
     emitted = [];
@@ -484,6 +494,44 @@ describe('AttentionService — live deltas', () => {
   });
 });
 
+describe('AttentionService — consent without a chat (P2-R19)', () => {
+  it('lists a workspace-level prompt on the top-level chat that owns the workspace, and drops it once answered', async () => {
+    await makeChat('owner', { workspaceId: 'w2' } as Partial<Chat>);
+    await makeChat('worker', { workspaceId: 'w2', parentChatId: 'owner' } as Partial<Chat>);
+    await makeChat('other', { workspaceId: 'w3' } as Partial<Chat>);
+    await startService().start();
+    consents = [
+      { requestId: 'rq2', workspaceId: 'w2', appLabel: 'Finder', action: 'open', summary: 'Open Downloads', expiresAt: Date.now() + 60_000 },
+    ];
+    await bus.emit('computer:w2', {
+      kind: 'computer.consent_required',
+      data: { workspaceId: 'w2', requestId: 'rq2', expiresAt: Date.now() + 60_000 },
+    } as unknown as AgentEvent);
+    await vi.waitFor(() => expect(service.getSnapshot().needsYou).toHaveLength(1));
+    expect(service.getSnapshot().needsYou[0]).toMatchObject({
+      key: 'chat:owner:rq2',
+      entityId: 'owner',
+      ask: { kind: 'computer_consent', summary: 'Allow Finder?' },
+    });
+
+    consents = [];
+    await bus.emit('computer:w2', {
+      kind: 'computer.consent_resolved',
+      data: { workspaceId: 'w2', requestId: 'rq2' },
+    } as unknown as AgentEvent);
+    await vi.waitFor(() => expect(service.getSnapshot().needsYou).toEqual([]));
+  });
+
+  it('finds a pending workspace-level prompt on boot', async () => {
+    await makeChat('owner', { workspaceId: 'w2' } as Partial<Chat>);
+    consents = [
+      { requestId: 'rq3', workspaceId: 'w2', appLabel: 'Mail', action: 'send', summary: 'Send', expiresAt: Date.now() + 60_000 },
+    ];
+    await startService().start();
+    expect(service.getSnapshot().needsYou.map((i) => i.key)).toEqual(['chat:owner:rq3']);
+  });
+});
+
 describe('GET /api/attention', () => {
   beforeEach(async () => {
     await makeProject('p1', 'Website');
@@ -525,6 +573,14 @@ describe('GET /api/attention', () => {
     const none = await request(app(principal(['read:activity']))).get('/api/attention');
     expect(JSON.stringify(none.body)).not.toContain('git push --force');
     expect((none.body as AttentionSnapshot).counts.needsYou).toBe(2);
+  });
+
+  it('P2-R17: answers 503, not an empty feed, when the service never started', async () => {
+    service.stop();
+    startService(); // constructed, not started
+    const res = await request(app(undefined)).get('/api/attention');
+    expect(res.status).toBe(503);
+    expect(res.body).toMatchObject({ error: { code: 'ATTENTION_UNAVAILABLE' } });
   });
 
   it('rejects an empty projectId', async () => {

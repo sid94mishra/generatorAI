@@ -320,6 +320,13 @@ export function parseChatListQuery(query: Record<string, unknown>): Parsed<ChatL
   };
 }
 
+/**
+ * `PATCH /chats/:id` fields a chat list row or an attention item shows. A
+ * change to any of them emits `chat.updated` (archive has its own
+ * `chat.archived`).
+ */
+const LIST_VISIBLE_CHAT_FIELDS = ['name', 'description', 'tags', 'status', 'projectId', 'agentRef'] as const;
+
 /** Body of `POST /chats/archive` and `POST /chats/delete`. */
 const ChatBulkSchema = z.object({
   ids: z.array(z.string().min(1).max(MAX_FILTER_VALUE_LENGTH)).min(1).max(CHAT_BULK_MAX_IDS),
@@ -678,6 +685,12 @@ export function createChatApiRoutes(container: Container): Router {
       }
 
       const updated = await container.chatEntityRepo.update(chatId, updates);
+      // Every live list (other tabs, a paired phone) and the attention feed's
+      // titles re-read on `chat.updated`; a rename, unarchive, tag, project,
+      // description or agent change is otherwise invisible to them (P2-R2).
+      if (LIST_VISIBLE_CHAT_FIELDS.some((field) => field in updates)) {
+        await eventBus.emit(updated.sessionId, { kind: 'chat.updated', data: { chatId } });
+      }
       if (agentRef !== undefined || agentOverrides !== undefined) {
         // Other clients (a second tab, a paired phone) must see the rebind.
         await eventBus.emit(updated.sessionId, {

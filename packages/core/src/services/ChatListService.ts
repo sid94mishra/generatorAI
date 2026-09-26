@@ -95,12 +95,18 @@ export function decodeChatListCursor(cursor: string, sort: ChatListSort): ChatLi
   } catch {
     payload = undefined;
   }
-  const valueOk = typeof payload?.v === 'number' || typeof payload?.v === 'string';
-  if (!payload || !valueOk || typeof payload.i !== 'string' || typeof payload.s !== 'string') {
+  if (!payload || typeof payload.i !== 'string' || typeof payload.s !== 'string') {
     throw new ValidationError('`cursor` is not a cursor this server issued');
   }
   if (payload.s !== sort) {
     throw new ValidationError(`\`cursor\` was issued for sort=${payload.s}, not sort=${sort}`);
+  }
+  // The value is compared against the sort column in SQL: a timestamp for
+  // activity/created, a lower-cased name for name (P2-R20).
+  const valueOk =
+    sort === 'name' ? typeof payload.v === 'string' : typeof payload.v === 'number' && Number.isFinite(payload.v);
+  if (!valueOk) {
+    throw new ValidationError('`cursor` is not a cursor this server issued');
   }
   return { value: payload.v as number | string, id: payload.i };
 }

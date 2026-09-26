@@ -47,7 +47,8 @@ export function DashboardPage() {
 
   const connected = !isError && !!health;
 
-  const activeChats = chatPage?.counts.active ?? health?.activeChats ?? 0;
+  // Unknown (loading or failed) renders a dash, never an invented zero (D-36).
+  const activeChats = chatPage?.counts.active ?? health?.activeChats;
 
   return (
     <PageContainer className="animate-fade-in">
@@ -94,7 +95,7 @@ export function DashboardPage() {
           icon={<MessageSquare className="h-5 w-5" />}
           iconTone="info"
           label="Chats"
-          value={chatsLoading ? '—' : activeChats}
+          value={chatsLoading || activeChats === undefined ? '—' : activeChats}
           onClick={() => navigate('/chats')}
         />
         <StatCard

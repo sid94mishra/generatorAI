@@ -447,4 +447,22 @@ describe('HttpPlatformClient', () => {
       expect.objectContaining({ method: 'PUT', body: JSON.stringify(data) }),
     );
   });
+
+  it('P2-R1: deleteChats splits a selection above the server cap into capped requests and merges them', async () => {
+    vi.mocked(globalThis.fetch).mockImplementation(async (_url, init) => {
+      const { ids } = JSON.parse(String(init?.body)) as { ids: string[] };
+      return jsonResponse({ succeeded: ids, failed: [] });
+    });
+    const ids = Array.from({ length: 401 }, (_, i) => `c${i}`);
+    const result = await client.deleteChats(ids);
+    const sizes = vi.mocked(globalThis.fetch).mock.calls.map(
+      ([url, init]) => [String(url), (JSON.parse(String(init?.body)) as { ids: string[] }).ids.length],
+    );
+    expect(sizes).toEqual([
+      ['http://localhost:3000/api/chats/delete', 200],
+      ['http://localhost:3000/api/chats/delete', 200],
+      ['http://localhost:3000/api/chats/delete', 1],
+    ]);
+    expect(result).toEqual({ succeeded: ids, failed: [] });
+  });
 });

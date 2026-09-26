@@ -154,9 +154,9 @@ beforeEach(async () => {
     debounceMs: 20,
     computeStats: async (workspaceId) => {
       if (workspaceId !== 'ws-dummy') return null;
-      summaries.invalidateWorkingTree();
       const summary = await summaries.getSummary({
         workspaceId,
+        freshWorkingTree: true,
         rootPath: dir,
         mounts: [{ alias: 'app', path: work, baseCommit: head }],
         autoInit: false,
@@ -175,6 +175,7 @@ beforeEach(async () => {
     logger,
   });
   app = express();
+  app.use(express.json());
   app.use(
     '/api/chats',
     createChatApiRoutes({
@@ -363,5 +364,31 @@ describe('GET /api/chats — chat list v2', () => {
     await bus.emit('sess-c-dummy', { kind: 'workspace.changed', data: { workspaceId: 'ws-dummy' } } as never);
     await changeStats.settled();
     expect(updated).toEqual(['c-dummy', 'c-dummy']);
+  });
+});
+
+describe('PATCH /api/chats/:id — live lists (P2-R2)', () => {
+  it('emits chat.updated for every list-visible field, and the attention title follows a rename', async () => {
+    await seed();
+    await attention.settled();
+    const patch = (id: string, body: Record<string, unknown>) =>
+      request(app).patch(`/api/chats/${id}`).send(body).expect((r) => expect(r.status, JSON.stringify(r.body)).toBe(200));
+
+    await patch('c-run', { name: 'Build the docs site' });
+    await patch('c-archived', { status: 'active' }); // unarchive
+    await patch('c-done', { tags: ['qa'] });
+    await patch('c-done', { description: 'Covers the parser' });
+    await patch('c-archived', { projectId: null }); // moved out of its project
+    expect(updated).toEqual(['c-run', 'c-archived', 'c-done', 'c-done', 'c-archived']);
+
+    // Not shown by any list: no event.
+    await patch('c-done', { harnessConfig: { streaming: true } });
+    expect(updated).toHaveLength(5);
+
+    // The list and the attention feed both show the new name.
+    expect((await list('q=docs site')).items.map((c) => c.id)).toEqual(['c-run']);
+    await attention.settled();
+    const running = attention.getSnapshot().running.find((i) => i.entityId === 'c-run');
+    expect(running?.title).toBe('Build the docs site');
   });
 });

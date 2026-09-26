@@ -204,4 +204,85 @@ describe('createAttentionStore', () => {
     expect(selectCounts(store.getState())).toBeNull();
     store.stop();
   });
+
+  it('P2-R12: a burst of deltas during a slow fetch neither stalls it nor is lost, and an older response never rolls the view back', async () => {
+    const mux = fakeMux();
+    const pending: Array<(s: AttentionSnapshot) => void> = [];
+    const api = { getAttention: vi.fn(() => new Promise<AttentionSnapshot>((r) => pending.push(r))) };
+    const store = createAttentionStore(api, mux.port);
+    store.start();
+    pending.shift()!(snapshot(10, [], [item('chat:a')]));
+    await vi.waitFor(() => expect(store.getState().snapshot?.seq).toBe(10));
+
+    // A refresh goes out; while it is in flight 50 deltas arrive and are
+    // applied live (the view never waits on the request).
+    void store.refresh();
+    await vi.waitFor(() => expect(api.getAttention).toHaveBeenCalledTimes(2));
+    for (let seq = 11; seq <= 60; seq++) mux.push(upsert(seq, item(`chat:n${seq}`)));
+    expect(store.getState().snapshot?.seq).toBe(60);
+    // Nothing cancelled or re-issued the request in flight.
+    expect(api.getAttention).toHaveBeenCalledTimes(2);
+
+    // The response was built at seq 12 — older than the view. The replay
+    // brings it forward instead of rolling back.
+    pending.shift()!(snapshot(12, [], [item('chat:a'), item('chat:n11'), item('chat:n12')]));
+    await vi.waitFor(() => expect(store.getState().fetching).toBe(false));
+    expect(store.getState().snapshot?.seq).toBe(60);
+    expect(selectRunning(store.getState())).toHaveLength(51);
+    expect(store.getState().needsResync).toBe(false);
+    expect(api.getAttention).toHaveBeenCalledTimes(2);
+    store.stop();
+  });
+
+  it('P2-R12: a gap during a fetch is settled by the replay; a resync during a fetch queues exactly one more', async () => {
+    const mux = fakeMux();
+    const pending: Array<(s: AttentionSnapshot) => void> = [];
+    const api = { getAttention: vi.fn(() => new Promise<AttentionSnapshot>((r) => pending.push(r))) };
+    const store = createAttentionStore(api, mux.port);
+    store.start();
+    // 5 and 7 arrive before the first snapshot; 6 was lost in transit but is
+    // inside the snapshot, so the replay has no hole.
+    mux.push(upsert(5, item('chat:five')));
+    mux.push(upsert(7, item('chat:seven')));
+    pending.shift()!(snapshot(6, [], [item('chat:five'), item('chat:six')]));
+    await vi.waitFor(() => expect(store.getState().snapshot?.seq).toBe(7));
+    expect(api.getAttention).toHaveBeenCalledTimes(1);
+
+    void store.refresh();
+    await vi.waitFor(() => expect(api.getAttention).toHaveBeenCalledTimes(2));
+    mux.disconnected('gap:replay_unavailable'); // the server lost our place mid-fetch
+    pending.shift()!(snapshot(7, [], [item('chat:five'), item('chat:six'), item('chat:seven')]));
+    await vi.waitFor(() => expect(api.getAttention).toHaveBeenCalledTimes(3));
+    pending.shift()!(snapshot(900, [], []));
+    await vi.waitFor(() => expect(store.getState().snapshot?.seq).toBe(900));
+    expect(store.getState().needsResync).toBe(false);
+    expect(api.getAttention).toHaveBeenCalledTimes(3);
+    store.stop();
+  });
+});
+
+describe('attentionReducer — fetch window (P2-R12)', () => {
+  it('holds deltas from the moment a fetch starts and replays only those past the response', () => {
+    let state = attentionReducer(initialAttentionState(), { type: 'snapshot', snapshot: snapshot(1) });
+    state = attentionReducer(state, { type: 'fetch' });
+    state = attentionReducer(state, { type: 'stream', event: upsert(2, item('chat:b')) });
+    state = attentionReducer(state, { type: 'stream', event: upsert(3, item('chat:c')) });
+    expect(state.snapshot!.seq).toBe(3);
+    expect(state.buffered).toHaveLength(2);
+    state = attentionReducer(state, { type: 'snapshot', snapshot: snapshot(2, [], [item('chat:b')]) });
+    expect(state.snapshot!.seq).toBe(3);
+    expect(selectRunning(state).map((i) => i.key)).toEqual(['chat:b', 'chat:c']);
+    expect(state).toMatchObject({ buffered: [], fetching: false, needsResync: false });
+  });
+
+  it('does not apply deltas to a stale snapshot, and a hole in the replay asks for another fetch', () => {
+    let state = attentionReducer(initialAttentionState(), { type: 'snapshot', snapshot: snapshot(1) });
+    state = attentionReducer(state, { type: 'resync' });
+    state = attentionReducer(state, { type: 'fetch' });
+    state = attentionReducer(state, { type: 'stream', event: upsert(9, item('chat:x')) });
+    expect(state.snapshot!.seq).toBe(1);
+    state = attentionReducer(state, { type: 'snapshot', snapshot: snapshot(5) });
+    expect(state.needsResync).toBe(true);
+    expect(state.snapshot!.seq).toBe(5);
+  });
 });

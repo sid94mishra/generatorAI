@@ -5,7 +5,7 @@
 
 import { describe, expect, it } from 'vitest';
 import type { AttentionItem, AttentionSnapshot, ChatListPage } from '@generatorai/shared';
-import { emptyAttentionCounts } from '@generatorai/shared';
+import { CHAT_BULK_MAX_IDS, emptyAttentionCounts, runChatBulk } from '@generatorai/shared';
 import {
   chatListInvalidatedBy,
   chatListKey,
@@ -175,5 +175,52 @@ describe('createApiClient().chats', () => {
       ['/api/chats/archive', 'POST', JSON.stringify({ ids: ['a'] })],
       ['/api/chats/delete', 'POST', JSON.stringify({ ids: ['a', 'b'] })],
     ]);
+  });
+
+  it('P2-R1: splits more than CHAT_BULK_MAX_IDS into capped requests and merges the per-id results', async () => {
+    const bodies: string[][] = [];
+    const fetchImpl = (async (_url: string, init?: RequestInit) => {
+      const { ids } = JSON.parse(String(init?.body)) as { ids: string[] };
+      bodies.push(ids);
+      const failed = ids.filter((id) => id === 'c-7' || id === 'c-420');
+      return new Response(
+        JSON.stringify({
+          succeeded: ids.filter((id) => !failed.includes(id)),
+          failed: failed.map((id) => ({ id, code: 'NOT_FOUND', message: 'gone' })),
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+    const api = createApiClient(fetchImpl);
+    const ids = Array.from({ length: 450 }, (_, i) => `c-${i}`);
+    const result = await api.chats.removeMany([...ids, 'c-3']); // a duplicate is sent once
+    expect(bodies.map((b) => b.length)).toEqual([CHAT_BULK_MAX_IDS, CHAT_BULK_MAX_IDS, 50]);
+    expect(result.succeeded).toHaveLength(448);
+    expect(result.failed.map((f) => f.id)).toEqual(['c-7', 'c-420']);
+  });
+});
+
+describe('runChatBulk (shared bulk contract)', () => {
+  it('throws the first error when nothing succeeded, else reports the rest as failed', async () => {
+    const boom = Object.assign(new Error('offline'), { code: 'NETWORK' });
+    await expect(runChatBulk(['a', 'b'], async () => Promise.reject(boom), 1)).rejects.toBe(boom);
+
+    let call = 0;
+    const result = await runChatBulk(
+      ['a', 'b', 'c'],
+      async (batch) => {
+        call += 1;
+        if (call === 2) throw boom;
+        return { succeeded: batch, failed: [] };
+      },
+      1,
+    );
+    expect(result).toEqual({
+      succeeded: ['a'],
+      failed: [
+        { id: 'b', code: 'NETWORK', message: 'offline' },
+        { id: 'c', code: 'NETWORK', message: 'offline' },
+      ],
+    });
   });
 });

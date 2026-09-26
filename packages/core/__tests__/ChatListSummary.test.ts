@@ -249,6 +249,28 @@ describe('ChatChangeStatsService', () => {
     expect(computeStats.mock.calls.filter(([ws]) => ws === 'ws-9')).toHaveLength(1);
   });
 
+  it('P2-R9: runs at most maxConcurrent summaries at once across workspaces, and every one still runs', async () => {
+    service.stop();
+    let inFlight = 0;
+    let peak = 0;
+    const done: string[] = [];
+    computeStats = vi.fn(async (ws: string) => {
+      inFlight += 1;
+      peak = Math.max(peak, inFlight);
+      await tick(5);
+      inFlight -= 1;
+      done.push(ws);
+      return { files: 1, additions: 1, deletions: 0 };
+    });
+    service = new ChatChangeStatsService({ eventBus: bus, chats, computeStats, debounceMs: 5, maxConcurrent: 3 });
+    service.start();
+    // A listed page of 40 never-computed rows on 40 workspaces.
+    service.ensure(Array.from({ length: 40 }, (_, i) => ({ workspaceId: `ws-${i}` })));
+    await service.settled();
+    expect(done).toHaveLength(40);
+    expect(peak).toBe(3);
+  });
+
   it('announces only a real change, and leaves the column unknown when the workspace is gone', async () => {
     await chat('c1', 'ws-1');
     service.ensure([{ workspaceId: 'ws-1' }]);
@@ -284,6 +306,11 @@ describe('ChatListService', () => {
     expect(decodeChatListCursor(cursor, 'name')).toEqual({ value: 'alpha', id: 'c1' });
     expect(() => decodeChatListCursor(cursor, 'activity')).toThrow(ValidationError);
     expect(() => decodeChatListCursor('not-a-cursor', 'name')).toThrow(ValidationError);
+    // The value's type must fit the sort it claims (P2-R20).
+    const forged = (s: string, v: unknown) => Buffer.from(JSON.stringify({ s, v, i: 'c1' })).toString('base64url');
+    expect(() => decodeChatListCursor(forged('activity', 'alpha'), 'activity')).toThrow(ValidationError);
+    expect(() => decodeChatListCursor(forged('name', 42), 'name')).toThrow(ValidationError);
+    expect(decodeChatListCursor(forged('created', 42), 'created')).toEqual({ value: 42, id: 'c1' });
   });
 
   it('builds row summaries: live agent over the frozen snapshot, preview, counts, next cursor', async () => {

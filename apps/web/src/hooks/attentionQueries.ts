@@ -1,46 +1,63 @@
 // ────────────────────────────────────────────────────────────────
 // Attention feed hooks (G-01) — Needs you + Running, live.
 //
-// The snapshot comes through React Query (`GET /api/attention`); the live
-// half is one `global` subscription on the shared multiplexed stream,
-// filtered to `attention.`, whose deltas are folded into the cached snapshot
-// with client-core's `applyAttentionEvent` — the same seq rules mobile's
-// `createAttentionStore` applies:
+// One implementation for every client (08-mobile-readiness): the web wraps
+// client-core's `createAttentionStore` — the same store mobile uses — in
+// `useSyncExternalStore`. The store owns the seq rules:
 //
 //   - a delta already covered by the snapshot is ignored;
 //   - a skipped `seq`, a stream resync, or a reconnect after an error
-//     invalidates the query, which refetches;
-//   - deltas that arrive before the first snapshot are held and replayed on
-//     top of it, so nothing that happened during the fetch is lost.
+//     refetches the snapshot — one request at a time, never cancelled, so a
+//     burst of deltas cannot keep a refetch from landing (P2-R12);
+//   - every delta that arrives while a request is in flight is held and
+//     replayed on top of the response, so an answer built before the latest
+//     delta never rolls the view back.
+//
+// Every hook instance for the same platform + project shares one store (one
+// `global` subscription, one request), reference-counted and stopped when the
+// last consumer unmounts.
 //
 // Consumers: the sidebar and rail (P3), ChatsList status (P3), Home, the
-// ProjectDetail banner and the palette (P5). No UI lives here. Until
-// `data` is defined the lists are UNKNOWN, not empty — render nothing
-// rather than "Nothing needs you" (D-36).
+// ProjectDetail banner and the palette (P5), the desktop badge/tray feed
+// (`useDesktopIntegration`). No UI lives here. Until `data` is defined the
+// lists are UNKNOWN, not empty — render nothing rather than "Nothing needs
+// you" (D-36).
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useRef } from 'react';
-import { useQuery, useQueryClient, type QueryClient } from '@tanstack/react-query';
+import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
 import {
-  ATTENTION_STREAM_FILTER,
-  applyAttentionEvent,
-  isAttentionStreamEvent,
+  createAttentionStore,
+  initialAttentionState,
+  type AttentionState,
+  type AttentionStore,
   type AttentionStreamEvent,
+  type AttentionStreamPort,
 } from '@generatorai/client-core';
-import type { AttentionCounts, AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
+import type { AttentionCounts, AttentionSnapshot, IPlatformClient } from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import { openMultiplexedStream } from '../platform/muxStream.js';
-
-export const attentionKeys = {
-  all: ['attention'] as const,
-  snapshot: (projectId?: string) => ['attention', projectId ?? 'all'] as const,
-};
 
 export interface UseAttentionOptions {
   /** Only this project's items; counts follow the filter. */
   projectId?: string;
   enabled?: boolean;
 }
+
+export interface AttentionResult {
+  /** Undefined until the first snapshot — never an invented empty feed. */
+  data: AttentionSnapshot | undefined;
+  /** The last snapshot request failed (the previous data, if any, is kept). */
+  error: string | null;
+  isLoading: boolean;
+  /** Fetch the snapshot again now. */
+  refetch: () => Promise<void>;
+}
+
+/**
+ * Safety net for a principal whose `global` subscription was refused: the
+ * stream keeps the snapshot current otherwise.
+ */
+const SAFETY_REFRESH_MS = 60_000;
 
 /** Parses one multiplexed frame body (`{"kind":…,"payload":…}`). */
 function parseFrame(raw: string): AttentionStreamEvent | null {
@@ -52,108 +69,110 @@ function parseFrame(raw: string): AttentionStreamEvent | null {
   }
 }
 
-/**
- * Applies one delta to the cached snapshot for `key`. Returns false when the
- * cache holds no snapshot yet (the caller buffers the delta).
- */
-function applyToCache(
-  queryClient: QueryClient,
-  key: readonly unknown[],
-  filter: AttentionFilter,
-  event: AttentionStreamEvent,
-): boolean {
-  const current = queryClient.getQueryData<AttentionSnapshot>(key);
-  if (!current) return false;
-  const result = applyAttentionEvent(current, event, filter);
-  if (result.gap) {
-    void queryClient.invalidateQueries({ queryKey: key, exact: true });
-  } else if (result.snapshot !== current) {
-    queryClient.setQueryData(key, result.snapshot);
-  }
-  return true;
-}
-
-/** Pre-snapshot deltas worth holding; anything older is either in the snapshot or shows up as a gap. */
-const MAX_BUFFERED = 500;
-
-/** The attention snapshot, kept live. `data.needsYou` / `data.running` / `data.counts`. */
-export function useAttention(options: UseAttentionOptions = {}) {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-  const { projectId } = options;
-  const enabled = options.enabled !== false;
-  const buffered = useRef<AttentionStreamEvent[]>([]);
-
-  const query = useQuery({
-    queryKey: attentionKeys.snapshot(projectId),
-    queryFn: () => platform.getAttention(projectId ? { projectId } : undefined),
-    enabled,
-    // The stream keeps it current; the interval is only a safety net for a
-    // principal whose `global` subscription was refused.
-    staleTime: 30_000,
-    refetchInterval: 60_000,
-  });
-
-  useEffect(() => {
-    if (!enabled) return;
-    const key = attentionKeys.snapshot(projectId);
-    const filter: AttentionFilter = projectId ? { projectId } : {};
-    const refetch = (): void => {
-      void queryClient.invalidateQueries({ queryKey: key, exact: true });
-    };
-    let lostConnection = false;
-    buffered.current = [];
-
+/** The web's shared multiplexed stream, in the shape `createAttentionStore` subscribes to. */
+const muxPort: AttentionStreamPort = {
+  subscribe(scope, id, handler, options) {
     const handle = openMultiplexedStream(
-      'global',
-      'all',
+      scope,
+      id,
       {
         onMessage: (message) => {
           const event = parseFrame(message.data);
-          if (!event || !isAttentionStreamEvent(event)) return;
-          if (!applyToCache(queryClient, key, filter, event)) {
-            buffered.current = [...buffered.current, event].slice(-MAX_BUFFERED);
-          }
+          if (event) handler(event);
         },
+        onOpen: () => options?.onConnected?.(),
+        onError: () => options?.onDisconnected?.('error'),
         // The server could not replay this scope from our cursor.
-        onResync: refetch,
-        onError: () => {
-          lostConnection = true;
-        },
-        onOpen: () => {
-          // A restarted server re-numbers `seq`; one refetch settles it.
-          if (lostConnection) {
-            lostConnection = false;
-            refetch();
-          }
-        },
+        onResync: (reason) => options?.onDisconnected?.(`gap:${reason}`),
       },
-      [...ATTENTION_STREAM_FILTER],
+      options?.filter,
     );
-    return () => {
-      handle.close();
-      buffered.current = [];
+    return () => handle.close();
+  },
+};
+
+interface Entry {
+  store: AttentionStore;
+  refs: number;
+  timer: ReturnType<typeof setInterval> | null;
+}
+
+const registry = new WeakMap<IPlatformClient, Map<string, Entry>>();
+
+function acquire(platform: IPlatformClient, projectId: string | undefined): Entry {
+  let byKey = registry.get(platform);
+  if (!byKey) {
+    byKey = new Map();
+    registry.set(platform, byKey);
+  }
+  const key = projectId ?? '';
+  let entry = byKey.get(key);
+  if (!entry) {
+    entry = {
+      store: createAttentionStore(platform, muxPort, projectId ? { projectId } : {}),
+      refs: 0,
+      timer: null,
     };
-  }, [enabled, projectId, queryClient]);
+    byKey.set(key, entry);
+  }
+  entry.refs += 1;
+  if (entry.refs === 1) {
+    entry.store.start();
+    const store = entry.store;
+    entry.timer = setInterval(() => void store.refresh(), SAFETY_REFRESH_MS);
+  }
+  return entry;
+}
 
-  // Replay deltas that arrived while the first snapshot was in flight.
-  const data = query.data;
+function release(platform: IPlatformClient, projectId: string | undefined, entry: Entry): void {
+  entry.refs -= 1;
+  if (entry.refs > 0) return;
+  if (entry.timer) clearInterval(entry.timer);
+  entry.timer = null;
+  entry.store.stop();
+  registry.get(platform)?.delete(projectId ?? '');
+}
+
+const IDLE: AttentionState = initialAttentionState();
+const noopSubscribe = (): (() => void) => () => {};
+
+/** The attention snapshot, kept live. `data.needsYou` / `data.running` / `data.counts`. */
+export function useAttention(options: UseAttentionOptions = {}): AttentionResult {
+  const platform = usePlatform();
+  const { projectId } = options;
+  const enabled = options.enabled !== false;
+  const [entry, setEntry] = useState<Entry | null>(null);
+
   useEffect(() => {
-    if (!data || buffered.current.length === 0) return;
-    const key = attentionKeys.snapshot(projectId);
-    const filter: AttentionFilter = projectId ? { projectId } : {};
-    const pending = buffered.current;
-    buffered.current = [];
-    for (const event of pending) applyToCache(queryClient, key, filter, event);
-  }, [data, projectId, queryClient]);
+    if (!enabled) {
+      setEntry(null);
+      return undefined;
+    }
+    const acquired = acquire(platform, projectId);
+    setEntry(acquired);
+    return () => release(platform, projectId, acquired);
+  }, [platform, projectId, enabled]);
 
-  return query;
+  const store = entry?.store;
+  const state = useSyncExternalStore(
+    store ? store.subscribe : noopSubscribe,
+    store ? store.getState : () => IDLE,
+  );
+  const refetch = useCallback(() => (store ? store.refresh() : Promise.resolve()), [store]);
+
+  const data = state.snapshot ?? undefined;
+  return {
+    data,
+    error: state.error,
+    isLoading: enabled && !data && !state.error,
+    refetch,
+  };
 }
 
 /**
  * Needs you / Running totals for badges (rail dot, running counter). Undefined
  * until loaded — never a made-up zero.
  */
-export function useAttentionCounts(): AttentionCounts | undefined {
-  return useAttention().data?.counts;
+export function useAttentionCounts(options: UseAttentionOptions = {}): AttentionCounts | undefined {
+  return useAttention(options).data?.counts;
 }

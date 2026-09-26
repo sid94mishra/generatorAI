@@ -412,8 +412,10 @@ function sortKey(sort: ChatListSort): SQL<number | string> {
       return sql<string>`lower(${chats.name})`;
     case 'activity':
     default:
-      // `created_at` is epoch seconds, the activity column epoch ms.
-      return sql<number>`COALESCE(${chats.lastActivityAt}, ${chats.createdAt} * 1000)`;
+      // The bare column, so `idx_chats_last_activity` serves the sort (P2-R20).
+      // It is never NULL: `create` stamps it and migration v55 backfilled
+      // every older row.
+      return sql<number>`${chats.lastActivityAt}`;
   }
 }
 

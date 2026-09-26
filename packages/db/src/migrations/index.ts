@@ -2517,13 +2517,18 @@ export const MIGRATIONS: readonly Migration[] = [
            chats.created_at
          ) * 1000
          WHERE last_activity_at IS NULL;`,
-        `WITH last_reply AS (
-           SELECT session_id, ts, metadata FROM (
-             SELECT m.session_id, m.timestamp AS ts, m.metadata,
-                    ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.timestamp DESC, m.rowid DESC) AS rn
-             FROM chat_messages m
-             WHERE m.role = 'assistant'
-           ) WHERE rn = 1
+        `WITH ranked AS (
+           -- Only the rowid goes through the window: carrying every assistant
+           -- message's metadata through the sort cost memory for nothing.
+           SELECT m.rowid AS rid,
+                  ROW_NUMBER() OVER (PARTITION BY m.session_id ORDER BY m.timestamp DESC, m.rowid DESC) AS rn
+           FROM chat_messages m
+           WHERE m.role = 'assistant'
+         ),
+         last_reply AS (
+           SELECT m.session_id, m.timestamp AS ts, m.metadata
+           FROM ranked r JOIN chat_messages m ON m.rowid = r.rid
+           WHERE r.rn = 1
          ),
          outcome AS (
            SELECT session_id, ts,
