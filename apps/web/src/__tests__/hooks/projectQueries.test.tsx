@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { IPlatformClient, Project } from '@generatorai/shared';
 
 import { PlatformContext } from '@/providers/PlatformProvider.js';
-import { useProject, useProjects } from '@/hooks/projectQueries.js';
+import { useProject, useProjectRuns, useProjects } from '@/hooks/projectQueries.js';
 
 const PROJECT: Project = {
   id: 'proj-1',
@@ -35,6 +35,7 @@ function setup() {
   const platform = {
     listProjects: vi.fn().mockResolvedValue([PROJECT]),
     getProject: vi.fn().mockResolvedValue(PROJECT),
+    listProjectRuns: vi.fn().mockResolvedValue({ items: [], nextCursor: null, total: 0 }),
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -68,5 +69,20 @@ describe('useProject', () => {
     const { result } = renderHook(() => useProject('proj-1', { includeSummary: true }), { wrapper });
     await waitFor(() => expect(result.current.data).toBeDefined());
     expect(platform.getProject).toHaveBeenCalledWith('proj-1', { includeSummary: true });
+  });
+});
+
+describe('useProjectRuns (G-15)', () => {
+  it('is disabled without a projectId', () => {
+    const { platform, wrapper } = setup();
+    renderHook(() => useProjectRuns(undefined), { wrapper });
+    expect(platform.listProjectRuns).not.toHaveBeenCalled();
+  });
+
+  it('fetches the project runs page and forwards the filter', async () => {
+    const { platform, wrapper } = setup();
+    const { result } = renderHook(() => useProjectRuns('proj-1', { status: 'failed', limit: 20 }), { wrapper });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(platform.listProjectRuns).toHaveBeenCalledWith('proj-1', { status: 'failed', limit: 20 });
   });
 });

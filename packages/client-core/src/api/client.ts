@@ -24,6 +24,7 @@ import {
   type StageRunStatus,
   type SystemInfo,
   type ProjectSummary as ProjectSummaryDetail,
+  type ProjectRunListPage,
 } from '@generatorai/shared';
 
 export interface ApiFetch {
@@ -1574,6 +1575,22 @@ export function createApiClient(fetchImpl: ApiFetch) {
 
       codebases: (id: string) =>
         request<CodebaseSummary[]>(fetchImpl, `/api/projects/${id}/codebases`),
+
+      /**
+       * G-15 — ProjectDetail Runs tab. `WorkflowRun` carries no `projectId`
+       * of its own, so this is `/projects/:id/runs`, not `/workflow-runs?
+       * projectId=` (that route is Workflow-Overhaul-owned engine code).
+       * Newest first; paged the same way `chats.list` is (`nextCursor` back
+       * as `cursor`).
+       */
+      runs: (id: string, params?: { status?: string | string[]; cursor?: string; limit?: number }) => {
+        const q = new URLSearchParams();
+        if (params?.status) q.set('status', Array.isArray(params.status) ? params.status.join(',') : params.status);
+        if (params?.cursor) q.set('cursor', params.cursor);
+        if (params?.limit !== undefined) q.set('limit', String(params.limit));
+        const suffix = q.toString() ? `?${q}` : '';
+        return request<ProjectRunListPage>(fetchImpl, `/api/projects/${id}/runs${suffix}`);
+      },
     },
 
     /**

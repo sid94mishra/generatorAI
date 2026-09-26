@@ -2322,6 +2322,43 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
     },
 
+    // ── Project-scoped workflow runs (G-15) — ProjectDetail Runs tab ──
+
+    '/api/projects/{id}/runs': {
+      get: {
+        tags: ['Projects'],
+        summary: 'Paged workflow runs for a project, newest first (G-15)',
+        description:
+          '`WorkflowRun` carries no `projectId` of its own, so this joins through the definition server-side. ' +
+          'Tolerates a project with zero definitions / zero runs (empty page, `total: 0`).',
+        parameters: [
+          idParam,
+          { in: 'query', name: 'status', required: false, schema: { type: 'string' }, description: 'Comma-separated, any-of.' },
+          { in: 'query', name: 'cursor', required: false, schema: { type: 'string' } },
+          { in: 'query', name: 'limit', required: false, schema: { type: 'integer', default: 50, maximum: 200 } },
+        ],
+        responses: {
+          '200': {
+            description: 'One page of runs',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { type: 'object' } },
+                    nextCursor: { type: 'string', nullable: true },
+                    total: { type: 'integer' },
+                  },
+                  required: ['items', 'nextCursor', 'total'],
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid status value or unknown cursor', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
     // ── Source control: pull requests under a project (doc §6) ──
 
     '/api/projects/{id}/pull-requests': {

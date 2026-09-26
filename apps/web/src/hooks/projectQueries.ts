@@ -28,6 +28,8 @@ export const projectKeys = {
   branches: (projectId: string, codebaseId: string) => ['codebase-branches', projectId, codebaseId] as const,
   configs: (projectId: string) => ['project-configs', projectId] as const,
   worktrees: (projectId: string) => ['project-worktrees', projectId] as const,
+  runs: (projectId: string, query?: { status?: string | string[]; cursor?: string; limit?: number }) =>
+    ['project-runs', projectId, query] as const,
   systemArtifacts: (type?: string) => ['system-artifacts', type] as const,
   availableArtifacts: (projectId: string, type?: string) => ['available-artifacts', projectId, type] as const,
   codebaseWorktrees: (projectId: string, codebaseId: string) => ['codebase-worktrees', projectId, codebaseId] as const,
@@ -282,6 +284,28 @@ export function useCleanupWorktrees() {
       // Also invalidate codebase-level worktree queries so CodebaseDetailPage refreshes
       queryClient.invalidateQueries({ queryKey: ['codebase-worktrees'] });
     },
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// Workflow Runs (G-15) — ProjectDetail Runs tab
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * One page of a project's workflow runs, newest first. `WorkflowRun` has no
+ * `projectId` of its own, so this reads `GET /projects/:id/runs` (joined
+ * through the definition server-side) rather than `/workflow-runs?
+ * projectId=`. Pass `nextCursor` back as `cursor` for the next page.
+ */
+export function useProjectRuns(
+  projectId: string | undefined,
+  query?: { status?: string | string[]; cursor?: string; limit?: number },
+) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: projectKeys.runs(projectId ?? '', query),
+    queryFn: () => platform.listProjectRuns(projectId!, query),
+    enabled: !!projectId,
   });
 }
 

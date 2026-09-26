@@ -24,6 +24,7 @@ import type {
 import type { Artifact } from '@generatorai/shared';
 import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
 import type { SystemInfo } from '@generatorai/shared';
+import type { ProjectRunListPage } from '@generatorai/shared';
 import {
   chatListSearchParams,
   runChatBulk,
@@ -2388,6 +2389,22 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async cleanupWorktrees(projectId: string): Promise<{ cleaned: number }> {
     return apiFetch<{ cleaned: number }>(`${this.baseUrl}/api/projects/${projectId}/worktrees/cleanup`, { method: 'POST' });
+  }
+
+  // ── Project workflow runs (G-15): ProjectDetail Runs tab ──
+  async listProjectRuns(
+    projectId: string,
+    filter?: { status?: string | string[]; cursor?: string; limit?: number },
+  ): Promise<ProjectRunListPage> {
+    const params = new URLSearchParams();
+    if (filter?.status) {
+      const status = Array.isArray(filter.status) ? filter.status.join(',') : filter.status;
+      params.set('status', status);
+    }
+    if (filter?.cursor) params.set('cursor', filter.cursor);
+    if (filter?.limit !== undefined) params.set('limit', String(filter.limit));
+    const qs = params.toString();
+    return apiFetch<ProjectRunListPage>(`${this.baseUrl}/api/projects/${projectId}/runs${qs ? `?${qs}` : ''}`);
   }
 
   // ── System info (G-12): Home "System" card + Settings › Diagnostics ──

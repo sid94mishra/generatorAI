@@ -566,3 +566,6 @@ export { MODEL_TIERS } from './HarnessCatalog.js';
 
 // ── System info (G-12) ──
 export type { SystemInfo } from './SystemInfo.js';
+
+// ── Project-scoped workflow runs (G-15) ──
+export type { ProjectRunListItem, ProjectRunListQuery, ProjectRunListPage } from './ProjectRuns.js';

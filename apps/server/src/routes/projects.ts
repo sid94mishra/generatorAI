@@ -18,7 +18,15 @@ import type {
   ISourceControlProvider,
   PullRequestRef,
 } from '@generatorai/core';
-import type { ProjectCodebase, ProjectPullRequest, ProjectSummary, ScmPullRequestState, WorkflowRun } from '@generatorai/shared';
+import type {
+  ProjectCodebase,
+  ProjectPullRequest,
+  ProjectRunListItem,
+  ProjectRunListPage,
+  ProjectSummary,
+  ScmPullRequestState,
+  WorkflowRun,
+} from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 
 const upload = multer({
@@ -640,6 +648,83 @@ export function createProjectRoutes(container: Container): Router {
       }
       const content = await codebaseService.getCodebaseFileContent(codebaseId, filePath);
       res.json({ content });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ════════════════════════════════════════════════════════════════
+  // Workflow runs (G-15) — ProjectDetail Runs tab
+  // ════════════════════════════════════════════════════════════════
+
+  const RUN_STATUSES = new Set([
+    'created', 'starting', 'running', 'paused', 'cancelling', 'completed', 'failed', 'cancelled',
+  ]);
+
+  // GET /projects/:id/runs — paged workflow runs for a project, newest first.
+  //
+  // `WorkflowRun` carries no `projectId` of its own — the project belongs to
+  // the definition — so this joins through `workflowDefinitionService.
+  // listDefinitions(projectId)` and reads each definition's runs with
+  // `workflowRunRepo.getByDefinitionId`, both existing read-only calls.
+  // `workflowRunRepo` is Workflow-Overhaul-owned engine code: no new method
+  // was added to it, and `apps/server/src/routes/workflowRuns.ts` (which
+  // mounts the unrelated `GET /workflow-runs`) is untouched. Tolerates zero
+  // definitions / zero runs cleanly (empty page, `total: 0`) for the Workflow
+  // Overhaul's run-history migration.
+  router.get('/:id/runs', async (req, res, next) => {
+    try {
+      const projectId = String(req.params['id']);
+
+      const statusParam = req.query['status'] as string | undefined;
+      let statusFilter: Set<string> | undefined;
+      if (statusParam) {
+        const statuses = statusParam.split(',').map((s) => s.trim());
+        const invalid = statuses.filter((s) => !RUN_STATUSES.has(s));
+        if (invalid.length > 0) {
+          res.status(400).json({
+            error: { code: 'VALIDATION_ERROR', message: `Invalid status values: ${invalid.join(', ')}` },
+          });
+          return;
+        }
+        statusFilter = new Set(statuses);
+      }
+
+      const limitParam = Number(req.query['limit']);
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.floor(limitParam), 200) : 50;
+      const cursor = req.query['cursor'] as string | undefined;
+
+      const definitions = await workflowDefinitionService.listDefinitions(projectId);
+      const definitionNameById = new Map(definitions.map((d) => [d.id, d.name]));
+      const runsByDefinition = await Promise.all(
+        definitions.map((d) => workflowRunRepo.getByDefinitionId(d.id)),
+      );
+      let runs: WorkflowRun[] = runsByDefinition.flat();
+      if (statusFilter) runs = runs.filter((r) => statusFilter.has(r.status));
+
+      const sortKey = (r: WorkflowRun): number => (r.startedAt ?? r.createdAt).getTime();
+      runs.sort((a, b) => sortKey(b) - sortKey(a) || (a.id < b.id ? 1 : -1));
+
+      const total = runs.length;
+      let startIndex = 0;
+      if (cursor) {
+        const idx = runs.findIndex((r) => r.id === cursor);
+        if (idx === -1) {
+          res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'Unknown cursor' } });
+          return;
+        }
+        startIndex = idx + 1;
+      }
+
+      const page = runs.slice(startIndex, startIndex + limit);
+      const nextCursor = startIndex + limit < total ? page[page.length - 1]?.id ?? null : null;
+      const items: ProjectRunListItem[] = page.map((r) => ({
+        ...r,
+        definitionName: definitionNameById.get(r.workflowDefinitionId) ?? 'Unknown workflow',
+      }));
+
+      const responseBody: ProjectRunListPage = { items, nextCursor, total };
+      res.json(responseBody);
     } catch (err) {
       next(err);
     }

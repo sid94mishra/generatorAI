@@ -41,7 +41,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-12 | System info (version, database size, disk, agent capacity) — **built (P2-05)** | P5 | P2 | S |
 | G-13 | Project summaries (Projects columns, tab counts) — **built (P2-05)** | P5 | P2 | S–M |
 | G-14 | ProjectDetail Chats tab (project filter on the client) — **built (P2-02)** | P5 | P2 (via G-02) | S |
-| G-15 | ProjectDetail Runs tab (`projectId` filter on runs) | P5 | P2 | S |
+| G-15 | ProjectDetail Runs tab (`projectId` filter on runs) — **built (P2-05)** | P5 | P2 | S |
 | G-16 | Codebase fetch/clone logs and live status | P5 | P2 | M |
 | G-17 | Worktree size, linked entity, reclaimable space | P5 | P2 | M |
 | G-18 | Palette entity search (+ recents) | P5 | P2 | M |
@@ -445,11 +445,15 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 
 ### G-15 — ProjectDetail Runs tab
 
+**Status: built in P2-05.**
+
 **Exists today.** `GET /workflow-runs?status|definitionId` (`workflowRuns.ts:49`). `WorkflowRun` has no `projectId` (`packages/shared/src/types/WorkflowRun.ts:84`): the project belongs to the definition (`GET /workflow-definitions?projectId`, `workflowDefinitions.ts:51`).
 
 **Needed.** `GET /workflow-runs?projectId=&status=&cursor=&limit=`, joined through the definition, returning `{ items, nextCursor, total }` (the same shape as G-02). The platform client's `listRuns` gains the filter.
 
 **Owner / phase / effort.** P2 · P5 · **S**. Coordinate with PW P01 as for G-10.
+
+**As built — deviated from the exact path.** `apps/server/src/routes/workflowRuns.ts` (which mounts `GET /workflow-runs`) is Workflow-Overhaul-owned engine code (07-phases.md §"Running in parallel", `wip/P2-05` HANDOFF note); it is never edited by this track, even to add a query parameter. Served instead as **`GET /projects/:id/runs?status=&cursor=&limit=`** on the redesign-owned `apps/server/src/routes/projects.ts`, joined through `workflowDefinitionService.listDefinitions(projectId)` + `workflowRunRepo.getByDefinitionId(id)` (both existing read-only calls; nothing added to either) and paged/sorted (newest by `startedAt ?? createdAt`) in the route handler. Same response shape as planned: `{ items, nextCursor, total }`, `items` = `WorkflowRun & { definitionName }` (`ProjectRunListItem`/`ProjectRunListPage` in `packages/shared/src/types/ProjectRuns.ts`). Cursor is a run id; an unknown cursor is `400`, an invalid status value is `400`. Tolerates a project with zero definitions / zero runs (`items: []`, `total: 0`) for the Workflow Overhaul's run-history migration. Client: `HttpPlatformClient.listProjectRuns(projectId, filter)`, client-core's `projects.runs(id, filter)`, web hook `useProjectRuns(projectId, query)`. OpenAPI documents `/api/projects/{id}/runs` (a genuinely new path, unlike G-13's additive query param). Tests: `apps/server/src/__tests__/projectRunsRoute.test.ts` (paging, status filter, invalid status/cursor, empty run history), `wireContract.test.ts`, `apps/web/src/__tests__/hooks/projectQueries.test.tsx`.
 
 ### G-16 — Codebase fetch/clone logs and live status
 

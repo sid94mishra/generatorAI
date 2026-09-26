@@ -86,6 +86,29 @@ describe('project summary wire contract (G-13)', () => {
   });
 });
 
+describe('project runs wire contract (G-15)', () => {
+  it('reads GET /api/projects/:id/runs, not /workflow-runs?projectId= (that route is off-limits)', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.runs('proj-1');
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.path).toBe('/api/projects/proj-1/runs');
+  });
+
+  it('sends status (joined), cursor and limit as query params', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.runs('proj-1', {
+      status: ['running', 'failed'],
+      cursor: 'run-9',
+      limit: 20,
+    });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.pathname).toBe('/api/projects/proj-1/runs');
+    expect(url.searchParams.get('status')).toBe('running,failed');
+    expect(url.searchParams.get('cursor')).toBe('run-9');
+    expect(url.searchParams.get('limit')).toBe('20');
+  });
+});
+
 describe('chat update wire contract', () => {
   it('sends agentRef, matching the field the PATCH /chats/:id route reads to bind an agent', async () => {
     const { calls, fetchImpl } = capture();
