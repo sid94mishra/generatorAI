@@ -404,6 +404,13 @@ Decided while building P1-T1…T6 where `02` was silent:
 - **G-18:** `GET /search?q=&types=&limit=` across chats, projects, agents, workflows, automations, scripts — scope-filtered per type before querying, ranked by title match + recency.
 - The backend track P2-00…P2-06 is complete; G-21…G-29 belong to the Workflow Overhaul (PW).
 
+### D-65 Dock as built (P4-06) — Final
+- One stable surface element: ≥1200 px it tracks an empty SplitPane spacer; <1200 px it becomes the 380 px non-modal sheet (`role=dialog`, `data-gai-overlay=sheet`, no backdrop, no `aria-modal`); full width below 768 px or a host under 760 px. Maximize covers the main card; close = `visibility:hidden` + `inert`, never unmount. `NarrowDockSheet` uses the Sheet variant styles, not a portalled Dialog, so the tree never moves.
+- `blocks/dock` registry: pages pass `DockRegistry` (type → `DockTabDef { Component | render, label, icon, pinned, allowMultiple, maxInstances, … }`); panels take `DockPanelProps {id,type,index,active}`, read data from context/stores and gate live work on `active`; a panel mounts on first selection and stays mounted until its tab closes.
+- Tab types, pinned set, `DOCK_TAB_CAPS` (browser 5, terminal 4, file 8, widget 6), the `?dock=` parser and storage keys live in `packages/shared/src/ui-contract/pane.ts`; keys `generatorai:dock:<scope>:open|layout|<id>`; `background_tasks` → `tasks`. Collapsed layouts are never saved.
+- Browser-host overlays receive an `AnnotationPalette` derived from tokens (in design-tokens to avoid a package cycle); main validates every value before `executeJavaScript`.
+- The legacy run page keeps `RightPane` until PW; its panel-import swap moves to P4-12.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
