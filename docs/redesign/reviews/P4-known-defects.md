@@ -4,9 +4,9 @@ Recorded as `it.fails` in `apps/web/src/__tests__/characterization/` on `desktop
 
 | # | Defect | Where (legacy file) | Fix in |
 |---|---|---|---|
-| 1 | Enter during IME composition sends | `ChatInput.tsx:1299-1311` | P4-02/P4-08 |
-| 2 | Bare "scratch that" dropped with a streaming STT engine | `ChatInput.tsx:985-993, 1046-1072` | P4-02 |
-| 3 | …and inserted as text with a non-streaming engine | `ChatInput.tsx:1149-1153` | P4-02 |
+| 1 | Enter during IME composition sends | `ChatInput.tsx:1299-1311` | **Fixed in P4-02** (`useComposerKeymap`) |
+| 2 | Bare "scratch that" dropped with a streaming STT engine | `ChatInput.tsx:985-993, 1046-1072` | **Fixed in P4-02** (`useDictation`) |
+| 3 | …and inserted as text with a non-streaming engine | `ChatInput.tsx:1149-1153` | **Fixed in P4-02** (`useDictation`) |
 | 4 | Inspect picks never attach: panel reads `payload.data`, stream delivers `{kind,payload}` | `BrowserPanel.tsx:472-487` | P4-03 |
 | 5 | `HTTP://x` → `https://HTTP://x` (case-sensitive scheme check) | `BrowserPanel.tsx:652` | P4-03 |
 | 6 | Restricted-mode URL pill shows internal `#gai-` URL | `BrowserPanel.tsx:1605` | P4-03/P4-10 |

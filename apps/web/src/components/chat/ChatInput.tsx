@@ -1,63 +1,45 @@
 // ────────────────────────────────────────────────────────────────
 // ChatInput — Modern Copilot-style input with unified toolbar,
 // model selection, codebase picker, and file attachment support
+//
+// The view. Its logic lives in the composer hooks
+// (`./composer/hooks/`, 03-component-inventory-domain.md §6.1) and the
+// shared composer machine in client-core (M-12); this file is JSX plus local
+// UI state (focus, which per-turn menu is open).
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { useSendPrompt, useHarnessConfig } from '@/hooks/queries.js';
-import { useModels, useHarnessProviders } from '@/hooks/harnessQueries.js';
-import { useStreamStore } from '@/stores/streamStore.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
-import { useSlashCommands, useWorkspaceFileIndex } from '@/hooks/composerQueries.js';
-import { usePlatform } from '@/providers/PlatformProvider.js';
-import { fuzzyMatch } from './composer/builtins.js';
-import { CaretInsertionSequencer, stitchDictation, splitScratchCommand, continueCase } from '@generatorai/shared';
 import { ComposerMenu, type ComposerMenuItem } from './composer/ComposerMenu.js';
-import type {
-  SlashCommand,
-  MentionFile,
-  ComposerAttachment,
-  ComposerMenuState,
-  CaptureSource,
-} from './composer/types.js';
-import type { HarnessCatalogModel } from '@generatorai/shared';
+import type { SlashCommand, CaptureSource } from './composer/types.js';
 import type { AgentMode, WorkspacePrepStatus } from '@generatorai/shared';
-import { WorkspacePrepBar, isPreparing } from './sources/WorkspacePrepBar.js';
+import { WorkspacePrepBar } from './sources/WorkspacePrepBar.js';
 import { AGENT_MODES, AGENT_MODE_REGISTRY, DEFAULT_AGENT_MODE } from '@generatorai/shared';
 import {
   Paperclip, X, Plus,
   FolderOpen, FolderGit2, GitBranch, ChevronDown, ChevronUp,
-  Square, ArrowUp, Gauge, Search, Check, Info, Image as ImageIcon,
-  Eye, Globe, Cpu, SlidersHorizontal, Lock,
+  Square, ArrowUp, Check, Image as ImageIcon,
+  Globe, SlidersHorizontal,
   Sparkles, ScrollText, Wrench, FileText, TerminalSquare, AtSign,
   ClipboardList, Zap, Bot,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { ModelPicker, ProviderIcon, formatTokens, DetailRow } from '@/components/shared/ModelPicker.js';
+import { ModelPicker, formatTokens } from '@/components/shared/ModelPicker.js';
 import { ContextUsageGauge } from '@/components/shared/ContextUsageGauge.js';
 import { Button, Input, Textarea, Spinner } from '@/components/ui/index.js';
-import { resolveModelLimit } from '@generatorai/client-core';
 import { VoiceRecorder } from './VoiceRecorder.js';
-import { useSpeechToText } from '@/hooks/useSpeechToText.js';
-import { useAudioInputDevices } from '@/hooks/useAudioInputDevices.js';
-import { resolveMicDeviceId, useMicPrefsStore } from '@/stores/micPrefsStore.js';
-import { composerAffordances } from '@/platform/surfaceCapabilities.js';
-import { toast } from '@/components/Toast.js';
 import { ImageHoverPreview, useObjectUrl, isPreviewableImage } from '@/components/shared/ImageHoverPreview.js';
-import {
-  caretLine,
-  materializeAttachment,
-  mergePromptHistory,
-  stepHistory,
-  type PromptHistoryEntry,
-} from './composer/promptHistory.js';
+import type { PromptHistoryEntry } from './composer/promptHistory.js';
+import { COMPOSER } from './composer/hooks/affordances.js';
+import { useComposerDraft } from './composer/hooks/useComposerDraft.js';
+import { useComposerHistory } from './composer/hooks/useComposerHistory.js';
+import { useComposerMenus } from './composer/hooks/useComposerMenus.js';
+import { useComposerModelControls } from './composer/hooks/useComposerModelControls.js';
+import { useComposerSend } from './composer/hooks/useComposerSend.js';
+import { useDictation } from './composer/hooks/useDictation.js';
+import { useComposerKeymap } from './composer/hooks/useComposerKeymap.js';
+import { useToolbarCollapse } from './composer/hooks/useToolbarCollapse.js';
 
-/**
- * W29 — what the composer offers on THIS surface, read from the capability
- * ledger. Module-level because the surface cannot change without a reload,
- * and a per-render read would be pure overhead on the composer's hot path.
- */
-const COMPOSER = composerAffordances();
 
 interface GitRepoInput {
   url: string;
@@ -228,8 +210,6 @@ export function ChatInput({
   promptHistory,
   restoredDraft,
 }: ChatInputProps) {
-  const [text, setText] = useState('');
-  const [attachments, setAttachments] = useState<ComposerAttachment[]>([]);
   const [isFocused, setIsFocused] = useState(false);
   const [showCodebasePanel, setShowCodebasePanel] = useState(false);
   const [showReasoningDropdown, setShowReasoningDropdown] = useState(false);
@@ -237,14 +217,6 @@ export function ChatInput({
   // PLN-01 — agent-mode picker.
   const [showModeDropdown, setShowModeDropdown] = useState(false);
   const activeAgentMode: AgentMode = agentMode ?? DEFAULT_AGENT_MODE;
-  // ── Composer menu (`/` commands + `@` file mentions) ──
-  const [activeCommand, setActiveCommand] = useState<SlashCommand | null>(null);
-  const [menu, setMenu] = useState<ComposerMenuState | null>(null);
-  const [menuIndex, setMenuIndex] = useState(0);
-  const [mentionLoading, setMentionLoading] = useState(false);
-  // Responsive: when the toolbar is too narrow, reasoning + context collapse
-  // into the "⋯" overflow menu; when there's room they show inline.
-  const [collapseControls, setCollapseControls] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const reasoningDropdownRef = useRef<HTMLDivElement>(null);
@@ -252,164 +224,71 @@ export function ChatInput({
   const modeDropdownRef = useRef<HTMLDivElement>(null);
   const codebasePanelRef = useRef<HTMLDivElement>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
-  const sendMutation = useSendPrompt(sessionId);
-  const startPending = useStreamStore((state) => state.startPending);
-  const clearStream = useStreamStore((state) => state.clearStream);
-  const usage = useStreamStore((state) => state.streams[sessionId]?.usage ?? null);
-  const contextUsage = useStreamStore((state) => state.streams[sessionId]?.contextUsage ?? null);
-  const { data: models, isPending: modelsPending } = useModels();
-  const { data: harnessConfig } = useHarnessConfig();
-  const activeProvider = harnessConfig?.harness?.type ?? 'copilot';
-  const sendingRef = useRef(false);
 
-  // ── Prompt history (↑ / ↓) ──
-  // `historyIdx` is null while the user's own draft is showing. The draft is
-  // parked in `draftRef` when they start browsing so ↓ past the newest entry
-  // brings it back untouched.
-  const [historyIdx, setHistoryIdx] = useState<number | null>(null);
-  const draftRef = useRef<{ text: string; attachments: ComposerAttachment[] } | null>(null);
-  const localHistoryRef = useRef<PromptHistoryEntry[]>([]);
-  const recallTokenRef = useRef(0);
-  const history = useMemo(
-    () => mergePromptHistory(promptHistory ?? [], localHistoryRef.current),
-    // localHistoryRef is mutated on send; `text` clearing after a send is the
-    // re-render that picks the new entry up.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [promptHistory, text],
-  );
-
-  // ── Restored draft (after a rewind) ──
-  // The prompt the rewind gave back lands in the box, selected at the end so
-  // the user can edit or delete it immediately. Keyed on the offer token, not
-  // the text, so a re-render never clobbers what they have typed since.
-  const restoredAtRef = useRef<number | null>(null);
-  useEffect(() => {
-    if (!restoredDraft) return;
-    if (restoredAtRef.current === restoredDraft.at) return;
-    restoredAtRef.current = restoredDraft.at;
-    setHistoryIdx(null);
-    draftRef.current = null;
-    setText(restoredDraft.text);
-    const el = textareaRef.current;
-    requestAnimationFrame(() => {
-      if (!el) return;
-      el.focus();
-      el.selectionStart = el.selectionEnd = restoredDraft.text.length;
-    });
-  }, [restoredDraft]);
-
-  // ── Composer data (slash commands + `@` file index) ──
-  const platform = usePlatform();
-  const slashCommands = useSlashCommands(projectId);
-  const { files: mentionFiles, isLoading: fileIndexLoading } = useWorkspaceFileIndex(workspaceId);
-
-  const isLoading = sendMutation.isPending;
-  // PLN-01 — the server rejects prompts with 409 while a human gate is open,
-  // so surface that as a disabled composer instead of a failed request.
-  const blockedByInteraction = !!pendingInteractionLabel;
-  // Mounts still being created: the prompt would have nowhere to run.
-  const blockedByWorkspacePrep = isPreparing(workspacePrep?.status);
-  // Attachments are a message too. A browser comment arrives as attachments
-  // with the composer empty — the note was typed in the page — and the send
-  // arrow stayed grey until the user invented something to type here.
-  const canSend =
-    (text.trim().length > 0 ||
-      activeCommand !== null ||
-      attachments.length > 0 ||
-      (pendingCaptures?.length ?? 0) > 0) &&
-    !disabled &&
-    !isLoading &&
-    !blockedByInteraction &&
-    !blockedByWorkspacePrep;
+  // ── Composer logic (03 §6.1) ──
+  const draft = useComposerDraft({ workspaceId });
+  const {
+    text,
+    attachments,
+    activeCommand,
+    setActiveCommand,
+    menu,
+    setMenu,
+    menuIndex,
+    setMenuIndex,
+    removeAttachment,
+    handleFilesChanged,
+    handleDrop,
+    handleDragOver,
+  } = draft;
+  const history = useComposerHistory({ promptHistory, restoredDraft, draft, textareaRef });
+  const menus = useComposerMenus({ projectId, workspaceId, draft, textareaRef });
+  const { filteredCommands, filteredMentions, fileIndexLoading, mentionLoading, applyMenuSelection } = menus;
+  const {
+    modelsPending,
+    displayModel,
+    activeModel,
+    reasoningLevels,
+    effectiveEffort,
+    contextTiers,
+    effectiveTier,
+    activeTierTokens,
+    hasReasoning,
+    hasContext,
+    usage,
+    contextUsage,
+  } = useComposerModelControls({ sessionId, selectedModel, onModelChange, reasoningEffort, contextTier });
+  const send = useComposerSend({
+    sessionId,
+    draft,
+    history,
+    disabled,
+    pendingCaptures,
+    pendingInteractionLabel,
+    workspacePrep,
+    agentMode: activeAgentMode,
+    onBeforeSend,
+    customSendFn,
+    onBuiltinCommand,
+    turnLive: isStreaming && !!onStop,
+    stopState,
+  });
+  const { isLoading, blockedByInteraction, canSend, primaryAction, handleSend } = send;
+  const dictation = useDictation({ textareaRef, text, setText: draft.setText });
+  const { handleKeyDown, handleTextChange, handlePaste, handleClick } = useComposerKeymap({
+    textareaRef,
+    draft,
+    menus,
+    history,
+    send,
+    dictation,
+  });
+  const collapseControls = useToolbarCollapse(toolbarRef);
 
   const { data: projectCodebases, isLoading: codebasesLoading } = useProjectCodebases(projectId);
 
   const connectedRepoCount =
     (codebaseIds?.length ?? 0) + gitRepositories.filter((r) => r.url.trim()).length;
-
-  const modelList = (models ?? []) as HarnessCatalogModel[];
-  // Resolve the selection against the LIVE catalog.
-  //
-  // A chat can carry a model id the account no longer has (a renamed or
-  // de-entitled model, or the legacy `claude-sonnet-4` default). When that
-  // happened `activeModel` came back undefined and every model-derived
-  // control — reasoning effort, context tier, and the context gauge —
-  // silently vanished from the composer. Falling back to the first available
-  // model keeps the toolbar intact and keeps the label honest about what
-  // will actually be used.
-  //
-  // The catalog only lists models of providers that are ready right now, so a
-  // selection can also be missing because its provider is briefly not ready
-  // (a re-probe, a CLI restart, a stale disk cache). That is not a reason to
-  // move the chat to another provider's model: substitute only when the
-  // absence is conclusive — a fresh catalog in which every installed provider
-  // answered.
-  const { data: providerCatalog } = useHarnessProviders();
-  const catalogIsConclusive =
-    !!providerCatalog && !providerCatalog.stale && providerCatalog.providers.every((p) => p.ready || !p.installed);
-  const displayModel = useMemo(() => {
-    if (selectedModel && modelList.some((m) => m.id === selectedModel)) return selectedModel;
-    if (selectedModel && !catalogIsConclusive) return selectedModel;
-    return modelList[0]?.id ?? selectedModel ?? '';
-  }, [selectedModel, modelList, catalogIsConclusive]);
-  const activeModel = useMemo(
-    () => modelList.find((m) => m.id === displayModel),
-    [modelList, displayModel],
-  );
-
-  // Persist the substitution so the label, the gauge and the model the server
-  // actually runs stay in agreement. Only fires when we genuinely had to
-  // substitute (no selection, or a selection a conclusive catalog no longer
-  // offers) — not on every open — and self-terminates once the parent echoes
-  // it back.
-  const onModelChangeRef = useRef(onModelChange);
-  onModelChangeRef.current = onModelChange;
-  useEffect(() => {
-    if (modelList.length === 0) return;
-    if (!displayModel || displayModel === selectedModel) return;
-    onModelChangeRef.current?.(displayModel);
-  }, [displayModel, selectedModel, modelList.length]);
-
-  // Provider tabs and the searchable model list now live inside the shared
-  // `ModelPicker`; the composer only needs the active model's metadata to
-  // drive the per-turn reasoning-effort and context-tier controls below.
-
-  // Reasoning-effort levels come from the selected model's provider metadata.
-  const reasoningLevels = activeModel?.supportsReasoning
-    ? (activeModel.reasoningEfforts?.length ? activeModel.reasoningEfforts : ['low', 'medium', 'high'])
-    : [];
-  const effectiveEffort = reasoningEffort ?? activeModel?.defaultReasoningEffort ?? reasoningLevels[Math.floor(reasoningLevels.length / 2)];
-
-  // Context-window tiers — offered only when the model exposes both a standard
-  // and a long-context tier. Values are the provider's PROMPT budgets, which is
-  // the same quantity the gauge divides by; showing the advertised total here
-  // is what made the composer say 264K while the gauge said 200K.
-  const contextTiers = useMemo(() => {
-    const standard = resolveModelLimit(activeModel, 'default');
-    const long = resolveModelLimit(activeModel, 'long_context');
-    if (!activeModel?.supportsLongContext || !standard || !long || standard >= long) {
-      return [] as Array<{ tier: 'default' | 'long_context'; tokens: number }>;
-    }
-    // ONE number per window. The catalog's figure is derived (window minus
-    // the completion reserve: 936K); the running session reports its own
-    // (1.00M), and that is what the gauge divides by. Side by side in the same
-    // toolbar they read as two different windows. When the session's figure
-    // is plainly the same tier measured differently — within 15% — it wins,
-    // so the chip and the gauge beside it always agree.
-    const live = contextUsage?.promptTokenLimit;
-    const agree = (catalog: number): number =>
-      typeof live === 'number' && live > 0 && Math.abs(live - catalog) / catalog < 0.15 ? live : catalog;
-    const active = (contextTier as 'default' | 'long_context' | undefined) ?? 'default';
-    return [
-      { tier: 'default' as const, tokens: active === 'default' ? agree(standard) : standard },
-      { tier: 'long_context' as const, tokens: active === 'long_context' ? agree(long) : long },
-    ];
-  }, [activeModel, contextUsage?.promptTokenLimit, contextTier]);
-  const effectiveTier = (contextTier as 'default' | 'long_context' | undefined) ?? 'default';
-  const activeTierTokens = contextTiers.find((t) => t.tier === effectiveTier)?.tokens
-    ?? resolveModelLimit(activeModel, effectiveTier);
-  const hasReasoning = !!activeModel?.supportsReasoning && reasoningLevels.length > 0;
-  const hasContext = contextTiers.length > 1;
 
   // Auto-resize textarea
   useEffect(() => {
@@ -419,22 +298,6 @@ export function ChatInput({
       el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
     }
   }, [text]);
-
-  // Responsive collapse — watch the toolbar width and fold the reasoning +
-  // context controls into the "⋯" overflow menu when the row gets tight, so
-  // the icons never spill out of the card. They pop back inline when there's
-  // room again. Threshold is a heuristic that comfortably fits the model
-  // pill + both controls + the gauge on the left cluster.
-  useEffect(() => {
-    const el = toolbarRef.current;
-    if (!el || typeof ResizeObserver === 'undefined') return;
-    const ro = new ResizeObserver((entries) => {
-      const w = entries[0]?.contentRect.width ?? 0;
-      setCollapseControls(w < 420);
-    });
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
 
   // Close dropdowns on outside click or Escape. The model picker manages its
   // own dismissal (it lives in the shared `ModelPicker`).
@@ -468,7 +331,7 @@ export function ChatInput({
     }
   }, [showReasoningDropdown, showToolsMenu, showModeDropdown]);
 
-  // ── Composer menu: icon, filtering, detection, and selection ──
+  // ── Composer menu rows (`/` commands + `@` file mentions) ──
   const commandIcon = useCallback((c: SlashCommand): React.ReactNode => {
     if (c.kind === 'skill') return <Sparkles className="h-3.5 w-3.5" />;
     if (c.kind === 'prompt') return <ScrollText className="h-3.5 w-3.5" />;
@@ -476,22 +339,6 @@ export function ChatInput({
     if (c.id === 'builtin:terminal') return <TerminalSquare className="h-3.5 w-3.5" />;
     return <Wrench className="h-3.5 w-3.5" />;
   }, []);
-
-  const filteredCommands = useMemo(() => {
-    if (!menu || menu.type !== 'slash') return [] as SlashCommand[];
-    const q = menu.query;
-    return slashCommands
-      .filter((c) => fuzzyMatch(q, c.name) || (c.description ? fuzzyMatch(q, c.description) : false))
-      .slice(0, 50);
-  }, [menu, slashCommands]);
-
-  const filteredMentions = useMemo(() => {
-    if (!menu || menu.type !== 'mention') return [] as MentionFile[];
-    const q = menu.query;
-    return mentionFiles
-      .filter((f) => fuzzyMatch(q, f.label) || fuzzyMatch(q, f.path))
-      .slice(0, 50);
-  }, [menu, mentionFiles]);
 
   const menuItems = useMemo<ComposerMenuItem[]>(() => {
     if (!menu) return [];
@@ -513,851 +360,9 @@ export function ChatInput({
     }));
   }, [menu, filteredCommands, filteredMentions, commandIcon]);
 
-  // Detect whether the caret sits inside a `/command` or `@mention` token.
-  const detectMenu = useCallback(
-    (value: string, caret: number) => {
-      // Slash: only when the value starts with '/', the caret is within the
-      // first (command) token, and no command is already active.
-      if (!activeCommand && value.startsWith('/')) {
-        const firstSpace = value.search(/\s/);
-        const tokenEnd = firstSpace === -1 ? value.length : firstSpace;
-        if (caret <= tokenEnd) {
-          setMenu({ type: 'slash', query: value.slice(1, caret), triggerIndex: 0 });
-          setMenuIndex(0);
-          return;
-        }
-      }
-      // Mention: last '@' before the caret, preceded by start/whitespace, with
-      // no whitespace between it and the caret. Requires a workspace to search.
-      if (workspaceId) {
-        const upto = value.slice(0, caret);
-        const at = upto.lastIndexOf('@');
-        if (at !== -1) {
-          const before = at === 0 ? '' : value.charAt(at - 1);
-          const token = value.slice(at + 1, caret);
-          if ((at === 0 || /\s/.test(before)) && !/\s/.test(token)) {
-            setMenu({ type: 'mention', query: token, triggerIndex: at });
-            setMenuIndex(0);
-            return;
-          }
-        }
-      }
-      setMenu(null);
-    },
-    [activeCommand, workspaceId],
-  );
-
-  /**
-   * The composer's text at the moment dictation started, and whether the user
-   * has actually changed the field since — the two things Cancel needs to be
-   * honest.
-   *
-   * Cancel (✕) and Accept (✓) sat next to each other doing the SAME thing:
-   * partials are written straight into the composer as they are spoken, so by
-   * the time either button is pressed the words are already in the field, and
-   * ✕ merely stopped the microphone. Pressing the one labelled "Cancel voice
-   * input" and watching every dictated word stay put is not a subtle defect.
-   *
-   * The snapshot is only safe to restore while dictation is the ONLY thing
-   * that has changed the field. Typing during dictation is explicitly
-   * supported (it pauses the mic — Part C.3), and throwing that away to undo
-   * the speech would be a worse bug than the one being fixed, so a real edit
-   * downgrades Cancel to "stop, and drop the words not yet committed".
-   *
-   * Set from the textarea's own change event, not from the keydown that
-   * pauses dictation: pressing Escape, an arrow key or a modifier pauses but
-   * changes nothing, and must not cost the user the ability to undo.
-   */
-  const preDictationTextRef = useRef<string | null>(null);
-  const editedDuringDictationRef = useRef(false);
-
-  const handleTextChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const value = e.target.value;
-      if (preDictationTextRef.current !== null) editedDuringDictationRef.current = true;
-      setText(value);
-      // Editing a recalled prompt makes it the user's own draft again.
-      if (historyIdx !== null) setHistoryIdx(null);
-      detectMenu(value, e.target.selectionStart ?? value.length);
-    },
-    [detectMenu, historyIdx],
-  );
-
-  /**
-   * Show history entry `idx` (or the parked draft when `null`). Attachments
-   * that live on the server are fetched back into real `File`s; a fetch that
-   * fails drops that one chip with a toast rather than blocking the recall.
-   */
-  const showHistoryEntry = useCallback(
-    (idx: number | null) => {
-      const token = ++recallTokenRef.current;
-      setMenu(null);
-      if (idx === null) {
-        const draft = draftRef.current;
-        setText(draft?.text ?? '');
-        setAttachments(draft?.attachments ?? []);
-        draftRef.current = null;
-        setHistoryIdx(null);
-        return;
-      }
-      const entry = history[idx];
-      if (!entry) return;
-      if (historyIdx === null) draftRef.current = { text, attachments };
-      setHistoryIdx(idx);
-      setText(entry.text);
-      setAttachments([]);
-      const el = textareaRef.current;
-      requestAnimationFrame(() => {
-        if (el) {
-          el.focus();
-          el.selectionStart = el.selectionEnd = entry.text.length;
-        }
-      });
-      if (entry.attachments.length === 0) return;
-      void Promise.all(
-        entry.attachments.map(async (att) => {
-          try {
-            return await materializeAttachment(att);
-          } catch {
-            toast({ variant: 'warning', title: `Could not restore attachment "${att.name}"` });
-            return null;
-          }
-        }),
-      ).then((files) => {
-        if (recallTokenRef.current !== token) return; // user moved on
-        setAttachments(
-          files.flatMap((file, i) =>
-            file ? [{ id: `history:${entry.id}:${i}`, file, source: 'file' as CaptureSource }] : [],
-          ),
-        );
-      });
-    },
-    [history, historyIdx, text, attachments],
-  );
-
-  /** ↑ / ↓ inside the textarea. Returns true when the key was consumed. */
-  const navigateHistory = useCallback(
-    (dir: -1 | 1, el: HTMLTextAreaElement): boolean => {
-      if (el.selectionStart !== el.selectionEnd) return false;
-      const { first, last } = caretLine(text, el.selectionStart);
-      if (dir === -1 && !first) return false;
-      if (dir === 1 && !last) return false;
-      const next = stepHistory(historyIdx, history.length, dir);
-      if (next === undefined) return false;
-      showHistoryEntry(next);
-      return true;
-    },
-    [text, historyIdx, history.length, showHistoryEntry],
-  );
-
-  const applySlashCommand = useCallback((cmd: SlashCommand) => {
-    setActiveCommand(cmd);
-    setText('');
-    setMenu(null);
-    setMenuIndex(0);
-    requestAnimationFrame(() => textareaRef.current?.focus());
-  }, []);
-
-  const applyMention = useCallback(
-    async (file: MentionFile) => {
-      const current = menu;
-      if (!current || current.type !== 'mention' || !workspaceId) return;
-      const el = textareaRef.current;
-      // Read the live value from the DOM node so this callback doesn't need to
-      // be re-created on every keystroke (keeps typing cheap).
-      const value = el?.value ?? '';
-      const caret = el?.selectionStart ?? value.length;
-      const newText = value.slice(0, current.triggerIndex) + value.slice(caret);
-      setText(newText);
-      setMenu(null);
-      requestAnimationFrame(() => {
-        const e2 = textareaRef.current;
-        if (e2) {
-          e2.focus();
-          e2.selectionStart = e2.selectionEnd = current.triggerIndex;
-        }
-      });
-      setMentionLoading(true);
-      try {
-        const res = await platform.getWorkspaceFileContent(
-          workspaceId,
-          file.path,
-          file.source,
-          file.worktreeAlias,
-        );
-        const blob = new Blob([res.content ?? ''], { type: 'text/plain' });
-        const f = new File([blob], file.label, { type: 'text/plain' });
-        setAttachments((prev) => {
-          if (prev.some((a) => a.source === 'mention' && a.label === file.path)) return prev;
-          return [
-            ...prev,
-            {
-              id: `mention:${file.source}:${file.worktreeAlias ?? ''}:${file.path}:${Date.now()}`,
-              file: f,
-              source: 'mention',
-              label: file.path,
-            },
-          ];
-        });
-      } catch {
-        toast({ variant: 'error', title: `Could not attach ${file.label}` });
-      } finally {
-        setMentionLoading(false);
-      }
-    },
-    [menu, workspaceId, platform],
-  );
-
-  const applyMenuSelection = useCallback(
-    (index: number) => {
-      if (!menu) return;
-      if (menu.type === 'slash') {
-        const cmd = filteredCommands[index];
-        if (cmd) applySlashCommand(cmd);
-      } else {
-        const file = filteredMentions[index];
-        if (file) void applyMention(file);
-      }
-    },
-    [menu, filteredCommands, filteredMentions, applySlashCommand, applyMention],
-  );
-
-  const handleSend = useCallback(async () => {
-    if (!canSend || sendingRef.current) return;
-    sendingRef.current = true;
-
-    const cmd = activeCommand;
-    const rawInput = text.trim();
-    const currentAttachments = attachments;
-
-    setText('');
-    setAttachments([]);
-    setActiveCommand(null);
-    setMenu(null);
-    // Remember what was sent so ↑ works before the server echoes it back.
-    setHistoryIdx(null);
-    draftRef.current = null;
-    if (rawInput || currentAttachments.length) {
-      localHistoryRef.current = [
-        ...localHistoryRef.current.slice(-49),
-        {
-          id: `local:${Date.now()}`,
-          text: rawInput,
-          ts: Date.now(),
-          attachments: currentAttachments.map((a) => ({ name: a.file.name, mimeType: a.file.type, file: a.file })),
-        },
-      ];
-    }
-
-    let prompt = rawInput;
-    try {
-      if (cmd) {
-        let template: string | undefined;
-        if (cmd.loadTemplate) {
-          try {
-            template = await cmd.loadTemplate();
-          } catch {
-            template = undefined;
-            toast({ variant: 'warning', title: `Could not load the "${cmd.name}" prompt template` });
-          }
-        }
-        prompt = cmd.format(rawInput, template);
-      }
-
-      // Captures (browser comments, terminal selections) live with the page and
-      // are merged into the message by `customSendFn`; they count here too.
-      const captureFiles = (pendingCaptures ?? []).map((c) => c.file);
-      if (!prompt.trim() && currentAttachments.length + captureFiles.length > 0) {
-        // The server needs words. Say what the attachments are for rather than
-        // making the user type a sentence that adds nothing.
-        const fromBrowser = [...currentAttachments.map((a) => a.file), ...captureFiles].some((f) =>
-          /^(element|region)-/.test(f.name),
-        );
-        prompt = fromBrowser
-          ? 'Please address the attached browser comment(s). Each .md file has my note and the element it is about; the .png shows it.'
-          : 'Please take a look at the attached file(s).';
-      }
-
-      if (!prompt.trim() && currentAttachments.length + captureFiles.length === 0) {
-        // Nothing to send after formatting — restore and bail.
-        setText(rawInput);
-        setActiveCommand(cmd);
-        setAttachments(currentAttachments);
-        sendingRef.current = false;
-        return;
-      }
-
-      startPending(sessionId, prompt);
-      const files = currentAttachments.map((a) => a.file);
-
-      // Built-in commands (`/browser`, `/terminal`) surface their integrated
-      // panel before the message is dispatched so the user can watch the agent
-      // drive it live (e.g. start the browser in visible mode + focus its tab).
-      if (cmd?.source === 'builtin' && onBuiltinCommand) {
-        try {
-          await onBuiltinCommand(cmd.id);
-        } catch {
-          /* non-fatal — the agent's lazy-start still runs */
-        }
-      }
-
-      if (onBeforeSend) {
-        await onBeforeSend();
-      }
-      if (customSendFn) {
-        await customSendFn({ prompt, attachments: files, mode: activeAgentMode });
-      } else {
-        await sendMutation.mutateAsync({ prompt, attachments: files });
-      }
-    } catch {
-      // The draft comes back; the reason the server refused it (still
-      // generating, waiting on a review, …) is toasted by the mutation's
-      // global error handler under the "Message not sent" title — see
-      // `useSendChatPrompt` / `useSendPrompt` meta.
-      setText(rawInput);
-      setActiveCommand(cmd);
-      setAttachments(currentAttachments);
-      clearStream(sessionId);
-    } finally {
-      sendingRef.current = false;
-    }
-  }, [
-    canSend,
-    text,
-    attachments,
-    activeCommand,
-    sessionId,
-    sendMutation,
-    startPending,
-    clearStream,
-    onBeforeSend,
-    customSendFn,
-    onBuiltinCommand,
-    activeAgentMode,
-    pendingCaptures,
-  ]);
-
-  // ── Voice input (Phase 1 rewrite — VOICE_MODULE_FINAL_ARCHITECTURE_PLAN.md Part C) ──
-  //
-  // Two changes from the original design, per Part C.2:
-  //   1. Finalized text (segment/final) is inserted at the textarea's
-  //      CURRENT CARET position, not appended to a separately-tracked base
-  //      string. This is what lets a manual edit + resume "just work" —
-  //      the browser's own caret is the source of truth for where new
-  //      speech lands, exactly like native OS dictation.
-  //   2. Live/interim text NEVER enters the real editable `text` state — it
-  //      is rendered as a separate, visually distinct, non-editable preview
-  //      (see the dimmed line above the textarea in the JSX below). Only a
-  //      fully finalized segment ever gets inserted into the real value.
-  //      This is what removes the "correction collides with in-flight
-  //      dictation" problem entirely: there is never any uncommitted STT
-  //      text sitting inside the editable buffer for an edit to collide
-  //      with.
-  //
-  // `useSpeechToText` is owned HERE (not inside VoiceRecorder) because
-  // pausing on manual composer interaction (Part C.3) requires the
-  // composer's own key/paste/click handlers to call `pauseVoice()`.
-  // Sequences insertions so two segments arriving back-to-back (before the
-  // first's requestAnimationFrame caret-restore has run) compose in speech
-  // order instead of racing on a not-yet-repainted textarea — see
-  // CaretInsertionSequencer's doc comment for the exact failure mode this
-  // fixes. `useRef` (not state) because it's mutated outside the render
-  // cycle and never needs to trigger a re-render itself.
-  const caretSequencerRef = useRef(new CaretInsertionSequencer());
-
-  const insertAtCaret = useCallback((raw: string) => {
-    const el = textareaRef.current;
-
-    if (!el) {
-      const insertText = raw.trim();
-      if (insertText) setText((prev) => (prev ? `${prev.trimEnd()} ${insertText}` : insertText));
-      return;
-    }
-
-    setText((prev) => {
-      // A batch engine's segment starts with a capital whether or not it
-      // continues the previous sentence; decide from what precedes it.
-      const cased = continueCase(prev.slice(0, el.selectionStart), raw);
-      const result = caretSequencerRef.current.insert(prev, el.selectionStart, el.selectionEnd, cased);
-      return result ? result.text : prev;
-    });
-
-    requestAnimationFrame(() => {
-      const el2 = textareaRef.current;
-      const caret = caretSequencerRef.current.consumePending();
-      if (el2 && caret != null) {
-        el2.focus();
-        el2.selectionStart = el2.selectionEnd = caret;
-      }
-    });
-  }, []);
-
-  // ── Live dictation region ────────────────────────────────────
-  // Streaming partials are written STRAIGHT INTO the composer rather than
-  // into a preview beside it, so words appear where they will actually end
-  // up, as they are spoken. `dictationRef` remembers the span the
-  // current utterance occupies so each revision replaces it instead of
-  // appending — a streaming decoder rewrites itself constantly ("Hel" ->
-  // "Hello" -> "Hello, how"), and appending each revision would produce
-  // "HelHelloHello, how".
-  //
-  // The span is cleared whenever the user touches the composer, so a manual
-  // edit is never overwritten by a partial that lands a moment later.
-  // The live region is described by the composer text WITHOUT it — what sits
-  // `before` and `after` the utterance. Storing those rather than a length is
-  // what makes each revision a pure recomputation instead of a patch applied
-  // to whatever the previous patch happened to leave behind, and it is what
-  // lets the separator between `before` and the utterance be decided per
-  // revision (see `stitchDictation`): "source" + "/server" needs no space,
-  // "source" + "server" does.
-  const dictationRef = useRef<{ before: string; after: string } | null>(null);
-  /**
-   * Where the last COMMITTED utterance sits in the composer text, so a
-   * spoken "scratch that" can take it back out. Cleared by any manual edit,
-   * because the offsets describe text the user has not touched since.
-   */
-  const lastCommittedRef = useRef<{ start: number; end: number } | null>(null);
-  /**
-   * The live region as it was when a manual edit detached it — see
-   * `onSegment`. Lets the flushed, formatted segment replace the raw partial
-   * that is still on screen, so the last half-second of what was said before
-   * the keystroke is not lost.
-   */
-  const detachedRef = useRef<{ start: number; shown: string } | null>(null);
-  /**
-   * The committed composer text, readable synchronously.
-   *
-   * Partials arrive every ~190ms, faster than React re-renders settle, so a
-   * handler that read `text` from its closure would repeatedly build on a
-   * stale value.
-   */
-  const textRef = useRef('');
-  textRef.current = text;
-
-  /**
-   * Whether the text of the CURRENT utterance is already visible in the
-   * composer because partials put it there.
-   *
-   * This is what tells a committed segment whether it is new text or a
-   * refinement of text the user is already looking at. Without it, typing
-   * mid-dictation produced a duplicate: the partial text was on screen, the
-   * edit detached the region, and the flushed segment — the same words, just
-   * formatted — was then appended at the caret:
-   *
-   *   "…the API integration by NOTE so I wanted to talk about the project
-   *    timeline. we need to finish the API integration by Friday…"
-   */
-  const utteranceShownRef = useRef(false);
-  /** The exact partial text last written for the current utterance. */
-  const shownTextRef = useRef('');
-
-  const clearDictationRegion = useCallback(() => {
-    dictationRef.current = null;
-  }, []);
-
-  /**
-   * Compute the composer text with `incoming` written into `region`, joined
-   * to its surroundings the way a dictation product would (spacing, sentence
-   * case, symbols that attach). Pure: nothing here touches React state.
-   */
-  const composeRegion = useCallback((region: { before: string; after: string }, incoming: string) => {
-    return stitchDictation(region.before, incoming, region.after);
-  }, []);
-
-  /**
-   * Replace the live region with `incoming`; create it at the caret if absent.
-   *
-   * CRITICAL: everything is computed BEFORE `setText`, and the updater it
-   * passes is a constant. React.StrictMode invokes state updaters twice in
-   * development, so an updater that mutated the region ref or inserted a
-   * separator inline ran both effects twice — which is exactly how the
-   * composer ended up reading "…schedule a meeting. Hello, how are you today?
-   * I would like to schedule a meeting.CCan you help me…".
-   */
-  const writeDictationRegion = useCallback((raw: string, commit: boolean) => {
-    // "scratch that" on its own retracts the PREVIOUS utterance. It is acted
-    // on the moment it is recognised (as Dragon and Windows do) rather than
-    // at commit, so the retracted words disappear while the speaker is still
-    // talking, and whatever follows the command takes their place.
-    const { scratch, rest } = splitScratchCommand(raw);
-    const incoming = scratch ? rest : raw;
-
-    let region = dictationRef.current;
-    if (!region) {
-      const el = textareaRef.current;
-      const prev = textRef.current;
-      const last = lastCommittedRef.current;
-      if (scratch && last && last.end <= prev.length) {
-        // Open the region where the retracted utterance was, without it.
-        region = { before: prev.slice(0, last.start).replace(/[ \t]+$/, ''), after: prev.slice(last.end) };
-        lastCommittedRef.current = null;
-      } else {
-        const at = el ? Math.min(el.selectionStart, prev.length) : prev.length;
-        region = { before: prev.slice(0, at), after: prev.slice(at) };
-      }
-      dictationRef.current = region;
-    }
-
-    const { text: next, start, end } = composeRegion(region, incoming);
-    const caret = end;
-    if (commit) {
-      // Committed text becomes what the NEXT utterance is written into.
-      dictationRef.current = null;
-      lastCommittedRef.current = incoming ? { start, end } : null;
-    }
-    textRef.current = next;
-    utteranceShownRef.current = !commit;
-    shownTextRef.current = commit ? '' : incoming;
-    detachedRef.current = null;
-    setText(next);
-
-    requestAnimationFrame(() => {
-      const el = textareaRef.current;
-      if (!el) return;
-      const pos = Math.min(caret, el.value.length);
-      el.selectionStart = el.selectionEnd = pos;
-    });
-  }, [composeRegion]);
-
-  // ── Live reveal ──────────────────────────────────────────────
-  // The streaming decoder hands over a revised partial every ~560ms (one
-  // encoder chunk), typically two or three words at a time, so writing each
-  // partial straight into the composer made the text lurch: nothing for half
-  // a second, then a clump. This paces the reveal one word every REVEAL_MS
-  // instead, so the words arrive at a typing-like cadence and the composer
-  // reads as continuous rather than jittery. A retraction (the decoder
-  // rewrote an earlier word) keeps the common prefix and re-reveals from
-  // there; a backlog of more than a few words is flushed at once so the
-  // display never falls behind the speaker. Commits bypass it entirely.
-  const REVEAL_MS = 70;
-  const REVEAL_CATCH_UP_WORDS = 6;
-  const revealRef = useRef<{ target: string; shown: string; timer: ReturnType<typeof setInterval> | null }>({
-    target: '', shown: '', timer: null,
-  });
-
-  const stopReveal = useCallback(() => {
-    const r = revealRef.current;
-    if (r.timer) clearInterval(r.timer);
-    r.timer = null;
-    r.target = '';
-    r.shown = '';
-  }, []);
-
-  const revealStep = useCallback(() => {
-    const r = revealRef.current;
-    if (r.shown === r.target) {
-      if (r.timer) clearInterval(r.timer);
-      r.timer = null;
-      return;
-    }
-    const rest = r.target.slice(r.shown.length);
-    const backlog = rest.split(/\s+/).filter(Boolean).length;
-    let end = r.target.indexOf(' ', r.shown.length + 1);
-    if (end === -1 || backlog > REVEAL_CATCH_UP_WORDS) end = r.target.length;
-    r.shown = r.target.slice(0, end);
-    writeDictationRegion(r.shown, false);
-  }, [writeDictationRegion]);
-
-  const revealPartial = useCallback((t: string) => {
-    const r = revealRef.current;
-    let common = 0;
-    const n = Math.min(r.shown.length, t.length);
-    while (common < n && r.shown[common] === t[common]) common += 1;
-    if (common < r.shown.length) r.shown = t.slice(0, common);
-    r.target = t;
-    if (!r.timer) {
-      revealStep();
-      if (r.shown !== r.target) r.timer = setInterval(revealStep, REVEAL_MS);
-    }
-  }, [revealStep]);
-
-  useEffect(() => () => { const r = revealRef.current; if (r.timer) clearInterval(r.timer); }, []);
-
-  // Which microphone dictation records from. Chosen in Settings > Audio and
-  // resolved against what is plugged in RIGHT NOW, so a headset that was
-  // unplugged since falls back to the system default instead of failing.
-  const micDeviceId = useMicPrefsStore((st) => st.deviceId);
-  // Only a user who CHOSE a microphone needs the device list here (to map the
-  // saved choice onto what is plugged in). Everyone else records from the
-  // system default, which needs no enumeration at all.
-  const micDevices = useAudioInputDevices({ enabled: micDeviceId !== '' });
-  const micDeviceLabel = useMicPrefsStore((st) => st.deviceLabel);
-  const resolvedMicId = useMemo(
-    () => resolveMicDeviceId(micDevices.devices, { deviceId: micDeviceId, deviceLabel: micDeviceLabel }),
-    [micDevices.devices, micDeviceId, micDeviceLabel],
-  );
-
-  const {
-    isSupported: voiceSupported,
-    status: voiceStatus,
-    error: voiceError,
-    amplitude: voiceAmplitude,
-    start: startVoice,
-    pause: pauseVoice,
-    resume: resumeVoice,
-    stop: stopVoice,
-    cancel: cancelVoice,
-  } = useSpeechToText({
-    // Partials go into the composer itself. On an engine with a native
-    // streaming decoder these arrive every ~190ms, sub-word; on a batch
-    // engine the server sends none and only the segments below appear.
-    onInterim: (t) => revealPartial(t),
-    onSegment: (t) => {
-      stopReveal();
-      if (dictationRef.current) {
-        // Normal case: refine the live region in place and commit it.
-        writeDictationRegion(t, true);
-      } else if (utteranceShownRef.current) {
-        // The user edited the composer while this utterance was still open,
-        // which detached the region. Its words are already on screen — and
-        // already filler-stripped, because partials go through the
-        // interim-safe formatter too — so re-inserting the whole segment
-        // would duplicate them somewhere the user did not put them.
-        //
-        // The flushed segment usually carries a few more words than the last
-        // partial (whatever was being spoken as the keystroke landed), so it
-        // replaces the partial IN PLACE — but only if that partial is still
-        // exactly where it was. If the user's edit moved or changed it, the
-        // segment is dropped: losing the half-word you were mid-way through
-        // is the cheaper, predictable failure. The caret is shifted by the
-        // difference when it sits after the region, so the keystrokes the
-        // user is typing right now are not displaced.
-        const detached = detachedRef.current;
-        const current = textRef.current;
-        if (detached && current.slice(detached.start, detached.start + detached.shown.length) === detached.shown) {
-          const region = { before: current.slice(0, detached.start), after: current.slice(detached.start + detached.shown.length) };
-          const { text: next, end } = composeRegion(region, splitScratchCommand(t).rest);
-          const el = textareaRef.current;
-          const selStart = el?.selectionStart ?? next.length;
-          const selEnd = el?.selectionEnd ?? next.length;
-          const delta = next.length - current.length;
-          textRef.current = next;
-          lastCommittedRef.current = null;
-          setText(next);
-          requestAnimationFrame(() => {
-            const el2 = textareaRef.current;
-            if (!el2) return;
-            const oldEnd = detached.start + detached.shown.length;
-            const shift = (pos: number): number => (pos >= oldEnd ? pos + delta : Math.min(pos, end));
-            el2.selectionStart = shift(selStart);
-            el2.selectionEnd = shift(selEnd);
-          });
-        }
-        detachedRef.current = null;
-        utteranceShownRef.current = false;
-        shownTextRef.current = '';
-      } else {
-        // Nothing was previewed (a batch engine emits no partials at all), so
-        // this segment IS the text.
-        insertAtCaret(t);
-      }
-    },
-    onFinal: (t) => {
-      stopReveal();
-      preDictationTextRef.current = null;
-      clearDictationRegion();
-      lastCommittedRef.current = null;
-      detachedRef.current = null;
-      utteranceShownRef.current = false;
-      shownTextRef.current = '';
-      if (t) insertAtCaret(t);
-    },
-    onError: (message) => toast({ variant: 'error', title: 'Voice input', description: message }),
-    deviceId: resolvedMicId,
-  });
-
-  const handleVoiceStart = useCallback(() => {
-    stopReveal();
-    clearDictationRegion();
-    preDictationTextRef.current = textRef.current;
-    editedDuringDictationRef.current = false;
-    void startVoice();
-  }, [startVoice, clearDictationRegion, stopReveal]);
-
-  /** ✕ — stop dictating and take back what this session put in the composer. */
-  const handleVoiceCancel = useCallback(() => {
-    stopReveal();
-    const snapshot = preDictationTextRef.current;
-    const region = dictationRef.current;
-    if (snapshot != null && !editedDuringDictationRef.current) {
-      textRef.current = snapshot;
-      setText(snapshot);
-    } else if (region) {
-      // Typed-during-dictation: only the open, uncommitted utterance goes.
-      const restored = `${region.before}${region.after}`;
-      textRef.current = restored;
-      setText(restored);
-    }
-    clearDictationRegion();
-    lastCommittedRef.current = null;
-    detachedRef.current = null;
-    utteranceShownRef.current = false;
-    shownTextRef.current = '';
-    preDictationTextRef.current = null;
-    cancelVoice();
-  }, [cancelVoice, clearDictationRegion, stopReveal]);
-
-  // Part C.3: EDITING the composer while dictation is live pauses it, so a
-  // manual correction and an incoming segment can't fight over the caret.
-  // Also drops any pending programmatic caret-restore (see insertAtCaret
-  // above) — once the user has genuinely touched the textarea, a
-  // `segment`/`final` frame that arrives moments later (network latency after
-  // the `pause` frame was sent) must land at their new position, not silently
-  // yank the caret back to wherever dictation had left off.
-  //
-  // "Editing" means typing or pasting — NOT clicking. Clicking is how you put
-  // the caret somewhere, and it is the first half of almost every correction,
-  // so pausing on it meant dictation stopped before the user had changed
-  // anything and stayed stopped until they noticed the pill and clicked it.
-  // Moving the caret still cancels the pending restore, which is the part
-  // that actually matters for a click.
-  const noteManualCaretMove = useCallback(() => {
-    caretSequencerRef.current.clearPending();
-    stopReveal();
-    // The live region's offsets describe the text as it was; once the user has
-    // moved or edited around it, the next partial must start a fresh span
-    // rather than overwrite whatever now sits at those offsets. Remember
-    // where the partial was, so the flushed segment can still refine it.
-    const region = dictationRef.current;
-    if (region && utteranceShownRef.current && shownTextRef.current) {
-      const { start } = composeRegion(region, shownTextRef.current);
-      detachedRef.current = { start, shown: shownTextRef.current };
-    }
-    clearDictationRegion();
-    // "scratch that" must never remove text the user has since edited.
-    lastCommittedRef.current = null;
-  }, [clearDictationRegion, composeRegion, stopReveal]);
-
-  const pauseVoiceIfListening = useCallback(() => {
-    noteManualCaretMove();
-    if (voiceStatus === 'listening') pauseVoice();
-  }, [voiceStatus, pauseVoice, noteManualCaretMove]);
-
-  const insertNewline = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) {
-      setText((prev) => prev + '\n');
-      return;
-    }
-    const start = el.selectionStart;
-    const end = el.selectionEnd;
-    setText((prev) => prev.slice(0, start) + '\n' + prev.slice(end));
-    // Restore caret after the inserted newline on the next frame.
-    requestAnimationFrame(() => {
-      el.selectionStart = el.selectionEnd = start + 1;
-    });
-  }, []);
-
-  const handleKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-      // Part C.3: any manual keystroke while dictation is listening pauses
-      // it — this is the "the act of typing into the field IS the pause
-      // trigger" behavior, not something the user has to remember to do.
-      pauseVoiceIfListening();
-
-      // Composer menu navigation takes priority while it is open.
-      if (menu) {
-        const count = menu.type === 'slash' ? filteredCommands.length : filteredMentions.length;
-        if (e.key === 'ArrowDown') {
-          e.preventDefault();
-          setMenuIndex((i) => (count ? (i + 1) % count : 0));
-          return;
-        }
-        if (e.key === 'ArrowUp') {
-          e.preventDefault();
-          setMenuIndex((i) => (count ? (i - 1 + count) % count : 0));
-          return;
-        }
-        if ((e.key === 'Enter' || e.key === 'Tab') && count > 0) {
-          e.preventDefault();
-          applyMenuSelection(menuIndex);
-          return;
-        }
-        if (e.key === 'Escape') {
-          e.preventDefault();
-          setMenu(null);
-          return;
-        }
-      }
-
-      // Backspace with an empty textarea removes the active command pill.
-      if (e.key === 'Backspace' && activeCommand && text.length === 0) {
-        e.preventDefault();
-        setActiveCommand(null);
-        return;
-      }
-
-      // ↑ / ↓ — recall earlier prompts (shell-style; only from the first /
-      // last line so multi-line editing still works).
-      if ((e.key === 'ArrowUp' || e.key === 'ArrowDown') && !e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) {
-        if (navigateHistory(e.key === 'ArrowUp' ? -1 : 1, e.currentTarget)) {
-          e.preventDefault();
-          return;
-        }
-      }
-
-      if (e.key !== 'Enter') return;
-      // W29 — a surface that does not declare composer key bindings leaves
-      // Enter to the textarea's own newline behaviour, so the only way to
-      // send is the button. Web and desktop both declare it.
-      if (!COMPOSER.sendShortcut) return;
-      // Ctrl/Cmd+Enter and Shift+Enter insert a newline; plain Enter sends.
-      if (e.ctrlKey || e.metaKey || e.shiftKey) {
-        e.preventDefault();
-        insertNewline();
-        return;
-      }
-      e.preventDefault();
-      handleSend();
-    },
-    [menu, filteredCommands, filteredMentions, menuIndex, applyMenuSelection, activeCommand, text, handleSend, insertNewline, pauseVoiceIfListening, navigateHistory],
-  );
-
   const handleFileSelect = useCallback(() => {
     if (!COMPOSER.attachments) return;
     fileInputRef.current?.click();
-  }, []);
-
-  const handleFilesChanged = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = Array.from(e.target.files ?? []);
-    if (files.length) {
-      setAttachments((prev) => [
-        ...prev,
-        ...files.map((file, i) => ({
-          id: `file:${Date.now()}:${i}:${file.name}`,
-          file,
-          source: 'file' as CaptureSource,
-        })),
-      ]);
-    }
-    e.target.value = '';
-  }, []);
-
-  const removeAttachment = useCallback((id: string) => {
-    setAttachments((prev) => prev.filter((a) => a.id !== id));
-  }, []);
-
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
-    // W29 — dropping a file on a surface that declares no file attachment
-    // must do nothing, not silently attach. `preventDefault` still runs so
-    // the browser does not navigate away to the dropped file.
-    if (!COMPOSER.attachments) return;
-    const files = Array.from(e.dataTransfer.files);
-    if (files.length) {
-      setAttachments((prev) => [
-        ...prev,
-        ...files.map((file, i) => ({
-          id: `file:${Date.now()}:${i}:${file.name}`,
-          file,
-          source: 'file' as CaptureSource,
-        })),
-      ]);
-    }
-  }, []);
-
-  const handleDragOver = useCallback((e: React.DragEvent) => {
-    e.preventDefault();
   }, []);
 
   // Hold the composer back until the model catalog resolves.
@@ -1576,27 +581,8 @@ export function ChatInput({
             value={text}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
-            onPaste={(e) => {
-              pauseVoiceIfListening();
-              // A pasted image (screenshot from the clipboard) becomes an
-              // attachment instead of being silently dropped.
-              if (!COMPOSER.attachments) return;
-              const files = Array.from(e.clipboardData?.files ?? []);
-              if (files.length === 0) return;
-              e.preventDefault();
-              setAttachments((prev) => [
-                ...prev,
-                ...files.map((file, i) => ({
-                  id: `paste:${Date.now()}:${i}:${file.name}`,
-                  file: file.name ? file : new File([file], `pasted-${Date.now()}.${(file.type.split('/')[1] ?? 'png').replace('jpeg', 'jpg')}`, { type: file.type }),
-                  source: 'file' as CaptureSource,
-                })),
-              ]);
-            }}
-            onClick={(e) => {
-              noteManualCaretMove();
-              detectMenu(e.currentTarget.value, e.currentTarget.selectionStart ?? 0);
-            }}
+            onPaste={handlePaste}
+            onClick={handleClick}
             onFocus={() => setIsFocused(true)}
             onBlur={() => { setIsFocused(false); setTimeout(() => setMenu(null), 120); }}
             disabled={disabled}
@@ -1922,15 +908,15 @@ export function ChatInput({
                 above for the full Phase 1 design). */}
             <VoiceRecorder
               disabled={disabled || isLoading || isStreaming}
-              isSupported={voiceSupported}
-              status={voiceStatus}
-              error={voiceError}
-              amplitude={voiceAmplitude}
-              onStart={handleVoiceStart}
-              onResume={resumeVoice}
-              onStop={stopVoice}
-              onCancel={handleVoiceCancel}
-              deviceLabel={resolvedMicId ? micDeviceLabel : undefined}
+              isSupported={dictation.voiceSupported}
+              status={dictation.voiceStatus}
+              error={dictation.voiceError}
+              amplitude={dictation.voiceAmplitude}
+              onStart={dictation.handleVoiceStart}
+              onResume={dictation.resumeVoice}
+              onStop={dictation.stopVoice}
+              onCancel={dictation.handleVoiceCancel}
+              deviceLabel={dictation.resolvedMicId ? dictation.micDeviceLabel : undefined}
             />
 
             {/* Stop — W30-b's two-phase control.
@@ -1939,9 +925,10 @@ export function ChatInput({
                 destructive path, and an explicit "Force reset" once the
                 graceful path has demonstrably failed. The label widens into a
                 pill only for the last one, so the composer's layout does not
-                shift on every ordinary stop. */}
-            {isStreaming && onStop ? (
-              stopState?.forceAvailable ? (
+                shift on every ordinary stop. The face comes from the shared
+                composer machine (client-core, M-12). */}
+            {primaryAction !== 'send' ? (
+              primaryAction === 'force_reset' ? (
                 <Button
                   variant="ghost"
                   onClick={onStop}
@@ -1949,7 +936,7 @@ export function ChatInput({
                   title="The turn did not stop gracefully — reset it"
                 >
                   <Square className="h-3 w-3 fill-current" />
-                  {stopState.label}
+                  {stopState?.label}
                 </Button>
               ) : (
                 <Button

@@ -177,10 +177,10 @@ describe('ChatInput — Enter semantics (09 §5.1; 03 §6.1 #3)', () => {
     await waitFor(() => expect(customSendFn).toHaveBeenCalledTimes(2));
   });
 
-  // DEFECT (09 §5.1): handleKeyDown (components/chat/ChatInput.tsx:1299-1311) never checks
+  // FIXED in P4-02 (known defect #1; useComposerKeymap). Was: handleKeyDown (ChatInput.tsx:1299-1311) never checked
   // `e.nativeEvent.isComposing` / keyCode 229, so the Enter that confirms an IME candidate
-  // (Japanese, Chinese, Korean input) sends the half-composed message. Fix in P4; this flips.
-  it.fails('does not send on Enter during IME composition', async () => {
+  // (Japanese, Chinese, Korean input) sent the half-composed message.
+  it('does not send on Enter during IME composition', async () => {
     const user = userEvent.setup();
     const customSendFn = vi.fn(async () => undefined);
     renderComposer({ customSendFn });

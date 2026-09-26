@@ -393,12 +393,12 @@ describe('ChatInput — dictation cancel and "scratch that" (09 §5.1; 03 §6.1 
     expect(textbox().value).toMatch(/^keep this\. and put these seven words in\.$/i);
   });
 
-  // DEFECT (09 §5.1 '"scratch that" retracts the last utterance'): a bare "scratch that" never
+  // FIXED in P4-02 (known defect #2; useDictation). Was a DEFECT (09 §5.1): a bare "scratch that" never
   // retracts on web. The word-paced reveal (ChatInput.tsx:1046-1072) opens the live region on
   // "scratch" alone, and writeDictationRegion only honours the command when it OPENS a region
   // (ChatInput.tsx:985-993); the commit then writes an empty utterance and "drop this." stays.
   // Mobile's commitDictation retracts on commit (apps/mobile/src/voice/dictationCommit.ts).
-  it.fails('a bare "scratch that" (streaming engine) retracts the previous utterance', () => {
+  it('a bare "scratch that" (streaming engine) retracts the previous utterance', () => {
     vi.useFakeTimers();
     renderComposer();
     startDictation();
@@ -408,10 +408,10 @@ describe('ChatInput — dictation cancel and "scratch that" (09 §5.1; 03 §6.1 
     expect(textbox().value).toMatch(/^keep this\.$/i);
   });
 
-  // DEFECT (09 §5.1): on a batch engine (segments only, no partials) onSegment inserts the
+  // FIXED in P4-02 (known defect #3). Was a DEFECT (09 §5.1): on a batch engine (segments only, no partials) onSegment inserts the
   // segment verbatim through insertAtCaret (ChatInput.tsx:1149-1153), so "scratch that" is
   // typed into the box ("Keep this. Drop this. Scratch that") instead of retracting "drop this.".
-  it.fails('a bare "scratch that" (batch engine) retracts the previous utterance', () => {
+  it('a bare "scratch that" (batch engine) retracts the previous utterance', () => {
     renderComposer();
     startDictation();
     segment('keep this.');
