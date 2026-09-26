@@ -2,18 +2,18 @@
   "counts": {
     "hardcodedPaletteClass": 99,
     "handRolledOverlay": 1,
-    "rawInputElement": 5,
-    "defaultTextSize": 457,
+    "rawInputElement": 2,
+    "defaultTextSize": 349,
     "whiteBlackClass": 11,
-    "defaultRadius": 263,
+    "defaultRadius": 214,
     "defaultShadow": 33,
-    "arbitraryValue": 616,
+    "arbitraryValue": 609,
     "varInClassString": 299,
     "legacyColorVar": 314,
-    "legacyTokenUtility": 1112,
-    "lucideDirectImport": 67,
+    "legacyTokenUtility": 876,
+    "lucideDirectImport": 61,
     "rawHeadlessImport": 1,
-    "unstyledVariant": 10
+    "unstyledVariant": 2
   },
   "locked": [
     "legacyGlassClass",

@@ -1,24 +1,24 @@
-// docs/redesign/07-phases.md §P1-S3. Workflow-owned pages (D-35); this
-// module only wraps them with `legacyHeader: true` until PW ports them
-// (docs/redesign/04-screen-map.md §0). Logged in docs/redesign/COORDINATION.md
-// as a whole-repo mechanical change (07-phases.md §Running in parallel).
+// docs/redesign/07-phases.md §P1-S3. Ported onto the kit (PW-d, 2026-09-27):
+// the Workflow Overhaul (D-81) built these functional-only on legacy
+// components; the redesign now rebuilds them on `ui/` + `blocks/` (D-35
+// fallback port).
 import type { RouteObject } from 'react-router';
 import { defineRoute } from './defineRoute.js';
 
 export const automationsRoutes: RouteObject[] = [
   defineRoute(
     'automations',
-    () => import('@/pages/AutomationsPage.js').then((m) => ({ default: m.AutomationsPage })),
-    { legacyHeader: true, nav: 'automations', title: 'Automations' },
+    () => import('@/features/automations/AutomationsListPage.js').then((m) => ({ default: m.AutomationsListPage })),
+    { legacyHeader: false, nav: 'automations', title: 'Automations' },
   ),
   defineRoute(
     'automations/new',
-    () => import('@/pages/CreateAutomationPage.js').then((m) => ({ default: m.CreateAutomationPage })),
-    { legacyHeader: true, nav: 'automations', title: 'Create Automation' },
+    () => import('@/features/automations/CreateAutomationPage.js').then((m) => ({ default: m.CreateAutomationPage })),
+    { legacyHeader: false, nav: 'automations', title: 'Create automation' },
   ),
   defineRoute(
     'automations/:id',
-    () => import('@/pages/AutomationDetailPage.js').then((m) => ({ default: m.AutomationDetailPage })),
-    { legacyHeader: true, nav: 'automations', title: 'Automation' },
+    () => import('@/features/automations/AutomationDetailPage.js').then((m) => ({ default: m.AutomationDetailPage })),
+    { legacyHeader: false, nav: 'automations', title: 'Automation' },
   ),
 ];

@@ -226,3 +226,25 @@ export function useCancelAutomationExecution() {
     },
   });
 }
+
+/**
+ * PARITY-9 — mint a fresh one-time webhook token + HMAC signing secret. The
+ * server never returns either value again after this response; the caller
+ * shows them exactly once (`WebhookCredentialsDialog`). Wrapped as a hook
+ * (rather than the page reaching for `usePlatform()` directly) so
+ * `features/automations` stays on the D-04 data boundary.
+ */
+export function useRotateWebhookToken() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    // The declared return type understates the response (`signingSecret` is
+    // real but untyped, same as the pre-port call site) — see PARITY-9.
+    mutationFn: (automationId: string) =>
+      platform.rotateWebhookToken(automationId) as Promise<{ token: string; signingSecret?: string }>,
+    onSuccess: (_data, automationId) => {
+      queryClient.invalidateQueries({ queryKey: automationKeys.detail(automationId) });
+    },
+  });
+}
