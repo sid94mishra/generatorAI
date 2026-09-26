@@ -139,6 +139,56 @@ export interface StageView {
    * stage alone filled it.
    */
   sharedContext?: boolean;
+  /** The node kind (`agent`, `check`, `loop`, P05). */
+  kind?: string;
+  /** A loop body instance: the enclosing loop instance's id (`scopeId`). */
+  loopId?: string;
+  /** A loop body instance: its iteration (0-based); absent on a wrap-up. */
+  iterationIndex?: number;
+  /** A loop's wrap-up instance (`<loop>#wrapup/<stage>`). */
+  wrapUp?: boolean;
+  /** A loop instance: its badge, rules, streaks and pending decision. */
+  loop?: LoopView;
+}
+
+/** One exit rule of a loop with its current streak. */
+export interface LoopRuleView {
+  reason: string;
+  action: string;
+  consecutive: number;
+  streak: number;
+  when?: string;
+}
+
+/** What a parked loop asks the operator (`interruptData.kind === 'loop_decision'`). */
+export interface LoopDecisionView {
+  /** `pause` (a pause rule fired) or `exhaust` (the limit was reached). */
+  action: string;
+  reason: string;
+  /** The last finished iteration (0-based). */
+  k: number;
+  iterations: number;
+  maxIterations: number;
+  usage: { turns?: number; costUsd?: number; inputTokens?: number; outputTokens?: number };
+  budget: { maxTurns?: number; maxCostUsd?: number; maxTokens?: number; maxWallClockMs?: number };
+  /** Iterations with a workspace checkpoint (accept_iteration can restore them). */
+  checkpoints: number[];
+  scores: Array<{ k: number; score: number | null }>;
+}
+
+/** A loop instance as the run page shows it (from `loopState` and the pinned spec). */
+export interface LoopView {
+  /** The current (or last) iteration, 0-based; -1 before the first one starts. */
+  k: number;
+  /** The effective maximum (the spec's, plus granted iterations). */
+  max: number;
+  phase: string;
+  rules: LoopRuleView[];
+  exitReason: string | null;
+  exitAction: string | null;
+  operatorInput: { text: string; forIteration: number } | null;
+  /** Set while the loop is parked for an operator decision. */
+  decision?: LoopDecisionView;
 }
 
 export interface RunView {
@@ -150,6 +200,10 @@ export interface RunView {
   completedAt?: number;
   permissionMode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan';
   stages: StageView[];
+  /** The stages outside any loop, in order: what the timeline, pipeline and header list. */
+  topLevel: StageView[];
+  /** A loop instance's body instances (every iteration and the wrap-up), by the loop's id. */
+  loopBodies: Record<string, StageView[]>;
   /** Optional run-level error. */
   error?: string;
 }

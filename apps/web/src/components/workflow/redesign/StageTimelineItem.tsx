@@ -63,7 +63,7 @@ export interface StageMenuActions {
   onRerunFrom: (id: string) => void;
 }
 
-interface StageTimelineItemProps {
+export interface StageTimelineItemProps {
   stage: StageView;
   focused: boolean;
   defaultOpen?: boolean;
@@ -98,6 +98,14 @@ interface StageTimelineItemProps {
   onSelectOutput?: (id: string) => void;
   /** Open the right inspector pane focused on this stage. */
   onOpenInspector?: (id: string) => void;
+  /** Extra header badges (a loop's `n/max`, rule streaks, "Needs decision"). */
+  headerExtra?: React.ReactNode;
+  /** Replaces the transcript (prompt, stream, review controls): a loop renders its iterations here. */
+  body?: React.ReactNode;
+  /** Rendered above the transcript: a loop body's iteration input, operator and digest turns. */
+  preamble?: React.ReactNode;
+  /** Hide the definition's first prompt (a later iteration's first turn was its follow-up prompt). */
+  hidePrompt?: boolean;
 }
 
 function statusVisual(status: StageStatus) {
@@ -212,6 +220,7 @@ function StageMenu({ stage, menu, onOpenInspector }: { stage: StageView; menu: S
 
 export const StageTimelineItem = React.memo(function StageTimelineItem({
   stage, focused, defaultOpen, autoCollapse = true, openWhenFinished = false, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onResolveGate, gateBusy, menu, composer, onRetry, onSelectFiles, onSelectOutput, onOpenInspector,
+  headerExtra, body, preamble, hidePrompt,
 }: StageTimelineItemProps) {
   const v = statusVisual(stage.status);
   const isActive = stage.status === 'running' || stage.status === 'awaiting_input' || stage.streaming === true;
@@ -322,6 +331,8 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
           {v.label}
         </span>
 
+        {headerExtra}
+
         {/* parallel badge */}
         {(stage.parallelWith?.length ?? 0) > 0 && (
           <span className="hidden shrink-0 items-center gap-0.5 rounded-full bg-cyan-500/10 px-1.5 py-0.5 text-[10px] font-medium text-cyan-400 md:inline-flex">
@@ -381,8 +392,10 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
       {/* Body — indented under the dot with the vertical line continuing */}
       {open && !isSkippedOrCancelled && (
         <div className="pl-[34px] pt-1.5 pb-3 space-y-2.5">
+          {body}
+
           {/* User prompt bubble — right-aligned */}
-          {stage.prompt && (
+          {!body && !hidePrompt && stage.prompt && (
             <div className="flex justify-end">
               <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-[var(--color-primary)]/[0.08] border border-[var(--color-primary)]/20 px-3 py-2">
                 <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-primary)]/80">
@@ -402,7 +415,8 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
               already communicate the state and a shimmer there is
               misleading (the model isn't producing tokens). Usage is NOT
               rendered here — it lives in the chips row below. */}
-          <StreamPanel
+          {!body && preamble}
+          {!body && <StreamPanel
             segments={stage.segments}
             steps={stage.steps}
             answer={stage.answer}
@@ -429,7 +443,7 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
                   },
                 }
               : {})}
-          />
+          />}
 
 
           {/* Chips row — files · output · details (inspector) · usage */}
@@ -485,7 +499,7 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
 
           {/* HITL controls — rendered at the bottom so the reviewer sees the
               stage output above the approval block. */}
-          {isAwaiting && stage.interrupt && (
+          {!body && isAwaiting && stage.interrupt && (
             <InlineHitlControls
               reason={stage.interrupt.reason}
               tool={stage.interrupt.tool}

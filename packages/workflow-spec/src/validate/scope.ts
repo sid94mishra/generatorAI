@@ -18,7 +18,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { checkExpression, type TypeEnv } from '../expr/typecheck.js';
-import { T, isNullable, kindsOf, nullable, typeFromJsonSchema, typeToString, union, withoutNull, type ExprType } from '../expr/types.js';
+import { T, kindsOf, nullable, typeFromJsonSchema, typeToString, union, withoutNull, type ExprType } from '../expr/types.js';
 import { STAGE_RUN_STATES } from '../state/stageRun.js';
 import type { VariableDefinition } from '../schemas/common.js';
 import { CONTAINER_STAGE_KINDS, LOOP_EXIT_ACTIONS, type CheckStage, type LoopStage, type StageSpec } from '../schemas/stage.js';

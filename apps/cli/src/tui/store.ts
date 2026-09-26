@@ -65,6 +65,18 @@ export type OverlayKind =
   | { kind: 'select'; message: string; options: Array<{ value: string; label: string; detail?: string }>; onSelect: (value: string) => void }
   | { kind: 'error'; title: string; message: string; hint?: string }
   /**
+   * P05 — a loop parked on an operator decision: each option has a hotkey
+   * (`g` grant +1, `i` continue with input, `a` accept, `f` fail, …) and the
+   * list also takes ↑↓ + Enter. `onChoose` gets the option's value.
+   */
+  | {
+      kind: 'loopDecision';
+      title: string;
+      message: string;
+      options: Array<{ key: string; value: string; label: string; detail?: string }>;
+      onChoose: (value: string) => void;
+    }
+  /**
    * Phase 7 item 4 — a multi-field form built from a `CommandSpec`'s own
    * args and flags (`cli-core`'s `formFieldsForSpec`). Replaces the chained
    * single-line `input` overlays `runFromPalette` used for required ARGS,

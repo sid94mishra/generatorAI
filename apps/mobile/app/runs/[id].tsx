@@ -21,6 +21,9 @@ import { useApi } from '../../src/api/useApi';
 import { useRunMutations, useRunPermissionMode, type RunAction } from '../../src/api/useRunControl';
 import { useRunStream } from '../../src/stream/useRunStream';
 import { StageGateCard } from '../../src/components/runs/StageGateCard';
+import { LoopDecisionCard } from '../../src/components/runs/LoopDecisionCard';
+import { CheckOutput } from '../../src/components/runs/CheckOutput';
+import { isCheckStage, isParkedLoop, type RunStage } from '../../src/components/runs/loopModel';
 import { formatDuration, relativeTime, runElapsed } from '../../src/components/runs/formatTime';
 import { StageTimeline } from '../../src/components/runs/StageTimeline';
 import { StageTranscriptInline } from '../../src/components/runs/StageTranscriptInline';
@@ -99,7 +102,12 @@ export default function RunDetailScreen(): React.ReactElement {
   const pull = usePullRefresh(() => run.refetch());
 
   const stages = run.data?.stageRuns ?? [];
-  const approvals = useMemo(() => stages.filter((s) => awaitsApproval(s.status)), [stages]);
+  // A parked loop is answered with the loop's own decisions, not an approval.
+  const approvals = useMemo(
+    () => stages.filter((s) => awaitsApproval(s.status) && !isParkedLoop(s as RunStage)),
+    [stages],
+  );
+  const loopDecisions = useMemo(() => stages.filter((s) => isParkedLoop(s as RunStage)) as RunStage[], [stages]);
   const controls = runControlsFor(runStatus ?? '');
 
   const doRunAction = useCallback(
@@ -313,9 +321,18 @@ export default function RunDetailScreen(): React.ReactElement {
           ) : null}
         </Card>
 
-        {approvals.length > 0 ? (
+        {approvals.length + loopDecisions.length > 0 ? (
           <>
             <SectionHeader title="Waiting for you" />
+            {loopDecisions.map((stage) => (
+              <LoopDecisionCard
+                key={stage.id}
+                runId={runId}
+                stage={stage}
+                canControl={runControl.available}
+                onRequestAccess={runControl.requestAccess}
+              />
+            ))}
             {/* A tool permission, question or plan inside a stage's turn is the
                 chat's card; the completion review is the approval card. */}
             {approvals.map((stage) => (
@@ -343,7 +360,10 @@ export default function RunDetailScreen(): React.ReactElement {
             onOpen={openStage}
             expandedId={expandedStageId}
             onToggle={(stage) => setExpanded(expandedStageId === stage.id ? null : stage.id)}
-            renderExpanded={(stage) => (
+            renderExpanded={(stage) =>
+              isCheckStage(stage as RunStage) ? (
+                <CheckOutput stage={stage as RunStage} />
+              ) : (
               <StageTranscriptInline
                 runId={runId}
                 stage={stage}
@@ -351,7 +371,8 @@ export default function RunDetailScreen(): React.ReactElement {
                 connected={connected}
                 onOpenStage={() => openStage(stage)}
               />
-            )}
+              )
+            }
             onAction={(stage, action) => {
               setBusyStage(stage.id);
               stageAction.mutate(

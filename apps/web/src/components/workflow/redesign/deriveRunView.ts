@@ -20,6 +20,7 @@ import type { StreamState, StreamHookInvocation } from '@/stores/streamStore.js'
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import type { RunView, StageView, StageStatus, RunStatus, HookInvocation } from './types.js';
 import { deriveTimeline, deriveAnswer, deriveSegments, widgetBlocks } from '@/components/agent/deriveTimeline.js';
+import { deriveLoopView, parseLoopPath } from './loopView.js';
 
 // ── Status normalizers ────────────────────────────────────────
 
@@ -224,6 +225,8 @@ interface StageViewInputs {
   dependsOn: string;
   shared: boolean;
   vars: Record<string, unknown> | undefined;
+  /** The enclosing loop instance's id (a body instance). */
+  loopId: string | undefined;
 }
 
 export type StageViewCache = Map<string, { inputs: StageViewInputs; view: StageView }>;
@@ -235,7 +238,8 @@ export function createStageViewCache(): StageViewCache {
 function sameInputs(a: StageViewInputs, b: StageViewInputs): boolean {
   return (
     a.sr === b.sr && a.stream === b.stream && a.def === b.def && a.order === b.order && a.depth === b.depth &&
-    a.parallel === b.parallel && a.dependsOn === b.dependsOn && a.shared === b.shared && a.vars === b.vars
+    a.parallel === b.parallel && a.dependsOn === b.dependsOn && a.shared === b.shared && a.vars === b.vars &&
+    a.loopId === b.loopId
   );
 }
 
@@ -282,6 +286,15 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
     stageCountBySession.set(sr.sessionId, (stageCountBySession.get(sr.sessionId) ?? 0) + 1);
   }
 
+  // A body instance names its loop by `scopeId`; an instance the stream
+  // inserted before the poll may only have its path (`<loop>#<k>/<body>`).
+  const idByPath = new Map(run.stageRuns.map((sr) => [sr.instancePath, sr.id]));
+  const loopIdOf = (sr: StageRun): string | undefined => {
+    if (sr.scopeId) return sr.scopeId;
+    const parsed = parseLoopPath(sr.instancePath);
+    return parsed ? idByPath.get(parsed.loopPath) : undefined;
+  };
+
   const seen = new Set<string>();
   const stages: StageView[] = sorted.map((sr, idx) => {
     const def = stageDefByKey.get(sr.stageKey);
@@ -298,6 +311,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
       dependsOn: dependsOn.join(','),
       shared: !!sr.sessionId && (stageCountBySession.get(sr.sessionId) ?? 0) > 1,
       vars: run.variables as Record<string, unknown> | undefined,
+      loopId: loopIdOf(sr),
     };
     seen.add(sr.id);
     const cached = cache?.get(sr.id);
@@ -308,6 +322,17 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
   });
   if (cache) for (const id of [...cache.keys()]) if (!seen.has(id)) cache.delete(id);
 
+  // Loop body instances group under their loop (P05): the timeline lists
+  // the loop once and its iterations inside it. A body whose loop is not in
+  // the run (defensive) stays top level rather than vanishing.
+  const ids = new Set(stages.map((s) => s.id));
+  const topLevel: StageView[] = [];
+  const loopBodies: Record<string, StageView[]> = {};
+  for (const s of stages) {
+    if (s.loopId && ids.has(s.loopId)) (loopBodies[s.loopId] ??= []).push(s);
+    else topLevel.push(s);
+  }
+
   return {
     id: run.id,
     name: run.name,
@@ -316,6 +341,8 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
     ...(run.completedAt ? { completedAt: new Date(run.completedAt).getTime() } : {}),
     permissionMode: permissionMode ?? run.effectivePermissionMode ?? run.permissionMode ?? 'default',
     stages,
+    topLevel,
+    loopBodies,
     error: run.error,
   };
 }
@@ -416,7 +443,27 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     usage: usageFrom(stream),
     contextUsage: stream?.contextUsage ?? undefined,
     sharedContext: inputs.shared,
+    ...loopFields(inputs),
   };
+}
+
+/** The loop fields of a StageView: a loop's badge and rules, a body instance's loop and iteration. */
+function loopFields(inputs: StageViewInputs): Partial<StageView> {
+  const { sr, def } = inputs;
+  const out: Partial<StageView> = { kind: sr.kind };
+  const loop = deriveLoopView(sr, def);
+  if (loop) {
+    out.kind = 'loop';
+    out.loop = loop;
+  }
+  if (inputs.loopId) {
+    out.loopId = inputs.loopId;
+    const parsed = parseLoopPath(sr.instancePath);
+    if (typeof sr.iterationIndex === 'number') out.iterationIndex = sr.iterationIndex;
+    else if (parsed && typeof parsed.iteration === 'number') out.iterationIndex = parsed.iteration;
+    if (parsed?.iteration === 'wrapup') out.wrapUp = true;
+  }
+  return out;
 }
 
 /** Build a subset of the streamStore state limited to stage stream keys.

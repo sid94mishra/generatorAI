@@ -44,6 +44,7 @@ import { dashboardRows, NO_ROWS, useActions, useTui, type DataKey } from './stor
 import { TerminalScreen, useTerminalScreen, type TerminalLine } from './terminalRender.js';
 import { buildWorkspaceTree, type TreeRow } from './workspaceTree.js';
 import type { WorkflowPaneState } from './open.js';
+import { decisionHeadline, hasControlFlow, parkedLoop, stageLines, type LoopStage, type StageLine } from './loopRows.js';
 
 export interface PaneProps {
   paneId: string;
@@ -716,7 +717,19 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
   const run = runs.find((r) => r['id'] === content.entityId);
 
   const items = timeline?.items ?? [];
-  const pending = timeline?.pendingApproval;
+  // Loops and checks (P05): the pane's fetched stage list (`App.tsx`
+  // refreshes it as the run's stage and loop events arrive).
+  const loopStages = ((content.state ?? {}) as { loopStages?: LoopStage[] }).loopStages ?? [];
+  const parked = parkedLoop(loopStages);
+  const lines = hasControlFlow(loopStages) ? stageLines(loopStages) : [];
+  const maxLines = Math.max(3, Math.floor(height / 3));
+  const shownLines = lines.length > maxLines ? lines.slice(0, maxLines - 1) : lines;
+  const hiddenLines = lines.length - shownLines.length;
+  const stageRows = lines.length === 0 ? 0 : shownLines.length + (hiddenLines > 0 ? 1 : 0) + 3;
+  // A parked loop is answered with the loop decisions, never approve/reject:
+  // the generic banner is for any other stage gate.
+  const loopIds = new Set(loopStages.filter((s) => s.kind === 'loop').map((s) => s.id));
+  const pending = timeline?.pendingApproval && !loopIds.has(timeline.pendingApproval.stageId) ? timeline.pendingApproval : null;
   // A tool permission, question or plan inside a stage's turn (P03b).
   const stageGate = timeline?.pendingInteraction ?? null;
 
@@ -742,12 +755,39 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
           <Text color={theme.c('muted')}>a approve {theme.glyphs.neutral} x reject</Text>
         </Box>
       ) : null}
+      {parked?.decision ? (
+        <Box
+          borderStyle={theme.borderStyle}
+          borderColor={theme.c('warning')}
+          paddingX={1}
+          marginBottom={1}
+          flexDirection="column"
+        >
+          <Text bold color={theme.c('warning')}>
+            {theme.glyphs.warning} Loop {parked.name || parked.stageKey} needs a decision
+          </Text>
+          <Text wrap="wrap">
+            {`${decisionHeadline(parked.decision)} · ${parked.decision.iterations}${
+              parked.decision.maxIterations !== null ? `/${parked.decision.maxIterations}` : ''
+            } iterations`}
+          </Text>
+          <Text color={theme.c('muted')}>a decide (grant, input, accept) {theme.glyphs.neutral} x fail</Text>
+        </Box>
+      ) : null}
       {stageGate ? <PendingInteractionBanner pending={stageGate} hint={`a answer ${theme.glyphs.neutral} the stage is waiting for you`} /> : null}
+      {lines.length > 0 ? (
+        <Box borderStyle={theme.borderStyle} borderColor={theme.c('border')} paddingX={1} marginBottom={1} flexDirection="column">
+          {shownLines.map((line) => (
+            <StageLineRow key={line.id} line={line} />
+          ))}
+          {hiddenLines > 0 ? <Text color={theme.c('muted')}>{`… ${hiddenLines} more (s stage detail)`}</Text> : null}
+        </Box>
+      ) : null}
 
       <VirtualList
         items={items}
         selectedIndex={items.length - 1}
-        height={Math.max(1, height - (pending ? 8 : 4) - (stageGate ? 5 : 0))}
+        height={Math.max(1, height - (pending ? 8 : 4) - (stageGate ? 5 : 0) - (parked?.decision ? 5 : 0) - stageRows)}
         emptyMessage="Waiting for events…"
         renderItem={(item) => <TimelineRow item={item} />}
       />
@@ -777,6 +817,31 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
         ) : null}
       </Box>
     </Panel>
+  );
+}
+
+/** One line of the run pane's loop/stage tree: indent, status glyph, name, what it is doing. */
+function StageLineRow({ line }: { line: StageLine }): React.JSX.Element {
+  const theme = useTheme();
+  const color =
+    line.tone === 'default' ? undefined : line.tone === 'muted' ? theme.c('muted') : theme.c(line.tone);
+  const glyph =
+    line.status === 'completed'
+      ? theme.glyphs.success
+      : line.status === 'failed'
+        ? theme.glyphs.failure
+        : line.status === 'awaiting_input' || line.status === 'paused'
+          ? theme.glyphs.warning
+          : line.status === 'running' || line.status === 'starting' || line.status === 'validating'
+            ? theme.glyphs.running
+            : theme.glyphs.neutral;
+  return (
+    <Text wrap="truncate-end">
+      {'  '.repeat(line.depth)}
+      <Text color={color}>{glyph}</Text>
+      {` ${line.label}`}
+      {line.detail ? <Text color={color ?? theme.c('muted')}>{`  ${line.detail}`}</Text> : null}
+    </Text>
   );
 }
 

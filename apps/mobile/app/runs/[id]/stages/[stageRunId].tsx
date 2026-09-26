@@ -28,6 +28,8 @@ import { useAdminApi } from '../../../../src/api/useAdminApi';
 import { useRunMutations, type StageAction } from '../../../../src/api/useRunControl';
 import { useRunStream } from '../../../../src/stream/useRunStream';
 import { ApprovalCard } from '../../../../src/components/runs/ApprovalCard';
+import { LoopDecisionCard } from '../../../../src/components/runs/LoopDecisionCard';
+import { isParkedLoop, type RunStage } from '../../../../src/components/runs/loopModel';
 import { StageComposer } from '../../../../src/components/runs/StageComposer';
 import { stageGateOf } from '../../../../src/components/runs/stageGate';
 import { formatDuration, relativeTime, runElapsed } from '../../../../src/components/runs/formatTime';
@@ -203,7 +205,14 @@ export default function StageScreen(): React.ReactElement {
         ) : null}
       </Card>
 
-      {awaitsApproval(stage.status) && stageGateOf(stage.interruptData).kind === 'review' ? (
+      {isParkedLoop(stage as RunStage) ? (
+        <LoopDecisionCard
+          runId={runId}
+          stage={stage as RunStage}
+          canControl={runControl.available}
+          onRequestAccess={runControl.requestAccess}
+        />
+      ) : awaitsApproval(stage.status) && stageGateOf(stage.interruptData).kind === 'review' ? (
         <ApprovalCard
           stage={stage}
           busy={approve.isPending}

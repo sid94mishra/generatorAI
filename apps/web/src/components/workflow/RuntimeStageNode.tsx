@@ -14,11 +14,14 @@ import {
   SkipForward,
   Clock,
   Loader2,
+  Repeat,
+  Hand,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
 import type { RuntimeStageNodeData } from './RuntimeDAGCanvas.js';
 import type { StageRunStatus } from '@generatorai/shared';
+import { loopBadge, loopExitText, loopRulesText } from './redesign/loopView.js';
 
 /** Color + icon mapping for stage run statuses */
 const statusStyles: Record<StageRunStatus, {
@@ -122,7 +125,7 @@ const statusStyles: Record<StageRunStatus, {
 };
 
 function RuntimeStageNodeComponent({ id, data }: NodeProps<Node<RuntimeStageNodeData>>) {
-  const { stageRun, label, isSelected } = data;
+  const { stageRun, label, isSelected, loop } = data;
   const selectStageRun = useWorkflowRunStore((s) => s.selectStageRun);
 
   const status = stageRun.status;
@@ -185,6 +188,32 @@ function RuntimeStageNodeComponent({ id, data }: NodeProps<Node<RuntimeStageNode
       <div className={cn('mt-1 text-xs font-medium capitalize', style.textColor)}>
         {status.replace(/_/g, ' ')}
       </div>
+
+      {/* Loop (P05): n/max, the rule streaks, a pending decision, the exit */}
+      {loop && (
+        <div className="mt-1.5 space-y-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary)]/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--color-primary)]">
+              <Repeat className="h-2.5 w-2.5" />
+              {loopBadge(loop)}
+            </span>
+            {loop.decision && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-warning)]">
+                <Hand className="h-2.5 w-2.5" />
+                Needs decision
+              </span>
+            )}
+          </div>
+          {loop.rules.length > 0 && status !== 'completed' && status !== 'failed' && (
+            <div className="truncate font-mono text-[10px] text-[var(--color-muted-foreground)]" title={loopRulesText(loop)}>
+              {loopRulesText(loop)}
+            </div>
+          )}
+          {(status === 'completed' || status === 'failed') && loopExitText(loop) && (
+            <div className="truncate text-[10.5px] text-[var(--color-muted-foreground)]">{loopExitText(loop)}</div>
+          )}
+        </div>
+      )}
 
       {/* Error indicator */}
       {stageRun.error && (

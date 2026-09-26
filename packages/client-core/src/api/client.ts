@@ -12,6 +12,7 @@ import type {
   WorkflowDefinitionRecord,
   WorkflowRunState,
 } from '@generatorai/workflow-spec';
+import type { LoopStateView } from '@generatorai/shared';
 
 export interface ApiFetch {
   (path: string, init?: RequestInit): Promise<Response>;
@@ -510,6 +511,14 @@ export interface StageRunSummary {
   amendedAt?: Timestamp | null;
   /** Monotonic CAS version: a poll merges an instance only when it is not older than what the stream applied. */
   version?: number;
+  /** The node kind: agent, check, loop (P05). */
+  kind?: string;
+  /** The enclosing container instance (a loop body stage). */
+  scopeId?: string;
+  /** The iteration of the enclosing loop this instance belongs to. */
+  iterationIndex?: number;
+  /** A loop instance's state (P05 §2.6). */
+  loopState?: LoopStateView;
 }
 
 /** How a stage took an operator message (`POST …/instances/:id/messages`). */

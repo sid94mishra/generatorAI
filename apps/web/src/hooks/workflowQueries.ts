@@ -3,8 +3,10 @@
 // All mutations invalidate relevant query caches automatically
 // ────────────────────────────────────────────────────────────────
 
+import { useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
+import { openMultiplexedStream } from '../platform/muxStream.js';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
 import type { InvocationFiles, WorkflowRunPermissionMode } from '@generatorai/shared';
 import type { InvocationRequest, RunCommand, WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
@@ -18,6 +20,9 @@ export const workflowKeys = {
   runsByDefinition: (defId: string) => ['workflow-runs', 'by-definition', defId] as const,
   run: (id: string) => ['workflow-run', id] as const,
   runWorkspace: (runId: string) => ['run-workspace', runId] as const,
+  /** Every loop's finished iterations of a run (the prefix the loop events invalidate). */
+  loopIterationsOfRun: (runId: string) => ['loop-iterations', runId] as const,
+  loopIterations: (runId: string, instanceId: string) => ['loop-iterations', runId, instanceId] as const,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -242,8 +247,53 @@ export function useRunCommand() {
     onSettled: (_data, _err, { runId }) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
       queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.loopIterationsOfRun(runId) });
     },
   });
+}
+
+// ── Loops (P05) ──────────────────────────────────────────────────
+
+/**
+ * A loop instance's finished iterations (`loop_iterations`): carry, exit
+ * values, streaks, signals, score and checkpoint per iteration. Refetched
+ * by `useLoopEventRefetch` when the run's loop events arrive.
+ */
+export function useLoopIterations(runId: string | undefined, instanceId: string | undefined, opts: { enabled?: boolean } = {}) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: workflowKeys.loopIterations(runId ?? '', instanceId ?? ''),
+    queryFn: () => platform.listLoopIterations(runId!, instanceId!),
+    enabled: !!runId && !!instanceId && (opts.enabled ?? true),
+  });
+}
+
+/** The run-stream events a loop emits (P05 §2.6). */
+const LOOP_EVENT_PREFIXES = ['loop.'] as const;
+
+/**
+ * Keep a run's loops live: on every `loop.*` event (iteration started or
+ * completed, exit, parked, command applied, wrap-up, errors) the run
+ * refetches (the loop instance's `loopState`) and so do the loops'
+ * iteration rows. The stage events already refetch the run themselves.
+ */
+export function useLoopEventRefetch(runId: string | undefined, enabled = true) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!runId || !enabled) return;
+    const handle = openMultiplexedStream(
+      'run',
+      runId,
+      {
+        onMessage: () => {
+          void queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
+          void queryClient.invalidateQueries({ queryKey: workflowKeys.loopIterationsOfRun(runId) });
+        },
+      },
+      LOOP_EVENT_PREFIXES,
+    );
+    return () => { handle.close(); };
+  }, [runId, enabled, queryClient]);
 }
 
 // ── A stage is a compact chat (P03b) ─────────────────────────────

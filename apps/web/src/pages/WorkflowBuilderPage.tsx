@@ -26,6 +26,7 @@ import {
 import type {
   InvocationRequest,
   InvocationResult,
+  StageKind,
   ValidationIssue,
   WorkflowDefinitionRecord,
   WorkflowGraph,
@@ -44,6 +45,7 @@ import {
   usePublishDefinition,
   workflowKeys,
 } from '@/hooks/workflowQueries.js';
+import { useScriptAllowlist } from '@/hooks/scriptQueries.js';
 import { cn } from '@/lib/utils.js';
 import { Badge, Button, Modal, Spinner } from '@/components/ui/index.js';
 import { useResizable } from '@/hooks/useResizable.js';
@@ -125,6 +127,9 @@ export function WorkflowBuilderPage() {
   const createDefinition = useCreateWorkflowDefinition();
   const saveDefinition = useSaveDefinitionGraph();
   const publishDefinition = usePublishDefinition();
+  // Check commands are validated against the server's effective allow-list
+  // (defaults plus the operator's extras), as the server does on save.
+  const { data: scriptAllowlist } = useScriptAllowlist();
 
   // ── Local UI state ──
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true);
@@ -207,6 +212,14 @@ export function WorkflowBuilderPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const commands = scriptAllowlist?.commands;
+    const store = useWorkflowBuilderStore.getState();
+    // An empty list means "not known" (nothing to offer), not "nothing allowed".
+    store.setCommandAllowlist(commands && commands.length > 0 ? commands : null);
+    if (store.nodes.some((n) => n.data.stage.kind === 'check')) store.validate();
+  }, [scriptAllowlist]);
+
   usePageTitle(name || 'Untitled Workflow');
 
   // The shell's close/quit guard needs the same answer the route blocker gives.
@@ -232,8 +245,8 @@ export function WorkflowBuilderPage() {
   }, [blocker]);
 
   // ── Add new stage ──
-  const handleAddStage = useCallback(() => {
-    const key = actions.addStage();
+  const handleAddStage = useCallback((kind?: StageKind) => {
+    const key = actions.addStage(undefined, { kind });
     actions.selectNode(key);
   }, [actions]);
 

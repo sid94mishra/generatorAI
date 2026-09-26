@@ -17,23 +17,35 @@ import {
   type EdgeTypes,
   type OnSelectionChangeParams,
 } from '@xyflow/react';
+import { useShallow } from 'zustand/react/shallow';
 import '@xyflow/react/dist/style.css';
 
 import { StageNode } from './StageNode.js';
 import { StageEdge } from './StageEdge.js';
-import type { EdgeOn } from '@generatorai/workflow-spec';
+import { LoopGroupNode } from './builder/LoopGroupNode.js';
+import { absolutePosition, descendantIds, isContainerStage, nodeDepth, nodeSize } from './builder/containerLayout.js';
+import type { EdgeOn, StageKind } from '@generatorai/workflow-spec';
 import { EDGE_TYPE_ORDER, EDGE_TYPE_COLORS, EDGE_TYPE_LABELS, DEFAULT_EDGE_TYPE } from './edgeTypeStyles.js';
 import { CanvasReadonlyContext } from './canvasContext.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
-import { AlignHorizontalDistributeCenter, Plus, GitBranch } from 'lucide-react';
+import { AlignHorizontalDistributeCenter, Plus, GitBranch, ChevronDown, Bot, Repeat, SquareTerminal, Group, Ungroup } from 'lucide-react';
 import { Tooltip } from '@/components/Tooltip.js';
-import { Button } from '@/components/ui/index.js';
+import {
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  toast,
+} from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import type { Node } from '@xyflow/react';
 
 const nodeTypes = {
   stageNode: StageNode,
+  // Container stages (loops) are group nodes with their body inside (P05).
+  loopNode: LoopGroupNode,
 } as NodeTypes;
 
 const edgeTypes = {
@@ -48,7 +60,8 @@ const defaultEdgeOptions = {
 
 interface DAGCanvasProps {
   readonly?: boolean;
-  onAddStage?: () => void;
+  /** Add a top-level stage of `kind` (agent when omitted). */
+  onAddStage?: (kind?: StageKind) => void;
 }
 
 export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
@@ -66,6 +79,19 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
   const redo = useWorkflowBuilderStore((s) => s.redo);
   const autoLayout = useWorkflowBuilderStore((s) => s.autoLayout);
   const selectedNodeId = useWorkflowBuilderStore((s) => s.selectedNodeId);
+  const wrapInLoop = useWorkflowBuilderStore((s) => s.wrapInLoop);
+  const unwrapLoop = useWorkflowBuilderStore((s) => s.unwrapLoop);
+  const reparentStage = useWorkflowBuilderStore((s) => s.reparentStage);
+  // The multi-selection the selection toolbar acts on (React Flow's `selected`).
+  const selectedKeys = useWorkflowBuilderStore(useShallow((s) => s.nodes.filter((n) => n.selected).map((n) => n.id)));
+  const selectionInfo = useWorkflowBuilderStore(
+    useShallow((s) => {
+      const picked = s.nodes.filter((n) => n.selected);
+      const scopes = new Set(picked.map((n) => n.data.stage.parentKey ?? ''));
+      const only = picked.length === 1 ? picked[0] : undefined;
+      return { sameScope: scopes.size <= 1, loopKey: only && isContainerStage(only.data.stage) ? only.id : null };
+    }),
+  );
 
   const reactFlowInstance = useReactFlow();
   const containerRef = useRef<HTMLDivElement>(null);
@@ -86,6 +112,43 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
     },
     [selectNode, selectEdge],
   );
+
+  // Dropping a stage onto a loop moves it into that loop's body (the
+  // innermost loop under the stage's centre). Leaving a loop is done from
+  // the stage panel: a body stage cannot be dragged out, its loop grows.
+  const onNodeDragStop = useCallback(
+    (_event: React.MouseEvent, dragged: Node) => {
+      const state = useWorkflowBuilderStore.getState();
+      const byId = new Map(state.nodes.map((n) => [n.id, n]));
+      const node = byId.get(dragged.id);
+      if (!node) return;
+      const at = absolutePosition(node.id, byId);
+      const size = nodeSize(node);
+      const cx = at.x + size.width / 2;
+      const cy = at.y + size.height / 2;
+      const excluded = new Set([node.id, ...descendantIds(node.id, state.nodes)]);
+      const target = state.nodes
+        .filter((n) => isContainerStage(n.data.stage) && !excluded.has(n.id))
+        .filter((n) => {
+          const p = absolutePosition(n.id, byId);
+          const s = nodeSize(n);
+          return cx >= p.x && cx <= p.x + s.width && cy >= p.y && cy <= p.y + s.height;
+        })
+        .sort((a, b) => nodeDepth(b.id, byId) - nodeDepth(a.id, byId))[0];
+      if (!target || target.id === node.parentId) return;
+      const dropped = reparentStage(node.id, target.id);
+      toast.success(
+        `Moved '${node.data.stage.name}' into '${target.data.stage.name}'` +
+          (dropped > 0 ? `; ${dropped} edge${dropped === 1 ? '' : 's'} crossing the loop boundary removed` : ''),
+      );
+    },
+    [reparentStage],
+  );
+
+  const handleWrap = useCallback(() => {
+    const result = wrapInLoop(selectedKeys);
+    if ('error' in result) toast.error(result.error);
+  }, [wrapInLoop, selectedKeys]);
 
   // Auto-layout handler — one undo step (D-28); positions are saved with the graph.
   const handleAutoLayout = useCallback(() => {
@@ -177,6 +240,7 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
         onEdgesChange={readonly ? undefined : onEdgesChange}
         onConnect={readonly ? undefined : onConnect}
         onSelectionChange={onSelectionChange}
+        onNodeDragStop={readonly ? undefined : onNodeDragStop}
         nodeTypes={nodeTypes}
         edgeTypes={edgeTypes}
         defaultEdgeOptions={defaultEdgeOptions}
@@ -240,6 +304,47 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
           />
         )}
 
+        {/* Selection toolbar: wrap the selected stages in a loop, or unwrap one */}
+        {!readonly && selectedKeys.length > 0 && (
+          <Panel position="top-center">
+            <div className="flex items-center gap-1.5 rounded-lg border border-[var(--color-border)] bg-[var(--color-card)] px-2 py-1 text-xs text-[var(--color-muted-foreground)] shadow-sm">
+              <span className="px-1">{selectedKeys.length} selected</span>
+              <Tooltip
+                content={
+                  selectionInfo.sameScope
+                    ? 'Repeat the selected stages in a new loop'
+                    : 'Select stages of one scope (all top level, or all in one loop)'
+                }
+                side="bottom"
+              >
+                <span>
+                  <Button
+                    onClick={handleWrap}
+                    disabled={!selectionInfo.sameScope}
+                    variant="ghost"
+                    size="sm"
+                    leftIcon={<Group className="h-3.5 w-3.5" />}
+                    className="h-7 px-2 text-xs"
+                  >
+                    Wrap in loop
+                  </Button>
+                </span>
+              </Tooltip>
+              {selectionInfo.loopKey && (
+                <Button
+                  onClick={() => unwrapLoop(selectionInfo.loopKey!)}
+                  variant="ghost"
+                  size="sm"
+                  leftIcon={<Ungroup className="h-3.5 w-3.5" />}
+                  className="h-7 px-2 text-xs"
+                >
+                  Unwrap
+                </Button>
+              )}
+            </div>
+          </Panel>
+        )}
+
         {/* Auto-layout button */}
         {!readonly && (
           <Panel position="top-right">
@@ -257,28 +362,60 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
           </Panel>
         )}
 
-        {/* Add Stage button — bottom-center, no overlap with controls */}
+        {/* Add Stage button — bottom-center, no overlap with controls. The
+            chevron offers the other kinds (check, loop). */}
         {!readonly && onAddStage && (
           <Panel position="bottom-center">
-            <Button
-              onClick={onAddStage}
-              variant="ghost"
-              size="sm"
+            <div
               className={cn(
-                'h-auto mb-3 flex items-center gap-2 rounded-full',
-                'px-5 py-2.5 text-sm font-medium',
+                'mb-3 flex items-center rounded-full',
                 'bg-[var(--color-primary)] text-[var(--color-primary-foreground)]',
                 'shadow-[0_4px_14px_rgba(79,70,229,0.25)]',
                 'transition-all duration-200 ease-out',
-                'hover:bg-[var(--color-primary)] hover:shadow-[0_8px_25px_rgba(79,70,229,0.35)] hover:scale-[1.03]',
-                'active:scale-[0.97]',
-                'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2',
+                'hover:shadow-[0_8px_25px_rgba(79,70,229,0.35)]',
               )}
-              title="Add new stage"
             >
-              <Plus className="h-4 w-4" />
-              Add Stage
-            </Button>
+              <Button
+                onClick={() => onAddStage()}
+                variant="ghost"
+                size="sm"
+                className={cn(
+                  'h-auto flex items-center gap-2 rounded-l-full rounded-r-none',
+                  'py-2.5 pl-5 pr-3 text-sm font-medium',
+                  'bg-transparent text-[var(--color-primary-foreground)]',
+                  'hover:bg-white/10 hover:text-[var(--color-primary-foreground)] active:scale-[0.97]',
+                  'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)] focus-visible:ring-offset-2',
+                )}
+                title="Add new stage"
+              >
+                <Plus className="h-4 w-4" />
+                Add Stage
+              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    aria-label="Add a stage of another kind"
+                    title="Add a check or a loop"
+                    className="h-auto rounded-l-none rounded-r-full border-l border-white/20 bg-transparent py-2.5 pl-2 pr-3 text-[var(--color-primary-foreground)] hover:bg-white/10 hover:text-[var(--color-primary-foreground)]"
+                  >
+                    <ChevronDown className="h-4 w-4" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent side="top" align="center">
+                  <DropdownMenuItem onSelect={() => onAddStage('agent')}>
+                    <Bot className="h-3.5 w-3.5" /> Agent stage
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onAddStage('check')}>
+                    <SquareTerminal className="h-3.5 w-3.5" /> Check (runs a command)
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onSelect={() => onAddStage('loop')}>
+                    <Repeat className="h-3.5 w-3.5" /> Loop
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
           </Panel>
         )}
 
@@ -297,7 +434,7 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
               </p>
               {onAddStage && (
                 <Button
-                  onClick={onAddStage}
+                  onClick={() => onAddStage()}
                   variant="ghost"
                   size="sm"
                   className="h-auto mt-4 inline-flex items-center gap-1.5 rounded-lg bg-[var(--color-primary)] px-4 py-2 text-sm font-medium text-[var(--color-primary-foreground)] shadow-sm transition-all hover:bg-[var(--color-primary)] hover:shadow-md active:scale-[0.97]"

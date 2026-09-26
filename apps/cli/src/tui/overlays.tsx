@@ -8,7 +8,7 @@
 // Close-key rule (one rule, every overlay):
 //   • Escape closes every overlay.
 //   • `q` ALSO closes an overlay that has no text input — help, validation,
-//     blocked-work queue, stage detail. It never closes one that is typing
+//     blocked-work queue, stage detail, loop decision. It never closes one that is typing
 //     into a field (palette, tab navigator, input, form), where `q` is a
 //     letter the user meant to type. `ErrorOverlay` dismisses on any key.
 // `overlays.closeKeys.test.tsx` pins this; add a new overlay to that table.
@@ -151,7 +151,72 @@ export function OverlayHost({ registry, keymap, implemented, onRunCommand }: Ove
 
     case 'stageDetail':
       return <StageDetailOverlay overlay={overlay} onClose={actions.closeOverlay} />;
+
+    case 'loopDecision':
+      return (
+        <LoopDecisionOverlay
+          overlay={overlay}
+          onChoose={(value) => {
+            actions.closeOverlay();
+            overlay.onChoose(value);
+          }}
+          onClose={actions.closeOverlay}
+        />
+      );
   }
+}
+
+// ── Loop decision (P05) ───────────────────────────────────────────
+//
+// A parked loop's decisions as one list: a hotkey per option (the footer and
+// each row say which), or ↑↓ + Enter. No text field, so `q` closes it too.
+
+function LoopDecisionOverlay({
+  overlay,
+  onChoose,
+  onClose,
+}: {
+  overlay: Extract<OverlayKind, { kind: 'loopDecision' }>;
+  onChoose: (value: string) => void;
+  onClose: () => void;
+}): React.JSX.Element {
+  const theme = useTheme();
+  const selection = useSelection(overlay.options.length);
+
+  useKeys((input, key) => {
+    if (key.escape || input === 'q') return onClose();
+    if (key.upArrow) return selection.move(-1);
+    if (key.downArrow) return selection.move(1);
+    if (key.return) {
+      const option = overlay.options[selection.index];
+      if (option) onChoose(option.value);
+      return;
+    }
+    if (!input || key.ctrl || key.meta) return;
+    const option = overlay.options.find((o) => o.key !== '' && o.key === input);
+    if (option) onChoose(option.value);
+  });
+
+  return (
+    <Overlay title={overlay.title} footer={`hotkey or ↑↓ + ${prettyChord('return')} · q / Esc close`}>
+      <Box marginBottom={1}>
+        <Text color={theme.c('warning')} wrap="wrap">
+          {overlay.message}
+        </Text>
+      </Box>
+      {overlay.options.map((option, index) => {
+        const selected = index === selection.index;
+        return (
+          <Text key={option.value} color={selected ? theme.c('primary') : undefined} wrap="truncate-end">
+            {selected ? theme.glyphs.arrowRight : ' '}
+            <Text bold>{` ${(option.key || ' ').padEnd(2)}`}</Text>
+            {option.label}
+            {option.detail ? <Text color={theme.c('muted')}>{`  ${option.detail}`}</Text> : null}
+          </Text>
+        );
+      })}
+    </Overlay>
+  );
 }
 
 // ── Schema-driven form (Phase 7 item 4) ────────────────────────────

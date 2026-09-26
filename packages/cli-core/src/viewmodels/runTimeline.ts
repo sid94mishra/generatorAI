@@ -474,6 +474,8 @@ export function reduceEvent(
     }
 
     case 'stage_run.input_received':
+    // A loop decision (P05) answers the loop's parked card: no stage_run.input_received follows.
+    case 'loop.command_applied':
       return { ...base, pendingApproval: null };
 
     // The stage conversation (P03b): what an operator sent, a stopped turn,

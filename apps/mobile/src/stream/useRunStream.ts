@@ -18,8 +18,8 @@ import { queryKeys, type MuxStreamEvent } from '@generatorai/client-core';
 
 import { useMuxStream } from './MuxStreamProvider';
 
-/** Kind prefixes that change what the run screens show. */
-export const RUN_SCOPE_FILTER: readonly string[] = ['workflow_run.', 'stage_run.', 'chat.', 'message.'];
+/** Kind prefixes that change what the run screens show (`loop.*`: iterations, parks, applied decisions). */
+export const RUN_SCOPE_FILTER: readonly string[] = ['workflow_run.', 'stage_run.', 'loop.', 'chat.', 'message.'];
 
 /** Coalescing window for bursts of step events. */
 const FLUSH_MS = 400;

@@ -18,6 +18,7 @@ import { cn } from '@/lib/utils.js';
 import { Spinner } from '@/components/ui/index.js';
 import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
 import type { StageRun } from '@generatorai/shared';
+import { iterationSuffix } from './redesign/loopView.js';
 
 // ── Status icon mapping ──
 
@@ -110,15 +111,18 @@ function buildTimeline(run: { status: string; createdAt: Date; startedAt?: Date;
     });
   }
 
-  // Stage events
+  // Stage events (a loop body instance names its iteration)
   for (const sr of run.stageRuns) {
+    const name = `${sr.name}${iterationSuffix(sr)}`;
+    const noun = sr.kind === 'loop' ? 'Loop' : 'Stage';
+    const exit = sr.kind === 'loop' && sr.loopState?.exitReason ? ` (${sr.loopState.exitReason})` : '';
     if (sr.startedAt) {
       entries.push({
         id: `stage-started-${sr.id}`,
         timestamp: new Date(sr.startedAt),
         type: 'stage',
         status: 'running',
-        label: `Stage "${sr.name}" started`,
+        label: `${noun} "${name}" started`,
         stageRunId: sr.id,
       });
     }
@@ -130,7 +134,7 @@ function buildTimeline(run: { status: string; createdAt: Date; startedAt?: Date;
         timestamp: new Date(sr.completedAt),
         type: 'stage',
         status: sr.status,
-        label: `Stage "${sr.name}" ${sr.status}`,
+        label: `${noun} "${name}" ${sr.status}${exit}`,
         detail: sr.error ?? undefined,
         duration,
         stageRunId: sr.id,

@@ -74,6 +74,14 @@ import {
 import { createCommandRunner, type CommandRunner } from './commandRunner.js';
 import { findOpenPane, openEntity, openerFor, workflowPaneContent, type WorkflowPaneState } from './open.js';
 import { buildWorkspaceTree, collapseTargetFor, type TreeRow } from './workspaceTree.js';
+import {
+  decisionHeadline,
+  loopDecisionOptions,
+  parkedLoop,
+  parseBudget,
+  toLoopStages,
+  type LoopStage,
+} from './loopRows.js';
 import { anchorFor, firstAnchorableLine, moveLineCursor, scrollToShow } from './diffCursor.js';
 import { parseComposerInput, queueAttachment } from './composerInput.js';
 import { findTerminalMatch, renderTerminalText } from './terminalRender.js';
@@ -626,6 +634,63 @@ export function App({
     () => createCommandRunner({ registry, makeContext, actions }),
     [registry, makeContext, actions],
   );
+
+  // ── Loops in the focused run pane (P05) ─────────────────────────
+  //
+  // The run pane's loop/stage tree and its decision banner read the run's
+  // stage list, kept (trimmed) in the pane's state. It is re-fetched when
+  // the pane's stage-level events move — a stage started/finished, a gate
+  // opened, the run's status changed — not on every streamed token.
+  const refreshRunStages = useCallback(
+    async (paneId: string, runId: string): Promise<LoopStage[] | null> => {
+      const stages = await withTimeout(api.runs.stages(runId), 8000).catch(() => null);
+      if (!stages) return null;
+      const loopStages = toLoopStages(stages as unknown[]);
+      const pane = getStoreApi()
+        .getState()
+        .workbench.tabs.flatMap((t) => paneLeaves(t.root))
+        .find((leaf) => leaf.id === paneId);
+      if (!pane || pane.content.kind !== 'run' || pane.content.entityId !== runId) return loopStages;
+      const prior = (pane.content.state ?? {}) as { loopStages?: LoopStage[] };
+      if (JSON.stringify(prior.loopStages ?? []) !== JSON.stringify(loopStages)) {
+        actions.patchPane(paneId, { state: { ...(pane.content.state ?? {}), loopStages } });
+      }
+      // The timeline reducer clears a gate only on `stage_run.input_received`,
+      // which a loop decision never emits: once the loop has moved on, clear
+      // its stale gate so the pane stops counting as blocked.
+      const gate = getStoreApi().getState().timelines[paneId]?.pendingApproval;
+      const gated = gate ? loopStages.find((st) => st.id === gate.stageId && st.kind === 'loop') : undefined;
+      if (gated && gated.status !== 'awaiting_input') {
+        actions.applyEvents(paneId, [{ kind: 'stage_run.input_received', data: { stageRunId: gated.id } }]);
+      }
+      return loopStages;
+    },
+    [api, actions],
+  );
+
+  const runStageSignal = useTui((s) => {
+    if (content?.kind !== 'run' || !focusedPane || !content.entityId) return '';
+    const tl = s.timelines[focusedPane.id];
+    let marks = '';
+    const items = tl?.items ?? [];
+    // The newest stage-level items only: a bounded scan, run on every store update.
+    for (let i = items.length - 1, seen = 0; i >= 0 && seen < 6; i--) {
+      const item = items[i];
+      if (!item || (item.kind !== 'stage' && item.kind !== 'notice' && item.kind !== 'error')) continue;
+      marks += `${item.id}${item.complete ? '+' : '-'};`;
+      seen++;
+    }
+    return `${focusedPane.id}|${content.entityId}|${tl?.runStatus ?? ''}|${tl?.pendingApproval?.stageId ?? ''}|${marks}`;
+  });
+
+  useEffect(() => {
+    if (!runStageSignal || !focusedPane || !content?.entityId) return;
+    const paneId = focusedPane.id;
+    const runId = content.entityId;
+    const timer = setTimeout(() => void refreshRunStages(paneId, runId), 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runStageSignal]);
 
   // ── Data loading ────────────────────────────────────────────────
   const neededKeys = useMemo<DataKey[]>(
@@ -3222,6 +3287,14 @@ export function App({
   }
 
   function approveGate(approve: boolean): void {
+    // A parked loop (P05) is answered with the loop decisions: `a` opens
+    // them, `x` fails the loop after a confirm.
+    const loop = parkedLoop(((content?.state ?? {}) as { loopStages?: LoopStage[] }).loopStages ?? []);
+    if (loop?.decision && content?.kind === 'run' && content.entityId) {
+      if (approve) decideLoop(content.entityId, loop);
+      else confirmFailLoop(content.entityId, loop);
+      return;
+    }
     // A tool permission, question or plan review inside a stage's turn is a
     // chat-shaped gate (P03b): the same overlays as a chat's answer it.
     const stageGate = getStoreApi().getState().timelines[focusedPane?.id ?? '']?.pendingInteraction;
@@ -3237,6 +3310,75 @@ export function App({
     void runner.run(approve ? 'run.hitl.approve' : 'run.hitl.reject', {
       run: content.entityId,
       stage: pending.stageId,
+    });
+  }
+
+  /** Sends one loop decision as a run command, then re-reads the run's stages. */
+  function sendLoopCommand(runId: string, loop: LoopStage, command: string, fields?: Record<string, unknown>): void {
+    const paneId = focusedPane?.id ?? '';
+    void runner
+      .run('run.command', { run: runId, instance: loop.id, command }, fields ? { json: JSON.stringify(fields) } : {})
+      .then(() => (paneId ? refreshRunStages(paneId, runId) : null));
+  }
+
+  function confirmFailLoop(runId: string, loop: LoopStage): void {
+    actions.showOverlay({
+      kind: 'confirm',
+      title: `Fail loop ${loop.name || loop.stageKey}?`,
+      message: 'The loop fails and every stage after it is blocked. This cannot be undone.',
+      danger: true,
+      onAnswer: (yes) => {
+        if (yes) sendLoopCommand(runId, loop, 'fail');
+      },
+    });
+  }
+
+  /** The decision overlay for a parked loop: grant, continue with input, accept, accept iteration k, raise budget, fail. */
+  function decideLoop(runId: string, loop: LoopStage): void {
+    const decision = loop.decision;
+    if (!decision) return;
+    const name = loop.name || loop.stageKey;
+    actions.showOverlay({
+      kind: 'loopDecision',
+      title: `Loop ${name} needs a decision`,
+      message: `${decisionHeadline(decision)} · ${decision.iterations}${
+        decision.maxIterations !== null ? `/${decision.maxIterations}` : ''
+      } iterations finished`,
+      options: loopDecisionOptions(decision),
+      onChoose: (value) => {
+        if (value.startsWith('grant:')) {
+          sendLoopCommand(runId, loop, 'grant_iterations', { n: Number(value.slice('grant:'.length)) });
+        } else if (value === 'accept') {
+          sendLoopCommand(runId, loop, 'accept');
+        } else if (value.startsWith('accept_iteration:')) {
+          sendLoopCommand(runId, loop, 'accept_iteration', { k: Number(value.slice('accept_iteration:'.length)) });
+        } else if (value === 'fail') {
+          confirmFailLoop(runId, loop);
+        } else if (value === 'input') {
+          actions.showOverlay({
+            kind: 'input',
+            message: `Message for the next iteration of ${name}`,
+            initial: '',
+            onSubmit: (text) => {
+              if (text.trim()) sendLoopCommand(runId, loop, 'continue_with_input', { text: text.trim() });
+            },
+          });
+        } else if (value === 'budget') {
+          actions.showOverlay({
+            kind: 'input',
+            message: 'Add to the budget (turns=20 cost=2.5 tokens=200000 minutes=30)',
+            initial: '',
+            onSubmit: (text) => {
+              const fields = parseBudget(text);
+              if (!fields) {
+                actions.toast('Nothing to raise: use turns=, cost=, tokens= or minutes= with a positive number.', 'warning');
+                return;
+              }
+              sendLoopCommand(runId, loop, 'raise_budget', fields);
+            },
+          });
+        }
+      },
     });
   }
 

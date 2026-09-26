@@ -6,7 +6,7 @@
 import React, { memo, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { Node } from '@xyflow/react';
-import { Box, Play, Pause, Check, X, AlertTriangle, AlertCircle, SkipForward, Clock, Copy, Trash2, Cpu, Sparkles, Server, ShieldCheck, Bot, Filter, UserCheck } from 'lucide-react';
+import { Box, Play, Pause, Check, X, AlertTriangle, AlertCircle, SkipForward, Clock, Copy, Trash2, Cpu, Sparkles, Server, ShieldCheck, Bot, Filter, UserCheck, SquareTerminal, MessagesSquare } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { Button } from '@/components/ui/index.js';
@@ -98,6 +98,9 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
 
   // Agent-only fields; a check stage shows its command instead (P05).
   const agent = stage.kind === 'agent' ? stage : undefined;
+  const check = stage.kind === 'check' ? stage.check : undefined;
+  // A body agent of a loop: does it continue one conversation across iterations?
+  const inLoop = agent !== undefined && stage.parentKey !== undefined;
   const retry = stage.kind === 'loop' ? undefined : stage.retry;
   const promptCount = agent?.prompts.length ?? 0;
 
@@ -168,6 +171,8 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
           )}>
             {statusStyle ? (
               statusStyle.icon
+            ) : check ? (
+              <SquareTerminal className="h-4 w-4 text-[var(--color-primary)]" />
             ) : (
               <Box className="h-4 w-4 text-[var(--color-primary)]" />
             )}
@@ -223,9 +228,33 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             </span>
           </Tooltip>
         )}
-        <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5">
-          {promptCount} prompt{promptCount !== 1 ? 's' : ''}
-        </span>
+        {check ? (
+          <Tooltip content={`Check: ${[check.command, ...check.args].join(' ')}`} side="top">
+            <span className="inline-flex max-w-[180px] items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 font-mono cursor-help">
+              <SquareTerminal className="h-3 w-3 shrink-0" />
+              <span className="truncate">{check.command}</span>
+            </span>
+          </Tooltip>
+        ) : agent ? (
+          <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5">
+            {promptCount} prompt{promptCount !== 1 ? 's' : ''}
+          </span>
+        ) : null}
+        {inLoop && agent && (
+          <Tooltip
+            content={
+              agent.sessionReuse === 'continue'
+                ? `Continues one conversation across iterations${agent.compactAfter ? `, compacted every ${agent.compactAfter}` : ''}`
+                : 'Starts a fresh conversation each iteration'
+            }
+            side="top"
+          >
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <MessagesSquare className="h-3 w-3" />
+              {agent.sessionReuse}
+            </span>
+          </Tooltip>
+        )}
         {agentRef && (
           <Tooltip content={`Driven by agent: ${agentRef}`} side="top">
             <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">

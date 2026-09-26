@@ -21,7 +21,10 @@ import {
   WORKFLOW_FORMAT_VERSION,
   validateWorkflow,
   type AgentStage,
+  type CheckStage,
   type DefinitionStatus,
+  type LoopStage,
+  type StageKind,
   type StageSpec,
   type EdgeSpec,
   type ValidationIssue,
@@ -29,8 +32,21 @@ import {
   type WorkflowGraph,
   type WorkflowSpec,
 } from '@generatorai/workflow-spec';
-import { getLayoutedElements } from '@/utils/dagLayout.js';
 import { globalSingleton } from '../lib/globalSingleton.js';
+import {
+  GROUP_HEADER,
+  GROUP_PAD,
+  absolutePosition,
+  canvasNodesFromStages,
+  descendantIds,
+  fitContainers,
+  isContainerStage,
+  layoutScoped,
+  nodeSize,
+  orderParentsFirst,
+  parentAttrs,
+  withParent,
+} from '@/components/workflow/builder/containerLayout.js';
 
 // ── Types ──
 
@@ -115,13 +131,37 @@ interface WorkflowBuilderState {
   autoLayout: () => void;
 
   // ── Actions: Stages ──
-  /** Add a stage with a generated name and key; returns the key. */
-  addStage: (name?: string) => string;
+  /**
+   * Add a stage with a generated name and key; returns the key. `kind`
+   * defaults to agent; a new loop gets one agent stage in its body (a
+   * container without a body is invalid). `parentKey` adds it inside that
+   * container.
+   */
+  addStage: (name?: string, opts?: { kind?: StageKind; parentKey?: string }) => string;
   updateStage: (key: string, updates: StageUpdate) => void;
   /** Rename a stage key, updating its edges and context sources. Returns an error message or null. */
   renameStageKey: (key: string, nextKey: string) => string | null;
+  /** Remove a stage; a container goes with its whole body. */
   removeStage: (key: string) => void;
+  /** Copy a stage under a new key; a container is copied with its body and the edges inside it. */
   duplicateStage: (key: string) => void;
+
+  // ── Actions: Containers (P05 loops) ──
+  /**
+   * Put stages of one scope into a new loop. Edges between a wrapped and
+   * an unwrapped stage move to the loop (one per pair), since an edge never
+   * crosses a scope. Returns the loop key, or an error message when the
+   * stages cannot be wrapped.
+   */
+  wrapInLoop: (keys: readonly string[]) => { key: string } | { error: string };
+  /** Remove a loop and move its body to the loop's own scope, rewiring its edges to the body's roots and leaves. */
+  unwrapLoop: (key: string) => void;
+  /**
+   * Move a stage into a container (or to the top level with `undefined`),
+   * keeping its canvas position. Its edges to stages of another scope are
+   * removed; returns how many.
+   */
+  reparentStage: (key: string, parentKey: string | undefined) => number;
 
   // ── Actions: Edges ──
   removeEdge: (edgeId: string) => void;
@@ -139,6 +179,13 @@ interface WorkflowBuilderState {
   setPostProcessing: (flag: 'autoCommit' | 'autoPush' | 'autoCreatePR', value: boolean) => void;
 
   // ── Actions: State ──
+  /**
+   * The server's effective command allow-list (defaults plus the operator's
+   * extras), used to validate check commands like the server does. `null`
+   * validates against the spec's default list.
+   */
+  commandAllowlist: readonly string[] | null;
+  setCommandAllowlist: (commands: readonly string[] | null) => void;
   markDirty: () => void;
   markSaving: (saving: boolean) => void;
   /** Locate issues (from the client validator or a 422) against `graph`, the document they describe. */
@@ -201,6 +248,34 @@ export function newAgentStage(key: string, name: string): AgentStage {
 }
 
 /**
+ * A new check stage in parsed form. The command is a placeholder from the
+ * default allow-list; the panel's picker offers the server's list.
+ */
+export function newCheckStage(key: string, name: string): CheckStage {
+  return {
+    kind: 'check',
+    key,
+    name,
+    join: { mode: 'all' },
+    check: { command: 'npm', args: ['test'], timeoutMs: 600_000, parseJson: false, failOnNonZero: false, tailBytes: 16_384 },
+  };
+}
+
+/**
+ * A new loop stage in parsed form. No exit rules: that is a warning (it
+ * runs to maxIterations), where a placeholder rule would be an error.
+ */
+export function newLoopStage(key: string, name: string): LoopStage {
+  return {
+    kind: 'loop',
+    key,
+    name,
+    join: { mode: 'all' },
+    loop: { maxIterations: 3, exits: [], onLimit: { mode: 'pause' }, onBodyFailure: 'fail', output: {} },
+  };
+}
+
+/**
  * The stage key for a display name: lower snake case, starting with a
  * letter, at most 48 characters, deduplicated against `taken` with `_2`,
  * `_3`, … (the suffix is kept inside the length limit).
@@ -229,13 +304,43 @@ function patch<T extends object>(target: T, updates: Partial<T>): T {
   return next as T;
 }
 
-function stageToNode(stage: StageSpec, position: { x: number; y: number }): Node<StageNodeData> {
+function stageToNode(stage: StageSpec, position: { x: number; y: number }, parentId?: string): Node<StageNodeData> {
   return {
     id: stage.key,
-    type: 'stageNode',
+    // A container renders as a group node with its body inside (P05).
+    type: isContainerStage(stage) ? 'loopNode' : 'stageNode',
     position,
     data: { stage, label: stage.name },
+    ...parentAttrs(parentId),
   };
+}
+
+/** A stage with its container set (`undefined` removes `parentKey`). */
+function withParentKey(stage: StageSpec, parentKey: string | undefined): StageSpec {
+  const next = { ...stage } as StageSpec;
+  if (parentKey) next.parentKey = parentKey;
+  else delete next.parentKey;
+  return next;
+}
+
+/** Scope of a stage: its container key, '' at the top level. */
+function scopeOf(stage: StageSpec): string {
+  return stage.parentKey ?? '';
+}
+
+/**
+ * Where a new node goes: below the last body stage of a container, or on
+ * the next free slot of the top-level grid.
+ */
+function nextPosition(nodes: readonly Node<StageNodeData>[], parentKey: string | undefined): { x: number; y: number } {
+  if (parentKey) {
+    const body = nodes.filter((n) => n.parentId === parentKey);
+    if (body.length === 0) return { x: GROUP_PAD, y: GROUP_HEADER };
+    const bottom = Math.max(...body.map((n) => n.position.y + nodeSize(n).height));
+    return { x: Math.min(...body.map((n) => n.position.x)), y: bottom + 40 };
+  }
+  const top = nodes.filter((n) => !n.parentId);
+  return { x: (top.length % 4) * 320 + 50, y: Math.floor(top.length / 4) * 150 + 50 };
 }
 
 function edgeToFlowEdge(edge: EdgeSpec): Edge<StageEdgeData> {
@@ -282,13 +387,15 @@ function detectCycles(nodes: Node[], edges: Edge[]): boolean {
   return visited !== nodes.length;
 }
 
-/** Nodes and edges for a graph: stored positions when every stage has one, dagre otherwise. */
+/**
+ * Nodes and edges for a graph: stored positions when every stage has one,
+ * a per-scope dagre layout otherwise. Body stages become child nodes of
+ * their container (stored positions are absolute; see containerLayout).
+ */
 function canvasFromGraph(graph: WorkflowGraph): { nodes: Node<StageNodeData>[]; edges: Edge<StageEdgeData>[] } {
-  const rawNodes = graph.stages.map((stage, i) => stageToNode(stage, stage.position ?? { x: i * 320, y: 100 }));
-  const rawEdges = graph.edges.map(edgeToFlowEdge);
-  const allPositioned = graph.stages.every((s) => s.position !== undefined);
-  if (allPositioned || rawNodes.length === 0) return { nodes: rawNodes, edges: rawEdges };
-  return getLayoutedElements(rawNodes, rawEdges, 'LR');
+  const edges = graph.edges.map(edgeToFlowEdge);
+  const nodes = canvasNodesFromStages(graph.stages, stageToNode, edges);
+  return { nodes, edges };
 }
 
 /** Locate raw issues against the graph they were computed for. */
@@ -337,6 +444,7 @@ function blankState() {
     isSaving: false,
     issues: [] as BuilderIssue[],
     lastSavedAt: null,
+    commandAllowlist: null as readonly string[] | null,
     // Seed the empty canvas as entry 0. Without it `historyIndex` starts at
     // -1, the first add lands at index 0, and `canUndo()` (index > 0) stays
     // false — so the very first stage you add to a NEW workflow could never
@@ -375,7 +483,8 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   },
 
   resetBuilder: () => {
-    set(blankState());
+    // The allow-list is server configuration, not part of a workflow.
+    set({ ...blankState(), commandAllowlist: get().commandAllowlist });
     coalesceKey = null;
   },
 
@@ -396,13 +505,16 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   // ── Document ──
   toGraph: () => {
     const { workflow, nodes, edges } = get();
+    // Body nodes hold positions relative to their container; the document
+    // stores canvas (absolute) positions.
+    const byId = new Map(nodes.map((n) => [n.id, n]));
     return {
       formatVersion: WORKFLOW_FORMAT_VERSION,
       workflow,
-      stages: nodes.map((n) => ({
-        ...n.data.stage,
-        position: { x: Math.round(n.position.x), y: Math.round(n.position.y) },
-      })),
+      stages: nodes.map((n) => {
+        const at = absolutePosition(n.id, byId);
+        return { ...n.data.stage, position: { x: Math.round(at.x), y: Math.round(at.y) } };
+      }),
       edges: edges.flatMap((e) => (e.data ? [e.data.edge] : [])),
     };
   },
@@ -415,15 +527,21 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     const hasMeaningfulChange = changes.some(
       (c) => c.type !== 'dimensions' && c.type !== 'select',
     );
-    set((state) => ({
-      nodes: applyNodeChanges(changes, state.nodes),
-      ...(hasMeaningfulChange ? { isDirty: true } : {}),
-    }));
+    const dragEnded = changes.some((c) => c.type === 'position' && c.dragging === false);
+    set((state) => {
+      const nodes = applyNodeChanges(changes, state.nodes);
+      return {
+        // A drag that settles re-fits the containers around their bodies
+        // (they only grow while dragging).
+        nodes: dragEnded ? fitContainers(nodes) : nodes,
+        ...(hasMeaningfulChange ? { isDirty: true } : {}),
+      };
+    });
     // Record the layout once the drag settles (React Flow reports
     // `dragging: false` on the final position change). Snapshotting every
     // intermediate frame would blow the history budget, and snapshotting
     // none of them meant a redo silently reverted the layout.
-    if (changes.some((c) => c.type === 'position' && c.dragging === false)) {
+    if (dragEnded) {
       get().pushHistory();
     }
   },
@@ -447,8 +565,12 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     if (state.edges.some((e) => e.id === id)) return;
     // Both ends must be stages that still exist: a stale handle from a
     // deleted node must never produce an edge to nowhere.
-    const keys = new Set(state.nodes.map((n) => n.id));
-    if (!keys.has(connection.source) || !keys.has(connection.target)) return;
+    const source = state.nodes.find((n) => n.id === connection.source);
+    const target = state.nodes.find((n) => n.id === connection.target);
+    if (!source || !target) return;
+    // An edge never crosses a scope (edge-crosses-scope): body stages connect
+    // to each other, outer stages to the loop node itself.
+    if (scopeOf(source.data.stage) !== scopeOf(target.data.stage)) return;
 
     const newEdge = edgeToFlowEdge({ from: connection.source, to: connection.target, on: 'success' });
     if (detectCycles(state.nodes, [...state.edges, newEdge])) return;
@@ -460,28 +582,40 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   autoLayout: () => {
     const { nodes, edges } = get();
     if (nodes.length === 0) return;
-    const layouted = getLayoutedElements(nodes, edges, 'LR');
-    set({ nodes: layouted.nodes, edges: layouted.edges, isDirty: true });
+    set({ nodes: layoutScoped(nodes, edges), isDirty: true });
     get().pushHistory();
   },
 
   // ── Stages ──
-  addStage: (name) => {
+  addStage: (name, opts) => {
     const state = get();
+    const kind = opts?.kind ?? 'agent';
+    const parent = opts?.parentKey ? state.nodes.find((n) => n.id === opts.parentKey) : undefined;
+    const parentKey = parent && isContainerStage(parent.data.stage) ? parent.id : undefined;
     const names = new Set(state.nodes.map((n) => n.data.stage.name));
-    let stageName = name;
-    if (!stageName) {
-      // Next unused "Stage N": after a delete, `Stage ${count + 1}` repeated an existing name.
-      let n = state.nodes.length + 1;
-      while (names.has(`Stage ${n}`)) n++;
-      stageName = `Stage ${n}`;
+    const taken = new Set(state.nodes.map((n) => n.id));
+    /** Next unused "<Prefix> N": after a delete, `count + 1` repeated an existing name. */
+    const freshName = (prefix: string) => {
+      let n = state.nodes.filter((node) => node.data.stage.kind === (prefix === 'Stage' ? 'agent' : prefix.toLowerCase())).length + 1;
+      while (names.has(`${prefix} ${n}`)) n++;
+      names.add(`${prefix} ${n}`);
+      return `${prefix} ${n}`;
+    };
+    const stageName = name || freshName(kind === 'loop' ? 'Loop' : kind === 'check' ? 'Check' : 'Stage');
+    const key = stageKeyFor(stageName, taken);
+    taken.add(key);
+    const stage: StageSpec = withParentKey(
+      kind === 'loop' ? newLoopStage(key, stageName) : kind === 'check' ? newCheckStage(key, stageName) : newAgentStage(key, stageName),
+      parentKey,
+    );
+    const added = [stageToNode(stage, nextPosition(state.nodes, parentKey), parentKey)];
+    if (kind === 'loop') {
+      // A container without a body is invalid (empty-body): start with one stage.
+      const bodyName = freshName('Stage');
+      const bodyKey = stageKeyFor(bodyName, taken);
+      added.push(stageToNode(withParentKey(newAgentStage(bodyKey, bodyName), key), { x: GROUP_PAD, y: GROUP_HEADER }, key));
     }
-    const key = stageKeyFor(stageName, new Set(state.nodes.map((n) => n.id)));
-    const node = stageToNode(newAgentStage(key, stageName), {
-      x: (state.nodes.length % 4) * 320 + 50,
-      y: Math.floor(state.nodes.length / 4) * 150 + 50,
-    });
-    set((s) => ({ nodes: [...s.nodes, node], isDirty: true }));
+    set((s) => ({ nodes: fitContainers(orderParentsFirst([...s.nodes, ...added])), isDirty: true }));
     get().pushHistory();
     return key;
   },
@@ -522,7 +656,12 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
           ...(stage.kind === 'agent' && from ? { context: { ...stage.context, from: from.map(rename) } } : {}),
           ...(stage.kind === 'loop' && stage.loop.wrapUp ? { loop: { ...stage.loop, wrapUp: { ...stage.loop.wrapUp, stage: rename(stage.loop.wrapUp.stage) } } } : {}),
         } as StageSpec;
-        return { ...node, id: rename(node.id), data: { ...node.data, stage: renamed } };
+        return {
+          ...node,
+          id: rename(node.id),
+          ...(node.parentId ? { parentId: rename(node.parentId) } : {}),
+          data: { ...node.data, stage: renamed },
+        };
       }),
       edges: s.edges.map((e) => {
         if (!e.data || (e.source !== key && e.target !== key)) return e;
@@ -536,19 +675,24 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   },
 
   removeStage: (key) => {
+    // A container goes with its body: a body without its container would
+    // be a set of stages whose parentKey names nothing.
+    const removed = new Set([key, ...descendantIds(key, get().nodes)]);
     set((state) => ({
-      nodes: state.nodes
-        .filter((n) => n.id !== key)
-        .map((n) => {
-          // A context source naming the deleted stage would fail validation;
-          // drop it with the stage.
-          const stage = n.data.stage;
-          if (stage.kind !== 'agent' || !stage.context.from?.includes(key)) return n;
-          const context = { ...stage.context, from: stage.context.from.filter((k) => k !== key) };
-          return { ...n, data: { ...n.data, stage: { ...stage, context } } };
-        }),
-      edges: state.edges.filter((e) => e.source !== key && e.target !== key),
-      selectedNodeId: state.selectedNodeId === key ? null : state.selectedNodeId,
+      nodes: fitContainers(
+        state.nodes
+          .filter((n) => !removed.has(n.id))
+          .map((n) => {
+            // A context source naming a deleted stage would fail validation;
+            // drop it with the stage.
+            const stage = n.data.stage;
+            if (stage.kind !== 'agent' || !stage.context.from?.some((k) => removed.has(k))) return n;
+            const context = { ...stage.context, from: stage.context.from.filter((k) => !removed.has(k)) };
+            return { ...n, data: { ...n.data, stage: { ...stage, context } } };
+          }),
+      ),
+      edges: state.edges.filter((e) => !removed.has(e.source) && !removed.has(e.target)),
+      selectedNodeId: state.selectedNodeId && removed.has(state.selectedNodeId) ? null : state.selectedNodeId,
       isDirty: true,
     }));
     get().pushHistory();
@@ -559,24 +703,234 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     const sourceNode = state.nodes.find((n) => n.id === key);
     if (!sourceNode) return;
 
-    const name = `${sourceNode.data.stage.name} (copy)`;
-    const newKey = stageKeyFor(`${sourceNode.data.stage.key}_copy`, new Set(state.nodes.map((n) => n.id)));
-    // The whole stage is copied, every field included: the graph is saved
-    // as a document, so nothing the panel cannot edit is lost on the copy.
-    const newStage: StageSpec = { ...structuredClone(sourceNode.data.stage), key: newKey, name };
-    const newNode = stageToNode(newStage, {
-      x: sourceNode.position.x + (sourceNode.measured?.width ?? 320) + 40,
-      y: sourceNode.position.y,
+    // A container is copied with its body; every copied key is new, and
+    // references inside the copy (parentKey, context sources, the wrap-up
+    // stage, edges) point at the copies.
+    const subtree = [key, ...descendantIds(key, state.nodes)];
+    const taken = new Set(state.nodes.map((n) => n.id));
+    const keyMap = new Map<string, string>();
+    for (const k of subtree) {
+      const next = stageKeyFor(`${k}_copy`, taken);
+      taken.add(next);
+      keyMap.set(k, next);
+    }
+    const mapKey = (k: string) => keyMap.get(k) ?? k;
+    const newKey = keyMap.get(key)!;
+
+    const copies = subtree.map((k) => {
+      const node = state.nodes.find((n) => n.id === k)!;
+      // The whole stage is copied, every field included: the graph is saved
+      // as a document, so nothing the panel cannot edit is lost on the copy.
+      const source = structuredClone(node.data.stage);
+      const stage = {
+        ...source,
+        key: mapKey(k),
+        ...(k === key ? { name: `${source.name} (copy)` } : {}),
+        ...(source.parentKey ? { parentKey: mapKey(source.parentKey) } : {}),
+        ...(source.kind === 'agent' && source.context.from ? { context: { ...source.context, from: source.context.from.map(mapKey) } } : {}),
+        ...(source.kind === 'loop' && source.loop.wrapUp
+          ? { loop: { ...source.loop, wrapUp: { ...source.loop.wrapUp, stage: mapKey(source.loop.wrapUp.stage) } } }
+          : {}),
+      } as StageSpec;
+      const position =
+        k === key ? { x: node.position.x + nodeSize(node).width + 40, y: node.position.y } : node.position;
+      const copy = stageToNode(stage, position, node.parentId ? mapKey(node.parentId) : undefined);
+      return isContainerStage(stage) ? { ...copy, width: node.width, height: node.height } : copy;
     });
+    const inside = new Set(subtree);
+    const copiedEdges = state.edges
+      .filter((e) => e.data && inside.has(e.source) && inside.has(e.target))
+      .map((e) => edgeToFlowEdge({ ...e.data!.edge, from: mapKey(e.source), to: mapKey(e.target) }));
+
     // A duplicate is the next editing target. Keeping the original selected
     // made edits silently change it, while the overlapping copy was obscured.
     set((s) => ({
-      nodes: [...s.nodes.map((node) => ({ ...node, selected: false })), { ...newNode, selected: true }],
+      nodes: fitContainers(
+        orderParentsFirst([
+          ...s.nodes.map((node) => ({ ...node, selected: false })),
+          ...copies.map((c) => (c.id === newKey ? { ...c, selected: true } : c)),
+        ]),
+      ),
+      edges: [...s.edges, ...copiedEdges],
       selectedNodeId: newKey,
       selectedEdgeId: null,
       isDirty: true,
     }));
     get().pushHistory();
+  },
+
+  // ── Containers ──
+  wrapInLoop: (keys) => {
+    const state = get();
+    const selected = keys.map((k) => state.nodes.find((n) => n.id === k)).filter((n): n is Node<StageNodeData> => !!n);
+    if (selected.length === 0) return { error: 'Select the stages to wrap' };
+    const scope = scopeOf(selected[0]!.data.stage);
+    if (selected.some((n) => scopeOf(n.data.stage) !== scope)) {
+      return { error: 'Only stages of the same scope can be wrapped together (all top level, or all in one loop)' };
+    }
+    const parentId = selected[0]!.parentId;
+    const inSel = new Set(selected.map((n) => n.id));
+
+    const names = new Set(state.nodes.map((n) => n.data.stage.name));
+    let n = state.nodes.filter((node) => node.data.stage.kind === 'loop').length + 1;
+    while (names.has(`Loop ${n}`)) n++;
+    const name = `Loop ${n}`;
+    const loopKey = stageKeyFor(name, new Set(state.nodes.map((node) => node.id)));
+
+    // An edge between a wrapped and an unwrapped stage would cross the new
+    // scope: it moves to the loop node. The first such edge of a pair wins,
+    // so the document keeps one edge per pair.
+    const edges: Edge<StageEdgeData>[] = [];
+    const seen = new Set<string>();
+    for (const e of state.edges) {
+      if (!e.data) continue;
+      let { from, to } = e.data.edge;
+      const fromIn = inSel.has(from);
+      const toIn = inSel.has(to);
+      if (fromIn !== toIn) {
+        if (fromIn) from = loopKey;
+        else to = loopKey;
+      }
+      const id = edgeId(from, to);
+      if (seen.has(id)) continue;
+      seen.add(id);
+      edges.push(from === e.source && to === e.target ? e : edgeToFlowEdge({ ...e.data.edge, from, to }));
+    }
+
+    // The loop sits around the selection's bounding box, in the selection's frame.
+    const minX = Math.min(...selected.map((node) => node.position.x));
+    const minY = Math.min(...selected.map((node) => node.position.y));
+    const origin = { x: minX - GROUP_PAD, y: minY - GROUP_HEADER };
+    const loopNode = { ...stageToNode(withParentKey(newLoopStage(loopKey, name), scope || undefined), origin, parentId), selected: true };
+
+    const firstIndex = state.nodes.findIndex((node) => inSel.has(node.id));
+    const nodes: Node<StageNodeData>[] = [];
+    state.nodes.forEach((node, i) => {
+      if (i === firstIndex) nodes.push(loopNode);
+      if (!inSel.has(node.id)) {
+        nodes.push({ ...node, selected: false });
+        return;
+      }
+      const stage = withParentKey(node.data.stage, loopKey);
+      nodes.push({
+        ...withParent(node, loopKey),
+        selected: false,
+        position: { x: node.position.x - origin.x, y: node.position.y - origin.y },
+        data: { ...node.data, stage },
+      });
+    });
+    // Wrapping a selection that is not closed under its paths (a → x → b
+    // with only a and b selected) would make the loop both precede and
+    // follow x.
+    if (detectCycles(nodes, edges)) {
+      return { error: 'Wrapping these stages would create a cycle: also select the stages on the paths between them' };
+    }
+
+    set({
+      nodes: fitContainers(orderParentsFirst(nodes)),
+      edges,
+      selectedNodeId: loopKey,
+      selectedEdgeId: null,
+      isDirty: true,
+    });
+    get().pushHistory();
+    return { key: loopKey };
+  },
+
+  unwrapLoop: (key) => {
+    const state = get();
+    const loopNode = state.nodes.find((n) => n.id === key);
+    if (!loopNode || loopNode.data.stage.kind !== 'loop') return;
+    const outerKey = loopNode.data.stage.parentKey;
+    const body = state.nodes.filter((n) => n.data.stage.parentKey === key);
+    const bodyKeys = new Set(body.map((n) => n.id));
+
+    // Edges into the loop now lead to the body's roots, edges out of it
+    // leave from the body's leaves, so the order around the body holds.
+    const internal = state.edges.filter((e) => bodyKeys.has(e.source) && bodyKeys.has(e.target));
+    const roots = body.filter((n) => !internal.some((e) => e.target === n.id)).map((n) => n.id);
+    const leaves = body.filter((n) => !internal.some((e) => e.source === n.id)).map((n) => n.id);
+    const edges: Edge<StageEdgeData>[] = [];
+    const seen = new Set<string>();
+    const add = (edge: EdgeSpec, flow?: Edge<StageEdgeData>) => {
+      const id = edgeId(edge.from, edge.to);
+      if (seen.has(id)) return;
+      seen.add(id);
+      edges.push(flow ?? edgeToFlowEdge(edge));
+    };
+    for (const e of state.edges) {
+      if (!e.data) continue;
+      if (e.target === key) roots.forEach((r) => add({ ...e.data!.edge, to: r }));
+      else if (e.source === key) leaves.forEach((l) => add({ ...e.data!.edge, from: l }));
+      else add(e.data.edge, e);
+    }
+
+    const nodes = state.nodes
+      .filter((n) => n.id !== key)
+      .map((n) => {
+        const stage = n.data.stage;
+        if (bodyKeys.has(n.id)) {
+          return {
+            ...withParent(n, loopNode.parentId),
+            position: { x: n.position.x + loopNode.position.x, y: n.position.y + loopNode.position.y },
+            data: { ...n.data, stage: withParentKey(stage, outerKey) },
+          };
+        }
+        if (stage.kind === 'agent' && stage.context.from?.includes(key)) {
+          const context = { ...stage.context, from: stage.context.from.filter((k) => k !== key) };
+          return { ...n, data: { ...n.data, stage: { ...stage, context } } };
+        }
+        return n;
+      });
+
+    set({
+      nodes: fitContainers(orderParentsFirst(nodes)),
+      edges,
+      selectedNodeId: state.selectedNodeId === key ? null : state.selectedNodeId,
+      isDirty: true,
+    });
+    get().pushHistory();
+  },
+
+  reparentStage: (key, parentKey) => {
+    const state = get();
+    const node = state.nodes.find((n) => n.id === key);
+    if (!node || (node.data.stage.parentKey ?? undefined) === parentKey) return 0;
+    const byId = new Map(state.nodes.map((n) => [n.id, n]));
+    if (parentKey !== undefined) {
+      const parent = byId.get(parentKey);
+      // Never into a non-container, itself or its own body.
+      if (!parent || !isContainerStage(parent.data.stage) || parentKey === key) return 0;
+      if (descendantIds(key, state.nodes).includes(parentKey)) return 0;
+    }
+    const abs = absolutePosition(key, byId);
+    const origin = parentKey ? absolutePosition(parentKey, byId) : { x: 0, y: 0 };
+    const nextScope = parentKey ?? '';
+    const crossing = (e: Edge<StageEdgeData>) => {
+      const other = e.source === key ? e.target : e.target === key ? e.source : undefined;
+      return other !== undefined && scopeOf(byId.get(other)!.data.stage) !== nextScope;
+    };
+    const dropped = state.edges.filter(crossing).length;
+
+    set({
+      nodes: fitContainers(
+        orderParentsFirst(
+          state.nodes.map((n) =>
+            n.id === key
+              ? {
+                  ...withParent(n, parentKey),
+                  position: { x: abs.x - origin.x, y: abs.y - origin.y },
+                  data: { ...n.data, stage: withParentKey(n.data.stage, parentKey) },
+                }
+              : n,
+          ),
+        ),
+      ),
+      edges: state.edges.filter((e) => !crossing(e)),
+      isDirty: true,
+    });
+    get().pushHistory();
+    return dropped;
   },
 
   // ── Edges ──
@@ -645,6 +999,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     }),
 
   // ── State tracking ──
+  setCommandAllowlist: (commandAllowlist) => set({ commandAllowlist }),
   markDirty: () => set({ isDirty: true }),
   markSaving: (saving) => set({ isSaving: saving }),
   setIssues: (issues, graph) => set({ issues: locateIssues(issues, graph) }),
@@ -716,7 +1071,8 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   // ── Validation ──
   validate: () => {
     const graph = get().toGraph();
-    const { issues } = validateWorkflow(graph, { engine: ENGINE_LEVEL });
+    const allowlist = get().commandAllowlist;
+    const { issues } = validateWorkflow(graph, { engine: ENGINE_LEVEL, ...(allowlist ? { commandAllowlist: allowlist } : {}) });
     const located = locateIssues(issues, graph);
     set({ issues: located });
     return located;

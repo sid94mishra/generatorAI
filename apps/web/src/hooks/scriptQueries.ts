@@ -10,6 +10,7 @@ export const scriptKeys = {
   scripts: ['scripts'] as const,
   script: (id: string) => ['script', id] as const,
   profiles: (id: string) => ['script-profiles', id] as const,
+  allowlist: ['script-allowlist'] as const,
 };
 
 // ── Queries ──
@@ -38,6 +39,20 @@ export function useScriptProfiles(id: string | undefined) {
     queryKey: scriptKeys.profiles(id ?? ''),
     queryFn: () => platform.getScriptProfiles(id!),
     enabled: !!id,
+  });
+}
+
+/**
+ * The server's effective command allow-list (`GET /settings/script-allowlist`):
+ * the commands a check stage (or a script hook) may run. The builder's
+ * command picker offers it and validates against it like the server does.
+ */
+export function useScriptAllowlist() {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: scriptKeys.allowlist,
+    queryFn: () => platform.getScriptAllowlist(),
+    staleTime: 5 * 60_000,
   });
 }
 

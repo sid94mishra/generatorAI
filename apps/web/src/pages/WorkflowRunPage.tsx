@@ -36,6 +36,7 @@ import {
   useRunWorkspace,
   useResolveStageInteraction,
   useSetRunPermissionMode,
+  useLoopEventRefetch,
 } from '@/hooks/workflowQueries.js';
 import { useWorkspaceChangeSummary, useWorkspaceCheckpoints } from '@/hooks/queries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
@@ -52,6 +53,7 @@ import {
   type StageMenuActions,
 } from '@/components/workflow/redesign/StageTimelineItem.js';
 import { StageComposer } from '@/components/workflow/redesign/StageComposer.js';
+import { LoopTimelineItem, type RenderStage } from '@/components/workflow/redesign/LoopTimelineItem.js';
 import { RightInspector } from '@/components/workflow/redesign/RightInspector.js';
 import { createStageViewCache, deriveRunView, pickStageStreams } from '@/components/workflow/redesign/deriveRunView.js';
 import type { FileChange, StageView } from '@/components/workflow/redesign/types.js';
@@ -275,6 +277,10 @@ export function WorkflowRunPage() {
     const disconnect = connectWorkflowRun(runId, platform);
     return () => { disconnect(); };
   }, [runId, platform]);
+
+  // Loops (P05): every `loop.*` event refetches the run and the iterations.
+  // Subscribed after the run stream so it joins that scope's subscription.
+  useLoopEventRefetch(runId, !!runData && !runIsTerminal);
 
   // Cleanup
   useEffect(() => () => { clearRun(); }, [clearRun]);
@@ -510,12 +516,49 @@ export function WorkflowRunPage() {
   const inspectorFiles = useStageFiles(runData?.workspaceId, focusedStage, rightPaneOpen);
 
   // The focused stage's composer (a stage is a compact chat).
+  // A loop is not a conversation: its decisions are the decision card's.
   const focusedComposer = useMemo(
-    () => (runId && focusedStage && focusedStage.status !== 'skipped' && focusedStage.status !== 'cancelled'
+    () => (runId && focusedStage && focusedStage.status !== 'skipped' && focusedStage.status !== 'cancelled' && !focusedStage.loop
       ? <StageComposer runId={runId} stage={focusedStage} workspaceId={runData?.workspaceId} />
       : null),
     [runId, focusedStage, runData?.workspaceId],
   );
+
+  // One renderer for every row: top-level stages, a loop's own row and its
+  // body instances (LoopTimelineItem), so they all focus, answer gates and
+  // open the "…" menu the same way.
+  const renderStage = useCallback<RenderStage>((s, opts) => (
+    <StageTimelineItem
+      key={s.id}
+      stage={s}
+      focused={focusedStageId === s.id}
+      // A finished run keeps its last stage open: that is the result
+      // the user came for, and collapsing it left the page blank.
+      autoCollapse={runIsActive}
+      openWhenFinished={opts.openWhenFinished ?? false}
+      showConnector={opts.showConnector}
+      onFocus={selectStage}
+      onApproveHitl={handleApproveHitl}
+      onRejectHitl={handleRejectHitl}
+      onTerminalRejectHitl={handleTerminalRejectHitl}
+      onResolveGate={handleResolveGate}
+      gateBusy={gateBusyStage === s.id}
+      menu={stageMenu}
+      composer={focusedStageId === s.id ? focusedComposer : undefined}
+      onRetry={runIsTerminal ? handleRetryStage : undefined}
+      onSelectFiles={selectStage}
+      onSelectOutput={selectStage}
+      onOpenInspector={handleOpenInspector}
+      {...(opts.headerExtra ? { headerExtra: opts.headerExtra } : {})}
+      {...(opts.body ? { body: opts.body } : {})}
+      {...(opts.preamble ? { preamble: opts.preamble } : {})}
+      {...(opts.hidePrompt ? { hidePrompt: true } : {})}
+    />
+  ), [
+    focusedStageId, runIsActive, runIsTerminal, selectStage, handleApproveHitl, handleRejectHitl,
+    handleTerminalRejectHitl, handleResolveGate, gateBusyStage, stageMenu, focusedComposer,
+    handleRetryStage, handleOpenInspector,
+  ]);
 
   // ── Loading / error ─────────────────────────────────────────
 
@@ -578,7 +621,8 @@ export function WorkflowRunPage() {
 
       {/* Header bar */}
       <RunHeaderBar
-        run={runView}
+        // A loop counts once in the progress; its iterations are inside it.
+        run={{ ...runView, stages: runView.topLevel }}
         awaitingCount={awaitingCount}
         parallelCount={parallelCount}
         onPause={handlePause}
@@ -597,7 +641,7 @@ export function WorkflowRunPage() {
       {graphOpen && (
         <div className="h-[320px] shrink-0 border-b border-[var(--color-border)] bg-[var(--color-background)]">
           <ReactFlowProvider>
-            <RuntimeDAGCanvas definitionEdges={pinnedGraph?.edges} />
+            <RuntimeDAGCanvas definitionEdges={pinnedGraph?.edges} definitionStages={pinnedGraph?.stages} />
           </ReactFlowProvider>
         </div>
       )}
@@ -605,7 +649,7 @@ export function WorkflowRunPage() {
       {/* Horizontal pipeline flow — toggleable */}
       {pipelineOpen && (
         <PipelineFlow
-          stages={runView.stages}
+          stages={runView.topLevel}
           focusedId={focusedStageId}
           onFocus={focusStage}
           className="shrink-0"
@@ -628,30 +672,23 @@ export function WorkflowRunPage() {
       <div className="relative flex flex-1 overflow-hidden">
         <div ref={scrollHostRef} className="min-w-0 flex-1 overflow-y-auto">
           <div className="relative px-6 py-4">
-            {runView.stages.map((s, i) => (
-              <StageTimelineItem
-                key={s.id}
-                stage={s}
-                focused={focusedStageId === s.id}
-                // A finished run keeps its last stage open: that is the result
-                // the user came for, and collapsing it left the page blank.
-                autoCollapse={runIsActive}
-                openWhenFinished={i === runView.stages.length - 1}
-                showConnector={i < runView.stages.length - 1}
-                onFocus={selectStage}
-                onApproveHitl={handleApproveHitl}
-                onRejectHitl={handleRejectHitl}
-                onTerminalRejectHitl={handleTerminalRejectHitl}
-                onResolveGate={handleResolveGate}
-                gateBusy={gateBusyStage === s.id}
-                menu={stageMenu}
-                composer={focusedStageId === s.id ? focusedComposer : undefined}
-                onRetry={runIsTerminal ? handleRetryStage : undefined}
-                onSelectFiles={selectStage}
-                onSelectOutput={selectStage}
-                onOpenInspector={handleOpenInspector}
-              />
-            ))}
+            {runView.topLevel.map((s, i) => {
+              const showConnector = i < runView.topLevel.length - 1;
+              return s.loop && runId ? (
+                <LoopTimelineItem
+                  key={s.id}
+                  runId={runId}
+                  stage={s}
+                  bodies={runView.loopBodies}
+                  focusedId={focusedStageId}
+                  showConnector={showConnector}
+                  renderStage={renderStage}
+                  onCommand={sendCommand}
+                />
+              ) : (
+                renderStage(s, { showConnector, openWhenFinished: i === runView.topLevel.length - 1 })
+              );
+            })}
 
             {/* Bottom control row: timeline toggle */}
             <div className="mt-6 flex items-center justify-center gap-2 pb-6">

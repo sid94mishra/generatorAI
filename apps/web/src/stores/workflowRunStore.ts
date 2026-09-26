@@ -96,6 +96,21 @@ function sessionMapOf(stageRuns: StageRun[]): Record<string, string> {
 }
 
 /**
+ * Where an instance the stream inserted sits in a loop (P05): its path is
+ * `<loop>#<k>/<body>` (an iteration) or `<loop>#wrapup/<body>` (the wrap-up),
+ * so it groups under its loop before the next poll brings `scopeId`.
+ */
+function loopPlacement(stageRuns: StageRun[], instancePath: string): Pick<StageRun, 'scopeId' | 'iterationIndex'> {
+  const m = /^(.+)#(\d+|wrapup)\/[^/#]+$/.exec(instancePath);
+  if (!m) return {};
+  const loop = stageRuns.find((sr) => sr.instancePath === m[1]);
+  return {
+    ...(loop ? { scopeId: loop.id } : {}),
+    ...(m[2] !== 'wrapup' ? { iterationIndex: Number(m[2]) } : {}),
+  };
+}
+
+/**
  * Merge a polled run into the one on screen, per instance by `version`
  * (D-21b): an instance the stream already moved past the snapshot keeps its
  * fresher state; instances the stream inserted and the snapshot predates
@@ -211,6 +226,9 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
       } else if (sr.interruptData !== undefined) {
         updates.interruptData = undefined;
       }
+      // A loop's state rides along when the event carries it (P05).
+      const loopState = data?.['loopState'];
+      if (loopState && typeof loopState === 'object') updates.loopState = loopState as StageRun['loopState'];
       return { ...sr, ...updates };
     };
 
@@ -229,18 +247,20 @@ const useWorkflowRunStoreImpl = create<RunMonitorState & RunMonitorActions>((set
     // it from the event instead of waiting for the next poll.
     const stageKey = data?.['stageKey'];
     if (!found && typeof stageKey === 'string') {
+      const instancePath = typeof data?.['instancePath'] === 'string' ? (data['instancePath'] as string) : stageKey;
       stageRuns.push(
         apply({
           id: stageRunId,
           workflowRunId: run.id,
           stageKey,
-          instancePath: typeof data?.['instancePath'] === 'string' ? (data['instancePath'] as string) : stageKey,
-          kind: 'agent',
+          instancePath,
+          kind: typeof data?.['kind'] === 'string' ? (data['kind'] as string) : 'agent',
           name: typeof data?.['name'] === 'string' ? (data['name'] as string) : stageKey,
           status,
           currentAttempt: 0,
           version: version ?? 0,
           createdAt: now,
+          ...loopPlacement(run.stageRuns, instancePath),
         } as StageRun),
       );
     }

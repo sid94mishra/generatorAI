@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   X, Settings2, FileText, Layers, Cpu, Zap, Shield, Bot, Server, Wand2, Webhook, Plus, Trash2,
-  CheckCircle2, Clock, Braces, UserCheck, GitMerge, AlertCircle,
+  CheckCircle2, Clock, Braces, UserCheck, GitMerge, AlertCircle, Repeat,
 } from 'lucide-react';
 import {
   ApprovalSpecSchema,
@@ -37,6 +37,7 @@ import { Button, Input, Select, Textarea, ToggleSwitch } from '@/components/ui/i
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { cn } from '@/lib/utils.js';
 import { StageKindPanel } from './StageKindPanels.js';
+import { ArgsEditor, JsonObjectEditor, ParentField, StageKeyField } from './builder/fields.js';
 
 interface StagePropertiesPanelProps {
   onClose: () => void;
@@ -224,6 +225,7 @@ function PropertiesTab({ stage, onUpdate, issues }: SectionProps) {
             placeholder="Optional description"
           />
         </div>
+        <ParentField stage={stage} issues={issuesAt(issues, '/parentKey')} />
       </CollapsibleSection>
 
       {/* Session: the stage session over the workflow session */}
@@ -281,6 +283,8 @@ function PropertiesTab({ stage, onUpdate, issues }: SectionProps) {
         )}
       </CollapsibleSection>
 
+      <LoopIterationSection stage={stage} onUpdate={onUpdate} issues={issues} />
+
       {/* Skills */}
       <CollapsibleSection title="Skills" icon={<Wand2 className="h-3.5 w-3.5" />} defaultOpen={false}>
         {sessionEditor(['skills'])}
@@ -299,49 +303,84 @@ function PropertiesTab({ stage, onUpdate, issues }: SectionProps) {
   );
 }
 
-/**
- * The stage key: the stable identity edges, context sources and
- * `stages.<key>` expressions refer to. Edited as a draft and renamed on
- * blur, so a half-typed key never renames anything.
- */
-function StageKeyField({ stage, issues }: { stage: AgentStage; issues: readonly BuilderIssue[] }) {
-  const renameStageKey = useWorkflowBuilderStore((s) => s.renameStageKey);
-  const [draft, setDraft] = useState(stage.key);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    setDraft(stage.key);
-    setError(null);
-  }, [stage.key]);
+// ── Loop iterations (P05) ──
 
-  const commit = () => {
-    const next = draft.trim();
-    if (next === stage.key) return;
-    const failure = renameStageKey(stage.key, next);
-    setError(failure);
-    if (failure) setDraft(stage.key);
-  };
+/**
+ * How a body agent of a loop behaves from one iteration to the next:
+ * follow-up prompts (sent instead of `prompts` from the second iteration
+ * on), one continuing conversation or a fresh one each time, and
+ * compaction of a continuing conversation. Shown for a stage inside a
+ * loop, and outside one while any of these is still set (they only warn
+ * there), so it can be cleared.
+ */
+function LoopIterationSection({ stage, onUpdate, issues }: SectionProps) {
+  const inLoop = useWorkflowBuilderStore(
+    (s) => !!stage.parentKey && s.nodes.find((n) => n.id === stage.parentKey)?.data.stage.kind === 'loop',
+  );
+  const followUps = stage.followUpPrompts;
+  if (!inLoop && stage.sessionReuse === 'fresh' && !followUps && stage.compactAfter === undefined) return null;
+  const continues = stage.sessionReuse === 'continue';
 
   return (
-    <div>
-      <label htmlFor="stage-key" className="mb-1.5 block text-xs font-medium text-foreground">Key</label>
-      <Input
-        id="stage-key"
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter') commit();
-        }}
-        className="font-mono text-xs"
-        placeholder="stage_key"
-        spellCheck={false}
-      />
-      <p className="mt-1 text-[10px] text-muted-foreground">
-        Edges, context sources and <code>stages.{stage.key}</code> expressions refer to the stage by key.
-      </p>
-      {error && <p className="mt-1 text-[11px] text-danger">{error}</p>}
-      <FieldIssues issues={issues} />
-    </div>
+    <CollapsibleSection
+      title="Loop iterations"
+      icon={<Repeat className="h-3.5 w-3.5" />}
+      badge={followUps?.length ? String(followUps.length) : undefined}
+      defaultOpen
+    >
+      {!inLoop && (
+        <p className="text-[11px] text-warning">This stage is not in a loop: these settings have no effect.</p>
+      )}
+      <div>
+        <label className="mb-1.5 block text-xs font-medium text-foreground">Conversation</label>
+        <Select
+          aria-label="Session reuse"
+          value={stage.sessionReuse}
+          onChange={(v) =>
+            // compactAfter only applies to a continuing conversation.
+            onUpdate(v === 'continue' ? { sessionReuse: 'continue' } : { sessionReuse: 'fresh', compactAfter: undefined })
+          }
+          options={[
+            { value: 'fresh', label: 'Fresh each iteration', description: 'A new conversation every time' },
+            { value: 'continue', label: 'Continue across iterations', description: 'One conversation for the whole loop' },
+          ]}
+        />
+        <FieldIssues issues={issuesAt(issues, '/sessionReuse')} />
+      </div>
+      <div className={cn(!continues && 'opacity-50')}>
+        <NumberStepper
+          label="Compact every N iterations (0 = never)"
+          value={stage.compactAfter ?? 0}
+          onChange={(v) => onUpdate({ compactAfter: continues && v > 0 ? v : undefined })}
+          min={0}
+          max={continues ? 20 : 0}
+        />
+        <p className="mt-1 text-[10px] text-muted-foreground">
+          {continues
+            ? 'Replaces the conversation with a fresh one seeded with a digest of the iterations so far (no model call).'
+            : 'Only with a continuing conversation.'}
+        </p>
+        <FieldIssues issues={issuesAt(issues, '/compactAfter')} />
+      </div>
+      <div>
+        <ToggleSwitch
+          checked={followUps !== undefined}
+          onChange={(checked) => onUpdate({ followUpPrompts: checked ? [] : undefined })}
+          label="Different prompts from the second iteration"
+          description="Sent instead of the prompts above from iteration 2 on; they can read loop.last, loop.carry and loop.operatorInput."
+        />
+        {followUps !== undefined && (
+          <div className="mt-2">
+            <PromptEditor
+              prompts={followUps}
+              onChange={(prompts: PromptDefinition[]) => onUpdate({ followUpPrompts: prompts })}
+              contentLabel="Follow-up"
+            />
+          </div>
+        )}
+        <FieldIssues issues={issuesAt(issues, '/followUpPrompts')} />
+      </div>
+    </CollapsibleSection>
   );
 }
 
@@ -387,13 +426,7 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
         <FieldIssues issues={issuesAt(issues, '/join')} />
 
         <ContextEditor stage={stage} onUpdate={onUpdate} issues={issues} />
-
-        <ToggleSwitch
-          checked={stage.sessionReuse === 'continue'}
-          onChange={(checked) => onUpdate({ sessionReuse: checked ? 'continue' : 'fresh' })}
-          label="Continue the conversation across loop iterations"
-        />
-        <FieldIssues issues={issuesAt(issues, '/sessionReuse', '/sessionGroup')} />
+        <FieldIssues issues={issuesAt(issues, '/sessionGroup')} />
       </CollapsibleSection>
 
       <CollapsibleSection title="Approval" icon={<UserCheck className="h-3.5 w-3.5" />} defaultOpen={!!stage.approval}>
@@ -732,65 +765,6 @@ function OutputSection({ stage, onUpdate, issues }: SectionProps) {
   );
 }
 
-/**
- * A JSON object edited as text: the draft is parsed on blur. Blank clears
- * the value; text that is not a JSON object is reported and not applied.
- */
-function JsonObjectEditor({
-  value,
-  onChange,
-  placeholder,
-  ariaLabel,
-}: {
-  value: Record<string, unknown> | undefined;
-  onChange: (value: Record<string, unknown> | undefined) => void;
-  placeholder?: string;
-  ariaLabel: string;
-}) {
-  const serialized = value === undefined ? '' : JSON.stringify(value, null, 2);
-  const [draft, setDraft] = useState(serialized);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    setDraft(serialized);
-    setError(null);
-  }, [serialized]);
-
-  const commit = () => {
-    if (!draft.trim()) {
-      setError(null);
-      if (value !== undefined) onChange(undefined);
-      return;
-    }
-    try {
-      const parsed: unknown = JSON.parse(draft);
-      if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
-        setError('Must be a JSON object');
-        return;
-      }
-      setError(null);
-      if (JSON.stringify(parsed) !== JSON.stringify(value)) onChange(parsed as Record<string, unknown>);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Invalid JSON');
-    }
-  };
-
-  return (
-    <div>
-      <Textarea
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onBlur={commit}
-        rows={5}
-        aria-label={ariaLabel}
-        className="resize-y font-mono text-xs"
-        placeholder={placeholder}
-        spellCheck={false}
-      />
-      {error && <p className="mt-1 text-[11px] text-danger">{error}</p>}
-    </div>
-  );
-}
-
 // ── Inline Hook Editor ──
 
 const HOOK_TYPES = [
@@ -1012,26 +986,6 @@ function blankRule(type: ResultValidationRule['type'], message?: string): Result
     case 'judge':
       return { type, rubric: '', threshold: 7, ...m };
   }
-}
-
-/**
- * Arguments edited one per line and parsed on blur, so typing a newline
- * never swallows the next argument before it exists.
- */
-function ArgsEditor({ args, onChange }: { args: string[]; onChange: (args: string[]) => void }) {
-  const [draft, setDraft] = useState(args.join('\n'));
-  useEffect(() => setDraft(args.join('\n')), [args]);
-  return (
-    <Textarea
-      value={draft}
-      onChange={(e) => setDraft(e.target.value)}
-      onBlur={() => onChange(draft.split('\n').map((a) => a.trim()).filter(Boolean))}
-      rows={2}
-      className="resize-y font-mono text-xs"
-      placeholder={'Arguments, one per line\nvalidate.js'}
-      aria-label="Script arguments"
-    />
-  );
 }
 
 function ValidationRuleEditor({
