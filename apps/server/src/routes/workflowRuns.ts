@@ -227,7 +227,9 @@ export function createWorkflowRunRoutes(container: Container): Router {
     try {
       const runId = String(req.params['id']);
       const command = req.body as RunCommand;
-      if (!DECISION_COMMANDS.has(command.command) && !mayControlRuns(req)) {
+      // A run-level budget raise (no instance) widens the whole run: run control (LOOP-R10).
+      const decision = DECISION_COMMANDS.has(command.command) && !(command.command === 'raise_budget' && !command.instanceId);
+      if (!decision && !mayControlRuns(req)) {
         res.status(403).json({
           error: { code: 'FORBIDDEN', message: `The ${command.command} command requires the write:workflows scope.` },
         });
@@ -350,7 +352,8 @@ export function createWorkflowRunRoutes(container: Container): Router {
       const files = (req.files ?? []) as Express.Multer.File[];
       const attachmentIds: string[] = [];
       if (files.length > 0) {
-        const sessionId = stageConversationService.attachmentSession(runId, instanceId);
+        // Refused before anything is stored: a 409 leaves no orphan attachments (CONVINV-R19).
+        const sessionId = stageConversationService.assertSendable(runId, instanceId);
         for (const file of files) {
           const artifact = await artifactService.createArtifact({
             sessionId,

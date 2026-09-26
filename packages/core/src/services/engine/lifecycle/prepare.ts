@@ -13,8 +13,11 @@
 //   projectConfigs  the project's agents, prompts and skills
 //   preprocess      the definition's preprocessing steps;
 //                   `on_preprocessing_complete` hooks
-//   sandbox         the run sandbox when the deployment has one; fails
-//                   closed unless `lifecycle.sandbox: 'optional'`;
+//   sandbox         provisions the run sandbox when the deployment has one
+//                   (`required` fails the run when it cannot start). Stage
+//                   sessions do not run in it yet: nothing reads
+//                   `systemVars.sandbox.cliUrl`, so stages run on the host
+//                   either way (CONVINV-R21; the plan warns).
 //                   `on_all_stages_scheduled` hooks
 //
 // Each is a pure-ish `(ctx, run) => PhaseResult`: it reads the run row and
@@ -151,8 +154,12 @@ const uploads: Phase = async ({ deps }, run) => {
       const record = await deps.uploads.get(u.uploadId);
       if (!record) throw new Error(`Upload ${u.uploadId} no longer exists (uploads expire after an hour)`);
       if (!(await deps.uploads.markConsumed(u.uploadId, run.id))) throw new Error(`Upload ${u.uploadId} was used by another run`);
-      const content = await fs.readFile(record.path);
-      await writeRunUpload(ws.rootPath, u.category, record.name, content);
+      // A resumed phase finds the staging gone when this run already copied it (CONVINV-R19).
+      const content = await fs.readFile(record.path).catch((err: NodeJS.ErrnoException) => {
+        if (err.code === 'ENOENT' && record.consumedByRunId === run.id) return null;
+        throw err;
+      });
+      if (content) await writeRunUpload(ws.rootPath, u.category, record.name, content);
       await fs.rm(path.dirname(record.path), { recursive: true, force: true }).catch(() => undefined);
     }
   }
@@ -226,7 +233,7 @@ async function startSandbox({ deps, graph }: PrepareContext, run: WorkflowRun): 
       detail: session.sandboxName,
     };
   } catch (err) {
-    // Fail closed: a run that asked for a sandbox never silently runs on the host.
+    // `required`: a sandbox that cannot be provisioned fails the run (its stages would not use it either).
     if (graph.workflow.lifecycle.sandbox !== 'optional') throw err;
     deps.logger?.warn(`[RunLifecycle] ${run.id}: the sandbox did not start (${String(err)}); lifecycle.sandbox is optional, running on the host`);
     return { detail: 'sandbox skipped (optional)' };

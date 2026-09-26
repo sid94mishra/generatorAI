@@ -87,7 +87,12 @@ export function planInvocation(
     postProcessing: buildPostProcessingSteps(lifecycle, v.codebases.length > 0).map((s) => s.name),
     permissionMode: v.effectivePermissionMode,
     lineage: { depth: v.lineage.depth, rootRunId: v.lineage.rootRunId ?? null, parentRunId: v.lineage.parentRunId ?? null },
-    warnings: v.warnings,
+    warnings: opts.sandbox
+      ? [
+          ...v.warnings,
+          { code: 'sandbox-not-used', path: ['target'], message: 'The run provisions a sandbox, but its stages run on the host: sessions are not routed through it yet', severity: 'warning' as const },
+        ]
+      : v.warnings,
     risks,
   };
 }

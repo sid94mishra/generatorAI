@@ -41,6 +41,7 @@ export function createReviewRoutes(container: Container): Router {
     workflowRunService,
     stageConversationService,
     stageRunRepo,
+    workflowRunRepo,
     checkpointService,
     logger,
   } = container;
@@ -289,7 +290,23 @@ export function createReviewRoutes(container: Container): Router {
         // stage, or a retry of a paused one). A refusal (a busy stage, an
         // open tool gate) is answered as an error and the batch stays
         // pending: it is marked delivered only once it was taken.
+        // It steers a run, so it needs what the stage message route needs
+        // (`exec:agent` + `write:workflows`), and only a run of THIS
+        // workspace takes it (CONVINV-R5).
+        const scopes = req.principal?.scopes as readonly string[] | undefined;
+        const missing = ['exec:agent', 'write:workflows'].filter((s) => scopes && !scopes.includes(s));
+        if (missing.length > 0) {
+          res.status(403).json({
+            error: { code: 'INSUFFICIENT_SCOPE', message: `Sending a review to a workflow stage needs the ${missing.join(' and ')} scope(s)` },
+          });
+          return;
+        }
+        const run = await workflowRunRepo.getById(target.runId).catch(() => null);
         const stage = await stageRunRepo.getById(target.stageId).catch(() => null);
+        if (!run || run.workspaceId !== workspaceId || !stage || stage.workflowRunId !== run.id) {
+          res.status(404).json({ error: { code: 'NOT_FOUND', message: 'No such stage of a run in this workspace' } });
+          return;
+        }
         const review = (stage?.interruptData as { kind?: string } | undefined)?.kind === 'stage_completion_review';
         if (stage?.status === 'awaiting_input' && review) {
           const r = await workflowRunService.command(target.runId, {
