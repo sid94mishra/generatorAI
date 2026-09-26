@@ -160,6 +160,29 @@ describe('Stop on a persistent Claude session settles the turn', () => {
     expect(supervisor.snapshot().activeExecutions).toBe(1);
   });
 
+  it('ECON-R6: a stop while the turn is queued for its permit withdraws it, and it never starts', async () => {
+    await turnInFlight('busy');
+    internals.conversations.set('q1', { conversationId: 'q1', workingDirectory: '/tmp', lastUsedAt: Date.now() });
+    const events: string[] = [];
+    provider.onConversationEvent('q1', (e) => { events.push(e.kind); });
+
+    const sent = provider.sendPrompt('q1', 'hello');
+    await vi.waitFor(() => expect(supervisor.snapshot().executionQueueDepth).toBe(1));
+
+    await provider.abortConversation('q1');
+    await sent;
+    expect(events).toContain('harness.cancelled');
+    expect(events.at(-1)).toBe('harness.idle');
+    expect(supervisor.snapshot().executionQueueDepth).toBe(0);
+    expect(internals.turns.has('q1')).toBe(false);
+    expect(internals.activeQueries.has('q1')).toBe(false);
+
+    // The busy turn's permit is not handed to the withdrawn waiter.
+    (provider as unknown as { completeTurn: (t: unknown, s: string) => void }).completeTurn(internals.turns.get('busy'), 'completed');
+    expect(supervisor.snapshot().activeExecutions).toBe(0);
+    expect(internals.turns.has('q1')).toBe(false);
+  });
+
   it('reports the permit accounting in runtime diagnostics', async () => {
     await turnInFlight('c5');
     expect(provider.runtimeDiagnostics()).toMatchObject({ turnsInFlight: 1, maxConcurrentTurns: 1, turnsQueued: 0 });

@@ -30,6 +30,13 @@
 
 // ── Semaphore ──────────────────────────────────────────────────────
 
+/** The rejection of a permit wait withdrawn by its abort signal. */
+function abortError(): Error {
+  const err = new Error('The permit wait was aborted');
+  err.name = 'AbortError';
+  return err;
+}
+
 /**
  * W12 — minimal FIFO counting semaphore shared across supervisor operations.
  * Re-declared here (vs. importing from tool-factory) so AgentHostSupervisor
@@ -45,10 +52,25 @@ class BoundedSemaphore {
     this.available = permits > 0 ? permits : Number.POSITIVE_INFINITY;
   }
 
-  async acquire(): Promise<void> {
+  /**
+   * Wait for a permit. An abort of `signal` while waiting removes the waiter
+   * (so no permit is ever handed to it) and rejects with an `AbortError`.
+   */
+  async acquire(signal?: AbortSignal): Promise<void> {
+    if (signal?.aborted) throw abortError();
     if (this.tryAcquire()) return;
-    await new Promise<void>((resolve) => {
-      this.waiters.push(resolve);
+    await new Promise<void>((resolve, reject) => {
+      const onAbort = () => {
+        const i = this.waiters.indexOf(grant);
+        if (i >= 0) this.waiters.splice(i, 1);
+        reject(abortError());
+      };
+      const grant = () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      };
+      this.waiters.push(grant);
+      signal?.addEventListener('abort', onAbort, { once: true });
     });
   }
 
@@ -102,7 +124,8 @@ export const DEFAULT_MAX_CONCURRENT_AGENT_TURNS = 4;
 export interface ExecutionGate {
   /** A permit only if one is free right now (never waits). */
   tryAcquire(): (() => void) | undefined;
-  acquire(): Promise<() => void>;
+  /** Wait for a permit; an abort of `signal` withdraws the wait and rejects (`AbortError`). */
+  acquire(signal?: AbortSignal): Promise<() => void>;
   state(): { running: number; queued: number; limit: number | undefined };
 }
 
@@ -117,8 +140,8 @@ function semaphoreGate(sem: BoundedSemaphore): ExecutionGate {
   };
   return {
     tryAcquire: () => (sem.tryAcquire() ? permit() : undefined),
-    acquire: async () => {
-      await sem.acquire();
+    acquire: async (signal) => {
+      await sem.acquire(signal);
       return permit();
     },
     state: () => ({
@@ -271,10 +294,12 @@ export class AgentHostSupervisor {
    * Call this BEFORE spawning a new agent turn (before `query()`).
    *
    * Callers must always call the release function — typically via
-   * `try { return await fn(); } finally { release(); }`.
+   * `try { return await fn(); } finally { release(); }`. An abort of `signal`
+   * before the permit arrives withdraws the wait: it rejects (`AbortError`)
+   * and no permit is held.
    */
-  async acquireExecution(): Promise<() => void> {
-    return this.executionGate.acquire();
+  async acquireExecution(signal?: AbortSignal): Promise<() => void> {
+    return this.executionGate.acquire(signal);
   }
 
   /**
