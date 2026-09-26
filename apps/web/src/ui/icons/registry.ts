@@ -73,6 +73,8 @@ import {
   ListIcon,
   ListTreeIcon,
   LoaderCircleIcon,
+  ChevronsUpDownIcon,
+  ChevronsDownUpIcon,
   LockIcon,
   Maximize2Icon,
   MessageSquareIcon,
@@ -240,6 +242,8 @@ export const ICON_REGISTRY = {
   loader: LoaderCircleIcon,
   think: BrainIcon,
   image: ImageIcon,
+  'expand-all': ChevronsUpDownIcon,
+  'collapse-all': ChevronsDownUpIcon,
 } as const satisfies Record<IconConcept, LucideIcon>;
 
 /** The lucide component for a concept (for APIs that take a component, e.g. a nav item). */

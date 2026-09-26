@@ -1,5 +1,5 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn, userEvent } from 'storybook/test';
+import { expect, fn, userEvent, within } from 'storybook/test';
 import { assertTargetSize } from '../../lib/test/targetSize.js';
 import { Count } from '../Count/Count.js';
 import { StatusDot } from '../StatusDot/StatusDot.js';
@@ -70,6 +70,16 @@ export const Pressed: Story = {
 };
 
 export const Disabled: Story = { args: { disabled: true } };
+
+/** Per-row busy state: the Spinner replaces the glyph inside a status region. */
+export const Loading: Story = {
+  args: { icon: 'check', label: 'Keep src/app.ts', size: 'sm', loading: true, disabled: true },
+  play: async ({ canvas }) => {
+    const button = canvas.getByRole('button', { name: 'Keep src/app.ts' });
+    await expect(button).toHaveAttribute('aria-busy', 'true');
+    await expect(within(button).getByRole('status')).toBeInTheDocument();
+  },
+};
 
 /** Compact density draws sm at 20px; the hit area stays 24×24 (`data-gai-hit`). */
 export const Compact: Story = {

@@ -7,7 +7,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ReactElement } from 'react';
-import { Toaster } from 'sonner';
+import { Toaster } from '@/ui/primitives/Toast/Toast.js';
 import { renderWithProviders } from '../../helpers/renderWithProviders.js';
 import { makeChangesPlatform } from './changesSurfaceHarness.js';
 

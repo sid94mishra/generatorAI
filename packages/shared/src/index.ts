@@ -9,6 +9,8 @@ export * from './telemetry/index.js';
 export * from './builders/index.js';
 // D-18 — 8-state status map (React-free, also exported from ./client)
 export * from './status/index.js';
+// Diff review intents + line label (React-free, also exported from ./client)
+export * from './review.js';
 // W12 — IPC protocol for inter-process communication
 export * from './ipc/AgentHostIpc.js';
 export * from './ipc/PtyHostIpc.js';

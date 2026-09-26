@@ -1,9 +1,8 @@
 // ────────────────────────────────────────────────────────────────
 // blocks/changes — the Changes panel's data layer (03-domain §6.3).
 //
-// P4-04 extracted these hooks from components/diff/ChangesSurface.tsx, which
-// is now a thin view over them; the P4-09 `blocks/changes` view consumes the
-// same hooks. Each hook returns plain values and stable callbacks; rendering,
+// P4-04 extracted these hooks from the legacy ChangesSurface; the P4-09
+// ChangesPanel view (ChangesPanel.tsx) composes them with the pure parts. Each hook returns plain values and stable callbacks; rendering,
 // dialogs and toasts stay with the host (confirm/warn are injected).
 // ────────────────────────────────────────────────────────────────
 

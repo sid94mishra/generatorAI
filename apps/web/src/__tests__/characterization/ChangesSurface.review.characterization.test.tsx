@@ -55,12 +55,12 @@ vi.mock('@/lib/desktop.js', async (orig) =>
   (await import('./helpers/changesSurfaceHarness.js')).desktopMock(await orig()),
 );
 // 09 §5.3: DiffCodeView is stubbed to a list of rows (no Shiki, no workers).
-vi.mock('@/components/diff/DiffCodeView.js', async () => ({
+vi.mock('@/blocks/diff/DiffCodeView.js', async () => ({
   DiffCodeView: (await import('./helpers/changesSurfaceHarness.js')).DiffCodeViewStub,
 }));
 
 // Import under test — the only line that changes when P4 moves the file.
-import { ChangesSurface } from '@/components/diff/ChangesSurface.js';
+import { ChangesPanel as ChangesSurface } from '@/blocks/changes/ChangesPanel.js';
 
 const restorers: Array<() => void> = [];
 beforeEach(() => {

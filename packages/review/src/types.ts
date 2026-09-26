@@ -12,7 +12,7 @@
 // The critical difference from GitHub: the "reviewer" audience is an agent,
 // so a thread is a typed instruction, not just prose.
 
-import type { ReviewThreadStatus } from '@generatorai/shared';
+import type { ReviewIntent, ReviewThreadStatus } from '@generatorai/shared';
 
 export type ReviewScope = 'chat' | 'run' | 'automation';
 
@@ -23,8 +23,8 @@ export type ReviewSide = 'additions' | 'deletions';
 // (D-18), so the review UI's badge mapping is exhaustive over it.
 export type { ReviewThreadStatus };
 
-/** What the comment is asking the agent to do. Drives the prompt wording. */
-export type ReviewIntent = 'fix' | 'question' | 'note' | 'refactor' | 'test';
+/** What the comment is asking the agent to do. Drives the prompt wording (shared with the review UI). */
+export type { ReviewIntent };
 
 export type ReviewAuthor = 'user' | 'agent';
 

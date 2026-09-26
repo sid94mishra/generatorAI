@@ -36,7 +36,7 @@ import { useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { FileCodeView } from './FileCodeView.js';
-import { DiffProviders } from './DiffProviders.js';
+import { DiffProviders } from '@/blocks/diff/DiffProviders.js';
 import { ChangesTree } from './ChangesTree.js';
 import type { FileTabRef } from './fileTabId.js';
 
@@ -495,7 +495,7 @@ function FilePreview({
   }
 
   return (
-    // W28 — see the identical comment in ChangesSurface.tsx: DiffProviders
+    // W28 — see the identical comment in blocks/changes/ChangesPanel.tsx: DiffProviders
     // wraps at the point of use, not the app root, safely (true singleton
     // pool underneath) and keeps the highlighter/WASM bundle out of every
     // page load that never opens a file.

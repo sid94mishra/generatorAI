@@ -128,7 +128,7 @@ await page.waitForTimeout(10000);
 // Files render COLLAPSED by default (bodies are fetched lazily), so a mounted
 // host with no <pre><code> only means "not expanded yet" — it is not evidence
 // that the renderer failed. Expand everything before asserting.
-const expandAll = page.getByRole('button', { name: /^Expand all$/ }).first();
+const expandAll = page.getByRole('button', { name: /^Expand all files$/ }).first();
 if (await expandAll.count()) {
   await expandAll.click().catch(() => {});
   await page.waitForTimeout(10000);

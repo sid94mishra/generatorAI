@@ -31,6 +31,9 @@ export * from './types/index.js';
 // D-18 status map: pure tables and helpers.
 export * from './status/index.js';
 
+// Diff review intents, their words and the line-range label.
+export * from './review.js';
+
 // Error classes are plain `Error` subclasses.
 export * from './errors/index.js';
 

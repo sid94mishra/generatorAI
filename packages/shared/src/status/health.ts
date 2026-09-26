@@ -58,7 +58,8 @@ export const HEALTH = {
   } satisfies Record<MountStatus, HealthMapping>,
 } as const;
 
-export type ChangeKindTone = 'ok' | 'fg-2' | 'fg-3' | 'err';
+/** A file-change letter's tone (03-domain §2.2 B-08 and the DockChanges board: M warn, R run). */
+export type ChangeKindTone = 'ok' | 'warn' | 'run' | 'fg-3' | 'err';
 
 export interface ChangeKindDef {
   letter: 'A' | 'M' | 'D' | 'R' | 'U' | 'I';
@@ -69,10 +70,10 @@ export interface ChangeKindDef {
 /** `removed` (pull-request files) renders exactly like `deleted`. */
 export const CHANGE_KIND = {
   added: { letter: 'A', tone: 'ok', label: 'Added' },
-  modified: { letter: 'M', tone: 'fg-2', label: 'Modified' },
+  modified: { letter: 'M', tone: 'warn', label: 'Modified' },
   deleted: { letter: 'D', tone: 'err', label: 'Deleted' },
   removed: { letter: 'D', tone: 'err', label: 'Deleted' },
-  renamed: { letter: 'R', tone: 'fg-2', label: 'Renamed' },
+  renamed: { letter: 'R', tone: 'run', label: 'Renamed' },
   untracked: { letter: 'U', tone: 'fg-3', label: 'Untracked' },
   ignored: { letter: 'I', tone: 'fg-3', label: 'Ignored' },
 } as const satisfies Record<ChangeKindValue, ChangeKindDef>;

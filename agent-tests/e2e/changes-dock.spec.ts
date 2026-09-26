@@ -6,8 +6,8 @@
 //    restored on disk (check with `git status` in the dummy repo); Undo
 //    all → the confirm dialog, then a clean tree."
 //
-// Drives the REAL server + web app's ChangesSurface (apps/web/src/
-// components/diff/ChangesSurface.tsx) against a THROWAWAY git repo created
+// Drives the REAL server + web app's Changes panel (apps/web/src/blocks/
+// changes/ChangesPanel.tsx) against a THROWAWAY git repo created
 // by scripts/redesign/make-dummy-repo.mjs (never this checkout — .claude/
 // CLAUDE.md "Git/SCM features: test against a throwaway dummy repo").
 //

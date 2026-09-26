@@ -24,7 +24,7 @@ import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { langFromPath } from '@/ui/patterns/CodeBlock/langFromPath.js';
 import { useHighlightedLines, type HighlightedToken } from '@/ui/patterns/CodeBlock/useHighlightedLines.js';
 import { FileCodeView } from '@/components/diff/FileCodeView.js';
-import { DiffProviders } from '@/components/diff/DiffProviders.js';
+import { DiffProviders } from '@/blocks/diff/DiffProviders.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
 
 // ── Types ──
@@ -437,7 +437,7 @@ export function FileViewerModal({ filePath, source, worktreeAlias, onClose, file
             // The modal supplies its own title bar, so the built-in header is
             // suppressed to avoid showing the filename twice.
             // W28 — DiffProviders wraps at the point of use; see the identical
-            // comment in ChangesSurface.tsx / FilesSurface.tsx.
+            // comment in blocks/changes/ChangesPanel.tsx / FilesSurface.tsx.
             <DiffProviders>
               <FileCodeView
                 name={filePath}

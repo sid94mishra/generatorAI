@@ -21,10 +21,10 @@ export function App() {
               the user is told why. */}
           <AuthGate>
             {/* Diff/code-view surfaces mount their own <DiffProviders> at the
-                point of use (ChangesSurface, FilesSurface, FileViewerModal,
+                point of use (ChangesPanel, FilesSurface, FileViewerModal,
                 CodebaseDetailPage) instead of here. @pierre/diffs/react's
                 worker pool is a lazily-created, refcounted module-level
-                singleton (see DiffProviders.tsx), so multiple mount points
+                singleton (see blocks/diff/DiffProviders.tsx), so multiple mount points
                 share one Shiki/WASM pool safely — but mounting it here would
                 statically import the whole library into this eager root
                 bundle instead of the lazy route chunks that actually use it. */}

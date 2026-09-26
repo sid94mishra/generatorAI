@@ -8,7 +8,9 @@
 // the `.ib.on` selected look (dock toggle). `badge` sits in the top-right
 // corner (a StatusDot or a Count bubble for rail counters). By default a
 // Tooltip (P-28) repeats the label (+ `shortcut`); `tooltip={false}` turns it
-// off, a string replaces the text.
+// off, a string replaces the text. `loading` swaps the glyph for the Spinner
+// inside a `role="status"` span (a per-row busy state, e.g. the Changes
+// dock's Keep while its request runs); it does not disable the button.
 // ────────────────────────────────────────────────────────────────
 
 import type { ReactNode } from 'react';
@@ -19,6 +21,7 @@ import type { IconConcept } from '@generatorai/design-tokens';
 import { cn } from '../../lib/cn.js';
 import { focusRing, hitSlop, HIT_ATTRS } from '../../lib/focus.js';
 import { Icon } from '../../icons/Icon.js';
+import { Spinner } from '../Spinner/Spinner.js';
 import { Tooltip } from '../Tooltip/Tooltip.js';
 
 export const iconButtonVariants = cva(
@@ -70,6 +73,8 @@ export interface IconButtonProps extends Omit<useRender.ComponentProps<'button'>
   /** Shortcut chord shown in the tooltip. */
   shortcut?: readonly string[];
   tooltipSide?: 'top' | 'bottom' | 'left' | 'right';
+  /** Busy: the Spinner (in a `role="status"` span) replaces the glyph. */
+  loading?: boolean;
 }
 
 /** A square icon-only button with a required accessible `label`. */
@@ -84,6 +89,7 @@ export function IconButton({
   tooltip = true,
   shortcut,
   tooltipSide = 'top',
+  loading = false,
   render,
   ref,
   className,
@@ -96,9 +102,16 @@ export function IconButton({
     ...(size === 'sm' ? HIT_ATTRS : {}),
     ...(render ? {} : { type: type ?? 'button' }),
     ...(pressed !== undefined ? { 'aria-pressed': pressed } : {}),
+    ...(loading ? { 'aria-busy': true } : {}),
     children: (
       <>
-        <Icon concept={icon} size={size === 'sm' ? 14 : 16} />
+        {loading ? (
+          <span role="status" aria-label="Working" className="flex">
+            <Spinner size={size === 'sm' ? 14 : 16} />
+          </span>
+        ) : (
+          <Icon concept={icon} size={size === 'sm' ? 14 : 16} />
+        )}
         {badge != null ? (
           <span className="pointer-events-none absolute -top-0.5 -right-0.5 flex">{badge}</span>
         ) : null}

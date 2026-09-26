@@ -42,7 +42,7 @@ import { useEditorTarget } from '@/stores/editorTargetStore.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { langFromPath } from '@/ui/patterns/CodeBlock/langFromPath.js';
 import { FileCodeView } from '@/components/diff/FileCodeView.js';
-import { DiffProviders } from '@/components/diff/DiffProviders.js';
+import { DiffProviders } from '@/blocks/diff/DiffProviders.js';
 import { toast } from '@/components/Toast.js';
 import { Modal, Button, Badge, Spinner, Tabs, PageHeader, Popover, PopoverTrigger, PopoverContent, Input, type BadgeTone } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
@@ -517,7 +517,7 @@ function FilePreviewPanel({
             // 20k-line file scrolls without blocking the main thread and
             // highlighting matches what the Changes panel shows. W28 —
             // DiffProviders wraps at the point of use; see the identical
-            // comment in ChangesSurface.tsx.
+            // comment in blocks/changes/ChangesPanel.tsx.
             <DiffProviders>
               <FileCodeView
                 name={filePath}

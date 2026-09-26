@@ -131,7 +131,7 @@ record('change summary lists the new file', files.length > 0, files.join(','));
 // ── 3. Diff renders in the PRODUCTION bundle (workers + shadow DOM) ──
 await page.goto(`${base}/chats/${chat.id}`);
 await page.waitForTimeout(6000);
-// The Changes surface lives in the RIGHT PANE, collapsed by default.
+// The Changes panel (blocks/changes/ChangesPanel) lives in the RIGHT PANE, collapsed by default.
 const showPane = page.getByRole('button', { name: /Show side pane/i }).first();
 if (await showPane.count()) {
   await showPane.click().catch(() => {});
@@ -142,7 +142,7 @@ await changesTab.click().catch(() => {});
 await page.waitForTimeout(5000);
 // Files start collapsed (bodies are lazy), so expand before asserting —
 // otherwise a mounted-but-empty host reads as a render failure.
-const expandAll = page.getByRole('button', { name: /^Expand all$/ }).first();
+const expandAll = page.getByRole('button', { name: /^Expand all files$/ }).first();
 if (await expandAll.count()) {
   await expandAll.click().catch(() => {});
   await page.waitForTimeout(8000);

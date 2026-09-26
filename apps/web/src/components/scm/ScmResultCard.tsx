@@ -11,7 +11,7 @@
 import React from 'react';
 import { AlertTriangle, ExternalLink, GitCommit, GitPullRequest } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
-import { ScmConflictActions } from './ScmConflictActions.js';
+import { ScmConflictActions } from '@/blocks/scm/ScmConflictActions.js';
 import type { ScmFlowResult } from '@generatorai/shared';
 
 export interface ScmResultCardProps {

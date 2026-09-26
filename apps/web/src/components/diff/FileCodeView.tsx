@@ -15,7 +15,8 @@ import { useMemo } from 'react';
 import { CodeView } from '@pierre/diffs/react';
 import type { CodeViewItem } from '@pierre/diffs';
 import { useTheme } from '@/providers/ThemeProvider.js';
-import { DIFF_THEMES, DIFF_UNSAFE_CSS, diffHostStyle } from './diffTheme.js';
+import '@/blocks/diff/diffSyntaxTheme.js';
+import { DIFF_THEMES, DIFF_UNSAFE_CSS, diffHostStyle } from '@/blocks/diff/diffTheme.js';
 
 export interface FileCodeViewProps {
   /** Path or filename — drives the header and the inferred language. */

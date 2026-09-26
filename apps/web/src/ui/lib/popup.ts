@@ -19,6 +19,15 @@ export const listPopup =
   // so a long menu scrolls instead of overflowing the window.
   'max-h-(--available-height) min-w-55 overflow-y-auto rounded-card p-1 outline-none';
 
+/**
+ * Popover box (P-29): a fixed-width card never wider than the room Base UI
+ * measured between the anchor's collision boundary edges, so a 340 card
+ * anchored in a narrow dock still fits the window.
+ */
+export const popoverClamp =
+  // --available-width: Base UI's usable width for the popup inside the viewport.
+  'max-w-(--available-width)';
+
 /** A listbox that should be at least as wide as its input (autocomplete, select). */
 export const anchorWidth =
   // --anchor-width: the trigger/input width Base UI measures.

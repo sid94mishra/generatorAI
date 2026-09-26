@@ -9,6 +9,9 @@
 // (D-41). Triggers take any element through `render`:
 // `<PopoverTrigger render={<Chip interactive label="Sources" />} />`.
 // Dismissal (outside press, Escape) and focus return are Base UI's.
+// `anchor` positions the popup against something the page does not own as a
+// trigger (a virtual point inside a diff viewer's shadow-root: the Changes
+// dock's review composer); drive `open` on the root yourself then.
 // ────────────────────────────────────────────────────────────────
 
 import type { ComponentProps } from 'react';
@@ -33,17 +36,31 @@ export interface PopoverPopupProps extends Omit<ComponentProps<typeof BasePopove
   side?: Side;
   align?: Align;
   sideOffset?: number;
+  /** Position against this instead of the trigger (element, ref or virtual element). */
+  anchor?: BasePopover.Positioner.Props['anchor'];
+  collisionPadding?: number;
   className?: string;
 }
 
 /** Portal + positioner + the styled popup box. */
-export function PopoverPopup({ side = 'bottom', align = 'start', sideOffset = 6, className, children, ...rest }: PopoverPopupProps) {
+export function PopoverPopup({
+  side = 'bottom',
+  align = 'start',
+  sideOffset = 6,
+  anchor,
+  collisionPadding,
+  className,
+  children,
+  ...rest
+}: PopoverPopupProps) {
   return (
     <BasePopover.Portal>
       <BasePopover.Positioner
         side={side}
         align={align}
         sideOffset={sideOffset}
+        {...(anchor !== undefined ? { anchor } : {})}
+        {...(collisionPadding !== undefined ? { collisionPadding } : {})}
         className="z-popover outline-none"
         {...overlayProps('popover')}
       >

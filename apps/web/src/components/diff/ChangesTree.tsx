@@ -17,7 +17,7 @@ import { FileTree, useFileTree, useFileTreeSelection } from '@pierre/trees/react
 import { cn } from '@/lib/utils.js';
 import { FILE_ICON_SET } from '@/components/shared/fileIcons.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
-import { treeHostStyleFor } from './diffTheme.js';
+import { treeHostStyleFor } from '@/blocks/diff/diffTheme.js';
 
 export type TreeGitStatus =
   | 'added'

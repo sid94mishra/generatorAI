@@ -26,6 +26,8 @@ import { useFileTabs } from '@/components/diff/useFileTabs.js';
 import { BrowserPanel, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
 import { ChatMessageSkeleton } from '@/components/Skeleton.js';
 import { Dock, useDockOpen, type DockRegistry } from '@/blocks/dock/index.js';
+import { ChangesDockContext, ChangesDockPanel } from '@/blocks/changes/ChangesDockPanel.js';
+import type { ChangesPanelProps } from '@/blocks/changes/ChangesPanel.js';
 import { WidgetHost } from '@/components/widgets/WidgetHost.js';
 import { parseWidgetTabId } from '@/lib/widgetTabId.js';
 import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
@@ -40,9 +42,6 @@ import { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS, ChatTranscript, useChatView } from 
 // keeping them static delayed the composer and transcript on every chat open.
 const TerminalPanel = React.lazy(() =>
   import('@/components/terminal/TerminalPanel.js').then((m) => ({ default: m.TerminalPanel })),
-);
-const ChangesSurface = React.lazy(() =>
-  import('@/components/diff/ChangesSurface.js').then((m) => ({ default: m.ChangesSurface })),
 );
 const ComputerPanel = React.lazy(() =>
   import('@/components/chat/ComputerPanel.js').then((m) => ({ default: m.ComputerPanel })),
@@ -199,6 +198,22 @@ export function ChatPage() {
   // label) reads it narrowly instead of closing over a value captured here —
   // `AgentShellPanel` subscribes itself, and `widgetLabel` below reads a
   // fresh snapshot only when `widgetTitlesKey` actually changes.
+  // The Changes tab's props, memoised so streamed tokens never re-render it.
+  const changesDockProps = useMemo<ChangesPanelProps>(
+    () => ({
+      ...(chat?.workspaceId ? { workspaceId: chat.workspaceId } : {}),
+      ...(chatId ? { chatId } : {}),
+      ...(chat?.name ? { scmHint: chat.name } : {}),
+      enableReview: true,
+      // Threads are scoped to the chat; the send target is also the chat, so
+      // "Send all" posts the batch as a new user turn.
+      reviewScope: { scope: 'chat', scopeId: chatId ?? '' },
+      ...(chatId ? { reviewTarget: { kind: 'chat', chatId } } : {}),
+      focusFile: changesFocusFile,
+    }),
+    [chat?.workspaceId, chatId, chat?.name, changesFocusFile],
+  );
+
   const tabs = useMemo<DockRegistry>(() => {
     // `widgetTitlesKey` (in the dep array below) is a trigger-only
     // dependency: it is not read here directly, but its identity is what
@@ -218,22 +233,8 @@ export function ChatPage() {
         description: 'Files & changes for this chat',
         icon: 'changes',
         pinned: true,
-        render: () => (
-          <React.Suspense fallback={<PanelFallback />}>
-            <ChangesSurface
-              embedded
-              workspaceId={chat?.workspaceId}
-              {...(chatId ? { chatId } : {})}
-              {...(chat?.name ? { scmHint: chat.name } : {})}
-              enableReview
-              // Threads are scoped to the chat; the send target is also the
-              // chat, so "Send all" posts the batch as a new user turn.
-              reviewScope={{ scope: 'chat', scopeId: chatId ?? '' }}
-              {...(chatId ? { reviewTarget: { kind: 'chat', chatId } } : {})}
-              focusFile={changesFocusFile}
-            />
-          </React.Suspense>
-        ),
+        // Reads its props from ChangesDockContext (provided below).
+        Component: ChangesDockPanel,
       },
       // D-27: Files is ONE pinned tab (the tree); opened files get `file` tabs.
       files: {
@@ -489,6 +490,7 @@ export function ChatPage() {
 
   return (
     <PathRootsContext.Provider value={workspace.pathRoots}>
+    <ChangesDockContext.Provider value={changesDockProps}>
     <div className="relative flex h-full">
       {/* The right dock (D-27) lays out the main chat column beside it. */}
       <Dock
@@ -638,6 +640,7 @@ export function ChatPage() {
         chat={chat}
       />
     </div>
+    </ChangesDockContext.Provider>
     </PathRootsContext.Provider>
   );
 }

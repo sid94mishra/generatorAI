@@ -153,6 +153,9 @@ const UI_CONCEPTS = {
   think: { lucide: 'brain' },
   /** A screenshot or image a step produced. */
   image: { lucide: 'image' },
+  /** Expand / collapse every section of a list (the Changes dock's files). */
+  'expand-all': { lucide: 'chevrons-up-down' },
+  'collapse-all': { lucide: 'chevrons-down-up' },
 } as const satisfies Record<string, IconConceptDef>;
 
 export const ICON_CONCEPTS = {
