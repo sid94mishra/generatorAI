@@ -14,8 +14,8 @@ Status values: `open` → `in progress` → `closed (PR #)` / `accepted (rationa
 | R4 | DAG evaluation; retries; a **generic** loop (fix ↔ review is one example) with a budget | README §5.1; P03 WP-3.3–3.6; P05 §2–§3, WP-5A.1–5A.5 (tests: loop matrix, examples L1–L6, v59 migration, Windows `check`) | closed (P05: loop 0c3f4e2..4d6ba7e, map/sub-workflow/wait 3eb76c9..dcd3b60; tests deferred to the final pass) |
 | R5 | Codex goals and Claude Code dynamic workflows research and support (as DAG constructs, no slash commands) | README §5.3; P05 examples L1–L6, M1–M3; P08 (judge panel + expansion; script runtime gated by PD-21) | in progress (P05 done: templates L1–L6, M1–M3, W1–W3, S1, completeness critic generated from presets, c46fe80; P08 remains) |
 | R6 | Remove legacy and back-compat code | P01 WP-1.1–1.4; P03 WP-3.7; P04 WP-4.1 (orchestrator, worktrees), 4.4 (MCP embedded), 4.6; `check-no-legacy` | in progress (P01–P04 parts done: orchestrator, preprocessor, run-start routes, MCP embedded mode deleted; 110 bans) |
-| R7 | Chat and the orchestrator invoke workflows | P06 WP-6.1–6.4 | open |
-| R8 | An authoring skill for any agent | P06 WP-6.5–6.8 | open |
+| R7 | Chat and the orchestrator invoke workflows | P06 WP-6.1–6.4 | closed (a55a1bf, 52e5497, 966e114, c44ba88, cf0ac96: one workflow tool set for chats, orchestrators and stages; chat bridge and cards) |
+| R8 | An authoring skill for any agent | P06 WP-6.5–6.8 | closed (52e5497, ba3759a, e0f06ac, fc3f9dc: authoring service and routes, the generated skill, CLI, MCP tools and resources) |
 | R9 | Review the earlier document | README §4 | closed (this plan) |
 | R10 | Evidence-backed recommendations | "Why" paragraphs in every phase; evidence folder | closed (this plan) |
 | R11 | A phase-by-phase plan for a coding agent | PHASE-00..09 | closed (this plan) |
@@ -238,6 +238,21 @@ Commits: 5A 0c3f4e2..4d6ba7e (see TRACKER); 5B 3eb76c9 (spec), 5ffd0a4 (engine),
 | P5-39 | CodeMirror 6 lazy chunk with a budget | c8640ef | `check-bundle-size.mjs` (104.7 KB of 250 KB) |
 | P5-42 | CLI `run command --json` (5A) plus `--eventKey/--idempotencyKey/--data @file` | 936e7a1, dcd3b60 | CLI surface snapshot |
 | Cross-file #14 | `WorkflowApprovalService` extracted in P05 (P06 reuses it) | 5ffd0a4 | notes/P05B-handoff.md |
+
+## Phase 06 closure (2026-09-26, review deferred to the final review)
+
+Commits: 21393c6 (v60), a55a1bf (WP-6.1 core with 6.2–6.5 wiring), a569934, 52e5497 (routes), cf0ac96 (6.4), 3e685fd + f1db906 (docs), 59f9b29 (deviations), 966e114 + c44ba88 + a7aadc2 (UI), e0f06ac (CLI), fc3f9dc (MCP), 4d7869c (fixes), ba3759a (skill). Tests for these items are deferred to the final pass (IMPLEMENTATION FIRST), except the v60 chat-safety test.
+
+| ID | What P06 closed | Commits | Evidence |
+|---|---|---|---|
+| R7 | Chats, orchestrators and stages find, run, follow, answer and cancel workflows through one tool set | a55a1bf, 52e5497, cf0ac96, 966e114, c44ba88 | `tools/workflows/`, `ChatWorkflowRunBridge`, web/mobile cards |
+| R8 | Any agent authors a workflow: validate → plan → draft → a person publishes; the generated skill in three channels | 52e5497, ba3759a, e0f06ac, fc3f9dc | `WorkflowAuthoringService`, `skills/generatorai-workflow-author/`, CLI `skill install`, MCP resources |
+| W-40 (P06 part), C-15 | The worker clamp holds on Copilot: built-in denials travel as `extraDeny` → `excludedBuiltinTools`; workers get no workflow tools | a55a1bf | `inheritWorkerCapabilitiesFrom` |
+| C-18 | A chat invokes workflows (trigger chat/orchestrator, lineage, ceiling, idempotency) | a55a1bf | `WorkflowToolHost.run` |
+| W-58 (P06 part) | The MCP server exposes the full workflow tool set and the skill (remote mode, no prompts) | fc3f9dc, 52e5497 | `packages/mcp-server/src/server.ts`, `/api/workflow-tools` |
+| W-64 (authoring side) | Stateless validate with server checks, plan without writes, the JSON Schema + hash endpoint, agent-authored drafts | 52e5497, 4d7869c | routes `/workflow-definitions/{validate,plan,schema,authoring/skill}` |
+| PD-14 | Agent-authored workflows are drafts; a person publishes (`GENERATORAI_ALLOW_AGENT_PUBLISH` for agents, default off) | 52e5497, 966e114 | `isPersonRequest`, agent-draft banner |
+| PD-23 | Workflow tools opt-in for plain chats, on for orchestrators, off for workers | a55a1bf | composer, `createChat`, resolver |
 
 ## Independent review findings
 
