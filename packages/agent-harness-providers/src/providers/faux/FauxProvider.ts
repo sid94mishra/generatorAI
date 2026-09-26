@@ -79,6 +79,20 @@ export interface FauxToolCallEntry {
   callId?: string;
 }
 
+/**
+ * Invoke one of the conversation's REGISTERED tools (the `tools` handed to
+ * `createConversation`, e.g. the orchestrator's `spawn_background_agent`) with
+ * `input`, emitting tool_start / tool_complete around the real handler — so a
+ * scripted chat can drive GeneratorAI's own tools end to end, the way a real
+ * model does. An unknown tool completes with `success: false`.
+ */
+export interface FauxToolInvokeEntry {
+  type: 'tool_invoke';
+  name: string;
+  input: Record<string, unknown>;
+  callId?: string;
+}
+
 /** Emit a tool_error event (for B1 truncation testing). */
 export interface FauxToolErrorEntry {
   type: 'tool_error';
@@ -177,6 +191,7 @@ export interface FauxPermissionRequestEntry {
 export type FauxScriptEntry =
   | FauxTextEntry
   | FauxToolCallEntry
+  | FauxToolInvokeEntry
   | FauxToolErrorEntry
   | FauxCompleteEntry
   | FauxCancelledEntry
@@ -573,6 +588,33 @@ export class FauxProvider implements IAgentHarness {
             this.broadcast(conversationId, {
               kind: 'harness.tool_complete',
               data: { tool: entry.name, result, callId, success: true },
+            });
+            break;
+          }
+
+          case 'tool_invoke': {
+            const callId = entry.callId ?? nextCallId();
+            this.broadcast(conversationId, {
+              kind: 'harness.tool_start',
+              data: { tool: entry.name, args: entry.input, callId },
+            });
+            const tool = conv.params.tools?.find((t) => t.name === entry.name);
+            let result: unknown;
+            let success = true;
+            if (!tool) {
+              result = `FauxProvider: no registered tool named "${entry.name}"`;
+              success = false;
+            } else {
+              try {
+                result = await tool.handler(entry.input);
+              } catch (err) {
+                result = err instanceof Error ? err.message : String(err);
+                success = false;
+              }
+            }
+            this.broadcast(conversationId, {
+              kind: 'harness.tool_complete',
+              data: { tool: entry.name, result, callId, success },
             });
             break;
           }

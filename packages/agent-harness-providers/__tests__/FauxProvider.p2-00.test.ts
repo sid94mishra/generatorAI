@@ -471,3 +471,40 @@ describe('FauxProvider — "file_edit" line counting (P2-R21c)', () => {
     expect(complete?.data.fileOp?.additions).toBe(2);
   });
 });
+
+describe('FauxProvider — tool_invoke (P2-04, drives registered tools end to end)', () => {
+  it('runs the registered tool handler with the scripted input and reports its result', async () => {
+    const calls: unknown[] = [];
+    const faux = new FauxProvider();
+    await faux.initialize();
+    await faux.createConversation({
+      conversationId: 'inv-1',
+      tools: [
+        {
+          name: 'spawn_background_agent',
+          description: 'x',
+          parametersSchema: {},
+          handler: async (args) => {
+            calls.push(args);
+            return { ok: true, taskId: 'worker-1' };
+          },
+        },
+      ],
+    });
+    const events: AgentEvent[] = [];
+    faux.onConversationEvent('inv-1', (e) => events.push(e));
+    faux.script(
+      [
+        { type: 'tool_invoke', name: 'spawn_background_agent', input: { taskName: 'audit', objective: 'o' } },
+        { type: 'tool_invoke', name: 'missing_tool', input: {} },
+        { type: 'complete' },
+      ],
+      'inv-1',
+    );
+    await faux.sendPromptAndWait('inv-1', 'go');
+    expect(calls).toEqual([{ taskName: 'audit', objective: 'o' }]);
+    const completes = events.filter((e) => e.kind === 'harness.tool_complete').map((e) => e.data as Record<string, unknown>);
+    expect(completes[0]).toMatchObject({ tool: 'spawn_background_agent', success: true, result: { ok: true, taskId: 'worker-1' } });
+    expect(completes[1]).toMatchObject({ tool: 'missing_tool', success: false });
+  });
+});
