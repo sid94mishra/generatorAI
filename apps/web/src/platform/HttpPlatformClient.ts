@@ -318,6 +318,8 @@ import type {
   ProjectSettings,
   CodebaseType,
   CodebaseSettings,
+  CodebaseLogsResponse,
+  FetchCodebaseResult,
   ConfigType,
 } from '@generatorai/shared';
 import { apiFetch, ApiError } from './apiFetch.js';
@@ -2168,8 +2170,22 @@ export class HttpPlatformClient implements IPlatformClient {
     await apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}`, { method: 'DELETE' });
   }
 
-  async fetchCodebase(projectId: string, codebaseId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/fetch`, { method: 'POST' });
+  /**
+   * G-16 — now starts a background job instead of waiting for the whole
+   * fetch: answers `202 { jobId }` almost immediately. `useFetchCodebase`
+   * ignores the resolved value (it only invalidated queries on success
+   * before), so this is a compatible change for the legacy page; poll
+   * `getCodebaseLogs` or the `codebase.status_changed` stream event for
+   * the outcome.
+   */
+  async fetchCodebase(projectId: string, codebaseId: string): Promise<FetchCodebaseResult> {
+    return apiFetch<FetchCodebaseResult>(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/fetch`, { method: 'POST' });
+  }
+
+  /** G-16 — the last N clone/fetch log lines + the current/last job. */
+  async getCodebaseLogs(projectId: string, codebaseId: string, params?: { limit?: number }): Promise<CodebaseLogsResponse> {
+    const qs = params?.limit ? `?limit=${params.limit}` : '';
+    return apiFetch<CodebaseLogsResponse>(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/logs${qs}`);
   }
 
   async getCodebaseBranches(projectId: string, codebaseId: string): Promise<string[]> {
@@ -2550,8 +2566,8 @@ export class HttpPlatformClient implements IPlatformClient {
   }
 
   // ── Codebase-level Worktree API ──
-  async listCodebaseWorktrees(projectId: string, codebaseId: string): Promise<any[]> {
-    return apiFetch<any[]>(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/worktrees`);
+  async listCodebaseWorktrees(projectId: string, codebaseId: string): Promise<WorktreeInfo[]> {
+    return apiFetch<WorktreeInfo[]>(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/worktrees`);
   }
 
   async removeCodebaseWorktree(projectId: string, codebaseId: string, worktreeId: string): Promise<void> {

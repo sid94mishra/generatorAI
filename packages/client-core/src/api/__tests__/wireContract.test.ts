@@ -704,3 +704,24 @@ describe('orchestrator run uploads wire contract', () => {
     expect(files[0]?.name).toBe('skill.md');
   });
 });
+
+describe('G-16 codebase fetch/logs wire contract', () => {
+  it('POSTs the fetch job route with no body', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.fetchCodebase('p1', 'cb1');
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/fetch');
+    expect(calls[0]?.method).toBe('POST');
+  });
+
+  it('sends `limit` as a query param on the logs route', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.codebaseLogs('p1', 'cb1', { limit: 50 });
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/logs?limit=50');
+  });
+
+  it('omits the query string when no limit is given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.codebaseLogs('p1', 'cb1');
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/logs');
+  });
+});

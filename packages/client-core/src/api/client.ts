@@ -27,6 +27,8 @@ import {
   type ProjectRunListPage,
   type StatsSummary,
   type RecentActivityPage,
+  type CodebaseLogsResponse,
+  type FetchCodebaseResult,
 } from '@generatorai/shared';
 
 export interface ApiFetch {
@@ -1592,6 +1594,22 @@ export function createApiClient(fetchImpl: ApiFetch) {
         if (params?.limit !== undefined) q.set('limit', String(params.limit));
         const suffix = q.toString() ? `?${q}` : '';
         return request<ProjectRunListPage>(fetchImpl, `/api/projects/${id}/runs${suffix}`);
+      },
+
+      /**
+       * G-16 — was synchronous; now starts a background job and answers
+       * `202 { jobId }` almost immediately. Tail progress with `codebaseLogs`
+       * below, or the `codebase.status_changed` stream event.
+       */
+      fetchCodebase: (id: string, codebaseId: string) =>
+        request<FetchCodebaseResult>(fetchImpl, `/api/projects/${id}/codebases/${codebaseId}/fetch`, {
+          method: 'POST',
+        }),
+
+      /** G-16 — the last N clone/fetch log lines + the current/last job. */
+      codebaseLogs: (id: string, codebaseId: string, params?: { limit?: number }) => {
+        const suffix = params?.limit ? `?limit=${params.limit}` : '';
+        return request<CodebaseLogsResponse>(fetchImpl, `/api/projects/${id}/codebases/${codebaseId}/logs${suffix}`);
       },
     },
 

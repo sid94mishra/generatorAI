@@ -38,6 +38,8 @@ export const projectKeys = {
   artifactContent: (artifactId: string, source: string) => ['artifact-content', artifactId, source] as const,
   mcpServers: (projectId: string) => ['project-mcp-servers', projectId] as const,
   systemMcpServers: ['system-mcp-servers'] as const,
+  // G-16 — codebase clone/fetch logs.
+  codebaseLogs: (projectId: string, codebaseId: string) => ['codebase-logs', projectId, codebaseId] as const,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -188,6 +190,13 @@ export function useUnlinkCodebase() {
   });
 }
 
+/**
+ * G-16 — the fetch now runs as a background job: this resolves as soon as
+ * the job starts (`{ jobId }`), not when the fetch finishes. Invalidating
+ * `codebases` still shows the immediate `cloning` transition; poll
+ * `useCodebaseLogs` (or fold in the `codebase.status_changed` stream event,
+ * once a live view subscribes to it) to see when it lands.
+ */
 export function useFetchCodebase() {
   const platform = usePlatform();
   const queryClient = useQueryClient();
@@ -196,6 +205,7 @@ export function useFetchCodebase() {
       platform.fetchCodebase(projectId, codebaseId),
     onSuccess: (_data, vars) => {
       queryClient.invalidateQueries({ queryKey: projectKeys.codebases(vars.projectId) });
+      queryClient.invalidateQueries({ queryKey: projectKeys.codebaseLogs(vars.projectId, vars.codebaseId) });
     },
   });
 }
@@ -342,6 +352,31 @@ export function useCodebaseWorktrees(projectId: string | undefined, codebaseId: 
     queryFn: () => platform.listCodebaseWorktrees(projectId!, codebaseId!),
     enabled: !!projectId && !!codebaseId,
     refetchInterval: 30_000,
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// Codebase fetch/clone logs (G-16)
+// ════════════════════════════════════════════════════════════════
+
+/**
+ * Tails a codebase's clone/fetch log ring buffer + current job. Per the gap
+ * ("the web polls the logs only while the status is cloning or fetching"),
+ * `enabled`/`isLive` is the caller's call — pass the codebase's own
+ * `status === 'cloning'` (or `pending`) so this stops polling once the job
+ * lands on `ready`/`stale`/`error`.
+ */
+export function useCodebaseLogs(
+  projectId: string | undefined,
+  codebaseId: string | undefined,
+  options?: { limit?: number; isLive?: boolean },
+) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: projectKeys.codebaseLogs(projectId ?? '', codebaseId ?? ''),
+    queryFn: () => platform.getCodebaseLogs(projectId!, codebaseId!, { limit: options?.limit }),
+    enabled: !!projectId && !!codebaseId,
+    refetchInterval: options?.isLive ? 2_000 : false,
   });
 }
 

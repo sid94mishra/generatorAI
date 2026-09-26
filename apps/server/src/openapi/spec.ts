@@ -2414,6 +2414,88 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
     },
 
+    // ── Codebase fetch/clone logs and live status (G-16) ──
+
+    '/api/projects/{id}/codebases/{cid}/fetch': {
+      post: {
+        tags: ['Projects'],
+        summary: 'Start a background fetch job for a codebase (G-16)',
+        description:
+          'Was synchronous; now returns as soon as the job starts. Tail its progress with ' +
+          '`GET .../logs`, or subscribe to `codebase.status_changed` on the `global` stream scope.',
+        parameters: [idParam, cidParam],
+        responses: {
+          '202': {
+            description: 'Job started',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { jobId: { type: 'string' } },
+                  required: ['jobId'],
+                },
+              },
+            },
+          },
+          '404': { description: 'Unknown codebase', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+    '/api/projects/{id}/codebases/{cid}/logs': {
+      get: {
+        tags: ['Projects'],
+        summary: "Tail a codebase's clone/fetch logs + current job (G-16)",
+        description:
+          'Served from an in-memory ring buffer of the last 500 lines (process lifetime, cleared on restart). ' +
+          'Poll only while `job.status === \'running\'`.',
+        parameters: [
+          idParam,
+          cidParam,
+          { in: 'query', name: 'limit', required: false, schema: { type: 'integer', default: 200, maximum: 500 } },
+        ],
+        responses: {
+          '200': {
+            description: 'Log lines + job',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    lines: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          ts: { type: 'string', format: 'date-time' },
+                          stream: { type: 'string', enum: ['stdout', 'stderr'] },
+                          text: { type: 'string' },
+                        },
+                        required: ['ts', 'stream', 'text'],
+                      },
+                    },
+                    job: {
+                      type: 'object',
+                      properties: {
+                        id: { type: 'string' },
+                        kind: { type: 'string', enum: ['clone', 'fetch'] },
+                        status: { type: 'string', enum: ['running', 'succeeded', 'failed'] },
+                        startedAt: { type: 'string', format: 'date-time' },
+                        endedAt: { type: 'string', format: 'date-time' },
+                        error: { type: 'string' },
+                      },
+                      required: ['id', 'kind', 'status', 'startedAt'],
+                    },
+                  },
+                  required: ['lines'],
+                },
+              },
+            },
+          },
+          '404': { description: 'Unknown codebase', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
     // ── Source control: pull requests under a project (doc §6) ──
 
     '/api/projects/{id}/pull-requests': {

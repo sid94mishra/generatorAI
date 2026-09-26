@@ -9,6 +9,16 @@ export interface GitClientOptions {
   defaultTimeoutMs?: number;
 }
 
+/**
+ * Live line-by-line output for a long-running operation (G-16: codebase
+ * clone/fetch logs). `IGitProcessRunner.run` already threads a `streamTo`
+ * through to the underlying process runner — this just exposes it on the
+ * two ops slow enough to be worth tailing.
+ */
+export interface GitStreamOptions {
+  streamTo?: (line: string, stream: 'stdout' | 'stderr') => void;
+}
+
 export interface GitTreeEntry {
   type: 'blob' | 'tree';
   name: string;
@@ -196,7 +206,7 @@ export interface IGitClient {
   lsFiles(dir: string): Promise<string[]>;
   currentBranch(repoDir: string): Promise<string | null>;
   cleanup(repoDir: string): Promise<void>;
-  bareClone(repoUrl: string, targetDir: string): Promise<string>;
+  bareClone(repoUrl: string, targetDir: string, options?: GitStreamOptions): Promise<string>;
   createWorktree(
     repoPath: string,
     worktreePath: string,
@@ -205,7 +215,7 @@ export interface IGitClient {
   ): Promise<string>;
   removeWorktree(repoPath: string, worktreePath: string): Promise<void>;
   listWorktrees(repoPath: string): Promise<string[]>;
-  fetchAll(repoPath: string): Promise<void>;
+  fetchAll(repoPath: string, options?: GitStreamOptions): Promise<void>;
   getBranches(repoPath: string): Promise<string[]>;
   pruneWorktrees(repoPath: string): Promise<void>;
   lsTree(repoPath: string, subPath?: string, ref?: string): Promise<GitTreeEntry[]>;

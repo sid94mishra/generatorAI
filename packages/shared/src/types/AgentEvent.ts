@@ -21,6 +21,7 @@ import type { SttEngineKind } from './Voice.js';
 import type { AttentionCountsEventData, AttentionRemoveEventData, AttentionUpsertEventData } from './Attention.js';
 import type { ChatUpdatedEventData } from './ChatList.js';
 import type { BackgroundTaskCancelledBy } from './Chat.js';
+import type { CodebaseStatus } from './Project.js';
 
 /**
  * Per-operation file-change stats, derived from the provider's structured
@@ -343,6 +344,19 @@ export type AgentEvent =
   | { kind: 'git.commit'; data: { sha: string; message: string } }
   | { kind: 'git.push'; data: { branch: string } }
   | { kind: 'git.pr_created'; data: { url: string; number: number } }
+  // G-16 — a project codebase's clone/fetch status changed (`global` scope,
+  // no `chatId`/`workflowRunId`). `lastFetchedAt` is present once the
+  // status is `ready`; `error` only on `error`/`stale`.
+  | {
+      kind: 'codebase.status_changed';
+      data: {
+        projectId: string;
+        codebaseId: string;
+        status: CodebaseStatus;
+        lastFetchedAt?: string;
+        error?: string;
+      };
+    }
   // ── Workspace / checkpoint events ──
   //
   // `workspace.changed` replaces the Changes panel's polling loop. It is

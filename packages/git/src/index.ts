@@ -18,6 +18,7 @@ export type {
   GitMergeResult,
   GitCommitResult,
   MergeOptions,
+  GitStreamOptions,
 } from './ports/IGitClient.js';
 export type {
   IGitProcessRunner,

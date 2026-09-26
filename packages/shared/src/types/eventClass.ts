@@ -204,6 +204,9 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'git.push': 'item',
   'git.pr_created': 'item',
 
+  // codebase (G-16) — a lifecycle transition; never dropped.
+  'codebase.status_changed': 'item',
+
   // workspace
   'workspace.changed': 'item',
   'workspace.review_changed': 'item',

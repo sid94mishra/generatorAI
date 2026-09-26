@@ -102,6 +102,39 @@ export interface CodebaseSettings {
   worktreeInclude?: string[];
 }
 
+// ── Codebase fetch/clone jobs (G-16) ──
+
+export type CodebaseJobKind = 'clone' | 'fetch';
+export type CodebaseJobStatus = 'running' | 'succeeded' | 'failed';
+
+/** One background clone/fetch job. Tracked in memory only (process lifetime). */
+export interface CodebaseJob {
+  id: string;
+  kind: CodebaseJobKind;
+  status: CodebaseJobStatus;
+  startedAt: string;
+  endedAt?: string;
+  error?: string;
+}
+
+export interface CodebaseLogLine {
+  ts: string;
+  stream: 'stdout' | 'stderr';
+  text: string;
+}
+
+/** `GET /projects/:id/codebases/:cid/logs` — a ring buffer of the last N lines. */
+export interface CodebaseLogsResponse {
+  lines: CodebaseLogLine[];
+  /** The job that produced (or is still producing) these lines, if any ran this process lifetime. */
+  job?: CodebaseJob;
+}
+
+/** `POST /projects/:id/codebases/:cid/fetch` — 202, the fetch runs in the background. */
+export interface FetchCodebaseResult {
+  jobId: string;
+}
+
 export interface CreateCodebaseParams {
   alias: string;
   type: CodebaseType;

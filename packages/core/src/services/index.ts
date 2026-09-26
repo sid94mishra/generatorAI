@@ -110,6 +110,7 @@ export type { CreatePlanFromGateParams, PlanServiceLogger } from './PlanService.
 // Project & Codebase Management services
 export { ProjectService } from './ProjectService.js';
 export { CodebaseService } from './CodebaseService.js';
+export { CodebaseLogService } from './CodebaseLogService.js';
 export { WorktreeService } from './WorktreeService.js';
 export { ProjectConfigService } from './ProjectConfigService.js';
 export { WorktreeCleanupService } from './WorktreeCleanupService.js';

@@ -74,6 +74,9 @@ export const LIFECYCLE_EVENT_KINDS: ReadonlySet<string> = new Set([
   'attention.upsert',
   'attention.remove',
   'attention.counts',
+  // Codebase fetch/clone (G-16): ProjectDetail/CodebaseDetail's status pill
+  // and "Last fetched" are wrong until they hear this.
+  'codebase.status_changed',
 ]);
 
 function readString(obj: unknown, key: string): string | undefined {

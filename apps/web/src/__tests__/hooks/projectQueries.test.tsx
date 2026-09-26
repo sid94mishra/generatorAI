@@ -12,7 +12,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { IPlatformClient, Project } from '@generatorai/shared';
 
 import { PlatformContext } from '@/providers/PlatformProvider.js';
-import { useProject, useProjectRuns, useProjects } from '@/hooks/projectQueries.js';
+import { useProject, useProjectRuns, useProjects, useCodebaseLogs, useFetchCodebase } from '@/hooks/projectQueries.js';
 
 const PROJECT: Project = {
   id: 'proj-1',
@@ -36,6 +36,8 @@ function setup() {
     listProjects: vi.fn().mockResolvedValue([PROJECT]),
     getProject: vi.fn().mockResolvedValue(PROJECT),
     listProjectRuns: vi.fn().mockResolvedValue({ items: [], nextCursor: null, total: 0 }),
+    getCodebaseLogs: vi.fn().mockResolvedValue({ lines: [] }),
+    fetchCodebase: vi.fn().mockResolvedValue({ jobId: 'job-1' }),
   };
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -84,5 +86,31 @@ describe('useProjectRuns (G-15)', () => {
     const { result } = renderHook(() => useProjectRuns('proj-1', { status: 'failed', limit: 20 }), { wrapper });
     await waitFor(() => expect(result.current.data).toBeDefined());
     expect(platform.listProjectRuns).toHaveBeenCalledWith('proj-1', { status: 'failed', limit: 20 });
+  });
+});
+
+describe('useCodebaseLogs (G-16)', () => {
+  it('fetches the ring buffer + job and forwards `limit`', async () => {
+    const { platform, wrapper } = setup();
+    const { result } = renderHook(() => useCodebaseLogs('proj-1', 'cb-1', { limit: 50 }), { wrapper });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(platform.getCodebaseLogs).toHaveBeenCalledWith('proj-1', 'cb-1', { limit: 50 });
+  });
+
+  it('is disabled without both ids', () => {
+    const { platform, wrapper } = setup();
+    renderHook(() => useCodebaseLogs(undefined, undefined), { wrapper });
+    expect(platform.getCodebaseLogs).not.toHaveBeenCalled();
+  });
+});
+
+describe('useFetchCodebase (G-16)', () => {
+  it('invalidates the codebase list and the logs query on success', async () => {
+    const { platform, wrapper } = setup();
+    const { result } = renderHook(() => useFetchCodebase(), { wrapper });
+    result.current.mutate({ projectId: 'proj-1', codebaseId: 'cb-1' });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    expect(platform.fetchCodebase).toHaveBeenCalledWith('proj-1', 'cb-1');
+    expect(result.current.data).toEqual({ jobId: 'job-1' });
   });
 });

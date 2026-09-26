@@ -39,6 +39,7 @@ export function createProjectRoutes(container: Container): Router {
   const {
     projectService,
     codebaseService,
+    codebaseLogService,
     worktreeService,
     worktreeCleanupService,
     projectConfigService,
@@ -329,27 +330,39 @@ export function createProjectRoutes(container: Container): Router {
     }
   });
 
-  // POST /projects/:id/codebases/:cid/fetch — Trigger git fetch
+  // POST /projects/:id/codebases/:cid/fetch — Start a background fetch job (G-16).
+  // Was synchronous (awaited the whole git fetch); now returns as soon as the
+  // job starts. `GET .../logs` tails its progress, and `codebase.status_changed`
+  // (`global` scope) tells a live view when it lands on `ready`/`stale`.
   router.post('/:id/codebases/:cid/fetch', async (req, res, next) => {
     try {
       const codebaseId = String(req.params['cid']);
-      await codebaseService.fetchCodebase(codebaseId);
-      const status = await codebaseService.getCodebaseStatus(codebaseId);
-      res.json({
-        success: true,
-        status: status.status,
-        lastFetchedAt: status.lastFetchedAt,
-      });
+      // Validate up front so a bad id/type answers before a job is started —
+      // `startFetchJob` throws synchronously only for "no log service wired",
+      // never for "codebase not found" (that surfaces asynchronously inside
+      // the job it started, which a 202 response can no longer report).
+      await codebaseService.getCodebaseStatus(codebaseId);
+      const job = codebaseService.startFetchJob(codebaseId);
+      res.status(202).json({ jobId: job.id });
     } catch (err) {
-      const errMsg = err instanceof Error ? err.message : String(err);
-      logger.warn(`[ProjectRoutes] Fetch failed for codebase ${req.params['cid']}: ${errMsg}`);
-      res.status(500).json({
-        error: {
-          code: 'FETCH_FAILED',
-          message: errMsg,
-          details: 'Check if the repository is accessible and there are no authentication issues or conflicts.',
-        },
-      });
+      next(err);
+    }
+  });
+
+  // GET /projects/:id/codebases/:cid/logs — Tail the last N clone/fetch log
+  // lines + the current/last job (G-16). Served from an in-memory ring
+  // buffer (process lifetime); a server restart clears it, which is fine —
+  // there is no in-flight job to resume either.
+  router.get('/:id/codebases/:cid/logs', async (req, res, next) => {
+    try {
+      const codebaseId = String(req.params['cid']);
+      await codebaseService.getCodebaseStatus(codebaseId); // 404s for an unknown codebase
+      const limitParam = Number(req.query['limit']);
+      const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.floor(limitParam) : undefined;
+      const logs = limit ? codebaseLogService.getLogs(codebaseId, limit) : codebaseLogService.getLogs(codebaseId);
+      res.set('Cache-Control', 'no-store').json(logs);
+    } catch (err) {
+      next(err);
     }
   });
 

@@ -23,6 +23,7 @@ import type {
   GitNumstatEntry,
   GitRawDiffEntry,
   GitRef,
+  GitStreamOptions,
   GitTreeEntry,
   IGitClient,
   MergeOptions,
@@ -665,12 +666,13 @@ export class GitClient implements IGitClient {
   // ══════════════════════════════════════════════════════════════
 
   /** Create a bare clone of a remote repository (used as central cache). */
-  async bareClone(repoUrl: string, targetDir: string): Promise<string> {
+  async bareClone(repoUrl: string, targetDir: string, options?: GitStreamOptions): Promise<string> {
     await fs.mkdir(path.dirname(targetDir), { recursive: true });
 
-    const result = await this.runner.run('git', ['clone', '--bare', repoUrl, targetDir], {
+    const result = await this.runner.run('git', ['clone', '--bare', '--progress', repoUrl, targetDir], {
       cwd: path.dirname(targetDir),
       timeout: this.timeout,
+      ...(options?.streamTo ? { streamTo: options.streamTo } : {}),
     });
 
     if (result.exitCode !== 0) {
@@ -746,10 +748,11 @@ export class GitClient implements IGitClient {
   }
 
   /** Fetch all remotes and prune stale tracking branches. */
-  async fetchAll(repoPath: string): Promise<void> {
-    const result = await this.runner.run('git', ['fetch', '--all', '--prune'], {
+  async fetchAll(repoPath: string, options?: GitStreamOptions): Promise<void> {
+    const result = await this.runner.run('git', ['fetch', '--all', '--prune', '--progress'], {
       cwd: repoPath,
       timeout: this.timeout,
+      ...(options?.streamTo ? { streamTo: options.streamTo } : {}),
     });
 
     if (result.exitCode !== 0) {

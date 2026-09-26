@@ -133,6 +133,7 @@ import {
   // Project & Codebase Management services
   ProjectService,
   CodebaseService,
+  CodebaseLogService,
   WorktreeService,
   ProjectConfigService,
   WorktreeCleanupService,
@@ -1194,11 +1195,16 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger,
   );
 
+  // G-16 — ring buffer of clone/fetch log lines + job tracking, in memory.
+  const codebaseLogService = new CodebaseLogService();
+
   const codebaseService = new CodebaseService(
     projectCodebaseRepo,
     projectService,
     gitManager,
     logger,
+    codebaseLogService,
+    eventBus,
   );
 
   const worktreeService = new WorktreeService(
@@ -2416,6 +2422,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Project & Codebase Management
     projectService,
     codebaseService,
+    codebaseLogService,
     worktreeService,
     projectConfigService,
     worktreeCleanupService,
@@ -2906,6 +2913,7 @@ export interface Container {
   // Project & Codebase Management
   projectService: ProjectService;
   codebaseService: CodebaseService;
+  codebaseLogService: CodebaseLogService;
   worktreeService: WorktreeService;
   worktreeCleanupService: WorktreeCleanupService;
   workspaceRetentionService: WorkspaceRetentionService;

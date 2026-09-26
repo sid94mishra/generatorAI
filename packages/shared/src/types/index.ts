@@ -280,6 +280,13 @@ export type {
   ArtifactWithSource,
   McpServerEntry,
   FileEntry,
+  // G-16 — codebase fetch/clone jobs and live logs
+  CodebaseJobKind,
+  CodebaseJobStatus,
+  CodebaseJob,
+  CodebaseLogLine,
+  CodebaseLogsResponse,
+  FetchCodebaseResult,
 } from './Project.js';
 
 // ── MCP servers (config forwarding, credentials, startup status) ──
