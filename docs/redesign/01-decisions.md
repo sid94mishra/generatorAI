@@ -339,6 +339,13 @@ Decided while building P1-T1…T6 where `02` was silent:
 
 ---
 
+### D-55 Deep links, model catalog, task cancel and computer control (G-07…G-09, G-20) as built — Final
+- **Deep links (G-08):** only `pair`, `dock`, `tab`, `kind`, `run` survive; `generatorai://pair?code=X` → `/?pair=X`. macOS `open-url` is registered before ready and `navigateTo` holds a route until the app page has loaded (cold start). In-app popup routes keep their full query.
+- **Model catalog (G-09):** shared `HarnessCatalog` types; `buildModelPickerCatalog` (client-core) orders READY providers first and never defaults to an unready one; web hooks in `hooks/harnessQueries.ts`; the CLI completes only ready providers.
+- **Task cancel (G-20):** migration **v57** adds `cancelledBy` (`user` | `orchestrator`) + `cancelledAt` on tasks, worker chats and `chat.background_task.*` events; cancel returns `202 { ok, taskId, cancelledBy, cancelledAt }`, 404 for an unknown task.
+- **Computer (G-07):** `computer_run_steps` (one consent for a listed plan via `ComputerService.actPlan`); consent answers take optional `scope: 'app' | 'any'` (`'any'` stored as a `*` grant; denials are always per app); `GET|POST /workspaces/:id/computer/control` with `agent | paused | user`, in-memory per server process, refusing agent desktop actions while paused/taken over, plus `computer.control_changed` SSE.
+- Migration numbers taken by the redesign: v55, v56, v57 — the Workflow Overhaul's next migration is v58+ (COORDINATION.md).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
