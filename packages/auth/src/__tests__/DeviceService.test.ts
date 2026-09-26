@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { DeviceService } from '../DeviceService.js';
+import { ALL_SCOPES } from '../scopes.js';
 import type { PairingError } from '../DeviceService.js';
 import { sha256Base64Url } from '../jose.js';
 import type {
@@ -142,5 +143,16 @@ describe('DeviceService refresh generation grace', () => {
     expect(device.scopes).toEqual(scopes);
     expect(device.credentialVersion).toBe(versionBefore);
     expect(devices.revokeCredentialsCalls).toBe(0);
+  });
+});
+describe('MCP devices (CONVINV-R9)', () => {
+  it('never hold administration or the terminal, whoever grants them', async () => {
+    const { device, service } = fixture();
+    device.platform = 'mcp';
+    const admin = { type: 'local-desktop' as const, id: 'owner', displayName: 'Owner', scopes: [...ALL_SCOPES], transport: 'loopback' as const };
+    await expect(service.updateDeviceScopes(device.deviceId, ['exec:agent', 'admin:settings'], admin)).rejects.toMatchObject<Partial<PairingError>>({
+      code: 'SCOPE_ESCALATION',
+    });
+    await expect(service.updateDeviceScopes(device.deviceId, ['exec:agent', 'write:workflows'], admin)).resolves.toEqual(['exec:agent', 'write:workflows']);
   });
 });
