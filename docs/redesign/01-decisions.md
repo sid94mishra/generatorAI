@@ -373,6 +373,12 @@ Decided while building P1-T1…T6 where `02` was silent:
 - One `MenuButton` per row instead of the board's split archive-icon + "…" pair; no header overflow menu (nothing real to put there, D-36); Tags is a free-text chip until a distinct-tags endpoint exists.
 - Accessible names: "New chat" (sentence case, F-chats-01) and tab names carry their live count ("Active 62"); specs updated.
 
+### D-60 Native IA as built (P3-06) — Final
+- Application menu, tray, macOS Dock menu, Windows JumpList and Linux `.desktop` actions are generated from `COMMANDS`/`NAV_DESTINATIONS`. Native menus, Dock menu and JumpList use title case; the tray keeps the registry's sentence case (as the board). Tray counts and the badge share one source (`attention-state`).
+- `generatorai://command/<id>` runs only allowlisted ids (`chat.new`, `workflow.new`); `WindowManager.sendCommand` holds a command until the page reports ready (cold start, reload, backend switch; last one wins).
+- The Servers "popover" is the kit **Menu** (the board draws a `role="menu"` with radio rows), 280 px, controlled so it closes on switch; "Add server…" only on desktop; on web the list includes the page's own server (other origins cannot be probed from a page — no status shown for them).
+- "Restart to update" pill: title strip on Windows/Linux-custom, sidebar footer on macOS/Linux-native, a download icon in the rail; only when an update is ready; never on web. `agent-tests/mock-update-server.mjs` (`serve` / `check` / `verify-log`) drives the per-OS install run (R-10), which stays an owner action on real installers.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
