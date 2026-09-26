@@ -62,3 +62,12 @@ export const workspaceMainMaxWidth = 'max-w-[860px]';
  * sheet. Viewport-derived literal, no token.
  */
 export const workspaceNarrowPadding = 'pr-[404px]';
+
+/**
+ * Picker popups (03 §2.1 B-01 ModelPicker 620×384, B-02 AgentPicker 760×508):
+ * fixed board boxes with no SHELL token, like the dialog boxes above. Both
+ * shrink to Base UI's room beside the anchor (`--available-height`) and to the
+ * window width minus the popup's 8px collision margin on each side.
+ */
+export const modelPickerBox = 'h-[384px] max-h-(--available-height) w-[620px] max-w-[calc(100vw-16px)]';
+export const agentPickerBox = 'h-[508px] max-h-(--available-height) w-[760px] max-w-[calc(100vw-16px)]';

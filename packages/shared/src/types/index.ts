@@ -577,7 +577,7 @@ export type {
   HarnessLoginResult,
   HarnessSetDefaultResult,
 } from './HarnessCatalog.js';
-export { MODEL_TIERS } from './HarnessCatalog.js';
+export { MODEL_TIERS, MODEL_TIER_LABELS } from './HarnessCatalog.js';
 
 // ── System info (G-12) ──
 export type { SystemInfo } from './SystemInfo.js';

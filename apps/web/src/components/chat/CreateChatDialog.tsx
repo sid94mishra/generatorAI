@@ -22,7 +22,7 @@ import {
   SourceControlOptionsFields,
   DEFAULT_SOURCE_CONTROL_OPTIONS,
 } from '@/components/scm/SourceControlOptionsFields.js';
-import { AgentPicker } from '@/components/agents/AgentPicker.js';
+import { AgentPicker } from '@/blocks/agent-picker/index.js';
 import { AgentOverridesEditor } from '@/components/agents/AgentOverridesEditor.js';
 import { EffectiveCapabilitiesPanel } from '@/components/agents/EffectiveCapabilitiesPanel.js';
 import { useResolveAgentPreview } from '@/hooks/agentQueries.js';

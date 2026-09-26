@@ -13,6 +13,13 @@
 export const MODEL_TIERS = ['lightweight', 'versatile', 'powerful'] as const;
 export type ModelTier = (typeof MODEL_TIERS)[number];
 
+/** What every picker (web, mobile) calls each tier. */
+export const MODEL_TIER_LABELS: Record<ModelTier, string> = {
+  lightweight: 'Fast',
+  versatile: 'Balanced',
+  powerful: 'Powerful',
+};
+
 /** One model a provider serves for the signed-in account. */
 export interface HarnessCatalogModel {
   id: string;
