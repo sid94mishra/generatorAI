@@ -48,9 +48,10 @@ import type { RunWorkspaceInfo } from '@generatorai/shared';
 import { RuntimeDAGCanvas } from '@/components/workflow/RuntimeDAGCanvas.js';
 import { RunTimeline } from '@/components/workflow/RunTimeline.js';
 import { ChangesPanel } from '@/blocks/changes/ChangesPanel.js';
-import { useFileTabs } from '@/components/diff/useFileTabs.js';
-import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
-import { TerminalPanel, type TerminalWorktreeOption } from '@/components/terminal/TerminalPanel.js';
+import { useFileTabs } from '@/blocks/files/useFileTabs.js';
+import { SourcesPanel } from '@/components/chat/sources/SourcesPanel.js';
+import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/blocks/browser/BrowserPanel.js';
+import { TerminalPanel, type TerminalWorktreeOption } from '@/blocks/terminal/TerminalPanel.js';
 import { WidgetHost } from '@/blocks/widgets/index.js';
 import { Breadcrumb } from '@/components/layout/Breadcrumb.js';
 import { RightPane, useRightPaneOpen } from '@/components/layout/RightPane.js';
@@ -151,6 +152,8 @@ export function WorkflowRunPageV2() {
     workspaceId: runData?.workspaceId,
     requestFocus: setBrowserTabFocusRequest,
     openPane: () => setRightPaneOpen(true),
+    disabledReason: 'This run has no workspace yet',
+    sources: <SourcesPanel embedded workspaceId={runData?.workspaceId} />,
   });
 
   // Closing a tab for good drops whatever that tab remembered.
@@ -668,7 +671,6 @@ export function WorkflowRunPageV2() {
               render: (ctx) => (
                 runData?.workspaceId ? (
                   <BrowserPanel
-                    embedded
                     workspaceId={runData.workspaceId}
                     tabId={ctx.id}
                     urlScopeKey={browserUrlScopeKey}
@@ -706,9 +708,9 @@ export function WorkflowRunPageV2() {
                 }));
                 return (
                   <TerminalPanel
-                    embedded
                     workspaceId={runData?.workspaceId}
                     tabId={ctx.id}
+                    label={ctx.index <= 1 ? 'Terminal' : `Terminal ${ctx.index}`}
                     {...(worktreeOptions ? { worktrees: worktreeOptions } : {})}
                     agentBusy={runData?.status === 'starting' || runData?.status === 'created'}
                   />
