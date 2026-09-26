@@ -5,7 +5,7 @@
 //   header   RunHeader: breadcrumb, pinned version, D-18 status, clock, run
 //            controls (Pause/Resume/Cancel/Retry failed), More (graph, event
 //            timeline, Open in editor), dock toggle; subbar with the
-//            permission mode and the WF-06 BudgetMeter — `legacyHeader: false`
+//            permission mode and the WF-06 BudgetMeter
 //   main     the run graph (toggle), compensation / error banners, pending
 //            decisions, the stage table (every row through StageRow, control
 //            flow through ControlFlowNode), the focused stage's composer
