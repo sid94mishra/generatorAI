@@ -96,16 +96,19 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
     selectNode(id);
   }, [id, selectNode]);
 
-  const promptCount = stage.prompts.length;
+  // Agent-only fields; a check stage shows its command instead (P05).
+  const agent = stage.kind === 'agent' ? stage : undefined;
+  const retry = stage.kind === 'loop' ? undefined : stage.retry;
+  const promptCount = agent?.prompts.length ?? 0;
 
   // Capability summary, read from the fields the panel writes (D-30).
-  const model = stage.session?.model;
-  const reasoningEffort = stage.session?.reasoningEffort;
-  const skillCount = stage.session?.agentOverrides?.addSkillIds?.length ?? 0;
-  const excludedMcpCount = stage.session?.mcp?.excludedIds?.length ?? 0;
-  const validationCount = stage.output.rules.length;
-  const agentRef = stage.session?.agentRef;
-  const isStructured = stage.output.format === 'json';
+  const model = agent?.session?.model;
+  const reasoningEffort = agent?.session?.reasoningEffort;
+  const skillCount = agent?.session?.agentOverrides?.addSkillIds?.length ?? 0;
+  const excludedMcpCount = agent?.session?.mcp?.excludedIds?.length ?? 0;
+  const validationCount = agent?.output.rules.length ?? 0;
+  const agentRef = agent?.session?.agentRef;
+  const isStructured = agent?.output.format === 'json';
 
   return (
     <div
@@ -251,7 +254,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             </span>
           </Tooltip>
         )}
-        {stage.approval && (
+        {agent?.approval && (
           <Tooltip content="Waits for approval before successors start" side="top">
             <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
               <UserCheck className="h-3 w-3" />
@@ -272,11 +275,11 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             </span>
           </Tooltip>
         )}
-        {stage.retry && (
-          <Tooltip content={`Retry policy: up to ${stage.retry.maxAttempts} attempts`} side="top">
+        {retry && (
+          <Tooltip content={`Retry policy: up to ${retry.maxAttempts} attempts`} side="top">
             <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-help">
               <AlertTriangle className="h-3 w-3" />
-              ×{stage.retry.maxAttempts}
+              ×{retry.maxAttempts}
             </span>
           </Tooltip>
         )}

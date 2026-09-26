@@ -1,9 +1,11 @@
 // ────────────────────────────────────────────────────────────────
 // StageSpec v2 (P01 design decision 2; G5 §2.3, §3.2; P05 §1.3).
 //
-// A discriminated union on `kind`. This phase ships `agent`; P05 adds the
-// container and deterministic kinds (loop, map, subworkflow, wait, check)
-// as further members that spread the same `stageBase`.
+// A discriminated union on `kind`: `agent` (P01), `check` and the `loop`
+// container (P05 milestone 5A). Map, sub-workflow and wait (5B) are further
+// members that spread the same `stageBase`. Each kind declares exactly the
+// fields that apply to it (P05 §1.3): a field of another kind is the
+// validator error `field-not-applicable`.
 //
 // Fields whose engine default the v1 engine cannot execute (onExhausted,
 // timeouts) are optional here, with the engine default in
@@ -12,7 +14,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { BARE_COMMAND_PATTERN, VARIABLE_NAME_PATTERN } from '../constants.js';
 import {
+  CodebaseAliasSchema,
   CompensationActionSchema,
   ExprSchema,
   HookDefinitionSchema,
@@ -20,6 +24,7 @@ import {
   PromptDefinitionSchema,
   ResultValidationRuleSchema,
   StageKeySchema,
+  TemplateSchema,
 } from './common.js';
 import { StageErrorCodeSchema } from './errors.js';
 import { SessionSpecSchema } from './session.js';
@@ -123,6 +128,7 @@ export const BudgetSchema = z
     maxTurns: z.number().int().min(1).max(100_000).optional().describe('Harness turns (one per usage report)'),
     maxCostUsd: z.number().positive().max(100_000).optional().describe('Provider-reported cost in USD'),
     maxWallClockMs: z.number().int().min(1000).max(604_800_000).optional().describe('Wall clock, excluding time parked for a human'),
+    maxTokens: z.number().int().min(1).max(10_000_000_000).optional().describe('Input plus output tokens reported by the provider'),
   })
   .strict()
   .describe('Spending limits; exhausting one never counts as success');
@@ -207,6 +213,15 @@ export const AgentStageSchema = z
       .enum(['fresh', 'continue'])
       .default('fresh')
       .describe('continue keeps one conversation across loop iterations; fresh starts a new one each time'),
+    compactAfter: z
+      .number()
+      .int()
+      .min(1)
+      .max(20)
+      .optional()
+      .describe(
+        'With sessionReuse continue: every n iterations the conversation is replaced by a fresh one seeded with a deterministic digest (no model call)',
+      ),
     sessionGroup: z
       .string()
       .regex(/^[a-z][a-z0-9_]{0,47}$/)
@@ -229,19 +244,228 @@ export const AgentStageSchema = z
   .describe('Agent stage');
 export type AgentStage = z.infer<typeof AgentStageSchema>;
 
-export const StageSpecSchema = z.discriminatedUnion('kind', [AgentStageSchema]).describe('One stage of the workflow graph');
+// ── check (P05 §1.2) ─────────────────────────────────────────────
+
+/** A path inside a mount: relative, no `..` segment, no drive letter. */
+export const RelativePathSchema = z
+  .string()
+  .min(1)
+  .max(1000)
+  .regex(/^(?![\\/])(?![A-Za-z]:)(?!(.*[\\/])?\.\.([\\/]|$)).+$/, 'A path inside the mount: relative, without ..')
+  .describe('A path relative to the mount root (no .., not absolute)');
+
+export const CheckSpecSchema = z
+  .object({
+    command: z
+      .string()
+      .regex(BARE_COMMAND_PATTERN, 'A bare executable name, resolved through PATH (no path separators)')
+      .describe('Executable to run: a bare name on the command allow-list (a literal; templates are rejected)'),
+    args: z
+      .array(z.string().max(4000))
+      .max(64)
+      .default([])
+      .describe('Literal arguments; a template is rejected (check-args-literal): pass values through env'),
+    env: z
+      .record(TemplateSchema.describe('Value: a template of non-secret values, or a secretref: reference'))
+      .optional()
+      .describe('Environment variables: the ONLY place templated values reach the command'),
+    mount: CodebaseAliasSchema.optional().describe('Run mount (codebase alias) the command runs in; omitted means the primary mount'),
+    cwd: RelativePathSchema.optional().describe('Working directory inside the mount'),
+    timeoutMs: z
+      .number()
+      .int()
+      .min(1000)
+      .max(3_600_000)
+      .default(600_000)
+      .describe('Kill the command after this long; the output is then timedOut: true, passed: false'),
+    parseJson: z.boolean().default(false).describe('Parse stdout as JSON into output.json (a parse error is output.jsonError)'),
+    failOnNonZero: z
+      .boolean()
+      .default(false)
+      .describe('A non-zero exit (or a timeout) fails the stage instead of completing with passed: false'),
+    tailBytes: z
+      .number()
+      .int()
+      .min(1024)
+      .max(262_144)
+      .default(16_384)
+      .describe('How much of the end of stdout and stderr the output keeps (ANSI colours stripped)'),
+  })
+  .strict()
+  .describe('The command a check stage runs');
+export type CheckSpec = z.infer<typeof CheckSpecSchema>;
+
+export const CheckTimeoutsSchema = z
+  .object({
+    queueMs: TimeoutsSchema.shape.queueMs,
+  })
+  .strict()
+  .describe('Timeouts of a check stage: only the admission wait (the command has check.timeoutMs)');
+
+export const CheckStageSchema = z
+  .object({
+    ...stageBase,
+    kind: z.literal('check').describe('One deterministic command, no LLM: its exit code and output are the stage output'),
+    check: CheckSpecSchema,
+    retry: RetryPolicySchema.optional(),
+    timeouts: CheckTimeoutsSchema.optional(),
+  })
+  .strict()
+  .describe('Check stage (runs repository code: the run capability `shell`)');
+export type CheckStage = z.infer<typeof CheckStageSchema>;
+
+// ── loop (P05 §2.1) ──────────────────────────────────────────────
+
+export const LOOP_EXIT_ACTIONS = ['complete', 'fail', 'pause', 'exhaust'] as const;
+export type LoopExitAction = (typeof LOOP_EXIT_ACTIONS)[number];
+
+/** Identifier names of carried values and `output.select` entries. */
+const LoopNameSchema = z.string().regex(VARIABLE_NAME_PATTERN, 'An identifier').max(64);
+
+export const ExitRuleSchema = z
+  .object({
+    when: ExprSchema.describe('Boolean expression evaluated after each iteration (context E(k)); an error or null counts as false'),
+    action: z
+      .enum(LOOP_EXIT_ACTIONS)
+      .describe('complete ends the loop successfully; fail fails it; pause parks it for an operator decision; exhaust applies onLimit'),
+    consecutive: z
+      .number()
+      .int()
+      .min(1)
+      .max(10)
+      .default(1)
+      .describe('How many iterations in a row the rule must hold (a streak; reset by an operator command, a firing, an error or a failed iteration)'),
+    reason: z
+      .string()
+      .regex(/^[a-z][a-z0-9_]{0,39}$/, 'lower snake case, at most 40 characters')
+      .describe('Recorded as the exit reason and shown in the run page'),
+  })
+  .strict()
+  .describe('An exit rule of a loop: when it fires, the loop takes its action');
+export type ExitRule = z.infer<typeof ExitRuleSchema>;
+
+export const LoopOnLimitSchema = z
+  .discriminatedUnion('mode', [
+    z.object({ mode: z.literal('pause').describe('Park the loop for an operator decision (default)') }).strict().describe('Pause'),
+    z.object({ mode: z.literal('fail').describe('Fail the loop') }).strict().describe('Fail'),
+    z
+      .object({ mode: z.literal('accept_last').describe('Complete with the last iteration (exitAction accept_last)') })
+      .strict()
+      .describe('Accept the last iteration'),
+    z
+      .object({
+        mode: z.literal('accept_best').describe('Complete with the best-scoring iteration; its workspace checkpoint is restored'),
+        score: ExprSchema.describe('Number evaluated after each iteration (context E(k)); ties go to the latest; all null behaves as pause'),
+      })
+      .strict()
+      .describe('Accept the best iteration'),
+  ])
+  .describe('What exhausting the loop does (max iterations, the budget, an exhaust rule)');
+export type LoopOnLimit = z.infer<typeof LoopOnLimitSchema>;
+
+export const LoopWrapUpSchema = z
+  .object({
+    stage: StageKeySchema.describe('Body agent stage (sessionReuse continue) whose conversation writes the wrap-up'),
+    prompt: PromptDefinitionSchema.describe('The wrap-up prompt (a template, context T of the last iteration)'),
+    maxTurns: z.number().int().min(1).max(5).default(1).describe('Turns the wrap-up may take'),
+    maxCostShare: z
+      .number()
+      .min(0)
+      .max(0.5)
+      .default(0.1)
+      .describe('Its own allowance: this share of budget.maxCostUsd, outside the 1.25× hard cap'),
+  })
+  .strict()
+  .describe('A last turn run once when the budget is exhausted, before onLimit applies');
+export type LoopWrapUp = z.infer<typeof LoopWrapUpSchema>;
+
+export const LoopSpecSchema = z
+  .object({
+    maxIterations: z.number().int().min(1).max(50).describe('Hard cap on iterations (operators may grant more)'),
+    exits: z.array(ExitRuleSchema).max(12).default([]).describe('Exit rules; precedence when several fire: fail > complete > pause > exhaust, then order'),
+    carryInit: z
+      .record(LoopNameSchema, ExprSchema)
+      .optional()
+      .describe('Initial carried values, evaluated once when the loop starts; a carry without one is null in iteration 0'),
+    carry: z
+      .record(LoopNameSchema, ExprSchema)
+      .optional()
+      .describe('Carried values, evaluated after each iteration all at once (each reads the previous carry: key order is irrelevant)'),
+    carrySchema: z
+      .record(LoopNameSchema, z.record(z.unknown()).describe('JSON Schema of the carried value'))
+      .optional()
+      .describe('Explicit types of carried values (otherwise inferred from their expressions)'),
+    onLimit: LoopOnLimitSchema.default({ mode: 'pause' }),
+    wrapUp: LoopWrapUpSchema.optional(),
+    onBodyFailure: z
+      .enum(['fail', 'next_iteration'])
+      .default('fail')
+      .describe('fail fails the loop when an iteration fails; next_iteration continues and exposes loop.last.failures'),
+    checkpointEachIteration: z
+      .boolean()
+      .optional()
+      .describe('Checkpoint the workspace after each iteration (accept_iteration, re-run from an iteration); on by default with accept_best'),
+    output: z
+      .object({
+        select: z
+          .record(LoopNameSchema, ExprSchema)
+          .optional()
+          .describe('Extra fields of the loop output, evaluated at exit (context E of the chosen iteration)'),
+      })
+      .strict()
+      .default({})
+      .describe('The loop output'),
+  })
+  .strict()
+  .describe('Loop settings: bounds, exit rules, carried state and exhaustion');
+export type LoopSpec = z.infer<typeof LoopSpecSchema>;
+
+export const LoopStageSchema = z
+  .object({
+    ...stageBase,
+    kind: z.literal('loop').describe('Repeat the body (the stages whose parentKey is this key) until a rule fires'),
+    loop: LoopSpecSchema,
+    budget: BudgetSchema.optional().describe('Cumulative budget of every iteration (a wrap-up has its own allowance)'),
+  })
+  .strict()
+  .describe('Loop container stage');
+export type LoopStage = z.infer<typeof LoopStageSchema>;
+
+export const StageSpecSchema = z
+  .discriminatedUnion('kind', [AgentStageSchema, CheckStageSchema, LoopStageSchema])
+  .describe('One stage of the workflow graph');
 export type StageSpec = z.infer<typeof StageSpecSchema>;
 export type StageKind = StageSpec['kind'];
 
-/** Container kinds own a body of child stages (`parentKey`). None exist before P05. */
-export const CONTAINER_STAGE_KINDS: readonly string[] = [];
+/** Every stage kind the schema knows, in declaration order. */
+export const STAGE_KINDS: readonly StageKind[] = ['agent', 'check', 'loop'];
+
+/** Container kinds own a body of child stages (`parentKey`). */
+export const CONTAINER_STAGE_KINDS: readonly string[] = ['loop'];
+
+/** The fields each kind accepts beyond `stageBase` (P05 §1.3), for `field-not-applicable`. */
+export function kindFields(kind: string): readonly string[] {
+  const shape =
+    kind === 'agent' ? AgentStageSchema.shape : kind === 'check' ? CheckStageSchema.shape : kind === 'loop' ? LoopStageSchema.shape : undefined;
+  return shape ? Object.keys(shape) : [];
+}
 
 /** Templates of a stage, as JSON-pointer suffix → text (used by the validator and the builders). */
 export function stageTemplateFields(stage: StageSpec): Array<{ pointer: string; text: string }> {
   const out: Array<{ pointer: string; text: string }> = [];
-  stage.prompts.forEach((p, i) => out.push({ pointer: `/prompts/${i}/text`, text: p.text }));
-  stage.followUpPrompts?.forEach((p, i) => out.push({ pointer: `/followUpPrompts/${i}/text`, text: p.text }));
-  if (stage.approval?.prompt) out.push({ pointer: '/approval/prompt', text: stage.approval.prompt });
-  if (stage.output.instructions) out.push({ pointer: '/output/instructions', text: stage.output.instructions });
+  switch (stage.kind) {
+    case 'agent':
+      stage.prompts.forEach((p, i) => out.push({ pointer: `/prompts/${i}/text`, text: p.text }));
+      stage.followUpPrompts?.forEach((p, i) => out.push({ pointer: `/followUpPrompts/${i}/text`, text: p.text }));
+      if (stage.approval?.prompt) out.push({ pointer: '/approval/prompt', text: stage.approval.prompt });
+      if (stage.output.instructions) out.push({ pointer: '/output/instructions', text: stage.output.instructions });
+      break;
+    case 'check':
+      for (const [name, text] of Object.entries(stage.check.env ?? {})) out.push({ pointer: `/check/env/${name}`, text });
+      break;
+    case 'loop':
+      if (stage.loop.wrapUp) out.push({ pointer: '/loop/wrapUp/prompt/text', text: stage.loop.wrapUp.prompt.text });
+      break;
+  }
   return out;
 }

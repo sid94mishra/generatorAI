@@ -18,7 +18,11 @@
       "import": "./src/jsonschema.ts",
       "types": "./src/jsonschema.ts"
     },
-    "./workflow.schema.json": "./generated/workflow.schema.json"
+    "./workflow.schema.json": "./generated/workflow.schema.json",
+    "./presets": {
+      "import": "./src/presets/index.ts",
+      "types": "./src/presets/index.ts"
+    }
   },
   "files": [
     "dist",
@@ -37,7 +41,11 @@
         "types": "./dist/builders/index.d.ts",
         "import": "./dist/builders/index.js"
       },
-      "./workflow.schema.json": "./generated/workflow.schema.json"
+      "./workflow.schema.json": "./generated/workflow.schema.json",
+      "./presets": {
+        "types": "./dist/presets/index.d.ts",
+        "import": "./dist/presets/index.js"
+      }
     }
   },
   "scripts": {

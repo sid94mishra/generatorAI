@@ -696,9 +696,11 @@
                       "number",
                       "boolean",
                       "choice",
-                      "text"
+                      "text",
+                      "list",
+                      "json"
                     ],
-                    "description": "Value type; choice restricts the value to `options`"
+                    "description": "Value type; choice restricts the value to `options`; list is a list of strings; json is any JSON value"
                   },
                   "label": {
                     "type": "string",
@@ -1538,6 +1540,12 @@
                   "minimum": 1000,
                   "maximum": 604800000,
                   "description": "Wall clock, excluding time parked for a human"
+                },
+                "maxTokens": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 10000000000,
+                  "description": "Input plus output tokens reported by the provider"
                 }
               },
               "additionalProperties": false,
@@ -1822,6 +1830,12 @@
                     ],
                     "default": "fresh",
                     "description": "continue keeps one conversation across loop iterations; fresh starts a new one each time"
+                  },
+                  "compactAfter": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 20,
+                    "description": "With sessionReuse continue: every n iterations the conversation is replaced by a fresh one seeded with a deterministic digest (no model call)"
                   },
                   "sessionGroup": {
                     "type": "string",
@@ -2367,6 +2381,428 @@
                 ],
                 "additionalProperties": false,
                 "description": "Agent stage"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/key"
+                  },
+                  "name": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/name"
+                  },
+                  "description": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/description"
+                  },
+                  "parentKey": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/parentKey"
+                  },
+                  "guard": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/guard"
+                  },
+                  "join": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/join"
+                  },
+                  "position": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/position"
+                  },
+                  "compensate": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/compensate"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "check",
+                    "description": "One deterministic command, no LLM: its exit code and output are the stage output"
+                  },
+                  "check": {
+                    "type": "object",
+                    "properties": {
+                      "command": {
+                        "type": "string",
+                        "pattern": "^(?!.*\\.\\.)[A-Za-z0-9_][A-Za-z0-9_.+-]{0,99}$",
+                        "description": "Executable to run: a bare name on the command allow-list (a literal; templates are rejected)"
+                      },
+                      "args": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "maxLength": 4000
+                        },
+                        "maxItems": 64,
+                        "default": [],
+                        "description": "Literal arguments; a template is rejected (check-args-literal): pass values through env"
+                      },
+                      "env": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "string",
+                          "maxLength": 100000,
+                          "description": "Value: a template of non-secret values, or a secretref: reference"
+                        },
+                        "description": "Environment variables: the ONLY place templated values reach the command"
+                      },
+                      "mount": {
+                        "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/lifecycle/properties/codebaseAliases/items",
+                        "description": "Run mount (codebase alias) the command runs in; omitted means the primary mount"
+                      },
+                      "cwd": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 1000,
+                        "pattern": "^(?![\\\\/])(?![A-Za-z]:)(?!(.*[\\\\/])?\\.\\.([\\\\/]|$)).+$",
+                        "description": "Working directory inside the mount"
+                      },
+                      "timeoutMs": {
+                        "type": "integer",
+                        "minimum": 1000,
+                        "maximum": 3600000,
+                        "default": 600000,
+                        "description": "Kill the command after this long; the output is then timedOut: true, passed: false"
+                      },
+                      "parseJson": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "Parse stdout as JSON into output.json (a parse error is output.jsonError)"
+                      },
+                      "failOnNonZero": {
+                        "type": "boolean",
+                        "default": false,
+                        "description": "A non-zero exit (or a timeout) fails the stage instead of completing with passed: false"
+                      },
+                      "tailBytes": {
+                        "type": "integer",
+                        "minimum": 1024,
+                        "maximum": 262144,
+                        "default": 16384,
+                        "description": "How much of the end of stdout and stderr the output keeps (ANSI colours stripped)"
+                      }
+                    },
+                    "required": [
+                      "command"
+                    ],
+                    "additionalProperties": false,
+                    "description": "The command a check stage runs"
+                  },
+                  "retry": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/retry",
+                    "description": "Retry policy for failed attempts"
+                  },
+                  "timeouts": {
+                    "type": "object",
+                    "properties": {
+                      "queueMs": {
+                        "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/timeouts/properties/queueMs"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "description": "Timeouts of a check stage: only the admission wait (the command has check.timeoutMs)"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name",
+                  "kind",
+                  "check"
+                ],
+                "additionalProperties": false,
+                "description": "Check stage (runs repository code: the run capability `shell`)"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/key"
+                  },
+                  "name": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/name"
+                  },
+                  "description": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/description"
+                  },
+                  "parentKey": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/parentKey"
+                  },
+                  "guard": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/guard"
+                  },
+                  "join": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/join"
+                  },
+                  "position": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/position"
+                  },
+                  "compensate": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/compensate"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "loop",
+                    "description": "Repeat the body (the stages whose parentKey is this key) until a rule fires"
+                  },
+                  "loop": {
+                    "type": "object",
+                    "properties": {
+                      "maxIterations": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 50,
+                        "description": "Hard cap on iterations (operators may grant more)"
+                      },
+                      "exits": {
+                        "type": "array",
+                        "items": {
+                          "type": "object",
+                          "properties": {
+                            "when": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 2000,
+                              "description": "Boolean expression evaluated after each iteration (context E(k)); an error or null counts as false"
+                            },
+                            "action": {
+                              "type": "string",
+                              "enum": [
+                                "complete",
+                                "fail",
+                                "pause",
+                                "exhaust"
+                              ],
+                              "description": "complete ends the loop successfully; fail fails it; pause parks it for an operator decision; exhaust applies onLimit"
+                            },
+                            "consecutive": {
+                              "type": "integer",
+                              "minimum": 1,
+                              "maximum": 10,
+                              "default": 1,
+                              "description": "How many iterations in a row the rule must hold (a streak; reset by an operator command, a firing, an error or a failed iteration)"
+                            },
+                            "reason": {
+                              "type": "string",
+                              "pattern": "^[a-z][a-z0-9_]{0,39}$",
+                              "description": "Recorded as the exit reason and shown in the run page"
+                            }
+                          },
+                          "required": [
+                            "when",
+                            "action",
+                            "reason"
+                          ],
+                          "additionalProperties": false,
+                          "description": "An exit rule of a loop: when it fires, the loop takes its action"
+                        },
+                        "maxItems": 12,
+                        "default": [],
+                        "description": "Exit rules; precedence when several fire: fail > complete > pause > exhaust, then order"
+                      },
+                      "carryInit": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/outputs/additionalProperties"
+                        },
+                        "propertyNames": {
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                          "maxLength": 64
+                        },
+                        "description": "Initial carried values, evaluated once when the loop starts; a carry without one is null in iteration 0"
+                      },
+                      "carry": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/outputs/additionalProperties"
+                        },
+                        "propertyNames": {
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                          "maxLength": 64
+                        },
+                        "description": "Carried values, evaluated after each iteration all at once (each reads the previous carry: key order is irrelevant)"
+                      },
+                      "carrySchema": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "type": "object",
+                          "additionalProperties": {},
+                          "description": "JSON Schema of the carried value"
+                        },
+                        "propertyNames": {
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                          "maxLength": 64
+                        },
+                        "description": "Explicit types of carried values (otherwise inferred from their expressions)"
+                      },
+                      "onLimit": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "pause",
+                                "description": "Park the loop for an operator decision (default)"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "additionalProperties": false,
+                            "description": "Pause"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "fail",
+                                "description": "Fail the loop"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "additionalProperties": false,
+                            "description": "Fail"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "accept_last",
+                                "description": "Complete with the last iteration (exitAction accept_last)"
+                              }
+                            },
+                            "required": [
+                              "mode"
+                            ],
+                            "additionalProperties": false,
+                            "description": "Accept the last iteration"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "mode": {
+                                "type": "string",
+                                "const": "accept_best",
+                                "description": "Complete with the best-scoring iteration; its workspace checkpoint is restored"
+                              },
+                              "score": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 2000,
+                                "description": "Number evaluated after each iteration (context E(k)); ties go to the latest; all null behaves as pause"
+                              }
+                            },
+                            "required": [
+                              "mode",
+                              "score"
+                            ],
+                            "additionalProperties": false,
+                            "description": "Accept the best iteration"
+                          }
+                        ],
+                        "description": "What exhausting the loop does (max iterations, the budget, an exhaust rule)",
+                        "default": {
+                          "mode": "pause"
+                        }
+                      },
+                      "wrapUp": {
+                        "type": "object",
+                        "properties": {
+                          "stage": {
+                            "type": "string",
+                            "pattern": "^[a-z][a-z0-9_]{0,47}$",
+                            "description": "Body agent stage (sessionReuse continue) whose conversation writes the wrap-up"
+                          },
+                          "prompt": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/prompts/items/properties/label"
+                              },
+                              "text": {
+                                "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/prompts/items/properties/text"
+                              }
+                            },
+                            "required": [
+                              "label",
+                              "text"
+                            ],
+                            "additionalProperties": false,
+                            "description": "The wrap-up prompt (a template, context T of the last iteration)"
+                          },
+                          "maxTurns": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 5,
+                            "default": 1,
+                            "description": "Turns the wrap-up may take"
+                          },
+                          "maxCostShare": {
+                            "type": "number",
+                            "minimum": 0,
+                            "maximum": 0.5,
+                            "default": 0.1,
+                            "description": "Its own allowance: this share of budget.maxCostUsd, outside the 1.25× hard cap"
+                          }
+                        },
+                        "required": [
+                          "stage",
+                          "prompt"
+                        ],
+                        "additionalProperties": false,
+                        "description": "A last turn run once when the budget is exhausted, before onLimit applies"
+                      },
+                      "onBodyFailure": {
+                        "type": "string",
+                        "enum": [
+                          "fail",
+                          "next_iteration"
+                        ],
+                        "default": "fail",
+                        "description": "fail fails the loop when an iteration fails; next_iteration continues and exposes loop.last.failures"
+                      },
+                      "checkpointEachIteration": {
+                        "type": "boolean",
+                        "description": "Checkpoint the workspace after each iteration (accept_iteration, re-run from an iteration); on by default with accept_best"
+                      },
+                      "output": {
+                        "type": "object",
+                        "properties": {
+                          "select": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/outputs/additionalProperties"
+                            },
+                            "propertyNames": {
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                              "maxLength": 64
+                            },
+                            "description": "Extra fields of the loop output, evaluated at exit (context E of the chosen iteration)"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "default": {},
+                        "description": "The loop output"
+                      }
+                    },
+                    "required": [
+                      "maxIterations"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Loop settings: bounds, exit rules, carried state and exhaustion"
+                  },
+                  "budget": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/budget",
+                    "description": "Cumulative budget of every iteration (a wrap-up has its own allowance)"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name",
+                  "kind",
+                  "loop"
+                ],
+                "additionalProperties": false,
+                "description": "Loop container stage"
               }
             ],
             "description": "One stage of the workflow graph"

@@ -8,7 +8,7 @@
 // version id. P03's compiler takes the same input.
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentStage, WorkflowGraph } from '@generatorai/workflow-spec';
+import type { StageSpec, WorkflowGraph } from '@generatorai/workflow-spec';
 import { NotFoundError } from '@generatorai/shared';
 import type { IWorkflowDefinitionStore } from '../../domain/ports/IWorkflowDefinitionStore.js';
 
@@ -32,7 +32,7 @@ export class RunDefinitionReader {
   }
 
   /** One stage of a version, by key. */
-  async stage(versionId: string, stageKey: string): Promise<AgentStage> {
+  async stage(versionId: string, stageKey: string): Promise<StageSpec> {
     const graph = await this.get(versionId);
     const stage = graph.stages.find((s) => s.key === stageKey);
     if (!stage) throw new NotFoundError(`Stage '${stageKey}' of definition version`, versionId);

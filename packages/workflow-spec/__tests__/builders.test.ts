@@ -58,7 +58,7 @@ function full() {
         .join({ mode: 'all' })
         .guard("variables.env == 'dev' or variables.env == 'prod'"),
     )
-    .stage('merge', (s) => s.prompt('Merge').set('output', { format: 'text', extraction: 'auto', rules: [] }))
+    .stage('merge', (s) => s.prompt('Merge').sessionReuse('continue').compactAfter(2).set('output', { format: 'text', extraction: 'auto', rules: [] }))
     .edge('fix', 'review', { on: 'success' })
     .edge('review', 'merge', { on: 'completion', when: "stages.review.output.verdict == 'approve'", handlesFailure: true });
 }

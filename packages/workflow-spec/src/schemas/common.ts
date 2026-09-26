@@ -8,6 +8,7 @@
 
 import { z } from 'zod';
 import {
+  CODEBASE_ALIAS_PATTERN,
   FORBIDDEN_VARIABLE_NAME_PATTERN,
   MAX_EXPRESSION_LENGTH,
   MAX_TEMPLATE_LENGTH,
@@ -30,6 +31,13 @@ export const StageKeySchema = z
   .regex(STAGE_KEY_PATTERN, 'Stage keys are lower snake case: a letter, then letters, digits or _ (at most 48)')
   .describe('Stable stage key, unique per workflow; edges, context sources and expressions refer to stages by key');
 export type StageKey = z.infer<typeof StageKeySchema>;
+
+export const CodebaseAliasSchema = z
+  .string()
+  .min(1)
+  .max(50)
+  .regex(CODEBASE_ALIAS_PATTERN, 'Aliases may contain letters, digits, . _ -')
+  .describe('Alias of a project codebase');
 
 export const ExprSchema = z
   .string()
@@ -69,7 +77,8 @@ export type PromptDefinition = z.infer<typeof PromptDefinitionSchema>;
 
 // ── Variables ────────────────────────────────────────────────────
 
-export const VARIABLE_TYPES = ['string', 'number', 'boolean', 'choice', 'text'] as const;
+/** `list` is a list of strings; `json` is any JSON value (P05, P5-23). */
+export const VARIABLE_TYPES = ['string', 'number', 'boolean', 'choice', 'text', 'list', 'json'] as const;
 export type VariableType = (typeof VARIABLE_TYPES)[number];
 
 export const VariableDefinitionSchema = z
@@ -80,7 +89,9 @@ export const VariableDefinitionSchema = z
       .max(64)
       .regex(VARIABLE_NAME_PATTERN, 'Variable names are identifiers')
       .describe('Identifier referenced as variables.<name> (or bare {{name}} in templates)'),
-    type: z.enum(VARIABLE_TYPES).describe('Value type; choice restricts the value to `options`'),
+    type: z
+      .enum(VARIABLE_TYPES)
+      .describe('Value type; choice restricts the value to `options`; list is a list of strings; json is any JSON value'),
     label: z.string().min(1).max(200).describe('Label shown in the run form'),
     description: z.string().max(2000).optional().describe('Help text shown in the run form'),
     required: z.boolean().default(false).describe('Whether a run must supply a value (or rely on the default)'),

@@ -804,12 +804,12 @@ export function VariableField({
       value={typeof value === 'string' ? value : ''}
       onChangeText={onChange}
       error={error ?? null}
-      {...(def.description ? { hint: def.description } : {})}
+      {...(def.description ? { hint: def.description } : def.type === 'list' ? { hint: 'One item per line' } : def.type === 'json' ? { hint: 'A JSON value' } : {})}
       keyboardType={def.type === 'number' ? 'decimal-pad' : 'default'}
-      multiline={def.type === 'text'}
+      multiline={def.type === 'text' || def.type === 'list' || def.type === 'json'}
       autoCapitalize="none"
       autoCorrect={def.type === 'text'}
-      {...(def.type === 'text' ? { style: { minHeight: 88, textAlignVertical: 'top' as const } } : {})}
+      {...(def.type === 'text' || def.type === 'list' || def.type === 'json' ? { style: { minHeight: 88, textAlignVertical: 'top' as const } } : {})}
     />
   );
 }

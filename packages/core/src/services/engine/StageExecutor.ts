@@ -1247,6 +1247,7 @@ export class StageExecutor {
     return ctx.graph.stages.some(
       (s) =>
         s.key !== key &&
+        s.kind === 'agent' &&
         s.context.mode === 'summary' &&
         (s.context.from ? s.context.from.includes(key) : ctx.graph.edges.some((e) => e.from === key && e.to === s.key)),
     );

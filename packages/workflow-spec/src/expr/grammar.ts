@@ -55,7 +55,21 @@ export const EXPRESSION_GRAMMAR = {
     },
     { syntax: 'run.{id, name, codebases.<alias>.{path, branch, baseRef}}', meaning: 'The run; codebase paths are read-only' },
     { syntax: 'parent.status', meaning: 'The source stage status; edge `when` expressions only' },
-    { syntax: 'loop, loops, item, map, maps, child', meaning: 'Reserved for container stages (loop, map, sub-workflow)' },
+    {
+      syntax: 'loop.{iteration, number, maxIterations, remaining, carry, priorCarry, operatorInput, usage}',
+      meaning: 'Inside a loop body and in the loop fields: the current iteration (0-based), its number (1-based), the granted maximum, the carried state, the carry before it, an operator message, the cumulative usage',
+    },
+    {
+      syntax: 'loop.{last, previous}.{stages.<key>.{output, status, summary}, signals, failures}',
+      meaning: 'The latest finished iteration and the one before it; null before they exist (see the loop context table)',
+    },
+    {
+      syntax: 'loop.last.signals.{toolCalls, workspaceChanged, stages.<key>.{toolCalls, outputHash, status}}',
+      meaning: 'Progress signals of an iteration; a signal that could not be computed is null, never false',
+    },
+    { syntax: 'loop.history[i].{k, exitValues, signals, usage, score, durationMs}', meaning: 'Every finished iteration, oldest first' },
+    { syntax: 'loops.<loopKey>.*', meaning: 'The same fields of an enclosing loop (nested loops)' },
+    { syntax: 'item, map, maps, child', meaning: 'Reserved for map and sub-workflow stages' },
   ] satisfies GrammarRow[],
   templates: [
     { syntax: '{{ expression }}', meaning: 'Insert a value: text as is, null as empty, lists and objects as JSON' },

@@ -383,7 +383,7 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
   // reached the model. Unresolved placeholders are left as-is on purpose so
   // authors can spot missing variables at a glance.
   const runVars = inputs.vars ?? {};
-  const rawPrompt = def?.prompts?.[0]?.text?.trim();
+  const rawPrompt = def?.kind === 'agent' ? def.prompts[0]?.text?.trim() : undefined;
   const prompt = rawPrompt ? interpolateVariables(rawPrompt, runVars) : undefined;
 
   return {

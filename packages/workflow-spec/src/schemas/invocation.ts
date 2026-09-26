@@ -18,8 +18,7 @@ import {
   RUN_PERMISSION_MODES,
   type RunPermissionMode,
 } from '../constants.js';
-import { customIssue, StageKeySchema } from './common.js';
-import { CodebaseAliasSchema } from './workflow.js';
+import { CodebaseAliasSchema, customIssue, StageKeySchema } from './common.js';
 
 /** Caller-supplied variables. Engine-reserved names (`__*`, `repo_path_*`, `repo_branch_*`) are always refused (R-8). */
 export const UserVariablesSchema = z

@@ -22,6 +22,7 @@ import {
   validateWorkflow,
   type AgentStage,
   type DefinitionStatus,
+  type StageSpec,
   type EdgeSpec,
   type ValidationIssue,
   type WorkflowDefinitionRecord,
@@ -33,8 +34,11 @@ import { globalSingleton } from '../lib/globalSingleton.js';
 
 // ── Types ──
 
+/** A property edit of a stage: any field of its kind (`undefined` deletes the field). */
+export type StageUpdate = { [K in keyof AgentStage | keyof Extract<StageSpec, { kind: 'loop' }> | keyof Extract<StageSpec, { kind: 'check' }>]?: unknown };
+
 export interface StageNodeData extends Record<string, unknown> {
-  stage: AgentStage;
+  stage: StageSpec;
   label: string;
 }
 
@@ -113,7 +117,7 @@ interface WorkflowBuilderState {
   // ── Actions: Stages ──
   /** Add a stage with a generated name and key; returns the key. */
   addStage: (name?: string) => string;
-  updateStage: (key: string, updates: Partial<AgentStage>) => void;
+  updateStage: (key: string, updates: StageUpdate) => void;
   /** Rename a stage key, updating its edges and context sources. Returns an error message or null. */
   renameStageKey: (key: string, nextKey: string) => string | null;
   removeStage: (key: string) => void;
@@ -160,7 +164,7 @@ interface WorkflowBuilderState {
   validate: () => BuilderIssue[];
 
   // ── Selectors ──
-  getSelectedStage: () => AgentStage | null;
+  getSelectedStage: () => StageSpec | null;
 }
 
 // ── Helpers ──
@@ -225,7 +229,7 @@ function patch<T extends object>(target: T, updates: Partial<T>): T {
   return next as T;
 }
 
-function stageToNode(stage: AgentStage, position: { x: number; y: number }): Node<StageNodeData> {
+function stageToNode(stage: StageSpec, position: { x: number; y: number }): Node<StageNodeData> {
   return {
     id: stage.key,
     type: 'stageNode',
@@ -486,7 +490,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     set((state) => ({
       nodes: state.nodes.map((node) => {
         if (node.id !== key) return node;
-        const stage = patch(node.data.stage, updates);
+        const stage = patch(node.data.stage as Record<string, unknown>, updates as Record<string, unknown>) as StageSpec;
         return { ...node, data: { ...node.data, stage, label: stage.name } };
       }),
       isDirty: true,
@@ -510,12 +514,14 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     set((s) => ({
       nodes: s.nodes.map((node) => {
         const stage = node.data.stage;
-        const from = stage.context.from;
-        const renamed: AgentStage = {
+        const from = stage.kind === 'agent' ? stage.context.from : undefined;
+        const renamed = {
           ...stage,
           key: rename(stage.key),
-          ...(from ? { context: { ...stage.context, from: from.map(rename) } } : {}),
-        };
+          ...(stage.parentKey ? { parentKey: rename(stage.parentKey) } : {}),
+          ...(stage.kind === 'agent' && from ? { context: { ...stage.context, from: from.map(rename) } } : {}),
+          ...(stage.kind === 'loop' && stage.loop.wrapUp ? { loop: { ...stage.loop, wrapUp: { ...stage.loop.wrapUp, stage: rename(stage.loop.wrapUp.stage) } } } : {}),
+        } as StageSpec;
         return { ...node, id: rename(node.id), data: { ...node.data, stage: renamed } };
       }),
       edges: s.edges.map((e) => {
@@ -536,10 +542,10 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
         .map((n) => {
           // A context source naming the deleted stage would fail validation;
           // drop it with the stage.
-          const from = n.data.stage.context.from;
-          if (!from?.includes(key)) return n;
-          const context = { ...n.data.stage.context, from: from.filter((k) => k !== key) };
-          return { ...n, data: { ...n.data, stage: { ...n.data.stage, context } } };
+          const stage = n.data.stage;
+          if (stage.kind !== 'agent' || !stage.context.from?.includes(key)) return n;
+          const context = { ...stage.context, from: stage.context.from.filter((k) => k !== key) };
+          return { ...n, data: { ...n.data, stage: { ...stage, context } } };
         }),
       edges: state.edges.filter((e) => e.source !== key && e.target !== key),
       selectedNodeId: state.selectedNodeId === key ? null : state.selectedNodeId,
@@ -557,7 +563,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     const newKey = stageKeyFor(`${sourceNode.data.stage.key}_copy`, new Set(state.nodes.map((n) => n.id)));
     // The whole stage is copied, every field included: the graph is saved
     // as a document, so nothing the panel cannot edit is lost on the copy.
-    const newStage: AgentStage = { ...structuredClone(sourceNode.data.stage), key: newKey, name };
+    const newStage: StageSpec = { ...structuredClone(sourceNode.data.stage), key: newKey, name };
     const newNode = stageToNode(newStage, {
       x: sourceNode.position.x + (sourceNode.measured?.width ?? 320) + 40,
       y: sourceNode.position.y,

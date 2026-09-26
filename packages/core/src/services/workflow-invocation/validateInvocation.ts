@@ -85,6 +85,13 @@ function variableIssues(graph: WorkflowGraph, provided: Record<string, unknown>,
           issues.push(issue('variable-choice', path, `variable "${v.name}" must be one of [${v.options.join(', ')}] (got "${raw}")`));
         }
         break;
+      case 'list':
+        if (!Array.isArray(raw) || !raw.every((x) => typeof x === 'string')) {
+          issues.push(issue('variable-type', path, `variable "${v.name}" must be a list of strings`));
+        }
+        break;
+      case 'json':
+        break; // any JSON value
     }
   }
   return issues;

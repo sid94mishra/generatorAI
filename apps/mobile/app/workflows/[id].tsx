@@ -21,7 +21,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { GitBranch, Lock, MoreHorizontal, Play, Trash2, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
 import { epochOr, queryKeys } from '@generatorai/client-core';
 
-import type { AgentStage } from '@generatorai/workflow-spec';
+import type { StageSpec } from '@generatorai/workflow-spec';
 
 import { incomingStages } from '../../src/components/work/workflowGraph';
 import { Sheet, SheetSection } from '../../src/components/ui/Sheet';
@@ -63,7 +63,8 @@ export default function WorkflowScreen(): React.ReactElement {
   const [menu, setMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [showAllRuns, setShowAllRuns] = useState(false);
-  const [selectedStage, setSelectedStage] = useState<AgentStage | null>(null);
+  const [selectedStage, setSelectedStage] = useState<StageSpec | null>(null);
+  const selectedAgent = selectedStage?.kind === 'agent' ? selectedStage : null;
 
   const workflow = useQuery({
     queryKey: [...queryKeys.workflows(), 'detail', workflowId],
@@ -350,20 +351,32 @@ export default function WorkflowScreen(): React.ReactElement {
         <View className="gap-3 px-5 pb-6">
           <Text className="text-sm text-muted-foreground">{selectedStage?.description ?? 'Workflow stage'}</Text>
           <SheetSection title="Execution" />
-          <Text className="text-md text-foreground">
-            {selectedStage?.session?.model ?? 'Workflow default model'}
-            {selectedStage?.session?.reasoningEffort ? ` · ${selectedStage.session.reasoningEffort}` : ''}
-          </Text>
-          {selectedStage?.session?.agentRef ? <Text className="text-sm text-foreground">Agent: {selectedStage.session.agentRef}</Text> : null}
-          <Text className="text-sm text-muted-foreground">{selectedStage?.approval ? 'Pauses for your review before continuing.' : 'Continues when the stage finishes.'}</Text>
-          <SheetSection title="Instructions" />
-          {(selectedStage?.prompts ?? []).map((prompt, i) => (
+          {selectedStage?.kind === 'check' ? (
+            <Text selectable className="font-mono text-sm text-foreground">
+              {[selectedStage.check.command, ...selectedStage.check.args].join(' ')}
+            </Text>
+          ) : null}
+          {selectedStage?.kind === 'loop' ? (
+            <Text className="text-md text-foreground">
+              Repeats its body up to {selectedStage.loop.maxIterations} times ({selectedStage.loop.exits.map((e) => e.reason).join(', ') || 'no exit rules'})
+            </Text>
+          ) : null}
+          {selectedAgent ? (
+            <Text className="text-md text-foreground">
+              {selectedAgent.session?.model ?? 'Workflow default model'}
+              {selectedAgent.session?.reasoningEffort ? ` · ${selectedAgent.session.reasoningEffort}` : ''}
+            </Text>
+          ) : null}
+          {selectedAgent?.session?.agentRef ? <Text className="text-sm text-foreground">Agent: {selectedAgent.session.agentRef}</Text> : null}
+          {selectedAgent ? <Text className="text-sm text-muted-foreground">{selectedAgent.approval ? 'Pauses for your review before continuing.' : 'Continues when the stage finishes.'}</Text> : null}
+          {selectedAgent ? <SheetSection title="Instructions" /> : null}
+          {(selectedAgent?.prompts ?? []).map((prompt, i) => (
             <View key={i} className="gap-1 rounded-xl border border-border p-3">
               <Text className="text-sm font-semibold text-foreground">{prompt.label}</Text>
               <Text selectable className="text-md leading-relaxed text-foreground">{prompt.text}</Text>
             </View>
           ))}
-          {selectedStage && selectedStage.prompts.length === 0 ? <Text className="text-sm text-muted-foreground">No inline instructions.</Text> : null}
+          {selectedAgent && selectedAgent.prompts.length === 0 ? <Text className="text-sm text-muted-foreground">No inline instructions.</Text> : null}
         </View>
       </Sheet>
       <ConfirmSheet

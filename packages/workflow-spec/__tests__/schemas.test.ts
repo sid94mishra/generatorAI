@@ -76,7 +76,7 @@ describe('strictness and hints', () => {
   });
 
   it('explains stage kinds that do not exist yet', () => {
-    const r = validateWorkflow(graph([{ key: 'l', name: 'l', kind: 'loop' } as never]));
+    const r = validateWorkflow(graph([{ key: 'l', name: 'l', kind: 'map' } as never]));
     expect(r.valid).toBe(false);
     expect(r.issues[0]!.hint).toMatch(/not available yet/);
   });

@@ -7,8 +7,8 @@
 // (`admin:settings`); the server decides by comparing fingerprints of the
 // old and the new graph (P01 WP-1.7, W-34). The security layer of the
 // validator walks the same registry, so a new command-bearing field is
-// covered by both once it is registered here. P05 registers the `check`
-// stage kind.
+// covered by both once it is registered here. A `check` stage (P05) is one:
+// it runs repository code (the run capability `shell`).
 // ────────────────────────────────────────────────────────────────
 
 import type { WorkflowGraph } from './schemas/graph.js';
@@ -26,7 +26,8 @@ export type CommandFieldKind =
   | 'postprocessing'
   | 'mcp'
   | 'provider'
-  | 'bypass';
+  | 'bypass'
+  | 'check';
 
 export interface CommandField {
   kind: CommandFieldKind;
@@ -147,9 +148,23 @@ export const COMMAND_COLLECTORS: CommandCollector[] = [
     g.stages.forEach((s, i) => {
       const p = `/stages/${i}`;
       const id = `stages/${s.key}`;
-      hookFields(s.hooks, 'hook', `${p}/hooks`, `${id}/hooks`, out, s.key);
+      if (s.kind === 'agent') hookFields(s.hooks, 'hook', `${p}/hooks`, `${id}/hooks`, out, s.key);
       // restore_checkpoint entries are skipped by hookFields (neither script nor function).
       hookFields(s.compensate as HookLike[] | undefined, 'compensation', `${p}/compensate`, `${id}/compensate`, out, s.key);
+      if (s.kind === 'check') {
+        out.push({
+          kind: 'check',
+          pointer: `${p}/check`,
+          stableId: `${id}/check`,
+          stageKey: s.key,
+          command: s.check.command,
+          args: s.check.args,
+          ...(s.check.env ? { env: s.check.env } : {}),
+          value: { command: s.check.command, args: s.check.args, env: s.check.env ?? null, mount: s.check.mount ?? null, cwd: s.check.cwd ?? null },
+        });
+        return;
+      }
+      if (s.kind !== 'agent') return;
       mcpFields(s.session, `${p}/session`, `${id}/session`, out, s.key);
       sessionPrivilegeFields(s.session, `${p}/session`, `${id}/session`, out, s.key);
       s.output.rules.forEach((r, j) => {

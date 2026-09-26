@@ -4,35 +4,47 @@
 // Pure: the builder runs it in the browser, the server runs it on every
 // save, import and publish, and the CLI and the authoring skill run it
 // offline. Layers, in order:
-//   1. strict schema (unknown fields are errors, with hints);
-//   2. the graph (keys, edges, one edge per pair, cycles, containers);
-//   3. references (variables, context sources, output contracts, joins);
-//   4. expressions and templates (parse and type-check);
+//   1. strict schema (unknown fields are errors, with hints; a field of
+//      another stage kind is `field-not-applicable`);
+//   2. the graph (keys, edges, one edge per pair, cycles per scope,
+//      containers: parents, nesting depth, edges crossing a scope, bodies);
+//   3. references (variables, context sources, output contracts, joins,
+//      loop settings, check commands);
+//   4. expressions and templates (parse and type-check, per evaluation
+//      context: P05 §2.2);
 //   5. security (literal commands, secretref-only secrets);
 //   6. the engine capability gate.
 // A schema failure stops validation: later layers need a parsed document.
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
-import { ENGINE_LEVEL, type EngineLevel } from '../constants.js';
-import type { ExprDiagnostic } from '../expr/ast.js';
+import { COST_REPORTING_PROVIDERS, DEFAULT_COMMAND_ALLOWLIST, ENGINE_LEVEL, MAX_CONTAINER_DEPTH, type EngineLevel } from '../constants.js';
+import { walkExpr, type ExprDiagnostic, type ExprNode } from '../expr/ast.js';
+import { parseExpression } from '../expr/parse.js';
 import { checkTemplate } from '../expr/template.js';
 import { checkExpression, type TypeEnv } from '../expr/typecheck.js';
+import { kindsOf, withoutNull } from '../expr/types.js';
 import { compileSafeRegex } from '../regex/safeRegex.js';
 import { WorkflowGraphSchema, type WorkflowGraph } from '../schemas/graph.js';
-import { CONTAINER_STAGE_KINDS, stageTemplateFields, type StageSpec } from '../schemas/stage.js';
+import { TimeoutsSchema, kindFields, stageTemplateFields, STAGE_KINDS, type LoopStage, type StageSpec } from '../schemas/stage.js';
 import type { PreprocessingStep } from '../schemas/workflow.js';
 import { unwrap } from '../util/zodWalk.js';
 import { engineIssues } from './capability.js';
 import { analyzeGraph, ancestorsOf, type GraphAnalysis } from './dag.js';
 import { unknownFieldHint } from './hints.js';
 import { pointerToken, toPointer, type ValidationIssue } from './issues.js';
-import { buildTypeEnv, preprocessingVariableNames } from './scope.js';
+import { GraphTypes, isContainerKind, preprocessingVariableNames, type ExprPlace } from './scope.js';
 import { securityIssues } from './security.js';
 
 export interface ValidateOptions {
   /** Engine whose capabilities gate the document (default: ENGINE_LEVEL). */
   engine?: EngineLevel;
+  /**
+   * Commands a `check` stage may run (default: DEFAULT_COMMAND_ALLOWLIST).
+   * The server passes its effective list (the defaults plus the operator's
+   * extras); offline tools keep the default.
+   */
+  commandAllowlist?: readonly string[];
 }
 
 export interface ValidationResult {
@@ -43,7 +55,8 @@ export interface ValidationResult {
   graph?: WorkflowGraph;
 }
 
-const FUTURE_KINDS = new Set(['loop', 'map', 'subworkflow', 'wait', 'check']);
+/** Stage kinds planned for P05 milestone 5B (a clearer message than "invalid discriminator"). */
+const FUTURE_KINDS = new Set(['map', 'subworkflow', 'wait']);
 
 export function validateWorkflow(input: unknown, opts: ValidateOptions = {}): ValidationResult {
   const engine = opts.engine ?? ENGINE_LEVEL;
@@ -55,7 +68,7 @@ export function validateWorkflow(input: unknown, opts: ValidateOptions = {}): Va
   const issues: ValidationIssue[] = [];
   const ctx = new GraphContext(graph);
   issues.push(...ctx.dagIssues());
-  issues.push(...referenceIssues(graph, ctx));
+  issues.push(...referenceIssues(graph, ctx, opts));
   issues.push(...expressionIssues(graph, ctx));
   issues.push(...securityIssues(graph));
   issues.push(...engineIssues(graph, engine));
@@ -116,6 +129,21 @@ function objectKeysAt(root: z.ZodTypeAny, input: unknown, path: ReadonlyArray<st
   return schema instanceof z.ZodObject ? Object.keys(schema.shape) : undefined;
 }
 
+/** A field that exists on another stage kind (P05 §1.3): `field-not-applicable`, not a typo. */
+function notApplicable(input: unknown, path: ReadonlyArray<string | number>, key: string): string | undefined {
+  if (path[0] !== 'stages' || typeof path[1] !== 'number') return undefined;
+  const kind = valueAt(input, [...path.slice(0, 2), 'kind']);
+  if (typeof kind !== 'string' || !(STAGE_KINDS as readonly string[]).includes(kind)) return undefined;
+  if (path.length === 2) {
+    const owners = STAGE_KINDS.filter((k) => k !== kind && kindFields(k).includes(key));
+    return owners.length > 0 ? `'${key}' does not apply to a ${kind} stage (it is a field of ${owners.join(' and ')} stages)` : undefined;
+  }
+  if (path.length === 3 && path[2] === 'timeouts' && kind === 'check' && Object.keys(TimeoutsSchema.shape).includes(key)) {
+    return `timeouts.${key} does not apply to a check stage: it has only timeouts.queueMs (the command has check.timeoutMs)`;
+  }
+  return undefined;
+}
+
 export function schemaIssues(error: z.ZodError, input: unknown): ValidationIssue[] {
   const out: ValidationIssue[] = [];
   const seen = new Set<string>();
@@ -131,6 +159,11 @@ export function schemaIssues(error: z.ZodError, input: unknown): ValidationIssue
     if (zi.code === z.ZodIssueCode.unrecognized_keys) {
       const siblings = objectKeysAt(WorkflowGraphSchema, input, zi.path);
       for (const key of zi.keys) {
+        const na = notApplicable(input, zi.path, key);
+        if (na) {
+          push({ code: 'field-not-applicable', severity: 'error', path: toPointer([...zi.path, key]), ...withStage, message: na });
+          continue;
+        }
         const hint = unknownFieldHint(key, siblings);
         push({
           code: 'unknown-field',
@@ -160,7 +193,9 @@ export function schemaIssues(error: z.ZodError, input: unknown): ValidationIssue
     }
     if (zi.path[zi.path.length - 1] === 'kind' || (zi.code === z.ZodIssueCode.invalid_union_discriminator && zi.path[0] === 'stages')) {
       const kind = valueAt(input, [...zi.path.slice(0, 2), 'kind']);
-      if (typeof kind === 'string' && FUTURE_KINDS.has(kind)) hint = `Stage kind '${kind}' is not available yet; only 'agent' stages exist`;
+      if (typeof kind === 'string' && FUTURE_KINDS.has(kind)) {
+        hint = `Stage kind '${kind}' is not available yet; the kinds are ${STAGE_KINDS.join(', ')}`;
+      }
     }
     if (zi.path.length === 1 && zi.path[0] === 'formatVersion') hint = 'Set "formatVersion": 2';
     push({
@@ -183,23 +218,51 @@ class GraphContext {
   readonly indexByKey = new Map<string, number>();
   readonly acyclic: boolean;
   private readonly ancestors = new Map<string, Set<string>>();
+  /** Stage keys by enclosing container ('' = top level). */
+  readonly scopes = new Map<string, string[]>();
+  readonly types: GraphTypes;
 
   constructor(readonly graph: WorkflowGraph) {
     graph.stages.forEach((s, i) => {
       if (!this.indexByKey.has(s.key)) this.indexByKey.set(s.key, i);
     });
     this.keys = [...this.indexByKey.keys()];
-    const edges = graph.edges.filter((e) => e.from !== e.to && this.indexByKey.has(e.from) && this.indexByKey.has(e.to));
+    for (const key of this.keys) {
+      const scope = this.stage(key)!.parentKey ?? '';
+      const list = this.scopes.get(scope) ?? [];
+      list.push(key);
+      this.scopes.set(scope, list);
+    }
+    const edges = graph.edges.filter((e) => e.from !== e.to && this.indexByKey.has(e.from) && this.indexByKey.has(e.to) && this.sameScope(e.from, e.to));
     this.analysis = analyzeGraph(this.keys, edges);
     this.acyclic = this.analysis.unordered.length === 0;
+    this.types = new GraphTypes({
+      graph,
+      upstream: (key) => this.upstream(key),
+      extraVariables: preprocessingVariableNames(graph.workflow.lifecycle.preprocessingSteps),
+    });
   }
 
-  /** Stages that always run before `key`. With a cycle, every other stage (to avoid cascading errors). */
+  sameScope(a: string, b: string): boolean {
+    return (this.stage(a)?.parentKey ?? '') === (this.stage(b)?.parentKey ?? '');
+  }
+
+  /**
+   * Stages that always run before `key`: its ancestors in its own scope and,
+   * for a body stage, everything upstream of its container (never the
+   * container itself). With a cycle, every other stage of the scope (to
+   * avoid cascading errors).
+   */
   upstream(key: string): Set<string> {
     let a = this.ancestors.get(key);
     if (!a) {
-      a = this.acyclic ? ancestorsOf(key, this.analysis) : new Set(this.keys.filter((k) => k !== key));
-      this.ancestors.set(key, a);
+      a = new Set<string>();
+      this.ancestors.set(key, a); // a parent cycle stops here
+      const scope = this.scopes.get(this.stage(key)?.parentKey ?? '') ?? [];
+      const own = this.acyclic ? ancestorsOf(key, this.analysis) : new Set(scope.filter((k) => k !== key));
+      for (const k of own) a.add(k);
+      const parent = this.stage(key)?.parentKey;
+      if (parent !== undefined && this.stage(parent)) for (const k of this.upstream(parent)) a.add(k);
     }
     return a;
   }
@@ -207,6 +270,20 @@ class GraphContext {
   stage(key: string): StageSpec | undefined {
     const i = this.indexByKey.get(key);
     return i === undefined ? undefined : this.graph.stages[i];
+  }
+
+  /** Number of enclosing containers, or -1 when the parent chain loops. */
+  depth(key: string): number {
+    const seen = new Set<string>([key]);
+    let d = 0;
+    let p = this.stage(key)?.parentKey;
+    while (p !== undefined) {
+      if (seen.has(p)) return -1;
+      seen.add(p);
+      d += 1;
+      p = this.stage(p)?.parentKey;
+    }
+    return d;
   }
 
   dagIssues(): ValidationIssue[] {
@@ -236,7 +313,7 @@ class GraphContext {
             stageKey: s.key,
             message: `parentKey '${s.parentKey}' is not a stage`,
           });
-        } else if (!CONTAINER_STAGE_KINDS.includes(parent.kind)) {
+        } else if (!isContainerKind(parent.kind)) {
           out.push({
             code: 'parent-not-container',
             severity: 'error',
@@ -245,7 +322,28 @@ class GraphContext {
             message: `Stage '${s.parentKey}' is a${parent.kind === 'agent' ? 'n' : ''} ${parent.kind} stage and cannot contain other stages`,
             hint: 'Only container stages (loop, map, sub-workflow) have a body',
           });
+        } else {
+          const d = this.depth(s.key);
+          if (d < 0 || d > MAX_CONTAINER_DEPTH) {
+            out.push({
+              code: 'nesting-too-deep',
+              severity: 'error',
+              path: `/stages/${i}/parentKey`,
+              stageKey: s.key,
+              message: d < 0 ? `The parentKey chain of '${s.key}' loops back on itself` : `'${s.key}' is nested ${d} containers deep; at most ${MAX_CONTAINER_DEPTH} are allowed`,
+            });
+          }
         }
+      }
+      if (isContainerKind(s.kind) && this.indexByKey.get(s.key) === i && (this.scopes.get(s.key)?.length ?? 0) === 0) {
+        out.push({
+          code: 'empty-body',
+          severity: 'error',
+          path: `/stages/${i}`,
+          stageKey: s.key,
+          message: `The ${s.kind} '${s.key}' has no body: no stage has parentKey '${s.key}'`,
+          hint: 'Give the stages to repeat parentKey set to this key',
+        });
       }
     });
     const pairs = new Set<string>();
@@ -259,6 +357,17 @@ class GraphContext {
       }
       if (!this.indexByKey.has(e.to)) {
         out.push({ code: 'unknown-edge-target', severity: 'error', path: `${p}/to`, message: `Edge target '${e.to}' is not a stage key` });
+      }
+      if (this.indexByKey.has(e.from) && this.indexByKey.has(e.to) && !this.sameScope(e.from, e.to)) {
+        const scopeOf = (k: string) => (this.stage(k)?.parentKey ? `the body of '${this.stage(k)!.parentKey}'` : 'the top level');
+        out.push({
+          code: 'edge-crosses-scope',
+          severity: 'error',
+          path: p,
+          stageKey: e.to,
+          message: `The edge '${e.from}' → '${e.to}' crosses a scope: '${e.from}' is in ${scopeOf(e.from)}, '${e.to}' in ${scopeOf(e.to)}`,
+          hint: 'Connect outer stages to the container itself; body stages connect only to stages of the same body',
+        });
       }
       const pair = `${e.from}\u0000${e.to}`;
       if (pairs.has(pair)) {
@@ -274,16 +383,24 @@ class GraphContext {
       pairs.add(pair);
     });
     if (!this.acyclic) {
+      // Edges never cross a scope here (those are excluded above), so each cycle lies in one scope.
       const unordered = new Set(this.analysis.unordered);
       const onCycle = this.analysis.unordered.filter((n) => reaches(n, n, this.analysis, unordered));
-      out.push({
-        code: 'cycle',
-        severity: 'error',
-        path: '/edges',
-        ...(onCycle[0] ? { stageKey: onCycle[0] } : {}),
-        message: `The edges form a cycle through: ${onCycle.join(', ')}`,
-        hint: 'A workflow graph is acyclic; repeat work with a loop stage instead',
-      });
+      const byScope = new Map<string, string[]>();
+      for (const n of onCycle) {
+        const s = this.stage(n)?.parentKey ?? '';
+        byScope.set(s, [...(byScope.get(s) ?? []), n]);
+      }
+      for (const [scope, nodes] of byScope) {
+        out.push({
+          code: 'cycle',
+          severity: 'error',
+          path: '/edges',
+          ...(nodes[0] ? { stageKey: nodes[0] } : {}),
+          message: `The edges ${scope ? `in the body of '${scope}' ` : ''}form a cycle through: ${nodes.join(', ')}`,
+          hint: 'A workflow graph is acyclic; repeat work with a loop stage instead',
+        });
+      }
     }
     return out;
   }
@@ -349,7 +466,36 @@ function duplicateIds(list: ReadonlyArray<{ id: string }>, pointer: string, stag
   return out;
 }
 
-function referenceIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIssue[] {
+/** Whether a variable default matches its declared type. */
+function defaultMatches(type: string, d: unknown, options: readonly string[] | undefined): boolean {
+  switch (type) {
+    case 'number':
+      return typeof d === 'number' && Number.isFinite(d);
+    case 'boolean':
+      return typeof d === 'boolean';
+    case 'choice':
+      return typeof d === 'string' && (!options || options.includes(d));
+    case 'list':
+      return Array.isArray(d) && d.every((x) => typeof x === 'string');
+    case 'json':
+      return true;
+    default:
+      return typeof d === 'string';
+  }
+}
+
+/** Whether the stage sits (at any depth) inside a loop body. */
+function insideLoop(ctx: GraphContext, key: string): boolean {
+  return ctx.types.containersOf(key).some((c) => c.kind === 'loop');
+}
+
+/** The provider a stage's session resolves to, when the document names one. */
+function providerOf(graph: WorkflowGraph, stage: StageSpec): string | undefined {
+  if (stage.kind !== 'agent') return undefined;
+  return stage.session?.harnessType ?? graph.workflow.session.harnessType;
+}
+
+function referenceIssues(graph: WorkflowGraph, ctx: GraphContext, opts: ValidateOptions): ValidationIssue[] {
   const out: ValidationIssue[] = [];
   const wf = graph.workflow;
 
@@ -366,24 +512,13 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIss
     if (v.type !== 'choice' && v.options !== undefined) {
       out.push({ code: 'options-without-choice', severity: 'warning', path: `${p}/options`, message: `options are ignored on a ${v.type} variable` });
     }
-    if (v.defaultValue !== undefined) {
-      const d = v.defaultValue;
-      const ok =
-        v.type === 'number'
-          ? typeof d === 'number' && Number.isFinite(d)
-          : v.type === 'boolean'
-            ? typeof d === 'boolean'
-            : v.type === 'choice'
-              ? typeof d === 'string' && (!v.options || v.options.includes(d))
-              : typeof d === 'string';
-      if (!ok) {
-        out.push({
-          code: 'variable-default-type',
-          severity: 'error',
-          path: `${p}/defaultValue`,
-          message: `The default of '${v.name}' does not match its type ${v.type}${v.type === 'choice' ? ' (or is not an option)' : ''}`,
-        });
-      }
+    if (v.defaultValue !== undefined && !defaultMatches(v.type, v.defaultValue, v.options)) {
+      out.push({
+        code: 'variable-default-type',
+        severity: 'error',
+        path: `${p}/defaultValue`,
+        message: `The default of '${v.name}' does not match its type ${v.type}${v.type === 'choice' ? ' (or is not an option)' : v.type === 'list' ? ' (a list of strings)' : ''}`,
+      });
     }
   });
 
@@ -395,12 +530,13 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIss
   }
 
   const aliases = new Set(wf.lifecycle.codebaseAliases);
-  const aliasCheck = (alias: string | undefined, path: string) => {
+  const aliasCheck = (alias: string | undefined, path: string, stageKey?: string) => {
     if (alias !== undefined && aliases.size > 0 && !aliases.has(alias)) {
       out.push({
         code: 'unknown-codebase-alias',
         severity: 'warning',
         path,
+        ...(stageKey ? { stageKey } : {}),
         message: `Codebase alias '${alias}' is not in lifecycle.codebaseAliases`,
       });
     }
@@ -431,59 +567,26 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIss
     if (s.config.type !== 'run_script') aliasCheck(s.config.repoAlias, `/workflow/lifecycle/postProcessing/steps/${i}/config/repoAlias`);
   });
 
+  const allowlist = new Set((opts.commandAllowlist ?? DEFAULT_COMMAND_ALLOWLIST).map((c) => c.toLowerCase()));
+  const costWarned = new Set<string>();
+  const budgetCost = (pointer: string, stageKey: string | undefined, stages: readonly StageSpec[]) => {
+    const blind = [...new Set(stages.map((s) => providerOf(graph, s)).filter((p): p is string => !!p && !(COST_REPORTING_PROVIDERS as readonly string[]).includes(p)))];
+    if (blind.length === 0 || costWarned.has(pointer)) return;
+    costWarned.add(pointer);
+    out.push({
+      code: 'budget-cost-unsupported',
+      severity: 'warning',
+      path: pointer,
+      ...(stageKey ? { stageKey } : {}),
+      message: `maxCostUsd cannot fire for stages on ${blind.join(', ')}: the provider reports no cost`,
+      hint: 'Bound the spend with maxTurns or maxTokens',
+    });
+  };
+  if (wf.budget?.maxCostUsd !== undefined) budgetCost('/workflow/budget/maxCostUsd', undefined, graph.stages);
+
   graph.stages.forEach((s, i) => {
     const p = `/stages/${i}`;
     const k = s.key;
-    if (s.prompts.length === 0 && !s.session?.agentRef) {
-      out.push({
-        code: 'stage-without-prompts',
-        severity: 'warning',
-        path: `${p}/prompts`,
-        stageKey: k,
-        message: `Stage '${k}' has no prompts and no agent: it has nothing to do`,
-      });
-    }
-    s.context.from?.forEach((from, j) => {
-      const path = `${p}/context/from/${j}`;
-      if (!ctx.indexByKey.has(from)) {
-        out.push({ code: 'unknown-context-source', severity: 'error', path, stageKey: k, message: `context.from names '${from}', which is not a stage key` });
-      } else if (from === k || !ctx.upstream(k).has(from)) {
-        out.push({
-          code: 'context-source-not-upstream',
-          severity: 'error',
-          path,
-          stageKey: k,
-          message: `Stage '${from}' does not run before '${k}', so its output cannot be context here`,
-          hint: 'Add an edge path from the source stage to this stage',
-        });
-      }
-    });
-    if (s.output.schema !== undefined) {
-      if (s.output.format !== 'json') {
-        out.push({ code: 'schema-requires-json', severity: 'error', path: `${p}/output/schema`, stageKey: k, message: 'output.schema needs output.format json' });
-      }
-      if (!isUsableJsonSchema(s.output.schema)) {
-        out.push({ code: 'invalid-output-schema', severity: 'error', path: `${p}/output/schema`, stageKey: k, message: 'output.schema is not a valid JSON Schema object' });
-      }
-    } else if (s.output.format === 'json') {
-      out.push({
-        code: 'json-without-schema',
-        severity: 'warning',
-        path: `${p}/output`,
-        stageKey: k,
-        message: 'A json output without a schema: expressions cannot check its fields',
-        hint: 'Add output.schema',
-      });
-    }
-    s.output.rules.forEach((r, j) => {
-      if (r.type === 'regex') {
-        const issue = regexIssue(r.pattern, r.flags, `${p}/output/rules/${j}/pattern`, k);
-        if (issue) out.push(issue);
-      } else if (r.type === 'json_schema' && !isUsableJsonSchema(r.schema)) {
-        out.push({ code: 'invalid-output-schema', severity: 'error', path: `${p}/output/rules/${j}/schema`, stageKey: k, message: 'The rule schema is not a valid JSON Schema object' });
-      }
-    });
-    out.push(...duplicateIds(s.hooks, `${p}/hooks`, k));
     const preds = ctx.analysis.predecessors.get(k)?.length ?? 0;
     if (s.join.mode === 'n_of_m' && s.join.n > preds) {
       out.push({
@@ -496,27 +599,107 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIss
     } else if (s.join.mode !== 'all' && preds <= 1) {
       out.push({ code: 'join-single-predecessor', severity: 'warning', path: `${p}/join`, stageKey: k, message: `A ${s.join.mode} join on a stage with ${preds} predecessor(s) has no effect` });
     }
-    if (s.sessionReuse === 'continue' && s.parentKey === undefined) {
-      out.push({
-        code: 'session-continue-outside-loop',
-        severity: 'warning',
-        path: `${p}/sessionReuse`,
-        stageKey: k,
-        message: 'sessionReuse continue only has an effect inside a loop body',
-      });
-    }
-    if (s.followUpPrompts !== undefined && s.parentKey === undefined) {
-      out.push({
-        code: 'follow-up-outside-loop',
-        severity: 'warning',
-        path: `${p}/followUpPrompts`,
-        stageKey: k,
-        message: 'followUpPrompts are only used from the second iteration of a loop',
-      });
-    }
-    if (s.retry && s.retry.maxDelayMs < s.retry.initialDelayMs) {
+    if ((s.kind === 'agent' || s.kind === 'check') && s.retry && s.retry.maxDelayMs < s.retry.initialDelayMs) {
       out.push({ code: 'retry-delay-bounds', severity: 'warning', path: `${p}/retry/maxDelayMs`, stageKey: k, message: 'maxDelayMs is below initialDelayMs, so every delay is maxDelayMs' });
     }
+
+    if (s.kind === 'agent') {
+      if (s.prompts.length === 0 && !s.session?.agentRef) {
+        out.push({
+          code: 'stage-without-prompts',
+          severity: 'warning',
+          path: `${p}/prompts`,
+          stageKey: k,
+          message: `Stage '${k}' has no prompts and no agent: it has nothing to do`,
+        });
+      }
+      s.context.from?.forEach((from, j) => {
+        const path = `${p}/context/from/${j}`;
+        if (!ctx.indexByKey.has(from)) {
+          out.push({ code: 'unknown-context-source', severity: 'error', path, stageKey: k, message: `context.from names '${from}', which is not a stage key` });
+        } else if (from === k || !ctx.upstream(k).has(from)) {
+          out.push({
+            code: 'context-source-not-upstream',
+            severity: 'error',
+            path,
+            stageKey: k,
+            message: `Stage '${from}' does not run before '${k}', so its output cannot be context here`,
+            hint: 'Add an edge path from the source stage to this stage',
+          });
+        }
+      });
+      if (s.output.schema !== undefined) {
+        if (s.output.format !== 'json') {
+          out.push({ code: 'schema-requires-json', severity: 'error', path: `${p}/output/schema`, stageKey: k, message: 'output.schema needs output.format json' });
+        }
+        if (!isUsableJsonSchema(s.output.schema)) {
+          out.push({ code: 'invalid-output-schema', severity: 'error', path: `${p}/output/schema`, stageKey: k, message: 'output.schema is not a valid JSON Schema object' });
+        }
+      } else if (s.output.format === 'json') {
+        out.push({
+          code: 'json-without-schema',
+          severity: 'warning',
+          path: `${p}/output`,
+          stageKey: k,
+          message: 'A json output without a schema: expressions cannot check its fields',
+          hint: 'Add output.schema',
+        });
+      }
+      s.output.rules.forEach((r, j) => {
+        if (r.type === 'regex') {
+          const issue = regexIssue(r.pattern, r.flags, `${p}/output/rules/${j}/pattern`, k);
+          if (issue) out.push(issue);
+        } else if (r.type === 'json_schema' && !isUsableJsonSchema(r.schema)) {
+          out.push({ code: 'invalid-output-schema', severity: 'error', path: `${p}/output/rules/${j}/schema`, stageKey: k, message: 'The rule schema is not a valid JSON Schema object' });
+        }
+      });
+      out.push(...duplicateIds(s.hooks, `${p}/hooks`, k));
+      const loopBody = insideLoop(ctx, k);
+      if (s.sessionReuse === 'continue' && !loopBody) {
+        out.push({
+          code: 'session-continue-outside-loop',
+          severity: 'warning',
+          path: `${p}/sessionReuse`,
+          stageKey: k,
+          message: 'sessionReuse continue only has an effect inside a loop body',
+        });
+      }
+      if (s.compactAfter !== undefined && s.sessionReuse !== 'continue') {
+        out.push({
+          code: 'compact-without-continue',
+          severity: 'error',
+          path: `${p}/compactAfter`,
+          stageKey: k,
+          message: 'compactAfter compacts a continuing conversation: it needs sessionReuse continue',
+        });
+      }
+      if (s.followUpPrompts !== undefined && !loopBody) {
+        out.push({
+          code: 'follow-up-outside-loop',
+          severity: 'warning',
+          path: `${p}/followUpPrompts`,
+          stageKey: k,
+          message: 'followUpPrompts are only used from the second iteration of a loop',
+        });
+      }
+      if (s.budget?.maxCostUsd !== undefined) budgetCost(`${p}/budget/maxCostUsd`, k, [s]);
+    }
+
+    if (s.kind === 'check') {
+      if (!allowlist.has(s.check.command.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, ''))) {
+        out.push({
+          code: 'check-command',
+          severity: 'error',
+          path: `${p}/check/command`,
+          stageKey: k,
+          message: `'${s.check.command}' is not on the command allow-list`,
+          hint: `Allowed: ${[...allowlist].sort().join(', ')} (an operator can add commands to scripts.extraAllowlist)`,
+        });
+      }
+      aliasCheck(s.check.mount, `${p}/check/mount`, k);
+    }
+
+    if (s.kind === 'loop') out.push(...loopIssues(ctx, s, p, budgetCost));
   });
 
   graph.edges.forEach((e, i) => {
@@ -525,6 +708,127 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIss
     }
   });
   return out;
+}
+
+/** The loop's own settings: exits, wrap-up, output names, budget. */
+function loopIssues(
+  ctx: GraphContext,
+  s: LoopStage,
+  p: string,
+  budgetCost: (pointer: string, stageKey: string | undefined, stages: readonly StageSpec[]) => void,
+): ValidationIssue[] {
+  const out: ValidationIssue[] = [];
+  const k = s.key;
+  const spec = s.loop;
+  const body = ctx.types.body(k);
+  if (spec.exits.length === 0) {
+    out.push({
+      code: 'loop-no-exit',
+      severity: 'warning',
+      path: `${p}/loop/exits`,
+      stageKey: k,
+      message: `The loop '${k}' has no exit rule: it always runs ${spec.maxIterations} iteration(s), then applies onLimit (${spec.onLimit.mode})`,
+      hint: 'Add an Until rule (action complete)',
+    });
+  }
+  spec.exits.forEach((rule, j) => {
+    if (rule.consecutive > spec.maxIterations) {
+      out.push({
+        code: 'exit-unreachable',
+        severity: 'warning',
+        path: `${p}/loop/exits/${j}/consecutive`,
+        stageKey: k,
+        message: `The rule '${rule.reason}' needs ${rule.consecutive} iterations in a row, but the loop runs at most ${spec.maxIterations}`,
+      });
+    }
+    const parsed = parseExpression(rule.when);
+    if (parsed.ok && !readsIteration(parsed.ast, new Set(body))) {
+      out.push({
+        code: 'exit-unbound',
+        severity: 'error',
+        path: `${p}/loop/exits/${j}/when`,
+        stageKey: k,
+        message: `The rule '${rule.reason}' reads nothing that changes between iterations, so it can never change its value`,
+        hint: 'Read a body stage (stages.<bodyKey>) or loop.carry, loop.priorCarry, loop.last, loop.previous, loop.history, loop.usage or loop.iteration',
+      });
+    }
+  });
+  if (spec.wrapUp) {
+    const target = ctx.stage(spec.wrapUp.stage);
+    const problem = !target
+      ? `'${spec.wrapUp.stage}' is not a stage`
+      : target.parentKey !== k
+        ? `'${spec.wrapUp.stage}' is not in the body of '${k}'`
+        : target.kind !== 'agent'
+          ? `'${spec.wrapUp.stage}' is a ${target.kind} stage, not an agent`
+          : target.sessionReuse !== 'continue'
+            ? `'${spec.wrapUp.stage}' does not continue its conversation (sessionReuse fresh): the wrap-up would start from nothing`
+            : undefined;
+    if (problem) {
+      out.push({
+        code: 'wrapup-stage',
+        severity: 'error',
+        path: `${p}/loop/wrapUp/stage`,
+        stageKey: k,
+        message: `The wrap-up stage ${problem}`,
+        hint: 'Name a body agent stage with sessionReuse continue',
+      });
+    }
+    if (s.budget?.maxCostUsd === undefined && s.budget?.maxTurns === undefined && s.budget?.maxTokens === undefined && s.budget?.maxWallClockMs === undefined) {
+      out.push({
+        code: 'wrapup-stage',
+        severity: 'warning',
+        path: `${p}/loop/wrapUp`,
+        stageKey: k,
+        message: 'A wrap-up runs when the loop budget is exhausted, but the loop has no budget',
+      });
+    }
+  }
+  const builtIn = new Set(['iterations', 'exitReason', 'exitAction', 'last', 'wrapUp', 'carry', 'history']);
+  for (const name of Object.keys(spec.output.select ?? {})) {
+    if (builtIn.has(name)) {
+      out.push({
+        code: 'invalid-output-name',
+        severity: 'error',
+        path: `${p}/loop/output/select/${pointerToken(name)}`,
+        stageKey: k,
+        message: `'${name}' is a field of every loop output; pick another name`,
+      });
+    }
+  }
+  ctx.types.carryTypes(s); // infers the carried types and records their issues
+  for (const issue of ctx.types.carryIssues.get(k) ?? []) {
+    out.push({ code: 'carry-type', severity: 'error', path: `${p}/loop/carry/${pointerToken(issue.name)}`, stageKey: k, message: issue.message });
+  }
+  if (s.budget?.maxCostUsd !== undefined) {
+    const bodyStages: StageSpec[] = [];
+    const visit = (key: string) => {
+      for (const c of ctx.types.body(key)) {
+        const st = ctx.stage(c);
+        if (!st) continue;
+        bodyStages.push(st);
+        visit(c);
+      }
+    };
+    visit(k);
+    budgetCost(`${p}/budget/maxCostUsd`, k, bodyStages);
+  }
+  return out;
+}
+
+const ITERATION_LOOP_FIELDS = new Set(['carry', 'priorCarry', 'last', 'previous', 'history', 'usage', 'iteration', 'number', 'remaining']);
+
+/** Whether an exit expression reads a per-iteration path: a body stage or a changing loop field (P5-30). */
+function readsIteration(ast: ExprNode, bodyKeys: ReadonlySet<string>): boolean {
+  let found = false;
+  walkExpr(ast, (n) => {
+    if (found || n.type !== 'member') return;
+    const obj = n.object;
+    if (obj.type !== 'ident') return;
+    if (obj.name === 'stages' && bodyKeys.has(n.property)) found = true;
+    if (obj.name === 'loop' && ITERATION_LOOP_FIELDS.has(n.property)) found = true;
+  });
+  return found;
 }
 
 // ── 4. Expressions and templates ─────────────────────────────────
@@ -536,17 +840,18 @@ function located(src: string, d: ExprDiagnostic): string {
 
 function expressionIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIssue[] {
   const out: ValidationIssue[] = [];
-  const extra = preprocessingVariableNames(graph.workflow.lifecycle.preprocessingSteps);
+  const types = ctx.types;
   const envCache = new Map<string, TypeEnv>();
-  const env = (visible: ReadonlySet<string> | null, opts: { parent?: boolean; stages?: boolean } = {}): TypeEnv => {
-    const cacheKey = `${visible ? [...visible].sort().join(',') : '*'}|${opts.parent ? 1 : 0}|${opts.stages === false ? 0 : 1}`;
-    let e = envCache.get(cacheKey);
+  const env = (place: ExprPlace): TypeEnv => {
+    const key = JSON.stringify(place);
+    let e = envCache.get(key);
     if (!e) {
-      e = buildTypeEnv({ graph, visibleStages: visible, parent: !!opts.parent, stages: opts.stages !== false, extraVariables: extra });
-      envCache.set(cacheKey, e);
+      e = types.env(place);
+      envCache.set(key, e);
     }
     return e;
   };
+  const extra = preprocessingVariableNames(graph.workflow.lifecycle.preprocessingSteps);
   const varNames = new Set([...graph.workflow.variables.map((v) => v.name), ...extra]);
 
   const report = (src: string, diags: ExprDiagnostic[], path: string, stageKey?: string) => {
@@ -561,8 +866,13 @@ function expressionIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIs
       });
     }
   };
-  const expr = (src: string, e: TypeEnv, path: string, expect: 'boolean' | 'any', stageKey?: string) =>
-    report(src, checkExpression(src, e, { expect }).diagnostics, path, stageKey);
+  const expr = (src: string, e: TypeEnv, path: string, expect: 'boolean' | 'any' | 'number', stageKey?: string) => {
+    const r = checkExpression(src, e, { expect: expect === 'boolean' ? 'boolean' : 'any' });
+    report(src, r.diagnostics, path, stageKey);
+    if (expect === 'number' && r.diagnostics.length === 0 && r.type.kind !== 'any' && !kindsOf(withoutNull(r.type)).has('number')) {
+      out.push({ code: 'expr-type', severity: 'error', path, ...(stageKey ? { stageKey } : {}), message: 'A score must be a number' });
+    }
+  };
   const template = (src: string | undefined, e: TypeEnv, path: string, stageKey?: string) => {
     if (src === undefined || !src.includes('{{')) return;
     report(src, checkTemplate(src, e, { variableNames: varNames }), path, stageKey);
@@ -579,36 +889,50 @@ function expressionIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIs
       template(c.cwd, e, `${p}/cwd`, stageKey);
     });
 
-  const all = env(null);
   graph.stages.forEach((s, i) => {
+    if (ctx.indexByKey.get(s.key) !== i) return; // a duplicate key: reported by the graph layer
     const p = `/stages/${i}`;
-    const upstream = ctx.upstream(s.key);
-    const stageEnv = env(upstream);
+    const stageEnv = env({ kind: 'stage', key: s.key });
     if (s.guard !== undefined) expr(s.guard, stageEnv, `${p}/guard`, 'boolean', s.key);
-    for (const f of stageTemplateFields(s)) template(f.text, stageEnv, `${p}${f.pointer}`, s.key);
-    hookTemplates(s.hooks, stageEnv, `${p}/hooks`, s.key);
-    const selfEnv = env(new Set([...upstream, s.key]));
+    // A loop's wrap-up prompt is sent inside its body (context T of its wrap-up stage).
+    const templateEnv = s.kind === 'loop' && s.loop.wrapUp ? env({ kind: 'stage', key: s.loop.wrapUp.stage }) : stageEnv;
+    for (const f of stageTemplateFields(s)) template(f.text, templateEnv, `${p}${f.pointer}`, s.key);
+    const selfEnv = env({ kind: 'stage', key: s.key, self: true });
     hookTemplates(s.compensate as ReadonlyArray<Hookish> | undefined, selfEnv, `${p}/compensate`, s.key);
-    s.output.rules.forEach((r, j) => {
-      if (r.type !== 'custom_script') return;
-      for (const [name, v] of Object.entries(r.env ?? {})) template(v, selfEnv, `${p}/output/rules/${j}/env/${pointerToken(name)}`, s.key);
-    });
+    if (s.kind === 'agent') {
+      hookTemplates(s.hooks, stageEnv, `${p}/hooks`, s.key);
+      s.output.rules.forEach((r, j) => {
+        if (r.type !== 'custom_script') return;
+        for (const [name, v] of Object.entries(r.env ?? {})) template(v, selfEnv, `${p}/output/rules/${j}/env/${pointerToken(name)}`, s.key);
+      });
+    }
+    if (s.kind === 'loop') {
+      const lp = `${p}/loop`;
+      const e = env({ kind: 'loop', key: s.key, context: 'E' });
+      s.loop.exits.forEach((r, j) => expr(r.when, e, `${lp}/exits/${j}/when`, 'boolean', s.key));
+      if (s.loop.onLimit.mode === 'accept_best') expr(s.loop.onLimit.score, e, `${lp}/onLimit/score`, 'number', s.key);
+      for (const [name, src] of Object.entries(s.loop.output.select ?? {})) expr(src, e, `${lp}/output/select/${pointerToken(name)}`, 'any', s.key);
+      const c = env({ kind: 'loop', key: s.key, context: 'C' });
+      for (const [name, src] of Object.entries(s.loop.carry ?? {})) expr(src, c, `${lp}/carry/${pointerToken(name)}`, 'any', s.key);
+      const init = env({ kind: 'loop', key: s.key, context: 'init' });
+      for (const [name, src] of Object.entries(s.loop.carryInit ?? {})) expr(src, init, `${lp}/carryInit/${pointerToken(name)}`, 'any', s.key);
+    }
   });
 
   graph.edges.forEach((e, i) => {
     if (e.when === undefined) return;
-    const from = ctx.stage(e.from);
-    const visible = from ? new Set([...ctx.upstream(e.from), e.from]) : new Set<string>();
-    expr(e.when, env(visible, { parent: true }), `/edges/${i}/when`, 'boolean', e.to);
+    if (!ctx.indexByKey.has(e.from)) return;
+    expr(e.when, env({ kind: 'edge', from: e.from }), `/edges/${i}/when`, 'boolean', e.to);
   });
 
   const wf = graph.workflow;
+  const all = env({ kind: 'workflow' });
   for (const [name, src] of Object.entries(wf.outputs ?? {})) expr(src, all, `/workflow/outputs/${pointerToken(name)}`, 'any');
   hookTemplates(wf.hooks, all, '/workflow/hooks');
   hookTemplates(wf.onExit, all, '/workflow/onExit');
   hookTemplates(wf.onFailure, all, '/workflow/onFailure');
 
-  const pre = env(null, { stages: false });
+  const pre = env({ kind: 'pre' });
   const visitPre = (steps: readonly PreprocessingStep[], pointer: string) =>
     steps.forEach((s, i) => {
       const p = `${pointer}/${i}/config`;

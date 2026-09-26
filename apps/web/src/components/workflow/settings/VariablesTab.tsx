@@ -72,7 +72,24 @@ function coerceDefault(raw: string, type: VariableDefinition['type']): unknown {
     if (lowered === 'false') return false;
     return raw;
   }
+  // A list default is typed comma-separated; a json default as JSON (kept verbatim until it parses).
+  if (type === 'list') return raw.split(',').map((x) => x.trim()).filter(Boolean);
+  if (type === 'json') {
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return raw;
+    }
+  }
   return raw;
+}
+
+/** The default value as the text field shows it. */
+function defaultText(value: unknown, type: VariableDefinition['type']): string {
+  if (value === undefined || value === null) return '';
+  if (type === 'list' && Array.isArray(value)) return value.join(', ');
+  if (type === 'json' && typeof value !== 'string') return JSON.stringify(value);
+  return String(value);
 }
 
 /**
@@ -304,6 +321,8 @@ export function VariablesTab() {
                             { value: 'boolean', label: 'Boolean' },
                             { value: 'choice', label: 'Choice' },
                             { value: 'text', label: 'Text (multiline)' },
+                            { value: 'list', label: 'List of strings' },
+                            { value: 'json', label: 'JSON' },
                           ]}
                         />
                       </div>
@@ -333,7 +352,7 @@ export function VariablesTab() {
                       <label className="block text-[11px] font-medium text-muted-foreground mb-1">Default Value</label>
                       <Input
                         type="text"
-                        value={String(variable.defaultValue ?? '')}
+                        value={defaultText(variable.defaultValue, variable.type)}
                         onChange={(e) =>
                           updateVariable(index, {
                             defaultValue: coerceDefault(e.target.value, variable.type),

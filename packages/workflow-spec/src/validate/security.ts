@@ -105,12 +105,12 @@ export function securityIssues(graph: WorkflowGraph): ValidationIssue[] {
     f.args?.forEach((a, i) => {
       if (!isTemplated(a)) return;
       out.push({
-        code: 'template-in-command',
+        code: f.kind === 'check' ? 'check-args-literal' : 'template-in-command',
         severity: 'error',
         path: `${f.pointer}/args/${i}`,
         ...stage,
         message: 'Command arguments cannot contain templates',
-        hint: 'Pass values through env and read them in the program',
+        hint: f.kind === 'check' ? 'Pass values through check.env and read them in the program' : 'Pass values through env and read them in the program',
       });
     });
     if (f.kind !== 'mcp') checkPairs(f.env, 'env', `${f.pointer}/env`, f.stageKey, out);
@@ -125,12 +125,13 @@ export function securityIssues(graph: WorkflowGraph): ValidationIssue[] {
   httpHooks(graph.workflow.onFailure, '/workflow/onFailure');
   checkSession(graph.workflow.session, '/workflow/session', undefined, out);
   graph.stages.forEach((s, i) => {
-    httpHooks(s.hooks, `/stages/${i}/hooks`, s.key);
     httpHooks(
       s.compensate as ReadonlyArray<{ config: { type: string; headers?: Record<string, string> } }> | undefined,
       `/stages/${i}/compensate`,
       s.key,
     );
+    if (s.kind !== 'agent') return;
+    httpHooks(s.hooks, `/stages/${i}/hooks`, s.key);
     checkSession(s.session, `/stages/${i}/session`, s.key, out);
   });
   return out;

@@ -11,7 +11,18 @@ export {
   type CodeInfo,
 } from './issues.js';
 export { analyzeGraph, ancestorsOf, type GraphAnalysis, type GraphEdge } from './dag.js';
-export { buildTypeEnv, stageType, stageOutputType, variableType, type ScopeContext } from './scope.js';
+export {
+  GraphTypes,
+  checkOutputType,
+  isContainerKind,
+  stageType,
+  stageTypeOf,
+  stageOutputType,
+  variableType,
+  USAGE_TYPE,
+  type ExprPlace,
+  type ScopeContext,
+} from './scope.js';
 export { literalSecretReason } from './security.js';
 export { engineIssues } from './capability.js';
 export { RENAMED_FIELDS, unknownFieldHint } from './hints.js';

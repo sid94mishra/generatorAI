@@ -195,7 +195,7 @@ export function ScriptDetailPage() {
                 <div className="text-sm font-medium text-foreground truncate">
                   {stage.name} <span className="font-mono text-xs text-muted-foreground">{stage.key}</span>
                 </div>
-                {stage.prompts[0]?.text && (
+                {stage.kind === 'agent' && stage.prompts[0]?.text && (
                   <div className="text-xs text-muted-foreground truncate mt-0.5">
                     {stage.prompts[0].text.slice(0, 80)}…
                   </div>

@@ -54,8 +54,12 @@ export function union(types: ExprType[]): ExprType {
     else flat.push(t);
   }
   if (flat.some((t) => t.kind === 'any')) return T.any;
+  // `[]` unifies with the element type of the other operand (P05 §1.1): a
+  // list of unknown elements next to a typed list adds nothing.
+  const typedList = flat.some((t) => t.kind === 'list' && t.element.kind !== 'any');
   const out: ExprType[] = [];
   for (const t of flat) {
+    if (typedList && t.kind === 'list' && t.element.kind === 'any') continue;
     if (!out.some((o) => sameType(o, t))) out.push(t);
   }
   if (out.length === 0) return T.any;

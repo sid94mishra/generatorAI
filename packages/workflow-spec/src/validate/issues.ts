@@ -53,6 +53,7 @@ export const VALIDATION_CODES = {
   },
   'hook-type-mismatch': { layer: 'schema', severity: 'error', description: 'A hook whose type differs from config.type' },
   'function-hook-target': { layer: 'schema', severity: 'error', description: 'A function hook without modulePath or handlerName' },
+  'field-not-applicable': { layer: 'schema', severity: 'error', description: 'A field of another stage kind (each kind declares the fields that apply to it)' },
   // 2. dag
   'empty-graph': { layer: 'dag', severity: 'warning', description: 'The workflow has no stages' },
   'duplicate-key': { layer: 'dag', severity: 'error', description: 'Two stages share a key' },
@@ -63,6 +64,9 @@ export const VALIDATION_CODES = {
   cycle: { layer: 'dag', severity: 'error', description: 'The edges form a cycle; repetition belongs in a loop stage' },
   'unknown-parent': { layer: 'dag', severity: 'error', description: 'parentKey names a stage that does not exist' },
   'parent-not-container': { layer: 'dag', severity: 'error', description: 'parentKey names a stage that is not a container kind' },
+  'nesting-too-deep': { layer: 'dag', severity: 'error', description: 'Containers nested more than 3 deep, or a parentKey chain that loops' },
+  'edge-crosses-scope': { layer: 'dag', severity: 'error', description: 'An edge between stages of different scopes (a body and its outside, or two bodies)' },
+  'empty-body': { layer: 'dag', severity: 'error', description: 'A container stage with no body stages' },
   // 3. references
   'duplicate-variable': { layer: 'references', severity: 'error', description: 'Two variables share a name' },
   'choice-without-options': { layer: 'references', severity: 'error', description: 'A choice variable without options' },
@@ -88,7 +92,31 @@ export const VALIDATION_CODES = {
   'retry-delay-bounds': { layer: 'references', severity: 'warning', description: 'retry.maxDelayMs is below retry.initialDelayMs' },
   'unknown-codebase-alias': { layer: 'references', severity: 'warning', description: 'A codebase alias that lifecycle.codebaseAliases does not declare' },
   'unknown-input-variable': { layer: 'references', severity: 'warning', description: 'A preprocessing step names an undeclared variable' },
-  'invalid-output-name': { layer: 'references', severity: 'error', description: 'A workflow output name that is not an identifier' },
+  'invalid-output-name': {
+    layer: 'references',
+    severity: 'error',
+    description: 'A workflow output name that is not an identifier, or a loop output.select name that shadows a built-in field',
+  },
+  'compact-without-continue': { layer: 'references', severity: 'error', description: 'compactAfter on a stage that does not continue its conversation' },
+  'exit-unbound': {
+    layer: 'references',
+    severity: 'error',
+    description: 'A loop exit rule that reads nothing per iteration (no body stage, no loop.carry/last/previous/history/usage/iteration)',
+  },
+  'exit-unreachable': { layer: 'references', severity: 'warning', description: 'An exit rule needing more iterations in a row than the loop runs' },
+  'loop-no-exit': { layer: 'references', severity: 'warning', description: 'A loop without exit rules (it always runs to maxIterations)' },
+  'carry-type': { layer: 'references', severity: 'error', description: 'A carried value whose type disagrees with its carryInit or carrySchema' },
+  'wrapup-stage': {
+    layer: 'references',
+    severity: 'error',
+    description: 'loop.wrapUp.stage is not a body agent stage with sessionReuse continue (a warning when the loop has no budget)',
+  },
+  'check-command': { layer: 'references', severity: 'error', description: 'A check command that is not on the command allow-list' },
+  'budget-cost-unsupported': {
+    layer: 'references',
+    severity: 'warning',
+    description: 'A maxCostUsd budget over stages whose provider reports no cost (it can never fire)',
+  },
   // 4. expressions and templates
   'expr-syntax': { layer: 'expressions', severity: 'error', description: 'An expression does not parse' },
   'expr-unknown-root': { layer: 'expressions', severity: 'error', description: 'An expression names an unknown root (variables, stages, run, …)' },
@@ -114,6 +142,7 @@ export const VALIDATION_CODES = {
     severity: 'error',
     description: 'A template in a command or its arguments; pass values through env',
   },
+  'check-args-literal': { layer: 'security', severity: 'error', description: 'A template in a check argument; pass values through check.env' },
   'secret-not-secretref': { layer: 'security', severity: 'error', description: 'A secret field that is not a secretref: reference' },
   'secret-literal': { layer: 'security', severity: 'error', description: 'A value that looks like a literal secret; use a secretref:' },
   // 6. engine

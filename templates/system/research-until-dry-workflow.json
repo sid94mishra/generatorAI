@@ -1,0 +1,129 @@
+{
+  "id": "research-until-dry",
+  "category": "custom",
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Research until dry",
+      "description": "Collect sources on a topic round after round until two rounds find nothing new.",
+      "session": {},
+      "variables": [
+        {
+          "name": "topic",
+          "type": "text",
+          "label": "Topic",
+          "required": true
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": false,
+        "sandbox": "required",
+        "preprocessingSteps": [],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
+      },
+      "tags": [
+        "loop"
+      ]
+    },
+    "stages": [
+      {
+        "key": "research",
+        "name": "Research",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "loop",
+        "loop": {
+          "maxIterations": 8,
+          "exits": [
+            {
+              "when": "len(loop.carry.newItems) == 0",
+              "action": "complete",
+              "consecutive": 2,
+              "reason": "dry"
+            }
+          ],
+          "carryInit": {
+            "seen": "[]"
+          },
+          "carry": {
+            "newItems": "diff(stages.find.output.findings, loop.carry.seen, f => f.url)",
+            "seen": "take(unique(concat(loop.carry.seen, stages.find.output.findings), f => f.url), 2000)"
+          },
+          "onLimit": {
+            "mode": "pause"
+          },
+          "onBodyFailure": "fail",
+          "output": {
+            "select": {
+              "findings": "loop.carry.seen"
+            }
+          }
+        }
+      },
+      {
+        "key": "find",
+        "name": "Find",
+        "parentKey": "research",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "find",
+            "text": "Find sources on {{variables.topic}}. Do not repeat these URLs:\n{{ take(map(coalesce(loop.carry.seen, []), f => f.url), 200) | bullets }}"
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "json",
+          "schema": {
+            "type": "object",
+            "required": [
+              "findings"
+            ],
+            "properties": {
+              "findings": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "url",
+                    "title"
+                  ],
+                  "properties": {
+                    "url": {
+                      "type": "string"
+                    },
+                    "title": {
+                      "type": "string"
+                    },
+                    "summary": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      }
+    ],
+    "edges": []
+  }
+}

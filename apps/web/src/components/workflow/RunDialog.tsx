@@ -196,6 +196,9 @@ export function RunDialog({
     const def = v.defaultValue ?? (v.type === 'boolean' ? false : '');
     // Coerce boolean defaults so "false" string doesn't render as checked
     if (v.type === 'boolean') return def === true || def === 'true' || def === '1';
+    // A list is edited one item per line; a json value as JSON text.
+    if (v.type === 'list') return Array.isArray(def) ? def.join('\n') : String(def ?? '');
+    if (v.type === 'json') return v.defaultValue === undefined ? '' : JSON.stringify(v.defaultValue, null, 2);
     return def;
   }, []);
 
@@ -333,6 +336,13 @@ export function RunDialog({
           newErrors[v.name] = `${v.label} must be a number`;
         }
       }
+      if (v.type === 'json' && typeof val === 'string' && val.trim() !== '') {
+        try {
+          JSON.parse(val);
+        } catch {
+          newErrors[v.name] = `${v.label} must be valid JSON`;
+        }
+      }
       // Bug 7: Validate choice variables against allowed options
       if (v.type === 'choice' && v.options && val !== undefined && val !== '') {
         if (!v.options.includes(String(val))) {
@@ -375,6 +385,16 @@ export function RunDialog({
       if (v.type === 'boolean') {
         // Bug 6: Explicit true/false check instead of Boolean() which makes "false" → true
         val = val === true || val === 'true' || val === '1';
+      }
+      if (v.type === 'list' && typeof val === 'string') {
+        val = val.trim() === '' ? undefined : val.split('\n').map((x) => x.trim()).filter(Boolean);
+      }
+      if (v.type === 'json' && typeof val === 'string') {
+        try {
+          val = val.trim() === '' ? undefined : JSON.parse(val);
+        } catch {
+          val = undefined; // refused by validate()
+        }
       }
       converted[v.name] = val;
     }
@@ -559,6 +579,18 @@ export function RunDialog({
                 onChange={(val) => updateValue(v.name, val)}
                 options={(v.options ?? []).map((opt) => ({ value: opt, label: opt }))}
                 placeholder="Select…"
+              />
+            )}
+
+            {/* List (one item per line) and JSON */}
+            {(v.type === 'list' || v.type === 'json') && (
+              <Textarea
+                value={String(values[v.name] ?? '')}
+                onChange={(e) => updateValue(v.name, e.target.value)}
+                rows={4}
+                invalid={!!errors[v.name]}
+                className={v.type === 'json' ? 'font-mono text-xs' : undefined}
+                placeholder={v.type === 'list' ? 'One item per line' : 'A JSON value'}
               />
             )}
 

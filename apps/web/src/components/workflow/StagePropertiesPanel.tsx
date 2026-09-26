@@ -25,7 +25,7 @@ import {
   type PromptDefinition,
   type ResultValidationRule,
 } from '@generatorai/workflow-spec';
-import { useWorkflowBuilderStore, type BuilderIssue } from '@/stores/workflowBuilderStore.js';
+import { useWorkflowBuilderStore, type BuilderIssue, type StageUpdate } from '@/stores/workflowBuilderStore.js';
 import { PromptEditor } from './PromptEditor.js';
 import { SessionSpecEditor, type SessionSpecSection } from '@/components/session/SessionSpecEditor.js';
 import { NumberStepper } from './NumberStepper.js';
@@ -36,6 +36,7 @@ import { ExpressionField, FieldIssues, issuesAt } from './engineGate.js';
 import { Button, Input, Select, Textarea, ToggleSwitch } from '@/components/ui/index.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { cn } from '@/lib/utils.js';
+import { StageKindPanel } from './StageKindPanels.js';
 
 interface StagePropertiesPanelProps {
   onClose: () => void;
@@ -67,7 +68,7 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
   );
 
   const handleUpdate = useCallback(
-    (updates: Partial<AgentStage>) => {
+    (updates: StageUpdate) => {
       if (!selectedNodeId) return;
       updateStage(selectedNodeId, updates);
     },
@@ -91,6 +92,11 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
         </p>
       </div>
     );
+  }
+
+  // Check and loop stages have their own panels (P05).
+  if (stage.kind !== 'agent') {
+    return <StageKindPanel stage={stage} onUpdate={handleUpdate} issues={stageIssues} onClose={onClose} />;
   }
 
   const errorCount = stageIssues.filter((i) => i.severity === 'error').length;

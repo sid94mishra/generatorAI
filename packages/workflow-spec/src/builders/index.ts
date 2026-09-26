@@ -37,11 +37,14 @@ import type {
   AgentStage,
   ApprovalSpec,
   Budget,
+  CheckSpec,
   ContextSpec,
   JoinPolicy,
+  LoopSpec,
   OutputContract,
   RepairPolicy,
   RetryPolicy,
+  StageSpec,
   Timeouts,
 } from '../schemas/stage.js';
 import type { Lifecycle, PostProcessingStep, PreprocessingStep, WorkflowSpec } from '../schemas/workflow.js';
@@ -134,6 +137,11 @@ export class StageBuilder {
   }
   sessionGroup(group: string): this {
     this.spec.sessionGroup = group;
+    return this;
+  }
+  /** With sessionReuse continue: replace the conversation by a deterministic digest every n iterations. */
+  compactAfter(n: number): this {
+    this.spec.compactAfter = n;
     return this;
   }
   guard(expr: string): this {
@@ -240,7 +248,7 @@ export class StageBuilder {
 
 export class WorkflowBuilder {
   private readonly spec: Mutable<In<WorkflowSpec>> & { name: string };
-  private readonly stages: StageBuilder[] = [];
+  private readonly stages: Array<Pick<StageBuilder, 'key' | 'toInput'>> = [];
   private readonly edges: Array<In<EdgeSpec> & Pick<EdgeSpec, 'from' | 'to'>> = [];
   private readonly inline: Array<{ phase: WorkflowHookPhase; handler: InlineHookHandler; opts: In<WorkflowHookDefinition> }> = [];
 
@@ -321,13 +329,27 @@ export class WorkflowBuilder {
     this.spec.outputs = { ...(this.spec.outputs ?? {}), [name]: expr };
     return this;
   }
-  /** Add a stage; `configure` fills it in. Keys are unique. */
+  /** Add an agent stage; `configure` fills it in. Keys are unique. */
   stage(key: string, configure: (s: StageBuilder) => StageBuilder | void = () => {}): this {
     if (this.stages.some((s) => s.key === key)) throw new Error(`Stage '${key}' is defined twice`);
     const b = new StageBuilder(key);
     configure(b);
     this.stages.push(b);
     return this;
+  }
+  /** Add a stage of another kind (check, loop) from its fields: `.node({ key, kind: 'check', check: {...} })`. */
+  node(stage: { key: string; kind: Exclude<StageSpec['kind'], 'agent'>; name?: string } & Record<string, unknown>): this {
+    if (this.stages.some((s) => s.key === stage.key)) throw new Error(`Stage '${stage.key}' is defined twice`);
+    this.stages.push({ key: stage.key, toInput: () => ({ name: stage.key, ...stage }) });
+    return this;
+  }
+  /** A check stage: one deterministic command (P05 §1.2). */
+  check(key: string, check: In<CheckSpec> & Pick<CheckSpec, 'command'>, fields: Record<string, unknown> = {}): this {
+    return this.node({ key, kind: 'check', ...fields, check });
+  }
+  /** A loop container; its body stages name it with `.parent(key)` (P05 §2.1). */
+  loop(key: string, loop: In<LoopSpec> & Pick<LoopSpec, 'maxIterations'>, fields: Record<string, unknown> = {}): this {
+    return this.node({ key, kind: 'loop', ...fields, loop });
   }
   edge(from: string, to: string, opts: In<Omit<EdgeSpec, 'from' | 'to'>> = {}): this {
     this.edges.push({ from, to, ...opts });

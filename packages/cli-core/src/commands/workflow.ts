@@ -49,6 +49,8 @@ export const WORKFLOW_GROUP = {
 };
 
 type StageInput = WorkflowGraphInput['stages'][number];
+/** An agent stage: the kind these flags edit (check and loop stages are edited as JSON through `workflow import`). */
+type AgentStageInput = Extract<StageInput, { kind: 'agent' }>;
 type EdgeInput = NonNullable<WorkflowGraphInput['edges']>[number];
 
 const HOOK_TYPES = ['script', 'http', 'function'] as const;
@@ -95,6 +97,17 @@ function findStageKey(graph: WorkflowGraphInput, ref: string): string {
 function stageAt(graph: WorkflowGraphInput, key: string): StageInput {
   const stage = graph.stages.find((s) => s.key === key);
   if (!stage) throw CliError.notFound('stage', key);
+  return stage;
+}
+
+/** The stage, which must be an agent stage (prompts, hooks, session and context live on agents). */
+function agentStageAt(graph: WorkflowGraphInput, key: string): AgentStageInput {
+  const stage = stageAt(graph, key);
+  if (stage.kind !== 'agent') {
+    throw CliError.usage(`Stage "${key}" is a ${stage.kind} stage; these fields belong to agent stages.`, {
+      hint: 'Edit it in the workflow JSON (workflow export, then workflow import).',
+    });
+  }
   return stage;
 }
 
@@ -270,7 +283,7 @@ function hasStageFields(flags: StageFieldFlags): boolean {
 /** Writes the given flags into a stage, leaving everything else as it was. */
 function applyStageFields(
   graph: WorkflowGraphInput,
-  stage: StageInput,
+  stage: AgentStageInput,
   flags: StageFieldFlags,
   prompt: string | undefined,
 ): void {
@@ -321,14 +334,16 @@ const workflowArg = { name: 'workflow', description: 'Workflow reference', requi
 const stageArg = { name: 'stage', description: 'Stage key or name', required: true, completes: 'stage' } as const;
 
 function stageRow(stage: StageInput): Record<string, unknown> {
+  const agent = stage.kind === 'agent' ? stage : undefined;
   return {
     key: stage.key,
     name: stage.name,
-    prompts: stage.prompts?.length ?? 0,
-    model: stage.session?.model,
-    agent: stage.session?.agentRef,
+    kind: stage.kind,
+    prompts: agent?.prompts?.length ?? 0,
+    model: agent?.session?.model,
+    agent: agent?.session?.agentRef,
     guard: stage.guard,
-    approval: stage.approval !== undefined,
+    approval: agent?.approval !== undefined,
   };
 }
 
@@ -759,7 +774,7 @@ export function workflowCommands(): CommandSpec[] {
               hint: 'Pass another --key.',
             });
           }
-          const added: StageInput = { kind: 'agent', key, name: flags.name };
+          const added: AgentStageInput = { kind: 'agent', key, name: flags.name };
           graph.stages.push(added);
           applyStageFields(graph, added, flags, prompt);
           return added;
@@ -786,7 +801,7 @@ export function workflowCommands(): CommandSpec[] {
         const target = await findDefinition(ctx, args.workflow);
         const prompt = await promptText(flags);
         const { result: stage, warnings } = await editGraph(ctx, target.id, (graph) => {
-          const changed = stageAt(graph, findStageKey(graph, args.stage));
+          const changed = agentStageAt(graph, findStageKey(graph, args.stage));
           if (flags.name) changed.name = flags.name;
           applyStageFields(graph, changed, flags, prompt);
           return changed;
@@ -816,7 +831,7 @@ export function workflowCommands(): CommandSpec[] {
           graph.stages = graph.stages.filter((s) => s.key !== key);
           graph.edges = (graph.edges ?? []).filter((e) => e.from !== key && e.to !== key);
           for (const other of graph.stages) {
-            if (!other.context?.from?.includes(key)) continue;
+            if (other.kind !== 'agent' || !other.context?.from?.includes(key)) continue;
             const from = other.context.from.filter((k) => k !== key);
             // An emptied list falls back to the direct predecessors rather
             // than silently becoming "no context" (that is `--context-mode none`).
@@ -859,7 +874,7 @@ export function workflowCommands(): CommandSpec[] {
       async handler(ctx, { args }) {
         const target = await findDefinition(ctx, args.workflow);
         const { graph } = await ctx.api.definitions.get(target.id);
-        return list(stageAt(graph, findStageKey(graph, args.stage)).hooks ?? []);
+        return list(agentStageAt(graph, findStageKey(graph, args.stage)).hooks ?? []);
       },
     }),
 
@@ -942,7 +957,7 @@ export function workflowCommands(): CommandSpec[] {
 
         const target = await findDefinition(ctx, args.workflow);
         const { warnings } = await editGraph(ctx, target.id, (graph) => {
-          const stage = stageAt(graph, findStageKey(graph, args.stage));
+          const stage = agentStageAt(graph, findStageKey(graph, args.stage));
           const existing = stage.hooks ?? [];
           if (existing.some((h) => h.name === flags.name)) {
             throw new CliError('CONFLICT', `This stage already has a hook named "${flags.name}".`, {
@@ -971,7 +986,7 @@ export function workflowCommands(): CommandSpec[] {
       async handler(ctx, { args }) {
         const target = await findDefinition(ctx, args.workflow);
         const { result: removed, warnings } = await editGraph(ctx, target.id, (graph) => {
-          const stage = stageAt(graph, findStageKey(graph, args.stage));
+          const stage = agentStageAt(graph, findStageKey(graph, args.stage));
           const existing = stage.hooks ?? [];
           const hook = resolveRef(args.hook, { kind: 'hook', candidates: existing });
           stage.hooks = existing.filter((h) => h.id !== hook.id);

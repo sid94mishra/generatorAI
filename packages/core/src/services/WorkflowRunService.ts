@@ -391,6 +391,7 @@ export class WorkflowRunService {
   async assertPermissionGating(run: WorkflowRun, graph: WorkflowGraph): Promise<void> {
     const projectId = run.projectId ?? graph.workflow.projectId ?? undefined;
     for (const stage of graph.stages) {
+      if (stage.kind !== 'agent') continue; // only agent stages hold a session
       const session = resolveSessionSpec(graph.workflow.session, stage.session);
       // The bound agent's runtime harness counts too (review R8).
       const provider = this.providerResolver ? await this.providerResolver({ session, ...(projectId ? { projectId } : {}) }) : session.harnessType;

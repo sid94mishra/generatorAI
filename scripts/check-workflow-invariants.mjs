@@ -20,6 +20,13 @@
 //   node scripts/check-workflow-invariants.mjs [--json]
 //
 // A single line can be waived with a trailing `// workflow-invariant-ok: <reason>`.
+//
+// Rule `no-preset-in-engine` (P05 ground rule 2): the engine knows only the
+// generic kinds. An exact preset export name or a generated template id of
+// `packages/workflow-spec/src/presets/index.ts` appearing anywhere under
+// `packages/core/src/domain/scheduler/**` or `packages/core/src/services/engine/**`
+// fails the check (whole words only, so a scenario word such as
+// `completion_review` is not a false positive). No waiver.
 // ────────────────────────────────────────────────────────────────
 
 import { readFileSync } from 'node:fs';
@@ -118,6 +125,34 @@ export function scanSource(file, src) {
   return hits;
 }
 
+/** Exact preset export names and template ids, read from the presets module. */
+export function presetNames(root = repoRoot) {
+  const src = readFileSync(resolve(root, 'packages/workflow-spec/src/presets/index.ts'), 'utf8');
+  const names = [...src.matchAll(/export const (\w+) = define\(/g)].map((m) => m[1]);
+  const sources = src.slice(src.indexOf('const TEMPLATE_SOURCES'));
+  const ids = [...sources.matchAll(/^\s{4}id: '([a-z0-9-]+)'/gm)].map((m) => m[1]);
+  return [...names, ...ids];
+}
+
+const ENGINE_SCAN = ['packages/core/src/domain/scheduler/**/*.ts', 'packages/core/src/services/engine/**/*.ts'];
+
+/** Preset names or template ids in engine code (`no-preset-in-engine`). */
+export function scanPresetNames(root = repoRoot, names = presetNames(root)) {
+  const hits = [];
+  if (names.length === 0) return hits;
+  const re = new RegExp(`(?<![\\w-])(${names.join('|')})(?![\\w-])`, 'g');
+  const files = new Set();
+  for (const g of ENGINE_SCAN) for (const f of globFiles(g, root)) files.add(f.replace(/\\/g, '/'));
+  for (const f of [...files].sort()) {
+    const src = readFileSync(resolve(root, f), 'utf8');
+    for (let m; (m = re.exec(src)); ) {
+      const line = lineOf(src, m.index);
+      hits.push({ file: f, line, kind: 'preset-name', text: m[1] });
+    }
+  }
+  return hits;
+}
+
 export function scanRepo(root = repoRoot) {
   const files = new Set();
   for (const g of SCAN) for (const f of globFiles(g, root)) files.add(f.replace(/\\/g, '/'));
@@ -142,6 +177,10 @@ if (isMain) {
         `outside the engine compare-and-set (${fail ? 'FAIL mode' : `report-only; baseline ${BASELINE}`})`,
     );
   }
+  const presets = scanPresetNames();
+  for (const h of presets) console.log(`  ${h.file}:${h.line}  [preset-name]  ${h.text}`);
+  console.log(`[workflow-invariants] no-preset-in-engine: ${presets.length} preset name(s) or template id(s) in the scheduler or engine`);
+  if (presets.length > 0) process.exit(1);
   if (fail && hits.length > 0) process.exit(1);
   if (hits.length > BASELINE) {
     console.error(`[workflow-invariants] ${hits.length} > baseline ${BASELINE}: a new direct stage status write was added`);

@@ -10,6 +10,7 @@ import { z } from 'zod';
 import { MAX_TEMPLATE_LENGTH, MAX_VARIABLES } from '../constants.js';
 import {
   ActionDefinitionSchema,
+  CodebaseAliasSchema,
   ExprSchema,
   TemplateSchema,
   VariableDefinitionSchema,
@@ -17,13 +18,6 @@ import {
 } from './common.js';
 import { SessionSpecSchema } from './session.js';
 import { BudgetSchema } from './stage.js';
-
-export const CodebaseAliasSchema = z
-  .string()
-  .min(1)
-  .max(50)
-  .regex(/^[A-Za-z0-9._-]+$/, 'Aliases may contain letters, digits, . _ -')
-  .describe('Alias of a project codebase');
 
 const InputRuleSchema = z
   .discriminatedUnion('type', [

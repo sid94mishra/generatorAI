@@ -103,6 +103,10 @@ const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 export function compile(graph: WorkflowGraph): CompiledWorkflow {
   const nodes = new Map<string, CompiledNode>();
   graph.stages.forEach((stage, ordinal) => {
+    // Per-kind fields (P05 §1.3): only agent and check stages run attempts.
+    const agent = stage.kind === 'agent' ? stage : undefined;
+    const work = stage.kind === 'agent' || stage.kind === 'check' ? stage : undefined;
+    const timeouts: { queueMs?: number; idleMs?: number; attemptMs?: number; totalMs?: number } | undefined = work?.timeouts;
     nodes.set(stage.key, {
       key: stage.key,
       kind: stage.kind,
@@ -112,17 +116,17 @@ export function compile(graph: WorkflowGraph): CompiledWorkflow {
       ...(stage.parentKey ? { parentKey: stage.parentKey } : {}),
       join: stage.join,
       ...(stage.guard !== undefined ? { guard: compileExpr(stage.guard)! } : {}),
-      retry: stage.retry ?? DEFAULT_RETRY,
-      repair: stage.repair ?? DEFAULT_REPAIR,
-      onExhausted: stage.onExhausted ?? STAGE_DEFAULTS.onExhausted,
+      retry: work?.retry ?? DEFAULT_RETRY,
+      repair: agent?.repair ?? DEFAULT_REPAIR,
+      onExhausted: agent?.onExhausted ?? STAGE_DEFAULTS.onExhausted,
       timeouts: {
-        queueMs: stage.timeouts?.queueMs ?? STAGE_DEFAULTS.timeouts.queueMs,
-        idleMs: stage.timeouts?.idleMs ?? STAGE_DEFAULTS.timeouts.idleMs,
-        ...(stage.timeouts?.attemptMs !== undefined ? { attemptMs: stage.timeouts.attemptMs } : {}),
-        ...(stage.timeouts?.totalMs !== undefined ? { totalMs: stage.timeouts.totalMs } : {}),
+        queueMs: timeouts?.queueMs ?? STAGE_DEFAULTS.timeouts.queueMs,
+        idleMs: timeouts?.idleMs ?? STAGE_DEFAULTS.timeouts.idleMs,
+        ...(timeouts?.attemptMs !== undefined ? { attemptMs: timeouts.attemptMs } : {}),
+        ...(timeouts?.totalMs !== undefined ? { totalMs: timeouts.totalMs } : {}),
       },
-      ...(stage.budget ? { budget: stage.budget } : {}),
-      ...(stage.sessionGroup ? { sessionGroup: stage.sessionGroup } : {}),
+      ...(stage.kind !== 'check' && stage.budget ? { budget: stage.budget } : {}),
+      ...(agent?.sessionGroup ? { sessionGroup: agent.sessionGroup } : {}),
       compensates: (stage.compensate?.length ?? 0) > 0,
       incoming: [],
       outgoing: [],

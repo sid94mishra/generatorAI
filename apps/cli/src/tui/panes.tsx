@@ -880,7 +880,8 @@ function WorkflowPane({ content, focused, height }: PaneProps): React.JSX.Elemen
   // dependency tree under 100 columns) and a cursor, so the authoring
   // commands act on "the selected stage".
   const edgesOnSelected = edges.filter((edge) => edge.from === selected?.key || edge.to === selected?.key);
-  const hookCount = selected?.hooks.length ?? 0;
+  const agent = selected?.kind === 'agent' ? selected : undefined;
+  const hookCount = agent?.hooks.length ?? 0;
 
   // The detail strip and the hint line are real rows — budgeting only the
   // graph overflows the panel and paints across the border, the same
@@ -908,10 +909,10 @@ function WorkflowPane({ content, focused, height }: PaneProps): React.JSX.Elemen
             <Text color={theme.c('muted')}>{`  ${selected.key}`}</Text>
           </Text>
           <Text color={theme.c('muted')} wrap="truncate-end">
-            {`${edgesOnSelected.length} edge(s) ${theme.glyphs.neutral} ${selected.prompts.length} prompt(s) ${theme.glyphs.neutral} ${hookCount} hook(s)`}
+            {`${edgesOnSelected.length} edge(s) ${theme.glyphs.neutral} ${agent ? `${agent.prompts.length} prompt(s)` : selected.kind} ${theme.glyphs.neutral} ${hookCount} hook(s)`}
             {selected.guard ? ` ${theme.glyphs.neutral} if ${selected.guard}` : ''}
-            {selected.session?.agentRef ? ` ${theme.glyphs.neutral} agent ${selected.session.agentRef}` : ''}
-            {selected.session?.model ? ` ${theme.glyphs.neutral} ${selected.session.model}` : ''}
+            {agent?.session?.agentRef ? ` ${theme.glyphs.neutral} agent ${agent.session.agentRef}` : ''}
+            {agent?.session?.model ? ` ${theme.glyphs.neutral} ${agent.session.model}` : ''}
           </Text>
         </Box>
       ) : (

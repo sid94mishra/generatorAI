@@ -6,7 +6,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach } from 'vitest';
-import type { WorkflowDefinitionRecord, WorkflowGraph } from '@generatorai/workflow-spec';
+import type { AgentStage, WorkflowDefinitionRecord, WorkflowGraph } from '@generatorai/workflow-spec';
 import {
   newAgentStage,
   stageKeyFor,
@@ -116,7 +116,7 @@ describe('workflowBuilderStore', () => {
     const graph = store().toGraph();
     expect(graph.stages.map((s) => s.key)).toEqual(['analyze', 'check']);
     expect(graph.edges).toEqual([{ from: 'analyze', to: 'check', on: 'success' }]);
-    expect(graph.stages[1]!.context.from).toEqual(['analyze']);
+    expect((graph.stages[1] as AgentStage).context.from).toEqual(['analyze']);
     expect(store().validate().filter((i) => i.severity === 'error')).toEqual([]);
   });
 
@@ -128,7 +128,7 @@ describe('workflowBuilderStore', () => {
     expect(store().renameStageKey('analyze', 'research')).toBeNull();
     const graph = store().toGraph();
     expect(graph.edges[0]).toMatchObject({ from: 'research', to: 'build' });
-    expect(graph.stages[1]!.context.from).toEqual(['research']);
+    expect((graph.stages[1] as AgentStage).context.from).toEqual(['research']);
   });
 
   // ── Wholesale graph: clearing a field removes it (D-4) ──
@@ -150,7 +150,7 @@ describe('workflowBuilderStore', () => {
     store().loadRecord(makeRecord());
     store().updateStage('analyze', { output: { format: 'json', extraction: 'auto', rules: [], schema: { type: 'object' } } });
     store().duplicateStage('analyze');
-    const copy = store().toGraph().stages[2]!;
+    const copy = store().toGraph().stages[2] as AgentStage;
     expect(copy.key).toBe('analyze_copy');
     expect(copy.name).toBe('Analyze (copy)');
     expect(copy.output.schema).toEqual({ type: 'object' });
