@@ -71,7 +71,6 @@
     "src/components/workflow/NumberStepper.tsx": 2,
     "src/components/workflow/PromptEditor.tsx": 7,
     "src/components/workflow/RunDialog.tsx": 34,
-    "src/components/workflow/runs/RunFilterBar.tsx": 9,
     "src/components/workflow/settings/GeneralTab.tsx": 4,
     "src/components/workflow/settings/HooksTab.tsx": 9,
     "src/components/workflow/settings/ProjectCodebasesTab.tsx": 15,
@@ -80,14 +79,11 @@
     "src/components/workflow/StageKindPanels.tsx": 5,
     "src/components/workflow/StageNode.tsx": 2,
     "src/components/workflow/StagePropertiesPanel.tsx": 47,
-    "src/components/workflow/WorkflowCard.tsx": 4,
     "src/components/workflow/WorkflowConfigPanel.tsx": 4,
     "src/pages/AutomationDetailPage.tsx": 38,
     "src/pages/CreateAutomationPage.tsx": 43,
     "src/pages/ScriptDetailPage.tsx": 13,
-    "src/pages/WorkflowBuilderPage.tsx": 11,
-    "src/pages/WorkflowDefinitionPage.tsx": 11,
-    "src/pages/WorkflowListPage.tsx": 7
+    "src/pages/WorkflowBuilderPage.tsx": 11
   },
   "whiteBlackClass": {
     "src/components/ui/ConfirmDialog.tsx": 1,
@@ -156,14 +152,11 @@
     "src/components/workflow/StageKindPanels.tsx": 1,
     "src/components/workflow/StageNode.tsx": 20,
     "src/components/workflow/StagePropertiesPanel.tsx": 22,
-    "src/components/workflow/WorkflowCard.tsx": 5,
     "src/components/workflow/WorkflowConfigPanel.tsx": 3,
     "src/pages/AutomationDetailPage.tsx": 23,
     "src/pages/CreateAutomationPage.tsx": 13,
     "src/pages/ScriptDetailPage.tsx": 5,
-    "src/pages/ScriptsListPage.tsx": 1,
-    "src/pages/WorkflowDefinitionPage.tsx": 2,
-    "src/pages/WorkflowListPage.tsx": 7
+    "src/pages/ScriptsListPage.tsx": 1
   },
   "defaultShadow": {
     "src/components/shared/ContextUsageGauge.tsx": 1,
@@ -245,7 +238,6 @@
     "src/components/workflow/expression/CodeExpressionEditor.tsx": 1,
     "src/components/workflow/NumberStepper.tsx": 2,
     "src/components/workflow/RunDialog.tsx": 5,
-    "src/components/workflow/runs/RunFilterBar.tsx": 1,
     "src/components/workflow/settings/ProjectCodebasesTab.tsx": 1,
     "src/components/workflow/settings/TagsMetadataTab.tsx": 1,
     "src/components/workflow/settings/VariablesTab.tsx": 10,
@@ -253,13 +245,10 @@
     "src/components/workflow/StageKindPanels.tsx": 2,
     "src/components/workflow/StageNode.tsx": 53,
     "src/components/workflow/StagePropertiesPanel.tsx": 14,
-    "src/components/workflow/WorkflowCard.tsx": 2,
     "src/components/workflow/WorkflowConfigPanel.tsx": 21,
     "src/pages/AutomationDetailPage.tsx": 5,
     "src/pages/CreateAutomationPage.tsx": 2,
-    "src/pages/WorkflowBuilderPage.tsx": 4,
-    "src/pages/WorkflowDefinitionPage.tsx": 2,
-    "src/pages/WorkflowListPage.tsx": 2
+    "src/pages/WorkflowBuilderPage.tsx": 4
   },
   "varInClassString": {
     "src/components/ErrorBoundary.tsx": 10,
@@ -304,8 +293,7 @@
     "src/components/workflow/edgeTypeStyles.ts": 4,
     "src/components/workflow/StageEdge.tsx": 6,
     "src/components/workflow/StageNode.tsx": 44,
-    "src/components/workflow/WorkflowConfigPanel.tsx": 20,
-    "src/pages/WorkflowListPage.tsx": 3
+    "src/components/workflow/WorkflowConfigPanel.tsx": 20
   },
   "legacyTokenUtility": {
     "src/components/agents/AgentOverridesEditor.tsx": 2,
@@ -372,7 +360,6 @@
     "src/components/workflow/NumberStepper.tsx": 13,
     "src/components/workflow/PromptEditor.tsx": 30,
     "src/components/workflow/RunDialog.tsx": 80,
-    "src/components/workflow/runs/RunFilterBar.tsx": 8,
     "src/components/workflow/settings/GeneralTab.tsx": 5,
     "src/components/workflow/settings/HooksTab.tsx": 9,
     "src/components/workflow/settings/ProjectCodebasesTab.tsx": 31,
@@ -381,15 +368,12 @@
     "src/components/workflow/StageKindPanels.tsx": 9,
     "src/components/workflow/StageNode.tsx": 3,
     "src/components/workflow/StagePropertiesPanel.tsx": 73,
-    "src/components/workflow/WorkflowCard.tsx": 32,
     "src/pages/AutomationDetailPage.tsx": 93,
     "src/pages/AutomationsPage.tsx": 8,
     "src/pages/CreateAutomationPage.tsx": 77,
     "src/pages/ScriptDetailPage.tsx": 34,
     "src/pages/ScriptsListPage.tsx": 5,
-    "src/pages/WorkflowBuilderPage.tsx": 37,
-    "src/pages/WorkflowDefinitionPage.tsx": 29,
-    "src/pages/WorkflowListPage.tsx": 33
+    "src/pages/WorkflowBuilderPage.tsx": 37
   },
   "lucideDirectImport": {
     "src/components/agents/AgentOverridesEditor.tsx": 1,
@@ -443,7 +427,6 @@
     "src/components/workflow/NumberStepper.tsx": 1,
     "src/components/workflow/PromptEditor.tsx": 1,
     "src/components/workflow/RunDialog.tsx": 1,
-    "src/components/workflow/runs/RunFilterBar.tsx": 1,
     "src/components/workflow/settings/HooksTab.tsx": 1,
     "src/components/workflow/settings/ProjectCodebasesTab.tsx": 1,
     "src/components/workflow/settings/TagsMetadataTab.tsx": 1,
@@ -452,16 +435,13 @@
     "src/components/workflow/StageKindPanels.tsx": 1,
     "src/components/workflow/StageNode.tsx": 1,
     "src/components/workflow/StagePropertiesPanel.tsx": 1,
-    "src/components/workflow/WorkflowCard.tsx": 1,
     "src/components/workflow/WorkflowConfigPanel.tsx": 1,
     "src/pages/AutomationDetailPage.tsx": 1,
     "src/pages/AutomationsPage.tsx": 1,
     "src/pages/CreateAutomationPage.tsx": 1,
     "src/pages/ScriptDetailPage.tsx": 1,
     "src/pages/ScriptsListPage.tsx": 1,
-    "src/pages/WorkflowBuilderPage.tsx": 1,
-    "src/pages/WorkflowDefinitionPage.tsx": 1,
-    "src/pages/WorkflowListPage.tsx": 1
+    "src/pages/WorkflowBuilderPage.tsx": 1
   },
   "rawHeadlessImport": {
     "src/components/shared/ModelPicker.tsx": 1
@@ -469,11 +449,8 @@
   "unstyledVariant": {
     "src/components/automation/TriggerAutomationModal.tsx": 2,
     "src/components/workflow/builder/issueFixes.tsx": 1,
-    "src/components/workflow/runs/RunFilterBar.tsx": 1,
-    "src/components/workflow/WorkflowCard.tsx": 2,
     "src/pages/AutomationDetailPage.tsx": 5,
     "src/pages/ScriptDetailPage.tsx": 1,
-    "src/pages/WorkflowBuilderPage.tsx": 1,
-    "src/pages/WorkflowDefinitionPage.tsx": 2
+    "src/pages/WorkflowBuilderPage.tsx": 1
   }
 }
