@@ -51,7 +51,7 @@ import { ChangesPanel } from '@/blocks/changes/ChangesPanel.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
 import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
 import { TerminalPanel, type TerminalWorktreeOption } from '@/components/terminal/TerminalPanel.js';
-import { WidgetHost } from '@/components/widgets/WidgetHost.js';
+import { WidgetHost } from '@/blocks/widgets/index.js';
 import { Breadcrumb } from '@/components/layout/Breadcrumb.js';
 import { RightPane, useRightPaneOpen } from '@/components/layout/RightPane.js';
 import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
