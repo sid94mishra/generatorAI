@@ -13,11 +13,17 @@
     "lint": "eslint src/"
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lint": "^6.9.7",
+    "@codemirror/state": "^6.7.6",
+    "@codemirror/view": "^6.43.13",
     "@dagrejs/dagre": "^2.0.4",
     "@generatorai/client-core": "workspace:*",
     "@generatorai/client-runtime": "workspace:*",
     "@generatorai/design-tokens": "workspace:*",
     "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*",
     "@pierre/diffs": "^1.2.12",
     "@pierre/trees": "1.0.0-beta.6",
     "@radix-ui/react-alert-dialog": "^1.1.19",

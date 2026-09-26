@@ -23,7 +23,7 @@
 // BOUNDS (L1 — "a bounded on-disk ceiling with enforced rotation"), all three
 // declared, not aspirational:
 //   - per-scope IN-MEMORY buffer: `maxBufferedBytesPerScope`, oldest line
-//     dropped with a marker, same idiom as `RunLogger`.
+//     dropped with a marker.
 //   - per-scope FILE, rotated at `maxFileBytes` into `maxGenerations` kept
 //     generations (`.jsonl`, `.jsonl.1`, …); beyond that, deleted.
 //   - GLOBAL on-disk ceiling: `enforceGlobalCeiling()`, called from the same

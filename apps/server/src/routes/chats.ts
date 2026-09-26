@@ -4,6 +4,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
+import { canBypassPermissions, canSetSessionProvider, chatPrincipalOf } from './permissionScope.js';
 import multer from 'multer';
 import { z } from 'zod';
 import type { Container } from '../composition-root.js';
@@ -19,7 +20,7 @@ import {
   UpdateChatSchema,
   UpdateChatSourcesSchema,
   SetChatPermissionModeSchema,
-  coerceAgentMode,
+  isAgentMode,
 } from '@generatorai/shared';
 import type { ChatMessage, ChatSourceControlOptions, PlanDocument } from '@generatorai/shared';
 
@@ -178,21 +179,6 @@ const upload = multer({
 // unified `/api/stream?scope=chat&id=<chatId>` endpoint backed by the
 // persistent `stream_cursors` log.
 
-/**
- * May this caller turn a chat's tool approvals OFF?
- *
- * `write:chats` is the default grant for every paired device, and until the
- * approval gate existed it was already equivalent to running code on the host
- * (review 5.2). Now that the gate is real, dropping it is the privileged act
- * and needs an administrative scope; entering a gated mode does not.
- */
-function canBypassPermissions(req: { principal?: { scopes?: readonly string[] } }): boolean {
-  const scopes = req.principal?.scopes;
-  // No principal at all is unauthenticated-loopback development mode, which
-  // is already fully trusted by design.
-  if (!scopes) return true;
-  return scopes.includes('admin:settings');
-}
 
 /**
  * Attach `workspacePrep` (mount readiness) to a chat DTO. The composer gates
@@ -295,6 +281,14 @@ export function createChatApiRoutes(container: Container): Router {
         params.sourceControl = sc.value;
       }
 
+      // R1 — a BYOK provider sends a stored key to a caller-chosen endpoint.
+      if (params.harnessConfig?.provider && !canSetSessionProvider(req)) {
+        res.status(403).json({
+          error: { code: 'FORBIDDEN', message: 'Setting a chat provider requires the admin:settings scope.' },
+        });
+        return;
+      }
+
       // Creation is the front door, and it takes `permissionMode` directly.
       // Gating only the two update routes left a caller free to ask for
       // approvals-off on the way in, which is the same escalation by another
@@ -316,7 +310,7 @@ export function createChatApiRoutes(container: Container): Router {
         params.permissionMode = 'default';
       }
 
-      const chat = await chatManagementService.createChat(params);
+      const chat = await chatManagementService.createChat({ ...params, createdByPrincipal: chatPrincipalOf(req) });
       logger.info(`[ChatRoutes] Created chat ${chat.id}`, { requestId: req.requestId });
       res.status(201).json(await withWorkspacePrep(container, chat));
     } catch (err) {
@@ -412,6 +406,19 @@ export function createChatApiRoutes(container: Container): Router {
     }
   });
 
+  // GET /chats/:id/workflow-runs — the runs this chat started through its
+  // workflow tools, as run cards (P06 WP-6.2): a reload or another device
+  // draws them from here, then follows `chat.workflow_run.*` on the stream.
+  router.get('/:id/workflow-runs', async (req, res, next) => {
+    try {
+      const chatId = String(req.params['id']);
+      await container.chatEntityRepo.getById(chatId);
+      res.json({ runs: (await container.chatWorkflowRunBridge?.cards(chatId)) ?? [] });
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // PUT /chats/:id/sources — replace what the chat works on.
   //
   // Validated against the filesystem and git before anything changes;
@@ -497,13 +504,25 @@ export function createChatApiRoutes(container: Container): Router {
       if (model !== undefined) updates.model = model;
       if (tags !== undefined) updates.tags = tags;
       if (projectId !== undefined) updates.projectId = projectId;
-      if (harnessConfig !== undefined) updates.harnessConfig = harnessConfig;
+      if (harnessConfig !== undefined) {
+        // R1 — setting or changing the BYOK provider needs admin:settings;
+        // keeping or removing it does not.
+        const nextProvider = (harnessConfig as { provider?: unknown } | null)?.provider;
+        if (nextProvider !== undefined && !canSetSessionProvider(req)) {
+          const current = await container.chatEntityRepo.getById(chatId);
+          if (JSON.stringify(current.harnessConfig?.provider ?? null) !== JSON.stringify(nextProvider)) {
+            res.status(403).json({
+              error: { code: 'FORBIDDEN', message: 'Changing a chat provider requires the admin:settings scope.' },
+            });
+            return;
+          }
+        }
+        updates.harnessConfig = harnessConfig;
+      }
       if (status !== undefined && status !== 'archived') updates.status = status;
-      // PLN-01 — sticky per-chat composer defaults. `coerceAgentMode` also
-      // folds the pre-rename `interactive` alias onto `auto`.
-      const coercedMode = coerceAgentMode(defaultAgentMode);
-      if (coercedMode) {
-        updates.defaultAgentMode = coercedMode;
+      // PLN-01 — sticky per-chat composer defaults.
+      if (isAgentMode(defaultAgentMode)) {
+        updates.defaultAgentMode = defaultAgentMode;
       }
       if (permissionMode !== undefined) {
         // Raising a chat to `bypassPermissions` turns the approval gate OFF

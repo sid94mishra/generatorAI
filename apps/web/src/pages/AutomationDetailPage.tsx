@@ -49,6 +49,14 @@ function formatDate(date: Date | string | undefined): string {
   });
 }
 
+/** PD-18 — the unattended runs' tool-approval policy. */
+const PERMISSION_MODE_LABEL: Record<string, string> = {
+  acceptEdits: 'Accept edits',
+  default: 'Ask',
+  plan: 'Plan (read-only)',
+  bypassPermissions: 'Bypass',
+};
+
 export function AutomationDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -120,8 +128,8 @@ export function AutomationDetailPage() {
   };
 
   // Schema-driven automations need the trigger modal to collect per-run
-  // dataset input. Legacy modes (single/loop/batch/script) have nothing
-  // to configure at run time — Run Now fires the trigger immediately.
+  // dataset input. An automation without a schema runs once with its base
+  // variables — Run Now fires the trigger immediately.
   const hasSchema = !!automation.dataSchema;
   const handleRunNow = () => {
     if (hasSchema) {
@@ -198,18 +206,16 @@ export function AutomationDetailPage() {
           <div className="mt-1 text-sm font-semibold text-foreground">{automation.workflowIds.length} workflow{automation.workflowIds.length !== 1 ? 's' : ''}</div>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
-          <div className="text-xs font-medium text-muted-foreground">Input Mode</div>
+          <div className="text-xs font-medium text-muted-foreground">Iterations</div>
           <div className="mt-1 flex items-center gap-1.5 text-sm font-semibold text-foreground">
             {automation.dataSchema && automation.iterationMode
               ? <><Repeat className="h-4 w-4" /> Schema · {automation.iterationMode.kind.replace('_', ' ')}</>
-              : automation.inputMode === 'loop'
-              ? <><Repeat className="h-4 w-4" /> Loop ({automation.loopItems?.length ?? 0})</>
-              : automation.inputMode === 'batch'
-              ? <><Repeat className="h-4 w-4" /> Batch ({automation.batchColumns?.length ?? 0} cols)</>
-              : automation.inputMode === 'script'
-              ? <><Repeat className="h-4 w-4" /> Script</>
-              : 'Single'}
+              : 'Single run'}
           </div>
+        </div>
+        <div className="rounded-lg border border-border bg-card p-4">
+          <div className="text-xs font-medium text-muted-foreground">Permission mode</div>
+          <div className="mt-1 text-sm font-semibold text-foreground">{PERMISSION_MODE_LABEL[automation.permissionMode] ?? automation.permissionMode}</div>
         </div>
         <div className="rounded-lg border border-border bg-card p-4">
           <div className="text-xs font-medium text-muted-foreground">Last Run</div>
@@ -268,31 +274,6 @@ export function AutomationDetailPage() {
           <pre className="mt-2 max-h-40 overflow-auto rounded-lg bg-muted p-3 text-xs text-foreground">
             {JSON.stringify(automation.variables, null, 2)}
           </pre>
-        </div>
-      )}
-
-      {/* Batch Data Info */}
-      {automation.inputMode === 'batch' && automation.batchDataFormat && (
-        <div className="mb-8 rounded-lg border border-border bg-card p-4">
-          <div className="text-xs font-medium text-muted-foreground">Batch Data</div>
-          <div className="mt-2 grid grid-cols-3 gap-4 text-sm">
-            <div>
-              <span className="text-xs text-muted-foreground">Format: </span>
-              <span className="font-medium text-foreground">{automation.batchDataFormat.toUpperCase()}</span>
-            </div>
-            <div>
-              <span className="text-xs text-muted-foreground">Columns: </span>
-              <span className="font-medium text-foreground">{automation.batchColumns?.join(', ') ?? '—'}</span>
-            </div>
-            {automation.batchColumnMapping && Object.keys(automation.batchColumnMapping).length > 0 && (
-              <div>
-                <span className="text-xs text-muted-foreground">Mappings: </span>
-                <span className="font-medium text-foreground">
-                  {Object.entries(automation.batchColumnMapping).map(([k, v]) => `${k}→${v}`).join(', ')}
-                </span>
-              </div>
-            )}
-          </div>
         </div>
       )}
 
@@ -559,7 +540,8 @@ function IterationRow({
 }) {
   const [showChanges, setShowChanges] = useState(false);
   // Only fetch once the user asks — an execution can hold many iterations.
-  const { data: runData } = useWorkflowRun(showChanges ? run.workflowRunId : undefined);
+  const runId = run.workflowRunId;
+  const { data: runData } = useWorkflowRun(showChanges && runId ? runId : undefined);
 
   return (
     <div className="rounded-lg">
@@ -579,12 +561,14 @@ function IterationRow({
           <FileCode className="h-3 w-3" />
           {showChanges ? 'Hide changes' : 'Changes'}
         </Button>
-        <Button variant="unstyled"
-          onClick={() => onViewRun(run.workflowRunId, run.workflowDefinitionId)}
-          className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
-        >
-          Run: {run.workflowRunId.slice(0, 8)}…
-        </Button>
+        {runId && (
+          <Button variant="unstyled"
+            onClick={() => onViewRun(runId, run.workflowDefinitionId)}
+            className="rounded px-1.5 py-0.5 text-xs text-muted-foreground hover:bg-accent"
+          >
+            Run: {runId.slice(0, 8)}…
+          </Button>
+        )}
       </div>
 
       {showChanges && (

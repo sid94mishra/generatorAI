@@ -183,7 +183,7 @@ describe('scope requests', () => {
     // `codebaseLinkLocal` (host folder picking) never rides along with it.
     expect(missing.find((m) => m.scope === 'write:projects')?.features).toEqual(['projectEdit']);
     expect(missing.find((m) => m.scope === 'write:workflows')?.features.sort()).toEqual(
-      ['runControl', 'workflowEdit'],
+      ['runControl', 'scriptRun', 'workflowEdit'],
     );
   });
 

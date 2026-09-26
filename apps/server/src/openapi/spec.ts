@@ -44,11 +44,22 @@ const errorResponseSchema = {
         code: { type: 'string' },
         message: { type: 'string' },
         details: {},
+        issues: {
+          type: 'array',
+          items: { $ref: '#/components/schemas/ValidationIssue' },
+          description: 'WORKFLOW_INVALID (422): every problem, each pointing at a field',
+        },
+        current: {
+          $ref: '#/components/schemas/WorkflowDefinition',
+          description: 'REVISION_CONFLICT (409): the record the save lost to',
+        },
       },
       required: ['code', 'message'],
     },
   },
 };
+
+const errorContent = { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } };
 
 const idParam = {
   in: 'path',
@@ -75,6 +86,20 @@ const prNumberParam = {
 const runIdParam = {
   in: 'path',
   name: 'runId',
+  required: true,
+  schema: { type: 'string' },
+};
+
+const instanceIdParam = {
+  in: 'path',
+  name: 'instanceId',
+  required: true,
+  schema: { type: 'string' },
+};
+
+const interactionIdParam = {
+  in: 'path',
+  name: 'interactionId',
   required: true,
   schema: { type: 'string' },
 };
@@ -552,67 +577,153 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
         required: ['id', 'sessionId', 'role', 'content', 'timestamp'],
       },
+      WorkflowGraph: {
+        type: 'object',
+        description:
+          'A v2 workflow document (`formatVersion: 2`): `workflow` settings, `stages` identified by `key`, ' +
+          'and `edges` between stage keys. The full JSON Schema ships as ' +
+          '`@generatorai/workflow-spec/workflow.schema.json`.',
+        properties: {
+          formatVersion: { type: 'integer', enum: [2] },
+          workflow: { type: 'object', additionalProperties: true },
+          stages: { type: 'array', items: { type: 'object', additionalProperties: true } },
+          edges: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                from: { type: 'string' },
+                to: { type: 'string' },
+                on: { type: 'string', enum: ['success', 'failure', 'completion', 'always'] },
+                when: { type: 'string' },
+              },
+              required: ['from', 'to', 'on'],
+            },
+          },
+        },
+        required: ['formatVersion', 'workflow', 'stages'],
+      },
+      ValidationIssue: {
+        type: 'object',
+        properties: {
+          code: { type: 'string' },
+          severity: { type: 'string', enum: ['error', 'warning', 'info'] },
+          path: { type: 'string', description: 'JSON pointer into the graph, e.g. `/stages/2/prompts/0/text`' },
+          stageKey: { type: 'string' },
+          message: { type: 'string' },
+          hint: { type: 'string' },
+        },
+        required: ['code', 'severity', 'path', 'message'],
+      },
+      ValidationResult: {
+        type: 'object',
+        properties: {
+          valid: { type: 'boolean' },
+          issues: { type: 'array', items: { $ref: '#/components/schemas/ValidationIssue' } },
+        },
+        required: ['valid', 'issues'],
+      },
       WorkflowDefinition: {
+        type: 'object',
+        description: 'A definition record: the working graph plus its draft/published state.',
+        properties: {
+          id: { type: 'string' },
+          status: { type: 'string', enum: ['draft', 'published'] },
+          revision: {
+            type: 'integer',
+            description: 'Bumped on every save; `PUT /graph` sends it back as `expectedRevision`',
+          },
+          currentVersionId: { type: ['string', 'null'], description: 'The published version new runs execute' },
+          hasUnpublishedChanges: { type: 'boolean' },
+          archivedAt: { type: ['string', 'null'], format: 'date-time' },
+          needsAttention: { type: 'array', items: { type: 'string' } },
+          createdAt: { type: 'string', format: 'date-time' },
+          updatedAt: { type: 'string', format: 'date-time' },
+          graph: { $ref: '#/components/schemas/WorkflowGraph' },
+        },
+        required: ['id', 'status', 'revision', 'currentVersionId', 'graph'],
+      },
+      WorkflowDefinitionSummary: {
         type: 'object',
         properties: {
           id: { type: 'string' },
           name: { type: 'string' },
           description: { type: 'string' },
-          version: { type: 'integer' },
-          sessionMode: { type: 'string', enum: ['auto', 'single', 'per-stage'] },
-          variables: { type: 'array' },
+          projectId: { type: ['string', 'null'] },
+          status: { type: 'string', enum: ['draft', 'published'] },
+          revision: { type: 'integer' },
+          currentVersionId: { type: ['string', 'null'] },
           tags: { type: 'array', items: { type: 'string' } },
+          stageCount: { type: 'integer' },
+          needsAttention: { type: 'boolean' },
+          archivedAt: { type: ['string', 'null'], format: 'date-time' },
           createdAt: { type: 'string', format: 'date-time' },
           updatedAt: { type: 'string', format: 'date-time' },
         },
-        required: ['id', 'name', 'version'],
+        required: ['id', 'name', 'status', 'revision', 'stageCount'],
+      },
+      WorkflowDefinitionVersion: {
+        type: 'object',
+        description: 'An immutable snapshot of a graph; every run pins one.',
+        properties: {
+          id: { type: 'string' },
+          workflowDefinitionId: { type: 'string' },
+          version: { type: 'integer' },
+          kind: { type: 'string', enum: ['published', 'test'] },
+          contentHash: { type: 'string' },
+          createdAt: { type: 'string', format: 'date-time' },
+          graph: { $ref: '#/components/schemas/WorkflowGraph', description: 'Only on the single-version read' },
+        },
+        required: ['id', 'workflowDefinitionId', 'version', 'kind'],
       },
       WorkflowRun: {
         type: 'object',
         properties: {
           id: { type: 'string' },
           workflowDefinitionId: { type: 'string' },
+          definitionVersionId: { type: 'string', description: 'The immutable definition version this run executes' },
           status: {
             type: 'string',
-            enum: [
-              'pending', 'queued', 'running', 'paused', 'completed',
-              'failed', 'cancelled',
-            ],
+            enum: ['created', 'starting', 'running', 'waiting', 'paused', 'finalizing', 'cancelling', 'completed', 'failed', 'cancelled'],
           },
+          statusReason: { type: 'string', nullable: true },
+          outcome: { type: 'string', enum: ['completed', 'failed', 'cancelled'], nullable: true },
+          version: { type: 'integer', description: 'CAS version (`expectedVersion` on commands)' },
+          ancestorRunId: { type: 'string', nullable: true, description: 'The run this one was forked from' },
           permissionMode: {
             type: 'string',
             enum: ['bypassPermissions', 'default', 'acceptEdits', 'plan'],
             description:
-              'HITL permission mode. Default `bypassPermissions` is fully ' +
-              'autonomous. Flip to `plan` / `default` / `acceptEdits` to ' +
-              'surface interrupts for human approval (see /pending-interrupts).',
+              "The operator's explicit run-level permission mode; unset lets the stage, workflow and trigger " +
+              'layers and the deployment posture decide. Gated modes park stages `awaiting_input` for approval.',
           },
           variables: { type: 'object', additionalProperties: true },
           startedAt: { type: 'string', format: 'date-time', nullable: true },
           completedAt: { type: 'string', format: 'date-time', nullable: true },
         },
-        required: ['id', 'workflowDefinitionId', 'status'],
+        required: ['id', 'workflowDefinitionId', 'definitionVersionId', 'status'],
       },
       StageRun: {
         type: 'object',
         properties: {
           id: { type: 'string' },
           workflowRunId: { type: 'string' },
-          stageDefinitionId: { type: 'string' },
+          stageKey: { type: 'string', description: "The stage's key in the run's pinned graph" },
           name: { type: 'string' },
+          instancePath: { type: 'string', description: 'Unique per run; the stage key at the top level' },
           status: {
             type: 'string',
             enum: [
-              'pending', 'queued', 'running', 'paused', 'completed',
-              'failed', 'cancelled', 'skipped', 'sleeping', 'awaiting_input',
+              'pending', 'ready', 'starting', 'running', 'validating', 'awaiting_input', 'waiting',
+              'retry_wait', 'paused', 'completed', 'failed', 'skipped', 'cancelled',
             ],
           },
-          wakeAt: { type: 'string', format: 'date-time', nullable: true },
-          interruptData: {},
-          retryCount: { type: 'integer' },
+          statusReason: { type: 'string', nullable: true },
+          interruptData: { description: 'What an awaiting_input instance asks for; answered with the approve command' },
+          currentAttempt: { type: 'integer' },
           version: { type: 'integer' },
         },
-        required: ['id', 'workflowRunId', 'stageDefinitionId', 'status'],
+        required: ['id', 'workflowRunId', 'stageKey', 'instancePath', 'status'],
       },
       Automation: {
         type: 'object',
@@ -628,14 +739,45 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           enabled: { type: 'boolean' },
         },
       },
-      ResumeStageRequest: {
+      RunCommand: {
         type: 'object',
+        description:
+          'Discriminated by `command`. The full JSON Schema ships as `@generatorai/workflow-spec/run-command.schema.json`.',
         properties: {
-          approved: { type: 'boolean' },
-          value: {},
-          reason: { type: 'string' },
+          command: { type: 'string', enum: ['pause', 'resume', 'cancel', 'retry', 'skip', 'fail', 'approve'] },
+          instanceId: { type: 'string', description: 'The instance the command targets; omitted means the run' },
+          expectedVersion: { type: 'integer' },
+          mode: { type: 'string', enum: ['drain', 'interrupt', 'resume', 'restart'], description: 'pause: drain|interrupt; retry: resume|restart' },
+          as: { type: 'string', enum: ['completed', 'skipped'], description: 'skip only' },
+          outcome: { type: 'string', enum: ['approved', 'changes_requested', 'rejected'], description: 'approve only' },
+          feedback: { type: 'string', description: 'approve only' },
+          data: { type: 'object', additionalProperties: true, description: "approve only: a question's answers, a plan decision" },
         },
-        required: ['approved'],
+        required: ['command'],
+      },
+      InvocationRequest: {
+        type: 'object',
+        description:
+          'The one request that starts a run. The full JSON Schema ships as `@generatorai/workflow-spec/invocation.schema.json`; ' +
+          'fields are listed in docs/workflow-overhaul/generated/INVOCATION.md.',
+        properties: {
+          target: {
+            type: 'object',
+            description: "{kind: 'definition', workflowDefinitionId, version?, testRun?} | {kind: 'script', scriptId} | {kind: 'fork', sourceRunId, rerunFrom?, definition?, workspace?}",
+          },
+          variables: { type: 'object', additionalProperties: true, description: 'Engine-reserved names (__*, repo_path_*, repo_branch_*) are refused' },
+          projectId: { type: 'string' },
+          codebases: { type: 'array', items: { type: 'object' }, description: '[{alias, baseRef?, mode: worktree|in_place}]' },
+          stageOverrides: { type: 'array', items: { type: 'object' }, description: '[{stageKey, skip?, variables?, model?}]' },
+          overrides: { type: 'object', description: '{model?, harnessType?, reasoningEffort?, permissionMode?}' },
+          uploads: { type: 'array', items: { type: 'object' }, description: '[{uploadId, category}]' },
+          profile: { type: 'string' },
+          name: { type: 'string' },
+          budget: { type: 'object' },
+          idempotencyKey: { type: 'string' },
+          client: { type: 'string', enum: ['web', 'desktop', 'mobile', 'cli', 'tui', 'sdk', 'mcp', 'http'] },
+        },
+        required: ['target'],
       },
       Agent: {
         type: 'object',
@@ -861,6 +1003,14 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Chat' } } },
           },
         },
+      },
+    },
+    '/api/chats/{id}/workflow-runs': {
+      get: {
+        tags: ['Chats'],
+        summary: "The runs the chat started through its workflow tools, as run cards (status, stage n of m, pending decisions, link)",
+        parameters: [idParam],
+        responses: { '200': { description: '{runs: ChatWorkflowRunCard[]}' }, '404': { description: 'Chat not found' } },
       },
     },
     '/api/chats/{id}': {
@@ -1250,15 +1400,27 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     '/api/workflow-definitions': {
       get: {
         tags: ['Workflows'],
-        summary: 'List workflow definitions',
+        summary: 'List workflow definitions (summaries, newest first)',
+        parameters: [
+          { in: 'query', name: 'projectId', schema: { type: 'string' }, description: '`global` lists definitions without a project' },
+          { in: 'query', name: 'status', schema: { type: 'string', enum: ['draft', 'published'] } },
+          { in: 'query', name: 'q', schema: { type: 'string' }, description: 'Name contains' },
+          { in: 'query', name: 'cursor', schema: { type: 'string' } },
+          { in: 'query', name: 'limit', schema: { type: 'integer' } },
+          { in: 'query', name: 'includeArchived', schema: { type: 'boolean' } },
+        ],
         responses: {
           '200': {
-            description: 'Definitions',
+            description: 'A page of definitions',
             content: {
               'application/json': {
                 schema: {
-                  type: 'array',
-                  items: { $ref: '#/components/schemas/WorkflowDefinition' },
+                  type: 'object',
+                  properties: {
+                    items: { type: 'array', items: { $ref: '#/components/schemas/WorkflowDefinitionSummary' } },
+                    nextCursor: { type: 'string' },
+                  },
+                  required: ['items'],
                 },
               },
             },
@@ -1267,44 +1429,139 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
       post: {
         tags: ['Workflows'],
-        summary: 'Create workflow definition',
-        requestBody: { required: true, content: { 'application/json': { schema: { type: 'object' } } } },
+        summary: 'Create a draft definition from a graph',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowGraph' } } } },
         responses: {
-          '201': {
-            description: 'Created',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } },
+          '201': { description: 'Created (draft)', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '403': { description: 'INSUFFICIENT_SCOPE: a command-bearing field needs `admin:settings`', content: errorContent },
+          '422': { description: 'WORKFLOW_INVALID: `error.issues` lists every problem', content: errorContent },
+        },
+      },
+    },
+    '/api/workflow-definitions/validate': {
+      post: {
+        tags: ['Workflows'],
+        summary: "Validate a graph without saving it: the spec's rules plus the server's (agents exist and are enabled, models, provider capabilities, command fields)",
+        description: 'Needs read:workflows only. The result carries `schema: {version, hash}`; an agent compares the hash with its skill.',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowGraph' } } } },
+        responses: {
+          '200': {
+            description: 'The validation result, valid or not',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ValidationResult' } } },
+          },
+        },
+      },
+    },
+    '/api/workflow-definitions/plan': {
+      post: {
+        tags: ['Workflows'],
+        summary: 'What a run of a graph (unsaved) or a saved definition would do; nothing is written',
+        description:
+          'Body `{graph | workflowId, variables?, stageOverrides?, codebases?, projectId?}` (a missing required codebase is a warning here) → `{plan: InvocationPlan, guards, unresolved, warnings}`. Needs read:workflows only.',
+        responses: { '200': { description: 'AuthoringPlan' }, '400': { description: 'VALIDATION_ERROR' }, '422': { description: 'The graph is not valid' } },
+      },
+    },
+    '/api/workflow-definitions/schema': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'The workflow JSON Schema the server validates against: `{version, hash, jsonSchema}`',
+        responses: { '200': { description: 'The schema and its hash' } },
+      },
+    },
+    '/api/workflow-definitions/authoring/skill': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'The generated `generatorai-workflow-author` skill bundle: `{name, schemaHash, files[]}`',
+        responses: { '200': { description: 'The bundle file list' } },
+      },
+    },
+    '/api/workflow-definitions/authoring/skill/file': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'One file of the authoring skill bundle (`?path=reference/schema.md`)',
+        responses: { '200': { description: 'The file' }, '400': { description: 'Not a bundle path' } },
+      },
+    },
+    '/api/workflow-definitions/import': {
+      post: {
+        tags: ['Workflows'],
+        summary: 'Import a canonical document, or create a draft from a template',
+        parameters: [
+          {
+            in: 'query',
+            name: 'publish',
+            schema: { type: 'boolean' },
+            description: 'Publish at once (people only; integrations import drafts)',
+          },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                oneOf: [
+                  { $ref: '#/components/schemas/WorkflowGraph' },
+                  {
+                    type: 'object',
+                    properties: {
+                      templateId: { type: 'string' },
+                      name: { type: 'string' },
+                      projectId: { type: ['string', 'null'] },
+                    },
+                    required: ['templateId'],
+                  },
+                ],
+              },
             },
           },
+        },
+        responses: {
+          '201': { description: 'Imported', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '403': { description: 'PUBLISH_NOT_ALLOWED or INSUFFICIENT_SCOPE', content: errorContent },
+          '422': { description: 'WORKFLOW_INVALID', content: errorContent },
         },
       },
     },
     '/api/workflow-definitions/{id}': {
       get: {
         tags: ['Workflows'],
-        summary: 'Get definition (with stages + edges)',
+        summary: 'Get a definition with its working graph',
         parameters: [idParam],
         responses: {
-          '200': {
-            description: 'Definition',
-            content: {
-              'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } },
-            },
-          },
+          '200': { description: 'Definition', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '404': { description: 'Not found', content: errorContent },
         },
       },
       delete: {
         tags: ['Workflows'],
-        summary: 'Delete definition + all runs',
+        summary: 'Delete a definition, or archive it when runs pin its versions',
         parameters: [idParam],
-        responses: { '204': { description: 'Deleted' } },
+        responses: {
+          '200': {
+            description: '`{deleted: true}`, or `{archived: true, runs}` when the definition has runs',
+            content: {
+              'application/json': {
+                schema: {
+                  oneOf: [
+                    { type: 'object', properties: { deleted: { type: 'boolean', enum: [true] } }, required: ['deleted'] },
+                    {
+                      type: 'object',
+                      properties: { archived: { type: 'boolean', enum: [true] }, runs: { type: 'integer' } },
+                      required: ['archived', 'runs'],
+                    },
+                  ],
+                },
+              },
+            },
+          },
+        },
       },
     },
-
-    '/api/workflow-runs': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Start a workflow run',
+    '/api/workflow-definitions/{id}/graph': {
+      put: {
+        tags: ['Workflows'],
+        summary: 'Replace the working graph (optimistic concurrency on revision)',
+        parameters: [idParam],
         requestBody: {
           required: true,
           content: {
@@ -1312,25 +1569,205 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
               schema: {
                 type: 'object',
                 properties: {
-                  workflowDefinitionId: { type: 'string' },
-                  variables: { type: 'object', additionalProperties: true },
-                  permissionMode: {
-                    type: 'string',
-                    enum: ['bypassPermissions', 'default', 'acceptEdits', 'plan'],
-                    description: 'HITL default — defaults to bypassPermissions',
-                  },
+                  graph: { $ref: '#/components/schemas/WorkflowGraph' },
+                  expectedRevision: { type: 'integer' },
                 },
-                required: ['workflowDefinitionId'],
+                required: ['graph', 'expectedRevision'],
               },
             },
           },
         },
         responses: {
-          '201': {
-            description: 'Run created',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowRun' } } },
+          '200': { description: 'Saved; the revision is bumped', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '400': { description: 'The body is not `{graph, expectedRevision}`', content: errorContent },
+          '403': { description: 'INSUFFICIENT_SCOPE: adding or changing a command needs `admin:settings`', content: errorContent },
+          '409': { description: 'REVISION_CONFLICT: `error.current` is the record the save lost to', content: errorContent },
+          '422': { description: 'WORKFLOW_INVALID: `error.issues` lists every problem', content: errorContent },
+        },
+      },
+    },
+    '/api/workflow-definitions/{id}/publish': {
+      post: {
+        tags: ['Workflows'],
+        summary: 'Publish the working graph as the version new runs execute',
+        description:
+          'A person publishes (PD-14): a service account, an internal service or an MCP device gets 403 unless the operator set `GENERATORAI_ALLOW_AGENT_PUBLISH=true`.',
+        parameters: [idParam],
+        responses: {
+          '200': { description: 'Published', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinition' } } } },
+          '403': { description: 'INSUFFICIENT_SCOPE: only a person publishes', content: errorContent },
+          '422': { description: 'WORKFLOW_INVALID', content: errorContent },
+        },
+      },
+    },
+    '/api/workflow-definitions/{id}/versions': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'List the published and test versions',
+        parameters: [idParam],
+        responses: {
+          '200': {
+            description: 'Versions, without their graphs',
+            content: {
+              'application/json': {
+                schema: { type: 'array', items: { $ref: '#/components/schemas/WorkflowDefinitionVersion' } },
+              },
+            },
           },
         },
+      },
+    },
+    '/api/workflow-definitions/{id}/versions/{versionId}': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'Get one version with its graph',
+        parameters: [idParam, { in: 'path', name: 'versionId', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Version',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowDefinitionVersion' } } },
+          },
+          '404': { description: 'Not found', content: errorContent },
+        },
+      },
+    },
+    '/api/workflow-definitions/{id}/export': {
+      get: {
+        tags: ['Workflows'],
+        summary: 'The canonical document text: importing it gives back the same graph',
+        parameters: [idParam],
+        responses: {
+          '200': {
+            description: 'Canonical JSON',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowGraph' } } },
+          },
+        },
+      },
+    },
+
+    '/api/workflow-runs': {
+      get: {
+        tags: ['Runs'],
+        summary: 'Search runs, oldest first; every filter narrows',
+        parameters: [
+          { in: 'query', name: 'status', schema: { type: 'string' }, description: 'Comma list of run states' },
+          { in: 'query', name: 'definitionId', schema: { type: 'string' } },
+          { in: 'query', name: 'trigger', schema: { type: 'string' }, description: 'Comma list of trigger kinds (user, automation, fork, stage, …); a run without a trigger is user' },
+          { in: 'query', name: 'from', schema: { type: 'string' }, description: 'Created at or after (ISO date or epoch ms)' },
+          { in: 'query', name: 'to', schema: { type: 'string' }, description: 'Created at or before (ISO date or epoch ms)' },
+          { in: 'query', name: 'q', schema: { type: 'string' }, description: 'Part of the run name, or the start of its id' },
+          { in: 'query', name: 'var', schema: { type: 'array', items: { type: 'string' } }, style: 'form', explode: true, description: 'name=value (repeatable): a variable with that value' },
+          { in: 'query', name: 'limit', schema: { type: 'integer', minimum: 1, maximum: 1000 }, description: 'Only the newest N matches' },
+        ],
+        responses: {
+          '200': { description: 'Runs', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/WorkflowRun' } } } } },
+          '400': { description: 'VALIDATION_ERROR (an unknown status, a bad date, var or limit)' },
+        },
+      },
+    },
+    '/api/workflow-runs/stage-history': {
+      get: {
+        tags: ['Runs'],
+        summary: "One stage's newest executions across the definition's runs (every instance), newest first: `[{stageRun, run: {id, name, status, createdAt}}]`",
+        parameters: [
+          { in: 'query', name: 'definitionId', required: true, schema: { type: 'string' } },
+          { in: 'query', name: 'stageKey', required: true, schema: { type: 'string' } },
+          { in: 'query', name: 'limit', schema: { type: 'integer', minimum: 1, maximum: 200, default: 20 } },
+        ],
+        responses: { '200': { description: 'The executions' }, '400': { description: 'VALIDATION_ERROR' } },
+      },
+    },
+    '/api/settings/workflow-engine': {
+      get: {
+        tags: ['Runs'],
+        summary: 'The workflow engine settings (P07): flow key limits, the workflow summary model, the trigger debounce, their defaults and every flow key live',
+        description:
+          '`{settings: {flowLimits, summaryModel, triggerDebounceMs}, defaults: {flowLimits, triggerDebounceMs}, flows: [{flowKey, kind, running, queued, limit, configurable, detail?}]}`. ' +
+          'Flow keys: global, provider:<id>, model:<id>, check:global (configurable), worktree:<mountId> and run:<id> (live only). Needs read:workflows.',
+        responses: { '200': { description: 'The settings and the live flow keys' } },
+      },
+      put: {
+        tags: ['Runs'],
+        summary: 'Change the workflow engine settings (applied at once); `flowLimits` is the whole set — a key left out goes back to its default',
+        description: 'Body `{flowLimits?: {<key>: 1..256}, summaryModel?: string | null, triggerDebounceMs?: 0..600000}`. Needs admin:settings.',
+        responses: { '200': { description: 'The settings and the live flow keys' }, '400': { description: 'INVALID_BODY' }, '403': { description: 'FORBIDDEN_SCOPE' } },
+      },
+    },
+    '/api/workflow-invocations': {
+      post: {
+        tags: ['Runs'],
+        summary: 'Start a workflow run: THE one run-start route (a definition, a script or a fork)',
+        description:
+          'JSON `InvocationRequest` (full JSON Schema: `@generatorai/workflow-spec/invocation.schema.json`), or multipart with a `request` JSON field ' +
+          'plus `skills|agents|prompts` files. The trigger is derived from the caller. `Idempotency-Key` (or `idempotencyKey`) replays the same run for 24 h; ' +
+          'another body under the same key is a 409. Needs exec:agent + read:workflows; a script target also write:workflows; bypass off loopback or an ' +
+          'in-place codebase admin:settings.',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/InvocationRequest' } } } },
+        responses: {
+          '202': { description: 'InvocationResult: runId, trigger, plan, links' },
+          '400': { description: '{error: {code: VALIDATION_ERROR, message, issues[]}}' },
+          '403': { description: 'FORBIDDEN_SCOPE or PERMISSION_ESCALATION' },
+          '404': { description: 'NOT_FOUND' },
+          '409': { description: 'IDEMPOTENCY_KEY_REUSED, DRAFT_NOT_RUNNABLE or CONFLICT' },
+          '422': { description: 'CODEBASE_REQUIRED, DEPTH_LIMIT, RECURSION, BUDGET_EXHAUSTED or PERMISSION_GATING_UNSUPPORTED' },
+          '503': { description: 'ENGINE_UNAVAILABLE' },
+        },
+      },
+    },
+    '/api/workflow-tools': {
+      get: {
+        tags: ['Workflows'],
+        summary: "The workflow tools of an external agent (the MCP server): `{tools: [{name, description, parametersSchema, readOnly}]}`",
+        responses: { '200': { description: 'The tool list' } },
+      },
+    },
+    '/api/workflow-tools/{name}': {
+      post: {
+        tags: ['Workflows'],
+        summary: 'Call one workflow tool as an external agent: `{arguments, idempotencyKey?, clientName?}` → `{result}`',
+        description:
+          'The same handlers as the in-app tools. Refusals come back as `result: {ok: false, code, error}`. Running, answering and cancelling need exec:agent; a draft write:workflows.',
+        parameters: [{ in: 'path', name: 'name', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: '{result}' }, '404': { description: 'No such tool' } },
+      },
+    },
+    '/api/workflow-invocations/plan': {
+      post: {
+        tags: ['Runs'],
+        summary: 'What an invocation would do (stages by layer, skips, codebases, phases, post-processing, permission mode); nothing is written',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/InvocationRequest' } } } },
+        responses: { '200': { description: 'InvocationPlan' }, '400': { description: 'VALIDATION_ERROR' } },
+      },
+    },
+    '/api/workflow-invocations/uploads': {
+      post: {
+        tags: ['Runs'],
+        summary: 'Stage skills, agents or prompts for a run that has not started (multipart; TTL 1 h)',
+        responses: { '201': { description: '{uploads: [{uploadId, category, name}]}' }, '400': { description: 'VALIDATION_ERROR' } },
+      },
+    },
+    '/api/workflow-invocations/{runId}/digest': {
+      get: {
+        tags: ['Runs'],
+        summary: "The run's digest; `wait=N` (≤ 60 s) long-polls for `finalized` (or an approval with `stopOnApproval=true`)",
+        parameters: [runIdParam],
+        responses: { '200': { description: 'RunDigest' }, '404': { description: 'NOT_FOUND' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/workspace': {
+      get: {
+        tags: ['Runs'],
+        summary: "The run's workspace: root, artifacts, uploads and every mount with its files",
+        parameters: [runIdParam],
+        responses: { '200': { description: 'RunWorkspaceInfo' }, '404': { description: 'No workspace yet' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/workspace/diff': {
+      get: {
+        tags: ['Runs'],
+        summary: "Each mount's change set",
+        parameters: [runIdParam],
+        responses: { '200': { description: '{hasGit, repos: [{alias, files}]}' } },
       },
     },
     '/api/workflow-runs/{runId}': {
@@ -1343,28 +1780,123 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
       },
     },
-    '/api/workflow-runs/{runId}/pause': {
+    '/api/workflow-runs/{runId}/commands': {
       post: {
-        tags: ['Runs'],
-        summary: 'Pause a running workflow',
+        tags: ['Runs', 'HITL'],
+        summary: 'An operator command on the run or one of its instances',
+        description:
+          'pause {mode: drain|interrupt}, resume, cancel, retry {mode: resume|restart}, skip {as}, fail, approve {outcome, feedback?, data?}, ' +
+          'the loop decisions grant_iterations {n}, raise_budget, continue_with_input {text}, accept, accept_iteration {k}, and deliver_event ' +
+          '{eventKey, idempotencyKey, data?} (P05). `instanceId` targets one instance; `expectedVersion` makes the command conditional. ' +
+          '`approve` also resolves an approval wait (its form is validated) and a decision of a sub-workflow child sent to the parent run. ' +
+          'The decisions (approve, the loop decisions, deliver_event) need exec:agent; every other command also needs write:workflows.',
         parameters: [runIdParam],
-        responses: { '200': { description: 'Paused' } },
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/RunCommand' } } },
+        },
+        responses: {
+          '200': { description: 'deliver_event: the same key and data were delivered before (`replayed: true`)' },
+          '202': { description: 'Accepted by the engine' },
+          '400': { description: 'Invalid command, or approval data that does not match the form schema of the wait' },
+          '403': { description: 'A run-control command without write:workflows' },
+          '404': { description: 'Unknown run or instance' },
+          '409': { description: 'invalid_state, version_conflict or conflict' },
+          '503': { description: 'No workflow engine in this process' },
+        },
       },
     },
-    '/api/workflow-runs/{runId}/resume': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Resume a paused workflow',
+    '/api/workflow-runs/{runId}/pending-decisions': {
+      get: {
+        tags: ['Runs', 'HITL'],
+        summary: 'Every decision the run waits on, with those of its sub-workflow children (P05)',
+        description:
+          'Completion reviews, in-turn gates, parked loops, approval and event waits: `{runId (the owning run), instanceId, stageKey, instancePath, name, kind, waitType?, ' +
+          'interruptData, version, callback?, via: [{runId, instanceId, stageKey, name}]}`. Answer any of them with the commands route of this run.',
         parameters: [runIdParam],
-        responses: { '200': { description: 'Running' } },
+        responses: { '200': { description: 'Pending decisions' }, '404': { description: 'Unknown run' } },
       },
     },
-    '/api/workflow-runs/{runId}/cancel': {
+    '/api/workflow-callbacks/{token}': {
       post: {
         tags: ['Runs'],
-        summary: 'Cancel a workflow',
-        parameters: [runIdParam],
-        responses: { '200': { description: 'Cancelled' } },
+        summary: "Deliver an event wait's event with its callback token (public; P05 §4.3)",
+        description:
+          'The token (from the waiting wait: `callback.url`) authenticates the delivery: an HMAC over the run, the wait instance and its event key. ' +
+          'Body `{data?, idempotencyKey?}` or the `Idempotency-Key` header; without a key the data is the key. Rate-limited per token and address.',
+        parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: { type: 'object', properties: { data: {}, idempotencyKey: { type: 'string' } } } } },
+        },
+        responses: {
+          '200': { description: 'Replayed (the same key and data were delivered before)' },
+          '202': { description: 'Delivered' },
+          '404': { description: 'Unknown or invalid token' },
+          '409': { description: 'The wait is not waiting any more, or the same key with other data' },
+          '429': { description: 'Rate limited' },
+        },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/messages': {
+      post: {
+        tags: ['Runs', 'HITL'],
+        summary: 'Send an operator message to a stage (a stage is a compact chat)',
+        description:
+          'multipart (`prompt`, `attachments[]`, `mode`) or JSON. Between turns the message is queued as the next turn; a completed stage is AMENDED ' +
+          '(its output replaced, successors not re-run); a paused stage is retried with the message as its next turn.',
+        parameters: [runIdParam, instanceIdParam],
+        responses: {
+          '202': { description: '`outcome`: queued, amending or retrying' },
+          '400': { description: 'Empty or invalid message' },
+          '404': { description: 'Unknown run or instance' },
+          '409': { description: 'STAGE_BUSY (mid-turn), INTERACTION_PENDING (an open gate), STAGE_NOT_STARTED or STAGE_NOT_CONVERSABLE' },
+          '503': { description: 'No workflow engine in this process' },
+        },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/turn/cancel': {
+      post: {
+        tags: ['Runs'],
+        summary: "Stop the stage's turn in flight without failing the stage",
+        parameters: [runIdParam, instanceIdParam],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: { type: 'object', properties: { force: { type: 'boolean' } } } } },
+        },
+        responses: { '200': { description: 'Stopped' }, '409': { description: 'NO_ACTIVE_TURN' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/permission': {
+      post: {
+        tags: ['Runs', 'HITL'],
+        summary: "Answer a stage's tool-permission gate ({behavior: allow|deny, message?})",
+        parameters: [runIdParam, instanceIdParam, interactionIdParam],
+        responses: { '202': { description: 'Answered' }, '409': { description: 'INTERACTION_STALE' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/answer': {
+      post: {
+        tags: ['Runs', 'HITL'],
+        summary: "Answer a stage's question gate ({answers, freeformResponse?})",
+        parameters: [runIdParam, instanceIdParam, interactionIdParam],
+        responses: { '202': { description: 'Answered' }, '409': { description: 'INTERACTION_STALE' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/plan': {
+      post: {
+        tags: ['Runs', 'HITL'],
+        summary: "Decide a stage's plan review ({approved, action?, feedback?})",
+        parameters: [runIdParam, instanceIdParam, interactionIdParam],
+        responses: { '202': { description: 'Decided' }, '409': { description: 'INTERACTION_STALE' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/attachments/{artifactId}': {
+      get: {
+        tags: ['Runs'],
+        summary: 'A file attached to a stage message',
+        parameters: [runIdParam, instanceIdParam, { name: 'artifactId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'The file' }, '404': { description: 'Not an attachment of this stage' } },
       },
     },
     '/api/workflow-runs/{runId}/permission-mode': {
@@ -1408,101 +1940,6 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           },
         },
         responses: { '200': { description: 'Mode updated' } },
-      },
-    },
-    '/api/workflow-runs/{runId}/pending-interrupts': {
-      get: {
-        tags: ['Runs', 'HITL'],
-        summary: 'List stages awaiting human approval',
-        parameters: [runIdParam],
-        responses: {
-          '200': {
-            description: 'Pending stages',
-            content: {
-              'application/json': {
-                schema: { type: 'array', items: { $ref: '#/components/schemas/StageRun' } },
-              },
-            },
-          },
-        },
-      },
-    },
-    '/api/workflow-runs/{runId}/stages/{stageId}/resume': {
-      post: {
-        tags: ['Runs', 'HITL'],
-        summary: 'Approve or reject an awaiting_input stage',
-        parameters: [
-          runIdParam,
-          { in: 'path', name: 'stageId', required: true, schema: { type: 'string' } },
-        ],
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: { $ref: '#/components/schemas/ResumeStageRequest' },
-            },
-          },
-        },
-        responses: {
-          '200': {
-            description: 'Resumed',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: { ok: { type: 'boolean' } },
-                },
-              },
-            },
-          },
-          '409': {
-            description: 'Stage no longer awaiting_input (race)',
-            content: {
-              'application/json': {
-                schema: {
-                  type: 'object',
-                  properties: {
-                    ok: { type: 'boolean' },
-                    reason: { type: 'string' },
-                  },
-                },
-              },
-            },
-          },
-        },
-      },
-    },
-    '/api/workflow-runs/{runId}/stages/{stageId}/pause': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Pause a specific stage run',
-        parameters: [
-          runIdParam,
-          { in: 'path', name: 'stageId', required: true, schema: { type: 'string' } },
-        ],
-        responses: { '200': { description: 'Paused' } },
-      },
-    },
-    '/api/workflow-runs/{runId}/stages/{stageId}/retry': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Retry a failed stage',
-        parameters: [
-          runIdParam,
-          { in: 'path', name: 'stageId', required: true, schema: { type: 'string' } },
-        ],
-        responses: { '200': { description: 'Queued for retry' } },
-      },
-    },
-    '/api/workflow-runs/{runId}/stages/{stageId}/cancel': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Cancel a stage',
-        parameters: [
-          runIdParam,
-          { in: 'path', name: 'stageId', required: true, schema: { type: 'string' } },
-        ],
-        responses: { '200': { description: 'Cancelled' } },
       },
     },
 
@@ -2128,14 +2565,6 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         tags: ['Copilot'],
         summary: 'List available Copilot models (honours harness.type config)',
         responses: { '200': { description: 'Models' } },
-      },
-    },
-
-    '/api/webhooks/github': {
-      post: {
-        tags: ['Webhooks'],
-        summary: 'GitHub webhook endpoint (HMAC-verified)',
-        responses: { '200': { description: 'Accepted' }, '401': { description: 'Signature mismatch' } },
       },
     },
   },

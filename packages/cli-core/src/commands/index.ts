@@ -16,7 +16,6 @@ import {
   computerCommands,
   extensionCommands,
   GROUPS as PLATFORM_GROUPS,
-  orchestratorCommands,
   platformCommands,
   reviewCommands,
   scriptCommands,
@@ -25,6 +24,7 @@ import {
 } from './platform.js';
 import { projectCommands, PROJECT_GROUP } from './project.js';
 import { runCommands, RUN_GROUP } from './run.js';
+import { skillCommands, SKILL_GROUP } from './skill.js';
 import { systemCommands, SYSTEM_GROUP } from './system.js';
 import { terminalCommands, TERMINAL_GROUP, workspaceCommands, WORKSPACE_GROUP } from './workspace.js';
 import { workflowCommands, WORKFLOW_GROUP } from './workflow.js';
@@ -42,6 +42,7 @@ export function buildRegistry(options: BuildRegistryOptions = {}): CommandRegist
     DEVICE_GROUP,
     CHAT_GROUP,
     WORKFLOW_GROUP,
+    SKILL_GROUP,
     RUN_GROUP,
     AUTOMATION_GROUP,
     PROJECT_GROUP,
@@ -60,6 +61,7 @@ export function buildRegistry(options: BuildRegistryOptions = {}): CommandRegist
     ...chatCommands(),
     ...agentCommands(),
     ...workflowCommands(),
+    ...skillCommands(),
     ...runCommands(),
     ...automationCommands(),
     ...projectCommands(),
@@ -72,7 +74,6 @@ export function buildRegistry(options: BuildRegistryOptions = {}): CommandRegist
     ...reviewCommands(),
     ...scriptCommands(),
     ...templateCommands(),
-    ...orchestratorCommands(),
     ...platformCommands(),
     ...systemCommands(options.version),
     ...configCommands(),

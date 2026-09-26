@@ -1,9 +1,11 @@
 // ────────────────────────────────────────────────────────────────
 // WorkflowDefinitionPage — Read-only view of a saved definition
-// Shows DAG visualisation, metadata, run history, action buttons
+// Shows DAG visualisation, metadata, run history, action buttons.
+// A draft runs only as a test run; a published definition runs its
+// current published version.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
@@ -15,23 +17,22 @@ import {
   Clock,
   Tag,
   AlertCircle,
-  Globe,
   MoreHorizontal,
   ChevronDown,
+  Download,
+  Upload,
 } from 'lucide-react';
 
 import { DAGCanvas } from '@/components/workflow/DAGCanvas.js';
-import { VariableInputModal } from '@/components/workflow/VariableInputModal.js';
-import type { UploadedFileSet, LinkedCodebaseInfo, StageOverrideEntry } from '@/components/workflow/VariableInputModal.js';
+import { RunDialog } from '@/components/workflow/RunDialog.js';
+import { DefinitionStatusBadge } from '@/components/workflow/WorkflowCard.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import {
   useWorkflowDefinition,
   useDeleteWorkflowDefinition,
-  useWorkflowRunsByDefinition,
-  useCreateWorkflowRun,
-  useStartWorkflowRun,
-  useStartOrchestratedRun,
+  useWorkflowRuns,
+  usePublishDefinition,
 } from '@/hooks/workflowQueries.js';
 import { cn } from '@/lib/utils.js';
 import {
@@ -44,9 +45,18 @@ import {
   PopoverContent,
 } from '@/components/ui/index.js';
 import { EntityListRow } from '@/components/data/index.js';
-import { useProjectCodebases } from '@/hooks/projectQueries.js';
-import type { WorkflowRun, CreateWorkflowRunParams } from '@generatorai/shared';
-import { encodeStageOverrides } from '@generatorai/client-core';
+import {
+  EMPTY_RUN_FILTERS,
+  RunFilterBar,
+  activeFilterCount,
+  toRunListFilter,
+  type RunFilters,
+} from '@/components/workflow/runs/RunFilterBar.js';
+import type { WorkflowRun } from '@generatorai/shared';
+import type { InvocationRequest, InvocationResult } from '@generatorai/workflow-spec';
+import { usePlatform } from '@/providers/PlatformProvider.js';
+import { downloadBlobAsFile } from '@/utils/downloadBlobAsFile.js';
+import { exportFileName } from '@/utils/workflowExport.js';
 import { usePageTitle } from '@/hooks/usePageTitle.js';
 import { runTitle } from '@generatorai/client-core';
 
@@ -57,43 +67,41 @@ export function WorkflowDefinitionPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
+  const platform = usePlatform();
   const { data: definition, isLoading, error } = useWorkflowDefinition(id);
+  const workflow = definition?.graph.workflow;
 
-  usePageTitle(definition?.name);
-  const { data: runs } = useWorkflowRunsByDefinition(id);
+  usePageTitle(workflow?.name);
+  // The run list is a server search: typing settles for a moment before it is sent.
+  const [runFilters, setRunFilters] = useState<RunFilters>(EMPTY_RUN_FILTERS);
+  const [searchedFilters, setSearchedFilters] = useState<RunFilters>(EMPTY_RUN_FILTERS);
+  useEffect(() => {
+    const t = setTimeout(() => setSearchedFilters(runFilters), 300);
+    return () => clearTimeout(t);
+  }, [runFilters]);
+  const runSearch = useMemo(() => toRunListFilter(searchedFilters, { definitionId: id }), [searchedFilters, id]);
+  const filtering = !!searchedFilters.q.trim() || activeFilterCount(searchedFilters) > 0;
+  const { data: runs, isFetching: runsFetching } = useWorkflowRuns(runSearch, { enabled: !!id });
   const deleteDefinition = useDeleteWorkflowDefinition();
-  const createRun = useCreateWorkflowRun();
-  const startRun = useStartWorkflowRun();
-  const startOrchestratedRun = useStartOrchestratedRun();
+  const publishDefinition = usePublishDefinition();
 
-  // Only `loadDefinition` is used on this read-only page — a single,
+  // Only `loadRecord` is used on this read-only page — a single,
   // referentially-stable action selector rather than subscribing to the
-  // whole (~700-line) builder store, which used to re-render this page on
-  // every field the *editor* touches (nodes/edges drag, keystrokes, etc.)
-  // even though this page never reads any of that state itself.
-  const loadDefinition = useWorkflowBuilderStore((s) => s.loadDefinition);
+  // whole builder store, which would re-render this page on every field the
+  // *editor* touches even though this page never reads any of that state.
+  const loadRecord = useWorkflowBuilderStore((s) => s.loadRecord);
 
-  const [variableModalOpen, setVariableModalOpen] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
+  const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [visibleRunCount, setVisibleRunCount] = useState(RUNS_PAGE_SIZE);
+  const [actionError, setActionError] = useState<string | null>(null);
 
-  const isOrchestrated = !!definition?.orchestratorConfig;
+  const isDraft = definition?.status !== 'published';
 
-  // ── Project codebases for auto-filling git variables in run dialog ──
-  const { data: projectCodebases } = useProjectCodebases(definition?.projectId ?? undefined);
-
-  const linkedCodebases = React.useMemo((): LinkedCodebaseInfo[] | undefined => {
-    if (!definition?.projectId || !definition?.orchestratorConfig?.gitRepositories?.length || !projectCodebases) return undefined;
-    const selectedAliases = definition.orchestratorConfig.gitRepositories.map(r => r.alias);
-    return selectedAliases
-      .map((alias) => {
-        const cb = projectCodebases.find((c) => c.alias === alias);
-        if (!cb) return null;
-        return { alias: cb.alias, url: cb.url ?? cb.localPath ?? '', branch: cb.defaultBranch ?? 'main' };
-      })
-      .filter((x): x is LinkedCodebaseInfo => x !== null);
-  }, [definition?.projectId, definition?.orchestratorConfig?.gitRepositories, projectCodebases]);
+  const stages = React.useMemo(
+    () => (definition?.graph.stages ?? []).map((s) => ({ key: s.key, name: s.name })),
+    [definition?.graph.stages],
+  );
 
   /**
    * Newest run first. The API returns rows ordered by `createdAt` ASC, so
@@ -111,74 +119,49 @@ export function WorkflowDefinitionPage() {
   // Load definition into store for the read-only DAG view
   React.useEffect(() => {
     if (definition) {
-      loadDefinition(definition);
+      loadRecord(definition);
     }
-  }, [definition, loadDefinition]);
+  }, [definition, loadRecord]);
 
-  const executeRun = useCallback(
-    async (variables: Record<string, unknown>, uploads?: UploadedFileSet, stageOverrides?: StageOverrideEntry[]) => {
-      if (!id) return;
-      setIsRunning(true);
-
-      try {
-        // Uploads need the prepared-launch path even for a plain definition:
-        // it creates the final workspace before storing/discovering content.
-        // The legacy create/upload/start sequence writes to a fallback folder
-        // that is abandoned when startRun provisions the workspace.
-        if (isOrchestrated || Object.values(uploads ?? {}).some((files) => files.length > 0)) {
-          const orchParams: Parameters<typeof startOrchestratedRun.mutateAsync>[0] = {
-            workflowDefinitionId: id,
-            variables,
-            uploads,
-          };
-
-          if (definition?.projectId) {
-            orchParams['projectId'] = definition.projectId;
-            // Use selectedCodebases from orchestratorConfig.codebaseAliases if available,
-            // fallback to gitRepositories aliases for backward compat with existing definitions
-            orchParams['selectedCodebases'] =
-              definition.orchestratorConfig?.codebaseAliases?.length
-                ? definition.orchestratorConfig.codebaseAliases
-                : definition.orchestratorConfig?.gitRepositories?.map(r => r.alias) ?? [];
-          }
-
-          // Pass stage overrides if any are active (shared encoding: a
-          // top-level array on the orchestrated route).
-          const encoded = encodeStageOverrides(variables, stageOverrides, { orchestrated: true });
-          if (encoded.stageOverrides) orchParams['stageOverrides'] = encoded.stageOverrides;
-
-          const context = await startOrchestratedRun.mutateAsync(orchParams);
-
-          setVariableModalOpen(false);
-          navigate(`/workflows/${id}/runs/${context.workflowRunId}`);
-        } else {
-          // Stage overrides used to be forwarded only on the orchestrated
-          // path, so a plain definition rendered the "SKIP" toggles and then
-          // ignored every one of them. `WorkflowRunService.findStageOverride`
-          // reads them from the run's own `__stageOverrides` variable, which
-          // is also how the script-run route passes them through.
-          const params: CreateWorkflowRunParams = {
-            workflowDefinitionId: id,
-            variables: encodeStageOverrides(variables, stageOverrides, { orchestrated: false }).variables,
-          };
-          const run = await createRun.mutateAsync(params);
-
-          await startRun.mutateAsync(run.id);
-          setVariableModalOpen(false);
-          navigate(`/workflows/${id}/runs/${run.id}`);
-        }
-      } catch (err) {
-        console.error('Run failed:', err);
-      } finally {
-        setIsRunning(false);
-      }
-    },
-    [id, isOrchestrated, createRun, startRun, startOrchestratedRun, navigate],
+  // A draft has no published version: it runs its working graph as a test run.
+  const runTarget = React.useMemo(
+    (): InvocationRequest['target'] | undefined =>
+      id ? { kind: 'definition', workflowDefinitionId: id, ...(isDraft ? { testRun: true } : {}) } : undefined,
+    [id, isDraft],
   );
+
+  const handleRunStarted = useCallback(
+    (result: InvocationResult) => {
+      setRunDialogOpen(false);
+      navigate(`/workflows/${result.workflowDefinitionId}/runs/${result.runId}`);
+    },
+    [navigate],
+  );
+
+  const handlePublish = useCallback(async () => {
+    if (!id) return;
+    setActionError(null);
+    try {
+      await publishDefinition.mutateAsync(id);
+    } catch (err) {
+      setActionError(err instanceof Error ? `Publish failed: ${err.message}` : 'Publish failed');
+    }
+  }, [id, publishDefinition]);
+
+  const handleExport = useCallback(async () => {
+    if (!id || !workflow) return;
+    setActionError(null);
+    try {
+      const text = await platform.exportDefinition(id);
+      await downloadBlobAsFile(new Blob([text], { type: 'application/json' }), exportFileName(workflow.name));
+    } catch (err) {
+      setActionError(err instanceof Error ? `Export failed: ${err.message}` : 'Export failed');
+    }
+  }, [id, workflow, platform]);
 
   const handleRun = useCallback(() => {
     if (!definition) return;
-    setVariableModalOpen(true);
+    setRunDialogOpen(true);
   }, [definition]);
 
   const handleDelete = useCallback(async () => {
@@ -186,11 +169,18 @@ export function WorkflowDefinitionPage() {
     setDeleteDialogOpen(true);
   }, [id]);
 
+  // A definition with runs is archived rather than deleted (D-6); either way
+  // it leaves the list.
   const confirmDelete = useCallback(async () => {
     if (!id) return;
-    await deleteDefinition.mutateAsync(id);
-    setDeleteDialogOpen(false);
-    navigate('/workflows');
+    try {
+      await deleteDefinition.mutateAsync(id);
+      setDeleteDialogOpen(false);
+      navigate('/workflows');
+    } catch (err) {
+      setDeleteDialogOpen(false);
+      setActionError(err instanceof Error ? `Delete failed: ${err.message}` : 'Delete failed');
+    }
   }, [id, deleteDefinition, navigate]);
 
   if (isLoading) {
@@ -201,7 +191,7 @@ export function WorkflowDefinitionPage() {
     );
   }
 
-  if (error || !definition) {
+  if (error || !definition || !workflow) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
         <AlertCircle className="h-10 w-10 text-danger" />
@@ -228,7 +218,7 @@ export function WorkflowDefinitionPage() {
         open={deleteDialogOpen}
         onOpenChange={setDeleteDialogOpen}
         title="Delete Workflow Definition"
-        description="Delete this workflow definition? This cannot be undone."
+        description="Delete this workflow definition? A workflow that has runs is archived instead, so its run history stays readable."
         confirmLabel="Delete"
         variant="destructive"
         onConfirm={confirmDelete}
@@ -242,42 +232,45 @@ export function WorkflowDefinitionPage() {
           <div className="min-w-0 flex-1">
             <div className="flex min-w-0 items-center gap-2">
               <h1 className="truncate text-base font-semibold text-foreground sm:text-lg">
-                {definition.name}
+                {workflow.name}
               </h1>
-              {isOrchestrated && (
-                <Badge tone="warning" size="sm" className="shrink-0">
-                  <Globe className="h-3 w-3" />
-                  Orchestrated
+              <DefinitionStatusBadge status={definition.status} />
+              {definition.hasUnpublishedChanges && definition.status === 'published' && (
+                <Badge tone="neutral" size="sm" className="shrink-0" title="Runs use the published version">
+                  Unpublished changes
                 </Badge>
               )}
             </div>
 
-            {definition.description && (
+            {workflow.description && (
               <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">
-                {definition.description}
+                {workflow.description}
               </p>
+            )}
+            {actionError && (
+              <p role="alert" className="mt-1 text-xs text-danger">{actionError}</p>
             )}
 
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
               <MetaChip
                 icon={<GitBranch className="h-3 w-3" />}
-                label={`${definition.stages?.length ?? 0} ${(definition.stages?.length ?? 0) === 1 ? 'stage' : 'stages'}`}
+                label={`${definition.graph.stages.length} ${definition.graph.stages.length === 1 ? 'stage' : 'stages'}`}
               />
               <MetaChip
                 icon={<Clock className="h-3 w-3" />}
-                label={`${definition.sessionMode} mode`}
-                title="Session mode"
+                label={`Revision ${definition.revision}`}
+                title={`Updated ${new Date(definition.updatedAt).toLocaleString()}`}
               />
               <MetaChip
                 icon={<Calendar className="h-3 w-3" />}
                 label={new Date(definition.createdAt).toLocaleDateString()}
                 title={`Created ${new Date(definition.createdAt).toLocaleString()}`}
               />
-              {definition.tags.length > 0 && (
+              {workflow.tags.length > 0 && (
                 <MetaChip
                   icon={<Tag className="h-3 w-3" />}
-                  label={definition.tags.join(', ')}
-                  title={`Tags: ${definition.tags.join(', ')}`}
+                  label={workflow.tags.join(', ')}
+                  title={`Tags: ${workflow.tags.join(', ')}`}
                   className="max-w-[14rem]"
                 />
               )}
@@ -291,16 +284,26 @@ export function WorkflowDefinitionPage() {
               variant="primary"
               size="sm"
               onClick={handleRun}
-              disabled={isRunning}
-              loading={isRunning}
-              leftIcon={isRunning ? undefined : <Play className="h-3.5 w-3.5" />}
-              title="Run workflow"
+              leftIcon={<Play className="h-3.5 w-3.5" />}
+              title={isDraft ? 'A draft runs only as a test run' : 'Run the published version'}
             >
-              <span className="hidden sm:inline">Run</span>
+              <span className="hidden sm:inline">{isDraft ? 'Test run' : 'Run'}</span>
             </Button>
 
             {/* Wide: inline secondary actions */}
             <div className="hidden items-center gap-1.5 lg:flex">
+              {(isDraft || definition.hasUnpublishedChanges) && (
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  onClick={() => void handlePublish()}
+                  loading={publishDefinition.isPending}
+                  leftIcon={<Upload className="h-3.5 w-3.5" />}
+                  title="Publish: runs use the published version"
+                >
+                  Publish
+                </Button>
+              )}
               <Button
                 variant="secondary"
                 size="sm"
@@ -308,6 +311,15 @@ export function WorkflowDefinitionPage() {
                 leftIcon={<Edit3 className="h-3.5 w-3.5" />}
               >
                 Edit
+              </Button>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                onClick={() => void handleExport()}
+                title="Export as JSON"
+                aria-label="Export workflow"
+              >
+                <Download className="h-3.5 w-3.5" />
               </Button>
               <Button
                 variant="ghost"
@@ -335,6 +347,18 @@ export function WorkflowDefinitionPage() {
                     label="Edit workflow"
                     onClick={() => navigate(`/workflows/${id}/edit`)}
                   />
+                  {(isDraft || definition.hasUnpublishedChanges) && (
+                    <MenuItem
+                      icon={<Upload className="h-3.5 w-3.5" />}
+                      label="Publish"
+                      onClick={() => void handlePublish()}
+                    />
+                  )}
+                  <MenuItem
+                    icon={<Download className="h-3.5 w-3.5" />}
+                    label="Export JSON"
+                    onClick={() => void handleExport()}
+                  />
                   <MenuItem
                     icon={<Trash2 className="h-3.5 w-3.5" />}
                     label="Delete workflow"
@@ -359,22 +383,38 @@ export function WorkflowDefinitionPage() {
 
         {/* Runs sidebar */}
         <div className="flex w-80 shrink-0 flex-col overflow-y-auto bg-card xl:w-96">
-          <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold text-foreground">Recent Runs</h2>
-            {sortedRuns.length > 0 && (
-              <Badge tone="neutral" size="sm">
-                {sortedRuns.length}
-              </Badge>
-            )}
+          <div className="space-y-2 border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-foreground">{filtering ? 'Matching Runs' : 'Recent Runs'}</h2>
+              {sortedRuns.length > 0 && (
+                <Badge tone="neutral" size="sm">
+                  {sortedRuns.length}
+                </Badge>
+              )}
+              {runsFetching && <Spinner size="sm" className="text-muted-foreground" />}
+            </div>
+            <RunFilterBar
+              value={runFilters}
+              onChange={(next) => {
+                setRunFilters(next);
+                setVisibleRunCount(RUNS_PAGE_SIZE);
+              }}
+            />
           </div>
 
           {sortedRuns.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Play className="mb-2 h-8 w-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No runs yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Run this workflow to see execution history
-              </p>
+              {filtering ? (
+                <p className="text-sm text-muted-foreground">No runs match these filters</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">No runs yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Run this workflow to see execution history
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-2 p-3">
@@ -407,34 +447,34 @@ export function WorkflowDefinitionPage() {
         </div>
       </div>
 
-      {/* Variable Input Modal */}
-      <VariableInputModal
-        open={variableModalOpen}
-        onClose={() => setVariableModalOpen(false)}
-        onSubmit={executeRun}
-        variables={definition.variables ?? []}
-        workflowName={definition.name}
-        isSubmitting={isRunning}
-        linkedCodebases={linkedCodebases}
-        stageNames={definition.stages?.map((s: { name: string }) => s.name) ?? []}
+      <RunDialog
+        open={runDialogOpen}
+        onClose={() => setRunDialogOpen(false)}
+        variables={workflow.variables}
+        workflowName={workflow.name}
+        stages={stages}
+        projectId={workflow.projectId}
+        lifecycle={workflow.lifecycle}
+        target={runTarget}
+        submitLabel={isDraft ? 'Test run' : 'Start Run'}
+        onStarted={handleRunStarted}
       />
     </div>
   );
 }
 
 function RunRow({ run }: { run: WorkflowRun }) {
-  const navigate = useNavigate();
+  const when = run.startedAt
+    ? `Started ${new Date(run.startedAt).toLocaleString()}`
+    : `Created ${new Date(run.createdAt).toLocaleString()}`;
+  const trigger = run.trigger?.kind && run.trigger.kind !== 'user' ? ` · ${run.trigger.kind}` : '';
   return (
     <EntityListRow
       size="sm"
       href={`/workflows/${run.workflowDefinitionId}/runs/${run.id}`}
       leading={<StatusBadge status={run.status} size="sm" />}
       title={<span className="truncate">{runTitle(run.name)}</span>}
-      description={
-        run.startedAt
-          ? `Started ${new Date(run.startedAt).toLocaleString()}`
-          : `Created ${new Date(run.createdAt).toLocaleString()}`
-      }
+      description={`${when}${trigger}`}
     />
   );
 }

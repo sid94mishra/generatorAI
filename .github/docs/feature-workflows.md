@@ -1,432 +1,258 @@
 # Feature: Workflow Definitions
 
-> A **WorkflowDefinition** is a reusable, design-time DAG of **StageDefinition**s connected by **StageEdge**s. This file covers everything about *defining* workflows. For *executing* them see [feature-workflow-runs.md](./feature-workflow-runs.md). For per-stage configuration depth, see [feature-stages.md](./feature-stages.md).
+A workflow definition is **one document**: a v2 `WorkflowGraph` from
+[`@generatorai/workflow-spec`](../../packages/workflow-spec/). The builder, the CLI, the SDK,
+templates, scripts and import all produce the same document, and the server validates it with
+the same validator before anything is stored. Every field, with its type and default, is in the
+generated [FIELDS.md](../../docs/workflow-overhaul/generated/FIELDS.md); the JSON Schema is
+`@generatorai/workflow-spec/workflow.schema.json`.
+
+Stage configuration is covered in [feature-stages.md](./feature-stages.md). The control-flow
+kinds — `check`, `loop`, `map`, `subworkflow`, `wait` — their semantics, the operator commands
+and the generated templates are in [feature-workflow-control-flow.md](./feature-workflow-control-flow.md).
+Agents author workflows (validate → plan → draft → a person publishes) and run them through the
+workflow tools: [feature-workflows-from-agents.md](./feature-workflows-from-agents.md).
 
 ---
 
-## 1. Entity & DB shape
+## 1. The document
 
-`workflow_definitions` table:
-
-```
-id                   text PK
-name                 text                     (unique not enforced)
-description?         text
-version              int (default 1)
-sessionMode          enum 'single' | 'per-stage' | 'auto'
-harnessConfig        JSON HarnessConfig       (template defaults — model, reasoningEffort, mcpServers, …)
-variables            JSON VariableDefinition[]
-hooks                JSON HookDefinition[]    (workflow-scope phases)
-hooksFile?           JSON                     (separate .hooks.json reference)
-orchestratorConfig?  JSON                     (system templates + preprocessing config)
-selectedArtifacts?   JSON                     (preselected skills/agents/prompts)
-tags                 JSON string[]
-scope                enum 'global' | 'project'
-projectId?           FK → projects.id
-useWorktree          boolean (default true when projectId set)
-createdAt, updatedAt
-```
-
-Plus:
-
-`stage_definitions` table — one row per stage (see [feature-stages.md](./feature-stages.md)).
-`stage_edges` table — one row per edge:
-
-```
-id                       text PK
-workflowDefinitionId     FK
-fromStageId              FK → stage_definitions.id
-toStageId                FK → stage_definitions.id
-edgeType                 enum 'on_success' | 'on_failure' | 'on_completion' | 'always'
-```
-
----
-
-## 2. Lifecycle operations
-
-### 2.1 Create
-
-API: `POST /api/workflow-definitions`  
-Body: `CreateWorkflowDefinitionSchema`:
-
-```typescript
+```jsonc
 {
-  name: string;
-  description?: string;
-  sessionMode?: 'single' | 'per-stage' | 'auto';   // default 'auto'
-  harnessConfig?: Partial<HarnessConfig>;
-  variables?: VariableDefinition[];
-  hooks?: HookDefinition[];
-  tags?: string[];
-  scope?: 'global' | 'project';                    // default 'global'
-  projectId?: string;
-  useWorktree?: boolean;
-  orchestratorConfig?: OrchestratorConfig;
-  // stages/edges can be provided inline or added via subsequent calls
-  stages?: CreateStageParams[];
-  edges?: CreateEdgeParams[];
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Review and fix",
+    "description": "…",
+    "session": { "harnessType": "claude-agent", "model": "…" },   // SessionSpec, merged under each stage's session
+    "variables": [{ "name": "ticket", "type": "string", "label": "Ticket", "required": true }],
+    "hooks": [],                    // workflow hooks (on_run_start, on_run_complete, …)
+    "lifecycle": {                  // codebases, worktrees, pre/post-processing
+      "codebaseAliases": [], "useWorktree": true, "requiresCodebase": false,
+      "preprocessingSteps": [],
+      "postProcessing": { "autoCommit": false, "autoPush": false, "autoCreatePR": false, "steps": [] }
+    },
+    "tags": [],
+    "projectId": null               // null or omitted = global
+  },
+  "stages": [ { "kind": "agent", "key": "review", "name": "Review", "prompts": [{ "label": "Review", "text": "…" }] } ],
+  "edges":  [ { "from": "review", "to": "fix", "on": "success" } ]
 }
 ```
 
-Server-side flow ([WorkflowDefinitionService.createDefinition](../../packages/core/src/services/WorkflowDefinitionService.ts)):
+- **Stage keys.** Every stage has a `key` (`^[a-z][a-z0-9_]{0,47}$`, unique). Edges,
+  `context.from`, `stages.<key>` in expressions and run stage overrides all use keys. Names are
+  display text only and need not be unique.
+- **Strict.** Unknown fields are rejected, with a hint when the field is a removed v1 name
+  (`retryPolicy` → `retry`, `resultValidation` → `output.rules`, …). See §7.
+- **Engine gate.** `validateWorkflow(graph, { engine: 'v1' })` rejects fields the current engine
+  cannot execute (code `engine-unsupported`): `join.mode` other than `all`, `repair`,
+  `onExhausted: 'pause'`, `sessionReuse: 'continue'`, `sessionGroup`, `budget`,
+  `timeouts.queueMs|idleMs|totalMs`, `output.extraction` other than `auto`, `compensate`,
+  `onExit`, `onFailure`, `maxParallel`, `workflow.outputs`, edge `handlesFailure`,
+  `session.provider` and `secretref:` values in MCP server env/headers (resolved by the session
+  composer, P02), and non-default `retry.maxDelayMs|jitter|retryOn|mode|restoreCheckpointOnRestart`
+  and `approval.allowChanges|maxRounds`. They become available when the engine level changes
+  (one constant, `ENGINE_LEVEL`).
 
-1. Validate body via Zod schema.
-2. Generate UUID.
-3. Insert `workflow_definitions` row.
-4. If `stages` provided: insert each `stage_definitions` row (order = array index unless explicit).
-5. If `edges` provided: insert each `stage_edges` row.
-6. If any DAG validation issues, transaction rolls back and `ValidationError` is thrown.
-7. Return `WorkflowDefinitionWithStages` (def + stages + edges).
+### Validation
 
-### 2.2 Read
-
-```
-GET /api/workflow-definitions
-  Query: ?projectId=<id> | ?scope=global|project | ?tags=tag1,tag2 | ?search=text
-GET /api/workflow-definitions/:id     → WorkflowDefinitionWithStages (def + stages + edges)
-GET /api/workflow-definitions/:id/export → JSON download (re-importable)
-```
-
-### 2.3 Update
-
-`PATCH /api/workflow-definitions/:id` accepts a partial body. Updating any field bumps `version`. The DAG cache is invalidated by hash — adding/removing stages forces re-computation on next run.
-
-Stage operations:
-
-```
-POST   /api/workflow-definitions/:id/stages
-PATCH  /api/workflow-definitions/:id/stages/:stageId
-DELETE /api/workflow-definitions/:id/stages/:stageId
-```
-
-Edge operations:
-
-```
-POST   /api/workflow-definitions/:id/edges
-DELETE /api/workflow-definitions/:id/edges/:edgeId
-```
-
-> **Edge case — delete with active runs:** `DELETE /api/workflow-definitions/:id` returns `400 ValidationError("Delete the runs first")` when `workflow_runs` rows reference the definition. Cancel/delete the runs first.
-
-### 2.4 Validate
-
-`POST /api/workflow-definitions/:id/validate` runs:
-- `DAGValidator.validateDAG(stages, edges)` — cycle detection (Kahn's algorithm), missing/dangling references, duplicate edges, self-edges.
-- Schema validation of every stage.
-- Resolution check on `condition.expression` references (parses but does not evaluate).
-
-Response shape:
-```json
-{ "valid": true, "errors": [], "warnings": [] }
-```
-
-### 2.5 Import / Export
-
-- `POST /api/workflow-definitions/import-json` — body is the exported JSON. Generates new IDs; preserves stage order; rewires edges to new IDs.
-- `GET /api/workflow-definitions/:id/export` — returns the canonical JSON.
-- `POST /api/workflow-definitions/from-template/:templateId` — copies a system template into a new mutable definition.
-
-### 2.6 Delete
-
-`DELETE /api/workflow-definitions/:id` — fails with `400` if runs exist. Cascades to `stage_definitions` + `stage_edges` rows via FK.
+`validateWorkflow(input)` returns `{ valid, issues, graph }`. Each issue is
+`{ code, severity, path, stageKey?, message, hint? }`, where `path` is a JSON pointer
+(`/stages/2/prompts/0/text`). It checks, in layers: the schema; keys and references
+(duplicate keys, unknown edge endpoints, self loops, two edges for one pair, `context.from`);
+the DAG (cycles); expressions (parse and type-check, declared variables only); templates
+(`{{name}}` must be a declared variable); commands (`command`/`args` are literals, templated
+values reach commands only through `env`, secrets only as `secretref:`); reserved variable names
+(`variables`, `stages`, `run`, … and `^(__|repo_path_|repo_branch_)`); and the engine gate.
 
 ---
 
-## 3. Configurations explained
+## 2. Storage, revisions and versions
 
-### 3.1 `sessionMode`
-
-Determines how harness sessions are allocated per stage during execution:
-
-| Mode | Behavior |
+| Table | What it holds |
 |---|---|
-| `single` | All stages share **one** harness session (`SessionAllocator.allocateSession()` returns the same conversation for every stage). Stage prompts are sequential. No parallelism possible. |
-| `per-stage` | Each stage gets its **own** harness session. Maximum parallelism. Independent context. |
-| `auto` (default) | Resolved once at run start for the WHOLE run: `per-stage` if the DAG has any parallelism (more than one root, or any execution layer with more than one stage), otherwise `single`. It is not a per-chain hybrid — a shared session cannot serve two concurrent stages, so `single` is also force-overridden to `per-stage` when the DAG is parallel. The resolved value is written back to `workflow_runs.sessionMode`. |
+| `workflow_definitions` | `id, name, description, project_id, status (draft\|published), revision, current_version_id, archived_at, needs_attention, spec` (workflow-level JSON) |
+| `stage_definitions` | one row per stage: `key` (unique per definition), `name`, `ordinal`, `position_x/y`, `spec` (the stage JSON) |
+| `stage_edges` | `from_key, to_key, edge_on, when_expr, handles_failure, ordinal` — FKs to the stage keys |
+| `workflow_definition_versions` | immutable copies: `version, kind (published\|test), content_hash, spec` |
 
-Override at run time via `runProfile.sessionMode`. See [feature-workflow-runs.md](./feature-workflow-runs.md#session-allocation).
-
-### 3.2 `harnessConfig` (template defaults)
-
-```typescript
-type HarnessConfig = {
-  model?: string;
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh' | 'max';
-  maxTurns?: number;                            // Anthropic only currently
-  systemMessage?: { mode: 'append' | 'replace'; content: string };
-  availableTools?: string[];                    // ['*'] = all
-  excludedTools?: string[];
-  skillDirectories?: string[];
-  disabledSkills?: string[];
-  customAgents?: CustomAgentConfig[];
-  mcpServers?: Record<string, McpServerConfig>;
-  provider?: BYOKProviderConfig;                // { name, baseUrl, apiKey, model? }
-  reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh';
-};
-```
-
-Each stage may override any of these in `harnessConfigOverrides`. `ConfigResolver` deep-merges (objects merge, arrays replace).
-
-### 3.3 `variables` (workflow-scope)
-
-```typescript
-type VariableDefinition = {
-  name: string;                                 // unique within workflow; used as {{name}}
-  type: 'string' | 'number' | 'boolean' | 'choice' | 'text';
-  label?: string;
-  description?: string;
-  required?: boolean;
-  defaultValue?: unknown;
-  options?: string[];                           // for type='choice'
-};
-```
-
-Variables are surfaced in the Run dialog (web) and `--var key=value` (CLI). Mustache-style `{{name}}` is interpolated into prompts at execution time.
-
-System variables auto-injected at run start: `__workingDirectory`, `__artifactsDirectory`, `__workflowRunId`, `__workspaceId`, `repo_path_<alias>`, `repo_branch_<alias>`, `repo_path_target`.
-
-Validation feedback variables auto-injected during in-session retry: `__validationFeedback`, `__validationRetryAttempt`.
-
-### 3.4 `hooks` (workflow-scope)
-
-Phases (15 workflow-scope, see [feature-hooks.md](./feature-hooks.md)):
-
-```
-on_run_start | on_run_complete | on_run_failed | on_run_cancelled
-pre_clone | post_clone | pre_commit | post_commit | on_pr_created
-on_preprocessing_complete | on_postprocessing_start
-on_all_stages_scheduled | on_stage_completed | on_stage_failed | on_parallel_join
-```
-
-Hooks at this level run *between* stages or at run boundaries. Stage-scope hooks (`pre_run`, `post_run`, `pre_prompt`, `post_prompt`, `on_error`, plus 12 harness phases) live on `StageDefinition.hooks`.
-
-### 3.5 `scope` + `projectId` + `useWorktree`
-
-- `scope = 'global'` — visible to every project; defaults when creating from web home.
-- `scope = 'project'` + `projectId` — only visible inside that project page. Useful for project-specific automations.
-- `useWorktree = true` — at run start, `WorkspaceManager` + `WorktreeService` create worktrees from the project's codebases into the run's workspace `source/<alias>/` directory. Set to `false` for a workflow that doesn't touch git.
-
-### 3.6 `orchestratorConfig` (advanced, system templates)
-
-```typescript
-type OrchestratorConfig = {
-  templateId?: string;                          // origin template if cloned
-  codebaseAliases?: string[];                   // which of the project's codebases to use
-  createWorktrees?: boolean;                    // default true
-  requiresCodebase?: boolean;
-  autoCommit?: boolean;                         // commit the worktrees after a successful run
-  autoPush?: boolean;                           // push the work branch (implied by autoCreatePR)
-  autoCreatePR?: boolean;
-  gitRepositories?: Array<{                     // LEGACY clone-a-URL path; not accepted by
-    url?: string;                               // the server schema, which strips it. New
-    alias: string;                              // work should use codebaseAliases.
-    branch?: string;
-  }>;
-  preprocessing?: { ... };                      // pre-prompt enrichment passes
-  postprocessing?: { ... };                     // post-stage transformations
-  selectedArtifacts?: {
-    skills?: string[];
-    agents?: string[];
-    prompts?: string[];
-  };
-};
-```
-
-Mostly used by the Orchestrator + system templates. Plain user workflows usually omit this.
-
-**Which codebase field is authoritative.** The project/codebase model uses
-`codebaseAliases` — the builder writes it, `OrchestratorConfigSchema` validates it, and
-the run path reads it to decide which worktrees to create. `gitRepositories` is the older
-clone-a-URL path; the server schema does not declare it, so anything sent there is
-silently dropped by zod. `loadDefinition` still falls back to `gitRepositories` aliases
-when reading so definitions saved before `codebaseAliases` existed keep working.
-
-`autoCommit` / `autoPush` / `autoCreatePR` apply to whatever the run actually has checked out
-— the legacy cloned repos *or* the worktrees created from `codebaseAliases`.
-
-**They run through the source-control flow.** `buildPostProcessingSteps` turns the flags into a
-`commit_and_push` step (`generateMessage: true`, `push: autoPush || autoCreatePR`) at order 100
-and a `create_pr` step (`generateText: true`) at order 200, and `WorkflowPreprocessor` routes
-both through `SourceControlFlowService.run`, once per run worktree — the same flow the Changes
-tab and agent-native chats use, so there is one branch policy, one base-branch sync and one
-conflict dry-run. The generated commit message / PR text is written from the diff with
-`"<workflow name> (workflow run <run id>)"` as the hint; the PR base is the codebase's
-`defaultBranch` (`OrchestratorContext.baseBranches`), overridden by an explicit
-`create_pr.baseBranch`. See [feature-source-control.md](./feature-source-control.md) §4–§5.
-
-**Failure semantics.** Both auto-steps are `failOnError: true`. A result that is not `ok` —
-`conflicts`, `blocked` or `failed` — fails the step and stops the post-processing sequence, so a
-PR is never opened on top of a commit that did not land. The failed `PreprocessingResult` carries
-`error` (one user-facing line) **and** `scm: ScmFlowResult[]` — the conflict report, the blocking
-reason and every step the flow ran — which is what the run page renders. A conflict never leaves
-a half-applied merge: the flow probes the merge with `git merge-tree --write-tree` (falling back
-to a `--no-commit` merge it immediately aborts), so `ScmConflictReport.mergeStarted` is `false`
-and the worktree is exactly as the run left it.
-
-**Legacy fallback.** When no flow service is wired (older embedders — e.g. the SDK's own
-composition in `packages/sdk/src/GeneratorAI.ts`), `commit_and_push` falls back to
-`GitManager.commitAndPush` and `create_pr` to `SourceControlService` / the `gh` CLI, exactly as
-before. The PR url + number are still reported in the step's `output`.
-
-### 3.7 `tags`
-
-Free-form strings. Web `WorkflowListPage` and CLI `workflow list` support tag filtering. Tags are normalized to lowercase server-side.
+- **Whole-graph save.** `PUT /api/workflow-definitions/:id/graph` with `{ graph, expectedRevision }`
+  replaces the graph in **one transaction**: stages are upserted by key, removed keys deleted,
+  edges replaced, `revision` bumped. A stale `expectedRevision` returns **409**
+  `REVISION_CONFLICT` with `error.current` (the stored record) and changes nothing.
+- **Draft / published.** New definitions are drafts. `POST /:id/publish` stores the working
+  graph as an immutable published version (reusing an existing version with the same content
+  hash) and makes it current. `hasUnpublishedChanges` says whether the working graph differs
+  from the current version.
+- **Runs pin a version.** A normal run executes the definition's current published version; a
+  draft runs only as a **test run** (`testRun: true`), which pins a `test` version of the working
+  graph. Editing or republishing a definition never changes a run already started — the run
+  reads its pinned `definitionVersionId`.
+- **Delete.** `DELETE /:id` hard-deletes a definition nobody ran and returns `{ deleted: true }`;
+  a definition with runs is archived (`{ archived: true, runs }`) so its runs stay readable.
+  Archived definitions cannot start runs.
+- **Command-bearing fields** (script hooks, `run_script`, `custom_script` rules) can be added or
+  changed only by a principal with the `admin:settings` scope; otherwise **403**
+  `INSUFFICIENT_SCOPE`. Unchanged commands can be saved by anyone who can edit.
+- Definitions migrated from v1 (migration 55) are published with version 1. Values the converter
+  could not map are listed in `needsAttention` until the next save.
 
 ---
 
-## 4. Stages, edges, and the DAG
+## 3. HTTP API
 
-Each `StageDefinition` is a node (see [feature-stages.md](./feature-stages.md) for full config). Each `StageEdge` is a directed dependency.
-
-### Edge types
-
-| Type | Fires when |
+| Method and path | Result |
 |---|---|
-| `on_success` | predecessor in terminal status `completed` |
-| `on_failure` | predecessor in terminal status `failed` |
-| `on_completion` | predecessor in `completed` OR `failed` (terminal regardless of result) |
-| `always` | any terminal status incl. `skipped` and `cancelled` |
+| `GET /api/workflow-definitions?projectId&status&q&cursor&limit&includeArchived` | `{ items: WorkflowDefinitionSummary[], nextCursor? }`; `projectId=global` lists definitions without a project |
+| `POST /api/workflow-definitions` (body: graph) | 201, the new draft record |
+| `POST /api/workflow-definitions/validate` (body: graph) | 200 `{ valid, issues }` |
+| `POST /api/workflow-definitions/import[?publish=true]` (body: graph, or `{ templateId, name?, projectId? }`) | 201 record; `publish` only for user principals |
+| `GET /api/workflow-definitions/:id` | the record: `{ id, status, revision, currentVersionId, hasUnpublishedChanges, archivedAt, needsAttention, createdAt, updatedAt, graph }` |
+| `PUT /api/workflow-definitions/:id/graph` | record; 409 on a stale revision, 422 on an invalid graph |
+| `POST /api/workflow-definitions/:id/publish` | record |
+| `GET /api/workflow-definitions/:id/versions[/:versionId]` | version summaries / one version with its graph |
+| `GET /api/workflow-definitions/:id/export` | the canonical JSON text |
+| `DELETE /api/workflow-definitions/:id` | `{ deleted: true }` or `{ archived: true, runs }` |
 
-Edge eval is implemented in `DAGScheduler.onStageCompleted()` (see [feature-workflow-runs.md → DAG scheduling](./feature-workflow-runs.md#dag-scheduling)).
+An invalid graph anywhere returns **422** `{ error: { code: 'WORKFLOW_INVALID', message, issues } }`.
 
-> **Setting the type in the builder:** click an edge's condition badge on the canvas to open the picker. New edges are created as `on_success`.
+Runs start through ONE route, `POST /api/workflow-invocations` (an `InvocationRequest`:
+`target`, `variables`, `codebases`, `stageOverrides: [{ stageKey, skip?, variables?, model? }]`,
+`overrides`, `uploads`, `name`, `budget`, `idempotencyKey`; see
+[feature-workflow-runs.md](./feature-workflow-runs.md) §0). Every run goes through the same
+lifecycle, whoever starts it. Engine-reserved variable names (`__*`, `repo_path_*`,
+`repo_branch_*`) are refused with 400: engine state comes only from typed fields. Stage runs carry
+`stageKey`, and `GET /api/workflow-runs/:id` orders them by the pinned graph.
 
-> **Skipped predecessors are asymmetric.** A stage skipped because *its own* condition or incoming edges never fired routes as `skipped`, so only an `always` edge leaves it. A stage skipped by a run-time **stage override** routes as `completed`, so its `on_success` edges DO fire — otherwise skipping any non-leaf stage would kill the whole downstream, which is not what an operator asking to skip one stage means.
+### Import and export
 
-### DAG validity rules (`DAGValidator.validateDAG`)
-
-- No cycles (Kahn's algorithm).
-- No self-edges (`fromStageId === toStageId`).
-- No dangling edges (both `fromStageId` and `toStageId` must exist).
-- No duplicate edges with identical `(from, to, edgeType)`.
-- Disconnected stages are allowed but flagged as warnings (they will never run unless promoted to a root).
-
-### Execution layers
-
-`DAGValidator.getExecutionLayers(dag)` returns `string[][]` — each inner array is a set of stages that can execute in parallel (all their dependencies are in earlier layers). UI uses this to visually align nodes.
+Export is canonical: the parsed document in schema field order, with every default filled in.
+`import(export(g))` gives back `g` exactly, so publishing an unchanged graph reuses its version
+(same content hash). The import endpoint accepts only v2 documents; there is no other import
+format.
 
 ---
 
-## 5. Templates
+## 4. Expressions and templates
 
-Five system v2 templates in [templates/system/](../../templates/system/):
+**Expression v2** is used by stage `guard`s, edge `when`s and preprocessing `conditional` steps.
 
-| Template | File |
+- Paths: `variables.<name>`, `stages.<key>.status|output|summary`, `run.id`, `run.name`,
+  `run.codebases.<alias>.path|branch|baseRef`, and on an edge `parent.status`.
+- Operators: `== != < <= > >=` (strict: no type coercion), `and or not` (also `&& || !`),
+  parentheses, string/number/boolean/null literals.
+- Functions: `len(x)`, `count(list, x => cond)`, `exists(x)`, `lower(s)`.
+- A missing path is `null`. Expressions are parsed and type-checked at save time; an
+  unparseable or ill-typed expression is a validation error, never a silent `false` at run time.
+
+**Guards and edges.** A stage's `guard` decides whether the stage runs once its incoming edges
+allow it; a false guard skips it. An edge's `on` (`success | failure | completion | always`)
+decides whether it carries control for the parent's outcome, and its optional `when` narrows
+that further. Skips cascade along `success` edges; `completion` and `always` edges still fire
+from a skipped parent.
+
+**Templates** (`{{…}}` in prompts, output instructions, approval prompts and hook `env`):
+`{{variables.x}}`, bare `{{x}}` as sugar for a declared variable, `{{stages.<key>.output.y}}`,
+`{{run.id}}`, `{{run.codebases.<alias>.path}}`. A bare name that is not a declared variable is a
+save-time error (`template-unknown-variable`). A declared variable the run leaves empty renders
+empty and raises an `unresolved_variables` warning on the stream.
+
+**Typed codebase scope.** Codebase checkouts are read from `run.codebases.<alias>`, which is
+read-only. Variables named `repo_path_*` / `repo_branch_*` are rejected; migration 55 rewrote
+`{{repo_path_<alias>}}` to `{{run.codebases.<alias>.path}}`.
+
+---
+
+## 5. Sessions
+
+`workflow.session` is a `SessionSpec` (provider, model, reasoning effort, agent binding
+`agentRef` + `agentOverrides`, tools, MCP, skills, permission mode, browser, …). A stage's
+`session` is merged over it. Every stage gets its own fresh conversation (`sessionReuse:
+'fresh'`); shared conversations arrive with session groups in the engine upgrade.
+
+---
+
+## 6. Templates and scripts
+
+- **System templates**: [templates/system/](../../templates/system/)`*-workflow.json`, each
+  `{ id, category, graph }`. `TemplateRegistry` validates every template at boot (a broken
+  template fails boot in development and is skipped with an error in production).
+  `GET /api/templates` lists them; `POST /api/workflow-definitions/import { templateId }` creates a
+  draft tagged `template:<id>`.
+- **Workflow scripts**: [templates/scripts/](../../templates/scripts/)`*.workflow.mjs` export a
+  builder from `@generatorai/workflow-spec/builders` as their default export, plus optional
+  `profiles` (`ScriptRunProfile`, stage overrides by key). The loader builds and validates the
+  graph; inline hook functions are registered as handlers. Script loading is off unless enabled.
+  See [feature-templates-scripts.md](./feature-templates-scripts.md).
+
+---
+
+## 7. Removed v1 fields
+
+| v1 field | v2 |
 |---|---|
-| Code Generation | `code-generation-workflow.json` |
-| Code Review | `code-review-workflow.json` |
-| Refactoring | `refactoring-workflow.json` |
-| Test Generation | `test-generation-workflow.json` |
-| E2E Testing | `e2e-testing-workflow.json` |
-
-Plus three programmatic workflow scripts in [templates/scripts/](../../templates/scripts/):
-
-- `code-review.workflow.mjs`
-- `comprehensive-test.workflow.mjs`
-- `e2e-feature-coverage.workflow.mjs`
-
-`TemplateRegistry` loads JSON templates on boot. `WorkflowScriptLoader` loads `.workflow.mjs` files.
-
-API:
-
-```
-GET  /api/templates                    → list metadata cards
-GET  /api/templates/:id                → full template JSON
-POST /api/orchestrator/runs           → start from template (legacy orchestrator path)
-POST /api/workflow-definitions/from-template/:id  → clone template to a mutable definition
-```
-
-See [feature-templates-scripts.md](./feature-templates-scripts.md) for the PWS deep-dive.
+| `sessionMode` | none (see §5) |
+| `harnessConfig` / `copilotConfig` | `workflow.session` |
+| `orchestratorConfig` (codebases, auto-commit/push/PR, pre/post-processing) | `workflow.lifecycle` |
+| `orchestratorConfig.resultValidations` | each stage's `output.rules` |
+| `hooksFile` | `workflow.hooks` and each stage's `hooks` |
+| `scope` | `projectId` (null = global) |
+| stage `order` / `id` in edges | stage `key`; edges `{ from, to, on, when? }` |
+| edge `edgeType: on_success/on_failure/on_completion/always` | edge `on: success/failure/completion/always` |
+| `condition` | stage `guard` or edge `when` |
+| the v1 JSON import and template-clone routes, nested stage/edge routes, `PATCH /:id` | the routes in §3 |
 
 ---
 
-## 6. CLI
+## 8. CLI
 
-```powershell
-# CRUD
-generatorai workflow list [--project <id>] [--tag <tag>] [--scope global|project]
-generatorai workflow create <name> [--description "..."] [--session-mode single|per-stage|auto]
-generatorai workflow show <id>                                  # full def + stages + edges
-generatorai workflow update <id> [--name "..."] [--description "..."]
-generatorai workflow delete <id>                                # fails if runs exist
-generatorai workflow validate <id>                              # DAG + schema validation
-generatorai workflow export <id>                                # JSON to stdout
-generatorai workflow import-json <path>                         # import (new IDs assigned)
-generatorai workflow from-template <templateId> --name "..."   # clone a system template
-
-# Stages
-generatorai workflow stage add <defId> <name> --prompt "Tell me..." [--model claude-sonnet-4.6] [--timeout 30000]
-generatorai workflow stage update <defId> <stageId> --name "..." --prompt "..."
-generatorai workflow stage delete <defId> <stageId>
-
-# Edges
-generatorai workflow edge add <defId> --from <stageId> --to <stageId> [--on on_success|on_failure|on_completion|always] [--condition "expr"]
-generatorai workflow edge delete <defId> <edgeId>
+```bash
+generatorai workflow list [--project <ref|global>] [--status draft|published] [--search q]
+generatorai workflow create [file|-] [--name n] [--publish]
+generatorai workflow import [file|-] | --template <id>  [--publish]
+generatorai workflow export <wf> [--out file]
+generatorai workflow validate <file|-|wf>          # prints `severity path [stageKey]: message — hint`
+generatorai workflow publish|versions|clone|delete <wf>
+generatorai stage add|update|remove <wf> <stage> …  # read-modify-write with one retry on 409
+generatorai edge add|remove <wf> --from a --to b [--on success] [--when expr]
+generatorai run start <wf> [--test-run] [--skip <key>] [--stage-var <key>.<name>=<value>]
 ```
+
+See [usage-cli.md](./usage-cli.md) for every flag.
 
 ---
 
-## 7. SDK
+## 9. SDK
 
 ```typescript
 import { createGeneratorAI, workflow } from '@generatorai/sdk';
 
-const ai = await createGeneratorAI({ provider: 'copilot' });
+const ai = await createGeneratorAI();
+const def = await ai.workflows.create(
+  workflow('Review and fix')
+    .variable('ticket', { type: 'string', label: 'Ticket', required: true })
+    .stage('review', (s) => s.name('Review').prompt('Review {{ticket}}.'))
+    .stage('fix', (s) => s.name('Fix').prompt('Fix what the review found.').contextFrom(['review'], 'output'))
+    .edge('review', 'fix'),
+); // published by default; pass { publish: false } for a draft
 
-const def = await ai.workflows.create(workflow(b => b
-  .id('triage-tickets')
-  .name('Triage support tickets')
-  .description('Classify → summarize → label')
-  .variable({ name: 'ticketId', type: 'string', required: true })
-  .harnessConfig({ model: 'claude-sonnet-4.6', reasoningEffort: 'high' })
-
-  .stage('classify', s => s
-    .name('Classify')
-    .prompts([{ text: 'Classify ticket {{ticketId}}. Output exactly one of: bug | feature | question | other' }])
-    .outputFormat('text')
-    .resultValidation([{ type: 'regex', value: '^(bug|feature|question|other)$', message: 'Bad class' }])
-    .retryPolicy({ maxRetries: 2, backoffMs: 1000, backoffMultiplier: 2 })
-  )
-  .stage('summarize', s => s
-    .name('Summarize')
-    .prompts([{ text: 'Summarize ticket {{ticketId}} in 2 sentences.' }])
-  )
-  .stage('label', s => s
-    .name('Apply label')
-    .prompts([{ text: 'Set GitHub label to {{classify.output}}' }])
-    .agentName('github-labeler')
-  )
-
-  .edge('classify', 'summarize', 'on_success')
-  .edge('classify', 'label', 'on_success')
-  .edge('summarize', 'label', 'on_success')   // diamond convergence on `label`
-
-  .profile({ name: 'fast', sessionMode: 'single' })
-  .profile({
-    name: 'thorough',
-    sessionMode: 'per-stage',
-    stageOverrides: [{ stageName: 'Summarize', timeoutMs: 60000 }],
-  })
-));
-
-// Run it
-const run = await ai.workflows.run(def.id, { variables: { ticketId: 'GH-123' } });
-for await (const event of ai.workflows.stream(run.id)) {
-  console.log(event.kind, event.data);
-}
+const run = await ai.workflows.run(def.id, { variables: { ticket: 'ABC-1' } });
+for await (const event of ai.workflows.stream(run.id)) console.log(event.kind);
 ```
+
+`ai.workflows.save(id, graph, expectedRevision)`, `publish(id)`, `validate(graph)`, `list()`,
+`get(id)` mirror the HTTP API. `validateWorkflow`, `exportGraph` and `importGraph` are exported
+from the SDK as well.
 
 ---
 
-## 8. Edge cases & gotchas
+## 10. Edge cases
 
-1. **Stage order changes** — `stages[].order` is an int. Updating it does not break edges (edges reference IDs).
-2. **Renaming a stage** — does not break anything; `RunProfile.stageOverrides` can match by `stageName` *or* `stageIndex`.
-3. **Removing a variable** still referenced in a prompt `{{name}}` — interpolation leaves the literal string. Validation does not currently catch this.
-4. **Adding a variable to an existing template** — old runs use the snapshot in `workflow_runs.variables`; new runs see the new variable.
-5. **Re-importing a JSON export** — IDs are re-generated. To overwrite an existing definition, delete it first then import.
-6. **Validation passes but run fails** — usually means the assistant ignored output format / a tool failed. Look at `stage_runs.error` and the `harness.error` SSE event.
-7. **Condition expression grammar** — `condition.expression` cannot reference downstream stages. Operands are `status` / `parentStatus`, `variables.<dotted.path>`, and quoted-string / numeric / boolean literals. Comparisons are `== != < <= > >=` (**not** `===`). Logical operators are `AND` / `OR` / `NOT` (case-insensitive) or `&& || !`, with parentheses. Anything unparseable evaluates to **false**, so a typo silently prevents the stage from running — e.g. `status == 'completed' AND variables.env == 'prod'`.
-8. **`scope='project'` workflows** filtered out of the global `/workflows` list. Make sure the UI passes `projectId` when you want both.
-9. **Workflows with no edges** — a workflow with N stages and zero edges has N roots; all run in parallel.
-10. **Duplicate names** — allowed at the definition level (names aren't unique). Use IDs in CLI/SDK.
+1. **Renaming a stage** changes only its display name; the key stays, so edges, overrides and
+   expressions keep working. Changing a key is a remove plus an add.
+2. **Removing a variable** still referenced by a template or expression fails validation.
+3. **A stage removed while runs exist** — runs keep their pinned version; the working graph
+   simply no longer has the stage.
+4. **Workflows with no edges** have one root per stage; all run in parallel.
+5. **Concurrent editors** — the second save gets 409 with the current record; re-apply the change
+   on it and save with the new revision.

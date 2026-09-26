@@ -37,15 +37,14 @@ export * from './config/loadConfig.js';
 export { buildRegistry } from './commands/index.js';
 export type { BuildRegistryOptions } from './commands/index.js';
 export {
+  buildInvocation,
+  describeInvocationPlan,
   loadRunProfile,
-  validateVariables,
-  type RunProfile,
+  waitForFinalized,
 } from './commands/run.js';
 export {
-  isTerminalRunState,
   sleep,
   streamUntil,
-  waitForRunTerminal,
 } from './commands/_shared.js';
 
 export * from './session/PaneModel.js';

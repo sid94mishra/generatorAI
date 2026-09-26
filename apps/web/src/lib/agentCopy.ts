@@ -47,6 +47,8 @@ export const TOOL_GROUP_LABELS: Record<keyof AgentToolPolicy, string> = {
   fileWrite: 'Write files',
   shell: 'Run shell commands',
   web: 'Web fetch & search',
+  workflows: 'Workflows',
+  workflowAuthoring: 'Workflow authoring',
 };
 
 export const TOOL_GROUP_HINTS: Record<keyof AgentToolPolicy, string> = {
@@ -58,6 +60,8 @@ export const TOOL_GROUP_HINTS: Record<keyof AgentToolPolicy, string> = {
   fileWrite: 'Create and edit files in the workspace.',
   shell: 'Execute terminal commands.',
   web: 'Fetch URLs and run web searches.',
+  workflows: 'Find, run, follow and cancel saved workflows. On for orchestrators; opt-in for chats.',
+  workflowAuthoring: 'Validate, plan and submit workflow drafts. A person reviews and publishes them.',
 };
 
 export const SCOPE_LABELS: Record<AgentScope, string> = {

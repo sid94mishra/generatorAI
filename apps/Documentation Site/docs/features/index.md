@@ -53,4 +53,4 @@ The application has three related layers of configuration: server-wide defaults,
 
 ## Source evidence
 
-The feature inventory was checked against `apps/web/src/pages`, `apps/web/src/components/settings/sectionRegistry.tsx`, `apps/web/src/pages/ChatPage.tsx`, `apps/web/src/pages/WorkflowRunPageV2.tsx`, and the contracts in `packages/shared/src/types` and `packages/shared/src/config`.
+The feature inventory was checked against `apps/web/src/pages`, `apps/web/src/components/settings/sectionRegistry.tsx`, `apps/web/src/pages/ChatPage.tsx`, `apps/web/src/pages/WorkflowRunPage.tsx`, and the contracts in `packages/shared/src/types` and `packages/shared/src/config`.

@@ -121,8 +121,19 @@ export interface ChatMessage {
   toolName?: string;
   toolArgs?: unknown;
   toolResult?: unknown;
-  workflowId?: string;
   /** Rich metadata for assistant messages (thinking, tool calls, system msgs) */
   metadata?: ChatMessageMetadata;
+  /**
+   * RV-10 — assistant messages: true when written on the provider's final
+   * turn event, false for a turn cut short (stop, pause, abort). Stored as
+   * `chat_messages.complete` (v56); absent on other roles.
+   */
+  complete?: boolean;
+  /**
+   * The role of the turn in a workflow stage conversation
+   * (`chat_messages.turn_role`, v57): prompt, repair, summary,
+   * approval_feedback and so on. Absent on chat messages.
+   */
+  turnRole?: string;
   timestamp: Date;
 }

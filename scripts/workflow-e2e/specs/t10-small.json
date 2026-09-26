@@ -1,0 +1,221 @@
+{
+  "tag": "T10-small",
+  "description": "scale, small: 11 stages / 13 edges, chains + two fan-ins, context none (F T10, reduced)",
+  "timeoutMs": 1200000,
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "e2e-t10-small"
+    },
+    "stages": [
+      {
+        "key": "root",
+        "name": "root",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "root",
+            "text": "Write one line containing the token ROOT."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "a1",
+        "name": "a1",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "a1",
+            "text": "Write one line containing the token A1."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "a2",
+        "name": "a2",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "a2",
+            "text": "Write one line containing the token A2."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "b1",
+        "name": "b1",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "b1",
+            "text": "Write one line containing the token B1."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "b2",
+        "name": "b2",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "b2",
+            "text": "Write one line containing the token B2."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "join1",
+        "name": "join1",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "join1",
+            "text": "Write one line containing the token JOIN1."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "p1",
+        "name": "p1",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "p1",
+            "text": "Write one line containing the token P1."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "p2",
+        "name": "p2",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "p2",
+            "text": "Write one line containing the token P2."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "p3",
+        "name": "p3",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "p3",
+            "text": "Write one line containing the token P3."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "join2",
+        "name": "join2",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "join2",
+            "text": "Write one line containing the token JOIN2."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      },
+      {
+        "key": "final",
+        "name": "final",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "final",
+            "text": "Write one line containing the token FINAL."
+          }
+        ],
+        "context": {
+          "mode": "none"
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "root",
+        "to": "a1"
+      },
+      {
+        "from": "a1",
+        "to": "a2"
+      },
+      {
+        "from": "root",
+        "to": "b1"
+      },
+      {
+        "from": "b1",
+        "to": "b2"
+      },
+      {
+        "from": "a2",
+        "to": "join1"
+      },
+      {
+        "from": "b2",
+        "to": "join1"
+      },
+      {
+        "from": "join1",
+        "to": "p1"
+      },
+      {
+        "from": "join1",
+        "to": "p2"
+      },
+      {
+        "from": "join1",
+        "to": "p3"
+      },
+      {
+        "from": "p1",
+        "to": "join2"
+      },
+      {
+        "from": "p2",
+        "to": "join2"
+      },
+      {
+        "from": "p3",
+        "to": "join2"
+      },
+      {
+        "from": "join2",
+        "to": "final"
+      }
+    ]
+  }
+}

@@ -33,14 +33,15 @@ export function createSdkTool(
     description: toolDef.description,
     parameters: toolDef.parametersSchema,
     ...(toolDef.skipPermission ? { skipPermission: true } : {}),
-    handler: async (args: unknown) => {
+    handler: async (args: unknown, invocation?: { toolCallId?: string }) => {
       // Validate args is a proper object before passing to domain handler.
       // The SDK may pass null, undefined, or a primitive; normalise to {}.
       const safeArgs =
         args != null && typeof args === 'object' && !Array.isArray(args)
           ? (args as Record<string, unknown>)
           : {};
-      const runHandler = () => toolDef.handler(safeArgs);
+      const toolCallId = invocation?.toolCallId;
+      const runHandler = () => toolDef.handler(safeArgs, toolCallId ? { toolCallId } : {});
       const result = semaphore
         ? await semaphore.runGuarded(toolDef.name, runHandler, {
             ...(conversationId !== undefined ? { conversationId } : {}),

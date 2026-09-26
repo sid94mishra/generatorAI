@@ -15,10 +15,47 @@
 
 import { describe, expect, it } from 'vitest';
 import { buildRegistry } from '../index.js';
+import { z } from 'zod';
 import { toDocs, toRpcMethods } from '../../registry/generators.js';
+import { defineCommand } from '../../registry/CommandSpec.js';
+import { CommandRegistry } from '../../registry/registry.js';
+import { RUN_GROUP } from '../run.js';
+import { inputSchema, ok } from '../_shared.js';
 
 const registry = buildRegistry();
 const allFlags = registry.all().flatMap((spec) => spec.flags.map((flag) => ({ spec, flag })));
+
+/**
+ * A registry with one command whose option is marked: the real registry may
+ * legitimately have none, and the "carries the marking" checks below must
+ * still prove something.
+ */
+const markedRegistry = new CommandRegistry().declareGroup(RUN_GROUP);
+markedRegistry.register(
+  defineCommand({
+    id: 'run.fixture',
+    group: 'run',
+    verb: 'fixture',
+    summary: 'Fixture with a marked option',
+    requiresServer: false,
+    sinceVersion: '0.2.0',
+    args: [],
+    flags: [
+      {
+        name: 'inert',
+        description: 'An option the fixture accepts',
+        type: 'string',
+        unsupported: 'The fixture accepts this value and discards it, on purpose.',
+      },
+    ],
+    schema: inputSchema({}, { inert: z.string().optional() }),
+    output: { kind: 'void' },
+    async handler() {
+      return ok('done');
+    },
+  }),
+);
+const markedFlags = markedRegistry.all().flatMap((spec) => spec.flags.map((flag) => ({ spec, flag })));
 
 /**
  * Phrases that mean "this does not do what it says".
@@ -74,20 +111,20 @@ describe('false-success marking', () => {
   });
 
   it('carries the marking into the generated docs', () => {
-    const marked = allFlags.filter(({ flag }) => flag.unsupported);
+    const marked = markedFlags.filter(({ flag }) => flag.unsupported);
     // Guards the guard: if nothing is marked, the two assertions below pass
     // vacuously and this test proves nothing.
     expect(marked.length).toBeGreaterThan(0);
 
-    const docs = toDocs(registry);
+    const docs = toDocs(markedRegistry);
     for (const { flag } of marked) {
       expect(docs).toContain(flag.unsupported!);
     }
   });
 
   it('carries the marking into the RPC method descriptors', () => {
-    const marked = allFlags.filter(({ flag }) => flag.unsupported);
-    const methods = JSON.stringify(toRpcMethods(registry));
+    const marked = markedFlags.filter(({ flag }) => flag.unsupported);
+    const methods = JSON.stringify(toRpcMethods(markedRegistry));
     for (const { flag } of marked) {
       expect(methods).toContain(flag.unsupported!);
     }
@@ -96,7 +133,7 @@ describe('false-success marking', () => {
   it('keeps accepting a marked option, so existing scripts still parse', () => {
     // Removing it outright would break callers that already pass it. The
     // contract is "accepted and honestly labelled", not "rejected".
-    for (const { spec, flag } of allFlags) {
+    for (const { spec, flag } of markedFlags) {
       if (!flag.unsupported || !spec.schema) continue;
       const result = spec.schema.safeParse({
         args: Object.fromEntries(spec.args.filter((a) => a.required).map((a) => [a.name, 'x'])),

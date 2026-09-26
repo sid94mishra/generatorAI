@@ -21,7 +21,7 @@ The asynchronous `withTransaction` facade serializes transactions over the synch
 | --- | --- | --- |
 | Conversation | `chats`, `sessions`, `chat_messages` | Chat/session/message repositories; ChatManagementService and SessionService |
 | Workflow definitions | `workflow_definitions`, `stage_definitions`, `stage_edges` | WorkflowDefinitionService and definition repositories |
-| Workflow execution | `workflow_runs`, `stage_runs`, `session_allocations`, `stage_session_maps` | WorkflowRunService, StageExecutionService, SessionAllocator |
+| Workflow execution | `workflow_runs`, `stage_runs`, `stage_attempts`, `run_sessions`, `workflow_timers`, `workflow_outbox`, `scheduler_journal`, `engine_lock` | WorkflowRunService and the engine (`RunSupervisor`, `StageExecutor`) over `RunStore` |
 | Automation | `automations`, `automation_executions`, `automation_execution_runs`, `idempotency_keys` | AutomationService and AutomationRecoveryService |
 | Projects | `projects`, `project_codebases`, `project_configs`, `system_configs`, `worktrees` | ProjectService, CodebaseService, ProjectConfigService, WorktreeService |
 | Execution files | `execution_workspaces`, `workspace_mounts`, `workspace_artifacts`, `artifacts` | WorkspaceManager, MountService, ArtifactService |

@@ -6,13 +6,15 @@
 import React, { memo, useCallback } from 'react';
 import { Handle, Position, type NodeProps } from '@xyflow/react';
 import type { Node } from '@xyflow/react';
-import { Box, Play, Pause, Check, X, AlertTriangle, SkipForward, Clock, Copy, Trash2, Cpu, Sparkles, Server, ShieldCheck, Bot } from 'lucide-react';
+import { Box, Play, Pause, Check, X, AlertTriangle, AlertCircle, SkipForward, Clock, Copy, Trash2, Cpu, Sparkles, Server, ShieldCheck, Bot, Filter, UserCheck, SquareTerminal, MessagesSquare, ListTree } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { Button } from '@/components/ui/index.js';
 import type { StageNodeData } from '@/stores/workflowBuilderStore.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
+import { useShallow } from 'zustand/react/shallow';
 import { useCanvasReadonly } from './canvasContext.js';
+import { KIND_META } from './builder/kindMeta.js';
 
 /** Color mapping for stage run statuses (used in runtime mode) */
 const statusColors: Record<string, { bg: string; border: string; icon: React.ReactNode }> = {
@@ -64,6 +66,10 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
   const selectNode = useWorkflowBuilderStore((s) => s.selectNode);
   const removeStage = useWorkflowBuilderStore((s) => s.removeStage);
   const duplicateStage = useWorkflowBuilderStore((s) => s.duplicateStage);
+  // Error-severity validator issues located on this stage (D-25).
+  const issueMessages = useWorkflowBuilderStore(
+    useShallow((s) => s.issues.filter((i) => i.stageKey === id && i.severity === 'error').map((i) => i.message)),
+  );
 
   // Determine status styling (runtime status if available, else design-time default)
   const runtimeStatus = (stage as StageNodeData['stage'] & { runtimeStatus?: string }).runtimeStatus;
@@ -91,20 +97,25 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
     selectNode(id);
   }, [id, selectNode]);
 
-  const promptCount = stage.prompts?.length ?? 0;
-  const hasTemplate = !!stage.templateId;
-  const promptLabel = (stage.promptType as string) === 'skills' ? 'skill' : (stage.promptType as string) === 'agents' ? 'agent' : 'prompt';
+  // Agent-only fields; a check stage shows its command instead (P05).
+  const agent = stage.kind === 'agent' ? stage : undefined;
+  const check = stage.kind === 'check' ? stage.check : undefined;
+  const wait = stage.kind === 'wait' ? stage.wait : undefined;
+  const sub = stage.kind === 'subworkflow' ? stage.subworkflow : undefined;
+  const KindIcon = KIND_META[stage.kind].icon;
+  // A body agent of a loop: does it continue one conversation across iterations?
+  const inLoop = agent !== undefined && stage.parentKey !== undefined;
+  const retry = stage.kind === 'agent' || stage.kind === 'check' ? stage.retry : undefined;
+  const promptCount = agent?.prompts.length ?? 0;
 
-  // Capability summary — surface what matters while building, not just the name
-  const model = stage.harnessConfigOverrides?.model;
-  const reasoningEffort = stage.harnessConfigOverrides?.reasoningEffort;
-  const skillCount = stage.skills?.length ?? 0;
-  const mcpCount = stage.harnessConfigOverrides?.mcpServers
-    ? Object.keys(stage.harnessConfigOverrides.mcpServers).length
-    : 0;
-  const validationCount = stage.resultValidation?.length ?? 0;
-  const agentName = stage.agentName;
-  const isStructured = stage.outputFormat === 'json';
+  // Capability summary, read from the fields the panel writes (D-30).
+  const model = agent?.session?.model;
+  const reasoningEffort = agent?.session?.reasoningEffort;
+  const skillCount = agent?.session?.agentOverrides?.addSkillIds?.length ?? 0;
+  const excludedMcpCount = agent?.session?.mcp?.excludedIds?.length ?? 0;
+  const validationCount = agent?.output.rules.length ?? 0;
+  const agentRef = agent?.session?.agentRef;
+  const isStructured = agent?.output.format === 'json';
 
   return (
     <div
@@ -126,6 +137,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
           : 'border-[var(--color-border)] hover:border-[var(--color-primary)]/60 hover:shadow-sm hover:shadow-black/5',
         statusStyle?.bg,
         statusStyle?.border,
+        issueMessages.length > 0 && !statusStyle && 'border-danger',
       )}
     >
       {/* Input Handle (left) — glows on hover */}
@@ -163,11 +175,24 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
           )}>
             {statusStyle ? (
               statusStyle.icon
+            ) : stage.kind !== 'agent' ? (
+              <KindIcon className="h-4 w-4 text-[var(--color-primary)]" />
             ) : (
               <Box className="h-4 w-4 text-[var(--color-primary)]" />
             )}
           </div>
           <span className="truncate text-sm font-semibold leading-tight">{label}</span>
+          {issueMessages.length > 0 && (
+            <Tooltip content={issueMessages.join(' · ')} side="top">
+              <span
+                className="inline-flex shrink-0 items-center gap-0.5 rounded-md bg-danger-muted px-1 py-0.5 text-[10px] font-semibold text-danger"
+                aria-label={`${issueMessages.length} validation ${issueMessages.length === 1 ? 'issue' : 'issues'}`}
+              >
+                <AlertCircle className="h-3 w-3" />
+                {issueMessages.length}
+              </span>
+            </Tooltip>
+          )}
         </div>
 
         {/* Action buttons (visible on hover) */}
@@ -207,18 +232,65 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             </span>
           </Tooltip>
         )}
-        {hasTemplate && (
-          <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-primary)]/10 px-1.5 py-0.5 text-[var(--color-primary)] font-medium">
-            {stage.templateId}
+        {check ? (
+          <Tooltip content={`Check: ${[check.command, ...check.args].join(' ')}`} side="top">
+            <span className="inline-flex max-w-[180px] items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 font-mono cursor-help">
+              <SquareTerminal className="h-3 w-3 shrink-0" />
+              <span className="truncate">{check.command}</span>
+            </span>
+          </Tooltip>
+        ) : wait ? (
+          <Tooltip
+            content={
+              wait.type === 'approval'
+                ? `Waits for an approval: ${wait.prompt.label}`
+                : wait.type === 'event'
+                  ? `Waits for the event ${wait.eventKey}`
+                  : `Waits ${Math.round(wait.durationMs / 60_000)} min`
+            }
+            side="top"
+          >
+            <span className="inline-flex max-w-[180px] items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <KindIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {wait.type === 'approval' ? 'approval' : wait.type === 'event' ? 'event' : `timer ${Math.round(wait.durationMs / 60_000)} min`}
+              </span>
+            </span>
+          </Tooltip>
+        ) : sub ? (
+          <Tooltip
+            content={`Runs the workflow ${'id' in sub.workflowRef ? `id ${sub.workflowRef.id}` : `'${sub.workflowRef.name}'`} (${sub.workspace === 'inherit' ? "in this run's mounts" : 'in its own workspace'})`}
+            side="top"
+          >
+            <span className="inline-flex max-w-[200px] items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <KindIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{'id' in sub.workflowRef ? sub.workflowRef.id : sub.workflowRef.name}</span>
+            </span>
+          </Tooltip>
+        ) : agent ? (
+          <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5">
+            {promptCount} prompt{promptCount !== 1 ? 's' : ''}
           </span>
-        )}
-        <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5">
-          {promptCount} {promptLabel}{promptCount !== 1 ? 's' : ''}
-        </span>
-        {agentName && (
-          <Tooltip content={`Delegated to agent: ${agentName}`} side="top">
+        ) : null}
+        {inLoop && agent && (
+          <Tooltip
+            content={
+              agent.sessionReuse === 'continue'
+                ? `Continues one conversation across iterations${agent.compactAfter ? `, compacted every ${agent.compactAfter}` : ''}`
+                : 'Starts a fresh conversation each iteration'
+            }
+            side="top"
+          >
             <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
-              <Bot className="h-3 w-3" />{agentName}
+              <MessagesSquare className="h-3 w-3" />
+              {agent.sessionReuse}
+            </span>
+          </Tooltip>
+        )}
+        {agentRef && (
+          <Tooltip content={`Driven by agent: ${agentRef}`} side="top">
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <Bot className="h-3 w-3" />{agentRef}
             </span>
           </Tooltip>
         )}
@@ -229,10 +301,24 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             </span>
           </Tooltip>
         )}
-        {mcpCount > 0 && (
-          <Tooltip content={`${mcpCount} MCP server${mcpCount !== 1 ? 's' : ''}`} side="top">
+        {excludedMcpCount > 0 && (
+          <Tooltip content={`${excludedMcpCount} MCP server${excludedMcpCount !== 1 ? 's' : ''} excluded`} side="top">
             <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
-              <Server className="h-3 w-3" />{mcpCount}
+              <Server className="h-3 w-3" />−{excludedMcpCount}
+            </span>
+          </Tooltip>
+        )}
+        {stage.guard && (
+          <Tooltip content={`Guard: ${stage.guard}`} side="top">
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <Filter className="h-3 w-3" />if
+            </span>
+          </Tooltip>
+        )}
+        {agent?.approval && (
+          <Tooltip content="Waits for approval before successors start" side="top">
+            <span className="inline-flex items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <UserCheck className="h-3 w-3" />
             </span>
           </Tooltip>
         )}
@@ -250,11 +336,11 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             </span>
           </Tooltip>
         )}
-        {stage.retryPolicy && (
-          <Tooltip content={`Retry policy: up to ${stage.retryPolicy.maxRetries} retries on failure`} side="top">
+        {retry && (
+          <Tooltip content={`Retry policy: up to ${retry.maxAttempts} attempts`} side="top">
             <span className="inline-flex items-center gap-1 rounded-md bg-amber-100 px-1.5 py-0.5 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400 cursor-help">
               <AlertTriangle className="h-3 w-3" />
-              ×{stage.retryPolicy.maxRetries}
+              ×{retry.maxAttempts}
             </span>
           </Tooltip>
         )}
@@ -265,6 +351,24 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
         <p className="mt-2 truncate text-xs text-[var(--color-muted-foreground)] leading-relaxed">
           {stage.description}
         </p>
+      )}
+
+      {/* Plan-then-execute (P08): the stages this planner adds at run time, as a dashed group. */}
+      {agent?.expands && (
+        <div
+          role="group"
+          aria-label={`Planned by ${label}`}
+          className="mt-2.5 rounded-md border-2 border-dashed border-[var(--color-border)] bg-[var(--color-primary)]/[0.03] px-2.5 py-2 text-[11px] text-[var(--color-muted-foreground)]"
+        >
+          <div className="flex items-center gap-1.5 font-medium text-[var(--color-card-foreground)]">
+            <ListTree className="h-3 w-3 shrink-0 text-[var(--color-primary)]" />
+            <span className="truncate">planned by {label}</span>
+          </div>
+          <div className="mt-0.5">
+            up to {agent.expands.maxStages} agent stage{agent.expands.maxStages !== 1 ? 's' : ''} at run time
+            {agent.expands.join === 'tolerate' ? ' · tolerates failures' : ''}
+          </div>
+        </div>
       )}
     </div>
   );

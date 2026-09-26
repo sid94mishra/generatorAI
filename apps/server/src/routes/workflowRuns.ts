@@ -1,5 +1,27 @@
 // ────────────────────────────────────────────────────────────────
-// WorkflowRun Routes (v2) — Run lifecycle + stage controls.
+// WorkflowRun Routes — runs, their instances and the commands API.
+//
+// A run starts through ONE route, `POST /workflow-invocations` (P04), and
+// so does a re-run of a terminal run (`target: {kind: 'fork'}`, G5 §3.8).
+// Every operator action on a run or one of its instances is ONE route,
+// `POST /:id/commands` (P03 WP-3.6/3.7, G5 §3.7): pause, resume, cancel,
+// retry, skip, fail and approve (which also answers a stage's in-turn
+// tool permission, question or plan review, and an approval wait), the
+// loop decisions and deliver_event (P05). `approve` goes through the
+// WorkflowApprovalService (a wait's form is validated; a sub-workflow
+// child's decision is answered through its parent). The pending decisions
+// are `GET /:id/pending-decisions` (the children's mirrored). The run's
+// workspace is read under `/:id/workspace*` (workflowRunWorkspace.ts).
+// `GET /` searches runs (status, trigger, dates, text, variables) and
+// `GET /stage-history` lists one stage's executions across runs (P07).
+//
+// A stage is a compact chat (P03b, `StageConversationService`):
+// `/:id/instances/:instanceId/messages` sends an operator message (queued
+// between turns, an amendment of a completed stage, a retry of a paused
+// one; 409 STAGE_BUSY mid-turn), `…/turn/cancel` stops the turn in flight,
+// `…/interactions/:interactionId/{permission|answer|plan}` answers an
+// in-turn gate in the chat's body shapes, `…/attachments/:artifactId`
+// serves an attached file.
 //
 // CLN-12 / STR-04 — the `GET /:id/stream` endpoint + its per-run ring
 // buffer, session-id routing map, and EventBus bridge were removed in
@@ -10,68 +32,188 @@
 // ────────────────────────────────────────────────────────────────
 
 import { orderStageRuns } from './workflowRunOrder.js';
+import { canBypassPermissions } from './permissionScope.js';
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
+import { z } from 'zod';
+import { RunCommandSchema, WORKFLOW_RUN_STATES, type RunCommand } from '@generatorai/workflow-spec';
+import { RunCommandRefusedError, type StageGateAnswer } from '@generatorai/core';
+import { AgentModeSchema, AnswerQuestionSchema, PlanDecisionSchema, ResolveToolPermissionSchema, type WorkflowRunStatus } from '@generatorai/shared';
+import type { WorkflowRunSearch } from '@generatorai/db';
+import multer from 'multer';
 import { validate } from '../middleware/validate.js';
-import { CreateWorkflowRunSchema, isStageReviewOutcome } from '@generatorai/shared';
-import type { StageReviewOutcome } from '@generatorai/shared';
+
+/** An operator message to a stage (the multipart fields, as strings). */
+const StageMessageSchema = z.object({
+  prompt: z.string().trim().min(1).max(100_000),
+  mode: AgentModeSchema.optional(),
+});
+
+const CancelStageTurnSchema = z.object({ force: z.boolean().optional() }).strict();
+
+/** A stage's plan review: the chat's decision minus the chat-only edited-content fields. */
+const StagePlanDecisionSchema = PlanDecisionSchema.pick({ approved: true, action: true, feedback: true });
+
+/** Files attached to a stage message: the chat's limits. */
+const stageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
+});
+
+/**
+ * Operator DECISIONS are run-time acts (`exec:agent`, the route policy): an
+ * approval, the loop decisions and delivering an event act on a run the
+ * caller may start (P05, DEVIATIONS). Every other command is a run-control
+ * act (`write:workflows`), so a paired phone decides without being able to
+ * edit or steer workflows.
+ */
+const DECISION_COMMANDS: ReadonlySet<RunCommand['command']> = new Set([
+  'approve',
+  'grant_iterations',
+  'raise_budget',
+  'continue_with_input',
+  'accept',
+  'accept_iteration',
+  'deliver_event',
+]);
+
+const RUN_LIST_MAX = 1000;
+const STAGE_HISTORY_DEFAULT = 20;
+const STAGE_HISTORY_MAX = 200;
+const VARIABLE_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+type Query = Record<string, unknown>;
+
+/** A query value as a list of strings (a repeated parameter arrives as an array). */
+function queryList(value: unknown): string[] {
+  const all = Array.isArray(value) ? value : value === undefined ? [] : [value];
+  return all.filter((v): v is string => typeof v === 'string');
+}
+
+/** A comma list parameter: its trimmed, non-empty entries. */
+function commaList(value: unknown): string[] {
+  return queryList(value).flatMap((v) => v.split(',')).map((s) => s.trim()).filter(Boolean);
+}
+
+/** `?limit`: undefined when absent, null when not an integer in [1, max]. */
+function boundedLimit(value: unknown, max: number): number | null | undefined {
+  if (value === undefined) return undefined;
+  const n = typeof value === 'string' ? Number(value) : NaN;
+  return Number.isInteger(n) && n >= 1 && n <= max ? n : null;
+}
+
+/** A time bound: epoch milliseconds or an ISO date. */
+function timeBound(value: unknown): Date | null | undefined {
+  if (value === undefined || value === '') return undefined;
+  if (typeof value !== 'string') return null;
+  const date = /^\d+$/.test(value) ? new Date(Number(value)) : new Date(value);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+/** The run list's query parameters as a repository search, or what is wrong with them. */
+function parseRunSearch(query: Query): { search: WorkflowRunSearch } | { error: string } {
+  const statuses = commaList(query['status']);
+  const invalid = statuses.filter((s) => !(WORKFLOW_RUN_STATES as readonly string[]).includes(s));
+  if (invalid.length > 0) return { error: `Invalid status values: ${invalid.join(', ')}` };
+  const from = timeBound(query['from']);
+  const to = timeBound(query['to']);
+  if (from === null || to === null) return { error: 'from and to are ISO dates or epoch milliseconds' };
+  const variables: Array<{ name: string; value: string }> = [];
+  for (const entry of queryList(query['var'])) {
+    const eq = entry.indexOf('=');
+    const name = eq > 0 ? entry.slice(0, eq).trim() : '';
+    if (!VARIABLE_NAME.test(name)) return { error: `var '${entry}' is not name=value` };
+    variables.push({ name, value: entry.slice(eq + 1) });
+  }
+  const limit = boundedLimit(query['limit'], RUN_LIST_MAX);
+  if (limit === null) return { error: `limit must be an integer from 1 to ${RUN_LIST_MAX}` };
+  const definitionId = typeof query['definitionId'] === 'string' ? query['definitionId'] : undefined;
+  const text = typeof query['q'] === 'string' ? query['q'].trim() : '';
+  const triggerKinds = commaList(query['trigger']);
+  return {
+    search: {
+      ...(definitionId ? { definitionId } : {}),
+      ...(statuses.length > 0 ? { statuses: statuses as WorkflowRunStatus[] } : {}),
+      ...(triggerKinds.length > 0 ? { triggerKinds } : {}),
+      ...(from ? { createdFrom: from } : {}),
+      ...(to ? { createdTo: to } : {}),
+      ...(text ? { text } : {}),
+      ...(variables.length > 0 ? { variables } : {}),
+      ...(limit !== undefined ? { limit } : {}),
+    },
+  };
+}
+
+/**
+ * A callback token lets its holder deliver the wait's event with no other
+ * credential: only a principal that may drive runs (`exec:agent`) reads it,
+ * not every `read:workflows` viewer (MAPWAIT-R13).
+ */
+function maySeeCallbacks(req: { principal?: { scopes?: readonly string[] } }): boolean {
+  const scopes = req.principal?.scopes;
+  return !scopes || scopes.includes('exec:agent');
+}
+
+function mayControlRuns(req: { principal?: { scopes?: readonly string[] } }): boolean {
+  const scopes = req.principal?.scopes;
+  return !scopes || scopes.includes('write:workflows');
+}
+
+/** Who sent a command (a wait's `output.by`). */
+function actorOf(req: { principal?: { id?: string; kind?: string } }): string | undefined {
+  return req.principal?.id ? `${req.principal.kind ?? 'principal'}:${req.principal.id}` : undefined;
+}
 
 export function createWorkflowRunRoutes(container: Container): Router {
   const router = Router();
-  const {
-    workflowRunService,
-    stageExecutionService,
-    stageRunRepo,
-    workflowRunRepo,
-    hitlService,
-    durableSleepService,
-    logger,
-  } = container;
+  const { workflowRunService, workflowApprovalService, stageConversationService, artifactService, stageRunRepo, workflowRunRepo, runDefinitionReader, logger } = container;
+
+  /** An event wait's callback on its row (P05 §4.3), for a principal that may see it. */
+  const withCallback =
+    (req: { principal?: { scopes?: readonly string[] } }) =>
+    <S extends Parameters<typeof workflowApprovalService.callbackFor>[0]>(s: S): S & { callback?: { url: string; token: string } } => {
+      const callback = maySeeCallbacks(req) ? workflowApprovalService.callbackFor(s) : undefined;
+      return callback ? { ...s, callback } : s;
+    };
 
   // ═══════════════════════════════════════════════════════════
   // WorkflowRun CRUD + Lifecycle
   // ═══════════════════════════════════════════════════════════
 
-  // POST /workflow-runs — Create a new workflow run
-  router.post('/', validate(CreateWorkflowRunSchema), async (req, res, next) => {
+  // GET /workflow-runs — List runs, oldest first. Every filter narrows:
+  // ?status and ?trigger (comma lists), ?definitionId, ?from and ?to (the
+  // creation time, ISO or epoch ms), ?q (part of the name, or the start of
+  // the id), ?var=name=value (repeatable) and ?limit (the newest N).
+  router.get('/', async (req, res, next) => {
     try {
-      const run = await workflowRunService.createRun(req.body);
-      logger.info(`[WorkflowRunRoutes] Created run ${run.id}`, {
-        requestId: req.requestId,
-      });
-      res.status(201).json(run);
+      const parsed = parseRunSearch(req.query);
+      if ('error' in parsed) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: parsed.error } });
+        return;
+      }
+      res.json(await workflowRunRepo.search(parsed.search));
     } catch (err) {
       next(err);
     }
   });
 
-  // GET /workflow-runs — List runs with optional ?status and ?definitionId filters
-  router.get('/', async (req, res, next) => {
+  // GET /workflow-runs/stage-history?definitionId&stageKey&limit — the newest
+  // executions of one stage across the definition's runs (every instance:
+  // loop iterations and map items included), each with its run.
+  router.get('/stage-history', async (req, res, next) => {
     try {
-      const statusFilter = req.query['status'] as string | undefined;
-      const definitionIdFilter = req.query['definitionId'] as string | undefined;
-
-      let runs;
-      if (definitionIdFilter) {
-        runs = await workflowRunRepo.getByDefinitionId(definitionIdFilter);
-      } else if (statusFilter) {
-        const validStatuses = ['created', 'starting', 'running', 'paused', 'cancelling', 'completed', 'failed', 'cancelled'];
-        const statuses = statusFilter.split(',').map((s) => s.trim());
-        const invalidStatuses = statuses.filter((s) => !validStatuses.includes(s));
-        if (invalidStatuses.length > 0) {
-          res.status(400).json({
-            error: { code: 'VALIDATION_ERROR', message: `Invalid status values: ${invalidStatuses.join(', ')}` },
-          });
-          return;
-        }
-        runs = await workflowRunRepo.getByStatus(statuses as Array<
-          'created' | 'starting' | 'running' | 'paused' | 'cancelling' | 'completed' | 'failed' | 'cancelled'
-        >);
-      } else {
-        runs = await workflowRunRepo.getAll();
+      const definitionId = typeof req.query['definitionId'] === 'string' ? req.query['definitionId'] : '';
+      const stageKey = typeof req.query['stageKey'] === 'string' ? req.query['stageKey'] : '';
+      if (!definitionId || !stageKey) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: 'definitionId and stageKey are required' } });
+        return;
       }
-
-      res.json(runs);
+      const limit = boundedLimit(req.query['limit'], STAGE_HISTORY_MAX);
+      if (limit === null) {
+        res.status(400).json({ error: { code: 'VALIDATION_ERROR', message: `limit must be an integer from 1 to ${STAGE_HISTORY_MAX}` } });
+        return;
+      }
+      res.json(await stageRunRepo.getStageHistory(definitionId, stageKey, limit ?? STAGE_HISTORY_DEFAULT));
     } catch (err) {
       next(err);
     }
@@ -82,133 +224,54 @@ export function createWorkflowRunRoutes(container: Container): Router {
     try {
       const runId = String(req.params['id']);
       const run = await workflowRunRepo.getById(runId);
-      const stageRuns = await stageRunRepo.getByRunId(runId);
-      res.json({ ...run, stageRuns: orderStageRuns(stageRuns, run.definitionSnapshot?.stages) });
+      const stageRuns = (await stageRunRepo.getByRunId(runId)).map(withCallback(req));
+      const graph = await runDefinitionReader.get(run.definitionVersionId);
+      res.json({ ...run, stageRuns: orderStageRuns(stageRuns, graph.stages.map((s) => s.key)) });
     } catch (err) {
       next(err);
     }
   });
 
-  // GET /workflow-runs/:id/scratchpad — Read the per-run scratchpad JSON file
-  router.get('/:id/scratchpad', async (req, res, next) => {
+  // POST /workflow-runs/:id/commands — every operator action (RunCommand).
+  // 202 when the engine accepted it; 404 unknown run or instance; 409 a state
+  // or version conflict; 400 an invalid command; 503 no engine in this process.
+  router.post('/:id/commands', validate(RunCommandSchema), async (req, res, next) => {
     try {
       const runId = String(req.params['id']);
-      const run = await workflowRunRepo.getById(runId);
-
-      // Resolve scratchpad path from run variables
-      const artifactsDir = run.variables?.['__artifactsDirectory'];
-      if (typeof artifactsDir !== 'string') {
-        res.json({ workflowRunId: runId, entries: [], lastUpdated: null });
+      const command = req.body as RunCommand;
+      // A run-level budget raise (no instance) widens the whole run: run control (LOOP-R10).
+      const decision = DECISION_COMMANDS.has(command.command) && !(command.command === 'raise_budget' && !command.instanceId);
+      if (!decision && !mayControlRuns(req)) {
+        res.status(403).json({
+          error: { code: 'FORBIDDEN', message: `The ${command.command} command requires the write:workflows scope.` },
+        });
         return;
       }
-
-      const { readFile } = await import('node:fs/promises');
-      const { join } = await import('node:path');
-      const scratchpadPath = join(artifactsDir, '..', 'scratchpad.json');
-
-      try {
-        const content = await readFile(scratchpadPath, 'utf-8');
-        res.json(JSON.parse(content));
-      } catch {
-        // File doesn't exist yet — return empty scratchpad
-        res.json({ workflowRunId: runId, entries: [], lastUpdated: null });
+      const actor = actorOf(req);
+      const r =
+        command.command === 'approve' && command.instanceId
+          ? await workflowApprovalService.respond(
+              runId,
+              command.instanceId,
+              {
+                outcome: command.outcome,
+                ...(command.feedback !== undefined ? { feedback: command.feedback } : {}),
+                ...(command.data !== undefined ? { data: command.data } : {}),
+                ...(command.expectedVersion !== undefined ? { expectedVersion: command.expectedVersion } : {}),
+              },
+              actor ? { actor } : {},
+            )
+          : await workflowRunService.command(runId, command, actor ? { actor } : {});
+      if (!r.ok) throw new RunCommandRefusedError(r);
+      logger.info(`[WorkflowRunRoutes] ${command.command} on run ${runId}${command.instanceId ? ` / ${command.instanceId}` : ''}`, {
+        requestId: req.requestId,
+      });
+      // A repeated deliver_event with the same key and data is a replay (200).
+      if (r.replayed) {
+        res.status(200).json({ runId, command: command.command, replayed: true });
+        return;
       }
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:id/start — Start a workflow run (202 Accepted)
-  router.post('/:id/start', async (req, res, next) => {
-    try {
-      const runId = String(req.params['id']);
-
-      // Fire and forget — run is started asynchronously.
-      // WorkflowRunService.startRun() handles workspace directory setup
-      // (via WorkspaceManager when available, legacy fallback otherwise).
-      workflowRunService.startRun(runId).catch((err) => {
-        logger.error(`[WorkflowRunRoutes] Run start failed for ${runId}`, {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-      logger.info(`[WorkflowRunRoutes] Started run ${runId}`, {
-        requestId: req.requestId,
-      });
-      res.status(202).json({ message: 'Workflow run start initiated', runId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:id/pause — Pause a running workflow
-  router.post('/:id/pause', async (req, res, next) => {
-    try {
-      const runId = String(req.params['id']);
-      await workflowRunService.pauseRun(runId);
-      logger.info(`[WorkflowRunRoutes] Paused run ${runId}`, {
-        requestId: req.requestId,
-      });
-      res.json({ message: 'Workflow run paused', runId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:id/resume — Resume a paused workflow
-  router.post('/:id/resume', async (req, res, next) => {
-    try {
-      const runId = String(req.params['id']);
-      await workflowRunService.resumeRun(runId);
-      logger.info(`[WorkflowRunRoutes] Resumed run ${runId}`, {
-        requestId: req.requestId,
-      });
-      res.json({ message: 'Workflow run resumed', runId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:id/retry — User-initiated retry of a failed run (2.4)
-  // Walks the state machine via `user:retry` (failed → created), resets
-  // failed stages, then fires startRun asynchronously. Returns 202.
-  router.post('/:id/retry', async (req, res, next) => {
-    try {
-      const runId = String(req.params['id']);
-      // `retryRun` creates a NEW run carrying `ancestorRunId` (W23 lineage) —
-      // the ancestor stays terminal. Starting `runId` here started the OLD,
-      // already-failed run (a no-op) and left the new one parked in `created`
-      // forever, so the button appeared to do nothing and every press
-      // orphaned another run.
-      const retried = await workflowRunService.retryRun(runId);
-      // Fire-and-forget the start so the retry endpoint returns quickly.
-      workflowRunService.startRun(retried.id).catch((err) => {
-        logger.error(`[WorkflowRunRoutes] Retry-start failed for ${retried.id}`, {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      });
-      logger.info(`[WorkflowRunRoutes] Retried run ${runId} as ${retried.id}`, {
-        requestId: req.requestId,
-      });
-      res.status(202).json({
-        message: 'Workflow run retry initiated',
-        runId: retried.id,
-        ancestorRunId: runId,
-        status: retried.status,
-      });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:id/cancel — Cancel a running workflow
-  router.post('/:id/cancel', async (req, res, next) => {
-    try {
-      const runId = String(req.params['id']);
-      await workflowRunService.cancelRun(runId);
-      logger.info(`[WorkflowRunRoutes] Cancelled run ${runId}`, {
-        requestId: req.requestId,
-      });
-      res.json({ message: 'Workflow run cancelled', runId });
+      res.status(202).json({ runId, command: command.command });
     } catch (err) {
       next(err);
     }
@@ -233,151 +296,175 @@ export function createWorkflowRunRoutes(container: Container): Router {
   // Stage Run Queries + Controls
   // ═══════════════════════════════════════════════════════════
 
+  // GET /workflow-runs/:id/pending-decisions — every decision the run waits
+  // on (completion reviews, in-turn gates, parked loops, approval and event
+  // waits), its sub-workflow children's mirrored with the chain they came
+  // through (P05 §4.2). Answer them with the commands route of THIS run.
+  router.get('/:id/pending-decisions', async (req, res, next) => {
+    try {
+      const runId = String(req.params['id']);
+      await workflowRunRepo.getById(runId);
+      const pending = await workflowApprovalService.listPending(runId);
+      res.json(maySeeCallbacks(req) ? pending : pending.map(({ callback: _callback, ...d }) => d));
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // GET /workflow-runs/:id/stages — List stage runs for a workflow run
   router.get('/:id/stages', async (req, res, next) => {
     try {
       const runId = String(req.params['id']);
-      const stages = await stageRunRepo.getByRunId(runId);
+      const stages = (await stageRunRepo.getByRunId(runId)).map(withCallback(req));
       res.json(stages);
     } catch (err) {
       next(err);
     }
   });
 
-  // POST /workflow-runs/:runId/stages/:stageId/pause — Pause a stage
-  router.post('/:runId/stages/:stageId/pause', async (req, res, next) => {
+  // GET /workflow-runs/:id/instances/:instanceId/iterations — a loop's
+  // finished iterations (carry, exit-rule values, streaks, signals, score,
+  // checkpoint, usage), oldest first (P05).
+  router.get('/:id/instances/:instanceId/iterations', async (req, res, next) => {
     try {
-      const stageId = String(req.params['stageId']);
-      await stageExecutionService.pauseStage(stageId);
-      logger.info(`[WorkflowRunRoutes] Paused stage ${stageId}`, {
-        requestId: req.requestId,
-      });
-      res.json({ message: 'Stage paused', stageId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:runId/stages/:stageId/resume — Resume a stage
-  router.post('/:runId/stages/:stageId/resume', async (req, res, next) => {
-    try {
-      const runId = String(req.params['runId']);
-      const stageId = String(req.params['stageId']);
-      const run = await workflowRunRepo.getById(runId);
-
-      // Resume fires execution asynchronously
-      stageExecutionService
-        .resumeStage(stageId, runId, run.sessionMode)
-        .then(() => workflowRunService.onStageCompleted(runId, stageId))
-        .catch((err) => workflowRunService.onStageFailed(runId, stageId, err));
-
-      logger.info(`[WorkflowRunRoutes] Resumed stage ${stageId}`, {
-        requestId: req.requestId,
-      });
-      res.status(202).json({ message: 'Stage resume initiated', stageId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:runId/stages/:stageId/wake — Wake a sleeping stage now
-  //
-  // The stage timeline has shown a "Wake now" button beside every sleeping
-  // stage for a while with nothing behind it (review 6.x / D14). This is the
-  // missing half: it takes the same atomic claim + resume path the timed
-  // sweeper takes, so an early wake and an expiry are indistinguishable
-  // downstream.
-  router.post('/:runId/stages/:stageId/wake', async (req, res, next) => {
-    try {
-      const runId = String(req.params['runId']);
-      const stageId = String(req.params['stageId']);
-
-      // The stage must belong to the run in the path. Without this, any run
-      // id would serve as a cover for waking any stage in the system.
-      //
-      // `getById` rejects on an unknown id rather than resolving undefined,
-      // so the lookup is guarded and both shapes end at the same 404.
-      const stage = await stageRunRepo.getById(stageId).catch(() => undefined);
-      if (!stage || stage.workflowRunId !== runId) {
-        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Stage run not found' } });
+      const runId = String(req.params['id']);
+      const inst = await stageRunRepo.getById(String(req.params['instanceId']));
+      if (inst.workflowRunId !== runId) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `No instance ${inst.id} in run ${runId}` } });
         return;
       }
-
-      const outcome = await durableSleepService.wakeNow(stageId);
-      if (outcome === 'not_found') {
-        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Stage run not found' } });
-        return;
-      }
-      if (outcome === 'not_sleeping') {
-        // 409, not 404: the row exists, it just is not parked. A double-click
-        // on the button lands here and must not read as a broken link.
-        res.status(409).json({
-          error: { code: 'STAGE_NOT_SLEEPING', message: 'Stage is not sleeping' },
-        });
-        return;
-      }
-
-      logger.info(`[WorkflowRunRoutes] Woke stage ${stageId} early`, {
-        requestId: req.requestId,
-      });
-      res.status(202).json({ message: 'Stage woken', stageId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:runId/stages/:stageId/retry — Retry a failed stage
-  router.post('/:runId/stages/:stageId/retry', async (req, res, next) => {
-    try {
-      const runId = String(req.params['runId']);
-      const stageId = String(req.params['stageId']);
-      const run = await workflowRunRepo.getById(runId);
-
-      // Reset stage status — use resetForRetry to clear error/timestamps via SQL NULL
-      await stageRunRepo.resetForRetry(stageId);
-      await stageRunRepo.incrementRetryCount(stageId);
-
-      const stageRun = await stageRunRepo.getById(stageId);
-
-      // Fire and forget — stage execution is async
-      stageExecutionService
-        .executeStage(stageRun, runId, run.sessionMode)
-        .then(() => workflowRunService.onStageCompleted(runId, stageId))
-        .catch((err) => workflowRunService.onStageFailed(runId, stageId, err));
-
-      logger.info(`[WorkflowRunRoutes] Retrying stage ${stageId}`, {
-        requestId: req.requestId,
-      });
-      res.status(202).json({ message: 'Stage retry initiated', stageId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:runId/stages/:stageId/cancel — Cancel a stage
-  router.post('/:runId/stages/:stageId/cancel', async (req, res, next) => {
-    try {
-      const stageId = String(req.params['stageId']);
-      await stageExecutionService.cancelStage(stageId);
-      logger.info(`[WorkflowRunRoutes] Cancelled stage ${stageId}`, {
-        requestId: req.requestId,
-      });
-      res.json({ message: 'Stage cancelled', stageId });
+      res.json(await stageRunRepo.getLoopIterations(inst.id));
     } catch (err) {
       next(err);
     }
   });
 
   // ═══════════════════════════════════════════════════════════
-  // HITL — Human-in-the-Loop (HITL-04)
-  //
-  // Every endpoint below is opt-in. A newly-created run has
-  // `permission_mode = 'bypassPermissions'` which means no stage will
-  // ever enter `awaiting_input` unless either (a) the operator flips
-  // the mode via `PATCH /:runId/permission-mode`, or (b) a stage body
-  // calls `hitl.interrupt(...)` explicitly. The surface is always
-  // mounted so the UI/CLI can render mode selectors + pending queues
-  // uniformly — it just returns empty lists until someone opts in.
+  // The stage conversation (P03b): a stage is a compact chat.
+  // ═══════════════════════════════════════════════════════════
+
+  // POST /workflow-runs/:id/instances/:instanceId/messages — an operator
+  // message (multipart: `prompt`, `attachments[]`, `mode`; or JSON). 202 with
+  // how it was taken: `queued` (the next turn), `amending` (a completed stage,
+  // PD-4) or `retrying` (a paused stage). 409 STAGE_BUSY mid-turn (PD-3),
+  // INTERACTION_PENDING on an open gate.
+  router.post('/:id/instances/:instanceId/messages', stageUpload.array('attachments', 10), async (req, res, next) => {
+    try {
+      const runId = String(req.params['id']);
+      const instanceId = String(req.params['instanceId']);
+      const parsed = StageMessageSchema.safeParse({
+        prompt: req.body?.['prompt'],
+        ...(typeof req.body?.['mode'] === 'string' && req.body['mode'] ? { mode: req.body['mode'] } : {}),
+      });
+      if (!parsed.success) {
+        res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: 'Message validation failed', fields: parsed.error.flatten().fieldErrors },
+        });
+        return;
+      }
+      const files = (req.files ?? []) as Express.Multer.File[];
+      const attachmentIds: string[] = [];
+      if (files.length > 0) {
+        // Refused before anything is stored: a 409 leaves no orphan attachments (CONVINV-R19).
+        const sessionId = stageConversationService.assertSendable(runId, instanceId);
+        for (const file of files) {
+          const artifact = await artifactService.createArtifact({
+            sessionId,
+            workflowRunId: runId,
+            stageRunId: instanceId,
+            name: file.originalname,
+            mimeType: file.mimetype,
+            content: file.buffer,
+          });
+          attachmentIds.push(artifact.id);
+        }
+      }
+      const r = await stageConversationService.send(runId, instanceId, {
+        prompt: parsed.data.prompt,
+        ...(attachmentIds.length ? { attachmentIds } : {}),
+        ...(parsed.data.mode ? { agentMode: parsed.data.mode } : {}),
+      });
+      logger.info(`[WorkflowRunRoutes] Message to ${runId} / ${instanceId}: ${r.outcome}`, { requestId: req.requestId });
+      res.status(202).json({ runId, instanceId, outcome: r.outcome, attachmentIds });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workflow-runs/:id/instances/:instanceId/turn/cancel {force?} —
+  // stop the turn in flight; the stage carries on (a stage cancel is the
+  // `cancel` command). 409 NO_ACTIVE_TURN when nothing is in flight.
+  router.post('/:id/instances/:instanceId/turn/cancel', validate(CancelStageTurnSchema), async (req, res, next) => {
+    try {
+      const runId = String(req.params['id']);
+      const instanceId = String(req.params['instanceId']);
+      const force = (req.body as z.infer<typeof CancelStageTurnSchema>).force === true;
+      stageConversationService.cancelTurn(runId, instanceId, { force });
+      logger.info(`[WorkflowRunRoutes] Turn stopped on ${runId} / ${instanceId}`, { requestId: req.requestId, force });
+      res.json({ status: 'cancelled', force });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workflow-runs/:id/instances/:instanceId/interactions/:interactionId/{permission|answer|plan}
+  // — answer the stage's in-turn gate, in the chat's body shapes. The route
+  // policy admits these on `exec:agent` (answering the agent), like `approve`.
+  const gateRoute = <S extends z.ZodTypeAny>(verb: string, schema: S, toAnswer: (body: z.infer<S>) => StageGateAnswer) =>
+    router.post(`/:id/instances/:instanceId/interactions/:interactionId/${verb}`, validate(schema), async (req, res, next) => {
+      try {
+        const runId = String(req.params['id']);
+        const instanceId = String(req.params['instanceId']);
+        const interactionId = String(req.params['interactionId']);
+        await stageConversationService.resolveInteraction(runId, instanceId, interactionId, toAnswer(req.body as z.infer<S>));
+        logger.info(`[WorkflowRunRoutes] ${verb} answered on ${runId} / ${instanceId}`, { requestId: req.requestId });
+        res.status(202).json({ runId, instanceId, interactionId });
+      } catch (err) {
+        next(err);
+      }
+    });
+  gateRoute('permission', ResolveToolPermissionSchema, (b) => ({ kind: 'permission', behavior: b.behavior, ...(b.message ? { message: b.message } : {}) }));
+  gateRoute('answer', AnswerQuestionSchema, (b) => ({
+    kind: 'answer',
+    answers: b.answers,
+    ...(b.freeformResponse ? { freeformResponse: b.freeformResponse } : {}),
+  }));
+  gateRoute('plan', StagePlanDecisionSchema, (b) => ({
+    kind: 'plan',
+    approved: b.approved,
+    ...(b.action ? { action: b.action } : {}),
+    ...(b.feedback ? { feedback: b.feedback } : {}),
+  }));
+
+  // GET /workflow-runs/:id/instances/:instanceId/attachments/:artifactId —
+  // the bytes of a file an operator attached to a stage message. Addressed by
+  // artifact id, scoped to the instance (a mismatch is a 404, not a leak).
+  router.get('/:id/instances/:instanceId/attachments/:artifactId', async (req, res, next) => {
+    try {
+      const runId = String(req.params['id']);
+      const instanceId = String(req.params['instanceId']);
+      const artifact = await artifactService.getArtifact(String(req.params['artifactId']));
+      if (!artifact || artifact.stageRunId !== instanceId || artifact.workflowRunId !== runId) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attachment not found' } });
+        return;
+      }
+      const content = await artifactService.readArtifactContent(artifact.id);
+      const mime = artifact.mimeType || 'application/octet-stream';
+      const inline = /^image\/|^text\/plain$|^application\/pdf$/.test(mime);
+      const safeName = encodeURIComponent(artifact.name).replace(/['()]/g, escape);
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Length', String(content.length));
+      res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${safeName}`);
+      res.end(content);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // Permission mode (HITL-04): the run row's own layer.
   // ═══════════════════════════════════════════════════════════
 
   // GET /workflow-runs/:id/permission-mode — Read active mode
@@ -406,156 +493,22 @@ export function createWorkflowRunRoutes(container: Container): Router {
         });
         return;
       }
+      // Raising a run to bypass turns its approval gate off for every later
+      // tool call: an administrative act, like a chat's (review 5.2).
+      if (mode === 'bypassPermissions' && !canBypassPermissions(req)) {
+        res.status(403).json({
+          error: {
+            code: 'FORBIDDEN',
+            message: 'Turning off tool approvals requires the admin:settings scope.',
+          },
+        });
+        return;
+      }
       await workflowRunService.setPermissionMode(runId, mode);
       logger.info(`[WorkflowRunRoutes] Permission mode for run ${runId} set to ${mode}`, {
         requestId: req.requestId,
       });
       res.json({ runId, mode });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // GET /workflow-runs/:id/pending-interrupts — List stages awaiting input
-  router.get('/:id/pending-interrupts', async (req, res, next) => {
-    try {
-      const runId = String(req.params['id']);
-      const pending = await hitlService.listPending(runId);
-      res.json(pending);
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:runId/stages/:stageId/interrupt — Force a stage
-  // into `awaiting_input` for manual approval testing.
-  //
-  // The default `bypassPermissions` mode never auto-blocks tool calls, so
-  // this endpoint exists so operators (and E2E tests) can drive a stage
-  // through the HITL approve/reject loop without writing custom hooks.
-  // The interrupt fires fire-and-forget — we don't await the resolution
-  // promise here; the row is flipped to `awaiting_input` and the approver
-  // later resolves it via POST /stages/:stageId/approve (HITL approval).
-  //
-  // Body: { data?: unknown, prompt?: string }
-  router.post('/:runId/stages/:stageId/interrupt', async (req, res, next) => {
-    try {
-      const runId = String(req.params['runId']);
-      const stageId = String(req.params['stageId']);
-      const body = (req.body ?? {}) as { data?: unknown; prompt?: unknown };
-      const interruptData = body.data ?? { type: 'manual', source: 'api' };
-      const prompt = typeof body.prompt === 'string' ? body.prompt : undefined;
-      // Fire-and-forget — interrupt() returns the resolution promise that
-      // would be awaited by the stage body in a fully wired flow.
-      void hitlService
-        .interrupt(stageId, runId, interruptData, prompt ? { prompt } : undefined)
-        .catch((err) => {
-          logger.warn(`[WorkflowRunRoutes] HITL interrupt failed for ${stageId}`, {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-      logger.info(`[WorkflowRunRoutes] Triggered HITL interrupt on stage ${stageId}`, {
-        requestId: req.requestId,
-      });
-      res.status(202).json({ message: 'Stage interrupted', stageId, runId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:runId/stages/:stageId/approve — Approver resume (HITL)
-  //
-  // Renamed from /resume to avoid colliding with the pause/resume route
-  // at /workflow-runs/:runId/stages/:stageId/resume (Express picks the
-  // first matching route). The /approve verb also reads more naturally
-  // for HITL approval flows.
-  //
-  // Body: { approved: boolean, value?: unknown, reason?: string }
-  // Response: 202 on success, 409 if the stage wasn't awaiting_input
-  // (already resumed by another approver / cancelled / never interrupted).
-  router.post('/:runId/stages/:stageId/approve', async (req, res, next) => {
-    try {
-      const runId = String(req.params['runId']);
-      const stageId = String(req.params['stageId']);
-      const body = (req.body ?? {}) as {
-        approved?: unknown;
-        outcome?: unknown;
-        value?: unknown;
-        reason?: unknown;
-        followUpPrompt?: unknown;
-      };
-      // Tri-state verdict. `outcome` wins when present; otherwise the legacy
-      // boolean is mapped (true → approved, false → changes_requested).
-      // `rejected` is only reachable via `outcome` because it terminates the
-      // run — it must never be the fallback meaning of "not approved".
-      const outcome: StageReviewOutcome = isStageReviewOutcome(body.outcome)
-        ? body.outcome
-        : body.approved === false
-          ? 'changes_requested'
-          : 'approved';
-      const approved = outcome === 'approved';
-      // Optional free-text follow-up the operator wants the stage to act on as
-      // the HITL response (e.g. "also handle the empty-input case"). Stored as
-      // the resume value AND injected into the stage's live conversation below.
-      const followUpPrompt =
-        typeof body.followUpPrompt === 'string' && body.followUpPrompt.trim().length > 0
-          ? body.followUpPrompt.trim()
-          : undefined;
-      // Detect the stage-completion review flow — for that kind, the stage
-      // executor is already awaiting the resume resolution in its own loop
-      // (it sends the feedback as a follow-up prompt itself and re-parks).
-      // Calling sendStageFollowUp here would race with that loop, so we
-      // short-circuit and route the feedback through the resolution value
-      // only.
-      let isCompletionReview = false;
-      try {
-        const stageRow = await hitlService
-          .listPending(runId)
-          .then((rows) => rows.find((r) => r.id === stageId));
-        const kind = (stageRow?.interruptData as { kind?: unknown } | undefined)?.kind;
-        if (kind === 'stage_completion_review') isCompletionReview = true;
-      } catch {
-        // Non-fatal — falls through to the legacy behaviour.
-      }
-      // If a follow-up is queued (legacy HITL flow only), reserve the stage
-      // BEFORE resuming HITL so the natural per-stage session release is
-      // skipped and the follow-up can be injected on the still-live
-      // conversation.
-      if (!isCompletionReview && approved && followUpPrompt) {
-        stageExecutionService.markFollowUpPending(stageId);
-      }
-      const result = await hitlService.resume(stageId, runId, {
-        approved,
-        outcome,
-        value: followUpPrompt ? { followUpPrompt } : body.value,
-        reason: typeof body.reason === 'string' ? body.reason : undefined,
-      });
-      if (!result.ok) {
-        res.status(409).json({
-          error: {
-            code: 'STAGE_NOT_AWAITING_INPUT',
-            message: result.reason ?? 'Stage was not awaiting_input',
-          },
-        });
-        return;
-      }
-      // Legacy HITL flow only: on approval with a follow-up, inject it into
-      // the stage's session and stream the agent's response. The
-      // stage-completion review flow handles this itself inside
-      // StageExecutionService.executeStage, so we skip it here.
-      if (!isCompletionReview && approved && followUpPrompt) {
-        void stageExecutionService
-          .sendStageFollowUp(stageId, runId, followUpPrompt)
-          .catch((err: unknown) => {
-            logger.warn(`[WorkflowRunRoutes] HITL follow-up injection failed for ${stageId}`, {
-              error: err instanceof Error ? err.message : String(err),
-            });
-          });
-      }
-      logger.info(`[WorkflowRunRoutes] Resumed stage ${stageId} (outcome=${outcome}, followUp=${!!followUpPrompt})`, {
-        requestId: req.requestId,
-      });
-      res.status(202).json({ message: 'Stage resumed', stageId, outcome, approved, followUp: !!followUpPrompt });
     } catch (err) {
       next(err);
     }

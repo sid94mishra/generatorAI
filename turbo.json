@@ -24,7 +24,10 @@
       "persistent": true
     },
     "test": {
-      "dependsOn": [],
+      "dependsOn": ["//#test:scripts"],
+      "cache": false
+    },
+    "//#test:scripts": {
       "cache": false
     },
     "lint": {

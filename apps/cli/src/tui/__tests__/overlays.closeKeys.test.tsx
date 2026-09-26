@@ -60,7 +60,7 @@ const validation: OverlayKind = {
   kind: 'validation',
   title: 'Validation',
   valid: false,
-  issues: [{ severity: 'error', code: 'X', message: 'broken', stageIds: [] }],
+  issues: [{ severity: 'error', code: 'X', path: '/stages/0', message: 'broken' }],
   onNavigate: () => undefined,
 };
 

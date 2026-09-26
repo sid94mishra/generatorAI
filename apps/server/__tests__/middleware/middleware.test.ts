@@ -47,10 +47,10 @@ describe('Middleware Integration', () => {
 
   describe('Error Handler Middleware', () => {
     it('should map InvalidTransitionError to 409', async () => {
-      (container.workflowRunService.pauseRun as ReturnType<typeof import('vitest').vi.fn>)
-        .mockRejectedValue(new InvalidTransitionError('Cannot pause from current state'));
+      (container.workflowRunService.deleteRun as ReturnType<typeof import('vitest').vi.fn>)
+        .mockRejectedValue(new InvalidTransitionError('Cannot delete from current state'));
 
-      const res = await request(app).post('/api/workflow-runs/run-1/pause');
+      const res = await request(app).delete('/api/workflow-runs/run-1');
 
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('INVALID_TRANSITION');
@@ -58,7 +58,7 @@ describe('Middleware Integration', () => {
     });
 
     it('should map ValidationError to 400', async () => {
-      (container.workflowDefinitionService.createDefinition as ReturnType<typeof import('vitest').vi.fn>)
+      (container.workflowDefinitionService.create as ReturnType<typeof import('vitest').vi.fn>)
         .mockRejectedValue(new ValidationError('Invalid config', { name: ['too short'] }));
 
       const res = await request(app)
@@ -70,7 +70,7 @@ describe('Middleware Integration', () => {
     });
 
     it('should map unknown errors to 502', async () => {
-      (container.workflowDefinitionService.listDefinitions as ReturnType<typeof import('vitest').vi.fn>)
+      (container.workflowDefinitionService.list as ReturnType<typeof import('vitest').vi.fn>)
         .mockRejectedValue(new Error('Something unexpected'));
 
       const res = await request(app).get('/api/workflow-definitions');

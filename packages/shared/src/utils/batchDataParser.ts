@@ -215,57 +215,6 @@ function detectColumns(rows: Record<string, unknown>[]): string[] {
   return columns;
 }
 
-/**
- * Resolve iteration variables for a single batch row.
- * Merges: base variables + mapped row fields + iteration metadata.
- * Validates variable names to prevent prototype pollution.
- */
-export function resolveIterationVariables(
-  row: Record<string, unknown>,
-  columnMapping: Record<string, string> | undefined,
-  baseVariables: Record<string, unknown>,
-  iterationIndex: number,
-  totalIterations: number,
-): Record<string, unknown> {
-  const resolvedRow: Record<string, unknown> = Object.create(null);
-
-  // Apply column mapping: map column names to variable names
-  for (const [col, val] of Object.entries(row)) {
-    const varName = columnMapping?.[col] ?? col;
-    // Skip reserved/dangerous property names
-    if (RESERVED_NAMES.has(varName)) continue;
-    resolvedRow[varName] = val;
-  }
-
-  return {
-    ...baseVariables,
-    ...resolvedRow,
-    __iteration_index: iterationIndex,
-    __iteration_total: totalIterations,
-  };
-}
-
-/**
- * Build iteration label — a human-readable summary of the row for UI display.
- * Uses the first non-internal column value, or falls back to "Iteration N".
- */
-export function buildIterationLabel(
-  row: Record<string, unknown>,
-  iterationIndex: number,
-): string {
-  const displayKeys = Object.keys(row).filter((k) => !k.startsWith('_'));
-  if (displayKeys.length === 0) return `Iteration ${iterationIndex + 1}`;
-
-  const firstKey = displayKeys[0]!;
-  const firstVal = row[firstKey];
-  const label = String(firstVal ?? '').slice(0, 80);
-  if (displayKeys.length === 1) return label || `Iteration ${iterationIndex + 1}`;
-
-  return `${firstKey}=${label}`;
-}
-
-// ── CSV Helpers ──
-
 /** Split CSV text into logical lines (handling multi-line quoted fields) */
 function splitCSVLines(text: string): string[] {
   const lines: string[] = [];

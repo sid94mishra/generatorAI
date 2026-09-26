@@ -71,6 +71,8 @@ describe('route policy — resolution', () => {
     // the public policy and let an unauthenticated caller list/create them.
     expect(resolveRoutePolicy('/automations').public).toBeFalsy();
     expect(resolveRoutePolicy('/automations/a1').public).toBeFalsy();
+    // The v1 /webhooks routes are gone; no public entry may survive them.
+    expect(resolveRoutePolicy('/webhooks/github').public).toBeFalsy();
     expect(allowed([], '/automations', 'GET')).toBe(false);
     expect(allowed([], '/automations', 'POST')).toBe(false);
   });
@@ -111,22 +113,19 @@ describe('route policy — mobile device authority', () => {
     // RUN-TIME authority. Requiring `write:workflows` here would conflate it
     // with the DESIGN-TIME right to edit a workflow, and would lock out the
     // one client the approval flow exists for.
-    expect(allowed(mobile, '/workflow-runs/r1/stages/s1/approve', 'POST')).toBe(true);
-    expect(allowed(mobile, '/workflow-runs/r1/stages/s1/interrupt', 'POST')).toBe(true);
+    // The commands route admits `exec:agent`; the route itself refuses
+    // every command other than `approve` without `write:workflows`.
+    expect(allowed(mobile, '/workflow-runs/r1/commands', 'POST')).toBe(true);
   });
 
   it('still cannot control the run itself', () => {
     // The narrowing above is surgical: operating a run is a different act
-    // from answering it, and remains behind the full write grant.
+    // from answering it, and remains behind the full write grant (the
+    // non-approve commands are refused by the commands route itself).
     for (const path of [
       '/workflow-runs',
       '/workflow-runs/r1/start',
-      '/workflow-runs/r1/pause',
-      '/workflow-runs/r1/resume',
-      '/workflow-runs/r1/cancel',
-      '/workflow-runs/r1/retry',
-      '/workflow-runs/r1/stages/s1/cancel',
-      '/workflow-runs/r1/stages/s1/retry',
+      '/workflow-runs/r1/fork',
     ]) {
       expect(allowed(mobile, path, 'POST'), `should NOT be able to POST ${path}`).toBe(false);
     }
@@ -231,13 +230,15 @@ describe('route policy — other principals keep their authority', () => {
     expect(allowed(DEFAULT_DEVICE_SCOPES, '/workspaces/w1/terminals', 'POST')).toBe(false);
   });
 
-  it('running a workflow script needs exec:agent, not just write:workflows', () => {
-    // POST /workflow-scripts/:id/run materialises a definition and STARTS a
-    // run, so it must match `/workflow-runs` (write:workflows + exec:agent).
+  it('starting a run is one route that needs exec:agent + read:workflows (PD-6, W-60)', () => {
+    // Every run (a definition, a script, a fork) starts through
+    // POST /workflow-invocations; the service asks for more when the body does.
     const designOnly = ['read:workflows', 'write:workflows'];
-    expect(allowed(designOnly, '/workflow-scripts/s1/run', 'POST')).toBe(false);
-    expect(allowed([...designOnly, 'exec:agent'], '/workflow-scripts/s1/run', 'POST')).toBe(true);
-    expect(resolveRoutePolicy('/workflow-scripts/s1/run').write).toEqual(['write:workflows', 'exec:agent']);
+    expect(allowed(designOnly, '/workflow-invocations', 'POST')).toBe(false);
+    expect(allowed(['read:workflows', 'exec:agent'], '/workflow-invocations', 'POST')).toBe(true);
+    expect(resolveRoutePolicy('/workflow-invocations/plan').write).toEqual(['exec:agent', 'read:workflows']);
+    // A default paired phone can start a run.
+    expect(allowed(DEFAULT_MOBILE_SCOPES, '/workflow-invocations', 'POST')).toBe(true);
 
     // Authoring and reading scripts are unchanged.
     expect(allowed(designOnly, '/workflow-scripts/s1/materialize', 'POST')).toBe(true);
@@ -248,7 +249,7 @@ describe('route policy — other principals keep their authority', () => {
 
   it('the HITL narrowing did not widen anything for a read-only principal', () => {
     const readOnly = ['read:workflows'];
-    expect(allowed(readOnly, '/workflow-runs/r1/stages/s1/approve', 'POST')).toBe(false);
-    expect(allowed(readOnly, '/workflow-runs/r1/stages/s1/approve', 'GET')).toBe(true);
+    expect(allowed(readOnly, '/workflow-runs/r1/commands', 'POST')).toBe(false);
+    expect(allowed(readOnly, '/workflow-runs/r1/commands', 'GET')).toBe(true);
   });
 });

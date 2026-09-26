@@ -1,16 +1,14 @@
 // @generatorai/core services exports
-export { SessionService } from './SessionService.js';
 export { ArtifactService } from './ArtifactService.js';
-export { WebhookService } from './WebhookService.js';
-export type { WebhookConfig } from './WebhookService.js';
 export { HookExecutor } from './HookExecutor.js';
 export type { HookContext, HookDryRunPlan, HookDryRunEntry } from './HookExecutor.js';
 export { HookInterceptor } from './HookInterceptor.js';
+export { SessionHookRegistry, sessionHookBridgeFactory } from './SessionHookRegistry.js';
+export type { SessionHookHandler } from './SessionHookRegistry.js';
 export type { SDKHookContext, StageHookContext } from './HookInterceptor.js';
-export { ConfigResolver } from './ConfigResolver.js';
-export type { ResolvedWorkflowConfig, SessionWorkflowOverrides, ResolvedStageConfig } from './ConfigResolver.js';
-export { TemplateRegistry } from './TemplateRegistry.js';
-export { StartupRecoveryService } from './StartupRecoveryService.js';
+export { TemplateRegistry, TemplateLoadError, TEMPLATE_FILE_SUFFIX } from './TemplateRegistry.js';
+export { runBootHousekeeping } from './BootHousekeeping.js';
+export type { BootHousekeepingDeps, BootHousekeepingSummary, ISandboxCleaner } from './BootHousekeeping.js';
 export { InterruptedTurnRecoveryService, INTERRUPTED_BY_RESTART_CODE } from './InterruptedTurnRecoveryService.js';
 export { OrphanProcessReaper, selectOrphans } from './OrphanProcessReaper.js';
 export type { OsProcess, OrphanProcessReaperOptions, ReapSummary } from './OrphanProcessReaper.js';
@@ -18,7 +16,6 @@ export type { InterruptedTurnRecoverySummary } from './InterruptedTurnRecoverySe
 export { ErrorHandler } from './ErrorHandler.js';
 
 // Workflow execution services
-export { SessionAllocator } from './SessionAllocator.js';
 export { ChatManagementService } from './ChatManagementService.js';
 export type {
   ChatManagementServiceExtensions,
@@ -26,20 +23,49 @@ export type {
   ForkChatResult,
   InternalCreateChatExtras,
 } from './ChatManagementService.js';
-export { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
-export { DAGScheduler } from './DAGScheduler.js';
-export { StageExecutionService } from './StageExecutionService.js';
-export { WorkflowRunService } from './WorkflowRunService.js';
+export { WorkflowDefinitionService, assertValidGraph, COMMAND_EDIT_SCOPE } from './WorkflowDefinitionService.js';
+export type { DefinitionWriteOptions, CreateDefinitionOptions, DeleteOutcome } from './WorkflowDefinitionService.js';
+export { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
+export { canonicalGraph } from './definitions/canonical.js';
+export { userVariables } from './definitions/runScope.js';
+export { WorkflowRunService, RunCommandRefusedError } from './WorkflowRunService.js';
+export type { StageProviderResolver, NewRunRecord } from './WorkflowRunService.js';
+export { WorkflowApprovalService, type PendingDecision, type ApprovalVerdictInput, type WorkflowApprovalServiceDeps } from './WorkflowApprovalService.js';
+export * from './workflow-invocation/index.js';
+export {
+  WorkflowAuthoringService,
+  AGENT_AUTHORED_TAG,
+  AUTHORING_GUIDE_TOPICS,
+  schemaHashOf,
+  type AuthoringGuideTopic,
+  type WorkflowAuthoringDeps,
+} from './WorkflowAuthoringService.js';
+export {
+  IdempotencyService,
+  IdempotencyKeyReusedError,
+  assertIdempotencyKey,
+  INVOCATION_IDEMPOTENCY_TTL_MS,
+  WEBHOOK_IDEMPOTENCY_TTL_MS,
+  type IdempotentOutcome,
+} from './IdempotencyService.js';
 
 // W18 — Admission control + concurrency management
-export { AdmissionController, AdmissionTimeoutError, laneFor, sizeLane } from './AdmissionController.js';
+export {
+  AdmissionController,
+  sizeGlobalFlowLimit,
+  defaultFlowLimits,
+  providerFlowKey,
+  modelFlowKey,
+  GLOBAL_FLOW_KEY,
+  CHECK_FLOW_KEY,
+  MAX_FLOW_LIMIT,
+} from './AdmissionController.js';
 export type {
-  AdmissionLane,
+  FlowGate,
+  FlowState,
+  FlowAcquireOptions,
   AdmissionControllerConfig,
-  AdmissionClassification,
   AdmissionTicket,
-  LaneSnapshot,
-  SizingDecision,
 } from './AdmissionController.js';
 
 // Orchestrator mode (background-agent orchestration for Chat)
@@ -49,10 +75,13 @@ export { ORCHESTRATOR_SYSTEM_PROMPT, WORKER_SYSTEM_PROMPT } from './orchestrator
 export { buildOrchestratorToolSet } from '../tools/orchestrator/index.js';
 
 // Orchestrator services
-export { WorkflowOrchestrator } from './WorkflowOrchestrator.js';
-export { WorkflowPreprocessor } from './WorkflowPreprocessor.js';
-export { ResultValidator } from './ResultValidator.js';
-export { resolveStageHooks } from './resolveStageHooks.js';
+export { createRunSandbox } from './createRunSandbox.js';
+export type { RunSandbox, RunSandboxOptions } from './createRunSandbox.js';
+export { LifecycleSteps, ScmPostProcessingError, scmFailureReason, repositoryFromInputs } from './engine/lifecycle/steps.js';
+export type { WorkflowScmFlowPort, LifecycleStepContext } from './engine/lifecycle/steps.js';
+export { runUploadsDir, writeRunUpload, scanRunUploads, safeUploadName, UPLOAD_EXTENSIONS } from './engine/lifecycle/runUploads.js';
+// Engine v2 (P03 WP-3.5/3.6)
+export * from './engine/index.js';
 
 // Phase 4 streaming rewrite (additive — coexists with legacy transports)
 export { StreamBroker } from './StreamBroker.js';
@@ -71,8 +100,6 @@ export type {
 // Automation services
 export { AutomationService, hashWebhookToken, toPublicAutomation } from './AutomationService.js';
 export type { IAutomationRepository, IAutomationExecutionRepository, ResolvedWebhook } from './AutomationService.js';
-export { DataSourceResolver } from './DataSourceResolver.js';
-export type { SecretResolver } from './DataSourceResolver.js';
 export { splitShellWords, ShellWordsError } from './shellWords.js';
 export { planIterations, previewIterations } from './IterationPlanner.js';
 export type { PlanArgs } from './IterationPlanner.js';
@@ -83,17 +110,8 @@ export type { IIdempotencyKeyRepository } from './AutomationRecoveryService.js';
 export { SandboxLifecycleManager } from './SandboxLifecycleManager.js';
 export type { SandboxSession, SandboxLifecycleConfig } from './SandboxLifecycleManager.js';
 
-// DUR-05 — durable step.sleep sweeper (background wake-up scheduler).
-export { DurableSleepService } from './DurableSleepService.js';
-export type {
-  DurableSleepConfig,
-  SleepLogger,
-  OnWakeHandler,
-} from './DurableSleepService.js';
-
 // HITL-01..05 — human-in-the-loop interrupt/resume.
-export { HitlService } from './HitlService.js';
-export type { InterruptResolution, HitlLogger } from './HitlService.js';
+export type { InterruptResolution } from './session/StageGatePort.js';
 
 // PLN-01 — plan mode
 export { AgentInteractionService } from './AgentInteractionService.js';
@@ -176,7 +194,7 @@ export * from './scm/index.js';
 export { PathResolver, PathEscapeError, SymlinkEscapeError } from './PathResolver.js';
 
 // Workflow Script services
-export { WorkflowScriptLoader, WORKFLOW_SCRIPTS_DISABLED_MESSAGE, ScriptSecurityError } from './WorkflowScriptLoader.js';
+export { WorkflowScriptLoader, WORKFLOW_SCRIPTS_DISABLED_MESSAGE, ScriptSecurityError, ScriptValidationError, scriptIdOf } from './WorkflowScriptLoader.js';
 export type { ScriptMetadata, LoadedScript, WorkflowScriptLoaderOptions } from './WorkflowScriptLoader.js';
 
 // Integrated Browser service (v13)
@@ -281,3 +299,4 @@ export type {
   EffectSpec,
   DurableContext,
 } from './DurableExecutionEngine.js';
+export * from './session/index.js';

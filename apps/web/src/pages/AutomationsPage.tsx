@@ -95,7 +95,7 @@ export function AutomationsPage() {
       <PageHeader
         className="mb-8"
         title="Automations"
-        subtitle="Schedule, trigger, and loop workflows automatically"
+        subtitle="Schedule and trigger workflows automatically"
         actions={
           <Button
             variant="primary"
@@ -116,7 +116,7 @@ export function AutomationsPage() {
         <EmptyState
           icon={<Zap className="h-12 w-12" />}
           title="No automations yet"
-          hint="Create an automation to run workflows on a schedule, via webhook, or in a loop for multiple inputs"
+          hint="Create an automation to run workflows on a schedule, via webhook, or once per row of a dataset"
           action={
             <Button
               variant="primary"
@@ -155,22 +155,10 @@ export function AutomationsPage() {
                     {triggerIcons[automation.triggerType]}
                     {triggerLabels[automation.triggerType]}
                   </Badge>
-                  {automation.inputMode === 'loop' && (
-                    <Badge tone="warning" size="sm">
-                      <Repeat className="h-3 w-3" />
-                      Loop ({automation.loopItems?.length ?? 0} items)
-                    </Badge>
-                  )}
-                  {automation.inputMode === 'batch' && (
+                  {automation.dataSchema && automation.iterationMode && (
                     <Badge tone="info" size="sm">
                       <Repeat className="h-3 w-3" />
-                      Batch
-                    </Badge>
-                  )}
-                  {automation.inputMode === 'script' && (
-                    <Badge tone="done" size="sm">
-                      <Repeat className="h-3 w-3" />
-                      Script
+                      Dataset · {automation.iterationMode.kind.replace('_', ' ')}
                     </Badge>
                   )}
                 </>

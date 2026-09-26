@@ -6,6 +6,15 @@
 // no transport, no retries live here — those belong to the layers below.
 // ────────────────────────────────────────────────────────────────
 
+import type {
+  ChatWorkflowRunCard,
+  RunCommand,
+  StageRunState,
+  WorkflowDefinitionRecord,
+  WorkflowRunState,
+} from '@generatorai/workflow-spec';
+import type { LoopStateView } from '@generatorai/shared';
+
 export interface ApiFetch {
   (path: string, init?: RequestInit): Promise<Response>;
 }
@@ -15,6 +24,8 @@ export class ApiError extends Error {
     readonly status: number,
     readonly path: string,
     message: string,
+    /** The parsed JSON error body, when there was one (e.g. `error.issues` on a 422, `error.current` on a 409). */
+    readonly body?: unknown,
   ) {
     super(message);
     this.name = 'ApiError';
@@ -36,13 +47,9 @@ export class ApiError extends Error {
  * rather than an error.
  *
  * Needed for routes that answer a legitimate question with a non-2xx status
- * and a meaningful JSON body — `POST /api/workflow-definitions/:id/validate`
- * answers 422 with `{valid:false, errors, warnings, issues}`, which is the
- * ANSWER, not a failure to deliver one. Routed through plain `request` it
- * threw `ApiError("422 Unprocessable Entity")` and the findings were
- * discarded entirely, so `generatorai workflow validate` on a genuinely
- * invalid definition reported the status line and nothing else — its own
- * `if (!result.valid)` branch was unreachable.
+ * and a meaningful JSON body, which is the ANSWER, not a failure to deliver
+ * one. Routed through plain `request`, such a response throws `ApiError`
+ * with the status line and the body's findings are discarded.
  *
  * Deliberately narrow: only the exact statuses a caller names are tolerated,
  * so a 500 or a 401 on the same route still throws like everywhere else.
@@ -56,12 +63,14 @@ export async function requestAllowing<T>(
   const res = await fetchImpl(path, init);
   if (!res.ok && !allowedStatuses.includes(res.status)) {
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      detail = describeErrorBody(await res.json()) ?? detail;
+      body = await res.json();
+      detail = describeErrorBody(body) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
-    throw new ApiError(res.status, path, detail);
+    throw new ApiError(res.status, path, detail, body);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -84,12 +93,14 @@ export async function requestText(
   const res = await fetchImpl(path, init);
   if (!res.ok) {
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      detail = describeErrorBody(await res.json()) ?? detail;
+      body = await res.json();
+      detail = describeErrorBody(body) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
-    throw new ApiError(res.status, path, detail);
+    throw new ApiError(res.status, path, detail, body);
   }
   if (res.status === 204) return '';
   return res.text();
@@ -101,12 +112,14 @@ export async function request<T>(fetchImpl: ApiFetch, path: string, init?: Reque
     // Prefer the server's message: it distinguishes "missing scope" from
     // "not found", which the status code alone does not.
     let detail = `${res.status} ${res.statusText}`;
+    let body: unknown;
     try {
-      detail = describeErrorBody(await res.json()) ?? detail;
+      body = await res.json();
+      detail = describeErrorBody(body) ?? detail;
     } catch {
       // Non-JSON error body; the status line is all we have.
     }
-    throw new ApiError(res.status, path, detail);
+    throw new ApiError(res.status, path, detail, body);
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -413,31 +426,29 @@ export interface SendMessageInput {
 
 // ── Runs ────────────────────────────────────────────────────────
 
+/** One row of the definition list (`WorkflowDefinitionSummary` of @generatorai/workflow-spec). */
 export interface WorkflowSummary {
   id: string;
   name: string;
   description?: string;
   projectId?: string | null;
+  status?: 'draft' | 'published';
+  stageCount?: number;
   createdAt: Timestamp;
   updatedAt: Timestamp;
   tags?: string[];
 }
 
-export type RunStatus =
-  | 'created'
-  | 'pending'
-  | 'starting'
-  | 'running'
-  | 'paused'
-  | 'completed'
-  | 'failed'
-  | 'cancelled';
+/** The v2 run states (`waiting`, `finalizing` and `cancelling` included). */
+export type RunStatus = WorkflowRunState;
 
 export interface WorkflowRunSummary {
   id: string;
   workflowDefinitionId: string;
-  /** Run inputs. A run started for a project carries it as `__projectId`. */
+  /** Run inputs (user variables only; engine values live in `systemVars`). */
   variables?: Record<string, unknown>;
+  /** The project the run was started for. */
+  projectId?: string | null;
   name?: string;
   status: RunStatus;
   createdAt: Timestamp;
@@ -446,67 +457,122 @@ export interface WorkflowRunSummary {
   completedAt?: Timestamp | null;
   error?: string | null;
   workspaceId?: string | null;
-  /** Set on a retry: the failed or cancelled run it replaced. */
+  /** Set on a fork: the terminal run it re-runs. */
   ancestorRunId?: string | null;
+  /** Why the run is in its status (`budget_exhausted`, …). */
+  statusReason?: string | null;
+  /** CAS version (`expectedVersion` on run commands). */
+  version?: number;
+  /** The effective run budget (`maxTurns`, `maxCostUsd`, `maxTokens`, `maxWallClockMs`). */
+  budget?: Record<string, unknown> | null;
+  /** Rolled-up usage; `costUsd` only when a provider reported cost. */
+  usage?: { turns?: number; costUsd?: number; inputTokens?: number; outputTokens?: number; toolCalls?: number } | null;
 }
 
-export type StageRunStatus =
-  | 'pending'
-  | 'queued'
-  | 'running'
-  | 'paused'
-  | 'sleeping'
-  | 'awaiting_input'
-  | 'completed'
-  | 'failed'
-  | 'cancelled'
-  | 'skipped';
+/**
+ * The v2 instance states. `ready`/`starting` are admitted-and-launching,
+ * `validating` is still the live attempt, `retry_wait` a retry backoff,
+ * `awaiting_input` a human gate.
+ */
+export type StageRunStatus = StageRunState;
 
 export interface StageRunSummary {
   id: string;
   workflowRunId: string;
-  stageDefinitionId: string;
+  /** The stage key in the run's pinned graph. */
+  stageKey: string;
   name?: string;
   status: StageRunStatus;
   sessionId?: string | null;
   startedAt?: Timestamp | null;
   completedAt?: Timestamp | null;
   error?: string | null;
-  retryCount?: number;
-  currentStep?: number;
-  totalSteps?: number;
+  /** `triage`, `review_loop#2/fix`: unique per run; the stage key at the top level. */
+  instancePath?: string;
+  /** The latest attempt number (0 before the first attempt); retries are attempts beyond the first. */
+  currentAttempt?: number;
+  /** Why the instance is in its status (`retry:resume`, `aborted:pause`, …). */
+  statusReason?: string | null;
+  /** Why a skipped instance was skipped (`guard`, `operator`, `unreachable`, …). */
+  skipReason?: string | null;
   /** Harness-produced summary of what the stage did. */
   summary?: string | null;
   /** Full raw output of the stage's main prompt(s). */
   outputText?: string | null;
   outputData?: Record<string, unknown> | null;
   artifactManifest?: Array<{ path: string; language: string; action: string; sizeBytes: number }> | null;
-  /** The parked payload while `awaiting_input` — shape varies by gate kind. */
+  /**
+   * The parked payload while `awaiting_input` — `kind` is
+   * `stage_completion_review`, `tool_permission`, `question` or `plan_review`.
+   * Pending approvals are the run's `awaiting_input` stage runs; there is no
+   * separate pending-approvals endpoint.
+   */
   interruptData?: unknown;
-  wakeAt?: Timestamp | null;
+  /** When an operator follow-up last amended this completed stage (PD-4). */
+  amendedAt?: Timestamp | null;
+  /** Monotonic CAS version: a poll merges an instance only when it is not older than what the stream applied. */
+  version?: number;
+  /** The node kind: agent, check, loop (P05). */
+  kind?: string;
+  /** The enclosing container instance (a loop body stage). */
+  scopeId?: string;
+  /** The iteration of the enclosing loop this instance belongs to. */
+  iterationIndex?: number;
+  /** A loop instance's state (P05 §2.6). */
+  loopState?: LoopStateView;
 }
 
 /**
- * One entry of `GET /workflow-runs/:id/pending-interrupts`.
- *
- * The server returns the parked STAGE RUN rows themselves
- * (`HitlService.listPending` → `StageRun[]`), so `id` is the stage-run id —
- * the id the approve/interrupt routes take — and the prompt, when there is
- * one, lives inside `interruptData`. This previously declared a
- * `{ stageId, prompt }` shape the server never sent, which is how a client
- * ended up matching on a field that was always undefined.
+ * A run search (`GET /workflow-runs`); every filter narrows. `status` and
+ * `trigger` match any of their entries (a run without a trigger is `user`);
+ * `from`/`to` bound the creation time; `q` matches part of the name or the
+ * start of the id; `variables` are `name=value` pairs; `limit` keeps the
+ * newest matches.
  */
-export interface PendingInterrupt {
-  id: string;
-  workflowRunId: string;
-  stageDefinitionId: string;
-  name?: string;
-  status: StageRunStatus;
-  sessionId?: string | null;
-  interruptData?: unknown;
+export interface RunListParams {
+  definitionId?: string;
+  status?: string | readonly string[];
+  trigger?: readonly string[];
+  from?: string | number | Date;
+  to?: string | number | Date;
+  q?: string;
+  variables?: Readonly<Record<string, string>>;
+  limit?: number;
 }
 
-/** Outcomes the HITL approve endpoint accepts. */
+/** The query string of a run search. */
+export function runListQuery(params: RunListParams = {}): string {
+  const q = new URLSearchParams();
+  const time = (t: string | number | Date) => (t instanceof Date ? t.toISOString() : String(t));
+  if (params.definitionId) q.set('definitionId', params.definitionId);
+  const status = typeof params.status === 'string' ? params.status : params.status?.join(',');
+  if (status) q.set('status', status);
+  if (params.trigger?.length) q.set('trigger', params.trigger.join(','));
+  if (params.from !== undefined) q.set('from', time(params.from));
+  if (params.to !== undefined) q.set('to', time(params.to));
+  if (params.q?.trim()) q.set('q', params.q.trim());
+  for (const [name, value] of Object.entries(params.variables ?? {})) q.append('var', `${name}=${value}`);
+  if (params.limit !== undefined) q.set('limit', String(params.limit));
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
+/** One execution of a stage across the definition's runs (`GET /workflow-runs/stage-history`). */
+export interface StageHistoryEntry {
+  stageRun: StageRunSummary & { usage?: Record<string, unknown> | null; createdAt?: Timestamp };
+  run: { id: string; name: string; status: RunStatus; createdAt: Timestamp };
+}
+
+/** How a stage took an operator message (`POST …/instances/:id/messages`). */
+export interface StageMessageResult {
+  runId: string;
+  instanceId: string;
+  /** queued: the next turn; amending: a completed stage's output is being amended; retrying: a paused stage restarted with it. */
+  outcome: 'queued' | 'amending' | 'retrying';
+  attachmentIds: string[];
+}
+
+/** Outcomes the `approve` run command accepts. */
 export type ApprovalOutcome = 'approved' | 'changes_requested' | 'rejected';
 
 // ── Automations ─────────────────────────────────────────────────
@@ -517,8 +583,7 @@ export interface AutomationSummary {
   description?: string;
   enabled: boolean;
   triggerType: 'manual' | 'schedule' | 'webhook';
-  workflowDefinitionId: string;
-  workflowIds?: string[];
+  workflowIds: string[];
   cronExpression?: string;
   timezone?: string;
   nextRunAt?: Timestamp | null;
@@ -530,10 +595,6 @@ export interface AutomationExecutionSummary {
   id: string;
   automationId: string;
   status: string;
-  /** @deprecated The server sends the `*Iterations` counts below; kept for older callers. */
-  totalRuns?: number;
-  completedRuns?: number;
-  failedRuns?: number;
   totalIterations?: number;
   completedIterations?: number;
   failedIterations?: number;
@@ -895,6 +956,8 @@ export const queryKeys = {
   chatPlans: (id: string) => ['chats', id, 'plans'] as const,
   chatInteractions: (id: string) => ['chats', id, 'interactions'] as const,
   chatTasks: (id: string) => ['chats', id, 'background-tasks'] as const,
+  /** The runs a chat started (`GET /chats/:id/workflow-runs`), patched live by `chat.workflow_run.*`. */
+  chatWorkflowRuns: (id: string) => ['chats', id, 'workflow-runs'] as const,
   models: () => ['models'] as const,
   providers: () => ['harness', 'providers'] as const,
   health: () => ['health'] as const,
@@ -916,8 +979,6 @@ export const queryKeys = {
     workflowId ? (['runs', 'by-workflow', workflowId] as const) : (['runs'] as const),
   run: (runId: string) => ['runs', 'detail', runId] as const,
   runStages: (runId: string) => ['runs', 'detail', runId, 'stages'] as const,
-  runInterrupts: (runId: string) => ['runs', 'detail', runId, 'interrupts'] as const,
-  runScratchpad: (runId: string) => ['runs', 'detail', runId, 'scratchpad'] as const,
   /** One stage session's persisted transcript. */
   stageTranscript: (runId: string, stageRunId: string) =>
     ['runs', 'detail', runId, 'stage', stageRunId, 'transcript'] as const,
@@ -1193,6 +1254,9 @@ export function createApiClient(fetchImpl: ApiFetch) {
           `/api/chats/${id}/background-tasks`,
         ),
 
+      /** The runs this chat started through its workflow tools, as run cards (P06). */
+      workflowRuns: (id: string) => request<{ runs: ChatWorkflowRunCard[] }>(fetchImpl, `/api/chats/${id}/workflow-runs`),
+
       respond: (
         id: string,
         interactionId: string,
@@ -1251,27 +1315,34 @@ export function createApiClient(fetchImpl: ApiFetch) {
     models: () => request<ModelInfo[]>(fetchImpl, '/api/harness/models'),
 
     workflows: {
-      list: (projectId?: string) =>
-        request<WorkflowSummary[]>(
-          fetchImpl,
-          `/api/workflow-definitions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ''}`,
-        ),
+      /** Every definition (all pages, following `nextCursor`), newest first. */
+      list: async (projectId?: string): Promise<WorkflowSummary[]> => {
+        const items: WorkflowSummary[] = [];
+        let cursor: string | undefined;
+        do {
+          const qs = new URLSearchParams({ limit: '200' });
+          if (projectId) qs.set('projectId', projectId);
+          if (cursor) qs.set('cursor', cursor);
+          const page = await request<{ items: WorkflowSummary[]; nextCursor?: string }>(
+            fetchImpl,
+            `/api/workflow-definitions?${qs.toString()}`,
+          );
+          items.push(...page.items);
+          cursor = page.nextCursor;
+        } while (cursor);
+        return items;
+      },
 
-      get: (id: string) =>
-        request<WorkflowSummary & { stages: unknown[]; edges: unknown[] }>(
-          fetchImpl,
-          `/api/workflow-definitions/${id}`,
-        ),
+      get: (id: string) => request<WorkflowDefinitionRecord>(fetchImpl, `/api/workflow-definitions/${id}`),
     },
 
     runs: {
-      list: (params?: { definitionId?: string; status?: string }) => {
-        const q = new URLSearchParams();
-        if (params?.definitionId) q.set('definitionId', params.definitionId);
-        if (params?.status) q.set('status', params.status);
-        const suffix = q.toString() ? `?${q}` : '';
-        return request<WorkflowRunSummary[]>(fetchImpl, `/api/workflow-runs${suffix}`);
-      },
+      list: (params?: RunListParams) =>
+        request<WorkflowRunSummary[]>(fetchImpl, `/api/workflow-runs${runListQuery(params)}`),
+
+      /** One stage's newest executions across a definition's runs, newest first. */
+      stageHistory: (definitionId: string, stageKey: string, limit?: number) =>
+        request<StageHistoryEntry[]>(fetchImpl, `/api/workflow-runs/stage-history${qs({ definitionId, stageKey, limit })}`),
 
       get: (id: string) =>
         request<WorkflowRunSummary & { stageRuns: StageRunSummary[] }>(
@@ -1282,40 +1353,98 @@ export function createApiClient(fetchImpl: ApiFetch) {
       stages: (id: string) =>
         request<StageRunSummary[]>(fetchImpl, `/api/workflow-runs/${id}/stages`),
 
-      pendingInterrupts: (id: string) =>
-        request<PendingInterrupt[]>(fetchImpl, `/api/workflow-runs/${id}/pending-interrupts`),
-
       /**
-       * Answer a stage's HITL gate.
+       * Send a run command (`POST /workflow-runs/:id/commands`).
        *
-       * This is the ONE mutating run operation a mobile device can perform:
-       * the route policy classifies it as `exec:agent` (answering the agent)
-       * rather than `write:workflows` (editing the workflow). Everything else
-       * below is intentionally absent from the mobile surface.
+       * `approve` (answering a stage's HITL gate) is the ONE mutating run
+       * operation a mobile device can perform without `write:workflows`: the
+       * route policy classifies the commands route as `exec:agent` (answering
+       * the agent), and the route itself demands `write:workflows` for every
+       * other command. The pending gates are the run's `awaiting_input` stage
+       * runs (`runs.get(id).stageRuns`).
        */
-      approve: (
-        runId: string,
-        stageId: string,
-        body: {
-          outcome?: ApprovalOutcome;
-          approved?: boolean;
-          reason?: string;
-          followUpPrompt?: string;
-          value?: unknown;
-        },
-      ) =>
-        request<{ message: string; outcome: string; approved: boolean }>(
+      command: (runId: string, body: RunCommand) =>
+        request<{ runId: string; command: string }>(
           fetchImpl,
-          `/api/workflow-runs/${runId}/stages/${stageId}/approve`,
+          `/api/workflow-runs/${runId}/commands`,
           json(body),
         ),
 
-      /** Supply data to a stage waiting on input. Also `exec:agent`. */
-      interrupt: (runId: string, stageId: string, body: { data?: unknown; prompt?: string }) =>
-        request<{ message: string }>(
+      // ── A stage is a compact chat (P03b) ──────────────────────────
+
+      /**
+       * Send an operator message to a stage instance. Between turns it is
+       * queued as the next turn, a completed stage is AMENDED (its output
+       * replaced; later stages keep what they used), a paused stage is
+       * retried with it. 409 `STAGE_BUSY` mid-turn, `INTERACTION_PENDING`
+       * while a gate waits.
+       */
+      stageMessage: (runId: string, instanceId: string, input: SendMessageInput) =>
+        request<StageMessageResult>(
           fetchImpl,
-          `/api/workflow-runs/${runId}/stages/${stageId}/interrupt`,
-          json(body),
+          `/api/workflow-runs/${runId}/instances/${instanceId}/messages`,
+          json({ prompt: input.message, ...(input.mode ? { mode: input.mode } : {}) }),
+        ),
+
+      /** {@link stageMessage} with files (multipart; the server caps at 10). */
+      stageMessageWithAttachments: (
+        runId: string,
+        instanceId: string,
+        input: SendMessageInput,
+        attachments: Array<{ name: string; data: Uint8Array; mimeType?: string }>,
+      ) => {
+        const form = new FormData();
+        form.set('prompt', input.message);
+        if (input.mode) form.set('mode', input.mode);
+        for (const file of attachments) {
+          form.append('attachments', new Blob([file.data as unknown as ArrayBuffer], { type: file.mimeType || 'application/octet-stream' }), file.name);
+        }
+        return request<StageMessageResult>(fetchImpl, `/api/workflow-runs/${runId}/instances/${instanceId}/messages`, {
+          method: 'POST',
+          body: form,
+        });
+      },
+
+      /** Stop the stage's turn in flight; the stage continues (a stage cancel is the `cancel` command). */
+      cancelStageTurn: (runId: string, instanceId: string, options?: { force?: boolean }) =>
+        request<{ status: string; force: boolean }>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/turn/cancel`,
+          json(options ?? {}),
+        ),
+
+      /** Answer a stage's tool-permission gate (the chat's body shape). */
+      stagePermission: (runId: string, instanceId: string, interactionId: string, response: { behavior: 'allow' | 'deny'; message?: string }) =>
+        request<void>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/permission`,
+          json(response),
+        ),
+
+      /** Answer a stage's question gate (the chat's body shape). */
+      stageAnswer: (
+        runId: string,
+        instanceId: string,
+        interactionId: string,
+        response: { answers: Record<string, string[]>; freeformResponse?: string },
+      ) =>
+        request<void>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/answer`,
+          json(response),
+        ),
+
+      /** Decide a stage's plan review. */
+      stagePlan: (
+        runId: string,
+        instanceId: string,
+        interactionId: string,
+        decision: { approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string },
+      ) =>
+        request<void>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/plan`,
+          json(decision),
         ),
     },
 

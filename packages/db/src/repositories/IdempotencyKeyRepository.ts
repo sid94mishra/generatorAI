@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
-// DrizzleIdempotencyKeyRepository — Track A idempotency-key storage
-//   Used by automation trigger and webhook endpoints to dedup
-//   requests within a short TTL window.
+// DrizzleIdempotencyKeyRepository — idempotency-key storage behind
+// `IdempotencyService` (automation triggers and webhooks, 5 min; workflow
+// invocations, 24 h with the request hash, v58).
 // ────────────────────────────────────────────────────────────────
 
 import { and, eq, lt } from 'drizzle-orm';
@@ -15,6 +15,8 @@ export interface IdempotencyKeyRecord {
   executionId: string;
   createdAt: Date;
   expiresAt: Date;
+  /** Hash of the request the key is claimed for (v58). */
+  requestHash?: string | null;
 }
 
 export class DrizzleIdempotencyKeyRepository {
@@ -29,7 +31,7 @@ export class DrizzleIdempotencyKeyRepository {
    * Callers should first invoke {@link sweepExpired} (or call the periodic
    * sweeper) so stale entries don't block fresh writes.
    */
-  async claim(record: IdempotencyKeyRecord): Promise<{ executionId: string; replay: boolean }> {
+  async claim(record: IdempotencyKeyRecord): Promise<{ executionId: string; replay: boolean; requestHash: string | null; createdAt?: Date }> {
     try {
       // Best-effort: opportunistically remove the same (key, scope) if it
       // is already expired. `INSERT OR IGNORE` alone can't distinguish
@@ -50,8 +52,9 @@ export class DrizzleIdempotencyKeyRepository {
         executionId: record.executionId,
         createdAt: record.createdAt,
         expiresAt: record.expiresAt,
+        requestHash: record.requestHash ?? null,
       });
-      return { executionId: record.executionId, replay: false };
+      return { executionId: record.executionId, replay: false, requestHash: record.requestHash ?? null };
     } catch (err) {
       // Uniqueness violation → replay hit. Fetch the stored executionId.
       const existing = await this.db
@@ -66,7 +69,7 @@ export class DrizzleIdempotencyKeyRepository {
         .limit(1);
       const row = existing[0];
       if (row) {
-        return { executionId: row.executionId, replay: true };
+        return { executionId: row.executionId, replay: true, requestHash: row.requestHash ?? null, createdAt: row.createdAt };
       }
       // No row on read either — genuine storage failure.
       throw new StorageError(
@@ -88,6 +91,19 @@ export class DrizzleIdempotencyKeyRepository {
       .update(idempotencyKeys)
       .set({ executionId })
       .where(and(eq(idempotencyKeys.key, key), eq(idempotencyKeys.scope, scope)));
+  }
+
+  /** Drop a claim whose work failed, so the key can be used again; `createdBefore` drops only a claim that old. */
+  async release(key: string, scope: string, opts: { createdBefore?: Date } = {}): Promise<void> {
+    await this.db
+      .delete(idempotencyKeys)
+      .where(
+        and(
+          eq(idempotencyKeys.key, key),
+          eq(idempotencyKeys.scope, scope),
+          ...(opts.createdBefore ? [lt(idempotencyKeys.createdAt, opts.createdBefore)] : []),
+        ),
+      );
   }
 
   /** Remove all keys past their expiry across all scopes. */

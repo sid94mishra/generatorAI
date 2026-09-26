@@ -22,6 +22,7 @@ export type {
   PermissionRequest,
   PermissionResponse,
   ToolDefinition,
+  ToolCallContext,
   McpServerConfig,
   AttachmentRef,
   CreateConversationParams,
@@ -47,11 +48,9 @@ export { TOOL_BINARY_KEY, takeToolBinaries } from './IAgentHarness.js';
 
 export type {
   ISessionRepository,
-  IWorkflowRepository,
   IEventRepository,
   IChatMessageRepository,
   IArtifactRepository,
-  IWebhookRepository,
 } from './IRepositories.js';
 
 export type { IChatRepository } from './IChatRepository.js';
@@ -63,18 +62,17 @@ export type {
   AddPlanRevisionParams,
   CreateInteractionParams,
 } from './IPlanRepository.js';
-export type { IWorkflowDefinitionRepository } from './IWorkflowDefinitionRepository.js';
-export type { IStageDefinitionRepository } from './IStageDefinitionRepository.js';
-export type { IStageEdgeRepository } from './IStageEdgeRepository.js';
-export type { IWorkflowRunRepository } from './IWorkflowRunRepository.js';
-export type { IStageRunRepository } from './IStageRunRepository.js';
-export type { ISessionAllocator, IDAGScheduler } from './IServiceInterfaces.js';
-export type { ISequenceAllocator } from './ISequenceAllocator.js';
 export type {
-  ISessionAllocationRepository,
-  SessionAllocationRow,
-  StageSessionMapRow,
-} from './ISessionAllocationRepository.js';
+  IWorkflowDefinitionStore,
+  DefinitionListFilter,
+  DefinitionListPage,
+  NewDefinition,
+  NewVersion,
+  ReplaceGraphResult,
+} from './IWorkflowDefinitionStore.js';
+export type { IWorkflowRunRepository, MemoizedInstance, MemoizedIteration, WorkflowRunUpdate } from './IWorkflowRunRepository.js';
+export type { IStageRunRepository, StageHistoryEntry } from './IStageRunRepository.js';
+export type { ISequenceAllocator } from './ISequenceAllocator.js';
 
 export type {
   HookBridge,
@@ -212,5 +210,62 @@ export type {
   ProviderCapabilities,
   ProviderInstanceId,
   ProviderWireProtocol,
+  ApprovalGatingLevel,
+  HostToolsLevel,
+  StructuredOutputLevel,
+  SkillsLevel,
 } from './IProviderInstance.js';
 export { makeProviderInstanceId } from './IProviderInstance.js';
+
+// ── Engine v2 persistence (P03 WP-3.1) ──
+export type {
+  IRunStore,
+  IStageRunCas,
+  IWorkflowRunCas,
+  StageInstanceRow,
+  StageRunCasPatch,
+  StageAmendPatch,
+  StageTransitionOptions,
+  LeaseOption,
+  TransitionResult,
+  WorkflowRunRow,
+  RunTransitionOptions,
+  ArmedTimer,
+  ApplyResult,
+  ApplyContext,
+} from './IRunStore.js';
+export type {
+  EngineStores,
+  StageAttemptRecord,
+  StageAttemptPatch,
+  IStageAttemptStore,
+  RunSessionRecord,
+  IRunSessionStore,
+  WorkflowTimerRecord,
+  IWorkflowTimerStore,
+  OutboxRecord,
+  IWorkflowOutboxStore,
+  SchedulerJournalRecord,
+  ISchedulerJournalStore,
+  TurnRole,
+  TurnReplayPolicy,
+  SettledTurn,
+  TurnJournalEntry,
+  JournalMessage,
+  ITurnJournal,
+  EngineLockRecord,
+  IEngineLockStore,
+  ExpiredLease,
+  IEngineQueries,
+  IRunEventStore,
+  RunEventDeliveryOutcome,
+} from './IEngineStore.js';
+export type {
+  IdempotencyClaim,
+  IIdempotencyKeyStore,
+  InvocationUploadCategory,
+  InvocationUploadRecord,
+  IInvocationUploadRepository,
+  ChatWorkflowRunLink,
+  IChatWorkflowRunRepository,
+} from './IInvocationStores.js';

@@ -18,12 +18,11 @@ import {
   type ParsedBatchData,
 } from '@generatorai/shared';
 
-/** Reserved variable names we never let a user field override. Match
- *  the semantics we already use elsewhere in variable interpolation. */
-const RESERVED_VARIABLE_NAMES = new Set([
-  '__proto__', 'constructor', 'prototype',
-  '__iteration_index', '__iteration_total',
-]);
+/** Names a field may never take (prototype pollution). */
+const RESERVED_VARIABLE_NAMES = new Set(['__proto__', 'constructor', 'prototype']);
+
+/** Engine-reserved variable names (`__*`, `repo_path_*`, `repo_branch_*`): never from a dataset (C-3, R-8). */
+const ENGINE_RESERVED = /^(__|repo_path_|repo_branch_)/;
 
 /** Regex enforced on generated / user-supplied variable names. */
 const VARIABLE_NAME_REGEX = /^[A-Za-z_][A-Za-z0-9_]*$/;
@@ -180,13 +179,15 @@ function validateRow(
     validated[field.name] = coerced;
   }
 
-  // Warn about (but don't reject) extra fields — pass them through so
-  // users can iterate on new columns without editing the schema.
+  // A dataset carries the declared fields only (C-3): an engine-reserved
+  // name is an attack, and any other extra field is refused rather than
+  // passed into the run's variables.
   for (const key of Object.keys(row)) {
-    if (!knownFieldNames.has(key) && VARIABLE_NAME_REGEX.test(key) && !RESERVED_VARIABLE_NAMES.has(key)) {
-      validated[key] = row[key];
-      warnings.push(`Row ${rowIndex + 1}: extra field "${key}" passed through`);
+    if (knownFieldNames.has(key)) continue;
+    if (ENGINE_RESERVED.test(key) || RESERVED_VARIABLE_NAMES.has(key)) {
+      throw new ValidationError(`Row ${rowIndex + 1}: "${key}" is an engine-reserved name and cannot be supplied`);
     }
+    throw new ValidationError(`Row ${rowIndex + 1}: field "${key}" is not declared in the DataSchema`);
   }
 
   return validated;
@@ -224,25 +225,22 @@ function groupRows(
 function buildIterationVariables(
   baseVariables: Record<string, unknown>,
   rowVars: Record<string, unknown>,
-  iterationIndex: number,
-  iterationTotal: number,
 ): Record<string, unknown> {
   // Plain literal — see note in validateRow(). Prototype-pollution keys
   // are filtered by RESERVED_VARIABLE_NAMES + VARIABLE_NAME_REGEX below.
   const bag: Record<string, unknown> = {};
   // Base first so row-level values override.
   for (const [k, v] of Object.entries(baseVariables)) {
-    if (RESERVED_VARIABLE_NAMES.has(k)) continue;
+    if (RESERVED_VARIABLE_NAMES.has(k) || ENGINE_RESERVED.test(k)) continue;
     if (!VARIABLE_NAME_REGEX.test(k)) continue;
     bag[k] = v;
   }
   for (const [k, v] of Object.entries(rowVars)) {
-    if (RESERVED_VARIABLE_NAMES.has(k)) continue;
+    if (RESERVED_VARIABLE_NAMES.has(k) || ENGINE_RESERVED.test(k)) continue;
     if (!VARIABLE_NAME_REGEX.test(k)) continue;
     bag[k] = v;
   }
-  bag['__iteration_index'] = iterationIndex;
-  bag['__iteration_total'] = iterationTotal;
+  // The iteration index travels in the run's trigger (`iterationIndex`), never as a variable.
   return bag;
 }
 
@@ -308,9 +306,8 @@ export function planIterations(args: PlanArgs): PlannedIterations {
   const parsedRowCount = validatedRows.length;
 
   if (mode.kind === 'each_row') {
-    const total = validatedRows.length;
     const iterations = validatedRows.map((row, idx) => ({
-      variables: buildIterationVariables(baseVariables, row, idx, total),
+      variables: buildIterationVariables(baseVariables, row),
       label: labelForRow(row, idx, schema.primaryKey),
     }));
     return { iterations, warnings, parsedRowCount };
@@ -324,18 +321,12 @@ export function planIterations(args: PlanArgs): PlannedIterations {
       );
     }
     const groups = groupRows(validatedRows, mode.fields);
-    const total = groups.length;
-    const iterations = groups.map((group, idx) => {
+    const iterations = groups.map((group) => {
       // Group key fields promote to top-level variables so prompts
       // can reference them directly (e.g. `{{priority}}`).
       const keyVars: Record<string, unknown> = {};
       for (const f of mode.fields) keyVars[f] = group.key[f];
-      const vars = buildIterationVariables(
-        baseVariables,
-        keyVars,
-        idx,
-        total,
-      );
+      const vars = buildIterationVariables(baseVariables, keyVars);
       vars[groupVar] = group.rows;
       return {
         variables: vars,
@@ -352,7 +343,7 @@ export function planIterations(args: PlanArgs): PlannedIterations {
         `Invalid datasetVariable "${datasetVar}" — must be a valid identifier`,
       );
     }
-    const vars = buildIterationVariables(baseVariables, {}, 0, 1);
+    const vars = buildIterationVariables(baseVariables, {});
     vars[datasetVar] = validatedRows;
     return {
       iterations: [{ variables: vars, label: `Full dataset (${parsedRowCount} rows)` }],

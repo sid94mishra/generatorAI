@@ -126,7 +126,7 @@ Operation: `POST /api/chats/:id/stop` (mapped to `harness.abortConversation(sess
 
 ### 2.5 Archive vs Delete
 
-- **Archive** — `POST /api/chats/:id/archive` → sets `chat.status = 'archived'`. Session is closed (`SessionStateMachine.transition('archive')` → `closed`). Workspace is **archived** (status = `archived`, files retained per retention policy).
+- **Archive** — `POST /api/chats/:id/archive` → sets `chat.status = 'archived'`. Session is closed (`sessions.status = closed`). Workspace is **archived** (status = `archived`, files retained per retention policy).
 - **Delete** — `DELETE /api/chats/:id` → cascades to `chat_messages`, `events`, `artifacts`, drops the session, and **also** removes the workspace files if the workspace retention policy allows it.
 
 ### 2.6 Update

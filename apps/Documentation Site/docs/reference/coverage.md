@@ -12,59 +12,42 @@ The top-level product modules exclude the separate `agent-tests` workspace and t
 | --- | --- | --- | --- |
 | `apps/agent-host` | `@generatorai/agent-host` | `shared`, `core`, `agent-harness-providers` | [Architecture](/architecture/modules.md) |
 | `apps/browser-host` | `@generatorai/browser-host` | `shared` | [Architecture](/architecture/modules.md) |
-| `apps/cli` | `@generatorai/cli` | `agent-harness-providers`, `cli-core`, `client-core`, `client-runtime`, `client-transport`, `core`, `db`, `design-tokens`, `secrets`, `shared`, `tui-kit` | [Architecture](/architecture/modules.md) |
+| `apps/cli` | `@generatorai/cli` | `agent-harness-providers`, `cli-core`, `client-core`, `client-runtime`, `client-transport`, `core`, `db`, `design-tokens`, `secrets`, `shared`, `workflow-spec`, `tui-kit` | [Architecture](/architecture/modules.md) |
 | `apps/cua-host` | `@generatorai/cua-host` | `shared` | [Architecture](/architecture/modules.md) |
 | `apps/desktop` | `@generatorai/desktop` | — | [Architecture](/architecture/modules.md) |
-| `apps/mobile` | `@generatorai/mobile` | `client-core`, `client-runtime`, `client-transport`, `design-tokens`, `relay-protocol`, `shared`, `auth` | [Architecture](/architecture/modules.md) |
+| `apps/mobile` | `@generatorai/mobile` | `client-core`, `client-runtime`, `client-transport`, `design-tokens`, `relay-protocol`, `shared`, `workflow-spec`, `auth` | [Architecture](/architecture/modules.md) |
 | `apps/pty-host` | `@generatorai/pty-host` | `shared` | [Architecture](/architecture/modules.md) |
 | `apps/relay` | `@generatorai/relay` | `relay-protocol` | [Architecture](/architecture/modules.md) |
-| `apps/server` | `@generatorai/server` | `agent-harness-providers`, `auth`, `core`, `db`, `relay-protocol`, `secrets`, `shared` | [Architecture](/architecture/modules.md) |
-| `apps/web` | `@generatorai/web` | `client-core`, `client-runtime`, `design-tokens`, `shared` | [Architecture](/architecture/modules.md) |
+| `apps/server` | `@generatorai/server` | `agent-harness-providers`, `auth`, `core`, `db`, `relay-protocol`, `secrets`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
+| `apps/web` | `@generatorai/web` | `client-core`, `client-runtime`, `design-tokens`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `packages/agent-harness-providers` | `@generatorai/agent-harness-providers` | `core`, `shared` | [Architecture](/architecture/modules.md) |
 | `packages/auth` | `@generatorai/auth` | `secrets`, `shared` | [Architecture](/architecture/modules.md) |
 | `packages/changes` | `@generatorai/changes` | `shared`, `git` | [Architecture](/architecture/modules.md) |
 | `packages/checkpoints` | `@generatorai/checkpoints` | `shared`, `git` | [Architecture](/architecture/modules.md) |
-| `packages/cli-core` | `@generatorai/cli-core` | `client-core`, `client-runtime`, `client-transport`, `secrets`, `shared` | [Architecture](/architecture/modules.md) |
-| `packages/client-core` | `@generatorai/client-core` | `client-transport`, `shared` | [Architecture](/architecture/modules.md) |
+| `packages/cli-core` | `@generatorai/cli-core` | `client-core`, `client-runtime`, `client-transport`, `secrets`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
+| `packages/client-core` | `@generatorai/client-core` | `client-transport`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `packages/client-runtime` | `@generatorai/client-runtime` | `relay-protocol`, `shared` | [Architecture](/architecture/modules.md) |
 | `packages/client-transport` | `@generatorai/client-transport` | `relay-protocol` | [Architecture](/architecture/modules.md) |
-| `packages/core` | `@generatorai/core` | `changes`, `checkpoints`, `git`, `review`, `secrets`, `shared`, `source-control` | [Architecture](/architecture/modules.md) |
-| `packages/db` | `@generatorai/db` | `auth`, `core`, `checkpoints`, `review`, `shared` | [Architecture](/architecture/modules.md) |
+| `packages/core` | `@generatorai/core` | `changes`, `checkpoints`, `git`, `review`, `secrets`, `shared`, `source-control`, `workflow-spec` | [Architecture](/architecture/modules.md) |
+| `packages/db` | `@generatorai/db` | `auth`, `core`, `checkpoints`, `review`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `packages/design-tokens` | `@generatorai/design-tokens` | — | [Architecture](/architecture/modules.md) |
 | `packages/git` | `@generatorai/git` | `shared` | [Architecture](/architecture/modules.md) |
-| `packages/mcp-server` | `@generatorai/mcp-server` | `core`, `sdk`, `shared` | [Architecture](/architecture/modules.md) |
+| `packages/mcp-server` | `@generatorai/mcp-server` | `client-core`, `client-runtime`, `secrets`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `packages/relay-protocol` | `@generatorai/relay-protocol` | — | [Architecture](/architecture/modules.md) |
 | `packages/review` | `@generatorai/review` | `shared` | [Architecture](/architecture/modules.md) |
-| `packages/sdk` | `@generatorai/sdk` | `shared`, `core`, `db`, `agent-harness-providers` | [Architecture](/architecture/modules.md) |
+| `packages/sdk` | `@generatorai/sdk` | `agent-harness-providers`, `core`, `db`, `secrets`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `packages/secrets` | `@generatorai/secrets` | `shared` | [Architecture](/architecture/modules.md) |
-| `packages/shared` | `@generatorai/shared` | — | [Architecture](/architecture/modules.md) |
+| `packages/shared` | `@generatorai/shared` | `workflow-spec` | [Architecture](/architecture/modules.md) |
 | `packages/source-control` | `@generatorai/source-control` | `shared` | [Architecture](/architecture/modules.md) |
 | `packages/tui-kit` | `@generatorai/tui-kit` | `cli-core`, `design-tokens`, `shared` | [Architecture](/architecture/modules.md) |
+| `packages/workflow-spec` | `@generatorai/workflow-spec` | — | [Architecture](/architecture/modules.md) |
+| `packages/workflow-testkit` | `@generatorai/workflow-testkit` | `agent-harness-providers`, `core`, `db`, `shared`, `workflow-spec` | [Architecture](/architecture/modules.md) |
 
 ## Web page components
 
 Guide: [Web page components](/clients/web.md).
 
-- `apps/web/src/pages/AgentEditorPage.tsx`
-- `apps/web/src/pages/AgentsListPage.tsx`
-- `apps/web/src/pages/AutomationDetailPage.tsx`
-- `apps/web/src/pages/AutomationsPage.tsx`
-- `apps/web/src/pages/ChatPage.tsx`
-- `apps/web/src/pages/ChatsListPage.tsx`
-- `apps/web/src/pages/CodebaseDetailPage.tsx`
-- `apps/web/src/pages/CreateAutomationPage.tsx`
-- `apps/web/src/pages/CreateProjectPage.tsx`
-- `apps/web/src/pages/DashboardPage.tsx`
-- `apps/web/src/pages/ProjectDetailPage.tsx`
-- `apps/web/src/pages/ProjectsListPage.tsx`
-- `apps/web/src/pages/PullRequestPage.tsx`
-- `apps/web/src/pages/ScriptDetailPage.tsx`
-- `apps/web/src/pages/ScriptsListPage.tsx`
-- `apps/web/src/pages/SettingsPage.tsx`
-- `apps/web/src/pages/WorkflowBuilderPage.tsx`
-- `apps/web/src/pages/WorkflowDefinitionPage.tsx`
-- `apps/web/src/pages/WorkflowListPage.tsx`
-- `apps/web/src/pages/WorkflowRunPageV2.tsx`
+
 
 ## Mobile route files
 
@@ -100,6 +83,7 @@ Guide: [Mobile route files](/clients/mobile.md).
 - `apps/mobile/app/settings/about.tsx`
 - `apps/mobile/app/settings/accessibility.tsx`
 - `apps/mobile/app/settings/appearance.tsx`
+- `apps/mobile/app/settings/audio.tsx`
 - `apps/mobile/app/settings/capabilities.tsx`
 - `apps/mobile/app/settings/diagnostics.tsx`
 - `apps/mobile/app/settings/extensions.tsx`
@@ -146,9 +130,6 @@ Guide: [Shared configuration contracts](/reference/configuration.md).
 - `packages/shared/src/config/numericEnv.ts`
 - `packages/shared/src/config/OrchestratorSchemas.ts`
 - `packages/shared/src/config/WidgetSchemas.ts`
-- `packages/shared/src/config/WorkflowDefinitionSchemas.ts`
-- `packages/shared/src/config/WorkflowScriptSchema.ts`
-- `packages/shared/src/config/WorkflowTemplate.ts`
 
 ## Count definitions
 

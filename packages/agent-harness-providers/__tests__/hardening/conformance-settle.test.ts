@@ -32,7 +32,7 @@ describe('W13 — conformance: cancellation settles pending work', () => {
       capabilities() {
         return {
           vision: false, reasoning: false, reasoningEfforts: [], planMode: false,
-          mcpServers: false, skillDirectories: false, fullToolGating: false,
+          mcpServers: false, approvalGating: 'none', hostTools: 'none', structuredOutput: 'none', skills: 'none',
           sessionPersistence: false, budgetTracking: false, computerUse: false,
         };
       }
@@ -63,7 +63,7 @@ describe('W13 — conformance: cancellation settles pending work', () => {
       capabilities() {
         return {
           vision: false, reasoning: false, reasoningEfforts: [], planMode: false,
-          mcpServers: false, skillDirectories: false, fullToolGating: false,
+          mcpServers: false, approvalGating: 'none', hostTools: 'none', structuredOutput: 'none', skills: 'none',
           sessionPersistence: false, budgetTracking: false, computerUse: false,
         };
       }

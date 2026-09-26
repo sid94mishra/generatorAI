@@ -97,13 +97,17 @@ describe('computeCacheMiss', () => {
 
 describe('estimateMissCost', () => {
   it('prices against every token the turn was billed for, cache included', () => {
-    const u = usage({ inputTokens: 1_000, outputTokens: 1_000, cacheReadTokens: 8_000, cost: 0.1 });
+    const u = usage({ inputTokens: 1_000, outputTokens: 1_000, cacheReadTokens: 8_000, costUsd: 0.1 });
     // 10_000 billed tokens → 0.00001/token.
     expect(estimateMissCost(u, 2_000)).toBeCloseTo(0.02, 6);
   });
 
   it('returns null when the turn reports no cost', () => {
     expect(estimateMissCost(usage(), 5_000)).toBeNull();
+  });
+
+  it('ignores a premium-request multiplier (Copilot `cost` is not USD)', () => {
+    expect(estimateMissCost(usage({ provider: 'copilot', cost: 1 }), 5_000)).toBeNull();
   });
 });
 

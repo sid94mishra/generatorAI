@@ -25,7 +25,7 @@
 //      too, not just the harness prompt.
 // ────────────────────────────────────────────────────────────────
 
-import type { ToolDefinition } from '../domain/ports/IAgentHarness.js';
+import type { ToolCallContext, ToolDefinition } from '../domain/ports/IAgentHarness.js';
 import type { PermissionPolicy, PermissionDecision } from '../permissions/index.js';
 import { evaluateToolPermissions } from '../permissions/index.js';
 
@@ -65,13 +65,13 @@ export function withPermissionGate(
 ): ToolDefinition {
   return {
     ...tool,
-    handler: async (args: Record<string, unknown>) => {
+    handler: async (args: Record<string, unknown>, ctx?: ToolCallContext) => {
       if (tool.skipPermission) {
         opts.onDecision?.(tool.name, {
           action: 'allow',
           reason: 'tool declared skipPermission=true',
         });
-        return tool.handler(args);
+        return tool.handler(args, ctx);
       }
       const decision = evaluateToolPermissions(
         opts.policy,
@@ -84,7 +84,7 @@ export function withPermissionGate(
       }
       // 'allow' and 'ask' both proceed; the harness's native prompt (when
       // it exists) handles the user-facing confirmation for 'ask'.
-      return tool.handler(args);
+      return tool.handler(args, ctx);
     },
   };
 }

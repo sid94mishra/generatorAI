@@ -299,30 +299,28 @@ async function runChats() {
 /** 3 concurrent workflow runs, each a single FauxProvider-backed stage. */
 async function runWorkflows() {
   const defRes = await apiRequest('POST', '/workflow-definitions', {
-    name: 'load-1q-workflow',
-    description: 'concurrent-load-1q seed',
-    sessionMode: 'auto',
-    tags: ['load-test'],
+    formatVersion: 2,
+    workflow: { name: 'load-1q-workflow', description: 'concurrent-load-1q seed', tags: ['load-test'] },
+    stages: [{ key: 'only_stage', name: 'only-stage', kind: 'agent', prompts: [{ label: 'P', text: 'do the thing' }] }],
+    edges: [],
   });
   if (!defRes.ok) throw new Error(`workflow definition create failed (${defRes.status})`);
   const defId = defRes.data.id;
-  const stageRes = await apiRequest('POST', `/workflow-definitions/${defId}/stages`, {
-    name: 'only-stage',
-    order: 0,
-    prompts: [{ label: 'P', text: 'do the thing', waitForCompletion: true }],
-  });
-  if (!stageRes.ok) throw new Error(`workflow stage create failed (${stageRes.status})`);
+  const pubRes = await apiRequest('POST', `/workflow-definitions/${defId}/publish`);
+  if (!pubRes.ok) throw new Error(`workflow publish failed (${pubRes.status})`);
 
   const latencies = [];
   const results = await Promise.allSettled(
     Array.from({ length: 3 }, async (_, i) => {
-      const runRes = await apiRequest('POST', '/workflow-runs', { workflowDefinitionId: defId, variables: {} });
-      if (!runRes.ok) throw new Error(`run ${i} create failed (${runRes.status})`);
-      const runId = runRes.data.id;
-
+      let runId;
       const { ms } = await timed(`workflow-run-${i}`, async () => {
-        const startRes = await apiRequest('POST', `/workflow-runs/${runId}/start`);
-        if (!startRes.ok) throw new Error(`run ${i} start failed (${startRes.status})`);
+        // The invocation creates and starts the run in one request.
+        const runRes = await apiRequest('POST', '/workflow-invocations', {
+          target: { kind: 'definition', workflowDefinitionId: defId },
+          client: 'http',
+        });
+        if (!runRes.ok) throw new Error(`run ${i} invoke failed (${runRes.status})`);
+        runId = runRes.data.runId;
         const start = Date.now();
         while (Date.now() - start < 30_000) {
           const statusRes = await apiRequest('GET', `/workflow-runs/${runId}`);

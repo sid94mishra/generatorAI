@@ -72,21 +72,24 @@ generatorai
 │     watch
 ├── agent                 # First-class agent definitions
 │     delete · export · import · list · resolve · show · usage
-├── workflow (wf)         # Workflow definitions: stages, edges, variables and validation
-│     clone · create · delete · edge add · edge delete · edge list ·
-│     export · from-template · import-json · list · show · stage add ·
-│     stage delete · stage hook add · stage hook list · stage hook remove
-│     · stage list · stage update · stage variables · update · validate
+├── workflow (wf)         # Workflow definitions: documents, versions, stages and edges
+│     clone · create · delete · edge add · edge list · edge remove ·
+│     export · import · lint · list · plan · publish · show · stage add ·
+│     stage hook add · stage hook list · stage hook remove · stage list ·
+│     stage remove · stage update · update · validate · versions
+├── skill                 # The workflow authoring skill for coding agents (Claude Code, Codex)
+│     install · print
 ├── run                   # Workflow run lifecycle, stage controls and human-in-the-loop gates
-│     cancel · delete · diff · hitl approve · hitl changes-request · hitl
-│     mode · hitl pending · hitl reject · list · messages · pause ·
-│     profile generate · profile list · profile validate · resume · retry
-│     · show · stage cancel · stage list · stage pause · stage resume ·
-│     stage retry · start · watch · workspace
+│     cancel · command · delete · diff · hitl approve · hitl
+│     changes-request · hitl mode · hitl pending · hitl reject ·
+│     iterations · list · messages · pause · pending · plan · profile
+│     generate · profile list · profile validate · resume · retry · show ·
+│     stage cancel · stage list · stage pause · stage resume · stage retry
+│     · stage send · stage stop · start · watch · workspace
 ├── automation (auto)     # Scheduled, webhook and manual triggers that fan out into runs
-│     create · datasource test · delete · disable · enable · execution
-│     cancel · execution list · execution show · list ·
-│     rotate-webhook-token · show · trigger · update
+│     create · delete · disable · enable · execution cancel · execution
+│     list · execution show · list · rotate-webhook-token · show · trigger
+│     · update
 ├── project (proj)        # Projects, linked codebases, configs, MCP servers and worktrees
 │     codebase branches · codebase browse · codebase fetch · codebase file
 │     · codebase link · codebase list · codebase unlink · config delete ·
@@ -102,8 +105,6 @@ generatorai
 │     list · materialize · profiles · reload · run · show · validate
 ├── template              # System workflow templates
 │     list · show
-├── orchestrator (orch)   # System workflows and orchestrated runs
-│     cancel · context · templates
 ├── extension (ext)       # Hot-loadable extensions
 │     disable · enable · list · reload · show · uninstall
 ├── widget                # Agent-rendered widget surfaces
@@ -117,9 +118,7 @@ generatorai
 │     activity · answer · frames · grants · pending · revoke · runtime ·
 │     status
 ├── hook                  # Lifecycle hooks
-│     list · phases · test
-├── webhook               # Incoming and outgoing webhooks
-│     create · delete · list
+│     phases · test
 ├── harness               # AI provider selection
 │     show · switch
 ├── source-control (scm)  # Git provider and pull-request configuration
@@ -157,7 +156,7 @@ Pairing, this installation's credential, and the device registry
 |---|---|---|
 | `device audit [options]` | Authentication events | `--limit` |
 | `device forget [connection]` | Delete this installation's credential for a server | — |
-| `device invite [options]` | Mint a pairing code for a new device | `--scopes` `--ttl` `--data-dir` |
+| `device invite [options]` | Mint a pairing code for a new device | `--scopes` `--name` `--platform` `--ttl` `--data-dir` |
 | `device invites` | Pairing codes that have not been redeemed yet | — |
 | `device list [options]` | Devices paired with the server | `--all` |
 | `device pair <code> [options]` | Pair this CLI with a server using a pairing code | `--name` |
@@ -173,7 +172,7 @@ Conversations against a provider, optionally scoped to a project
 |---|---|---|
 | `chat archive <chat>` | Archive a chat | — |
 | `chat cancel <chat>` | Stop the in-flight turn | — |
-| `chat create <name> [options]` | Create a chat | `--description` `--model` `--project` `--agent` `--codebase` `--worktree` `--no-worktree` `--tags` `--permission-mode` |
+| `chat create <name> [options]` | Create a chat | `--description` `--model` `--project` `--agent` `--codebase` `--folder` `--worktree` `--no-worktree` `--primary` `--tags` `--permission-mode` |
 | `chat delete <chat>` | Delete a chat and its messages | — |
 | `chat list [options]` | List chats | `--status` `--project` `--limit` |
 | `chat messages <chat> [options]` | Message history | `--limit` `--before` |
@@ -202,31 +201,42 @@ First-class agent definitions
 
 ### `workflow` (alias: `wf`)
 
-Workflow definitions: stages, edges, variables and validation
+Workflow definitions: documents, versions, stages and edges
 
 | Command | What | Flags |
 |---|---|---|
-| `workflow clone <workflow> [name]` | Copy a definition, stages and edges included | — |
-| `workflow create <name> [options]` | Create an empty workflow definition | `--description` `--session-mode` `--project` `--tags` |
-| `workflow delete <workflow>` | Delete a definition | — |
-| `workflow edge add <workflow> [options]` | Connect two stages | `--from` `--to` `--on` |
-| `workflow edge delete <workflow> <edge>` | Delete an edge | — |
+| `workflow clone <workflow> [name]` | Copy a definition into a new draft | — |
+| `workflow create [file] [options]` | Create a draft from a workflow document, or an empty one with --name | `--name` `--description` `--project` `--tags` `--publish` |
+| `workflow delete <workflow>` | Delete a definition (archived instead when runs pin it) | — |
+| `workflow edge add <workflow> [options]` | Connect two stages | `--from` `--to` `--on` `--when` |
 | `workflow edge list <workflow>` | Edges in a definition | — |
-| `workflow export <workflow> [options]` | Export a definition as JSON | `--out` |
-| `workflow from-template <template> [options]` | Create a definition from a system template | `--name` |
-| `workflow import-json <file> [options]` | Import a definition from a JSON file | `--name` |
-| `workflow list [options]` | List workflow definitions | `--project` `--tag` |
-| `workflow show <workflow>` | Show a definition with its stages and edges | — |
-| `workflow stage add <workflow> [options]` | Add a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--order` `--timeout` `--retries` `--var` `--condition` `--condition-expression` |
-| `workflow stage delete <workflow> <stage>` | Delete a stage and its edges | — |
-| `workflow stage hook add <workflow> <stage> [options]` | Attach a lifecycle hook to a stage | `--name` `--phase` `--type` `--config` `--priority` `--timeout` `--retries` `--failure-policy` `--disabled` |
+| `workflow edge remove <workflow> [options]` | Disconnect two stages | `--from` `--to` `--on` |
+| `workflow export <workflow> [options]` | The canonical document (import gives it back unchanged) | `--out` |
+| `workflow import [file] [options]` | Import a canonical workflow document, or instantiate a template | `--template` `--name` `--project` `--draft` `--publish` |
+| `workflow lint <file>` | Validate a document file offline, with the workflow spec alone | — |
+| `workflow list [options]` | List workflow definitions | `--project` `--status` `--search` `--tag` `--archived` `--limit` |
+| `workflow plan <target> [options]` | What a run of a document or a saved workflow would do, without saving or running it | `--var` `--stage-var` `--skip` `--stage-model` `--project` |
+| `workflow publish <workflow>` | Publish the working graph as a new version (runs use the latest) | — |
+| `workflow show <workflow>` | Show a definition: status, revision and its graph | — |
+| `workflow stage add <workflow> [options]` | Add an agent stage | `--name` `--key` `--description` `--prompt` `--prompt-file` `--guard` `--retry-attempts` `--timeout-ms` `--output-format` `--context-from` `--context-mode` `--agent` `--model` `--approval` |
+| `workflow stage hook add <workflow> <stage> [options]` | Attach a lifecycle hook to a stage | `--name` `--phase` `--type` `--config` `--priority` `--timeout-ms` `--retries` `--failure-policy` `--disabled` |
 | `workflow stage hook list <workflow> <stage>` | A stage's lifecycle hooks | — |
 | `workflow stage hook remove <workflow> <stage> <hook>` | Detach a lifecycle hook from a stage | — |
 | `workflow stage list <workflow>` | Stages in a definition | — |
-| `workflow stage update <workflow> <stage> [options]` | Patch a stage | `--name` `--prompt` `--prompt-file` `--model` `--agent` `--timeout` `--retries` `--var` `--clear-vars` `--condition` `--condition-expression` |
-| `workflow stage variables <workflow> <stage>` | A stage's variables | — |
-| `workflow update <workflow> [options]` | Patch a definition | `--name` `--description` `--session-mode` `--tags` |
-| `workflow validate <workflow>` | Check a definition for cycles, orphans and bad references | — |
+| `workflow stage remove <workflow> <stage>` | Remove a stage, its edges and references to it as a context source | — |
+| `workflow stage update <workflow> <stage> [options]` | Change a stage | `--name` `--description` `--prompt` `--prompt-file` `--guard` `--retry-attempts` `--timeout-ms` `--output-format` `--context-from` `--context-mode` `--agent` `--model` `--approval` |
+| `workflow update <workflow> [options]` | Change a definition's name, description or tags | `--name` `--description` `--tags` |
+| `workflow validate <target>` | Validate a document file, or a stored definition | — |
+| `workflow versions <workflow>` | Published and test versions of a definition | — |
+
+### `skill`
+
+The workflow authoring skill for coding agents (Claude Code, Codex)
+
+| Command | What | Flags |
+|---|---|---|
+| `skill install [options]` | Install the workflow authoring skill for Claude Code or Codex, and print the MCP config | `--target` `--project` `--dir` `--from` |
+| `skill print [path] [options]` | Print a file of the workflow authoring skill (SKILL.md by default) | `--from` |
 
 ### `run`
 
@@ -235,30 +245,36 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 | Command | What | Flags |
 |---|---|---|
 | `run cancel <run>` | Cancel a run | — |
+| `run command <run> <instance> <command> [options]` | Send an operator command to a run or one of its instances (any run command, fields as JSON) | `--json` `--event-key` `--idempotency-key` `--data` |
 | `run delete <run>` | Delete a run record | — |
-| `run diff <run>` | Unified diff of everything a run changed | — |
-| `run hitl approve <run> <stage> [options]` | Approve a waiting stage | `--value` `--reason` `--follow-up` |
-| `run hitl changes-request <run> <stage> [options]` | Send a waiting stage back for changes | `--value` `--reason` `--follow-up` |
+| `run diff <run>` | Unified diff of everything a run changed, per mounted codebase | — |
+| `run hitl approve <run> <stage> [options]` | Approve a waiting stage | `--value` `--feedback` |
+| `run hitl changes-request <run> <stage> [options]` | Send a waiting stage back for changes | `--value` `--feedback` |
 | `run hitl mode <run> [mode]` | Show or set the run permission mode | — |
 | `run hitl pending <run>` | Gates waiting for a human decision | — |
-| `run hitl reject <run> <stage> [options]` | Reject a waiting stage and fail the run | `--value` `--reason` `--follow-up` |
+| `run hitl reject <run> <stage> [options]` | Reject a waiting stage and fail the run | `--value` `--feedback` |
+| `run iterations <run> <loop>` | A loop's finished iterations: exit-rule values, streaks, score, workspace change, carried state | — |
 | `run list [options]` | List workflow runs | `--status` `--definition` `--limit` |
 | `run messages <run> [options]` | Messages recorded for a run, optionally one stage | `--stage` |
 | `run pause <run>` | Pause a run | — |
-| `run profile generate <workflow> [options]` | Write a run-profile template for a workflow | `--out` |
-| `run profile list` | Run profiles visible from here | — |
-| `run profile validate <workflow> <profile>` | Check a run profile against a workflow definition | — |
+| `run pending <run>` | The decisions a run waits on: reviews, gates, parked loops, approval and event waits (sub-workflow children included) | — |
+| `run plan [workflow] [options]` | Show what `run start` would do, without starting anything | `--var` `--profile` `--skip` `--stage-var` `--stage-model` `--model` `--effort` `--codebase` `--project` `--permission-mode` `--name` `--run-timeout` `--skill-file` `--agent-file` `--prompt-file` `--test-run` |
+| `run profile generate <workflow> [options]` | Write a run-profile template (RunProfile v2) for a workflow | `--out` |
+| `run profile list` | Run profiles visible from here, each checked against the RunProfile schema | — |
+| `run profile validate <workflow> <profile> [options]` | Check a run profile: its schema, then the server plan for a workflow | `--test-run` |
 | `run resume <run>` | Resume a run | — |
-| `run retry <run> [options]` | Retry a run | `--watch` `--verbosity` |
+| `run retry <run> [options]` | Re-run the failed stages of a finished run as a new run | `--from` `--idempotency-key` `--watch` `--verbosity` |
 | `run show <run> [options]` | Show a run and its stages | `--stages` |
 | `run stage cancel <run> <stage>` | Cancel one stage | — |
 | `run stage list <run>` | Stage runs for a run | — |
 | `run stage pause <run> <stage>` | Pause one stage | — |
 | `run stage resume <run> <stage>` | Resume one stage | — |
 | `run stage retry <run> <stage>` | Retry one stage | — |
-| `run start <workflow> [options]` | Create and start a run<br>⚠️ `--name` — The server has no route that names a run, so this value is accepted and discarded. | `--name` ⚠️ `--var` `--profile` `--project` `--permission-mode` `--watch` `--verbosity` `--no-start` |
-| `run watch <run> [options]` | Stream a run until it reaches a terminal state | `--verbosity` |
-| `run workspace <run>` | Workspace a run executed in | — |
+| `run stage send <run> <stage> <text> [options]` | Send a message to a stage (the next turn, an amendment of a completed stage, or a retry of a paused one) | `--mode` `--attach` |
+| `run stage stop <run> <stage> [options]` | Stop the turn a stage is taking; the stage continues from its next step | `--force` |
+| `run start [workflow] [options]` | Start a run of a workflow (one invocation) | `--var` `--profile` `--skip` `--stage-var` `--stage-model` `--model` `--effort` `--codebase` `--project` `--permission-mode` `--name` `--run-timeout` `--skill-file` `--agent-file` `--prompt-file` `--test-run` `--idempotency-key` `--watch` `--verbosity` |
+| `run watch <run> [options]` | Stream a run until it is finalized (post-processing done); the exit code reflects its outcome | `--verbosity` |
+| `run workspace <run>` | Workspace a run executed in: its root, artifacts, uploads and every mount with its files | — |
 
 ### `automation` (alias: `auto`)
 
@@ -266,8 +282,7 @@ Scheduled, webhook and manual triggers that fan out into runs
 
 | Command | What | Flags |
 |---|---|---|
-| `automation create [options]` | Create an automation | `--name` `--workflow` `--trigger` `--schedule` `--input-mode` `--loop-variable` `--loop-items` `--batch-format` `--batch-data` `--batch-data-file` `--var` `--max-concurrency` `--on-error` `--data-source` `--project` `--enabled` |
-| `automation datasource test <config>` | Dry-run a data-source config and print what it would yield | — |
+| `automation create [options]` | Create an automation | `--name` `--workflow` `--trigger` `--schedule` `--data-schema` `--iteration-mode` `--default-dataset-file` `--default-dataset-format` `--var` `--max-concurrency` `--on-error` `--permission-mode` `--project` `--enabled` |
 | `automation delete <automation>` | Delete an automation | — |
 | `automation disable <automation>` | Disable an automation | — |
 | `automation enable <automation>` | Enable an automation | — |
@@ -275,10 +290,10 @@ Scheduled, webhook and manual triggers that fan out into runs
 | `automation execution list <automation>` | Executions of an automation | — |
 | `automation execution show <automation> <execution>` | One execution and its nested runs | — |
 | `automation list [options]` | List automations | `--project` |
-| `automation rotate-webhook-token <automation>` | Issue a new webhook token, invalidating the old one | — |
+| `automation rotate-webhook-token <automation>` | Issue a new webhook token + signing secret, invalidating the old ones | — |
 | `automation show <automation>` | Show an automation with recent executions | — |
 | `automation trigger <automation> [options]` | Fire an automation now | `--var` `--payload` |
-| `automation update <automation> [options]` | Patch an automation | `--name` `--schedule` `--max-concurrency` `--on-error` `--var` |
+| `automation update <automation> [options]` | Patch an automation | `--name` `--schedule` `--max-concurrency` `--on-error` `--permission-mode` `--var` |
 
 ### `project` (alias: `proj`)
 
@@ -349,10 +364,10 @@ Programmatic workflow scripts (.workflow.mjs)
 | Command | What | Flags |
 |---|---|---|
 | `script list` | List programmatic workflow scripts | — |
-| `script materialize <script> [options]` | Turn a script into a concrete workflow definition | `--profile` |
+| `script materialize <script> [options]` | Turn a script into a concrete workflow definition | `--name` `--project` |
 | `script profiles <script>` | Profiles a script exposes | — |
 | `script reload [script]` | Re-read scripts from disk without restarting the server | — |
-| `script run <script> [options]` | Materialize and start a script | `--profile` `--watch` `--verbosity` |
+| `script run <script> [options]` | Start a run of a script (materialized once per script content) | `--profile` `--var` `--idempotency-key` `--watch` `--verbosity` |
 | `script show <script>` | Show a script | — |
 | `script validate <file>` | Validate a script file without registering it | — |
 
@@ -364,16 +379,6 @@ System workflow templates
 |---|---|---|
 | `template list` | System workflow templates | — |
 | `template show <template>` | Show one template | — |
-
-### `orchestrator` (alias: `orch`)
-
-System workflows and orchestrated runs
-
-| Command | What | Flags |
-|---|---|---|
-| `orchestrator cancel <run>` | Cancel an orchestrated run and everything under it | — |
-| `orchestrator context <run>` | Orchestrator context for a run | — |
-| `orchestrator templates` | System workflows available to the orchestrator | — |
 
 ### `extension` (alias: `ext`)
 
@@ -451,19 +456,8 @@ Lifecycle hooks
 
 | Command | What | Flags |
 |---|---|---|
-| `hook list <session>` | Hooks registered on a session — global definitions plus per-workflow overrides | — |
 | `hook phases` | Hook phases the server can invoke | — |
 | `hook test <session> <phase> [options]` | Dry-run one hook against a session | `--type` `--config` `--priority` `--timeout` `--retries` `--failure-policy` |
-
-### `webhook`
-
-Incoming and outgoing webhooks
-
-| Command | What | Flags |
-|---|---|---|
-| `webhook create <url> [options]` | Register an outgoing webhook | `--event` `--secret` |
-| `webhook delete <webhook>` | Remove a webhook registration | — |
-| `webhook list` | Outgoing webhook registrations | — |
 
 ### `harness`
 
@@ -532,8 +526,8 @@ Configuration, profiles and key bindings
 For deep coverage of each, see the matching feature doc:
 
 - Chat: [feature-chat.md → CLI](./feature-chat.md#6-cli)
-- Workflows: [feature-workflows.md → CLI](./feature-workflows.md#6-cli)
-- Stages: [feature-stages.md → CLI](./feature-stages.md#6-cli)
+- Workflows: [feature-workflows.md → CLI](./feature-workflows.md#8-cli)
+- Stages: [feature-stages.md → CLI](./feature-stages.md#5-cli)
 - Runs: [feature-workflow-runs.md → CLI](./feature-workflow-runs.md#13-cli)
 - Automations: [feature-automations.md → CLI](./feature-automations.md#7-cli)
 - Projects: [feature-projects-codebases.md → CLI](./feature-projects-codebases.md#7-cli)
@@ -620,6 +614,7 @@ Active in every pane.
 | Key | Action |
 |---|---|
 | `ctrl+k` / `ctrl+p` | Command palette |
+| `?` | Toggle help |
 | `ctrl+c` | Quit |
 | `ctrl+r` | Refresh current view |
 | `escape` | Back / close overlay |
@@ -677,7 +672,6 @@ Any pane with rows, and the fallback for several others.
 
 | Key | Action |
 |---|---|
-| `?` | Toggle help |
 | `/` | Search in view |
 | `down` / `j` | Move down |
 | `up` / `k` | Move up |
@@ -767,7 +761,7 @@ Editing a workflow definition.
 | `d` | Delete the selected stage |
 | `E` | Connect this stage to another |
 | `D` | Delete an edge on this stage |
-| `v` | Edit the stage's variables |
+| `v` | Show the workflow's input variables |
 | `h` | Manage the stage's hooks |
 | `V` | Validate — jump from a finding to its stage |
 | `r` | Start a run of this workflow |
@@ -945,10 +939,23 @@ Two operations are deliberately shell-only and are hidden from the TUI palette: 
 
 ## 10. Common workflows
 
-### Start a workflow and watch
+### Plan, start and watch a workflow
 ```powershell
-generatorai run start <wfDefId> --var topic="caching" --watch
+generatorai run plan nightly-e2e --var topic="caching" --skip lint     # what would run, without starting it
+generatorai run start nightly-e2e --var topic="caching" --skip lint --watch
+generatorai run start review --codebase api@main --stage-model review=claude-opus --run-timeout 30
 ```
+
+`run start` sends ONE request (`POST /api/workflow-invocations`) with a fresh idempotency key; `--watch` long-polls the run digest until the run is finalized (post-processing included) and exits non-zero when it failed or was cancelled. `--run-timeout` is in minutes (the global `--timeout` is the per-request timeout in ms).
+
+### Run profiles
+```powershell
+generatorai run profile generate nightly-e2e -o .generatorai/run-profiles/quick.json
+generatorai run profile validate nightly-e2e quick                 # schema + server plan
+generatorai run start --profile quick --var topic="caching"        # flags win over the profile
+```
+
+A profile is a `RunProfile` v2 JSON file (`@generatorai/workflow-spec`): `{version: 2, name, workflow?, runName?, variables, projectId?, codebases?, stageOverrides? (by stage key), overrides?, budget?, skillFiles?, agentFiles?, promptFiles?}`. File paths in a profile are relative to the profile file.
 
 ### Run a PWS script with profile
 ```powershell
@@ -958,13 +965,13 @@ generatorai script run e2e-feature-coverage --profile quick-surface --watch
 ### Approve a HITL stage
 ```powershell
 generatorai run hitl pending <runId>                     # see what's waiting
-generatorai run hitl resume <runId> <stageId> --approve
+generatorai run hitl approve <runId> <stageKey>
 ```
 
 ### Export + re-import a workflow
 ```powershell
-generatorai workflow export <id> > my-wf.json
-generatorai workflow import-json ./my-wf.json
+generatorai workflow export <id> --out my-wf.json
+generatorai workflow import ./my-wf.json            # a new draft; --publish to publish it
 ```
 
 ### Link a private repo to a project
@@ -1002,7 +1009,7 @@ generatorai project worktree cleanup <projId>
 ## 11. Edge cases
 
 1. **Server not running** — `system health` returns a clear "Could not connect" error. Most other commands need the server.
-2. **`--json` + interactive prompts** — when commands need user input (`workflow import-json` confirmation, etc.), `--json` skips prompts and assumes defaults / refuses.
+2. **`--json` + interactive prompts** — when commands need user input (a destructive-action confirmation, etc.), `--json` skips prompts and assumes defaults / refuses.
 3. **`Ctrl+C` while watching** — sends SIGINT; the SSE client unsubscribes cleanly. The remote run continues.
 4. **`hook phases` output** — flattens `categories` object to a row list (fix from session 66). Older API responses (where it was already a list) still parse correctly.
 5. **CLI version vs server version mismatch** — currently no strict compatibility check. Wire formats are backwards-compatible within a major version.

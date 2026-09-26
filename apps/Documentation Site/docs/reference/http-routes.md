@@ -52,21 +52,20 @@ Source: `apps/server/src/routes/automations.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/automations` | 173 |
-| `GET` | `/api/automations` | 186 |
-| `POST` | `/api/automations/test-data-source` | 199 |
-| `POST` | `/api/automations/preview-iterations` | 214 |
-| `GET` | `/api/automations/:id` | 236 |
-| `PATCH` | `/api/automations/:id` | 250 |
-| `DELETE` | `/api/automations/:id` | 260 |
-| `POST` | `/api/automations/:id/enable` | 272 |
-| `POST` | `/api/automations/:id/disable` | 282 |
-| `POST` | `/api/automations/:id/rotate-webhook-token` | 300 |
-| `POST` | `/api/automations/:id/trigger` | 326 |
-| `POST` | `/api/automations/webhooks/:token` | 386 |
-| `GET` | `/api/automations/:id/executions` | 454 |
-| `GET` | `/api/automations/:id/executions/:execId` | 464 |
-| `POST` | `/api/automations/:id/executions/:execId/cancel` | 478 |
+| `POST` | `/api/automations` | 117 |
+| `GET` | `/api/automations` | 141 |
+| `POST` | `/api/automations/preview-iterations` | 157 |
+| `GET` | `/api/automations/:id` | 179 |
+| `PATCH` | `/api/automations/:id` | 193 |
+| `DELETE` | `/api/automations/:id` | 217 |
+| `POST` | `/api/automations/:id/enable` | 229 |
+| `POST` | `/api/automations/:id/disable` | 239 |
+| `POST` | `/api/automations/:id/rotate-webhook-token` | 257 |
+| `POST` | `/api/automations/:id/trigger` | 283 |
+| `POST` | `/api/automations/webhooks/:token` | 343 |
+| `GET` | `/api/automations/:id/executions` | 411 |
+| `GET` | `/api/automations/:id/executions/:execId` | 421 |
+| `POST` | `/api/automations/:id/executions/:execId/cancel` | 435 |
 
 ## browser
 
@@ -96,34 +95,34 @@ Source: `apps/server/src/routes/chats.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/chats` | 274 |
-| `GET` | `/api/chats` | 328 |
-| `GET` | `/api/chats/:id` | 405 |
-| `PUT` | `/api/chats/:id/sources` | 420 |
-| `POST` | `/api/chats/:id/workspace/prepare` | 438 |
-| `DELETE` | `/api/chats/:id` | 454 |
-| `PATCH` | `/api/chats/:id` | 466 |
-| `POST` | `/api/chats/:id/cancel` | 582 |
-| `POST` | `/api/chats/:id/prompt` | 615 |
-| `GET` | `/api/chats/:id/attachments/:artifactId` | 742 |
-| `GET` | `/api/chats/:id/messages` | 769 |
-| `GET` | `/api/chats/:id/transcript` | 799 |
-| `POST` | `/api/chats/:id/rewind` | 816 |
-| `POST` | `/api/chats/:id/fork` | 832 |
-| `GET` | `/api/chats/:id/background-tasks` | 866 |
-| `GET` | `/api/chats/:id/background-tasks/:taskId` | 877 |
-| `POST` | `/api/chats/:id/background-tasks/:taskId/cancel` | 888 |
-| `GET` | `/api/chats/:id/plans` | 907 |
-| `GET` | `/api/chats/:id/plans/:planId` | 918 |
-| `GET` | `/api/chats/:id/plans/:planId/content` | 942 |
-| `PUT` | `/api/chats/:id/plans/:planId/content` | 977 |
-| `POST` | `/api/chats/:id/plans/:planId/comments` | 1022 |
-| `POST` | `/api/chats/:id/plans/:planId/decision` | 1058 |
-| `POST` | `/api/chats/:id/plans/:planId/save-to-workspace` | 1112 |
-| `GET` | `/api/chats/:id/interactions` | 1145 |
-| `POST` | `/api/chats/:id/interactions/:interactionId/respond` | 1165 |
-| `POST` | `/api/chats/:id/interactions/:interactionId/permission` | 1200 |
-| `PATCH` | `/api/chats/:id/permission-mode` | 1233 |
+| `POST` | `/api/chats` | 260 |
+| `GET` | `/api/chats` | 322 |
+| `GET` | `/api/chats/:id` | 399 |
+| `PUT` | `/api/chats/:id/sources` | 414 |
+| `POST` | `/api/chats/:id/workspace/prepare` | 432 |
+| `DELETE` | `/api/chats/:id` | 448 |
+| `PATCH` | `/api/chats/:id` | 460 |
+| `POST` | `/api/chats/:id/cancel` | 588 |
+| `POST` | `/api/chats/:id/prompt` | 621 |
+| `GET` | `/api/chats/:id/attachments/:artifactId` | 748 |
+| `GET` | `/api/chats/:id/messages` | 775 |
+| `GET` | `/api/chats/:id/transcript` | 805 |
+| `POST` | `/api/chats/:id/rewind` | 822 |
+| `POST` | `/api/chats/:id/fork` | 838 |
+| `GET` | `/api/chats/:id/background-tasks` | 872 |
+| `GET` | `/api/chats/:id/background-tasks/:taskId` | 883 |
+| `POST` | `/api/chats/:id/background-tasks/:taskId/cancel` | 894 |
+| `GET` | `/api/chats/:id/plans` | 913 |
+| `GET` | `/api/chats/:id/plans/:planId` | 924 |
+| `GET` | `/api/chats/:id/plans/:planId/content` | 948 |
+| `PUT` | `/api/chats/:id/plans/:planId/content` | 983 |
+| `POST` | `/api/chats/:id/plans/:planId/comments` | 1028 |
+| `POST` | `/api/chats/:id/plans/:planId/decision` | 1064 |
+| `POST` | `/api/chats/:id/plans/:planId/save-to-workspace` | 1118 |
+| `GET` | `/api/chats/:id/interactions` | 1151 |
+| `POST` | `/api/chats/:id/interactions/:interactionId/respond` | 1171 |
+| `POST` | `/api/chats/:id/interactions/:interactionId/permission` | 1206 |
+| `PATCH` | `/api/chats/:id/permission-mode` | 1239 |
 
 ## computer
 
@@ -221,9 +220,8 @@ Source: `apps/server/src/routes/hooks.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/hooks/phases` | 50 |
-| `GET` | `/api/hooks/sessions/:id/hooks` | 68 |
-| `POST` | `/api/hooks/sessions/:id/hooks/test` | 113 |
+| `GET` | `/api/hooks/phases` | 24 |
+| `POST` | `/api/hooks/sessions/:id/hooks/test` | 51 |
 
 ## internal-browser
 
@@ -258,28 +256,6 @@ Source: `apps/server/src/routes/openapi.ts`.
 | --- | --- | --- |
 | `GET` | `/api/openapi.json` | 26 |
 | `GET` | `/api/docs` | 30 |
-
-## orchestrator
-
-Source: `apps/server/src/routes/orchestrator.ts`.
-
-| Method | Path | Source line |
-| --- | --- | --- |
-| `GET` | `/api/orchestrator/system-workflows` | 95 |
-| `GET` | `/api/orchestrator/system-workflows/:id` | 105 |
-| `POST` | `/api/orchestrator/from-template` | 122 |
-| `POST` | `/api/orchestrator/runs` | 158 |
-| `GET` | `/api/orchestrator/runs/:id/context` | 228 |
-| `POST` | `/api/orchestrator/runs/:id/cancel` | 245 |
-| `POST` | `/api/orchestrator/workflows/:id/uploads` | 264 |
-| `GET` | `/api/orchestrator/workflows/:id/files` | 329 |
-| `GET` | `/api/orchestrator/workflows/:id/files/download` | 357 |
-| `DELETE` | `/api/orchestrator/workflows/:id/files` | 401 |
-| `POST` | `/api/orchestrator/runs/:id/uploads` | 433 |
-| `GET` | `/api/orchestrator/runs/:id/workspace` | 513 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/download` | 624 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/content` | 691 |
-| `GET` | `/api/orchestrator/runs/:id/workspace/diff` | 751 |
 
 ## projects
 
@@ -330,13 +306,13 @@ Source: `apps/server/src/routes/review.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/workspaces/:id/review/threads` | 52 |
-| `POST` | `/api/workspaces/:id/review/threads` | 88 |
-| `POST` | `/api/workspaces/:id/review/threads/:threadId/comments` | 142 |
-| `PATCH` | `/api/workspaces/:id/review/threads/:threadId` | 164 |
-| `DELETE` | `/api/workspaces/:id/review/threads/:threadId` | 186 |
-| `PATCH` | `/api/workspaces/:id/review/threads/:threadId/comments/:commentId` | 200 |
-| `POST` | `/api/workspaces/:id/review/submit` | 237 |
+| `GET` | `/api/workspaces/:id/review/threads` | 55 |
+| `POST` | `/api/workspaces/:id/review/threads` | 91 |
+| `POST` | `/api/workspaces/:id/review/threads/:threadId/comments` | 145 |
+| `PATCH` | `/api/workspaces/:id/review/threads/:threadId` | 167 |
+| `DELETE` | `/api/workspaces/:id/review/threads/:threadId` | 189 |
+| `PATCH` | `/api/workspaces/:id/review/threads/:threadId/comments/:commentId` | 203 |
+| `POST` | `/api/workspaces/:id/review/submit` | 240 |
 
 ## scopeRequests
 
@@ -391,11 +367,11 @@ Source: `apps/server/src/routes/stream.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/stream/tickets` | 280 |
-| `POST` | `/api/stream/connections` | 363 |
-| `POST` | `/api/stream/connections/:id/subs` | 470 |
-| `GET` | `/api/stream` | 531 |
-| `GET` | `/api/stream/replay` | 1059 |
+| `POST` | `/api/stream/tickets` | 298 |
+| `POST` | `/api/stream/connections` | 381 |
+| `POST` | `/api/stream/connections/:id/subs` | 476 |
+| `GET` | `/api/stream` | 546 |
+| `GET` | `/api/stream/replay` | 1079 |
 
 ## system
 
@@ -444,18 +420,6 @@ Source: `apps/server/src/routes/terminals.ts`.
 | `POST` | `/api/workspaces/:id/terminals/:sid/signal` | 198 |
 | `DELETE` | `/api/workspaces/:id/terminals/:sid` | 220 |
 
-## webhooks
-
-Source: `apps/server/src/routes/webhooks.ts`.
-
-| Method | Path | Source line |
-| --- | --- | --- |
-| `POST` | `/api/webhooks/github` | 37 |
-| `POST` | `/api/webhooks/custom/:trigger` | 82 |
-| `GET` | `/api/webhooks/registrations` | 124 |
-| `POST` | `/api/webhooks/registrations` | 138 |
-| `DELETE` | `/api/webhooks/registrations/:id` | 161 |
-
 ## widgets
 
 Source: `apps/server/src/routes/widgets.ts`.
@@ -478,20 +442,39 @@ Source: `apps/server/src/routes/workflowDefinitions.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/workflow-definitions` | 26 |
-| `GET` | `/api/workflow-definitions` | 51 |
-| `GET` | `/api/workflow-definitions/:id` | 62 |
-| `PATCH` | `/api/workflow-definitions/:id` | 73 |
-| `DELETE` | `/api/workflow-definitions/:id` | 94 |
-| `POST` | `/api/workflow-definitions/:id/stages` | 123 |
-| `PUT` | `/api/workflow-definitions/:id/stages/:stageId` | 140 |
-| `DELETE` | `/api/workflow-definitions/:id/stages/:stageId` | 154 |
-| `POST` | `/api/workflow-definitions/:id/edges` | 172 |
-| `DELETE` | `/api/workflow-definitions/:id/edges/:edgeId` | 189 |
-| `POST` | `/api/workflow-definitions/:id/validate` | 207 |
-| `POST` | `/api/workflow-definitions/import` | 219 |
-| `POST` | `/api/workflow-definitions/import-json` | 239 |
-| `GET` | `/api/workflow-definitions/:id/export` | 252 |
+| `GET` | `/api/workflow-definitions` | 44 |
+| `POST` | `/api/workflow-definitions` | 64 |
+| `POST` | `/api/workflow-definitions/validate` | 75 |
+| `POST` | `/api/workflow-definitions/import` | 84 |
+| `GET` | `/api/workflow-definitions/:id` | 109 |
+| `PUT` | `/api/workflow-definitions/:id/graph` | 117 |
+| `POST` | `/api/workflow-definitions/:id/publish` | 137 |
+| `GET` | `/api/workflow-definitions/:id/versions` | 150 |
+| `GET` | `/api/workflow-definitions/:id/versions/:versionId` | 158 |
+| `GET` | `/api/workflow-definitions/:id/export` | 166 |
+| `DELETE` | `/api/workflow-definitions/:id` | 179 |
+
+## workflowInvocations
+
+Source: `apps/server/src/routes/workflowInvocations.ts`.
+
+| Method | Path | Source line |
+| --- | --- | --- |
+| `POST` | `/api/workflow-invocations/uploads` | 99 |
+| `POST` | `/api/workflow-invocations/plan` | 111 |
+| `POST` | `/api/workflow-invocations` | 120 |
+| `GET` | `/api/workflow-invocations/:runId/digest` | 147 |
+
+## workflowRunWorkspace
+
+Source: `apps/server/src/routes/workflowRunWorkspace.ts`.
+
+| Method | Path | Source line |
+| --- | --- | --- |
+| `GET` | `/api/workflow-runs/:id/workspace` | 125 |
+| `GET` | `/api/workflow-runs/:id/workspace/download` | 151 |
+| `GET` | `/api/workflow-runs/:id/workspace/content` | 188 |
+| `GET` | `/api/workflow-runs/:id/workspace/diff` | 221 |
 
 ## workflowRuns
 
@@ -499,27 +482,16 @@ Source: `apps/server/src/routes/workflowRuns.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `POST` | `/api/workflow-runs` | 36 |
-| `GET` | `/api/workflow-runs` | 49 |
-| `GET` | `/api/workflow-runs/:id` | 81 |
-| `GET` | `/api/workflow-runs/:id/scratchpad` | 93 |
-| `POST` | `/api/workflow-runs/:id/start` | 122 |
-| `POST` | `/api/workflow-runs/:id/pause` | 144 |
-| `POST` | `/api/workflow-runs/:id/resume` | 158 |
-| `POST` | `/api/workflow-runs/:id/retry` | 174 |
-| `POST` | `/api/workflow-runs/:id/cancel` | 204 |
-| `DELETE` | `/api/workflow-runs/:id` | 218 |
-| `GET` | `/api/workflow-runs/:id/stages` | 237 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/pause` | 248 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/resume` | 262 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/wake` | 290 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/retry` | 330 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/cancel` | 358 |
-| `GET` | `/api/workflow-runs/:id/permission-mode` | 384 |
-| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 395 |
-| `GET` | `/api/workflow-runs/:id/pending-interrupts` | 420 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/interrupt` | 441 |
-| `POST` | `/api/workflow-runs/:runId/stages/:stageId/approve` | 476 |
+| `GET` | `/api/workflow-runs` | 76 |
+| `GET` | `/api/workflow-runs/:id` | 106 |
+| `POST` | `/api/workflow-runs/:id/commands` | 121 |
+| `DELETE` | `/api/workflow-runs/:id` | 143 |
+| `GET` | `/api/workflow-runs/:id/stages` | 162 |
+| `POST` | `/api/workflow-runs/:id/instances/:instanceId/messages` | 181 |
+| `POST` | `/api/workflow-runs/:id/instances/:instanceId/turn/cancel` | 226 |
+| `GET` | `/api/workflow-runs/:id/instances/:instanceId/attachments/:artifactId` | 271 |
+| `GET` | `/api/workflow-runs/:id/permission-mode` | 300 |
+| `PATCH` | `/api/workflow-runs/:id/permission-mode` | 311 |
 
 ## workflowScripts
 
@@ -527,15 +499,14 @@ Source: `apps/server/src/routes/workflowScripts.ts`.
 
 | Method | Path | Source line |
 | --- | --- | --- |
-| `GET` | `/api/workflow-scripts` | 55 |
-| `GET` | `/api/workflow-scripts/:id` | 65 |
-| `GET` | `/api/workflow-scripts/:id/profiles` | 85 |
-| `POST` | `/api/workflow-scripts/:id/materialize` | 100 |
-| `POST` | `/api/workflow-scripts/:id/run` | 194 |
-| `POST` | `/api/workflow-scripts/reload` | 352 |
-| `POST` | `/api/workflow-scripts/:id/reload` | 364 |
-| `POST` | `/api/workflow-scripts/upload` | 391 |
-| `POST` | `/api/workflow-scripts/validate` | 440 |
+| `GET` | `/api/workflow-scripts` | 31 |
+| `GET` | `/api/workflow-scripts/:id` | 41 |
+| `GET` | `/api/workflow-scripts/:id/profiles` | 56 |
+| `POST` | `/api/workflow-scripts/:id/materialize` | 89 |
+| `POST` | `/api/workflow-scripts/reload` | 118 |
+| `POST` | `/api/workflow-scripts/:id/reload` | 130 |
+| `POST` | `/api/workflow-scripts/upload` | 157 |
+| `POST` | `/api/workflow-scripts/validate` | 206 |
 
 ## workspaces
 

@@ -118,10 +118,7 @@ async function fetchCandidates(
         label: (a as { name?: string }).name,
       }));
     case 'workflow':
-      return (await api.definitions.list()).map((w) => ({
-        id: (w as { id: string }).id,
-        label: (w as { name?: string }).name,
-      }));
+      return (await api.definitions.list({ limit: MAX_CANDIDATES })).items.map((w) => ({ id: w.id, label: w.name }));
     case 'run':
       return (await api.runs.list({ limit: MAX_CANDIDATES })).map((r) => ({
         id: r.id,
@@ -145,10 +142,7 @@ async function fetchCandidates(
     case 'script':
       return (await api.scripts.list()).map((s) => ({ id: s.id, label: s.name }));
     case 'template':
-      return (await api.templates.list()).map((t) => ({
-        id: String((t as { id?: unknown }).id ?? ''),
-        label: String((t as { name?: unknown }).name ?? ''),
-      }));
+      return (await api.templates.list()).map((t) => ({ id: t.id, label: t.graph.workflow.name }));
     case 'extension':
       return (await api.extensions.list()).map((e) => ({ id: e.id, label: e.name }));
     case 'widget':

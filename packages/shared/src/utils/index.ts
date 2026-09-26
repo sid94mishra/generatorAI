@@ -42,7 +42,7 @@ export type {
 // server-only modules below.
 export { generateId, deepMerge, sleep, interpolateVariables } from './pure.js';
 
-export { parseBatchData, resolveIterationVariables, buildIterationLabel } from './batchDataParser.js';
+export { parseBatchData } from './batchDataParser.js';
 export {
   matchesHostPattern,
   matchesAnyHostPattern,

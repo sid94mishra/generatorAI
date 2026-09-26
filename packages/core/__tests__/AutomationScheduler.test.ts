@@ -13,13 +13,16 @@
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { createDB, migrateDB, EntryRepository, RegisterRepository } from '@generatorai/db';
 import { AutomationService } from '../src/services/AutomationService.js';
+import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import type {
   IAutomationRepository,
   IAutomationExecutionRepository,
 } from '../src/services/AutomationService.js';
 import { EventBus } from '../src/events/EventBus.js';
 import type { WorkflowRunService } from '../src/services/WorkflowRunService.js';
+import type { WorkflowInvocationService } from '../src/services/workflow-invocation/WorkflowInvocationService.js';
 import type { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
 import type { IWorkflowRunRepository } from '../src/domain/ports/IWorkflowRunRepository.js';
 import type {
@@ -31,6 +34,14 @@ import type {
   PersistedEvent,
   WorkflowRun,
 } from '@generatorai/shared';
+
+/** Automation iterations are durable slots (P01 WP-1.3) — back them with a real engine. */
+function makeEngine(): DurableExecutionEngine {
+  const db = createDB(':memory:');
+  migrateDB(db);
+  const quiet = { debug() {}, info() {}, warn() {}, error() {} } as never;
+  return new DurableExecutionEngine(new RegisterRepository(db), new EntryRepository(db), quiet);
+}
 
 function mockLogger(): ILogger {
   return { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() } as unknown as ILogger;
@@ -56,7 +67,6 @@ function scheduleAutomation(overrides: Partial<Automation> = {}): Automation {
     triggerType: 'schedule',
     cronExpression: '*/5 * * * *',
     workflowIds: ['wf-1'],
-    inputMode: 'single',
     variables: {},
     maxConcurrency: 1,
     onError: 'continue',
@@ -160,6 +170,10 @@ function makeExecutionRepo(calls: string[] = []): {
       executions.set(e.id, { ...e });
       return { ...e };
     },
+    openExecution: async (e) => {
+      calls.push('execution-created');
+      executions.set(e.id, { ...e });
+    },
     getExecutionById: async (id) => {
       const e = executions.get(id);
       if (!e) throw new Error(`execution ${id} not found`);
@@ -226,7 +240,7 @@ function makeWorkflowHarness(
       return run;
     },
     startRun: async () => {},
-    cancelRun: async () => {},
+    command: async () => ({ ok: true }),
   } as unknown as WorkflowRunService;
 
   const workflowRunRepo = {
@@ -238,6 +252,22 @@ function makeWorkflowHarness(
   } as unknown as IWorkflowRunRepository;
 
   return { workflowRunService, workflowRunRepo, createLog };
+}
+
+
+/** The invocation over the fake run service (P04: an automation starts every run through `invoke`, then `waitFor`). */
+function invocationOver(runs: WorkflowRunService, repo: IWorkflowRunRepository): Pick<WorkflowInvocationService, 'invoke' | 'waitFor'> {
+  return {
+    invoke: async (req: { target: { workflowDefinitionId?: string }; variables?: Record<string, unknown> }) => {
+      const run = await (runs as unknown as { createRun: (p: unknown) => Promise<{ id: string }> }).createRun({
+        workflowDefinitionId: req.target.workflowDefinitionId,
+        variables: req.variables ?? {},
+      });
+      await runs.startRun(run.id);
+      return { runId: run.id };
+    },
+    waitFor: async (runId: string) => ({ ...(await repo.getById(runId)), waited: 'finalized' }),
+  } as unknown as Pick<WorkflowInvocationService, 'invoke' | 'waitFor'>;
 }
 
 interface Harness {
@@ -265,14 +295,13 @@ function setup(outcomeFor?: (variables: Record<string, unknown>, defId: string) 
     automationRepo,
     executionRepo,
     workflowRunService,
+    invocationOver(workflowRunService, workflowRunRepo),
     workflowRunRepo,
     {} as unknown as WorkflowDefinitionService,
     eventBus,
     mockLogger(),
-    undefined,
-    undefined,
-    undefined,
-    undefined,
+    makeEngine(),
+    undefined, // artifactsDir
     // Item 38 — huge interval: these tests drive `runSchedulerTick()`
     // directly rather than waiting on the real setInterval.
     { pollIntervalMs: 1_000_000, leaseMs: 60_000 },
@@ -380,16 +409,19 @@ describe('Item 38 — DB-backed due-row scheduler', () => {
   });
 
   it('three-way status: mixed iteration outcomes settle as "partial", not "completed"', async () => {
-    const mixed = setup((variables) => (variables['__iteration_index'] === 0 ? 'completed' : 'failed'));
+    const mixed = setup((variables) => (variables['row'] === 'a' ? 'completed' : 'failed'));
     mixed.automationRepo.seed({
       id: 'auto-mixed',
       name: 'batch',
       enabled: true,
       triggerType: 'manual',
       workflowIds: ['wf-1'],
-      inputMode: 'loop',
-      loopVariable: 'row',
-      loopItems: ['a', 'b'],
+      dataSchema: { version: 1, format: 'json_array', fields: [{ name: 'row', type: 'string' }] },
+      iterationMode: { kind: 'each_row' },
+      defaultDataset: {
+        format: 'json_array',
+        data: JSON.stringify([{ row: 'a' }, { row: 'b' }]),
+      },
       variables: {},
       maxConcurrency: 1,
       onError: 'continue',

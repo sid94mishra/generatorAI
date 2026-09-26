@@ -7,15 +7,15 @@ const inputs=[
  ['server','Server runtime','packages/shared/src/config/AppConfig.ts'],
  ['chats','Chats and interactions','packages/shared/src/config/ChatSchemas.ts'],
  ['agents','Agents and capability overrides','packages/shared/src/config/AgentSchemas.ts'],
- ['workflows','Workflow definitions and runs','packages/shared/src/config/WorkflowDefinitionSchemas.ts'],
+ ['workflows','Workflow definition documents (v2 graph)','packages/workflow-spec/src/schemas/graph.ts'],
  ['automations','Automations and datasets','packages/shared/src/config/AutomationSchemas.ts'],
  ['browser','Workspace browser','packages/shared/src/config/BrowserConfigSchema.ts'],
  ['mcp','MCP connections','packages/shared/src/config/McpSchemas.ts'],
  ['extensions','Extension manifests and installation','packages/shared/src/config/ExtensionManifestSchema.ts'],
  ['widgets','Widget instances and actions','packages/shared/src/config/WidgetSchemas.ts'],
  ['orchestration','Background task contracts','packages/shared/src/config/OrchestratorSchemas.ts'],
- ['scripts','Workflow scripts and profiles','packages/shared/src/config/WorkflowScriptSchema.ts'],
- ['templates','Templates, hooks and profiles','packages/shared/src/config/WorkflowTemplate.ts'],
+ ['scripts','Definition records, templates and script profiles','packages/workflow-spec/src/definition.ts'],
+ ['templates','Hooks, variables, prompts and result rules','packages/workflow-spec/src/schemas/common.ts'],
  ['cli','CLI and TUI configuration','packages/cli-core/src/config/schema.ts'],
 ];
 const escape=v=>String(v??'').replaceAll('|','&#124;').replaceAll('<','&lt;').replaceAll('>','&gt;').replaceAll('\n',' ');

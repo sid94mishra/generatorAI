@@ -451,7 +451,7 @@ Key invariants:
 
 ## 12. Testing & catalog references
 
-- Playwright E2E: [agent-tests/hooks-e2e.spec.ts](../../agent-tests/hooks-e2e.spec.ts) covers hook-driven widget renders; [agent-tests/workflow-comprehensive-e2e.spec.ts](../../agent-tests/workflow-comprehensive-e2e.spec.ts) exercises the widget surface end-to-end.
+- Playwright E2E: [agent-tests/e2e/widget-designer-layout.spec.ts](../../agent-tests/e2e/widget-designer-layout.spec.ts) covers the widget designer layout.
 - Session memory: `/memories/repo/session-82-extension-authoring-skill.md` captures the LLM-authoring hardening; the surface-collapse + action-catalog + code-mode work (this doc's current shape) is the follow-on session.
 
 ---

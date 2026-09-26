@@ -9,8 +9,7 @@ describe('reduceEvent — stage lifecycle (real event shapes)', () => {
   // Regression: the reducer used to switch on `stage.started`/
   // `stage_run.started` and `stage.awaiting_input`/`stage.resumed` — kinds
   // the server has never emitted. The real producers
-  // (`packages/core/src/services/StageExecutionService.ts`,
-  // `HitlService.ts`) always send `stage_run.running`/
+  // (the engine's `decide()` and `StageExecutor`) always send `stage_run.running`/
   // `stage_run.awaiting_input`/`stage_run.input_received`, keyed by
   // `stageRunId`. Against a real server this made the "stage started" card,
   // the HITL approval banner, AND `run.approve`/`run.reject` all
@@ -116,47 +115,6 @@ describe('reduceEvent — harness.context_usage', () => {
   });
 });
 
-// Phase 6 item 4 — per-stage step progress (`RunPane`'s stage detail view).
-// Fields verified against the real producer
-// (`packages/core/src/services/StageExecutionService.ts`), not assumed
-// from `AgentEvent.ts`'s type union alone.
-describe('reduceEvent — stage_run.step_started / step_completed', () => {
-  it('pushes a running step item scoped to its stage run', () => {
-    const state = reduceEvent(
-      emptyTimeline(),
-      evt('stage_run.step_started', { stageRunId: 'sr_1', step: 0, totalSteps: 3, label: 'lint' }),
-    );
-    expect(state.items).toHaveLength(1);
-    expect(state.items[0]).toMatchObject({
-      kind: 'step',
-      stageRunId: 'sr_1',
-      text: 'lint',
-      complete: false,
-      step: { index: 0, totalSteps: 3, label: 'lint', status: 'running' },
-    });
-  });
-
-  it('completes the matching step by stageRunId + step index, not the first running step of any stage', () => {
-    let state = reduceEvent(emptyTimeline(), evt('stage_run.step_started', { stageRunId: 'sr_1', step: 0 }));
-    state = reduceEvent(state, evt('stage_run.step_started', { stageRunId: 'sr_2', step: 0 }));
-    state = reduceEvent(state, evt('stage_run.step_completed', { stageRunId: 'sr_1', step: 0 }));
-
-    const [first, second] = state.items;
-    expect(first).toMatchObject({ stageRunId: 'sr_1', complete: true, step: { status: 'complete' } });
-    expect(second).toMatchObject({ stageRunId: 'sr_2', complete: false, step: { status: 'running' } });
-  });
-
-  it('does not confuse two different steps of the SAME stage run', () => {
-    let state = reduceEvent(emptyTimeline(), evt('stage_run.step_started', { stageRunId: 'sr_1', step: 0 }));
-    state = reduceEvent(state, evt('stage_run.step_started', { stageRunId: 'sr_1', step: 1 }));
-    state = reduceEvent(state, evt('stage_run.step_completed', { stageRunId: 'sr_1', step: 0 }));
-
-    const [step0, step1] = state.items;
-    expect(step0?.complete).toBe(true);
-    expect(step1?.complete).toBe(false);
-  });
-});
-
 // Phase 6 item 4 — hooks are run-scoped, not stage-scoped: confirmed by
 // reading every real `hook.*` emit call in
 // `packages/core/src/services/HookExecutor.ts`, none of which carries a
@@ -201,19 +159,17 @@ describe('reduceEvent — hook.started / completed / failed', () => {
     expect(postTurn).toMatchObject({ complete: true });
   });
 
-  // Steps/hooks are the same class of granular noise as a tool call —
-  // "minimal" verbosity (Phase 6 item 4's per-pane control, which maps to
+  // Hooks are the same class of granular noise as a tool call — "minimal"
+  // verbosity (Phase 6 item 4's per-pane control, which maps to
   // `showTools: false`) must actually hide them, or the feature does not
-  // do what its name promises for a run pane full of step/hook events.
-  it('showTools: false suppresses step and hook items, matching how it already suppresses tool calls', () => {
+  // do what its name promises for a run pane full of hook events.
+  it('showTools: false suppresses hook items, matching how it already suppresses tool calls', () => {
     const options = { showTools: false };
-    let state = reduceEvent(emptyTimeline(), evt('stage_run.step_started', { stageRunId: 'sr_1', step: 0 }), options);
-    state = reduceEvent(state, evt('hook.started', { hookName: 'pre_run', phase: 'pre_run' }), options);
+    let state = reduceEvent(emptyTimeline(), evt('hook.started', { hookName: 'pre_run', phase: 'pre_run' }), options);
     expect(state.items).toHaveLength(0);
 
     // And a completion for something that was never pushed (because it was
     // suppressed) must stay a safe no-op, not throw.
-    state = reduceEvent(state, evt('stage_run.step_completed', { stageRunId: 'sr_1', step: 0 }), options);
     state = reduceEvent(state, evt('hook.completed', { hookName: 'pre_run', phase: 'pre_run' }), options);
     expect(state.items).toHaveLength(0);
   });
@@ -437,6 +393,26 @@ describe('reduceEvent — chat.permission.* (tool-permission gate)', () => {
     let state = reduceEvent(emptyTimeline(), evt('chat.question.asked', { interactionId: 'i2', questions: [] }));
     state = reduceEvent(state, evt('chat.permission.resolved', { interactionId: 'i2', behavior: 'allow' }));
     expect(state.pendingInteraction).not.toBeNull();
+  });
+
+  // CONVINV-R12: parallel stages each park a gate; answering one must not lose the other.
+  it('keeps every parallel stage gate open, answering them oldest first', () => {
+    const perm = (stageRunId: string, interactionId: string): StreamEvent =>
+      evt('stage.permission.requested', { stageRunId, workflowRunId: 'r', interactionId, toolName: 'Bash', type: 'shell', description: 'x', inputSummary: '', permissionMode: 'default' });
+    const parked = (stageRunId: string, interactionId: string): StreamEvent =>
+      evt('stage_run.awaiting_input', { stageRunId, workflowRunId: 'r', interruptData: { kind: 'tool_permission', interactionId } });
+    let s = reduceEvent(emptyTimeline(), perm('A', 'a1'));
+    s = reduceEvent(s, parked('A', 'a1'));
+    s = reduceEvent(s, perm('B', 'b1'));
+    s = reduceEvent(s, parked('B', 'b1'));
+    expect(s.pendingInteractions.map((p) => p.interactionId)).toEqual(['a1', 'b1']);
+    expect(s.pendingInteraction?.interactionId).toBe('a1');
+    s = reduceEvent(s, evt('stage.permission.resolved', { stageRunId: 'B', interactionId: 'b1', behavior: 'allow' }));
+    expect(s.pendingInteraction?.interactionId).toBe('a1');
+    // A gate whose stage moved on without a verdict event (a crash, then resume) goes too.
+    s = reduceEvent(s, evt('stage_run.paused', { stageRunId: 'A', workflowRunId: 'r' }));
+    expect(s.pendingInteractions).toEqual([]);
+    expect(s.pendingInteraction).toBeNull();
   });
 });
 

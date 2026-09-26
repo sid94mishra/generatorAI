@@ -5,10 +5,10 @@
 
 import React, { useState, useCallback } from 'react';
 import { Plus, Trash2, Eye, Edit3, ChevronUp, ChevronDown } from 'lucide-react';
-import type { PromptDefinition } from '@generatorai/shared';
+import type { PromptDefinition } from '@generatorai/workflow-spec';
 import { cn } from '@/lib/utils.js';
-import { Button, Input, Textarea } from '@/components/ui/index.js';
-import { Checkbox } from '@/components/ui/primitives/checkbox.js';
+import { Button, Input } from '@/components/ui/index.js';
+import { ExpressionField } from './engineGate.js';
 
 interface PromptEditorProps {
   prompts: PromptDefinition[];
@@ -43,7 +43,6 @@ export function PromptEditor({ prompts, onChange, readonly, contentLabel = 'Prom
     const newPrompt: PromptDefinition = {
       label: `${contentLabel} ${prompts.length + 1}`,
       text: '',
-      waitForCompletion: true,
     };
     onChange([...prompts, newPrompt]);
     setEditingIndex(prompts.length);
@@ -131,17 +130,6 @@ export function PromptEditor({ prompts, onChange, readonly, contentLabel = 'Prom
                 </span>
               )}
 
-              {/* Wait for completion toggle */}
-              <label className="flex items-center gap-1 text-[10px] text-muted-foreground">
-                <Checkbox
-                  checked={prompt.waitForCompletion}
-                  onCheckedChange={(v) => updatePrompt(index, { waitForCompletion: v === true })}
-                  disabled={readonly}
-                  className="h-3 w-3"
-                />
-                Wait
-              </label>
-
               {/* Action buttons */}
               {!readonly && (
                 <div className="flex items-center gap-0.5">
@@ -213,12 +201,13 @@ export function PromptEditor({ prompts, onChange, readonly, contentLabel = 'Prom
             {/* Editing mode: textarea */}
             {editingIndex === index && (
               <div className="p-3">
-                <Textarea
+                <ExpressionField
+                  mode="template"
                   value={prompt.text}
-                  onChange={(e) => updatePrompt(index, { text: e.target.value })}
+                  onChange={(text) => updatePrompt(index, { text })}
                   rows={5}
-                  className="p-3 font-mono"
-                  placeholder="Enter prompt text... Use {{variableName}} for variable interpolation"
+                  ariaLabel={`${prompt.label} text`}
+                  placeholder="Enter prompt text... Use {{variableName}} or {{ stages.<key>.output }} (Ctrl+Space completes)"
                 />
               </div>
             )}

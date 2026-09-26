@@ -18,14 +18,10 @@ triggerType              enum 'manual' | 'schedule' | 'webhook'
 cronExpression?          text                       (for schedule)
 webhookToken?            text                       (for webhook)
 workflowIds              JSON string[]              (one or more workflow definition IDs)
-inputMode                enum 'single' | 'loop' | 'batch' | 'script'
-loopVariable?            text                       (for inputMode='loop')
-loopItems?               JSON unknown[]             (for inputMode='loop')
-batchDataFormat?         enum 'csv' | 'json_array' | 'jsonl'
-batchData?               text                       (for inputMode='batch')
-batchColumns?            JSON string[]
-batchColumnMapping?      JSON Record<string,string>
-dataSourceConfig?        JSON DataSourceConfig      (for inputMode='script')
+dataSchema?              JSON DataSchema            (row shape; enables datasets)
+iterationMode?           JSON IterationMode         (each_row | group_by | single)
+defaultDataset?          JSON AutomationDataset     (schedule triggers, bare manual triggers)
+retryPolicy?             JSON AutomationRetryPolicy
 variables                JSON Record<string,unknown>  (base vars merged into every iteration)
 maxConcurrency           int (default 1)
 onError                  enum 'continue' | 'stop'   (default 'stop')
@@ -89,74 +85,39 @@ The token can be **rotated** via `POST /api/automations/:id/rotate-webhook-token
 
 ---
 
-## 3. Input modes
+## 3. Iterations
 
 Determines how many WorkflowRuns are spawned per trigger.
 
-### `single`
-Spawns **one** workflow run per workflow ID, using `automation.variables` as the variables dict.
+### No data schema
+Each trigger spawns **one** iteration: the workflows run once with `automation.variables`.
+A webhook payload is recorded on the execution (`webhookPayload`); it is not spread into
+variables.
 
-### `loop`
-For each item in `loopItems[]`:
-- Spawn one workflow run with variables `= { ...automation.variables, [loopVariable]: item }`.
+### Schema-driven datasets
+`dataSchema` declares the fields of one row; `iterationMode` decides how rows become
+iterations (`each_row`, `group_by` a set of fields, or `single` — the whole dataset in one
+variable). The dataset comes from the trigger body (manual), the raw HTTP body (webhook) or
+`defaultDataset` (schedule, and a manual trigger without a body). `IterationPlanner`
+validates and coerces every row before the execution opens, so a bad dataset is a 400,
+not a silent background failure. `POST /api/automations/preview-iterations` shows how a
+schema + mode + dataset fan out without saving anything.
 
 Example:
 ```json
 {
-  "inputMode": "loop",
-  "loopVariable": "ticketId",
-  "loopItems": ["GH-1", "GH-2", "GH-3"],
+  "dataSchema": { "version": 1, "format": "json_array", "fields": [{ "name": "ticketId", "type": "string" }] },
+  "iterationMode": { "kind": "each_row" },
+  "defaultDataset": { "format": "json_array", "data": "[{\"ticketId\":\"GH-1\"},{\"ticketId\":\"GH-2\"}]" },
   "variables": { "priority": "high" }
 }
 ```
-→ 3 runs, each with `{ priority: 'high', ticketId: 'GH-N' }`.
+→ 2 runs, each with `{ priority: 'high', ticketId: 'GH-N' }`.
 
-### `batch`
-`batchData` parsed by `batchDataParser` (in `@generatorai/shared`) according to `batchDataFormat`:
-
-- `csv` — Papaparse-like CSV parsing. `batchColumns` and `batchColumnMapping` rename columns to variable names.
-- `json_array` — JSON.parse → array of objects, each object's keys become variables.
-- `jsonl` — newline-delimited JSON, same as json_array.
-
-Each row spawns one run. `automation.variables` are merged underneath (row data wins).
-
-### `script`
-`dataSourceConfig: DataSourceConfig`:
-
-```typescript
-type DataSourceConfig = {
-  type: 'inline' | 'file' | 'script';
-  // type='inline'
-  data?: string | unknown[];
-  format?: 'csv' | 'json_array' | 'jsonl';
-  columns?: string[];
-  columnMapping?: Record<string, string>;
-
-  // type='file'
-  filePath?: string;          // relative to projects/<id>/data-sources/ or absolute
-  format?: 'csv' | 'json_array' | 'jsonl';
-
-  // type='script'
-  command?: string;           // node, python, bash, etc.
-  args?: string[];
-  env?: Record<string, string>;
-  timeoutMs?: number;
-  // script must output rows to stdout in `format`
-};
-```
-
-`DataSourceResolver.resolve(config)` returns `{ rows: Record<string, unknown>[], rowCount: number }`. Then each row spawns a run.
-
-Shipped data-source scripts in [templates/data-source-scripts/](../../templates/data-source-scripts/):
-- `fetch-github-prs.sh` — list open PRs for a repo
-- `fetch-azure-devops-workitems.py` — pull work items
-- `fetch-jira-issues.py` — pull Jira issues
-- `fetch-sonar-issues.py` — pull SonarQube issues
-- `list-dotnet-projects.sh` — list .NET projects in a repo
-- `parse-excel-to-json.py` — Excel → JSON rows
-- `test-data-source.js` — sample test rows
-
-You can `POST /api/automations/data-source/test` with a `DataSourceConfig` to dry-run a resolver without saving.
+The legacy `single` / `loop` / `batch` / `script` input modes and dynamic data sources
+(`dataSourceConfig`, `DataSourceResolver`, `templates/data-source-scripts/`) were removed
+in the workflow overhaul (P01, PD-8); migration v55 converts stored loop/batch automations
+to a data schema + default dataset.
 
 ---
 
@@ -170,7 +131,7 @@ You can `POST /api/automations/data-source/test` with a `DataSourceConfig` to dr
 `AutomationService.executeExecution(execution)`:
 
 ```
-1. Resolve data into rows[] (from inputMode + dataSourceConfig)
+1. Plan the iterations (IterationPlanner over the dataset, or one iteration without a schema)
 2. Update automation_executions.totalIterations = rows.length
 3. Build a semaphore with maxConcurrency permits
 4. For each row in rows[]:
@@ -204,7 +165,6 @@ GET    /api/automations/:id/executions
 GET    /api/automations/executions/:execId
 POST   /api/automations/executions/:execId/cancel
 
-POST   /api/automations/data-source/test         → dry-run a DataSourceConfig
 
 POST   /api/automations/webhook/:token           → public endpoint for webhook triggers
 ```
@@ -264,9 +224,9 @@ const auto = await ai.automations.create({
   triggerType: 'schedule',
   cronExpression: '0 2 * * *',
   workflowIds: ['wf-triage-id'],
-  inputMode: 'loop',
-  loopVariable: 'ticketId',
-  loopItems: ['T-1', 'T-2', 'T-3'],
+  dataSchema: { version: 1, format: 'json_array', fields: [{ name: 'ticketId', type: 'string' }] },
+  iterationMode: { kind: 'each_row' },
+  defaultDataset: { format: 'json_array', data: JSON.stringify([{ ticketId: 'T-1' }, { ticketId: 'T-2' }]) },
   maxConcurrency: 3,
   onError: 'continue',
   variables: { project: 'core' },
@@ -311,12 +271,11 @@ automation.iteration_failed
 ## 10. Edge cases & gotchas
 
 1. **`schedule` trigger with invalid cron** — server rejects on save (Zod validates against `cron-parser`).
-2. **Webhook payload variable interpolation** — payload is *not* automatically mapped into variables. Use `inputMode: 'script'` with a tiny preprocessor script if you need that.
+2. **Webhook payload variable interpolation** — payload is *not* mapped into variables. Give the automation a `dataSchema` and the payload becomes the dataset.
 3. **`maxConcurrency = 0`** — illegal; Zod requires `>= 1`.
 4. **`onError = 'continue'` with many runs** — execution status will be `partial` if any failed; `completed` only if all succeeded.
 5. **Cron lease lock TTL = 60s** — if a process crashes mid-execution, the lock auto-expires; another process can pick it up next tick. Stale executions are marked failed by `StartupRecoveryService`.
 6. **Project-scoped automations** — only visible from inside that project page. Set `scope='project'` + `projectId`.
-7. **Data source script timeout** — default 60s. Override per `dataSourceConfig.timeoutMs`. Script stdout is captured up to 64MB.
-8. **`batchData` size limits** — stored as TEXT in SQLite; we recommend < 1MB. For larger batches use `inputMode: 'script'` to stream rows.
-9. **`useWorktree` false** — speeds up batch runs but stages won't have git repos available.
-10. **Concurrency leak through pause** — pausing an automation execution stops dispatching new iterations but in-flight runs continue. Use `cancel` to abort them.
+7. **Dataset size limits** — a dataset is capped at 5MB (`AutomationDatasetSchema`).
+8. **`useWorktree` false** — speeds up batch runs but stages won't have git repos available.
+9. **Concurrency leak through pause** — pausing an automation execution stops dispatching new iterations but in-flight runs continue. Use `cancel` to abort them.

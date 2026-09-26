@@ -20,22 +20,22 @@ Single Node process binding to `$GENERATORAI_PORT` (default 3100). Owns:
 | `system.ts` | `GET /api/system/artifacts`, `GET /api/system/mcp-servers` | `SystemArtifactService` |
 | `copilot.ts` | `GET /api/copilot/models`, `GET /api/copilot/state`, `GET /api/copilot/conversations`, `GET /api/copilot/conversations/:id/messages`, `POST /api/copilot/ping` | `harness` directly |
 | `harness.ts` | `GET /api/harness`, `POST /api/harness/switch` | `harnessProxy.switchAdapter` |
-| `sessions.ts` | v1 `POST/GET/DELETE /api/sessions`, `/{id}/{start,pause,resume,cancel}`, `/{id}/messages` | `SessionService` |
+| `sessions.ts` | `GET /api/sessions/{id}/chat` (message history by session id) | `chatMessageRepo` |
 | `chats.ts`, `chat.ts`, `chats-list.ts` | v2 `POST /api/chats`, `GET /api/chats[/:id]`, `PUT/DELETE /api/chats/:id`, `POST /api/chats/:id/prompt`, `GET /api/chats/:id/messages`, `GET /api/chats/:id/workspace`, `GET /api/chats/:id/workspace/files`, `POST /api/chats/:id/archive` | `ChatManagementService` |
 | `workflows.ts` | v1 legacy CRUD | `WorkflowService` |
-| `workflowDefinitions.ts` | `POST/GET/PATCH/DELETE /api/workflow-definitions`, `POST /api/workflow-definitions/import-json`, `POST /api/workflow-definitions/:id/validate`, `GET /api/workflow-definitions/:id/export`, stage CRUD, edge CRUD | `WorkflowDefinitionService` |
-| `workflowRuns.ts` | `POST /api/workflow-runs`, `GET /api/workflow-runs[/:id]`, `/{id}/{start,pause,resume,cancel,retry}`, `/{id}/stages`, `/{id}/scratchpad`, `/{id}/workspace`, `/{id}/messages`, HITL approval & rejection | `WorkflowRunService` + `HitlService` |
-| `workflowScripts.ts` | `GET /api/workflow-scripts`, `/:id`, `/:id/profiles`, `POST /:id/validate`, `POST /:id/materialize`, `POST /:id/run`, `POST /reload` | `WorkflowScriptLoader` + `WorkflowDefinitionService` + `WorkflowRunService` |
-| `orchestrator.ts` | `GET /api/orchestrator/templates`, `POST /api/orchestrator/runs`, `/{id}/{start,pause,cancel}`, `/{id}/context`, `/{id}/runs` | `WorkflowOrchestrator` |
-| `automations.ts` | `POST/GET/PUT/DELETE /api/automations`, `/{id}/{enable,disable,trigger,rotate-webhook-token}`, `/{id}/executions`, `/executions/{execId}`, `/executions/{execId}/cancel`, `POST /api/automations/data-source/test` | `AutomationService` + `DataSourceResolver` |
+| `workflowDefinitions.ts` | `GET/POST /api/workflow-definitions`, `POST /api/workflow-definitions/validate`, `POST /api/workflow-definitions/import` (graph or `{ templateId }`), `GET/DELETE /:id`, `PUT /:id/graph` (whole-graph save with `expectedRevision`), `POST /:id/publish`, `GET /:id/versions[/:versionId]`, `GET /:id/export` | `WorkflowDefinitionService` |
+| `workflowInvocations.ts` | THE run start: `POST /api/workflow-invocations` (JSON or multipart), `POST /plan`, `POST /uploads`, `GET /{runId}/digest?wait=` | `WorkflowInvocationService` |
+| `workflowRuns.ts` | `GET /api/workflow-runs[/:id]`, `/{id}/commands` (pause, resume, cancel, retry, skip, fail, approve), `/{id}/stages`, `/{id}/permission-mode`, `DELETE /{id}`; the stage conversation: `/{id}/instances/{instanceId}/{messages,turn/cancel,interactions/{interactionId}/{permission,answer,plan},attachments/{artifactId}}` | `WorkflowRunService` + `StageConversationService` |
+| `workflowRunWorkspace.ts` | `GET /api/workflow-runs/{id}/workspace`, `/workspace/{download,content,diff}` | `WorkspaceManager` (the run's mounts) |
+| `workflowScripts.ts` | `GET /api/workflow-scripts`, `/:id`, `/:id/profiles`, `POST /validate`, `POST /:id/materialize`, `POST /reload`, `POST /:id/reload`, `POST /upload` (running a script is an invocation) | `WorkflowScriptLoader` + `WorkflowDefinitionService` |
+| `automations.ts` | `POST/GET/PUT/DELETE /api/automations`, `/{id}/{enable,disable,trigger,rotate-webhook-token}`, `/{id}/executions`, `/executions/{execId}`, `/executions/{execId}/cancel`, `POST /api/automations/preview-iterations` | `AutomationService` |
 | `projects.ts` | `POST/GET/PUT/DELETE /api/projects`, `/{id}/codebases/*`, `/{id}/configs/*`, `/{id}/mcp-servers/*`, `/{id}/worktrees/*`, `/{id}/available-artifacts` | `ProjectService`, `CodebaseService`, `ProjectConfigService`, `WorktreeService`, `SystemArtifactService` |
 | `workspaces.ts` | `GET /api/workspaces`, `/:id`, `POST /:id/{archive,commit}`, `DELETE /:id`, `POST /api/workspaces/cleanup`, `/:id/worktrees` | `WorkspaceManager` + `WorktreeService` |
 | `browser.ts` | `POST /api/workspaces/:id/browser/{start,stop,actions,selection,attach,detach,capture,input,resize}`, `GET /api/workspaces/:id/browser/{descriptor,snapshots,scroll,screencast.jpg,files/*}` — user + inspector-script surface for the Integrated Browser | `BrowserService` |
 | `terminals.ts` | `POST/GET/DELETE /api/workspaces/:id/terminals[/:sid]`, `GET /:sid/scrollback`, `POST /:sid/{resize,signal}` — REST surface for the Integrated Terminal (WS handles live IO) | `TerminalService` |
 | `extensions.ts` | `GET /api/extensions[/:id]`, `GET /api/extensions/widgets`, `POST /api/extensions`, `PATCH /api/extensions/:id`, `DELETE /api/extensions/:id`, `POST /api/extensions/reload`, `POST /api/extensions/:id/reload`, `GET /api/widget-assets/:extensionId/*` — extension install / reload + widget bundle serving | `ExtensionManager` |
 | `widgets.ts` | `GET /api/widgets[?sessionId=&chatId=]`, `GET /api/widgets/:id`, `POST /api/widgets`, `PATCH /api/widgets/:id/state`, `POST /api/widgets/:id/actions`, `DELETE /api/widgets/:id` — widget-instance lifecycle backing the postMessage bridge (see [feature-extensions-widgets.md](./feature-extensions-widgets.md)) | `WidgetService` |
-| `webhooks.ts` | `POST/GET/DELETE /api/webhooks`, `POST /api/webhooks/github`, `POST /api/automations/webhook/:token` | `WebhookService` + `AutomationService` |
-| `hooks.ts` | `GET /api/hooks/phases`, `POST /api/sessions/:id/hooks/test` | `HookExecutor` introspection |
+| `hooks.ts` | `GET /api/hooks/phases`, `POST /api/hooks/sessions/:id/hooks/test` | `HookExecutor` introspection |
 | `stream.ts` | **`GET /api/stream?scope=&id=&afterSeq=&filter=`** (SSE), **`GET /api/stream/replay?scope=&id=&afterSeq=&limit=`** | `StreamBroker` |
 | `templates.ts` | `GET /api/templates[/:id]` | `TemplateRegistry` |
 
@@ -123,7 +123,7 @@ Vite-bundled SPA served by Vite in dev and statically from server in prod (`/web
 components/
 ├── layout/            AppLayout, Sidebar (8 nav items), Header, Breadcrumb,
 │                     RightPane (unified tabbed dock — hosts Changes / Inspector / Browser / Terminal tabs
-│                                on both ChatPage and WorkflowRunPageV2; state persisted per-page in localStorage)
+│                                on both ChatPage and WorkflowRunPage; state persisted per-page in localStorage)
 ├── chat/              ChatView, ChatList, ChatMessageList, ChatInput, ChatFilesPanel,
 │                     BrowserPanel (Integrated Browser — VSCode-style share/inspect/capture UI),
 │                     NativeBrowserView (desktop overlay coordinator for Electron's WebContentsView),
@@ -199,9 +199,9 @@ generatorai
 ├── config / config profile {list,create,use,delete}
 ├── copilot {conversations, messages, ping}
 ├── chat {list, create, show, send, messages, watch, archive, delete}
-├── workflow|wf {list, create, show, update, delete, validate,
-│                 import-json, import-template, export, from-template,
-│                 stage {add,update,delete}, edge {add,delete}}
+├── workflow|wf {list, create, show, update, delete, validate, clone,
+│                 import, export, publish, versions,
+│                 stage {list,add,update,remove,hook}, edge {list,add,remove}}
 ├── run {list, start, show, watch, pause, resume, cancel, retry, messages, workspace,
 │         stage {pause,resume,retry,cancel,list},
 │         hitl {mode, pending, resume},
@@ -308,7 +308,7 @@ A small, deliberately boring process you run somewhere a GeneratorAI server and 
 | `WS /relay/data?streamId=…` | Per-stream byte pipe |
 | `GET /healthz` | Liveness + capacity |
 
-The relay is a byte pipe: it reads no application payloads. Identity and authorisation are end-to-end between the client and the GeneratorAI server (see the auth/relay implementation notes, internal). Frame lanes mirror `AdmissionController`'s interactive/ordinary/bulk classes so a bulk artifact transfer cannot starve interactive input.
+The relay is a byte pipe: it reads no application payloads. Identity and authorisation are end-to-end between the client and the GeneratorAI server (see the auth/relay implementation notes, internal). Frame lanes (interactive, ordinary, bulk) keep a bulk artifact transfer from starving interactive input.
 
 ---
 

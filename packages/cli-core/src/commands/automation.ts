@@ -1,9 +1,9 @@
 // `generatorai automation …` — triggers that fan out into workflow runs.
 
 import { z } from 'zod';
+import type { CreateAutomationParams } from '@generatorai/shared';
 import { randomUUID } from 'node:crypto';
 import * as path from 'node:path';
-import type { DataSourceConfig } from '@generatorai/shared';
 import { defineCommand, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
@@ -23,6 +23,7 @@ import {
   requireSomeUpdate,
   statusColumn,
 } from './_shared.js';
+import { listDefinitions } from './workflow.js';
 
 export const AUTOMATION_GROUP = {
   name: 'automation',
@@ -32,35 +33,23 @@ export const AUTOMATION_GROUP = {
 };
 
 const TRIGGERS = ['manual', 'schedule', 'webhook'] as const;
-const INPUT_MODES = ['single', 'loop', 'batch', 'script'] as const;
 // `AutomationErrorPolicy` (packages/shared) has exactly these two values —
 // the CLI previously also offered 'retry', which `CreateAutomationSchema`
 // does not accept and `validate()` would have silently stripped.
 const ERROR_POLICIES = ['continue', 'stop'] as const;
-const BATCH_FORMATS = ['json', 'csv', 'jsonl'] as const;
-const DATA_SOURCE_TYPES = ['static', 'script', 'http', 'file', 'workflow_script'] as const;
+const DATASET_FORMATS = ['json_array', 'csv', 'jsonl'] as const;
+// PD-18 — the permission mode an automation's unattended runs use.
+const PERMISSION_MODES = ['acceptEdits', 'default', 'plan', 'bypassPermissions'] as const;
 
-/** Parses `--dataSource` into a real `DataSourceConfig`, or fails clearly. */
-function parseDataSourceConfig(raw: string): DataSourceConfig {
-  let parsed: unknown;
+/** Parses a JSON-valued flag, or fails naming the flag. */
+function parseJsonFlag(flag: string, raw: string): unknown {
   try {
-    parsed = JSON.parse(raw);
+    return JSON.parse(raw);
   } catch (error) {
-    throw CliError.usage('--dataSource is not valid JSON.', {
-      hint:
-        error instanceof Error
-          ? error.message
-          : `Expected an object like {"type":"script","command":"..."}.`,
+    throw CliError.usage(`--${flag} is not valid JSON.`, {
+      hint: error instanceof Error ? error.message : String(error),
     });
   }
-  const type = (parsed as { type?: unknown } | null)?.type;
-  if (typeof type !== 'string' || !DATA_SOURCE_TYPES.includes(type as (typeof DATA_SOURCE_TYPES)[number])) {
-    throw CliError.usage(
-      `--dataSource must include "type": one of ${DATA_SOURCE_TYPES.join(', ')}.`,
-      { hint: 'e.g. {"type":"script","command":"python fetch.py"}' },
-    );
-  }
-  return parsed as DataSourceConfig;
 }
 
 async function findAutomation(ctx: CliContext, ref: string) {
@@ -87,7 +76,6 @@ export function automationCommands(): CommandSpec[] {
           idColumn,
           nameColumn,
           { key: 'triggerType', header: 'Trigger', priority: 0 },
-          { key: 'inputMode', header: 'Input', priority: 1 },
           { key: 'enabled', header: 'Enabled', format: 'boolean', priority: 0 },
           { key: 'schedule', header: 'Schedule', priority: 3 },
           // The scheduler has always stored `nextRunAt`; neither this table
@@ -135,7 +123,7 @@ export function automationCommands(): CommandSpec[] {
       sinceVersion: '0.2.0',
       examples: [
         'generatorai auto create --name nightly --workflow e2e --trigger schedule --schedule "0 2 * * *"',
-        'generatorai auto create --name batch --workflow review --input-mode loop --loop-variable file',
+        'generatorai auto create --name review-each --workflow review --data-schema \'{"format":"json_array","fields":[{"name":"file","type":"string"}]}\' --iteration-mode \'{"kind":"each_row"}\'',
       ],
       args: [],
       flags: [
@@ -150,16 +138,20 @@ export function automationCommands(): CommandSpec[] {
         },
         { name: 'trigger', description: 'Trigger type', type: 'string', choices: TRIGGERS, default: 'manual' },
         { name: 'schedule', description: 'Cron expression (schedule trigger)', type: 'string' },
-        { name: 'inputMode', description: 'How inputs fan out', type: 'string', choices: INPUT_MODES, default: 'single' },
-        { name: 'loopVariable', description: 'Variable iterated in loop mode', type: 'string' },
-        { name: 'loopItems', description: 'JSON array of values for loop mode, e.g. \'["a","b"]\'', type: 'string' },
-        { name: 'batchFormat', description: 'Batch payload format', type: 'string', choices: BATCH_FORMATS },
-        { name: 'batchData', description: 'Raw batch data (CSV/JSON/JSONL matching --batchFormat)', type: 'string' },
-        { name: 'batchDataFile', description: 'Read batch data from a file instead of --batchData', type: 'string', completes: 'file' },
+        { name: 'dataSchema', description: 'JSON row schema: each dataset row becomes run variables', type: 'string' },
+        { name: 'iterationMode', description: 'JSON iteration mode, e.g. {"kind":"each_row"} (required with --data-schema)', type: 'string' },
+        { name: 'defaultDatasetFile', description: 'Default dataset (used by schedule triggers and bare manual triggers)', type: 'string', completes: 'file' },
+        { name: 'defaultDatasetFormat', description: 'Format of --default-dataset-file', type: 'string', choices: DATASET_FORMATS },
         { name: 'var', description: 'Static variable key=value (repeatable)', type: 'string', variadic: true },
         { name: 'maxConcurrency', description: 'Parallel run cap (1-10)', type: 'number' },
         { name: 'onError', description: 'Error policy', type: 'string', choices: ERROR_POLICIES },
-        { name: 'dataSource', description: 'JSON data-source config, e.g. {"type":"script","command":"..."}', type: 'string' },
+        {
+          name: 'permissionMode',
+          description: 'Permission mode of the unattended runs (bypass on a webhook needs admin:settings)',
+          type: 'string',
+          choices: PERMISSION_MODES,
+          default: 'acceptEdits',
+        },
         projectFlag,
         { name: 'enabled', description: 'Enable immediately', type: 'boolean' },
       ],
@@ -170,16 +162,14 @@ export function automationCommands(): CommandSpec[] {
           workflow: z.array(z.string()).min(1, 'at least one workflow is required'),
           trigger: z.enum(TRIGGERS).default('manual'),
           schedule: z.string().optional(),
-          inputMode: z.enum(INPUT_MODES).default('single'),
-          loopVariable: z.string().optional(),
-          loopItems: z.string().optional(),
-          batchFormat: z.enum(BATCH_FORMATS).optional(),
-          batchData: z.string().optional(),
-          batchDataFile: z.string().optional(),
+          dataSchema: z.string().optional(),
+          iterationMode: z.string().optional(),
+          defaultDatasetFile: z.string().optional(),
+          defaultDatasetFormat: z.enum(DATASET_FORMATS).optional(),
           var: z.array(z.string()).optional(),
           maxConcurrency: z.coerce.number().int().min(1).max(10).optional(),
           onError: z.enum(ERROR_POLICIES).optional(),
-          dataSource: z.string().optional(),
+          permissionMode: z.enum(PERMISSION_MODES).default('acceptEdits'),
           project: z.string().optional(),
           enabled: z.boolean().optional(),
         },
@@ -191,49 +181,28 @@ export function automationCommands(): CommandSpec[] {
             hint: 'Use a 5-field cron expression, e.g. "0 2 * * *".',
           });
         }
-        if (flags.inputMode === 'loop' && !flags.loopVariable) {
-          throw CliError.usage('--loop-variable is required when --input-mode is loop.');
-        }
-        if (flags.inputMode === 'loop' && !flags.loopItems) {
-          // The server's `CreateAutomationSchema` refuses `inputMode: 'loop'`
-          // with an empty/missing `loopItems` outright — previously this
-          // flag did not exist at all, so every loop-mode create 400'd.
-          throw CliError.usage('--loop-items is required when --input-mode is loop.', {
-            hint: 'JSON array of values, e.g. --loop-items \'["a.ts","b.ts"]\'',
+        if (flags.dataSchema && !flags.iterationMode) {
+          throw CliError.usage('--iteration-mode is required with --data-schema.', {
+            hint: 'e.g. --iteration-mode \'{"kind":"each_row"}\'',
           });
         }
-        let loopItems: unknown[] | undefined;
-        if (flags.loopItems) {
-          let parsed: unknown;
-          try {
-            parsed = JSON.parse(flags.loopItems);
-          } catch (error) {
-            throw CliError.usage('--loop-items is not valid JSON.', {
-              hint: error instanceof Error ? error.message : String(error),
-            });
-          }
-          if (!Array.isArray(parsed) || parsed.length === 0) {
-            throw CliError.usage('--loop-items must be a non-empty JSON array.');
-          }
-          loopItems = parsed;
+        if (flags.defaultDatasetFile && !flags.defaultDatasetFormat) {
+          throw CliError.usage('--default-dataset-format is required with --default-dataset-file.');
         }
+        const dataSchema = flags.dataSchema
+          ? (parseJsonFlag('data-schema', flags.dataSchema) as CreateAutomationParams['dataSchema'])
+          : undefined;
+        const iterationMode = flags.iterationMode
+          ? (parseJsonFlag('iteration-mode', flags.iterationMode) as CreateAutomationParams['iterationMode'])
+          : undefined;
+        const defaultDataset = flags.defaultDatasetFile
+          ? {
+              format: flags.defaultDatasetFormat!,
+              data: await readTextFile(path.resolve(flags.defaultDatasetFile), 'default dataset file'),
+            }
+          : undefined;
 
-        if (flags.inputMode === 'batch' && !flags.batchFormat) {
-          throw CliError.usage('--batch-format is required when --input-mode is batch.');
-        }
-        if (flags.inputMode === 'batch' && !flags.batchData && !flags.batchDataFile) {
-          // Same shape as `loopItems` above: `batchData` did not exist as a
-          // flag either, so every batch-mode create 400'd too.
-          throw CliError.usage('--batch-data or --batch-data-file is required when --input-mode is batch.');
-        }
-        if (flags.batchData && flags.batchDataFile) {
-          throw CliError.usage('--batch-data and --batch-data-file are mutually exclusive.');
-        }
-        const batchData = flags.batchDataFile
-          ? await readTextFile(path.resolve(flags.batchDataFile), 'batch data file')
-          : flags.batchData;
-
-        const definitions = await ctx.api.definitions.list();
+        const definitions = await listDefinitions(ctx);
         const workflowIds = flags.workflow.map(
           (ref) => resolveRef(ref, { kind: 'workflow', candidates: definitions }).id,
         );
@@ -244,30 +213,20 @@ export function automationCommands(): CommandSpec[] {
           projectId = resolveRef(flags.project, { kind: 'project', candidates: projects }).id;
         }
 
-        const dataSourceConfig = flags.dataSource ? parseDataSourceConfig(flags.dataSource) : undefined;
-
-        // Field names below are `CreateAutomationParams`'s exactly. The
-        // previous body used CLI-flag-shaped names for four of them
-        // (`workflowDefinitionIds`, `schedule`, `batchFormat`, `errorPolicy`)
-        // plus a nonexistent `enabled` and `dataSource` — `validate()` drops
-        // unknown keys, so those five values were silently discarded on
-        // every call, and `--trigger schedule` created a schedule trigger
-        // with no cron expression at all.
+        // Field names below are `CreateAutomationParams`'s exactly.
         const created = await ctx.api.automations.create({
           name: flags.name,
           workflowIds,
           triggerType: flags.trigger,
-          inputMode: flags.inputMode,
+          permissionMode: flags.permissionMode,
           variables: parseKeyValues(flags.var),
           ...compact({
             cronExpression: flags.schedule,
-            loopVariable: flags.loopVariable,
-            loopItems,
-            batchDataFormat: flags.batchFormat,
-            batchData,
+            dataSchema,
+            iterationMode,
+            defaultDataset,
             maxConcurrency: flags.maxConcurrency,
             onError: flags.onError,
-            dataSourceConfig,
             projectId,
           }),
         });
@@ -304,6 +263,7 @@ export function automationCommands(): CommandSpec[] {
         { name: 'schedule', description: 'New cron expression', type: 'string' },
         { name: 'maxConcurrency', description: 'Parallel run cap (1-10)', type: 'number' },
         { name: 'onError', description: 'Error policy', type: 'string', choices: ERROR_POLICIES },
+        { name: 'permissionMode', description: 'Permission mode of the unattended runs', type: 'string', choices: PERMISSION_MODES },
         { name: 'var', description: 'Static variable key=value (repeatable, replaces)', type: 'string', variadic: true },
       ],
       schema: inputSchema(
@@ -313,6 +273,7 @@ export function automationCommands(): CommandSpec[] {
           schedule: z.string().optional(),
           maxConcurrency: z.coerce.number().int().min(1).max(10).optional(),
           onError: z.enum(ERROR_POLICIES).optional(),
+          permissionMode: z.enum(PERMISSION_MODES).optional(),
           var: z.array(z.string()).optional(),
         },
       ),
@@ -329,6 +290,7 @@ export function automationCommands(): CommandSpec[] {
             cronExpression: flags.schedule,
             maxConcurrency: flags.maxConcurrency,
             onError: flags.onError,
+            permissionMode: flags.permissionMode,
             variables: flags.var ? parseKeyValues(flags.var) : undefined,
           }),
           'Pass at least one field to change.',
@@ -444,8 +406,8 @@ export function automationCommands(): CommandSpec[] {
         columns: [
           idColumn,
           statusColumn,
-          { key: 'totalRuns', header: 'Runs', format: 'number', priority: 1 },
-          { key: 'completedRuns', header: 'Done', format: 'number', priority: 2 },
+          { key: 'totalIterations', header: 'Runs', format: 'number', priority: 1 },
+          { key: 'completedIterations', header: 'Done', format: 'number', priority: 2 },
           createdColumn,
         ],
       },
@@ -494,28 +456,6 @@ export function automationCommands(): CommandSpec[] {
         const target = await findAutomation(ctx, args.automation);
         await ctx.api.automations.cancelExecution(target.id, args.execution);
         return ok('Cancelled execution.');
-      },
-    }),
-
-    defineCommand({
-      id: 'automation.datasource.test',
-      group: 'automation',
-      verb: 'datasource test',
-      summary: 'Dry-run a data-source config and print what it would yield',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'config', description: 'JSON config, or a script id', required: true }],
-      flags: [],
-      schema: inputSchema({ config: z.string() }, {}),
-      output: { kind: 'record' },
-      async handler(ctx, { args }) {
-        let config: Record<string, unknown>;
-        try {
-          config = JSON.parse(args.config) as Record<string, unknown>;
-        } catch {
-          config = { scriptId: args.config };
-        }
-        return record(await ctx.api.automations.testDataSource(config));
       },
     }),
 

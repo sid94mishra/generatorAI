@@ -67,6 +67,8 @@ import { InlineDiff } from './InlineDiff';
 import { CARD_ICON_AXIS, NestedRows, RowEnterContext, RowFrame, statusColor, type RowTone } from './RowFrame';
 import { useChatMotion } from '../chatMotion';
 import { ScmResultRow } from './ScmResultRow';
+import { WorkflowDraftRow, WorkflowRunRow } from './WorkflowRunRows';
+import { UserMessageRow } from './UserMessageRow';
 import { useTimelineActions } from './TimelineActions';
 import {
   countSteps,
@@ -162,6 +164,12 @@ export const TimelineRowView = memo(
   (prev, next) => prev.turnId === next.turnId && rowsEqual(prev.row, next.row),
 );
 
+/** The live form of a stage operator's message: the same bubble as a saved one. */
+function OperatorMessageRow({ id, text }: { id: string; text: string }): React.ReactElement {
+  const message = useMemo(() => ({ id, chatId: '', role: 'user' as const, content: text }), [id, text]);
+  return <UserMessageRow message={message} />;
+}
+
 function RowBody({ row, turnId }: { row: TimelineRow; turnId?: string | undefined }): React.ReactElement | null {
   switch (row.kind) {
     case 'thinking':
@@ -179,7 +187,12 @@ function RowBody({ row, turnId }: { row: TimelineRow; turnId?: string | undefine
     case 'work':
       return <WorkRow work={row.work} turnId={turnId} />;
     case 'system':
-      return <SystemRow block={row.block} tone={row.tone} />;
+      // A message an operator sent into a workflow stage (P03b) is the user's bubble.
+      return row.block.category === 'operator' ? (
+        <OperatorMessageRow id={row.id} text={row.block.message} />
+      ) : (
+        <SystemRow block={row.block} tone={row.tone} />
+      );
     case 'widget':
       return <WidgetRow block={row.block} />;
     case 'waiting':
@@ -192,6 +205,10 @@ function RowBody({ row, turnId }: { row: TimelineRow; turnId?: string | undefine
       return <UsageRow usage={row.usage} />;
     case 'scm_result':
       return <ScmResultRow block={row.block} />;
+    case 'workflow_run':
+      return <WorkflowRunRow run={row.run} callId={row.callId} />;
+    case 'workflow_draft':
+      return <WorkflowDraftRow draft={row.draft} />;
     default:
       return null;
   }

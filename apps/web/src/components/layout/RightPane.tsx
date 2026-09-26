@@ -12,7 +12,7 @@
 //
 // Used by:
 //   • ChatPage           — Changes (default) + Browser
-//   • WorkflowRunPageV2  — Changes (default) + Inspector + Browser
+//   • WorkflowRunPage  — Changes (default) + Inspector + Browser
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';

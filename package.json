@@ -17,13 +17,21 @@
     "dev:relay": "pnpm --filter @generatorai/relay dev",
     "build": "turbo build",
     "test": "turbo test",
-    "lint": "turbo lint && pnpm run check:security && pnpm run check:durability && pnpm run check:docs && pnpm run check:syncio && pnpm run check:tokens",
+    "test:scripts": "vitest run scripts/__tests__ --project node",
+    "lint": "turbo lint && pnpm run check:security && pnpm run check:durability && pnpm run check:docs && pnpm run check:syncio && pnpm run check:tokens && pnpm run check:workflow-invariants && pnpm run check:no-legacy && pnpm run check:migrations-lock && pnpm run check:db-baseline && pnpm run check:workflow-spec && pnpm run check:templates && pnpm run check:workflow-skill",
     "typecheck": "turbo typecheck",
     "check:security": "node scripts/check-no-app-wide-cdp.mjs && node scripts/check-security-invariants.mjs",
     "check:durability": "node scripts/check-durability-invariants.mjs",
     "check:docs": "node scripts/check-doc-drift.mjs",
     "check:syncio": "node scripts/check-sync-io-budget.mjs",
     "check:tokens": "pnpm --filter @generatorai/design-tokens tokens:check",
+    "check:workflow-invariants": "node scripts/check-workflow-invariants.mjs",
+    "check:no-legacy": "node scripts/check-no-legacy.mjs",
+    "check:migrations-lock": "node scripts/check-migrations-lock.mjs",
+    "check:db-baseline": "pnpm --filter @generatorai/db exec tsx ../../scripts/generate-db-baseline.ts --check",
+    "check:workflow-spec": "pnpm --filter @generatorai/server exec tsx ../../scripts/generate-workflow-spec.ts --check",
+    "check:templates": "pnpm --filter @generatorai/server exec tsx ../../scripts/generate-templates.ts --check",
+    "check:workflow-skill": "pnpm --filter @generatorai/server exec tsx ../../scripts/generate-workflow-skill.ts --check",
     "cli:docs": "pnpm --filter @generatorai/cli docs",
     "cli:docs:check": "pnpm --filter @generatorai/cli docs:check",
     "package:desktop": "pnpm --filter @generatorai/desktop package",
@@ -34,13 +42,21 @@
     "clean": "pnpm -r exec node -e \"const fs=require('fs');for(const d of ['dist','dist-bundle','dist-electron','.turbo'])fs.rmSync(d,{recursive:true,force:true});for(const f of fs.readdirSync('.'))if(f.endsWith('.tsbuildinfo'))fs.rmSync(f,{force:true})\"",
     "postinstall": "node scripts/fix-native-exec-bits.mjs",
     "generate:schemas": "pnpm --filter @generatorai/server exec tsx ../../scripts/generate-schemas.ts",
+    "generate:workflow-spec": "pnpm --filter @generatorai/server exec tsx ../../scripts/generate-workflow-spec.ts",
+    "generate:templates": "pnpm --filter @generatorai/server exec tsx ../../scripts/generate-templates.ts",
+    "generate:workflow-skill": "pnpm --filter @generatorai/server exec tsx ../../scripts/generate-workflow-skill.ts",
     "db:backup": "pnpm --filter @generatorai/server exec tsx ../../scripts/db-backup.ts",
     "db:reclaim": "pnpm --filter @generatorai/server exec tsx ../../scripts/db-reclaim.ts",
     "db:generate": "pnpm --filter @generatorai/db db:generate",
     "db:check": "pnpm --filter @generatorai/db db:check",
+    "db:baseline": "pnpm --filter @generatorai/db exec tsx ../../scripts/generate-db-baseline.ts",
     "db:reset": "pnpm --filter @generatorai/db db:reset",
     "db:prepare-dist": "pnpm --filter @generatorai/db db:prepare-dist",
-    "sweep:temp": "node scripts/sweep-temp-workspaces.mjs"
+    "sweep:temp": "node scripts/sweep-temp-workspaces.mjs",
+    "workflow:backup": "node scripts/workflow-backup.mjs",
+    "workflow:e2e": "node scripts/workflow-e2e/run.mjs",
+    "workflow:cleanup-runs": "node scripts/workflow-cleanup-runs.mjs",
+    "workflow:dbcopy-upgrade": "node scripts/workflow-dbcopy-upgrade.mjs"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
@@ -72,7 +88,9 @@
     "prettier": "^3.5.0",
     "turbo": "^2.5.0",
     "typescript": "^5.8.0",
-    "vitest": "^3.2.6"
+    "vitest": "^3.2.6",
+    "zod": "^3.25.76",
+    "zod-to-json-schema": "3.25.2"
   },
   "dependencies": {
     "tweetnacl": "^1.0.3"

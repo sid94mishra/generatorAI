@@ -72,8 +72,19 @@ import {
   type DataKey,
 } from './store.js';
 import { createCommandRunner, type CommandRunner } from './commandRunner.js';
-import { findOpenPane, openEntity, openerFor, workflowPaneContent } from './open.js';
+import { findOpenPane, openEntity, openerFor, workflowPaneContent, type WorkflowPaneState } from './open.js';
 import { buildWorkspaceTree, collapseTargetFor, type TreeRow } from './workspaceTree.js';
+import {
+  decisionHeadline,
+  loopDecisionOptions,
+  parkedLoop,
+  toMirroredDecisions,
+  waitingApproval,
+  type MirroredDecision,
+  parseBudget,
+  toLoopStages,
+  type LoopStage,
+} from './loopRows.js';
 import { anchorFor, firstAnchorableLine, moveLineCursor, scrollToShow } from './diffCursor.js';
 import { parseComposerInput, queueAttachment } from './composerInput.js';
 import { findTerminalMatch, renderTerminalText } from './terminalRender.js';
@@ -356,11 +367,19 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
  * so instead of failing validation on a command that was never going to fit.
  */
 const LIST_COMMANDS: Partial<
-  Record<PaneContent['kind'], { create?: { id: string; arg: string }; remove?: { id: string; arg: string } }>
+  Record<
+    PaneContent['kind'],
+    {
+      /** `flag`: the name is passed as `--<arg>` rather than as a positional argument. */
+      create?: { id: string; arg: string; flag?: true };
+      remove?: { id: string; arg: string };
+    }
+  >
 > = {
   chats: { create: { id: 'chat.create', arg: 'name' }, remove: { id: 'chat.delete', arg: 'chat' } },
   workflows: {
-    create: { id: 'workflow.create', arg: 'name' },
+    // An empty draft; a document file is the terminal command's other form.
+    create: { id: 'workflow.create', arg: 'name', flag: true },
     remove: { id: 'workflow.delete', arg: 'workflow' },
   },
   projects: {
@@ -618,6 +637,70 @@ export function App({
     () => createCommandRunner({ registry, makeContext, actions }),
     [registry, makeContext, actions],
   );
+
+  // ── Loops in the focused run pane (P05) ─────────────────────────
+  //
+  // The run pane's loop/stage tree and its decision banner read the run's
+  // stage list, kept (trimmed) in the pane's state. It is re-fetched when
+  // the pane's stage-level events move — a stage started/finished, a gate
+  // opened, the run's status changed — not on every streamed token.
+  const refreshRunStages = useCallback(
+    async (paneId: string, runId: string): Promise<LoopStage[] | null> => {
+      const stages = await withTimeout(api.runs.stages(runId), 8000).catch(() => null);
+      if (!stages) return null;
+      const loopStages = toLoopStages(stages as unknown[]);
+      // A sub-workflow's child decisions are mirrored into the parent's pane (P05 §4.2).
+      const childDecisions = loopStages.some((st) => st.kind === 'subworkflow')
+        ? toMirroredDecisions(runId, ((await withTimeout(api.runs.pendingDecisions(runId), 8000).catch(() => null)) ?? []) as unknown[])
+        : [];
+      const pane = getStoreApi()
+        .getState()
+        .workbench.tabs.flatMap((t) => paneLeaves(t.root))
+        .find((leaf) => leaf.id === paneId);
+      if (!pane || pane.content.kind !== 'run' || pane.content.entityId !== runId) return loopStages;
+      const prior = (pane.content.state ?? {}) as { loopStages?: LoopStage[]; childDecisions?: MirroredDecision[] };
+      if (
+        JSON.stringify(prior.loopStages ?? []) !== JSON.stringify(loopStages) ||
+        JSON.stringify(prior.childDecisions ?? []) !== JSON.stringify(childDecisions)
+      ) {
+        actions.patchPane(paneId, { state: { ...(pane.content.state ?? {}), loopStages, childDecisions } });
+      }
+      // The timeline reducer clears a gate only on `stage_run.input_received`,
+      // which a loop decision never emits: once the loop has moved on, clear
+      // its stale gate so the pane stops counting as blocked.
+      const gate = getStoreApi().getState().timelines[paneId]?.pendingApproval;
+      const gated = gate ? loopStages.find((st) => st.id === gate.stageId && st.kind === 'loop') : undefined;
+      if (gated && gated.status !== 'awaiting_input') {
+        actions.applyEvents(paneId, [{ kind: 'stage_run.input_received', data: { stageRunId: gated.id } }]);
+      }
+      return loopStages;
+    },
+    [api, actions],
+  );
+
+  const runStageSignal = useTui((s) => {
+    if (content?.kind !== 'run' || !focusedPane || !content.entityId) return '';
+    const tl = s.timelines[focusedPane.id];
+    let marks = '';
+    const items = tl?.items ?? [];
+    // The newest stage-level items only: a bounded scan, run on every store update.
+    for (let i = items.length - 1, seen = 0; i >= 0 && seen < 6; i--) {
+      const item = items[i];
+      if (!item || (item.kind !== 'stage' && item.kind !== 'notice' && item.kind !== 'error')) continue;
+      marks += `${item.id}${item.complete ? '+' : '-'};`;
+      seen++;
+    }
+    return `${focusedPane.id}|${content.entityId}|${tl?.runStatus ?? ''}|${tl?.pendingApproval?.stageId ?? ''}|${marks}`;
+  });
+
+  useEffect(() => {
+    if (!runStageSignal || !focusedPane || !content?.entityId) return;
+    const paneId = focusedPane.id;
+    const runId = content.entityId;
+    const timer = setTimeout(() => void refreshRunStages(paneId, runId), 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runStageSignal]);
 
   // ── Data loading ────────────────────────────────────────────────
   const neededKeys = useMemo<DataKey[]>(
@@ -1860,26 +1943,21 @@ export function App({
   // command the binary does, collected through the spec's own
   // schema-driven form rather than a bespoke dialog per command.
 
-  const workflowState = (content?.kind === 'workflow' ? (content.state ?? {}) : {}) as {
-    stages?: Array<{ id: string; name: string }>;
-    edges?: Array<{ id?: string; fromStageId: string; toStageId: string; edgeType?: string }>;
-    variables?: Record<string, unknown>;
-    selectedStageId?: string | null;
-  };
+  const workflowState = (content?.kind === 'workflow' ? (content.state ?? {}) : {}) as WorkflowPaneState;
 
   const selectedStage = useCallback(() => {
     const stages = workflowState.stages ?? [];
-    return stages.find((stage) => stage.id === workflowState.selectedStageId) ?? stages[0];
-  }, [workflowState.stages, workflowState.selectedStageId]);
+    return stages.find((stage) => stage.key === workflowState.selectedStageKey) ?? stages[0];
+  }, [workflowState.stages, workflowState.selectedStageKey]);
 
   const moveStageSelection = useCallback(
     (delta: 1 | -1) => {
       const stages = workflowState.stages ?? [];
       if (stages.length === 0) return;
-      const at = Math.max(0, stages.findIndex((stage) => stage.id === workflowState.selectedStageId));
-      patchState({ selectedStageId: stages[(at + delta + stages.length) % stages.length]!.id });
+      const at = Math.max(0, stages.findIndex((stage) => stage.key === workflowState.selectedStageKey));
+      patchState({ selectedStageKey: stages[(at + delta + stages.length) % stages.length]!.key });
     },
-    [workflowState.stages, workflowState.selectedStageId, patchState],
+    [workflowState.stages, workflowState.selectedStageKey, patchState],
   );
 
   /** Rebuilds the pane from the server after any authoring command changed it. */
@@ -1889,10 +1967,10 @@ export function App({
       content.entityId,
       content.title,
       api,
-      workflowState.selectedStageId ?? undefined,
+      workflowState.selectedStageKey ?? undefined,
     ).catch(() => null);
     if (rebuilt) open(rebuilt, 'replace', focusedPane.id);
-  }, [content, focusedPane, api, workflowState.selectedStageId, open]);
+  }, [content, focusedPane, api, workflowState.selectedStageKey, open]);
 
   /**
    * Runs an authoring command through the schema-driven form and reloads
@@ -1915,30 +1993,16 @@ export function App({
     // that command deliberately THROWS on an invalid definition (so the
     // binary exits non-zero), which the runner would surface as an error
     // modal — losing the structured `issues` this overlay navigates by.
-    const result = await withTimeout(api.definitions.validate(content.entityId), 8000).catch(
-      () => null,
-    );
+    const definitionId = content.entityId;
+    const result = await withTimeout(
+      api.definitions.get(definitionId).then((record) => api.definitions.validate(record.graph)),
+      8000,
+    ).catch(() => null);
     if (!result) {
       actions.toast('Could not reach the server to validate.', 'error');
       return;
     }
-    const issues = result.issues ?? [
-      // An older server sends only the flat strings. Showing them without
-      // navigation beats showing nothing, so they are lifted into the same
-      // shape with no stage attached.
-      ...(result.errors ?? []).map((message) => ({
-        severity: 'error' as const,
-        code: 'error',
-        message,
-        stageIds: [],
-      })),
-      ...(result.warnings ?? []).map((message) => ({
-        severity: 'warning' as const,
-        code: 'warning',
-        message,
-        stageIds: [],
-      })),
-    ];
+    const issues = result.issues;
     if (result.valid && issues.length === 0) {
       actions.toast('Workflow is valid.', 'success');
       return;
@@ -1948,7 +2012,7 @@ export function App({
       title: `Validation — ${content.title}`,
       valid: result.valid,
       issues,
-      onNavigate: (stageId) => patchState({ selectedStageId: stageId }),
+      onNavigate: (stageKey) => patchState({ selectedStageKey: stageKey }),
     });
   }, [content, api, actions, patchState]);
 
@@ -2568,7 +2632,9 @@ export function App({
           message: `${create.id.split('.')[0]} name`,
           initial: '',
           onSubmit: (value) => {
-            if (value.trim()) void runner.run(create.id, { [create.arg]: value.trim() });
+            if (!value.trim()) return;
+            const input = { [create.arg]: value.trim() };
+            void (create.flag ? runner.run(create.id, {}, input) : runner.run(create.id, input));
           },
         });
       },
@@ -2804,19 +2870,19 @@ export function App({
         if (!stage) return actions.toast('This workflow has no stages yet — press n.', 'warning');
         void authorThen(
           'workflow.stage.update',
-          { workflow: content?.entityId ?? '', stage: stage.id, name: stage.name },
+          { workflow: content?.entityId ?? '', stage: stage.key, name: stage.name },
           `Edit stage — ${stage.name}`,
         );
       },
       'workflow.deleteStage': () => {
         const stage = selectedStage();
         if (!stage) return actions.toast('No stage selected.', 'warning');
-        // `workflow.stage.delete` is `destructive: true`; the runner's own
+        // `workflow.stage.remove` is `destructive: true`; the runner's own
         // gate asks. Run directly rather than through a form — both its
         // arguments are already known, so a form would be an empty
         // confirmation dialog stacked on top of a real one.
         void runner
-          .run('workflow.stage.delete', { workflow: content?.entityId ?? '', stage: stage.id })
+          .run('workflow.stage.remove', { workflow: content?.entityId ?? '', stage: stage.key })
           .then((result) => {
             if (result !== undefined) void reloadWorkflow();
           });
@@ -2826,47 +2892,57 @@ export function App({
         if (!stage) return actions.toast('No stage selected.', 'warning');
         void authorThen(
           'workflow.edge.add',
-          { workflow: content?.entityId ?? '', from: stage.id },
+          { workflow: content?.entityId ?? '', from: stage.key },
           `Connect ${stage.name} to…`,
         );
       },
       'workflow.deleteEdge': () => {
         const stage = selectedStage();
         const edges = (workflowState.edges ?? []).filter(
-          (edge) => edge.fromStageId === stage?.id || edge.toStageId === stage?.id,
+          (edge) => edge.from === stage?.key || edge.to === stage?.key,
         );
         if (edges.length === 0) {
           actions.toast('This stage has no edges.', 'warning');
           return;
         }
-        const nameOf = (id: string): string =>
-          (workflowState.stages ?? []).find((s) => s.id === id)?.name ?? shortId(id);
+        const nameOf = (key: string): string =>
+          (workflowState.stages ?? []).find((s) => s.key === key)?.name ?? key;
         actions.showOverlay({
           kind: 'select',
           message: 'Delete which edge?',
+          // One edge per stage pair, so `from to` identifies it.
           options: edges.map((edge) => ({
-            value: String(edge.id ?? ''),
-            label: `${nameOf(edge.fromStageId)} → ${nameOf(edge.toStageId)}`,
-            detail: edge.edgeType ?? 'on_success',
+            value: `${edge.from} ${edge.to}`,
+            label: `${nameOf(edge.from)} → ${nameOf(edge.to)}`,
+            detail: edge.when ? `${edge.on} when ${edge.when}` : edge.on,
           })),
-          onSelect: (edgeId) =>
+          onSelect: (pair) => {
+            const [from = '', to = ''] = pair.split(' ');
             void runner
-              .run('workflow.edge.delete', { workflow: content?.entityId ?? '', edge: edgeId })
+              .run('workflow.edge.remove', { workflow: content?.entityId ?? '', from, to })
               .then((result) => {
                 if (result !== undefined) void reloadWorkflow();
-              }),
+              });
+          },
         });
       },
       'workflow.variables': () => {
-        const stage = selectedStage();
-        if (!stage) return actions.toast('No stage selected.', 'warning');
-        // `--var name=value` (repeatable) is the whole variables surface, so
-        // the form's own variadic field IS the variable editor — no second
-        // key-value UI to keep in step with the command's semantics.
-        void authorThen(
-          'workflow.stage.update',
-          { workflow: content?.entityId ?? '', stage: stage.id },
-          `Variables — ${stage.name} (--var name=value, comma separated)`,
+        // Variables are workflow inputs (a stage has none of its own) and a
+        // run supplies their values, so this is a read-only view of what a
+        // run will ask for.
+        const variables = workflowState.variables ?? [];
+        if (variables.length === 0) {
+          actions.toast('This workflow declares no input variables.', 'info');
+          return;
+        }
+        open(
+          {
+            kind: 'inspector',
+            entityId: content?.entityId ?? '',
+            title: `variables ${content?.title ?? ''}`,
+            state: { variables },
+          },
+          'split-h',
         );
       },
       'workflow.hooks': () => {
@@ -2884,7 +2960,7 @@ export function App({
           onSelect: (choice) => {
             if (choice === 'list') {
               void runner
-                .run('workflow.stage.hook.list', { workflow: workflowId, stage: stage.id })
+                .run('workflow.stage.hook.list', { workflow: workflowId, stage: stage.key })
                 .then((rows) => {
                   const hooks = (Array.isArray(rows) ? rows : []) as Array<Record<string, unknown>>;
                   if (hooks.length === 0) {
@@ -2894,7 +2970,7 @@ export function App({
                   open(
                     {
                       kind: 'inspector',
-                      entityId: stage.id,
+                      entityId: stage.key,
                       title: `hooks ${stage.name}`,
                       state: { hooks },
                     },
@@ -2905,7 +2981,7 @@ export function App({
             }
             void authorThen(
               choice === 'add' ? 'workflow.stage.hook.add' : 'workflow.stage.hook.remove',
-              { workflow: workflowId, stage: stage.id },
+              { workflow: workflowId, stage: stage.key },
             );
           },
         });
@@ -3221,6 +3297,62 @@ export function App({
   }
 
   function approveGate(approve: boolean): void {
+    // A parked loop (P05) is answered with the loop decisions: `a` opens
+    // them, `x` fails the loop after a confirm.
+    const paneState = (content?.state ?? {}) as { loopStages?: LoopStage[]; childDecisions?: MirroredDecision[] };
+    const loop = parkedLoop(paneState.loopStages ?? []);
+    if (loop?.decision && content?.kind === 'run' && content.entityId) {
+      if (approve) decideLoop(content.entityId, loop);
+      else confirmFailLoop(content.entityId, loop);
+      return;
+    }
+    // An approval wait (P05 §4.3), this run's or a sub-workflow child's
+    // (answered through this run: the server routes it to the child).
+    const wait = waitingApproval(paneState.loopStages ?? []);
+    const mirrored = (paneState.childDecisions ?? []).find((d) => d.kind === 'wait' ? d.waitType === 'approval' : d.kind === 'stage_completion_review');
+    const target = wait
+      ? { instanceId: wait.id, hasForm: wait.wait?.hasForm === true, name: wait.name || wait.stageKey }
+      : mirrored
+        ? { instanceId: mirrored.instanceId, hasForm: mirrored.hasForm, name: `${mirrored.name} (via ${mirrored.via})` }
+        : null;
+    if (target && content?.kind === 'run' && content.entityId) {
+      const runId = content.entityId;
+      const paneId = focusedPane?.id ?? '';
+      const send = (fields: Record<string, unknown>) =>
+        void runner
+          .run('run.command', { run: runId, instance: target.instanceId, command: 'approve' }, { json: JSON.stringify(fields) })
+          .then(() => (paneId ? refreshRunStages(paneId, runId) : null));
+      if (!approve) {
+        send({ outcome: 'rejected' });
+        return;
+      }
+      if (!target.hasForm) {
+        send({ outcome: 'approved' });
+        return;
+      }
+      actions.showOverlay({
+        kind: 'input',
+        message: `${target.name}: the approval form as JSON (e.g. {"environment":"staging"})`,
+        initial: '{}',
+        onSubmit: (text) => {
+          try {
+            const data: unknown = JSON.parse(text || '{}');
+            if (!data || typeof data !== 'object' || Array.isArray(data)) throw new Error('not an object');
+            send({ outcome: 'approved', data });
+          } catch (err) {
+            actions.toast(`The form is not a JSON object: ${err instanceof Error ? err.message : String(err)}`, 'warning');
+          }
+        },
+      });
+      return;
+    }
+    // A tool permission, question or plan review inside a stage's turn is a
+    // chat-shaped gate (P03b): the same overlays as a chat's answer it.
+    const stageGate = getStoreApi().getState().timelines[focusedPane?.id ?? '']?.pendingInteraction;
+    if (stageGate?.stageRunId) {
+      respondToChatGate();
+      return;
+    }
     const pending = getStoreApi().getState().timelines[focusedPane?.id ?? '']?.pendingApproval;
     if (!pending || !content?.entityId) {
       actions.toast('No gate is waiting.', 'warning');
@@ -3229,6 +3361,75 @@ export function App({
     void runner.run(approve ? 'run.hitl.approve' : 'run.hitl.reject', {
       run: content.entityId,
       stage: pending.stageId,
+    });
+  }
+
+  /** Sends one loop decision as a run command, then re-reads the run's stages. */
+  function sendLoopCommand(runId: string, loop: LoopStage, command: string, fields?: Record<string, unknown>): void {
+    const paneId = focusedPane?.id ?? '';
+    void runner
+      .run('run.command', { run: runId, instance: loop.id, command }, fields ? { json: JSON.stringify(fields) } : {})
+      .then(() => (paneId ? refreshRunStages(paneId, runId) : null));
+  }
+
+  function confirmFailLoop(runId: string, loop: LoopStage): void {
+    actions.showOverlay({
+      kind: 'confirm',
+      title: `Fail loop ${loop.name || loop.stageKey}?`,
+      message: 'The loop fails and every stage after it is blocked. This cannot be undone.',
+      danger: true,
+      onAnswer: (yes) => {
+        if (yes) sendLoopCommand(runId, loop, 'fail');
+      },
+    });
+  }
+
+  /** The decision overlay for a parked loop: grant, continue with input, accept, accept iteration k, raise budget, fail. */
+  function decideLoop(runId: string, loop: LoopStage): void {
+    const decision = loop.decision;
+    if (!decision) return;
+    const name = loop.name || loop.stageKey;
+    actions.showOverlay({
+      kind: 'loopDecision',
+      title: `Loop ${name} needs a decision`,
+      message: `${decisionHeadline(decision)} · ${decision.iterations}${
+        decision.maxIterations !== null ? `/${decision.maxIterations}` : ''
+      } iterations finished`,
+      options: loopDecisionOptions(decision),
+      onChoose: (value) => {
+        if (value.startsWith('grant:')) {
+          sendLoopCommand(runId, loop, 'grant_iterations', { n: Number(value.slice('grant:'.length)) });
+        } else if (value === 'accept') {
+          sendLoopCommand(runId, loop, 'accept');
+        } else if (value.startsWith('accept_iteration:')) {
+          sendLoopCommand(runId, loop, 'accept_iteration', { k: Number(value.slice('accept_iteration:'.length)) });
+        } else if (value === 'fail') {
+          confirmFailLoop(runId, loop);
+        } else if (value === 'input') {
+          actions.showOverlay({
+            kind: 'input',
+            message: `Message for the next iteration of ${name}`,
+            initial: '',
+            onSubmit: (text) => {
+              if (text.trim()) sendLoopCommand(runId, loop, 'continue_with_input', { text: text.trim() });
+            },
+          });
+        } else if (value === 'budget') {
+          actions.showOverlay({
+            kind: 'input',
+            message: 'Add to the budget (turns=20 cost=2.5 tokens=200000 minutes=30)',
+            initial: '',
+            onSubmit: (text) => {
+              const fields = parseBudget(text);
+              if (!fields) {
+                actions.toast('Nothing to raise: use turns=, cost=, tokens= or minutes= with a positive number.', 'warning');
+                return;
+              }
+              sendLoopCommand(runId, loop, 'raise_budget', fields);
+            },
+          });
+        }
+      },
     });
   }
 
@@ -3261,9 +3462,44 @@ export function App({
       return;
     }
     const chatId = content.entityId;
+    // A workflow stage's gate (P03b): the pane is the run, and the answer
+    // goes to the stage's interaction routes instead of the chat's.
+    const stage = pending.stageRunId ? { runId: content.entityId, stageRunId: pending.stageRunId } : null;
+    const reportFailure = (err: unknown): void =>
+      actions.toast(`Could not answer: ${err instanceof Error ? err.message : String(err)}`, 'error');
+    const answerPermission = (interactionId: string, body: { behavior: 'allow' | 'deny'; message?: string }): void => {
+      if (stage) void api.runs.stagePermission(stage.runId, stage.stageRunId, interactionId, body).catch(reportFailure);
+      else void api.chats.respondPermission(chatId, interactionId, body);
+    };
 
     if (pending.kind === 'plan') {
-      const { planId, title, summary } = pending;
+      const { planId, title, summary, interactionId } = pending;
+      if (stage) {
+        actions.showOverlay({
+          kind: 'confirm',
+          message: `${title}\n\n${summary}`,
+          danger: false,
+          onAnswer: (approve) => {
+            if (approve) {
+              void api.runs.stagePlan(stage.runId, stage.stageRunId, interactionId, { approved: true }).catch(reportFailure);
+              return;
+            }
+            actions.showOverlay({
+              kind: 'input',
+              message: 'Why? (optional feedback, Enter to skip)',
+              initial: '',
+              onSubmit: (note) =>
+                void api.runs
+                  .stagePlan(stage.runId, stage.stageRunId, interactionId, {
+                    approved: false,
+                    ...(note.trim() ? { feedback: note.trim() } : {}),
+                  })
+                  .catch(reportFailure),
+            });
+          },
+        });
+        return;
+      }
       actions.showOverlay({
         kind: 'confirm',
         message: `${title}\n\n${summary}`,
@@ -3301,15 +3537,14 @@ export function App({
         danger: false,
         onAnswer: (allow) => {
           if (allow) {
-            void api.chats.respondPermission(chatId, interactionId, permissionResponseBody('allow', ''));
+            answerPermission(interactionId, permissionResponseBody('allow', ''));
             return;
           }
           actions.showOverlay({
             kind: 'input',
             message: 'Why deny? (optional, Enter to skip)',
             initial: '',
-            onSubmit: (note) =>
-              void api.chats.respondPermission(chatId, interactionId, permissionResponseBody('deny', note)),
+            onSubmit: (note) => answerPermission(interactionId, permissionResponseBody('deny', note)),
           });
         },
       });
@@ -3327,7 +3562,8 @@ export function App({
     const askNext = (index: number, answers: Record<string, string[]>): void => {
       const q = questions[index];
       if (!q) {
-        void api.chats.respond(chatId, interactionId, { answers });
+        if (stage) void api.runs.stageAnswer(stage.runId, stage.stageRunId, interactionId, { answers }).catch(reportFailure);
+        else void api.chats.respond(chatId, interactionId, { answers });
         return;
       }
       const finish = (value: string) => askNext(index + 1, { ...answers, [q.id]: [value] });
@@ -3394,7 +3630,7 @@ export function App({
         startedAt: s.startedAt ? String(s.startedAt) : null,
         completedAt: s.completedAt ? String(s.completedAt) : null,
         error: s.error ?? null,
-        retryCount: s.retryCount,
+        attempts: s.currentAttempt,
       })),
       variables: run?.variables ?? {},
     });

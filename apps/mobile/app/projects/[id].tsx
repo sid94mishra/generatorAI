@@ -8,7 +8,7 @@
 // a small project is a short screen rather than a stack of empty cards.
 //
 // The server has no project filter on runs; `projectRuns` derives them from
-// the project's workflow ids plus runs tagged with `__projectId`.
+// the project's workflow ids plus runs started for it (`run.projectId`).
 //
 // Segments: Overview (the above) · Artifacts (project skills / prompts /
 // agents / MCP servers) · Settings (name, worktree retention, limits,

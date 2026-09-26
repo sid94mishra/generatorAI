@@ -229,6 +229,40 @@ export class WorkspaceCheckpointService {
   }
 
   /**
+   * `restoreTurn`, all or nothing (P05 accept_best / accept_iteration): when
+   * any mount fails, every mount that was restored is put back on the
+   * pre-restore snapshot it took, and the call reports the failure.
+   */
+  async restoreTurnAllOrNothing(
+    workspaceId: string,
+    turnId: string,
+    scope: CheckpointEventScope = {},
+    phase: 'before' | 'after' = 'after',
+  ): Promise<{ ok: boolean; error?: string }> {
+    const result = await this.restoreTurn(workspaceId, turnId, scope, phase);
+    const failed = result.mounts.filter((m) => !m.ok);
+    if (result.mounts.length > 0 && failed.length === 0) return { ok: true };
+    const workspace = await this.workspaceRepo.findById(workspaceId);
+    const repos = workspace ? await this.resolveRepos(workspace) : [];
+    for (const m of result.mounts) {
+      if (!m.ok || !m.preRestoreCheckpointId) continue;
+      const pre = await this.checkpoints.getById(m.preRestoreCheckpointId);
+      const repo = repos.find((r) => r.alias === m.alias);
+      if (!pre || !repo) continue;
+      try {
+        await this.checkpoints.restore(pre, repo.repoDir);
+        this.restoreListener?.(repo.repoDir);
+      } catch (err) {
+        this.logger.warn(`[WorkspaceCheckpoints] rolling ${m.alias} back after a failed restore of ${turnId} failed: ${err}`);
+      }
+    }
+    return {
+      ok: false,
+      error: result.mounts.length === 0 ? 'The workspace has no mount to restore' : failed.map((m) => `${m.alias}: ${m.error ?? 'failed'}`).join('; '),
+    };
+  }
+
+  /**
    * The snapshot an ANCESTOR workspace took for `turnId` on the mount with
    * this alias — nearest ancestor first — provided its tree is reachable from
    * this mount's repository. Null when there is none, or when the objects are
@@ -419,6 +453,24 @@ export class WorkspaceCheckpointService {
     });
     for (const repo of repos) this.checkpoints.registerShadow(repo.repoDir, repo.gitDir);
     return repos;
+  }
+
+  /**
+   * The tree hash of every mount of a workspace (alias → hash, null where
+   * it cannot be computed): the loop's "workspace changed" signal (P05 §2.5).
+   * Null when the workspace is gone.
+   */
+  async treeHashes(workspaceId: string): Promise<Record<string, string | null> | null> {
+    try {
+      const workspace = await this.workspaceRepo.findById(workspaceId);
+      if (!workspace) return null;
+      const out: Record<string, string | null> = {};
+      for (const repo of await this.resolveRepos(workspace)) out[repo.alias] = await this.checkpoints.treeHash(repo.repoDir);
+      return out;
+    } catch (err) {
+      this.logger.warn(`[WorkspaceCheckpoints] tree hashes failed for ${workspaceId}: ${err}`);
+      return null;
+    }
   }
 
   /** Resolve a single repo alias to its absolute directory. */

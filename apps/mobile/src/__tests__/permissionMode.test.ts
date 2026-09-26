@@ -15,7 +15,7 @@ describe('run permission mode', () => {
 
   it('reads the GET response and falls back to the server default', () => {
     expect(permissionModeOf({ runId: 'r', mode: 'plan' })).toBe('plan');
-    expect(permissionModeOf({ mode: 'askOnce' })).toBe(DEFAULT_RUN_PERMISSION_MODE);
+    expect(permissionModeOf({ mode: 'nope' })).toBe(DEFAULT_RUN_PERMISSION_MODE);
     expect(permissionModeOf(null)).toBe('bypassPermissions');
   });
 

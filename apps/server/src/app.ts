@@ -84,14 +84,14 @@ export function createApp(container: Container): Express {
   //   - Both parsers return 413 Payload Too Large on overflow via the
   //     default error handler.
   //
-  // The webhook route captures `rawBody` via the verify hook for HMAC
-  // signature verification — preserved exactly so SEC-12 still works.
+  // The automation webhook route captures `rawBody` via the verify hook for
+  // HMAC signature verification (SEC-12).
   const jsonBodyLimit = process.env['GENERATORAI_JSON_BODY_LIMIT'] ?? '2mb';
   const urlencodedBodyLimit = process.env['GENERATORAI_URLENCODED_LIMIT'] ?? '1mb';
   // Webhook paths that need raw-body for HMAC signature verification (SEC-12).
   // Capture is scoped to only these prefixes so non-webhook requests do NOT
   // buffer a second copy of the body in addition to the parsed JSON object.
-  const WEBHOOK_RAW_BODY_PREFIXES = ['/api/webhooks', '/api/automations/webhooks'];
+  const WEBHOOK_RAW_BODY_PREFIXES = ['/api/automations/webhooks'];
   app.use(express.json({
     limit: jsonBodyLimit,
     verify: (req: IncomingMessage, _res, buf) => {

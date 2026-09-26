@@ -26,11 +26,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | copilot.autoRestart | boolean | `default true` | — |
 | copilot.githubToken | string | `optional` | — |
 | copilot.githubHost | string | `optional` | — |
-| workflow | object | `default {}` | unknown keys: strip |
-| workflow.stageTimeoutMs | number | `default 300000` | int; min 1000; max 86400000 |
-| workflow.maxStageTimeoutMs | number | `default 14400000` | int; min 1000; max 604800000 |
-| workflow.heartbeatIntervalMs | number | `default 10000` | int; min 1000; max 600000 |
-| workflow.heartbeatStaleMultiplier | number | `default 3` | min 2; max 100 |
 | harness | object | `default {}` | unknown keys: strip |
 | harness.type | "copilot" / "claude-agent" / "codex" / "opencode" / "acp" | `default "copilot"` | — |
 | harness.copilot | object | `default {}` | unknown keys: strip |
@@ -69,11 +64,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | security.relayDirectorUrl | string | `optional` | — |
 | security.auditRetentionDays | number | `default 365` | int; min 1; max 3650 |
 | security.sessionTtlHours | number | `default 48` | int; min 1; max 8760 |
-| webhooks | object | `default {}` | unknown keys: strip |
-| webhooks.enabled | boolean | `default false` | — |
-| webhooks.githubSecret | string | `optional` | — |
-| webhooks.webhookToken | string | `optional` | — |
-| webhooks.rateLimitPerMinute | number | `default 60` | int; min 1 |
 | sandbox | object | `default {}` | unknown keys: strip |
 | sandbox.enabled | boolean | `default false` | — |
 | sandbox.provider | "docker" / "host" / "auto" | `default "auto"` | — |
@@ -84,10 +74,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | scripts | object | `default {}` | unknown keys: strip |
 | scripts.workflowScriptsEnabled | boolean | `default false` | — |
 | scripts.extraAllowlist | array of string | `default []` | maxLength 64 |
-| durableSleep | object | `default {}` | unknown keys: strip |
-| durableSleep.sweepIntervalMs | number | `default 5000` | int; min 100 |
-| durableSleep.maxWakesPerSweep | number | `default 100` | int; min 1; max 10000 |
-| durableSleep.enabled | boolean | `default true` | — |
 | retention | object | `default {}` | unknown keys: strip |
 | retention.eventPayloadTtlDays | number | `default 30` | int; min 1; max 3650 |
 | retention.deltaPayloadTtlDays | number | `default 1` | int; min 1; max 3650 |
@@ -129,7 +115,6 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | computerUse.extraBlockedNameFragments | array of string | `default []` | maxLength 500 |
 | computerUse.extraBlockedExecutables | array of string | `default []` | maxLength 500 |
 | computerUse.alwaysAllowedApps | array of string | `default []` | maxLength 100 |
-| projectRoot | string | `optional` | — |
 
 ## Complete validation contract
 
@@ -194,21 +179,6 @@ export const AppConfigSchema = z.object({
        *  accounts get "not authorized to use this Copilot feature" 403s
        *  because the CLI defaults to github.com. */
       githubHost: z.string().optional(),
-    })
-    .default({}),
-
-  // WS-D1 — workflow stage liveness. `stageTimeoutMs` is the default stage
-  // timeout when a stage definition sets none (the documented 300 s);
-  // `maxStageTimeoutMs` caps any explicit value. The heartbeat is written by
-  // the executor every `heartbeatIntervalMs` while a stage is queued/running
-  // and the run reconciler fails a stage whose last beat is older than
-  // `heartbeatIntervalMs * heartbeatStaleMultiplier`.
-  workflow: z
-    .object({
-      stageTimeoutMs: z.number().int().min(1_000).max(24 * 60 * 60 * 1000).default(300_000),
-      maxStageTimeoutMs: z.number().int().min(1_000).max(7 * 24 * 60 * 60 * 1000).default(4 * 60 * 60 * 1000),
-      heartbeatIntervalMs: z.number().int().min(1_000).max(10 * 60 * 1000).default(10_000),
-      heartbeatStaleMultiplier: z.number().min(2).max(100).default(3),
     })
     .default({}),
 
@@ -356,15 +326,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  webhooks: z
-    .object({
-      enabled: z.boolean().default(false),
-      githubSecret: z.string().optional(),
-      webhookToken: z.string().optional(),
-      rateLimitPerMinute: z.number().int().min(1).default(60),
-    })
-    .default({}),
-
   sandbox: z
     .object({
       /** Enable sandbox execution mode */
@@ -403,22 +364,6 @@ export const AppConfigSchema = z.object({
        * (comma-separated).
        */
       extraAllowlist: z.array(z.string().min(1).max(64)).max(64).default([]),
-    })
-    .default({}),
-
-  // DUR-05 — durable step.sleep sweeper. Active whenever at least one
-  // stage row is `sleeping`; runs a small poll against the indexed
-  // `wake_at` column. Defaults are deliberately modest — bump
-  // `sweepIntervalMs` in production once sleep semantics are exercised
-  // more aggressively.
-  durableSleep: z
-    .object({
-      /** How often (ms) the sweeper polls for wake-ready rows. */
-      sweepIntervalMs: z.number().int().min(100).default(5_000),
-      /** Cap per sweep to keep SQLite write windows bounded. */
-      maxWakesPerSweep: z.number().int().min(1).max(10_000).default(100),
-      /** Disable the sweeper entirely. */
-      enabled: z.boolean().default(true),
     })
     .default({}),
 
@@ -613,8 +558,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  /** Project root directory — used as default CWD for data source scripts */
-  projectRoot: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

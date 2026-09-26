@@ -6,14 +6,16 @@
 
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { CheckCircle2, XCircle, Clock, Eye, ExternalLink, Ban } from 'lucide-react';
+import { CheckCircle2, XCircle, Clock, Eye, ExternalLink, Ban, Hand } from 'lucide-react';
 import { useBackgroundTasks, useBackgroundTaskDigest, useChat } from '@/hooks/queries.js';
+import { useChatWorkflowRuns } from '@/hooks/workflowQueries.js';
+import { appPath } from '@generatorai/client-core';
 import { useStreamStore } from '@/stores/streamStore.js';
 import type { BackgroundTaskBlock } from '@generatorai/client-core';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import { cn } from '@/lib/utils.js';
-import { Button, Spinner } from '@/components/ui/index.js';
+import { Button, Spinner, StatusBadge } from '@/components/ui/index.js';
 
 interface BackgroundTasksPanelProps {
   chatId: string | undefined;
@@ -121,6 +123,62 @@ function LiveProgress({ block }: { block: BackgroundTaskBlock | undefined }) {
   );
 }
 
+/**
+ * Workflow runs the orchestrator started (`run_workflow`, P06 WP-6.2): the
+ * same cards the transcript shows under each call, as one list.
+ */
+function WorkflowRunsSection({ chatId }: { chatId: string | undefined }) {
+  const navigate = useNavigate();
+  const { data } = useChatWorkflowRuns(chatId);
+  const runs = data?.runs ?? [];
+  if (runs.length === 0) return null;
+  return (
+    <div className="border-t border-[var(--color-border)]" data-testid="bg-workflow-runs">
+      <div className="flex items-center justify-between px-3 py-2">
+        <div className="text-xs font-semibold text-[var(--color-foreground)]">Workflow runs</div>
+        <div className="text-[10px] text-[var(--color-muted-foreground)]">{runs.length} run{runs.length === 1 ? '' : 's'}</div>
+      </div>
+      <ul className="divide-y divide-[var(--color-border)]">
+        {runs.map((r) => {
+          const link = appPath(r.link);
+          return (
+            <li key={r.runId} className="flex items-start gap-2 px-3 py-2">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-xs font-medium text-[var(--color-foreground)]">{r.workflowName}</span>
+                  <StatusBadge status={r.status} />
+                </div>
+                <div className="mt-0.5 truncate text-[10px] text-[var(--color-muted-foreground)]">
+                  {r.stagesTotal > 0 && <span className="tabular-nums">{r.stagesDone}/{r.stagesTotal} stages</span>}
+                  {r.currentStage && <span> · {r.currentStage}</span>}
+                </div>
+                {r.pendingApprovals.length > 0 && (
+                  <div className="mt-1 flex items-center gap-1 text-[10px] text-warning">
+                    <Hand className="h-3 w-3" />
+                    {r.pendingApprovals.length} decision{r.pendingApprovals.length === 1 ? '' : 's'} waiting
+                  </div>
+                )}
+              </div>
+              {link && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  title="Open run"
+                  className="h-auto w-auto rounded p-1 text-[var(--color-muted-foreground)] hover:bg-[var(--color-muted)] hover:text-[var(--color-foreground)]"
+                  onClick={() => navigate(link)}
+                >
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
+
 export function BackgroundTasksPanel({ chatId }: BackgroundTasksPanelProps) {
   const navigate = useNavigate();
   const platform = usePlatform() as HttpPlatformClient;
@@ -197,6 +255,7 @@ export function BackgroundTasksPanel({ chatId }: BackgroundTasksPanelProps) {
             })}
           </ul>
         )}
+        <WorkflowRunsSection chatId={chatId} />
       </div>
     </div>
   );

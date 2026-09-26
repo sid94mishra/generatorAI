@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils.js';
 import { formatRelativeTime } from '@/utils/formatRelativeTime.js';
 import { useTicker, formatElapsed } from './useTicker.js';
 import type { LiveItem, LiveKind } from '@/hooks/useLiveOperations.js';
-import { useCancelWorkflowRun, useRetryWorkflowRun } from '@/hooks/workflowQueries.js';
+import { useInvokeWorkflow, useRunCommand } from '@/hooks/workflowQueries.js';
 import { useCancelChat } from '@/hooks/queries.js';
 import { useCancelAutomationExecution, useTriggerAutomation } from '@/hooks/automationQueries.js';
 
@@ -47,7 +47,7 @@ const KIND_LABEL: Record<LiveKind, string> = {
   automation: 'Automation',
 };
 
-const RUNNING_STATUSES = new Set(['running', 'starting', 'cancelling', 'pending']);
+const RUNNING_STATUSES = new Set(['running', 'starting', 'waiting', 'finalizing', 'cancelling', 'pending']);
 
 type Tab = 'today' | 'running' | 'attention';
 
@@ -58,13 +58,13 @@ export function ActivityPanel({ today, running, attention, isLoading }: Activity
   const hasLive = [...today, ...running].some((i) => i.live);
   const now = useTicker(hasLive);
 
-  const cancelRun = useCancelWorkflowRun();
-  const retryRun = useRetryWorkflowRun();
+  const runCommand = useRunCommand();
+  const invokeWorkflow = useInvokeWorkflow({ errorTitle: 'Could not re-run' });
   const cancelChat = useCancelChat();
   const cancelExec = useCancelAutomationExecution();
   const triggerAutomation = useTriggerAutomation();
   const busy =
-    cancelRun.isPending || retryRun.isPending || cancelChat.isPending ||
+    runCommand.isPending || invokeWorkflow.isPending || cancelChat.isPending ||
     cancelExec.isPending || triggerAutomation.isPending;
 
   const items = tab === 'today' ? today : tab === 'running' ? running : attention;
@@ -109,17 +109,21 @@ export function ActivityPanel({ today, running, attention, isLoading }: Activity
               now={now}
               busy={busy}
               onOpen={() => navigate(item.href)}
-              onCancelRun={() => cancelRun.mutate(item.runId!)}
+              onCancelRun={() => runCommand.mutate({ runId: item.runId!, command: { command: 'cancel' } })}
               onRetryRun={() => {
-                // Retry starts a NEW run — open it rather than leaving the
-                // card pointing at the terminal ancestor.
-                void retryRun.mutateAsync(item.runId!).then((res) => {
-                  // `item.href` is `/workflows/<defId>/runs/<runId>`; swap the
-                  // trailing run id for the new run rather than re-deriving it.
-                  if (res?.runId && item.href.includes('/runs/')) {
-                    navigate(item.href.replace(/\/runs\/[^/]+$/, `/runs/${res.runId}`));
-                  }
-                });
+                // "Retry failed" forks a NEW run (the failed one stays
+                // terminal) — open it rather than leaving the card pointing
+                // at the ancestor.
+                void invokeWorkflow.mutateAsync({
+                  request: {
+                    target: { kind: 'fork', sourceRunId: item.runId!, definition: 'pinned', workspace: 'fresh' },
+                    variables: {},
+                    client: 'web',
+                  },
+                }).then(
+                  (fork) => navigate(`/workflows/${fork.workflowDefinitionId}/runs/${fork.runId}`),
+                  () => undefined,
+                );
               }}
               onStopChat={() => cancelChat.mutate(item.id)}
               onCancelExec={() =>
@@ -207,7 +211,7 @@ function ActivityRow({
         {item.kind === 'run' && isFailed && (
           <Button variant="secondary" size="sm" disabled={busy}
             leftIcon={<RotateCcw className="h-3.5 w-3.5" />} onClick={stop(onRetryRun)}>
-            Restart
+            Retry failed
           </Button>
         )}
         {item.kind === 'automation' && isRunning && (

@@ -2,11 +2,10 @@
 // Database Schema — Tables (Drizzle ORM + SQLite)
 // ────────────────────────────────────────────────────────────────
 
-import { sqliteTable, text, integer, blob, index, uniqueIndex, primaryKey } from 'drizzle-orm/sqlite-core';
+import { sql } from 'drizzle-orm';
+import { sqliteTable, text, integer, real, blob, index, unique, uniqueIndex, primaryKey, foreignKey, type AnySQLiteColumn } from 'drizzle-orm/sqlite-core';
 import type {
   ChatMessageMetadata,
-  WorkflowDefinitionSnapshot,
-  DataSourceConfig,
   ProjectSettings,
   CodebaseSettings,
   DataSchema,
@@ -18,10 +17,10 @@ import type {
   AgentOrchestrationPolicy,
   AgentOverrides,
   ResolvedAgentProjection,
-  SkillReference,
-  AgentReference,
   ChatSourceControlOptions,
+  ChatPrincipal,
 } from '@generatorai/shared';
+import type { DefinitionAuthor } from '@generatorai/workflow-spec';
 
 // ── Sessions ──
 
@@ -39,15 +38,8 @@ export const sessions = sqliteTable(
       ],
     }).notNull().default('created'),
     model: text('model'),
-    repoUrl: text('repo_url'),
     repoBranch: text('repo_branch'),
-    requiresCodebase: integer('requires_codebase', { mode: 'boolean' }).notNull().default(false),
-    workspacePath: text('workspace_path'),
     tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),
-    triggeredBy: text('triggered_by', { mode: 'json' }).$type<{
-      source: string;
-      event: string;
-    } | null>(),
     conversationId: text('conversation_id'),
     /** The provider's own session handle (Claude session id / Codex thread id). */
     providerSessionId: text('provider_session_id'),
@@ -62,44 +54,6 @@ export const sessions = sqliteTable(
   (table) => ({
     statusIdx: index('idx_sessions_status').on(table.status),
     createdAtIdx: index('idx_sessions_created_at').on(table.createdAt),
-  }),
-);
-
-// ── Workflows ──
-
-/** @deprecated v1 table — use workflowDefinitions + workflowRuns instead */
-export const workflows = sqliteTable(
-  'workflows',
-  {
-    id: text('id').primaryKey(),
-    sessionId: text('session_id')
-      .notNull()
-      .references(() => sessions.id, { onDelete: 'cascade' }),
-    templateId: text('template_id').notNull(),
-    name: text('name').notNull(),
-    order: integer('order').notNull(),
-    status: text('status', {
-      enum: ['pending', 'queued', 'running', 'paused', 'completed', 'failed', 'cancelled'],
-    }).notNull().default('pending'),
-    conversationId: text('conversation_id'),
-    variables: text('variables', { mode: 'json' })
-      .$type<Record<string, unknown>>()
-      .default({}),
-    hookOverrides: text('hook_overrides', { mode: 'json' })
-      .$type<Record<string, unknown>>()
-      .default({}),
-    harnessConfigOverrides: text('harness_config_overrides', { mode: 'json' }),
-    currentStep: integer('current_step').default(0),
-    totalSteps: integer('total_steps').default(0),
-    error: text('error'),
-    startedAt: integer('started_at', { mode: 'timestamp' }),
-    completedAt: integer('completed_at', { mode: 'timestamp' }),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-  },
-  (table) => ({
-    sessionIdx: index('idx_workflows_session_id').on(table.sessionId),
-    statusIdx: index('idx_workflows_status').on(table.status),
-    orderIdx: index('idx_workflows_order').on(table.sessionId, table.order),
   }),
 );
 
@@ -204,7 +158,6 @@ export const chatMessages = sqliteTable(
     toolName: text('tool_name'),
     toolArgs: text('tool_args', { mode: 'json' }),
     toolResult: text('tool_result', { mode: 'json' }),
-    workflowId: text('workflow_id').references(() => workflows.id),
     /** Rich metadata (thinking, tool calls, system msgs) for assistant messages */
     metadata: text('metadata', { mode: 'json' }).$type<ChatMessageMetadata>(),
     chatId: text('chat_id'),
@@ -212,6 +165,18 @@ export const chatMessages = sqliteTable(
     agentRef: text('agent_ref'),
     agentVersion: integer('agent_version'),
     timestamp: integer('timestamp', { mode: 'timestamp' }).notNull(),
+    /**
+     * v56 (RV-10) — true only when the message was written on the provider's
+     * final turn event; false for a partial written on cancel or pause.
+     */
+    complete: integer('complete', { mode: 'boolean' }).notNull().default(true),
+    /**
+     * v57 — what a stage-session message is in its attempt: `context`,
+     * `feedback`, `prompt`, `repair`, `summary`, `approval_feedback`,
+     * `operator`, `iteration_input`, `wrap_up`, `digest`. NULL for chats.
+     * Deliberately no CHECK: a later role needs no rebuild of this table.
+     */
+    turnRole: text('turn_role'),
   },
   (table) => ({
     sessionIdx: index('idx_chat_session_id').on(table.sessionId),
@@ -229,7 +194,6 @@ export const artifacts = sqliteTable(
     sessionId: text('session_id')
       .notNull()
       .references(() => sessions.id, { onDelete: 'cascade' }),
-    workflowId: text('workflow_id').references(() => workflows.id),
     name: text('name').notNull(),
     path: text('path').notNull(),
     mimeType: text('mime_type'),
@@ -242,48 +206,6 @@ export const artifacts = sqliteTable(
   },
   (table) => ({
     sessionIdx: index('idx_artifacts_session_id').on(table.sessionId),
-  }),
-);
-
-// ── Webhook Registrations ──
-
-export const webhookRegistrations = sqliteTable('webhook_registrations', {
-  id: text('id').primaryKey(),
-  name: text('name').notNull(),
-  source: text('source').notNull(),
-  eventType: text('event_type').notNull(),
-  condition: text('condition'),
-  templateId: text('template_id').notNull(),
-  autoStart: integer('auto_start', { mode: 'boolean' }).notNull().default(true),
-  sessionConfig: text('session_config', { mode: 'json' }),
-  enabled: integer('enabled', { mode: 'boolean' }).notNull().default(true),
-  createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-  lastTriggeredAt: integer('last_triggered_at', { mode: 'timestamp' }),
-});
-
-// ── Webhook Deliveries ──
-
-export const webhookDeliveries = sqliteTable(
-  'webhook_deliveries',
-  {
-    id: text('id').primaryKey(),
-    registrationId: text('registration_id').references(() => webhookRegistrations.id),
-    deliveryId: text('delivery_id'),
-    source: text('source').notNull(),
-    eventType: text('event_type').notNull(),
-    payload: text('payload', { mode: 'json' }),
-    status: text('status', {
-      enum: ['received', 'processed', 'failed', 'duplicate'],
-    }).notNull(),
-    error: text('error'),
-    sessionId: text('session_id').references(() => sessions.id),
-    receivedAt: integer('received_at', { mode: 'timestamp' }).notNull(),
-    processedAt: integer('processed_at', { mode: 'timestamp' }),
-  },
-  (table) => ({
-    deliveryIdIdx: uniqueIndex('idx_webhook_deliveries_delivery_id').on(table.deliveryId),
-    registrationIdx: index('idx_webhook_deliveries_registration').on(table.registrationId),
-    statusIdx: index('idx_webhook_deliveries_status').on(table.status),
   }),
 );
 
@@ -362,6 +284,9 @@ export const chats = sqliteTable(
     agentSnapshot: text('agent_snapshot', { mode: 'json' }).$type<ResolvedAgentProjection>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    // ── Agent integration (v60) ──
+    /** The creating principal `{kind, id, scopes}`; the chat's workflow tools act with its scopes. NULL before v60. */
+    createdByPrincipal: text('created_by_principal', { mode: 'json' }).$type<ChatPrincipal>(),
   },
   (table) => ({
     statusIdx: index('idx_chats_status').on(table.status),
@@ -373,7 +298,14 @@ export const chats = sqliteTable(
   }),
 );
 
-// ── Workflow Definitions ──
+// ── Workflow Definitions (v55: v2 documents) ──
+//
+// A definition is a `WorkflowGraph` (`@generatorai/workflow-spec`) stored as
+// rows: the workflow spec (minus name/description/projectId, which are
+// columns for listing) on `workflow_definitions.spec`, one row per stage
+// (the stage spec minus key/name/position on `spec`) and one per edge, all
+// keyed by stage KEY. `saveGraph` replaces them in one transaction and bumps
+// `revision`; runs pin an immutable `workflow_definition_versions` row.
 
 export const workflowDefinitions = sqliteTable(
   'workflow_definitions',
@@ -381,32 +313,26 @@ export const workflowDefinitions = sqliteTable(
     id: text('id').primaryKey(),
     name: text('name').notNull(),
     description: text('description'),
-    version: integer('version').notNull().default(1),
-    sessionMode: text('session_mode', { enum: ['single', 'per-stage', 'auto'] }).notNull().default('auto'),
-    harnessConfig: text('harness_config', { mode: 'json' }),
-    variables: text('variables', { mode: 'json' }).$type<unknown[]>().default([]),
-    tags: text('tags', { mode: 'json' }).$type<string[]>().default([]),
-    orchestratorConfig: text('orchestrator_config', { mode: 'json' }),
-    selectedArtifacts: text('selected_artifacts', { mode: 'json' }).$type<Record<string, string[]>>().default({}),
-    scope: text('scope').default('global'),
     projectId: text('project_id'),
-    useWorktree: integer('use_worktree', { mode: 'boolean' }).notNull().default(true),
-    hooks: text('hooks', { mode: 'json' }).$type<unknown[]>().default([]),
-    hooksFile: text('hooks_file', { mode: 'json' }),
-    /** G8 fix — was typed on the domain object but never had a column at all. */
-    skills: text('skills', { mode: 'json' }).$type<SkillReference[]>(),
-    /** G8 fix — was typed on the domain object but never had a column at all. */
-    agents: text('agents', { mode: 'json' }).$type<AgentReference[]>(),
-    /** Portable `scope:slug` ref of the default agent for stages without their own. */
-    defaultAgentRef: text('default_agent_ref'),
+    status: text('status', { enum: ['draft', 'published'] }).notNull().default('draft'),
+    /** Bumped by every graph save; `PUT …/graph` requires the current value. */
+    revision: integer('revision').notNull().default(1),
+    /** The version runs of this definition use (the latest published one). */
+    currentVersionId: text('current_version_id'),
+    archivedAt: integer('archived_at', { mode: 'timestamp' }),
+    /** JSON array of notes a migration left for the author; cleared by the next save. */
+    needsAttention: text('needs_attention', { mode: 'json' }).$type<string[]>(),
+    /** The WorkflowSpec without name, description and projectId. */
+    spec: text('spec').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    /** Who authored it (v60): an agent-authored draft's chat, stage or external agent. NULL = a person. */
+    authoredBy: text('authored_by', { mode: 'json' }).$type<DefinitionAuthor>(),
   },
   (table) => ({
     createdAtIdx: index('idx_workflow_defs_created_at').on(table.createdAt),
-    scopeIdx: index('idx_workflow_defs_scope').on(table.scope),
     projectIdx: index('idx_workflow_defs_project').on(table.projectId),
-    agentRefIdx: index('idx_workflow_defs_agent_ref').on(table.defaultAgentRef),
+    statusIdx: index('idx_workflow_defs_status').on(table.status),
   }),
 );
 
@@ -419,39 +345,24 @@ export const stageDefinitions = sqliteTable(
     workflowDefinitionId: text('workflow_definition_id')
       .notNull()
       .references(() => workflowDefinitions.id, { onDelete: 'cascade' }),
+    /** Stable stage key (`^[a-z][a-z0-9_]{0,47}$`), unique per definition. */
+    key: text('key').notNull(),
     name: text('name').notNull(),
-    description: text('description'),
-    templateId: text('template_id'),
-    order: integer('order').notNull().default(0),
-    prompts: text('prompts', { mode: 'json' }).$type<unknown[]>().default([]),
-    harnessConfigOverrides: text('harness_config_overrides', { mode: 'json' }),
-    variables: text('variables', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
-    hooks: text('hooks', { mode: 'json' }).$type<unknown[]>().default([]),
-    retryPolicy: text('retry_policy', { mode: 'json' }),
-    timeoutMs: integer('timeout_ms'),
-    condition: text('condition', { mode: 'json' }),
-    contextFilter: text('context_filter').default('summary-only'),
-    contextSources: text('context_sources', { mode: 'json' }).$type<string[]>(),
-    outputFormat: text('output_format').default('text'),
-    agentName: text('agent_name'),
-    resultValidation: text('result_validation', { mode: 'json' }).$type<unknown[]>(),
-    expectedOutput: text('expected_output'),
-    outputSchema: text('output_schema', { mode: 'json' }).$type<Record<string, unknown>>(),
-    iterationConfig: text('iteration_config', { mode: 'json' }).$type<Record<string, unknown>>(),
-    approvalRequired: integer('approval_required', { mode: 'boolean' }).notNull().default(false),
-    /**
-     * Per-stage agent mode (v22). Null means inherit the run default (`auto`).
-     * With `approvalRequired`, `plan` gates the plan for human approval.
-     */
-    agentMode: text('agent_mode', { enum: ['auto', 'plan'] }),
-    /** Portable `scope:slug` ref of the agent driving this stage. Supersedes `agentName`. */
-    agentRef: text('agent_ref'),
+    /** Position in the document's `stages` array. */
+    ordinal: integer('ordinal').notNull().default(0),
+    positionX: real('position_x'),
+    positionY: real('position_y'),
+    /** The StageSpec without key, name and position. */
+    spec: text('spec').notNull(),
+    /** P05 (v59) — the stage kind and its container (also in `spec`). */
+    parentKey: text('parent_key'),
+    kind: text('kind').notNull().default('agent'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },
   (table) => ({
-    workflowIdx: index('idx_stage_defs_workflow').on(table.workflowDefinitionId),
-    orderIdx: index('idx_stage_defs_order').on(table.workflowDefinitionId, table.order),
-    agentRefIdx: index('idx_stage_defs_agent_ref').on(table.agentRef),
+    keyIdx: uniqueIndex('idx_stage_defs_key').on(table.workflowDefinitionId, table.key),
+    parentIdx: index('idx_stage_defs_parent').on(table.workflowDefinitionId, table.parentKey),
   }),
 );
 
@@ -464,25 +375,60 @@ export const stageEdges = sqliteTable(
     workflowDefinitionId: text('workflow_definition_id')
       .notNull()
       .references(() => workflowDefinitions.id, { onDelete: 'cascade' }),
-    fromStageId: text('from_stage_id')
-      .notNull()
-      .references(() => stageDefinitions.id, { onDelete: 'cascade' }),
-    toStageId: text('to_stage_id')
-      .notNull()
-      .references(() => stageDefinitions.id, { onDelete: 'cascade' }),
-    edgeType: text('edge_type', { enum: ['on_success', 'on_failure', 'on_completion', 'always'] })
-      .notNull()
-      .default('on_success'),
+    fromKey: text('from_key').notNull(),
+    toKey: text('to_key').notNull(),
+    /** EdgeSpec `on` (`on` is an SQL keyword, hence the column name). */
+    edgeOn: text('edge_on', { enum: ['success', 'failure', 'completion', 'always'] }).notNull().default('success'),
+    whenExpr: text('when_expr'),
+    handlesFailure: integer('handles_failure', { mode: 'boolean' }),
+    /** Position in the document's `edges` array. */
+    ordinal: integer('ordinal').notNull().default(0),
   },
   (table) => ({
-    workflowIdx: index('idx_stage_edges_workflow').on(table.workflowDefinitionId),
-    fromIdx: index('idx_stage_edges_from').on(table.fromStageId),
-    toIdx: index('idx_stage_edges_to').on(table.toStageId),
-    uniqueEdge: uniqueIndex('idx_stage_edges_unique').on(table.fromStageId, table.toStageId),
+    pairIdx: uniqueIndex('idx_stage_edges_pair').on(table.workflowDefinitionId, table.fromKey, table.toKey),
+    fromFk: foreignKey({
+      columns: [table.workflowDefinitionId, table.fromKey],
+      foreignColumns: [stageDefinitions.workflowDefinitionId, stageDefinitions.key],
+    }).onDelete('cascade'),
+    toFk: foreignKey({
+      columns: [table.workflowDefinitionId, table.toKey],
+      foreignColumns: [stageDefinitions.workflowDefinitionId, stageDefinitions.key],
+    }).onDelete('cascade'),
   }),
 );
 
-// ── Workflow Runs ──
+// ── Workflow Definition Versions ──
+// Immutable snapshots of a definition's canonical WorkflowGraph. `published`
+// versions are what runs use; `test` versions back test runs of drafts.
+
+export const workflowDefinitionVersions = sqliteTable(
+  'workflow_definition_versions',
+  {
+    id: text('id').primaryKey(),
+    workflowDefinitionId: text('workflow_definition_id')
+      .notNull()
+      .references(() => workflowDefinitions.id, { onDelete: 'cascade' }),
+    version: integer('version').notNull(),
+    /** sha256 of the canonical export text; publishing identical content reuses the version. */
+    contentHash: text('content_hash').notNull(),
+    kind: text('kind', { enum: ['published', 'test'] }).notNull(),
+    /** The canonical WorkflowGraph JSON (the export format). */
+    spec: text('spec').notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+  },
+  (table) => ({
+    versionIdx: uniqueIndex('idx_wf_def_versions_version').on(table.workflowDefinitionId, table.version),
+    hashIdx: index('idx_wf_def_versions_hash').on(table.workflowDefinitionId, table.contentHash),
+  }),
+);
+
+// ── Workflow Runs (v57, the v2 engine: G5 §6.2) ──
+//
+// Every timestamp of the run-side tables is epoch MILLISECONDS
+// (`timestamp_ms`). Status values are the v2 state machines of
+// `@generatorai/workflow-spec` (the DDL carries the CHECK). Status is
+// written only through the CAS `transition()` methods (R-4) — the v1
+// engine's repository methods keep writing it until the P03 cutover.
 
 export const workflowRuns = sqliteTable(
   'workflow_runs',
@@ -491,166 +437,350 @@ export const workflowRuns = sqliteTable(
     workflowDefinitionId: text('workflow_definition_id')
       .notNull()
       .references(() => workflowDefinitions.id),
+    /** The immutable definition version this run executes (W-13). */
+    definitionVersionId: text('definition_version_id')
+      .notNull()
+      .references(() => workflowDefinitionVersions.id),
     name: text('name').notNull(),
     status: text('status', {
-      enum: ['created', 'starting', 'running', 'paused', 'cancelling', 'completed', 'failed', 'cancelled'],
+      enum: ['created', 'starting', 'running', 'waiting', 'paused', 'finalizing', 'cancelling', 'completed', 'failed', 'cancelled'],
     }).notNull().default('created'),
-    sessionMode: text('session_mode', { enum: ['single', 'per-stage', 'auto'] }).notNull().default('auto'),
-    masterSessionId: text('master_session_id'),
-    variables: text('variables', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
-    error: text('error'),
-    /**
-     * HITL + TOL-04 — per-run permission mode. Default 'bypassPermissions'
-     * keeps the out-of-the-box experience fully autonomous; any other mode
-     * surfaces tool calls as `awaiting_input`. Nullable for backward-
-     * compatibility with runs created before this column landed; the
-     * domain evaluator treats NULL as `bypassPermissions`.
-     */
+    /** Why the run is in its status (`budget_exhausted`, `setup:<phase>`, …). */
+    statusReason: text('status_reason'),
+    /** Fixed when the run enters `finalizing`. */
+    outcome: text('outcome', { enum: ['completed', 'failed', 'cancelled'] }),
+    /** CAS version, bumped by every run transition. */
+    version: integer('version').notNull().default(0),
+    variables: text('variables', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    /** The run's permission mode (P04 invocation writes the resolved mode). */
     permissionMode: text('permission_mode', {
       enum: ['bypassPermissions', 'default', 'acceptEdits', 'plan'],
-    }),
+    }).notNull(),
     projectId: text('project_id'),
     workspaceId: text('workspace_id'),
-    /** Links this run to a parent iteration stage (if it's a sub-workflow child) */
-    parentStageRunId: text('parent_stage_run_id'),
+    /** P04 — the server-derived trigger (JSON). */
+    trigger: text('trigger', { mode: 'json' }).$type<unknown>(),
+    invocationId: text('invocation_id'),
+    idempotencyKey: text('idempotency_key'),
+    parentRunId: text('parent_run_id').references((): AnySQLiteColumn => workflowRuns.id, { onDelete: 'set null' }),
+    parentStageRunId: text('parent_stage_run_id').references((): AnySQLiteColumn => stageRuns.id, { onDelete: 'set null' }),
+    rootRunId: text('root_run_id').notNull(),
+    depth: integer('depth').notNull().default(0),
+    /** The run this one was forked from (a terminal run is never mutated). */
+    ancestorRunId: text('ancestor_run_id').references((): AnySQLiteColumn => workflowRuns.id, { onDelete: 'set null' }),
+    forkSpec: text('fork_spec', { mode: 'json' }).$type<unknown>(),
+    runOverrides: text('run_overrides', { mode: 'json' }).$type<Record<string, unknown>>(),
+    stageOverrides: text('stage_overrides', { mode: 'json' }).$type<unknown>(),
+    codebaseSelection: text('codebase_selection', { mode: 'json' }).$type<unknown>(),
+    systemVars: text('system_vars', { mode: 'json' }).$type<Record<string, unknown>>(),
+    budget: text('budget', { mode: 'json' }).$type<unknown>(),
+    usage: text('usage', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    /** RV-27 — the process hosting the run's actor, and the fencing epoch. */
+    ownerId: text('owner_id'),
+    ownerEpoch: integer('owner_epoch').notNull().default(0),
+    ownerExpiresAt: integer('owner_expires_at', { mode: 'timestamp_ms' }),
+    /** Outbox sequence (last `workflow_outbox.run_seq` written). */
+    runSeq: integer('run_seq').notNull().default(0),
     /** Frozen, redacted agent projection captured when the run started. */
     agentSnapshot: text('agent_snapshot', { mode: 'json' }).$type<ResolvedAgentProjection>(),
-    /**
-     * W23 / X-24 — Run identity model.
-     * When this run was created by retrying a terminal run, this field
-     * holds the id of the failed/cancelled ancestor. NULL on first-attempt
-     * runs. A terminal run is NEVER mutated; retry always creates a new run.
-     */
-    ancestorRunId: text('ancestor_run_id'),
-    /**
-     * WS-D1 — the stage definitions + edges frozen at `startRun`. The
-     * scheduler builds an in-flight run's DAG from this rather than the live
-     * definition, so a mid-run edit cannot change what has not executed yet.
-     */
-    definitionSnapshot: text('definition_snapshot', { mode: 'json' }).$type<WorkflowDefinitionSnapshot>(),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-    updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
-    startedAt: integer('started_at', { mode: 'timestamp' }),
-    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    error: text('error'),
+    errorCode: text('error_code'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+    startedAt: integer('started_at', { mode: 'timestamp_ms' }),
+    completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
     definitionIdx: index('idx_workflow_runs_definition').on(table.workflowDefinitionId),
+    versionIdx: index('idx_workflow_runs_version').on(table.definitionVersionId),
     projectIdx: index('idx_workflow_runs_project').on(table.projectId),
     statusIdx: index('idx_workflow_runs_status').on(table.status),
     createdAtIdx: index('idx_workflow_runs_created_at').on(table.createdAt),
     statusCreatedIdx: index('idx_workflow_runs_status_created').on(table.status, table.createdAt),
-    parentStageIdx: index('idx_workflow_runs_parent_stage').on(table.parentStageRunId),
+    ancestorIdx: index('idx_workflow_runs_ancestor').on(table.ancestorRunId).where(sql`ancestor_run_id IS NOT NULL`),
+    parentStageIdx: index('idx_workflow_runs_parent_stage').on(table.parentStageRunId).where(sql`parent_stage_run_id IS NOT NULL`),
+    parentRunIdx: index('idx_workflow_runs_parent_run').on(table.parentRunId).where(sql`parent_run_id IS NOT NULL`),
+    idempotencyIdx: uniqueIndex('idx_workflow_runs_idempotency').on(table.idempotencyKey).where(sql`idempotency_key IS NOT NULL`),
   }),
 );
 
-// ── Stage Runs ──
+// ── Stage Runs: node instances (v57) ──
 
 export const stageRuns = sqliteTable(
   'stage_runs',
   {
+    /** uuidv5(run id, instance path) for engine-created instances. */
     id: text('id').primaryKey(),
     workflowRunId: text('workflow_run_id')
       .notNull()
       .references(() => workflowRuns.id, { onDelete: 'cascade' }),
-    stageDefinitionId: text('stage_definition_id')
-      .notNull()
-      .references(() => stageDefinitions.id),
-    sessionId: text('session_id').references(() => sessions.id),
+    /** Key of the stage in the run's pinned definition version. */
+    stageKey: text('stage_key').notNull(),
+    kind: text('kind').notNull().default('agent'),
     name: text('name').notNull(),
+    /** `triage`, `review_loop#2/fix`, `fanout#3/impl`. Unique per run. */
+    instancePath: text('instance_path').notNull(),
+    /** The enclosing container instance (P05); null at the top level. */
+    scopeId: text('scope_id').references((): AnySQLiteColumn => stageRuns.id, { onDelete: 'cascade' }),
+    iterationIndex: integer('iteration_index'),
+    itemIndex: integer('item_index'),
+    /** P05 (v59) — a map item's stable key; the instance path uses the index. */
+    itemKey: text('item_key'),
     status: text('status', {
-      enum: ['pending', 'queued', 'running', 'paused', 'completed', 'failed', 'cancelled', 'skipped', 'sleeping', 'awaiting_input'],
+      enum: ['pending', 'ready', 'starting', 'running', 'validating', 'awaiting_input', 'waiting', 'retry_wait', 'paused', 'completed', 'failed', 'skipped', 'cancelled'],
     }).notNull().default('pending'),
-    currentStep: integer('current_step').notNull().default(0),
-    totalSteps: integer('total_steps').notNull().default(0),
-    retryCount: integer('retry_count').notNull().default(0),
-    error: text('error'),
-    summary: text('summary'),
-    /** Full raw output of the stage's main prompt(s) — for contextFilter='full' handoff. */
-    outputText: text('output_text'),
-    /** Validated structured output JSON matching the stage's outputSchema */
-    outputData: text('output_data', { mode: 'json' }).$type<Record<string, unknown>>(),
-    /** JSON manifest of files created/modified by this stage */
-    artifactManifest: text('artifact_manifest', { mode: 'json' }).$type<unknown[]>(),
-    /** Current iteration index for iteration stages */
-    iterationIndex: integer('iteration_index').default(0),
-    /** Links child workflow runs back to parent iteration stage */
-    parentStageRunId: text('parent_stage_run_id'),
-    /**
-     * Optimistic-lock version counter. Incremented on every update via
-     * `retryCount`-style `SET version = version + 1 WHERE version = :expected`
-     * so two processes cannot both succeed at retrying the same stage.
-     */
+    statusReason: text('status_reason'),
+    /** CAS version, bumped by every transition and patch. */
     version: integer('version').notNull().default(0),
-    /** DUR-05 — durable-sleep deadline (epoch-ms); non-null only while sleeping. */
-    wakeAt: integer('wake_at', { mode: 'timestamp' }),
-    /** DUR-05 — when the stage entered `sleeping`, for observability. */
-    sleptSince: integer('slept_since', { mode: 'timestamp' }),
-    /**
-     * HITL-02 — opaque JSON payload the stage asked an approver to
-     * review. Set when the row transitions to `awaiting_input`; cleared
-     * on resume. Persisted so late-connecting UIs see the same queue.
-     */
+    currentAttempt: integer('current_attempt').notNull().default(0),
+    epoch: integer('epoch').notNull().default(1),
+    sessionKey: text('session_key'),
+    /** The conversation of the current attempt (what the run page shows). */
+    sessionId: text('session_id').references(() => sessions.id),
+    skipReason: text('skip_reason'),
+    skipCauseId: text('skip_cause_id'),
+    gateAs: text('gate_as', { enum: ['completed', 'skipped'] }),
+    outputData: text('output_data', { mode: 'json' }).$type<unknown>(),
+    outputText: text('output_text'),
+    summary: text('summary'),
+    artifactManifest: text('artifact_manifest', { mode: 'json' }).$type<unknown[]>(),
+    /** Container state (P05): iteration, overrides, exit reason, history. */
+    loopState: text('loop_state', { mode: 'json' }).$type<unknown>(),
+    /** What an `awaiting_input` instance asks an approver for. */
     interruptData: text('interrupt_data', { mode: 'json' }).$type<unknown>(),
-    /**
-     * WS-D1 — liveness beat written every ~10 s by the executor while the
-     * stage is `queued`/`running`. The run reconciler fails a stage whose
-     * beat is older than the stale window; that reaper works even when the
-     * process that owned the stage is gone.
-     */
-    heartbeatAt: integer('heartbeat_at', { mode: 'timestamp' }),
-    /** WS-D1 — executor identity that last claimed the stage (diagnostics). */
+    usage: text('usage', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    error: text('error'),
+    errorClass: text('error_class'),
+    errorCode: text('error_code'),
+    /** Executor lease (G5 §5.6), stamped by the CAS that enters starting/running. */
     leaseOwner: text('lease_owner'),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
-    startedAt: integer('started_at', { mode: 'timestamp' }),
-    completedAt: integer('completed_at', { mode: 'timestamp' }),
+    leaseExpiresAt: integer('lease_expires_at', { mode: 'timestamp_ms' }),
+    heartbeatAt: integer('heartbeat_at', { mode: 'timestamp_ms' }),
+    lastProgressAt: integer('last_progress_at', { mode: 'timestamp_ms' }),
+    copiedFromStageRunId: text('copied_from_stage_run_id'),
+    /** P03b — set when a follow-up on a completed stage amended its output. */
+    amendedAt: integer('amended_at', { mode: 'timestamp_ms' }),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    updatedAt: integer('updated_at', { mode: 'timestamp_ms' }).notNull(),
+    startedAt: integer('started_at', { mode: 'timestamp_ms' }),
+    completedAt: integer('completed_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
+    instanceIdx: uniqueIndex('idx_stage_runs_instance').on(table.workflowRunId, table.instancePath),
     workflowRunIdx: index('idx_stage_runs_workflow_run').on(table.workflowRunId),
+    runStatusIdx: index('idx_stage_runs_run_status').on(table.workflowRunId, table.status),
     sessionIdx: index('idx_stage_runs_session').on(table.sessionId),
     statusIdx: index('idx_stage_runs_status').on(table.status),
     statusCreatedIdx: index('idx_stage_runs_status_created').on(table.status, table.createdAt),
-    /** DUR-05 — the sweeper queries this frequently. */
-    wakeAtIdx: index('idx_stage_runs_wake_at').on(table.wakeAt),
+    scopeIdx: index('idx_stage_runs_scope').on(table.scopeId),
+    leaseIdx: index('idx_stage_runs_lease').on(table.status, table.leaseExpiresAt).where(sql`lease_expires_at IS NOT NULL`),
+    attentionIdx: index('idx_stage_runs_attention').on(table.status).where(sql`status IN ('awaiting_input', 'paused')`),
   }),
 );
 
-// ── Session Allocations (1.6) ──
-// Persisted tracking of SessionAllocator state so runs can survive a restart
-// without orphaning Copilot SDK sessions. On boot, StartupRecoveryService
-// rehydrates these rows into the in-memory allocator map.
+// ── Loop iterations (v59, P05 §2.6): one row per finished iteration ──
 
-export const sessionAllocations = sqliteTable(
-  'session_allocations',
+export const loopIterations = sqliteTable(
+  'loop_iterations',
+  {
+    stageRunId: text('stage_run_id')
+      .notNull()
+      .references(() => stageRuns.id, { onDelete: 'cascade' }),
+    k: integer('k').notNull(),
+    /** carry(k), JSON. */
+    carry: text('carry', { mode: 'json' }).$type<unknown>(),
+    exitValues: text('exit_values', { mode: 'json' }).$type<unknown>(),
+    streaks: text('streaks', { mode: 'json' }).$type<unknown>(),
+    signals: text('signals', { mode: 'json' }).$type<unknown>(),
+    score: real('score'),
+    checkpointTurnId: text('checkpoint_turn_id'),
+    usage: text('usage', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    /** The iteration scope's outcome (completed, failed, cancelled). */
+    outcome: text('outcome'),
+    startedAt: integer('started_at', { mode: 'timestamp_ms' }),
+    endedAt: integer('ended_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.stageRunId, table.k] }),
+  }),
+);
+
+// ── Chat-started runs (v60, P06 WP-6.2): the chat's run cards ──
+
+export const chatWorkflowRuns = sqliteTable(
+  'chat_workflow_runs',
+  {
+    chatId: text('chat_id')
+      .notNull()
+      .references(() => chats.id, { onDelete: 'cascade' }),
+    runId: text('run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    /** The harness tool call that started the run. */
+    toolCallId: text('tool_call_id'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.chatId, table.runId] }),
+    runIdx: index('idx_chat_workflow_runs_run').on(table.runId),
+  }),
+);
+
+// ── Run events (v59, P05 §4.3): what `wait` stages consume ──
+
+export const workflowRunEvents = sqliteTable(
+  'workflow_run_events',
+  {
+    id: text('id').primaryKey(),
+    runId: text('run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    eventKey: text('event_key').notNull(),
+    idempotencyKey: text('idempotency_key').notNull(),
+    data: text('data', { mode: 'json' }).$type<unknown>(),
+    receivedAt: integer('received_at', { mode: 'timestamp_ms' }).notNull(),
+    consumedByStageRunId: text('consumed_by_stage_run_id'),
+  },
+  (table) => ({
+    uniqueDelivery: unique().on(table.runId, table.eventKey, table.idempotencyKey),
+    pendingIdx: index('idx_workflow_run_events_pending')
+      .on(table.runId, table.eventKey, table.receivedAt)
+      .where(sql`consumed_by_stage_run_id IS NULL`),
+  }),
+);
+
+// ── Stage Attempts (v57): one execution try of an instance ──
+
+export const stageAttempts = sqliteTable(
+  'stage_attempts',
+  {
+    id: text('id').primaryKey(),
+    stageRunId: text('stage_run_id')
+      .notNull()
+      .references(() => stageRuns.id, { onDelete: 'cascade' }),
+    attemptNo: integer('attempt_no').notNull(),
+    mode: text('mode', { enum: ['fresh', 'resume', 'restart'] }).notNull(),
+    epoch: integer('epoch').notNull(),
+    status: text('status', { enum: ['running', 'succeeded', 'failed', 'aborted', 'interrupted'] }).notNull(),
+    /** sessions.id (no FK: sessions may be purged). */
+    sessionId: text('session_id'),
+    repairCount: integer('repair_count').notNull().default(0),
+    structuredOutput: text('structured_output', { mode: 'json' }).$type<unknown>(),
+    /** P02 — the frozen agent projection the attempt ran with. */
+    agentSnapshot: text('agent_snapshot', { mode: 'json' }).$type<unknown>(),
+    /** P05 — judge verdicts per repair round. */
+    judge: text('judge', { mode: 'json' }).$type<unknown>(),
+    error: text('error'),
+    errorClass: text('error_class'),
+    errorCode: text('error_code'),
+    errorDetails: text('error_details', { mode: 'json' }).$type<unknown>(),
+    /** Operator prompt or variables override (G5 §3.7). */
+    overrides: text('overrides', { mode: 'json' }).$type<unknown>(),
+    checkpointBeforeId: text('checkpoint_before_id'),
+    usage: text('usage', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),
+    startedAt: integer('started_at', { mode: 'timestamp_ms' }).notNull(),
+    endedAt: integer('ended_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => ({
+    attemptNoIdx: uniqueIndex('idx_stage_attempts_no').on(table.stageRunId, table.attemptNo),
+  }),
+);
+
+// ── Run Sessions (v57): session_key → conversation, per run ──
+
+export const runSessions = sqliteTable(
+  'run_sessions',
   {
     id: text('id').primaryKey(),
     workflowRunId: text('workflow_run_id')
       .notNull()
       .references(() => workflowRuns.id, { onDelete: 'cascade' }),
-    mode: text('mode', { enum: ['single', 'per-stage', 'auto'] }).notNull(),
-    sharedSessionId: text('shared_session_id'),
-    sharedRefCount: integer('shared_ref_count').notNull().default(0),
-    createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
+    sessionKey: text('session_key').notNull(),
+    sessionId: text('session_id').notNull(),
+    /** The instance whose terminal state releases the session. */
+    ownerScopeId: text('owner_scope_id'),
+    configHash: text('config_hash').notNull(),
+    status: text('status', { enum: ['active', 'released'] }).notNull().default('active'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    releasedAt: integer('released_at', { mode: 'timestamp_ms' }),
   },
   (table) => ({
-    runIdx: uniqueIndex('idx_session_allocations_run').on(table.workflowRunId),
+    keyIdx: uniqueIndex('idx_run_sessions_key').on(table.workflowRunId, table.sessionKey),
   }),
 );
 
-export const stageSessionMaps = sqliteTable(
-  'stage_session_maps',
+// ── Workflow Timers (v57): durable timers (retry, pause TTL, waits, budgets) ──
+
+export const workflowTimers = sqliteTable(
+  'workflow_timers',
   {
     id: text('id').primaryKey(),
-    allocationId: text('allocation_id')
+    workflowRunId: text('workflow_run_id')
       .notNull()
-      .references(() => sessionAllocations.id, { onDelete: 'cascade' }),
-    stageRunId: text('stage_run_id').notNull(),
-    sessionId: text('session_id').notNull(),
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    stageRunId: text('stage_run_id').references(() => stageRuns.id, { onDelete: 'cascade' }),
+    kind: text('kind').notNull(),
+    fireAt: integer('fire_at', { mode: 'timestamp_ms' }).notNull(),
+    firedAt: integer('fired_at', { mode: 'timestamp_ms' }),
+    cancelledAt: integer('cancelled_at', { mode: 'timestamp_ms' }),
+    payload: text('payload', { mode: 'json' }).$type<unknown>(),
   },
   (table) => ({
-    allocationIdx: index('idx_stage_session_maps_allocation').on(table.allocationId),
-    stageRunIdx: uniqueIndex('idx_stage_session_maps_stage_run').on(table.stageRunId),
+    dueIdx: index('idx_workflow_timers_due').on(table.fireAt).where(sql`fired_at IS NULL AND cancelled_at IS NULL`),
+    liveKindIdx: uniqueIndex('idx_workflow_timers_live_kind')
+      .on(table.workflowRunId, sql`IFNULL(stage_run_id, '')`, table.kind)
+      .where(sql`fired_at IS NULL AND cancelled_at IS NULL`),
   }),
 );
+
+// ── Workflow Outbox (v57): engine events, dispatched after commit ──
+
+export const workflowOutbox = sqliteTable(
+  'workflow_outbox',
+  {
+    workflowRunId: text('workflow_run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    runSeq: integer('run_seq').notNull(),
+    kind: text('kind').notNull(),
+    payload: text('payload', { mode: 'json' }).$type<unknown>().notNull(),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    dispatchedAt: integer('dispatched_at', { mode: 'timestamp_ms' }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workflowRunId, table.runSeq] }),
+    pendingIdx: index('idx_workflow_outbox_pending').on(table.dispatchedAt).where(sql`dispatched_at IS NULL`),
+  }),
+);
+
+// ── Scheduler Journal (v57): one row per decision batch ──
+
+export const schedulerJournal = sqliteTable(
+  'scheduler_journal',
+  {
+    workflowRunId: text('workflow_run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    seq: integer('seq').notNull(),
+    message: text('message', { mode: 'json' }).$type<unknown>().notNull(),
+    decisions: text('decisions', { mode: 'json' }).$type<unknown>().notNull(),
+    stateHash: text('state_hash').notNull(),
+    at: integer('at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.workflowRunId, table.seq] }),
+  }),
+);
+
+// ── Engine Lock (v57, RV-27): one engine process per database ──
+
+export const engineLock = sqliteTable('engine_lock', {
+  id: integer('id').primaryKey(),
+  ownerId: text('owner_id'),
+  bootId: text('boot_id'),
+  heartbeatAt: integer('heartbeat_at', { mode: 'timestamp_ms' }),
+});
+
 
 // ── Automations ──
 
@@ -669,22 +799,9 @@ export const automations = sqliteTable(
     missedRunPolicy: text('missed_run_policy', { enum: ['skip', 'run_once'] }).notNull().default('skip'),
     /** v47 — what to do when a slot is due while an execution is still running. */
     overlapPolicy: text('overlap_policy', { enum: ['skip', 'queue'] }).notNull().default('skip'),
-    /**
-     * LEGACY plaintext webhook token. Always null after v47's boot-time
-     * backfill; kept only so the backfill can read it. Never written.
-     */
-    webhookToken: text('webhook_token'),
     /** sha256(raw token), hex. The only persisted form of the token (v47). */
     webhookTokenHash: text('webhook_token_hash'),
     workflowIds: text('workflow_ids', { mode: 'json' }).$type<string[]>().notNull().default([]),
-    inputMode: text('input_mode', { enum: ['single', 'loop', 'batch', 'script'] }).notNull().default('single'),
-    loopVariable: text('loop_variable'),
-    loopItems: text('loop_items', { mode: 'json' }).$type<unknown[]>().default([]),
-    batchDataFormat: text('batch_data_format', { enum: ['json', 'csv', 'jsonl'] }),
-    batchData: text('batch_data'),
-    batchColumns: text('batch_columns', { mode: 'json' }).$type<string[]>().default([]),
-    batchColumnMapping: text('batch_column_mapping', { mode: 'json' }).$type<Record<string, string>>().default({}),
-    dataSourceConfig: text('data_source_config', { mode: 'json' }).$type<DataSourceConfig>(),
     variables: text('variables', { mode: 'json' }).$type<Record<string, unknown>>().default({}),
     maxConcurrency: integer('max_concurrency').notNull().default(1),
     onError: text('on_error', { enum: ['continue', 'stop'] }).notNull().default('continue'),
@@ -710,6 +827,13 @@ export const automations = sqliteTable(
     iterationMode: text('iteration_mode', { mode: 'json' }).$type<IterationMode>(),
     defaultDataset: text('default_dataset', { mode: 'json' }).$type<AutomationDataset>(),
     retryPolicy: text('retry_policy', { mode: 'json' }).$type<AutomationRetryPolicy>(),
+    /**
+     * v56 (PD-18) — the permission mode an automation's unattended runs use.
+     * Required; bypass on a webhook trigger needs an admin-scoped opt-in.
+     */
+    permissionMode: text('permission_mode', { enum: ['default', 'acceptEdits', 'plan', 'bypassPermissions'] })
+      .notNull()
+      .default('acceptEdits'),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
   },
@@ -769,9 +893,8 @@ export const automationExecutionRuns = sqliteTable(
     executionId: text('execution_id')
       .notNull()
       .references(() => automationExecutions.id, { onDelete: 'cascade' }),
-    workflowRunId: text('workflow_run_id')
-      .notNull()
-      .references(() => workflowRuns.id, { onDelete: 'restrict' }),
+    /** Nulled when the run is deleted; the iteration record stays. */
+    workflowRunId: text('workflow_run_id').references(() => workflowRuns.id, { onDelete: 'set null' }),
     workflowDefinitionId: text('workflow_definition_id')
       .notNull()
       .references(() => workflowDefinitions.id),
@@ -805,11 +928,35 @@ export const idempotencyKeys = sqliteTable(
     executionId: text('execution_id').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    /** v58 — hash of the request the key was claimed for (invocations): a replay with another body is a 409. */
+    requestHash: text('request_hash'),
   },
   (table) => ({
     pk: uniqueIndex('pk_idempotency_keys').on(table.key, table.scope),
     // Sweep scans `WHERE expires_at < now`; leading column must be expires_at.
     expiresIdx: index('idx_idempotency_keys_expires').on(table.expiresAt),
+  }),
+);
+
+// ── Invocation uploads (v58) ──
+
+/** Files staged before a run starts (`POST /workflow-invocations/uploads`, TTL 1 h); the run's `uploads` phase consumes them. */
+export const invocationUploads = sqliteTable(
+  'invocation_uploads',
+  {
+    id: text('id').primaryKey(),
+    category: text('category', { enum: ['skills', 'agents', 'prompts'] }).notNull(),
+    name: text('name').notNull(),
+    /** Where the staged file lives on the server. */
+    path: text('path').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    principalId: text('principal_id'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    consumedByRunId: text('consumed_by_run_id'),
+  },
+  (table) => ({
+    expiresIdx: index('idx_invocation_uploads_expires').on(table.expiresAt),
   }),
 );
 
@@ -1279,7 +1426,8 @@ export const planDocuments = sqliteTable(
       .notNull()
       .default('drafting'),
     currentRevision: integer('current_revision').notNull().default(1),
-    harnessType: text('harness_type').notNull().default('copilot'),
+    /** The harness that produced the plan (recorded, never defaulted). */
+    harnessType: text('harness_type').notNull(),
     availableActions: text('available_actions', { mode: 'json' }).$type<string[]>().default([]),
     recommendedAction: text('recommended_action'),
     decision: text('decision', { mode: 'json' }).$type<unknown>(),

@@ -27,7 +27,7 @@ const SettingsPage = lazy(() => import('@/pages/SettingsPage.js').then((m) => ({
 const WorkflowListPage = lazy(() => import('@/pages/WorkflowListPage.js').then((m) => ({ default: m.WorkflowListPage })));
 const WorkflowDefinitionPage = lazy(() => import('@/pages/WorkflowDefinitionPage.js').then((m) => ({ default: m.WorkflowDefinitionPage })));
 const WorkflowBuilderPage = lazy(() => import('@/pages/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })));
-const WorkflowRunPageV2 = lazy(() => import('@/pages/WorkflowRunPageV2.js').then((m) => ({ default: m.WorkflowRunPageV2 })));
+const WorkflowRunPage = lazy(() => import('@/pages/WorkflowRunPage.js').then((m) => ({ default: m.WorkflowRunPage })));
 const AutomationsPage = lazy(() => import('@/pages/AutomationsPage.js').then((m) => ({ default: m.AutomationsPage })));
 const AutomationDetailPage = lazy(() => import('@/pages/AutomationDetailPage.js').then((m) => ({ default: m.AutomationDetailPage })));
 const CreateAutomationPage = lazy(() => import('@/pages/CreateAutomationPage.js').then((m) => ({ default: m.CreateAutomationPage })));
@@ -77,7 +77,7 @@ export const router = createBrowserRouter([
       { path: 'workflows/new', element: withBoundary('Workflow Builder', <WorkflowBuilderPage />) },
       { path: 'workflows/:id', element: withBoundary('Workflow', <WorkflowDefinitionPage />) },
       { path: 'workflows/:id/edit', element: withBoundary('Workflow Builder', <WorkflowBuilderPage />) },
-      { path: 'workflows/:id/runs/:runId', element: withBoundary('Workflow Run', <WorkflowRunPageV2 />) },
+      { path: 'workflows/:id/runs/:runId', element: withBoundary('Workflow Run', <WorkflowRunPage />) },
       { path: 'automations', element: withBoundary('Automations', <AutomationsPage />) },
       { path: 'automations/new', element: withBoundary('Create Automation', <CreateAutomationPage />) },
       { path: 'automations/:id', element: withBoundary('Automation', <AutomationDetailPage />) },

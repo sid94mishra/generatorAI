@@ -1,0 +1,986 @@
+<title>Workflow Engine Audit</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,500;6..72,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+:root{
+  --bg:#f6f7f9; --surface:#ffffff; --surface-2:#eef1f5; --line:#dde2ea; --text:#141a24; --muted:#586274; --faint:#8a93a3;
+  --accent:#0b6e6e; --accent-soft:#e2f1f0;
+  --p0:#b42318; --p0-soft:#fdecea; --p1:#b25e09; --p1-soft:#fdf1e3; --p2:#1d5bbf; --p2-soft:#e8effb; --p3:#5d6778; --p3-soft:#eceff3;
+  --ok:#1f7a3a; --ok-soft:#e5f4ea;
+  --code-bg:#f0f2f6;
+  --serif:"Newsreader",Georgia,"Times New Roman",serif;
+  --sans:"IBM Plex Sans",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"IBM Plex Mono",ui-monospace,"Cascadia Mono",Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    color-scheme:dark;
+    --bg:#0f1319; --surface:#161b23; --surface-2:#1c2330; --line:#2a3342; --text:#e6e9ef; --muted:#a3adbd; --faint:#6f7a8c;
+    --accent:#4fc4bd; --accent-soft:#12302f;
+    --p0:#ff8a7a; --p0-soft:#3a1a17; --p1:#f5b35c; --p1-soft:#36260f; --p2:#8db4ff; --p2-soft:#172641; --p3:#aeb7c6; --p3-soft:#232a36;
+    --ok:#6fd48e; --ok-soft:#14301d; --code-bg:#1d2430;
+  }
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#0f1319; --surface:#161b23; --surface-2:#1c2330; --line:#2a3342; --text:#e6e9ef; --muted:#a3adbd; --faint:#6f7a8c;
+  --accent:#4fc4bd; --accent-soft:#12302f;
+  --p0:#ff8a7a; --p0-soft:#3a1a17; --p1:#f5b35c; --p1-soft:#36260f; --p2:#8db4ff; --p2-soft:#172641; --p3:#aeb7c6; --p3-soft:#232a36;
+  --ok:#6fd48e; --ok-soft:#14301d; --code-bg:#1d2430;
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--text);font-family:var(--sans);font-size:15px;line-height:1.6;padding-inline:16px;padding-block:0 64px}
+.shell{max-width:1240px;margin:0 auto;display:grid;grid-template-columns:230px minmax(0,1fr);gap:40px}
+@media (max-width:980px){.shell{grid-template-columns:minmax(0,1fr)} nav.toc{display:none}}
+nav.toc{position:sticky;top:env(safe-area-inset-top,0px);align-self:start;max-height:100vh;overflow:auto;padding-block:28px;font-size:13px}
+nav.toc .t{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--faint);margin-bottom:8px}
+nav.toc a{display:block;color:var(--muted);text-decoration:none;padding:3px 0 3px 10px;border-left:2px solid transparent}
+nav.toc a:hover,nav.toc a:focus-visible{color:var(--text);border-left-color:var(--accent);outline:none}
+nav.toc a.sub{padding-left:22px;font-size:12.5px}
+main{min-width:0;padding-block:28px}
+header.doc{border-bottom:1px solid var(--line);padding-bottom:22px;margin-bottom:8px}
+.eyebrow{font-family:var(--mono);font-size:11.5px;letter-spacing:.08em;text-transform:uppercase;color:var(--accent)}
+h1{font-family:var(--serif);font-weight:600;font-size:clamp(30px,4.2vw,42px);line-height:1.12;margin:.3em 0 .35em;text-wrap:balance}
+h2{font-family:var(--serif);font-weight:600;font-size:28px;line-height:1.2;margin:56px 0 10px;text-wrap:balance;scroll-margin-top:16px}
+h3{font-size:17px;font-weight:600;margin:30px 0 8px;scroll-margin-top:16px}
+h4{font-size:14.5px;font-weight:600;margin:20px 0 6px}
+p,li{max-width:74ch}
+p{margin:0 0 12px}
+ul,ol{padding-left:22px;margin:0 0 12px}
+li{margin:3px 0}
+a{color:var(--accent)}
+code,.mono{font-family:var(--mono);font-size:.86em}
+code{background:var(--code-bg);padding:1px 5px;border-radius:4px;overflow-wrap:anywhere}
+.meta{display:flex;flex-wrap:wrap;gap:8px 22px;color:var(--muted);font-size:13px}
+.meta b{color:var(--text);font-weight:500}
+.lede{font-size:16.5px;color:var(--text);max-width:72ch}
+.note{border-left:3px solid var(--accent);background:var(--accent-soft);padding:10px 14px;border-radius:0 6px 6px 0;margin:14px 0;max-width:80ch}
+.warn{border-left-color:var(--p0);background:var(--p0-soft)}
+.tw{overflow-x:auto;margin:12px 0 18px;border:1px solid var(--line);border-radius:8px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;font-size:13.5px}
+th,td{text-align:left;vertical-align:top;padding:8px 10px;border-bottom:1px solid var(--line)}
+th{font-weight:600;background:var(--surface-2);font-size:12.5px;white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.num,th.num{text-align:right;font-variant-numeric:tabular-nums}
+.sev{display:inline-block;font-family:var(--mono);font-size:11px;font-weight:500;padding:1px 7px;border-radius:999px;white-space:nowrap}
+.sev.P0{color:var(--p0);background:var(--p0-soft)} .sev.P1{color:var(--p1);background:var(--p1-soft)}
+.sev.P2{color:var(--p2);background:var(--p2-soft)} .sev.P3{color:var(--p3);background:var(--p3-soft)}
+.tag{display:inline-block;font-family:var(--mono);font-size:10.5px;color:var(--muted);border:1px solid var(--line);padding:0 6px;border-radius:4px;white-space:nowrap}
+.tag.ver{color:var(--ok);border-color:var(--ok);}
+.y{color:var(--ok);font-weight:600} .n{color:var(--p0);font-weight:600} .pa{color:var(--p1);font-weight:600}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:18px 0}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px 14px}
+.stat .v{font-family:var(--serif);font-size:30px;font-weight:600;line-height:1;font-variant-numeric:tabular-nums}
+.stat .l{font-size:12.5px;color:var(--muted);margin-top:6px}
+.stat.P0 .v{color:var(--p0)} .stat.P1 .v{color:var(--p1)} .stat.P2 .v{color:var(--p2)}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:14px 16px}
+.card h4{margin-top:0}
+pre.mermaid{background:var(--surface);border:1px solid var(--line);border-radius:8px;padding:12px;overflow-x:auto;font-size:12px}
+pre.code{background:var(--code-bg);border-radius:8px;padding:12px 14px;overflow-x:auto;font-family:var(--mono);font-size:12.5px;line-height:1.5}
+/* issue register */
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:12px 0}
+.controls input{font:inherit;font-size:13.5px;padding:7px 10px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--text);min-width:0;flex:1 1 220px}
+.chip{font:inherit;font-size:12.5px;padding:5px 11px;border-radius:999px;border:1px solid var(--line);background:var(--surface);color:var(--muted);cursor:pointer}
+.chip[aria-pressed="true"]{background:var(--text);color:var(--bg);border-color:var(--text)}
+.chip:focus-visible,.controls input:focus-visible,summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.count{font-size:12.5px;color:var(--muted);margin-left:auto}
+details.iss{background:var(--surface);border:1px solid var(--line);border-radius:8px;margin:8px 0}
+details.iss[data-sev="P0"]{border-left:3px solid var(--p0)} details.iss[data-sev="P1"]{border-left:3px solid var(--p1)}
+details.iss[data-sev="P2"]{border-left:3px solid var(--p2)} details.iss[data-sev="P3"]{border-left:3px solid var(--p3)}
+details.iss summary{cursor:pointer;padding:10px 14px;display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;list-style:none}
+details.iss summary::-webkit-details-marker{display:none}
+details.iss summary .id{font-family:var(--mono);font-size:12px;color:var(--faint);min-width:44px}
+details.iss summary .tt{font-weight:500;flex:1 1 320px}
+details.iss .body{padding:0 16px 14px 16px;font-size:14px}
+details.iss .body dt{font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--faint);margin-top:10px}
+details.iss .body dd{margin:2px 0 0}
+.phase{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:16px 18px;margin:16px 0}
+.phase > .ph{display:flex;gap:12px;align-items:baseline;flex-wrap:wrap}
+.phase > .ph .pn{font-family:var(--mono);font-size:12px;color:var(--accent)}
+.phase > .ph h3{margin:0}
+.phase > .ph .dur{font-size:12.5px;color:var(--muted)}
+.item{border-top:1px solid var(--line);padding-top:12px;margin-top:12px}
+.item h4{margin:0 0 4px}
+.item .why{font-size:13.5px;color:var(--muted)}
+.item .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--faint)}
+.small{font-size:13px;color:var(--muted)}
+footer{margin-top:60px;border-top:1px solid var(--line);padding-top:14px;font-size:12.5px;color:var(--faint)}
+@media (prefers-reduced-motion:reduce){*{scroll-behavior:auto!important}}
+html{scroll-behavior:smooth}
+</style>
+
+<div class="shell">
+<nav class="toc" aria-label="Contents">
+  <div class="t">Contents</div>
+  <a href="#summary">Executive summary</a>
+  <a href="#method">Scope &amp; method</a>
+  <a href="#arch">Part I · How it works</a>
+  <a class="sub" href="#arch-layers">Layers &amp; entry points</a>
+  <a class="sub" href="#arch-model">Definition model</a>
+  <a class="sub" href="#arch-options">Stage option catalog</a>
+  <a class="sub" href="#arch-dag">DAG &amp; edge semantics</a>
+  <a class="sub" href="#arch-run">Run lifecycle</a>
+  <a class="sub" href="#arch-sessions">Sessions &amp; context</a>
+  <a class="sub" href="#arch-validation">Conditions, validation, retry</a>
+  <a class="sub" href="#arch-durable">Durability &amp; recovery</a>
+  <a class="sub" href="#arch-stream">Streaming</a>
+  <a class="sub" href="#arch-orch">Orchestration &amp; integrations</a>
+  <a class="sub" href="#arch-harness">Option × harness matrix</a>
+  <a class="sub" href="#arch-ui">Builder, run page &amp; right pane</a>
+  <a class="sub" href="#arch-import">Import / export</a>
+  <a href="#live">Part II · Live test results</a>
+  <a href="#findings">Part III · Audit findings</a>
+  <a class="sub" href="#patterns">Root-cause patterns</a>
+  <a class="sub" href="#register">Issue register</a>
+  <a href="#bench">Part IV · Benchmark</a>
+  <a href="#plan">Part V · Improvement plan</a>
+  <a class="sub" href="#plan-0">Phase 0 · Stop the bleeding</a>
+  <a class="sub" href="#plan-1">Phase 1 · Foundations</a>
+  <a class="sub" href="#plan-2">Phase 2 · Capability parity</a>
+  <a class="sub" href="#plan-3">Phase 3 · Differentiators</a>
+  <a class="sub" href="#plan-seq">Sequencing &amp; acceptance</a>
+  <a href="#docs">Doc drift</a>
+  <a href="#sources">Sources</a>
+</nav>
+
+<main>
+<header class="doc">
+  <div class="eyebrow">GeneratorAI · Workflow module · Review draft</div>
+  <h1>Workflow Engine Audit and Improvement Plan</h1>
+  <div class="meta">
+    <span>Branch <b>desktop_redesign</b> @ <b>a83a7bf</b></span>
+    <span>Date <b>24 Sep 2026</b></span>
+    <span>Scope <b>~52k lines</b> across core, db, server, web, cli-core, sdk, shared</span>
+    <span>Status <b>for review</b></span>
+  </div>
+</header>
+
+<section id="summary">
+<h2>Executive summary</h2>
+<p class="lede">The workflow module is broad and much of its design is right. It has a declarative DAG, a pinned topology snapshot, a durable turn journal, a crash-recovery path, a replayable multiplexed stream and a polished run page.</p>
+<p class="lede">Live runs confirm the <b>scheduler logic is correct</b>: joins, conditions with AND/OR/NOT, skip cascades, all four edge types, retry backoff, approve and reject, and a 25-stage DAG all behaved as specified. <b>The stage executor is where the problems are.</b> Pausing, "request changes" on an approval, crash recovery and result validation all produced wrong output that the run still reported as <code>completed</code>.</p>
+<p>Beyond the executor:</p>
+<ul>
+  <li>A stage that re-enters <code>running</code> after an approval or a validation retry is reaped as stale.</li>
+  <li>Success criteria are checked against the model's summary turn as well as its answer.</li>
+  <li>The same workflow commits and opens a PR when launched from the web, and silently does not when launched from the CLI or an automation.</li>
+</ul>
+
+<div class="stats" id="statTiles"></div>
+
+<p>Almost every defect traces back to three structural patterns, not to isolated mistakes:</p>
+<ol>
+  <li><b>One field, six hand-written mappings.</b> A stage option has to be carried through the zod schema, the service, the repository, the DB column, the web <code>toStageParams</code>, the exporter, the importer and three script materializers. Each earlier fix patched some layers and missed others. The result is roughly 20 options that are stored-but-ignored, accepted-but-dropped, or impossible to clear.</li>
+  <li><b>State transitions are unconditional writes, and ordering is left to chance.</b> Stage and run status changes are plain <code>UPDATE</code>s, not compare-and-set. Terminal events go to a channel the run never listens on, so a 3-second reconciler does all the routing and hides the races. Abort-before-write, reaper-vs-resume and double-finalize bugs all come from this.</li>
+  <li><b>Two lifecycles for one run.</b> <code>WorkflowOrchestrator</code> (clone, preprocess, uploads, commit/PR) wraps <code>WorkflowRunService</code> only for some entry points. CLI, automations, SDK <code>run()</code>, MCP, scripts and retries skip it. Behaviour depends on the caller.</li>
+</ol>
+<p>The plan in <a href="#plan">Part V</a> fixes the patterns rather than the symptoms, in four phases:</p>
+<ul>
+  <li><b>Phase 0 (about 2 weeks).</b> Targeted fixes for the P0s and the security issues.</li>
+  <li><b>Phase 1 (about 5 weeks).</b> One schema-derived mapping, an atomic versioned graph save, runs pinned to immutable definition versions, CAS state transitions with an event-driven per-run scheduler, and a single run lifecycle.</li>
+  <li><b>Phase 2.</b> The capabilities modern engines treat as standard: rerun-from-stage, error classes with pause-on-exhaustion, split timeouts, typed outputs with a repair turn, join policies, loops, fan-out, budgets and tracing.</li>
+  <li><b>Phase 3.</b> Differentiators such as run diffing and pinned-data stage testing.</li>
+</ul>
+
+<h3>Top ten, in fix order</h3>
+<div class="tw"><table>
+<thead><tr><th>#</th><th>Issue</th><th>Sev</th><th>Evidence</th></tr></thead>
+<tbody id="topTen"></tbody>
+</table></div>
+</section>
+
+<section id="method">
+<h2>Scope &amp; method</h2>
+<p>Four static audits (definitions and DB, run-time engine, orchestration and integrations, web UI) traced every claim from where a value is written to where it is read. A grep hit was never accepted as evidence; earlier audits showed that a control can exist, look finished and do nothing. Two of the audits also ran scratch probes against the real services outside the repo:</p>
+<ul>
+  <li>A round-trip probe of <code>WorkflowDefinitionService</code> and the Drizzle repositories on in-memory SQLite.</li>
+  <li>Vitest probes of <code>WorkflowRunService</code>, <code>DAGScheduler</code>, <code>StageExecutionService</code>, <code>HitlService</code> and <code>EventBus</code>.</li>
+</ul>
+<p>A fifth track drove real multi-stage workflows against an isolated server (see <a href="#live">Part II</a>). A sixth surveyed 22 modern workflow and agent engines from their official documentation.</p>
+<p>The lead reviewer re-checked the highest-impact claims against source before including them. Those are marked <span class="tag ver">verified</span> in the register.</p>
+<ul>
+  <li>Existing unit tests for the area: <b>373 / 374 pass</b> across 25 files. The single failure is a Windows symlink <code>EPERM</code>, an environment issue.</li>
+  <li>Severity scale: <span class="sev P0">P0</span> stuck, lost or duplicated work on a normal path, or exploitable security; <span class="sev P1">P1</span> a common feature is broken or data is silently lost; <span class="sev P2">P2</span> an edge case or a semantics gap; <span class="sev P3">P3</span> hygiene, performance or latent.</li>
+  <li>File references use <code>path:line</code> on this branch. The abbreviations are <code>WRS</code> = <code>packages/core/src/services/WorkflowRunService.ts</code>, <code>SES</code> = <code>StageExecutionService.ts</code> and <code>SCH</code> = <code>DAGScheduler.ts</code>.</li>
+</ul>
+</section>
+
+<!-- ============================ PART I ============================ -->
+<section id="arch">
+<h2>Part I · How the workflow module works today</h2>
+
+<h3 id="arch-layers">Layers and entry points</h3>
+<pre class="mermaid">
+flowchart LR
+  subgraph Clients
+    WEB[Web / Desktop builder + run page]
+    CLI[CLI workflow / run]
+    MOB[Mobile StartRunSheet]
+    SDK[SDK WorkflowFacade]
+    MCP[MCP server tool]
+    AUTO[Automations: cron / webhook / manual]
+    SCR[.workflow.mjs scripts]
+  end
+  subgraph Server["apps/server routes"]
+    RD["/workflow-definitions"]
+    RR["/workflow-runs"]
+    RO["/orchestrator/runs"]
+    RS["/workflow-scripts"]
+    ST["/api/stream (mux SSE)"]
+  end
+  subgraph Core["packages/core"]
+    WDS[WorkflowDefinitionService]
+    WO[WorkflowOrchestrator<br/>clone · preprocess · uploads · commit/PR]
+    WRS[WorkflowRunService<br/>createRun · startRun · reconciler]
+    SCH[DAGScheduler + ConditionEvaluator]
+    SES[StageExecutionService<br/>session · turns · validation · HITL]
+    DEE[DurableExecutionEngine<br/>turn journal]
+    SA[SessionAllocator]
+    EB[EventBus → StreamBroker]
+  end
+  H[MultiHarness: claude-agent · copilot · codex · opencode · acp]
+  DB[(SQLite: workflow_definitions · stage_definitions · stage_edges · workflow_runs · stage_runs · journal · stream rows)]
+  WEB --> RD & RO & RR
+  CLI --> RD & RR
+  MOB --> RO & RR
+  SDK --> RD & RR & RO
+  MCP --> RR
+  AUTO --> WRS
+  SCR --> RS --> WDS
+  RD --> WDS --> DB
+  RO --> WO --> WRS
+  RR --> WRS
+  WRS --> SCH
+  WRS --> SES --> SA --> H
+  SES --> DEE --> DB
+  SES --> EB --> ST
+  WRS --> DB
+</pre>
+<p>There are two ways into a run, and they are not equivalent. The <b>orchestrated</b> path is <code>POST /orchestrator/runs</code> → <code>WorkflowOrchestrator.execute</code>. It is used by the web when the definition has <code>orchestratorConfig</code> or the user uploaded files, and by mobile and SDK <code>orchestrate()</code>. It adds these phases around <code>startRun</code>:</p>
+<ul>
+  <li>workspace and worktree creation, and repository clone;</li>
+  <li>project config wiring and preprocessing steps;</li>
+  <li>an upload scan (skills, agents, prompts) and a sandbox;</li>
+  <li>post-processing: autoCommit, autoPush, autoCreatePR.</li>
+</ul>
+<p>The <b>plain</b> path is <code>POST /workflow-runs</code> + <code>/start</code>. It is used by the CLI, automations, SDK <code>run()</code>, the MCP server, script runs and every retry, and it skips all of those phases (<code>WorkflowOrchestrator.ts:589-744,903-982</code>).</p>
+<div class="note">"Orchestrated mode" is not an orchestrator <em>agent</em>. The LLM orchestrator, which spawns workers through tools (<code>OrchestratorService</code>), is bound only to chats (<code>ChatManagementService.ts:1994-2011</code>). A stage bound to an orchestrator-role agent gets its team as SDK sub-agents (<code>SES:444-452</code>), and on Codex, OpenCode and ACP those are dropped.</div>
+
+<h3 id="arch-model">Definition model</h3>
+<div class="two">
+  <div class="card"><h4>WorkflowDefinition</h4>
+  <p class="small"><code>name</code>, <code>description</code>, <code>version</code> (bumped only by a definition PATCH, never compared), <code>sessionMode</code> (<code>auto</code>/<code>single</code>/<code>per-stage</code>, default <code>auto</code>), <code>harnessConfig</code> (model, harnessType, reasoningEffort, maxTurns, permissionMode, systemMessage, mcpServers, tools allow/deny, skills, customAgents, BYOK provider, agentRef), <code>variables[]</code> (string/number/boolean/choice/text, ≤50), <code>tags</code>, <code>hooks[]</code> (15 phases), <code>hooksFile</code>, <code>projectId</code>, <code>orchestratorConfig</code> (codebaseAliases, preprocessing/post-processing steps, resultValidations by stage index, requiresCodebase, autoCommit/Push/CreatePR). Also declared but not stored or not read: <code>skills</code>, <code>agents</code>, <code>defaultAgentRef</code>, <code>useWorktree</code>, <code>browserConfig</code>, <code>selectedArtifacts</code>.</p></div>
+  <div class="card"><h4>StageDefinition · StageEdge</h4>
+  <p class="small">A stage has <code>prompts[]</code> (label, text with <code>{{var}}</code>, waitForCompletion, attachments), <code>harnessConfigOverrides</code>, <code>agentRef</code>, <code>agentMode</code> (auto/plan), <code>condition</code>, <code>retryPolicy</code>, <code>timeoutMs</code>, <code>contextFilter</code>, <code>contextSources</code>, <code>outputFormat</code>/<code>outputSchema</code>/<code>expectedOutput</code>, <code>resultValidation[]</code>, <code>approvalRequired</code>, <code>hooks[]</code>, <code>variables</code> and <code>iterationConfig</code>. An edge is <code>(from, to, edgeType)</code>, with <code>edgeType</code> one of on_success, on_failure, on_completion or always. The DB enforces <code>UNIQUE(from,to)</code> regardless of type. Edges carry no condition, although the builder API and the CLI docs suggest one.</p></div>
+</div>
+<p>Tables (<code>packages/db/src/schema.ts:378-619</code>): <code>workflow_definitions</code>, <code>stage_definitions</code> (cascade on definition), <code>stage_edges</code> (cascade on both), <code>workflow_runs</code> (<code>definition_snapshot</code>, <code>agent_snapshot</code>, <code>ancestor_run_id</code>), <code>stage_runs</code> (<code>version</code>, <code>heartbeat_at</code>, <code>lease_owner</code>, <code>wake_at</code>; FK to <code>stage_definitions</code> <b>without cascade</b>), plus the durable journal (register and entries), <code>session_allocations</code>, <code>stage_session_maps</code> and stream rows. Foreign keys are enforced (<code>db/src/index.ts:334</code>). There is no soft delete and no optimistic lock on definitions.</p>
+
+<h3 id="arch-options">Stage option catalog: what each option actually does</h3>
+<p class="small">Four checks per option: can the builder set it, does Save persist it, does the run read it, and does export/import keep it. <span class="y">●</span> yes · <span class="pa">◐</span> partly · <span class="n">○</span> no.</p>
+<div class="tw"><table id="optTable">
+<thead><tr><th>Option</th><th>Values / default</th><th>Runtime effect (reader)</th><th>UI</th><th>Saved</th><th>Read</th><th>Round-trip</th></tr></thead>
+<tbody></tbody></table></div>
+
+<h3 id="arch-dag">DAG and edge semantics</h3>
+<div class="tw"><table>
+<thead><tr><th>Aspect</th><th>Behaviour today</th><th>Evidence</th></tr></thead>
+<tbody>
+<tr><td>Readiness</td><td>A stage is ready when it is <code>pending</code> and <b>all</b> its predecessors are terminal (completed, failed, skipped, cancelled).</td><td><code>SCH:124-136</code></td></tr>
+<tr><td>Edge activation</td><td><code>on_success</code> → predecessor completed · <code>on_failure</code> → failed · <code>on_completion</code> → completed or failed · <code>always</code> → any terminal state, including skipped and cancelled.</td><td><code>SCH:91-102</code></td></tr>
+<tr><td>Join</td><td><b>AND-join with veto</b>. An inactive inbound edge whose predecessor had a real outcome skips the stage. An inactive edge from a <em>skipped</em> predecessor is neutral. At least one inbound edge must be active. There is no OR-join, N-of-M or discriminator.</td><td><code>SCH:138-151</code></td></tr>
+<tr><td>Stage condition</td><td>Evaluated once per activating parent, with <code>some()</code> semantics. A root stage evaluates against <code>completed</code>. False means skip.</td><td><code>SCH:153-161</code></td></tr>
+<tr><td>Skip propagation</td><td>A fixed point: successors of a skipped stage see neutral edges and cascade. An operator override-skip now also cascades (the September "quirk" has flipped).</td><td><code>SCH:237-254</code></td></tr>
+<tr><td>Terminal run status</td><td>A failed stage counts as "handled" if an active out-edge leads to a completed stage. Because <code>always</code> and <code>on_completion</code> are active on failure, a trailing Notify stage turns a failed run into <code>completed</code>.</td><td><code>SCH:177-217</code></td></tr>
+<tr><td>Concurrency</td><td>Process-wide admission lane (sized from the machine) plus a stage semaphore of 8. There is no per-run, per-provider or per-worktree cap.</td><td><code>composition-root.ts:1585-1600</code></td></tr>
+<tr><td>Loops / map / sub-workflows</td><td><b>None.</b> <code>iterationConfig</code> is validated, persisted and exposed in the SDK, but has no executor.</td><td>grep: no reader</td></tr>
+<tr><td>Cycles</td><td>Rejected with Kahn's algorithm. Disconnected stages only produce a warning, and they run as roots.</td><td><code>DAGValidator.ts:123-200</code></td></tr>
+</tbody></table></div>
+
+<h3 id="arch-run">Run lifecycle</h3>
+<ol>
+  <li><b>Create.</b> <code>createRun</code> (<code>WRS:408-579</code>) freezes <code>definitionSnapshot</code> (stages and edges), type-checks variables, fills in defaults, and inserts the run plus N <code>pending</code> stage rows in one transaction.</li>
+  <li><b>Start.</b> <code>startRun</code> (<code>WRS:675-864</code>) provisions a workspace or worktree, sets <code>starting</code>, fires <code>on_run_start</code> and builds the DAG from the snapshot. It resolves <code>auto</code> to <code>single</code> for a linear DAG, else <code>per-stage</code>. It then sets <code>running</code>, subscribes to global events, starts the 3 s reconciler and calls <code>advanceRun</code>.</li>
+  <li><b>Schedule.</b> <code>advanceRun</code> → <code>reconcileRun</code> (per-run FIFO lock) → a pure <code>reconcileDAG</code>, which returns <code>{toLaunch, toSkip, runTerminal}</code>. Each launch goes through admission, the semaphore and <code>executeStage</code>, fire-and-forget.</li>
+  <li><b>Execute.</b> <code>executeStage</code> (<code>SES:1035-2734</code>):
+    <ul>
+      <li>claims <code>pending→queued</code> atomically and resolves the agent;</li>
+      <li>runs <code>pre_run</code> hooks, allocates a session, sets <code>running</code> and starts the heartbeat;</li>
+      <li>runs its turns through the durable effect journal: context turn, prompt turns, output-format retries, summary turn;</li>
+      <li>persists artifacts, runs <code>post_run</code> hooks and the optional approval gate;</li>
+      <li>writes <code>completed</code> and emits <code>stage_run.completed</code> <b>on the session channel</b>.</li>
+    </ul>
+  </li>
+  <li><b>Advance.</b> Because the run subscribed to the global channel, it never sees that event. The 3 s reconciler notices the completed row, runs result validation (<code>onStageCompleted</code>), may retry, then calls <code>advanceRun</code>.</li>
+  <li><b>Finish.</b> <code>finalizeRun</code> → <code>completeRun</code> releases sessions, completes the workspace and fires <code>on_run_complete</code>. On the orchestrated path, a listener then runs commit, push and PR.</li>
+</ol>
+<pre class="mermaid">
+sequenceDiagram
+  participant API as routes
+  participant WRS as WorkflowRunService
+  participant SCH as DAGScheduler
+  participant SES as StageExecutionService
+  participant H as Harness
+  participant BUS as EventBus
+  participant T as Reconciler (3 s)
+  API->>WRS: createRun (snapshot + pending rows)
+  API-->>WRS: startRun (fire and forget)
+  WRS->>BUS: subscribeGlobal(stage_run.completed)
+  WRS->>SCH: reconcileRun → toLaunch
+  WRS->>SES: executeStage (admission + semaphore)
+  SES->>H: turns via durable journal
+  H-->>BUS: harness.* deltas → session + run scope
+  SES->>BUS: emit(session) stage_run.completed
+  Note over BUS,WRS: never delivered to the global subscriber (B-1)
+  T->>WRS: sees completed row → validate → advanceRun
+  WRS->>SCH: reconcile → next stages or finalize
+</pre>
+<p><b>Controls.</b></p>
+<ul>
+  <li><b>Run:</b> pause, resume, cancel, retry. Retry creates a <em>new</em> run with <code>ancestorRunId</code> and copies the completed stages.</li>
+  <li><b>Stage:</b> pause, resume, retry, cancel, interrupt, approve, reject, request changes, wake.</li>
+</ul>
+<p>Only <code>startRun</code> uses the run state machine. Every other transition is a raw status write. The stage state machine is checked <em>after</em> the DB write, as an assertion.</p>
+
+<h3 id="arch-sessions">Sessions and context passing</h3>
+<ul>
+  <li><b>Session modes.</b> <code>per-stage</code> gives each stage its own session. <code>single</code> shares one session: the first stage creates it with <em>its own</em> model, agent, tools and permission handler, and later stages only resume it. <code>auto</code> becomes <code>single</code> for any linear DAG, and <code>auto</code> is the default.</li>
+  <li><b>Context between stages.</b> <code>gatherPredecessorSummaries</code> takes <code>contextSources</code> (stage <em>names</em>) or the direct predecessors, and injects them as a separate internal user turn according to <code>contextFilter</code>: <code>summary-only</code> (the default; an LLM summary turn, or the first 3000 characters as fallback), <code>full</code>, <code>structured</code> (summary plus <code>outputData</code>), or <code>none</code>.</li>
+  <li><b>Templating.</b> <code>{{name}}</code> and dotted paths over run variables and hook-injected variables. Stage outputs <b>cannot</b> be referenced in prompts or in conditions.</li>
+  <li><b>Workspace.</b> A per-run workspace, or git worktrees per project codebase. A retry strips the workspace variables and starts in a fresh, empty directory.</li>
+</ul>
+
+<h3 id="arch-validation">Conditions, success criteria, retry and timeouts</h3>
+<div class="two">
+<div class="card"><h4>Condition grammar</h4>
+<pre class="code">expr  := or ; NOT &gt; AND &gt; OR, parentheses
+ops   := AND OR NOT (word-boundary) | &amp;&amp; || !
+leaf  := true | false | lhs (== != &lt; &lt;= &gt; &gt;=) rhs
+value := 'str' | "str" | number | status | parentStatus
+       | variables.a.b</pre>
+<p class="small">The only scopes are the activating parent's status and <em>static</em> run variables. There is no access to a stage's output. Equality is loose. An unresolvable operand becomes <code>undefined</code>, and <code>undefined == undefined</code> is <b>true</b>. <code>NOT</code> alone evaluates to true.</p></div>
+<div class="card"><h4>Result validation (success criteria)</h4>
+<p class="small">Rule types: <code>contains</code>, <code>not_contains</code>, <code>min_length</code>, <code>max_length</code>, <code>regex</code> (no ReDoS guard), <code>custom_script</code> (a host shell command with a 60 s timeout), <code>json_schema</code> (top-level keys of the <em>first</em> json block) and <code>llm_validation</code>. The last is a placeholder that only checks length ≥ 50.</p>
+<p class="small">Input is <em>every</em> assistant message of the stage's session. Validation runs only inside the reconciler tick. On failure there is an in-session retry for early attempts and a full restart for the last; the backoff sleep happens inside the tick. The validation retry default is 0, the error retry default is 1 (<code>{1, 3000 ms, ×1}</code>), and there is no error classification.</p></div>
+</div>
+<p><b>Timeouts.</b></p>
+<ul>
+  <li>The per-prompt timeout (default 300 s) covers only the main prompt turns, and it <em>includes</em> time spent waiting for a human tool approval.</li>
+  <li>Context, summary, output-retry, recap, in-session-retry and follow-up turns have <b>no timeout</b>.</li>
+  <li>The heartbeat is a 10 s <code>setInterval</code>, and the reconciler fails rows whose beat is older than 30 s. That measures whether the process is alive, not whether the stage is making progress.</li>
+</ul>
+
+<h3 id="arch-durable">Durability and crash recovery</h3>
+<p>Each <b>turn</b> is an effect: intent is written, the turn runs, and settlement is written in one transaction. After a crash, settled turns replay from the journal without re-running. For an in-flight turn:</p>
+<ul>
+  <li>If its policy is <code>safe</code> (only read or web tools), it re-runs.</li>
+  <li>If its policy is <code>never</code> (any write, shell or browser tool, which is almost every stage), it is <b>skipped with a synthetic result and the stage continues to <code>completed</code></b>.</li>
+</ul>
+<p>On boot, running stages are reset to <code>pending</code> and the run is re-driven. That happens <em>before</em> the session allocator rehydrates. <code>awaiting_input</code> stages stay parked, and <code>DurableSleepService</code> is sound but nothing calls <code>sleep()</code>.</p>
+<div class="note"><b>Thought experiment: server killed with three parallel stages in flight.</b> On reboot, all three are reset and relaunched. Their completed turns replay for free. The interrupted turn on each mutating stage is skipped, so each stage "completes" on partial work, possibly with empty output, and its successors run on that. Nothing is double-executed on this path. Double execution comes instead from the cancel, reaper and route-retry races (W-01, W-02, W-12). <b>Confirmed live (T8):</b> there was no double execution and no hang, but even a turn that had <em>finished</em> 12 s before the kill was treated as in flight and skipped, and the stage completed with empty output (W-16).</div>
+
+<h3 id="arch-stream">Streaming</h3>
+<p>Transport and replay:</p>
+<ul>
+  <li><code>EventBus.emit(sessionId)</code> commits through <code>StreamBroker</code>, then broadcasts. A bridge republishes every event that carries <code>workflowRunId</code> into the <code>run</code> scope, fire-and-forget.</li>
+  <li>The client opens one multiplexed <code>EventSource</code> per tab and subscribes to <code>run:&lt;id&gt;</code>. It hydrates by paging <code>streamReplay</code> 500 rows at a time and buffers live frames during replay.</li>
+  <li>Deltas may be dropped under congestion (announced with a <code>gap</code> frame). Items are never dropped by design.</li>
+  <li>Stage transcripts live in <code>messages</code>.</li>
+</ul>
+<p><b>Event catalog.</b></p>
+<ul>
+  <li><b>Run:</b> <code>workflow_run.{created, starting, running, paused, resumed, cancelling, cancelled, completed, failed, retried, permission_mode_changed, stage_validation, orchestration_*, preprocessing_*, postprocessing_*, worktree_creating, sandbox_*}</code>.</li>
+  <li><b>Stage:</b> <code>stage_run.{queued, running, step_started, step_completed, completed, failed, skipped, retrying, awaiting_input, input_received, sleeping, woken}</code>.</li>
+  <li><b>Harness:</b> <code>harness.*</code> deltas, tools, usage and session info.</li>
+  <li><b>Hooks:</b> <code>hook.*</code>.</li>
+</ul>
+<p>A user-initiated <code>stage_run.cancelled</code> or <code>stage_run.paused</code> is <b>never emitted</b>.</p>
+<p>Write cost:</p>
+<ul>
+  <li>Each token delta is written twice: once to the session scope and once to the run scope.</li>
+  <li>Each stage costs roughly 25–40 writes, plus a heartbeat every 10 s.</li>
+  <li>Each active run costs about 2–6 reads every 3 s for its whole lifetime, including 30-day approval waits.</li>
+</ul>
+
+<h3 id="arch-orch">Orchestration, skills, agents and integrations</h3>
+<div class="tw"><table>
+<thead><tr><th>Integration</th><th>How it is wired</th><th>State</th></tr></thead>
+<tbody>
+<tr><td>Agents (<code>agentRef</code>)</td><td><code>resolveStageAgent</code> → <code>AgentResolver</code>: runtime scalars, skills, MCP baseline, tool-group deny list, team → <code>customAgents</code>, instructions fenced <code>trust="user"</code></td><td class="pa">Works. Deny names default to Copilot's (W-20). A missing or disabled agent silently widens permissions.</td></tr>
+<tr><td>Skills</td><td>Agent skills are staged into <code>&lt;workingDirectory&gt;/.generatorai/skills</code>. The builder writes <code>agentOverrides.addSkillIds</code>. Stage <code>skills</code> has no DB column.</td><td class="n">Claude loads none (skills are passed by name with <code>settingSources: []</code>). Staged into the worktree, so they get committed into PRs.</td></tr>
+<tr><td>MCP servers</td><td>Workflow and stage <code>mcpServers</code> plus the agent baseline, merged in <code>SES:426-431</code></td><td class="n"><code>secretref:</code> credentials are never resolved for stages (chats call <code>mcpHub.resolveForRun</code>; stages do not)</td></tr>
+<tr><td>Browser tools</td><td>Bound only when <code>__workspaceId</code> is set and the agent allows the <code>browser</code> group</td><td class="pa">Never bound on orchestrated runs (no <code>__workspaceId</code>)</td></tr>
+<tr><td>Widgets · computer use · extension tools</td><td>Bound in <code>ChatManagementService</code> only</td><td class="n">Not available to stages. The run page Widget tab can never populate.</td></tr>
+<tr><td>Projects / codebases / worktrees</td><td>Orchestrated: <code>selectedCodebases</code> from the client, else all. Plain: <code>gitRepositories</code> (stripped by zod), else <b>all</b>.</td><td class="pa">Saved <code>codebaseAliases</code> are read by nothing on the server</td></tr>
+<tr><td>autoCommit / push / PR</td><td>Orchestrator post-processing listener (24 h TTL)</td><td class="n">Orchestrated path only; skipped for CLI, automations, SDK <code>run()</code>, MCP, scripts and retries</td></tr>
+<tr><td>Automations</td><td>Cron, manual and webhook (<code>/api/automations/webhooks/:token</code>) → plain <code>createRun</code>/<code>startRun</code></td><td class="pa">No permission field (so bypass). The dataset path lets <code>__*</code> keys through.</td></tr>
+<tr><td>Legacy <code>/webhooks/github</code>, <code>/webhooks/custom</code></td><td><code>SessionService.createSession({workflows})</code></td><td class="n">Dead: logs "processed" and never runs a workflow. Unauthenticated when no secret is set.</td></tr>
+<tr><td>CLI</td><td>workflow list/show/create/update/delete/validate/export/import-json/from-template/clone, plus stage, edge, hook, run and profile subcommands</td><td class="pa">No orchestrated start. Run-profile stage overrides are no-ops (wrong shape).</td></tr>
+<tr><td>SDK</td><td><code>WorkflowFacade.create/run/orchestrate/stream</code></td><td class="pa"><code>create</code> is lossy. <code>stream()</code> of a finished run replays nothing.</td></tr>
+<tr><td>Mobile</td><td>Start sheet (orchestrated vs plain), approvals, permission-mode sheet</td><td class="pa">Uploads race the start. The permission sheet has no effect on Claude or Codex stages.</td></tr>
+<tr><td>Chat → workflow</td><td>—</td><td class="n">Missing: a chat agent cannot start or wait on a workflow</td></tr>
+<tr><td>Notifications</td><td>Push on <code>awaiting_input</code>, <code>failed</code> and <code>completed</code></td><td class="pa">Orchestration and PR failures are not notified</td></tr>
+</tbody></table></div>
+
+<h3 id="arch-harness">Stage option × harness matrix</h3>
+<p class="small">Only Copilot honours nearly everything a stage author can set. Every "silently ignored" cell is invisible to the author: providers record <code>FIELD_UNSUPPORTED_BY_PROVIDER</code> warnings, but no core service ever reads them.</p>
+<div class="tw"><table>
+<thead><tr><th>Stage option</th><th>claude-agent</th><th>copilot</th><th>codex</th><th>opencode</th><th>acp</th></tr></thead>
+<tbody>
+<tr><td>model</td><td class="y">●</td><td class="y">●</td><td class="y">●</td><td class="pa">◐ qualified only</td><td class="n">○</td></tr>
+<tr><td>systemMessage / agent instructions</td><td class="y">●</td><td class="y">●</td><td class="y">●</td><td class="pa">◐ mode lost</td><td class="n">○ dropped</td></tr>
+<tr><td>mcpServers</td><td class="y">●</td><td class="y">●</td><td class="y">●</td><td class="n">○ silent (claims support)</td><td class="n">○</td></tr>
+<tr><td>MCP <code>secretref:</code> resolution</td><td class="n">○</td><td class="n">○</td><td class="n">○</td><td>—</td><td>—</td></tr>
+<tr><td>skills / skillDirectories</td><td class="n">○ never load</td><td class="y">●</td><td class="pa">◐ global to process</td><td class="n">○</td><td class="n">○</td></tr>
+<tr><td>customAgents (team)</td><td class="y">●</td><td class="y">●</td><td class="n">○</td><td class="n">○</td><td class="n">○</td></tr>
+<tr><td>availableTools / excludedTools</td><td class="y">●</td><td class="pa">◐ custom/MCP only</td><td class="n">○</td><td class="n">○</td><td class="n">○</td></tr>
+<tr><td>agent tool-group deny</td><td class="pa">◐ wrong names unless harnessType set</td><td class="pa">◐ advisory</td><td class="n">○</td><td class="n">○</td><td class="n">○</td></tr>
+<tr><td>maxTurns</td><td class="y">●</td><td class="n">○</td><td class="n">○</td><td class="n">○</td><td class="n">○</td></tr>
+<tr><td>run permissionMode (HITL gate)</td><td class="pa">◐ skipped under bypass</td><td class="y">●</td><td class="pa">◐ bypass → never</td><td class="n">○</td><td class="y">●</td></tr>
+<tr><td>agentMode = plan</td><td class="y">●</td><td class="y">●</td><td class="y">● read-only</td><td class="n">○</td><td class="n">○</td></tr>
+<tr><td>hooks bridge</td><td class="y">●</td><td class="y">●</td><td class="n">○</td><td class="n">○</td><td class="n">○</td></tr>
+</tbody></table></div>
+
+<h3 id="arch-ui">Builder, run page and right pane</h3>
+<p><b>Creating a workflow.</b> From the list page: New Workflow, Upload JSON (client-side checks, then <code>POST /import-json</code>), a sample-template download, or Browse templates.</p>
+<ul>
+  <li><b>Stages</b> are added with the canvas "Add Stage" pill, the empty-state button, or Duplicate. There is no palette, context menu or keyboard shortcut.</li>
+  <li><b>Edges</b> are drawn handle to handle, always as <code>on_success</code>, and retyped from the badge menu.</li>
+  <li><b>Validate</b> is client-only; the server <code>/validate</code> endpoint has no caller.</li>
+  <li><b>Save</b> is 1 + N + M sequential HTTP calls with no transaction.</li>
+  <li><b>Undo/redo</b> covers structural and property edits, but not settings or auto-layout.</li>
+</ul>
+<p><b>Stage panel.</b></p>
+<ul>
+  <li><b>Properties tab:</b> name, description, template (dead), model override, reasoning effort, prompts (inline, files, agent binding), skills, MCP servers, stage variables (dead).</li>
+  <li><b>Execution tab:</b> run condition, timeout, context filter (the <code>structured</code> mode is missing), approval, retry, result-validation rules, stage hooks.</li>
+  <li><b>Workflow settings:</b> general (no model or harness control, though stages say "inherit from workflow"), project and codebases (at most 3) plus auto-commit, push and PR, variables, hooks, tags.</li>
+</ul>
+<p><b>Launch.</b> <code>VariableInputModal</code> collects typed variables, auto-fills git variables and offers per-stage <em>skip</em> overrides. It does not offer a per-run model, branch, permission mode or session mode.</p>
+<p><b>Run page.</b></p>
+<ul>
+  <li>A header with pause, resume, cancel and retry.</li>
+  <li>A pipeline strip and a stage timeline with live stream panels, inline approve, request-changes and reject, and a graph toggle.</li>
+  <li>An event-timeline modal.</li>
+</ul>
+<p>The <b>right pane</b> tabs, and the data behind each:</p>
+<div class="tw"><table>
+<thead><tr><th>Tab</th><th>Data source</th><th>State</th></tr></thead>
+<tbody>
+<tr><td>Changes (default)</td><td><code>ChangesSurface</code> on the run workspace, review target = awaiting stage</td><td class="y">Works</td></tr>
+<tr><td>Files / file tabs</td><td><code>FilesSurface</code> on the workspace</td><td class="y">Works</td></tr>
+<tr><td>Inspector → Files</td><td>Stage <code>artifactManifest</code>, else the whole workspace listing</td><td class="pa">Misleading: every stage shows every run file as "added"</td></tr>
+<tr><td>Inspector → Output</td><td>Scratchpad + <code>outputData</code> + summary (3 s poll)</td><td class="y">Works; refetched even when hidden</td></tr>
+<tr><td>Inspector → Hooks / Tools</td><td>Live stream only</td><td class="pa">Empty after reload or once the stream is evicted (32-stream LRU; run page never protects its streams)</td></tr>
+<tr><td>Browser (≤5)</td><td><code>BrowserPanel</code>, auto-opens on <code>browser.session_created</code></td><td class="y">Works (on demand)</td></tr>
+<tr><td>Terminal (≤4)</td><td>A real PTY in the run workspace, with a worktree selector</td><td class="y">Works</td></tr>
+<tr><td>Widget</td><td><code>WidgetHost sessionId="stageRun:&lt;id&gt;"</code></td><td class="n">Dead: stages have no widget tools</td></tr>
+</tbody></table></div>
+
+<h3 id="arch-import">Import from JSON, export and templates</h3>
+<p><b>Import</b> validates edge indices, then creates the definition, stages (through the shared <code>templateStageToCreateParams</code>) and edges in one transaction, validating the DAG after each edge. Cycles, self-edges and duplicate pairs roll the whole import back. Unknown keys are stripped silently. There is no format version. Duplicate names are accepted.</p>
+<p><b>Export</b> (<code>GET /:id/export</code>) returns a <em>template</em>-shaped object, not an import-shaped one. <b>CLI clone</b> is export → import, so it inherits every gap.</p>
+<p><b>Round trip.</b></p>
+<ul>
+  <li><b>Survives:</b> the core stage fields and the edge types.</li>
+  <li><b>Lost:</b> stage <code>agentMode</code> (a plan-gated stage comes back as auto), <code>iterationConfig</code>, the whole <code>orchestratorConfig</code> (project, codebases, auto-commit and PR, preprocessing, workflow-level validations), <code>projectId</code>, <code>skills</code>, <code>agents</code>, <code>defaultAgentRef</code>, <code>hooksFile</code>, <code>browserConfig</code>.</li>
+</ul>
+<p><b>Templates.</b> Four of the five system templates cannot be imported as JSON. <code>e2e-testing-workflow.json</code> still uses the pre-June key <code>copilotConfig</code>, so its model and system prompt are stripped.</p>
+</section>
+
+<!-- ============================ PART II ============================ -->
+<section id="live">
+<h2>Part II · Live test results</h2>
+<div id="liveBody">
+<p><b>Setup.</b></p>
+<ul>
+  <li><b>Server:</b> an isolated instance on <code>127.0.0.1:3111</code> with its own DB, workspaces and vault. The user's server on :3100 and the real DB were not touched.</li>
+  <li><b>Harness:</b> <code>claude-agent</code> with model <code>haiku</code> (<code>claude-haiku-4-5-20251001</code>).</li>
+  <li><b>Client:</b> a Node script using the repo's own <code>client-runtime</code>, paired as an all-scope DPoP device through the loopback local-admin recovery channel, with a file-backed credential store. <code>~/.generatorai</code> was never touched.</li>
+  <li><b>Evidence:</b> every run captured its SSE stream and its DB rows. Scripts, specs and raw results are in <code>C:/gaimob/wfe2e/</code>.</li>
+</ul>
+<div class="tw"><table>
+<thead><tr><th>Test</th><th>Scenario</th><th>Result</th><th>Verdict</th></tr></thead>
+<tbody>
+<tr><td>T1</td><td>Wide fan-out / fan-in (start → 5 branches → join → final)</td><td><span class="sev P2">PASS · perf</span></td><td>The join is correct and the run completes. Branch launches are serialised about 2.5 s apart by the checkpoint lock, and at most 4 model turns run at once (W-49).</td></tr>
+<tr><td>T2</td><td>Conditional routing: AND/OR/NOT, &amp;&amp;/||/!, parentheses, lower-case <code>and</code></td><td><span class="sev P3" style="color:var(--ok);background:var(--ok-soft)">PASS</span></td><td>All correct. The skip cascade is correct. A join with a skipped predecessor runs rather than hanging. An <code>always</code> edge from a skipped stage fires. <code>stages.X…</code> silently evaluates to false (W-31).</td></tr>
+<tr><td>T3</td><td>Failure paths and all four edge types, retry 2 with backoff 2 s → 4 s</td><td><span class="sev P3" style="color:var(--ok);background:var(--ok-soft)">PASS</span></td><td>3 attempts, each on a fresh session. on_failure, on_completion and always ran; on_success was skipped. The run ends <code>completed</code> (failure handled).</td></tr>
+<tr><td>T3b</td><td>Unhandled failure with the default retry</td><td><span class="sev P2">PASS · issues</span></td><td>The default retry is 1 (validation's default is 0). <code>timeoutMs</code> does not bound the context turn (W-15). <code>single</code> mode re-sends context and prompt (W-09).</td></tr>
+<tr><td>T4</td><td>Result validation, one stage per rule type</td><td><span class="sev P0">FAIL</span></td><td>Rules check the summary text too (W-17). <code>json_schema</code>, <code>llm_validation</code> and <code>custom_script</code> are unusable (W-47). A validation race let a failing stage end <code>completed</code> (W-17).</td></tr>
+<tr><td>T4b</td><td>Validation retry in-session</td><td><span class="sev P0">FAIL</span></td><td>The heartbeat reaper killed the retry, so attempts 2..N never ran (W-02).</td></tr>
+<tr><td>T5</td><td>Approve / reject</td><td><span class="sev P3" style="color:var(--ok);background:var(--ok-soft)">PASS</span></td><td>A double approve and approving a non-parked stage both return 409. Reject fails the stage without retrying and skips the successor.</td></tr>
+<tr><td>T5</td><td>Request changes</td><td><span class="sev P0">FAIL</span></td><td>The revision reply is lost, and the pre-revision output is approved (W-46).</td></tr>
+<tr><td>T5</td><td>Pause / resume mid-stage</td><td><span class="sev P0">FAIL</span></td><td>The stage completed with empty output <em>while the run was paused</em> and was not re-run on resume (W-01).</td></tr>
+<tr><td>T5</td><td>Cancel mid-run</td><td><span class="sev P2">PASS · issue</span></td><td>Everything becomes <code>cancelled</code>, and processes are gone within 33 s. The cancel call takes 3.8 s, and new turns are still dispatched during it (W-01).</td></tr>
+<tr><td>T5</td><td>Run retry · stage retry · wake</td><td><span class="sev P1">MIXED</span></td><td>Run retry copies completed stages and re-runs only failed ones. Retrying a completed run returns HTTP 502, and one ancestor can be retried repeatedly. Stage retry on a failed run skips validation. For wake, only the negative paths could be tested, since no API puts a stage to sleep (W-12, W-24).</td></tr>
+<tr><td>T6</td><td>Export → import round trip; 19 malformed inputs</td><td><span class="sev P0">FAIL</span></td><td>Loses <code>orchestratorConfig</code>, <code>hooksFile</code> and every <code>agentMode</code>. Create drops skills, agents, browserConfig and defaultAgentRef, and stores <code>useWorktree:false</code> as true (W-20, W-25). Cycles, self-loops and bad edges are rejected. Duplicate names, unparseable conditions and unknown <code>contextSources</code> are accepted (W-30).</td></tr>
+<tr><td>T7</td><td>Context passing: full / none / structured / contextSources / templating</td><td><span class="sev P3" style="color:var(--ok);background:var(--ok-soft)">PASS</span></td><td>The mechanics are correct. An unresolved <code>{{x}}</code> is sent raw with a warning. Stage outputs cannot be templated, and context costs an extra model turn (W-49).</td></tr>
+<tr><td>T8</td><td>Server killed mid-stage, restarted</td><td><span class="sev P0">FAIL</span></td><td>No double execution and no hang. But a finished turn was treated as in flight and skipped, the summary failed on a non-UUID resume id, and the stage completed with empty output, so its successor ran blind (W-16).</td></tr>
+<tr><td>T9</td><td>Streaming during T1</td><td><span class="sev P2">PASS · perf</span></td><td>1188 of 1188 ids are unique and monotonic, and each lifecycle event arrived exactly once. There are ~8–9 s to first event per turn, then 15–40 ms bursts. Every event is written 3× (W-42).</td></tr>
+<tr><td>T10</td><td>25 stages, 31 edges (chains, a 3-way and a 6-way fan-in, a parallel group)</td><td><span class="sev P3" style="color:var(--ok);background:var(--ok-soft)">PASS</span></td><td>25 of 25 completed in 421 s. Scheduler overhead was about 13 s (~3%): 2–3 s per chain link, 1–6 s at the joins. It wrote about 1.9 MB of stream data.</td></tr>
+</tbody></table></div>
+<div class="stats">
+  <div class="stat"><div class="v">26–47 s</div><div class="l">wall time of a trivial stage (root / non-root): 2–3 model turns each</div></div>
+  <div class="stat"><div class="v">~3%</div><div class="l">scheduler share of a 25-stage run's wall time</div></div>
+  <div class="stat"><div class="v">4</div><div class="l">effective fan-out width (claude-agent turn cap)</div></div>
+  <div class="stat"><div class="v">~2.5 s</div><div class="l">stagger between "parallel" launches (checkpoint lock)</div></div>
+  <div class="stat"><div class="v">1.9 MB</div><div class="l">stream data written for a trivial 25-stage run (3× per event)</div></div>
+</div>
+<p class="small"><b>Caveat on content checks.</b> Haiku refused about 30% of "reply exactly…" prompts as prompt injection, probably provoked by the ~700-character file-creation boilerplate appended to every prompt (W-48). That affected output text only, never the orchestration results above. Where a refusal made a content check inconclusive, the result says so.</p>
+<p class="small"><b>How the live results relate to the static findings.</b> The runtime probe predicted that cancel would bring a stage back. Live, on claude-agent, an aborted prompt <em>resolves</em> instead of throwing, so the stage runs its summary turn and ends <code>completed</code> with empty output. Both behaviours come from the same root cause, which is that status is never re-checked after an abort. W-01 records both. The scheduler-hop latency predicted by the static audit (W-08) was measured at 1.6–2.8 s per hop, which is real but small next to model time.</p>
+</div>
+</section>
+
+<!-- ============================ PART III ============================ -->
+<section id="findings">
+<h2>Part III · Audit findings</h2>
+
+<h3 id="patterns">Root-cause patterns</h3>
+<div class="two">
+<div class="card"><h4>1 · Hand-carried fields</h4><p class="small">Every stage or definition field crosses 6–10 hand-written mappings: the zod schema, the service entity literal, the repository create/update/mapRow, the DB column, web <code>toStageParams</code>, the exporter, the importer, the template schema and three script materializers. A missed layer silently drops, strips or freezes the value.</p><p class="small">About 20 register entries come from this. So did five of the eight September fixes, which reopened because they patched only some layers.</p></div>
+<div class="card"><h4>2 · Unconditional transitions, accidental ordering</h4><p class="small">Status writes are plain <code>UPDATE</code>s. Abort happens before the terminal write. Stage terminal events go to a channel the run does not hear, so a 3 s single-threaded tick serialises everything by accident.</p><p class="small">This produces resurrection on cancel, the reaper killing live stages, lost dedup keys, double finalisation and slow hops. Fixing the routing without adding CAS would <em>expose</em> more races.</p></div>
+<div class="card"><h4>3 · Split lifecycle</h4><p class="small">Pre- and post-processing, uploads, the sandbox and SCM live in <code>WorkflowOrchestrator</code>. The workspace, DAG and hooks live in <code>WorkflowRunService</code>. Six entry points bypass the first.</p><p class="small">The result: missing PRs, missing browser tools, hooks that fire twice, and a retry that runs in an empty folder.</p></div>
+<div class="card"><h4>4 · Controls with no reader</h4><p class="small">These controls are stored but have no run-time reader:</p><ul class="small"><li>stage variables, prompt files, template select, stage skills;</li><li><code>iterationConfig</code>, durable sleep, <code>defaultAgentRef</code>, <code>codebaseAliases</code>;</li><li>post-processing <code>enabled</code>, the Widget tab, the stage "…" button;</li><li><code>llm_validation</code>, legacy webhooks.</li></ul><p class="small">Users configure them and nothing happens.</p></div>
+</div>
+
+<h3 id="register">Issue register</h3>
+<p class="small">These are 49 consolidated issues, merged from 133 slice findings (A = definitions/DB, B = runtime, C = orchestration, D = web UI, F = live). Each entry lists its source IDs. Expand an entry for its evidence, failure scenario and fix.</p>
+<div class="controls" role="group" aria-label="Filter issues">
+  <input id="q" type="search" placeholder="Search issues, files, IDs…" aria-label="Search issues">
+  <button class="chip" data-sev="all" aria-pressed="true">All</button>
+  <button class="chip" data-sev="P0" aria-pressed="false">P0</button>
+  <button class="chip" data-sev="P1" aria-pressed="false">P1</button>
+  <button class="chip" data-sev="P2" aria-pressed="false">P2</button>
+  <button class="chip" data-sev="P3" aria-pressed="false">P3</button>
+  <span class="count" id="count"></span>
+</div>
+<div class="controls" role="group" aria-label="Filter by area" id="areaChips"></div>
+<div id="issues"></div>
+</section>
+
+<!-- ============================ PART IV ============================ -->
+<section id="bench">
+<h2>Part IV · Benchmark against modern engines</h2>
+<p>GeneratorAI is a <b>declarative DAG interpreter whose nodes are expensive, non-deterministic agent sessions</b>. That places it with DBOS, Inngest, Cloudflare Workflows and LangGraph. All of them memoize each step's result and skip completed steps on recovery. It does not belong with Temporal-style replay of orchestrator code. The right durability primitive is <b>memoized stage results keyed by (run, stage, iteration), plus a pinned definition snapshot</b>. GeneratorAI already has most of the pieces: the turn journal and <code>definition_snapshot</code>. What is missing is using them consistently.</p>
+<div class="tw"><table id="benchTable">
+<thead><tr><th>Capability</th><th>Who does it (reference)</th><th>GeneratorAI today</th><th>Gap</th></tr></thead>
+<tbody></tbody></table></div>
+<p class="small">Two limits on this research. Run diffing is not a built-in feature of any engine surveyed, so it would be a differentiator. SQLite as the durable store is confirmed for DBOS (Python default, Go since June 2026), Cloudflare Workflows (Durable Object SQLite), and the LangGraph and CrewAI checkpointers. DBOS TypeScript SQLite support was not confirmed.</p>
+</section>
+
+<!-- ============================ PART V ============================ -->
+<section id="plan">
+<h2>Part V · Improvement plan</h2>
+<p>The plan is ordered so that each phase removes a root-cause pattern before building on it. Every item gives the change, the issues it closes, the evidence that this is the approach mature engines use, and the reason it is the cheapest correct option here. Estimates assume one engineer familiar with the codebase.</p>
+<div id="planBody"></div>
+
+<h3 id="plan-seq">Sequencing and acceptance</h3>
+<pre class="mermaid">
+flowchart LR
+  P0["Phase 0<br/>targeted P0 + security fixes<br/>~2 wks"] --> F1["1.1 schema-derived mapping"]
+  P0 --> F2["1.4 CAS transitions + lease"]
+  F1 --> F3["1.2 atomic versioned graph save"]
+  F3 --> F4["1.3 immutable definition versions<br/>+ pinned runs"]
+  F2 --> F5["1.5 event-driven per-run scheduler"]
+  F4 --> F6["1.6 single run lifecycle"]
+  F5 --> F6
+  F6 --> C1["2.1 rerun-from-stage / fork"]
+  F4 --> C1
+  F5 --> C2["2.2 error classes + pause-on-exhaust<br/>2.3 split timeouts"]
+  F1 --> C3["2.4 typed outputs + repair turn<br/>+ conditions on outputs"]
+  C3 --> C4["2.5 join policies · loop · fan-out"]
+  F6 --> C5["2.6 budgets · 2.7 flow control · 2.9 tracing"]
+  C1 --> D1["Phase 3<br/>run diff · stage cache · pinned-data test"]
+</pre>
+<p><b>Gate for each phase:</b></p>
+<ul>
+  <li>The existing 373-test suite stays green.</li>
+  <li>Every closed register item has a regression test that fails on the old code. Probe scripts are named in the appendix.</li>
+  <li>The live scenarios in Part II are re-run: fan-out, conditions, failure paths, approval, cancel, crash, import/export and a 25-stage DAG.</li>
+</ul>
+<p><b>Three properties need permanent tests:</b></p>
+<ol>
+  <li>A property test that <code>import(export(def)) ≡ def</code> over every schema key.</li>
+  <li>A stage state-machine fuzz test (random interleavings of cancel, pause, complete, reap and retry) asserting that no terminal state is ever overwritten.</li>
+  <li>A scheduler replay test that feeds recorded stage results and asserts identical edge decisions.</li>
+</ol>
+</section>
+
+<section id="docs">
+<h2>Documentation drift</h2>
+<p><code>.github/docs/feature-workflows.md</code>, <code>feature-stages.md</code> and <code>feature-workflow-runs.md</code> diverge from the code in more than 25 places. The ones that mislead users:</p>
+<ul>
+  <li><b>Wrong verbs and routes.</b> Stage update is documented as PATCH but is PUT. <code>POST /from-template/:id</code> does not exist; the real route is <code>POST /import {templateId}</code>.</li>
+  <li><b>Fictional SDK example.</b> The §7 example in <code>feature-workflows.md</code> calls <code>workflow()</code>, <code>.profile()</code> and <code>.resultValidation()</code>, none of which exist.</li>
+  <li><b>Features documented as working that are not.</b> Stage variables and file prompts are described as working (both are dead). "Renaming a stage does not break anything" is false: <code>contextSources</code> match by name.</li>
+  <li><b>Wrong semantics.</b> <code>on_success</code> is described as requiring all predecessors (it is any activating parent). Both retry defaults are documented as <code>{1, 3000, 1}</code>, but validation retries default to 0.</li>
+  <li><b>Wrong CLI and config.</b> <code>edge add --condition</code> is documented but edges have no condition. <code>--timeout</code> is documented in ms but takes seconds. <code>GENERATORAI_ORCH_WORKER_TIMEOUT_MS</code> is described as a wall-clock kill; it only bounds <code>check(wait)</code>.</li>
+</ul>
+<p>Recommendation: generate the field reference from the zod schemas (Phase 1.1 makes this free). Keep hand-written docs for semantics only.</p>
+</section>
+
+<section id="sources">
+<h2>Sources</h2>
+<p class="small">Engine references were checked against official documentation on 24 Sep 2026. Code evidence is on branch <code>desktop_redesign</code>. The raw slice reports, with every file:line, and the probe scripts are listed below.</p>
+<div id="srcList" class="small"></div>
+</section>
+
+<footer>Workflow Engine Audit · prepared with Claude Code · review draft. Findings marked "verified" were re-read against source or reproduced by a probe. The rest are static traces with file:line evidence and should be reproduced before fixing.</footer>
+</main>
+</div>
+
+<script>
+/* ---------------- data ---------------- */
+const ISSUES = [
+/* ---- P0 ---- */
+{id:"W-01",sev:"P0",area:"Runtime",v:true,src:"B-3 · F-1 · O-9",title:"Pause and cancel are not respected mid-stage: a paused stage ends completed with empty output, and a cancelled stage can come back",
+ev:"<code>cancelStage</code> and <code>pauseStage</code> abort the harness and only <em>afterwards</em> write <code>cancelled</code>/<code>paused</code> (<code>SES:3247-3274</code>, <code>SES:3129-3136</code>). Status is never re-checked between turns. What happens next depends on how the provider ends an aborted turn:<ul><li><b>The abort throws</b> (Copilot per conformance, and the probe). The <code>catch</code> sees <code>running</code> (<code>SES:2625</code>) and calls <code>retryStage</code>, which writes <code>queued</code> over <code>cancelled</code> without checking (<code>SES:3296-3300</code>). Probe P5: <code>status right after cancelStage=cancelled; 3.6s later=running retryCount=1</code>.</li><li><b>The abort resolves</b> (claude-agent, observed live). The loop falls through to the output-retry and summary turns and writes <code>completed</code>. Live F-1: a run was paused at +15.8 s, and the stage reached <code>completed</code> at +32.6 s <em>while the run was still paused</em>, with <code>outputText=''</code>. It was not re-run on resume. Live O-9: during the 3.8 s cancel call, new prompt and summary turns were still dispatched.</li></ul>",
+sc:"Pausing a long stage and resuming it silently skips the stage, and its successors run on nothing. On Copilot, cancelling a run restarts every in-flight stage 3 s later on a new, never-released session, which burns tokens and writes into a terminal run's workspace.",
+fix:"Write <code>cancelled</code>/<code>paused</code> <em>before</em> aborting. Re-check stage and run status after every turn and before every status write. In <code>catch</code> and <code>retryStage</code>, bail unless both are still <code>running</code>. Make every status write a CAS (<code>UPDATE … WHERE status IN (…) AND version=?</code>). This is Phase 1.4 in miniature."},
+{id:"W-02",sev:"P0",area:"Runtime",v:true,src:"B-2 · F-4",title:"The heartbeat reaper kills healthy stages that re-enter running after an approval, validation retry or follow-up",
+ev:"The reaper fails any <code>queued</code>/<code>running</code> row whose <code>heartbeat_at</code> is older than 30 s (<code>WRS:1587-1593</code>). Beats are only written while the row is running, so they freeze during <code>awaiting_input</code>. Five paths set <code>running</code> without refreshing the beat: <code>HitlService.resume</code> (<code>HitlService.ts:387</code>), approval-gate feedback (<code>SES:2486</code>), <code>retryStageAfterValidation</code> (<code>WRS:1666</code>), <code>retryInSession</code>, which never starts a heartbeat, and <code>sendStageFollowUp</code> (<code>SES:3002</code>). Probe P4 reproduced <code>failed (Stage heartbeat stale …)</code> after an approval. <b>Live F-4</b>: a stage with <code>maxRetries:2</code> logged <code>Triggering validation retry</code>, and 20 s later <code>Stage heartbeat stale: no liveness beat for 33s … the executor is hung</code>. Attempts 2 and 3 never ran.",
+sc:"In default or plan permission mode, a human approves a tool call after more than 30 s. The next tick usually wins the race (about 85% of the time), aborts the turn and fails the stage, and the <code>catch</code> then retries it inside a run that is already failing. Every in-session validation retry longer than about 20 s dies the same way.",
+fix:"Every transition into <code>running</code>/<code>queued</code> stamps <code>heartbeat_at=now</code> in the same UPDATE. <code>retryInSession</code> and the follow-up path start the heartbeat. Longer term, replace the timestamp with an owner-fenced lease renewed by harness stream activity (Phase 1.4 / 2.3)."},
+{id:"W-03",sev:"P0",area:"Builder",v:true,src:"D-1 · A-8",title:"Saving an existing workflow with a newly added, connected stage always fails, and the edge is lost",
+ev:"New stages get a local id <code>stage-&lt;ts&gt;-xxxxx</code> (<code>workflowBuilderStore.ts:472</code>). The update path of <code>handleSave</code> adds them but throws away the returned server id (<code>WorkflowBuilderPage.tsx:386-401</code>), then posts edges with the raw <code>edge.source</code>/<code>edge.target</code> (<code>:426-436</code>). <code>CreateEdgeSchema</code> requires <code>z.string().uuid()</code> (<code>WorkflowDefinitionSchemas.ts:277-278</code>), so the request fails with a 400. The create path does remap ids (<code>:325-347</code>); the update path does not.",
+sc:"Open a saved workflow, add Stage 4, connect Stage 3 → Stage 4 and click Save. Stage 4 is created, the edge POST fails, and the mid-save refetch reloads the canvas, so the edge silently disappears and the page no longer shows unsaved changes. Every retry creates another disconnected stage.",
+fix:"Short term: keep a <code>localToServerId</code> map in the update loop and remap edge endpoints. Proper fix: replace the whole 1+N+M diff with one atomic <code>PUT /workflow-definitions/:id/graph</code> (Phase 1.2)."},
+{id:"W-04",sev:"P0",area:"Builder / DB",v:true,src:"D-2 · A-7",title:"Deleting a stage corrupts the workflow: edges are removed, then the stage delete fails on a foreign key (or the save aborts on a 404)",
+ev:"<code>deleteStage</code> deletes the stage's edges one by one and then the stage, with no transaction (<code>WorkflowDefinitionService.ts:317-326</code>). <code>stage_runs.stage_definition_id</code> references <code>stage_definitions</code> with <b>no cascade</b> (<code>schema.ts:555-557</code>), and <code>foreign_keys=ON</code> (<code>db/src/index.ts:334</code>), so any stage that has ever run fails <em>after</em> its edges are gone. Probe: <code>SqliteError FOREIGN KEY constraint failed → stages=[A,B] edges=0</code>. When there are no runs, the builder's edge loop then deletes the same edges again from the stale <code>definition.edges</code>, gets a 404 from <code>getById</code>, and aborts before adding new edges.",
+sc:"A→B→C. Delete B, connect A→C, Save. The workflow ends up with no edges: B becomes an orphan root, A and C run in parallel, and the save shows an error the user cannot act on. The stage can never be deleted.",
+fix:"Make the delete transactional. Stage runs should reference immutable <em>definition-version</em> stage rows (Phase 1.3), so a live stage can always be deleted. Until then, use <code>ON DELETE SET NULL</code> (stage_runs already copies <code>name</code>) or return a 409 before touching edges. The builder should skip edge deletes whose endpoints were deleted in the same save."},
+{id:"W-05",sev:"P0",area:"Builder",v:false,src:"D-3 · A-24",title:"A save is not atomic, and any mid-save failure throws away the user's remaining unsaved edits",
+ev:"Every stage and edge mutation invalidates the <code>workflow-definition</code> query (<code>workflowQueries.ts:173-240</code>). The builder reloads the store on every data change (<code>WorkflowBuilderPage.tsx:200-204</code> → <code>loadDefinition</code>, which clears <code>isDirty</code> and history). The save itself is sequential HTTP calls with no rollback. Definition <code>version</code> is never compared, so the last writer wins across tabs and devices.",
+sc:"Any 400, 404 or 500 during a save (W-03, W-04, an empty prompt, an empty hook URL, a bad variable name) leaves a partly written server state. The canvas is overwritten with that state and every edit not yet sent is lost, with no unsaved marker.",
+fix:"Phase 1.2: send one request with <code>{definition, stages, edges, expectedVersion}</code>, apply it in one SQLite transaction with a DAG check, and return 409 on a version mismatch. The client must not reload from query data while <code>isSaving || isDirty</code>."},
+{id:"W-06",sev:"P0",area:"Security",v:true,src:"C-3",title:"Reserved __* run variables are caller-controllable, including through automation webhooks: host folders get attached to prompts and the working directory is redirected",
+ev:"<code>executeStage</code> trusts <code>variables.__workingDirectory</code>, <code>__skillDirectories</code>, <code>__customAgents</code> and <code>__promptDirectories</code> (<code>SES:1168-1190,1957</code>). <code>startRun</code> skips workspace provisioning when <code>__workingDirectory</code> is present (<code>WRS:684</code>). <code>createRun</code> copies caller variables wholesale. The webhook dataset path passes through any extra field matching <code>/^[A-Za-z_]\\w*$/</code>, including <code>__x</code> (<code>IterationPlanner.ts:20-29,184-188</code>), even though the legacy path blocks <code>__</code>.",
+sc:"The holder of a webhook token posts <code>[{\"topic\":\"x\",\"__promptDirectories\":[\"C:/Users/me/.ssh\"],\"__workingDirectory\":\"C:/Users/me\"}]</code>. The private keys are attached to the prompt and sent to the model provider, and the agent runs in the home directory with bypassPermissions (W-07).",
+fix:"Strip every <code>__</code>-prefixed key from externally supplied variables in <code>createRun</code>, <code>triggerWebhook</code>, <code>IterationPlanner</code> and <code>startOrchestratedRun</code>. Move system values into a separate <code>system_vars</code> column that only the server writes. Validate directory variables against the run's uploads directory."},
+{id:"W-07",sev:"P1",area:"Security",v:false,src:"C-9",title:"Unattended workflow runs default to bypassPermissions regardless of deployment posture",
+ev:"A NULL <code>run.permissionMode</code> reads as <code>bypassPermissions</code> (<code>SES:734-745</code>, <code>WRS:1249,1263</code>). Automations have no permission field. Chats default to <code>acceptEdits</code> off-loopback (<code>composition/security.ts:382-388</code>); workflow runs do not.",
+sc:"A LAN or relay deployment exposes an automation webhook. The payload text is interpolated verbatim into the prompt, which is an injection vector, and the agent has unrestricted shell with no approval gate.",
+fix:"Default <code>run.permissionMode</code> to the deployment posture. Add <code>permissionMode</code> to automations, and require an explicit opt-in for bypass on webhook-triggered automations. Fence interpolated external data as untrusted (see W-37)."},
+/* ---- P1 runtime ---- */
+{id:"W-08",sev:"P1",area:"Runtime",v:true,src:"B-1",title:"Event-driven DAG routing never fires: every hop waits for the 3 s poll, and validation and backoff block the whole run",
+ev:"<code>subscribeRunEvents</code> uses <code>eventBus.subscribeGlobal</code> (<code>WRS:932-947</code>), whose handlers run only from <code>emitGlobal</code> (<code>EventBus.ts:430,552,666</code>). <code>SES</code> emits <code>stage_run.completed</code> with <code>eventBus.emit(session.id,…)</code> (<code>SES:2586</code>), which broadcasts only to <code>session:&lt;id&gt;</code> and <code>session:*</code> (<code>EventBus.ts:396-398</code>). Probe P2: the successor launched exactly one tick after the predecessor completed. <code>onStageCompleted</code>, including <code>custom_script</code> validation (up to 60 s per rule) and the retry backoff sleep (<code>WRS:1681</code>), runs <em>inside</em> the non-reentrant tick. <b>Measured live:</b> predecessor completed → successor queued took 1.6–2.8 s per hop, which is about 3% of a 25-stage run's wall time. Latency is a secondary cost. The main risk is the blocking tick, plus the fact that the poll is currently what hides the finalisation races.",
+sc:"A 10-stage linear workflow gains up to 30 s of dead time. One slow validation script freezes reaping, completion handling and launches for every other stage of that run.",
+fix:"Do not simply switch to <code>emitGlobal</code>: the poll is what currently serialises finalisation (W-35). Phase 1.5: give each run its own serial queue that receives stage-terminal events directly, queue validation and backoff per stage outside the tick, keep the poll only as a slow backstop, and make finalisation a CAS."},
+{id:"W-09",sev:"P1",area:"Runtime",v:true,src:"B-9 · C-1b · F-18",title:"The default session mode makes stages 2..N of any linear workflow run with stage 1's model, agent, tools, MCP and permission handler",
+ev:"<code>auto</code> resolves to <code>single</code> for every linear DAG (<code>WRS:813-821</code>), and <code>auto</code> is the default (<code>WorkflowDefinitionService.ts:143,501</code>). <code>allocateSingleMode</code> returns the existing session and ignores the new config (<code>SessionAllocator.ts:248-296</code>). The permission handler closes over stage 1's <code>stageRunId</code> and tool groups (<code>SES:1322-1327</code>). <b>Live F-18</b>: in a run where <code>auto</code> resolved to <code>single</code>, stage 2 still got a context turn repeating what the shared conversation already held, and on its timeout retry the same conversation received the context and the prompt a second time.",
+sc:"Stage 1 is Research (read-only agent). Stage 2 is Implement (a different model, a write-capable agent, extra MCP servers). Stage 2 runs on stage 1's conversation and deny policy. Or the reverse: a read-only reviewer inherits write access. A tool approval raised in stage 2 parks stage 1's <em>completed</em> row, the reaper then fails it (W-02), and the run fails.",
+fix:"Resolve <code>auto</code> to <code>per-stage</code> unless every stage has an identical binding key (harness, model, agent and version, tool policy, MCP set). In <code>single</code> mode, bind the permission handler per turn through a mutable per-conversation slot."},
+{id:"W-10",sev:"P1",area:"Lifecycle",v:false,src:"C-1 · B-6 · C-6 · C-17",title:"What a run does depends on who started it: CLI, automations, SDK run(), MCP, scripts and retries skip preprocessing, uploads, sandbox and autoCommit/PR",
+ev:"Post-processing exists only in <code>WorkflowOrchestrator.handleRunTerminal</code> (<code>:903-982</code>). Plain entry points: CLI <code>run.ts:371-409</code>, <code>AutomationService.ts:1167-1198</code>, <code>WorkflowFacade.ts:140-148</code>, MCP <code>server.ts:177</code>, <code>workflowScripts.ts:311-335</code>, retry <code>WRS:626</code>. The orchestrated path also never sets <code>__workspaceId</code>, so it gets no browser tools and no artifact tracking (<code>WorkflowOrchestrator.ts:465-476</code>). Run-level hooks fire twice on it (<code>:485</code> vs <code>WRS:780</code>).",
+sc:"A nightly automation of a project workflow with autoCommit and autoCreatePR edits the worktree and reports completed, but no commit, push or PR ever happens. The same workflow launched from the web opens a PR. A retry of that run gets none of it.",
+fix:"Phase 1.6: one lifecycle (<code>prepare → execute DAG → finalize</code>) owned by the run service, where each phase is a recorded step. Every entry point calls the same <code>startRun</code>. <code>WorkflowOrchestrator</code> becomes a set of phase handlers."},
+{id:"W-11",sev:"P1",area:"Runtime",v:true,src:"B-6",title:"Retrying a failed run fails it again: copied stages are re-validated against an empty session, and the fresh workspace has none of the earlier files",
+ev:"<code>retryRun</code> copies completed rows without <code>sessionId</code> and does not pre-seed their dedup keys (<code>WRS:651-660</code>, unlike <code>redriveRun</code> <code>:378-384</code>). The first tick validates them, <code>ResultValidator</code> finds no session and gets an empty string, and they fail. Probe P3: <code>copied stage A in retry run is now: failed (Validation failed … A too short)</code>. The retry also strips the workspace and repo variables (<code>WRS:59-80</code>).",
+sc:"A 3-stage coding workflow fails at stage 3. Retry: stage 1 (which has a validation rule) is failed instantly. Without validation, stage 3 runs in an empty directory with unresolved <code>{{repo_path}}</code> and no PR step.",
+fix:"Immediate: pre-seed dedup keys for copied rows and carry the workspace forward. Proper: Phase 2.1 rerun-from-stage with memoized stage outputs and a workspace checkpoint restore."},
+{id:"W-12",sev:"P1",area:"Runtime",v:true,src:"B-5 · F-11 · F-15",title:"Stage-level retry and resume routes lose variables, workspace and context, and treat any settle as completed",
+ev:"<code>POST /stages/:id/retry</code> and <code>/resume</code> call <code>executeStage(stageRun, runId, sessionMode)</code> with no variables, harness config or predecessor summaries (<code>workflowRuns.ts:269-272,343-346</code>). Durable-sleep <code>onWake</code> does the same (<code>composition-root.ts:1092-1095</code>). With no <code>__workingDirectory</code>, the agent runs in the <b>server's</b> <code>process.cwd()</code> (<code>SES:1168-1172</code>). The route's <code>.then(onStageCompleted)</code> fires even when the stage failed. There is no status guard, and admission and the semaphore are bypassed. <b>Live F-11</b>: retrying a stage of a <code>failed</code> run returned 202, re-ran the model and ended the stage <code>completed</code>, even though its validation rule still could not pass (validation was skipped). The run stayed <code>failed</code> with a stale error. <b>Live F-15</b>: retrying a completed run returns HTTP 502, and one ancestor can be retried repeatedly into duplicate runs.",
+sc:"The user clicks Retry on a failed stage. The agent edits files in the server's own directory using literal <code>{{topic}}</code> prompts.",
+fix:"Route both through <code>WRS.retryStage</code>/<code>resumeStage</code>, which rebuild context the way <code>resumeRun</code> does. Only call <code>onStageCompleted</code> when <code>status==='completed'</code>. Guard on status and go through admission."},
+{id:"W-13",sev:"P1",area:"Versioning",v:false,src:"A-6 · B-13",title:"Runs are pinned to topology only: live stage edits leak into in-flight runs, and deleting a stage mid-run wedges the run forever",
+ev:"<code>createRun</code> snapshots stages and edges (<code>WRS:408-423</code>), but <code>executeStage</code> (<code>SES:1063</code>), validation (<code>WRS:1327-1332</code>), retry (<code>WRS:1652</code>) and the orchestrator (<code>:840</code>) re-read the <b>live</b> stage rows. Workflow-level harness config, hooks and orchestratorConfig are read live at nine sites. In <code>onStageCompleted</code> the dedup key is recorded (<code>WRS:1299</code>) before <code>stageDefRepo.getById</code> throws.",
+sc:"While stage 1 runs, the user edits stage 3's prompt, removes its approval gate or changes its model. Stage 3 runs with the new config, and the run cannot be reproduced. If the last stage is deleted while it runs, its completion throws once, is deduped forever, and the run stays <code>running</code> indefinitely.",
+fix:"Phase 1.3: immutable <code>workflow_definition_versions</code>. The run stores <code>definition_version_id</code>, and every runtime read resolves from the version. Interim: read from <code>run.definitionSnapshot</code> (it already contains full stage objects), and record dedup keys only after success."},
+{id:"W-14",sev:"P1",area:"Runtime",v:false,src:"B-4",title:"Cancelling a run strands stages waiting for approval or sleeping; approving later revives work in a cancelled run",
+ev:"<code>cancelRun</code> only cancels <code>running|paused|queued|pending</code> (<code>WRS:1209</code>). <code>HitlService.cancelWaiter</code> has zero production callers. Recovery uses the same filter (<code>StartupRecoveryService.ts:236</code>).",
+sc:"A run with a pending approval is cancelled. The executor frame, its 30-day timer, its heartbeat interval and its admission ticket stay alive. A later approval resumes on a destroyed conversation, fails, and re-executes the stage through W-01.",
+fix:"Cancel every non-terminal status, call <code>hitl.cancelWaiter</code> for <code>awaiting_input</code>, and include <code>sleeping</code>. A cancel region should emit a terminal event per stage (W-36)."},
+{id:"W-15",sev:"P1",area:"Runtime",v:true,src:"B-7 · B-8 · F-14",title:"The stage timeout counts human approval time and restarts the stage; internal turns have no timeout at all",
+ev:"The tool-permission handler runs inside the <code>withStageTimeout</code>-wrapped <code>sendPromptAndWait</code> (<code>SES:1999-2010,759-777</code>), with a 300 s default. On timeout, <code>retryStage</code> writes <code>queued</code> over <code>awaiting_input</code>, and the stale handler later re-acquires a semaphore permit that is never released (<code>WRS:300-309</code>). Context, summary, output-retry, recap, in-session-retry and follow-up turns call <code>sendPromptAndWait</code> with no deadline (<code>SES:1733,1770,2129,2188,2860,3085</code>). <b>Live F-14</b>: a stage with <code>timeoutMs:1000</code> took 33 s of wall time to fail twice, because its context turn (~12 s) ran before the prompt with no deadline.",
+sc:"An approver takes 6 minutes. The stage restarts from scratch, the approval UI returns 409, and one of the 8 stage permits is lost. After enough of these, launches queue in admission for 30 minutes and then fail. A provider hanging in a summary turn leaves the run running forever.",
+fix:"Phase 2.3: split timeouts into queue, attempt (agent time only, paused while <code>awaiting_input</code>), total, and idle (no harness event for N minutes). Wrap every turn. Make the permit callbacks idempotent and owned by the launch."},
+{id:"W-16",sev:"P1",area:"Durability",v:true,src:"B-10 · F-3",title:"Crash recovery completes the interrupted stage with empty output, even when the turn had actually finished",
+ev:"A <code>never</code> replay policy with a missing settlement produces a synthetic result, and <code>runTurn</code> returns an empty string with a notice (<code>SES:1624-1647</code>). Execution continues to the summary and <code>completed</code> (<code>SES:2564</code>). The policy is <code>never</code> for any stage with write, shell or browser tools (<code>DurableExecutionEngine.ts:176-197</code>). <b>Live F-3</b> (server killed with <code>taskkill /T /F</code>, then restarted) found three defects:<ul><li>The prompt's assistant answer had been persisted 12 s <em>before</em> the kill, but the journal settlement lags the message persist, so the finished turn was classified in flight and skipped (<code>corruption:missing_settlement</code>).</li><li>The summary turn failed with <code>--resume requires a valid session ID … not a UUID</code>: recovery resumes with the GeneratorAI conversation id instead of the provider session id.</li><li>The stage was still marked <code>completed</code> with <code>output_text=''</code> and <code>summary=NULL</code>, and its successor ran with no context.</li></ul>There was no double execution and no orphan processes, and the run did not hang.",
+sc:"The desktop app restarts during an \"implement feature\" stage. After reboot the stage completes in seconds with empty output and a summary of nothing, and its successors proceed on that.",
+fix:"Settle the journal in the same transaction as the assistant-message persist. Resume with the provider session id recorded at session creation. On a synthetic result for a main prompt turn, park the stage as <code>paused</code> (reason <code>crash_interrupted</code>) and let the operator choose resume in session, restart, or skip. That follows Restate's pause-on-exhaustion. Surface it in the run status and notifications."},
+{id:"W-17",sev:"P1",area:"Validation",v:true,src:"B-11 · B-12 · A-31 · F-6 · F-5",title:"Success criteria check the wrong text and can be skipped entirely by a race; in-session retries cannot fix structural failures",
+ev:"The validator concatenates <b>every</b> assistant message of the session: the context acknowledgement, the output-retry answers, the <b>summary turn</b> and any rejected earlier attempt (<code>ResultValidator.ts:49-56</code>). <b>Live F-6:</b> the real answer was a correct 54-character line, yet <code>max_length 200</code>, <code>not_contains \"instruct\"</code> (only the summary said \"as instructed\") and an anchored <code>regex</code> all failed. A <code>contains</code> rule can also falsely pass because the summary mentions the token. <b>Live F-5:</b> <code>executeStage</code> writes <code>completed</code> <em>before</em> <code>onStageCompleted</code> validates. When a concurrent reconcile finalised the run in the same second, the late validation hit <code>if (run.status !== 'running') return</code> (<code>WRS:~1301</code>), and two stages whose rules could never pass ended <code>completed</code> with no validator log line. <code>json_schema</code> reads the <em>first</em> json block (<code>:209</code>). <code>retryInSession</code> updates only status, time and summary (<code>SES:2913-2917</code>); <code>outputText</code>, <code>outputData</code> and the sealed artifact stay stale, and successors prefer the artifact (<code>WRS:1838-1842</code>). Workflow-level rules still release the conversation before the retry (<code>SES:210-219</code>). With no policy set, validation retries default to 0 while error retries default to 1.",
+sc:"A JSON stage fails its schema check. The retry produces valid JSON, but validation still reads the old block and fails. If it passes, a successor with <code>contextFilter: full</code> receives the rejected output anyway.",
+fix:"Immediate: validate only the stage's prompt-turn output (the <code>outputText</code> column), never internal turns, and run validation <em>before</em> the stage becomes <code>completed</code> (introduce a <code>validating</code> status, or validate inside <code>executeStage</code>) so that finalisation cannot overtake it. Phase 2.4: validate only the latest attempt (keep a message boundary), rewrite the output columns and artifact on in-session retry, and make the repair turn part of the stage contract with its own budget."},
+{id:"W-18",sev:"P1",area:"Integrations",v:true,src:"C-2",title:"MCP credentials are never resolved for workflow stages",
+ev:"<code>mcpHub.resolveForRun</code> is the only place <code>secretref:</code> pointers are swapped for real credentials. Its only callers are in chat (<code>ChatManagementService.ts:1962,2340</code>). Stage MCP servers go straight to the harness (<code>SES:426-431</code>).",
+sc:"A stage uses the GitHub or Jira MCP server configured with a token in Settings. The provider launches it with the literal <code>secretref:mcp/…</code>, authentication fails, and the model improvises without the tool. The same server works in chat.",
+fix:"Call <code>mcpHub.resolveForRun({workflowRunId, declared})</code> on <code>sessionConfig.mcpServers</code> before <code>allocateSession</code>, and emit the dropped servers as <code>harness.session_info</code>. Best done in a shared platform tool binder used by chat and stages alike (see W-40)."},
+{id:"W-19",sev:"P1",area:"Security",v:false,src:"C-4 · C-5",title:"Permission gates do not hold on Claude or Codex stages: deny lists use Copilot tool names, and the run's HITL mode is ignored",
+ev:"<code>harnessType ?? 'copilot'</code> drives the agent deny-name expansion (<code>SES:399</code>, <code>AgentResolver.ts:180-186</code>), but the builder only ever sets <code>model</code>. Every stage turn sends the deployment-default <code>permissionMode</code> (<code>SES:3399-3405</code>), which is bypass on loopback. Under bypass, Claude never consults <code>canUseTool</code> and Codex maps it to <code>approvalPolicy:'never'</code> (<code>CodexProvider.ts:2305-2308</code>).",
+sc:"A \"read-only reviewer\" agent (fileWrite:false, shell:false) on a Claude model still writes files and runs shell commands. <code>run hitl mode &lt;run&gt; default</code> gates Copilot stages but not Claude or Codex stages.",
+fix:"Resolve the effective provider before agent resolution, or expand deny lists for all providers (absent names are harmless). Derive the per-turn mode from <code>run.permissionMode</code> and <code>stage.agentMode</code>, re-read each turn. Refuse gated modes on providers whose <code>capabilities().fullToolGating</code> is false. Needs one live confirmation on Claude."},
+/* ---- P1 definition / UI ---- */
+{id:"W-20",sev:"P1",area:"Definitions",v:true,src:"A-1 · A-2 · A-3 · C-13 · F-12",title:"Options accepted and echoed back but never stored or used: stage skills, promptType, browserConfig; definition skills, agents, defaultAgentRef, useWorktree, browserConfig",
+ev:"No DB columns exist for stage <code>skills</code>, <code>prompt_type</code> or <code>browser_config</code>, or for definition <code>browser_config</code> (<code>schema.ts:378-457</code>). <code>createDefinition</code> builds the entity without skills, agents, defaultAgentRef, useWorktree and browserConfig (<code>WorkflowDefinitionService.ts:138-154</code>). <code>defaultAgentRef</code> has no runtime reader; stages fall back to <code>harnessConfig.agentRef</code> (<code>SES:372</code>). Probe: <code>addStage</code> returned <code>skills=[…]</code>, and a re-read gave <code>undefined</code>. <code>useWorktree</code> is always true.",
+sc:"A script or SDK author sets per-stage skills or a browser override and gets 201 with the values echoed back. On reload they are gone. The workflow default agent never applies.",
+fix:"Phase 1.1: derive the repository mapping from the zod schema, and add a round-trip test that iterates <code>CreateStageSchema.shape</code>. For each field, either add a column and a reader, or delete it from the types."},
+{id:"W-21",sev:"P1",area:"Definitions",v:false,src:"A-10 · D-4",title:"Cleared or disabled settings never persist",
+ev:"<code>JSON.stringify</code> drops <code>undefined</code>. The repositories write only <code>!== undefined</code> keys (<code>StageDefinitionRepository.ts:117-140</code>, <code>WorkflowDefinitionRepository.ts:129-145</code>). The route schemas are not <code>.nullable()</code>. The UI clears values to <code>undefined</code> for: retry off, timeout 0, the last validation rule, description, template, model back to default, <code>description || undefined</code>, <code>hooks.length ? … : undefined</code>, and <code>projectId ?? undefined</code>.",
+sc:"The user turns off Retry on failure and saves. After reload, retry is back on. Deleting the last workflow hook leaves it firing, and unlinking a project leaves it linked.",
+fix:"Treat <code>null</code> as \"clear\" end to end (it already works this way for <code>agentRef</code>). With a full-graph PUT (Phase 1.2), the stored document is replaced wholesale and the question disappears."},
+{id:"W-22",sev:"P1",area:"Definitions",v:false,src:"A-4 · D-23",title:"Saved codebase selection is ignored on the server: non-web runs create worktrees for every project codebase",
+ev:"<code>orchestratorConfig.codebaseAliases</code> has no server-side reader (grep finds only a comment). The plain path uses <code>gitRepositories</code>, which zod strips, and otherwise falls back to <b>all</b> ready codebases (<code>WRS:883-892</code>). The orchestrated path uses the client's <code>selectedCodebases</code>, and mobile never sends it.",
+sc:"A workflow saved with <code>codebaseAliases:['frontend']</code> in a 6-codebase project, run from the CLI, an automation, mobile or a retry, creates 6 worktrees and exposes every repository to the agent.",
+fix:"Default <code>selectedCodebases</code> to <code>definition.orchestratorConfig.codebaseAliases</code> in both paths, and delete the <code>gitRepositories</code> plumbing."},
+{id:"W-23",sev:"P1",area:"Definitions",v:false,src:"A-5",title:"Explicit post-processing steps never run, and their presence disables autoCommit",
+ev:"The zod schema for post-processing steps has no <code>enabled</code> field, so it is stripped (probe: <code>enabled = undefined</code>). <code>WorkflowPreprocessor.ts:262</code> filters on <code>s.enabled</code>. <code>WorkflowOrchestrator.ts:1205-1216</code> counts an explicit step as <code>hasExplicitCommit</code>, which suppresses auto-commit. An unguarded <code>s.config.type</code> throws when <code>config</code> is missing.",
+sc:"A user adds a <code>run_script</code> post step through the API or an import. It is skipped silently, and autoCommit stops working.",
+fix:"Add <code>enabled: z.boolean().default(true)</code>, require <code>config</code> through a discriminated union, and treat <code>enabled !== false</code> as enabled."},
+{id:"W-24",sev:"P1",area:"Dead features",v:false,src:"A-11 · A-12 · A-13 · B-17 · D-7 · D-8 · D-9 · D-16 · D-18",title:"Controls that look live but have no reader: stage variables, prompt files, template select, iterationConfig, durable sleep, Widget tab, stage \"…\" menu",
+ev:"The only merger of <code>stage.variables</code> is <code>ConfigResolver.resolveStageConfig</code>, which has zero callers. Launch passes <code>run.variables</code> plus override variables only (<code>WRS:1508-1522</code>). <code>prompt.attachments</code>, <code>source</code> and <code>filePath</code> are never read (<code>StageBuilder.promptFile()</code> sends an empty prompt). <code>templateId</code> is display-only. <code>iterationConfig</code> has no executor. <code>DurableSleepService.sleep</code> has no caller. <code>buildWidgetTools</code> is chat-only. The stage \"…\" button's handler is only <code>stopPropagation</code> (<code>StageTimelineItem.tsx:244-256</code>), and pause, resume and cancel hooks exist with no UI.",
+sc:"Users configure these, runs ignore them, and nothing warns anyone.",
+fix:"For each control, either wire it to the runtime (stage variables merged at launch; attachments resolved in the prompt loop; widget tools through the shared binder; the \"…\" menu to pause, resume and cancel) or remove it. Reject <code>iterationConfig</code> at validation until loops ship (Phase 2.5)."},
+{id:"W-25",sev:"P1",area:"Import / export",v:true,src:"A-14 · A-15 · A-16 · A-17 · F-12",title:"Export → import (and CLI clone) is lossy; one shipped template is broken; the script materializers each drop different fields",
+ev:"<code>exportAsTemplate</code> emits a template shape, and <code>ImportWorkflowJsonSchema</code> strips its top-level preprocessing, validation and codebase keys. <code>importFromJSON</code> ignores the <code>orchestratorConfig</code>, <code>browserConfig</code> and <code>defaultAgentRef</code> it accepts (<code>:583-595</code>). <code>templateStageToCreateParams</code> omits <code>agentMode</code> (probe: a plan stage comes back as auto). <code>e2e-testing-workflow.json</code> uses <code>copilotConfig</code>, which is stripped. The three script materializers drop <code>outputSchema</code>, <code>expectedOutput</code>, <code>resultValidation</code> and <code>agentMode</code>, and <code>/run</code> creates a new definition on every run.",
+sc:"<code>workflow clone</code> of a project-linked, auto-PR workflow with a plan-mode approval stage yields a copy with no project, no PR and a stage that implements without planning.",
+fix:"A single versioned interchange format (<code>formatVersion</code>) equal to the persisted definition-version document (Phase 1.1 and 1.3). Export and import become serialisation of that document. Scripts compile to it and go through <code>importFromJSON</code>. Add a property test <code>import(export(d)) ≡ d</code> and a CI check that parses every template <code>.strict()</code>."},
+{id:"W-26",sev:"P1",area:"Builder",v:false,src:"D-5 · D-25 · D-26",title:"An empty prompt makes the workflow unsaveable, a failed first save creates duplicate workflows, and client validation misses what the server rejects",
+ev:"\"Add Prompt\" and the Files sub-tab create <code>text:''</code>, which the server rejects (<code>text.min(1)</code>). On a new workflow <code>setDefinitionId</code> runs before stages are saved, but the next save still takes the create branch because the URL is still <code>/new</code> (<code>WorkflowBuilderPage.tsx:305,322</code>). Client <code>validate()</code> does not check prompt text, variable names, hook URLs, tag limits or condition syntax. The server <code>/validate</code> is never called, and save errors show only \"Request body validation failed\". The regex placeholder <code>/export\\s+default/</code> can never match.",
+sc:"New workflow, one empty prompt, Save gives a 400. Fix the prompt and save again: a second workflow is created. Each retry adds another orphan.",
+fix:"Run the shared zod schemas client-side before saving, highlight the offending node, render the server's <code>fields</code>, switch to update once a definition id exists, and fix the placeholder."},
+{id:"W-27",sev:"P1",area:"Builder",v:false,src:"D-6 · D-13 · D-14 · D-15",title:"Silent failures in the UI: deleting a workflow that has runs, run launch, pause, cancel, retry and approval errors; lost uploads; skip overrides dropped",
+ev:"Delete gets a 409 without <code>?force</code>, and <code>confirmDelete</code> has no catch (<code>WorkflowListPage.tsx:313-325</code>). <code>executeRun</code> only logs with <code>console.error</code>. Pause, resume and cancel are <code>void mutateAsync</code>, and retry has no <code>.catch</code> (<code>WorkflowRunPageV2.tsx:352-364</code>). The builder's plain path does create → upload → start, and the upload lands in an abandoned folder. The no-variables branch of the Run dialog drops stage overrides and auto-filled git values.",
+sc:"The user deletes a workflow that was ever run and nothing happens. An approval that loses a race shows no message.",
+fix:"Show API errors inline or as toasts. Offer \"Delete workflow and N runs\". Use one shared <code>launchRun</code> helper that sends uploads through the multipart start. Always render the overrides."},
+{id:"W-28",sev:"P1",area:"Builder",v:false,src:"D-10 · D-11",title:"Workflow Variables tab: renaming loses focus on every keystroke, and choice options cannot be typed",
+ev:"<code>key={variable.name}</code> remounts the row on each character (<code>VariablesTab.tsx:153</code>). The options input joins and splits with empty entries filtered out, so the comma vanishes (<code>:270-278</code>). The stage-level editor already fixed the same focus bug.",
+sc:"A user cannot type a multi-character variable name or a second choice option.",
+fix:"Use a stable key per row and the existing draft-name pattern. Keep a raw options string that is parsed on blur."},
+/* ---- P2 ---- */
+{id:"W-29",sev:"P2",area:"Semantics",v:true,src:"B-16",title:"Failure masking: always and on_completion cleanup stages turn a failed run into completed, which then auto-commits and opens a PR",
+ev:"<code>computeTerminalRunStatusFor</code> treats any active outgoing edge to a completed stage as \"handled\" (<code>SCH:195-201</code>). Probe S3.",
+sc:"The build fails, a Notify stage (on_completion) succeeds, the run reports completed, and post-processing opens a PR.",
+fix:"Only <code>on_failure</code> edges should absorb a failure, or add an explicit per-edge \"handles failure\" flag. Report \"completed with handled failures\" as its own status."},
+{id:"W-30",sev:"P2",area:"Semantics",v:true,src:"B-18 · D-32 · F-13",title:"Definition validation accepts broken workflows: fan-ins that can never run, contradictory conditions, duplicate names, unparseable expressions",
+ev:"The duplicate-edge key includes the type (<code>DAGValidator.ts:106</code>), so A→B on_success plus A→B on_failure is accepted, and the veto rule then always skips B (probe S2). A stage condition of \"on upstream failure\" with the default on_success edge can never run. The DB's <code>UNIQUE(from,to)</code> disagrees with the validator. <b>Live F-13</b>: these are all accepted with 201, and <code>/validate</code> returns <code>valid:true</code>: duplicate stage names, duplicate <code>order</code>, the condition <code>((( variables.x ==</code> (which then skips the stage forever), <code>{type:'expression'}</code> with no text, and <code>contextSources:['nope']</code>. Malformed JSON gets <code>UNKNOWN_ERROR/process</code> instead of a 400 validation code.",
+sc:"The author builds a \"run B either way\" pair and B never runs, with no warning.",
+fix:"Validate the full semantics at save time: reject contradictory pairs and conflicting conditions, and point to <code>on_completion</code>. Move success and failure routing out of the stage condition, so that edges own routing and conditions own data predicates."},
+{id:"W-31",sev:"P2",area:"Semantics",v:true,src:"A-21 · B-22",title:"The condition evaluator is not fail-safe, and it cannot route on a stage's output",
+ev:"An unresolvable operand becomes <code>undefined</code>, and <code>undefined == undefined</code> is true. <code>NOT</code> alone is true. The string <code>\"false\"</code> is truthy. <code>===</code> is not rejected. Probe: <code>{{enable_tests}} === true</code> with <code>enable_tests=false</code> gives <b>true</b>, so the shipped <code>e2e-feature-coverage.workflow.mjs</code> condition always passes. The only scopes are the parent status and static variables. The preprocessor has a second, different grammar.",
+sc:"A stage meant to run only when tests are enabled always runs. There is no way to write \"run Fix only if review.verdict == 'reject'\".",
+fix:"Parse at save time and treat unknown identifiers as errors. Add typed scopes <code>stages.&lt;id&gt;.status</code> and <code>stages.&lt;id&gt;.output.&lt;field&gt;</code> (from typed outputs, Phase 2.4). Use one grammar for the preprocessor and the DAG."},
+{id:"W-32",sev:"P2",area:"Runtime",v:true,src:"B-14 · B-15 · B-20 · B-23 · B-19 · F-17",title:"Lifecycle hygiene: dedup-before-guard loses events, failed runs leak sessions, a boot-order race exists, finalisation is check-then-act, and the post-processing listener expires after 24 h",
+ev:"Dedup keys are added before the <code>run.status</code> guard (<code>WRS:1299,1416</code>). <code>finalizeRun</code> for failed or cancelled runs never calls <code>releaseAll</code> (<code>WRS:1536-1582</code>). Recovery redrives runs before <code>sessionAllocator.rehydrate()</code> (<code>StartupRecoveryService.ts:99 vs 109</code>). <code>completeRun</code> never re-checks status. The post-processing listener has a 24 h TTL while approvals can wait 30 days (<code>WorkflowOrchestrator.ts:1048</code>). <b>Live F-17</b>: sessions of failed and reaped stages were still <code>active</code> and were rehydrated on restart.",
+sc:"A weekend approval completes on Monday and no PR is created. Shared-session CLI processes survive every failed run. A resumed run stays stuck on a <code>queued</code> row with a null heartbeat.",
+fix:"Phase 1.4 and 1.5 close all of these: CAS finalisation, dedup recorded after a successful handler, <code>releaseAll</code> in every terminal path, rehydrate before redrive, and post-processing driven by the persisted intent instead of a listener."},
+{id:"W-33",sev:"P2",area:"Streaming",v:false,src:"B-21 · D-19 · D-20 · D-21 · D-22 · D-24 · D-34",title:"The run page stream and UI have correctness and cost gaps",
+ev:"The run-scope republish is fire-and-forget (<code>composition-root.ts:1009-1015</code>). A watermark filter can drop an item for a second subscriber (<code>StreamBroker.ts:227-236</code>). <code>updateStageRunStatus</code> drops <code>interruptData</code>, so the approve buttons wait for the 5 s poll. Graph and timeline clicks set a store field that V2 never reads. The 32-stream LRU evicts the page's own stage streams (<code>protectStream</code> is never called). A 1 s timer re-renders every stage. The scratchpad is refetched every 3 s and the workspace listing is polled forever. The Files tab shows the whole workspace as \"added\".",
+sc:"The approval buttons appear 5 s late. After browsing about 30 chats, the current run's tool steps and hooks vanish. A long run keeps a CPU core busy re-rendering.",
+fix:"Per-subscriber ordered queues. Copy <code>interruptData</code> in the reducer. Protect the run's streams. Move the clock into the header. Memoise stage views. Stop polling once the run is terminal. Label or compute per-stage file changes from checkpoints."},
+{id:"W-34",sev:"P2",area:"Security",v:false,src:"A-19 · A-20 · C §e.4 · C-20",title:"Command-bearing definition fields need only write:workflows, and secrets are stored and returned in plain text",
+ev:"All of these execute host commands and are writable with <code>write:workflows</code>: hooks (<code>command</code>/<code>modulePath</code>), stdio MCP servers, pre- and post-processing <code>run_script</code>, and <code>custom_script</code> validation. Script upload writes the file <em>before</em> validating it, so a failing script stays on disk and runs at every boot (<code>WorkflowScriptLoader.ts:420-425</code>). <code>harnessConfig.provider.apiKey</code>, hook headers and env are returned unredacted by GET and export. There is no <code>secret</code> variable type, so values land in prompts, JSONL logs and <code>GEN_VAR_*</code> env. Stage-to-stage context is not fenced as untrusted.",
+sc:"A paired device with <code>write:workflows</code> plants a hook command, which runs when the owner next runs the workflow.",
+fix:"Require an elevated scope for command-bearing fields. Use <code>secretref:</code> for keys and headers. Add <code>type:'secret'</code> variables backed by the vault and redacted from logs. Validate scripts before the atomic rename. Wrap injected context as <code>&lt;generatorai:stage-output trust=\"untrusted\"&gt;</code>."},
+{id:"W-35",sev:"P2",area:"References",v:false,src:"A-22 · D-29 · D-28",title:"Cross-references by stage name or order are fragile",
+ev:"<code>contextSources</code> resolve by stage name, first match (<code>WRS:1817</code>). Workflow-level validations match <code>stageIndex === order</code>, and <code>order</code> is not compacted after deletes. Stage overrides match name <em>or</em> index in one <code>find</code> (<code>WRS:1878-1881</code>). Stage names are not unique. Node positions are never persisted.",
+sc:"Renaming \"Plan\" silently removes it from its successors' context. Skipping \"Deploy\" also skips \"Lint\", which shares its index. Hand-arranged layouts reset on every save.",
+fix:"Store stage ids in every reference (translate names at import), enforce unique names, validate references at save time, and persist <code>position</code>."},
+{id:"W-36",sev:"P2",area:"Orchestration",v:false,src:"C-7 · C-8 · C-11 · C-12",title:"Orchestrator cancel deletes worktrees with rm -rf; staged skills are committed into PRs; provider capability loss and missing agents are silent",
+ev:"<code>cancelOrchestratedRun</code> and the failure catch call <code>GitClient.cleanup</code> (<code>fs.rm</code> recursive) on worktree paths (<code>WorkflowOrchestrator.ts:412-417,776-778</code>). Skills are staged into <code>&lt;worktree&gt;/.generatorai/skills</code> and committed by <code>git add -A</code>. No core caller reads <code>getConversationWarnings</code>. A missing or disabled <code>agentRef</code> falls back to the default tool policy with only a <code>console.warn</code>.",
+sc:"Cancelling deletes partial work and leaves dangling <code>.git/worktrees</code> metadata. A PR contains <code>.generatorai/skills/**</code>. A stage routed to OpenCode silently loses its MCP servers.",
+fix:"Use <code>WorktreeService</code> removal and never delete on cancel. Stage skills at the workspace root. Surface provider warnings on the stage stream and validate options against <code>capabilitiesFor()</code> at save. Fail the stage when a bound agent is missing."},
+{id:"W-37",sev:"P2",area:"Integrations",v:false,src:"C-10 · C-14 · C-16 · A-27 · A-28",title:"CLI run profiles do nothing, legacy webhooks run nothing, three upload layouts exist, and the SDK create path is lossy",
+ev:"The CLI emits <code>{stageId, patch}</code> overrides while the server matches <code>stageName</code>/<code>stageIndex</code> (<code>run.ts:36-42</code> vs <code>WRS:1862-1882</code>). <code>WebhookService</code> → <code>SessionService.createSession</code> ignores <code>workflows</code>. Upload routes write <code>skills/&lt;name&gt;/SKILL.md</code> or loose files. <code>WorkflowFacade.create</code> drops <code>harnessOverrides</code> and <code>variables</code> and writes malformed hooks.",
+sc:"<code>run profile validate</code> says valid, and the run still executes every stage the profile meant to skip. A GitHub webhook logs \"processed\" and nothing runs.",
+fix:"Parse profiles with <code>RunProfileSchema</code>. Return 410 from the legacy routes or forward them to automations. Use one upload writer. Route the SDK through the interchange format."},
+{id:"W-38",sev:"P2",area:"API",v:false,src:"A-25 · A-23 · A-34 · F-16",title:"Nested routes skip the ownership check, force-delete orphans active executors, and withTransaction absorbs unrelated writes",
+ev:"<code>PUT/DELETE /:id/stages/:stageId</code> and <code>DELETE /:id/edges/:edgeId</code> ignore <code>:id</code>. <code>deleteDefinition(force)</code> deletes runs through the repository without cancelling them. The <code>automation_execution_runs</code> DDL is <code>NOT NULL … ON DELETE SET NULL</code>. <code>withTransaction</code> holds a raw <code>BEGIN</code> across awaits on the shared connection, so unrelated writes (heartbeats, events) join, and roll back with, an import.",
+sc:"A failed import rolls back a burst of unrelated stream events and heartbeats. Deleting a definition leaves agents running with no rows.",
+fix:"Assert ownership on nested routes. Route force-delete through <code>WorkflowRunService.deleteRun</code>. Fix the DDL in a migration. Make transactions synchronous (better-sqlite3 <code>db.transaction</code>) or give them a dedicated connection."},
+{id:"W-39",sev:"P2",area:"Validation",v:false,src:"B §c · B-24 · C-19",title:"Retry has no error classification or jitter, regex rules are unguarded, and config knobs are unwired",
+ev:"Every error is retried once by default, including auth failures, a missing model and quota errors. Only <code>StageRejectedError</code> is excluded. There is no jitter. <code>new RegExp(user)</code> has no guard. <code>AppConfig.workflow.stageTimeoutMs</code> and the heartbeat knobs are never wired.",
+sc:"An invalid API key retries once per stage. A pathological regex blocks the event loop.",
+fix:"Phase 2.2: error classes (retryable, non-retryable, repairable), full jitter, and <code>Retry-After</code> support. Use RE2 or a time-boxed matcher. Wire the config."},
+{id:"W-40",sev:"P2",area:"Integrations",v:false,src:"C-18 · C-15",title:"Stages lack the tools chats have (widgets, computer use, extension tools, chat→workflow), and the worker capability clamp does not hold on Copilot",
+ev:"<code>buildWidgetTools</code>, <code>buildComputerToolSet</code> and <code>customToolRegistry</code> are bound only in <code>ChatManagementService</code>. No chat tool starts or monitors a workflow. The parent's built-in deny list goes into <code>excludedTools</code>, which Copilot does not apply to built-ins.",
+sc:"A stage cannot render a widget, drive the desktop or use an extension's tools. A chat agent cannot hand work off to a workflow.",
+fix:"One platform tool binder used by both chat and stage, gated by <code>toolPolicy.groups</code>. Add <code>run_workflow</code> and <code>check_workflow_run</code> chat tools. Put the parent's denials into <code>excludedBuiltinTools</code>."},
+{id:"W-46",sev:"P1",area:"HITL",v:true,src:"F-2",title:"\"Request changes\" on an approval gate: the revision reply is never streamed, saved or merged, so the approved output is the pre-revision one",
+ev:"<code>unsubscribe?.()</code> tears down the conversation subscription at <code>SES:2225</code>, before the approval-gate review loop. The loop assumes \"the existing subscription handles emission + persistence\" (<code>SES:2457,2492</code>), so <code>turnContent</code> stays empty and the merge into <code>outputText</code> is skipped. <b>Live</b> (run <code>46e800a1</code>): the feedback message was persisted, the model ran for about 15 s, and there were zero harness events, no assistant message and an unchanged <code>outputText</code>. After approval, the successor received the pre-revision output.",
+sc:"A reviewer asks for changes, sees the stage re-park as \"updated after feedback\" and approves, and the downstream stages use the text they rejected.",
+fix:"Keep the subscription alive until the approval loop settles, or run each review turn through the same <code>runTurn</code> path as the prompt turns (with journaling, streaming, persistence and output merge). Add an integration test: request changes → approve → successor context contains the revision."},
+{id:"W-47",sev:"P2",area:"Validation",v:true,src:"F-7 · F-8 · F-9",title:"Three of the eight result-validation rule types cannot be used: json_schema, llm_validation and custom_script",
+ev:"<ul><li><code>json_schema</code> treats the schema's own keywords as required output keys. Live: <code>{\"name\":\"Bob\",\"age\":42}</code> against a real JSON Schema failed with <code>missing keys: type, required, properties</code> (<code>ResultValidator.ts:190-229</code>).</li><li><code>llm_validation</code> passes whenever the output is at least 50 characters. Live: \"must be written in French and mention Paris\" passed on English output (<code>:233-247</code>).</li><li><code>custom_script</code> passes the whole string as the executable with <code>args: []</code>, against an allowlist of bare names, so <code>node -e \"…\"</code> is rejected with a misleading \"no path separators\" error (<code>SandboxedScriptRunner.ts:343,353</code>).</li></ul>",
+sc:"The author adds a JSON Schema check or a judge rule. The first fails every correct output, the second passes every output.",
+fix:"<code>json_schema</code>: validate with Ajv against the extracted JSON (the one from the latest turn). <code>llm_validation</code>: implement it as a judge call with a rubric and threshold (soft tier, Phase 2.4), or remove it from the schema and UI. <code>custom_script</code>: add <code>args[]</code>, run in the workspace, and document the allowlist."},
+{id:"W-48",sev:"P2",area:"Runtime",v:true,src:"F-10 · O-6",title:"Short answers trigger an extra \"output retry\" turn whose reply is appended to the stage output; prompt boilerplate provokes refusals",
+ev:"A text stage with output under 50 characters is sent up to 2 extra prompts (\"Your response did not include a clear summary…\", <code>SES:2069-2095</code>), and the replies are <b>appended</b> to <code>outputText</code>. Live: <code>outputText = \"OK-A **Summary** The only instruction…\"</code>, and a JSON stage's output became <code>```json {...}``` You're right. I apologize…</code>. Every prompt also gets a ~700-character \"IMPORTANT: How to create files…\" suffix. Haiku refused about 30% of trivial directive prompts as prompt injection.",
+sc:"Yes/no classifiers, routers and JSON-producing stages get polluted output, which breaks downstream parsing, and each such stage pays for an extra ~12 s model turn.",
+fix:"Remove the length heuristic, or make it opt-in per stage (<code>minOutputChars</code>). Never append retry replies: replace the output instead. Attach the file-creation guidance only to stages that can write files, and put it in the system prompt instead of the user turn."},
+{id:"W-49",sev:"P2",area:"Performance",v:true,src:"O-1 · O-2 · O-3 · T9 · T10",title:"Each stage costs 2–3 model turns and parallel branches are serialised: a trivial stage takes 26–47 s, and fan-out width is effectively 4",
+ev:"<ul><li>A root stage runs prompt + summary. Every non-root stage adds a context-ack turn (context is sent as a separate user turn). With haiku, each turn took ~8–9 s to first event, so a trivial stage took 26 s at the root and 41–47 s elsewhere.</li><li><code>executeStage</code> awaits a git checkpoint capture (<code>git add -A</code> + <code>write-tree</code>, ~2.5 s on Windows) under a per-workspace single-flight lock <em>before</em> emitting <code>queued</code> (<code>SES:1100-1113</code>, <code>CheckpointService.ts:30-63</code>). Five \"parallel\" branches started ~12 s apart.</li><li>claude-agent caps concurrent turns at 4 (<code>GENERATORAI_MAX_CONCURRENT_AGENT_TURNS</code>), separate from the stage semaphore of 8 and admission of 16.</li><li>Each stream event is written 3 times. A trivial 25-stage run wrote about 1.9 MB.</li></ul>",
+sc:"A 25-stage workflow of one-line prompts takes 7 minutes. The scheduler adds only about 3% of that, and model-turn overhead is the rest. Fan-out beyond 4 queues silently.",
+fix:"Deliver predecessor context in the first prompt turn (or the system prompt), not as its own turn. Make the summary turn opt-in, or have a cheaper model produce it asynchronously (use <code>outputData</code>/structured output when a schema exists). Take checkpoints outside the launch path, and skip them for stages with no write tools. Expose the per-provider turn cap as a flow-control key (Phase 2.7). Write stream events once (W-42)."},
+/* ---- P3 ---- */
+{id:"W-41",sev:"P3",area:"Runtime",v:false,src:"B-24",title:"Smaller runtime defects",
+ev:"<ul><li><code>waitForCompletion:false</code> fires and forgets with empty output.</li><li>Pause mid-turn on Claude saves the partial text as a complete message, so resume skips the rest.</li><li><code>pauseRun</code> ignores <code>queued</code> stages.</li><li>A double start leaks a <code>RunLogger</code>.</li><li><code>pre_run</code> hook variables leak across sibling stages.</li><li><code>stage_run.cancelled</code> and user-initiated <code>stage_run.paused</code> are never emitted.</li><li>The preprocessor uses <code>sh -c</code>, which is missing on stock Windows, and its cwd defaults to the server's.</li><li>A <code>StageExecutionError</code> passes the definition id as the run id (<code>SES:377</code>).</li></ul>",
+sc:"Each is minor on its own. Together they make stage state harder to trust.",
+fix:"Fix each directly. Most go away with Phase 1.4 (the state machine enforced at the repository) and a per-platform shell."},
+{id:"W-42",sev:"P3",area:"Performance",v:false,src:"A-33 · B-25",title:"Write amplification and polling cost",
+ev:"<ul><li>Two SQL writes per token delta (session scope and run scope).</li><li>25–40 writes per stage.</li><li>2–6 reads per active run every 3 s, including runs waiting 30 days for approval.</li><li>O(n²) query re-reads on import.</li><li>An unpaginated definition list.</li></ul>",
+sc:"This is fine at today's sizes (tens of stages) but grows with runs × lifetime.",
+fix:"Write deltas once and derive the run scope as a view. Use an event-driven scheduler (Phase 1.5) so idle runs cost nothing. Batch import writes. Paginate the list."},
+{id:"W-43",sev:"P3",area:"Builder",v:false,src:"D-17 · D-27 · D-30 · D-31 · D-33",title:"Builder polish",
+ev:"<ul><li>Run is allowed with unsaved edits and executes the saved version.</li><li>Duplicating a stage drops the fields the builder cannot edit.</li><li>Node pills read fields the panel never writes.</li><li>There is no workflow-level model control, although stages say \"inherit\".</li><li>The <code>structured</code> context filter is missing from the select.</li><li>Cancel has no confirmation.</li><li>Completed runs have no Re-run.</li></ul>",
+sc:"The user runs a stale prompt, or sees capability pills that never light up.",
+fix:"Add a \"Save and run\" prompt. Derive <code>toStageParams</code> from the schema. Fix the pills. Add a model, reasoning and default-agent section to the General tab."},
+{id:"W-44",sev:"P3",area:"Docs",v:false,src:"A doc drift · C-19",title:"Documentation drift in more than 25 places, including a fictional SDK example",
+ev:"See the Documentation drift section.",
+sc:"Users follow the documented PATCH, <code>--condition</code> and SDK calls, and they fail.",
+fix:"Generate the field reference from the zod schemas, and keep semantics docs hand-written."},
+{id:"W-45",sev:"P3",area:"Templates",v:false,src:"A-26 · A-30 · A-35",title:"Template schema hazards and validator gaps",
+ev:"<ul><li>The template harness schema injects <code>model:'claude-sonnet-4.6'</code> whenever a harness object is present, and strips harnessType, permissionMode and agentRef.</li><li>Template hooks use the stage schema but are stored as workflow hooks.</li><li>Stage templates are never loaded.</li><li>The two template endpoints disagree on the autoCommit default.</li><li>Export includes the source id and has no format version.</li><li>Tags accumulate as <code>json-import</code> duplicates.</li></ul>",
+sc:"A template stage override that only sets reasoning effort also forces a model.",
+fix:"Reuse <code>HarnessConfigSchema</code> for templates with no defaults injected. This is absorbed by the interchange format (W-25)."}
+];
+
+const TOP = ["W-01","W-02","W-06","W-03","W-04","W-17","W-46","W-16","W-10","W-09"];
+
+const OPTIONS = [
+["prompts[].text","string with {{var}}","Interpolated and sent as a turn (SES:1809-1855)","y","y","y","y"],
+["prompts[].waitForCompletion","bool, default true","false = fire-and-forget sendPrompt, no timeout, empty output","y","y","y","y"],
+["prompts[].attachments / source / filePath","paths","Never read at run time","pa","pa","n","pa"],
+["harnessConfigOverrides.model / reasoningEffort","model id / low–high","Routes the provider by model; effort via AgentResolver","y","y","y","y"],
+["harnessConfigOverrides (other keys)","mcpServers, tools, systemMessage…","Copied over the workflow config (mcpServers deep-merged)","n","y","y","y"],
+["agentRef","scope:slug","AgentResolver: tools, skills, MCP, team, instructions","y","y","y","y"],
+["agentMode","auto | plan","Per-turn plan mode (SES:1929,3400)","n","y","y","n"],
+["skills (stage)","{name,dir}[] ≤10","No column; dropped on save","n","n","n","n"],
+["browserConfig (stage)","BrowserConfig","No column; dropped","n","n","n","n"],
+["variables (stage)","Record","Never merged into run variables","y","y","n","y"],
+["condition","always | on_success | on_failure | expression","Evaluated per activating parent (SCH:153-161)","y","y","y","y"],
+["retryPolicy","maxRetries 0-10, backoffMs ≥100, ×≥1","Error retry default {1,3000,1}; validation retry default 0","y","pa","y","y"],
+["timeoutMs","≥1000 ms, default 300 000","Per main prompt turn only; includes HITL wait","y","pa","pa","y"],
+["contextFilter","summary-only | full | structured | none","Predecessor context turn (SES:1672-1737)","pa","y","y","y"],
+["contextSources","stage names ≤50","Context from named stages, first name match","n","y","y","y"],
+["outputFormat / outputSchema / expectedOutput","text|json, JSON Schema","JSON extraction, format retries, auto-summary","n","y","y","pa"],
+["resultValidation[]","8 rule types ≤20","Checked in the reconciler tick; retry or fail","y","pa","y","y"],
+["approvalRequired","bool","Approval gate after post_run (SES:2301)","y","y","y","y"],
+["hooks[]","pre_run, post_prompt, post_run, on_error, on_cancel…","HookExecutor phases","y","y","y","y"],
+["iterationConfig","sub-workflow loop","No executor","n","y","n","n"],
+["templateId","string","Display only","y","pa","n","n"]
+];
+
+const BENCH = [
+["Run pinned to a full definition version","Airflow 3, Trigger.dev, Vercel WDK, Temporal (Pinned), DBOS","Topology snapshot only; config read live","P0 gap (W-13)"],
+["Step result memoized, written atomically with next-step activation","DBOS, Inngest, Cloudflare Workflows","Turn journal exists; stage completion and routing are separate writes plus a 3 s poll","P0 gap (W-08)"],
+["Rerun from step / fork, optionally with edited input","Inngest, DBOS forkWorkflow, Mastra timeTravel, LangGraph, Step Functions redrive, Temporal reset","Retry creates a new run that re-validates copied stages and loses the workspace","P0 gap (W-11)"],
+["Exhausted retries → pause, not fail; error classes","Restate 1.5, Inngest NonRetriableError/RetryAfterError, Temporal non-retryable types","No error classes; retry once, then fail","P0 gap (W-39)"],
+["Approval = durable wait + token + timeout edge; frees the slot","Inngest waitForEvent, Trigger.dev waitpoints, Airflow 3.1 HITL, Step Functions task token","Durable awaitable (30 d); holds a stage permit; timeout counts against the stage; no timeout edge","Partial (W-15)"],
+["Hierarchical budgets (turns, $, tokens, time)","Claude Agent SDK maxTurns / maxBudgetUsd, OpenAI max_turns","maxTurns on Claude only; no run budget","Gap"],
+["Split timeouts: queue, attempt, total, heartbeat","Temporal (four timeouts), Step Functions HeartbeatSeconds","One per-prompt timeout plus a liveness heartbeat","Gap (W-15)"],
+["Typed step I/O, schema validation, repair turn","Mastra input/outputSchema, OpenAI output_type, Dagster blocking checks","outputSchema + json_schema rule (top-level keys, first block)","Partial (W-17)"],
+["Conditions on step output","Step Functions Choice, Argo depends, CrewAI @router","Parent status and static variables only","Gap (W-31)"],
+["Join policies: all / any / N-of-M / race","Argo AnySucceeded, Serverless fork.compete, BPMN complex gateway","AND-join with veto only","Gap"],
+["Loops with a cap (evaluator-optimizer)","Mastra dowhile, ADK LoopAgent, Anthropic guidance","None (iterationConfig is dead)","Gap"],
+["Fan-out/map with a concurrency cap and failure tolerance","Step Functions Distributed Map, Mastra foreach, LangGraph Send","Static parallel branches only","Gap"],
+["Flow control: per-key concurrency, priority, singleton","Inngest, Hatchet, Temporal fairness, DBOS queues","Global admission + semaphore(8)","Gap"],
+["Compensation / exit handlers","Temporal saga, Prefect on_rollback, Argo onExit","on_failure edges and hooks; no rollback","Partial"],
+["OTel GenAI tracing; per-step cost","OTel GenAI conventions, OpenAI SDK tracing, Inngest traces","Per-stage usage chips (live only)","Gap"],
+["Test a single node with pinned data","n8n pinned data / execute step, Mastra time travel","None","Gap"],
+["Step result cache","Prefect cache policies, LangGraph CachePolicy, Argo memoization","None","Gap"],
+["Idempotency keys on triggers and approvals","Restate, Trigger.dev, DBOS","Stage claim is idempotent; run start and trigger are not","Partial"],
+["Run diffing","No engine offers it as a built-in feature","None","Opportunity"]
+];
+
+const PLAN = [
+{id:"plan-0",pn:"Phase 0",title:"Stop the bleeding",dur:"about 2 weeks · targeted patches, no redesign",items:[
+["0.1 Cancel and pause order + retry guard","W-01, W-14","Write the terminal status before aborting. <code>retryStage</code> and <code>catch</code> re-read the stage and run and bail unless both are running. Cancel <code>awaiting_input</code> and <code>sleeping</code> too, and call <code>hitl.cancelWaiter</code>.","Cheapest fix that removes duplicated work, about 40 lines. The general fix (1.4) comes later, but this one stops the token burn now."],
+["0.2 Heartbeat stamped on every entry to running","W-02","Add <code>heartbeat_at = now</code> to every UPDATE that sets <code>running</code>/<code>queued</code>, and start the heartbeat in <code>retryInSession</code> and follow-ups.","A one-column change at five call sites. Step Functions recommends a heartbeat on every callback task for exactly this failure (reaping on a stale beat)."],
+["0.3 Builder save: remap ids, skip cascaded edges, no reload during save","W-03, W-04 (UI half), W-05 (UI half)","Add a <code>localToServerId</code> map to the update path. Drop edge deletes whose endpoints were deleted. Gate <code>loadDefinition</code> on <code>!isSaving && !isDirty</code>.","Stops data loss in the most-used screen while 1.2 is built."],
+["0.4 deleteStage in a transaction + FK SET NULL","W-04","New migration: <code>stage_runs.stage_definition_id</code> becomes <code>ON DELETE SET NULL</code> (the name is already copied onto the row). Wrap the delete in <code>withTransaction</code>, and map FK errors to 409.","Keeps run history readable and makes the delete atomic, with no need to wait for the versions table."],
+["0.5 Security: strip reserved variables, posture-based permission default, resolve MCP secrets","W-06, W-07, W-18","Filter <code>__*</code> keys at every external boundary. Default <code>run.permissionMode</code> to the deployment posture. Call <code>mcpHub.resolveForRun</code> in <code>executeStage</code>.","Three small patches that close a data-exfiltration path and a functional break for credentialed MCP servers."],
+["0.6 Surface errors in the UI","W-27, W-26 (duplicates)","Toasts for launch, pause, cancel, retry, approve and delete. The create path switches to update once a definition id exists.","The user can currently lose work or state without being told."],
+["0.7 Validation reads the right text, before completion","W-17, W-47 (json_schema)","Validate <code>outputText</code> from the prompt turns only, never context, summary or retry turns. Run validation before writing <code>completed</code>, so finalisation cannot overtake it. Validate <code>json_schema</code> with Ajv.","Live T4 showed three correct outputs failing and a failing stage passing. The fix is local to <code>ResultValidator</code> and the completion write."],
+["0.8 Keep the approval-gate revision","W-46","Keep the harness subscription until the approval loop settles, and merge the revision into <code>outputText</code>.","A two-line ordering fix for a confirmed live data-loss path."],
+["0.9 Stop polluting short outputs","W-48","Drop the under-50-characters output-retry heuristic, or gate it behind an opt-in. Never append retry replies to the output.","Classifier and JSON stages are broken by it today, and it costs an extra model turn each time."]
+]},
+{id:"plan-1",pn:"Phase 1",title:"Foundations: remove the root-cause patterns",dur:"about 5 weeks",items:[
+["1.1 One schema, derived everywhere","W-20, W-21, W-23, W-25, W-43, W-44, W-45","The zod schemas in <code>shared</code> become the single source. The repository maps a stage as a validated JSON document (<code>stage_definitions.config JSON</code>) plus a few indexed columns, instead of about 30 hand-mapped columns. <code>toStageParams</code>, export, import, template and script materialisation all use <code>Schema.parse</code>/<code>pick</code>. A compile-time exhaustiveness test and a property test assert <code>import(export(d)) ≡ d</code>.","<b>Evidence:</b> five of the eight September fixes reopened because they patched some layers and not others (A §e). Mastra defines step I/O schemas once and derives from them. SQLite JSON columns with <code>json_extract</code> indexes keep query needs covered. <b>Why cheapest:</b> it deletes code (about 10 mappers) instead of adding it, and every future field is correct by construction."],
+["1.2 Atomic, versioned graph save","W-03, W-04, W-05, W-21, W-38","<code>PUT /workflow-definitions/:id/graph {definition, stages, edges, expectedVersion}</code>. One synchronous better-sqlite3 transaction replaces the stages and edges, validates the DAG and bumps <code>version</code>. It returns 409 with the current version on a mismatch. The builder sends the whole document; the CLI and SDK get a <code>graph set</code>.","<b>Evidence:</b> n8n and Step Functions save the whole workflow document. Optimistic concurrency with an expected version is the standard answer to last-writer-wins across devices (the mobile and desktop split already exists). <b>Why cheapest:</b> one endpoint replaces 1+N+M calls and the client diff code. A single SQLite transaction of 100 rows takes milliseconds."],
+["1.3 Immutable definition versions; runs pin a version","W-13, W-04, W-25, W-11","Every save that changes the graph writes a <code>workflow_definition_versions</code> row (the full document from 1.1, plus a hash). The run stores <code>definition_version_id</code>, and every runtime read (stage config, hooks, harness config, orchestratorConfig) resolves from it. Stage runs reference the version's stage ids, so deleting a live stage never touches history. Add a Versions list and diff in the UI.","<b>Evidence:</b> Airflow 3 (\"a DAG will run through to completion based on the version at start\"), Trigger.dev (runs locked at start, retries on the original version), Vercel WDK, Temporal Pinned and DBOS app versions. <b>Why cheapest:</b> <code>definition_snapshot</code> already stores full stage objects, so this promotes an existing blob to a first-class, deduplicated (hash) table and switches about 9 read sites."],
+["1.4 Enforced state machine with CAS transitions and a fenced lease","W-01, W-02, W-14, W-32, W-41","The <code>StageRunRepository.transition(id, from[], to, patch, expectedVersion)</code> does <code>UPDATE … WHERE id=? AND status IN (…) AND version=? RETURNING</code> and is the <em>only</em> writer of status. The allowed-transition table is the existing <code>StageRunStateMachine</code>. The lease uses <code>lease_owner</code> plus <code>lease_expires_at</code>, renewed by harness stream activity, and the reaper steals only expired leases. Runs get the same treatment.","<b>Evidence:</b> Absurd and DBOS use claim-based scheduling with conditional updates, and Temporal and Step Functions distinguish a heartbeat from start-to-close. The fuzz test above makes the invariant (\"a terminal state is never overwritten\") executable. <b>Why cheapest:</b> the columns (<code>version</code>, <code>lease_owner</code>) and the state machine already exist but are unused. SQLite WAL with a single writer makes a CAS a single-row UPDATE with no lock manager."],
+["1.5 Event-driven per-run scheduler (actor)","W-08, W-32, W-42","Each active run gets an in-process serial mailbox. Stage-terminal events are delivered to it directly (not through the global bus). Validation, backoff and hooks run as queued jobs per stage, off the scheduling path. The 3 s poll becomes a 30 s backstop that only checks leases. Completion, activation of successors and the next-stage claims are written in one transaction.","<b>Evidence:</b> the DBOS \"one write per step\" budget, and the SQLite design note of writing the checkpoint in the same transaction as edge activation (E §5). <b>Why cheapest:</b> removes 3 s per hop and the idle polling cost with no new infrastructure. A mailbox per run keeps the existing FIFO-lock semantics, and 1.4 makes it safe to stop relying on the poll."],
+["1.6 One run lifecycle for every entry point","W-10, W-11, W-22, W-36, W-37","<code>startRun</code> executes <code>prepare</code> (workspace, worktrees from <code>codebaseAliases</code>, clone, preprocessing, uploads, sandbox), then <code>execute</code> (the DAG), then <code>finalize</code> (hooks, commit, PR, release). Each phase is a durable step recorded in the run, so a restart resumes the right phase and post-processing is driven by the recorded intent, not a 24 h listener. The CLI, automations, SDK, MCP, scripts and retry all call it. <code>WorkflowOrchestrator</code> is split into phase handlers.","<b>Evidence:</b> Argo <code>onExit</code> and Prefect transactions treat setup and teardown as part of the workflow, not as a client-dependent wrapper. <b>Why cheapest:</b> the phases already exist as functions, so this is re-plumbing, and it deletes the duplicated hooks and the TTL listener."],
+["1.7 Per-stage session binding and a shared platform tool binder","W-09, W-18, W-19, W-40","<code>auto</code> becomes per-stage unless the binding keys match. One <code>PlatformToolBinder</code> (MCP hub resolution, browser, widgets, computer use, extension tools, per-turn permission handler) is used by both chat and stages. The per-turn permission mode comes from the run. Provider warnings go to the stage stream.","<b>Why:</b> every stage-vs-chat gap in the harness matrix comes from two different binding code paths. Sharing one closes them all and keeps them closed."]
+]},
+{id:"plan-2",pn:"Phase 2",title:"Capability parity with modern engines",dur:"about 6–10 weeks, parallelisable",items:[
+["2.1 Rerun from stage / fork run","W-11","\"Rerun from here\" on any stage creates a child run pinned to the same version (or, optionally, the latest). Completed upstream stages are copied as memoized results (output, artifacts, summary). The workspace is restored from the stage's before-checkpoint. An optional input edit is recorded. The run page shows the lineage.","<b>Evidence:</b> Inngest rerun-from-step with edited input, DBOS <code>forkWorkflow</code>, Mastra <code>timeTravel</code>, LangGraph fork, Step Functions redrive and Temporal reset. The research names it the main debugging tool for LLM workflows. <b>Why cheapest here:</b> per-stage checkpoints (<code>captureStageAfter</code>) and durable artifacts already exist."],
+["2.2 Error classes + pause-on-exhaustion","W-39, W-16","Classify errors as <code>retryable</code> (429, 529, 5xx, transport; honour Retry-After, full jitter), <code>non_retryable</code> (auth, model missing, budget, permission denied) or <code>repairable</code> (validation). When retries run out, the stage is <em>paused</em> with a reason, and the operator can resume, edit and resume, skip, or fail. A crash-interrupted turn goes the same way.","<b>Evidence:</b> Restate 1.5 pauses on exhausted retries; Inngest has <code>NonRetriableError</code> and <code>RetryAfterError</code>; Temporal has non-retryable types; Step Functions has <code>JitterStrategy: FULL</code>. <b>Why:</b> agent runs are expensive, so pausing keeps the journal and avoids a full restart."],
+["2.3 Split timeouts, with approval time excluded","W-15","Four stage timeouts: <code>queueTimeout</code>, <code>attemptTimeout</code> (agent time only), <code>totalTimeout</code> and <code>idleTimeout</code> (no harness event). Every internal turn is covered. Approvals get their own <code>approvalTimeout</code> with a timeout edge and release the concurrency slot while waiting.","<b>Evidence:</b> Temporal's four activity timeouts, Step Functions <code>HeartbeatSeconds</code>, and Airflow 3.1 deferrable HITL operators that free the worker."],
+["2.4 Typed stage outputs, repair turn and output-aware conditions","W-17, W-31","Promote <code>outputSchema</code> to the stage contract: ask the harness for structured output, validate only the latest attempt, and send one repair turn in the same session before counting a retry. Conditions and prompt templates can use <code>stages.&lt;id&gt;.output.&lt;field&gt;</code>, checked at save time against the schema. Validation has two tiers: hard (schema, regex, script, tests) and soft (LLM-judge score, which replaces the placeholder <code>llm_validation</code>).","<b>Evidence:</b> Mastra step schemas, OpenAI <code>output_type</code>, Dagster blocking asset checks, Anthropic prompt-chaining \"programmatic gates\" and evaluator-optimizer. <b>Why:</b> routing on status alone cannot express \"fix if the review rejects\", which is the most common agent-workflow shape."],
+["2.5 Join policies, loop block and fan-out stage","W-24 (iterationConfig), W-29, W-30","Join policy per node: <code>all</code> | <code>any</code> | <code>n_of_m</code> | <code>race</code> (+ cancelRemaining), with explicit Skipped propagation. Loop block: a subgraph with <code>maxIterations</code> and an exit condition, memo key <code>(run, stage, iteration)</code>, replacing the dead <code>iterationConfig</code>. Fan-out stage: over a list output, with a concurrency cap, tolerated-failure % and per-item redrive.","<b>Evidence:</b> van der Aalst discriminator and N-of-M patterns, Serverless Workflow <code>fork.compete</code>, Argo enhanced depends, ADK LoopAgent, Step Functions Distributed Map and Mastra foreach. The iteration-index memo key avoids Mastra's collision bugs (#24044, #24581)."],
+["2.6 Budgets","new","Per stage: <code>maxTurns</code> and <code>maxBudgetUsd</code>, passed to harnesses that support them and enforced by the engine otherwise. Per run: a total $ and token cap, and when it is hit, pause for approval (\"continue with +$5?\"). Record the model and harness that actually ran.","<b>Evidence:</b> Claude Agent SDK <code>maxTurns</code>/<code>maxBudgetUsd</code>. Anthropic reports that multi-agent systems use about 15× the tokens of chat."],
+["2.7 Flow control keys","new","Concurrency keys for <code>provider/model</code>, <code>harness</code>, <code>worktree</code> (singleton writer) and <code>global</code>, plus per-run <code>maxParallel</code> and debounce on webhook and cron triggers. Idempotency key on run start.","<b>Evidence:</b> Inngest concurrency keys and singleton, Hatchet fairness, Temporal priority, DBOS queues. A worktree singleton prevents two agents clobbering one checkout."],
+["2.8 Stage turn economy","W-49, W-42","Deliver predecessor context inside the first prompt turn (or the system prompt), not as a separate turn. Make the LLM summary opt-in. Prefer the structured <code>outputData</code> when a schema exists, else a cheap-model summary produced asynchronously and off the critical path. Take workspace checkpoints outside the launch path, and skip them for stages without write tools. Write each stream event once.","<b>Measured live:</b> the scheduler is about 3% of wall time, while the extra context and summary turns are about 50–65% of a trivial stage's time and tokens. Anthropic's context-engineering guidance favours structured artifacts over transcript relays between agents. This is the single largest latency and cost win available."],
+["2.9 Tracing and cost","W-42","Emit OTel GenAI spans: run → <code>invoke_agent</code> per stage → <code>chat</code> / <code>execute_tool</code> per turn, with <code>gen_ai.usage.*</code>. Roll up cost per stage and run into the run row. Content capture is opt-in.","<b>Evidence:</b> the OTel GenAI semantic conventions and OpenAI Agents SDK tracing. Local-first export to any OTel backend."]
+]},
+{id:"plan-3",pn:"Phase 3",title:"Differentiators",dur:"after parity",items:[
+["3.1 Run diff","—","Side by side for a forked run and its parent: prompts (resolved), outputs, validation verdicts, cost, duration and file changes per stage.","No surveyed engine has this built in (E §J2). The fork lineage from 2.1 makes it cheap."],
+["3.2 Test a single stage with pinned upstream data","—","\"Run this stage only\" using a past run's upstream outputs as pinned inputs. Build a per-stage eval set from pins.","n8n pinned data and execute step; Mastra time travel with custom context."],
+["3.3 Opt-in stage result cache","—","Key: hash(resolved prompt, stage config, model, input artifact hashes, repo HEAD), with a TTL. Off by default for stages with side effects.","Prefect cache policies, LangGraph CachePolicy, Argo memoization. Big savings while authoring."],
+["3.4 Authoring UX","W-35, W-43","Variable and output autocomplete in prompts, a visual condition builder with live evaluation, inline node errors, persisted layout, version history and restore, and export in the UI.","Closes the builder gaps listed in D §f."],
+["3.5 Chat ↔ workflow","W-40","<code>run_workflow</code> and <code>check_workflow_run</code> chat tools, plus a workflow stage that is a chat orchestrator (<code>OrchestratorService</code> tools bound in stages), with orchestrator decisions journaled before execution.","Anthropic orchestrator-workers. Temporal and Restate journal non-deterministic decisions so that recovery never re-asks the model."]
+]}
+];
+
+const SOURCES = [
+["Slice reports (raw)","A_definitions_db.md · B_runtime.md · C_orchestration_integrations.md · D_web_ui.md · E_modern_engines_research.md · F_live_tests.md, with probes roundtrip.mts and probe/probe*.test.ts. Copies are in docs/workflow-audit/ in the repo."],
+["Durability","<a href='https://docs.dbos.dev/architecture'>DBOS architecture</a> · <a href='https://www.inngest.com/docs/learn/how-functions-are-executed'>Inngest execution</a> · <a href='https://developers.cloudflare.com/workflows/build/rules-of-workflows/'>Cloudflare rules of workflows</a> · <a href='https://docs.langchain.com/oss/python/langgraph/durable-execution'>LangGraph durable execution</a> · <a href='https://lucumr.pocoo.org/2025/11/3/absurd-workflows/'>Absurd</a> · <a href='https://www.morling.dev/blog/building-durable-execution-engine-with-sqlite/'>DE with SQLite</a>"],
+["Versioning","<a href='https://airflow.apache.org/docs/apache-airflow/3.0.0/release_notes.html'>Airflow 3</a> · <a href='https://trigger.dev/docs/versioning'>Trigger.dev</a> · <a href='https://vercel.com/docs/workflows'>Vercel Workflows</a> · <a href='https://docs.temporal.io/production-deployment/worker-deployments/worker-versioning'>Temporal Worker Versioning</a> · <a href='https://docs.dbos.dev/faq'>DBOS FAQ</a>"],
+["Rerun / fork","<a href='https://www.inngest.com/docs/platform/manage/rerun-function-runs'>Inngest rerun</a> · <a href='https://www.dbos.dev/blog/handling-failures-workflow-forks'>DBOS forks</a> · <a href='https://mastra.ai/docs/workflows/time-travel'>Mastra time travel</a> · <a href='https://docs.langchain.com/oss/python/langgraph/use-time-travel'>LangGraph time travel</a> · <a href='https://docs.aws.amazon.com/step-functions/latest/dg/redrive-executions.html'>Step Functions redrive</a>"],
+["Retries & timeouts","<a href='https://restate.dev/blog/announcing-restate-1-5'>Restate 1.5</a> · <a href='https://www.inngest.com/docs/features/inngest-functions/error-retries/inngest-errors'>Inngest errors</a> · <a href='https://docs.temporal.io/encyclopedia/detecting-activity-failures'>Temporal activity failures</a> · <a href='https://docs.aws.amazon.com/step-functions/latest/dg/concepts-error-handling.html'>Step Functions error handling</a>"],
+["HITL","<a href='https://www.inngest.com/docs/reference/typescript/functions/step-wait-for-event'>Inngest waitForEvent</a> · <a href='https://trigger.dev/docs/wait-for-token'>Trigger.dev waitpoints</a> · <a href='https://airflow.apache.org/docs/apache-airflow-providers-standard/stable/operators/hitl.html'>Airflow HITL operators</a> · <a href='https://docs.langchain.com/oss/python/langgraph/interrupts'>LangGraph interrupts</a>"],
+["Control flow","<a href='https://argo-workflows.readthedocs.io/en/latest/enhanced-depends-logic/'>Argo enhanced depends</a> · <a href='https://github.com/serverlessworkflow/specification/blob/main/dsl-reference.md'>Serverless Workflow DSL</a> · <a href='http://www.workflowpatterns.com/patterns/control/'>Workflow patterns</a> · <a href='https://mastra.ai/docs/workflows/control-flow'>Mastra control flow</a> · <a href='https://docs.aws.amazon.com/step-functions/latest/dg/state-map-distributed.html'>Distributed Map</a>"],
+["LLM-specific","<a href='https://www.anthropic.com/engineering/building-effective-agents'>Building effective agents</a> · <a href='https://www.anthropic.com/engineering/multi-agent-research-system'>Multi-agent research system</a> · <a href='https://mastra.ai/reference/workflows/step'>Mastra step schemas</a> · <a href='https://openai.github.io/openai-agents-python/guardrails/'>OpenAI guardrails</a> · <a href='https://platform.claude.com/docs/en/agent-sdk/typescript'>Claude Agent SDK</a>"],
+["Flow control & observability","<a href='https://www.inngest.com/docs/guides/flow-control'>Inngest flow control</a> · <a href='https://docs.hatchet.run/v1/concurrency'>Hatchet concurrency</a> · <a href='https://opentelemetry.io/blog/2026/genai-observability/'>OTel GenAI</a>"],
+["Testing & caching","<a href='https://docs.n8n.io/data/data-pinning/'>n8n data pinning</a> · <a href='https://docs-3.prefect.io/v3/develop/task-caching'>Prefect caching</a> · <a href='https://docs.temporal.io/dev-guide/typescript/testing'>Temporal replay tests</a>"]
+];
+
+/* ---------------- render ---------------- */
+const $ = (s,r=document)=>r.querySelector(s);
+const esc = s => s;
+function sevCount(s){return ISSUES.filter(i=>i.sev===s).length}
+$("#statTiles").innerHTML = [
+  ["P0",sevCount("P0"),"P0: stuck, lost or duplicated work, or exploitable security"],
+  ["P1",sevCount("P1"),"P1: common feature broken or silent data loss"],
+  ["P2",sevCount("P2"),"P2: edge case or semantics gap"],
+  ["",ISSUES.filter(i=>i.v).length,"verified by source re-read or probe"],
+  ["","373/374","existing unit tests pass (1 Windows symlink EPERM)"]
+].map(([c,v,l])=>`<div class="stat ${c}"><div class="v">${v}</div><div class="l">${l}</div></div>`).join("");
+
+$("#topTen").innerHTML = TOP.map((id,n)=>{const i=ISSUES.find(x=>x.id===id);return `<tr><td class="num">${n+1}</td><td><a href="#${i.id}">${i.id}</a> ${i.title}</td><td><span class="sev ${i.sev}">${i.sev}</span></td><td>${i.v?'<span class="tag ver">verified</span>':'<span class="tag">traced</span>'}</td></tr>`}).join("");
+
+const mark = v => v==="y"?'<span class="y">●</span>':v==="pa"?'<span class="pa">◐</span>':'<span class="n">○</span>';
+$("#optTable tbody").innerHTML = OPTIONS.map(r=>`<tr><td><code>${r[0]}</code></td><td>${r[1]}</td><td>${r[2]}</td><td>${mark(r[3])}</td><td>${mark(r[4])}</td><td>${mark(r[5])}</td><td>${mark(r[6])}</td></tr>`).join("");
+
+$("#benchTable tbody").innerHTML = BENCH.map(r=>`<tr><td>${r[0]}</td><td class="small">${r[1]}</td><td>${r[2]}</td><td>${/P0/.test(r[3])?'<span class="sev P0">'+r[3]+'</span>':/Gap/.test(r[3])?'<span class="sev P1">'+r[3]+'</span>':/Partial/.test(r[3])?'<span class="sev P2">'+r[3]+'</span>':'<span class="sev P3">'+r[3]+'</span>'}</td></tr>`).join("");
+
+$("#planBody").innerHTML = PLAN.map(p=>`<div class="phase" id="${p.id}"><div class="ph"><span class="pn">${p.pn}</span><h3>${p.title}</h3><span class="dur">${p.dur}</span></div>${p.items.map(it=>`<div class="item"><h4>${it[0]}</h4><div class="lbl">Closes ${it[1]}</div><p>${it[2]}</p><p class="why"><span class="lbl">Why this approach</span><br>${it[3]}</p></div>`).join("")}</div>`).join("");
+
+$("#srcList").innerHTML = SOURCES.map(s=>`<p><b>${s[0]}.</b> ${s[1]}</p>`).join("");
+
+const areas = [...new Set(ISSUES.map(i=>i.area))];
+$("#areaChips").innerHTML = `<button class="chip" data-area="all" aria-pressed="true">All areas</button>` + areas.map(a=>`<button class="chip" data-area="${a}" aria-pressed="false">${a}</button>`).join("");
+
+function renderIssues(){
+  const q = $("#q").value.trim().toLowerCase();
+  const sev = document.querySelector('[data-sev][aria-pressed="true"]').dataset.sev;
+  const area = document.querySelector('[data-area][aria-pressed="true"]').dataset.area;
+  const list = ISSUES.filter(i=>(sev==="all"||i.sev===sev)&&(area==="all"||i.area===area)&&(!q||(i.id+i.title+i.ev+i.sc+i.fix+i.src).toLowerCase().includes(q)));
+  $("#count").textContent = `${list.length} of ${ISSUES.length}`;
+  $("#issues").innerHTML = list.map(i=>`<details class="iss" id="${i.id}" data-sev="${i.sev}"><summary><span class="id">${i.id}</span><span class="sev ${i.sev}">${i.sev}</span><span class="tt">${i.title}</span><span class="tag">${i.area}</span>${i.v?'<span class="tag ver">verified</span>':''}</summary><div class="body"><dl><dt>Source findings</dt><dd class="mono small">${i.src}</dd><dt>Evidence</dt><dd>${i.ev}</dd><dt>Failure scenario</dt><dd>${i.sc}</dd><dt>Fix</dt><dd>${i.fix}</dd></dl></div></details>`).join("");
+}
+document.addEventListener("click",e=>{
+  const b=e.target.closest(".chip"); if(!b) return;
+  const key = b.dataset.sev!==undefined?"data-sev":"data-area";
+  document.querySelectorAll(`.chip[${key}]`).forEach(x=>x.setAttribute("aria-pressed","false"));
+  b.setAttribute("aria-pressed","true"); renderIssues();
+});
+$("#q").addEventListener("input",renderIssues);
+renderIssues();
+function openHash(){const h=location.hash.slice(1); const d=h&&document.getElementById(h); if(d&&d.tagName==="DETAILS"){d.open=true;}}
+window.addEventListener("hashchange",openHash); openHash();
+document.addEventListener("click",e=>{const a=e.target.closest('a[href^="#W-"]'); if(a){const d=document.getElementById(a.getAttribute("href").slice(1)); if(d){ $("#q").value=""; document.querySelectorAll('.chip').forEach(x=>x.setAttribute("aria-pressed", x.dataset.sev==="all"||x.dataset.area==="all"?"true":"false")); renderIssues(); const d2=document.getElementById(a.getAttribute("href").slice(1)); d2.open=true;}}});
+</script>

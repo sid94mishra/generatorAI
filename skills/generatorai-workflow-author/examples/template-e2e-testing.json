@@ -1,0 +1,233 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "E2E Testing & Debugging Workflow",
+    "description": "End-to-end browser testing, debugging, and issue fix automation powered by playwright-cli — Microsoft's CLI tool designed for AI coding agents. Uses session-based browser automation via shell commands (open, goto, click, fill, snapshot, screenshot) for interactive browser control with persistent state.",
+    "session": {},
+    "variables": [
+      {
+        "name": "target_url",
+        "type": "string",
+        "label": "Target URL",
+        "description": "The URL of the web application to test (e.g., http://localhost:3000)",
+        "required": true,
+        "defaultValue": "http://localhost:3000"
+      },
+      {
+        "name": "test_scenarios",
+        "type": "text",
+        "label": "Test Scenarios",
+        "description": "Describe the test scenarios or user flows to validate. Include specific pages, interactions, and expected behaviors.",
+        "required": true,
+        "defaultValue": "1. Verify homepage loads correctly\n2. Test navigation between main pages\n3. Validate form submissions\n4. Check responsive layout\n5. Verify error handling for invalid inputs"
+      },
+      {
+        "name": "expected_results",
+        "type": "text",
+        "label": "Expected Results",
+        "description": "Describe what the expected behavior should be for the test scenarios",
+        "required": false,
+        "defaultValue": "All pages should load without errors. Forms should validate inputs and show appropriate feedback. Navigation should work correctly."
+      },
+      {
+        "name": "browser",
+        "type": "choice",
+        "label": "Browser",
+        "description": "Browser engine to use for testing",
+        "required": true,
+        "defaultValue": "Chromium",
+        "options": [
+          "Chromium",
+          "Firefox",
+          "WebKit"
+        ]
+      },
+      {
+        "name": "viewport",
+        "type": "choice",
+        "label": "Viewport Size",
+        "description": "Screen size for testing",
+        "required": true,
+        "defaultValue": "1280x720",
+        "options": [
+          "1920x1080",
+          "1280x720",
+          "768x1024",
+          "375x812"
+        ]
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": false,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "e2e-testing",
+      "playwright",
+      "playwright-cli",
+      "browser-automation",
+      "debugging",
+      "quality"
+    ]
+  },
+  "stages": [
+    {
+      "key": "test_planning",
+      "name": "Test Planning",
+      "description": "Open the target application with playwright-cli and create a test plan from live page analysis",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "Recon & Plan",
+          "text": "You are testing the web application at: {{target_url}}\n\nTest Requirements:\n{{test_scenarios}}\n\nExpected Results:\n{{expected_results}}\n\nPerform a live reconnaissance of the target application using playwright-cli:\n\n1. Open the browser and navigate:\n   `playwright-cli open {{target_url}}`\n\n2. Set the viewport:\n   `playwright-cli resize {{viewport}}`\n\n3. Take a snapshot to see the page structure:\n   `playwright-cli snapshot`\n\n4. Take a screenshot for visual reference:\n   `playwright-cli screenshot`\n\n5. Check for any console errors:\n   `playwright-cli console`\n\n6. Explore key pages by clicking navigation elements (use refs from snapshot):\n   `playwright-cli click <ref>`\n   `playwright-cli snapshot`\n\nBased on your live exploration, create a detailed test plan:\n1. List of test cases to execute (numbered)\n2. For each test case: page URL, element refs to interact with, steps, expected outcome\n3. Priority order (critical paths first)\n4. Key element refs discovered from snapshots\n5. Any console errors or issues already found"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "test_execution",
+      "name": "Test Execution",
+      "description": "Execute test scenarios interactively using playwright-cli browser commands",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "Execute Tests",
+          "text": "Execute the test scenarios against {{target_url}} using playwright-cli.\n\nFor EACH test case from the plan:\n1. Navigate to the starting page:\n   `playwright-cli goto <url>`\n\n2. Take a snapshot to get current element refs:\n   `playwright-cli snapshot`\n\n3. Perform test actions using refs from snapshot:\n   - Click: `playwright-cli click <ref>`\n   - Fill inputs: `playwright-cli fill <ref> <text>`\n   - Select dropdowns: `playwright-cli select <ref> <value>`\n   - Check boxes: `playwright-cli check <ref>`\n   - Press keys: `playwright-cli press Enter`\n\n4. After each action, snapshot again to verify the result:\n   `playwright-cli snapshot`\n\n5. Take evidence screenshots at key checkpoints:\n   `playwright-cli screenshot`\n\n6. Check console for errors after interactions:\n   `playwright-cli console`\n\n7. Check network requests if API calls are involved:\n   `playwright-cli network`\n\nFor each test, record:\n- Test name and status: PASS or FAIL\n- Steps executed with playwright-cli commands used\n- Snapshot evidence showing expected state was reached\n- Screenshots taken\n- Any console errors or network failures\n\nContinue with remaining tests even if some fail."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [
+          {
+            "type": "min_length",
+            "value": 200,
+            "message": "Test execution results should be detailed"
+          },
+          {
+            "type": "contains",
+            "value": "PASS",
+            "message": "Results should include test status indicators"
+          }
+        ],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "debug_issue_analysis",
+      "name": "Debug & Issue Analysis",
+      "description": "Debug failures interactively using playwright-cli devtools commands",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "Debug Failures",
+          "text": "Review the test results from the previous stage.\n\nFor each FAILED test, debug interactively using playwright-cli:\n\n1. Navigate to the failing page:\n   `playwright-cli goto <url>`\n\n2. Take a snapshot to see current state:\n   `playwright-cli snapshot`\n\n3. Start tracing to capture detailed browser activity:\n   `playwright-cli tracing-start`\n\n4. Reproduce the failing steps:\n   `playwright-cli click <ref>` / `fill <ref> <text>` / etc.\n\n5. Check console for JavaScript errors:\n   `playwright-cli console`\n\n6. Check network for failed API calls:\n   `playwright-cli network`\n\n7. Run JavaScript to inspect element state:\n   `playwright-cli eval \"document.querySelector('<selector>').innerText\"`\n\n8. Take diagnostic screenshots:\n   `playwright-cli screenshot`\n\n9. Stop tracing:\n   `playwright-cli tracing-stop`\n\nFor each issue found, provide:\n- Severity: Critical / High / Medium / Low\n- Category: Bug / UI Issue / Performance / Accessibility\n- Root Cause Analysis with evidence from console, network, and snapshots\n- Suggested Fix\n- Reproduction Steps (exact playwright-cli commands)"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "test_report_generation",
+      "name": "Test Report Generation",
+      "description": "Generate comprehensive test report with evidence from playwright-cli sessions",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "Generate Report",
+          "text": "Generate a comprehensive E2E test report for {{target_url}}.\n\nFirst, close the browser session:\n`playwright-cli close`\n\nInclude:\n\n## Test Summary\n- Total Tests: [count]\n- Passed: [count]\n- Failed: [count]\n- Blocked: [count]\n- Pass Rate: [percentage]\n\n## Test Results Table\nFor each test: Name | Status | Steps Executed | Notes\n\n## Failed Test Details\nFor each failure:\n- Reproduction steps (exact playwright-cli commands)\n- Console errors captured\n- Network failures observed\n- Snapshots showing incorrect state\n- Root cause analysis\n- Suggested fix\n\n## Issues Found\nPrioritized list of all issues with severity and category\n\n## Recommendations\n1. Critical fixes needed\n2. UI/UX improvements\n3. Accessibility improvements\n4. Performance observations\n5. Suggested additional test cases\n\n## Environment\n- URL: {{target_url}}\n- Browser: {{browser}}\n- Viewport: {{viewport}}\n- Execution Method: playwright-cli (interactive agent CLI)\n- Test Date: Current date/time\n\n## Evidence\n- Screenshots captured during testing\n- Console error logs\n- Network request logs\n- Traces recorded during debugging"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [
+          {
+            "type": "min_length",
+            "value": 300,
+            "message": "Test report should be comprehensive"
+          },
+          {
+            "type": "contains",
+            "value": "Test Summary",
+            "message": "Report should include a test summary section"
+          }
+        ],
+        "summary": "auto"
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "test_planning",
+      "to": "test_execution",
+      "on": "success"
+    },
+    {
+      "from": "test_execution",
+      "to": "debug_issue_analysis",
+      "on": "success"
+    },
+    {
+      "from": "test_execution",
+      "to": "test_report_generation",
+      "on": "failure"
+    },
+    {
+      "from": "debug_issue_analysis",
+      "to": "test_report_generation",
+      "on": "completion"
+    }
+  ]
+}

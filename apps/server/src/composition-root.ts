@@ -3,25 +3,27 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AppConfig, ILogger, PersistedEvent } from '@generatorai/shared';
-import { createLogger, readBoundedInt } from '@generatorai/shared';
+import { createLogger, getMeter, readBoundedInt } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
+import { WorkflowEngineSettingsStore } from './settings/workflowEngine.js';
 import * as path from 'node:path';
-import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand } from '@generatorai/agent-harness-providers';
+import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
 import { readWorkspaceRetentionPreferences } from './settings/workspaceRetention.js';
 import { readAudioPreferences } from './settings/audio.js';
-import { AgentHostClient, HostSupervisor, resolveWorktreePath } from '@generatorai/core';
+import { AgentHostClient, HostSupervisor, resolveWorktreePath, sessionHookBridgeFactory } from '@generatorai/core';
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { registerHarnessInstances } from './composition/harnessInstances.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
+import { loadOrCreateCallbackKey } from './composition/callbackKey.js';
 import { installAgentCursorTheme, resolveCuaDriverBinary } from './computer/driverBinary.js';
 import { ScreenCast } from './computer/screenCast.js';
 import { createPreviewProducer } from './computer/previewProducer.js';
 import { registerEphemeralProducer } from './streaming/ephemeralScopes.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
-import { deriveStreamScopes } from './composition/streamScopes.js';
+import { deriveStreamScopes, streamRowsFor } from './composition/streamScopes.js';
 import {
   ExpoPushProvider,
   PushDispatcher,
@@ -31,33 +33,30 @@ import {
   createDB,
   migrateDB,
   closeDB,
-  withTransaction,
   setInvalidJsonColumnReporter,
   EventRetentionService,
   PushTokenRepository,
 } from '@generatorai/db';
 import type { AppDatabase } from '@generatorai/db';
+import { createEngineStores } from '@generatorai/db';
 import {
   DrizzleSessionRepository,
-  DrizzleWorkflowRepository,
   DrizzleEventRepository,
   DrizzleSequenceAllocator,
-  DrizzleSessionAllocationRepository,
   DrizzleStreamCursorRepository,
   DrizzleChatMessageRepository,
   DrizzleArtifactRepository,
-  DrizzleWebhookRepository,
   // v2 repositories
   DrizzleChatRepository,
-  DrizzleWorkflowDefinitionRepository,
-  DrizzleStageDefinitionRepository,
-  DrizzleStageEdgeRepository,
+  SqliteWorkflowDefinitionStore,
   DrizzleWorkflowRunRepository,
   DrizzleStageRunRepository,
   // Automation repositories
   DrizzleAutomationRepository,
   DrizzleAutomationExecutionRepository,
   DrizzleIdempotencyKeyRepository,
+  DrizzleInvocationUploadRepository,
+  DrizzleChatWorkflowRunRepository,
   // Project & Codebase Management repositories
   DrizzleProjectRepository,
   DrizzleProjectCodebaseRepository,
@@ -89,7 +88,7 @@ import {
 import {
   // Bootstrap — shared core services factory
   createCoreServices,
-  StartupRecoveryService,
+  runBootHousekeeping,
   InterruptedTurnRecoveryService,
   OrphanProcessReaper,
   SandboxedScriptRunner,
@@ -109,14 +108,9 @@ import {
   ScmTextGenerator,
   SourceControlFlowService,
   EditorLauncherService,
-  DockerSandboxProvider,
-  HostProcessSandboxProvider,
   SandboxScriptRunner,
+  createRunSandbox,
   // orchestrator services
-  WorkflowOrchestrator,
-  WorkflowPreprocessor,
-  ResultValidator,
-  SandboxLifecycleManager,
   // Phase 4 streaming rewrite (additive)
   StreamBroker,
   // W07 — durable delta log, dual-written alongside stream_cursors
@@ -126,8 +120,6 @@ import {
   InMemoryMcpHub,
   McpCredentialVault,
   McpSettingsStore,
-  // DUR-05 — durable step.sleep sweeper
-  DurableSleepService,
   // Project & Codebase Management services
   ProjectService,
   CodebaseService,
@@ -178,39 +170,43 @@ import {
   // Extension-author built-in tools
   buildWriteExtensionTool,
   buildReloadExtensionTool,
-  // M8-fix: W18 admission controller — value import (cannot be `import type`)
+  // The admission controller (flow keys) — value import (cannot be `import type`)
   AdmissionController,
+  providerFlowKey,
   // Workspace mounts (chat sources → directories the agent edits)
   MountService,
 } from '@generatorai/core';
 import type {
   IAgentHarness,
-  ISandboxProvider,
+  RunSandbox,
   TemplateRegistry,
   HookExecutor,
-  ConfigResolver,
   IMcpHub,
 
   // Types referenced by call sites below
   EventBus,
-  SessionService,
   ArtifactService,
-  WebhookService,
   ErrorHandler,
   // v2 services
-  SessionAllocator,
   ChatManagementService,
   OrchestratorService,
   WorkflowDefinitionService,
-  DAGScheduler,
-  StageExecutionService,
+  RunDefinitionReader,
+  RunSupervisor,
+  OutboxPublisher,
   WorkflowRunService,
+  WorkflowInvocationService,
+  WorkflowApprovalService,
+  WorkflowCallbacks,
+  WorkflowAuthoringService,
+  WorkflowToolHost,
+  ChatWorkflowRunBridge,
+  IdempotencyService,
+  StageConversationService,
   // automation services
   AutomationService,
   // Track A1 — boot reconciler + idempotency sweeper
   AutomationRecoveryService,
-  // HITL-03 — human-in-the-loop interrupt/resume service
-  HitlService,
   AgentInteractionService,
   PlanService,
   ChatManagementServiceExtensions,
@@ -329,7 +325,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   };
 
   // W12 / P0-14 — process-wide supervisor bounding concurrent Claude turns.
-  // maxConcurrentExecutions defaults to 16 (env: GENERATORAI_MAX_CONCURRENT_AGENT_TURNS).
+  // Its turn permits come from the admission controller's
+  // `provider:claude-agent` flow key once that exists (below; P07 WP-7.2).
   // maxConcurrentColdStarts defaults to 4 (env: GENERATORAI_MAX_CONCURRENT_COLD_STARTS).
   //
   // W12-wiring: AgentHostClient (out-of-process) is OPT-IN, not the default,
@@ -499,6 +496,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const loadTestFauxHarness = process.env['GENERATORAI_LOAD_TEST_FAUX_HARNESS'] === 'true';
   let harness: IAgentHarness;
   let hostSupervisor: HostSupervisor | undefined;
+  /** The out-of-process agent host's client: its turns are admitted on the gateway's flow keys (P07 WP-7.2). */
+  let agentHostTurns: AgentHostClient | undefined;
 
   // §1.Q — the concurrent-load test (agent-tests/concurrent-load-1q.mjs)
   // needs to drive real chat/workflow/automation traffic through the FULL
@@ -554,6 +553,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         onFatal: (reason) => agentHostClient?.handleHostFatal(reason),
       });
       agentHostClient = new AgentHostClient(supervisor, logger);
+      agentHostTurns = agentHostClient;
       hostSupervisor = supervisor;
       harness = agentHostClient;
       logger.info('[Container] AgentHostClient wired — provider runtimes will run out-of-process (L5)');
@@ -657,86 +657,32 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   );
 
   // ── Sandbox Infrastructure (conditional) ──
-  let sandboxProvider: ISandboxProvider | undefined;
-  let sandboxLifecycleManager: SandboxLifecycleManager | undefined;
-
-  if (config.sandbox.enabled) {
-    // Determine which provider to use
-    const wantDocker = config.sandbox.provider === 'docker' || config.sandbox.provider === 'auto';
-    let dockerAvailable = false;
-
-    if (wantDocker) {
-      const dockerProvider = new DockerSandboxProvider(logger);
-      dockerAvailable = await dockerProvider.isAvailable();
-
-      if (dockerAvailable) {
-        sandboxProvider = dockerProvider;
-        logger.info('[Container] Docker Sandbox detected — using microVM isolation');
-      } else if (config.sandbox.provider === 'docker') {
-        // User explicitly requested Docker but it's not available
-        logger.error('[Container] Docker Sandbox not available but provider=docker was specified');
-        throw new Error(
-          'Sandbox mode requires Docker Desktop with Sandbox support. ' +
-          'Set sandbox.provider to "auto" or "host" for fallback, or disable sandbox mode.',
-        );
-      }
-    }
-
-    if (!sandboxProvider) {
-      // Host-process fallback has NO hypervisor isolation — agent-generated
-      // code runs directly on the host. Require explicit opt-in (either by
-      // choosing `provider='host'` or by setting the env var below) to prevent
-      // users who configured `auto` from silently running unsandboxed.
-      const hostExplicit = config.sandbox.provider === 'host';
-      const hostAllowed = process.env['GENERATORAI_ALLOW_HOST_SANDBOX'] === 'true';
-      if (!hostExplicit && !hostAllowed) {
-        logger.error(
-          '[Container] Docker Sandbox unavailable and host-process fallback not opted in. ' +
-          'Either install Docker, set sandbox.provider="host" explicitly, ' +
-          'or set GENERATORAI_ALLOW_HOST_SANDBOX=true to proceed without isolation.',
-        );
-        throw new Error(
-          'Sandbox fallback to host-process requires explicit opt-in. ' +
-          'Set GENERATORAI_ALLOW_HOST_SANDBOX=true or sandbox.provider="host".',
-        );
-      }
-      sandboxProvider = new HostProcessSandboxProvider(logger);
-      // Use ERROR level so this cannot be missed in log scrapers; agent code
-      // running on the host is a production hazard.
-      logger.error(
-        '[Container] SANDBOX ISOLATION DISABLED — using host-process fallback. ' +
-        'Agent-generated code will run with the server process\'s privileges. ' +
-        `(opt-in source: ${hostExplicit ? 'sandbox.provider="host"' : 'GENERATORAI_ALLOW_HOST_SANDBOX=true'})`,
-      );
-    }
-
-    sandboxLifecycleManager = new SandboxLifecycleManager(
-      sandboxProvider,
-      {
-        image: config.sandbox.image,
-        cliPort: config.sandbox.cliPort,
-        startupTimeoutMs: config.sandbox.startupTimeoutMs,
-        dockerAvailable,
-      },
-      logger,
-    );
-
-    logger.info(`[Container] Sandbox mode ENABLED (provider: ${dockerAvailable ? 'docker' : 'host-fallback'})`);
-  }
+  // `null` when sandbox mode is off; the provider choice (and its refusal to
+  // fall back to the host without an explicit opt-in) lives in core so the
+  // SDK boots the same sandbox for the same settings.
+  const sandbox: RunSandbox | null = config.sandbox.enabled
+    ? await createRunSandbox(
+        {
+          provider: config.sandbox.provider,
+          image: config.sandbox.image,
+          cliPort: config.sandbox.cliPort,
+          startupTimeoutMs: config.sandbox.startupTimeoutMs,
+          allowHostFallback: process.env['GENERATORAI_ALLOW_HOST_SANDBOX'] === 'true',
+        },
+        logger,
+      )
+    : null;
+  const sandboxLifecycleManager = sandbox?.lifecycle;
 
   // ── Repositories (v1) ──
   const sessionRepo = new DrizzleSessionRepository(db);
-  const workflowRepo = new DrizzleWorkflowRepository(db);
   const eventRepo = new DrizzleEventRepository(db);
   const chatMessageRepo = new DrizzleChatMessageRepository(db);
   const artifactRepo = new DrizzleArtifactRepository(db);
-  const webhookRepo = new DrizzleWebhookRepository(db);
 
   // ── Repositories (v2) ──
   const chatEntityRepo = new DrizzleChatRepository(db);
-  const workflowDefinitionRepo = new DrizzleWorkflowDefinitionRepository(db);
-  const stageDefinitionRepo = new DrizzleStageDefinitionRepository(db);
-  const stageEdgeRepo = new DrizzleStageEdgeRepository(db);
+  const workflowDefinitionStore = new SqliteWorkflowDefinitionStore(db);
   const workflowRunRepo = new DrizzleWorkflowRunRepository(db);
   const stageRunRepo = new DrizzleStageRunRepository(db);
 
@@ -768,9 +714,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // sequence IDs. Without it, the in-memory counter in EventRepository
   // can collide when multiple processes write to the same DB.
   const sequenceAllocator = new DrizzleSequenceAllocator(db);
-  // Persist SessionAllocator state (Phase 1, 1.6) so a restart doesn't
-  // orphan SDK sessions.
-  const sessionAllocationRepo = new DrizzleSessionAllocationRepository(db);
 
   // Section 8 (TOL-01 / TOL-06) — harness-agnostic tool + MCP layer.
   // Declared BEFORE `createCoreServices` so they can be threaded into
@@ -792,15 +735,68 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // as `settings/computerUse.ts`'s computer-use.json.
   const mcpSettingsStore = new McpSettingsStore(path.dirname(resolve(config.dbPath)));
 
+  // ── Workspace Manager ──
+  const workspaceManager = new WorkspaceManager(
+    executionWorkspaceRepo,
+    workspaceMountRepo,
+    workspaceArtifactRepo,
+    {
+      workspacesDir: config.workspacesDir,
+      defaultGitEnabled: true,
+    },
+    logger,
+    gitManager,
+    // The legacy `worktrees` table: back-fills mounts for pre-mount
+    // workspaces and is unregistered on delete.
+    worktreeRepo,
+  );
+
+  // P07 WP-7.2 — the AdmissionController's flow keys are the one
+  // concurrency gate; their limits are operator settings (Settings →
+  // Workflow engine), not environment variables. The old admission-lane
+  // variables do nothing: say so rather than let an operator believe them.
+  for (const name of Object.keys(process.env).filter((k) => /^GENERATORAI_((INTERACTIVE|ORDINARY|BULK)_CONCURRENCY|ADMISSION_QUEUE_WAIT_MS)$/.test(k))) {
+    logger.warn(`[Admission] ${name} is ignored: concurrency limits are the flow keys of Settings → Workflow engine`);
+  }
+  const admissionController = new AdmissionController({
+    logger: {
+      info: (msg, meta) => logger.info(msg, meta),
+      warn: (msg, meta) => logger.warn(msg, meta),
+    },
+  });
+
+  // P07 WP-7.2 (W-66, O-2) — one concurrency gate. A provider's per-turn
+  // permit IS the admission controller's `provider:<id>` flow key, so chat
+  // turns and workflow stages count against the one limit, and the operator
+  // sets every limit in Settings → Workflow engine (applied live). With the
+  // agent host on, the gateway admits every turn before it crosses IPC.
+  agentHostSupervisor.useExecutionGate(admissionController.flowGate(providerFlowKey('claude-agent')));
+  agentHostTurns?.useTurnGates(
+    (provider) => admissionController.flowGate(providerFlowKey(provider)),
+    (model) => harnessRegistry.resolveProviderForModel(model),
+  );
+  const workflowEngineSettings = await WorkflowEngineSettingsStore.load(dirname(resolve(config.dbPath)), (s) =>
+    admissionController.setFlowLimits(s.flowLimits),
+  );
+
   // Chat extensions object — passed by reference to createCoreServices.
   // `worktreeService` is set later after project services are created.
   const chatExtensions: ChatManagementServiceExtensions = {
     customToolRegistry,
     mcpHub,
+    // BYOK provider API keys are `secretref:` pointers; the session composer
+    // reads the value here, at the last moment (never the pointer string).
+    resolveSecretRef: (ref) => mcpCredentialVault.resolveRef(ref),
     // Agent-native source control (doc §5) — the post-turn commit → push → PR
     // hook for chats created with `sourceControl.autoCommit`.
     sourceControlFlowService,
     repoReadinessService,
+  };
+
+  // The engine's outbox publisher needs the stream broker, which is built
+  // after the core graph; it is assigned right after the broker exists.
+  let publishEngineEvent: OutboxPublisher = async () => {
+    throw new Error('the engine outbox publisher is not wired yet');
   };
 
   // Core services factory — shared with the CLI composition root. Any
@@ -808,6 +804,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // wiring (stream manager, sandbox manager, orchestrator stack) stays
   // here.
   const core = createCoreServices({
+    workflowSummaryModel: () => workflowEngineSettings.get().summaryModel,
     logger,
     harness,
     scriptRunner,
@@ -818,48 +815,41 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     eventRepo,
     chatMessageRepo,
     artifactRepo,
-    webhookRepo,
     chatEntityRepo,
-    workflowDefinitionRepo,
-    stageDefinitionRepo,
-    stageEdgeRepo,
+    workflowDefinitionStore,
     workflowRunRepo,
     stageRunRepo,
     automationRepo,
     automationExecutionRepo,
     idempotencyKeyRepo,
+    // P04 — files staged before a run starts, and the codebases a run may mount.
+    invocationUploadRepo: new DrizzleInvocationUploadRepository(db),
+    projectCodebaseRepo,
+    // P06 — the runs chats start through their workflow tools, the generated
+    // authoring skill (guide, schema hash) and the operator's publish switch.
+    chatWorkflowRunRepo: new DrizzleChatWorkflowRunRepository(db),
+    workflowSkillDir: resolve(config.templatesDir, 'system', 'skills', 'generatorai-workflow-author'),
+    allowAgentPublish: config.workflows?.allowAgentPublish === true,
     // W22 / W47 — durable execution engine storage.
     registerRepo,
     entryRepo,
-    sessionAllocationRepo,
-    // Wire the sandbox lifecycle manager as the orphan reaper so
-    // StartupRecoveryService can call `cleanupOrphans()` on boot to
-    // destroy `genai-run-*` containers left behind by a crash.
-    sandboxCleaner: sandboxLifecycleManager,
+    // The workflow engine (P03): its stores over this database, the harness
+    // boundary, and the outbox publisher (wired below, once the stream
+    // broker exists).
+    engineStores: createEngineStores(db),
+    // P05 §4.3 — the key of the per-wait callback tokens (kept in the data dir).
+    callbackKey: loadOrCreateCallbackKey(path.dirname(resolve(config.dbPath))),
+    toHarnessError: harnessErrorOf,
+    publishEngineEvent: (event, row) => publishEngineEvent(event, row),
+    engineOwnerLabel: `server:${process.pid}`,
+    workspaceManager,
+    admissionController,
+    // Post-processing commit/push/PR runs through the same flow as the
+    // Changes tab and agent-native chats (doc §5).
+    scmFlow: sourceControlFlowService,
     config: {
       artifactsDir: config.artifactsDir,
-      maxConcurrentSessions: config.maxConcurrentSessions,
-      // P1#7 — bound concurrent stage execution (harness subprocess fan-out).
-      // Env-overridable; defaults to 8 inside createCoreServices when undefined.
-      //
-      // Bounded read: this value reaches `new Semaphore(...)`, and a bare
-      // `parseInt` of a typo'd value yielded NaN — which the semaphore
-      // accepted and then never granted a permit for, hanging every stage
-      // launch silently. `readBoundedInt` cannot produce a non-finite value.
-      maxConcurrentStages: process.env['MAX_CONCURRENT_STAGES']
-        ? readBoundedInt('MAX_CONCURRENT_STAGES', {
-            defaultValue: 8,
-            min: 1,
-            max: 64,
-            onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-          })
-        : undefined,
-      webhooks: config.webhooks,
-      projectRoot: config.projectRoot,
     },
-    // Atomically commit multi-row writes (run + stage_rows, automation open);
-    // a mid-sequence failure rolls back.
-    withTransaction: (fn) => withTransaction(db, fn),
     // Section 8 — thread harness-agnostic extensions into ChatManagementService.
     // Until a module registers tools / overrides MCP / installs a HookBridge
     // factory, every handler here is a no-op at runtime.
@@ -868,6 +858,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // factory, every handler here is a no-op at runtime.
     // `worktreeService` is set *after* project service creation below.
     chatExtensions,
+    // `secretref:workflow/<name>` values of workflow hooks (namespace-restricted).
+    workflowSecrets: mcpCredentialVault,
     // PLN-01 — plan mode persistence.
     planRepo: new DrizzlePlanRepository(db),
     agentInteractionRepo: new DrizzleAgentInteractionRepository(db),
@@ -876,28 +868,31 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const {
     eventBus,
     templateRegistry,
-    configResolver,
     hookExecutor,
     hookInterceptor,
-    sessionService,
     artifactService,
-    webhookService,
-    recoveryService,
     errorHandler,
-    sessionAllocator,
     chatManagementService,
     orchestratorService,
-    dagScheduler,
     workflowDefinitionService,
-    stageExecutionService,
+    runDefinitionReader,
+    engine,
     workflowRunService,
+    stageConversationService,
     automationService,
     automationRecoveryService,
-    hitlService,
     planService,
     agentInteractionService,
-    dataSourceResolver,
+    workflowInvocationService,
+    workflowApprovalService,
+    workflowCallbacks,
+    workflowAuthoringService,
+    workflowToolHost,
+    chatWorkflowRunBridge,
+    idempotencyService,
   } = core;
+  // P07 WP-7.2 — the webhook/cron trigger debounce is an engine setting, read per trigger.
+  automationService.setTriggerDebounce(() => workflowEngineSettings.get().triggerDebounceMs);
 
   // STR-01 / CLN-12 — `StreamBroker` is now the only streaming transport.
   // Web clients subscribe via the unified `/api/stream?scope=<s>&id=<id>`
@@ -930,6 +925,17 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     logger.info('[Container] GENERATORAI_DELTA_LOG=true — deltas are dual-written to the file delta log (experimental)');
   }
   const streamBroker = new StreamBroker(streamCursorRepo, logger, deltaLog ? { deltaLog } : {});
+
+  // The engine's outbox publisher (G5 §5.8, B-21): every engine event is
+  // published to its run's stream scope AND broadcast globally (the RV-5
+  // terminal-event listeners read the global bus), both AWAITED before the
+  // outbox row is marked dispatched. The event carries its `runSeq`, so the
+  // bridge below knows the run scope already has it.
+  publishEngineEvent = async (event, row) => {
+    const data = { ...event.data, runSeq: row.runSeq };
+    await streamBroker.publish('run', row.workflowRunId, event.kind, data);
+    await eventBus.emitGlobal({ kind: event.kind, data } as Parameters<typeof eventBus.emitGlobal>[0]);
+  };
 
   // P1-4 / EVT-01 — the durable stream log is now the event bus's commit point
   // AND its sequence source. `emit()` awaits `append` before broadcasting, so a
@@ -1015,6 +1021,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     });
   };
 
+  // P07 WP-7.5 — write amplification of workflow events (W-42, accepted at <= 2.2 rows per event).
+  const streamRowsPerEvent = getMeter('generatorai.server').createHistogram('workflow.stream.rows_per_event', {
+    description: 'stream_cursors rows written per workflow event (primary scope + fan-out)',
+  });
+
   const bridgeEvent = (event: {
     sessionId: string;
     kind: string;
@@ -1034,8 +1045,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Secondary scopes stay fire-and-forget: they are additional views of an
     // event that is already durable, so losing one costs a resume on that
     // view alone.
-    for (const target of deriveStreamScopes(event)) {
+    const targets = deriveStreamScopes(event);
+    for (const target of targets) {
       publishToBroker(target.scope, target.id, event.kind, event.data);
+    }
+    // P07 WP-7.5 (W-42): the rows a workflow event costs across its scopes.
+    if (event.data && typeof (event.data as { workflowRunId?: unknown }).workflowRunId === 'string') {
+      streamRowsPerEvent.record(streamRowsFor(event, targets), { family: event.kind.split('.')[0] ?? event.kind });
     }
   };
 
@@ -1070,60 +1086,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     );
   }
 
-  // DUR-05 — durable step.sleep sweeper. Flips `sleeping → queued` for
-  // stage rows whose `wake_at` has passed and then invokes `onWake` to
-  // resume execution. Stage code calls `durableSleepService.sleep(...)`
-  // to park a running stage; the sweeper owns the reverse transition.
-  //
-  // `onWake` lives in the composition root because it bridges two
-  // services — it needs `stageExecutionService` (to re-run the stage)
-  // AND `workflowRunRepo` (to fetch the run's sessionMode). Keeping it
-  // here avoids pulling either concern into `DurableSleepService`.
-  const durableSleepService = new DurableSleepService(
-    stageRunRepo,
-    eventBus,
-    async (stage) => {
-      try {
-        const run = await workflowRunRepo.getById(stage.workflowRunId);
-        // Fire-and-forget: the stage execution path already plumbs
-        // onStageCompleted / onStageFailed through WorkflowRunService,
-        // so the run loop continues on its own once executeStage
-        // resolves / rejects.
-        stageExecutionService
-          .executeStage(stage, stage.workflowRunId, run.sessionMode)
-          .then(() => workflowRunService.onStageCompleted(stage.workflowRunId, stage.id))
-          .catch((err) => workflowRunService.onStageFailed(stage.workflowRunId, stage.id, err));
-      } catch (err) {
-        logger.error(`[DurableSleep] Failed to resume woken stage ${stage.id}`, {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-    config.durableSleep,
-    logger,
-  );
-
   // ── Orchestrator Services ──
-
-  const workflowPreprocessor = new WorkflowPreprocessor(
-    gitManager,
-    scriptRunner,
-    eventBus,
-    logger,
-    sourceControlService,
-    // Post-processing commit/push/PR runs through the SAME flow as the
-    // Changes tab and agent-native chats (doc §5) — one branch policy, one
-    // base-branch sync, one conflict dry-run.
-    sourceControlFlowService,
-  );
-
-  const resultValidator = new ResultValidator(
-    chatMessageRepo,
-    stageRunRepo,
-    eventBus,
-    logger,
-    scriptRunner,
-  );
 
   // ── Project & Codebase Management Services ──
   const projectService = new ProjectService(
@@ -1203,22 +1166,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Chat repo lets the orphan check correctly evaluate chat-owned worktrees
     // (runType 'manual') instead of mis-classifying every live chat worktree.
     chatEntityRepo,
-  );
-
-  // ── Workspace Manager ──
-  const workspaceManager = new WorkspaceManager(
-    executionWorkspaceRepo,
-    workspaceMountRepo,
-    workspaceArtifactRepo,
-    {
-      workspacesDir: config.workspacesDir,
-      defaultGitEnabled: true,
-    },
-    logger,
-    gitManager,
-    // The legacy `worktrees` table: back-fills mounts for pre-mount
-    // workspaces and is unregistered on delete.
-    worktreeRepo,
   );
 
   // ── Mounts ──
@@ -1535,71 +1482,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     void refreshPushTargets();
   }
 
-  const workflowOrchestrator = new WorkflowOrchestrator(
-    workflowRunService,
-    workflowDefinitionService,
-    workflowPreprocessor,
-    resultValidator,
-    stageRunRepo,
-    stageDefinitionRepo,
-    workflowRunRepo,
-    eventBus,
-    templateRegistry,
-    logger,
-    config.artifactsDir,
-    sandboxLifecycleManager,
-    sandboxProvider,
-    worktreeService,
-    projectService,
-    projectConfigService,
-    workspaceManager,
-    hookExecutor,
-  );
-
-  // Late-wire workspaceManager into services that were created before it.
-  workflowRunService.setWorkspaceManager(workspaceManager);
-  workflowRunService.setWorktreeService(worktreeService, projectCodebaseRepo);
-  workflowRunService.setHookExecutor(hookExecutor);
-  workflowRunService.setResultValidator(resultValidator);
-
-  // M8-fix: W18 — wire the AdmissionController so stage launches are gated by
-  // the `ordinary` lane. Interactive chat turns bypass this via ChatManagementService.
-  //
-  // W18 requires configuration to be clamped on load, logged, and audited.
-  // Reading these with a bare `parseInt` was a live hang: a typo'd value
-  // parsed to NaN, which `new Semaphore(NaN)` accepted and every `acquire()`
-  // then awaited forever — no error, no log, every workflow stage stuck.
-  // `readBoundedInt` cannot produce a non-finite value, and reports whatever
-  // it had to correct. `undefined` (variable unset) is passed through so the
-  // controller can size the lane from measured machine capacity instead.
-  const laneEnv = (name: string, min: number, max: number, dflt: number): number | undefined =>
-    process.env[name] === undefined
-      ? undefined
-      : readBoundedInt(name, {
-          defaultValue: dflt,
-          min,
-          max,
-          onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-        });
-
-  const admissionController = new AdmissionController({
-    interactiveConcurrency: laneEnv('GENERATORAI_INTERACTIVE_CONCURRENCY', 1, 64, 4),
-    ordinaryConcurrency: laneEnv('GENERATORAI_ORDINARY_CONCURRENCY', 1, 64, 8),
-    bulkConcurrency: laneEnv('GENERATORAI_BULK_CONCURRENCY', 1, 64, 2),
-    queueWaitTimeoutMs: readBoundedInt('GENERATORAI_ADMISSION_QUEUE_WAIT_MS', {
-      defaultValue: 1_800_000,
-      min: 0,
-      max: 24 * 60 * 60 * 1000,
-      onWarn: (msg, rec) => logger.warn(msg, rec as unknown as Record<string, unknown>),
-    }),
-    logger: {
-      info: (msg, meta) => logger.info(msg, meta),
-      warn: (msg, meta) => logger.warn(msg, meta),
-    },
-  });
-  workflowRunService.setAdmissionController(admissionController);
-  stageExecutionService.setWorkspaceManager(workspaceManager);
-  stageExecutionService.setWorkspaceCheckpointService(workspaceCheckpointService);
+  // Late-wire services that were created after the core graph: the
+  // engine's prepare phase creates the project's worktrees, its executor
+  // and compensation use checkpoints, and a `restore_checkpoint` fork rolls
+  // the source workspace back.
+  engine.setLifecyclePlatform({ mounts: mountService, projectConfigs: projectConfigService, sandbox });
+  engine.setCheckpoints(workspaceCheckpointService);
+  workflowRunService.setCheckpointService(workspaceCheckpointService);
 
   // ── Register built-in function hook handlers ──
   // These handlers demonstrate the HookResult return channel and can be
@@ -1684,8 +1573,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   chatExtensions.agentResolver = agentResolver;
   chatExtensions.agentStaging = agentStaging;
   chatExtensions.systemArtifacts = systemArtifactService;
-  stageExecutionService.setAgentServices(agentResolver, agentStaging);
   orchestratorService.setAgentService(agentService);
+  // P06 — authoring validation checks that the agents a draft names exist.
+  workflowAuthoringService.setAgents(agentService);
   // Staged skill files live under `<workspace>/.generatorai`, outside every
   // worktree; drop them with the workspace (invariant §5.14).
   //
@@ -1772,13 +1662,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     }
   }, 'native');
 
-  // Late-wire browserService into ChatManagementService so chats with
-  // `browserConfig.enabled: true` auto-boot a shared Chromium and inject
-  // the CDP endpoint into the harness system prompt.
-  chatExtensions.browserService = browserService;  // Same story for stage sessions — the workflow path builds sessions
-  // via StageExecutionService which needs BrowserService to register
-  // the built-in browser tool set per stage.
-  stageExecutionService.setBrowserService(browserService);
+  // Late-wire browserService into the session composer's deps: every chat
+  // and every stage session gets the built-in browser tool set, and sessions
+  // with `browserConfig.enabled` auto-boot a shared Chromium.
+  chatExtensions.browserService = browserService;
 
   // Computer Use. The bridge chain ends in NullComputerBridge so that with no
   // desktop attached every call resolves to a typed refusal rather than
@@ -2184,9 +2071,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // not opted in — not just the upload route.
     enabled: config.scripts.workflowScriptsEnabled,
   });
-
-  // Late-bind script loader into DataSourceResolver for 'workflow_script' data source support
-  dataSourceResolver.setScriptLoader(workflowScriptLoader);
+  // A script target is materialized from the loaded script (P04).
+  workflowInvocationService.setScripts(workflowScriptLoader);
+  // Staged run uploads nobody used expire after an hour.
+  let invocationUploadSweeper: ReturnType<typeof setInterval> | undefined;
 
   // ── Widgets & Extensions ──
   const widgetRegistry = new WidgetRegistry();
@@ -2199,7 +2087,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       },
       logger,
     },
-    { widgetRegistry, customToolRegistry, eventBus },
+    { widgetRegistry, customToolRegistry, eventBus, sessionHookRegistry: core.sessionHookRegistry },
   );
   const widgetOrigin =
     process.env['WIDGET_ORIGIN'] ??
@@ -2219,6 +2107,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // host SPA/API — the MCP-Apps sandbox-proxy origin split. Override with
   // WIDGET_ORIGIN (e.g. a packaged desktop build's loopback URL).
   chatExtensions.widgetService = widgetService;
+  // HKS-01 / W-54 — the synchronous hook bridge every chat and stage session
+  // gets: the in-process hooks extensions register (`ai.registerHook`). With
+  // none registered the factory returns undefined and configs are unchanged.
+  chatExtensions.buildHookBridge = sessionHookBridgeFactory(core.sessionHookRegistry, hookInterceptor, eventBus);
   chatExtensions.widgetRegistry = widgetRegistry;
   chatExtensions.widgetAssetsBase = widgetOrigin;
 
@@ -2247,22 +2139,27 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     pushTokens,
 
     // Services
-    sessionService,
     artifactService,
-    webhookService,
     errorHandler,
 
     // v2 Services
     chatManagementService,
     orchestratorService,
     workflowDefinitionService,
+    runDefinitionReader,
+    engine,
     workflowRunService,
-    dagScheduler,
-    stageExecutionService,
-    sessionAllocator,
+    stageConversationService,
+    // P04 — THE way a run starts.
+    workflowInvocationService,
+    // P05 — pending decisions (sub-workflow children mirrored) and per-wait callbacks.
+    workflowApprovalService,
+    workflowCallbacks,
+    // P06 — agents and workflows: authoring, the tools' one implementation, chat run cards.
+    workflowAuthoringService,
+    workflowToolHost,
+    chatWorkflowRunBridge,
 
-    // Orchestrator
-    workflowOrchestrator,
     gitManager,
     changeSetService,
     sourceControlService,
@@ -2277,9 +2174,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automationService,
     automationRecoveryService,
     idempotencyKeyRepo,
-
-    // HITL (Human-in-the-Loop)
-    hitlService,
+    idempotencyService,
 
     // PLN-01 — plan mode
     planService,
@@ -2340,7 +2235,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     reloadVoiceConfig,
 
     // v2 Repositories (exposed for route-level queries)
-    workflowRepo,
+    sessionRepo,
     chatEntityRepo,
     chatMessageRepo,
     workflowRunRepo,
@@ -2358,15 +2253,15 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // undefined = fell back to in-process MultiHarness.
     hostSupervisor,
     admissionController,
+    workflowEngineSettings,
     streamBroker,
     customToolRegistry,
     mcpHub,
     mcpSettingsStore,
     mcpCredentialVault,
-    durableSleepService,
     templateRegistry,
     hookExecutor,
-    configResolver,
+    scriptRunner,
     workflowScriptLoader,
 
     // Widgets & Extensions
@@ -2464,22 +2359,29 @@ export async function createContainer(config: AppConfig): Promise<Container> {
           });
       }
 
-      // Register global harness lifecycle hooks
-      const globalHooks = configResolver.resolveGlobalHooks();
-      hookInterceptor.registerClientLifecycleHooks(harness, globalHooks, {
-        sessionId: '__global__',
-        workspacePath: config.workspacesDir,
-        variables: {},
-        eventBus,
-      });
+      // Surface harness client lifecycle events on the global stream
+      hookInterceptor.registerClientLifecycleEvents(harness);
 
       // Restore global event sequence counter from DB so post-restart
       // global events don't collide with pre-restart sequence IDs.
       await eventRepo.initialize();
 
-      // Recover interrupted sessions (also restores per-session EventBus
-      // sequence counters from DB via restoreCounters()).
-      await recoveryService.recover();
+      // Boot housekeeping: EventBus sequence counters, sessions a crash left
+      // closing, and orphaned sandbox containers.
+      await runBootHousekeeping({
+        eventBus,
+        sessionRepo,
+        harness,
+        ...(sandbox ? { orphanReaper: sandbox.lifecycle } : {}),
+        logger,
+      });
+
+      // The workflow engine: the single-engine lock, then recovery of every
+      // live run (G5 §3.10). Another live process on this database owns the
+      // engine; this one serves everything else, and run commands answer
+      // ENGINE_UNAVAILABLE until its lock goes stale (a quick restart finds
+      // the previous process's lock still fresh): the engine then starts.
+      await engine.startOrRetry();
 
       // Chat turns the previous process died in: persist what streamed and
       // write the terminal events a reconnecting client is waiting for.
@@ -2537,22 +2439,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         }
         automationRecoveryService.startIdempotencySweeper();
       }
-
-      // Re-arm workflow post-processing that a restart interrupted.
-      //
-      // Auto-commit and auto-PR were attached to a run only as an in-memory
-      // event subscription, so a restart lost them silently: the run reported
-      // success and never opened its pull request. The intent is persisted on
-      // the run now, and this is what picks it back up (review 6.2).
-      if (workflowOrchestrator) {
-        try {
-          await workflowOrchestrator.reArmPendingPostProcessing();
-        } catch (err) {
-          logger.warn(
-            `[Container] Re-arming workflow post-processing failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
+      invocationUploadSweeper = setInterval(() => {
+        void workflowInvocationService.sweepUploads().catch((err: unknown) => logger.warn(`[Container] upload sweep failed: ${String(err)}`));
+      }, 10 * 60_000);
+      invocationUploadSweeper.unref?.();
 
       // Initialize automation cron scheduler AFTER recovery so the two
       // don't race on the same execution row.
@@ -2560,11 +2450,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
 
       // DB-04 — start the event/stream retention sweeper. No-op if disabled.
       eventRetentionService.start();
-
-      // DUR-05 — start the durable-sleep sweeper. One tick fires
-      // immediately so a server that restarted mid-sleep resumes any
-      // stages whose `wake_at` is already in the past.
-      durableSleepService.start();
 
       // Worktree cleanup: detect orphaned worktrees from crashed runs
       // and start the background retention sweep timer.
@@ -2613,18 +2498,15 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       if (automationRecoveryService) {
         automationRecoveryService.stopIdempotencySweeper();
       }
+      if (invocationUploadSweeper) clearInterval(invocationUploadSweeper);
       // DB-04 — halt the retention sweeper so a pending sweep can't block
       // closeDB() by holding the write lock.
       eventRetentionService.stop();
-      // DUR-05 — stop the durable-sleep sweeper. Any stages still
-      // `sleeping` stay that way — a subsequent server boot resumes
-      // them on the next sweep.
-      durableSleepService.stop();
       worktreeCleanupService.stop();
       workspaceRetentionService.stop();
-      // Stop run poll loops + unsubscribe EventBus listeners + close run loggers
-      // so no new events are produced and no setInterval handles are orphaned.
-      workflowRunService.shutdown();
+      // Stop the workflow engine: its timers, reaper and outbox, and release
+      // the engine lock. In-flight attempts are recovered by the next boot.
+      await engine.stop();
 
       // Kill any live terminal sessions (PTY handles hold FDs → must not
       // outlive the process on shutdown paths where OS reaping is unreliable).
@@ -2712,22 +2594,33 @@ export interface Container {
    * than assuming it exists.
    */
   pushTokens: PushTokenRepository | null;
-  sessionService: SessionService;
   artifactService: ArtifactService;
-  webhookService: WebhookService;
   errorHandler: ErrorHandler;
 
   // v2 services
   chatManagementService: ChatManagementService;
   orchestratorService: OrchestratorService;
   workflowDefinitionService: WorkflowDefinitionService;
+  /** The graph of each run's pinned definition version. */
+  runDefinitionReader: RunDefinitionReader;
+  /** The workflow engine (P03). */
+  engine: RunSupervisor;
   workflowRunService: WorkflowRunService;
-  dagScheduler: DAGScheduler;
-  stageExecutionService: StageExecutionService;
-  sessionAllocator: SessionAllocator;
+  /** The stage conversation API (P03b): a stage is a compact chat. */
+  stageConversationService: StageConversationService;
 
-  // Orchestrator
-  workflowOrchestrator: WorkflowOrchestrator;
+  /** THE way a run starts (P04): `POST /workflow-invocations`. */
+  workflowInvocationService: WorkflowInvocationService;
+  /** Pending decisions of a run, its sub-workflow children's mirrored, and the one way to answer them (P05). */
+  workflowApprovalService: WorkflowApprovalService;
+  /** Per-wait callback tokens (`/api/workflow-callbacks/:token`, P05 §4.3). */
+  workflowCallbacks: WorkflowCallbacks;
+  /** How agents author workflows (P06 WP-6.5): validate, plan, drafts, publish, the skill bundle. */
+  workflowAuthoringService: WorkflowAuthoringService;
+  /** The workflow tools' one implementation (P06 WP-6.1); the MCP tool route runs it for external agents. */
+  workflowToolHost: WorkflowToolHost;
+  /** Runs chats started, mirrored onto the chats (P06 WP-6.2). */
+  chatWorkflowRunBridge: ChatWorkflowRunBridge | null;
   gitManager: GitManager;
   changeSetService: ChangeSetService;
   sourceControlService: SourceControlService;
@@ -2746,11 +2639,11 @@ export interface Container {
   automationService: AutomationService;
   /** Track A — recovery service for boot-time reconciliation. */
   automationRecoveryService: AutomationRecoveryService | null;
-  /** Track A3 — idempotency key store, used directly by trigger routes. */
+  /** Track A3 — idempotency key store. */
   idempotencyKeyRepo: DrizzleIdempotencyKeyRepository;
+  /** Claim-then-finalize idempotency (automation triggers, invocations). */
+  idempotencyService: IdempotencyService | null;
 
-  /** HITL — human-in-the-loop interrupt/resume service. */
-  hitlService: HitlService;
   /** PLN-01 — plan mode. Undefined only if the plan repos were not supplied. */
   planService: PlanService | undefined;
   agentInteractionService: AgentInteractionService | undefined;
@@ -2813,7 +2706,7 @@ export interface Container {
   reloadVoiceConfig: () => Promise<void>;
 
   // v2 repositories (for route-level queries)
-  workflowRepo: InstanceType<typeof DrizzleWorkflowRepository>;
+  sessionRepo: InstanceType<typeof DrizzleSessionRepository>;
   chatEntityRepo: InstanceType<typeof DrizzleChatRepository>;
   chatMessageRepo: InstanceType<typeof DrizzleChatMessageRepository>;
   workflowRunRepo: InstanceType<typeof DrizzleWorkflowRunRepository>;
@@ -2845,6 +2738,8 @@ export interface Container {
    * is observable rather than mysterious.
    */
   admissionController: AdmissionController;
+  /** Flow key limits, the summary model and the trigger debounce (Settings → Workflow engine, P07). */
+  workflowEngineSettings: WorkflowEngineSettingsStore;
   streamBroker: StreamBroker;
   /** TOL-01 — harness-agnostic custom tool catalog. Empty by default. */
   customToolRegistry: CustomToolRegistry;
@@ -2854,11 +2749,10 @@ export interface Container {
   mcpSettingsStore: McpSettingsStore;
   /** W48 — the only place MCP credential VALUES are read/written. */
   mcpCredentialVault: McpCredentialVault;
-  /** DUR-05 — durable step.sleep sweeper. Stage code calls `sleep(...)` to park. */
-  durableSleepService: DurableSleepService;
   templateRegistry: TemplateRegistry;
   hookExecutor: HookExecutor;
-  configResolver: ConfigResolver;
+  /** The policy-checked child-process runner (hooks, lifecycle scripts, check stages). */
+  scriptRunner: SandboxedScriptRunner;
   workflowScriptLoader: WorkflowScriptLoader;
 
   // Widgets & Extensions

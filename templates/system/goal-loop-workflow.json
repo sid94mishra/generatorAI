@@ -1,0 +1,202 @@
+{
+  "id": "goal-loop",
+  "category": "custom",
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Goal loop",
+      "description": "Pursue an objective with an evidence audit after every round, until it is met, impossible or blocked, within a budget.",
+      "session": {},
+      "variables": [
+        {
+          "name": "objective",
+          "type": "text",
+          "label": "Objective",
+          "required": true
+        },
+        {
+          "name": "verification",
+          "type": "text",
+          "label": "How it is verified",
+          "required": true
+        },
+        {
+          "name": "constraints",
+          "type": "text",
+          "label": "Constraints",
+          "required": false,
+          "defaultValue": "None"
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": false,
+        "sandbox": "required",
+        "preprocessingSteps": [],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
+      },
+      "tags": [
+        "loop"
+      ]
+    },
+    "stages": [
+      {
+        "key": "goal",
+        "name": "Goal",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "loop",
+        "loop": {
+          "maxIterations": 20,
+          "exits": [
+            {
+              "when": "stages.assess.output.status == 'impossible'",
+              "action": "fail",
+              "consecutive": 1,
+              "reason": "impossible"
+            },
+            {
+              "when": "stages.assess.output.status == 'met'",
+              "action": "complete",
+              "consecutive": 1,
+              "reason": "met"
+            },
+            {
+              "when": "stages.assess.output.status == 'blocked' and stages.assess.output.blocker == loop.previous.stages.assess.output.blocker",
+              "action": "pause",
+              "consecutive": 2,
+              "reason": "same_blocker"
+            },
+            {
+              "when": "loop.last.signals.stages.work.toolCalls == 0",
+              "action": "exhaust",
+              "consecutive": 2,
+              "reason": "no_progress"
+            }
+          ],
+          "carry": {
+            "gaps": "coalesce(stages.assess.output.gaps, [])"
+          },
+          "onLimit": {
+            "mode": "pause"
+          },
+          "wrapUp": {
+            "stage": "work",
+            "prompt": {
+              "label": "wrap_up",
+              "text": "Budget reached. Summarise verified progress, remaining work, blockers and the next step. Do not start new work."
+            },
+            "maxTurns": 1,
+            "maxCostShare": 0.1
+          },
+          "onBodyFailure": "fail",
+          "output": {}
+        },
+        "budget": {
+          "maxTurns": 400,
+          "maxTokens": 4000000
+        }
+      },
+      {
+        "key": "work",
+        "name": "Work",
+        "parentKey": "goal",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "objective",
+            "text": "Objective: {{variables.objective}}\nVerified by: {{variables.verification}}\nConstraints: {{variables.constraints}}\nWork from evidence in the current workspace and keep the full objective."
+          }
+        ],
+        "followUpPrompts": [
+          {
+            "label": "continue",
+            "text": "The assessment found unmet requirements:\n{{loop.carry.gaps | bullets}}\nContinue."
+          }
+        ],
+        "sessionReuse": "continue",
+        "compactAfter": 8,
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      },
+      {
+        "key": "assess",
+        "name": "Assess",
+        "parentKey": "goal",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "audit",
+            "text": "Objective: {{variables.objective}}\nVerified by: {{variables.verification}}\nAudit whether the objective is met in the current workspace. For each requirement, cite evidence and classify it as proves / contradicts / missing. Uncertain means not met. If blocked, give a short stable identifier in `blocker`."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "json",
+          "schema": {
+            "type": "object",
+            "required": [
+              "status",
+              "gaps"
+            ],
+            "properties": {
+              "status": {
+                "enum": [
+                  "met",
+                  "not_met",
+                  "blocked",
+                  "impossible"
+                ]
+              },
+              "blocker": {
+                "type": "string"
+              },
+              "gaps": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "work",
+        "to": "assess",
+        "on": "success"
+      }
+    ]
+  }
+}

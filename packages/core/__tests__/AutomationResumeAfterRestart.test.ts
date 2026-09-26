@@ -38,6 +38,7 @@ import { AutomationRecoveryService } from '../src/services/AutomationRecoverySer
 import type { IIdempotencyKeyRepository } from '../src/services/AutomationRecoveryService.js';
 import type { IWorkflowRunRepository } from '../src/domain/ports/IWorkflowRunRepository.js';
 import type { WorkflowRunService } from '../src/services/WorkflowRunService.js';
+import type { WorkflowInvocationService } from '../src/services/workflow-invocation/WorkflowInvocationService.js';
 import type { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
 import {
   DurableExecutionEngine,
@@ -74,9 +75,12 @@ function automation(): Automation {
     enabled: true,
     triggerType: 'manual',
     workflowIds: ['wf-1'],
-    inputMode: 'loop',
-    loopVariable: 'row',
-    loopItems: Array.from({ length: TOTAL_ITERATIONS }, (_, i) => `row-${i}`),
+    dataSchema: { version: 1, format: 'json_array', fields: [{ name: 'row', type: 'string' }] },
+    iterationMode: { kind: 'each_row' },
+    defaultDataset: {
+      format: 'json_array',
+      data: JSON.stringify(Array.from({ length: TOTAL_ITERATIONS }, (_, i) => ({ row: `row-${i}` }))),
+    },
     variables: {},
     maxConcurrency: 1,
     onError: 'continue',
@@ -165,6 +169,22 @@ function workflowRunService(stores: Stores): WorkflowRunService {
   } as unknown as WorkflowRunService;
 }
 
+
+/** The invocation over the fake run service (P04: an automation starts every run through `invoke`, then `waitFor`). */
+function invocationOver(runs: WorkflowRunService, repo: IWorkflowRunRepository): Pick<WorkflowInvocationService, 'invoke' | 'waitFor'> {
+  return {
+    invoke: async (req: { target: { workflowDefinitionId?: string }; variables?: Record<string, unknown> }) => {
+      const run = await (runs as unknown as { createRun: (p: unknown) => Promise<{ id: string }> }).createRun({
+        workflowDefinitionId: req.target.workflowDefinitionId,
+        variables: req.variables ?? {},
+      });
+      await runs.startRun(run.id);
+      return { runId: run.id };
+    },
+    waitFor: async (runId: string) => ({ ...(await repo.getById(runId)), waited: 'finalized' }),
+  } as unknown as Pick<WorkflowInvocationService, 'invoke' | 'waitFor'>;
+}
+
 function idempotencyRepo(): IIdempotencyKeyRepository {
   return { sweepExpired: async () => 0 };
 }
@@ -196,13 +216,11 @@ beforeEach(() => {
     automationRepo(stores),
     executionRepo(stores),
     workflowRunService(stores),
+    invocationOver(workflowRunService(stores), workflowRunRepo(stores)),
     workflowRunRepo(stores),
     {} as unknown as WorkflowDefinitionService,
     new EventBus(),
     mockLogger(),
-    undefined,
-    undefined,
-    undefined,
     engine,
   );
 });
@@ -359,8 +377,8 @@ describe('P0-b — an interrupted automation batch resumes instead of reporting 
 
   it('leaves an iteration whose workflow run is still live claimed, so it is not run twice', async () => {
     simulateCrashedBatch();
-    // Iteration 4's workflow run survived the restart and is being re-driven
-    // by StartupRecoveryService.
+    // Iteration 4's workflow run survived the restart and is being driven
+    // by the workflow engine's recovery.
     stores.workflowRuns.set('live-run', { id: 'live-run', status: 'running' } as unknown as WorkflowRun);
     stores.execRuns.push({
       id: 'live-exec-run',

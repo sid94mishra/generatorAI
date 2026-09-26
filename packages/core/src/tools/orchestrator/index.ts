@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // buildOrchestratorToolSet — the background-agent tool surface an
 // orchestrator chat drives. Mirrors buildBrowserToolSet: handlers close
-// over the OrchestratorService + parentChatId.
+// over the OrchestratorService + the parent id (a chat, or a stage run whose agent is an orchestrator).
 //
 // Tool schemas use STABLE key order so the tools prefix hashes identically
 // across turns/workers (prompt-cache friendliness, plan §5.8 / M2).
@@ -13,7 +13,7 @@ import { TaskBriefSchema } from '@generatorai/shared';
 
 export interface OrchestratorToolSetDeps {
   orchestratorService: OrchestratorService;
-  parentChatId: string;
+  parentId: string;
   owner?: string;
   /**
    * Append `list_available_agents`. Off by default: adding a 7th tool
@@ -24,7 +24,7 @@ export interface OrchestratorToolSetDeps {
 }
 
 export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDefinition[] {
-  const { orchestratorService, parentChatId, owner } = deps;
+  const { orchestratorService, parentId, owner } = deps;
 
   const spawn: ToolDefinition = {
     name: 'spawn_background_agent',
@@ -67,13 +67,13 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       required: ['taskName', 'objective'],
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const parsed = TaskBriefSchema.safeParse(args);
       if (!parsed.success) {
         return { ok: false, error: `Invalid brief: ${parsed.error.issues.map((i: { path: (string | number)[]; message: string }) => `${i.path.join('.')}: ${i.message}`).join('; ')}` };
       }
-      return orchestratorService.spawnBackgroundAgent(parentChatId, parsed.data);
+      return orchestratorService.spawnBackgroundAgent(parentId, parsed.data);
     },
   };
 
@@ -90,10 +90,10 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       },
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const wait = Boolean((args as { wait?: unknown }).wait);
-      const digests = await orchestratorService.checkBackgroundAgents(parentChatId, { wait });
+      const digests = await orchestratorService.checkBackgroundAgents(parentId, { wait });
       return { count: digests.length, digests };
     },
   };
@@ -110,7 +110,7 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       required: ['taskId'],
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const a = args as { taskId?: unknown; wait?: unknown };
       if (typeof a.taskId !== 'string') return { ok: false, error: 'taskId is required' };
@@ -132,7 +132,7 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       required: ['taskId', 'followup'],
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async (args) => {
       const a = args as { taskId?: unknown; followup?: unknown };
       if (typeof a.taskId !== 'string' || typeof a.followup !== 'string') {
@@ -150,9 +150,9 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       properties: {},
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async () => {
-      const tasks = await orchestratorService.listBackgroundAgents(parentChatId);
+      const tasks = await orchestratorService.listBackgroundAgents(parentId);
       return { count: tasks.length, tasks };
     },
   };
@@ -169,7 +169,7 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       properties: {},
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async () => {
       const models = await orchestratorService.listAvailableModels();
       return { count: models.length, models };
@@ -189,9 +189,9 @@ export function buildOrchestratorToolSet(deps: OrchestratorToolSetDeps): ToolDef
       properties: {},
     },
     skipPermission: true,
-    owner: owner ?? `orchestrator:${parentChatId}`,
+    owner: owner ?? `orchestrator:${parentId}`,
     handler: async () => {
-      const agents = await orchestratorService.listAssignableAgents(parentChatId);
+      const agents = await orchestratorService.listAssignableAgents(parentId);
       return { count: agents.length, agents };
     },
   };

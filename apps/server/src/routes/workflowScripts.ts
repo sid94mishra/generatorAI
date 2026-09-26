@@ -1,10 +1,12 @@
 // ────────────────────────────────────────────────────────────────
-// Workflow Scripts Routes — CRUD + materialize + run
+// Workflow Scripts Routes — list, profiles, materialize, reload, upload.
+// Running a script is an invocation (`POST /workflow-invocations`,
+// `target: {kind: 'script'}`), materialized once per script content.
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
-import type { StageEdgeType } from '@generatorai/shared';
+import type { WorkflowGraph } from '@generatorai/workflow-spec';
 import { ScriptSecurityError } from '@generatorai/core';
 import type { Response } from 'express';
 
@@ -21,35 +23,9 @@ function respondIfScriptsDisabled(err: unknown, res: Response): boolean {
   return false;
 }
 
-type CanonicalPermissionMode = 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan';
-
-/**
- * SCHEMA-1: Map the script-profile permission-mode vocabulary
- * (`askOnEachTool | askOnce | bypassPermissions`) onto the canonical run
- * permission-mode vocabulary (`bypassPermissions | default | acceptEdits |
- * plan`). The two enums diverged; persisting a raw script value left invalid
- * data on the run. Already-canonical values pass through unchanged.
- */
-function mapScriptPermissionMode(mode: string | undefined): CanonicalPermissionMode | undefined {
-  if (!mode) return undefined;
-  switch (mode) {
-    case 'askOnEachTool':
-      return 'default'; // prompt on each tool use === default HITL behaviour
-    case 'askOnce':
-      return 'acceptEdits'; // ask once, then auto-accept edits
-    case 'bypassPermissions':
-    case 'default':
-    case 'acceptEdits':
-    case 'plan':
-      return mode;
-    default:
-      return undefined; // unknown — drop rather than persist garbage
-  }
-}
-
 export function createWorkflowScriptRoutes(container: Container): Router {
   const router = Router();
-  const { workflowScriptLoader, workflowDefinitionService, workflowRunService, logger } = container;
+  const { workflowScriptLoader, workflowDefinitionService, logger } = container;
 
   // GET /workflow-scripts — List all discovered scripts with metadata
   router.get('/', (_req, res, next) => {
@@ -70,12 +46,7 @@ export function createWorkflowScriptRoutes(container: Container): Router {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: `Script not found: ${id}` } });
         return;
       }
-      res.json({
-        metadata: script.metadata,
-        definition: script.output.definition,
-        stages: script.output.stages.map((s: { localId: string; config: unknown }) => ({ localId: s.localId, config: s.config })),
-        edges: script.output.edges,
-      });
+      res.json({ metadata: script.metadata, graph: script.graph });
     } catch (err) {
       next(err);
     }
@@ -96,7 +67,25 @@ export function createWorkflowScriptRoutes(container: Container): Router {
     }
   });
 
-  // POST /workflow-scripts/:id/materialize — Create WorkflowDefinition from script
+  /**
+   * The script's graph as a new definition's document: tagged with the
+   * script id, optionally renamed and bound to a project. Scripts are loaded
+   * only when an operator opted in (and uploads need admin), so their
+   * command-bearing fields are trusted like the operator's own.
+   */
+  function scriptGraph(id: string, graph: WorkflowGraph, opts: { name?: string; projectId?: string }): WorkflowGraph {
+    return {
+      ...graph,
+      workflow: {
+        ...graph.workflow,
+        ...(opts.name ? { name: opts.name } : {}),
+        ...(opts.projectId ? { projectId: opts.projectId } : {}),
+        tags: [...new Set([...graph.workflow.tags, `script:${id}`])].slice(0, 20),
+      },
+    };
+  }
+
+  // POST /workflow-scripts/:id/materialize — a draft definition from the script
   router.post('/:id/materialize', async (req, res, next) => {
     try {
       const id = String(req.params['id']);
@@ -105,243 +94,20 @@ export function createWorkflowScriptRoutes(container: Container): Router {
         res.status(404).json({ error: { code: 'NOT_FOUND', message: `Script not found: ${id}` } });
         return;
       }
-
-      const { name, projectId, variables } = req.body as {
-        name?: string;
-        projectId?: string;
-        variables?: Record<string, unknown>;
-      };
-
-      // Create the workflow definition from script output
-      const defParams = {
-        name: name ?? script.output.definition.name,
-        description: script.output.definition.description,
-        sessionMode: script.output.definition.sessionMode,
-        harnessConfig: script.output.definition.harnessConfig,
-        variables: script.output.definition.variables,
-        tags: [...script.output.definition.tags, `script:${id}`],
-        projectId,
-        skills: script.output.definition.skills,
-        agents: script.output.definition.agents,
-        hooks: script.output.definition.hooks,
-      };
-
-      const definition = await workflowDefinitionService.createDefinition(defParams);
-
-      // Add stages
-      const stageIdMap = new Map<string, string>(); // localId → actual UUID
-      for (const stage of script.output.stages) {
-        const stageResult = await workflowDefinitionService.addStage({
-          workflowDefinitionId: definition.id,
-          name: stage.config.name,
-          description: stage.config.description,
-          order: stage.config.order,
-          prompts: stage.config.prompts,
-          hooks: stage.config.hooks,
-          variables: stage.config.variables
-            ? { ...stage.config.variables, ...(variables ?? {}) }
-            : variables,
-          harnessConfigOverrides: stage.config.harnessConfigOverrides,
-          agentName: stage.config.agentName,
-          agentRef: stage.config.agentRef,
-          contextFilter: stage.config.contextFilter,
-          // SCRIPT-2: forward contextSources (.contextFrom([...]) in scripts) —
-          // previously dropped here, so a script's explicit context wiring was
-          // silently lost on materialize/run (importFromJSON already kept it).
-          contextSources: stage.config.contextSources,
-          outputFormat: stage.config.outputFormat,
-          retryPolicy: stage.config.retryPolicy,
-          timeoutMs: stage.config.timeoutMs,
-          condition: stage.config.condition,
-          iterationConfig: stage.config.iterationConfig,
-          skills: stage.config.skills,
-          approvalRequired: stage.config.approvalRequired,
-        });
-        stageIdMap.set(stage.localId, stageResult.id);
-      }
-
-      // Add edges (resolve localId → actual IDs)
-      for (const edge of script.output.edges) {
-        const fromId = stageIdMap.get(edge.from);
-        const toId = stageIdMap.get(edge.to);
-        if (fromId && toId) {
-          await workflowDefinitionService.addEdge({
-            workflowDefinitionId: definition.id,
-            fromStageId: fromId,
-            toStageId: toId,
-            edgeType: edge.edgeType as StageEdgeType,
-          });
-        }
-      }
-
-      logger.info(
-        `[WorkflowScripts] Materialized script '${id}' into definition ${definition.id}`,
-        { stages: stageIdMap.size },
+      const { name, projectId } = req.body as { name?: string; projectId?: string };
+      // The one materializer (PD-16).
+      const definition = await workflowDefinitionService.createFromSpec(
+        scriptGraph(id, script.graph, { ...(name ? { name } : {}), ...(projectId ? { projectId } : {}) }),
+        { canEditCommands: true, status: 'draft' },
       );
-
+      logger.info(`[WorkflowScripts] Materialized script '${id}' into definition ${definition.id}`, {
+        stages: script.graph.stages.length,
+      });
       res.status(201).json({
         definitionId: definition.id,
         definition,
-        stageCount: stageIdMap.size,
-        edgeCount: script.output.edges.length,
-      });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-scripts/:id/run — Materialize + create run + start
-  router.post('/:id/run', async (req, res, next) => {
-    try {
-      const id = String(req.params['id']);
-      const script = workflowScriptLoader.getScript(id);
-      if (!script) {
-        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Script not found: ${id}` } });
-        return;
-      }
-
-      const { profileName, variables, projectId } = req.body as {
-        profileName?: string;
-        variables?: Record<string, unknown>;
-        projectId?: string;
-      };
-
-      // Resolve profile if specified
-      let resolvedVars = variables ?? {};
-      let resolvedSessionMode = script.output.definition.sessionMode;
-      let resolvedStageOverrides: unknown[] | undefined;
-      let resolvedPermissionMode: string | undefined;
-
-      if (profileName) {
-        const profile = script.profiles.find((p: { name: string }) => p.name === profileName);
-        if (!profile) {
-          res.status(400).json({
-            error: { code: 'INVALID_PROFILE', message: `Profile not found: ${profileName}` },
-          });
-          return;
-        }
-        resolvedVars = { ...profile.variables, ...resolvedVars };
-        resolvedSessionMode = profile.sessionMode ?? resolvedSessionMode;
-        // PWS-08 — propagate stageOverrides and permissionMode from the
-        // profile into the run. Previously these were silently dropped, so
-        // profile `skip: true` and timeout overrides had no effect.
-        // Stage overrides ride in the run's variables under the well-known
-        // `__stageOverrides` key (consumed by WorkflowRunService.findStageOverride).
-        // Runtime overrides take precedence; explicit ones in the request body
-        // are merged on top of the profile's.
-        const profileOverrides = (profile as { stageOverrides?: unknown[] }).stageOverrides;
-        const runtimeOverrides = (variables?.['__stageOverrides'] as unknown[] | undefined);
-        if (profileOverrides || runtimeOverrides) {
-          resolvedStageOverrides = [
-            ...(profileOverrides ?? []),
-            ...(runtimeOverrides ?? []),
-          ];
-        }
-        resolvedPermissionMode = (profile as { permissionMode?: string }).permissionMode;
-      }
-
-      // Stage overrides — fold into variables so the runner picks them up.
-      if (resolvedStageOverrides && resolvedStageOverrides.length > 0) {
-        resolvedVars = { ...resolvedVars, __stageOverrides: resolvedStageOverrides };
-      }
-
-      // Materialize first
-      const defParams = {
-        name: script.output.definition.name,
-        description: script.output.definition.description,
-        sessionMode: resolvedSessionMode,
-        harnessConfig: script.output.definition.harnessConfig,
-        variables: script.output.definition.variables,
-        tags: [...script.output.definition.tags, `script:${id}`],
-        projectId,
-        skills: script.output.definition.skills,
-        agents: script.output.definition.agents,
-        hooks: script.output.definition.hooks,
-      };
-
-      const definition = await workflowDefinitionService.createDefinition(defParams);
-
-      // Add stages
-      const stageIdMap = new Map<string, string>();
-      for (const stage of script.output.stages) {
-        const stageResult = await workflowDefinitionService.addStage({
-          workflowDefinitionId: definition.id,
-          name: stage.config.name,
-          description: stage.config.description,
-          order: stage.config.order,
-          prompts: stage.config.prompts,
-          hooks: stage.config.hooks,
-          variables: stage.config.variables
-            ? { ...stage.config.variables, ...(resolvedVars) }
-            : resolvedVars,
-          harnessConfigOverrides: stage.config.harnessConfigOverrides,
-          agentName: stage.config.agentName,
-          agentRef: stage.config.agentRef,
-          contextFilter: stage.config.contextFilter,
-          // SCRIPT-2: forward contextSources (.contextFrom([...]) in scripts) —
-          // previously dropped here, so a script's explicit context wiring was
-          // silently lost on materialize/run (importFromJSON already kept it).
-          contextSources: stage.config.contextSources,
-          outputFormat: stage.config.outputFormat,
-          retryPolicy: stage.config.retryPolicy,
-          timeoutMs: stage.config.timeoutMs,
-          condition: stage.config.condition,
-          iterationConfig: stage.config.iterationConfig,
-          skills: stage.config.skills,
-          approvalRequired: stage.config.approvalRequired,
-        });
-        stageIdMap.set(stage.localId, stageResult.id);
-      }
-
-      // Add edges
-      for (const edge of script.output.edges) {
-        const fromId = stageIdMap.get(edge.from);
-        const toId = stageIdMap.get(edge.to);
-        if (fromId && toId) {
-          await workflowDefinitionService.addEdge({
-            workflowDefinitionId: definition.id,
-            fromStageId: fromId,
-            toStageId: toId,
-            edgeType: edge.edgeType as StageEdgeType,
-          });
-        }
-      }
-
-      // Create and start the run
-      const run = await workflowRunService.createRun({
-        workflowDefinitionId: definition.id,
-        variables: resolvedVars,
-        projectId,
-      });
-
-      // Apply profile permissionMode if provided.
-      // SCHEMA-1: the script-profile vocabulary (askOnEachTool | askOnce |
-      // bypassPermissions) is NOT the canonical run permission-mode vocabulary
-      // (bypassPermissions | default | acceptEdits | plan). Map it before
-      // persisting, otherwise an invalid value (e.g. 'askOnce') is stored and
-      // every downstream consumer of the canonical enum chokes on it.
-      const canonicalPermissionMode = mapScriptPermissionMode(resolvedPermissionMode);
-      if (canonicalPermissionMode) {
-        try {
-          await workflowRunService.setPermissionMode(run.id, canonicalPermissionMode);
-        } catch (err) {
-          logger.warn(
-            `[WorkflowScripts] Failed to set permissionMode '${canonicalPermissionMode}' (from profile '${resolvedPermissionMode}') on run ${run.id}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
-
-      // Start the run
-      await workflowRunService.startRun(run.id);
-
-      logger.info(
-        `[WorkflowScripts] Created and started run from script '${id}': ${run.id}`,
-      );
-
-      res.status(202).json({
-        definitionId: definition.id,
-        runId: run.id,
-        status: 'running',
+        stageCount: script.graph.stages.length,
+        edgeCount: script.graph.edges.length,
       });
     } catch (err) {
       next(err);

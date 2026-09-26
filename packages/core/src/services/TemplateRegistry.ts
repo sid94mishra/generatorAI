@@ -1,63 +1,79 @@
 // ────────────────────────────────────────────────────────────────
-// TemplateRegistry — unified registry for workflow and stage templates
+// TemplateRegistry — workflow templates (P01 WP-1.7).
+//
+// A template file (`templates/system/*-workflow.json`) is
+// `{ id, category, graph }` with a canonical v2 `WorkflowGraph`. Every
+// template is validated at boot with the same validator as a save; an
+// invalid template FAILS the boot in development and test (a broken
+// template is a bug in the repo), and is skipped with a warning in
+// production.
 // ────────────────────────────────────────────────────────────────
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ILogger } from '@generatorai/shared';
-import { WorkflowTemplateSchema, StageTemplateSchema } from '@generatorai/shared';
-import type { WorkflowTemplate, StageTemplate } from '@generatorai/shared';
+import {
+  WorkflowTemplateSchema,
+  validateWorkflow,
+  type WorkflowTemplate,
+} from '@generatorai/workflow-spec';
+
+/** Workflow template files; other JSON files in the folder (catalogs) are not templates. */
+export const TEMPLATE_FILE_SUFFIX = '-workflow.json';
+
+export class TemplateLoadError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'TemplateLoadError';
+  }
+}
 
 export class TemplateRegistry {
   private workflowTemplates = new Map<string, WorkflowTemplate>();
-  private stageTemplates = new Map<string, StageTemplate>();
 
-  constructor(private readonly logger: ILogger) {}
+  constructor(
+    private readonly logger: ILogger,
+    /** Throw on an invalid template (default: every environment but production). */
+    private readonly strict: boolean = process.env['NODE_ENV'] !== 'production',
+  ) {}
 
-  /** Load workflow templates from a directory (JSON files). */
+  /** Load and validate every `*-workflow.json` template in a directory. */
   async loadWorkflowTemplates(dir: string): Promise<void> {
     const files = await this.safeReadDir(dir);
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      const filePath = path.join(dir, file);
-      try {
-        const raw = JSON.parse(await fs.readFile(filePath, 'utf-8'));
-        const parsed = WorkflowTemplateSchema.safeParse(raw);
-        if (parsed.success) {
-          this.registerWorkflowTemplate(parsed.data);
-          this.logger.info(`[TemplateRegistry] Loaded workflow template: ${parsed.data.id} from ${file}`);
-        } else {
-          this.logger.warn(
-            `[TemplateRegistry] Invalid workflow template ${file}: ${JSON.stringify(parsed.error.format())}`,
-          );
-        }
-      } catch (err) {
-        this.logger.warn(`[TemplateRegistry] Failed to load ${file}: ${err}`);
-      }
+    for (const file of files.filter((f) => f.endsWith(TEMPLATE_FILE_SUFFIX)).sort()) {
+      const problem = await this.loadFile(path.join(dir, file));
+      if (!problem) continue;
+      if (this.strict) throw new TemplateLoadError(`Invalid workflow template ${file}: ${problem}`);
+      this.logger.warn(`[TemplateRegistry] Skipped invalid workflow template ${file}: ${problem}`);
     }
   }
 
-  /** Load stage templates from a directory (JSON files). */
-  async loadStageTemplates(dir: string): Promise<void> {
-    const files = await this.safeReadDir(dir);
-    for (const file of files) {
-      if (!file.endsWith('.json')) continue;
-      const filePath = path.join(dir, file);
-      try {
-        const raw = JSON.parse(await fs.readFile(filePath, 'utf-8'));
-        const parsed = StageTemplateSchema.safeParse(raw);
-        if (parsed.success) {
-          this.registerStageTemplate(parsed.data);
-          this.logger.info(`[TemplateRegistry] Loaded stage template: ${parsed.data.id} from ${file}`);
-        } else {
-          this.logger.warn(
-            `[TemplateRegistry] Invalid stage template ${file}: ${JSON.stringify(parsed.error.format())}`,
-          );
-        }
-      } catch (err) {
-        this.logger.warn(`[TemplateRegistry] Failed to load ${file}: ${err}`);
-      }
+  /** Returns a problem description, or undefined when the template registered. */
+  private async loadFile(filePath: string): Promise<string | undefined> {
+    let raw: unknown;
+    try {
+      raw = JSON.parse(await fs.readFile(filePath, 'utf-8'));
+    } catch (err) {
+      return `unreadable: ${err instanceof Error ? err.message : String(err)}`;
     }
+    const parsed = WorkflowTemplateSchema.safeParse(raw);
+    if (!parsed.success) {
+      return parsed.error.issues
+        .slice(0, 3)
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
+    }
+    const result = validateWorkflow(parsed.data.graph);
+    if (!result.valid) {
+      return result.issues
+        .filter((i) => i.severity === 'error')
+        .slice(0, 3)
+        .map((i) => `${i.path || '/'}: ${i.message}`)
+        .join('; ');
+    }
+    this.registerWorkflowTemplate({ ...parsed.data, graph: result.graph! });
+    this.logger.info(`[TemplateRegistry] Loaded workflow template: ${parsed.data.id}`);
+    return undefined;
   }
 
   // ── Workflow Templates ─────────────────────────────────────────
@@ -78,29 +94,9 @@ export class TemplateRegistry {
     return this.workflowTemplates.has(id);
   }
 
-  // ── Stage Templates ────────────────────────────────────────────
-
-  registerStageTemplate(template: StageTemplate): void {
-    this.stageTemplates.set(template.id, template);
-  }
-
-  getStageTemplate(id: string): StageTemplate | undefined {
-    return this.stageTemplates.get(id);
-  }
-
-  getAllStageTemplates(): StageTemplate[] {
-    return [...this.stageTemplates.values()];
-  }
-
-  hasStageTemplate(id: string): boolean {
-    return this.stageTemplates.has(id);
-  }
-
-  // ── Combined accessors ─────────────────────────────────────────
-
-  /** Get total template count (workflow + stage) */
+  /** Number of registered workflow templates */
   getTemplateCount(): number {
-    return this.workflowTemplates.size + this.stageTemplates.size;
+    return this.workflowTemplates.size;
   }
 
   // ── Private helpers ────────────────────────────────────────────

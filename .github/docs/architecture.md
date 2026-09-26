@@ -17,19 +17,19 @@ GeneratorAI follows **Hexagonal / Ports-and-Adapters with a DDD core**. Four str
 ├─────────────────────────────────────────────────────────────┤
 │ APPLICATION                                                 │
 │   packages/core/src/services                                │
-│     SessionService, ChatManagementService,                  │
+│     ChatManagementService,                                  │
 │     WorkflowDefinitionService, WorkflowRunService,          │
 │     StageExecutionService, DAGScheduler,                    │
-│     SessionAllocator, ConfigResolver, HookExecutor,         │
+│     SessionAllocator, HookExecutor,                         │
 │     HookInterceptor, ArtifactService, AutomationService,    │
-│     HitlService, ResultValidator, DataSourceResolver,       │
+│     HitlService, ResultValidator,                           │
 │     ProjectService, CodebaseService, ProjectConfigService,  │
 │     WorktreeService, WorktreeCleanupService,                │
 │     WorkspaceManager, PathResolver, TemplateRegistry,       │
-│     WebhookService, StartupRecoveryService, ErrorHandler,   │
+│     StartupRecoveryService, ErrorHandler,                   │
 │     SandboxLifecycleManager, StreamBroker,                  │
 │     SystemArtifactService, WorkflowScriptLoader,            │
-│     DurableSleepService, WorkflowPreprocessor,              │
+│     WorkflowPreprocessor,                                   │
 │     WorkflowOrchestrator,                                   │
 │     BrowserService, TerminalService,                        │
 │     ExtensionManager, WidgetService, WidgetRegistry         │
@@ -40,7 +40,7 @@ GeneratorAI follows **Hexagonal / Ports-and-Adapters with a DDD core**. Four str
 │   packages/core/src/domain                                  │
 │     ports/   — IAgentHarness, IXxxRepository, …             │
 │     state-machines/  — Session, WorkflowRun, StageRun       │
-│     dag/    — DAGValidator, ConditionEvaluator, types       │
+│     dag/    — buildDAG (over a validated graph), types      │
 │     events  — AgentEvent factories                          │
 │       │                                                     │
 │       ▼ implemented by                                      │
@@ -139,7 +139,6 @@ HTTP/SSE listener (Express)
    ├── /api/projects/*      → ProjectService + Codebase/Config services
    ├── /api/workspaces/*    → WorkspaceManager
    ├── /api/hooks/*         → HookExecutor introspection
-   ├── /api/webhooks/*      → WebhookService
    ├── /api/copilot/*       → harness.getModels(), .ping(), .listConversations()
    └── /api/health          → server + db + harness ping
 
@@ -147,11 +146,7 @@ Background timers (unref'd):
    ├── DAGScheduler         → per-run polling loop (3s) for stage completion detection
    ├── WorktreeCleanupService → retention sweep (default hourly)
    ├── EventRetentionService → DB pruning sweep
-   ├── DurableSleepService  → wakes 'sleeping' stage runs at wake_at
    └── AutomationService    → cron evaluator + lease lock (1.23) for scheduled triggers
-
-Per-run loggers:
-   └── RunLogger            → per-runId JSONL stream attached to EventBus
 ```
 
 ### 4.2 Harness sub-process
@@ -198,24 +193,24 @@ Both perform auth + Origin gating **before** `wss.handleUpgrade`. Lifecycle even
 ## 6. Configuration resolution (3-level hierarchy)
 
 ```
-WorkflowDefinition.harnessConfig          (template defaults)
-   ↓ deep-merged with
-StageDefinition.harnessConfigOverrides    (per-stage overrides)
-   ↓ deep-merged with
+graph.workflow.session                    (SessionSpec — workflow defaults)
+   ↓ merged with (resolveSessionSpec)
+stage.session                             (partial SessionSpec — per-stage overrides)
+   ↓ merged with
 RunProfile / Runtime variables            (per-run overrides)
    │
    ▼
 Final resolved config → passed to harness.createConversation()
 ```
 
-Service: [packages/core/src/services/ConfigResolver.ts](../../packages/core/src/services/ConfigResolver.ts).
+Merge: `resolveSessionSpec` in `@generatorai/workflow-spec`; mapping to the harness config: [packages/core/src/services/definitions/sessionSpec.ts](../../packages/core/src/services/definitions/sessionSpec.ts) (`sessionSpecToHarnessConfig`), applied in `StageExecutionService`.
 
 Variables in prompts are interpolated with mustache-style `{{varName}}` after the resolver runs. The set of variables passed in is the union of:
 
 - Workflow-level `variables` defaults
 - Runtime/Profile `variables` (override defaults)
-- Stage-local `variables` (override both)
-- System variables: `__workingDirectory`, `__artifactsDirectory`, `__workflowRunId`, `__workspaceId`, `__validationFeedback`, `__validationRetryAttempt`, `__stageOverrides`, `repo_path_<alias>`, `repo_branch_<alias>`, `repo_path_target`.
+- Run-time stage override `variables` (`stageOverrides[].variables`, by stage key — override both)
+- System variables: `__workingDirectory`, `__artifactsDirectory`, `__workflowRunId`, `__workspaceId`, `__validationFeedback`, `__validationRetryAttempt`, `__stageOverrides`, and the engine-recorded checkouts `repo_path_<alias>` / `repo_branch_<alias>`. Templates and expressions read checkouts as `{{run.codebases.<alias>.path}}` / `.branch`; authors cannot declare `repo_path_*` / `repo_branch_*` variables (see [feature-workflows.md](./feature-workflows.md) §4).
 
 ---
 
@@ -223,9 +218,8 @@ Variables in prompts are interpolated with mustache-style `{{varName}}` after th
 
 All state transitions are encoded as guard tables in pure TypeScript. They have no IO dependencies and are unit-testable in isolation.
 
-- `SessionStateMachine` — 8 states (chat / stage_run / workflow_run own sessions).
 - `WorkflowRunStateMachine` — 7 states.
-- `StageRunStateMachine` — 10 states (includes `sleeping`, `awaiting_input`, `skipped`).
+- `StageRunStateMachine` — 9 states (includes `awaiting_input`, `skipped`).
 
 The state machines fire **only on legal transitions**; illegal transitions throw `InvalidTransitionError`. All `*Repository.updateStatus()` calls go through these machines so the DB never holds an impossible state.
 
@@ -257,7 +251,7 @@ Routes use `ErrorHandler.normalize(err)` to map all errors to a stable wire form
 
 ## 9. Observability
 
-- **Structured logging** — pino (`@generatorai/shared/logging/Logger.ts`). JSON in prod, pretty in dev. Per-run `RunLogger` attaches to `EventBus` and writes JSONL files into the run's `artifacts/` directory.
+- **Structured logging** — pino (`@generatorai/shared/logging/Logger.ts`). JSON in prod, pretty in dev. Run history is replayed from the persisted stream (DeltaLog/stream cursors); there is no per-run JSONL file.
 - **OpenTelemetry** — metrics + traces. Initialized in `apps/server/src/instrumentation.ts` and `apps/cli/src/instrumentation.ts`. Default OTLP-compatible. Collector compose file: [docker/observability/](../../docker/observability/).
 - **Metrics shipped:**
   - `copilot.prompts.total`, `copilot.prompt.duration_ms`, `copilot.active_sessions`

@@ -27,6 +27,7 @@
     "@generatorai/design-tokens": "workspace:*",
     "@generatorai/relay-protocol": "workspace:*",
     "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*",
     "@gorhom/bottom-sheet": "^5.2.6",
     "@gorhom/portal": "^1.0.14",
     "@legendapp/list": "^3.3.11",

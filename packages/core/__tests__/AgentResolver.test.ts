@@ -3,6 +3,7 @@
 // it gets the most direct coverage: 5 agent skills + 2 stage skills = 7.
 // ────────────────────────────────────────────────────────────────
 
+import { MCP_REDACTED_VALUE } from '@generatorai/shared';
 import { describe, it, expect, beforeEach } from 'vitest';
 import { AgentResolver, redactProjection } from '../src/services/AgentResolver.js';
 import type { ArtifactCatalog, CatalogMcpServer, CatalogSkill } from '../src/services/ArtifactCatalog.js';
@@ -136,7 +137,7 @@ describe('AgentResolver — capability union', () => {
     expect(p.warnings.map((w) => w.code)).toContain('SKILL_NOT_FOUND');
   });
 
-  // Guards the stage wiring: `StageExecutionService` hands the stage's own
+  // Guards the stage wiring: the stage session hands the stage's own
   // `harnessConfigOverrides` in as `runtimeOverrides`, which is the ONLY level
   // that carries `excludedMcpServerIds`. Before that, a stage-level MCP
   // exclusion silently did nothing.
@@ -422,15 +423,18 @@ describe('AgentResolver — orchestrator team', () => {
 });
 
 describe('redactProjection', () => {
-  it('strips MCP env and headers', () => {
+  it('masks literal MCP env and header values and keeps secretref pointers (R2)', () => {
     const p = AgentResolver.empty();
     p.mcpServers = {
-      github: { type: 'stdio', command: 'npx', env: { TOKEN: 'ghp_secret' } },
+      github: { type: 'stdio', command: 'npx', env: { TOKEN: 'ghp_secret', REF: 'secretref:mcp-gh/token' } },
       api: { type: 'http', url: 'https://x', headers: { Authorization: 'Bearer secret' } },
     };
     const out = redactProjection(p);
     expect(JSON.stringify(out)).not.toContain('ghp_secret');
     expect(JSON.stringify(out)).not.toContain('Bearer secret');
-    expect((out.mcpServers['github'] as Record<string, unknown>)['env']).toBe('<redacted>');
+    expect((out.mcpServers['github'] as { env: Record<string, string> }).env).toEqual({
+      TOKEN: MCP_REDACTED_VALUE,
+      REF: 'secretref:mcp-gh/token',
+    });
   });
 });

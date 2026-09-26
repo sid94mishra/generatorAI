@@ -97,6 +97,12 @@ export interface HarnessModel {
 export interface ConversationResponse {
   content: string;
   toolCalls?: { tool: string; args: unknown; result: unknown }[];
+  /**
+   * RV-9 — the turn's structured output, when the turn asked for one with
+   * `SendPromptOptions.outputSchema` and the provider produces it natively
+   * (claude-agent `structured_output`, Codex's schema-constrained final message).
+   */
+  structuredOutput?: unknown;
 }
 
 export interface ConversationMessage {
@@ -243,6 +249,22 @@ export interface SendPromptOptions {
    * mode derived from `agentMode` and over the stored conversation default.
    */
   permissionMode?: HarnessPermissionMode;
+  /**
+   * RV-9 — constrain THIS turn's final answer to a JSON Schema, for a
+   * provider whose `capabilities().structuredOutput` is `native`
+   * (claude-agent `outputFormat`, Codex `turn/start.outputSchema`). The
+   * workflow engine sends it on a stage's final prompt turn only: on Claude
+   * the format is session-scoped. The value comes back as
+   * `ConversationResponse.structuredOutput`. Other providers ignore it.
+   */
+  outputSchema?: Record<string, unknown>;
+  /**
+   * P07 WP-7.2 — the caller already holds this turn's `provider:<id>` flow
+   * key (a workflow stage attempt, admitted by the AdmissionController for
+   * its whole attempt): the provider takes no per-turn execution permit of
+   * its own, so the one limit is not counted twice.
+   */
+  admitted?: boolean;
 }
 
 /** What the adapter hands the host when the agent finishes planning. */
@@ -329,11 +351,22 @@ export function takeToolBinaries(result: unknown): { text: unknown; binaries: To
   return { text: rest, binaries: raw as ToolBinaryAttachment[] };
 }
 
+/**
+ * What a provider knows about one tool call (P06 WP-6.1), passed as the
+ * handler's second argument. `toolCallId` is the provider's own id for the
+ * call (Claude's tool_use id, Copilot's toolCallId, Codex's callId) when it
+ * gives one: a replayed call carries the same id, so handlers that start
+ * work key their idempotency on it.
+ */
+export interface ToolCallContext {
+  toolCallId?: string;
+}
+
 export interface ToolDefinition {
   name: string;
   description: string;
   parametersSchema: Record<string, unknown>;
-  handler: (args: Record<string, unknown>) => Promise<unknown>;
+  handler: (args: Record<string, unknown>, ctx?: ToolCallContext) => Promise<unknown>;
   /**
    * TOL-02 — if true, the harness skips its permission prompt for this
    * tool (use for inherently safe tools). Copilot SDK honours this
@@ -450,6 +483,13 @@ export interface CreateConversationParams {
    */
   skills?: string[];
   /**
+   * Local plugin roots (claude-agent `Options.plugins`). The composer stages a
+   * session's skills into one plugin root for providers whose skills level is
+   * `plugin` (RV-7): no SDK option takes skill directories, and loading them
+   * as a project setting source would also load the repository's hooks.
+   */
+  plugins?: Array<{ type: 'local'; path: string }>;
+  /**
    * Tool names hidden from the DEFAULT agent while staying available to
    * sub-agents that name them. Copilot `defaultAgent.excludedTools`.
    */
@@ -563,6 +603,21 @@ export interface IHarnessClientLifecycle {
    * other does not). Optional: single-provider adapters need not implement it.
    */
   capabilitiesFor?(conversationId: string): ProviderCapabilities;
+  /**
+   * The provider id that WOULD run a conversation with these params (an
+   * existing conversation's owner, an explicit `harnessType`, or the model's
+   * catalog owner), without creating anything. `undefined` when it cannot be
+   * told. The session composer plans capability levels with it.
+   */
+  resolveProvider?(params: { conversationId?: string; harnessType?: string; model?: string }): Promise<string | undefined>;
+  /**
+   * Give back the provider turn permit the turn in flight holds while one of
+   * its tools blocks on other work (a workflow tool waiting for a run that
+   * needs the same provider, ECON-R7). The returned function takes a permit
+   * again (it may wait). `undefined` when the turn holds none (an admitted
+   * workflow stage turn, or no gate).
+   */
+  yieldTurnPermit?(conversationId: string): (() => Promise<void>) | undefined;
 }
 
 /** Model discovery. */
@@ -685,6 +740,13 @@ export interface IHarnessConversationLifecycle {
    * callers must treat the move as a cold start rather than assume continuity.
    */
   getProviderSessionId?(conversationId: string): string | undefined;
+  /**
+   * The provider that actually runs `conversationId` — the router's answer,
+   * which may differ from the configured `harnessType` (unset, or picked by
+   * model). Callers that record which harness produced something (plans) read
+   * this instead of guessing. Optional: a single-provider harness may omit it.
+   */
+  conversationHarness?(conversationId: string): HarnessType | undefined;
   /**
    * Branch `conversationId` into a NEW conversation whose provider-side
    * history is a copy of the source through `throughAnchor`. OPTIONAL —

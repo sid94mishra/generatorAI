@@ -8,7 +8,7 @@
 // Close-key rule (one rule, every overlay):
 //   • Escape closes every overlay.
 //   • `q` ALSO closes an overlay that has no text input — help, validation,
-//     blocked-work queue, stage detail. It never closes one that is typing
+//     blocked-work queue, stage detail, loop decision. It never closes one that is typing
 //     into a field (palette, tab navigator, input, form), where `q` is a
 //     letter the user meant to type. `ErrorOverlay` dismisses on any key.
 // `overlays.closeKeys.test.tsx` pins this; add a new overlay to that table.
@@ -78,7 +78,7 @@ export function OverlayHost({ registry, keymap, implemented, onRunCommand }: Ove
 
     case 'confirm':
       return (
-        <Overlay title={overlay.danger ? 'Confirm' : 'Are you sure?'} footer="y confirm · n / Esc cancel">
+        <Overlay title={overlay.title ?? (overlay.danger ? 'Confirm' : 'Are you sure?')} footer="y confirm · n / Esc cancel">
           <Confirm
             message={overlay.message}
             danger={overlay.danger}
@@ -141,9 +141,9 @@ export function OverlayHost({ registry, keymap, implemented, onRunCommand }: Ove
       return (
         <ValidationOverlay
           overlay={overlay}
-          onNavigate={(stageId) => {
+          onNavigate={(stageKey) => {
             actions.closeOverlay();
-            overlay.onNavigate(stageId);
+            overlay.onNavigate(stageKey);
           }}
           onClose={actions.closeOverlay}
         />
@@ -151,7 +151,72 @@ export function OverlayHost({ registry, keymap, implemented, onRunCommand }: Ove
 
     case 'stageDetail':
       return <StageDetailOverlay overlay={overlay} onClose={actions.closeOverlay} />;
+
+    case 'loopDecision':
+      return (
+        <LoopDecisionOverlay
+          overlay={overlay}
+          onChoose={(value) => {
+            actions.closeOverlay();
+            overlay.onChoose(value);
+          }}
+          onClose={actions.closeOverlay}
+        />
+      );
   }
+}
+
+// ── Loop decision (P05) ───────────────────────────────────────────
+//
+// A parked loop's decisions as one list: a hotkey per option (the footer and
+// each row say which), or ↑↓ + Enter. No text field, so `q` closes it too.
+
+function LoopDecisionOverlay({
+  overlay,
+  onChoose,
+  onClose,
+}: {
+  overlay: Extract<OverlayKind, { kind: 'loopDecision' }>;
+  onChoose: (value: string) => void;
+  onClose: () => void;
+}): React.JSX.Element {
+  const theme = useTheme();
+  const selection = useSelection(overlay.options.length);
+
+  useKeys((input, key) => {
+    if (key.escape || input === 'q') return onClose();
+    if (key.upArrow) return selection.move(-1);
+    if (key.downArrow) return selection.move(1);
+    if (key.return) {
+      const option = overlay.options[selection.index];
+      if (option) onChoose(option.value);
+      return;
+    }
+    if (!input || key.ctrl || key.meta) return;
+    const option = overlay.options.find((o) => o.key !== '' && o.key === input);
+    if (option) onChoose(option.value);
+  });
+
+  return (
+    <Overlay title={overlay.title} footer={`hotkey or ↑↓ + ${prettyChord('return')} · q / Esc close`}>
+      <Box marginBottom={1}>
+        <Text color={theme.c('warning')} wrap="wrap">
+          {overlay.message}
+        </Text>
+      </Box>
+      {overlay.options.map((option, index) => {
+        const selected = index === selection.index;
+        return (
+          <Text key={option.value} color={selected ? theme.c('primary') : undefined} wrap="truncate-end">
+            {selected ? theme.glyphs.arrowRight : ' '}
+            <Text bold>{` ${(option.key || ' ').padEnd(2)}`}</Text>
+            {option.label}
+            {option.detail ? <Text color={theme.c('muted')}>{`  ${option.detail}`}</Text> : null}
+          </Text>
+        );
+      })}
+    </Overlay>
+  );
 }
 
 // ── Schema-driven form (Phase 7 item 4) ────────────────────────────
@@ -325,11 +390,9 @@ function FormOverlay({
 
 // ── Validation findings (Phase 7 item 6) ───────────────────────────
 //
-// Before this the only validation surface was `workflow validate`'s prose
-// error list — and that list never even reached a client, because the
-// route answers 422 and the client threw the body away (see
-// `requestAllowing` in client-core). With `issues` carrying the responsible
-// stage ids, Enter can move the DAG cursor straight to the element at fault.
+// `POST /workflow-definitions/validate` answers every issue with its JSON
+// pointer and, when it belongs to one, the stage key — so Enter can move the
+// DAG cursor straight to the stage at fault.
 
 function ValidationOverlay({
   overlay,
@@ -337,7 +400,7 @@ function ValidationOverlay({
   onClose,
 }: {
   overlay: Extract<OverlayKind, { kind: 'validation' }>;
-  onNavigate: (stageId: string) => void;
+  onNavigate: (stageKey: string) => void;
   onClose: () => void;
 }): React.JSX.Element {
   const theme = useTheme();
@@ -349,10 +412,9 @@ function ValidationOverlay({
     if (key.upArrow) return selection.move(-1);
     if (key.downArrow) return selection.move(1);
     if (key.return) {
-      const stageId = selected?.stageIds[0];
-      // An issue with no navigable stage (an empty graph, an edge whose
-      // both ends are missing) says so rather than silently doing nothing.
-      if (stageId) onNavigate(stageId);
+      // An issue not tied to a stage (a workflow setting, an empty graph)
+      // says so in the footer rather than moving the cursor anywhere.
+      if (selected?.stageKey) onNavigate(selected.stageKey);
     }
   });
 
@@ -393,8 +455,9 @@ function ValidationOverlay({
         <Box marginTop={1}>
           <Text color={theme.c('muted')} wrap="truncate-end">
             {selected.code}
-            {selected.stageIds.length > 0 ? `  ${theme.glyphs.neutral} stages: ${selected.stageIds.join(', ')}` : '  (not tied to a stage)'}
-            {selected.field ? `  ${theme.glyphs.neutral} field: ${selected.field}` : ''}
+            {selected.stageKey ? `  ${theme.glyphs.neutral} stage: ${selected.stageKey}` : '  (not tied to a stage)'}
+            {`  ${theme.glyphs.neutral} ${selected.path || '/'}`}
+            {selected.hint ? `  ${theme.glyphs.neutral} ${selected.hint}` : ''}
           </Text>
         </Box>
       ) : null}
@@ -633,10 +696,9 @@ function NotificationQueue({ onClose }: { onClose: () => void }): React.JSX.Elem
 // `stages`/`variables` are a point-in-time snapshot fetched when this
 // opened (`App.tsx`'s `openStageDetail`) — this overlay does not re-fetch
 // while open, matching the terminal chooser's `select` overlay. Per-stage
-// steps and run-wide hooks, though, DO need to be live: they come out of
-// the pane's own timeline (`stage_run.step_started`/`.step_completed`,
-// `hook.*`), which is already reducer-maintained and keeps updating while
-// this overlay is open.
+// Run-wide hooks, though, DO need to be live: they come out of the pane's
+// own timeline (`hook.*`), which is already reducer-maintained and keeps
+// updating while this overlay is open.
 
 function StageDetailOverlay({
   overlay,
@@ -650,10 +712,6 @@ function StageDetailOverlay({
   const selection = useSelection(overlay.stages.length);
 
   const selectedStage = overlay.stages[selection.index];
-  const steps = useMemo(
-    () => (timeline?.items ?? []).filter((item) => item.kind === 'step' && item.stageRunId === selectedStage?.id),
-    [timeline, selectedStage?.id],
-  );
   // Hooks are run-wide, not stage-scoped (no producer correlates a hook to
   // a specific stage run) — shown once, not per selected stage.
   const hooks = useMemo(() => (timeline?.items ?? []).filter((item) => item.kind === 'hook'), [timeline]);
@@ -685,7 +743,9 @@ function StageDetailOverlay({
               {' '}
               <Text color={statusColor(stage.status)}>{stage.status.padEnd(10)}</Text>
               {stage.name ?? stage.id}
-              {stage.retryCount ? <Text color={theme.c('warning')}>{`  retry ×${stage.retryCount}`}</Text> : null}
+              {(stage.attempts ?? 0) > 1 ? (
+                <Text color={theme.c('warning')}>{`  retry ×${(stage.attempts ?? 1) - 1}`}</Text>
+              ) : null}
             </Text>
           )}
         />
@@ -703,18 +763,6 @@ function StageDetailOverlay({
               <Text color={theme.c('danger')} wrap="wrap">
                 {selectedStage.error}
               </Text>
-            ) : null}
-
-            {steps.length > 0 ? (
-              <Box flexDirection="column" marginTop={1}>
-                <Text color={theme.c('muted')}>Steps</Text>
-                {steps.map((step) => (
-                  <Text key={step.id}>
-                    {step.step?.status === 'complete' ? theme.glyphs.success : theme.glyphs.running}{' '}
-                    {step.step?.label ?? step.text}
-                  </Text>
-                ))}
-              </Box>
             ) : null}
           </Box>
         ) : null}

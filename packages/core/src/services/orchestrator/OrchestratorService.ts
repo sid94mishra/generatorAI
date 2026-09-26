@@ -18,7 +18,8 @@ import type { IAgentHarness, HarnessModel } from '../../domain/ports/IAgentHarne
 import type { EventBus } from '../../events/EventBus.js';
 import type { ChatManagementService } from '../ChatManagementService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
-import type { Agent, Chat, HarnessConfig } from '@generatorai/shared';
+import type { Agent, AgentOverrides, AgentToolPolicy, Chat, HarnessConfig } from '@generatorai/shared';
+import type { TurnPolicy } from '../session/types.js';
 import { WORKER_SYSTEM_PROMPT, renderBriefMessage } from './prompts.js';
 
 /**
@@ -92,7 +93,7 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
   // Each worker is a chat, and on the default (persistent-session) Claude
   // provider each chat is a ~230 MB CLI process. Twelve workers per parent was
   // 2.8 GB of processes per orchestration, three times the turn permit
-  // (`GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`, default 4) — the extra eight
+  // (the `provider:claude-agent` flow key, default 4) — the extra eight
   // could only ever wait for a permit while holding their memory. Four matches
   // the permit; raise `GENERATORAI_ORCH_MAX_WORKERS` on a machine that has the
   // memory for more.
@@ -184,9 +185,21 @@ const PROGRESS_TEXT_TAIL = 240;
 /** What a worker inherits from the orchestrator that spawned it (G15). */
 export interface InheritedWorkerCapabilities {
   harnessConfig: Partial<HarnessConfig>;
+  /**
+   * The clamp as resolver input (C-15): the parent's built-in denials as
+   * `extraDeny` (the resolver turns them into `excludedBuiltinTools`, which
+   * Copilot enforces on built-ins, unlike `excludedTools`), every group the
+   * parent had off, and the workflow groups off (workers never fan out).
+   */
+  agentOverrides: AgentOverrides;
   permissionMode?: Chat['permissionMode'];
   defaultAgentMode?: Chat['defaultAgentMode'];
   browserConfig?: Chat['browserConfig'];
+  /**
+   * PD-5 — the parent's computer-use decision, which the worker is composed
+   * and judged under: a chat's `switch`, a stage's `opted_in` or `off`.
+   */
+  computerUse: TurnPolicy['computerUse'];
 }
 
 /**
@@ -223,8 +236,34 @@ export interface InheritedWorkerCapabilities {
  * already resolved to.
  */
 export function inheritWorkerCapabilities(parent: Chat): InheritedWorkerCapabilities {
-  const parentConfig = parent.harnessConfig ?? {};
-  const snapshotPolicy = parent.agentSnapshot?.toolPolicy;
+  return inheritWorkerCapabilitiesFrom({
+    harnessConfig: parent.harnessConfig ?? {},
+    ...(parent.agentSnapshot?.toolPolicy ? { toolPolicy: parent.agentSnapshot.toolPolicy } : {}),
+    ...(parent.agentOverrides ? { agentOverrides: parent.agentOverrides } : {}),
+    ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
+    ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
+    ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
+    computerUse: 'switch',
+  });
+}
+
+/**
+ * The same ceiling for any parent — a chat, or a stage whose agent is an
+ * orchestrator (the composer builds the stage's view of these fields from its
+ * session spec and resolved projection).
+ */
+export function inheritWorkerCapabilitiesFrom(parent: {
+  harnessConfig: Partial<HarnessConfig>;
+  toolPolicy?: { allow: string[]; deny: string[]; groups?: AgentToolPolicy };
+  /** The parent's own capability delta (a chat's `agentOverrides`). */
+  agentOverrides?: AgentOverrides;
+  permissionMode?: Chat['permissionMode'];
+  defaultAgentMode?: Chat['defaultAgentMode'];
+  browserConfig?: Chat['browserConfig'];
+  computerUse: TurnPolicy['computerUse'];
+}): InheritedWorkerCapabilities {
+  const parentConfig = parent.harnessConfig;
+  const snapshotPolicy = parent.toolPolicy;
 
   const excluded = new Set<string>([
     ...(parentConfig.excludedTools ?? []),
@@ -256,15 +295,62 @@ export function inheritWorkerCapabilities(parent: Chat): InheritedWorkerCapabili
         : {}),
   };
 
+  // C-15 — the same clamp as resolver input, so it lands in the worker's
+  // `excludedBuiltinTools` on every provider.
+  const extraDeny = [...new Set([...(snapshotPolicy?.deny ?? []), ...(parent.agentOverrides?.extraDeny ?? [])])];
+  const off: Partial<AgentToolPolicy> = {};
+  for (const [group, on] of Object.entries({ ...(snapshotPolicy?.groups ?? {}), ...(parent.agentOverrides?.tools ?? {}) })) {
+    if (on === false) off[group as keyof AgentToolPolicy] = false;
+  }
+  const agentOverrides: AgentOverrides = {
+    ...(extraDeny.length > 0 ? { extraDeny } : {}),
+    tools: { ...off, workflows: false, workflowAuthoring: false },
+  };
+
   return {
     harnessConfig,
+    agentOverrides,
     ...(parent.permissionMode ? { permissionMode: parent.permissionMode } : {}),
     ...(parent.defaultAgentMode ? { defaultAgentMode: parent.defaultAgentMode } : {}),
     ...(parent.browserConfig ? { browserConfig: parent.browserConfig } : {}),
+    computerUse: parent.computerUse,
   };
 }
 
+/**
+ * A workflow stage whose bound agent is an orchestrator (T6). Registered by
+ * the session composer when it binds the orchestrator tool set to the stage,
+ * so the stage can spawn workers exactly like an orchestrator chat. Workers
+ * stay chats; their `parentChatId` is the stage run id.
+ */
+export interface StageOrchestratorParent {
+  stageRunId: string;
+  workflowRunId: string;
+  sessionId: string;
+  workspaceId?: string;
+  projectId?: string;
+  model?: string;
+  agentRef?: string;
+  inherited: InheritedWorkerCapabilities;
+}
+
+/** What spawning needs to know about a parent, whichever kind it is. */
+interface ParentView {
+  kind: 'chat' | 'stage';
+  id: string;
+  sessionId: string;
+  projectId?: string;
+  model?: string;
+  workspaceId?: string;
+  codebaseIds?: string[];
+  gitRepositories?: Chat['gitRepositories'];
+  agentRef?: string;
+  inherited: InheritedWorkerCapabilities;
+}
+
 export class OrchestratorService {
+  /** Stage run id → a stage acting as an orchestrator (see `registerStageParent`). */
+  private stageParents = new Map<string, StageOrchestratorParent>();
   /** taskId → record. */
   private tasks = new Map<string, TaskRecord>();
   /** parentChatId → firstOutput promise of the current wave's leader (warm-first). */
@@ -363,7 +449,7 @@ export class OrchestratorService {
     parentChatId: string,
   ): Promise<Array<{ ref: string; name: string; description: string }>> {
     if (!this.agentService) return [];
-    const parent = await this.chatRepo.getById(parentChatId).catch(() => null);
+    const parent = await this.parentView(parentChatId).catch(() => null);
     const selectable = await this.agentService.listSelectable(parent?.projectId);
     const team = parent?.agentRef
       ? (await this.agentService.getByRef(parent.agentRef))?.orchestration?.teamAgentRefs ?? []
@@ -376,6 +462,71 @@ export class OrchestratorService {
 
   getConfig(): OrchestratorConfig {
     return this.config;
+  }
+
+  /** A stage whose agent is an orchestrator can now spawn workers (T6). */
+  registerStageParent(parent: StageOrchestratorParent): void {
+    this.stageParents.set(parent.stageRunId, parent);
+  }
+
+  /**
+   * When an orchestrator's current episode runs out of time (P06 WP-6.3):
+   * the workflow tools cap `waitSeconds` and a child run's `maxDurationMs`
+   * with it. Before the first wave (or after an episode ended) a new
+   * episode would start now.
+   */
+  episodeDeadline(parentChatId: string): number | undefined {
+    if (this.config.timeBudgetMs <= 0) return undefined;
+    const startedAt = this.episodeEnded.has(parentChatId) ? undefined : this.orchestrationStartedAt.get(parentChatId);
+    return (startedAt ?? Date.now()) + this.config.timeBudgetMs;
+  }
+
+  /** The stage's session is gone; its workers keep their records. */
+  unregisterStageParent(stageRunId: string): void {
+    this.stageParents.delete(stageRunId);
+  }
+
+  /**
+   * PD-5 — the computer-use decision a worker of `parentId` runs under: a
+   * registered stage's own, a chat's deployment switch, and none for a parent
+   * that is gone (a stage whose session ended, or not yet re-bound after a
+   * restart). Read at every compose and turn of the worker (review R5).
+   */
+  async workerComputerUse(parentId: string): Promise<TurnPolicy['computerUse']> {
+    const stage = this.stageParents.get(parentId);
+    if (stage) return stage.inherited.computerUse;
+    const chat = await this.chatRepo.getById(parentId).catch(() => null);
+    return chat ? 'switch' : 'off';
+  }
+
+  /** The parent a worker is spawned for: a registered stage, else a chat. */
+  private async parentView(parentId: string): Promise<ParentView> {
+    const stage = this.stageParents.get(parentId);
+    if (stage) {
+      return {
+        kind: 'stage',
+        id: stage.stageRunId,
+        sessionId: stage.sessionId,
+        ...(stage.projectId ? { projectId: stage.projectId } : {}),
+        ...(stage.model ? { model: stage.model } : {}),
+        ...(stage.workspaceId ? { workspaceId: stage.workspaceId } : {}),
+        ...(stage.agentRef ? { agentRef: stage.agentRef } : {}),
+        inherited: stage.inherited,
+      };
+    }
+    const chat = await this.chatRepo.getById(parentId);
+    return {
+      kind: 'chat',
+      id: chat.id,
+      sessionId: chat.sessionId,
+      ...(chat.projectId ? { projectId: chat.projectId } : {}),
+      ...(chat.model ? { model: chat.model } : {}),
+      ...(chat.workspaceId ? { workspaceId: chat.workspaceId } : {}),
+      ...(chat.codebaseIds ? { codebaseIds: chat.codebaseIds } : {}),
+      ...(chat.gitRepositories ? { gitRepositories: chat.gitRepositories } : {}),
+      ...(chat.agentRef ? { agentRef: chat.agentRef } : {}),
+      inherited: inheritWorkerCapabilities(chat),
+    };
   }
 
   // ── Spawn ────────────────────────────────────────────────────
@@ -418,7 +569,7 @@ export class OrchestratorService {
       };
     }
 
-    const parent = await this.chatRepo.getById(parentChatId);
+    const parent = await this.parentView(parentChatId);
 
     // Resolve + validate the worker model. When the orchestrator doesn't pick
     // one, this defaults to a CHEAPER tier (not the orchestrator's own model)
@@ -477,7 +628,7 @@ export class OrchestratorService {
     // G15 — a worker must never be able to do something its orchestrator
     // could not. Computed before `createChat` so the clamp is part of the
     // creation, not a correction applied afterwards.
-    const inherited = inheritWorkerCapabilities(parent);
+    const inherited = parent.inherited;
     let worker;
     try {
       worker = await this.chatManagementService.createChat({
@@ -507,7 +658,9 @@ export class OrchestratorService {
         // The agent instructions are appended AFTER the constant worker prompt, so
         // the shared cache prefix survives for workers that share an agent.
         ...(workerAgentRef ? { agentRef: workerAgentRef } : {}),
-        // G15 — capability inheritance (see `inheritWorkerCapabilities`).
+        // G15 — capability inheritance (see `inheritWorkerCapabilities`),
+        // the built-in clamp through the resolver (C-15).
+        agentOverrides: inherited.agentOverrides,
         ...(inherited.permissionMode ? { permissionMode: inherited.permissionMode } : {}),
         ...(inherited.defaultAgentMode ? { defaultAgentMode: inherited.defaultAgentMode } : {}),
         ...(inherited.browserConfig ? { browserConfig: inherited.browserConfig } : {}),
@@ -789,6 +942,10 @@ export class OrchestratorService {
    */
   private async nudgeParentAfterWave(parentChatId: string): Promise<void> {
     if (this.suppressNudge.has(parentChatId)) return;
+    // A stage parent collects its digests through check_* within its own
+    // turn; the stage conversation cannot be prompted from here (P03b posts
+    // the nudge as a stage conversation message).
+    if (this.stageParents.has(parentChatId)) return;
     try {
       const streaming = this.chatManagementService.getStreamingChatIds?.() ?? [];
       if (streaming.includes(parentChatId)) return;
@@ -1358,7 +1515,7 @@ export class OrchestratorService {
   private async writeScratchpad(parentChatId: string): Promise<void> {
     if (!this.workspaceManager) return;
     try {
-      const parent = await this.chatRepo.getById(parentChatId);
+      const parent = await this.parentView(parentChatId);
       if (!parent.workspaceId) return;
       const ws = await this.workspaceManager.getExecutionWorkspace(parent.workspaceId);
       if (!ws) return;

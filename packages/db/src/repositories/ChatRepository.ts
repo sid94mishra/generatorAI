@@ -5,7 +5,7 @@
 import { count, eq } from 'drizzle-orm';
 import type { IChatRepository } from '@generatorai/core';
 import type { Chat, ChatLocalFolder, ChatStatus, BackgroundTaskMeta, BackgroundTaskStatus } from '@generatorai/shared';
-import { NotFoundError, StorageError, DEFAULT_AGENT_MODE, coerceAgentMode } from '@generatorai/shared';
+import { NotFoundError, StorageError, DEFAULT_AGENT_MODE, isAgentMode } from '@generatorai/shared';
 import { chats } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
@@ -61,6 +61,7 @@ export class DrizzleChatRepository implements IChatRepository {
         agentVersion: chat.agentVersion ?? null,
         agentOverrides: chat.agentOverrides ?? null,
         agentSnapshot: chat.agentSnapshot ?? null,
+        createdByPrincipal: chat.createdByPrincipal ?? null,
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
       });
@@ -276,13 +277,16 @@ export class DrizzleChatRepository implements IChatRepository {
       forkedAtTurnId: row.forkedAtTurnId ?? undefined,
       conversationSeed: row.conversationSeed ?? undefined,
       backgroundTask,
-      defaultAgentMode: coerceAgentMode(row.defaultAgentMode) ?? DEFAULT_AGENT_MODE,
+      defaultAgentMode: isAgentMode(row.defaultAgentMode) ? row.defaultAgentMode : DEFAULT_AGENT_MODE,
       permissionMode: (row.permissionMode as Chat['permissionMode']) ?? 'bypassPermissions',
       agentRef: row.agentRef ?? undefined,
       agentId: row.agentId ?? undefined,
       agentVersion: row.agentVersion ?? undefined,
       agentOverrides: safeJsonColumn(row.agentOverrides, jsonRecord, { fallback: undefined }) as Chat['agentOverrides'],
       agentSnapshot: safeJsonColumn(row.agentSnapshot, jsonRecord, { fallback: undefined }) as Chat['agentSnapshot'],
+      ...(row.createdByPrincipal
+        ? { createdByPrincipal: safeJsonColumn(row.createdByPrincipal, jsonRecord, { fallback: undefined }) as Chat['createdByPrincipal'] }
+        : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

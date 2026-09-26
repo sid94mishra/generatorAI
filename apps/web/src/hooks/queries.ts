@@ -4,7 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
-import type { CreateSessionParams, CreateChatParams } from '@generatorai/shared';
+import type { CreateChatParams } from '@generatorai/shared';
 import type { AgentMode, PlanAction } from '@generatorai/shared';
 import type {
   ScmFlowRequest,
@@ -20,7 +20,6 @@ import { toast } from '../components/Toast.js';
 export const queryKeys = {
   sessions: ['sessions'] as const,
   session: (id: string) => ['session', id] as const,
-  workflows: (sessionId: string) => ['workflows', sessionId] as const,
   chatHistory: (sessionId: string) => ['chat', sessionId] as const,
   templates: ['templates'] as const,
   artifacts: (sessionId: string) => ['artifacts', sessionId] as const,
@@ -33,45 +32,6 @@ export const queryKeys = {
 };
 
 // ── Query Hooks ──
-
-export function useSessions() {
-  const platform = usePlatform();
-  return useQuery({
-    queryKey: queryKeys.sessions,
-    queryFn: () => platform.getSessions(),
-    refetchInterval: 30_000,
-  });
-}
-
-export function useSession(sessionId: string | undefined) {
-  const platform = usePlatform();
-  return useQuery({
-    queryKey: queryKeys.session(sessionId ?? ''),
-    queryFn: () => platform.getSession(sessionId!),
-    enabled: !!sessionId,
-    // Reduce polling for terminal states — SSE events handle active session updates.
-    // Only poll as a safety net for active sessions.
-    refetchInterval: (query) => {
-      const session = query.state.data;
-      if (session && ['completed', 'cancelled', 'deleted'].includes(session.status)) {
-        return false; // No polling for terminal states
-      }
-      return 30_000; // Safety-net polling for active sessions (SSE is primary)
-    },
-  });
-}
-
-export function useWorkflows(sessionId: string | undefined, opts?: { refetchInterval?: number | false }) {
-  const platform = usePlatform();
-  return useQuery({
-    queryKey: queryKeys.workflows(sessionId ?? ''),
-    queryFn: () => platform.getWorkflows(sessionId!),
-    enabled: !!sessionId,
-    // Default: SSE events handle workflow invalidation, so no polling.
-    // Callers can pass a specific interval if needed.
-    refetchInterval: opts?.refetchInterval ?? false,
-  });
-}
 
 export function useChatHistory(sessionId: string | undefined) {
   const platform = usePlatform();
@@ -240,82 +200,6 @@ export function useHealth() {
 
 // ── Mutation Hooks ──
 
-export function useCreateSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: CreateSessionParams) => platform.createSession(params),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-    },
-  });
-}
-
-export function useStartSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.startSession(sessionId),
-    onSuccess: (_data, sessionId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-    },
-  });
-}
-
-export function usePauseSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.pauseSession(sessionId),
-    onSuccess: (_data, sessionId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-    },
-  });
-}
-
-export function useResumeSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.resumeSession(sessionId),
-    onSuccess: (_data, sessionId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-    },
-  });
-}
-
-export function useCancelSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.cancelSession(sessionId),
-    onSuccess: (_data, sessionId) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-      queryClient.invalidateQueries({ queryKey: queryKeys.session(sessionId) });
-    },
-  });
-}
-
-export function useDeleteSession() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (sessionId: string) => platform.deleteSession(sessionId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.sessions });
-    },
-  });
-}
-
 export function useSendPrompt(sessionId: string) {
   const platform = usePlatform();
 
@@ -335,32 +219,6 @@ export function useSendPrompt(sessionId: string) {
     // display to flash.  SSE events (copilot.user_message, copilot.idle,
     // copilot.message_complete) handle chatHistory invalidation at the
     // correct points when the data is actually persisted.
-  });
-}
-
-export function usePauseWorkflow() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { workflowId: string; sessionId: string }) =>
-      platform.pauseWorkflow(args.workflowId),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.workflows(args.sessionId) });
-    },
-  });
-}
-
-export function useResumeWorkflow() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { workflowId: string; sessionId: string }) =>
-      platform.resumeWorkflow(args.workflowId),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.workflows(args.sessionId) });
-    },
   });
 }
 

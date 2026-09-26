@@ -75,7 +75,12 @@ export interface ToolCallBlock {
  * dropped by the timeline, which is where a plan update used to go to die. The
  * message is "Plan: 2/5 done" on the first line, one `[x] step` per line after.
  */
-export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning' | 'plan';
+/**
+ * `operator`: a message an operator sent into a workflow stage (the stage
+ * conversation API); the message is the text they sent. Renderers show it
+ * as the user's bubble inside the stage transcript.
+ */
+export type SystemCategory = 'system' | 'subagent' | 'error' | 'warning' | 'plan' | 'operator';
 
 export interface SystemBlock {
   type: 'system';
@@ -282,6 +287,8 @@ export interface StreamUsage {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   cost?: number;
+  /** USD, set only by a provider that reports one (`cost` may be a multiplier). */
+  costUsd?: number;
   provider?: string;
 }
 

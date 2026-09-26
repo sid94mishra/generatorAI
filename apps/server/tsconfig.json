@@ -13,6 +13,7 @@
     { "path": "../../packages/auth" },
     { "path": "../../packages/secrets" },
     { "path": "../../packages/relay-protocol" },
-    { "path": "../../packages/agent-harness-providers" }
+    { "path": "../../packages/agent-harness-providers" },
+    { "path": "../../packages/workflow-spec" }
   ]
 }

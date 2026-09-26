@@ -103,6 +103,14 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   // carries its settled state, so it is kept an item like its siblings: a
   // dropped final tick would leave a finished worker spinning in the transcript.
   'chat.background_task.progress': 'item',
+  // chat.workflow_run — a run the chat started through its workflow tools
+  // (P06 WP-6.2), mirrored onto the chat scope. Items like the background
+  // tasks: the run card is the chat's only view of it, and the last progress
+  // tick carries the settled state.
+  'chat.workflow_run.linked': 'item',
+  'chat.workflow_run.progress': 'item',
+  'chat.workflow_run.awaiting_approval': 'item',
+  'chat.workflow_run.finalized': 'item',
   // Rewind/fork move the transcript itself — every viewer must refetch.
   'chat.rewound': 'item',
   'chat.forked': 'item',
@@ -129,6 +137,18 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'chat.permission.resolved': 'item',
   'chat.permission.expired': 'item',
 
+  // stage.* gates — the chat gate shapes for a stage run (P02); the same
+  // "losing one strands the run" reasoning.
+  'stage.permission.requested': 'item',
+  'stage.permission.resolved': 'item',
+  'stage.permission.expired': 'item',
+  'stage.question.asked': 'item',
+  'stage.question.answered': 'item',
+  'stage.question.expired': 'item',
+  'stage.plan.created': 'item',
+  'stage.plan.review_requested': 'item',
+  'stage.plan.decided': 'item',
+
   // agent
   'agent.created': 'item',
   'agent.updated': 'item',
@@ -139,27 +159,23 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'workflow_run.starting': 'item',
   'workflow_run.running': 'item',
   'workflow_run.paused': 'item',
+  'workflow_run.budget_exhausted': 'item',
   'workflow_run.resumed': 'item',
   'workflow_run.cancelling': 'item',
   'workflow_run.completed': 'item',
   'workflow_run.failed': 'item',
   'workflow_run.cancelled': 'item',
-  'workflow_run.retried': 'item',
-  'workflow_run.orchestration_started': 'item',
-  'workflow_run.worktree_creating': 'item',
-  'workflow_run.worktree_created': 'item',
-  'workflow_run.preprocessing_started': 'item',
-  'workflow_run.preprocessing_completed': 'item',
+  'workflow_run.forked': 'item',
+  'workflow_run.invoked': 'item',
+  'workflow_run.finalized': 'item',
+  'workflow_run.phase_started': 'item',
+  'workflow_run.phase_completed': 'item',
+  'workflow_run.phase_failed': 'item',
   'workflow_run.preprocessing_step_started': 'item',
   'workflow_run.preprocessing_step_completed': 'item',
   'workflow_run.preprocessing_step_failed': 'item',
-  'workflow_run.stage_validation': 'item',
-  'workflow_run.orchestration_failed': 'item',
-  'workflow_run.orchestration_completed': 'item',
   'workflow_run.sandbox_created': 'item',
   'workflow_run.sandbox_destroyed': 'item',
-  'workflow_run.postprocessing_started': 'item',
-  'workflow_run.postprocessing_completed': 'item',
   'workflow_run.postprocessing_step_started': 'item',
   'workflow_run.postprocessing_step_completed': 'item',
   'workflow_run.postprocessing_step_failed': 'item',
@@ -167,10 +183,7 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
 
   // stage_run
   'stage_run.pending': 'item',
-  'stage_run.queued': 'item',
   'stage_run.running': 'item',
-  'stage_run.step_started': 'item',
-  'stage_run.step_completed': 'item',
   'stage_run.paused': 'item',
   'stage_run.resumed': 'item',
   'stage_run.completed': 'item',
@@ -178,10 +191,18 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'stage_run.cancelled': 'item',
   'stage_run.skipped': 'item',
   'stage_run.retrying': 'item',
-  'stage_run.sleeping': 'item',
-  'stage_run.woken': 'item',
+  'stage_run.repairing': 'item',
   'stage_run.awaiting_input': 'item',
   'stage_run.input_received': 'item',
+  'stage_run.waiting': 'item',
+  'stage_run.admission_queued': 'item',
+  'stage_run.admission_granted': 'item',
+  'stage_run.summary_ready': 'item',
+  'stage_run.operator_message': 'item',
+  'stage_run.operator_message_dropped': 'item',
+  'stage_run.turn_cancelled': 'item',
+  'stage_run.amended': 'item',
+  'stage_run.amend_failed': 'item',
 
   // session
   'session.created': 'item',

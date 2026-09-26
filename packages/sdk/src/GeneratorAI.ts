@@ -15,15 +15,22 @@ import {
   CustomToolRegistry,
   InMemoryMcpHub,
   WorkspaceManager,
-  WorkflowOrchestrator,
-  WorkflowPreprocessor,
-  ResultValidator,
+  AdmissionController,
+  MAX_FLOW_LIMIT,
+  MountService,
+  runBootHousekeeping,
+  type RunSandbox,
+  createRunSandbox,
+  SourceControlRegistry,
+  SourceControlConfigService,
+  RepoReadinessService,
+  ScmTextGenerator,
+  SourceControlFlowService,
   ProjectService,
   CodebaseService,
   WorktreeService,
   ProjectConfigService,
   StreamBroker,
-  DurableSleepService,
   WorktreeCleanupService,
   SystemArtifactService,
   BrowserService,
@@ -35,19 +42,26 @@ import {
   createDB,
   closeDB,
   migrateDB,
-  withTransaction,
   createAllRepositories,
+  createEngineStores,
   EventRetentionService,
   type AppDatabase,
 } from '@generatorai/db';
 import {
   createHarnessProvider,
+  harnessErrorOf,
   HarnessProxy,
   type HarnessType,
 } from '@generatorai/agent-harness-providers';
 import { createLogger, type ILogger } from '@generatorai/shared';
+import { createSecretStore } from '@generatorai/secrets';
 
 import { type GeneratorAIConfig, type ResolvedConfig, resolveConfig } from './config.js';
+
+/** The GitHub token the server also reads, seeded into source control when no account exists. */
+function githubToken(): string | undefined {
+  return process.env['GENERATORAI_GITHUB_TOKEN'] ?? process.env['GITHUB_TOKEN'] ?? process.env['GH_TOKEN'] ?? undefined;
+}
 
 /** `HarnessProviderConfig` option-bag key per harness type. */
 const PROVIDER_OPTIONS_KEY: Record<HarnessType, string> = {
@@ -78,14 +92,15 @@ import * as path from 'node:path';
 /** Background services + repositories the SDK lifecycle (initialize/shutdown) owns. */
 interface GeneratorAIInternals {
   repos: ReturnType<typeof createAllRepositories>;
+  /** The run sandbox (its orphan reaper runs at boot), or null. */
+  sandbox: RunSandbox | null;
   eventRetention: EventRetentionService;
-  durableSleep: DurableSleepService;
   worktreeCleanup: WorktreeCleanupService;
   systemArtifacts: SystemArtifactService;
 }
 
 export class GeneratorAI {
-  /** Workflow operations (create, run, orchestrate, stream, pause, resume, cancel) */
+  /** Workflow operations (create, invoke/run/fork, plan, waitFor, stream, commands) */
   readonly workflows: WorkflowFacade;
   /** Chat operations (create, send, stream) */
   readonly chat: ChatFacade;
@@ -123,11 +138,6 @@ export class GeneratorAI {
    */
   readonly services: CoreServices;
 
-  /**
-   * Direct access to the workflow orchestrator.
-   * @internal UNSTABLE — see `services`. Prefer `workflows.run` / `workflows.orchestrate`.
-   */
-  readonly orchestrator: WorkflowOrchestrator;
 
   /**
    * Direct access to the stream broker for SSE-style pub/sub.
@@ -155,7 +165,6 @@ export class GeneratorAI {
     logger: ILogger,
     runRepo: IWorkflowRunRepository,
     chatRepo: IChatRepository,
-    orchestrator: WorkflowOrchestrator,
     streamBroker: StreamBroker,
     workspaceManager: WorkspaceManager,
     projectService: ProjectService,
@@ -174,11 +183,10 @@ export class GeneratorAI {
     this.logger = logger;
     this._scriptLoader = scriptLoader;
     this._internals = internals;
-    this.orchestrator = orchestrator;
     this.streamBroker = streamBroker;
 
     // Create facades with all dependencies
-    this.workflows = new WorkflowFacade(services, runRepo, orchestrator, scriptLoader);
+    this.workflows = new WorkflowFacade(services, runRepo, internals.repos.eventRepo, scriptLoader);
     this.chat = new ChatFacade(services, chatRepo);
     this.automations = new AutomationFacade(services);
     this.scripts = new ScriptFacade(services, config, scriptLoader);
@@ -199,8 +207,10 @@ export class GeneratorAI {
    *  1. load workflow/stage templates + system artifacts
    *  2. **start the harness** (without this, no workflow/chat can run)
    *  3. register global harness lifecycle hooks
-   *  4. restore the global event-sequence counter
-   *  5. recover interrupted runs/sessions (+ rehydrate the session allocator)
+   *  4. restore the event-sequence counters, finish closing sessions, reap sandbox orphans
+   *  5. start the workflow engine: the single-engine lock (the server, the
+   *     desktop app and every SDK instance on one database share it), then
+   *     recovery of every live run
    *  6. start automation cron jobs
    *  7. start background sweepers (event retention, durable step.sleep, worktree GC)
    *
@@ -210,9 +220,8 @@ export class GeneratorAI {
   async initialize(): Promise<void> {
     if (this._initialized) return;
     this._initialized = true;
-    const { templateRegistry, configResolver, hookInterceptor, eventBus, recoveryService, automationService } =
-      this.services;
-    const { repos, eventRetention, durableSleep, worktreeCleanup, systemArtifacts } = this._internals;
+    const { templateRegistry, hookInterceptor, engine, eventBus, automationService } = this.services;
+    const { repos, sandbox, eventRetention, worktreeCleanup, systemArtifacts } = this._internals;
 
     // 1. Templates (root + system subdirectory), tolerating a missing dir.
     const templatesDir = this._config.templatesDir;
@@ -234,31 +243,31 @@ export class GeneratorAI {
       );
     }
 
-    // 3. Global harness lifecycle hooks.
-    try {
-      const globalHooks = configResolver.resolveGlobalHooks();
-      hookInterceptor.registerClientLifecycleHooks(this._harness, globalHooks, {
-        sessionId: '__global__',
-        workspacePath: path.join(this._config.artifactsDir, 'workspaces'),
-        variables: {},
-        eventBus,
-      });
-    } catch (err) {
-      this.logger.warn(`[GeneratorAI] Global hook registration failed: ${err instanceof Error ? err.message : String(err)}`);
-    }
+    // 3. Harness client lifecycle events → global event stream.
+    hookInterceptor.registerClientLifecycleEvents(this._harness);
 
     // 4. Restore global event sequence counter (avoids post-restart collisions).
     await repos.eventRepo.initialize();
 
-    // 5. Recover interrupted runs/sessions (also rehydrates SessionAllocator).
-    await recoveryService.recover();
+    await runBootHousekeeping({
+      eventBus,
+      sessionRepo: repos.sessionRepo,
+      harness: this._harness,
+      ...(sandbox ? { orphanReaper: sandbox.lifecycle } : {}),
+      logger: this.logger,
+    });
+
+    // 5. The workflow engine. Another live process owning this database's
+    //    engine leaves this instance without one: run commands then fail
+    //    with `engine_unavailable`, everything else works, until that
+    //    lock goes stale: the engine then starts.
+    await engine.startOrRetry();
 
     // 6. Automation cron scheduler.
     await automationService.initializeCronJobs();
 
     // 7. Background sweepers.
     eventRetention.start();
-    durableSleep.start();
     await worktreeCleanup.recoverOnStartup();
     worktreeCleanup.start();
 
@@ -276,17 +285,15 @@ export class GeneratorAI {
     // Stop background sweepers first so they can't touch the DB after close.
     try {
       this._internals.eventRetention.stop();
-      this._internals.durableSleep.stop();
       this._internals.worktreeCleanup.stop();
       this.services.automationService.shutdown();
     } catch {
       // Best-effort
     }
 
-    // Stop run poll loops + EventBus subscriptions so no new events are produced
-    // and no setInterval handles are orphaned.
+    // Stop the workflow engine (timers, reaper, outbox) and release its lock.
     try {
-      this.services.workflowRunService.shutdown();
+      await this.services.engine.stop();
     } catch {
       // Best-effort
     }
@@ -380,40 +387,7 @@ export class GeneratorAI {
     const customToolRegistry = new CustomToolRegistry();
     const mcpHub = new InMemoryMcpHub();
 
-    // ── Core Services ──
-    const services = createCoreServices({
-      logger,
-      harness,
-      scriptRunner,
-      httpClient,
-      gitManager,
-      sequenceAllocator: repos.sequenceAllocator,
-      sessionRepo: repos.sessionRepo,
-      eventRepo: repos.eventRepo,
-      chatMessageRepo: repos.chatMessageRepo,
-      artifactRepo: repos.artifactRepo,
-      webhookRepo: repos.webhookRepo,
-      chatEntityRepo: repos.chatEntityRepo,
-      workflowDefinitionRepo: repos.workflowDefinitionRepo,
-      stageDefinitionRepo: repos.stageDefinitionRepo,
-      stageEdgeRepo: repos.stageEdgeRepo,
-      workflowRunRepo: repos.workflowRunRepo,
-      stageRunRepo: repos.stageRunRepo,
-      automationRepo: repos.automationRepo,
-      automationExecutionRepo: repos.automationExecutionRepo,
-      sessionAllocationRepo: repos.sessionAllocationRepo,
-      config: {
-        artifactsDir: resolved.artifactsDir,
-        maxConcurrentSessions: resolved.maxConcurrentSessions,
-        maxConcurrentStages: resolved.maxConcurrentStages,
-        webhooks: resolved.webhooks,
-        projectRoot: resolved.projectRoot,
-      },
-      withTransaction: <T>(fn: () => Promise<T>) => withTransaction(db, fn),
-      chatExtensions: { customToolRegistry, mcpHub },
-    });
-
-    // ── Workspace Manager + Late-Wire ──
+    // ── Workspace Manager ──
     const workspacesDir = path.join(resolved.artifactsDir, 'workspaces');
     fs.mkdirSync(workspacesDir, { recursive: true });
     const workspaceManager = new WorkspaceManager(
@@ -426,10 +400,83 @@ export class GeneratorAI {
       repos.worktreeRepo,
     );
 
-    // Late-wire workspace manager into services that were created before it
-    services.workflowRunService.setWorkspaceManager(workspaceManager);
-    services.workflowRunService.setHookExecutor(services.hookExecutor);
-    services.stageExecutionService.setWorkspaceManager(workspaceManager);
+    // ── Source control (accounts + the commit → PR flow), as on the server ──
+    // Account settings live in `<artifactsDir>/source-control.json`; tokens in
+    // the encrypted secret store beside it, never in the file.
+    const scmRegistry = new SourceControlRegistry();
+    const scmConfig = new SourceControlConfigService(scmRegistry, {
+      http: httpClient,
+      processRunner: scriptRunner,
+      secrets: createSecretStore({ dataDir: resolved.artifactsDir, logger }),
+      logger,
+      configDir: resolved.artifactsDir,
+      env: {
+        ...(githubToken() ? { githubToken: githubToken()! } : {}),
+        ...(process.env['GENERATORAI_GITHUB_HOST'] ?? process.env['COPILOT_GH_HOST']
+          ? { githubHost: (process.env['GENERATORAI_GITHUB_HOST'] ?? process.env['COPILOT_GH_HOST'])! }
+          : {}),
+      },
+    });
+    await scmConfig.load();
+    const scmFlow = new SourceControlFlowService({
+      git: gitManager,
+      registry: scmRegistry,
+      readiness: new RepoReadinessService({
+        git: gitManager,
+        registry: scmRegistry,
+        logger,
+        settings: () => scmConfig.getSettings(),
+      }),
+      text: new ScmTextGenerator({ harness, logger, generation: () => scmConfig.generation() }),
+      logger,
+      settings: () => scmConfig.getSettings(),
+    });
+
+    // ── Run sandbox (same provider choice as the server) ──
+    const sandbox = resolved.sandbox.enabled
+      ? await createRunSandbox({ provider: resolved.sandbox.preferDocker === false ? 'host' : 'auto' }, logger)
+      : null;
+
+    // ── Core Services ──
+    const services = createCoreServices({
+      logger,
+      harness,
+      scriptRunner,
+      httpClient,
+      gitManager,
+      sequenceAllocator: repos.sequenceAllocator,
+      sessionRepo: repos.sessionRepo,
+      eventRepo: repos.eventRepo,
+      chatMessageRepo: repos.chatMessageRepo,
+      artifactRepo: repos.artifactRepo,
+      chatEntityRepo: repos.chatEntityRepo,
+      workflowDefinitionStore: repos.workflowDefinitionStore,
+      workflowRunRepo: repos.workflowRunRepo,
+      stageRunRepo: repos.stageRunRepo,
+      automationRepo: repos.automationRepo,
+      automationExecutionRepo: repos.automationExecutionRepo,
+      registerRepo: repos.registerRepo,
+      entryRepo: repos.entryRepo,
+      // P04 — the invocation path: idempotency, staged uploads, the codebases a run mounts.
+      idempotencyKeyRepo: repos.idempotencyKeyRepo,
+      invocationUploadRepo: repos.invocationUploadRepo,
+      projectCodebaseRepo: repos.projectCodebaseRepo,
+      engineStores: createEngineStores(db),
+      toHarnessError: harnessErrorOf,
+      engineOwnerLabel: `sdk:${process.pid}`,
+      workspaceManager,
+      // The engine's one concurrency gate (W-66): stage launches use the ordinary lane.
+      // The `global` flow key: every stage launch (P07 WP-7.2); 0 = no practical cap.
+      // The embedder's `flowLimits` (any key, `global` included) win.
+      admissionController: new AdmissionController({
+        flowLimits: { global: resolved.maxConcurrentStages > 0 ? resolved.maxConcurrentStages : MAX_FLOW_LIMIT, ...resolved.flowLimits },
+      }),
+      scmFlow,
+      config: {
+        artifactsDir: resolved.artifactsDir,
+      },
+      chatExtensions: { customToolRegistry, mcpHub },
+    });
 
     // ── Project & Codebase Management Services ──
     const projectService = new ProjectService(
@@ -461,58 +508,21 @@ export class GeneratorAI {
       logger,
     );
 
-    // Late-wire worktreeService into WorkflowRunService
-    services.workflowRunService.setWorktreeService(worktreeService, repos.projectCodebaseRepo);
+    // The run lifecycle mounts a run's codebases like a chat's (MountService),
+    // wires the project's configs and runs the sandbox, as on the server.
+    const mountService = new MountService({
+      mountRepo: repos.workspaceMountRepo,
+      workspaceRepo: repos.executionWorkspaceRepo,
+      git: gitManager,
+      logger,
+      workspacesDir,
+      codebaseRepo: repos.projectCodebaseRepo,
+      eventBus: services.eventBus,
+    });
+    services.engine.setLifecyclePlatform({ mounts: mountService, projectConfigs: projectConfigService, sandbox });
 
     // ── Stream Broker ──
     const streamBroker = new StreamBroker(repos.streamCursorRepo, logger);
-
-    // ── Workflow Orchestrator (full DAG execution) ──
-    const workflowPreprocessor = new WorkflowPreprocessor(
-      gitManager,
-      scriptRunner,
-      services.eventBus,
-      logger,
-    );
-
-    const resultValidator = new ResultValidator(
-      repos.chatMessageRepo,
-      repos.stageRunRepo,
-      services.eventBus,
-      logger,
-      scriptRunner,
-    );
-
-    // SDK-9: the SDK does not yet wire sandbox providers (the server does). If
-    // the caller asked for a sandbox, warn instead of silently ignoring it so
-    // the no-op is visible rather than a false sense of isolation.
-    if (resolved.sandbox?.enabled) {
-      logger.warn(
-        '[GeneratorAI] sandbox.enabled=true was requested but the SDK runs stages WITHOUT a sandbox ' +
-        '(sandbox providers are server-only). Commands execute on the host. Run via the server for sandboxing.',
-      );
-    }
-
-    const workflowOrchestrator = new WorkflowOrchestrator(
-      services.workflowRunService,
-      services.workflowDefinitionService,
-      workflowPreprocessor,
-      resultValidator,
-      repos.stageRunRepo,
-      repos.stageDefinitionRepo,
-      repos.workflowRunRepo,
-      services.eventBus,
-      services.templateRegistry,
-      logger,
-      resolved.artifactsDir,
-      undefined, // sandboxLifecycleManager — not wired in SDK mode (SDK-9); see warning above
-      undefined, // sandboxProvider — not wired in SDK mode (SDK-9); see warning above
-      worktreeService,
-      projectService,
-      projectConfigService,
-      workspaceManager,
-      services.hookExecutor,
-    );
 
     // ── Workflow Script Loader (if scripts directory exists) ──
     let scriptLoader: WorkflowScriptLoader | undefined;
@@ -523,38 +533,16 @@ export class GeneratorAI {
         services.hookExecutor,
       );
       await scriptLoader.discoverScripts();
-      // Connect script loader to data source resolver for automation
-      services.dataSourceResolver.setScriptLoader(scriptLoader);
+      // A script target is materialized from the loaded script.
+      services.workflowInvocationService.setScripts(scriptLoader);
     }
 
     // ── Background lifecycle services (constructed here, started by initialize()) ──
     // Defaults mirror the server's AppConfig so SDK-embedded engines get the
-    // same durability (event retention, durable step.sleep wake, worktree GC).
+    // same durability (event retention, worktree GC).
     const eventRetention = new EventRetentionService(
       db,
       { eventPayloadTtlDays: 90, sweepIntervalMs: 6 * 60 * 60 * 1000, maxDeletePerSweep: 50_000, enabled: true },
-      logger,
-    );
-
-    const durableSleep = new DurableSleepService(
-      repos.stageRunRepo,
-      services.eventBus,
-      async (stage) => {
-        try {
-          const run = await repos.workflowRunRepo.getById(stage.workflowRunId);
-          // Fire-and-forget: WorkflowRunService.onStageCompleted/onStageFailed
-          // drives the DAG forward once executeStage settles.
-          services.stageExecutionService
-            .executeStage(stage, stage.workflowRunId, run.sessionMode)
-            .then(() => services.workflowRunService.onStageCompleted(stage.workflowRunId, stage.id))
-            .catch((err) => services.workflowRunService.onStageFailed(stage.workflowRunId, stage.id, err));
-        } catch (err) {
-          logger.error(`[DurableSleep] Failed to resume woken stage ${stage.id}`, {
-            error: err instanceof Error ? err.message : String(err),
-          });
-        }
-      },
-      { sweepIntervalMs: 5_000, maxWakesPerSweep: 100, enabled: true },
       logger,
     );
 
@@ -593,7 +581,6 @@ export class GeneratorAI {
       logger,
       repos.workflowRunRepo,
       repos.chatEntityRepo,
-      workflowOrchestrator,
       streamBroker,
       workspaceManager,
       projectService,
@@ -601,7 +588,7 @@ export class GeneratorAI {
       worktreeService,
       projectConfigService,
       browserService,
-      { repos, eventRetention, durableSleep, worktreeCleanup, systemArtifacts },
+      { repos, sandbox, eventRetention, worktreeCleanup, systemArtifacts },
       scriptLoader,
       customToolRegistry,
     );

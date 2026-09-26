@@ -35,7 +35,8 @@ import {
   type SecretBackendInfo,
   type SecretStore,
 } from './SecretStore.js';
-import { writeFileAtomicRestricted, type KeyProvider } from './KeyProvider.js';
+import { writeFileAtomicRestricted } from '@generatorai/shared/node';
+import type { KeyProvider } from './KeyProvider.js';
 
 const VAULT_VERSION = 1;
 const IV_BYTES = 12;

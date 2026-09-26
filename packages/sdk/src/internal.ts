@@ -22,11 +22,8 @@ export type {
   IEventRepository,
   IChatMessageRepository,
   IArtifactRepository,
-  IWebhookRepository,
   IChatRepository,
-  IWorkflowDefinitionRepository,
-  IStageDefinitionRepository,
-  IStageEdgeRepository,
+  IWorkflowDefinitionStore,
   IWorkflowRunRepository,
   IStageRunRepository,
   IScriptRunner,
@@ -37,15 +34,14 @@ export type {
 
 // ── Service classes (advanced composition) ──
 export {
-  WorkflowOrchestrator,
+  WorkflowInvocationService,
   StreamBroker,
   ProjectService,
   CodebaseService,
   WorktreeService,
   ProjectConfigService,
   WorkspaceManager,
-  HitlService,
-  DurableSleepService,
+  WorkflowApprovalService,
   WorkflowScriptLoader,
   CustomToolRegistry,
   InMemoryMcpHub,
@@ -60,10 +56,7 @@ export type {
 } from '@generatorai/core';
 
 // ── DAG utilities ──
-export {
-  buildDAG,
-  validateDAG,
-  topologicalSort,
-  getExecutionLayers,
-  evaluateCondition,
-} from '@generatorai/core';
+// Validation, ordering and layers of a workflow document are
+// `validateWorkflow` / `analyzeGraph` in @generatorai/workflow-spec; this is
+// the engine's DAG over a validated graph.
+export { buildDAG } from '@generatorai/core';

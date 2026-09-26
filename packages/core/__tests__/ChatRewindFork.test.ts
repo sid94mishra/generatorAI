@@ -87,7 +87,7 @@ class BranchingHarness extends MockAgentHarness {
   capabilities(): ProviderCapabilities {
     return {
       vision: false, reasoning: false, reasoningEfforts: [], planMode: false, mcpServers: false,
-      skillDirectories: false, fullToolGating: false, sessionPersistence: true, budgetTracking: false,
+      approvalGating: 'none', hostTools: 'none', structuredOutput: 'none', skills: 'none', sessionPersistence: true, budgetTracking: false,
       ...this.caps,
     };
   }

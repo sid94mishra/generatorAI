@@ -7,12 +7,9 @@ import { eq, and, or, isNull, isNotNull, lt, lte } from 'drizzle-orm';
 import type {
   Automation,
   AutomationTriggerType,
-  AutomationInputMode,
   AutomationErrorPolicy,
   AutomationMissedRunPolicy,
   AutomationOverlapPolicy,
-  BatchDataFormat,
-  DataSourceConfig,
   DataSchema,
   IterationMode,
   AutomationDataset,
@@ -23,16 +20,12 @@ import { automations } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { validateJsonColumn } from '../utils/validateJsonColumn.js';
-import { jsonArray, jsonRecord, stringArray } from '../utils/jsonColumnSchemas.js';
+import { jsonRecord, stringArray } from '../utils/jsonColumnSchemas.js';
 
 // DB-03 — JSON column guards for `automations`. Used on both the write
 // and read paths so the same Zod schema defines valid shape end-to-end.
 function validateAutomationJson(obj: {
   workflowIds?: unknown;
-  loopItems?: unknown;
-  batchColumns?: unknown;
-  batchColumnMapping?: unknown;
-  dataSourceConfig?: unknown;
   variables?: unknown;
   dataSchema?: unknown;
   iterationMode?: unknown;
@@ -40,10 +33,6 @@ function validateAutomationJson(obj: {
   retryPolicy?: unknown;
 }, table = 'automations'): void {
   if (obj.workflowIds !== undefined) validateJsonColumn(obj.workflowIds, stringArray, { column: 'workflowIds', table });
-  if (obj.loopItems !== undefined) validateJsonColumn(obj.loopItems, jsonArray, { column: 'loopItems', table });
-  if (obj.batchColumns !== undefined) validateJsonColumn(obj.batchColumns, stringArray, { column: 'batchColumns', table });
-  if (obj.batchColumnMapping !== undefined) validateJsonColumn(obj.batchColumnMapping, jsonRecord, { column: 'batchColumnMapping', table });
-  if (obj.dataSourceConfig !== undefined) validateJsonColumn(obj.dataSourceConfig, jsonRecord, { column: 'dataSourceConfig', table });
   if (obj.variables !== undefined) validateJsonColumn(obj.variables, jsonRecord, { column: 'variables', table });
   // The new JSON columns store structured objects; use `jsonRecord` here as
   // a shallow shape guard (the shared Zod schemas do the exhaustive check).
@@ -74,17 +63,8 @@ export class DrizzleAutomationRepository {
         missedRunPolicy: automation.missedRunPolicy ?? 'skip',
         overlapPolicy: automation.overlapPolicy ?? 'skip',
         // The raw token is NEVER persisted — only its hash (v47).
-        webhookToken: null,
         webhookTokenHash: automation.webhookTokenHash ?? null,
         workflowIds: automation.workflowIds,
-        inputMode: automation.inputMode,
-        loopVariable: automation.loopVariable ?? null,
-        loopItems: automation.loopItems ?? [],
-        batchDataFormat: automation.batchDataFormat ?? null,
-        batchData: automation.batchData ?? null,
-        batchColumns: automation.batchColumns ?? [],
-        batchColumnMapping: automation.batchColumnMapping ?? {},
-        dataSourceConfig: automation.dataSourceConfig ?? null,
         variables: automation.variables,
         maxConcurrency: automation.maxConcurrency,
         onError: automation.onError,
@@ -97,6 +77,7 @@ export class DrizzleAutomationRepository {
         iterationMode: automation.iterationMode ?? null,
         defaultDataset: automation.defaultDataset ?? null,
         retryPolicy: automation.retryPolicy ?? null,
+        permissionMode: automation.permissionMode,
         createdAt: automation.createdAt,
         updatedAt: automation.updatedAt,
       });
@@ -165,27 +146,6 @@ export class DrizzleAutomationRepository {
     return rows[0] ? this.mapRow(rows[0]) : null;
   }
 
-  /**
-   * v47 backfill — hash any plaintext tokens left in the legacy column and
-   * null the raw value. Idempotent; returns how many rows were converted.
-   */
-  async hashLegacyWebhookTokens(): Promise<number> {
-    const rows = await this.db
-      .select({ id: automations.id, webhookToken: automations.webhookToken })
-      .from(automations)
-      .where(isNotNull(automations.webhookToken));
-    let converted = 0;
-    for (const row of rows) {
-      if (!row.webhookToken) continue;
-      await this.db
-        .update(automations)
-        .set({ webhookTokenHash: hashWebhookToken(row.webhookToken), webhookToken: null })
-        .where(eq(automations.id, row.id));
-      converted++;
-    }
-    return converted;
-  }
-
   async update(id: string, updates: Partial<Automation>): Promise<Automation> {
     // DB-03 — validate only the JSON columns present in the diff.
     validateAutomationJson(updates);
@@ -202,14 +162,6 @@ export class DrizzleAutomationRepository {
     // `webhookToken` is deliberately NOT writable — only the hash is stored.
     if (updates.webhookTokenHash !== undefined) values.webhookTokenHash = updates.webhookTokenHash ?? null;
     if (updates.workflowIds !== undefined) values.workflowIds = updates.workflowIds;
-    if (updates.inputMode !== undefined) values.inputMode = updates.inputMode;
-    if (updates.loopVariable !== undefined) values.loopVariable = updates.loopVariable ?? null;
-    if (updates.loopItems !== undefined) values.loopItems = updates.loopItems ?? [];
-    if (updates.batchDataFormat !== undefined) values.batchDataFormat = updates.batchDataFormat ?? null;
-    if (updates.batchData !== undefined) values.batchData = updates.batchData ?? null;
-    if (updates.batchColumns !== undefined) values.batchColumns = updates.batchColumns ?? [];
-    if (updates.batchColumnMapping !== undefined) values.batchColumnMapping = updates.batchColumnMapping ?? {};
-    if (updates.dataSourceConfig !== undefined) values.dataSourceConfig = updates.dataSourceConfig ?? null;
     if (updates.variables !== undefined) values.variables = updates.variables;
     if (updates.maxConcurrency !== undefined) values.maxConcurrency = updates.maxConcurrency;
     if (updates.onError !== undefined) values.onError = updates.onError;
@@ -222,6 +174,7 @@ export class DrizzleAutomationRepository {
     if (updates.iterationMode !== undefined) values.iterationMode = updates.iterationMode ?? null;
     if (updates.defaultDataset !== undefined) values.defaultDataset = updates.defaultDataset ?? null;
     if (updates.retryPolicy !== undefined) values.retryPolicy = updates.retryPolicy ?? null;
+    if (updates.permissionMode !== undefined) values.permissionMode = updates.permissionMode;
     values.updatedAt = new Date();
 
     await this.db
@@ -340,14 +293,6 @@ export class DrizzleAutomationRepository {
       // Raw token is never read back; the hash is the persisted identity.
       webhookTokenHash: row.webhookTokenHash ?? undefined,
       workflowIds: safeJsonColumn(row.workflowIds, stringArray, { fallback: [] }) ?? [],
-      inputMode: row.inputMode as AutomationInputMode,
-      loopVariable: row.loopVariable ?? undefined,
-      loopItems: safeJsonColumn(row.loopItems, jsonArray, { fallback: [] }) ?? [],
-      batchDataFormat: (row.batchDataFormat as BatchDataFormat) ?? undefined,
-      batchData: row.batchData ?? undefined,
-      batchColumns: safeJsonColumn(row.batchColumns, stringArray, { fallback: undefined }),
-      batchColumnMapping: safeJsonColumn(row.batchColumnMapping, jsonRecord, { fallback: undefined }) as Record<string, string> | undefined,
-      dataSourceConfig: safeJsonColumn(row.dataSourceConfig, jsonRecord, { fallback: undefined }) as DataSourceConfig | undefined,
       variables: safeJsonColumn(row.variables, jsonRecord, { fallback: {} }) ?? {},
       maxConcurrency: row.maxConcurrency,
       onError: row.onError as AutomationErrorPolicy,
@@ -360,6 +305,7 @@ export class DrizzleAutomationRepository {
       iterationMode: safeJsonColumn(row.iterationMode, jsonRecord, { fallback: undefined }) as IterationMode | undefined,
       defaultDataset: safeJsonColumn(row.defaultDataset, jsonRecord, { fallback: undefined }) as AutomationDataset | undefined,
       retryPolicy: safeJsonColumn(row.retryPolicy, jsonRecord, { fallback: undefined }) as AutomationRetryPolicy | undefined,
+      permissionMode: row.permissionMode as Automation['permissionMode'],
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

@@ -29,9 +29,6 @@ export interface AutomationView {
   nextRunAt?: WireTime;
   lastRunAt?: WireTime;
   workflowIds?: string[] | null;
-  /** Legacy single-workflow field some older payloads still carry. */
-  workflowDefinitionId?: string | null;
-  inputMode?: string | null;
   dataSchema?: unknown;
   defaultDataset?: unknown;
   executions?: ExecutionView[];
@@ -146,11 +143,9 @@ export function needsInputs(a: Pick<AutomationView, 'dataSchema' | 'defaultDatas
   return Boolean(a.dataSchema) && !a.defaultDataset;
 }
 
-/** Workflow ids to list, falling back to the legacy single-workflow field. */
-export function workflowIdsOf(a: Pick<AutomationView, 'workflowIds' | 'workflowDefinitionId'>): string[] {
-  const ids = Array.isArray(a.workflowIds) ? a.workflowIds.filter((x) => typeof x === 'string' && x) : [];
-  if (ids.length > 0) return ids;
-  return a.workflowDefinitionId ? [a.workflowDefinitionId] : [];
+/** Workflow ids to list. */
+export function workflowIdsOf(a: Pick<AutomationView, 'workflowIds'>): string[] {
+  return Array.isArray(a.workflowIds) ? a.workflowIds.filter((x) => typeof x === 'string' && x) : [];
 }
 
 // ── Executions ─────────────────────────────────────────────────

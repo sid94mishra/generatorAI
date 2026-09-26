@@ -29,13 +29,20 @@ Exported from `@generatorai/sdk`:
 - **Configuration**: `GeneratorAIConfig`, `HarnessSelection`, `ResolvedConfig`,
   `LoggerConfig`, `SandboxConfig`. `config.harness` is the harness field;
   `config.provider` is a deprecated alias kept for one minor.
-- **Builders**: `WorkflowBuilder`, `StageBuilder`.
+- **Workflow documents**: the builders `workflow`, `WorkflowBuilder`,
+  `StageBuilder` and `WorkflowBuildError`, re-exported from
+  `@generatorai/workflow-spec/builders`; `validateWorkflow`, `exportGraph`,
+  `importGraph` and `parseGraph`; and the document types `WorkflowGraph`,
+  `WorkflowGraphInput`, `StageSpec`, `EdgeSpec`, `WorkflowSpec`,
+  `ValidationIssue`, `ValidationResult`, `WorkflowDefinitionRecord`,
+  `WorkflowDefinitionSummary`, `WorkflowDefinitionVersionSummary` from
+  `@generatorai/workflow-spec`.
 - **Domain types** re-exported from `@generatorai/shared` (e.g.
-  `WorkflowDefinition`, `WorkflowRun`, `Chat`, `ChatMessage`, `Automation`,
+  `WorkflowRun`, `StageRun`, `Chat`, `ChatMessage`, `Automation`,
   `PersistedEvent`, `HookDefinition`, …).
 - **Errors**: `GeneratorAIError`, `ValidationError`, `HarnessConnectionError`.
-- **State machines**: `WorkflowRunStateMachine`, `StageRunStateMachine`,
-  `SessionStateMachine` (pure, dependency-free).
+- **State machines**: `WorkflowRunStateMachine`, `StageRunStateMachine`
+  (pure, dependency-free).
 - **Bring-your-own-harness**: the `IAgentHarness` interface and the harness
   provider types (`HarnessType`, `HarnessProviderConfig`). Implement
   `IAgentHarness` and pass the instance as `config.harness` to run on any
@@ -58,8 +65,9 @@ fields `ai.services`, `ai.orchestrator`, `ai.streamBroker`:
   `ProjectService`, `WorkspaceManager`, `HitlService`, `DurableSleepService`, …)
 - Repository / infrastructure ports (`ISessionRepository`,
   `IWorkflowRunRepository`, `IScriptRunner`, …) other than `IAgentHarness`
-- DAG utilities (`buildDAG`, `validateDAG`, `topologicalSort`,
-  `getExecutionLayers`, `evaluateCondition`)
+- The engine's DAG utility `buildDAG` (validation, ordering and layers of a
+  workflow document are `validateWorkflow` / `analyzeGraph` in
+  `@generatorai/workflow-spec`)
 
 These exist for power users composing the engine directly. They can change —
 including breaking changes — in any minor release. If you depend on them, pin an
@@ -67,8 +75,11 @@ exact SDK version and expect to adjust on upgrade.
 
 ## Durability note (important for embedders)
 
-Workflow runs are driven by an in-process scheduler backed by the durable SQLite
-state. If your host process restarts, `initialize()` auto-resumes interrupted
-runs from the database (in-flight stages re-run at-least-once). Make stage side
-effects idempotent where possible. This behaviour is part of the stable
-contract; the mechanism (`StartupRecoveryService` etc.) is not.
+Workflow runs are driven by an in-process engine backed by the durable SQLite
+state. If your host process restarts, `initialize()` recovers interrupted runs
+from the database: settled turns replay from the journal, an interrupted turn
+that is safe to repeat is re-sent, and one that may have changed the
+workspace pauses its stage for an operator instead of re-running. Only one
+process drives a database's runs (the engine lock); a second one runs
+without an engine. This behaviour is part of the stable contract; the
+mechanism (`RunSupervisor` etc.) is not.

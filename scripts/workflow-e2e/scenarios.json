@@ -1,0 +1,118 @@
+{
+  "$comment": "Live E2E scenario registry. `phases.NN` lists the scenarios `pnpm workflow:e2e --phase NN` runs (`--phase all` runs every listed scenario once; `--phase smoke` is the credential-free smoke). Every spec holds a v2 workflow document under `graph`, created and published through the definition API, then started through POST /workflow-invocations. `expect` is judged for claude-agent, `expectFaux` (when present) for --provider faux. `knownBugs` records register items whose current behaviour an expectation deliberately encodes; a later phase that fixes one updates the expectation in the same commit.",
+  "phases": {
+    "smoke": ["SMOKE-check"],
+    "smoke-live": ["SMOKE-loop"],
+    "00": ["T1", "T2", "T3", "T7", "T10-small"],
+    "01": ["SMOKE-check", "T1"],
+    "03": ["T1", "T3", "T10-small"],
+    "04": ["SMOKE-check", "SMOKE-agent"],
+    "05": ["SMOKE-check", "T2"],
+    "07": ["T7"]
+  },
+  "scenarios": {
+    "SMOKE-check": {
+      "spec": "specs/smoke-check.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": { "version": "completed", "again": "completed", "on_failure": "skipped" },
+        "outputContains": [
+          { "stage": "version", "text": "\"passed\":true" },
+          { "stage": "again", "text": "\"stdoutTail\":\"v" }
+        ]
+      }
+    },
+    "SMOKE-agent": {
+      "spec": "specs/smoke-agent.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": { "first": "completed", "second": "completed" },
+        "hasContext": ["second"],
+        "contextContains": [{ "stage": "second", "text": "## Completed stage \"first\"" }]
+      },
+      "expectFaux": {
+        "runStatus": "completed",
+        "stages": { "first": "completed", "second": "completed" }
+      }
+    },
+    "SMOKE-loop": {
+      "spec": "specs/smoke-loop.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": { "hello": "completed", "twice": "completed", "tick": "completed" },
+        "outputContains": [
+          { "stage": "twice", "text": "\"iterations\":2" }
+        ]
+      }
+    },
+    "T1": {
+      "spec": "specs/t1.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": {
+          "start": "completed", "B1": "completed", "B2": "completed", "B3": "completed",
+          "B4": "completed", "B5": "completed", "join": "completed", "final": "completed"
+        },
+        "contextContains": [{ "stage": "join", "text": "## Completed stage \"B5\"" }]
+      },
+      "expectFaux": {
+        "runStatus": "completed",
+        "stages": {
+          "start": "completed", "B1": "completed", "B2": "completed", "B3": "completed",
+          "B4": "completed", "B5": "completed", "join": "completed", "final": "completed"
+        }
+      }
+    },
+    "T2": {
+      "spec": "specs/t2.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": {
+          "R": "completed", "C_and": "completed", "C_not": "completed", "C_amp": "completed", "C_lower": "completed",
+          "C_stageref": "completed", "J": "completed", "J_always": "completed",
+          "C_or_false": "skipped", "C_paren": "skipped", "D_after_skip": "skipped"
+        }
+      }
+    },
+    "T3": {
+      "spec": "specs/t3.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": { "F": "failed", "S": "skipped", "Rec": "completed", "OC": "completed", "AL": "completed", "Z": "completed" },
+        "attempts": { "F": 3 }
+      },
+      "expectFaux": {
+        "runStatus": "completed",
+        "stages": { "F": "completed", "S": "completed", "Rec": "skipped", "OC": "completed", "AL": "completed", "Z": "skipped" }
+      }
+    },
+    "T7": {
+      "spec": "specs/t7.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": {
+          "A": "completed", "B_summary": "completed", "B_full": "completed", "B_none": "completed",
+          "B_struct": "completed", "B_srcs": "completed", "V_interp": "completed"
+        },
+        "hasContext": ["B_summary", "B_full", "B_struct", "B_srcs"],
+        "noContext": ["B_none"],
+        "contextContains": [{ "stage": "B_srcs", "text": "## Completed stage \"A\"" }],
+        "promptStartsWith": [{ "stage": "V_interp", "text": "TOPIC=otters NESTED=deep MISSING=" }]
+      },
+      "expectFaux": {
+        "runStatus": "completed",
+        "noContext": ["B_none"],
+        "promptStartsWith": [{ "stage": "V_interp", "text": "TOPIC=otters NESTED=deep MISSING=" }]
+      },
+      "knownBugs": ["W-48 prompt boilerplate provokes refusals (content checks are advisory)"]
+    },
+    "T10-small": {
+      "spec": "specs/t10-small.json",
+      "expect": {
+        "runStatus": "completed",
+        "allStages": "completed",
+        "noContext": ["join1", "join2", "final"]
+      }
+    }
+  }
+}

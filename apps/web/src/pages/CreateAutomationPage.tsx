@@ -7,13 +7,12 @@ import { useNavigate } from 'react-router-dom';
 import { useCreateAutomation } from '@/hooks/automationQueries.js';
 import { useWorkflowDefinitions } from '@/hooks/workflowQueries.js';
 import { useProjects } from '@/hooks/projectQueries.js';
-import { ArrowLeft, Plus, X, Clock, Webhook, Hand, Repeat, AlertCircle, Table2, FileSpreadsheet, Terminal, Play, FolderGit2 } from 'lucide-react';
+import { ArrowLeft, Plus, X, Clock, Webhook, Hand, AlertCircle, FolderGit2 } from 'lucide-react';
 import { Select, Button, Input, Textarea, Spinner, PageHeader } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { cn } from '@/lib/utils.js';
-import type { CreateAutomationParams, AutomationTriggerType, AutomationInputMode, BatchDataFormat, DataSourceConfig, DataSourceOutputFormat } from '@generatorai/shared';
-import { parseBatchData } from '@generatorai/shared';
+import type { CreateAutomationParams, AutomationTriggerType } from '@generatorai/shared';
 import { WebhookCredentialsDialog, type WebhookCredentials } from '@/components/automation/WebhookCredentialsDialog.js';
 
 export function CreateAutomationPage() {
@@ -28,23 +27,12 @@ export function CreateAutomationPage() {
   const [triggerType, setTriggerType] = useState<AutomationTriggerType>('manual');
   const [cronExpression, setCronExpression] = useState('0 9 * * *');
   const [selectedWorkflowIds, setSelectedWorkflowIds] = useState<string[]>([]);
-  const [inputMode, setInputMode] = useState<AutomationInputMode>('single');
-  const [loopVariable, setLoopVariable] = useState('');
-  const [loopItemsText, setLoopItemsText] = useState('');
-  // Batch mode state
-  const [batchDataFormat, setBatchDataFormat] = useState<BatchDataFormat>('csv');
-  const [batchDataText, setBatchDataText] = useState('');
-  const [batchColumnMapping, setBatchColumnMapping] = useState<Record<string, string>>({});
-  // Script data source state (E1)
-  const [scriptCommand, setScriptCommand] = useState('');
-  const [scriptOutputFormat, setScriptOutputFormat] = useState<DataSourceOutputFormat>('json_array');
-  const [scriptTimeout, setScriptTimeout] = useState(60000);
-  const [scriptEnvText, setScriptEnvText] = useState('{}');
-  const [scriptTestResult, setScriptTestResult] = useState<{ success: boolean; preview?: unknown; totalCount?: number; error?: string } | null>(null);
-  const [scriptTesting, setScriptTesting] = useState(false);
   const [variablesText, setVariablesText] = useState('{}');
   const [maxConcurrency, setMaxConcurrency] = useState(1);
   const [onError, setOnError] = useState<'continue' | 'stop'>('continue');
+  // PD-18 — unattended runs must declare a permission mode; accept-edits is
+  // the default offered (file edits run, commands wait for an approver).
+  const [permissionMode, setPermissionMode] = useState<CreateAutomationParams['permissionMode']>('acceptEdits');
   const [error, setError] = useState<string | null>(null);
   // Item A5 — one-time reveal of the webhook token + signing secret after
   // a webhook automation is created. Navigation to the detail page is held
@@ -83,39 +71,13 @@ export function CreateAutomationPage() {
   const [retryOnTimeout, setRetryOnTimeout] = useState(true);
   const [retryOnNetwork, setRetryOnNetwork] = useState(true);
 
-  // Clear mode-specific fields when switching input modes
-  const handleInputModeChange = (mode: AutomationInputMode) => {
-    setInputMode(mode);
-    setError(null);
-    if (mode !== 'loop') {
-      setLoopVariable('');
-      setLoopItemsText('');
-    }
-    if (mode !== 'batch') {
-      setBatchDataText('');
-      setBatchColumnMapping({});
-    }
-    if (mode !== 'script' as string) {
-      setScriptCommand('');
-      setScriptTestResult(null);
-    }
-  };
-
-  // Parse batch data for preview (single parse for both result and error)
-  const { parsedBatch, batchParseError } = useMemo(() => {
-    if (inputMode !== 'batch' || !batchDataText.trim()) return { parsedBatch: null, batchParseError: null };
-    try {
-      return { parsedBatch: parseBatchData(batchDataFormat, batchDataText), batchParseError: null };
-    } catch (e) {
-      return { parsedBatch: null, batchParseError: e instanceof Error ? e.message : String(e) };
-    }
-  }, [inputMode, batchDataFormat, batchDataText]);
-
   // Filter workflows by selected project (if any)
   const filteredWorkflows = useMemo(() => {
     if (!workflows) return [];
-    if (!selectedProjectId) return workflows;
-    return workflows.filter((w) => w.projectId === selectedProjectId || !w.projectId);
+    // Automations start normal runs, which need a published version.
+    const runnable = workflows.filter((w) => w.status === 'published' && !w.archivedAt);
+    if (!selectedProjectId) return runnable;
+    return runnable.filter((w) => w.projectId === selectedProjectId || !w.projectId);
   }, [workflows, selectedProjectId]);
 
   const handleAddWorkflow = (id: string) => {
@@ -135,10 +97,6 @@ export function CreateAutomationPage() {
     if (!name.trim()) { setError('Name is required'); return; }
     if (selectedWorkflowIds.length === 0) { setError('Select at least one workflow'); return; }
     if (triggerType === 'schedule' && !cronExpression.trim()) { setError('Cron expression is required for schedule triggers'); return; }
-    if (inputMode === 'loop' && !loopVariable.trim()) { setError('Loop variable name is required for loop mode'); return; }
-    if (inputMode === 'batch' && !batchDataText.trim()) { setError('Batch data is required for batch mode'); return; }
-    if (inputMode === 'batch' && batchParseError) { setError(`Batch data error: ${batchParseError}`); return; }
-    if ((inputMode as string) === 'script' && !scriptCommand.trim()) { setError('Script command is required for script data source mode'); return; }
 
     let variables: Record<string, unknown> = {};
     try {
@@ -148,54 +106,16 @@ export function CreateAutomationPage() {
       return;
     }
 
-    let loopItems: unknown[] | undefined;
-    if (inputMode === 'loop' && loopItemsText.trim()) {
-      try {
-        loopItems = JSON.parse(loopItemsText);
-        if (!Array.isArray(loopItems)) { setError('Loop items must be a JSON array'); return; }
-      } catch {
-        setError('Loop items must be valid JSON array');
-        return;
-      }
-    }
-
-    // Build data source config for script mode (E1)
-    let dataSourceConfig: DataSourceConfig | undefined;
-    if (inputMode === 'script') {
-      let scriptEnv: Record<string, string> | undefined;
-      try {
-        const parsed = JSON.parse(scriptEnvText);
-        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
-          scriptEnv = parsed;
-        }
-      } catch { /* ignore invalid env JSON */ }
-
-      dataSourceConfig = {
-        type: 'script',
-        command: scriptCommand.trim(),
-        timeout: scriptTimeout,
-        outputFormat: scriptOutputFormat,
-        env: scriptEnv,
-      };
-    }
-
     const params: CreateAutomationParams = {
       name: name.trim(),
       description: description.trim() || undefined,
       triggerType,
       cronExpression: triggerType === 'schedule' ? cronExpression.trim() : undefined,
       workflowIds: selectedWorkflowIds,
-      inputMode: inputMode,
-      loopVariable: inputMode === 'loop' ? loopVariable.trim() : undefined,
-      loopItems: inputMode === 'loop' ? loopItems : undefined,
-      batchDataFormat: inputMode === 'batch' ? batchDataFormat : undefined,
-      batchData: inputMode === 'batch' ? batchDataText : undefined,
-      batchColumns: inputMode === 'batch' && parsedBatch ? parsedBatch.columns : undefined,
-      batchColumnMapping: inputMode === 'batch' && Object.keys(batchColumnMapping).length > 0 ? batchColumnMapping : undefined,
-      dataSourceConfig,
       variables,
       maxConcurrency,
       onError,
+      permissionMode,
       projectId: selectedProjectId || undefined,
     };
 
@@ -447,433 +367,52 @@ export function CreateAutomationPage() {
           )}
         </div>
 
-        {/* Input Mode */}
+        {/* Concurrency & Error Policy */}
         <div className="rounded-lg border border-border bg-card p-6">
-          <h2 className="mb-4 text-sm font-semibold text-foreground">Input Mode</h2>
-          <div className="grid grid-cols-4 gap-3">
-            <Button variant="ghost"
-              type="button"
-              onClick={() => handleInputModeChange('single')}
-              aria-pressed={inputMode === 'single'}
-              className={cn(
-                'h-auto whitespace-normal flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
-                inputMode === 'single'
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-muted-foreground',
-              )}
-            >
-              <Hand className={cn('h-5 w-5', inputMode === 'single' ? 'text-primary' : 'text-muted-foreground')} />
-              <span className="text-sm font-medium text-foreground">Single</span>
-              <span className="text-[11px] text-muted-foreground">Run once with base variables</span>
-            </Button>
-            <Button variant="ghost"
-              type="button"
-              onClick={() => handleInputModeChange('loop')}
-              aria-pressed={inputMode === 'loop'}
-              className={cn(
-                'h-auto whitespace-normal flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
-                inputMode === 'loop'
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-muted-foreground',
-              )}
-            >
-              <Repeat className={cn('h-5 w-5', inputMode === 'loop' ? 'text-primary' : 'text-muted-foreground')} />
-              <span className="text-sm font-medium text-foreground">Loop</span>
-              <span className="text-[11px] text-muted-foreground">Iterate with single variable</span>
-            </Button>
-            <Button variant="ghost"
-              type="button"
-              onClick={() => handleInputModeChange('batch')}
-              aria-pressed={inputMode === 'batch'}
-              className={cn(
-                'h-auto whitespace-normal flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
-                inputMode === 'batch'
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-muted-foreground',
-              )}
-            >
-              <FileSpreadsheet className={cn('h-5 w-5', inputMode === 'batch' ? 'text-primary' : 'text-muted-foreground')} />
-              <span className="text-sm font-medium text-foreground">Batch</span>
-              <span className="text-[11px] text-muted-foreground">Spreadsheet of tasks, multi-var</span>
-            </Button>
-            <Button variant="ghost"
-              type="button"
-              onClick={() => handleInputModeChange('script')}
-              aria-pressed={inputMode === 'script'}
-              className={cn(
-                'h-auto whitespace-normal flex flex-col items-center gap-2 rounded-lg border p-4 text-center transition-colors',
-                inputMode === 'script'
-                  ? 'border-primary bg-primary/5'
-                  : 'border-border hover:border-muted-foreground',
-              )}
-            >
-              <Terminal className={cn('h-5 w-5', (inputMode as string) === 'script' ? 'text-primary' : 'text-muted-foreground')} />
-              <span className="text-sm font-medium text-foreground">Script</span>
-              <span className="text-[11px] text-muted-foreground">Dynamic data from script</span>
-            </Button>
+          <h2 className="mb-4 text-sm font-semibold text-foreground">Iterations</h2>
+          <p className="mb-3 text-xs text-muted-foreground">
+            Without a data schema an automation runs its workflows once with the base variables.
+            With one, every iteration the dataset produces runs them.
+          </p>
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="automation-max-concurrency" className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
+              <Input id="automation-max-concurrency"
+                type="number"
+                min={1}
+                max={10}
+                value={maxConcurrency}
+                onChange={(e) => setMaxConcurrency(Number(e.target.value))}
+              />
+            </div>
+            <div>
+              <label htmlFor="automation-on-error" className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
+              <Select id="automation-on-error"
+                value={onError}
+                onChange={(v) => setOnError(v as 'continue' | 'stop')}
+                options={[
+                  { value: 'continue', label: 'Continue on error' },
+                  { value: 'stop', label: 'Stop on error' },
+                ]}
+              />
+            </div>
+            <div className="col-span-2">
+              <label htmlFor="automation-permission-mode" className="mb-1.5 block text-xs font-medium text-muted-foreground">Permission mode</label>
+              <Select id="automation-permission-mode"
+                value={permissionMode}
+                onChange={(v) => setPermissionMode(v as CreateAutomationParams['permissionMode'])}
+                options={[
+                  { value: 'acceptEdits', label: 'Accept edits — file edits run, other tools wait for approval' },
+                  { value: 'default', label: 'Ask — every gated tool call waits for approval' },
+                  { value: 'plan', label: 'Plan — read-only; the plan waits for approval' },
+                  { value: 'bypassPermissions', label: 'Bypass — no approvals (webhook triggers need admin)' },
+                ]}
+              />
+              <p className="mt-1 text-xs text-muted-foreground">
+                Nobody watches an automation run, so its tool-approval policy is set here. A stage or workflow can still tighten it.
+              </p>
+            </div>
           </div>
-
-          {inputMode === 'loop' && (
-            <div className="mt-4 space-y-4">
-              <div>
-                <label htmlFor="automation-loop-variable-name" className="mb-1.5 block text-xs font-medium text-muted-foreground">Loop Variable Name *</label>
-                <Input id="automation-loop-variable-name"
-                  type="text"
-                  value={loopVariable}
-                  onChange={(e) => setLoopVariable(e.target.value)}
-                  placeholder="e.g. projectName"
-                />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  This variable will be set to a different value for each iteration
-                </p>
-              </div>
-              <div>
-                <label htmlFor="automation-loop-items-json-array" className="mb-1.5 block text-xs font-medium text-muted-foreground">Loop Items (JSON Array)</label>
-                <Textarea id="automation-loop-items-json-array"
-                  value={loopItemsText}
-                  onChange={(e) => setLoopItemsText(e.target.value)}
-                  rows={4}
-                  className="font-mono"
-                  placeholder='["item1", "item2", "item3"]'
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="automation-max-concurrency" className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
-                  <Input id="automation-max-concurrency"
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={maxConcurrency}
-                    onChange={(e) => setMaxConcurrency(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="automation-on-error" className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
-                  <Select id="automation-on-error"
-                    value={onError}
-                    onChange={(v) => setOnError(v as 'continue' | 'stop')}
-                    options={[
-                      { value: 'continue', label: 'Continue on error' },
-                      { value: 'stop', label: 'Stop on error' },
-                    ]}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {inputMode === 'batch' && (
-            <div className="mt-4 space-y-4">
-              {/* Format selector */}
-              <div>
-                <label className="mb-1.5 block text-xs font-medium text-muted-foreground">Data Format *</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {([
-                    { fmt: 'csv' as const, label: 'CSV', desc: 'Comma-separated with headers' },
-                    { fmt: 'json' as const, label: 'JSON Array', desc: 'Array of objects' },
-                    { fmt: 'jsonl' as const, label: 'JSONL', desc: 'One JSON object per line' },
-                  ]).map(({ fmt, label, desc }) => (
-                    <Button variant="ghost"
-                      key={fmt}
-                      type="button"
-                      onClick={() => setBatchDataFormat(fmt)}
-                      aria-pressed={batchDataFormat === fmt}
-                      className={cn(
-                        'h-auto flex-col items-stretch whitespace-normal rounded-lg border p-2.5 text-left transition-colors',
-                        batchDataFormat === fmt
-                          ? 'border-primary bg-primary/5'
-                          : 'border-border hover:border-muted-foreground',
-                      )}
-                    >
-                      <span className="block text-xs font-medium text-foreground">{label}</span>
-                      <span className="block text-[10px] text-muted-foreground">{desc}</span>
-                    </Button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Batch data input */}
-              <div>
-                <label htmlFor="automation-batch-data" className="mb-1.5 block text-xs font-medium text-muted-foreground">Batch Data *</label>
-                <Textarea id="automation-batch-data"
-                  value={batchDataText}
-                  onChange={(e) => setBatchDataText(e.target.value)}
-                  rows={8}
-                  className="font-mono text-xs"
-                  placeholder={
-                    batchDataFormat === 'csv'
-                      ? 'apiName,endpoint,method\nusers,/api/users,GET\norders,/api/orders,POST'
-                      : batchDataFormat === 'json'
-                      ? '[{"apiName": "users", "endpoint": "/api/users"}, {"apiName": "orders", "endpoint": "/api/orders"}]'
-                      : '{"apiName": "users", "endpoint": "/api/users"}\n{"apiName": "orders", "endpoint": "/api/orders"}'
-                  }
-                />
-                {batchParseError && (
-                  <p className="mt-1 text-xs text-danger">{batchParseError}</p>
-                )}
-                {parsedBatch && (
-                  <p className="mt-1 text-xs text-success">
-                    {parsedBatch.rowCount} rows, {parsedBatch.columns.length} columns detected: {parsedBatch.columns.join(', ')}
-                  </p>
-                )}
-              </div>
-
-              {/* Table Preview */}
-              {parsedBatch && parsedBatch.rowCount > 0 && (
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                    <Table2 className="mr-1 inline h-3.5 w-3.5" />
-                    Data Preview ({parsedBatch.rowCount} rows)
-                  </label>
-                  <div className="max-h-36 overflow-auto rounded-lg border border-border">
-                    <table className="w-full text-xs">
-                      <thead className="sticky top-0 bg-muted">
-                        <tr>
-                          <th className="px-2 py-1.5 text-left font-medium text-muted-foreground">#</th>
-                          {parsedBatch.columns.map((col) => (
-                            <th key={col} className="px-2 py-1.5 text-left font-medium text-muted-foreground">{col}</th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {parsedBatch.rows.slice(0, 20).map((row, i) => (
-                          <tr key={i} className="border-t border-border">
-                            <td className="px-2 py-1 text-muted-foreground">{i + 1}</td>
-                            {parsedBatch.columns.map((col) => (
-                              <td key={col} className="max-w-[200px] truncate px-2 py-1 text-foreground">
-                                {String(row[col] ?? '')}
-                              </td>
-                            ))}
-                          </tr>
-                        ))}
-                        {parsedBatch.rowCount > 20 && (
-                          <tr className="border-t border-border">
-                            <td colSpan={parsedBatch.columns.length + 1} className="px-2 py-1.5 text-center text-muted-foreground">
-                              ... and {parsedBatch.rowCount - 20} more rows
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-              )}
-
-              {/* Column Mapping */}
-              {parsedBatch && parsedBatch.columns.length > 0 && (
-                <div>
-                  <label className="mb-1.5 block text-xs font-medium text-muted-foreground">
-                    Column → Variable Mapping (optional)
-                  </label>
-                  <p className="mb-2 text-[10px] text-muted-foreground">
-                    Map data columns to workflow variable names. Leave empty to use column names as-is.
-                  </p>
-                  <div className="space-y-2">
-                    {parsedBatch.columns.map((col) => (
-                      <div key={col} className="flex items-center gap-2">
-                        <span className="w-32 text-xs font-mono text-foreground truncate">{col}</span>
-                        <span className="text-xs text-muted-foreground">→</span>
-                        <Input
-                          type="text"
-                          value={batchColumnMapping[col] ?? ''}
-                          onChange={(e) => {
-                            const newMapping = { ...batchColumnMapping };
-                            if (e.target.value.trim()) {
-                              newMapping[col] = e.target.value.trim();
-                            } else {
-                              delete newMapping[col];
-                            }
-                            setBatchColumnMapping(newMapping);
-                          }}
-                          className="flex-1 font-mono text-xs"
-                          aria-label={`Workflow variable for ${col}`}
-                          placeholder={col}
-                        />
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Concurrency & Error Policy */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="automation-max-concurrency" className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
-                  <Input id="automation-max-concurrency"
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={maxConcurrency}
-                    onChange={(e) => setMaxConcurrency(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="automation-on-error" className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
-                  <Select id="automation-on-error"
-                    value={onError}
-                    onChange={(v) => setOnError(v as 'continue' | 'stop')}
-                    options={[
-                      { value: 'continue', label: 'Continue on error' },
-                      { value: 'stop', label: 'Stop on error' },
-                    ]}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
-
-          {(inputMode as string) === 'script' && (
-            <div className="mt-4 space-y-4">
-              {/* Script Command */}
-              <div>
-                <label htmlFor="automation-script-command" className="mb-1.5 block text-xs font-medium text-muted-foreground">Script Command *</label>
-                <Textarea id="automation-script-command"
-                  value={scriptCommand}
-                  onChange={(e) => { setScriptCommand(e.target.value); setScriptTestResult(null); }}
-                  rows={3}
-                  className="font-mono"
-                  placeholder='python fetch_jira_issues.py&#10;# or: gh pr list --repo owner/repo --json number,title,url'
-                />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Shell command that outputs a JSON array to stdout. Use env vars for secrets.
-                </p>
-              </div>
-
-              {/* Output Format & Timeout */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="automation-output-format" className="mb-1.5 block text-xs font-medium text-muted-foreground">Output Format</label>
-                  <Select id="automation-output-format"
-                    value={scriptOutputFormat}
-                    onChange={(v) => setScriptOutputFormat(v as DataSourceOutputFormat)}
-                    options={[
-                      { value: 'json_array', label: 'JSON Array' },
-                      { value: 'csv', label: 'CSV' },
-                      { value: 'jsonl', label: 'JSONL' },
-                    ]}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="automation-timeout-ms" className="mb-1.5 block text-xs font-medium text-muted-foreground">Timeout (ms)</label>
-                  <Input id="automation-timeout-ms"
-                    type="number"
-                    min={1000}
-                    max={300000}
-                    step={1000}
-                    value={scriptTimeout}
-                    onChange={(e) => setScriptTimeout(Number(e.target.value))}
-                  />
-                </div>
-              </div>
-
-              {/* Environment Variables */}
-              <div>
-                <label htmlFor="automation-environment-variables-json" className="mb-1.5 block text-xs font-medium text-muted-foreground">Environment Variables (JSON)</label>
-                <Textarea id="automation-environment-variables-json"
-                  value={scriptEnvText}
-                  onChange={(e) => setScriptEnvText(e.target.value)}
-                  rows={3}
-                  className="font-mono text-xs"
-                  placeholder='{ "JIRA_URL": "https://...", "JIRA_TOKEN": "xxx", "JIRA_PROJECT": "PROJ" }'
-                />
-                <p className="mt-1 text-xs text-muted-foreground">
-                  Key/value pairs passed as environment variables to the script
-                </p>
-              </div>
-
-              {/* Test Button */}
-              <div>
-                <Button
-                  type="button"
-                  disabled={!scriptCommand.trim() || scriptTesting}
-                  onClick={async () => {
-                    setScriptTesting(true);
-                    setScriptTestResult(null);
-                    try {
-                      let scriptEnv: Record<string, string> | undefined;
-                      try { scriptEnv = JSON.parse(scriptEnvText); } catch { /* ignore */ }
-
-                      const response = await fetch('/api/automations/test-data-source', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({
-                          type: 'script',
-                          command: scriptCommand.trim(),
-                          timeout: scriptTimeout,
-                          outputFormat: scriptOutputFormat,
-                          env: scriptEnv,
-                        }),
-                      });
-                      const result = await response.json();
-                      setScriptTestResult(result);
-                    } catch (err) {
-                      setScriptTestResult({ success: false, error: err instanceof Error ? err.message : String(err) });
-                    } finally {
-                      setScriptTesting(false);
-                    }
-                  }}
-                  variant="secondary"
-                  loading={scriptTesting}
-                  leftIcon={<Play className="h-4 w-4" />}
-                >
-                  Test Data Source
-                </Button>
-              </div>
-
-              {/* Test Results */}
-              {scriptTestResult && (
-                <div className={cn(
-                  'rounded-lg border p-3',
-                  scriptTestResult.success
-                    ? 'border-success/30 bg-success-muted'
-                    : 'border-danger/30 bg-danger-muted',
-                )}>
-                  {scriptTestResult.success ? (
-                    <div className="space-y-2">
-                      <p className="text-xs font-medium text-success">
-                        ✓ Script returned {scriptTestResult.totalCount} items
-                      </p>
-                      {scriptTestResult.preview != null && (
-                        <pre className="max-h-32 overflow-auto text-[10px] text-success">
-                          {JSON.stringify(scriptTestResult.preview, null, 2)}
-                        </pre>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-xs text-danger">
-                      ✗ {scriptTestResult.error}
-                    </p>
-                  )}
-                </div>
-              )}
-
-              {/* Concurrency & Error Policy */}
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label htmlFor="automation-max-concurrency" className="mb-1.5 block text-xs font-medium text-muted-foreground">Max Concurrency</label>
-                  <Input id="automation-max-concurrency"
-                    type="number"
-                    min={1}
-                    max={10}
-                    value={maxConcurrency}
-                    onChange={(e) => setMaxConcurrency(Number(e.target.value))}
-                  />
-                </div>
-                <div>
-                  <label htmlFor="automation-on-error" className="mb-1.5 block text-xs font-medium text-muted-foreground">On Error</label>
-                  <Select id="automation-on-error"
-                    value={onError}
-                    onChange={(v) => setOnError(v as 'continue' | 'stop')}
-                    options={[
-                      { value: 'continue', label: 'Continue on error' },
-                      { value: 'stop', label: 'Stop on error' },
-                    ]}
-                  />
-                </div>
-              </div>
-            </div>
-          )}
         </div>
 
         {/* Base Variables */}

@@ -5,18 +5,18 @@
 // conflict / blocked result does to the step (and to the steps after it).
 
 import { describe, it, expect, vi } from 'vitest';
+import type { PostProcessingStep } from '@generatorai/workflow-spec';
 import type {
   ILogger,
-  PostProcessingStep,
   RepoReadiness,
   ScmFlowRequest,
   ScmFlowResult,
 } from '@generatorai/shared';
 import {
-  WorkflowPreprocessor,
-  type PreprocessorContext,
+  LifecycleSteps,
+  type LifecycleStepContext,
   type WorkflowScmFlowPort,
-} from '../WorkflowPreprocessor.js';
+} from '../engine/lifecycle/steps.js';
 import type { GitManager } from '../../infrastructure/GitManager.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
 import type { EventBus } from '../../events/EventBus.js';
@@ -54,40 +54,38 @@ function readiness(alias: string, partial: Partial<RepoReadiness> = {}): RepoRea
   };
 }
 
-function context(partial: Partial<PreprocessorContext> = {}): PreprocessorContext {
+const CODEBASES: LifecycleStepContext['codebases'] = {
+  api: { path: '/run/api', branch: 'generatorai/run-1234abcd-api', baseRef: 'origin/develop' },
+  web: { path: '/run/web', branch: 'generatorai/run-1234abcd-web', baseRef: null },
+};
+
+function context(partial: Partial<LifecycleStepContext> = {}): LifecycleStepContext {
   return {
-    workflowRunId: 'run-1234abcd',
+    runId: 'run-1234abcd',
     workflowName: 'Nightly refactor',
-    variables: { __workflowRunId: 'run-1234abcd' },
-    gitRepositories: [],
-    clonedPaths: { api: '/run/api', web: '/run/web' },
-    featureBranches: { api: 'generatorai/run-1234abcd-api', web: 'generatorai/run-1234abcd-web' },
-    baseBranches: { api: 'develop' },
-    runWorkspaceDir: '/run',
+    variables: {},
+    codebases: CODEBASES,
+    workDir: '/run',
     ...partial,
   };
 }
 
 function commitStep(config: Record<string, unknown> = {}): PostProcessingStep {
   return {
-    type: 'commit_and_push',
     name: 'Auto-commit changes',
     config: {
       type: 'commit_and_push',
-      commitMessage: 'feat: workflow changes (run {{__workflowRunId}})',
+      commitMessage: 'feat: workflow changes (run {{run.id}})',
       generateMessage: true,
       push: true,
       ...config,
     },
     failOnError: true,
-    order: 100,
-    enabled: true,
   } as PostProcessingStep;
 }
 
 function prStep(config: Record<string, unknown> = {}): PostProcessingStep {
   return {
-    type: 'create_pr',
     name: 'Auto-create Pull Request',
     config: {
       type: 'create_pr',
@@ -97,20 +95,17 @@ function prStep(config: Record<string, unknown> = {}): PostProcessingStep {
       ...config,
     },
     failOnError: true,
-    order: 200,
-    enabled: true,
   } as PostProcessingStep;
 }
 
-function build(flow: WorkflowScmFlowPort | undefined, gitManager?: Partial<GitManager>) {
+function build(flow: WorkflowScmFlowPort) {
   const emitGlobal = vi.fn(async () => undefined);
   const eventBus = { emitGlobal } as unknown as EventBus;
-  const preprocessor = new WorkflowPreprocessor(
-    (gitManager ?? {}) as GitManager,
+  const preprocessor = new LifecycleSteps(
+    {} as GitManager,
     {} as IScriptRunner,
     eventBus,
     logger,
-    undefined,
     flow,
   );
   return { preprocessor, emitGlobal };
@@ -163,7 +158,7 @@ describe('workflow post-processing → SourceControlFlowService', () => {
     const { preprocessor } = build(flow);
     await preprocessor.executePostProcessing(
       [commitStep({ push: false })],
-      context({ clonedPaths: { api: '/run/api' } }),
+      context({ codebases: { api: CODEBASES['api']! } }),
     );
     expect(requests[0]?.push).toBe(false);
   });
@@ -195,7 +190,7 @@ describe('workflow post-processing → SourceControlFlowService', () => {
 
     const results = await preprocessor.executePostProcessing(
       [prStep()],
-      context({ clonedPaths: { api: '/run/api' } }),
+      context({ codebases: { api: CODEBASES['api']! } }),
     );
 
     expect(requests[0]).toMatchObject({
@@ -219,7 +214,7 @@ describe('workflow post-processing → SourceControlFlowService', () => {
     const { preprocessor } = build(flow);
     await preprocessor.executePostProcessing(
       [prStep({ baseBranch: 'release/3.x' })],
-      context({ clonedPaths: { api: '/run/api' } }),
+      context({ codebases: { api: CODEBASES['api']! } }),
     );
     expect(requests[0]?.pullRequest?.base).toBe('release/3.x');
   });
@@ -249,7 +244,7 @@ describe('workflow post-processing → SourceControlFlowService', () => {
 
     const results = await preprocessor.executePostProcessing(
       [commitStep(), prStep()],
-      context({ clonedPaths: { api: '/run/api' } }),
+      context({ codebases: { api: CODEBASES['api']! } }),
     );
 
     // The commit step fails, and the PR step never runs behind it.
@@ -287,7 +282,7 @@ describe('workflow post-processing → SourceControlFlowService', () => {
 
     const results = await preprocessor.executePostProcessing(
       [prStep()],
-      context({ clonedPaths: { api: '/run/api' } }),
+      context({ codebases: { api: CODEBASES['api']! } }),
     );
 
     expect(results[0]?.success).toBe(false);
@@ -318,23 +313,5 @@ describe('workflow post-processing → SourceControlFlowService', () => {
     expect(seen).toEqual(['api']);
     expect(results[0]?.success).toBe(false);
     expect(results[0]?.error).toBe('api: push rejected');
-  });
-
-  it('falls back to the legacy GitManager path when no flow service is wired', async () => {
-    const commitAndPush = vi.fn(async () => undefined);
-    const { preprocessor } = build(undefined, { commitAndPush } as unknown as Partial<GitManager>);
-
-    const results = await preprocessor.executePostProcessing(
-      [commitStep()],
-      context({ clonedPaths: { api: '/run/api' } }),
-    );
-
-    expect(commitAndPush).toHaveBeenCalledWith(
-      '/run/api',
-      'feat: workflow changes (run run-1234abcd)',
-      'generatorai/run-1234abcd-api',
-    );
-    expect(results[0]?.success).toBe(true);
-    expect(results[0]?.scm).toBeUndefined();
   });
 });

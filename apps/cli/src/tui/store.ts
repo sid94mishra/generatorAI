@@ -14,6 +14,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import { applyLifecycleEvent } from './lifecycle.js';
 import { useSyncExternalStore } from 'react';
+import type { ValidationIssue } from '@generatorai/workflow-spec';
 import {
   addTab,
   allAttachments,
@@ -59,10 +60,22 @@ export type OverlayKind =
   | { kind: 'tabs' }
   /** Phase 6 item 5 — global blocked-work/notification queue. See `blockedWorkItems`. */
   | { kind: 'notifications' }
-  | { kind: 'confirm'; message: string; danger: boolean; onAnswer: (value: boolean) => void }
+  | { kind: 'confirm'; message: string; danger: boolean; onAnswer: (value: boolean) => void; /** Overrides the default title. */ title?: string }
   | { kind: 'input'; message: string; initial: string; onSubmit: (value: string) => void }
   | { kind: 'select'; message: string; options: Array<{ value: string; label: string; detail?: string }>; onSelect: (value: string) => void }
   | { kind: 'error'; title: string; message: string; hint?: string }
+  /**
+   * P05 — a loop parked on an operator decision: each option has a hotkey
+   * (`g` grant +1, `i` continue with input, `a` accept, `f` fail, …) and the
+   * list also takes ↑↓ + Enter. `onChoose` gets the option's value.
+   */
+  | {
+      kind: 'loopDecision';
+      title: string;
+      message: string;
+      options: Array<{ key: string; value: string; label: string; detail?: string }>;
+      onChoose: (value: string) => void;
+    }
   /**
    * Phase 7 item 4 — a multi-field form built from a `CommandSpec`'s own
    * args and flags (`cli-core`'s `formFieldsForSpec`). Replaces the chained
@@ -98,16 +111,10 @@ export type OverlayKind =
       kind: 'validation';
       title: string;
       valid: boolean;
-      issues: Array<{
-        severity: 'error' | 'warning';
-        code: string;
-        message: string;
-        stageIds: string[];
-        edge?: { fromStageId: string; toStageId: string; edgeType?: string };
-        field?: string;
-      }>;
-      /** Called with the first navigable stage id of the selected issue. */
-      onNavigate: (stageId: string) => void;
+      /** `validateWorkflow` issues: JSON pointer, optional stage key, message, hint. */
+      issues: ValidationIssue[];
+      /** Called with the stage key of the selected issue. */
+      onNavigate: (stageKey: string) => void;
     }
   /**
    * Phase 6 item 4 — a run's stages plus its variables, fetched once when
@@ -129,7 +136,8 @@ export type OverlayKind =
         startedAt?: string | number | null;
         completedAt?: string | number | null;
         error?: string | null;
-        retryCount?: number;
+        /** The latest attempt number; retries are the attempts beyond the first. */
+        attempts?: number;
       }>;
       variables: Record<string, unknown>;
     };
@@ -364,7 +372,7 @@ export interface BlockedWorkItem {
   tabTitle: string;
   paneTitle: string;
   kind: PaneContent['kind'];
-  /** 'approval' = a workflow stage gate (`pendingApproval`); 'interaction' = a chat-scoped plan/question gate (`pendingInteraction`). */
+  /** 'approval' = a workflow stage gate (`pendingApproval`); 'interaction' = a plan/question/permission gate (`pendingInteractions`). */
   gate: 'approval' | 'interaction';
   summary: string;
 }
@@ -374,7 +382,7 @@ export interface BlockedWorkItem {
  * precedent existed anywhere in this codebase (or `apps/web`) for
  * aggregating pending HITL gates across panes/tabs; this is a plain scan
  * over every open pane's timeline rather than a second, separately-tracked
- * copy of "what's blocked" — `pendingApproval`/`pendingInteraction` on
+ * copy of "what's blocked" — `pendingApproval`/`pendingInteractions` on
  * `TimelineState` (`runTimeline.ts`) already are that state, so there is
  * nothing else to keep in sync.
  *
@@ -403,8 +411,8 @@ export function blockedWorkItems(
           summary: `Stage awaiting input: ${timeline.pendingApproval.stageName}`,
         });
       }
-      if (timeline.pendingInteraction) {
-        const pending = timeline.pendingInteraction;
+      // Every open gate, not just the answerable one: parallel stages can each park one.
+      for (const pending of timeline.pendingInteractions) {
         items.push({
           paneId: leaf.id,
           tabId: tab.id,
@@ -1190,7 +1198,7 @@ function buildDashboardRows(data: DataCache): DashboardRow[] {
 
 const LOADERS: Record<DataKey, (api: Api) => Promise<Array<Record<string, unknown>>>> = {
   chats: async (api) => (await api.chats.list({ limit: 200 })) as never,
-  workflows: async (api) => (await api.definitions.list()) as never,
+  workflows: async (api) => (await api.definitions.list({ limit: 200 })).items as never,
   runs: async (api) => (await api.runs.list({ limit: 200 })) as never,
   automations: async (api) => (await api.automations.list()) as never,
   projects: async (api) => (await api.projects.list()) as never,

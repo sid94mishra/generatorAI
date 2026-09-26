@@ -1,15 +1,15 @@
 // ────────────────────────────────────────────────────────────────
 // variableForm — the pure half of the Start-run sheet.
 //
-// A workflow declares typed inputs (`VariableDefinitionSchema` in
-// packages/shared/src/config/WorkflowDefinitionSchemas.ts): string, text,
-// number, boolean, choice — each with a label, optional default, `required`
+// A workflow declares typed inputs (`graph.workflow.variables`,
+// `VariableDefinitionSchema` of @generatorai/workflow-spec): string, text,
+// number, boolean, choice, list (of strings), json — each with a label, optional default, `required`
 // and `options`. The sheet edits every value as a STRING (or boolean) and
 // this module turns that draft into the `variables` object the create-run
 // route takes, reporting per-field errors instead of letting the server 400.
 // ────────────────────────────────────────────────────────────────
 
-export type VariableType = 'string' | 'number' | 'boolean' | 'choice' | 'text';
+export type VariableType = 'string' | 'number' | 'boolean' | 'choice' | 'text' | 'list' | 'json';
 
 export interface VariableDefinition {
   name: string;
@@ -25,7 +25,7 @@ export interface VariableDefinition {
 export type DraftValue = string | boolean;
 export type Draft = Record<string, DraftValue>;
 
-const TYPES: readonly VariableType[] = ['string', 'number', 'boolean', 'choice', 'text'];
+const TYPES: readonly VariableType[] = ['string', 'number', 'boolean', 'choice', 'text', 'list', 'json'];
 
 /**
  * Read the definition's `variables` defensively — the detail endpoint is
@@ -62,6 +62,10 @@ export function initialDraft(defs: readonly VariableDefinition[]): Draft {
     const d = def.defaultValue;
     if (def.type === 'boolean') {
       draft[def.name] = d === true || d === 'true';
+    } else if (def.type === 'list' && Array.isArray(d)) {
+      draft[def.name] = d.join('\n');
+    } else if (def.type === 'json' && d !== undefined) {
+      draft[def.name] = JSON.stringify(d, null, 2);
     } else if (d !== undefined && d !== null) {
       draft[def.name] = String(d);
     } else if (def.type === 'choice' && def.required && def.options && def.options.length > 0) {
@@ -108,6 +112,21 @@ export function buildVariables(defs: readonly VariableDefinition[], draft: Draft
         continue;
       }
       variables[def.name] = n;
+      continue;
+    }
+
+    if (def.type === 'list') {
+      // One item per line.
+      variables[def.name] = text.split('\n').map((x) => x.trim()).filter(Boolean);
+      continue;
+    }
+
+    if (def.type === 'json') {
+      try {
+        variables[def.name] = JSON.parse(trimmed);
+      } catch {
+        errors[def.name] = `${def.label} must be valid JSON.`;
+      }
       continue;
     }
 

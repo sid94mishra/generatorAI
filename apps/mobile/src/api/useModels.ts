@@ -25,11 +25,12 @@ export {
   type ModelGroup,
 } from './modelCatalogue';
 
-export function useModels(): UseQueryResult<ModelInfo[]> {
+export function useModels(options: { enabled?: boolean } = {}): UseQueryResult<ModelInfo[]> {
   const api = useApi();
   return useQuery({
     queryKey: queryKeys.models(),
     queryFn: () => api.models(),
+    enabled: options.enabled ?? true,
     // The catalogue only changes when a provider is re-authenticated or the
     // server restarts. Re-probing on every mount would spawn CLIs for nothing.
     staleTime: 10 * 60_000,

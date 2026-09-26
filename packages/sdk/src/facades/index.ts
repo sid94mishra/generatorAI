@@ -1,5 +1,6 @@
 export { WorkflowFacade } from './WorkflowFacade.js';
-export type { CreateWorkflowInput, RunOptions, OrchestrateOptions, StreamOptions } from './WorkflowFacade.js';
+export type { CreateWorkflowOptions, GraphSource, RunOptions, StreamOptions } from './WorkflowFacade.js';
+export { SDK_INVOCATION_CONTEXT } from './WorkflowFacade.js';
 
 export { ChatFacade } from './ChatFacade.js';
 export type { CreateChatOptions } from './ChatFacade.js';
@@ -27,7 +28,7 @@ export { HookFacade } from './HookFacade.js';
 export type { HookContext, HookResult, HookHandler } from './HookFacade.js';
 
 export { HitlFacade } from './HitlFacade.js';
-export type { InterruptOptions, InterruptResolution } from './HitlFacade.js';
+export type { ApprovalVerdictInput, PendingDecision } from './HitlFacade.js';
 
 export { WorkspaceFacade } from './WorkspaceFacade.js';
 export type { CreateWorkspaceInput, WorkspaceFilters } from './WorkspaceFacade.js';

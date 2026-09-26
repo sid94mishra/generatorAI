@@ -29,12 +29,15 @@
 // Pure — no React, no store — so the whole taxonomy is unit-testable.
 // ────────────────────────────────────────────────────────────────
 
-import type {
-  StreamBlock,
-  StreamHookInvocation,
-  StreamUsage,
-  ToolCallBlock,
-  ToolFileOp,
+import {
+  workflowToolCard,
+  type StreamBlock,
+  type StreamHookInvocation,
+  type StreamUsage,
+  type ToolCallBlock,
+  type ToolFileOp,
+  type WorkflowDraftToolCard,
+  type WorkflowRunToolCard,
 } from '@generatorai/client-core';
 
 import { isShellTool, rowFromToolCall, type AgentConsoleRow } from '../../../terminal/agentConsoleRows';
@@ -115,7 +118,11 @@ export type TimelineRow =
   // Emitted by `chat.scm.result` (agent-native commits); see `scmResultBlock.ts`.
   | { kind: 'scm_result'; id: string; block: ScmResultBlock }
   // A settled turn's folded activity; see `collapseWork`.
-  | { kind: 'work'; id: string; work: WorkSummary };
+  | { kind: 'work'; id: string; work: WorkSummary }
+  // The run a `run_workflow` call started (P06 WP-6.2): live from the chat's run cards.
+  | { kind: 'workflow_run'; id: string; run: WorkflowRunToolCard; callId: string }
+  // The draft a `create_workflow_draft` call submitted.
+  | { kind: 'workflow_draft'; id: string; draft: WorkflowDraftToolCard };
 
 /** The folded activity of a settled turn: "Ran 2 commands, read 3 files". */
 export interface WorkSummary {
@@ -570,6 +577,19 @@ export function deriveTimeline(
         // Decisions are pinned cards above the composer, not rows.
         break;
     }
+    // A workflow tool's outcome is a card of its own under the call: the run
+    // it started (live status, approvals) or the draft it submitted.
+    if (b.type === 'tool_call' && b.status === 'complete') {
+      const card = workflowToolCard(b.tool, b.result, b.error === true);
+      if (card) {
+        flushRun();
+        rows.push(
+          card.kind === 'run'
+            ? { kind: 'workflow_run', id: `${prefix}wfrun-${b.blockId}`, run: card, callId: b.callId }
+            : { kind: 'workflow_draft', id: `${prefix}wfdraft-${b.blockId}`, draft: card },
+        );
+      }
+    }
   }
   flushRun();
 
@@ -827,6 +847,12 @@ export function rowsEqual(a: TimelineRow, b: TimelineRow): boolean {
       return a.usage === (b as typeof a).usage;
     case 'scm_result':
       return a.block === (b as typeof a).block;
+    case 'workflow_run': {
+      const r = (b as typeof a).run;
+      return a.run.runId === r.runId && a.run.status === r.status && a.callId === (b as typeof a).callId;
+    }
+    case 'workflow_draft':
+      return a.draft.workflowId === (b as typeof a).draft.workflowId;
     default:
       return false;
   }

@@ -1,0 +1,105 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Fix an issue, approve, open a PR",
+    "description": "Fix an issue, review it read-only, and let a person approve the review before post-processing commits, pushes and opens a pull request.",
+    "session": {
+      "permissionMode": "acceptEdits"
+    },
+    "variables": [
+      {
+        "name": "issue_url",
+        "type": "string",
+        "label": "Issue URL",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": true,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": true,
+        "steps": []
+      }
+    },
+    "tags": [
+      "example"
+    ]
+  },
+  "stages": [
+    {
+      "key": "fix",
+      "name": "Fix",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "fix",
+          "text": "Fix {{variables.issue_url}}. Add or update tests, run them, and describe the change."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "budget": {
+        "maxTurns": 120
+      },
+      "hooks": []
+    },
+    {
+      "key": "review",
+      "name": "Review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "review",
+          "text": "Review the diff that fixes {{variables.issue_url}}: correctness, tests, risk. Say clearly whether it is ready to merge."
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "approval": {
+        "prompt": "Approve to commit, push and open the pull request for {{variables.issue_url}}. Reject to stop: nothing is committed.",
+        "allowChanges": true,
+        "maxRounds": 3
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "fix",
+      "to": "review",
+      "on": "success"
+    }
+  ]
+}

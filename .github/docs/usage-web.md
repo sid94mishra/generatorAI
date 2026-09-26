@@ -113,8 +113,8 @@ In agent-native mode the same result appears **in the transcript** as a compact 
 - Search filter (any text in name/description).
 - Tag filter.
 - Bulk select (checkbox per card) → **Delete Selected** with confirmation dialog.
-- **Template** button → JSON download of selected definition (uses temp `<a download>`).
-- **Upload JSON** button → file picker → `POST /api/workflow-definitions/import-json` → redirects to `/workflows/<id>/edit`.
+- **Template** button → downloads a sample v2 workflow document (`workflow-template.workflow.json`, canonical `exportGraph` form).
+- **Upload JSON** button → file picker (`.json`, ≤ 5 MB) → `POST /api/workflow-definitions/import` (a v2 document) → redirects to `/workflows/<id>/edit`.
 
 ### `/workflows/:id` (read-only summary)
 - DAG canvas (read-only).
@@ -185,11 +185,11 @@ Canvas: React Flow with `StageNode` (rounded rectangle, input/output handles) an
 - Search filter.
 
 ### `/scripts/:id` page
-- Stages list (collapsed).
-- Edges list.
-- Run Profiles (each expandable: variables, sessionMode, permissionMode, stageOverrides).
-- **Run Script** button (profile picker).
-- **Materialize** button (creates a mutable workflow definition).
+- Stages list (name and key).
+- Edges list (`from → to (on)`).
+- Run Profiles (description, permission mode; click to select).
+- **Run Script** button (runs with the selected profile).
+- **Materialize** button (creates a draft workflow definition).
 
 ---
 

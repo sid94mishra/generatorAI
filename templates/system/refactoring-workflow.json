@@ -1,111 +1,194 @@
 {
   "id": "system-refactoring",
-  "name": "Code Refactoring Workflow",
-  "description": "Analyze an existing codebase, identify refactoring opportunities, plan the refactoring, and generate refactored code.",
   "category": "system",
-  "version": "1.0.0",
-  "requiresCodebase": true,
-  "supportsMultipleCodebases": false,
-  "tags": ["refactoring", "improvement", "code-quality"],
-  "preprocessingSteps": [
-    {
-      "type": "clone_repo",
-      "name": "Clone repository",
-      "config": { "type": "clone_repo", "repoAlias": "target" },
-      "failOnError": true,
-      "order": 0
-    }
-  ],
-  "stages": [
-    {
-      "name": "Code Analysis",
-      "description": "Analyze the codebase to identify refactoring opportunities",
-      "order": 0,
-      "prompts": [
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Code Refactoring Workflow",
+      "description": "Analyze an existing codebase, identify refactoring opportunities, plan the refactoring, and generate refactored code.",
+      "session": {},
+      "variables": [
         {
-          "label": "Analyze Code",
-          "text": "Analyze the codebase at {{repo_path_target}} focusing on {{refactoring_focus}}. Identify:\n1. Code smells and anti-patterns\n2. Duplicated code\n3. Complex/long methods\n4. Tight coupling\n5. Missing abstractions\n6. Performance bottlenecks\n\nProvide a prioritized list of refactoring opportunities.",
-          "waitForCompletion": true
+          "name": "git_url",
+          "type": "string",
+          "label": "Repository URL",
+          "description": "Git repository URL of the codebase to refactor",
+          "required": true
+        },
+        {
+          "name": "branch",
+          "type": "string",
+          "label": "Branch",
+          "required": false,
+          "defaultValue": ""
+        },
+        {
+          "name": "refactoring_focus",
+          "type": "text",
+          "label": "Refactoring Focus",
+          "description": "Specific files, modules, or areas to focus on",
+          "required": true,
+          "defaultValue": "Overall code quality and maintainability"
+        },
+        {
+          "name": "refactoring_approach",
+          "type": "choice",
+          "label": "Refactoring Approach",
+          "required": false,
+          "defaultValue": "Incremental",
+          "options": [
+            "Incremental",
+            "Aggressive",
+            "Conservative"
+          ]
         }
       ],
-      "isLocked": true
-    },
-    {
-      "name": "Refactoring Plan",
-      "description": "Create a detailed refactoring plan",
-      "order": 1,
-      "prompts": [
-        {
-          "label": "Create Plan",
-          "text": "Based on the analysis, create a detailed refactoring plan. For each refactoring:\n1. What to refactor\n2. Which pattern/technique to apply\n3. Files affected\n4. Risk assessment\n5. Testing strategy\n\nPrioritize by impact and risk. Target approach: {{refactoring_approach}}.",
-          "waitForCompletion": true
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": true,
+        "preprocessingSteps": [
+          {
+            "name": "Clone repository",
+            "failOnError": true,
+            "config": {
+              "type": "clone_repo",
+              "repoAlias": "target"
+            }
+          }
+        ],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
         }
-      ],
-      "isLocked": true
+      },
+      "tags": [
+        "refactoring",
+        "improvement",
+        "code-quality"
+      ]
     },
-    {
-      "name": "Generate Refactored Code",
-      "description": "Generate the refactored code based on the plan",
-      "order": 2,
-      "prompts": [
-        {
-          "label": "Refactor Code",
-          "text": "Execute the refactoring plan from the previous stage. Generate the refactored code with:\n1. Clear before/after comparisons\n2. Explanation of each change\n3. Updated imports and dependencies\n4. Backward compatibility notes\n\nEnsure all refactorings maintain existing functionality.",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    },
-    {
-      "name": "Verification",
-      "description": "Verify the refactoring maintains correctness",
-      "order": 3,
-      "prompts": [
-        {
-          "label": "Verify Refactoring",
-          "text": "Review all the refactored code and verify:\n1. No functionality was lost\n2. All interfaces are preserved\n3. Tests still pass conceptually\n4. Edge cases are handled\n5. Performance characteristics are maintained or improved\n\nGenerate a verification report.",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    }
-  ],
-  "edges": [
-    { "fromStageIndex": 0, "toStageIndex": 1, "edgeType": "on_success" },
-    { "fromStageIndex": 1, "toStageIndex": 2, "edgeType": "on_success" },
-    { "fromStageIndex": 2, "toStageIndex": 3, "edgeType": "on_success" }
-  ],
-  "variables": [
-    {
-      "name": "git_url",
-      "type": "git_url",
-      "label": "Repository URL",
-      "description": "Git repository URL of the codebase to refactor",
-      "required": true
-    },
-    {
-      "name": "branch",
-      "type": "string",
-      "label": "Branch",
-      "required": false,
-      "defaultValue": ""
-    },
-    {
-      "name": "refactoring_focus",
-      "type": "text",
-      "label": "Refactoring Focus",
-      "description": "Specific files, modules, or areas to focus on",
-      "required": true,
-      "defaultValue": "Overall code quality and maintainability"
-    },
-    {
-      "name": "refactoring_approach",
-      "type": "choice",
-      "label": "Refactoring Approach",
-      "required": false,
-      "defaultValue": "Incremental",
-      "options": ["Incremental", "Aggressive", "Conservative"]
-    }
-  ],
-  "resultValidations": []
+    "stages": [
+      {
+        "key": "code_analysis",
+        "name": "Code Analysis",
+        "description": "Analyze the codebase to identify refactoring opportunities",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Analyze Code",
+            "text": "Analyze the codebase at {{run.codebases.target.path}} focusing on {{refactoring_focus}}. Identify:\n1. Code smells and anti-patterns\n2. Duplicated code\n3. Complex/long methods\n4. Tight coupling\n5. Missing abstractions\n6. Performance bottlenecks\n\nProvide a prioritized list of refactoring opportunities."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "refactoring_plan",
+        "name": "Refactoring Plan",
+        "description": "Create a detailed refactoring plan",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Create Plan",
+            "text": "Based on the analysis, create a detailed refactoring plan. For each refactoring:\n1. What to refactor\n2. Which pattern/technique to apply\n3. Files affected\n4. Risk assessment\n5. Testing strategy\n\nPrioritize by impact and risk. Target approach: {{refactoring_approach}}."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "generate_refactored_code",
+        "name": "Generate Refactored Code",
+        "description": "Generate the refactored code based on the plan",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Refactor Code",
+            "text": "Execute the refactoring plan from the previous stage. Generate the refactored code with:\n1. Clear before/after comparisons\n2. Explanation of each change\n3. Updated imports and dependencies\n4. Backward compatibility notes\n\nEnsure all refactorings maintain existing functionality."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "verification",
+        "name": "Verification",
+        "description": "Verify the refactoring maintains correctness",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Verify Refactoring",
+            "text": "Review all the refactored code and verify:\n1. No functionality was lost\n2. All interfaces are preserved\n3. Tests still pass conceptually\n4. Edge cases are handled\n5. Performance characteristics are maintained or improved\n\nGenerate a verification report."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "code_analysis",
+        "to": "refactoring_plan",
+        "on": "success"
+      },
+      {
+        "from": "refactoring_plan",
+        "to": "generate_refactored_code",
+        "on": "success"
+      },
+      {
+        "from": "generate_refactored_code",
+        "to": "verification",
+        "on": "success"
+      }
+    ]
+  }
 }

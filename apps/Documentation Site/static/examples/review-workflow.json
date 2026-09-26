@@ -1,118 +1,139 @@
 {
-  "name": "Priority filter — reviewed delivery",
-  "sessionMode": "per-stage",
-  "harnessConfig": {
-    "harnessType": "codex",
-    "reasoningEffort": "high",
-    "permissionMode": "default"
-  },
-  "variables": [
-    {
-      "name": "feature",
-      "type": "text",
-      "label": "Requested feature",
-      "required": true,
-      "defaultValue": "Add a priority filter without breaking saved URLs."
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Priority filter — reviewed delivery",
+    "session": {
+      "harnessType": "codex",
+      "reasoningEffort": "high",
+      "permissionMode": "default"
+    },
+    "variables": [
+      {
+        "name": "feature",
+        "type": "text",
+        "label": "Requested feature",
+        "required": true,
+        "defaultValue": "Add a priority filter without breaking saved URLs."
+      }
+    ],
+    "tags": [
+      "reviewed-change"
+    ],
+    "lifecycle": {
+      "requiresCodebase": true,
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false
+      }
     }
-  ],
-  "tags": [
-    "reviewed-change"
-  ],
-  "orchestratorConfig": {
-    "createWorktrees": true,
-    "requiresCodebase": true,
-    "autoCommit": false,
-    "autoPush": false,
-    "autoCreatePR": false
   },
   "stages": [
     {
+      "kind": "agent",
+      "key": "plan",
       "name": "Inspect and plan",
-      "order": 0,
       "prompts": [
         {
           "label": "Task",
-          "text": "Inspect the codebase for {{feature}}. Write a plan with compatibility risks and acceptance tests. Do not implement yet.",
-          "source": "inline",
-          "waitForCompletion": true
+          "text": "Inspect the codebase for {{feature}}. Write a plan with compatibility risks and acceptance tests. Do not implement yet."
         }
       ],
-      "approvalRequired": true,
-      "agentMode": "plan",
-      "timeoutMs": 300000,
-      "contextFilter": "none"
+      "approval": {},
+      "session": {
+        "defaultAgentMode": "plan"
+      },
+      "timeouts": {
+        "attemptMs": 300000
+      },
+      "context": {
+        "mode": "none"
+      }
     },
     {
+      "kind": "agent",
+      "key": "implement",
       "name": "Implement",
-      "order": 1,
       "prompts": [
         {
           "label": "Task",
-          "text": "Implement the approved plan for {{feature}}. Preserve current behavior and keep changes scoped.",
-          "source": "inline",
-          "waitForCompletion": true
+          "text": "Implement the approved plan for {{feature}}. Preserve current behavior and keep changes scoped."
         }
       ],
-      "agentMode": "auto",
-      "contextFilter": "full",
-      "timeoutMs": 600000,
-      "retryPolicy": {
-        "maxRetries": 1,
-        "backoffMs": 1000,
+      "session": {
+        "defaultAgentMode": "auto"
+      },
+      "context": {
+        "mode": "output"
+      },
+      "timeouts": {
+        "attemptMs": 600000
+      },
+      "retry": {
+        "maxAttempts": 2,
+        "initialDelayMs": 1000,
         "backoffMultiplier": 2
       }
     },
     {
+      "kind": "agent",
+      "key": "verify",
       "name": "Verify",
-      "order": 2,
       "prompts": [
         {
           "label": "Task",
-          "text": "Run the relevant tests. Inspect the diff. Report commands, results, and unresolved defects. Do not commit or push.",
-          "source": "inline",
-          "waitForCompletion": true
+          "text": "Run the relevant tests. Inspect the diff. Report commands, results, and unresolved defects. Do not commit or push."
         }
       ],
-      "contextFilter": "summary-only",
-      "timeoutMs": 600000,
-      "resultValidation": [
-        {
-          "type": "min_length",
-          "value": 80,
-          "message": "Provide a substantive verification report."
-        }
-      ]
+      "context": {
+        "mode": "summary"
+      },
+      "timeouts": {
+        "attemptMs": 600000
+      },
+      "output": {
+        "rules": [
+          {
+            "type": "min_length",
+            "value": 80,
+            "message": "Provide a substantive verification report."
+          }
+        ]
+      }
     },
     {
+      "kind": "agent",
+      "key": "triage",
       "name": "Failure triage",
-      "order": 3,
       "prompts": [
         {
           "label": "Task",
-          "text": "Explain the failed verification, identify the likely cause, and propose the smallest follow-up. Do not hide failures.",
-          "source": "inline",
-          "waitForCompletion": true
+          "text": "Explain the failed verification, identify the likely cause, and propose the smallest follow-up. Do not hide failures."
         }
       ],
-      "contextFilter": "full",
-      "timeoutMs": 300000
+      "context": {
+        "mode": "output"
+      },
+      "timeouts": {
+        "attemptMs": 300000
+      }
     }
   ],
   "edges": [
     {
-      "fromStageIndex": 0,
-      "toStageIndex": 1,
-      "edgeType": "on_success"
+      "from": "plan",
+      "to": "implement",
+      "on": "success"
     },
     {
-      "fromStageIndex": 1,
-      "toStageIndex": 2,
-      "edgeType": "on_success"
+      "from": "implement",
+      "to": "verify",
+      "on": "success"
     },
     {
-      "fromStageIndex": 2,
-      "toStageIndex": 3,
-      "edgeType": "on_failure"
+      "from": "verify",
+      "to": "triage",
+      "on": "failure"
     }
   ]
 }

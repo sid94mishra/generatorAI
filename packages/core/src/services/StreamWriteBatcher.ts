@@ -70,9 +70,8 @@ const MAX_PENDING = 10_000;
  * How long a commit may be blocked by an unrelated open transaction before the
  * batch gives up.
  *
- * `withTransaction` tolerates a caller holding a transaction for up to its
- * 10 s deadline, and better-sqlite3 exposes one connection, so a stream write
- * landing in that window cannot commit. Retrying is right — the transaction
+ * better-sqlite3 exposes one connection, so a stream write landing while
+ * another caller holds a transaction cannot commit. Retrying is right — the transaction
  * will end — and this bounds how long we are willing to wait for it.
  */
 const TX_CONTENTION_RETRY_MS = 25;
@@ -316,8 +315,8 @@ export class StreamWriteBatcher {
   /**
    * Commit, waiting out an unrelated open transaction rather than failing.
    *
-   * better-sqlite3 exposes one connection, and `withTransaction` legitimately
-   * holds it across awaits for up to its 10 s deadline. `appendBatch` refuses
+   * better-sqlite3 exposes one connection, and another caller may hold a
+   * transaction on it. `appendBatch` refuses
    * to run inside a transaction — correctly, because it would become a
    * SAVEPOINT the outer rollback could undo after the broadcast — but the
    * batcher commits on a timer, so it can land in that window through no fault

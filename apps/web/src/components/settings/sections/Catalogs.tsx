@@ -681,7 +681,7 @@ export function TemplatesSection() {
     const listAll = templates ?? [];
     if (!q.trim()) return listAll;
     const s = q.toLowerCase();
-    return listAll.filter((t) => t.name.toLowerCase().includes(s) || t.description.toLowerCase().includes(s));
+    return listAll.filter((t) => t.graph.workflow.name.toLowerCase().includes(s) || (t.graph.workflow.description ?? '').toLowerCase().includes(s));
   }, [templates, q]);
 
   return (
@@ -723,10 +723,10 @@ export function TemplatesSection() {
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="truncate text-sm font-medium text-foreground">{t.name}</span>
+                  <span className="truncate text-sm font-medium text-foreground">{t.graph.workflow.name}</span>
                   <Badge tone="primary" size="sm" className="shrink-0">{t.category}</Badge>
                 </div>
-                <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{t.description}</div>
+                <div className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{t.graph.workflow.description}</div>
               </div>
               <Button
                 variant="secondary"

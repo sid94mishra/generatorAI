@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // RuntimeStageNode — Custom React Flow node for workflow run stages
-// Shows live runtime status, progress bars, animated indicators
+// Shows live runtime status and animated indicators
 // ────────────────────────────────────────────────────────────────
 
 import React, { memo, useCallback } from 'react';
@@ -14,11 +14,14 @@ import {
   SkipForward,
   Clock,
   Loader2,
+  Repeat,
+  Hand,
 } from 'lucide-react';
 import { cn } from '@/lib/utils.js';
 import { useWorkflowRunStore } from '@/stores/workflowRunStore.js';
 import type { RuntimeStageNodeData } from './RuntimeDAGCanvas.js';
 import type { StageRunStatus } from '@generatorai/shared';
+import { loopBadge, loopExitText, loopRulesText } from './redesign/loopView.js';
 
 /** Color + icon mapping for stage run statuses */
 const statusStyles: Record<StageRunStatus, {
@@ -35,7 +38,14 @@ const statusStyles: Record<StageRunStatus, {
     icon: <Clock className="h-4 w-4 text-gray-400" />,
     textColor: 'text-gray-500',
   },
-  queued: {
+  ready: {
+    bg: 'bg-blue-50/50 dark:bg-blue-900/20',
+    border: 'border-blue-300 dark:border-blue-600',
+    ringColor: 'ring-blue-300/30',
+    icon: <Clock className="h-4 w-4 text-blue-500" />,
+    textColor: 'text-blue-600',
+  },
+  starting: {
     bg: 'bg-blue-50/50 dark:bg-blue-900/20',
     border: 'border-blue-300 dark:border-blue-600',
     ringColor: 'ring-blue-300/30',
@@ -49,11 +59,32 @@ const statusStyles: Record<StageRunStatus, {
     icon: <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />,
     textColor: 'text-blue-700',
   },
+  validating: {
+    bg: 'bg-blue-50 dark:bg-blue-900/30',
+    border: 'border-blue-400 dark:border-blue-500',
+    ringColor: 'ring-blue-400/30',
+    icon: <Loader2 className="h-4 w-4 text-blue-600 animate-spin" />,
+    textColor: 'text-blue-700',
+  },
   paused: {
     bg: 'bg-amber-50 dark:bg-amber-900/20',
     border: 'border-amber-400 dark:border-amber-500',
     ringColor: 'ring-amber-400/30',
     icon: <Pause className="h-4 w-4 text-amber-500" />,
+    textColor: 'text-amber-700',
+  },
+  waiting: {
+    bg: 'bg-amber-50 dark:bg-amber-900/20',
+    border: 'border-amber-400 dark:border-amber-500',
+    ringColor: 'ring-amber-400/30',
+    icon: <Clock className="h-4 w-4 text-amber-500" />,
+    textColor: 'text-amber-700',
+  },
+  retry_wait: {
+    bg: 'bg-amber-50 dark:bg-amber-900/20',
+    border: 'border-amber-400 dark:border-amber-500',
+    ringColor: 'ring-amber-400/30',
+    icon: <Clock className="h-4 w-4 text-amber-500" />,
     textColor: 'text-amber-700',
   },
   completed: {
@@ -84,13 +115,6 @@ const statusStyles: Record<StageRunStatus, {
     icon: <SkipForward className="h-4 w-4 text-gray-400" />,
     textColor: 'text-gray-500',
   },
-  sleeping: {
-    bg: 'bg-indigo-50 dark:bg-indigo-900/20',
-    border: 'border-indigo-300 dark:border-indigo-600',
-    ringColor: 'ring-indigo-300/30',
-    icon: <Clock className="h-4 w-4 text-indigo-400" />,
-    textColor: 'text-indigo-500',
-  },
   awaiting_input: {
     bg: 'bg-amber-50 dark:bg-amber-900/20',
     border: 'border-amber-400 dark:border-amber-500',
@@ -101,14 +125,13 @@ const statusStyles: Record<StageRunStatus, {
 };
 
 function RuntimeStageNodeComponent({ id, data }: NodeProps<Node<RuntimeStageNodeData>>) {
-  const { stageRun, label, isSelected } = data;
+  const { stageRun, label, isSelected, loop } = data;
   const selectStageRun = useWorkflowRunStore((s) => s.selectStageRun);
 
   const status = stageRun.status;
   const style = statusStyles[status] ?? statusStyles.pending;
-  const progressPercent = stageRun.totalSteps > 0
-    ? Math.round((stageRun.currentStep / stageRun.totalSteps) * 100)
-    : 0;
+  // Retries are the attempts beyond the first.
+  const retries = Math.max(0, (stageRun.currentAttempt ?? 0) - 1);
 
   const handleClick = useCallback(() => {
     selectStageRun(id);
@@ -161,26 +184,34 @@ function RuntimeStageNodeComponent({ id, data }: NodeProps<Node<RuntimeStageNode
         </span>
       </div>
 
-      {/* Status text — only show step counter when it's actually informative (multi-step) */}
+      {/* Status text */}
       <div className={cn('mt-1 text-xs font-medium capitalize', style.textColor)}>
-        {status === 'awaiting_input' ? 'awaiting input' : status}
-        {status === 'running' && stageRun.totalSteps > 1 && (
-          <span className="ml-1 font-normal">
-            (step {stageRun.currentStep}/{stageRun.totalSteps})
-          </span>
-        )}
+        {status.replace(/_/g, ' ')}
       </div>
 
-      {/* Progress bar (for running/paused stages with multiple steps) */}
-      {(status === 'running' || status === 'paused') && stageRun.totalSteps > 1 && (
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-gray-200 dark:bg-gray-700">
-          <div
-            className={cn(
-              'h-full rounded-full transition-all duration-500',
-              status === 'running' ? 'bg-blue-500' : 'bg-amber-500',
+      {/* Loop (P05): n/max, the rule streaks, a pending decision, the exit */}
+      {loop && (
+        <div className="mt-1.5 space-y-1">
+          <div className="flex flex-wrap items-center gap-1.5">
+            <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary)]/10 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-[var(--color-primary)]">
+              <Repeat className="h-2.5 w-2.5" />
+              {loopBadge(loop)}
+            </span>
+            {loop.decision && (
+              <span className="inline-flex items-center gap-1 rounded-full bg-[var(--color-warning)]/15 px-1.5 py-0.5 text-[10px] font-semibold text-[var(--color-warning)]">
+                <Hand className="h-2.5 w-2.5" />
+                Needs decision
+              </span>
             )}
-            style={{ width: `${progressPercent}%` }}
-          />
+          </div>
+          {loop.rules.length > 0 && status !== 'completed' && status !== 'failed' && (
+            <div className="truncate font-mono text-[10px] text-[var(--color-muted-foreground)]" title={loopRulesText(loop)}>
+              {loopRulesText(loop)}
+            </div>
+          )}
+          {(status === 'completed' || status === 'failed') && loopExitText(loop) && (
+            <div className="truncate text-[10.5px] text-[var(--color-muted-foreground)]">{loopExitText(loop)}</div>
+          )}
         </div>
       )}
 
@@ -192,9 +223,9 @@ function RuntimeStageNodeComponent({ id, data }: NodeProps<Node<RuntimeStageNode
       )}
 
       {/* Retry indicator */}
-      {stageRun.retryCount > 0 && (
+      {retries > 0 && (
         <div className="mt-1 text-xs text-[var(--color-muted-foreground)]">
-          Retry #{stageRun.retryCount}
+          Retry #{retries}
         </div>
       )}
 

@@ -52,7 +52,7 @@ Widgets can appear inline or open in a dedicated dock tab. Each widget instance 
 
 ## Source evidence
 
-`apps/web/src/components/layout/RightPane.tsx`, `apps/web/src/pages/ChatPage.tsx`, `apps/web/src/pages/WorkflowRunPageV2.tsx`, `apps/web/src/components/diff/useFileTabs.tsx`, `apps/web/src/components/chat/BrowserPanel.tsx`, `apps/web/src/components/terminal/TerminalPanel.tsx`, `apps/web/src/components/chat/ComputerPanel.tsx`, and `apps/web/src/components/chat/BackgroundTasksPanel.tsx`.
+`apps/web/src/components/layout/RightPane.tsx`, `apps/web/src/pages/ChatPage.tsx`, `apps/web/src/pages/WorkflowRunPage.tsx`, `apps/web/src/components/diff/useFileTabs.tsx`, `apps/web/src/components/chat/BrowserPanel.tsx`, `apps/web/src/components/terminal/TerminalPanel.tsx`, `apps/web/src/components/chat/ComputerPanel.tsx`, and `apps/web/src/components/chat/BackgroundTasksPanel.tsx`.
 
 ## Configuration and worked examples
 

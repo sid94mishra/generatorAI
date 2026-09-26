@@ -309,6 +309,20 @@ async function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/**
+ * RV-9 — a turn sent with `outputSchema` ends in a schema-constrained final
+ * message: its JSON is the turn's structured output. Text that does not
+ * parse leaves the output unset (the engine's extractor then repairs).
+ */
+function withStructuredOutput(content: string, options: SendPromptOptions | undefined): ConversationResponse {
+  if (!options?.outputSchema) return { content };
+  try {
+    return { content, structuredOutput: JSON.parse(content.trim()) as unknown };
+  } catch {
+    return { content };
+  }
+}
+
 /** Thread items that represent a tool the model invoked. */
 const TOOL_ITEM_TYPES: ReadonlySet<string> = new Set([
   'commandExecution',
@@ -980,11 +994,16 @@ export class CodexProvider implements IAgentHarness {
       // `mcpServerStatus/list`, `mcpServer/tool/call` and MCP elicitation
       // requests are all in the protocol.
       mcpServers: true,
-      // `skills/list` and `skills/extraRoots/set` exist upstream.
-      skillDirectories: true,
+      // `skills/extraRoots/set` takes directories, scoped to the app-server
+      // process rather than a thread (the composer warns, C-19).
+      skills: 'directories',
       // Approvals are per-command/patch and only fire under an approval policy
-      // that asks for them — not a PreToolUse gate on every call.
-      fullToolGating: false,
+      // that asks for them — not a gate on every tool call (PD-17).
+      approvalGating: 'exec_and_patch',
+      // `dynamicTools` are accepted on `thread/start` only.
+      hostTools: 'start_only',
+      // `outputSchema` on `turn/start`.
+      structuredOutput: 'native',
       // Threads are persisted server-side and rejoinable via `thread/resume`.
       sessionPersistence: true,
       // `thread/fork { lastTurnId }` and `thread/revert { beforeTurnId }` are
@@ -1661,6 +1680,8 @@ export class CodexProvider implements IAgentHarness {
       // "This turn and subsequent turns" — re-sent each turn so a change made
       // between turns (or a resumed thread) always takes the chat's effort.
       ...(conv.params.reasoningEffort ? { effort: conv.params.reasoningEffort } : {}),
+      // RV-9 — a workflow stage's final prompt turn asks for its structured output.
+      ...(options?.outputSchema ? { outputSchema: options.outputSchema } : {}),
     };
 
     let assistantText = '';
@@ -2261,7 +2282,7 @@ export class CodexProvider implements IAgentHarness {
               // `providerTurnId` is the anchor `thread/fork` / `thread/revert` take.
               if (turn?.id) this.broadcast(conv, { kind: 'harness.turn_end', data: { turnId: turn.id, providerTurnId: turn.id } });
               this.broadcast(conv, { kind: 'harness.idle', data: {} });
-              resolve({ content: finalAnswer ?? assistantText });
+              resolve(withStructuredOutput(finalAnswer ?? assistantText, options));
             });
             break;
           }
@@ -2802,12 +2823,15 @@ export class CodexProvider implements IAgentHarness {
     conv: ConversationState | undefined,
     params: unknown,
   ): Promise<{ success: boolean; contentItems: Array<{ type: 'inputText'; text: string }> }> {
-    const { tool, arguments: args } = (params ?? {}) as { tool?: string; arguments?: unknown };
+    const { tool, arguments: args, callId } = (params ?? {}) as { tool?: string; arguments?: unknown; callId?: unknown };
     const text = (v: string) => [{ type: 'inputText' as const, text: v }];
     const def = conv?.params.tools?.find((t) => t.name === tool);
     if (!def) return { success: false, contentItems: text(`Tool "${String(tool)}" is not available in this conversation.`) };
     try {
-      const out = await def.handler((args && typeof args === 'object' ? args : {}) as Record<string, unknown>);
+      const out = await def.handler(
+        (args && typeof args === 'object' ? args : {}) as Record<string, unknown>,
+        typeof callId === 'string' && callId ? { toolCallId: callId } : {},
+      );
       return { success: true, contentItems: text(typeof out === 'string' ? out : JSON.stringify(out ?? null)) };
     } catch (err) {
       return { success: false, contentItems: text(err instanceof Error ? err.message : String(err)) };

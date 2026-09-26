@@ -3,15 +3,38 @@
 // Web uses HTTP+SSE, CLI uses in-process direct calls, Desktop uses IPC
 // ────────────────────────────────────────────────────────────────
 
-import type { Session, SessionWithWorkflows } from './Session.js';
-import type { Workflow } from './Workflow.js';
 import type { ChatMessage } from './ChatMessage.js';
 import type { Artifact } from './Artifact.js';
-import type { CreateSessionParams } from './CreateSessionParams.js';
 import type { AgentEvent, PersistedEvent } from './AgentEvent.js';
 import type { Chat, CreateChatParams } from './Chat.js';
-import type { WorkflowDefinition, WorkflowDefinitionWithStages, CreateWorkflowDefinitionParams } from './WorkflowDefinition.js';
-import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams, StageRun } from './WorkflowRun.js';
+import type {
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowGraphInput,
+  WorkflowTemplate,
+} from '@generatorai/workflow-spec';
+import type { InvocationPlan, InvocationRequest, InvocationResult, RunCommand } from '@generatorai/workflow-spec';
+import type { LoopIteration, PendingDecisionView, WorkflowRun, WorkflowRunWithStages } from './WorkflowRun.js';
+
+/** Files a run start uploads before invoking, by category. */
+export type InvocationFiles = Partial<Record<'skills' | 'agents' | 'prompts', Array<Blob & { readonly name: string }>>>;
+
+/**
+ * A run search (`GET /workflow-runs`); every filter narrows. `status` and
+ * `trigger` match any entry (a run without a trigger is `user`), `from`/`to`
+ * bound the creation time, `q` matches part of the name or the start of the
+ * id, `variables` are `name=value` pairs, `limit` keeps the newest matches.
+ */
+export interface WorkflowRunListFilter {
+  definitionId?: string;
+  status?: string | readonly string[];
+  trigger?: readonly string[];
+  from?: string | number | Date;
+  to?: string | number | Date;
+  q?: string;
+  variables?: Readonly<Record<string, string>>;
+  limit?: number;
+}
 
 /** Platform type discriminator */
 export type PlatformType = 'web' | 'cli' | 'desktop';
@@ -32,25 +55,6 @@ export interface EventSubscriptionOptions {
   kindPrefixes?: string[];
 }
 
-/** Workflow template summary for listing */
-export interface WorkflowTemplateSummary {
-  id: string;
-  name: string;
-  description: string;
-  category: string;
-  version: string;
-  requiresCodebase: boolean;
-  variables: Array<{
-    name: string;
-    label: string;
-    type: string;
-    required: boolean;
-    default?: unknown;
-    description?: string;
-    options?: string[];
-  }>;
-}
-
 /**
  * Platform-agnostic client interface.
  *
@@ -68,29 +72,12 @@ export interface IPlatformClient {
   initialize(): Promise<void>;
   shutdown(): Promise<void>;
 
-  // ── Session CRUD ──
-  createSession(params: CreateSessionParams): Promise<Session>;
-  getSession(sessionId: string): Promise<SessionWithWorkflows>;
-  getSessions(filter?: { status?: string }): Promise<Session[]>;
-  deleteSession(sessionId: string): Promise<void>;
-
-  // ── Session Control ──
-  startSession(sessionId: string): Promise<void>;
-  pauseSession(sessionId: string): Promise<void>;
-  resumeSession(sessionId: string): Promise<void>;
-  cancelSession(sessionId: string): Promise<void>;
-
-  // ── Workflow Control ──
-  getWorkflows(sessionId: string): Promise<Workflow[]>;
-  pauseWorkflow(workflowId: string): Promise<void>;
-  resumeWorkflow(workflowId: string): Promise<void>;
-
   // ── Chat ──
   sendPrompt(sessionId: string, prompt: string, attachments?: Array<{ type: 'file'; path: string; displayName?: string }>): Promise<void>;
   getChatHistory(sessionId: string, limit?: number, offset?: number, stageRunId?: string): Promise<ChatMessage[]>;
 
   // ── Templates ──
-  getWorkflowTemplates(): Promise<WorkflowTemplateSummary[]>;
+  getWorkflowTemplates(): Promise<WorkflowTemplate[]>;
 
   // ── Artifacts ──
   getArtifacts(sessionId: string): Promise<Artifact[]>;
@@ -123,39 +110,44 @@ export interface IPlatformClient {
   sendChatPrompt(chatId: string, prompt: string, attachments?: Array<{ type: 'file'; path: string; displayName?: string }>): Promise<void>;
   getChatMessages(chatId: string, limit?: number, offset?: number): Promise<ChatMessage[]>;
 
-  // ── v2: Workflow Definition Operations ──
-  createDefinition(params: CreateWorkflowDefinitionParams): Promise<WorkflowDefinition>;
-  listDefinitions(): Promise<WorkflowDefinition[]>;
-  getDefinition(id: string): Promise<WorkflowDefinitionWithStages>;
-  updateDefinition(id: string, params: Partial<CreateWorkflowDefinitionParams>): Promise<WorkflowDefinition>;
-  deleteDefinition(id: string): Promise<void>;
+  // ── Workflow definitions (v2 documents, P01 WP-1.7) ──
+  /** Create a draft from a graph. */
+  createDefinition(graph: WorkflowGraphInput): Promise<WorkflowDefinitionRecord>;
+  listDefinitions(): Promise<WorkflowDefinitionSummary[]>;
+  getDefinition(id: string): Promise<WorkflowDefinitionRecord>;
+  /** Replace the whole graph; 409 REVISION_CONFLICT when `expectedRevision` is stale. */
+  saveDefinitionGraph(id: string, graph: WorkflowGraphInput, expectedRevision: number): Promise<WorkflowDefinitionRecord>;
+  /** Hard delete, or archive when runs pinned the definition. */
+  deleteDefinition(id: string): Promise<{ deleted: true } | { archived: true; runs: number }>;
 
-  // ── v2: Workflow Run Operations ──
-  createRun(params: CreateWorkflowRunParams): Promise<WorkflowRun>;
-  listRuns(filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]>;
+  // ── Workflow runs ──
+  /**
+   * THE way a run starts (P04): `POST /workflow-invocations`. A definition,
+   * a script or a fork of an earlier run; the server derives the trigger.
+   * `files` are uploaded first and sent as upload ids.
+   */
+  invokeWorkflow(
+    request: InvocationRequest,
+    opts?: { idempotencyKey?: string; files?: InvocationFiles },
+  ): Promise<InvocationResult>;
+  /** What `invokeWorkflow` would do, without writing anything. */
+  planWorkflowInvocation(request: InvocationRequest): Promise<InvocationPlan>;
+  listRuns(filter?: WorkflowRunListFilter): Promise<WorkflowRun[]>;
   getRun(id: string): Promise<WorkflowRunWithStages>;
-  startRun(id: string): Promise<void>;
-  pauseRun(id: string): Promise<void>;
-  resumeRun(id: string): Promise<void>;
-  cancelRun(id: string): Promise<void>;
   /**
-   * PARITY-1: run-level retry. Creates and starts a NEW run that inherits
-   * the failed run's definition, variables and already-successful stages,
-   * and resolves with that new run's id — the ancestor stays terminal.
+   * Every operator action on a run or one of its instances (P03 commands
+   * API): pause, resume, cancel, retry, skip, fail and approve (which also
+   * answers an in-turn tool permission, question or plan review). A refused
+   * command rejects with the server's 409/400/404 error.
    */
-  retryRun(id: string): Promise<{ runId: string }>;
+  runCommand(runId: string, command: RunCommand): Promise<void>;
+  /** A loop instance's finished iterations, oldest first (P05). */
+  listLoopIterations(runId: string, instanceId: string): Promise<LoopIteration[]>;
+  /** Every decision the run waits on, its sub-workflow children's mirrored (P05). */
+  listPendingDecisions(runId: string): Promise<PendingDecisionView[]>;
+  /** The commands a check stage may run: the defaults plus the operator's extras (P05). */
+  getScriptAllowlist(): Promise<{ commands: string[]; defaults: string[]; extras: string[] }>;
   deleteRun(id: string): Promise<void>;
-
-  // ── PARITY-2: per-stage controls (dedicated /stages/:id/* endpoints) ──
-  pauseStageRun(runId: string, stageId: string): Promise<void>;
-  resumeStageRun(runId: string, stageId: string): Promise<void>;
-  /**
-   * Wake a stage parked by `step.sleep` ahead of its scheduled time. Rejects
-   * with a 409 when the stage is not actually sleeping.
-   */
-  wakeStageRun(runId: string, stageId: string): Promise<void>;
-  retryStageRun(runId: string, stageId: string): Promise<void>;
-  cancelStageRun(runId: string, stageId: string): Promise<void>;
 
   // ── HITL — permission mode + interrupt resume (HITL-04) ──
   getPermissionMode(runId: string): Promise<{
@@ -166,10 +158,4 @@ export interface IPlatformClient {
     runId: string,
     mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan',
   ): Promise<void>;
-  listPendingInterrupts(runId: string): Promise<StageRun[]>;
-  resumeStage(
-    runId: string,
-    stageId: string,
-    resolution: { approved: boolean; value?: unknown; reason?: string },
-  ): Promise<{ ok: boolean; reason?: string }>;
 }

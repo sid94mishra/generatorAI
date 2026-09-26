@@ -4,54 +4,30 @@
 
 import type {
   IPlatformClient,
-  Session,
-  SessionWithWorkflows,
-  Workflow,
   ChatMessage,
   Artifact,
-  CreateSessionParams,
   PersistedEvent,
-  WorkflowTemplateSummary,
   EventSubscriptionOptions,
   Chat,
   CreateChatParams,
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  CreateWorkflowDefinitionParams,
   WorkflowRun,
   WorkflowRunWithStages,
-  CreateWorkflowRunParams,
+  InvocationFiles,
+  WorkflowRunListFilter,
 } from '@generatorai/shared';
+import type {
+  InvocationPlan,
+  InvocationRequest,
+  InvocationResult,
+  RunCommand,
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowGraph,
+  WorkflowGraphInput,
+  WorkflowTemplate,
+} from '@generatorai/workflow-spec';
+import { LifecycleSchema } from '@generatorai/workflow-spec';
 import { vi } from 'vitest';
-
-export function createMockSession(overrides: Partial<Session> = {}): Session {
-  return {
-    id: 'session-1',
-    name: 'Test Session',
-    status: 'created',
-    tags: [],
-    createdAt: new Date('2025-01-01T00:00:00Z'),
-    updatedAt: new Date('2025-01-01T00:00:00Z'),
-    ...overrides,
-  };
-}
-
-export function createMockWorkflow(overrides: Partial<Workflow> = {}): Workflow {
-  return {
-    id: 'workflow-1',
-    sessionId: 'session-1',
-    templateId: 'code-generation',
-    name: 'Code Generation',
-    order: 0,
-    status: 'pending',
-    variables: {},
-    hookOverrides: {},
-    currentStep: 0,
-    totalSteps: 3,
-    createdAt: new Date('2025-01-01T00:00:00Z'),
-    ...overrides,
-  };
-}
 
 export function createMockChatMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
   return {
@@ -78,29 +54,42 @@ export function createMockArtifact(overrides: Partial<Artifact> = {}): Artifact 
   };
 }
 
-export function createMockTemplate(overrides: Partial<WorkflowTemplateSummary> = {}): WorkflowTemplateSummary {
+/** A minimal valid graph (parsed form). */
+export function createMockGraph(name = 'Definition A', overrides: Partial<WorkflowGraph> = {}): WorkflowGraph {
+  return {
+    formatVersion: 2,
+    workflow: { name, session: {}, variables: [], hooks: [], lifecycle: LifecycleSchema.parse({}), tags: [] },
+    stages: [],
+    edges: [],
+    ...overrides,
+  };
+}
+
+export function createMockDefinition(
+  overrides: Partial<WorkflowDefinitionRecord> = {},
+  name = 'Definition A',
+): WorkflowDefinitionRecord {
+  return {
+    id: 'def-a',
+    status: 'draft',
+    revision: 1,
+    currentVersionId: null,
+    hasUnpublishedChanges: false,
+    archivedAt: null,
+    needsAttention: [],
+    authoredBy: null,
+    createdAt: '2026-09-01T00:00:00.000Z',
+    updatedAt: '2026-09-01T00:00:00.000Z',
+    graph: createMockGraph(name),
+    ...overrides,
+  };
+}
+
+export function createMockTemplate(overrides: Partial<WorkflowTemplate> = {}): WorkflowTemplate {
   return {
     id: 'code-generation',
-    name: 'Code Generation',
-    description: 'Generate code from a description',
-    category: 'generation',
-    version: '1.0.0',
-    requiresCodebase: false,
-    variables: [
-      {
-        name: 'language',
-        label: 'Language',
-        type: 'select',
-        required: true,
-        options: ['typescript', 'python', 'go'],
-      },
-      {
-        name: 'description',
-        label: 'Description',
-        type: 'text',
-        required: true,
-      },
-    ],
+    category: 'code-generation',
+    graph: createMockGraph('Code Generation'),
     ...overrides,
   };
 }
@@ -108,53 +97,12 @@ export function createMockTemplate(overrides: Partial<WorkflowTemplateSummary> =
 export class MockPlatformClient implements IPlatformClient {
   readonly platform = 'web' as const;
 
-  sessions: Session[] = [createMockSession()];
-  workflows: Workflow[] = [createMockWorkflow()];
   messages: ChatMessage[] = [];
   artifacts: Artifact[] = [];
-  templates: WorkflowTemplateSummary[] = [createMockTemplate()];
+  templates: WorkflowTemplate[] = [createMockTemplate()];
 
   initialize = vi.fn(async () => {});
   shutdown = vi.fn(async () => {});
-
-  createSession = vi.fn(async (params: CreateSessionParams): Promise<Session> => {
-    const session = createMockSession({
-      id: `session-${Date.now()}`,
-      name: params.name,
-      description: params.description,
-    });
-    this.sessions.push(session);
-    return session;
-  });
-
-  getSession = vi.fn(async (sessionId: string): Promise<SessionWithWorkflows> => {
-    const session = this.sessions.find((s) => s.id === sessionId);
-    if (!session) throw new Error(`Session ${sessionId} not found`);
-    return {
-      ...session,
-      workflows: this.workflows.filter((w) => w.sessionId === sessionId),
-    };
-  });
-
-  getSessions = vi.fn(async (): Promise<Session[]> => {
-    return [...this.sessions];
-  });
-
-  deleteSession = vi.fn(async (sessionId: string): Promise<void> => {
-    this.sessions = this.sessions.filter((s) => s.id !== sessionId);
-  });
-
-  startSession = vi.fn(async () => {});
-  pauseSession = vi.fn(async () => {});
-  resumeSession = vi.fn(async () => {});
-  cancelSession = vi.fn(async () => {});
-
-  getWorkflows = vi.fn(async (sessionId: string): Promise<Workflow[]> => {
-    return this.workflows.filter((w) => w.sessionId === sessionId);
-  });
-
-  pauseWorkflow = vi.fn(async () => {});
-  resumeWorkflow = vi.fn(async () => {});
 
   sendPrompt = vi.fn(async () => {});
 
@@ -162,7 +110,7 @@ export class MockPlatformClient implements IPlatformClient {
     return this.messages.filter((m) => m.sessionId === sessionId);
   });
 
-  getWorkflowTemplates = vi.fn(async (): Promise<WorkflowTemplateSummary[]> => {
+  getWorkflowTemplates = vi.fn(async (): Promise<WorkflowTemplate[]> => {
     return [...this.templates];
   });
 
@@ -220,35 +168,43 @@ export class MockPlatformClient implements IPlatformClient {
     return [];
   });
 
-  // ── v2: Workflow Definition Operations ──
+  // ── Workflow definitions (v2 documents) ──
 
-  createDefinition = vi.fn(async (_params: CreateWorkflowDefinitionParams): Promise<WorkflowDefinition> => {
+  createDefinition = vi.fn(async (_graph: WorkflowGraphInput): Promise<WorkflowDefinitionRecord> => {
     throw new Error('Not implemented in mock');
   });
 
-  listDefinitions = vi.fn(async (): Promise<WorkflowDefinition[]> => {
+  listDefinitions = vi.fn(async (): Promise<WorkflowDefinitionSummary[]> => {
     return [];
   });
 
-  getDefinition = vi.fn(async (_id: string): Promise<WorkflowDefinitionWithStages> => {
+  getDefinition = vi.fn(async (_id: string): Promise<WorkflowDefinitionRecord> => {
     throw new Error('Not implemented in mock');
   });
 
-  updateDefinition = vi.fn(
-    async (_id: string, _params: Partial<CreateWorkflowDefinitionParams>): Promise<WorkflowDefinition> => {
+  saveDefinitionGraph = vi.fn(
+    async (_id: string, _graph: WorkflowGraphInput, _expectedRevision: number): Promise<WorkflowDefinitionRecord> => {
       throw new Error('Not implemented in mock');
     },
   );
 
-  deleteDefinition = vi.fn(async (_id: string): Promise<void> => {});
+  deleteDefinition = vi.fn(async (_id: string): Promise<{ deleted: true } | { archived: true; runs: number }> => ({
+    deleted: true,
+  }));
 
   // ── v2: Workflow Run Operations ──
 
-  createRun = vi.fn(async (_params: CreateWorkflowRunParams): Promise<WorkflowRun> => {
+  invokeWorkflow = vi.fn(
+    async (_request: InvocationRequest, _opts?: { idempotencyKey?: string; files?: InvocationFiles }): Promise<InvocationResult> => {
+      throw new Error('Not implemented in mock');
+    },
+  );
+
+  planWorkflowInvocation = vi.fn(async (_request: InvocationRequest): Promise<InvocationPlan> => {
     throw new Error('Not implemented in mock');
   });
 
-  listRuns = vi.fn(async (_filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]> => {
+  listRuns = vi.fn(async (_filter?: WorkflowRunListFilter): Promise<WorkflowRun[]> => {
     return [];
   });
 
@@ -256,17 +212,11 @@ export class MockPlatformClient implements IPlatformClient {
     throw new Error('Not implemented in mock');
   });
 
-  startRun = vi.fn(async (_id: string): Promise<void> => {});
-  pauseRun = vi.fn(async (_id: string): Promise<void> => {});
-  resumeRun = vi.fn(async (_id: string): Promise<void> => {});
-  cancelRun = vi.fn(async (_id: string): Promise<void> => {});
-  retryRun = vi.fn(async (id: string): Promise<{ runId: string }> => ({ runId: id }));
+  runCommand = vi.fn(async (_runId: string, _command: RunCommand): Promise<void> => {});
+  listLoopIterations = vi.fn(async (_runId: string, _instanceId: string) => [] as never[]);
+  listPendingDecisions = vi.fn(async (_runId: string) => [] as never[]);
+  getScriptAllowlist = vi.fn(async () => ({ commands: [] as string[], defaults: [] as string[], extras: [] as string[] }));
   deleteRun = vi.fn(async (_id: string): Promise<void> => {});
-  pauseStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
-  resumeStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
-  wakeStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
-  retryStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
-  cancelStageRun = vi.fn(async (_runId: string, _stageId: string): Promise<void> => {});
 
   // ── HITL Operations ──
   getPermissionMode = vi.fn(async (_runId: string) => ({
@@ -274,6 +224,4 @@ export class MockPlatformClient implements IPlatformClient {
     mode: 'default' as const,
   }));
   setPermissionMode = vi.fn(async (_runId: string, _mode: string): Promise<void> => {});
-  listPendingInterrupts = vi.fn(async (_runId: string) => []);
-  resumeStage = vi.fn(async (_runId: string, _stageId: string, _resolution: { approved: boolean; value?: unknown; reason?: string }) => ({ ok: true }));
 }

@@ -1,0 +1,137 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Per-file migration",
+    "description": "Scan for the files a change touches, then migrate each file in its own worktree and open one pull request per file.",
+    "session": {},
+    "variables": [
+      {
+        "name": "change",
+        "type": "text",
+        "label": "The change to apply",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": true,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": true,
+        "autoCreatePR": true,
+        "steps": []
+      }
+    },
+    "tags": [
+      "map"
+    ]
+  },
+  "stages": [
+    {
+      "key": "scan",
+      "name": "Scan",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "scan",
+          "text": "List every file that must change for this migration: {{variables.change}}. Give a one-line reason per file."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "files"
+          ],
+          "properties": {
+            "files": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "per_file",
+      "name": "Per file",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "map",
+      "map": {
+        "items": "stages.scan.output.files",
+        "itemKey": "item.path",
+        "maxItems": 50,
+        "concurrency": 4,
+        "toleratedFailurePercent": 0,
+        "workspace": "mount_per_item",
+        "merge": "pr_per_item",
+        "output": {}
+      }
+    },
+    {
+      "key": "migrate",
+      "name": "Migrate file",
+      "parentKey": "per_file",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "migrate",
+          "text": "Apply this migration to {{item.path}} only: {{variables.change}}\nWhy this file: {{item.reason}}"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "scan",
+      "to": "per_file",
+      "on": "success"
+    }
+  ]
+}

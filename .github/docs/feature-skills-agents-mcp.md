@@ -70,7 +70,7 @@ MCP client failed, because there isn't one.
 |---|---|---|---|
 | **Skill** | A scoped behavior or rulebook (e.g., "review TypeScript safely"). Often a markdown or JSON instruction file the harness loads on demand. | `templates/system/artifacts/skills/` (system) + `<project>/config/skills/` (project) | `skillDirectories`, `disabledSkills` |
 | **Custom Agent** | A named sub-agent with its own system prompt + tool whitelist. | `templates/system/artifacts/agents/` + `<project>/config/agents/` | `customAgents: CustomAgentConfig[]` |
-| **Prompt template** | A reusable prompt body referenced via `PromptDefinition.source = 'file'`. | `templates/system/artifacts/prompts/` + `<project>/config/prompts/` | injected into `prompts[].text` at preprocessing |
+| **Prompt template** | A reusable prompt file the agent can read. | `templates/system/artifacts/prompts/` + `<project>/config/prompts/` + run uploads | attached to the stage's prompts from the run's prompt directories |
 | **MCP Server** | Model Context Protocol tool provider config (`http`, `sse` or `stdio`) forwarded to the harness SDK, which is the thing that actually speaks MCP. | bundled: `templates/system/mcp-servers.json`; custom: server-side `mcp-settings.json` (Settings → MCP Servers, **not** the browser); project: `project_configs` rows of type `mcp` | `mcpServers: Record<name, McpServerConfig>` |
 
 ---
@@ -84,9 +84,9 @@ SYSTEM     templates/system/artifacts/* + templates/system/mcp-servers.json
    ↓ merged with
 PROJECT    projects/<id>/config/*
    ↓ merged with
-WORKFLOW   workflow_definitions.selectedArtifacts + orchestratorConfig
+WORKFLOW   graph.workflow.session (SessionSpec, incl. agentRef)
    ↓ merged with
-STAGE      stage_definitions.harnessConfigOverrides.{customAgents,skillDirectories,disabledSkills,mcpServers}
+STAGE      stage.session.{customAgents,skills,mcp,tools,agentOverrides}
 ```
 
 `SystemArtifactService` is the canonical merger for skills/agents/prompts.
@@ -158,17 +158,18 @@ Any hot-loaded extension can register skills, prompts, custom agents, tools, and
   on/off + inputs + credentials — see §6).
 
 ### Workflow
-- `workflow_definitions.selectedArtifacts: { skills?, agents?, prompts? }` — a list of artifact IDs that *must* be available (a "lockfile").
-- `orchestratorConfig.selectedArtifacts` — same idea but for orchestrator-driven flows.
-- Stage-scope overrides take precedence.
+- `workflow.session` — the workflow-level `SessionSpec` defaults; `session.agentRef` is the default agent for stages that bind none.
+- Stage-scope overrides take precedence (`resolveSessionSpec` merges the stage's `session` over the workflow's).
 
 ### Stage
-- `harnessConfigOverrides.customAgents` (array of `CustomAgentConfig`).
-- `harnessConfigOverrides.skillDirectories` (extra dirs to scan).
-- `harnessConfigOverrides.disabledSkills` (names to exclude).
-- `harnessConfigOverrides.mcpServers` (Record<name, McpServerConfig> to *add* or *override*).
-- `harnessConfigOverrides.excludedTools` (blacklist; supports `mcp__<server>__<tool>` to exclude MCP tools).
-- `harnessConfigOverrides.agentName` — convenience field; tells `StageExecutionService` to use that custom agent as the stage's "main" agent.
+A stage's `session` (partial `SessionSpec`, see [feature-stages.md](./feature-stages.md) §2):
+- `session.customAgents` (inline sub-agents).
+- `session.skills.directories` (extra dirs to scan).
+- `session.skills.disabled` (skill names to exclude).
+- `session.agentOverrides.addSkillIds` / `removeSkillIds` (skills added to / removed from the bound agent's set).
+- `session.mcp.servers` (Record<id, McpServerConfig> to *add* or *override*).
+- `session.mcp.excludedIds` (MCP server ids removed).
+- `session.tools.excluded` (tool-name blacklist; supports `mcp__<server>__<tool>` to exclude MCP tools).
 
 ---
 
@@ -254,9 +255,8 @@ type McpServerEntry = {
 
 In the workflow builder, Stage Properties panel → Properties tab:
 
-- **`SkillSelector`** ([apps/web/src/components/workflow/SkillSelector.tsx](../../apps/web/src/components/workflow/SkillSelector.tsx)) — toggles checkboxes; writes to `harnessConfigOverrides.disabledSkills` (so checked = enabled by exclusion).
-- **`AgentSelector`** ([apps/web/src/components/workflow/AgentSelector.tsx](../../apps/web/src/components/workflow/AgentSelector.tsx)) — single-select dropdown; writes `stage.agentName` AND `harnessConfigOverrides.customAgents = [theAgent]`.
-- **`McpServerSelector`** ([apps/web/src/components/workflow/McpServerSelector.tsx](../../apps/web/src/components/workflow/McpServerSelector.tsx)) — toggles each server; merges into `harnessConfigOverrides.excludedTools` (TODO: dedicated `excludedMcpServers` field).
+- **`SkillSelector`** ([apps/web/src/components/workflow/SkillSelector.tsx](../../apps/web/src/components/workflow/SkillSelector.tsx)) — toggles checkboxes; a checked skill is added via `session.agentOverrides.addSkillIds` (and dropped from `session.skills.disabled` / `removeSkillIds`).
+- **`McpServerSelector`** ([apps/web/src/components/workflow/McpServerSelector.tsx](../../apps/web/src/components/workflow/McpServerSelector.tsx)) — toggles each server; an unchecked server is listed in `session.mcp.excludedIds`.
 
 Settings → MCP Servers (**`apps/web/src/components/settings/sections/Catalogs.tsx`**'s `McpSection`) is the global surface: it lists bundled + custom servers together (one `GET /api/system/mcp-servers` call), shows an inline "Needs setup" form for any server with `needsConfiguration` (fills `{{input}}` values and credentials, `PUT .../system/:id`), and the "Add server" sub-page creates a custom server server-side.
 
@@ -410,31 +410,35 @@ generatorai system mcp-servers
 
 ## 8. PWS / SDK
 
-In a `.workflow.mjs` script:
+In a `.workflow.mjs` script (builder from `@generatorai/workflow-spec/builders`), the stage's `session` carries these settings:
 
 ```js
-b.stage('review', s => s
-  .name('Code Review')
-  .agentName('typescript-reviewer')                          // selects the custom agent
-  .harnessConfig({
-    customAgents: [
-      {
-        name: 'typescript-reviewer',
-        description: 'Reviews TS code for safety + correctness',
-        instructions: 'You are a senior TypeScript reviewer …',
-        tools: ['read_file', 'list_dir', 'grep_search'],
+import { workflow } from '@generatorai/workflow-spec/builders';
+
+export default workflow('Review')
+  .variable('filePath', { type: 'string', label: 'File', required: true })
+  .variable('lang', { type: 'string', label: 'Language', required: true })
+  .stage('review', (s) => s
+    .name('Code Review')
+    .session({
+      customAgents: [
+        {
+          name: 'typescript-reviewer',
+          description: 'Reviews TS code for safety + correctness',
+          instructions: 'You are a senior TypeScript reviewer …',
+          tools: ['read_file', 'list_dir', 'grep_search'],
+        },
+      ],
+      skills: { directories: ['/path/to/extra/skills'], disabled: ['general-coding'] },
+      mcp: {
+        servers: { 'project-db': { type: 'stdio', command: 'node', args: ['./mcp/project-db.mjs'] } },
       },
-    ],
-    skillDirectories: ['/path/to/extra/skills'],
-    disabledSkills: ['general-coding'],
-    mcpServers: {
-      'project-db': { type: 'stdio', command: 'node', args: ['./mcp/project-db.mjs'] },
-    },
-    excludedTools: ['shell_exec'],
-  })
-  .prompts([{ text: 'Review {{filePath}} against the {{lang}} guidelines.' }])
-);
+      tools: { excluded: ['shell_exec'] },
+    })
+    .prompt('Review {{filePath}} against the {{lang}} guidelines.'));
 ```
+
+To bind a catalog agent instead, use `.agent('project:typescript-reviewer')` (sets `session.agentRef`).
 
 In SDK:
 

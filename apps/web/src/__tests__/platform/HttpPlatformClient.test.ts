@@ -61,124 +61,27 @@ describe('HttpPlatformClient', () => {
     resetMuxStreamForTests();
   });
 
-  it('sends orchestrated uploads and overrides in one request before execution', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ workflowRunId: 'r1' }, 201));
+  it('starts a run with its uploads and overrides in one invocation request', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ runId: 'r1' }, 202));
     const skill = new File(['skill instructions'], 'review.md', { type: 'text/markdown' });
-    await client.startOrchestratedRun({
-      workflowDefinitionId: 'd1', stageOverrides: [{ stageIndex: 1, skip: true }],
-      uploads: { skills: [skill], prompts: [], agents: [] },
-    });
+    const request = {
+      target: { kind: 'definition' as const, workflowDefinitionId: 'd1' },
+      variables: {},
+      stageOverrides: [{ stageKey: 'review', skip: true }],
+    };
+    // jsdom's FormData drops a Blob part's filename, so read what was appended.
+    const append = vi.spyOn(FormData.prototype, 'append');
+    await client.invokeWorkflow(request, { idempotencyKey: 'k1', files: { skills: [skill] } });
+    expect(append).toHaveBeenCalledWith('skills', expect.any(Blob), 'review.md');
+    append.mockRestore();
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    const init = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(url).toBe('http://localhost:3000/api/workflow-invocations');
     const body = init?.body as FormData;
-    expect(JSON.parse(body.get('config') as string)).toEqual({
-      workflowDefinitionId: 'd1', stageOverrides: [{ stageIndex: 1, skip: true }],
-    });
-    expect((body.get('skills') as File).name).toBe('review.md');
-    expect(new Headers(init?.headers).has('content-type')).toBe(false);
-  });
-
-  // ── Session CRUD ──
-
-  it('createSession calls POST /api/sessions with JSON body', async () => {
-    const session = { id: 's1', name: 'Test', status: 'created' };
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(session, 201));
-
-    const params = { name: 'Test', workflows: [{ templateId: 'code-generation' }] };
-    const result = await client.createSession(params as any);
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions',
-      expect.objectContaining({
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(params),
-      }),
-    );
-    expect(result).toEqual(session);
-  });
-
-  it('getSessions calls GET /api/sessions', async () => {
-    const sessions = [{ id: 's1', name: 'A' }, { id: 's2', name: 'B' }];
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(sessions));
-
-    const result = await client.getSessions();
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions',
-      expect.objectContaining({ headers: {} }),
-    );
-    expect(result).toEqual(sessions);
-  });
-
-  it('getSession calls GET /api/sessions/:id', async () => {
-    const session = { id: 's1', name: 'Test', workflows: [] };
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(session));
-
-    const result = await client.getSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1',
-      expect.objectContaining({ headers: {} }),
-    );
-    expect(result).toEqual(session);
-  });
-
-  // ── Session Control ──
-
-  it('startSession calls POST /api/sessions/:id/start', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.startSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1/start',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('pauseSession calls POST /api/sessions/:id/pause', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.pauseSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1/pause',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('resumeSession calls POST /api/sessions/:id/resume', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.resumeSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1/resume',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('cancelSession calls POST /api/sessions/:id/cancel', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.cancelSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1/cancel',
-      expect.objectContaining({ method: 'POST' }),
-    );
-  });
-
-  it('deleteSession calls DELETE /api/sessions/:id', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(noContentResponse());
-
-    await client.deleteSession('s1');
-
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      'http://localhost:3000/api/sessions/s1',
-      expect.objectContaining({ method: 'DELETE' }),
-    );
+    expect(JSON.parse(body.get('request') as string)).toEqual(request);
+    const headers = new Headers(init?.headers);
+    expect(headers.has('content-type')).toBe(false);
+    expect(headers.get('idempotency-key')).toBe('k1');
   });
 
   // ── Chat ──

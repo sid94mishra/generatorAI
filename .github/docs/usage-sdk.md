@@ -32,7 +32,7 @@ The harness packages are *lazy-loaded*, so you only need to install whichever yo
 ## 2. Quick start
 
 ```typescript
-import { createGeneratorAI } from '@generatorai/sdk';
+import { createGeneratorAI, workflow } from '@generatorai/sdk';
 
 const ai = await createGeneratorAI({
   provider: 'copilot',
@@ -41,7 +41,16 @@ const ai = await createGeneratorAI({
   logger: { level: 'info', pretty: true },
 });
 
-const run = await ai.workflows.run('e2e-feature-coverage', {
+// A definition is one v2 WorkflowGraph; create() publishes it by default.
+const def = await ai.workflows.create(
+  workflow('Research')
+    .variable('topic', { type: 'string', label: 'Topic', required: true })
+    .stage('research', (s) => s.prompt('Research {{topic}}.'))
+    .stage('summarize', (s) => s.prompt('Summarize the findings.').contextFrom(['research'], 'output'))
+    .edge('research', 'summarize'),
+);
+
+const run = await ai.workflows.run(def.id, {
   variables: { topic: 'AI safety' },
 });
 
@@ -120,7 +129,7 @@ providerOptions: {
 `ai.workflows`, `ai.chat`, `ai.automations`, `ai.events`, `ai.scripts`, `ai.tools`. See per-feature docs for full signatures:
 
 - [feature-chat.md → SDK](./feature-chat.md#7-sdk)
-- [feature-workflows.md → SDK](./feature-workflows.md#7-sdk)
+- [feature-workflows.md → SDK](./feature-workflows.md#9-sdk)
 - [feature-workflow-runs.md → SDK](./feature-workflow-runs.md#14-sdk)
 - [feature-automations.md → SDK](./feature-automations.md#8-sdk)
 - [feature-templates-scripts.md → SDK](./feature-templates-scripts.md#5-sdk)
@@ -130,10 +139,13 @@ Quick reference:
 
 ```typescript
 // Workflows
-await ai.workflows.create({ id, name, stages, edges, … });
-await ai.workflows.list();
-await ai.workflows.get(id);
-const run = await ai.workflows.run(id, { variables, projectId });
+const def = await ai.workflows.create(workflow('Name').stage('a', s => s.prompt('…')));  // or a WorkflowGraph; { publish: false } = draft
+await ai.workflows.save(def.id, graph, def.revision);   // whole-graph save; stale revision throws
+await ai.workflows.publish(def.id);
+ai.workflows.validate(graph);                           // { valid, issues, graph? }
+await ai.workflows.list();                              // WorkflowDefinitionSummary[]
+await ai.workflows.get(id);                             // WorkflowDefinitionRecord (graph in .graph)
+const run = await ai.workflows.run(id, { variables, projectId, testRun });  // a draft runs only with testRun: true
 for await (const ev of ai.workflows.stream(run.id, { fromSequence: 0 })) { … }
 await ai.workflows.pause(runId);
 await ai.workflows.resume(runId);
@@ -238,7 +250,7 @@ const ai2 = await createTestGeneratorAI({ database: ':memory:' });
 `ai.services: CoreServices` exposes every application service. Use sparingly; the facades exist for a reason.
 
 ```typescript
-const def = await ai.services.workflowDefinitionService.getById(defId);
+const def = await ai.services.workflowDefinitionService.get(defId);
 const run = await ai.services.workflowRunService.startRun(runId);
 
 // Register a function hook handler
@@ -284,7 +296,7 @@ await proxy.switchAdapter(claudeHarness, 'claude-agent');
 // All services keep using `proxy`; traffic now flows to Claude.
 ```
 
-> Stage `harnessConfigOverrides.model` is provider-specific. Switching providers without scrubbing/aliasing model overrides will fail stages. Prefer model-namespace agnostic settings (e.g., omit `model` to fall back to the provider's `defaultModel`).
+> A stage's `session.model` (and `workflow.session.model`) is provider-specific. Switching providers without scrubbing/aliasing model overrides will fail stages. Prefer model-namespace agnostic settings (e.g., omit `model` to fall back to the provider's `defaultModel`).
 
 ---
 

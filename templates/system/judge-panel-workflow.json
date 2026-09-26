@@ -1,0 +1,193 @@
+{
+  "id": "judge-panel",
+  "category": "code-generation",
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Judge panel (best of N)",
+      "description": "Three agents solve a task from different angles in their own worktrees; a read-only judge scores them, and only the winner is merged into the run mount.",
+      "session": {},
+      "variables": [
+        {
+          "name": "task",
+          "type": "text",
+          "label": "Task",
+          "required": true
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": true,
+        "sandbox": "required",
+        "preprocessingSteps": [],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
+      },
+      "tags": [
+        "map",
+        "judge-panel"
+      ]
+    },
+    "stages": [
+      {
+        "key": "panel",
+        "name": "Candidates",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "map",
+        "map": {
+          "items": "['minimal', 'thorough', 'idiomatic']",
+          "itemKey": "item",
+          "maxItems": 3,
+          "concurrency": 3,
+          "toleratedFailurePercent": 50,
+          "workspace": "mount_per_item",
+          "merge": {
+            "mode": "winner",
+            "key": "stages.judge.output.winner"
+          },
+          "output": {}
+        }
+      },
+      {
+        "key": "attempt",
+        "name": "Candidate",
+        "parentKey": "panel",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "attempt",
+            "text": "Solve this task: {{variables.task}}\nTake the {{item}} approach. Work only in this worktree, run the relevant tests, then report a summary, the files you changed and the risks you see."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "json",
+          "schema": {
+            "type": "object",
+            "required": [
+              "summary",
+              "files"
+            ],
+            "properties": {
+              "summary": {
+                "type": "string"
+              },
+              "files": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              },
+              "risks": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      },
+      {
+        "key": "judge",
+        "name": "Judge",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "judge",
+            "text": "Task: {{variables.task}}\nIndependent candidates solved it, one per angle, each in its own git worktree (its `workdir` below). Compare them for correctness, completeness, test results and risk; read their changed files in their workdirs where you need to. Score every candidate 0-10 and pick the best one as `winner` (its key).\n{{ stages.panel.output.results | json }}"
+          }
+        ],
+        "session": {
+          "permissionMode": "plan"
+        },
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "json",
+          "schema": {
+            "type": "object",
+            "required": [
+              "winner",
+              "scores",
+              "rationale"
+            ],
+            "properties": {
+              "winner": {
+                "enum": [
+                  "minimal",
+                  "thorough",
+                  "idiomatic"
+                ]
+              },
+              "scores": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "candidate",
+                    "score"
+                  ],
+                  "properties": {
+                    "candidate": {
+                      "enum": [
+                        "minimal",
+                        "thorough",
+                        "idiomatic"
+                      ]
+                    },
+                    "score": {
+                      "type": "number",
+                      "minimum": 0,
+                      "maximum": 10
+                    },
+                    "notes": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "rationale": {
+                "type": "string"
+              }
+            }
+          },
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "panel",
+        "to": "judge",
+        "on": "success"
+      }
+    ]
+  }
+}

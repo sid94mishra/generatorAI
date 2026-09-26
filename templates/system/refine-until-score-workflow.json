@@ -1,0 +1,156 @@
+{
+  "id": "refine-until-score",
+  "category": "documentation",
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Refine until it scores",
+      "description": "Draft, critique and improve until the critic scores it 8 or more; keeps the best iteration when it runs out.",
+      "session": {},
+      "variables": [
+        {
+          "name": "version",
+          "type": "string",
+          "label": "Version",
+          "required": true
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": false,
+        "sandbox": "required",
+        "preprocessingSteps": [],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
+      },
+      "tags": [
+        "loop"
+      ]
+    },
+    "stages": [
+      {
+        "key": "refine",
+        "name": "Refine",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "loop",
+        "loop": {
+          "maxIterations": 4,
+          "exits": [
+            {
+              "when": "stages.critique.output.score >= 8",
+              "action": "complete",
+              "consecutive": 1,
+              "reason": "good_enough"
+            }
+          ],
+          "carry": {
+            "issues": "stages.critique.output.issues"
+          },
+          "onLimit": {
+            "mode": "accept_best",
+            "score": "stages.critique.output.score"
+          },
+          "onBodyFailure": "fail",
+          "output": {
+            "select": {
+              "notes": "loop.last.stages.draft.output"
+            }
+          }
+        }
+      },
+      {
+        "key": "draft",
+        "name": "Draft",
+        "parentKey": "refine",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "draft",
+            "text": "Write the release notes for {{variables.version}}. Output only the notes."
+          }
+        ],
+        "followUpPrompts": [
+          {
+            "label": "improve",
+            "text": "Improve the draft. Critique:\n{{loop.carry.issues | bullets}}"
+          }
+        ],
+        "sessionReuse": "continue",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      },
+      {
+        "key": "critique",
+        "name": "Critique",
+        "parentKey": "refine",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "score",
+            "text": "Score this work 0-10 for accuracy, completeness and clarity, and list concrete issues:\n{{stages.draft.output}}"
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "json",
+          "schema": {
+            "type": "object",
+            "required": [
+              "score",
+              "issues"
+            ],
+            "properties": {
+              "score": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 10
+              },
+              "issues": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "draft",
+        "to": "critique",
+        "on": "success"
+      }
+    ]
+  }
+}

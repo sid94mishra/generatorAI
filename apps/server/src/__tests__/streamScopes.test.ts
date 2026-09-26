@@ -34,6 +34,11 @@ describe('per-entity scopes', () => {
     });
   });
 
+  it('does not republish an engine outbox event to its run (the outbox already published it, awaited)', () => {
+    const targets = at('__global__', 'stage_run.completed', { workflowRunId: 'r1', stageRunId: 's', runSeq: 7 });
+    expect(targets.some((t) => t.scope === 'run')).toBe(false);
+  });
+
   it('fans a chat-keyed event out to its chat', () => {
     expect(at('s1', 'harness.token', { chatId: 'c1', text: 'x' })).toEqual([
       { scope: 'chat', id: 'c1' },

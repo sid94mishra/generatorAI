@@ -398,9 +398,12 @@ export class AcpProvider implements IAgentHarness {
       reasoningEfforts: [],
       planMode: false,
       mcpServers: false,
-      skillDirectories: false,
-      // Tier-B: full tool gating enforced at the host boundary, not in-provider.
-      fullToolGating: !tierB,
+      skills: 'none',
+      // `session/request_permission` reaches the session's gate per call
+      // (Tier-B additionally denies `execute`-kind calls at the boundary).
+      approvalGating: 'per_call',
+      hostTools: 'none',
+      structuredOutput: 'none',
       sessionPersistence: false,
       budgetTracking: false,
       // ACP has no dedicated GUI/computer-use surface, and Tier-B blocks

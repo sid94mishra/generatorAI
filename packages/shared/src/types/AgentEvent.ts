@@ -95,6 +95,13 @@ export type AgentEvent =
         cacheReadTokens?: number;
         cacheWriteTokens?: number;
         cost?: number;
+        /**
+         * The turn's cost in US dollars, set ONLY by a provider that reports one
+         * (claude-agent's `total_cost_usd`). Budgets and the run page read this,
+         * never `cost` (Copilot's is a premium-request multiplier); there is no
+         * pricing table (P07 WP-7.3).
+         */
+        costUsd?: number;
         durationMs?: number;
         provider?: string;
       };
@@ -211,6 +218,43 @@ export type AgentEvent =
         startedAt: number;
       };
     }
+  // ── Workflow runs started by the chat's workflow tools (P06 WP-6.2; on the chat's session scope) ──
+  | {
+      kind: 'chat.workflow_run.linked';
+      data: { chatId: string; runId: string; workflowId: string; workflowName: string; toolCallId?: string; status: string; link: string };
+    }
+  // Throttled to one per 500 ms per run; stage transitions are not throttled.
+  | {
+      kind: 'chat.workflow_run.progress';
+      data: {
+        chatId: string;
+        runId: string;
+        status: string;
+        /** The stage running (or last to change) now. */
+        currentStage?: string;
+        stagesDone: number;
+        stagesTotal: number;
+      };
+    }
+  | {
+      kind: 'chat.workflow_run.awaiting_approval';
+      data: {
+        chatId: string;
+        runId: string;
+        instanceId: string;
+        stageKey: string;
+        stageName: string;
+        /** `stage_completion_review`, `tool_permission`, `question`, `plan_review`, `loop_decision`, `wait`. */
+        decision: string;
+        /** A completion review on a run whose invocation delegated approvals to the invoking agent. */
+        answerableByAgent: boolean;
+        link: string;
+      };
+    }
+  | {
+      kind: 'chat.workflow_run.finalized';
+      data: { chatId: string; runId: string; status: 'completed' | 'failed' | 'cancelled'; summary?: string; prUrl?: string; link: string };
+    }
   // ── Rewind / fork (chat-scoped) ──
   | {
       kind: 'chat.rewound';
@@ -242,6 +286,16 @@ export type AgentEvent =
   | { kind: 'chat.permission.requested'; data: { chatId: string; interactionId: string; turnId?: string; toolName: string; type: string; description: string; inputSummary: string; permissionMode: string } }
   | { kind: 'chat.permission.resolved'; data: { chatId: string; interactionId: string; behavior: 'allow' | 'deny'; message?: string } }
   | { kind: 'chat.permission.expired'; data: { chatId: string; interactionId: string; reason: string } }
+  // ── Stage gates (P02): the chat gate shapes, keyed by the stage run ──
+  | { kind: 'stage.permission.requested'; data: { stageRunId: string; workflowRunId: string; interactionId: string; turnId?: string; toolName: string; type: string; description: string; inputSummary: string; permissionMode: string } }
+  | { kind: 'stage.permission.resolved'; data: { stageRunId: string; workflowRunId: string; interactionId: string; behavior: 'allow' | 'deny'; message?: string } }
+  | { kind: 'stage.permission.expired'; data: { stageRunId: string; workflowRunId: string; interactionId: string; reason: string } }
+  | { kind: 'stage.question.asked'; data: { stageRunId: string; workflowRunId: string; interactionId: string; turnId?: string; questions: unknown[] } }
+  | { kind: 'stage.question.answered'; data: { stageRunId: string; workflowRunId: string; interactionId: string; answers: Record<string, string[]>; freeformResponse?: string } }
+  | { kind: 'stage.question.expired'; data: { stageRunId: string; workflowRunId: string; interactionId: string; reason: string } }
+  | { kind: 'stage.plan.created'; data: { stageRunId: string; workflowRunId: string; planId: string; revision: number; title: string; fileName: string; summary: string; status?: string; turnId?: string } }
+  | { kind: 'stage.plan.review_requested'; data: { stageRunId: string; workflowRunId: string; interactionId: string; planId?: string; revision?: number; title?: string; fileName?: string; summary: string; actions: string[]; recommendedAction?: string } }
+  | { kind: 'stage.plan.decided'; data: { stageRunId: string; workflowRunId: string; interactionId: string; planId?: string; approved: boolean; action?: string; feedback?: string } }
 
   // ── Agents (first-class agent entity) ──
   | { kind: 'agent.created'; data: { agentId: string; ref: string; name: string; scope: string } }
@@ -256,30 +310,28 @@ export type AgentEvent =
   | { kind: 'workflow_run.starting'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.running'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.paused'; data: { workflowRunId: string; reason?: string } }
+  /** The run paused because its budget ran out (P07 WP-7.3; a push notification). */
+  | { kind: 'workflow_run.budget_exhausted'; data: { workflowRunId: string; name?: string; usage?: Record<string, unknown>; budget?: Record<string, unknown> | null } }
   | { kind: 'workflow_run.resumed'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.cancelling'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.completed'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.failed'; data: { workflowRunId: string; error: string } }
   | { kind: 'workflow_run.cancelled'; data: { workflowRunId: string } }
-  | { kind: 'workflow_run.retried'; data: { workflowRunId: string; ancestorRunId?: string } }
-  // ── WorkflowRun Orchestration Events ──
-  | { kind: 'workflow_run.orchestration_started'; data: { workflowRunId: string; hasCodebases: boolean; hasPreprocessing: boolean } }
-  | { kind: 'workflow_run.worktree_creating'; data: { workflowRunId: string; codebaseCount: number; codebases: Array<{ alias: string; codebaseId: string }> } }
-  | { kind: 'workflow_run.worktree_created'; data: { workflowRunId: string; worktrees: Record<string, string> } }
-  | { kind: 'workflow_run.preprocessing_started'; data: { workflowRunId: string; stepCount: number } }
-  | { kind: 'workflow_run.preprocessing_completed'; data: { workflowRunId: string; results: Array<{ stepName: string; success: boolean; durationMs: number }> } }
+  | { kind: 'workflow_run.forked'; data: { workflowRunId: string; ancestorRunId: string; rerunFrom: string[]; memoized: number } }
+  | { kind: 'workflow_run.invoked'; data: { workflowRunId: string; invocationId: string; trigger: { kind: string; [key: string]: unknown } } }
+  /** After the run's terminal event, once its lifecycle (compensation, hooks, post-processing, release) is done: what every waiter keys on. */
+  | { kind: 'workflow_run.finalized'; data: { workflowRunId: string; status: 'completed' | 'failed' | 'cancelled' } }
+  // ── WorkflowRun lifecycle phases (P04: `starting` and `finalizing`) ──
+  | { kind: 'workflow_run.phase_started'; data: { workflowRunId: string; stage: 'prepare' | 'finalize'; phase: string } }
+  | { kind: 'workflow_run.phase_completed'; data: { workflowRunId: string; stage: 'prepare' | 'finalize'; phase: string; durationMs: number } }
+  | { kind: 'workflow_run.phase_failed'; data: { workflowRunId: string; stage: 'prepare' | 'finalize'; phase: string; error: string } }
   | { kind: 'workflow_run.preprocessing_step_started'; data: { workflowRunId: string; stepName: string; stepType: string } }
   | { kind: 'workflow_run.preprocessing_step_completed'; data: { workflowRunId: string; stepName: string; success: boolean; durationMs: number } }
   | { kind: 'workflow_run.preprocessing_step_failed'; data: { workflowRunId: string; stepName: string; error: string } }
-  | { kind: 'workflow_run.stage_validation'; data: { workflowRunId: string; stageRunId: string; stageName: string; passed: boolean; failures: string[] } }
-  | { kind: 'workflow_run.orchestration_failed'; data: { workflowRunId: string; error: string } }
-  | { kind: 'workflow_run.orchestration_completed'; data: { workflowRunId: string; preprocessingResults: unknown[]; postProcessingResults?: unknown[]; stageValidationResults: unknown[] } }
   // ── WorkflowRun Sandbox Events ──
   | { kind: 'workflow_run.sandbox_created'; data: { workflowRunId: string; sandboxName: string; cliUrl: string; isDockerSandbox: boolean } }
   | { kind: 'workflow_run.sandbox_destroyed'; data: { workflowRunId: string } }
   // ── WorkflowRun Post-Processing Events ──
-  | { kind: 'workflow_run.postprocessing_started'; data: { workflowRunId: string; stepCount: number } }
-  | { kind: 'workflow_run.postprocessing_completed'; data: { workflowRunId: string; results: Array<{ stepName: string; success: boolean; durationMs: number }> } }
   | { kind: 'workflow_run.postprocessing_step_started'; data: { workflowRunId: string; stepName: string; stepType: string } }
   | { kind: 'workflow_run.postprocessing_step_completed'; data: { workflowRunId: string; stepName: string; success: boolean; durationMs: number } }
   | { kind: 'workflow_run.postprocessing_step_failed'; data: { workflowRunId: string; stepName: string; error: string } }
@@ -287,10 +339,7 @@ export type AgentEvent =
   | { kind: 'workflow_run.permission_mode_changed'; data: { workflowRunId: string; mode: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan'; previous?: string } }
   // ── StageRun Events ──
   | { kind: 'stage_run.pending'; data: { stageRunId: string; workflowRunId: string; name: string } }
-  | { kind: 'stage_run.queued'; data: { stageRunId: string; workflowRunId: string; name: string } }
   | { kind: 'stage_run.running'; data: { stageRunId: string; workflowRunId: string; sessionId?: string; name?: string } }
-  | { kind: 'stage_run.step_started'; data: { stageRunId: string; workflowRunId: string; step: number; totalSteps: number; label: string } }
-  | { kind: 'stage_run.step_completed'; data: { stageRunId: string; workflowRunId: string; step: number } }
   | { kind: 'stage_run.paused'; data: { stageRunId: string; workflowRunId: string; reason?: string } }
   | { kind: 'stage_run.resumed'; data: { stageRunId: string; workflowRunId: string } }
   | { kind: 'stage_run.completed'; data: { stageRunId: string; workflowRunId: string; name?: string } }
@@ -298,12 +347,26 @@ export type AgentEvent =
   | { kind: 'stage_run.cancelled'; data: { stageRunId: string; workflowRunId: string } }
   | { kind: 'stage_run.skipped'; data: { stageRunId: string; workflowRunId: string; reason: string } }
   | { kind: 'stage_run.retrying'; data: { stageRunId: string; workflowRunId: string; retryCount: number } }
-  // DUR-05 — durable step.sleep lifecycle events.
-  | { kind: 'stage_run.sleeping'; data: { stageRunId: string; workflowRunId: string; wakeAt: number; reason?: string } }
-  | { kind: 'stage_run.woken'; data: { stageRunId: string; workflowRunId: string; overdueMs: number } }
+  | { kind: 'stage_run.repairing'; data: { stageRunId: string; workflowRunId: string; repair: number; failures?: unknown } }
   // HITL — human-in-the-loop lifecycle events.
   | { kind: 'stage_run.awaiting_input'; data: { stageRunId: string; workflowRunId: string; interruptData?: unknown; prompt?: string } }
   | { kind: 'stage_run.input_received'; data: { stageRunId: string; workflowRunId: string; value?: unknown } }
+  // A wait stage armed (P05 §4.3): an approval, an event or a timer; resolved by `stage_run.completed`.
+  | { kind: 'stage_run.waiting'; data: { stageRunId: string; workflowRunId: string; interruptData?: unknown } }
+  /** A `ready` stage waits for a flow key of the admission controller (P07 WP-7.2): "waiting for provider claude-agent (4/4)". */
+  | {
+      kind: 'stage_run.admission_queued';
+      data: { stageRunId: string; workflowRunId: string; flowKey: string; label: string; running: number; limit: number | null; queued: number };
+    }
+  | { kind: 'stage_run.admission_granted'; data: { stageRunId: string; workflowRunId: string; flowKey: string } }
+  /** A completed stage's `llm` summary was written (P07 WP-7.1). */
+  | { kind: 'stage_run.summary_ready'; data: { stageRunId: string; workflowRunId: string } }
+  // The stage conversation (P03b): an operator message, a stopped turn, an amendment of a completed stage.
+  | { kind: 'stage_run.operator_message'; data: { stageRunId: string; workflowRunId: string; content: string; attachments?: string[] } }
+  | { kind: 'stage_run.operator_message_dropped'; data: { stageRunId: string; workflowRunId: string; count: number; outcome: string } }
+  | { kind: 'stage_run.turn_cancelled'; data: { stageRunId: string; workflowRunId: string; opId: string; force: boolean } }
+  | { kind: 'stage_run.amended'; data: { stageRunId: string; workflowRunId: string; amendedAt: number; outputText: string } }
+  | { kind: 'stage_run.amend_failed'; data: { stageRunId: string; workflowRunId: string; error: string } }
   // ── Session Events ──
   | { kind: 'session.created'; data: { sessionId: string; name?: string } }
   | { kind: 'session.active'; data: { sessionId: string } }

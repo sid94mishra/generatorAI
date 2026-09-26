@@ -70,10 +70,17 @@ export async function apiFetch<T = unknown>(
     let msg = `Request failed with status ${String(response.status)}`;
     let details: unknown;
     try {
-      const errorBody = (await response.json()) as { error?: { code?: string; message?: string; details?: unknown } };
+      const errorBody = (await response.json()) as {
+        error?: { code?: string; message?: string; details?: unknown; issues?: unknown; current?: unknown };
+      };
       if (errorBody?.error?.code) code = errorBody.error.code;
       if (errorBody?.error?.message) msg = errorBody.error.message;
-      details = errorBody?.error?.details;
+      // A workflow save's structured payloads ride next to the message: the
+      // validation `issues` of a 422 and the `current` record of a 409.
+      const e = errorBody?.error;
+      details =
+        e?.details ??
+        (e && (e.issues !== undefined || e.current !== undefined) ? { issues: e.issues, current: e.current } : undefined);
     } catch {
       // Response might not be JSON
     }

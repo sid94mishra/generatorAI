@@ -25,7 +25,10 @@ import { getLayoutedElements } from '@/utils/dagLayout.js';
 import { cn } from '@/lib/utils.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
 import type { Node, Edge } from '@xyflow/react';
-import type { StageRun, StageRunStatus, StageEdge } from '@generatorai/shared';
+import type { StageRun, StageRunStatus } from '@generatorai/shared';
+import type { EdgeSpec, StageSpec } from '@generatorai/workflow-spec';
+import { deriveLoopView } from './redesign/loopView.js';
+import type { LoopView } from './redesign/types.js';
 
 // ── Node/Edge data types ──
 
@@ -33,6 +36,8 @@ export interface RuntimeStageNodeData extends Record<string, unknown> {
   stageRun: StageRun;
   label: string;
   isSelected: boolean;
+  /** A loop instance (P05): its `n/max` badge, rule streaks and decision. */
+  loop?: LoopView;
 }
 
 export interface RuntimeStageEdgeData extends Record<string, unknown> {
@@ -57,7 +62,9 @@ function stageRunToNode(
   sr: StageRun,
   position: { x: number; y: number },
   isSelected: boolean,
+  def?: StageSpec,
 ): Node<RuntimeStageNodeData> {
+  const loop = deriveLoopView(sr, def);
   return {
     id: sr.id,
     type: 'runtimeStageNode',
@@ -66,6 +73,7 @@ function stageRunToNode(
       stageRun: sr,
       label: sr.name,
       isSelected,
+      ...(loop ? { loop } : {}),
     },
     selectable: true,
     draggable: false,
@@ -75,12 +83,14 @@ function stageRunToNode(
 // ── Main Component ──
 
 interface RuntimeDAGCanvasProps {
-  /** Definition-time edges for DAG structure */
-  definitionEdges?: StageEdge[];
+  /** Edges of the run's pinned graph (DAG structure) */
+  definitionEdges?: EdgeSpec[];
+  /** Stages of the run's pinned graph (a loop node's exit rules). */
+  definitionStages?: StageSpec[];
   className?: string;
 }
 
-function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCanvasProps) {
+function RuntimeDAGCanvasComponent({ definitionEdges, definitionStages, className }: RuntimeDAGCanvasProps) {
   const { resolvedTheme } = useTheme();
   const run = useWorkflowRunStore((s) => s.run);
   const selectedStageRunId = useWorkflowRunStore((s) => s.selectedStageRunId);
@@ -92,21 +102,27 @@ function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCan
   const { nodes, edges } = useMemo(() => {
     if (!run) return { nodes: [], edges: [] };
 
+    // The graph is the top level: a loop's body instances (every iteration)
+    // live inside its node on the timeline, not as nodes of their own.
+    const topLevel = run.stageRuns.filter((sr) => !sr.scopeId && !/#(\d+|wrapup)\//.test(sr.instancePath));
+    const defByKey = new Map((definitionStages ?? []).map((d) => [d.key, d]));
+
     // Create nodes from stage runs
-    const rawNodes: Node<RuntimeStageNodeData>[] = run.stageRuns.map((sr, index) => {
+    const rawNodes: Node<RuntimeStageNodeData>[] = topLevel.map((sr, index) => {
       return stageRunToNode(
         sr,
         { x: index * 320, y: 100 }, // Will be auto-layouted
         sr.id === selectedStageRunId,
+        defByKey.get(sr.stageKey),
       );
     });
 
-    // Build a stageDefinitionId → stageRunId map for edge creation
+    // Build a stageKey → stageRunId map for edge creation
     const defToRunId = new Map<string, string>();
     const stageRunByDefId = new Map<string, StageRun>();
-    for (const sr of run.stageRuns) {
-      defToRunId.set(sr.stageDefinitionId, sr.id);
-      stageRunByDefId.set(sr.stageDefinitionId, sr);
+    for (const sr of topLevel) {
+      defToRunId.set(sr.stageKey, sr.id);
+      stageRunByDefId.set(sr.stageKey, sr);
     }
 
     // Build edges from definition edges (mapping definition IDs → runtime IDs)
@@ -115,29 +131,29 @@ function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCan
     if (definitionEdges && definitionEdges.length > 0) {
       // Use the actual DAG structure from the workflow definition
       for (const defEdge of definitionEdges) {
-        const sourceRunId = defToRunId.get(defEdge.fromStageId);
-        const targetRunId = defToRunId.get(defEdge.toStageId);
+        const sourceRunId = defToRunId.get(defEdge.from);
+        const targetRunId = defToRunId.get(defEdge.to);
         if (sourceRunId && targetRunId) {
-          const sourceStage = stageRunByDefId.get(defEdge.fromStageId);
-          const targetStage = stageRunByDefId.get(defEdge.toStageId);
+          const sourceStage = stageRunByDefId.get(defEdge.from);
+          const targetStage = stageRunByDefId.get(defEdge.to);
           rawEdges.push({
             id: `e-${sourceRunId}-${targetRunId}`,
             source: sourceRunId,
             target: targetRunId,
             type: 'runtimeStageEdge',
             data: {
-              edgeType: defEdge.edgeType,
+              edgeType: defEdge.on,
               sourceStatus: sourceStage?.status ?? 'pending',
               targetStatus: targetStage?.status ?? 'pending',
             },
           });
         }
       }
-    } else if (run.stageRuns.length > 1) {
+    } else if (topLevel.length > 1) {
       // Fallback: sequential edges based on stage order
-      for (let i = 0; i < run.stageRuns.length - 1; i++) {
-        const from = run.stageRuns[i]!;
-        const to = run.stageRuns[i + 1]!;
+      for (let i = 0; i < topLevel.length - 1; i++) {
+        const from = topLevel[i]!;
+        const to = topLevel[i + 1]!;
         rawEdges.push({
           id: `e-${from.id}-${to.id}`,
           source: from.id,
@@ -159,7 +175,7 @@ function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCan
     }
 
     return { nodes: rawNodes, edges: rawEdges };
-  }, [run, selectedStageRunId, definitionEdges]);
+  }, [run, selectedStageRunId, definitionEdges, definitionStages]);
 
   // Handle node selection
   const onSelectionChange = useCallback(
@@ -225,12 +241,17 @@ function RuntimeDAGCanvasComponent({ definitionEdges, className }: RuntimeDAGCan
       const status = data?.stageRun?.status;
       switch (status) {
         case 'completed': return 'var(--color-success)';
-        case 'running': return 'var(--color-info)';
+        case 'running':
+        case 'validating': return 'var(--color-info)';
         case 'failed': return 'var(--color-danger)';
-        case 'paused': return 'var(--color-warning)';
+        case 'paused':
+        case 'waiting':
+        case 'retry_wait':
+        case 'awaiting_input': return 'var(--color-warning)';
         case 'cancelled': return 'var(--color-muted-foreground)';
         case 'skipped': return 'var(--color-border)';
-        case 'queued': return 'var(--color-primary)';
+        case 'ready':
+        case 'starting': return 'var(--color-primary)';
         default: return 'var(--color-emphasis)';
       }
     },

@@ -106,10 +106,10 @@ const RULES = [
   },
   {
     id: 'W18-depth',
-    claim: 'The health endpoint publishes admission cap/running/waiting (§3.9).',
+    claim: 'The health endpoint publishes the admission flow keys: running/queued/limit per key (§3.9, P07 WP-7.2).',
     evidence: ['apps/server/src/routes/health.ts'],
-    pattern: /admissionController\?\.snapshot\(\)/,
-    remedy: 'Re-publish the lane snapshot on /api/health, or drop the claim from §3.9 and the tracker.',
+    pattern: /admissionController\?\.flowSnapshot\(\)/,
+    remedy: 'Re-publish the flow key snapshot on /api/health, or drop the claim from §3.9 and the tracker.',
   },
   {
     id: 'W31-env',

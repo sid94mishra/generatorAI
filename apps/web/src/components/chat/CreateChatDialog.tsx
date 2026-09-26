@@ -1,13 +1,15 @@
 // ────────────────────────────────────────────────────────────────
 // CreateChatDialog — Modal for creating a new v2 Chat
-// Supports name, description, model selection, repo URL, tags
+// Name, description, sources, tags, and the chat's session edited with the
+// shared SessionSpecEditor (the same controls a workflow and a stage use),
+// mapped onto the chat's own create fields (PD-20).
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCreateChat } from '@/hooks/queries.js';
-import { X, MessageSquarePlus, Tag, Plus, Boxes, Bot, Network } from 'lucide-react';
-import { Modal, Button, Input, Textarea, Badge } from '@/components/ui/index.js';
+import { X, MessageSquarePlus, Tag, Plus, Boxes, Network } from 'lucide-react';
+import { Modal, Button, Input, Textarea } from '@/components/ui/index.js';
 import { SourcePicker } from '@/components/chat/sources/SourcePicker.js';
 import {
   draftsToSources,
@@ -16,23 +18,39 @@ import {
 } from '@/components/chat/sources/sourceModel.js';
 import { getDefaultChatModel } from '@/lib/appPreferences.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
-import { ModelPicker } from '@/components/shared/ModelPicker.js';
 import { useModels } from '@/hooks/queries.js';
 import {
   SourceControlOptionsFields,
   DEFAULT_SOURCE_CONTROL_OPTIONS,
 } from '@/components/scm/SourceControlOptionsFields.js';
-import { AgentPicker } from '@/components/agents/AgentPicker.js';
-import { AgentOverridesEditor } from '@/components/agents/AgentOverridesEditor.js';
-import { EffectiveCapabilitiesPanel } from '@/components/agents/EffectiveCapabilitiesPanel.js';
-import { useResolveAgentPreview } from '@/hooks/agentQueries.js';
-import type { Agent, AgentOverrides, ChatSourceControlOptions, CreateChatParams, ResolvedAgentProjection } from '@generatorai/shared';
+import { SessionSpecEditor, applySessionPatch } from '@/components/session/SessionSpecEditor.js';
+import type { SessionSpec } from '@generatorai/workflow-spec';
+import type { Agent, AgentOverrides, ChatPermissionMode, ChatSourceControlOptions, CreateChatParams, HarnessConfig } from '@generatorai/shared';
 import {
   BrowserVisibilityPicker,
   DEFAULT_BROWSER_PICKER_VALUE,
   pickerValueToBrowserConfig,
   type BrowserPickerValue,
 } from '@/components/browser/BrowserVisibilityPicker.js';
+
+/** The chat create fields a session describes (the inverse of the server's chatSessionSpec). */
+export function chatParamsFromSession(session: SessionSpec): Partial<CreateChatParams> {
+  const hc: Partial<HarnessConfig> = {};
+  if (session.harnessType) hc.harnessType = session.harnessType;
+  if (session.reasoningEffort) hc.reasoningEffort = session.reasoningEffort as HarnessConfig['reasoningEffort'];
+  if (session.contextTier) hc.contextTier = session.contextTier;
+  if (session.skills?.disabled?.length) hc.disabledSkills = session.skills.disabled;
+  if (session.mcp?.excludedIds?.length) hc.excludedMcpServerIds = session.mcp.excludedIds;
+  const overrides = session.agentOverrides as AgentOverrides | undefined;
+  return {
+    ...(session.model ? { model: session.model } : {}),
+    ...(Object.keys(hc).length > 0 ? { harnessConfig: hc } : {}),
+    ...(session.agentRef ? { agentRef: session.agentRef } : {}),
+    ...(overrides && Object.keys(overrides).length > 0 ? { agentOverrides: overrides } : {}),
+    ...(session.defaultAgentMode ? { defaultAgentMode: session.defaultAgentMode } : {}),
+    ...(session.permissionMode ? { permissionMode: session.permissionMode as ChatPermissionMode } : {}),
+  };
+}
 
 interface CreateChatDialogProps {
   open: boolean;
@@ -45,7 +63,10 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [model, setModel] = useState('');
+  /** The chat's session: model, provider, effort, agent, mode, permissions, skills, MCP. */
+  const [session, setSession] = useState<SessionSpec>({});
+  const patchSession = useCallback((updates: Partial<SessionSpec>) => setSession((s) => applySessionPatch(s, updates)), []);
+  const model = session.model ?? '';
   const [tagInput, setTagInput] = useState('');
   const [tags, setTags] = useState<string[]>([]);
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -67,14 +88,9 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
     DEFAULT_SOURCE_CONTROL_OPTIONS,
   );
 
-  // AGT-01 — agent binding. The chat stores the portable `scope:slug` ref plus
-  // an additive override delta; the server resolves the union at create time.
-  const [agentRef, setAgentRef] = useState<string | undefined>(undefined);
+  // AGT-01 — the picked agent itself: an orchestrator agent turns on
+  // orchestrate mode. Its ref and overrides live on the session.
   const [selectedAgent, setSelectedAgent] = useState<Agent | undefined>(undefined);
-  const [agentOverrides, setAgentOverrides] = useState<AgentOverrides>({});
-  const [showCapabilities, setShowCapabilities] = useState(false);
-  const [projection, setProjection] = useState<ResolvedAgentProjection | undefined>(undefined);
-  const resolvePreview = useResolveAgentPreview();
 
   const nameInputRef = useRef<HTMLInputElement>(null);
 
@@ -90,9 +106,10 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
   // Settings takes effect on the very next chat creation.
   useEffect(() => {
     if (open) {
-      setModel(getDefaultChatModel());
+      const preferred = getDefaultChatModel();
+      patchSession({ model: preferred || undefined });
     }
-  }, [open]);
+  }, [open, patchSession]);
 
   // No saved preference → start on the first model that can actually run.
   // The field used to open on "Select a model…" every single time, and Create
@@ -102,15 +119,15 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
   useEffect(() => {
     if (!open || model) return;
     const first = availableModels?.[0];
-    if (first) setModel(first.id);
-  }, [open, model, availableModels]);
+    if (first) patchSession({ model: first.id });
+  }, [open, model, availableModels, patchSession]);
 
   // Reset form on close
   useEffect(() => {
     if (!open) {
       setName('');
       setDescription('');
-      setModel('');
+      setSession({});
       setTagInput('');
       setTags([]);
       setShowAdvanced(false);
@@ -119,37 +136,9 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
       setPrimaryAlias(undefined);
       setSourceError(null);
       setBrowserPicker(DEFAULT_BROWSER_PICKER_VALUE);
-      setAgentRef(undefined);
       setSelectedAgent(undefined);
-      setAgentOverrides({});
-      setShowCapabilities(false);
-      setProjection(undefined);
     }
   }, [open]);
-
-  // Resolve the effective capabilities whenever the binding changes. Debounced
-  // because toggling several skills in a row would otherwise fire a request per
-  // click. The response is redacted server-side.
-  const overridesKey = JSON.stringify(agentOverrides);
-  const resolveMutate = resolvePreview.mutateAsync;
-  useEffect(() => {
-    if (!open) return;
-    if (!agentRef && overridesKey === '{}') {
-      setProjection(undefined);
-      return;
-    }
-    const timer = setTimeout(() => {
-      void resolveMutate({
-        scope: 'chat',
-        ...(agentRef ? { agentRef } : {}),
-        ...(selectedProjectId ? { projectId: selectedProjectId } : {}),
-        overrides: JSON.parse(overridesKey) as AgentOverrides,
-      })
-        .then(setProjection)
-        .catch(() => setProjection(undefined));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [open, agentRef, overridesKey, selectedProjectId, resolveMutate]);
 
   const handleAddTag = useCallback(() => {
     const tag = tagInput.trim();
@@ -190,7 +179,7 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
       const params: CreateChatParams = {
         name: name.trim(),
         description: description.trim() || undefined,
-        model: model || undefined,
+        ...chatParamsFromSession(session),
         tags,
         projectId: selectedProjectId || undefined,
         // `sources` supersedes codebaseIds / createWorktree / gitRepositories:
@@ -198,8 +187,6 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
         ...(sources.length > 0 ? { sources } : {}),
         ...(sources.length > 0 && primaryAlias ? { primary: primaryAlias } : {}),
         orchestratorMode: orchestratorMode || undefined,
-        agentRef: agentRef || undefined,
-        agentOverrides: Object.keys(agentOverrides).length > 0 ? agentOverrides : undefined,
         // Only sent when the user actually opted in — an all-false object
         // would read on the server as "explicitly disabled" rather than
         // "not configured".
@@ -216,7 +203,7 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
     } catch (err) {
       setSourceError(err instanceof Error ? err.message : 'Could not create the chat.');
     }
-  }, [name, description, model, tags, selectedProjectId, sourceDrafts, primaryAlias, browserPicker, orchestratorMode, agentRef, agentOverrides, sourceControl, createMutation, onOpenChange, navigate]);
+  }, [name, description, session, tags, selectedProjectId, sourceDrafts, primaryAlias, browserPicker, orchestratorMode, sourceControl, createMutation, onOpenChange, navigate]);
 
   return (
     <Modal
@@ -276,106 +263,30 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
             />
           </div>
 
-          {/* Model Selection */}
-          <div>
-            <label htmlFor="chat-model" className="mb-1.5 block text-sm font-medium text-foreground">
-              Model
-            </label>
-            <ModelPicker
-              id="chat-model"
-              value={model}
-              onChange={(v) => setModel(v)}
-              placeholder="Select a model…"
-              ariaLabel="Chat model"
-            />
-          </div>
+          {/* The chat's session — the same editor a workflow and a stage use. */}
+          <SessionSpecEditor
+            value={session}
+            onChange={patchSession}
+            scope="chat"
+            projectId={selectedProjectId || undefined}
+            sections={['runtime', 'mode', 'agent', 'warnings']}
+            onAgentChange={(agent) => {
+              setSelectedAgent(agent);
+              // An orchestrator agent IS the orchestrator: keep the checkbox
+              // in sync rather than letting the two disagree.
+              if (agent?.role === 'orchestrator') setOrchestratorMode(true);
+            }}
+          />
+          {selectedAgent?.role === 'orchestrator' && (
+            <p className="flex items-center gap-1.5 text-[11px] text-primary">
+              <Network className="h-3 w-3" />
+              Orchestrate mode is enabled by this agent.
+            </p>
+          )}
 
           {/* Agent-native source control — the platform commits for the
               agent, so the agent never runs `git commit` itself. */}
           <SourceControlOptionsFields value={sourceControl} onChange={setSourceControl} />
-
-          {/* Agent binding — reusable instructions with their own skills, MCP
-              servers and capabilities. Capabilities selected below are a
-              UNION with the agent's own, never a replacement. */}
-          <div>
-            <label className="mb-1.5 flex items-center gap-1.5 text-sm font-medium text-foreground">
-              <Bot className="h-4 w-4 text-primary" />
-              Agent
-            </label>
-            <AgentPicker
-              value={agentRef}
-              projectId={selectedProjectId || undefined}
-              data-testid="create-chat-agent-picker"
-              onChange={(ref, agent) => {
-                setAgentRef(ref);
-                setSelectedAgent(agent);
-                // An orchestrator agent IS the orchestrator: keep the checkbox
-                // in sync rather than letting the two disagree.
-                if (agent?.role === 'orchestrator') setOrchestratorMode(true);
-              }}
-            />
-            {selectedAgent?.role === 'orchestrator' && (
-              <p className="mt-1.5 flex items-center gap-1.5 text-[11px] text-primary">
-                <Network className="h-3 w-3" />
-                Orchestrate mode is enabled by this agent.
-              </p>
-            )}
-
-            <Button
-              type="button"
-              variant="ghost"
-              onClick={() => setShowCapabilities((v) => !v)}
-              data-testid="create-chat-customize-capabilities"
-              className="mt-2 h-auto p-0 text-xs font-medium text-primary hover:underline"
-            >
-              {showCapabilities ? 'Hide capabilities' : 'Customize capabilities'}
-            </Button>
-
-            {projection && !showCapabilities && (
-              <div className="mt-2 flex flex-wrap gap-1.5" data-testid="create-chat-capability-chips">
-                <Badge tone="neutral" size="sm">
-                  {projection.skills.names.length} skills
-                  {selectedAgent
-                    ? ` (${selectedAgent.skillIds.length} from agent + ${Math.max(
-                        0,
-                        projection.skills.names.length - selectedAgent.skillIds.length,
-                      )} added)`
-                    : ''}
-                </Badge>
-                <Badge tone="neutral" size="sm">
-                  {Object.keys(projection.mcpServers ?? {}).length} MCP servers
-                </Badge>
-              </div>
-            )}
-
-            {showCapabilities && (
-              <div className="mt-3 space-y-3 rounded-lg border border-border p-3">
-                <AgentOverridesEditor
-                  agent={selectedAgent}
-                  value={agentOverrides}
-                  onChange={setAgentOverrides}
-                  {...(selectedProjectId ? { projectId: selectedProjectId } : {})}
-                  {...(projection
-                    ? { effectiveGroups: projection.toolPolicy.groups }
-                    : {})}
-                />
-                <div className="border-t border-border pt-3">
-                  <EffectiveCapabilitiesPanel
-                    projection={projection}
-                    isLoading={resolvePreview.isPending && !projection}
-                    {...(selectedAgent
-                      ? {
-                          baseCounts: {
-                            skills: selectedAgent.skillIds.length,
-                            mcpServers: selectedAgent.mcpServerIds.length,
-                          },
-                        }
-                      : {})}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
 
           {/* Orchestrate mode */}
           <div className="rounded-lg border border-[var(--color-border)] p-3">
@@ -483,6 +394,16 @@ export function CreateChatDialog({ open, onOpenChange }: CreateChatDialogProps) 
                     ))}
                   </div>
                 )}
+              </div>
+
+              {/* Skills and MCP servers added to the chat's session. */}
+              <div>
+                <p className="mb-1.5 text-sm font-medium text-foreground">Skills</p>
+                <SessionSpecEditor value={session} onChange={patchSession} scope="chat" projectId={selectedProjectId || undefined} sections={['skills']} />
+              </div>
+              <div>
+                <p className="mb-1.5 text-sm font-medium text-foreground">MCP Servers</p>
+                <SessionSpecEditor value={session} onChange={patchSession} scope="chat" projectId={selectedProjectId || undefined} sections={['mcp']} />
               </div>
 
               {/* Integrated Browser configuration — visibility + evalAllowed + hosts. */}

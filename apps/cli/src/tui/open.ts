@@ -10,7 +10,18 @@
 
 import type { Api, PaneContent, TimelineState, WorkbenchState } from '@generatorai/cli-core';
 import { epochOr, shortId, timelineFromHistory } from '@generatorai/cli-core';
+import type { EdgeSpec, StageSpec, VariableDefinition } from '@generatorai/workflow-spec';
 import { getStore, paneLeaves, type TuiActions } from './store.js';
+
+/** State of a `workflow` pane: the definition's graph, keyed by stage key. */
+export interface WorkflowPaneState {
+  stages?: StageSpec[];
+  edges?: EdgeSpec[];
+  variables?: VariableDefinition[];
+  status?: string;
+  revision?: number;
+  selectedStageKey?: string | null;
+}
 
 export interface Opener {
   /** Pane kind the row opens into. */
@@ -71,10 +82,10 @@ const OPENERS: Partial<Record<PaneContent['kind'], Opener>> = {
         return {
           id: String(s['id'] ?? `stage-${index}`),
           kind: 'stage' as const,
-          text: `${String(s['stageName'] ?? s['name'] ?? 'stage')} — ${String(s['status'] ?? '')}`,
+          text: `${String(s['name'] ?? s['stageKey'] ?? 'stage')} — ${String(s['status'] ?? '')}`,
           complete: true,
           at: Date.parse(String(s['createdAt'] ?? '')) || Date.now(),
-          stageName: String(s['stageName'] ?? s['name'] ?? ''),
+          stageName: String(s['name'] ?? s['stageKey'] ?? ''),
         };
       });
       return { ...timelineFromHistory([]), items, runStatus: String(row['status'] ?? '') };
@@ -231,38 +242,36 @@ export function openerFor(kind: PaneContent['kind']): Opener | undefined {
  * every subsequent reload structurally identical; two copies would drift the
  * moment one of them gained a field.
  *
- * `selectedStageId` is preserved across a reload when the stage still exists:
- * a cursor that jumps back to the first stage after every edit makes editing
- * three stages in a row unusable.
+ * `selectedStageKey` is preserved across a reload when the stage still
+ * exists: a cursor that jumps back to the first stage after every edit makes
+ * editing three stages in a row unusable.
  */
 export async function workflowPaneContent(
   id: string,
   fallbackTitle: string,
   api: Api,
-  keepStageId?: string,
+  keepStageKey?: string,
 ): Promise<PaneContent> {
-  const full = (await api.definitions.get(id)) as unknown as {
-    name?: string;
-    variables?: Record<string, unknown>;
-    stages?: Array<{ id: string; name: string }>;
-    edges?: Array<{ id?: string; fromStageId: string; toStageId: string; edgeType?: string }>;
-  };
-  const stages = full.stages ?? [];
-  const selectedStageId =
-    keepStageId && stages.some((stage) => stage.id === keepStageId)
-      ? keepStageId
-      : (stages[0]?.id ?? null);
+  const record = await api.definitions.get(id);
+  const graph = record.graph;
+  const stages = graph.stages;
+  const selectedStageKey =
+    keepStageKey && stages.some((stage) => stage.key === keepStageKey)
+      ? keepStageKey
+      : (stages[0]?.key ?? null);
 
   return {
     kind: 'workflow',
     entityId: id,
-    title: full.name ?? fallbackTitle,
+    title: graph.workflow.name || fallbackTitle,
     state: {
       stages,
-      edges: full.edges ?? [],
-      variables: full.variables ?? {},
-      selectedStageId,
-    },
+      edges: graph.edges,
+      variables: graph.workflow.variables,
+      status: record.status,
+      revision: record.revision,
+      selectedStageKey,
+    } satisfies WorkflowPaneState,
   };
 }
 

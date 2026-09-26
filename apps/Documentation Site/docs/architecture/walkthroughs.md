@@ -42,7 +42,7 @@ The orchestrator schedules dependency-ready stages, while the stage execution se
 
 Hooks and executable workflow scripts are separate extensibility paths. Hook schema acceptance is not a guarantee that an arbitrary command succeeds. Validation labels also have implementation limits: the current JSON/LLM validation paths must be understood from the [run guide](../features/workflow-runs.md), not inferred from their names.
 
-Sources: `packages/core/src/services/{WorkflowOrchestrator,StageExecutionService}.ts`, `packages/shared/src/config/WorkflowDefinitionSchemas.ts`, `apps/server/src/routes/{workflowDefinitions,workflowRuns,workflowScripts}.ts`.
+Sources: `packages/core/src/services/WorkflowOrchestrator.ts`, `packages/core/src/services/engine/StageExecutor.ts`, `packages/shared/src/config/WorkflowDefinitionSchemas.ts`, `apps/server/src/routes/{workflowDefinitions,workflowRuns,workflowScripts}.ts`.
 
 ## An automation fans input into child runs
 

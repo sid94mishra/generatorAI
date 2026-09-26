@@ -1,146 +1,235 @@
 {
   "id": "system-code-generation",
-  "name": "Code Generation Workflow",
-  "description": "Generate code based on requirements, with optional existing codebase context. Analyzes requirements, designs the solution, generates code, and creates tests.",
   "category": "system",
-  "version": "1.0.0",
-  "requiresCodebase": false,
-  "supportsMultipleCodebases": true,
-  "tags": ["code-generation", "development"],
-  "preprocessingSteps": [
-    {
-      "type": "conditional",
-      "name": "Clone repository if provided",
-      "config": {
-        "type": "conditional",
-        "condition": "git_url",
-        "thenSteps": [
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Code Generation Workflow",
+      "description": "Generate code based on requirements, with optional existing codebase context. Analyzes requirements, designs the solution, generates code, and creates tests.",
+      "session": {},
+      "variables": [
+        {
+          "name": "git_url",
+          "type": "string",
+          "label": "Repository URL (Optional)",
+          "description": "If building on existing code, provide the git repository URL",
+          "required": false
+        },
+        {
+          "name": "requirements",
+          "type": "text",
+          "label": "Requirements",
+          "description": "Detailed description of what you want to generate",
+          "required": true
+        },
+        {
+          "name": "language",
+          "type": "choice",
+          "label": "Programming Language",
+          "required": true,
+          "defaultValue": "TypeScript",
+          "options": [
+            "TypeScript",
+            "JavaScript",
+            "Python",
+            "Java",
+            "Go",
+            "Rust",
+            "C#"
+          ]
+        },
+        {
+          "name": "framework",
+          "type": "string",
+          "label": "Framework",
+          "description": "Framework to use (e.g., React, Express, Django, Spring)",
+          "required": false,
+          "defaultValue": ""
+        },
+        {
+          "name": "coding_style",
+          "type": "choice",
+          "label": "Coding Style",
+          "required": false,
+          "defaultValue": "Clean Architecture",
+          "options": [
+            "Clean Architecture",
+            "MVC",
+            "Functional",
+            "Microservices",
+            "Monolithic"
+          ]
+        },
+        {
+          "name": "test_framework",
+          "type": "string",
+          "label": "Test Framework",
+          "description": "Testing framework to use (e.g., Jest, Vitest, Pytest)",
+          "required": false,
+          "defaultValue": "Vitest"
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": false,
+        "preprocessingSteps": [
           {
-            "type": "clone_repo",
-            "name": "Clone target repository",
-            "config": { "type": "clone_repo", "repoAlias": "target" },
-            "failOnError": true,
-            "order": 0
+            "name": "Clone repository if provided",
+            "failOnError": false,
+            "config": {
+              "type": "conditional",
+              "condition": "len(variables.git_url) > 0",
+              "thenSteps": [
+                {
+                  "name": "Clone target repository",
+                  "failOnError": true,
+                  "config": {
+                    "type": "clone_repo",
+                    "repoAlias": "target"
+                  }
+                }
+              ]
+            }
           }
-        ]
+        ],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
       },
-      "failOnError": false,
-      "order": 0
-    }
-  ],
-  "stages": [
-    {
-      "name": "Requirements Analysis",
-      "description": "Analyze and break down the requirements",
-      "order": 0,
-      "prompts": [
-        {
-          "label": "Analyze Requirements",
-          "text": "Analyze the following requirements and create a detailed technical specification:\n\nRequirements: {{requirements}}\nLanguage: {{language}}\nFramework: {{framework}}\n\nProvide:\n1. Functional requirements breakdown\n2. Technical approach\n3. Data models needed\n4. API endpoints (if applicable)\n5. File structure",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    },
-    {
-      "name": "Code Generation",
-      "description": "Generate the actual code based on the analysis",
-      "order": 1,
-      "prompts": [
-        {
-          "label": "Generate Code",
-          "text": "Based on the requirements analysis above, generate the complete implementation code.\n\nLanguage: {{language}}\nFramework: {{framework}}\nStyle: {{coding_style}}\n\nGenerate clean, well-documented, production-ready code. Include error handling and follow best practices for {{language}}.",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    },
-    {
-      "name": "Test Generation",
-      "description": "Generate comprehensive tests for the generated code",
-      "order": 2,
-      "prompts": [
-        {
-          "label": "Generate Tests",
-          "text": "Generate comprehensive tests for the code generated in the previous stage. Include:\n1. Unit tests for all functions/methods\n2. Integration tests for key flows\n3. Edge case tests\n\nUse {{test_framework}} as the testing framework.",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    },
-    {
-      "name": "Documentation",
-      "description": "Generate documentation for the generated code",
-      "order": 3,
-      "prompts": [
-        {
-          "label": "Generate Documentation",
-          "text": "Generate comprehensive documentation for the code generated above. Include:\n1. README with setup instructions\n2. API documentation (if applicable)\n3. Architecture overview\n4. Usage examples",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    }
-  ],
-  "edges": [
-    { "fromStageIndex": 0, "toStageIndex": 1, "edgeType": "on_success" },
-    { "fromStageIndex": 1, "toStageIndex": 2, "edgeType": "on_success" },
-    { "fromStageIndex": 1, "toStageIndex": 3, "edgeType": "on_success" }
-  ],
-  "variables": [
-    {
-      "name": "git_url",
-      "type": "git_url",
-      "label": "Repository URL (Optional)",
-      "description": "If building on existing code, provide the git repository URL",
-      "required": false
-    },
-    {
-      "name": "requirements",
-      "type": "text",
-      "label": "Requirements",
-      "description": "Detailed description of what you want to generate",
-      "required": true
-    },
-    {
-      "name": "language",
-      "type": "choice",
-      "label": "Programming Language",
-      "required": true,
-      "defaultValue": "TypeScript",
-      "options": ["TypeScript", "JavaScript", "Python", "Java", "Go", "Rust", "C#"]
-    },
-    {
-      "name": "framework",
-      "type": "string",
-      "label": "Framework",
-      "description": "Framework to use (e.g., React, Express, Django, Spring)",
-      "required": false,
-      "defaultValue": ""
-    },
-    {
-      "name": "coding_style",
-      "type": "choice",
-      "label": "Coding Style",
-      "required": false,
-      "defaultValue": "Clean Architecture",
-      "options": ["Clean Architecture", "MVC", "Functional", "Microservices", "Monolithic"]
-    },
-    {
-      "name": "test_framework",
-      "type": "string",
-      "label": "Test Framework",
-      "description": "Testing framework to use (e.g., Jest, Vitest, Pytest)",
-      "required": false,
-      "defaultValue": "Vitest"
-    }
-  ],
-  "resultValidations": [
-    {
-      "stageIndex": 1,
-      "rules": [
-        { "type": "min_length", "value": 200, "message": "Generated code should be substantive" }
+      "tags": [
+        "code-generation",
+        "development"
       ]
-    }
-  ]
+    },
+    "stages": [
+      {
+        "key": "requirements_analysis",
+        "name": "Requirements Analysis",
+        "description": "Analyze and break down the requirements",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Analyze Requirements",
+            "text": "Analyze the following requirements and create a detailed technical specification:\n\nRequirements: {{requirements}}\nLanguage: {{language}}\nFramework: {{framework}}\n\nProvide:\n1. Functional requirements breakdown\n2. Technical approach\n3. Data models needed\n4. API endpoints (if applicable)\n5. File structure"
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "code_generation",
+        "name": "Code Generation",
+        "description": "Generate the actual code based on the analysis",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Generate Code",
+            "text": "Based on the requirements analysis above, generate the complete implementation code.\n\nLanguage: {{language}}\nFramework: {{framework}}\nStyle: {{coding_style}}\n\nGenerate clean, well-documented, production-ready code. Include error handling and follow best practices for {{language}}."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": [
+            {
+              "type": "min_length",
+              "value": 200,
+              "message": "Generated code should be substantive"
+            }
+          ]
+        },
+        "hooks": []
+      },
+      {
+        "key": "test_generation",
+        "name": "Test Generation",
+        "description": "Generate comprehensive tests for the generated code",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Generate Tests",
+            "text": "Generate comprehensive tests for the code generated in the previous stage. Include:\n1. Unit tests for all functions/methods\n2. Integration tests for key flows\n3. Edge case tests\n\nUse {{test_framework}} as the testing framework."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "documentation",
+        "name": "Documentation",
+        "description": "Generate documentation for the generated code",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Generate Documentation",
+            "text": "Generate comprehensive documentation for the code generated above. Include:\n1. README with setup instructions\n2. API documentation (if applicable)\n3. Architecture overview\n4. Usage examples"
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "requirements_analysis",
+        "to": "code_generation",
+        "on": "success"
+      },
+      {
+        "from": "code_generation",
+        "to": "test_generation",
+        "on": "success"
+      },
+      {
+        "from": "code_generation",
+        "to": "documentation",
+        "on": "success"
+      }
+    ]
+  }
 }

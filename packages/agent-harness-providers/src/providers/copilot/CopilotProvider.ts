@@ -36,7 +36,7 @@ import type {
   ProviderCapabilities,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
-import { HarnessSessionError, withSpan, getMeter } from '@generatorai/shared';
+import { HarnessSessionError, withSpan, getMeter, GenAiTurnSpans } from '@generatorai/shared';
 import { mapSdkEventToAgentEvent } from './event-mapper.js';
 // W41 — `./tool-factory.js` value-imports `defineTool` from the Copilot SDK,
 // so a static import here would defeat the lazy load above. Imported
@@ -140,7 +140,7 @@ const listenerLeakWarnings = meter.createCounter('copilot.listeners.leak_warning
  * ORC-05 — warn threshold above which we log "listener leak suspected" and
  * bump the `copilot.listeners.leak_warnings` metric. 50 is chosen because
  * a single conversation realistically needs ~3-5 listeners (one per
- * consumer: route SSE, RunLogger, hook phases). Anything north of 50
+ * consumer: route SSE, hook phases). Anything north of 50
  * almost always indicates a subscription without a matching cleanup.
  */
 const LISTENER_LEAK_THRESHOLD = 50;
@@ -306,6 +306,8 @@ export class CopilotProvider implements IAgentHarness {
    * and must rebuild the session instead of short-circuiting.
    */
   private conversationModels = new Map<string, string>();
+  /** P07 WP-7.4 — a `chat <model>` span per turn (GenAI conventions). */
+  private readonly genai = new GenAiTurnSpans('copilot-bridge', 'copilot');
   private clientEventHandlers = new Set<(event: HarnessClientEvent) => void>();
   private clientStatePollingInterval?: ReturnType<typeof setInterval>;
   /** Tracks active event listener cleanup functions per conversation.
@@ -1645,7 +1647,7 @@ export class CopilotProvider implements IAgentHarness {
    * L9: Capability discovery is by declaration, not by exception.
    * W42 — N-2 fix: no runtime probe required.
    *
-   * Copilot does not support the PreToolUse hook (N-5), so fullToolGating
+   * Copilot does not support the PreToolUse hook (N-5), so its gating level
    * is false — permission checking can fall through to the SDK's canUseTool.
    * vision / reasoning are model-specific; declare conservatively as false;
    * the model catalogue already surfaces per-model limits.
@@ -1657,13 +1659,16 @@ export class CopilotProvider implements IAgentHarness {
       reasoningEfforts: [],   // query the live model for supported efforts
       planMode: true,         // Copilot has plan/normal mode switching
       mcpServers: false,      // Copilot SDK does not support MCP servers
-      skillDirectories: false,
-      // Finding-9 fix: the Copilot SDK DOES wire onPreToolUse (SessionConfig.hooks)
-      // which fires before every tool call — identical in semantics to Claude's
-      // PreToolUse hook. The original 'false' was wrong (the code at
-      // createConversation line ~686 explicitly maps HookBridge.onPreToolUse to
-      // sessionConfig.hooks.onPreToolUse). fullToolGating is therefore true.
-      fullToolGating: true,
+      // The SDK routes onPermissionRequest for every tool it does not
+      // auto-approve (and SessionConfig.hooks.onPreToolUse fires before every
+      // call), so a run's permission mode is enforceable per call.
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      // No output-schema option: structured output is a host tool.
+      structuredOutput: 'tool',
+      // `skillDirectories` IS passed to the SDK (RV-8); it used to be declared
+      // unsupported while `createConversation` forwarded it.
+      skills: 'directories',
       sessionPersistence: true,
       budgetTracking: false,
       // MINOR-4 fix: computerUse must be explicitly declared (L9 fail-closed).
@@ -1732,9 +1737,7 @@ export class CopilotProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<void> {
     const start = Date.now();
-    return withSpan('copilot-bridge', 'copilot.sendPrompt', async (span) => {
-      span.setAttribute('copilot.conversation_id', conversationId);
-      span.setAttribute('copilot.prompt.length', prompt.length);
+    return this.genai.chat(conversationId, this.conversationModels.get(conversationId), prompt, async () => {
       promptCounter.add(1, { conversation_id: conversationId });
 
       const session = this.getSession(conversationId);
@@ -1765,9 +1768,7 @@ export class CopilotProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<ConversationResponse> {
     const start = Date.now();
-    return withSpan('copilot-bridge', 'copilot.sendPromptAndWait', async (span) => {
-      span.setAttribute('copilot.conversation_id', conversationId);
-      span.setAttribute('copilot.prompt.length', prompt.length);
+    return this.genai.chat(conversationId, this.conversationModels.get(conversationId), prompt, async (span) => {
       promptCounter.add(1, { conversation_id: conversationId });
 
     // W13-B1 — a turn starts un-truncated. Without this the latch set by a
@@ -1836,7 +1837,7 @@ export class CopilotProvider implements IAgentHarness {
 
     // Phase 2, 2.23 + 2.25 — adapter-level `defaultTimeoutMs` is a last-ditch
     // guard so a stuck SDK session can't hang indefinitely. The callers
-    // (StageExecutionService, HookExecutor) drive their own timeouts via
+    // (the engine's StageExecutor, HookExecutor) drive their own timeouts via
     // `signal`; this fires only when nothing else bounds the wait.
     //
     // HITL-07: the watchdog is a rolling interval instead of a single

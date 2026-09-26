@@ -148,7 +148,7 @@ Excellent! Now I have a comprehensive understanding of the codebase. Let me comp
 6. Set reasoning effort (low | medium | high | xhigh)
 7. Edit prompts:
    - Switch prompt type: Inline / Files / Agent
-   - Add/edit/delete inline prompts (label, text, waitForCompletion toggle)
+   - Add/edit/delete inline prompts (label, text)
    - Upload prompt files
    - Select pre-defined agents
 8. Enable/disable skills (toggles)
@@ -906,7 +906,7 @@ Excellent! Now I have a comprehensive understanding of the codebase. Let me comp
    await api('POST', `/api/workflow-definitions/${defId}/stages`, {
      name: 'Test Stage',
      order: 0,
-     prompts: [{ label: 'Prompt 1', text: 'Say hello', waitForCompletion: true }],
+     prompts: [{ label: 'Prompt 1', text: 'Say hello' }],
    });
    ```
 
@@ -1025,7 +1025,7 @@ await page.route('/api/workflow-runs/*', async (route) => {
    - [HI-014] Edit stage name in properties; save; verify persists on reload
    - [HI-015] Set session mode (single/per-stage/auto); save; verify in definition
    - [HI-016] Add variable to workflow; fill in name/type/default; save; verify in definition
-   - [HI-017] Edit prompt (inline): add label, text, toggle waitForCompletion; save; verify
+   - [HI-017] Edit prompt (inline): add label, text; save; verify
    - [HI-018] Add second prompt to same stage; save; verify both render in messages after run
    - [HI-019] Set run condition to on_success; set follow-up stage; verify second stage only runs if first succeeds (in actual run)
    - [HI-020] Set run condition to expression; enter `stages.first.status === "completed"`; verify stage evaluates condition

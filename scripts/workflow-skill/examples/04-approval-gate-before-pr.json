@@ -1,0 +1,34 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Fix an issue, approve, open a PR",
+    "description": "Fix an issue, review it read-only, and let a person approve the review before post-processing commits, pushes and opens a pull request.",
+    "variables": [
+      { "name": "issue_url", "type": "string", "label": "Issue URL", "required": true }
+    ],
+    "session": { "permissionMode": "acceptEdits" },
+    "lifecycle": {
+      "requiresCodebase": true,
+      "postProcessing": { "autoCreatePR": true }
+    },
+    "tags": ["example"]
+  },
+  "stages": [
+    {
+      "key": "fix",
+      "name": "Fix",
+      "kind": "agent",
+      "prompts": [{ "label": "fix", "text": "Fix {{variables.issue_url}}. Add or update tests, run them, and describe the change." }],
+      "budget": { "maxTurns": 120 }
+    },
+    {
+      "key": "review",
+      "name": "Review",
+      "kind": "agent",
+      "session": { "permissionMode": "plan" },
+      "prompts": [{ "label": "review", "text": "Review the diff that fixes {{variables.issue_url}}: correctness, tests, risk. Say clearly whether it is ready to merge." }],
+      "approval": { "prompt": "Approve to commit, push and open the pull request for {{variables.issue_url}}. Reject to stop: nothing is committed." }
+    }
+  ],
+  "edges": [{ "from": "fix", "to": "review" }]
+}

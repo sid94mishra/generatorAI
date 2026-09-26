@@ -13,15 +13,15 @@ same promise as one that does not.
 
 | Measure | Count |
 |---|---:|
-| Commands | 219 |
-| Groups | 25 |
-| Server-backed commands | 192 |
-| Destructive commands | 34 |
+| Commands | 221 |
+| Groups | 24 |
+| Server-backed commands | 193 |
+| Destructive commands | 32 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
 | Bindings executed by a component | 21 |
 | Bindings nothing executes | 0 |
-| Administration views | 22 |
+| Administration views | 20 |
 
 ## Commands
 
@@ -35,7 +35,6 @@ same promise as one that does not.
 | `agent.show` | `agent show` | yes | no | yes | yes | agent | — |
 | `agent.usage` | `agent usage` | yes | no | yes | yes | agent | — |
 | `automation.create` | `automation create` | yes | no | yes | yes | — | --name, --workflow |
-| `automation.datasource.test` | `automation datasource test` | yes | no | yes | yes | config | — |
 | `automation.delete` | `automation delete` | yes | yes | yes | yes | automation | — |
 | `automation.disable` | `automation disable` | yes | no | yes | yes | automation | — |
 | `automation.enable` | `automation enable` | yes | no | yes | yes | automation | — |
@@ -118,12 +117,8 @@ same promise as one that does not.
 | `extension.uninstall` | `extension uninstall` | yes | yes | yes | yes | extension | — |
 | `harness.show` | `harness show` | yes | no | yes | yes | — | — |
 | `harness.switch` | `harness switch` | yes | no | yes | yes | provider | — |
-| `hook.list` | `hook list` | yes | no | yes | yes | session | — |
 | `hook.phases` | `hook phases` | yes | no | yes | yes | — | — |
 | `hook.test` | `hook test` | yes | no | yes | yes | session, phase | --type, --config |
-| `orchestrator.cancel` | `orchestrator cancel` | yes | yes | yes | yes | run | — |
-| `orchestrator.context` | `orchestrator context` | yes | no | yes | yes | run | — |
-| `orchestrator.templates` | `orchestrator templates` | yes | no | yes | yes | — | — |
 | `project.codebase.branches` | `project codebase branches` | yes | no | yes | yes | project, codebase | — |
 | `project.codebase.browse` | `project codebase browse` | yes | no | yes | yes | project, codebase | — |
 | `project.codebase.fetch` | `project codebase fetch` | yes | no | yes | yes | project, codebase | — |
@@ -152,6 +147,7 @@ same promise as one that does not.
 | `review.submit` | `review submit` | yes | no | yes | yes | workspace | — |
 | `review.unresolve` | `review unresolve` | yes | no | yes | yes | workspace, thread | — |
 | `run.cancel` | `run cancel` | yes | yes | yes | yes | run | — |
+| `run.command` | `run command` | yes | no | yes | yes | run, instance, command | — |
 | `run.delete` | `run delete` | yes | yes | yes | yes | run | — |
 | `run.diff` | `run diff` | yes | no | yes | yes | run | — |
 | `run.hitl.approve` | `run hitl approve` | yes | no | yes | yes | run, stage | — |
@@ -159,9 +155,12 @@ same promise as one that does not.
 | `run.hitl.mode` | `run hitl mode` | yes | no | yes | yes | run | — |
 | `run.hitl.pending` | `run hitl pending` | yes | no | yes | yes | run | — |
 | `run.hitl.reject` | `run hitl reject` | yes | yes | yes | yes | run, stage | — |
+| `run.iterations` | `run iterations` | yes | no | yes | yes | run, loop | — |
 | `run.list` | `run list` | yes | no | yes | yes | — | — |
 | `run.messages` | `run messages` | yes | no | yes | yes | run | — |
 | `run.pause` | `run pause` | yes | no | yes | yes | run | — |
+| `run.pending` | `run pending` | yes | no | yes | yes | run | — |
+| `run.plan` | `run plan` | yes | no | yes | yes | — | — |
 | `run.profile.generate` | `run profile generate` | yes | no | yes | yes | workflow | — |
 | `run.profile.list` | `run profile list` | no | no | yes | yes | — | — |
 | `run.profile.validate` | `run profile validate` | yes | no | yes | yes | workflow, profile | — |
@@ -173,7 +172,9 @@ same promise as one that does not.
 | `run.stage.pause` | `run stage pause` | yes | no | yes | yes | run, stage | — |
 | `run.stage.resume` | `run stage resume` | yes | no | yes | yes | run, stage | — |
 | `run.stage.retry` | `run stage retry` | yes | no | yes | yes | run, stage | — |
-| `run.start` | `run start` | yes | no | yes | yes | workflow | — |
+| `run.stage.send` | `run stage send` | yes | no | yes | yes | run, stage, text | — |
+| `run.stage.stop` | `run stage stop` | yes | no | yes | yes | run, stage | — |
+| `run.start` | `run start` | yes | no | yes | yes | — | — |
 | `run.watch` | `run watch` | yes | no | yes | yes | run | — |
 | `run.workspace` | `run workspace` | yes | no | yes | yes | run | — |
 | `script.list` | `script list` | yes | no | yes | yes | — | — |
@@ -186,6 +187,8 @@ same promise as one that does not.
 | `security.audit` | `security audit` | yes | no | yes | yes | — | — |
 | `security.networkAccess` | `security network-access` | yes | no | yes | yes | — | — |
 | `security.posture` | `security posture` | yes | no | yes | yes | — | — |
+| `skill.install` | `skill install` | yes | no | yes | yes | — | --target |
+| `skill.print` | `skill print` | yes | no | yes | yes | — | — |
 | `sourceControl.config` | `source-control config` | yes | no | yes | yes | — | — |
 | `sourceControl.status` | `source-control status` | yes | no | yes | yes | — | — |
 | `system.artifact` | `system artifact` | yes | no | yes | yes | id | — |
@@ -204,34 +207,33 @@ same promise as one that does not.
 | `terminal.list` | `terminal list` | yes | no | yes | yes | workspace | — |
 | `terminal.scrollback` | `terminal scrollback` | yes | no | yes | yes | workspace, terminal | — |
 | `terminal.signal` | `terminal signal` | yes | no | yes | yes | workspace, terminal | — |
-| `webhook.create` | `webhook create` | yes | no | yes | yes | url | — |
-| `webhook.delete` | `webhook delete` | yes | yes | yes | yes | webhook | — |
-| `webhook.list` | `webhook list` | yes | no | yes | yes | — | — |
 | `widget.close` | `widget close` | yes | yes | yes | yes | widget | — |
 | `widget.list` | `widget list` | yes | no | yes | yes | — | — |
 | `widget.read` | `widget read` | yes | no | yes | yes | widget | — |
 | `widget.setState` | `widget set-state` | yes | no | yes | yes | widget, state | — |
 | `workflow.clone` | `workflow clone` | yes | no | yes | yes | workflow | — |
-| `workflow.create` | `workflow create` | yes | no | yes | yes | name | — |
+| `workflow.create` | `workflow create` | yes | no | yes | yes | — | — |
 | `workflow.delete` | `workflow delete` | yes | yes | yes | yes | workflow | — |
 | `workflow.edge.add` | `workflow edge add` | yes | no | yes | yes | workflow | --from, --to |
-| `workflow.edge.delete` | `workflow edge delete` | yes | yes | yes | yes | workflow, edge | — |
 | `workflow.edge.list` | `workflow edge list` | yes | no | yes | yes | workflow | — |
+| `workflow.edge.remove` | `workflow edge remove` | yes | yes | yes | yes | workflow | --from, --to |
 | `workflow.export` | `workflow export` | yes | no | yes | yes | workflow | — |
-| `workflow.fromTemplate` | `workflow from-template` | yes | no | yes | yes | template | — |
-| `workflow.importJson` | `workflow import-json` | yes | no | yes | yes | file | — |
+| `workflow.import` | `workflow import` | yes | no | yes | yes | — | — |
+| `workflow.lint` | `workflow lint` | no | no | yes | yes | file | — |
 | `workflow.list` | `workflow list` | yes | no | yes | yes | — | — |
+| `workflow.plan` | `workflow plan` | yes | no | yes | yes | target | — |
+| `workflow.publish` | `workflow publish` | yes | no | yes | yes | workflow | — |
 | `workflow.show` | `workflow show` | yes | no | yes | yes | workflow | — |
 | `workflow.stage.add` | `workflow stage add` | yes | no | yes | yes | workflow | --name |
-| `workflow.stage.delete` | `workflow stage delete` | yes | yes | yes | yes | workflow, stage | — |
 | `workflow.stage.hook.add` | `workflow stage hook add` | yes | no | yes | yes | workflow, stage | --name, --phase, --type, --config |
 | `workflow.stage.hook.list` | `workflow stage hook list` | yes | no | yes | yes | workflow, stage | — |
 | `workflow.stage.hook.remove` | `workflow stage hook remove` | yes | yes | yes | yes | workflow, stage, hook | — |
 | `workflow.stage.list` | `workflow stage list` | yes | no | yes | yes | workflow | — |
+| `workflow.stage.remove` | `workflow stage remove` | yes | yes | yes | yes | workflow, stage | — |
 | `workflow.stage.update` | `workflow stage update` | yes | no | yes | yes | workflow, stage | — |
-| `workflow.stage.variables` | `workflow stage variables` | yes | no | yes | yes | workflow, stage | — |
 | `workflow.update` | `workflow update` | yes | no | yes | yes | workflow | — |
-| `workflow.validate` | `workflow validate` | yes | no | yes | yes | workflow | — |
+| `workflow.validate` | `workflow validate` | yes | no | yes | yes | target | — |
+| `workflow.versions` | `workflow versions` | yes | no | yes | yes | workflow | — |
 | `workspace.archive` | `workspace archive` | yes | no | yes | yes | workspace | — |
 | `workspace.changes` | `workspace changes` | yes | no | yes | yes | workspace | — |
 | `workspace.checkpoints` | `workspace checkpoints` | yes | no | yes | yes | workspace | — |
@@ -430,7 +432,6 @@ same promise as one that does not.
 | extensions | `extension.list` | list |
 | health | `system.health` | record |
 | hook-phases | `hook.phases` | list |
-| hooks | `hook.list` | list |
 | mcp | `system.mcpServers` | list |
 | prompts | `system.artifacts` | list |
 | providers | `system.models` | list |
@@ -441,5 +442,4 @@ same promise as one that does not.
 | skills | `system.artifacts` | list |
 | templates | `template.list` | list |
 | version | `system.version` | record |
-| webhooks | `webhook.list` | list |
 | widgets | `widget.list` | list |

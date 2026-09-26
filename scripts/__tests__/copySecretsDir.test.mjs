@@ -1,6 +1,6 @@
 // Pins the half of `pnpm db:backup` that §5.11 found missing: the secrets
 // directory travels with the database. Runs under the root vitest "node"
-// project (`pnpm exec vitest run scripts` from the repo root).
+// project (`pnpm test:scripts`; `turbo test` runs it).
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';

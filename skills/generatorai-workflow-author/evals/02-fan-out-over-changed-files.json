@@ -1,0 +1,23 @@
+{
+  "id": "fan-out-over-changed-files",
+  "title": "Fan out over changed files",
+  "prompt": "I want a workflow that looks at what changed on my branch compared with main, reviews every changed file separately and in parallel (no more than 4 at a time, and it must not edit anything), and then writes one combined review. Put it in GeneratorAI as a draft.",
+  "channels": ["generatorai-chat", "mcp", "cli"],
+  "expected": {
+    "stageKinds": ["agent", "map"],
+    "shape": [
+      "a scan agent stage (read-only) whose output is JSON with a typed list of files",
+      "a map stage whose items is that list (stages.<scan>.output.files or a mapped field), concurrency <= 4, a maxItems bound, workspace shared",
+      "a read-only body agent stage (parentKey = the map key) that reviews {{item}}",
+      "a report stage after the map reading stages.<map>.output.results",
+      "no post-processing commit, push or PR"
+    ]
+  },
+  "pass": [
+    "validation passes within 3 validate calls",
+    "the plan is shown to the user before the draft is created",
+    "the draft is created, not published or run",
+    "no forbidden fields (as in eval 01); every stage that only reads has permissionMode plan; no map-shared-write-concurrency warning left unexplained",
+    "the map reads a typed list: no expr-type or expr-unknown-field errors on the final document"
+  ]
+}

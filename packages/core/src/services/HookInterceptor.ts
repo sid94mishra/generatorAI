@@ -183,30 +183,11 @@ export class HookInterceptor {
   }
 
   /**
-   * Register hooks for Copilot CLI client lifecycle events.
-   * These fire regardless of any specific session/workflow.
+   * Forward harness client lifecycle events (started / stopped / error /
+   * restarting) to the event bus as global AgentEvents, for observability.
    */
-  registerClientLifecycleHooks(
-    copilot: IAgentHarness,
-    hooks: HookDefinition[],
-    context: Omit<HookContext, 'workflowId'>,
-  ): () => void {
-    return copilot.onClientEvent(async (clientEvent: HarnessClientEvent) => {
-      const phase = this.mapClientEventToHookPhase(clientEvent);
-      if (phase) {
-        const clientContext: HookContext = {
-          ...context,
-          workflowId: '__client__',
-          variables: {
-            ...context.variables,
-            clientEventType: clientEvent.type,
-            clientEventMessage: clientEvent.data?.message ?? '',
-          },
-        };
-        await this.hookExecutor.executePhase(phase, hooks, clientContext);
-      }
-
-      // Emit as global AgentEvent for observability
+  registerClientLifecycleEvents(harness: IAgentHarness): () => void {
+    return harness.onClientEvent(async (clientEvent: HarnessClientEvent) => {
       const agentEvent = this.mapClientEventToAgentEvent(clientEvent);
       if (agentEvent) {
         await this.eventBus.emitGlobal(agentEvent);
@@ -251,22 +232,6 @@ export class HookInterceptor {
         return 'post_run';
       case 'stage_run.failed':
         return 'on_session_error';
-      default:
-        return null;
-    }
-  }
-
-  /** Map client lifecycle events → hook phases. */
-  private mapClientEventToHookPhase(event: HarnessClientEvent): HookPhase | null {
-    switch (event.type) {
-      case 'client.started':
-        return 'on_client_start';
-      case 'client.stopped':
-        return 'on_client_stop';
-      case 'client.error':
-        return 'on_client_error';
-      case 'client.restarting':
-        return 'on_client_restart';
       default:
         return null;
     }

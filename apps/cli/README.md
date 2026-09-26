@@ -273,63 +273,56 @@ generatorai chat send "$CHAT_ID" "Run linting" --json
 
 ### workflow (wf)
 
-Define and manage multi-stage AI workflows.
+A workflow definition is one v2 document (`WorkflowGraph`: workflow settings,
+stages keyed by `key`, edges between keys). Definitions start as drafts; runs
+use the latest published version (`run start --test-run` runs the draft).
 
 ```bash
-generatorai workflow list
-generatorai wf create <name> [--description <desc>] [--session-mode single|per-stage|auto] [--project <id>] [--tags tag1,tag2]
-generatorai wf show <id>
-generatorai wf update <id> [--name <name>] [--description <desc>] [--session-mode <mode>]
-generatorai wf delete <id>
-generatorai wf validate <id>         # validate definition integrity
-generatorai wf export <id>           # print definition as JSON
-generatorai wf import <file.json>    # import from JSON file
+generatorai workflow list [--project <ref>|global] [--status draft|published] [--search <text>] [--tag <tag>] [--archived]
+generatorai wf create <file.json> [--name <name>] [--project <ref>] [--tags a,b] [--publish]
+generatorai wf create --name <name>                  # an empty draft
+generatorai wf import <file.json> [--publish]        # a canonical (exported) document
+generatorai wf import --template <templateId> [--name <name>] [--publish]
+generatorai wf export <workflow> [--out file.json]   # canonical document; import gives it back unchanged
+generatorai wf validate <file.json|workflow>         # issues with JSON pointer, stage key and hint
+generatorai wf publish <workflow>
+generatorai wf versions <workflow>
+generatorai wf show <workflow>
+generatorai wf update <workflow> [--name <name>] [--description <text>] [--tags a,b]
+generatorai wf clone <workflow> [name]
+generatorai wf delete <workflow>                     # archived instead when runs pin it
 
-# Stage management
-generatorai wf stage list <definitionId>
-generatorai wf stage add <definitionId> <stageName> [--type agent|human|tool] [--prompt <text>] [--model <model>]
-generatorai wf stage update <definitionId> <stageId> [--name <name>] [--prompt <text>]
-generatorai wf stage delete <definitionId> <stageId>
+# Stages (by key or name)
+generatorai wf stage list <workflow>
+generatorai wf stage add <workflow> --name <name> [--key <key>] [--prompt <text>|--prompt-file <file>]
+    [--guard <expr>] [--retry-attempts <n>] [--timeout-ms <ms>] [--output-format text|json]
+    [--context-from a,b] [--context-mode summary|output|structured|none]
+    [--agent <scope:slug>] [--model <id>] [--approval on|off]
+generatorai wf stage update <workflow> <stage> [same flags, --name]
+generatorai wf stage remove <workflow> <stage>
+generatorai wf stage hook list|add|remove <workflow> <stage> ...
 
-# Edge management (stage ordering)
-generatorai wf edge list <definitionId>
-generatorai wf edge add <definitionId> <fromStageId> <toStageId> [--condition <expr>]
-generatorai wf edge delete <definitionId> <edgeId>
-
-# From system templates
-generatorai wf from-template <templateId> [--params '{"key":"value"}']
+# Edges (one per stage pair)
+generatorai wf edge list <workflow>
+generatorai wf edge add <workflow> --from <stage> --to <stage> [--on success|failure|completion|always] [--when <expr>]
+generatorai wf edge remove <workflow> --from <stage> --to <stage>
 ```
 
-**Session modes:**
+Every stage and edge command edits the whole graph: it reads the definition,
+changes it, validates it locally and saves it with the revision it read. If
+someone else saved in between (409), the change is re-applied once to a fresh
+read; a second conflict is reported and nothing is saved.
 
-| Mode | Description |
-|------|-------------|
-| `single` | One AI session for all stages |
-| `per-stage` | New session per stage |
-| `auto` | Server decides based on stage types |
-
-**Example: Build a code review workflow:**
+**Example: build a code review workflow:**
 
 ```bash
-# Create workflow
-generatorai wf create "Code Review" --session-mode per-stage
-
-# Add stages (use the short ID prefix)
-generatorai wf stage add abc12345 "Lint Check" --type agent --prompt "Run linting and report issues"
-generatorai wf stage add abc12345 "Security Scan" --type agent --prompt "Check for security vulnerabilities"
-generatorai wf stage add abc12345 "Human Review" --type human
-
-# Connect stages in order
-STAGE_IDS=$(generatorai wf show abc12345 --json | jq -r '.stages[].id')
-# Wire lint → security → human
-generatorai wf edge add abc12345 <stage1-id> <stage2-id>
-generatorai wf edge add abc12345 <stage2-id> <stage3-id>
-
-# Validate
-generatorai wf validate abc12345
-
-# Export for version control
-generatorai wf export abc12345 > workflows/code-review.json
+generatorai wf create --name "Code Review"
+generatorai wf stage add "Code Review" --name "Lint check" --prompt "Run linting and report issues"
+generatorai wf stage add "Code Review" --name "Security scan" --prompt "Check for security vulnerabilities" --approval on
+generatorai wf edge add "Code Review" --from lint_check --to security_scan
+generatorai wf validate "Code Review"
+generatorai wf publish "Code Review"
+generatorai wf export "Code Review" --out workflows/code-review.json
 ```
 
 ---
@@ -340,7 +333,7 @@ Start and monitor workflow run executions.
 
 ```bash
 generatorai run list [--status created|starting|paused|completed|failed|cancelled] [--definition <id>] [--limit 20]
-generatorai run start <definitionId> [--name <name>] [--var key=value ...] [--watch] [--permission-mode <mode>]
+generatorai run start <workflow> [--var key=value ...] [--profile <name>] [--skip <stageKey> ...] [--stage-var <stageKey>.<name>=<value> ...] [--test-run] [--watch] [--permission-mode <mode>]
 generatorai run show <id>
 generatorai run watch <id> [--verbosity minimal|normal|verbose] [--thinking]
 generatorai run cancel <id>
@@ -349,14 +342,26 @@ generatorai run retry <id>
 # Human-in-the-loop (HITL)
 generatorai run hitl mode <id> <mode>          # set permission mode
 generatorai run hitl pending <id>              # list pending approvals
-generatorai run hitl resume <runId> <stageId> [--approve] [--reject] [--reason <text>] [--value <json>]
+generatorai run hitl resume <runId> <stage> [--approve] [--reject] [--reason <text>] [--value <json>]
 
 # Stage-level controls
-generatorai run stage pause <runId> <stageId>
-generatorai run stage resume <runId> <stageId>
-generatorai run stage retry <runId> <stageId>
-generatorai run stage cancel <runId> <stageId>
+generatorai run stage pause <runId> <stage>
+generatorai run stage resume <runId> <stage>
+generatorai run stage retry <runId> <stage>
+generatorai run stage cancel <runId> <stage>
+
+# A stage is a compact chat: message it, or stop the turn it is taking
+generatorai run stage send <runId> <stage> "<text>" [--mode auto|plan] [--attach <file>...]
+generatorai run stage stop <runId> <stage> [--force]
 ```
+
+`run stage send` answers with how the stage took the message: `queued` (its
+next turn), `amending` (a completed stage's output is amended; later stages
+keep what they used) or `retrying` (a paused stage resumes with it). A stage
+in the middle of a turn refuses with `STAGE_BUSY` — stop it first — and one
+waiting on a gate with `INTERACTION_PENDING`. In the TUI, a tool permission,
+question or plan review a stage raises inside its turn shows on the run pane
+and is answered with `a` / `x`, the same overlays as a chat's gate.
 
 **Permission modes:**
 
@@ -392,10 +397,7 @@ generatorai run hitl resume <run-id> <stage-id> --reject --reason "Needs more co
 High-level orchestrated workflow runs via system templates.
 
 ```bash
-generatorai orchestrator templates                                   # list system templates
-generatorai orchestrator create-from-template <templateId> [--params '{"key":"value"}']
 generatorai orchestrator start --definition <id> [--project <id>] [--vars '{"key":"value"}']
-generatorai orchestrator context <runId>
 generatorai orchestrator cancel <runId>
 ```
 
@@ -473,19 +475,13 @@ generatorai ws cleanup                          # remove stale workspaces
 
 ---
 
-### webhook
+### hook
 
-Manage inbound webhooks and session hook phases.
+Hook phases and dry-run testing.
 
 ```bash
-# Webhooks (for automations)
-generatorai webhook list
-generatorai webhook create --automation <id> [--secret <secret>]
-generatorai webhook delete <id>
-
-# Hook phases (session lifecycle hooks)
-generatorai webhook hook phases <sessionId>
-generatorai webhook hook test <sessionId> <phase> [--payload '{"key":"value"}']
+generatorai hook phases
+generatorai hook test <sessionId> <phase> [--payload '{"key":"value"}']
 ```
 
 ---

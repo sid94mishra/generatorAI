@@ -24,6 +24,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ILogger, McpServerConfig } from '@generatorai/shared';
+import { isMcpSecretRef } from '@generatorai/shared';
 import type { McpCredentialVault } from './McpCredentialVault.js';
 
 export interface ResolvedMcpConfig {
@@ -87,12 +88,29 @@ export class InMemoryMcpHub implements IMcpHub {
       if (this.disabled.has(name) || cfg.enabled === false) continue;
       filtered[name] = cfg;
     }
-    if (!this.opts.vault) return { servers: filtered, dropped: [] };
+    if (!this.opts.vault) {
+      // No vault (an embedder such as the SDK): a pointer cannot be resolved,
+      // and sending it would hand the pointer string to the server as a
+      // credential. Drop those servers with a warning (final review PLATFORM R16).
+      const servers: Record<string, McpServerConfig> = {};
+      const dropped: ResolvedMcpConfig['dropped'] = [];
+      for (const [name, cfg] of Object.entries(filtered)) {
+        const needsVault = [...Object.values(cfg.headers ?? {}), ...Object.values(cfg.env ?? {})].some((v) => isMcpSecretRef(v));
+        if (needsVault) dropped.push({ server: name, reason: 'it needs a stored credential and no secrets vault is configured' });
+        else servers[name] = cfg;
+      }
+      for (const d of dropped) {
+        this.opts.logger?.warn(`[McpHub] ${input.workflowDefinitionId}/${input.workflowRunId}: dropping MCP server "${d.server}": ${d.reason}`);
+      }
+      return { servers, dropped };
+    }
 
     const injected = await this.opts.vault.injectSecrets(filtered);
     const dropped = injected.missing.map((m) => ({
       server: m.server,
-      reason: `credential ${m.ref} is not in the secrets vault — re-enter it in Settings → MCP Servers`,
+      reason: m.refused
+        ? `credential ${m.ref} is not one of this server's own credentials (secretref:mcp/<scope>/<server id>/<name>)`
+        : `credential ${m.ref} is not in the secrets vault — re-enter it in Settings → MCP Servers`,
     }));
     for (const d of dropped) {
       this.opts.logger?.warn(

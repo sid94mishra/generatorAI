@@ -22,7 +22,7 @@ export interface RoutePolicy {
   write: Scope[];
   /** Extra scopes required regardless of method. */
   always?: Scope[];
-  /** Reachable without any credential (health, webhooks with their own HMAC). */
+  /** Reachable without any credential (health, automation webhook triggers with their own token). */
   public?: boolean;
   riskLevel?: 'low' | 'medium' | 'high';
 }
@@ -35,9 +35,8 @@ export const DEFAULT_POLICY: RoutePolicy = {
 };
 
 export const ROUTE_POLICIES: RoutePolicy[] = [
-  // Public — health probes and webhook receivers (own HMAC verification).
+  // Public — health probes.
   { prefix: '/health', read: [], write: [], public: true },
-  { prefix: '/webhooks', read: [], write: [], public: true },
   // Auth bootstrap. Pairing completion is deliberately public: the caller has
   // no credential yet, and the single-use pairing grant IS the credential.
   { prefix: '/auth/pair/complete', read: [], write: [], public: true },
@@ -86,9 +85,12 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // to list agents to pick one, and BINDING an agent happens through
   // PATCH /chats/:id under `write:chats`.
   { prefix: '/agents', read: ['read:workflows'], write: ['admin:settings'], riskLevel: 'high' },
-  { prefix: '/orchestrator', read: ['read:chats'], write: ['write:chats', 'exec:agent'] },
   { prefix: '/sessions', read: ['read:chats'], write: ['write:chats'] },
 
+  // Validating and planning a document write nothing (P06): any reader may,
+  // an agent included, before it submits a draft (which needs write:workflows).
+  { prefix: '/workflow-definitions/validate', read: ['read:workflows'], write: ['read:workflows'] },
+  { prefix: '/workflow-definitions/plan', read: ['read:workflows'], write: ['read:workflows'] },
   { prefix: '/workflow-definitions', read: ['read:workflows'], write: ['write:workflows'] },
   // Answering a stage's Human-In-The-Loop gate is a RUN-TIME act — it is
   // literally "answer the agent's question", which is what `exec:agent`
@@ -98,29 +100,47 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // whose default grant includes `exec:agent` but deliberately excludes
   // `write:workflows` (see DEFAULT_MOBILE_SCOPES).
   //
-  // Longest-prefix matching means these two entries win over `/workflow-runs`
-  // for their own paths only; everything else about a run (start, pause,
-  // cancel, retry, delete) still needs the full write grant.
+  // Every run command (pause, resume, cancel, retry, skip, fail, approve, the
+  // loop decisions, deliver_event) goes through one route, so this entry
+  // admits the route on `exec:agent` and the route itself demands
+  // `write:workflows` for the run-control commands. The operator DECISIONS —
+  // approve, the loop decisions (grant_iterations, raise_budget,
+  // continue_with_input, accept, accept_iteration) and deliver_event — are
+  // run-time acts on a run the caller may start, so `exec:agent` suffices. Longest-prefix matching means this entry wins over
+  // `/workflow-runs` for its own path only; everything else about a run
+  // (delete, the permission mode) still needs the full write grant.
   {
-    prefix: '/workflow-runs/:id/stages/:stageId/approve',
+    prefix: '/workflow-runs/:id/commands',
     read: ['read:workflows'],
     write: ['exec:agent'],
   },
+  // Answering a stage's in-turn gate (tool permission, question, plan) is the
+  // same run-time act as `approve` (the stage conversation API, P03b).
+  // Sending a message or stopping a turn steers the run: the full write grant.
   {
-    prefix: '/workflow-runs/:id/stages/:stageId/interrupt',
+    prefix: '/workflow-runs/:id/instances/:instanceId/interactions',
     read: ['read:workflows'],
     write: ['exec:agent'],
   },
   { prefix: '/workflow-runs', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
-  // Running a script materialises a definition AND starts a run — agents
-  // execute, exactly like `POST /workflow-runs/:id/start`. Authoring scripts
-  // (validate, reload, materialize) stays a design-time write, but running
-  // one must carry `exec:agent` too or `write:workflows` alone would launch
-  // agents that the `/workflow-runs` policy deliberately withholds.
+  // THE way a run starts (P04, PD-6): starting a run is a run-time act, so a
+  // default paired phone may do it (`exec:agent` + `read:workflows`; W-60).
+  // The service demands more for what the body asks: `write:workflows` for a
+  // script target (it materializes a definition), `admin:settings` for a
+  // bypass run off loopback or an in-place codebase.
+  { prefix: '/workflow-invocations', read: ['read:workflows'], write: ['exec:agent', 'read:workflows'] },
+  // The workflow tools of an external agent (P06, the MCP server in remote
+  // mode): each tool checks its own scope in the handler — running,
+  // answering and cancelling need `exec:agent`, a draft `write:workflows`;
+  // listing, describing, validating and planning only read.
+  { prefix: '/workflow-tools', read: ['read:workflows'], write: ['read:workflows'] },
+  // Uploading a script installs code that runs in-process with the server's
+  // privileges (A-19): admin only, on top of the operator opt-in flags.
   {
-    prefix: '/workflow-scripts/:id/run',
+    prefix: '/workflow-scripts/upload',
     read: ['read:workflows'],
-    write: ['write:workflows', 'exec:agent'],
+    write: ['admin:settings'],
+    riskLevel: 'high',
   },
   { prefix: '/workflow-scripts', read: ['read:workflows'], write: ['write:workflows'] },
   // Webhook deliveries are the whole point of this trigger type: GitHub,
@@ -132,9 +152,20 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // admin-scoped '/automations' below, the same precedent as
   // '/auth/pair/preview' ahead of '/auth/pair'.
   { prefix: '/automations/webhooks', read: [], write: [], public: true },
+  // An event wait's callback (P05 §4.3): CI and other external systems hold
+  // no credential; the per-wait HMAC token in the path authenticates the one
+  // event it may deliver (routes/workflowCallbacks.ts), rate-limited there.
+  { prefix: '/workflow-callbacks', read: [], write: [], public: true },
   { prefix: '/automations', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
   { prefix: '/templates', read: ['read:workflows'], write: ['write:workflows'] },
   { prefix: '/hooks', read: ['read:workflows'], write: ['write:workflows'] },
+  // The commands a check stage may run (the builder's picker, P05 §1.2):
+  // reading it is authoring; the list itself is operator configuration.
+  { prefix: '/settings/script-allowlist', read: ['read:workflows'], write: ['admin:settings'] },
+  // The engine's flow key limits, summary model and trigger debounce (P07
+  // WP-7.2): anyone who reads workflows may see why a stage waits; changing
+  // a limit is operator configuration.
+  { prefix: '/settings/workflow-engine', read: ['read:workflows'], write: ['admin:settings'] },
 
   { prefix: '/projects', read: ['read:projects'], write: ['write:projects'] },
   { prefix: '/source-control', read: ['read:projects'], write: ['write:projects'] },

@@ -1,12 +1,12 @@
 // ────────────────────────────────────────────────────────────────
 // Per-stage variables for the Advanced section of StartRunSheet.
 //
-// A stage override's `variables` are free-form (StageRunOverride in
-// @generatorai/shared) — there is no per-stage declaration to build fields
-// from — so the sheet takes one `key=value` per line. Values that parse as
-// JSON scalars (numbers, true/false, null) are sent typed; everything else
-// is a string. The wire encoding itself is `encodeStageOverrides` in
-// @generatorai/client-core.
+// A stage override's `variables` are free-form (the invocation's
+// `stageOverrides[].variables`) — there is no per-stage declaration to build
+// fields from — so the sheet takes one `key=value` per line. Values that
+// parse as JSON scalars (numbers, true/false, null) are sent typed;
+// everything else is a string. `activeStageOverrides` (client-core) turns
+// the drafts into the request's `stageOverrides`.
 //
 // Tested in src/__tests__/stageOverrideForm.test.ts.
 // ────────────────────────────────────────────────────────────────

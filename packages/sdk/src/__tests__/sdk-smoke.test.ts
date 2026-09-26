@@ -1,4 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
+import { workflow } from '@generatorai/workflow-spec/builders';
 import { createTestGeneratorAI } from '../testing/helpers.js';
 import { MockHarness } from '../testing/MockHarness.js';
 import type { GeneratorAI } from '../GeneratorAI.js';
@@ -59,37 +60,34 @@ describe('GeneratorAI lifecycle', () => {
 describe('WorkflowFacade', () => {
   it('creates a workflow with stages + edges and reads it back', async () => {
     const sdk = await make();
-    const def = await sdk.workflows.create({
-      name: 'SDK Smoke WF',
-      stages: [
-        { localId: 'a', name: 'Build', prompt: 'build it' },
-        { localId: 'b', name: 'Test', prompt: 'test it' },
-      ],
-      edges: [{ fromStageLocalId: 'a', toStageLocalId: 'b', edgeType: 'on_success' }],
-    });
+    const def = await sdk.workflows.create(
+      workflow('SDK Smoke WF')
+        .stage('build', (s) => s.name('Build').prompt('build it'))
+        .stage('test', (s) => s.name('Test').prompt('test it'))
+        .edge('build', 'test'),
+    );
     expect(def.id).toBeTruthy();
-    expect(def.stages).toHaveLength(2);
+    expect(def.status).toBe('published');
+    expect(def.graph.stages).toHaveLength(2);
 
     const list = await sdk.workflows.list();
     expect(list.some((w) => w.id === def.id)).toBe(true);
 
     const fetched = await sdk.workflows.get(def.id);
-    expect(fetched.stages.map((s) => s.name).sort()).toEqual(['Build', 'Test']);
-    expect(fetched.edges).toHaveLength(1);
+    expect(fetched.graph.stages.map((s) => s.name).sort()).toEqual(['Build', 'Test']);
+    expect(fetched.graph.edges).toEqual([{ from: 'build', to: 'test', on: 'success' }]);
   });
 
-  it('createRun produces a run in the created state without executing', async () => {
+  it('plan shows what a run would do without starting one', async () => {
     const sdk = await make();
     const def = await sdk.workflows.create({
-      name: 'SDK Run WF',
-      stages: [{ localId: 's', name: 'Only', prompt: 'ok' }],
-      edges: [],
+      formatVersion: 2,
+      workflow: { name: 'SDK Run WF' },
+      stages: [{ kind: 'agent', key: 'only', name: 'Only', prompts: [{ label: 'p', text: 'ok' }] }],
     });
-    const run = await sdk.workflows.createRun(def.id);
-    expect(run.id).toBeTruthy();
-    expect(run.status).toBe('created');
-    const status = await sdk.workflows.status(run.id);
-    expect(status.status).toBe('created');
+    const plan = await sdk.workflows.plan({ target: { kind: 'definition', workflowDefinitionId: def.id }, variables: {} });
+    expect(plan.stages.map((s) => s.key)).toEqual(['only']);
+    expect(plan.workflowDefinitionId).toBe(def.id);
   });
 });
 

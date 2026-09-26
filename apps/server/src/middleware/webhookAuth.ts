@@ -1,10 +1,10 @@
 // ────────────────────────────────────────────────────────────────
-// Webhook Auth Middleware — HMAC-SHA256/SHA512 and token verification
+// Webhook Auth — HMAC-SHA256/SHA512 signature verification for
+// automation webhooks
 // (SEC-12 — algorithm pinning + defensive comments for new contributors)
 // ────────────────────────────────────────────────────────────────
 
 import * as crypto from 'node:crypto';
-import type { Request, Response, NextFunction } from 'express';
 
 /**
  * SEC-12 — allowlist of HMAC algorithms we accept on inbound webhooks.
@@ -42,79 +42,18 @@ function parseSignatureHeader(header: string): { algo: string; hex: string } | n
 }
 
 /**
- * Verifies GitHub webhook signature using HMAC-SHA256 by default
- * (the only algorithm GitHub emits on `x-hub-signature-256`).
- *
- * SEC-12 — this function now:
- *   1. Uses `parseSignatureHeader` to pin to an allowlisted algorithm before
- *      doing any crypto. Weaker algorithms (md5/sha1) are rejected with 401.
- *   2. Length-checks the hex payload to catch truncation attacks.
- *   3. Still does constant-time comparison of the raw hex bytes so timing
- *      oracles don't leak whether a digest was "close".
- *
- * New contributors: do NOT add sha1 or md5 support here. GitHub's legacy
- * `x-hub-signature` (sha1) header is explicitly unsupported.
- */
-export function verifyGitHubSignature(secret: string) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const signature = req.headers['x-hub-signature-256'] as string | undefined;
-    if (!signature) {
-      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Missing webhook signature' } });
-      return;
-    }
-
-    const parsed = parseSignatureHeader(signature);
-    if (!parsed || parsed.algo !== 'sha256') {
-      // Explicit refusal. We expect `sha256=<64-hex>` for GitHub.
-      res.status(401).json({
-        error: {
-          code: 'UNAUTHORIZED',
-          message: 'Unsupported or malformed signature algorithm (expected sha256)',
-        },
-      });
-      return;
-    }
-
-    const hmac = crypto.createHmac('sha256', secret);
-    // Use raw body buffer (captured by express.json verify hook in app.ts)
-    // for accurate HMAC — re-serialising `req.body` can produce different
-    // key ordering than what the sender signed.
-    const rawBody = req.rawBody;
-    const body = rawBody ?? Buffer.from(JSON.stringify(req.body));
-    const expectedHex = hmac.update(body).digest('hex');
-
-    // Constant-time comparison of the hex payloads. `timingSafeEqual` throws
-    // if buffers differ in length, hence the length guard.
-    const sigBuf = Buffer.from(parsed.hex, 'hex');
-    const expectedBuf = Buffer.from(expectedHex, 'hex');
-    if (sigBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(sigBuf, expectedBuf)) {
-      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid webhook signature' } });
-      return;
-    }
-
-    next();
-  };
-}
-
-/**
  * Header an automation webhook signs its raw body with. Matches the
  * `Automation.webhookSecret` doc comment ("HMAC key for X-Signature-256").
- * Deliberately NOT `x-hub-signature-256` — that header is reserved for the
- * GitHub-keyed `/api/webhooks/github` route and its GLOBAL secret; automation
- * webhooks are keyed per-automation, so they get their own header name to
- * make the two impossible to confuse.
  */
 export const AUTOMATION_SIGNATURE_HEADER = 'x-signature-256';
 
 /**
  * Verifies an HMAC signature against an explicit secret + raw body.
  *
- * Unlike `verifyGitHubSignature`, this is not an Express middleware bound to
- * one GLOBAL secret read from config — automation webhooks are keyed
- * per-automation, resolved at request time (after the route looks the
- * automation up by its token), so the caller passes the secret in directly.
- * Reuses the same allowlisted-algorithm parsing and constant-time comparison
- * as `verifyGitHubSignature` — do not reimplement either half separately.
+ * Automation webhooks are keyed per-automation, resolved at request time
+ * (after the route looks the automation up by its token), so the caller
+ * passes the secret in directly. Pins the algorithm through
+ * `parseSignatureHeader` and compares in constant time.
  *
  * Returns `false` (never throws) for any parsing/verification failure —
  * callers should treat that uniformly as "reject with 401".
@@ -137,32 +76,3 @@ export function verifySignedPayload(
   return crypto.timingSafeEqual(sigBuf, expectedBuf);
 }
 
-/**
- * Verifies custom webhook token from `Authorization: Bearer <token>` header.
- * Uses constant-time comparison via `timingSafeEqual`.
- *
- * SEC-12 — no HMAC here because this path authenticates with a bearer
- * secret, not a signed body. The HMAC algorithm pinning above only applies
- * to signature-based webhooks. Bearer webhooks are simpler but ONLY safe
- * over TLS — never expose this path plaintext.
- */
-export function verifyWebhookToken(expectedToken: string) {
-  return (req: Request, res: Response, next: NextFunction): void => {
-    const authHeader = req.headers['authorization'] as string | undefined;
-    if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Missing or invalid authorization header' } });
-      return;
-    }
-
-    const token = authHeader.slice(7);
-    const tokenBuf = Buffer.from(token);
-    const expectedBuf = Buffer.from(expectedToken);
-
-    if (tokenBuf.length !== expectedBuf.length || !crypto.timingSafeEqual(tokenBuf, expectedBuf)) {
-      res.status(401).json({ error: { code: 'UNAUTHORIZED', message: 'Invalid webhook token' } });
-      return;
-    }
-
-    next();
-  };
-}

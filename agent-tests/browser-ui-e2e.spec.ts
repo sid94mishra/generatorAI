@@ -31,6 +31,28 @@ async function api(method: string, path: string, body?: unknown) {
   return { status: res.status, data };
 }
 
+/** A published one-stage workflow (a v2 graph, formatVersion 2); returns its id. */
+async function createWorkflow(name: string, stageName: string, prompt: string): Promise<string> {
+  const { data } = await api('POST', '/api/workflow-definitions', {
+    formatVersion: 2,
+    workflow: { name },
+    stages: [{ key: 'only', name: stageName, kind: 'agent', prompts: [{ label: 'P', text: prompt }] }],
+    edges: [],
+  });
+  const defId = (data as { id: string }).id;
+  await api('POST', `/api/workflow-definitions/${defId}/publish`);
+  return defId;
+}
+
+/** Start a run through the invocation (created and started in one request); returns its id. */
+async function invoke(defId: string): Promise<string> {
+  const { data } = await api('POST', '/api/workflow-invocations', {
+    target: { kind: 'definition', workflowDefinitionId: defId },
+    client: 'http',
+  });
+  return (data as { runId: string }).runId;
+}
+
 async function waitForRunComplete(runId: string, timeoutMs = 90_000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
@@ -146,18 +168,7 @@ test.describe('3. Workflow Builder', () => {
 
   test.beforeAll(async () => {
     // Create workflow via API
-    const { data } = await api('POST', '/api/workflow-definitions', {
-      name: `Browser Builder Test ${Date.now()}`,
-      sessionMode: 'single',
-    });
-    defId = (data as { id: string }).id;
-
-    // Add stages
-    await api('POST', `/api/workflow-definitions/${defId}/stages`, {
-      name: 'First Stage',
-      order: 0,
-      prompts: [{ label: 'Test', text: 'Say hello', waitForCompletion: true }],
-    });
+    defId = await createWorkflow(`Browser Builder Test ${Date.now()}`, 'First Stage', 'Say hello');
   });
 
   test('builder page loads with canvas', async ({ page }) => {
@@ -203,24 +214,10 @@ test.describe('4. Workflow Run Page', () => {
 
   test.beforeAll(async () => {
     // Create definition
-    const { data: def } = await api('POST', '/api/workflow-definitions', {
-      name: `Browser Run Test ${Date.now()}`,
-      sessionMode: 'single',
-    });
-    defId = (def as { id: string }).id;
+    defId = await createWorkflow(`Browser Run Test ${Date.now()}`, 'Streamed Stage', 'Say "Hello World" exactly and nothing else.');
 
-    await api('POST', `/api/workflow-definitions/${defId}/stages`, {
-      name: 'Streamed Stage',
-      order: 0,
-      prompts: [{ label: 'Test', text: 'Say "Hello World" exactly and nothing else.', waitForCompletion: true }],
-    });
-
-    // Create and start run
-    const { data: run } = await api('POST', '/api/workflow-runs', {
-      workflowDefinitionId: defId,
-    });
-    runId = (run as { id: string }).id;
-    await api('POST', `/api/workflow-runs/${runId}/start`);
+    // Start a run
+    runId = await invoke(defId);
   });
 
   test('run page shows running state', async ({ page }) => {
@@ -425,22 +422,10 @@ test.describe('10. Full Workflow Lifecycle (Browser)', () => {
 
   test('create workflow, run it, verify messages, cleanup', async ({ page }) => {
     // 1. Create workflow via API
-    const { data: def } = await api('POST', '/api/workflow-definitions', {
-      name: `Full Lifecycle ${Date.now()}`,
-      sessionMode: 'single',
-    });
-    defId = (def as { id: string }).id;
+    defId = await createWorkflow(`Full Lifecycle ${Date.now()}`, 'Lifecycle Stage', 'Say "lifecycle complete" and nothing else.');
 
-    await api('POST', `/api/workflow-definitions/${defId}/stages`, {
-      name: 'Lifecycle Stage',
-      order: 0,
-      prompts: [{ label: 'LC', text: 'Say "lifecycle complete" and nothing else.', waitForCompletion: true }],
-    });
-
-    // 2. Create and start run
-    const { data: run } = await api('POST', '/api/workflow-runs', { workflowDefinitionId: defId });
-    runId = (run as { id: string }).id;
-    await api('POST', `/api/workflow-runs/${runId}/start`);
+    // 2. Start a run
+    runId = await invoke(defId);
 
     // 3. Navigate to run page
     await page.goto(`${WEB_URL}/workflows/${defId}/runs/${runId}`);

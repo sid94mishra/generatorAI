@@ -16,12 +16,12 @@ export interface DagStage {
   status?: string | null;
 }
 
+/** An edge between two node ids (stage keys), with the outcome that activates it. */
 export interface DagEdge {
-  id?: string;
-  fromStageId: string;
-  toStageId: string;
-  edgeType?: string;
-  condition?: string | null;
+  from: string;
+  to: string;
+  on?: string;
+  when?: string;
 }
 
 export interface LaidOutNode extends DagStage {
@@ -61,11 +61,11 @@ export function layoutDag(stages: DagStage[], edges: DagEdge[]): DagLayout {
   // Edges naming a stage that no longer exists are skipped rather than
   // fatal: a definition mid-edit is a normal state to render.
   const valid = edges.filter(
-    (e) => byId.has(e.fromStageId) && byId.has(e.toStageId),
+    (e) => byId.has(e.from) && byId.has(e.to),
   );
   for (const edge of valid) {
-    outgoing.get(edge.fromStageId)!.push(edge.toStageId);
-    incoming.get(edge.toStageId)!.push(edge.fromStageId);
+    outgoing.get(edge.from)!.push(edge.to);
+    incoming.get(edge.to)!.push(edge.from);
   }
 
   const cycle = detectCycle(stages, outgoing);
@@ -164,7 +164,8 @@ export interface TreeLine {
   depth: number;
   /** Rendered as a repeat marker rather than expanded again. */
   repeat: boolean;
-  edgeType?: string | undefined;
+  /** Outcome of the edge that led here (`success`, `failure`, …). */
+  on?: string | undefined;
   isLast: boolean;
 }
 
@@ -174,18 +175,18 @@ export function toTree(stages: DagStage[], edges: DagEdge[]): TreeLine[] {
   const hasParent = new Set<string>();
 
   for (const edge of edges) {
-    if (!byId.has(edge.fromStageId) || !byId.has(edge.toStageId)) continue;
-    const list = children.get(edge.fromStageId) ?? [];
+    if (!byId.has(edge.from) || !byId.has(edge.to)) continue;
+    const list = children.get(edge.from) ?? [];
     list.push(edge);
-    children.set(edge.fromStageId, list);
-    hasParent.add(edge.toStageId);
+    children.set(edge.from, list);
+    hasParent.add(edge.to);
   }
 
   const roots = stages.filter((s) => !hasParent.has(s.id));
   const emitted = new Set<string>();
   const lines: TreeLine[] = [];
 
-  const walk = (id: string, depth: number, edgeType: string | undefined, isLast: boolean): void => {
+  const walk = (id: string, depth: number, on: string | undefined, isLast: boolean): void => {
     const stage = byId.get(id);
     if (!stage) return;
 
@@ -196,7 +197,7 @@ export function toTree(stages: DagStage[], edges: DagEdge[]): TreeLine[] {
       status: stage.status ?? null,
       depth,
       repeat,
-      edgeType,
+      on,
       isLast,
     });
     if (repeat) return;
@@ -204,7 +205,7 @@ export function toTree(stages: DagStage[], edges: DagEdge[]): TreeLine[] {
 
     const outgoing = children.get(id) ?? [];
     outgoing.forEach((edge, index) => {
-      walk(edge.toStageId, depth + 1, edge.edgeType, index === outgoing.length - 1);
+      walk(edge.to, depth + 1, edge.on, index === outgoing.length - 1);
     });
   };
 

@@ -17,7 +17,6 @@ export class ArtifactService {
   /** Create a new artifact from content. */
   async createArtifact(params: {
     sessionId: string;
-    workflowId?: string;
     /** v2: Associate artifact with a workflow run */
     workflowRunId?: string;
     /** v2: Associate artifact with a stage run */
@@ -39,7 +38,6 @@ export class ArtifactService {
     const artifact: Artifact = {
       id,
       sessionId: params.sessionId,
-      workflowId: params.workflowId,
       workflowRunId: params.workflowRunId,
       stageRunId: params.stageRunId,
       name: params.name,

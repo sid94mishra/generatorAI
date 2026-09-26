@@ -26,44 +26,6 @@ export { McpServerBodySchema, McpTransportSchema, SystemMcpPrefsBodySchema } fro
 export type { McpServerBody, SystemMcpPrefsBody } from './McpSchemas.js';
 export type { AppConfig } from './AppConfig.js';
 export {
-  WorkflowTemplateSchema,
-  StageTemplateSchema,
-  WorkflowRunProfileSchema,
-  HookDefinitionSchema,
-  WorkflowHookDefinitionSchema,
-  HooksFileConfigSchema,
-  TemplateCategorySchema,
-  TemplateHarnessConfigSchema,
-  ConfigurableVariableSchema,
-  PreprocessingStepSchema,
-  ResultValidationSchema,
-  WorkflowTemplateStageSchema,
-  WorkflowTemplateEdgeSchema,
-  templateStageToCreateParams,
-  StageTemplatePromptSchema,
-} from './WorkflowTemplate.js';
-export type { WorkflowTemplate, WorkflowTemplateStage, StageTemplate, WorkflowRunProfile } from './WorkflowTemplate.js';
-
-export {
-  CreateWorkflowDefinitionSchema,
-  UpdateWorkflowDefinitionSchema,
-  CreateStageSchema,
-  CreateEdgeSchema,
-  CreateWorkflowRunSchema,
-  WorkflowDefinitionSchema,
-  ImportWorkflowJsonSchema,
-  PromptDefinitionSchema,
-  PromptTypeSchema,
-  RetryPolicySchema,
-  StageConditionSchema,
-  VariableDefinitionSchema,
-  SkillDefinitionSchema,
-  AgentDefinitionSchema,
-} from './WorkflowDefinitionSchemas.js';
-export type { ImportWorkflowJson, RunProfileInput } from './WorkflowDefinitionSchemas.js';
-export { RunProfileSchema, StageRunOverrideSchema } from './WorkflowDefinitionSchemas.js';
-
-export {
   McpServerConfigSchema,
   AgentToolPolicySchema,
   AgentRuntimePolicySchema,
@@ -94,7 +56,6 @@ export {
   SetChatPermissionModeSchema,
   ResolveToolPermissionSchema,
   UpdateChatSchema,
-  StageReviewDecisionSchema,
 } from './ChatSchemas.js';
 
 // Orchestrator mode — background-agent task brief + result digest contracts
@@ -115,7 +76,6 @@ export type { BrowserConfigInput } from './BrowserConfigSchema.js';
 export {
   CreateAutomationSchema,
   UpdateAutomationSchema,
-  TestDataSourceSchema,
   DataSchemaSchema,
   IterationModeSchema,
   AutomationDatasetSchema,
@@ -123,16 +83,6 @@ export {
   TriggerAutomationBodySchema,
   PreviewIterationsBodySchema,
 } from './AutomationSchemas.js';
-
-// Workflow Script schemas
-export {
-  WorkflowScriptOutputSchema,
-  ScriptRunProfileSchema,
-} from './WorkflowScriptSchema.js';
-export type {
-  WorkflowScriptOutputParsed,
-  ScriptRunProfileParsed,
-} from './WorkflowScriptSchema.js';
 
 // Extensions + Widgets
 export {

@@ -15,7 +15,6 @@ export class DrizzleArtifactRepository implements IArtifactRepository {
     await this.db.insert(artifacts).values({
       id: artifact.id,
       sessionId: artifact.sessionId,
-      workflowId: artifact.workflowId ?? null,
       name: artifact.name,
       path: artifact.path,
       mimeType: artifact.mimeType ?? null,
@@ -32,7 +31,6 @@ export class DrizzleArtifactRepository implements IArtifactRepository {
       .values({
         id: artifact.id,
         sessionId: artifact.sessionId,
-        workflowId: artifact.workflowId ?? null,
         name: artifact.name,
         path: artifact.path,
         mimeType: artifact.mimeType ?? null,
@@ -78,7 +76,6 @@ export class DrizzleArtifactRepository implements IArtifactRepository {
     return {
       id: row.id,
       sessionId: row.sessionId,
-      workflowId: row.workflowId ?? undefined,
       name: row.name,
       path: row.path,
       mimeType: row.mimeType ?? '',

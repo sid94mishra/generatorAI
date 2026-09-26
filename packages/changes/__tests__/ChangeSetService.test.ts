@@ -101,7 +101,6 @@ describe('isMetadataPath', () => {
     expect(isMetadataPath('uploads/skill.md')).toBe(true);
     expect(isMetadataPath('.workspace.json')).toBe(true);
     expect(isMetadataPath('scratchpad.json')).toBe(true);
-    expect(isMetadataPath('stream-log.jsonl')).toBe(true);
   });
   it('does not flag real source paths', () => {
     expect(isMetadataPath('src/app.ts')).toBe(false);

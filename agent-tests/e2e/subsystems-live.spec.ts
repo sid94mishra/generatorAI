@@ -401,25 +401,8 @@ test.describe('Computer use integration', () => {
 // ── Orchestration & background tasks ────────────────────────────
 
 test.describe('Orchestration', () => {
-  test('system workflows are registered and individually retrievable', async () => {
-    const list = await apiRequest<Array<{ id: string; name?: string }>>(
-      'GET',
-      '/orchestrator/system-workflows',
-    );
-    expect(list.ok).toBe(true);
-    expect(Array.isArray(list.data)).toBe(true);
-
-    if (list.data.length > 0) {
-      const one = await apiRequest(
-        'GET',
-        `/orchestrator/system-workflows/${encodeURIComponent(list.data[0]!.id)}`,
-      );
-      expect(one.ok).toBe(true);
-    }
-  });
-
   test('cancelling an unknown run is refused cleanly, not with a 500', async () => {
-    const res = await apiRequest('POST', '/orchestrator/runs/does-not-exist/cancel', {});
+    const res = await apiRequest('POST', '/workflow-runs/does-not-exist/commands', { command: 'cancel' });
     expect(res.status).toBeGreaterThanOrEqual(400);
     expect(res.status).toBeLessThan(500);
   });
@@ -444,7 +427,7 @@ test.describe('Workflows', () => {
     await expect(page.getByText('report')).toBeVisible();
   });
 
-  test('a run is created in a schedulable state with its stages materialised', async ({ seed }) => {
+  test('an invoked run is live (not terminal) with its stages materialised', async ({ seed }) => {
     const wfId = await seed.workflow({
       name: `e2e-live-run-${Date.now()}`,
       stages: [{ localId: 'only', name: 'only', prompt: 'do the thing' }],
@@ -454,9 +437,9 @@ test.describe('Workflows', () => {
 
     const run = await apiRequest<{ status: string; id: string }>('GET', `/workflow-runs/${runId}`);
     expect(run.ok).toBe(true);
-    // A freshly created run must be in a state the scheduler can pick up —
-    // never already-terminal, which is how P0-41-class bugs present.
-    expect(['pending', 'created', 'starting', 'queued']).toContain(run.data.status);
+    // A freshly invoked run must be live — never already-terminal, which is
+    // how P0-41-class bugs present.
+    expect(['created', 'starting', 'running']).toContain(run.data.status);
 
     const stages = await apiRequest<Array<{ status: string }>>(
       'GET',
@@ -465,7 +448,7 @@ test.describe('Workflows', () => {
     if (stages.ok && Array.isArray(stages.data)) {
       expect(stages.data.length).toBeGreaterThan(0);
       for (const s of stages.data) {
-        expect(['pending', 'created', 'queued']).toContain(s.status);
+        expect(['pending', 'ready', 'starting', 'running']).toContain(s.status);
       }
     }
   });

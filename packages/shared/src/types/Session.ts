@@ -34,9 +34,3 @@ export interface Session {
   /** When the session was closed (harness conversation destroyed) */
   closedAt?: Date;
 }
-
-import type { Workflow } from './Workflow.js';
-
-export interface SessionWithWorkflows extends Session {
-  workflows: Workflow[];
-}

@@ -40,13 +40,11 @@ describe('applyLifecycleEvent — creations', () => {
       .toEqual({ refetch: 'runs' });
   });
 
-  it('refetches on a retry, whose NEW run id the event does not carry', () => {
-    // `workflow_run.retried` names the ANCESTOR; the new run only exists
-    // server-side.
+  it('refetches on a fork, whose full row the event does not carry', () => {
     expect(
       applyLifecycleEvent(emptyCache, {
-        kind: 'workflow_run.retried',
-        data: { workflowRunId: 'r1', ancestorRunId: 'r0' },
+        kind: 'workflow_run.forked',
+        data: { workflowRunId: 'r1', ancestorRunId: 'r0', rerunFrom: [], memoized: 2 },
       }),
     ).toEqual({ refetch: 'runs' });
   });

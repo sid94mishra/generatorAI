@@ -1,17 +1,19 @@
 // The remaining domains, each small enough that a file per group would be
 // more navigation than signal: agents, extensions, widgets, review, source
 // control, security, hooks, webhooks, harness, templates, scripts,
-// orchestrator, browser and computer use.
+// browser and computer use.
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { HookDefinition } from '@generatorai/shared';
+import type { RunProfile } from '@generatorai/workflow-spec';
+import { newIdempotencyKey } from '@generatorai/client-core';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError, EXIT_CODES } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
 import type { CliContext } from '../context/CliContext.js';
-import { watchRun } from './run.js';
+import { invocationError, startedRun, watchRun } from './run.js';
 import {
   degradeWidget,
   degradeWidgets,
@@ -25,6 +27,7 @@ import {
   list,
   nameColumn,
   ok,
+  parseKeyValues,
   projectFlag,
   readTextFile,
   record,
@@ -37,14 +40,12 @@ export const GROUPS = [
   { name: 'agent', summary: 'First-class agent definitions', order: 15 },
   { name: 'script', aliases: ['sc'], summary: 'Programmatic workflow scripts (.workflow.mjs)', order: 60 },
   { name: 'template', summary: 'System workflow templates', order: 61 },
-  { name: 'orchestrator', aliases: ['orch'], summary: 'System workflows and orchestrated runs', order: 62 },
   { name: 'extension', aliases: ['ext'], summary: 'Hot-loadable extensions', order: 70 },
   { name: 'widget', summary: 'Agent-rendered widget surfaces', order: 71 },
   { name: 'review', summary: 'Review threads on workspace files', order: 72 },
   { name: 'browser', summary: 'Workspace-scoped Chromium', order: 73 },
   { name: 'computer', summary: 'Computer Use: desktop windows and audit', order: 74 },
   { name: 'hook', summary: 'Lifecycle hooks', order: 80 },
-  { name: 'webhook', summary: 'Incoming and outgoing webhooks', order: 81 },
   { name: 'harness', summary: 'AI provider selection', order: 82 },
   { name: 'source-control', aliases: ['scm'], summary: 'Git provider and pull-request configuration', order: 83 },
   { name: 'security', summary: 'Security posture, devices and audit', order: 84 },
@@ -250,7 +251,7 @@ export function agentCommands(): CommandSpec[] {
   ];
 }
 
-// ── Scripts / templates / orchestrator ─────────────────────────────
+// ── Scripts / templates ────────────────────────────────────────────
 
 export function scriptCommands(): CommandSpec[] {
   const find = async (ctx: CliContext, ref: string) => {
@@ -308,11 +309,25 @@ export function scriptCommands(): CommandSpec[] {
       schema: inputSchema({ script: z.string() }, {}),
       output: {
         kind: 'list',
-        columns: [nameColumn, { key: 'description', header: 'Description', priority: 1 }],
+        columns: [
+          nameColumn,
+          { key: 'description', header: 'Description', priority: 1 },
+          { key: 'permissionMode', header: 'Mode', priority: 2 },
+          { key: 'stageOverrides', header: 'Overrides (stage keys)', priority: 3 },
+        ],
       },
       async handler(ctx, { args }) {
         const target = await find(ctx, args.script);
-        return list(await ctx.api.scripts.profiles(target.id));
+        const profiles: RunProfile[] = await ctx.api.scripts.profiles(target.id);
+        return list(
+          profiles.map((profile) => ({
+            ...profile,
+            permissionMode: profile.overrides?.permissionMode,
+            stageOverrides: (profile.stageOverrides ?? [])
+              .map((o) => `${o.stageKey}${o.skip ? ' (skip)' : ''}`)
+              .join(', '),
+          })),
+        );
       },
     }),
 
@@ -324,15 +339,19 @@ export function scriptCommands(): CommandSpec[] {
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [{ name: 'script', description: 'Script reference', required: true, completes: 'script' }],
-      flags: [{ name: 'profile', description: 'Profile name', type: 'string' }],
-      schema: inputSchema({ script: z.string() }, { profile: z.string().optional() }),
-      output: { kind: 'record', successMessage: 'Materialized workflow {id}' },
+      flags: [
+        { name: 'name', description: 'Name of the new draft (defaults to the script name)', type: 'string' },
+        { name: 'project', description: 'Project id or name', type: 'string', completes: 'project' },
+      ],
+      schema: inputSchema({ script: z.string() }, { name: z.string().optional(), project: z.string().optional() }),
+      output: { kind: 'record' },
       async handler(ctx, { args, flags }) {
         const target = await find(ctx, args.script);
-        return record(
-          await ctx.api.scripts.materialize(target.id, // The route reads `profileName`; `profile` was silently ignored.
-          compact({ profileName: flags.profile })),
-        );
+        const projectId = flags.project
+          ? resolveRef(flags.project, { kind: 'project', candidates: await ctx.api.projects.list() }).id
+          : undefined;
+        const result = await ctx.api.scripts.materialize(target.id, compact({ name: flags.name, projectId }));
+        return record(result.definition, `Materialized ${target.name} as draft ${result.definitionId}.`);
       },
     }),
 
@@ -340,31 +359,53 @@ export function scriptCommands(): CommandSpec[] {
       id: 'script.run',
       group: 'script',
       verb: 'run',
-      summary: 'Materialize and start a script',
+      summary: 'Start a run of a script (materialized once per script content)',
       requiresServer: true,
       sinceVersion: '0.2.0',
+      examples: ['generatorai script run nightly --profile quick --var topic=caching --watch'],
       args: [{ name: 'script', description: 'Script reference', required: true, completes: 'script' }],
-      flags: [{ name: 'profile', description: 'Profile name', type: 'string' }, watchFlag, verbosityFlag],
+      flags: [
+        { name: 'profile', description: 'A run profile the script exports (`script profiles`)', type: 'string' },
+        { name: 'var', description: 'Variable as key=value (repeatable); wins over the profile', type: 'string', variadic: true },
+        {
+          name: 'idempotencyKey',
+          description: 'Idempotency key; the same key and request replay the same run (default: a fresh key)',
+          type: 'string',
+        },
+        watchFlag,
+        verbosityFlag,
+      ],
       schema: inputSchema(
         { script: z.string() },
         {
           profile: z.string().optional(),
+          var: z.array(z.string()).optional(),
+          idempotencyKey: z.string().regex(/^[!-~]{1,200}$/, 'printable ASCII without spaces, at most 200 characters').optional(),
           watch: z.boolean().optional(),
           verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal'),
         },
       ),
-      output: { kind: 'record', successMessage: 'Started run {id}' },
-      async handler(ctx, { args, flags }) {
+      output: { kind: 'record', successMessage: 'Started run {runId}' },
+      async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
         const target = await find(ctx, args.script);
-        const run = await ctx.api.scripts.run(target.id, compact({ profile: flags.profile }));
-        if (!flags.watch) {
-          return record(run, `Started run ${run.id} — \`generatorai run watch ${run.id}\``);
-        }
-        // Reuses `run start`'s watcher so there is one implementation of
-        // "follow a run" — previously this printed a suggestion to watch
-        // instead of actually doing it.
-        await watchRun(ctx, run.id, flags.verbosity);
-        return record(await ctx.api.runs.get(run.id));
+        const result = await ctx.api.workflows
+          .invoke(
+            {
+              target: { kind: 'script', scriptId: target.id },
+              variables: parseKeyValues(flags.var),
+              ...(flags.profile ? { profile: flags.profile } : {}),
+              client: 'cli',
+            },
+            { idempotencyKey: flags.idempotencyKey ?? newIdempotencyKey() },
+          )
+          .catch((error: unknown) => {
+            throw invocationError(error);
+          });
+        const { message, warnings } = startedRun(result);
+        if (!flags.watch) return { data: result, warnings, message };
+        // `run start`'s watcher: one implementation of "follow a run".
+        await watchRun(ctx, result.runId, flags.verbosity);
+        return { data: await ctx.api.runs.get(result.runId), warnings };
       },
     }),
 
@@ -375,13 +416,14 @@ export function scriptCommands(): CommandSpec[] {
       summary: 'Validate a script file without registering it',
       requiresServer: true,
       sinceVersion: '0.2.0',
-      args: [{ name: 'file', description: '.workflow.mjs file', required: true, completes: 'file' }],
+      args: [{ name: 'file', description: '.workflow.mjs file inside a server script directory', required: true, completes: 'file' }],
       flags: [],
       schema: inputSchema({ file: z.string() }, {}),
       output: { kind: 'record' },
       async handler(ctx, { args }) {
-        const source = await readTextFile(path.resolve(args.file), 'script file');
-        const result = await ctx.api.scripts.validate({ source, name: path.basename(args.file) });
+        // The route loads the file itself (`{ path }`), so the path must be one
+        // the server can read, inside its script directories.
+        const result = await ctx.api.scripts.validate({ path: path.resolve(args.file) });
         if (!result.valid) {
           throw new CliError('VALIDATION', `Script is not valid:\n${(result.errors ?? []).map((e) => `  ${e}`).join('\n')}`);
         }
@@ -424,10 +466,24 @@ export function templateCommands(): CommandSpec[] {
       schema: inputSchema({}, {}),
       output: {
         kind: 'list',
-        columns: [idColumn, nameColumn, { key: 'description', header: 'Description', priority: 2 }],
+        columns: [
+          idColumn,
+          nameColumn,
+          { key: 'category', header: 'Category', priority: 1 },
+          { key: 'stageCount', header: 'Stages', format: 'number', priority: 3 },
+          { key: 'description', header: 'Description', priority: 2 },
+        ],
       },
       async handler(ctx) {
-        return list(await ctx.api.templates.list());
+        return list(
+          (await ctx.api.templates.list()).map((template) => ({
+            id: template.id,
+            name: template.graph.workflow.name,
+            category: template.category,
+            stageCount: template.graph.stages.length,
+            description: template.graph.workflow.description,
+          })),
+        );
       },
     }),
 
@@ -444,60 +500,6 @@ export function templateCommands(): CommandSpec[] {
       output: { kind: 'record' },
       async handler(ctx, { args }) {
         return record(await ctx.api.templates.get(args.template));
-      },
-    }),
-  ];
-}
-
-export function orchestratorCommands(): CommandSpec[] {
-  return [
-    defineCommand({
-      id: 'orchestrator.templates',
-      group: 'orchestrator',
-      verb: 'templates',
-      summary: 'System workflows available to the orchestrator',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [],
-      flags: [],
-      schema: inputSchema({}, {}),
-      output: { kind: 'list', columns: [idColumn, nameColumn, { key: 'description', header: 'Description', priority: 2 }] },
-      async handler(ctx) {
-        return list(await ctx.api.orchestrator.templates());
-      },
-    }),
-
-    defineCommand({
-      id: 'orchestrator.context',
-      group: 'orchestrator',
-      verb: 'context',
-      summary: 'Orchestrator context for a run',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
-      flags: [],
-      schema: inputSchema({ run: z.string() }, {}),
-      output: { kind: 'record' },
-      async handler(ctx, { args }) {
-        return record(await ctx.api.orchestrator.context(args.run));
-      },
-    }),
-
-    defineCommand({
-      id: 'orchestrator.cancel',
-      group: 'orchestrator',
-      verb: 'cancel',
-      summary: 'Cancel an orchestrated run and everything under it',
-      requiresServer: true,
-      destructive: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
-      flags: [],
-      schema: inputSchema({ run: z.string() }, {}),
-      output: { kind: 'void', successMessage: 'Cancelled.' },
-      async handler(ctx, { args }) {
-        await ctx.api.orchestrator.cancel(args.run);
-        return ok('Cancelled orchestrated run.');
       },
     }),
   ];
@@ -1567,143 +1569,6 @@ export function platformCommands(): CommandSpec[] {
           ...(result.success ? {} : { exitCode: EXIT_CODES.RESULT_FAILED }),
           message: result.message,
         };
-      },
-    }),
-
-    defineCommand({
-      id: 'hook.list',
-      group: 'hook',
-      verb: 'list',
-      summary: 'Hooks registered on a session — global definitions plus per-workflow overrides',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'session', description: 'Session id', required: true }],
-      flags: [],
-      schema: inputSchema({ session: z.string() }, {}),
-      output: {
-        kind: 'list',
-        columns: [
-          { key: 'scope', header: 'Scope', priority: 0 },
-          { key: 'workflowName', header: 'Workflow', priority: 2 },
-          { key: 'name', header: 'Name', priority: 0 },
-          { key: 'phase', header: 'Phase', priority: 0 },
-          { key: 'type', header: 'Type', priority: 1 },
-          { key: 'failurePolicy', header: 'On failure', priority: 2 },
-          { key: 'priority', header: 'Priority', format: 'number', priority: 3 },
-        ],
-      },
-      async handler(ctx, { args }) {
-        const response = await ctx.api.hooks.sessionHooks(args.session);
-        const rows: Array<Record<string, unknown>> = [];
-        const globalById = new Map((response.globalHooks ?? []).map((hook) => [hook.id, hook]));
-
-        for (const hook of response.globalHooks ?? []) {
-          rows.push({
-            scope: 'global',
-            workflowId: null,
-            workflowName: null,
-            hookId: hook.id,
-            name: hook.name,
-            phase: hook.phase,
-            type: hook.type,
-            priority: hook.priority,
-            failurePolicy: hook.failurePolicy,
-            enabled: hook.enabled,
-          });
-        }
-        for (const wf of response.workflowHooks ?? []) {
-          for (const [hookId, override] of Object.entries(wf.hooks ?? {})) {
-            // `hookOverrides` is a PARTIAL patch keyed by hook id — a field
-            // the override doesn't set falls back to the base definition in
-            // `globalHooks`. Without this fallback, a row that overrides only
-            // e.g. `priority` rendered every other column as undefined even
-            // though the real value was sitting right there in `globalHooks`.
-            const base = globalById.get(hookId);
-            rows.push({
-              scope: 'workflow',
-              workflowId: wf.workflowId,
-              workflowName: wf.workflowName,
-              hookId,
-              name: override.name ?? base?.name,
-              phase: override.phase ?? base?.phase,
-              type: override.type ?? base?.type,
-              priority: override.priority ?? base?.priority,
-              failurePolicy: override.failurePolicy ?? base?.failurePolicy,
-              enabled: override.enabled ?? base?.enabled,
-            });
-          }
-        }
-        return list(rows);
-      },
-    }),
-
-    defineCommand({
-      id: 'webhook.list',
-      group: 'webhook',
-      verb: 'list',
-      aliases: ['ls'],
-      summary: 'Outgoing webhook registrations',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [],
-      flags: [],
-      schema: inputSchema({}, {}),
-      output: {
-        kind: 'list',
-        columns: [
-          idColumn,
-          { key: 'url', header: 'URL', priority: 0 },
-          { key: 'events', header: 'Events', format: 'list', priority: 1 },
-          createdColumn,
-        ],
-      },
-      async handler(ctx) {
-        return list(await ctx.api.webhooks.list());
-      },
-    }),
-
-    defineCommand({
-      id: 'webhook.create',
-      group: 'webhook',
-      verb: 'create',
-      summary: 'Register an outgoing webhook',
-      requiresServer: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'url', description: 'Destination URL', required: true }],
-      flags: [
-        { name: 'event', description: 'Event to deliver (repeatable)', type: 'string', variadic: true },
-        { name: 'secret', description: 'HMAC secret', type: 'string' },
-      ],
-      schema: inputSchema(
-        { url: z.string().url('must be a URL') },
-        { event: z.array(z.string()).optional(), secret: z.string().optional() },
-      ),
-      output: { kind: 'record', successMessage: 'Registered webhook {id}' },
-      async handler(ctx, { args, flags }) {
-        return record(
-          await ctx.api.webhooks.create(
-            compact({ url: args.url, events: flags.event, secret: flags.secret }),
-          ),
-        );
-      },
-    }),
-
-    defineCommand({
-      id: 'webhook.delete',
-      group: 'webhook',
-      verb: 'delete',
-      aliases: ['rm'],
-      summary: 'Remove a webhook registration',
-      requiresServer: true,
-      destructive: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'webhook', description: 'Registration id', required: true }],
-      flags: [],
-      schema: inputSchema({ webhook: z.string() }, {}),
-      output: { kind: 'void', successMessage: 'Removed.' },
-      async handler(ctx, { args }) {
-        await ctx.api.webhooks.remove(args.webhook);
-        return ok('Removed webhook.');
       },
     }),
 

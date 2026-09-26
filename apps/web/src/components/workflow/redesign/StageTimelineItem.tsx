@@ -10,7 +10,13 @@
 //   │  ● Thinking about …
 //   │  <streaming markdown answer, inline>
 //   │  chips: files · summary · output
+//   │  [compact composer — the focused stage only]
 //   ●  next stage…
+//
+// A stage is a compact chat (P03b): the focused stage gets the shared
+// composer (messages, attachments, Stop), its in-turn gates render as the
+// chat's permission / question / plan cards, and the "…" menu sends every
+// stage command through the commands API.
 //
 // The whole thing sits on a shared vertical timeline drawn by
 // StageTimeline (below); this item just draws its dot + content.
@@ -18,19 +24,46 @@
 
 import React, { useEffect, useState } from 'react';
 import {
-  Check, Loader2, Clock, Pause, Hand, X, SkipForward, AlertTriangle, Zap, Moon,
-  ChevronRight, ChevronDown, User, FileText, Database, RefreshCw, MoreHorizontal,
-  PanelRightOpen,
+  Check, Loader2, Clock, Pause, Hand, X, SkipForward, AlertTriangle, Zap,
+  ChevronDown, User, FileText, Database, RefreshCw,
+  PanelRightOpen, MoreHorizontal, Play, RotateCcw, Copy, GitFork, PencilLine,
 } from 'lucide-react';
+import type { RunCommand } from '@generatorai/workflow-spec';
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/index.js';
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+} from '@/components/ui/primitives/dropdown-menu.js';
 import { StreamPanel } from '@/components/agent/StreamPanel.js';
 import { UsageChip } from '@/components/agent/UsageChip.js';
 import { ContextUsageGauge } from '@/components/shared/ContextUsageGauge.js';
 import { InlineHitlControls } from './InlineHitlControls.js';
 import type { StageStatus, StageView } from './types.js';
 
-interface StageTimelineItemProps {
+/** An answer to one of a stage's in-turn gates, in the chat's shapes (the stage conversation API). */
+export type StageGateResolution =
+  | { kind: 'permission'; interactionId: string; behavior: 'allow' | 'deny'; message?: string }
+  | { kind: 'answer'; interactionId: string; answers: Record<string, string[]>; freeformResponse?: string }
+  | { kind: 'plan'; interactionId: string; approved: boolean; action?: 'implement_interactive' | 'implement_autopilot'; feedback?: string };
+
+/**
+ * The stage "…" menu (D-18). Every command goes through the commands API;
+ * the page supplies stable callbacks so the memoised row does not re-render.
+ */
+export interface StageMenuActions {
+  /** Whether the run still takes instance commands (not terminal). */
+  runLive: boolean;
+  onCommand: (id: string, command: RunCommand) => void;
+  onCopyOutput: (id: string) => void;
+  /** Fork the finished run from this instance (enabled once the run is terminal). */
+  onRerunFrom: (id: string) => void;
+}
+
+export interface StageTimelineItemProps {
   stage: StageView;
   focused: boolean;
   defaultOpen?: boolean;
@@ -44,32 +77,58 @@ interface StageTimelineItemProps {
    *  False for the final stage so the timeline doesn't dangle past it. */
   showConnector?: boolean;
   onFocus?: (id: string) => void;
-  onApproveHitl?: (id: string, followUp?: string) => void;
+  onApproveHitl?: (id: string) => void;
   onRejectHitl?: (id: string, feedback?: string) => void;
   /** Terminal rejection — fails the stage and blocks the rest of the run. */
   onTerminalRejectHitl?: (id: string, reason?: string) => void;
+  /**
+   * Answer one of the stage's in-turn gates (tool permission, question, plan
+   * review) through the stage conversation API: the parked turn continues
+   * with the answer (P02 review R7).
+   */
+  onResolveGate?: (id: string, resolution: StageGateResolution) => void;
+  /** A gate answer or approval of this stage is in flight: its buttons are disabled (D-13). */
+  gateBusy?: boolean;
+  /** The stage "…" menu. */
+  menu?: StageMenuActions;
+  /** The compact composer, rendered for the focused stage only. */
+  composer?: React.ReactNode;
   onRetry?: (id: string) => void;
-  /** Wake a sleeping stage ahead of its scheduled time. */
-  onWake?: (id: string) => void;
   onSelectFiles?: (id: string) => void;
   onSelectOutput?: (id: string) => void;
   /** Open the right inspector pane focused on this stage. */
   onOpenInspector?: (id: string) => void;
+  /** Extra header badges (a loop's `n/max`, rule streaks, "Needs decision"). */
+  headerExtra?: React.ReactNode;
+  /** Replaces the transcript (prompt, stream, review controls): a loop renders its iterations here. */
+  body?: React.ReactNode;
+  /** Rendered above the transcript: a loop body's iteration input, operator and digest turns. */
+  preamble?: React.ReactNode;
+  /** Hide the definition's first prompt (a later iteration's first turn was its follow-up prompt). */
+  hidePrompt?: boolean;
 }
 
 function statusVisual(status: StageStatus) {
   switch (status) {
     case 'completed':      return { Icon: Check,          dot: 'bg-[var(--color-success)] text-white',        label: 'Completed',       tone: 'success', pulse: false };
     case 'running':        return { Icon: Loader2,        dot: 'bg-[var(--color-primary)] text-white',        label: 'Running',         tone: 'primary', pulse: 'spin' };
-    case 'queued':         return { Icon: Clock,          dot: 'bg-[var(--color-primary)]/40 text-white',     label: 'Queued',          tone: 'primary', pulse: false };
+    case 'ready':          return { Icon: Clock,          dot: 'bg-[var(--color-primary)]/40 text-white',     label: 'Queued',          tone: 'primary', pulse: false };
+    case 'waiting':        return { Icon: Clock,          dot: 'bg-[var(--color-warning)]/60 text-white',     label: 'Waiting',         tone: 'warning', pulse: false };
     case 'pending':        return { Icon: Clock,          dot: 'bg-[var(--color-muted-foreground)]/30 text-[var(--color-muted-foreground)]', label: 'Pending', tone: 'muted', pulse: false };
     case 'paused':         return { Icon: Pause,          dot: 'bg-[var(--color-warning)] text-white',        label: 'Paused',          tone: 'warning', pulse: false };
     case 'awaiting_input': return { Icon: Hand,           dot: 'bg-[var(--color-warning)] text-white',        label: 'Awaiting input',  tone: 'warning', pulse: 'breathe' };
-    case 'sleeping':       return { Icon: Moon,           dot: 'bg-indigo-500 text-white',                    label: 'Sleeping',        tone: 'indigo',  pulse: false };
     case 'failed':         return { Icon: AlertTriangle,  dot: 'bg-[var(--color-danger)] text-white',         label: 'Failed',          tone: 'danger',  pulse: false };
     case 'cancelled':      return { Icon: X,              dot: 'bg-[var(--color-muted-foreground)]/40 text-white', label: 'Cancelled', tone: 'muted', pulse: false };
     case 'skipped':        return { Icon: SkipForward,    dot: 'bg-[var(--color-muted-foreground)]/40 text-white', label: 'Skipped',  tone: 'muted', pulse: false };
   }
+}
+
+/** The interaction a plan card answers: the plan block's own, else the stage's parked plan review. */
+function planInteraction(stage: StageView, planId: string): string | undefined {
+  for (const seg of stage.segments) {
+    if (seg.type === 'plan' && seg.plan.planId === planId && seg.plan.interactionId) return seg.plan.interactionId;
+  }
+  return undefined;
 }
 
 function formatDuration(ms?: number): string | null {
@@ -78,20 +137,94 @@ function formatDuration(ms?: number): string | null {
   return `${Math.floor(ms / 60_000)}m ${Math.floor((ms % 60_000) / 1000)}s`;
 }
 
-function formatCountdown(ms: number): string {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  return `${m}m ${(s % 60).toString().padStart(2, '0')}s`;
+/** The "…" menu of one stage: what the instance's engine state accepts. */
+function StageMenu({ stage, menu, onOpenInspector }: { stage: StageView; menu: StageMenuActions; onOpenInspector?: (id: string) => void }) {
+  const raw = stage.rawStatus;
+  const live = menu.runLive;
+  const inAttempt = raw === 'starting' || raw === 'running' || raw === 'validating';
+  const canPause = live && (raw === 'ready' || raw === 'retry_wait' || inAttempt);
+  const paused = live && raw === 'paused';
+  const canSkip = live && (raw === 'paused' || raw === 'ready');
+  const terminal = raw === 'completed' || raw === 'failed' || raw === 'skipped' || raw === 'cancelled';
+  const canCancel = live && !terminal;
+  const hasOutput = !!stage.outputText || !!stage.outputData;
+  const cmd = (command: RunCommand) => menu.onCommand(stage.id, command);
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <Button
+          type="button"
+          variant="ghost"
+          size="icon-sm"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+          title="Stage actions"
+          aria-label={`Actions for ${stage.name}`}
+          className="h-auto w-auto rounded-md p-0.5 text-[var(--color-muted-foreground)] hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
+        >
+          <MoreHorizontal className="h-3.5 w-3.5" />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="min-w-[210px]" onClick={(e) => e.stopPropagation()}>
+        <DropdownMenuItem disabled={!canPause} onSelect={() => cmd({ command: 'pause', instanceId: stage.id, mode: 'interrupt' })}>
+          <Pause className="mr-2 h-3.5 w-3.5" />
+          Pause stage
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!paused} onSelect={() => cmd({ command: 'resume', instanceId: stage.id })}>
+          <Play className="mr-2 h-3.5 w-3.5" />
+          Resume
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!paused} onSelect={() => cmd({ command: 'retry', instanceId: stage.id, mode: 'resume' })}>
+          <RotateCcw className="mr-2 h-3.5 w-3.5" />
+          Retry (continue the conversation)
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!paused} onSelect={() => cmd({ command: 'retry', instanceId: stage.id, mode: 'restart' })}>
+          <RefreshCw className="mr-2 h-3.5 w-3.5" />
+          Retry (restart the stage)
+        </DropdownMenuItem>
+        <DropdownMenuItem disabled={!canSkip} onSelect={() => cmd({ command: 'skip', instanceId: stage.id, as: 'completed' })}>
+          <SkipForward className="mr-2 h-3.5 w-3.5" />
+          Skip as completed
+        </DropdownMenuItem>
+        <DropdownMenuItem
+          disabled={!canCancel}
+          onSelect={() => cmd({ command: 'cancel', instanceId: stage.id })}
+          className="text-[var(--color-danger)] focus:text-[var(--color-danger)]"
+        >
+          <X className="mr-2 h-3.5 w-3.5" />
+          Cancel stage…
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem disabled={!hasOutput} onSelect={() => menu.onCopyOutput(stage.id)}>
+          <Copy className="mr-2 h-3.5 w-3.5" />
+          Copy output
+        </DropdownMenuItem>
+        {onOpenInspector && (
+          <DropdownMenuItem onSelect={() => onOpenInspector(stage.id)}>
+            <PanelRightOpen className="mr-2 h-3.5 w-3.5" />
+            Open in inspector
+          </DropdownMenuItem>
+        )}
+        <DropdownMenuItem
+          disabled={live}
+          title={live ? 'Available once the run has finished: a re-run is a new run' : undefined}
+          onSelect={() => menu.onRerunFrom(stage.id)}
+        >
+          <GitFork className="mr-2 h-3.5 w-3.5" />
+          Re-run from here
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
 }
 
 export const StageTimelineItem = React.memo(function StageTimelineItem({
-  stage, focused, defaultOpen, autoCollapse = true, openWhenFinished = false, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onRetry, onWake, onSelectFiles, onSelectOutput, onOpenInspector,
+  stage, focused, defaultOpen, autoCollapse = true, openWhenFinished = false, showConnector = true, onFocus, onApproveHitl, onRejectHitl, onTerminalRejectHitl, onResolveGate, gateBusy, menu, composer, onRetry, onSelectFiles, onSelectOutput, onOpenInspector,
+  headerExtra, body, preamble, hidePrompt,
 }: StageTimelineItemProps) {
   const v = statusVisual(stage.status);
-  const isActive = stage.status === 'running' || stage.status === 'awaiting_input';
+  const isActive = stage.status === 'running' || stage.status === 'awaiting_input' || stage.streaming === true;
   const isTerminal = stage.status === 'completed' || stage.status === 'failed' || stage.status === 'cancelled' || stage.status === 'skipped';
-  const isSleeping = stage.status === 'sleeping';
   const isAwaiting = stage.status === 'awaiting_input';
   const isFailed = stage.status === 'failed';
   const isSkippedOrCancelled = stage.status === 'skipped' || stage.status === 'cancelled';
@@ -194,9 +327,15 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
           v.tone === 'danger'  && 'bg-[var(--color-danger)]/12  text-[var(--color-danger)]',
           v.tone === 'indigo'  && 'bg-indigo-500/12 text-indigo-400',
           v.tone === 'muted'   && 'bg-[var(--color-muted-foreground)]/10 text-[var(--color-muted-foreground)]',
-        )}>
-          {v.label}
+        )}
+          {...(stage.admission ? { title: `${stage.admission.queued} launch${stage.admission.queued === 1 ? '' : 'es'} queued on ${stage.admission.flowKey}` } : {})}
+        >
+          {stage.admission
+            ? `ready · waiting for ${stage.admission.label} (${stage.admission.limit !== null ? `${stage.admission.running}/${stage.admission.limit}` : `${stage.admission.running} running`})`
+            : v.label}
         </span>
+
+        {headerExtra}
 
         {/* parallel badge */}
         {(stage.parallelWith?.length ?? 0) > 0 && (
@@ -229,10 +368,19 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
                 : {})}
             />
           )}
+          {stage.amendedAt && (
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--color-primary)]/10 px-1.5 py-0.5 text-[10px] font-medium text-[var(--color-primary)]"
+              title={`Output amended ${new Date(stage.amendedAt).toLocaleString()}. Later stages kept the output they already used; re-run from here to update them.`}
+            >
+              <PencilLine className="h-2.5 w-2.5" />
+              Amended
+            </span>
+          )}
           {isFailed && onRetry && (
             <Button
               onClick={(e) => { e.stopPropagation(); onRetry(stage.id); }}
-              title="Retry stage"
+              title="Re-run from this stage"
               variant="ghost"
               size="icon-sm"
               className="h-auto w-auto rounded-md border border-[var(--color-border)] p-0.5 text-[var(--color-muted-foreground)] hover:bg-[var(--color-primary)]/10 hover:text-[var(--color-primary)]"
@@ -240,20 +388,7 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
               <RefreshCw className="h-2.5 w-2.5" />
             </Button>
           )}
-          <Button
-            onClick={(e) => e.stopPropagation()}
-            variant="ghost"
-            size="icon-sm"
-            className={cn(
-              'h-auto w-auto rounded-md p-0.5 text-[var(--color-muted-foreground)]/60 hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]',
-              // 12px icon + 2px padding is a 16px target; the pseudo-element
-              // brings the clickable area up to 24px without changing the row.
-              'relative before:absolute before:-inset-1 before:content-[""]',
-            )}
-            aria-label="Stage actions"
-          >
-            <MoreHorizontal className="h-3 w-3" />
-          </Button>
+          {menu && <StageMenu stage={stage} menu={menu} {...(onOpenInspector ? { onOpenInspector } : {})} />}
           <ChevronDown className={cn('h-3.5 w-3.5 transition-transform text-[var(--color-muted-foreground)]/60', !open && '-rotate-90')} />
         </span>
       </div>
@@ -261,8 +396,10 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
       {/* Body — indented under the dot with the vertical line continuing */}
       {open && !isSkippedOrCancelled && (
         <div className="pl-[34px] pt-1.5 pb-3 space-y-2.5">
+          {body}
+
           {/* User prompt bubble — right-aligned */}
-          {stage.prompt && (
+          {!body && !hidePrompt && stage.prompt && (
             <div className="flex justify-end">
               <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-[var(--color-primary)]/[0.08] border border-[var(--color-primary)]/20 px-3 py-2">
                 <div className="mb-1 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-[var(--color-primary)]/80">
@@ -276,48 +413,45 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
             </div>
           )}
 
-          {/* Sleeping block */}
-          {isSleeping && stage.sleepRemainingMs != null && (
-            <div className="rounded-lg border border-indigo-500/30 bg-indigo-500/[0.06] px-3 py-2 flex items-center gap-2 text-[12px]">
-              <Moon className="h-3.5 w-3.5 text-indigo-400" />
-              <span className="font-medium text-indigo-400">Sleeping</span>
-              <span className="text-[var(--color-muted-foreground)]">
-                Wakes in <span className="font-mono tabular-nums text-[var(--color-foreground)]/85">{formatCountdown(stage.sleepRemainingMs)}</span>
-              </span>
-              <Button
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onWake?.(stage.id);
-                }}
-                disabled={!onWake}
-                variant="ghost"
-                size="sm"
-                className="h-auto ml-auto rounded-md border border-indigo-500/40 bg-indigo-500/10 px-2 py-0.5 text-[10.5px] font-medium text-indigo-300 hover:bg-indigo-500/20"
-              >
-                Wake now
-              </Button>
-            </div>
-          )}
-
           {/* Steps + streaming answer + error — the shared stream body.
               Skeleton placeholder is never shown while the stage is parked
               in HITL (`awaiting_input`), since the InlineHitlControls below
               already communicate the state and a shimmer there is
               misleading (the model isn't producing tokens). Usage is NOT
               rendered here — it lives in the chips row below. */}
-          <StreamPanel
+          {!body && preamble}
+          {!body && <StreamPanel
             segments={stage.segments}
             steps={stage.steps}
             answer={stage.answer}
-            active={stage.status === 'running'}
+            widgets={stage.widgets}
+            streamKey={`stageRun:${stage.id}`}
+            active={stage.status === 'running' || stage.streaming === true}
             answerStreaming={isActive && !isAwaiting}
-            loading={isActive && !isAwaiting && stage.steps.length === 0}
+            loading={isActive && !isAwaiting && stage.steps.length === 0 && !stage.answer}
             error={isFailed ? stage.error : undefined}
-          />
+            planBusy={gateBusy ?? false}
+            {...(onResolveGate
+              ? {
+                  onAnswerPermission: (interactionId: string, behavior: 'allow' | 'deny', message?: string) =>
+                    onResolveGate(stage.id, { kind: 'permission', interactionId, behavior, ...(message ? { message } : {}) }),
+                  onAnswerQuestion: (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) =>
+                    onResolveGate(stage.id, { kind: 'answer', interactionId, answers, ...(freeformResponse ? { freeformResponse } : {}) }),
+                  onApprovePlan: (planId: string, action: 'implement_interactive' | 'implement_autopilot') => {
+                    const interactionId = planInteraction(stage, planId);
+                    if (interactionId) onResolveGate(stage.id, { kind: 'plan', interactionId, approved: true, action });
+                  },
+                  onRequestPlanChanges: (planId: string, feedback: string) => {
+                    const interactionId = planInteraction(stage, planId);
+                    if (interactionId) onResolveGate(stage.id, { kind: 'plan', interactionId, approved: false, feedback });
+                  },
+                }
+              : {})}
+          />}
 
 
           {/* Chips row — files · output · details (inspector) · usage */}
-          {isTerminal && (stage.files?.length || stage.outputData || stage.summary || stage.usage || onOpenInspector) && (
+          {isTerminal && (stage.files?.length || stage.outputData || stage.summary || stage.usage || stage.contextUsage || onOpenInspector) && (
             <div className="flex flex-wrap items-center gap-1.5 pt-1">
               {stage.files?.length ? (
                 <Button
@@ -354,23 +488,37 @@ export const StageTimelineItem = React.memo(function StageTimelineItem({
                 </Button>
               )}
               {stage.usage && <UsageChip usage={stage.usage} />}
+              {stage.contextUsage && (
+                <ContextUsageGauge
+                  snapshot={stage.contextUsage}
+                  usage={stage.usage ?? null}
+                  placement="top"
+                  {...(stage.sharedContext
+                    ? { scopeNote: 'This run shares one conversation across stages, so this is the run’s context window — not this stage alone.' }
+                    : {})}
+                />
+              )}
             </div>
           )}
 
           {/* HITL controls — rendered at the bottom so the reviewer sees the
               stage output above the approval block. */}
-          {isAwaiting && stage.interrupt && (
+          {!body && isAwaiting && stage.interrupt && (
             <InlineHitlControls
               reason={stage.interrupt.reason}
               tool={stage.interrupt.tool}
               args={stage.interrupt.args}
-              onApprove={(fu) => onApproveHitl?.(stage.id, fu)}
+              busy={gateBusy ?? false}
+              onApprove={() => onApproveHitl?.(stage.id)}
               onReject={(feedback) => onRejectHitl?.(stage.id, feedback)}
               {...(onTerminalRejectHitl
                 ? { onTerminalReject: (reason?: string) => onTerminalRejectHitl(stage.id, reason) }
                 : {})}
             />
           )}
+
+          {/* The focused stage's compact composer (a stage is a compact chat). */}
+          {composer}
         </div>
       )}
 

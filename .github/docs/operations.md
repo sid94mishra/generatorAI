@@ -222,8 +222,6 @@ Per-operation git timeout is hardcoded (120s in `GitClient`, shorter for individ
 
 | Var | Default | Purpose |
 |---|---|---|
-| `WEBHOOKS_ENABLED` | `false` | Master switch for incoming webhook handlers |
-| `GITHUB_WEBHOOK_SECRET` | (none) | HMAC shared secret for GitHub webhooks |
 | `WEBHOOK_TOKEN` | (none) | Shared token required on inbound custom-automation webhook triggers (`x-webhook-token` header) |
 
 There is no WEBHOOK_AUTOMATION_BASE_URL env var — nothing in the codebase constructs webhook URLs from a configurable base; there is no such mechanism today.
@@ -333,7 +331,7 @@ Structured JSON logs via pino:
 { "level": 30, "time": ..., "service": "generatorai-server", "msg": "...", "runId": "...", "sessionId": "..." }
 ```
 
-Per-run JSONL logs are written to `<workspace>/artifacts/logs/run.jsonl` by `RunLogger`. Each line is one event.
+There is no per-run JSONL log file; run events are replayed from the persisted stream.
 
 `GENERATORAI_LOG_LEVEL=debug` enables detailed logs in `EventBus`, `StreamBroker`, `DAGScheduler`, harness providers.
 
@@ -385,7 +383,7 @@ For deploying to others (org users / public web):
 2. **Restrict CORS** to your own origins in `apps/server/src/app.ts`.
 3. **Enable sandbox** (`SANDBOX_ENABLED=true`) so user-supplied `script` hooks run isolated.
 4. **Don't expose `/api/copilot/*` publicly** — those endpoints reveal model lists and harness state.
-5. **Webhook secrets** — set `GITHUB_WEBHOOK_SECRET`; rotate automation webhook tokens regularly.
+5. **Webhook secrets** — set a per-automation webhook secret (HMAC, `X-Signature-256`); rotate automation webhook tokens regularly.
 6. **DB at rest** — encrypt the volume if persisting on shared infra. SQLite plain text is the default.
 7. **Path traversal** — enforced by `PathResolver`; don't bypass it in custom code.
 8. **GHEC tokens** — never log them; scrub from spawned environments.
@@ -428,12 +426,12 @@ VS Code's Copilot extension injects `COPILOT_GITHUB_TOKEN` into spawned child pr
 Run `claude login` once on the host to populate `~/.claude/.credentials.json`. The SDK reads from there. No env var needed in our provider.
 
 ### `Claude Code returned an error result: There's an issue with the selected model`
-A workflow stage's `harnessConfigOverrides.model` is provider-specific. Switching `HARNESS_TYPE` without clearing/aliasing model overrides fails. Either:
+A workflow's or stage's `session.model` is provider-specific. Switching `HARNESS_TYPE` without clearing/aliasing model overrides fails. Either:
 - Set the model field to a provider-appropriate value (`claude-sonnet-4-6` for Claude Agent; `claude-sonnet-4.6` for Copilot).
 - Remove the override to fall back to provider default.
 
-### `Workflow has no root stages`
-The DAG has no entry point. Either (a) every stage has incoming edges (cycle hiding via `condition: on_failure`), or (b) you have edges referencing non-existent stage IDs. Run `workflow validate <id>` to see the offenders.
+### `Invalid DAG: Cycle detected involving stages: …`
+The graph has a cycle, so no stage can start. `validateWorkflow` rejects cycles and edges to unknown stage keys at save, publish and run start, so this only appears for a graph that bypassed validation. Run `generatorai workflow validate <workflow>` to see the offending keys.
 
 ### `gpt-5.3-codex` hangs / no tokens
 The auto-router on some GHEC tenants picks `gpt-5.3-codex` and the model never emits anything. Default was switched to `claude-sonnet-4.6`. Override at the workflow/stage level if you want a specific model.
@@ -460,11 +458,10 @@ A write is trying to put an invalid shape into a JSON column. Likely a schema dr
 
 ## 11. Performance tuning
 
-- **`sessionMode: 'single'`** is fastest for sequential stages on cheap models.
-- **`sessionMode: 'per-stage'`** maximizes parallelism but multiplies harness sessions.
+- **Session sharing is automatic** — a purely linear graph runs every stage in one shared conversation (fastest for sequential stages); any parallel branch gives each stage its own session, which maximizes parallelism but multiplies harness sessions. There is no per-definition session mode.
 - **`reasoningEffort: 'low'`** halves Claude/Copilot latency at the cost of quality.
-- **`harnessConfig.availableTools`** — restricting tools speeds up model decision-making.
-- **`contextFilter: 'summary-only'`** (default) is much smaller than `'full'` for long predecessor outputs.
+- **`session.tools.available`** — restricting tools speeds up model decision-making.
+- **`context.mode: 'summary'`** (default) is much smaller than `'output'` for long predecessor outputs.
 - **`stream_cursors` retention** — the 30-day TTL is not env-configurable (see §4 Streaming); shorten `retention.eventPayloadTtlDays` in `AppConfig` if disk is tight.
 - **`SANDBOX_ENABLED=false`** — host execution is faster than Docker; only enable in shared environments.
 
@@ -489,7 +486,7 @@ Returns:
 }
 ```
 
-`harness.runtime` (and `harness.runtime.providers.<type>`) reports what the harness is holding: `liveConversations`, `liveSessions` (one CLI process each), `warmSessions`, and for providers that cap concurrent turns, `turnsInFlight` / `maxConcurrentTurns` (default 4, `GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`) / `turnsQueued`. **`turnsQueued > 0` while `turnsInFlight` is 0 means a permit leaked** — every new prompt would sit on "Waiting for a free agent slot"; `runningChatIds` lists the chats the server thinks are mid-turn.
+`harness.runtime` (and `harness.runtime.providers.<type>`) reports what the harness is holding: `liveConversations`, `liveSessions` (one CLI process each), `warmSessions`, and for providers that cap concurrent turns, `turnsInFlight` / `maxConcurrentTurns` (the `provider:claude-agent` flow key, default 4, Settings → Workflow engine) / `turnsQueued`. **`turnsQueued > 0` while `turnsInFlight` is 0 means a permit leaked** — every new prompt would sit on "Waiting for a free agent slot"; `runningChatIds` lists the chats the server thinks are mid-turn.
 
 `GET /api/health/config` returns non-sensitive resolved config (paths, models, ports, flags). Use this in CI to verify deployment.
 

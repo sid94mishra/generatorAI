@@ -125,7 +125,22 @@ export function rotateDeviceRequest(deviceId: string): JsonRequest {
 }
 
 /** Mirrors `PLATFORMS` in apps/server/src/routes/auth.ts. */
-export type PairingPlatform = 'web' | 'desktop' | 'cli' | 'mobile' | 'other';
+export type PairingPlatform = 'web' | 'desktop' | 'cli' | 'mobile' | 'mcp' | 'other';
+
+/** How a device's platform reads in a list (an unknown value is shown as sent). */
+export const PAIRING_PLATFORM_LABEL: Record<PairingPlatform, string> = {
+  web: 'Browser',
+  desktop: 'Desktop',
+  cli: 'CLI',
+  mobile: 'Phone',
+  mcp: 'MCP client',
+  other: 'Other',
+};
+
+export function platformLabel(platform: string | null | undefined): string | null {
+  if (!platform) return null;
+  return PAIRING_PLATFORM_LABEL[platform as PairingPlatform] ?? platform;
+}
 
 export const PAIRING_TTL_MS = { min: 30_000, max: 10 * 60_000, default: 5 * 60_000 } as const;
 
