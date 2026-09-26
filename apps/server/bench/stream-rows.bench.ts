@@ -4,9 +4,9 @@
 // Runs T1 (start → 5 branches → join → final) on the testkit and routes
 // every event the run emitted through the server's own scope fan-out
 // (`streamRowsFor`, the rule the event store + bridge apply), counting the
-// `stream_cursors` rows the run would write per event. The P01 RunLogger
-// deletion and the P03 outbox removed the third copy F T9 measured
-// (3 writes per event); W-42 is accepted at <= 2.2 rows per event.
+// `stream_cursors` rows the run would write per event. P01 deleted the
+// per-run JSONL log and P03 added the outbox, which removed the third copy
+// F T9 measured (3 writes per event); W-42 is accepted at <= 2.2 rows per event.
 //
 // A soft check: a warning above 2.2, never a failure (the stream-index
 // rewrite is a deferred follow-up, not a gate).

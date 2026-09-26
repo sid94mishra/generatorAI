@@ -2,6 +2,39 @@
   "$comment": "Workflow overhaul no-legacy guard (README §7 step 6, R-1). `banned`: identifiers each phase removed, APPENDED in the same commit that deletes them; a regex `pattern` matched per line against packages/** and apps/** source (tests, dist, node_modules excluded), optional `paths` prefixes; any hit fails. `comments`: `@deprecated` / `legacy` / `backward compat` / `fallback for old` inside comments of the workflow-module files matched by `paths` (regex sources). Report-only while `phase` < `failFromPhase` (null = not scheduled), but the count may never exceed `baseline`. Each phase bumps `phase` and lowers `baseline`; the phase that clears the module sets `failFromPhase` to itself.",
   "banned": [
     {
+      "phase": "07",
+      "pattern": "GENERATORAI_MAX_CONCURRENT_AGENT_TURNS",
+      "paths": [
+        "apps/server/",
+        "apps/agent-host/",
+        "apps/desktop/",
+        "packages/"
+      ],
+      "reason": "WP-7.2: the hidden claude-agent turn cap is the provider:claude-agent flow key (Settings → Workflow engine)"
+    },
+    {
+      "phase": "07",
+      "pattern": "\\b(admitFlow|DEFAULT_FLOW_LIMITS)\\b",
+      "paths": [
+        "apps/",
+        "packages/"
+      ],
+      "reason": "WP-7.2: one flow gate; admitFlows takes every key of a launch at once, defaultFlowLimits() sizes them"
+    },
+    {
+      "phase": "07",
+      "pattern": "'(claude_agent|copilot)\\.sendPrompt(AndWait)?'",
+      "reason": "WP-7.4: provider turns are `chat <model>` spans (GenAiTurnSpans), GenAI conventions"
+    },
+    {
+      "phase": "07",
+      "pattern": "data\\[['\"]cost['\"]\\]",
+      "paths": [
+        "packages/core/src/services/engine/"
+      ],
+      "reason": "WP-7.3: the engine reads provider-reported dollars from costUsd only (no pricing table; Copilot's cost is not USD)"
+    },
+    {
       "phase": "01",
       "pattern": "\\bStyledSelect\\b",
       "paths": [
