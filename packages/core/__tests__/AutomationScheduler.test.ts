@@ -22,6 +22,7 @@ import type {
 } from '../src/services/AutomationService.js';
 import { EventBus } from '../src/events/EventBus.js';
 import type { WorkflowRunService } from '../src/services/WorkflowRunService.js';
+import type { WorkflowInvocationService } from '../src/services/workflow-invocation/WorkflowInvocationService.js';
 import type { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
 import type { IWorkflowRunRepository } from '../src/domain/ports/IWorkflowRunRepository.js';
 import type {
@@ -253,6 +254,22 @@ function makeWorkflowHarness(
   return { workflowRunService, workflowRunRepo, createLog };
 }
 
+
+/** The invocation over the fake run service (P04: an automation starts every run through `invoke`, then `waitFor`). */
+function invocationOver(runs: WorkflowRunService, repo: IWorkflowRunRepository): Pick<WorkflowInvocationService, 'invoke' | 'waitFor'> {
+  return {
+    invoke: async (req: { target: { workflowDefinitionId?: string }; variables?: Record<string, unknown> }) => {
+      const run = await (runs as unknown as { createRun: (p: unknown) => Promise<{ id: string }> }).createRun({
+        workflowDefinitionId: req.target.workflowDefinitionId,
+        variables: req.variables ?? {},
+      });
+      await runs.startRun(run.id);
+      return { runId: run.id };
+    },
+    waitFor: async (runId: string) => ({ ...(await repo.getById(runId)), waited: 'finalized' }),
+  } as unknown as Pick<WorkflowInvocationService, 'invoke' | 'waitFor'>;
+}
+
 interface Harness {
   service: AutomationService;
   automationRepo: InMemoryAutomationRepo;
@@ -278,6 +295,7 @@ function setup(outcomeFor?: (variables: Record<string, unknown>, defId: string) 
     automationRepo,
     executionRepo,
     workflowRunService,
+    invocationOver(workflowRunService, workflowRunRepo),
     workflowRunRepo,
     {} as unknown as WorkflowDefinitionService,
     eventBus,
@@ -391,7 +409,7 @@ describe('Item 38 — DB-backed due-row scheduler', () => {
   });
 
   it('three-way status: mixed iteration outcomes settle as "partial", not "completed"', async () => {
-    const mixed = setup((variables) => (variables['__iteration_index'] === 0 ? 'completed' : 'failed'));
+    const mixed = setup((variables) => (variables['row'] === 'a' ? 'completed' : 'failed'));
     mixed.automationRepo.seed({
       id: 'auto-mixed',
       name: 'batch',

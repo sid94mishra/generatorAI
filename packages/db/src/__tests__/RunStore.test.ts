@@ -169,9 +169,10 @@ describe('RunStore.apply', () => {
       'stage_run.completed',
       'stage_run.completed',
       'workflow_run.completed',
+      'workflow_run.finalized',
     ]);
-    expect(outbox.map((o) => o.runSeq)).toEqual([1, 2, 3, 4, 5]);
-    expect(row.runSeq).toBe(5);
+    expect(outbox.map((o) => o.runSeq)).toEqual([1, 2, 3, 4, 5, 6]);
+    expect(row.runSeq).toBe(6);
     expect(new SchedulerJournalRepository(raw(open[0]!)).list('r').map((j) => j.seq)).toEqual([1, 2, 3, 4, 5]);
     // Terminal: no live timer left.
     expect(new WorkflowTimerRepository(raw(open[0]!)).listLive('r')).toEqual([]);

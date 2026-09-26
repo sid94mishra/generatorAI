@@ -1,23 +1,28 @@
 // ────────────────────────────────────────────────────────────────
 // Run and stage control mutations: run commands (`POST /commands`) and forks.
 //
-// All of these need `runControl` (write:workflows + exec:agent) EXCEPT
+// Commands need `runControl` (write:workflows + exec:agent) EXCEPT
 // `approve`, which the route policy lets through on exec:agent alone
-// (answering the agent). Every mutation refetches the run on settle; the
-// server is the only authority on what state the run landed in (a 409 means
-// another device or the sweeper got there first, which the refetch then
-// shows). A finished run is never mutated: retrying it forks a NEW run.
+// (answering the agent). A fork is a new invocation
+// (`POST /workflow-invocations`, target `fork`), so it needs only
+// `runStart`. Every mutation refetches the run on settle; the server is the
+// only authority on what state the run landed in (a 409 means another
+// device or the sweeper got there first, which the refetch then shows). A
+// finished run is never mutated: retrying it forks a NEW run.
 // ────────────────────────────────────────────────────────────────
 
 import { Alert } from 'react-native';
 import { router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import {
+  newIdempotencyKey,
   queryKeys,
   type ApprovalOutcome,
   type StageRunSummary,
   type WorkflowRunSummary,
 } from '@generatorai/client-core';
+
+import type { InvocationRequest } from '@generatorai/workflow-spec';
 
 import { useAdminApi } from './useAdminApi';
 import { useApi } from './useApi';
@@ -38,6 +43,21 @@ function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** A fork of a finished run: pinned definition, fresh workspace. */
+function forkRequest(sourceRunId: string, rerunFrom?: string[]): InvocationRequest {
+  return {
+    target: {
+      kind: 'fork',
+      sourceRunId,
+      definition: 'pinned',
+      workspace: 'fresh',
+      ...(rerunFrom ? { rerunFrom } : {}),
+    },
+    variables: {},
+    client: 'mobile',
+  };
+}
+
 export function useRunMutations(runId: string) {
   const api = useApi();
   const admin = useAdminApi();
@@ -53,8 +73,8 @@ export function useRunMutations(runId: string) {
     mutationFn: async (action: RunAction): Promise<{ newRunId?: string }> => {
       if (action === 'retry') {
         // "Retry failed": a NEW run re-runs every stage that did not complete.
-        const fork = await admin.runs.fork(runId);
-        return { newRunId: fork.id };
+        const fork = await admin.workflows.invoke(forkRequest(runId), { idempotencyKey: newIdempotencyKey() });
+        return { newRunId: fork.runId };
       }
       // Pause in `interrupt` mode so in-flight stages pause too.
       await admin.runs.command(
@@ -79,8 +99,11 @@ export function useRunMutations(runId: string) {
       if (action === 'retry' && run && isTerminal(run.status)) {
         // A stage of a finished run re-runs from that stage in a fork.
         const stage = run.stageRuns.find((s) => s.id === stageRunId);
-        const fork = await admin.runs.fork(runId, { rerunFrom: [stage?.instancePath ?? stage?.stageKey ?? stageRunId] });
-        return { newRunId: fork.id };
+        const fork = await admin.workflows.invoke(
+          forkRequest(runId, [stage?.instancePath ?? stage?.stageKey ?? stageRunId]),
+          { idempotencyKey: newIdempotencyKey() },
+        );
+        return { newRunId: fork.runId };
       }
       await admin.runs.command(
         runId,

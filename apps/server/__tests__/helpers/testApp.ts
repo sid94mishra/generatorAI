@@ -374,13 +374,25 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     deleteByRunId: vi.fn(),
   };
 
-  // WorkflowOrchestrator mock — startRun route calls getRunWorkspaceDir/
-  // getRunArtifactsDir before firing workflowRunService.startRun, so the
-  // mock needs these present or the route returns 502.
-  const workflowOrchestrator = {
-    getRunWorkspaceDir: vi.fn().mockResolvedValue('/tmp/test-workspaces/run-1'),
-    getRunArtifactsDir: vi.fn().mockResolvedValue('/tmp/test-artifacts/run-1'),
-    orchestrateRun: vi.fn().mockResolvedValue(undefined),
+  // THE way a run starts (P04): the invocation route calls this service.
+  const workflowInvocationService = {
+    invoke: vi.fn().mockResolvedValue({
+      invocationId: 'inv-1',
+      runId: 'run-1',
+      workflowDefinitionId: 'def-1',
+      status: 'starting',
+      replayed: false,
+      trigger: { kind: 'user', client: 'http', principalId: 'local' },
+      links: { app: '/workflows/def-1/runs/run-1', api: '/api/workflow-runs/run-1', stream: '/api/stream?scope=run&id=run-1' },
+      plan: { stages: [], codebases: [], prepare: [], preprocessing: [], postProcessing: [], warnings: [] },
+      warnings: [],
+    }),
+    plan: vi.fn(),
+    stageUploads: vi.fn().mockResolvedValue([]),
+    digest: vi.fn(),
+    waitFor: vi.fn(),
+    sweepUploads: vi.fn().mockResolvedValue(0),
+    setScripts: vi.fn(),
   };
 
   const harnessProxy = {
@@ -398,7 +410,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     config,
     logger,
     eventBus,
-    workflowOrchestrator,
+    workflowInvocationService,
     harnessProxy,
     harnessRegistry,
     artifactService,

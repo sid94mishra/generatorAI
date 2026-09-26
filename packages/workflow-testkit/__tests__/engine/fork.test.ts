@@ -86,7 +86,8 @@ describe('forkRun', () => {
     await run.waitForTerminal();
     const first = await engine.commands.send(run.runId, { type: 'retry-run', request: { idempotencyKey: 'click-1', start: false } });
     const second = await engine.commands.send(run.runId, { type: 'retry-run', request: { idempotencyKey: 'click-1', start: false } });
-    expect(first.status).toBe(201);
+    // A re-run is an invocation (P04): 202, the new run in `runId`.
+    expect(first.status).toBe(202);
     expect(second.runId).toBe(first.runId);
     const third = await engine.commands.send(run.runId, { type: 'retry-run', request: { idempotencyKey: 'click-2', start: false } });
     expect(third.runId).not.toBe(first.runId);

@@ -28,18 +28,15 @@ export interface PermissionModeSource {
   read(): Promise<ChatPermissionMode | undefined>;
 }
 
-/** Engine-state key a run's trigger-declared mode is kept under (PD-18). */
-export const TRIGGER_PERMISSION_MODE_KEY = '__triggerPermissionMode';
-
 /** A run's mode through its layers, without the deployment posture. */
 export function runPermissionMode(
-  run: Pick<WorkflowRun, 'permissionMode' | 'variables'>,
+  run: Pick<WorkflowRun, 'permissionMode' | 'systemVars'>,
   stage: SessionSpec | undefined,
   workflow: SessionSpec | undefined,
 ): ChatPermissionMode | undefined {
   if (run.permissionMode) return run.permissionMode as ChatPermissionMode;
-  const raw = run.variables?.[TRIGGER_PERMISSION_MODE_KEY];
-  const trigger = typeof raw === 'string' ? (raw as ChatPermissionMode) : undefined;
+  // The trigger's ceiling is a system value (never a variable, W-06).
+  const trigger = run.systemVars?.triggerPermissionMode as ChatPermissionMode | undefined;
   const definition = (stage?.permissionMode ?? workflow?.permissionMode) as ChatPermissionMode | undefined;
   if (!trigger) return definition;
   if (!definition) return trigger;
@@ -51,7 +48,7 @@ const PERMISSIVENESS: Record<string, number> = { plan: 0, default: 1, acceptEdit
 
 /** The run source: every read goes back to the run row. */
 export function runPermissionSource(
-  readRun: () => Promise<Pick<WorkflowRun, 'permissionMode' | 'variables'>>,
+  readRun: () => Promise<Pick<WorkflowRun, 'permissionMode' | 'systemVars'>>,
   stage: SessionSpec | undefined,
   workflow: SessionSpec | undefined,
 ): PermissionModeSource {

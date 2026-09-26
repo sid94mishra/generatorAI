@@ -1,13 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CustomToolRegistry } from '@generatorai/core';
 import { GeneratorAiMcpServer, type AiFacade, type AiChatSummary } from '../server.js';
 
-// The old `McpServerScaffold.start()` was a single log line — the package
-// had `@modelcontextprotocol/sdk` in node_modules and a name promising a
-// real server, but no transport and nothing that dispatched a tool call.
-// This exercises the real dispatch path (`callTool`) without needing a live
-// stdio transport or a real `@generatorai/sdk` `GeneratorAI` instance —
-// `AiFacade` is a narrow structural interface a fake can satisfy directly.
+// This exercises the real dispatch path (`callTool`) without a live stdio
+// transport or a running server — `AiFacade` is the narrow slice of the
+// remote API (P04 remote mode) a fake can satisfy directly.
 
 function fakeAi(overrides: Partial<AiFacade> = {}): AiFacade {
   const chats: AiChatSummary[] = [{ id: 'c1', name: 'Existing chat', status: 'active' }];
@@ -18,7 +14,17 @@ function fakeAi(overrides: Partial<AiFacade> = {}): AiFacade {
       send: vi.fn(async () => undefined),
     },
     workflows: {
-      run: vi.fn(async (definitionId) => ({ id: 'run-1', status: 'running', definitionId })),
+      invoke: vi.fn(async () => ({
+        invocationId: 'inv-1',
+        runId: 'run-1',
+        workflowDefinitionId: 'def-1',
+        status: 'starting' as const,
+        replayed: false,
+        trigger: { kind: 'external_agent' as const, via: 'mcp' as const, principalId: 'd1' },
+        links: { app: '/workflows/def-1/runs/run-1', api: '/api/workflow-runs/run-1', stream: '/api/stream?scope=run&id=run-1' },
+        plan: {} as never,
+        warnings: [],
+      })),
     },
     ...overrides,
   } as AiFacade;
@@ -64,33 +70,23 @@ describe('GeneratorAiMcpServer', () => {
     await expect(server.callTool('generatorai_send_prompt', {})).rejects.toThrow('"message" is required');
   });
 
-  it('generatorai_run_workflow forwards to ai.workflows.run', async () => {
+  it('generatorai_run_workflow starts the run through the one invocation', async () => {
     const ai = fakeAi();
     const server = new GeneratorAiMcpServer({ ai });
     const result = await server.callTool('generatorai_run_workflow', {
       definitionId: 'def-1',
       variables: { foo: 'bar' },
+      idempotencyKey: 'k1',
     });
-    expect(ai.workflows.run).toHaveBeenCalledWith('def-1', { variables: { foo: 'bar' }, projectId: undefined });
-    expect(result).toMatchObject({ id: 'run-1', status: 'running' });
+    expect(ai.workflows.invoke).toHaveBeenCalledWith(
+      { target: { kind: 'definition', workflowDefinitionId: 'def-1' }, variables: { foo: 'bar' }, client: 'mcp' },
+      { idempotencyKey: 'k1' },
+    );
+    expect(result).toMatchObject({ runId: 'run-1', status: 'starting' });
   });
 
-  it('an unknown tool with no registry throws', async () => {
+  it('an unknown tool throws', async () => {
     const server = new GeneratorAiMcpServer({ ai: fakeAi() });
     await expect(server.callTool('not_a_real_tool', {})).rejects.toThrow('Unknown tool');
-  });
-
-  it('dispatches a registered custom tool (TOL-05) alongside the built-ins', async () => {
-    const registry = new CustomToolRegistry();
-    registry.register({
-      name: 'echo',
-      description: 'Echoes its input',
-      parametersSchema: { type: 'object', properties: { text: { type: 'string' } } },
-      handler: async (args) => ({ echoed: args }),
-    });
-    const server = new GeneratorAiMcpServer({ ai: fakeAi(), registry });
-    expect(server.listTools().map((t) => t.name)).toContain('echo');
-    const result = await server.callTool('echo', { text: 'hi' });
-    expect(result).toEqual({ echoed: { text: 'hi' } });
   });
 });

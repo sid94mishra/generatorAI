@@ -20,7 +20,8 @@ import { createChatApiRoutes } from './chats.js';
 import { createAgentApiRoutes } from './agents.js';
 import { createWorkflowDefinitionRoutes } from './workflowDefinitions.js';
 import { createWorkflowRunRoutes } from './workflowRuns.js';
-import { createOrchestratorRoutes } from './orchestrator.js';
+import { createWorkflowInvocationRoutes } from './workflowInvocations.js';
+import { createWorkflowRunWorkspaceRoutes } from './workflowRunWorkspace.js';
 import { createAutomationRoutes } from './automations.js';
 import { createSessionRoutes } from './sessions.js';
 import { createOpenApiRoutes } from './openapi.js';
@@ -59,11 +60,12 @@ export function createApiRouter(container: Container): Router {
   // Workflow definitions (v2) — CRUD + stages + edges
   router.use('/workflow-definitions', createWorkflowDefinitionRoutes(container));
 
-  // Workflow runs (v2) — run lifecycle + stage controls + SSE
+  // Workflow runs (v2) — runs, instances, the commands API, the run workspace
   router.use('/workflow-runs', createWorkflowRunRoutes(container));
+  router.use('/workflow-runs', createWorkflowRunWorkspaceRoutes(container));
 
-  // Orchestrator (v2) — system workflows + orchestrated runs
-  router.use('/orchestrator', createOrchestratorRoutes(container));
+  // THE way a run starts (P04): one route for every client
+  router.use('/workflow-invocations', createWorkflowInvocationRoutes(container));
 
   // Projects — CRUD + codebases + configs + worktrees
   router.use('/projects', createProjectRoutes(container));

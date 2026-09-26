@@ -23,13 +23,18 @@ import {
   Download,
   Upload,
 } from 'lucide-react';
-import type { ValidationIssue, WorkflowDefinitionRecord, WorkflowGraph } from '@generatorai/workflow-spec';
+import type {
+  InvocationRequest,
+  InvocationResult,
+  ValidationIssue,
+  WorkflowDefinitionRecord,
+  WorkflowGraph,
+} from '@generatorai/workflow-spec';
 
 import { DAGCanvas } from '@/components/workflow/DAGCanvas.js';
 import { StagePropertiesPanel } from '@/components/workflow/StagePropertiesPanel.js';
 import { WorkflowConfigPanel } from '@/components/workflow/WorkflowConfigPanel.js';
-import { VariableInputModal } from '@/components/workflow/VariableInputModal.js';
-import type { UploadedFileSet, LinkedCodebaseInfo } from '@/components/workflow/VariableInputModal.js';
+import { RunDialog } from '@/components/workflow/RunDialog.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import {
@@ -37,10 +42,6 @@ import {
   useCreateWorkflowDefinition,
   useSaveDefinitionGraph,
   usePublishDefinition,
-  useCreateWorkflowRun,
-  useStartWorkflowRun,
-  useStartOrchestratedRun,
-  useUploadRunFiles,
   workflowKeys,
 } from '@/hooks/workflowQueries.js';
 import { cn } from '@/lib/utils.js';
@@ -48,13 +49,10 @@ import { Badge, Button, Modal, Spinner } from '@/components/ui/index.js';
 import { useResizable } from '@/hooks/useResizable.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 import { usePageTitle } from '@/hooks/usePageTitle.js';
-import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { ApiError } from '@/platform/apiFetch.js';
 import { downloadBlobAsFile } from '@/utils/downloadBlobAsFile.js';
 import { exportFileName } from '@/utils/workflowExport.js';
-import type { CreateWorkflowRunParams } from '@generatorai/shared';
-import { encodeStageOverrides, needsOrchestratedStart, type StageOverrideDraft } from '@generatorai/client-core';
 
 /**
  * What the Run button does for the current definition state:
@@ -95,6 +93,7 @@ export function WorkflowBuilderPage() {
   const needsAttention = useWorkflowBuilderStore((s) => s.needsAttention);
   const projectId = useWorkflowBuilderStore((s) => s.workflow.projectId ?? null);
   const codebaseAliases = useWorkflowBuilderStore(useShallow((s) => s.workflow.lifecycle.codebaseAliases));
+  const lifecycleUseWorktree = useWorkflowBuilderStore((s) => s.workflow.lifecycle.useWorktree);
   const variables = useWorkflowBuilderStore((s) => s.workflow.variables);
   const issues = useWorkflowBuilderStore((s) => s.issues);
   const canUndo = useWorkflowBuilderStore((s) => s.canUndo());
@@ -126,16 +125,11 @@ export function WorkflowBuilderPage() {
   const createDefinition = useCreateWorkflowDefinition();
   const saveDefinition = useSaveDefinitionGraph();
   const publishDefinition = usePublishDefinition();
-  const createRun = useCreateWorkflowRun();
-  const startRun = useStartWorkflowRun();
-  const startOrchestratedRun = useStartOrchestratedRun();
-  const uploadRunFiles = useUploadRunFiles();
 
   // ── Local UI state ──
   const [propertiesPanelOpen, setPropertiesPanelOpen] = useState(true);
   const [configPanelOpen, setConfigPanelOpen] = useState(false);
-  const [variableModalOpen, setVariableModalOpen] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
+  const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [isPublishing, setIsPublishing] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -153,19 +147,10 @@ export function WorkflowBuilderPage() {
     status !== 'published' ? 'test' : isDirty ? 'save-run' : hasUnpublishedChanges ? 'publish-run' : 'run';
   const errorIssues = useMemo(() => issues.filter((i) => i.severity === 'error'), [issues]);
 
-  // ── Project codebases (for auto-filling git variables in run dialog) ──
-  const { data: projectCodebases } = useProjectCodebases(projectId ?? undefined);
-
-  const linkedCodebases = useMemo((): LinkedCodebaseInfo[] | undefined => {
-    if (!projectId || codebaseAliases.length === 0 || !projectCodebases) return undefined;
-    return codebaseAliases
-      .map((alias) => {
-        const cb = projectCodebases.find((c) => c.alias === alias);
-        if (!cb) return null;
-        return { alias: cb.alias, url: cb.url ?? cb.localPath ?? '', branch: cb.defaultBranch ?? 'main' };
-      })
-      .filter((x): x is LinkedCodebaseInfo => x !== null);
-  }, [projectId, codebaseAliases, projectCodebases]);
+  const runLifecycle = useMemo(
+    () => ({ codebaseAliases, useWorktree: lifecycleUseWorktree }),
+    [codebaseAliases, lifecycleUseWorktree],
+  );
 
   // ── Resizable properties panel ──
   const { width: propertiesPanelWidth, isDragging: isResizingProps, handleProps: propsHandleProps } = useResizable({
@@ -388,72 +373,41 @@ export function WorkflowBuilderPage() {
   // ── Run workflow ──
   const handleRun = useCallback(() => {
     if (!handleValidate()) return;
-    setVariableModalOpen(true);
+    setRunDialogOpen(true);
   }, [handleValidate]);
 
-  const executeRun = useCallback(
-    async (
-      runVariables: Record<string, unknown>,
-      uploads?: UploadedFileSet,
-      stageOverrides?: StageOverrideDraft[],
-    ) => {
-      setIsRunning(true);
-      try {
-        // Bring the server up to what the canvas shows before running it.
-        const mode = runMode;
-        if (mode === 'save-run' || mode === 'publish-run') {
-          if (!(await publish())) return;
-        } else {
-          const current = useWorkflowBuilderStore.getState();
-          if (current.isDirty || !current.definitionId) {
-            if (!(await saveGraph())) return;
-          }
-        }
-        // Fresh snapshot — the save above may have created the definition.
-        const store = useWorkflowBuilderStore.getState();
-        const defId = store.definitionId;
-        if (!defId) return;
-        const testRun = mode === 'test';
-        const projectForRun = store.workflow.projectId ?? undefined;
+  // What the dialog previews: the saved definition (a draft as a test run).
+  const runTarget = useMemo(
+    (): InvocationRequest['target'] | undefined =>
+      definitionId
+        ? { kind: 'definition', workflowDefinitionId: definitionId, ...(runMode === 'test' ? { testRun: true } : {}) }
+        : undefined,
+    [definitionId, runMode],
+  );
 
-        if (needsOrchestratedStart(store.workflow)) {
-          const encoded = encodeStageOverrides(runVariables, stageOverrides);
-          const aliases = store.workflow.lifecycle.codebaseAliases;
-          const context = await startOrchestratedRun.mutateAsync({
-            workflowDefinitionId: defId,
-            ...encoded,
-            uploads,
-            projectId: projectForRun,
-            selectedCodebases: aliases.length > 0 ? aliases : undefined,
-            ...(testRun ? { testRun: true } : {}),
-          });
-          setVariableModalOpen(false);
-          navigate(`/workflows/${defId}/runs/${context.workflowRunId}`);
-        } else {
-          const params: CreateWorkflowRunParams = {
-            workflowDefinitionId: defId,
-            ...encodeStageOverrides(runVariables, stageOverrides),
-            ...(testRun ? { testRun: true } : {}),
-          };
-          const run = await createRun.mutateAsync(params);
-          if (uploads) {
-            for (const category of ['prompts', 'skills', 'agents'] as const) {
-              if (uploads[category].length > 0) {
-                await uploadRunFiles.mutateAsync({ runId: run.id, category, files: uploads[category] });
-              }
-            }
-          }
-          await startRun.mutateAsync(run.id);
-          setVariableModalOpen(false);
-          navigate(`/workflows/${defId}/runs/${run.id}`);
-        }
-      } catch (err) {
-        showError(err instanceof Error ? `Run failed: ${err.message}` : 'Run failed');
-      } finally {
-        setIsRunning(false);
+  // On Start: bring the server up to what the canvas shows, then run that.
+  const prepareRunTarget = useCallback(async (): Promise<InvocationRequest['target'] | null> => {
+    const mode = runMode;
+    if (mode === 'save-run' || mode === 'publish-run') {
+      if (!(await publish())) return null;
+    } else {
+      const current = useWorkflowBuilderStore.getState();
+      if (current.isDirty || !current.definitionId) {
+        if (!(await saveGraph())) return null;
       }
+    }
+    // Fresh snapshot — the save above may have created the definition.
+    const defId = useWorkflowBuilderStore.getState().definitionId;
+    if (!defId) return null;
+    return { kind: 'definition', workflowDefinitionId: defId, ...(mode === 'test' ? { testRun: true } : {}) };
+  }, [runMode, publish, saveGraph]);
+
+  const handleRunStarted = useCallback(
+    (result: InvocationResult) => {
+      setRunDialogOpen(false);
+      navigate(`/workflows/${result.workflowDefinitionId}/runs/${result.runId}`);
     },
-    [runMode, publish, saveGraph, createRun, startRun, startOrchestratedRun, uploadRunFiles, navigate, showError],
+    [navigate],
   );
 
   // ── Keyboard shortcuts ──
@@ -709,8 +663,7 @@ export function WorkflowBuilderPage() {
           <Button
             variant="primary"
             onClick={handleRun}
-            disabled={isRunning || isSaving || (!isNew && !definition)}
-            loading={isRunning}
+            disabled={isSaving || (!isNew && !definition)}
             leftIcon={<Play className="h-4 w-4" />}
           >
             {RUN_LABELS[runMode]}
@@ -843,16 +796,18 @@ export function WorkflowBuilderPage() {
       {/* ── Modals ── */}
       <WorkflowConfigPanel open={configPanelOpen} onClose={() => setConfigPanelOpen(false)} />
 
-      <VariableInputModal
-        open={variableModalOpen}
-        onClose={() => setVariableModalOpen(false)}
-        onSubmit={executeRun}
+      <RunDialog
+        open={runDialogOpen}
+        onClose={() => setRunDialogOpen(false)}
         variables={variables}
         workflowName={name || 'Untitled Workflow'}
-        isSubmitting={isRunning}
-        linkedCodebases={linkedCodebases}
         stages={stages}
+        projectId={projectId}
+        lifecycle={runLifecycle}
+        target={runTarget}
+        prepareTarget={prepareRunTarget}
         submitLabel={RUN_LABELS[runMode]}
+        onStarted={handleRunStarted}
       />
     </div>
   );

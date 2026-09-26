@@ -1547,29 +1547,24 @@ export class StreamEventRouter {
         out.push({ op: 'invalidate', resource: 'runs' });
         break;
 
-      // Orchestration / pre- and post-processing progress. Narration for the
-      // RUN, so it goes on the session key rather than into a stage.
-      case 'workflow_run.orchestration_started':
-        note('Orchestration started — preparing workflow execution');
+      // Lifecycle phases (P04: `starting` and `finalizing`) and their steps.
+      // Narration for the RUN, so it goes on the session key rather than
+      // into a stage.
+      case 'workflow_run.phase_started':
+        note(`${str(data['stage']) === 'finalize' ? 'Finalizing' : 'Preparing'}: ${str(data['phase'], 'phase')}`);
         break;
-      case 'workflow_run.orchestration_completed':
-        note('Orchestration completed');
+      case 'workflow_run.phase_completed':
+        note(`${str(data['phase'], 'phase')} done`);
         break;
-      case 'workflow_run.orchestration_failed':
-        note(`Orchestration failed: ${str(data['error'], 'Unknown error')}`, 'error');
+      case 'workflow_run.phase_failed':
+        note(`${str(data['phase'], 'phase')} failed: ${str(data['error'], 'Unknown error')}`, 'error');
         break;
-      case 'workflow_run.worktree_creating':
-        note('Creating worktree...');
+      // Waiters key on this: the lifecycle is done, post-processing included.
+      case 'workflow_run.finalized': {
+        const runId = optStr(data['workflowRunId']);
+        if (runId) out.push({ op: 'invalidate', resource: 'run', id: runId });
         break;
-      case 'workflow_run.worktree_created':
-        note(`Worktree created: ${str(data['path'])}`);
-        break;
-      case 'workflow_run.preprocessing_started':
-        note('Preprocessing started');
-        break;
-      case 'workflow_run.preprocessing_completed':
-        note('Preprocessing completed');
-        break;
+      }
       case 'workflow_run.preprocessing_step_started':
         note(`Preprocessing: ${str(data['stepName'] ?? data['step'], 'step')} started`);
         break;
@@ -1578,12 +1573,6 @@ export class StreamEventRouter {
         break;
       case 'workflow_run.preprocessing_step_failed':
         note(`Preprocessing step failed: ${str(data['error'], 'Unknown')}`, 'error');
-        break;
-      case 'workflow_run.postprocessing_started':
-        note('Post-processing started');
-        break;
-      case 'workflow_run.postprocessing_completed':
-        note('Post-processing completed');
         break;
       case 'workflow_run.postprocessing_step_started':
         note(`Post-processing: ${str(data['stepName'] ?? data['step'], 'step')} started`);
@@ -1595,13 +1584,10 @@ export class StreamEventRouter {
         note(`Post-processing step failed: ${str(data['error'], 'Unknown')}`, 'error');
         break;
       case 'workflow_run.sandbox_created':
-        note(`Sandbox created: ${str(data['sandboxId'])}`);
+        note(`Sandbox created: ${str(data['sandboxName'])}`);
         break;
       case 'workflow_run.sandbox_destroyed':
         note('Sandbox destroyed');
-        break;
-      case 'workflow_run.stage_validation':
-        note(`Stage validation: ${str(data['message'], 'validating stages')}`);
         break;
       case 'workflow_run.permission_mode_changed':
         note(`Permission mode changed to: ${str(data['mode'], 'unknown')}`);

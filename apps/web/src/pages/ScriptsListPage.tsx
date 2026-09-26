@@ -12,7 +12,8 @@ import {
   Layers,
 } from 'lucide-react';
 
-import { useScripts, useReloadScripts, useRunScript } from '@/hooks/scriptQueries.js';
+import { useScripts, useReloadScripts } from '@/hooks/scriptQueries.js';
+import { useInvokeWorkflow } from '@/hooks/workflowQueries.js';
 import { CardGridSkeleton } from '@/components/Skeleton.js';
 import { SearchInput, EmptyState, Button, Badge, PageHeader } from '@/components/ui/index.js';
 import { EntityCard } from '@/components/data/index.js';
@@ -34,7 +35,7 @@ export function ScriptsListPage() {
   const navigate = useNavigate();
   const { data: scripts, isLoading, error } = useScripts();
   const reloadScripts = useReloadScripts();
-  const runScript = useRunScript();
+  const invokeWorkflow = useInvokeWorkflow();
 
   const [search, setSearch] = useState('');
 
@@ -117,7 +118,10 @@ export function ScriptsListPage() {
                   size="icon-sm"
                   onClick={(e) => {
                     e.stopPropagation();
-                    runScript.mutate({ id: script.id });
+                    invokeWorkflow.mutate(
+                      { request: { target: { kind: 'script', scriptId: script.id }, variables: {}, client: 'web' } },
+                      { onSuccess: (result) => navigate(`/workflows/${result.workflowDefinitionId}/runs/${result.runId}`) },
+                    );
                   }}
                   className="h-auto w-auto rounded-lg bg-success-muted p-2 text-success transition-colors hover:bg-success/20 hover:text-success"
                   title="Run with defaults"

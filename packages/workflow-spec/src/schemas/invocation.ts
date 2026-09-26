@@ -1,14 +1,23 @@
 // ────────────────────────────────────────────────────────────────
-// InvocationRequest and the trigger union (P04 WP-4.2; G4 §1.3.3).
+// InvocationRequest, the trigger union, the plan and the run digest
+// (P04 WP-4.2; G4 §1.3.3–1.3.4).
 //
 // The shapes live here so every client, the server route, the workflow
-// tools and the generated schema share one definition. P04 wires the
-// service that consumes them. The trigger is never taken from a request
-// body: the server derives it and passes it in the trusted context.
+// tools and the generated schema share one definition;
+// `WorkflowInvocationService` consumes them. The trigger is never taken
+// from a request body: the server derives it and passes it in the trusted
+// context. `RunProfileSchema` is the one saved-inputs shape (CLI profile
+// files and the profiles a workflow script exports; C-10).
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
-import { FORBIDDEN_VARIABLE_NAME_PATTERN, HARNESS_PROVIDER_IDS, REASONING_EFFORTS, RUN_PERMISSION_MODES } from '../constants.js';
+import {
+  FORBIDDEN_VARIABLE_NAME_PATTERN,
+  HARNESS_PROVIDER_IDS,
+  REASONING_EFFORTS,
+  RUN_PERMISSION_MODES,
+  type RunPermissionMode,
+} from '../constants.js';
 import { customIssue, StageKeySchema } from './common.js';
 import { CodebaseAliasSchema } from './workflow.js';
 
@@ -37,9 +46,8 @@ export const InvocationTargetSchema = z
       .describe('Definition target'),
     z
       .object({
-        kind: z.literal('script').describe('Materialize and run a workflow script'),
+        kind: z.literal('script').describe('Materialize (once per script content) and run a workflow script'),
         scriptId: z.string().min(1).max(200).describe('Script id'),
-        profileName: z.string().max(200).optional().describe('Script run profile'),
       })
       .strict()
       .describe('Script target'),
@@ -55,8 +63,8 @@ export const InvocationTargetSchema = z
         definition: z.enum(['pinned', 'latest']).default('pinned').describe('Definition version of the fork'),
         workspace: z
           .enum(['restore_checkpoint', 'reuse', 'fresh'])
-          .default('restore_checkpoint')
-          .describe('Workspace of the fork'),
+          .default('fresh')
+          .describe('fresh provisions a new workspace; reuse runs in the source one; restore_checkpoint reuses it rolled back to before the earliest re-run instance'),
       })
       .strict()
       .describe('Fork target'),
@@ -128,7 +136,11 @@ export const InvocationRequestSchema = z
       .max(60)
       .optional()
       .describe('Files staged before the run starts'),
-    profile: z.string().max(200).optional().describe('Saved run profile name'),
+    profile: z
+      .string()
+      .max(200)
+      .optional()
+      .describe("A script target's exported run profile; this request's own inputs win over it"),
     name: z.string().max(200).optional().describe('Run name'),
     budget: InvocationBudgetSchema.optional(),
     idempotencyKey: z
@@ -208,3 +220,139 @@ export const InvocationTriggerSchema = z
   ])
   .describe('Who or what started the run; server-derived, never read from a request body');
 export type InvocationTrigger = z.infer<typeof InvocationTriggerSchema>;
+
+/** Error codes of the invocation API's `{error: {code, message, issues[]}}` envelope. */
+export const INVOCATION_ERROR_CODES = [
+  'VALIDATION_ERROR',
+  'NOT_FOUND',
+  'IDEMPOTENCY_KEY_REUSED',
+  'DEPTH_LIMIT',
+  'RECURSION',
+  'BUDGET_EXHAUSTED',
+  'PERMISSION_ESCALATION',
+  'PERMISSION_GATING_UNSUPPORTED',
+  'CODEBASE_REQUIRED',
+  'DRAFT_NOT_RUNNABLE',
+  'FORBIDDEN_SCOPE',
+  'CONFLICT',
+  'ENGINE_UNAVAILABLE',
+] as const;
+export type InvocationErrorCode = (typeof INVOCATION_ERROR_CODES)[number];
+
+/** One problem with a request (`path` is the JSON path into the request). */
+export interface InvocationIssue {
+  code: string;
+  path: Array<string | number>;
+  message: string;
+  severity: 'error' | 'warning';
+}
+
+/** A run started by a stage of another run is at most this deep (the root run is depth 0). */
+export const MAX_INVOCATION_DEPTH = 3;
+
+/** The lifecycle phases, in order (`workflow_run.phase_*` events; journalled as `lifecycle/<phase>`). */
+export const PREPARE_PHASES = ['workspace', 'worktrees', 'uploads', 'projectConfigs', 'preprocess', 'sandbox'] as const;
+export type PreparePhase = (typeof PREPARE_PHASES)[number];
+export const FINALIZE_PHASES = ['compensate', 'hooks', 'postProcess', 'release'] as const;
+export type FinalizePhase = (typeof FINALIZE_PHASES)[number];
+
+/** What an invocation will do, computed before anything is written (`plan`, and part of `invoke`'s result). */
+export interface InvocationPlan {
+  workflowDefinitionId: string;
+  /** The version the run pins (`null` when planning a script that is not materialized yet). */
+  definitionVersionId: string | null;
+  workflowName: string;
+  stages: Array<{
+    key: string;
+    name: string;
+    /** Topological layer (0 = roots). */
+    layer: number;
+    skipped: boolean;
+    skipReason?: 'override' | 'guard_false';
+    model?: string;
+    harnessType?: string;
+    agentRef?: string;
+    /** A completion review parks the stage for a person. */
+    approvalRequired: boolean;
+  }>;
+  codebases: Array<{ alias: string; baseRef: string | null; mode: 'worktree' | 'in_place'; source: 'request' | 'lifecycle' }>;
+  /** Prepare phases with work to do, in order. */
+  prepare: PreparePhase[];
+  preprocessing: string[];
+  postProcessing: string[];
+  permissionMode: RunPermissionMode;
+  lineage: { depth: number; rootRunId: string | null; parentRunId: string | null };
+  warnings: InvocationIssue[];
+}
+
+/** What `invoke` answers (202). A replayed idempotency key answers the original run with `replayed: true`. */
+export interface InvocationResult {
+  invocationId: string;
+  runId: string;
+  workflowDefinitionId: string;
+  status: 'created' | 'starting';
+  replayed: boolean;
+  trigger: InvocationTrigger;
+  links: { app: string; api: string; stream: string };
+  plan: InvocationPlan;
+  warnings: InvocationIssue[];
+}
+
+/** A compact run state for waiters and agents (`digest`, the long-poll route, `waitFor`). */
+export interface RunDigest {
+  runId: string;
+  workflowDefinitionId: string;
+  name: string;
+  status: string;
+  statusReason: string | null;
+  outcome: 'completed' | 'failed' | 'cancelled' | null;
+  /** True once `workflow_run.finalized` fired: post-processing and release are done. */
+  finalized: boolean;
+  error: string | null;
+  stages: Array<{
+    instanceId: string;
+    key: string;
+    instancePath: string;
+    name: string;
+    status: string;
+    statusReason: string | null;
+    summary?: string | null;
+    output?: unknown;
+    error?: string | null;
+  }>;
+  /** Instances waiting for a person (a completion review or an in-turn gate). */
+  pendingApprovals: Array<{ instanceId: string; key: string; name: string }>;
+  /** Post-processing step results, once finalized. */
+  postProcessing: Array<{ step: string; success: boolean; output?: string; error?: string }>;
+  /** Why a waiter returned. */
+  waited?: 'finalized' | 'approval' | 'timeout' | 'aborted';
+}
+
+// ── Run profiles (C-10) ───────────────────────────────────────────
+
+/**
+ * Saved run inputs: a CLI profile file (`--profile <path>`) or a profile a
+ * workflow script exports. Stage overrides are by stage KEY. Upload paths
+ * are local to the client that reads the profile.
+ */
+export const RunProfileSchema = z
+  .object({
+    version: z.literal(2).default(2).describe('Profile format version'),
+    name: z.string().min(1).max(100).describe('Profile name'),
+    description: z.string().max(2000).optional().describe('What the profile is for'),
+    workflow: z.string().min(1).max(200).optional().describe('Workflow definition id or name the profile is for'),
+    runName: z.string().max(200).optional().describe('Run name'),
+    variables: UserVariablesSchema.default({}),
+    projectId: z.string().uuid().optional().describe('Project whose codebases the run may mount'),
+    codebases: z.array(CodebaseSelectionSchema).max(10).optional().describe('Codebases to mount'),
+    stageOverrides: z.array(InvocationStageOverrideSchema).max(100).optional().describe('Per-stage overrides, by stage key'),
+    overrides: RunOverridesSchema.optional(),
+    budget: InvocationBudgetSchema.optional(),
+    skillFiles: z.array(z.string().min(1).max(1000)).max(20).optional().describe('Skill files to upload (client-local paths)'),
+    agentFiles: z.array(z.string().min(1).max(1000)).max(20).optional().describe('Agent files to upload (client-local paths)'),
+    promptFiles: z.array(z.string().min(1).max(1000)).max(20).optional().describe('Prompt files to upload (client-local paths)'),
+  })
+  .strict()
+  .describe('Saved run inputs');
+export type RunProfile = z.infer<typeof RunProfileSchema>;
+export type RunProfileInput = z.input<typeof RunProfileSchema>;

@@ -1084,12 +1084,15 @@ importers:
 
   packages/mcp-server:
     dependencies:
-      '@generatorai/core':
+      '@generatorai/client-core':
         specifier: workspace:*
-        version: link:../core
-      '@generatorai/sdk':
+        version: link:../client-core
+      '@generatorai/client-runtime':
         specifier: workspace:*
-        version: link:../sdk
+        version: link:../client-runtime
+      '@generatorai/secrets':
+        specifier: workspace:*
+        version: link:../secrets
       '@generatorai/shared':
         specifier: workspace:*
         version: link:../shared
@@ -18681,9 +18684,7 @@ snapshots:
       metro-runtime: 0.84.4
     transitivePeerDependencies:
       - '@babel/core'
-      - bufferutil
       - supports-color
-      - utf-8-validate
 
   '@react-native/normalize-colors@0.74.89': {}
 

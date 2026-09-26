@@ -447,8 +447,10 @@ export type RunStatus = WorkflowRunState;
 export interface WorkflowRunSummary {
   id: string;
   workflowDefinitionId: string;
-  /** Run inputs. A run started for a project carries it as `__projectId`. */
+  /** Run inputs (user variables only; engine values live in `systemVars`). */
   variables?: Record<string, unknown>;
+  /** The project the run was started for. */
+  projectId?: string | null;
   name?: string;
   status: RunStatus;
   createdAt: Timestamp;

@@ -128,6 +128,13 @@ export const DEFAULT_CLI_SCOPES: readonly Scope[] = [
 ];
 
 /** Scopes that must never be attached to a signed link. */
+/**
+ * Default grant for an MCP server in remote mode (PD-22): read and start
+ * workflow runs and follow them. Authoring (`write:workflows`) is asked for
+ * explicitly with `device invite --platform mcp --scopes …`.
+ */
+export const DEFAULT_MCP_SCOPES: readonly Scope[] = ['read:status', 'read:workflows', 'stream:events', 'exec:agent'];
+
 export const SIGNED_LINK_FORBIDDEN_SCOPES: readonly Scope[] = [
   'exec:terminal',
   'exec:browser',

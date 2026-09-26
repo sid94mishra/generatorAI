@@ -58,7 +58,7 @@ import { EffectsDispatcher } from './EffectsDispatcher.js';
 import { inFlightIsSafe, LeaseReaper } from './LeaseReaper.js';
 import { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
 import { RunActor, type DecideRecord, type ProcessResult } from './RunActor.js';
-import { DefaultRunLifecycle, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';
+import { DefaultRunLifecycle, type LifecyclePlatform, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';
 import { journalEpoch, StageExecutor, type ExecutorTiming, type StageArtifactReader } from './StageExecutor.js';
 import { TimerService } from './TimerService.js';
 
@@ -104,6 +104,8 @@ export interface RunSupervisorDeps {
   lifecycle?: RunLifecycle | undefined;
   /** PD-17 start check of the default lifecycle's `prepare`. */
   permissionCheck?: RunLifecycleDeps['permissionCheck'];
+  /** The default lifecycle's platform services known at construction (the rest are late-wired). */
+  lifecyclePlatform?: LifecyclePlatform | undefined;
   /** This process's boot id (default: a random UUID). */
   bootId?: string | undefined;
   /** A label for the lock row (host, pid). */
@@ -193,6 +195,7 @@ export class RunSupervisor {
         hookExecutor: deps.hookExecutor,
         checkpoints: deps.checkpoints,
         permissionCheck: deps.permissionCheck,
+        ...(deps.lifecyclePlatform ?? {}),
         logger: deps.logger,
         now: this.now,
       });
@@ -230,6 +233,11 @@ export class RunSupervisor {
   setCheckpoints(checkpoints: WorkspaceCheckpointService): void {
     this.executor.setCheckpoints(checkpoints);
     if (this.lifecycle instanceof DefaultRunLifecycle) this.lifecycle.setCheckpoints(checkpoints);
+  }
+
+  /** Late wiring: the lifecycle's mounts, uploads, project configs and sandbox (composition root, SDK). */
+  setLifecyclePlatform(platform: LifecyclePlatform): void {
+    if (this.lifecycle instanceof DefaultRunLifecycle) this.lifecycle.setPlatform(platform);
   }
 
   // ── Boot ─────────────────────────────────────────────────────

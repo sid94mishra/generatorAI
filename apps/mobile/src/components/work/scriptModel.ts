@@ -1,13 +1,14 @@
 // ────────────────────────────────────────────────────────────────
 // Workflow scripts — pure view logic for the Scripts segment and screen.
 //
-// The admin client types these routes loosely (`ScriptSummary`,
-// `RunSummary`) but the server actually returns:
+// The admin client types these routes loosely (`ScriptSummary`) but the
+// server actually returns:
 //   GET  /workflow-scripts          ScriptMetadata[]
 //   GET  /workflow-scripts/:id      { metadata, graph }   (graph: WorkflowGraph)
-//   GET  /workflow-scripts/:id/profiles  ScriptRunProfile[] (stageOverrides by key)
-//   POST /workflow-scripts/:id/run  { definitionId, runId, status }
-// so every read here is defensive.
+//   GET  /workflow-scripts/:id/profiles  RunProfile[] (stageOverrides by key,
+//        permission mode at `overrides.permissionMode`)
+// so every read here is defensive. A script runs through
+// `workflows.invoke({ target: { kind: 'script', scriptId }, profile })`.
 //
 // Tested in src/__tests__/scriptModel.test.ts.
 // ────────────────────────────────────────────────────────────────
@@ -107,7 +108,7 @@ export function parseScriptProfiles(raw: unknown): ScriptProfileView[] {
       name,
       description: str(r['description']),
       variables: vars && typeof vars === 'object' && !Array.isArray(vars) ? (vars as Record<string, unknown>) : {},
-      permissionMode: str(r['permissionMode']),
+      permissionMode: str(obj(r['overrides'])['permissionMode']),
       skippedStages: overrides.filter((o) => o && typeof o === 'object' && (o as { skip?: unknown }).skip === true).length,
     });
   }
@@ -140,11 +141,4 @@ export function applyProfileDefaults(rawVariables: unknown, profile: ScriptProfi
       ? { ...(v as object), defaultValue: profile.variables[name] }
       : v;
   });
-}
-
-/** The run id a `POST /workflow-scripts/:id/run` response names. */
-export function scriptRunIdOf(response: unknown): string | null {
-  if (!response || typeof response !== 'object') return null;
-  const r = response as { runId?: unknown; id?: unknown };
-  return str(r.runId) ?? str(r.id);
 }

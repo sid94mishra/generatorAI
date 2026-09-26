@@ -26,6 +26,7 @@ import type { TokenService } from './TokenService.js';
 import { AuditAction, type SecurityAuditService } from './SecurityAuditService.js';
 import {
   DEFAULT_CLI_SCOPES,
+  DEFAULT_MCP_SCOPES,
   DEFAULT_DEVICE_SCOPES,
   DEFAULT_MOBILE_SCOPES,
   HIGH_RISK_SCOPES,
@@ -160,6 +161,8 @@ export function defaultScopesForPlatform(platform: DevicePlatform): readonly Sco
       return DEFAULT_MOBILE_SCOPES;
     case 'cli':
       return DEFAULT_CLI_SCOPES;
+    case 'mcp':
+      return DEFAULT_MCP_SCOPES;
     default:
       return DEFAULT_DEVICE_SCOPES;
   }

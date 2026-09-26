@@ -693,12 +693,15 @@ function onFinalized(w: Working, msg: Extract<RunMessage, { type: 'finalized' }>
     w.push({ t: 'cancel_timer' });
     if (completed) w.emit('workflow_run.completed', {});
     else w.emit('workflow_run.failed', { error: msg.error ?? w.run.statusReason ?? 'The run failed' });
+    // Every waiter keys on this one (W-63): the lifecycle is done, post-processing included.
+    w.emit('workflow_run.finalized', { status: completed ? 'completed' : 'failed' });
     return;
   }
   if (w.run.status === 'cancelling') {
     w.runTransition('cancelled', msg.ok ? undefined : { error: msg.error ?? 'Compensation failed' });
     w.push({ t: 'cancel_timer' });
     w.emit('workflow_run.cancelled', {});
+    w.emit('workflow_run.finalized', { status: 'cancelled' });
   }
 }
 
@@ -891,6 +894,7 @@ export function decide(graph: CompiledWorkflow, state: RunState, msg: RunMessage
         w.runTransition('failed', { statusReason: `setup:${msg.phase}`, outcome: 'failed', error: msg.error });
         w.push({ t: 'cancel_timer' });
         w.emit('workflow_run.failed', { error: msg.error });
+        w.emit('workflow_run.finalized', { status: 'failed' });
       }
       break;
     case 'attempt_settled':

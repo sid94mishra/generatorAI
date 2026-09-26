@@ -27,10 +27,18 @@ export { WorkflowDefinitionService, assertValidGraph, COMMAND_EDIT_SCOPE } from 
 export type { DefinitionWriteOptions, CreateDefinitionOptions, DeleteOutcome } from './WorkflowDefinitionService.js';
 export { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
 export { canonicalGraph } from './definitions/canonical.js';
-export { userVariables, codebasesOf, runScope, stagesScope, templateScope } from './definitions/runScope.js';
-export type { RunScope, StageScope, CodebaseScope } from './definitions/runScope.js';
-export { WorkflowRunService, RunCommandRefusedError, stripExecutionContext } from './WorkflowRunService.js';
-export type { StageProviderResolver } from './WorkflowRunService.js';
+export { userVariables } from './definitions/runScope.js';
+export { WorkflowRunService, RunCommandRefusedError } from './WorkflowRunService.js';
+export type { StageProviderResolver, NewRunRecord } from './WorkflowRunService.js';
+export * from './workflow-invocation/index.js';
+export {
+  IdempotencyService,
+  IdempotencyKeyReusedError,
+  assertIdempotencyKey,
+  INVOCATION_IDEMPOTENCY_TTL_MS,
+  WEBHOOK_IDEMPOTENCY_TTL_MS,
+  type IdempotentOutcome,
+} from './IdempotencyService.js';
 
 // W18 — Admission control + concurrency management
 export { AdmissionController, AdmissionTimeoutError, laneFor, sizeLane } from './AdmissionController.js';
@@ -50,12 +58,11 @@ export { ORCHESTRATOR_SYSTEM_PROMPT, WORKER_SYSTEM_PROMPT } from './orchestrator
 export { buildOrchestratorToolSet } from '../tools/orchestrator/index.js';
 
 // Orchestrator services
-export { WorkflowOrchestrator } from './WorkflowOrchestrator.js';
-export type { OrchestratorSandbox } from './WorkflowOrchestrator.js';
 export { createRunSandbox } from './createRunSandbox.js';
-export type { RunSandboxOptions } from './createRunSandbox.js';
-export { WorkflowPreprocessor } from './WorkflowPreprocessor.js';
-export type { WorkflowScmFlowPort } from './WorkflowPreprocessor.js';
+export type { RunSandbox, RunSandboxOptions } from './createRunSandbox.js';
+export { LifecycleSteps, ScmPostProcessingError, scmFailureReason, repositoryFromInputs } from './engine/lifecycle/steps.js';
+export type { WorkflowScmFlowPort, LifecycleStepContext } from './engine/lifecycle/steps.js';
+export { runUploadsDir, writeRunUpload, scanRunUploads, safeUploadName, UPLOAD_EXTENSIONS } from './engine/lifecycle/runUploads.js';
 // Engine v2 (P03 WP-3.5/3.6)
 export * from './engine/index.js';
 

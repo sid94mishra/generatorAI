@@ -5,7 +5,8 @@
 // approve a gate. This file covers what an operator needs: create and mutate
 // definitions, drive runs, manage projects and codebases, and reach the
 // feature areas (extensions, widgets, browser, computer use, webhooks,
-// hooks, scripts, orchestrator) that no client previously exposed.
+// hooks, scripts) that no client previously exposed. A run starts through
+// ONE method, `workflows.invoke` (P04).
 //
 // It lives in client-core rather than in the CLI because the CLI is the
 // third client to need most of it, and the first two each grew their own
@@ -46,10 +47,13 @@ import type {
   WorkflowDefinitionVersionSummary,
   WorkflowGraph,
   WorkflowGraphInput,
-  ScriptRunProfile,
+  RunProfile,
   WorkflowTemplate,
-  ForkRunRequest,
+  InvocationPlan,
+  InvocationRequest,
+  InvocationResult,
   RunCommand,
+  RunDigest,
 } from '@generatorai/workflow-spec';
 import {
   json,
@@ -61,6 +65,12 @@ import {
   type ApiFetch,
   type DeviceScopeRequest,
 } from './client.js';
+
+/** Upload categories of a run start. */
+export type InvocationUploadCategory = 'skills' | 'agents' | 'prompts';
+
+/** Files a run start uploads before invoking, by category. */
+export type InvocationUploadFiles = Partial<Record<InvocationUploadCategory, Array<{ name: string; data: Uint8Array; mimeType?: string }>>>;
 
 /** A page of `GET /workflow-definitions`. */
 export interface DefinitionPage {
@@ -288,29 +298,23 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       get: (id: string) => req<RunSummary & { stageRuns: StageRun[] }>(`/api/workflow-runs/${id}`),
 
       /**
-       * Creates a run in `created`. It does NOT begin executing — the server
-       * models creation and start as two steps so variables can be validated
-       * and a profile applied before any stage is scheduled. Callers that
-       * want "run it now" must follow with `start`.
-       */
-      create: (body: Record<string, unknown>) =>
-        req<RunSummary>('/api/workflow-runs', json(body)),
-
-      start: (id: string) => req<RunSummary>(`/api/workflow-runs/${id}/start`, json({})),
-
-      /**
        * Every operator action on a run or one of its instances (P03 commands
        * API): pause, resume, cancel, retry, skip, fail, approve. The server
        * answers 202; a refused command throws its 409/400/404.
        */
       command: (id: string, body: RunCommand) =>
         req<{ runId: string; command: string }>(`/api/workflow-runs/${id}/commands`, json(body)),
-      /**
-       * Re-run a terminal run as a NEW run (G5 §3.8). The default re-runs every
-       * instance that did not complete; completed ones are memoized.
-       */
-      fork: (id: string, body: ForkRunRequest = {}) =>
-        req<RunSummary>(`/api/workflow-runs/${id}/fork`, json(body)),
+      /** The run's workspace: the managed root, artifacts, uploads and every mount with its files. */
+      workspace: (id: string) => req<Record<string, unknown>>(`/api/workflow-runs/${id}/workspace`),
+      workspaceContent: (id: string, path: string, source?: string, worktreeAlias?: string) =>
+        req<{ path: string; content: string | null; truncated: boolean; size: number }>(
+          `/api/workflow-runs/${id}/workspace/content${qs({ path, source, worktreeAlias })}`,
+        ),
+      /** Each mount's change set. */
+      workspaceDiff: (id: string) =>
+        req<{ hasGit: boolean; repos: Array<{ alias: string; files: Array<{ path: string; status: string; diff?: string }> }> }>(
+          `/api/workflow-runs/${id}/workspace/diff`,
+        ),
 
       remove: (id: string) => req<void>(`/api/workflow-runs/${id}`, { method: 'DELETE' }),
 
@@ -761,14 +765,12 @@ export function createAdminApi(fetchImpl: ApiFetch) {
     scripts: {
       list: () => req<ScriptSummary[]>('/api/workflow-scripts'),
       get: (id: string) => req<ScriptDetail>(`/api/workflow-scripts/${id}`),
-      profiles: (id: string) => req<ScriptRunProfile[]>(`/api/workflow-scripts/${id}/profiles`),
+      profiles: (id: string) => req<RunProfile[]>(`/api/workflow-scripts/${id}/profiles`),
       materialize: (id: string, body?: { name?: string; projectId?: string }) =>
         req<{ definitionId: string; definition: WorkflowDefinitionRecord; stageCount: number; edgeCount: number }>(
           `/api/workflow-scripts/${id}/materialize`,
           json(body ?? {}),
         ),
-      run: (id: string, body?: { profileName?: string; variables?: Record<string, unknown>; projectId?: string }) =>
-        req<{ definitionId: string; runId: string; status: 'running' }>(`/api/workflow-scripts/${id}/run`, json(body ?? {})),
       validate: (body: { path: string }) =>
         req<{ valid: boolean; errors: string[] }>('/api/workflow-scripts/validate', json(body)),
       reloadAll: () => req<Record<string, unknown>>('/api/workflow-scripts/reload', json({})),
@@ -776,51 +778,60 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         req<Record<string, unknown>>(`/api/workflow-scripts/${id}/reload`, json({})),
     },
 
-    // ── orchestrator.ts ─────────────────────────────────────────
-    orchestrator: {
-      startRun: (body: Record<string, unknown>) =>
-        req<Record<string, unknown>>('/api/orchestrator/runs', json(body)),
-      cancel: (runId: string) =>
-        req<void>(`/api/orchestrator/runs/${runId}/cancel`, json({})),
-      /**
-       * `POST /orchestrator/runs/:id/uploads` — custom prompts, skills or
-       * agent definitions for one run (multipart, field `files`, max 20).
-       * The server checks extensions and rejects path-like names itself.
-       */
-      uploadRunFiles: (
-        runId: string,
-        category: 'prompts' | 'skills' | 'agents',
-        files: Array<{ name: string; data: Uint8Array; mimeType?: string }>,
-      ) => {
+    // ── workflowInvocations.ts ──────────────────────────────────
+    //
+    // THE way a run starts (P04): a definition, a script or a fork of a
+    // terminal run, one request, one route. The server derives the trigger;
+    // `client` is a label. Every "Start" press sends its own idempotency
+    // key, so a double click or a network retry does not start two runs.
+    workflows: {
+      invoke: async (
+        body: InvocationRequest,
+        opts: { idempotencyKey?: string; files?: InvocationUploadFiles } = {},
+      ): Promise<InvocationResult> => {
+        const files = Object.entries(opts.files ?? {}).flatMap(([category, list]) =>
+          (list ?? []).map((f) => ({ category: category as InvocationUploadCategory, ...f })),
+        );
+        const headers: Record<string, string> = opts.idempotencyKey ? { 'Idempotency-Key': opts.idempotencyKey } : {};
+        if (files.length === 0) {
+          return req<InvocationResult>('/api/workflow-invocations', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...headers },
+            body: JSON.stringify(body),
+          });
+        }
         const form = new FormData();
-        form.set('category', category);
-        for (const file of files) {
-          form.append(
-            'files',
-            // Same harmless `Uint8Array<ArrayBufferLike>` typings mismatch as
-            // `chats.sendWithAttachments`.
-            new Blob([file.data as unknown as ArrayBuffer], {
-              type: file.mimeType || 'application/octet-stream',
-            }),
-            file.name,
-          );
+        form.set('request', JSON.stringify(body));
+        for (const f of files) {
+          // Same harmless `Uint8Array<ArrayBufferLike>` typings mismatch as
+          // `chats.sendWithAttachments`.
+          form.append(f.category, new Blob([f.data as unknown as ArrayBuffer], { type: f.mimeType || 'application/octet-stream' }), f.name);
         }
         // No content-type: fetch sets the multipart boundary from the body.
-        return req<{ files?: Array<{ name: string; path: string }> }>(
-          `/api/orchestrator/runs/${runId}/uploads`,
+        return req<InvocationResult>('/api/workflow-invocations', { method: 'POST', headers, body: form });
+      },
+      /** What `invoke` would do: stages by layer, skips, codebases, phases, post-processing, permission mode. */
+      plan: (body: InvocationRequest) => req<InvocationPlan>('/api/workflow-invocations/plan', json(body)),
+      /** Stage files before invoking (TTL 1 h); send the ids in `invoke`'s `uploads`. */
+      uploads: (files: Array<{ category: InvocationUploadCategory; name: string; data: Uint8Array; mimeType?: string }>) => {
+        const form = new FormData();
+        for (const f of files) {
+          form.append(f.category, new Blob([f.data as unknown as ArrayBuffer], { type: f.mimeType || 'application/octet-stream' }), f.name);
+        }
+        return req<{ uploads: Array<{ uploadId: string; category: InvocationUploadCategory; name: string }> }>(
+          '/api/workflow-invocations/uploads',
           { method: 'POST', body: form },
         );
       },
-      runWorkspace: (runId: string) =>
-        req<Record<string, unknown>>(`/api/orchestrator/runs/${runId}/workspace`),
-      runWorkspaceContent: (runId: string, path: string, source?: string) =>
-        req<{ content: string }>(
-          `/api/orchestrator/runs/${runId}/workspace/content${qs({ path, source })}`,
+      /** The run's digest; `waitSeconds` long-polls (≤ 60) until it finalizes (or waits for an approval). */
+      digest: (runId: string, opts: { waitSeconds?: number; stopOnApproval?: boolean; detail?: 'brief' | 'full' } = {}) =>
+        req<RunDigest>(
+          `/api/workflow-invocations/${runId}/digest${qs({
+            ...(opts.waitSeconds ? { wait: String(opts.waitSeconds) } : {}),
+            ...(opts.stopOnApproval ? { stopOnApproval: 'true' } : {}),
+            ...(opts.detail ? { detail: opts.detail } : {}),
+          })}`,
         ),
-      runDiff: (runId: string) =>
-        req<{ diff: string } | string>(`/api/orchestrator/runs/${runId}/workspace/diff`),
-      workflowFiles: (defId: string) =>
-        req<FileEntryRecord[]>(`/api/orchestrator/workflows/${defId}/files`),
     },
 
     // ── templates.ts ────────────────────────────────────────────

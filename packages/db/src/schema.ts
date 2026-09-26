@@ -845,11 +845,35 @@ export const idempotencyKeys = sqliteTable(
     executionId: text('execution_id').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     expiresAt: integer('expires_at', { mode: 'timestamp' }).notNull(),
+    /** v58 — hash of the request the key was claimed for (invocations): a replay with another body is a 409. */
+    requestHash: text('request_hash'),
   },
   (table) => ({
     pk: uniqueIndex('pk_idempotency_keys').on(table.key, table.scope),
     // Sweep scans `WHERE expires_at < now`; leading column must be expires_at.
     expiresIdx: index('idx_idempotency_keys_expires').on(table.expiresAt),
+  }),
+);
+
+// ── Invocation uploads (v58) ──
+
+/** Files staged before a run starts (`POST /workflow-invocations/uploads`, TTL 1 h); the run's `uploads` phase consumes them. */
+export const invocationUploads = sqliteTable(
+  'invocation_uploads',
+  {
+    id: text('id').primaryKey(),
+    category: text('category', { enum: ['skills', 'agents', 'prompts'] }).notNull(),
+    name: text('name').notNull(),
+    /** Where the staged file lives on the server. */
+    path: text('path').notNull(),
+    sizeBytes: integer('size_bytes').notNull(),
+    principalId: text('principal_id'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+    expiresAt: integer('expires_at', { mode: 'timestamp_ms' }).notNull(),
+    consumedByRunId: text('consumed_by_run_id'),
+  },
+  (table) => ({
+    expiresIdx: index('idx_invocation_uploads_expires').on(table.expiresAt),
   }),
 );
 

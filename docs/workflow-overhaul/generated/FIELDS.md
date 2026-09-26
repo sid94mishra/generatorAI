@@ -180,6 +180,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `workflow.lifecycle.codebaseAliases` | string `^[A-Za-z0-9._-]+$` (1..50 chars)[] (≤5) |  | `[]` | Project codebases the run mounts; exposed as run.codebases.<alias> |
 | `workflow.lifecycle.useWorktree` | boolean |  | `true` | Mount codebases as isolated worktrees rather than in place |
 | `workflow.lifecycle.requiresCodebase` | boolean |  | `false` | Refuse to start without at least one codebase |
+| `workflow.lifecycle.sandbox` | 'required' \| 'optional' |  | `"required"` | When the deployment runs stages in a sandbox: required fails the run if the sandbox cannot start; optional runs on the host instead |
 | `workflow.lifecycle.preprocessingSteps` | object[] (≤50) |  | `[]` | Steps run before any stage |
 | `workflow.lifecycle.preprocessingSteps[].name` | string (1..200 chars) | yes |  | Display name |
 | `workflow.lifecycle.preprocessingSteps[].failOnError` | boolean |  | `true` | Fail the run when the step fails |
@@ -625,14 +626,13 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `target.workflowDefinitionId` | string uuid | yes |  | Definition id |
 | `target.version` | integer (≥1) |  |  | Published version; omitted means the current published version |
 | `target.testRun` | boolean |  |  | Run the draft as a test version (user principals only) |
-| `target.kind` | "script" | yes |  | Materialize and run a workflow script |
+| `target.kind` | "script" | yes |  | Materialize (once per script content) and run a workflow script |
 | `target.scriptId` | string (1..200 chars) | yes |  | Script id |
-| `target.profileName` | string (≤200 chars) |  |  | Script run profile |
 | `target.kind` | "fork" | yes |  | Fork an earlier run, re-running from the given instances |
 | `target.sourceRunId` | string (1..100 chars) | yes |  | Run to fork |
 | `target.rerunFrom` | string (1..500 chars)[] (≤50) |  |  | Instance paths to re-run from; omitted means the failed instances |
 | `target.definition` | 'pinned' \| 'latest' |  | `"pinned"` | Definition version of the fork |
-| `target.workspace` | 'restore_checkpoint' \| 'reuse' \| 'fresh' |  | `"restore_checkpoint"` | Workspace of the fork |
+| `target.workspace` | 'restore_checkpoint' \| 'reuse' \| 'fresh' |  | `"fresh"` | fresh provisions a new workspace; reuse runs in the source one; restore_checkpoint reuses it rolled back to before the earliest re-run instance |
 | `variables` | record<string, any> |  | `{}` | Variable values by name; engine-reserved names are refused |
 | `projectId` | string uuid |  |  | Project whose codebases the run may mount |
 | `codebases` | object[] (≤10) |  |  | Codebases to mount; omitted means lifecycle.codebaseAliases |
@@ -652,7 +652,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `uploads` | object[] (≤60) |  |  | Files staged before the run starts |
 | `uploads[].uploadId` | string (1..100 chars) | yes |  | Id returned by the uploads endpoint |
 | `uploads[].category` | 'skills' \| 'agents' \| 'prompts' | yes |  | Upload category |
-| `profile` | string (≤200 chars) |  |  | Saved run profile name |
+| `profile` | string (≤200 chars) |  |  | A script target's exported run profile; this request's own inputs win over it |
 | `name` | string (≤200 chars) |  |  | Run name |
 | `budget` | object |  |  | Run budget |
 | `budget.maxDurationMs` | integer (≥10000, ≤86400000) |  |  | Wall clock for the whole run |

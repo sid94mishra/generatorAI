@@ -3,9 +3,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { CoreServices, WorkflowScriptLoader, ScriptMetadata, LoadedScript } from '@generatorai/core';
-import type { WorkflowRun } from '@generatorai/shared';
-import type { WorkflowDefinitionRecord } from '@generatorai/workflow-spec';
+import type { InvocationResult, WorkflowDefinitionRecord } from '@generatorai/workflow-spec';
 import type { ResolvedConfig } from '../config.js';
+import { SDK_INVOCATION_CONTEXT } from './WorkflowFacade.js';
 
 export type { ScriptMetadata };
 
@@ -35,6 +35,7 @@ export class ScriptFacade {
   /** Inject script loader (late binding) */
   setScriptLoader(loader: WorkflowScriptLoader): void {
     this.scriptLoader = loader;
+    this.services.workflowInvocationService.setScripts(loader);
   }
 
   /** List all loaded scripts metadata */
@@ -93,34 +94,21 @@ export class ScriptFacade {
   }
 
   /**
-   * SDK-5: Materialize a script and start a run of it (createRun → startRun).
-   * Honors a named profile's variables when `profileName` is given. Returns the
-   * started run. This is the SDK's headline "load a script and run it" path.
+   * SDK-5: run a script — THE invocation with a script target (P04): the
+   * script is materialized once per content and its named profile sits
+   * under the call's own inputs. Resolves once the run is starting.
    */
-  async run(scriptId: string, options?: RunScriptOptions): Promise<WorkflowRun> {
+  async run(scriptId: string, options?: RunScriptOptions): Promise<InvocationResult> {
     if (!this.scriptLoader) throw new Error('Script loader not initialized');
-    const script = this.scriptLoader.getScript(scriptId);
-    if (!script) throw new Error(`Script not found: ${scriptId}`);
-
-    // Merge profile variables (if any) under explicit call-site variables.
-    let mergedVars = options?.variables ?? {};
-    if (options?.profileName) {
-      const profile = script.profiles.find((p) => p.name === options.profileName);
-      if (!profile) throw new Error(`Profile not found: ${options.profileName}`);
-      mergedVars = { ...profile.variables, ...mergedVars };
-    }
-
-    const definition = await this.materialize(scriptId, {
-      projectId: options?.projectId,
-      variables: mergedVars,
-    });
-
-    const run = await this.services.workflowRunService.createRun({
-      workflowDefinitionId: definition.id,
-      variables: mergedVars,
-      projectId: options?.projectId,
-    });
-    await this.services.workflowRunService.startRun(run.id);
-    return run;
+    return this.services.workflowInvocationService.invoke(
+      {
+        target: { kind: 'script', scriptId },
+        variables: options?.variables ?? {},
+        ...(options?.profileName ? { profile: options.profileName } : {}),
+        ...(options?.projectId ? { projectId: options.projectId } : {}),
+        client: 'sdk',
+      },
+      SDK_INVOCATION_CONTEXT,
+    );
   }
 }

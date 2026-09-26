@@ -1,10 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  activeStageOverrides,
-  blankStageOverrides,
-  encodeStageOverrides,
-} from '../stageOverrides.js';
+import { activeStageOverrides, blankStageOverrides } from '../runStart.js';
 
 describe('stage overrides', () => {
   it('seeds one untouched draft per stage', () => {
@@ -23,20 +19,5 @@ describe('stage overrides', () => {
       { stageKey: 'c', variables: { depth: 2 } },
     ]);
     expect(activeStageOverrides(undefined)).toEqual([]);
-  });
-
-  it('sends nothing extra for an untouched form', () => {
-    const vars = { repo: 'x' };
-    expect(encodeStageOverrides(vars, blankStageOverrides([{ key: 'a', name: 'A' }]))).toEqual({ variables: vars });
-    expect(encodeStageOverrides(vars, [])).toEqual({ variables: vars });
-  });
-
-  it('sends overrides as a typed top-level array, never inside variables', () => {
-    const vars = { repo: 'x' };
-    const drafts = [{ stageKey: 'a', stageName: 'A', skip: true, variables: {} }];
-    const out = encodeStageOverrides(vars, drafts);
-    expect(out.variables).toEqual({ repo: 'x' });
-    expect(out.stageOverrides).toEqual([{ stageKey: 'a', skip: true }]);
-    expect(vars).toEqual({ repo: 'x' });
   });
 });

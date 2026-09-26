@@ -130,19 +130,19 @@ export const profiles = [
     name: 'Quick Surface Review',
     description: 'Fast review skipping the security scan',
     variables: { depth: 'surface', branch: 'main' },
-    permissionMode: 'bypassPermissions',
+    overrides: { permissionMode: 'bypassPermissions' },
     stageOverrides: [{ stageKey: 'security', skip: true }],
   },
   {
     name: 'Full Security Audit',
     description: 'Comprehensive security-focused review',
     variables: { depth: 'comprehensive' },
-    permissionMode: 'bypassPermissions',
+    overrides: { permissionMode: 'bypassPermissions' },
   },
   {
     name: 'CI Pipeline Review',
     description: 'Automated review for CI/CD integration',
     variables: { depth: 'thorough' },
-    permissionMode: 'bypassPermissions',
+    overrides: { permissionMode: 'bypassPermissions' },
   },
 ];

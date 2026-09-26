@@ -5,9 +5,11 @@
 // WORKFLOW_RUN_TRANSITIONS and fenced on `owner_epoch`) is the only status
 // writer. The run row's permission layer: `run_overrides.permissionMode` is
 // the operator's explicit run-level mode (optional: unset lets the stage,
-// workflow and trigger layers decide, re-read every turn); the NOT NULL
-// `permission_mode` column holds the run's effective mode as resolved when
-// it was created or last changed (P04's invocation writes it the same way).
+// workflow and trigger layers decide, re-read every turn), next to the
+// invocation's run-wide session overrides; the NOT NULL `permission_mode`
+// column holds the run's effective mode as resolved when it was created or
+// last changed. `system_vars` holds the engine-owned values (workspace
+// paths, codebases, uploads, the lifecycle journal); callers never write it.
 // ────────────────────────────────────────────────────────────────
 
 import { count, eq, inArray } from 'drizzle-orm';
@@ -31,10 +33,11 @@ import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
 
-type RunOverrides = { permissionMode?: WorkflowRunPermissionMode };
+/** `run_overrides`: the operator's explicit run mode plus the invocation's run-wide session overrides. */
+type RunOverrides = { permissionMode?: WorkflowRunPermissionMode; model?: string; harnessType?: string; reasoningEffort?: string };
 
-function overrides(mode: WorkflowRunPermissionMode | null | undefined): RunOverrides {
-  return mode ? { permissionMode: mode } : {};
+function overrides(mode: WorkflowRunPermissionMode | null | undefined, session?: WorkflowRun['runOverrides']): RunOverrides {
+  return { ...(session ?? {}), ...(mode ? { permissionMode: mode } : {}) };
 }
 
 function runInsertValues(run: WorkflowRun): typeof workflowRuns.$inferInsert {
@@ -47,14 +50,20 @@ function runInsertValues(run: WorkflowRun): typeof workflowRuns.$inferInsert {
     variables: run.variables,
     error: run.error ?? null,
     permissionMode: run.effectivePermissionMode ?? run.permissionMode ?? 'default',
-    runOverrides: overrides(run.permissionMode),
+    runOverrides: overrides(run.permissionMode, run.runOverrides),
     stageOverrides: run.stageOverrides ?? null,
     projectId: run.projectId ?? null,
     trigger: run.trigger ?? null,
+    invocationId: run.invocationId ?? null,
     idempotencyKey: run.idempotencyKey ?? null,
     forkSpec: run.forkSpec ?? null,
     codebaseSelection: run.codebaseSelection ?? null,
-    rootRunId: run.id,
+    systemVars: (run.systemVars as Record<string, unknown> | undefined) ?? null,
+    budget: run.budget ?? null,
+    parentRunId: run.parentRunId ?? null,
+    parentStageRunId: run.parentStageRunId ?? null,
+    rootRunId: run.rootRunId ?? run.id,
+    depth: run.depth ?? 0,
     workspaceId: run.workspaceId ?? null,
     ancestorRunId: run.ancestorRunId ?? null,
     createdAt: run.createdAt,
@@ -181,7 +190,12 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
     if (updates.name !== undefined) values['name'] = updates.name;
     if (updates.variables !== undefined) values['variables'] = updates.variables;
     if (updates.error !== undefined) values['error'] = updates.error;
-    if (updates.permissionMode !== undefined) values['runOverrides'] = overrides(updates.permissionMode);
+    if (updates.permissionMode !== undefined) {
+      const current = (await this.db.select({ o: workflowRuns.runOverrides }).from(workflowRuns).where(eq(workflowRuns.id, id)).limit(1))[0];
+      const { permissionMode: _previous, ...session } = (current?.o as RunOverrides | null) ?? {};
+      values['runOverrides'] = overrides(updates.permissionMode, session);
+    }
+    if (updates.systemVars !== undefined) values['systemVars'] = updates.systemVars;
     if (updates.effectivePermissionMode !== undefined) values['permissionMode'] = updates.effectivePermissionMode;
     if (updates.projectId !== undefined) values['projectId'] = updates.projectId;
     if (updates.workspaceId !== undefined) values['workspaceId'] = updates.workspaceId;
@@ -200,6 +214,9 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
     const trigger = row.trigger as WorkflowRun['trigger'] | null;
     const stageOverrides = row.stageOverrides as WorkflowRun['stageOverrides'] | null;
     const forkSpec = row.forkSpec as Record<string, unknown> | null;
+    const { permissionMode, ...sessionOverrides } = (row.runOverrides as RunOverrides | null) ?? {};
+    const systemVars = row.systemVars as WorkflowRun['systemVars'] | null;
+    const budget = row.budget as Record<string, unknown> | null;
     return {
       id: row.id,
       workflowDefinitionId: row.workflowDefinitionId,
@@ -211,14 +228,24 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
       version: row.version,
       variables: safeJsonColumn(row.variables, jsonRecord, { fallback: {} }) ?? {},
       error: row.error ?? undefined,
-      permissionMode: (row.runOverrides as RunOverrides | null)?.permissionMode ?? undefined,
+      permissionMode: permissionMode ?? undefined,
+      ...(Object.keys(sessionOverrides).length > 0 ? { runOverrides: sessionOverrides } : {}),
+      ...(systemVars ? { systemVars } : {}),
+      ...(budget ? { budget } : {}),
+      ...(row.invocationId ? { invocationId: row.invocationId } : {}),
+      ...(row.parentRunId ? { parentRunId: row.parentRunId } : {}),
+      ...(row.parentStageRunId ? { parentStageRunId: row.parentStageRunId } : {}),
+      rootRunId: row.rootRunId,
+      depth: row.depth,
       effectivePermissionMode: row.permissionMode,
       ...(row.projectId ? { projectId: row.projectId } : {}),
       ...(trigger ? { trigger } : {}),
       ...(stageOverrides ? { stageOverrides } : {}),
       ...(forkSpec ? { forkSpec } : {}),
       ...(row.idempotencyKey ? { idempotencyKey: row.idempotencyKey } : {}),
-      ...(row.codebaseSelection !== null && row.codebaseSelection !== undefined ? { codebaseSelection: row.codebaseSelection } : {}),
+      ...(row.codebaseSelection !== null && row.codebaseSelection !== undefined
+        ? { codebaseSelection: row.codebaseSelection as NonNullable<WorkflowRun['codebaseSelection']> }
+        : {}),
       workspaceId: row.workspaceId ?? undefined,
       ancestorRunId: row.ancestorRunId ?? undefined,
       createdAt: row.createdAt,

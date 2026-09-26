@@ -14,8 +14,10 @@ import {
   Cpu,
 } from 'lucide-react';
 
-import type { ScriptRunProfile, WorkflowGraph } from '@generatorai/workflow-spec';
-import { useScript, useScriptProfiles, useMaterializeScript, useRunScript } from '@/hooks/scriptQueries.js';
+import type { RunProfile, WorkflowGraph } from '@generatorai/workflow-spec';
+import { newIdempotencyKey } from '@generatorai/client-core';
+import { useScript, useScriptProfiles, useMaterializeScript } from '@/hooks/scriptQueries.js';
+import { useInvokeWorkflow } from '@/hooks/workflowQueries.js';
 import { CardGridSkeleton } from '@/components/Skeleton.js';
 import { Button, Badge, PageHeader } from '@/components/ui/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
@@ -30,9 +32,11 @@ export function ScriptDetailPage() {
   usePageTitle(script?.metadata?.name ?? script?.id);
   const { data: profiles } = useScriptProfiles(id);
   const materialize = useMaterializeScript();
-  const runScript = useRunScript();
+  const invokeWorkflow = useInvokeWorkflow();
 
   const [selectedProfile, setSelectedProfile] = useState<string | undefined>();
+  // One key per start: a double click is one run.
+  const [idempotencyKey, setIdempotencyKey] = useState(newIdempotencyKey);
 
   if (isLoading) return <CardGridSkeleton count={3} />;
   if (error || !script) {
@@ -50,12 +54,23 @@ export function ScriptDetailPage() {
   const stages = graph?.stages ?? [];
   const edges = graph?.edges ?? [];
 
+  // The script is materialized once per content hash and run; the selected
+  // profile supplies the inputs.
   const handleRun = () => {
-    runScript.mutate(
-      { id: id!, options: { profileName: selectedProfile } },
+    invokeWorkflow.mutate(
+      {
+        request: {
+          target: { kind: 'script', scriptId: id! },
+          variables: {},
+          ...(selectedProfile ? { profile: selectedProfile } : {}),
+          client: 'web',
+        },
+        idempotencyKey,
+      },
       {
         onSuccess: (result) => {
-          navigate(`/workflows/${result.definitionId}/runs/${result.runId}`);
+          setIdempotencyKey(newIdempotencyKey());
+          navigate(`/workflows/${result.workflowDefinitionId}/runs/${result.runId}`);
         },
       },
     );
@@ -97,8 +112,8 @@ export function ScriptDetailPage() {
             <Button
               variant="primary"
               onClick={handleRun}
-              disabled={runScript.isPending}
-              loading={runScript.isPending}
+              disabled={invokeWorkflow.isPending}
+              loading={invokeWorkflow.isPending}
               leftIcon={<Play className="w-4 h-4" />}
             >
               Run Script
@@ -135,7 +150,7 @@ export function ScriptDetailPage() {
             Run Profiles
           </h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            {(profiles as ScriptRunProfile[]).map((profile) => (
+            {(profiles as RunProfile[]).map((profile) => (
               <Button variant="unstyled"
                 key={profile.name}
                 onClick={() => setSelectedProfile(profile.name === selectedProfile ? undefined : profile.name)}
@@ -150,8 +165,8 @@ export function ScriptDetailPage() {
                 {profile.description && (
                   <div className="text-xs text-muted-foreground mt-1">{profile.description}</div>
                 )}
-                {profile.permissionMode && (
-                  <div className="text-xs text-muted-foreground mt-1">Permissions: {profile.permissionMode}</div>
+                {profile.overrides?.permissionMode && (
+                  <div className="text-xs text-muted-foreground mt-1">Permissions: {profile.overrides.permissionMode}</div>
                 )}
               </Button>
             ))}

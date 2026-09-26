@@ -198,6 +198,10 @@ export const LifecycleSchema = z
       .describe('Project codebases the run mounts; exposed as run.codebases.<alias>'),
     useWorktree: z.boolean().default(true).describe('Mount codebases as isolated worktrees rather than in place'),
     requiresCodebase: z.boolean().default(false).describe('Refuse to start without at least one codebase'),
+    sandbox: z
+      .enum(['required', 'optional'])
+      .default('required')
+      .describe('When the deployment runs stages in a sandbox: required fails the run if the sandbox cannot start; optional runs on the host instead'),
     preprocessingSteps: z.array(PreprocessingStepSchema).max(50).default([]).describe('Steps run before any stage'),
     postProcessing: z
       .object({

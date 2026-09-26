@@ -79,7 +79,7 @@ generatorai
 │     stage update · update · validate · versions
 ├── run                   # Workflow run lifecycle, stage controls and human-in-the-loop gates
 │     cancel · delete · diff · hitl approve · hitl changes-request · hitl
-│     mode · hitl pending · hitl reject · list · messages · pause ·
+│     mode · hitl pending · hitl reject · list · messages · pause · plan ·
 │     profile generate · profile list · profile validate · resume · retry
 │     · show · stage cancel · stage list · stage pause · stage resume ·
 │     stage retry · stage send · stage stop · start · watch · workspace
@@ -102,8 +102,6 @@ generatorai
 │     list · materialize · profiles · reload · run · show · validate
 ├── template              # System workflow templates
 │     list · show
-├── orchestrator (orch)   # System workflows and orchestrated runs
-│     cancel
 ├── extension (ext)       # Hot-loadable extensions
 │     disable · enable · list · reload · show · uninstall
 ├── widget                # Agent-rendered widget surfaces
@@ -234,7 +232,7 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 |---|---|---|
 | `run cancel <run>` | Cancel a run | — |
 | `run delete <run>` | Delete a run record | — |
-| `run diff <run>` | Unified diff of everything a run changed | — |
+| `run diff <run>` | Unified diff of everything a run changed, per mounted codebase | — |
 | `run hitl approve <run> <stage> [options]` | Approve a waiting stage | `--value` `--feedback` |
 | `run hitl changes-request <run> <stage> [options]` | Send a waiting stage back for changes | `--value` `--feedback` |
 | `run hitl mode <run> [mode]` | Show or set the run permission mode | — |
@@ -243,22 +241,23 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 | `run list [options]` | List workflow runs | `--status` `--definition` `--limit` |
 | `run messages <run> [options]` | Messages recorded for a run, optionally one stage | `--stage` |
 | `run pause <run>` | Pause a run | — |
-| `run profile generate <workflow> [options]` | Write a run-profile template for a workflow | `--out` |
-| `run profile list` | Run profiles visible from here | — |
-| `run profile validate <workflow> <profile>` | Check a run profile against a workflow definition | — |
+| `run plan [workflow] [options]` | Show what `run start` would do, without starting anything | `--var` `--profile` `--skip` `--stage-var` `--stage-model` `--model` `--effort` `--codebase` `--project` `--permission-mode` `--name` `--run-timeout` `--skill-file` `--agent-file` `--prompt-file` `--test-run` |
+| `run profile generate <workflow> [options]` | Write a run-profile template (RunProfile v2) for a workflow | `--out` |
+| `run profile list` | Run profiles visible from here, each checked against the RunProfile schema | — |
+| `run profile validate <workflow> <profile> [options]` | Check a run profile: its schema, then the server plan for a workflow | `--test-run` |
 | `run resume <run>` | Resume a run | — |
-| `run retry <run> [options]` | Re-run a finished run as a new run (a fork) | `--from` `--watch` `--verbosity` |
+| `run retry <run> [options]` | Re-run the failed stages of a finished run as a new run | `--from` `--idempotency-key` `--watch` `--verbosity` |
 | `run show <run> [options]` | Show a run and its stages | `--stages` |
 | `run stage cancel <run> <stage>` | Cancel one stage | — |
 | `run stage list <run>` | Stage runs for a run | — |
 | `run stage pause <run> <stage>` | Pause one stage | — |
 | `run stage resume <run> <stage>` | Resume one stage | — |
 | `run stage retry <run> <stage>` | Retry one stage | — |
-| `run stage send <run> <stage> <text\|->` | Send a message to a stage (a stage is a compact chat): its next turn, an amendment of a completed stage, or a retry of a paused one | `--mode` `--attach` |
-| `run stage stop <run> <stage>` | Stop the stage's turn in flight; the stage carries on | `--force` |
-| `run start <workflow> [options]` | Create and start a run<br>⚠️ `--name` — The server has no route that names a run, so this value is accepted and discarded. | `--name` ⚠️ `--var` `--profile` `--skip` `--stage-var` `--test-run` `--project` `--permission-mode` `--watch` `--verbosity` `--no-start` |
-| `run watch <run> [options]` | Stream a run until it reaches a terminal state | `--verbosity` |
-| `run workspace <run>` | Workspace a run executed in | — |
+| `run stage send <run> <stage> <text> [options]` | Send a message to a stage (the next turn, an amendment of a completed stage, or a retry of a paused one) | `--mode` `--attach` |
+| `run stage stop <run> <stage> [options]` | Stop the turn a stage is taking; the stage continues from its next step | `--force` |
+| `run start [workflow] [options]` | Start a run of a workflow (one invocation) | `--var` `--profile` `--skip` `--stage-var` `--stage-model` `--model` `--effort` `--codebase` `--project` `--permission-mode` `--name` `--run-timeout` `--skill-file` `--agent-file` `--prompt-file` `--test-run` `--idempotency-key` `--watch` `--verbosity` |
+| `run watch <run> [options]` | Stream a run until it is finalized (post-processing done); the exit code reflects its outcome | `--verbosity` |
+| `run workspace <run>` | Workspace a run executed in: its root, artifacts, uploads and every mount with its files | — |
 
 ### `automation` (alias: `auto`)
 
@@ -266,7 +265,7 @@ Scheduled, webhook and manual triggers that fan out into runs
 
 | Command | What | Flags |
 |---|---|---|
-| `automation create [options]` | Create an automation | `--name` `--workflow` `--trigger` `--schedule` `--data-schema` `--iteration-mode` `--default-dataset-file` `--default-dataset-format` `--var` `--max-concurrency` `--on-error` `--project` `--enabled` |
+| `automation create [options]` | Create an automation | `--name` `--workflow` `--trigger` `--schedule` `--data-schema` `--iteration-mode` `--default-dataset-file` `--default-dataset-format` `--var` `--max-concurrency` `--on-error` `--permission-mode` `--project` `--enabled` |
 | `automation delete <automation>` | Delete an automation | — |
 | `automation disable <automation>` | Disable an automation | — |
 | `automation enable <automation>` | Enable an automation | — |
@@ -277,7 +276,7 @@ Scheduled, webhook and manual triggers that fan out into runs
 | `automation rotate-webhook-token <automation>` | Issue a new webhook token + signing secret, invalidating the old ones | — |
 | `automation show <automation>` | Show an automation with recent executions | — |
 | `automation trigger <automation> [options]` | Fire an automation now | `--var` `--payload` |
-| `automation update <automation> [options]` | Patch an automation | `--name` `--schedule` `--max-concurrency` `--on-error` `--var` |
+| `automation update <automation> [options]` | Patch an automation | `--name` `--schedule` `--max-concurrency` `--on-error` `--permission-mode` `--var` |
 
 ### `project` (alias: `proj`)
 
@@ -351,7 +350,7 @@ Programmatic workflow scripts (.workflow.mjs)
 | `script materialize <script> [options]` | Turn a script into a concrete workflow definition | `--name` `--project` |
 | `script profiles <script>` | Profiles a script exposes | — |
 | `script reload [script]` | Re-read scripts from disk without restarting the server | — |
-| `script run <script> [options]` | Materialize and start a script | `--profile` `--watch` `--verbosity` |
+| `script run <script> [options]` | Start a run of a script (materialized once per script content) | `--profile` `--var` `--idempotency-key` `--watch` `--verbosity` |
 | `script show <script>` | Show a script | — |
 | `script validate <file>` | Validate a script file without registering it | — |
 
@@ -363,14 +362,6 @@ System workflow templates
 |---|---|---|
 | `template list` | System workflow templates | — |
 | `template show <template>` | Show one template | — |
-
-### `orchestrator` (alias: `orch`)
-
-System workflows and orchestrated runs
-
-| Command | What | Flags |
-|---|---|---|
-| `orchestrator cancel <run>` | Cancel an orchestrated run and everything under it | — |
 
 ### `extension` (alias: `ext`)
 
@@ -931,10 +922,23 @@ Two operations are deliberately shell-only and are hidden from the TUI palette: 
 
 ## 10. Common workflows
 
-### Start a workflow and watch
+### Plan, start and watch a workflow
 ```powershell
-generatorai run start <wfDefId> --var topic="caching" --watch
+generatorai run plan nightly-e2e --var topic="caching" --skip lint     # what would run, without starting it
+generatorai run start nightly-e2e --var topic="caching" --skip lint --watch
+generatorai run start review --codebase api@main --stage-model review=claude-opus --run-timeout 30
 ```
+
+`run start` sends ONE request (`POST /api/workflow-invocations`) with a fresh idempotency key; `--watch` long-polls the run digest until the run is finalized (post-processing included) and exits non-zero when it failed or was cancelled. `--run-timeout` is in minutes (the global `--timeout` is the per-request timeout in ms).
+
+### Run profiles
+```powershell
+generatorai run profile generate nightly-e2e -o .generatorai/run-profiles/quick.json
+generatorai run profile validate nightly-e2e quick                 # schema + server plan
+generatorai run start --profile quick --var topic="caching"        # flags win over the profile
+```
+
+A profile is a `RunProfile` v2 JSON file (`@generatorai/workflow-spec`): `{version: 2, name, workflow?, runName?, variables, projectId?, codebases?, stageOverrides? (by stage key), overrides?, budget?, skillFiles?, agentFiles?, promptFiles?}`. File paths in a profile are relative to the profile file.
 
 ### Run a PWS script with profile
 ```powershell
@@ -944,7 +948,7 @@ generatorai script run e2e-feature-coverage --profile quick-surface --watch
 ### Approve a HITL stage
 ```powershell
 generatorai run hitl pending <runId>                     # see what's waiting
-generatorai run hitl resume <runId> <stageId> --approve
+generatorai run hitl approve <runId> <stageKey>
 ```
 
 ### Export + re-import a workflow

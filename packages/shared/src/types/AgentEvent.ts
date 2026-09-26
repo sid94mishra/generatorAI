@@ -272,24 +272,20 @@ export type AgentEvent =
   | { kind: 'workflow_run.failed'; data: { workflowRunId: string; error: string } }
   | { kind: 'workflow_run.cancelled'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.forked'; data: { workflowRunId: string; ancestorRunId: string; rerunFrom: string[]; memoized: number } }
-  // ── WorkflowRun Orchestration Events ──
-  | { kind: 'workflow_run.orchestration_started'; data: { workflowRunId: string; hasCodebases: boolean; hasPreprocessing: boolean } }
-  | { kind: 'workflow_run.worktree_creating'; data: { workflowRunId: string; codebaseCount: number; codebases: Array<{ alias: string; codebaseId: string }> } }
-  | { kind: 'workflow_run.worktree_created'; data: { workflowRunId: string; worktrees: Record<string, string> } }
-  | { kind: 'workflow_run.preprocessing_started'; data: { workflowRunId: string; stepCount: number } }
-  | { kind: 'workflow_run.preprocessing_completed'; data: { workflowRunId: string; results: Array<{ stepName: string; success: boolean; durationMs: number }> } }
+  | { kind: 'workflow_run.invoked'; data: { workflowRunId: string; invocationId: string; trigger: { kind: string; [key: string]: unknown } } }
+  /** After the run's terminal event, once its lifecycle (compensation, hooks, post-processing, release) is done: what every waiter keys on. */
+  | { kind: 'workflow_run.finalized'; data: { workflowRunId: string; status: 'completed' | 'failed' | 'cancelled' } }
+  // ── WorkflowRun lifecycle phases (P04: `starting` and `finalizing`) ──
+  | { kind: 'workflow_run.phase_started'; data: { workflowRunId: string; stage: 'prepare' | 'finalize'; phase: string } }
+  | { kind: 'workflow_run.phase_completed'; data: { workflowRunId: string; stage: 'prepare' | 'finalize'; phase: string; durationMs: number } }
+  | { kind: 'workflow_run.phase_failed'; data: { workflowRunId: string; stage: 'prepare' | 'finalize'; phase: string; error: string } }
   | { kind: 'workflow_run.preprocessing_step_started'; data: { workflowRunId: string; stepName: string; stepType: string } }
   | { kind: 'workflow_run.preprocessing_step_completed'; data: { workflowRunId: string; stepName: string; success: boolean; durationMs: number } }
   | { kind: 'workflow_run.preprocessing_step_failed'; data: { workflowRunId: string; stepName: string; error: string } }
-  | { kind: 'workflow_run.stage_validation'; data: { workflowRunId: string; stageRunId: string; stageName: string; passed: boolean; failures: string[] } }
-  | { kind: 'workflow_run.orchestration_failed'; data: { workflowRunId: string; error: string } }
-  | { kind: 'workflow_run.orchestration_completed'; data: { workflowRunId: string; preprocessingResults: unknown[]; postProcessingResults?: unknown[] } }
   // ── WorkflowRun Sandbox Events ──
   | { kind: 'workflow_run.sandbox_created'; data: { workflowRunId: string; sandboxName: string; cliUrl: string; isDockerSandbox: boolean } }
   | { kind: 'workflow_run.sandbox_destroyed'; data: { workflowRunId: string } }
   // ── WorkflowRun Post-Processing Events ──
-  | { kind: 'workflow_run.postprocessing_started'; data: { workflowRunId: string; stepCount: number } }
-  | { kind: 'workflow_run.postprocessing_completed'; data: { workflowRunId: string; results: Array<{ stepName: string; success: boolean; durationMs: number }> } }
   | { kind: 'workflow_run.postprocessing_step_started'; data: { workflowRunId: string; stepName: string; stepType: string } }
   | { kind: 'workflow_run.postprocessing_step_completed'; data: { workflowRunId: string; stepName: string; success: boolean; durationMs: number } }
   | { kind: 'workflow_run.postprocessing_step_failed'; data: { workflowRunId: string; stepName: string; error: string } }

@@ -46,6 +46,7 @@ import {
   templateVariableNames,
   type AgentMode,
   type AgentStage,
+  type SessionSpec,
   type WorkflowGraph,
 } from '@generatorai/workflow-spec';
 import { classifyStageError, classified, StageError } from '../../domain/errors/StageError.js';
@@ -614,9 +615,10 @@ export class StageExecutor {
     const stage = graph.stages.find((s) => s.key === instance.stageKey) as AgentStage | undefined;
     if (!stage || stage.kind !== 'agent') throw new StageError('config_invalid', `Stage ${instance.stageKey} is not an agent stage of the pinned version`);
 
-    const spec = resolveSessionSpec(graph.workflow.session, stage.session);
+    const spec = stageSessionSpec(graph, stage, run).merged;
     const workspace = await runWorkspace(this.deps.workspaceManager, run);
-    const pinned = typeof run.variables?.['__workingDirectory'] === 'string' ? (run.variables['__workingDirectory'] as string) : undefined;
+    // The run's primary mount, pinned by the lifecycle's `worktrees` phase (system values, never variables: W-06).
+    const pinned = run.systemVars?.workingDirectory;
     const ctx: AttemptContext = {
       frame,
       run,
@@ -695,21 +697,20 @@ export class StageExecutor {
     };
     const snapshot = this.agentSnapshot(ctx);
     const exposure = await workspaceExposure(this.deps.workspaceManager, ctx.workspace, {
-      workingDirectory: typeof ctx.variables['__workingDirectory'] === 'string' ? (ctx.variables['__workingDirectory'] as string) : undefined,
+      workingDirectory: ctx.run.systemVars?.workingDirectory,
     });
-    const spec = resolveSessionSpec(ctx.graph.workflow.session, ctx.stage.session);
-    const variables = ctx.variables;
+    const { merged: spec, binding } = stageSessionSpec(ctx.graph, ctx.stage, ctx.run);
     const composed = await composer.compose({
       owner,
       conversationId,
       mode: create ? 'create' : 'resume',
       spec,
-      bindingSpec: ctx.stage.session ?? {},
-      agent: { baseLayer: resolverLayer(ctx.graph.workflow.session), bindingLayer: resolverLayer(ctx.stage.session) },
+      bindingSpec: binding,
+      agent: { baseLayer: resolverLayer(ctx.graph.workflow.session), bindingLayer: resolverLayer(binding) },
       agentSnapshot: snapshot,
       workspace: ctx.workspace,
       exposure,
-      projectId: typeof variables['__projectId'] === 'string' ? (variables['__projectId'] as string) : undefined,
+      projectId: ctx.run.projectId ?? ctx.graph.workflow.projectId ?? undefined,
       ...(session?.providerSessionId ? { resumeProviderSessionId: session.providerSessionId } : {}),
       attended: true,
       gates: new StageGatePort({
@@ -1517,7 +1518,8 @@ export class StageExecutor {
     for (const [k, v] of Object.entries(r.mergedResult.variables ?? {})) ctx.variables[k] = v;
     for (const m of r.mergedResult.contextMessages ?? []) ctx.hookContext.push(m.content);
     for (const att of r.mergedResult.attachments ?? []) {
-      const dir = path.join(ctx.workDir, 'hook-attachments');
+      // Outside the mounts, so autoCommit never picks the attachments up (C-8).
+      const dir = path.join(ctx.workspace.rootPath, 'hook-attachments', ctx.stage.key);
       await fs.mkdir(dir, { recursive: true });
       await fs.writeFile(path.join(dir, path.basename(att.filename)), att.content, 'utf-8');
     }
@@ -1560,4 +1562,32 @@ export class StageExecutor {
     const event = { kind, data: full } as unknown as AgentEvent;
     await (ctx.session ? this.deps.eventBus.emit(ctx.session.id, event) : this.deps.eventBus.emitGlobal(event)).catch(() => undefined);
   }
+}
+
+/**
+ * A stage's session: the workflow's, then the run-wide overrides of the
+ * invocation (model, provider, effort) and the run's uploaded skills and
+ * sub-agents, then the stage's own, then the run's per-stage model. The
+ * binding-site layer (runtime scalars) is everything but the workflow's.
+ */
+export function stageSessionSpec(
+  graph: WorkflowGraph,
+  stage: Pick<AgentStage, 'key' | 'session'>,
+  run: Pick<WorkflowRun, 'runOverrides' | 'stageOverrides' | 'systemVars'>,
+): { merged: SessionSpec; binding: SessionSpec } {
+  const o = run.runOverrides ?? {};
+  const sv = run.systemVars ?? {};
+  const runLayer: SessionSpec = {
+    ...(o.model ? { model: o.model } : {}),
+    ...(o.harnessType ? { harnessType: o.harnessType as SessionSpec['harnessType'] } : {}),
+    ...(o.reasoningEffort ? { reasoningEffort: o.reasoningEffort as SessionSpec['reasoningEffort'] } : {}),
+    ...(sv.skillDirectories?.length ? { skills: { directories: [...sv.skillDirectories] } } : {}),
+    ...(sv.customAgents?.length ? { customAgents: sv.customAgents.map((a) => ({ ...a })) } : {}),
+  };
+  const model = run.stageOverrides?.find((x) => x.stageKey === stage.key)?.model;
+  const stageRunLayer: SessionSpec | undefined = model ? { model } : undefined;
+  return {
+    merged: resolveSessionSpec(graph.workflow.session, runLayer, stage.session, stageRunLayer),
+    binding: resolveSessionSpec(runLayer, stage.session, stageRunLayer),
+  };
 }

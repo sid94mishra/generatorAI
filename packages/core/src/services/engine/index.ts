@@ -49,4 +49,4 @@ export { TimerService, type ScheduledTimer } from './TimerService.js';
 export { LeaseReaper, inFlightIsSafe } from './LeaseReaper.js';
 export { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
 export { EffectsDispatcher } from './EffectsDispatcher.js';
-export { DefaultRunLifecycle, PrepareError, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';
+export { DefaultRunLifecycle, PrepareError, type LifecyclePlatform, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';

@@ -1,12 +1,14 @@
 // ────────────────────────────────────────────────────────────────
 // WorkflowRun Routes — runs, their instances and the commands API.
 //
+// A run starts through ONE route, `POST /workflow-invocations` (P04), and
+// so does a re-run of a terminal run (`target: {kind: 'fork'}`, G5 §3.8).
 // Every operator action on a run or one of its instances is ONE route,
 // `POST /:id/commands` (P03 WP-3.6/3.7, G5 §3.7): pause, resume, cancel,
 // retry, skip, fail and approve (which also answers a stage's in-turn
-// tool permission, question or plan review). Re-running a terminal run is
-// `POST /:id/fork` (G5 §3.8). Pending approvals are the `awaiting_input`
-// instances of `GET /:id` (their `interruptData`).
+// tool permission, question or plan review). Pending approvals are the
+// `awaiting_input` instances of `GET /:id` (their `interruptData`). The
+// run's workspace is read under `/:id/workspace*` (workflowRunWorkspace.ts).
 //
 // A stage is a compact chat (P03b, `StageConversationService`):
 // `/:id/instances/:instanceId/messages` sends an operator message (queued
@@ -29,26 +31,11 @@ import { canBypassPermissions } from './permissionScope.js';
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
 import { z } from 'zod';
-import { StageKeySchema, UserVariablesSchema } from '@generatorai/workflow-spec';
-import { ForkRunRequestSchema, RunCommandSchema, WORKFLOW_RUN_STATES, type RunCommand } from '@generatorai/workflow-spec';
+import { RunCommandSchema, WORKFLOW_RUN_STATES, type RunCommand } from '@generatorai/workflow-spec';
 import { RunCommandRefusedError, type StageGateAnswer } from '@generatorai/core';
 import { AgentModeSchema, AnswerQuestionSchema, PlanDecisionSchema, ResolveToolPermissionSchema } from '@generatorai/shared';
 import multer from 'multer';
 import { validate } from '../middleware/validate.js';
-
-/** `POST /workflow-runs`. A draft can only start as a test run. */
-const StageOverrideSchema = z
-  .object({ stageKey: StageKeySchema, skip: z.boolean().optional(), variables: UserVariablesSchema.optional() })
-  .strict();
-
-const CreateWorkflowRunSchema = z.object({
-  workflowDefinitionId: z.string().uuid(),
-  // Engine-reserved names (__*, repo_path_*, repo_branch_*) are refused (R-8).
-  variables: UserVariablesSchema.default({}),
-  projectId: z.string().uuid().optional(),
-  testRun: z.boolean().optional(),
-  stageOverrides: z.array(StageOverrideSchema).max(100).optional(),
-});
 
 /** An operator message to a stage (the multipart fields, as strings). */
 const StageMessageSchema = z.object({
@@ -84,19 +71,6 @@ export function createWorkflowRunRoutes(container: Container): Router {
   // ═══════════════════════════════════════════════════════════
   // WorkflowRun CRUD + Lifecycle
   // ═══════════════════════════════════════════════════════════
-
-  // POST /workflow-runs — Create a new workflow run
-  router.post('/', validate(CreateWorkflowRunSchema), async (req, res, next) => {
-    try {
-      const run = await workflowRunService.createRun(req.body);
-      logger.info(`[WorkflowRunRoutes] Created run ${run.id}`, {
-        requestId: req.requestId,
-      });
-      res.status(201).json(run);
-    } catch (err) {
-      next(err);
-    }
-  });
 
   // GET /workflow-runs — List runs with optional ?status and ?definitionId filters
   router.get('/', async (req, res, next) => {
@@ -141,19 +115,6 @@ export function createWorkflowRunRoutes(container: Container): Router {
     }
   });
 
-  // POST /workflow-runs/:id/start — Start a created run (202 Accepted). The
-  // PD-17 check refuses it synchronously; the prepare phases run in the engine.
-  router.post('/:id/start', async (req, res, next) => {
-    try {
-      const runId = String(req.params['id']);
-      await workflowRunService.startRun(runId);
-      logger.info(`[WorkflowRunRoutes] Started run ${runId}`, { requestId: req.requestId });
-      res.status(202).json({ message: 'Workflow run start initiated', runId });
-    } catch (err) {
-      next(err);
-    }
-  });
-
   // POST /workflow-runs/:id/commands — every operator action (RunCommand).
   // 202 when the engine accepted it; 404 unknown run or instance; 409 a state
   // or version conflict; 400 an invalid command; 503 no engine in this process.
@@ -173,19 +134,6 @@ export function createWorkflowRunRoutes(container: Container): Router {
         requestId: req.requestId,
       });
       res.status(202).json({ runId, command: command.command });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-runs/:id/fork — re-run a terminal run as a NEW run
-  // (G5 §3.8); the source stays terminal. 201 with the fork.
-  router.post('/:id/fork', validate(ForkRunRequestSchema), async (req, res, next) => {
-    try {
-      const runId = String(req.params['id']);
-      const fork = await workflowRunService.forkRun(runId, req.body);
-      logger.info(`[WorkflowRunRoutes] Forked run ${runId} as ${fork.id}`, { requestId: req.requestId });
-      res.status(201).json(fork);
     } catch (err) {
       next(err);
     }

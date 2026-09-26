@@ -9,7 +9,15 @@ import { DockerSandboxProvider } from '../infrastructure/DockerSandboxProvider.j
 import { HostProcessSandboxProvider } from '../infrastructure/HostProcessSandboxProvider.js';
 import type { ISandboxProvider } from '../domain/ports/ISandboxProvider.js';
 import { SandboxLifecycleManager } from './SandboxLifecycleManager.js';
-import type { OrchestratorSandbox } from './WorkflowOrchestrator.js';
+
+/**
+ * The run sandbox. `null` when sandbox mode is off in the deployment
+ * config — a configuration, not a missing dependency.
+ */
+export interface RunSandbox {
+  lifecycle: SandboxLifecycleManager;
+  provider: ISandboxProvider;
+}
 
 export interface RunSandboxOptions {
   /** `docker` requires Docker Sandbox; `host` runs on the host; `auto` prefers Docker. */
@@ -31,7 +39,7 @@ export interface RunSandboxOptions {
 export async function createRunSandbox(
   options: RunSandboxOptions,
   logger: ILogger,
-): Promise<OrchestratorSandbox> {
+): Promise<RunSandbox> {
   let provider: ISandboxProvider | undefined;
   let dockerAvailable = false;
 

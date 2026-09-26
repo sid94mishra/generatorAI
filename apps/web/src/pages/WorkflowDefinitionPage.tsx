@@ -17,7 +17,6 @@ import {
   Clock,
   Tag,
   AlertCircle,
-  Globe,
   MoreHorizontal,
   ChevronDown,
   Download,
@@ -25,8 +24,7 @@ import {
 } from 'lucide-react';
 
 import { DAGCanvas } from '@/components/workflow/DAGCanvas.js';
-import { VariableInputModal } from '@/components/workflow/VariableInputModal.js';
-import type { UploadedFileSet, LinkedCodebaseInfo } from '@/components/workflow/VariableInputModal.js';
+import { RunDialog } from '@/components/workflow/RunDialog.js';
 import { DefinitionStatusBadge } from '@/components/workflow/WorkflowCard.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
@@ -34,9 +32,6 @@ import {
   useWorkflowDefinition,
   useDeleteWorkflowDefinition,
   useWorkflowRunsByDefinition,
-  useCreateWorkflowRun,
-  useStartWorkflowRun,
-  useStartOrchestratedRun,
   usePublishDefinition,
 } from '@/hooks/workflowQueries.js';
 import { cn } from '@/lib/utils.js';
@@ -50,9 +45,8 @@ import {
   PopoverContent,
 } from '@/components/ui/index.js';
 import { EntityListRow } from '@/components/data/index.js';
-import { useProjectCodebases } from '@/hooks/projectQueries.js';
-import type { WorkflowRun, CreateWorkflowRunParams } from '@generatorai/shared';
-import { encodeStageOverrides, needsOrchestratedStart, type StageOverrideDraft } from '@generatorai/client-core';
+import type { WorkflowRun } from '@generatorai/shared';
+import type { InvocationRequest, InvocationResult } from '@generatorai/workflow-spec';
 import { usePlatform } from '@/providers/PlatformProvider.js';
 import { downloadBlobAsFile } from '@/utils/downloadBlobAsFile.js';
 import { exportFileName } from '@/utils/workflowExport.js';
@@ -73,9 +67,6 @@ export function WorkflowDefinitionPage() {
   usePageTitle(workflow?.name);
   const { data: runs } = useWorkflowRunsByDefinition(id);
   const deleteDefinition = useDeleteWorkflowDefinition();
-  const createRun = useCreateWorkflowRun();
-  const startRun = useStartWorkflowRun();
-  const startOrchestratedRun = useStartOrchestratedRun();
   const publishDefinition = usePublishDefinition();
 
   // Only `loadRecord` is used on this read-only page — a single,
@@ -84,30 +75,12 @@ export function WorkflowDefinitionPage() {
   // *editor* touches even though this page never reads any of that state.
   const loadRecord = useWorkflowBuilderStore((s) => s.loadRecord);
 
-  const [variableModalOpen, setVariableModalOpen] = useState(false);
-  const [isRunning, setIsRunning] = useState(false);
+  const [runDialogOpen, setRunDialogOpen] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [visibleRunCount, setVisibleRunCount] = useState(RUNS_PAGE_SIZE);
   const [actionError, setActionError] = useState<string | null>(null);
 
-  const projectId = workflow?.projectId ?? undefined;
-  const codebaseAliases = workflow?.lifecycle.codebaseAliases;
-  const isOrchestrated = !!workflow && needsOrchestratedStart(workflow);
   const isDraft = definition?.status !== 'published';
-
-  // ── Project codebases for auto-filling git variables in run dialog ──
-  const { data: projectCodebases } = useProjectCodebases(projectId);
-
-  const linkedCodebases = React.useMemo((): LinkedCodebaseInfo[] | undefined => {
-    if (!projectId || !codebaseAliases?.length || !projectCodebases) return undefined;
-    return codebaseAliases
-      .map((alias) => {
-        const cb = projectCodebases.find((c) => c.alias === alias);
-        if (!cb) return null;
-        return { alias: cb.alias, url: cb.url ?? cb.localPath ?? '', branch: cb.defaultBranch ?? 'main' };
-      })
-      .filter((x): x is LinkedCodebaseInfo => x !== null);
-  }, [projectId, codebaseAliases, projectCodebases]);
 
   const stages = React.useMemo(
     () => (definition?.graph.stages ?? []).map((s) => ({ key: s.key, name: s.name })),
@@ -134,58 +107,19 @@ export function WorkflowDefinitionPage() {
     }
   }, [definition, loadRecord]);
 
-  const executeRun = useCallback(
-    async (variables: Record<string, unknown>, uploads?: UploadedFileSet, stageOverrides?: StageOverrideDraft[]) => {
-      if (!id) return;
-      setIsRunning(true);
-      setActionError(null);
-      // A draft has no published version: it runs its working graph as a test run.
-      const testRun = isDraft;
+  // A draft has no published version: it runs its working graph as a test run.
+  const runTarget = React.useMemo(
+    (): InvocationRequest['target'] | undefined =>
+      id ? { kind: 'definition', workflowDefinitionId: id, ...(isDraft ? { testRun: true } : {}) } : undefined,
+    [id, isDraft],
+  );
 
-      try {
-        // Uploads need the prepared-launch path even for a plain definition:
-        // it creates the final workspace before storing/discovering content.
-        if (isOrchestrated || Object.values(uploads ?? {}).some((files) => files.length > 0)) {
-          const orchParams: Parameters<typeof startOrchestratedRun.mutateAsync>[0] = {
-            workflowDefinitionId: id,
-            variables,
-            uploads,
-            ...(testRun ? { testRun: true } : {}),
-          };
-
-          if (projectId) {
-            orchParams['projectId'] = projectId;
-            orchParams['selectedCodebases'] = codebaseAliases ?? [];
-          }
-
-          // Pass stage overrides if any are active (shared encoding: a
-          // top-level array on the orchestrated route).
-          const encoded = encodeStageOverrides(variables, stageOverrides);
-          if (encoded.stageOverrides) orchParams['stageOverrides'] = encoded.stageOverrides;
-
-          const context = await startOrchestratedRun.mutateAsync(orchParams);
-
-          setVariableModalOpen(false);
-          navigate(`/workflows/${id}/runs/${context.workflowRunId}`);
-        } else {
-          const params: CreateWorkflowRunParams = {
-            workflowDefinitionId: id,
-            ...encodeStageOverrides(variables, stageOverrides),
-            ...(testRun ? { testRun: true } : {}),
-          };
-          const run = await createRun.mutateAsync(params);
-
-          await startRun.mutateAsync(run.id);
-          setVariableModalOpen(false);
-          navigate(`/workflows/${id}/runs/${run.id}`);
-        }
-      } catch (err) {
-        setActionError(err instanceof Error ? `Run failed: ${err.message}` : 'Run failed');
-      } finally {
-        setIsRunning(false);
-      }
+  const handleRunStarted = useCallback(
+    (result: InvocationResult) => {
+      setRunDialogOpen(false);
+      navigate(`/workflows/${result.workflowDefinitionId}/runs/${result.runId}`);
     },
-    [id, isDraft, isOrchestrated, projectId, codebaseAliases, createRun, startRun, startOrchestratedRun, navigate],
+    [navigate],
   );
 
   const handlePublish = useCallback(async () => {
@@ -211,7 +145,7 @@ export function WorkflowDefinitionPage() {
 
   const handleRun = useCallback(() => {
     if (!definition) return;
-    setVariableModalOpen(true);
+    setRunDialogOpen(true);
   }, [definition]);
 
   const handleDelete = useCallback(async () => {
@@ -290,12 +224,6 @@ export function WorkflowDefinitionPage() {
                   Unpublished changes
                 </Badge>
               )}
-              {isOrchestrated && (
-                <Badge tone="warning" size="sm" className="shrink-0">
-                  <Globe className="h-3 w-3" />
-                  Orchestrated
-                </Badge>
-              )}
             </div>
 
             {workflow.description && (
@@ -340,9 +268,7 @@ export function WorkflowDefinitionPage() {
               variant="primary"
               size="sm"
               onClick={handleRun}
-              disabled={isRunning}
-              loading={isRunning}
-              leftIcon={isRunning ? undefined : <Play className="h-3.5 w-3.5" />}
+              leftIcon={<Play className="h-3.5 w-3.5" />}
               title={isDraft ? 'A draft runs only as a test run' : 'Run the published version'}
             >
               <span className="hidden sm:inline">{isDraft ? 'Test run' : 'Run'}</span>
@@ -489,17 +415,17 @@ export function WorkflowDefinitionPage() {
         </div>
       </div>
 
-      {/* Variable Input Modal */}
-      <VariableInputModal
-        open={variableModalOpen}
-        onClose={() => setVariableModalOpen(false)}
-        onSubmit={executeRun}
+      <RunDialog
+        open={runDialogOpen}
+        onClose={() => setRunDialogOpen(false)}
         variables={workflow.variables}
         workflowName={workflow.name}
-        isSubmitting={isRunning}
-        linkedCodebases={linkedCodebases}
         stages={stages}
+        projectId={workflow.projectId}
+        lifecycle={workflow.lifecycle}
+        target={runTarget}
         submitLabel={isDraft ? 'Test run' : 'Start Run'}
+        onStarted={handleRunStarted}
       />
     </div>
   );

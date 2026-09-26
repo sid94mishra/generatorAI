@@ -53,6 +53,7 @@ import {
   DrizzleAutomationRepository,
   DrizzleAutomationExecutionRepository,
   DrizzleIdempotencyKeyRepository,
+  DrizzleInvocationUploadRepository,
   // Project & Codebase Management repositories
   DrizzleProjectRepository,
   DrizzleProjectCodebaseRepository,
@@ -86,7 +87,6 @@ import {
   createCoreServices,
   runBootHousekeeping,
   EngineLockedError,
-  DefaultRunLifecycle,
   InterruptedTurnRecoveryService,
   OrphanProcessReaper,
   SandboxedScriptRunner,
@@ -109,7 +109,6 @@ import {
   SandboxScriptRunner,
   createRunSandbox,
   // orchestrator services
-  WorkflowOrchestrator,
   // Phase 4 streaming rewrite (additive)
   StreamBroker,
   // W07 — durable delta log, dual-written alongside stream_cursors
@@ -176,7 +175,7 @@ import {
 } from '@generatorai/core';
 import type {
   IAgentHarness,
-  OrchestratorSandbox,
+  RunSandbox,
   TemplateRegistry,
   HookExecutor,
   IMcpHub,
@@ -193,6 +192,8 @@ import type {
   RunSupervisor,
   OutboxPublisher,
   WorkflowRunService,
+  WorkflowInvocationService,
+  IdempotencyService,
   StageConversationService,
   // automation services
   AutomationService,
@@ -649,7 +650,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // `null` when sandbox mode is off; the provider choice (and its refusal to
   // fall back to the host without an explicit opt-in) lives in core so the
   // SDK boots the same sandbox for the same settings.
-  const sandbox: OrchestratorSandbox | null = config.sandbox.enabled
+  const sandbox: RunSandbox | null = config.sandbox.enabled
     ? await createRunSandbox(
         {
           provider: config.sandbox.provider,
@@ -818,6 +819,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automationRepo,
     automationExecutionRepo,
     idempotencyKeyRepo,
+    // P04 — files staged before a run starts, and the codebases a run may mount.
+    invocationUploadRepo: new DrizzleInvocationUploadRepository(db),
+    projectCodebaseRepo,
     // W22 / W47 — durable execution engine storage.
     registerRepo,
     entryRepo,
@@ -868,7 +872,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     hitlService,
     planService,
     agentInteractionService,
-    workflowPreprocessor,
+    workflowInvocationService,
+    idempotencyService,
   } = core;
 
   // STR-01 / CLN-12 — `StreamBroker` is now the only streaming transport.
@@ -1449,30 +1454,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     void refreshPushTargets();
   }
 
-  const workflowOrchestrator = new WorkflowOrchestrator(
-    workflowRunService,
-    workflowDefinitionService,
-    runDefinitionReader,
-    workflowPreprocessor,
-    workflowRunRepo,
-    eventBus,
-    logger,
-    config.artifactsDir,
-    workspaceManager,
-    worktreeService,
-    projectService,
-    projectConfigService,
-    hookExecutor,
-    sandbox,
-  );
-
   // Late-wire services that were created after the core graph: the
   // engine's prepare phase creates the project's worktrees, its executor
   // and compensation use checkpoints, and a `restore_checkpoint` fork rolls
   // the source workspace back.
-  if (engine.lifecycle instanceof DefaultRunLifecycle) {
-    engine.lifecycle.setWorktrees({ service: worktreeService, codebases: projectCodebaseRepo });
-  }
+  engine.setLifecyclePlatform({ mounts: mountService, projectConfigs: projectConfigService, sandbox });
   engine.setCheckpoints(workspaceCheckpointService);
   workflowRunService.setCheckpointService(workspaceCheckpointService);
 
@@ -2055,6 +2041,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // not opted in — not just the upload route.
     enabled: config.scripts.workflowScriptsEnabled,
   });
+  // A script target is materialized from the loaded script (P04).
+  workflowInvocationService.setScripts(workflowScriptLoader);
+  // Staged run uploads nobody used expire after an hour.
+  let invocationUploadSweeper: ReturnType<typeof setInterval> | undefined;
 
   // ── Widgets & Extensions ──
   const widgetRegistry = new WidgetRegistry();
@@ -2130,9 +2120,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     engine,
     workflowRunService,
     stageConversationService,
+    // P04 — THE way a run starts.
+    workflowInvocationService,
 
-    // Orchestrator
-    workflowOrchestrator,
     gitManager,
     changeSetService,
     sourceControlService,
@@ -2147,6 +2137,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     automationService,
     automationRecoveryService,
     idempotencyKeyRepo,
+    idempotencyService,
 
     // HITL (Human-in-the-Loop)
     hitlService,
@@ -2416,22 +2407,10 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         }
         automationRecoveryService.startIdempotencySweeper();
       }
-
-      // Re-arm workflow post-processing that a restart interrupted.
-      //
-      // Auto-commit and auto-PR were attached to a run only as an in-memory
-      // event subscription, so a restart lost them silently: the run reported
-      // success and never opened its pull request. The intent is persisted on
-      // the run now, and this is what picks it back up (review 6.2).
-      if (workflowOrchestrator) {
-        try {
-          await workflowOrchestrator.reArmPendingPostProcessing();
-        } catch (err) {
-          logger.warn(
-            `[Container] Re-arming workflow post-processing failed: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
-      }
+      invocationUploadSweeper = setInterval(() => {
+        void workflowInvocationService.sweepUploads().catch((err: unknown) => logger.warn(`[Container] upload sweep failed: ${String(err)}`));
+      }, 10 * 60_000);
+      invocationUploadSweeper.unref?.();
 
       // Initialize automation cron scheduler AFTER recovery so the two
       // don't race on the same execution row.
@@ -2487,6 +2466,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       if (automationRecoveryService) {
         automationRecoveryService.stopIdempotencySweeper();
       }
+      if (invocationUploadSweeper) clearInterval(invocationUploadSweeper);
       // DB-04 — halt the retention sweeper so a pending sweep can't block
       // closeDB() by holding the write lock.
       eventRetentionService.stop();
@@ -2597,8 +2577,8 @@ export interface Container {
   /** The stage conversation API (P03b): a stage is a compact chat. */
   stageConversationService: StageConversationService;
 
-  // Orchestrator
-  workflowOrchestrator: WorkflowOrchestrator;
+  /** THE way a run starts (P04): `POST /workflow-invocations`. */
+  workflowInvocationService: WorkflowInvocationService;
   gitManager: GitManager;
   changeSetService: ChangeSetService;
   sourceControlService: SourceControlService;
@@ -2617,8 +2597,10 @@ export interface Container {
   automationService: AutomationService;
   /** Track A — recovery service for boot-time reconciliation. */
   automationRecoveryService: AutomationRecoveryService | null;
-  /** Track A3 — idempotency key store, used directly by trigger routes. */
+  /** Track A3 — idempotency key store. */
   idempotencyKeyRepo: DrizzleIdempotencyKeyRepository;
+  /** Claim-then-finalize idempotency (automation triggers, invocations). */
+  idempotencyService: IdempotencyService | null;
 
   /** HITL — human-in-the-loop interrupt/resume service. */
   hitlService: HitlService;

@@ -14,9 +14,9 @@ same promise as one that does not.
 | Measure | Count |
 |---|---:|
 | Commands | 214 |
-| Groups | 24 |
+| Groups | 23 |
 | Server-backed commands | 187 |
-| Destructive commands | 33 |
+| Destructive commands | 32 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
 | Bindings executed by a component | 21 |
@@ -119,7 +119,6 @@ same promise as one that does not.
 | `harness.switch` | `harness switch` | yes | no | yes | yes | provider | — |
 | `hook.phases` | `hook phases` | yes | no | yes | yes | — | — |
 | `hook.test` | `hook test` | yes | no | yes | yes | session, phase | --type, --config |
-| `orchestrator.cancel` | `orchestrator cancel` | yes | yes | yes | yes | run | — |
 | `project.codebase.branches` | `project codebase branches` | yes | no | yes | yes | project, codebase | — |
 | `project.codebase.browse` | `project codebase browse` | yes | no | yes | yes | project, codebase | — |
 | `project.codebase.fetch` | `project codebase fetch` | yes | no | yes | yes | project, codebase | — |
@@ -158,6 +157,7 @@ same promise as one that does not.
 | `run.list` | `run list` | yes | no | yes | yes | — | — |
 | `run.messages` | `run messages` | yes | no | yes | yes | run | — |
 | `run.pause` | `run pause` | yes | no | yes | yes | run | — |
+| `run.plan` | `run plan` | yes | no | yes | yes | — | — |
 | `run.profile.generate` | `run profile generate` | yes | no | yes | yes | workflow | — |
 | `run.profile.list` | `run profile list` | no | no | yes | yes | — | — |
 | `run.profile.validate` | `run profile validate` | yes | no | yes | yes | workflow, profile | — |
@@ -171,7 +171,7 @@ same promise as one that does not.
 | `run.stage.retry` | `run stage retry` | yes | no | yes | yes | run, stage | — |
 | `run.stage.send` | `run stage send` | yes | no | yes | yes | run, stage, text | — |
 | `run.stage.stop` | `run stage stop` | yes | no | yes | yes | run, stage | — |
-| `run.start` | `run start` | yes | no | yes | yes | workflow | — |
+| `run.start` | `run start` | yes | no | yes | yes | — | — |
 | `run.watch` | `run watch` | yes | no | yes | yes | run | — |
 | `run.workspace` | `run workspace` | yes | no | yes | yes | run | — |
 | `script.list` | `script list` | yes | no | yes | yes | — | — |

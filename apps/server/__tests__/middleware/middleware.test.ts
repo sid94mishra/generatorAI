@@ -47,10 +47,10 @@ describe('Middleware Integration', () => {
 
   describe('Error Handler Middleware', () => {
     it('should map InvalidTransitionError to 409', async () => {
-      (container.workflowRunService.startRun as ReturnType<typeof import('vitest').vi.fn>)
-        .mockRejectedValue(new InvalidTransitionError('Cannot start from current state'));
+      (container.workflowRunService.deleteRun as ReturnType<typeof import('vitest').vi.fn>)
+        .mockRejectedValue(new InvalidTransitionError('Cannot delete from current state'));
 
-      const res = await request(app).post('/api/workflow-runs/run-1/start');
+      const res = await request(app).delete('/api/workflow-runs/run-1');
 
       expect(res.status).toBe(409);
       expect(res.body.error.code).toBe('INVALID_TRANSITION');

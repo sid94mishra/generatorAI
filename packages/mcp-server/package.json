@@ -6,10 +6,13 @@
   "main": "./src/index.ts",
   "types": "./src/index.ts",
   "bin": {
-    "generatorai-mcp-server": "./src/cli.ts"
+    "generatorai-mcp": "./src/cli.ts"
   },
   "exports": {
-    ".": { "import": "./src/index.ts", "types": "./src/index.ts" }
+    ".": {
+      "import": "./src/index.ts",
+      "types": "./src/index.ts"
+    }
   },
   "scripts": {
     "build": "tsc -p tsconfig.json",
@@ -18,8 +21,9 @@
     "lint": "eslint src/"
   },
   "dependencies": {
-    "@generatorai/core": "workspace:*",
-    "@generatorai/sdk": "workspace:*",
+    "@generatorai/client-core": "workspace:*",
+    "@generatorai/client-runtime": "workspace:*",
+    "@generatorai/secrets": "workspace:*",
     "@generatorai/shared": "workspace:*",
     "@generatorai/workflow-spec": "workspace:*",
     "@modelcontextprotocol/sdk": "^1.29.0"

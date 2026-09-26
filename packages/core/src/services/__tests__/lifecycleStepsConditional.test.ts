@@ -3,23 +3,22 @@
 // regex engine (P01 WP-1.5).
 import { describe, expect, it, vi } from 'vitest';
 
-import { WorkflowPreprocessor, type PreprocessorContext } from '../WorkflowPreprocessor.js';
+import { LifecycleSteps, type LifecycleStepContext } from '../engine/lifecycle/steps.js';
 
 function harness() {
   const run = vi.fn(async () => ({ exitCode: 0, stdout: 'ran', stderr: '' }));
-  const preprocessor = new WorkflowPreprocessor(
-    { cloneToDirectory: vi.fn(), clone: vi.fn() } as never,
+  const preprocessor = new LifecycleSteps(
+    { cloneToDirectory: vi.fn() } as never,
     { run } as never,
     { emitGlobal: vi.fn(async () => undefined) } as never,
     { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
     { run: vi.fn() },
   );
-  const context = (variables: Record<string, unknown>): PreprocessorContext => ({
-    workflowRunId: 'run-1',
+  const context = (variables: Record<string, unknown>): LifecycleStepContext => ({
+    runId: 'run-1',
     variables,
-    clonedPaths: {},
-    featureBranches: {},
-    runWorkspaceDir: '/runs/run-1',
+    codebases: {},
+    workDir: '/runs/run-1',
   });
   return { preprocessor, context };
 }

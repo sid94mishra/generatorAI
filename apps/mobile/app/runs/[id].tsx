@@ -68,6 +68,8 @@ export default function RunDetailScreen(): React.ReactElement {
   const focused = useIsFocused();
   const { colors } = useTheme();
   const runControl = useFeature('runControl');
+  // Retry forks a new run (an invocation), which needs only runStart.
+  const runStart = useFeature('runStart');
   // The workbench: tools for the run's workspace, as on a chat.
   const [panelOpen, setPanelOpen] = useState(false);
   const [tool, setTool] = useState<ToolId | null>(null);
@@ -205,30 +207,33 @@ export default function RunDetailScreen(): React.ReactElement {
   const elapsed = runElapsed(data, isActive(data.status) ? null : data.completedAt ?? data.updatedAt);
   const workspaceId = data.workspaceId;
 
-  const menuActions: MenuAction[] = runControl.available
-    ? [
-        ...(['pause', 'resume', 'retry', 'cancel'] as const)
-          .filter((action) => controls[action])
-          .map((action) => ({
-            label: ACTION_LABEL[action],
-            destructive: action === 'cancel',
-            onPress: () => (action === 'cancel' ? setConfirmCancel(true) : doRunAction(action)),
-          })),
-        {
-          label: 'Delete run',
-          destructive: true,
-          icon: <Trash2 size={18} color={colors.danger} />,
-          onPress: () => setConfirmDelete(true),
-        },
-      ]
-    : [
-        {
-          label: 'Request access',
-          detail: 'Pausing, cancelling and retrying runs needs workflow permission on this device.',
-          icon: <Lock size={18} color={colors['muted-foreground']} />,
-          onPress: runControl.requestAccess,
-        },
-      ];
+  const allowed = (action: RunAction): boolean => (action === 'retry' ? runStart.available : runControl.available);
+  const menuActions: MenuAction[] = [
+    ...(['pause', 'resume', 'retry', 'cancel'] as const)
+      .filter((action) => controls[action] && allowed(action))
+      .map((action) => ({
+        label: ACTION_LABEL[action],
+        destructive: action === 'cancel',
+        onPress: () => (action === 'cancel' ? setConfirmCancel(true) : doRunAction(action)),
+      })),
+    ...(runControl.available
+      ? [
+          {
+            label: 'Delete run',
+            destructive: true,
+            icon: <Trash2 size={18} color={colors.danger} />,
+            onPress: () => setConfirmDelete(true),
+          },
+        ]
+      : [
+          {
+            label: 'Request access',
+            detail: 'Pausing, cancelling and deleting runs needs workflow permission on this device.',
+            icon: <Lock size={18} color={colors['muted-foreground']} />,
+            onPress: runControl.requestAccess,
+          },
+        ]),
+  ];
 
   // The single most relevant control, inline, so it is not hidden in a menu.
   const primary: RunAction | null = controls.resume ? 'resume' : controls.retry ? 'retry' : null;
@@ -295,7 +300,7 @@ export default function RunDetailScreen(): React.ReactElement {
               <Text className="text-sm text-foreground">{data.error}</Text>
             </View>
           ) : null}
-          {primary && runControl.available ? (
+          {primary && allowed(primary) ? (
             <Button
               label={ACTION_LABEL[primary]}
               variant={primary === 'retry' ? 'primary' : 'secondary'}
@@ -333,7 +338,7 @@ export default function RunDetailScreen(): React.ReactElement {
           <StageTimeline
             stages={stages}
             runStatus={data.status}
-            canControl={runControl.available}
+            canControl={isTerminal(data.status) ? runStart.available : runControl.available}
             busyStageId={busyStage}
             onOpen={openStage}
             expandedId={expandedStageId}

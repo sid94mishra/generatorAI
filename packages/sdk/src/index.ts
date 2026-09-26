@@ -45,7 +45,6 @@ export type {
   CreateWorkflowOptions,
   GraphSource,
   RunOptions,
-  OrchestrateOptions,
   StreamOptions,
   CreateChatOptions,
   RunScriptOptions,
@@ -139,7 +138,7 @@ export type {
 // contract (see API-STABILITY.md). Power users who accept that can import it
 // explicitly:
 //
-//   import { WorkflowOrchestrator } from '@generatorai/sdk/internal';
+//   import { WorkflowInvocationService } from '@generatorai/sdk/internal';
 //
 // Prefer the facades (`ai.workflows`, `ai.chat`, …) — they are the stable API.
 // ────────────────────────────────────────────────────────────────

@@ -12,10 +12,12 @@ import type {
   CreateChatParams,
   WorkflowRun,
   WorkflowRunWithStages,
-  CreateWorkflowRunParams,
+  InvocationFiles,
 } from '@generatorai/shared';
 import type {
-  ForkRunRequest,
+  InvocationPlan,
+  InvocationRequest,
+  InvocationResult,
   RunCommand,
   WorkflowDefinitionRecord,
   WorkflowDefinitionSummary,
@@ -190,7 +192,13 @@ export class MockPlatformClient implements IPlatformClient {
 
   // ── v2: Workflow Run Operations ──
 
-  createRun = vi.fn(async (_params: CreateWorkflowRunParams): Promise<WorkflowRun> => {
+  invokeWorkflow = vi.fn(
+    async (_request: InvocationRequest, _opts?: { idempotencyKey?: string; files?: InvocationFiles }): Promise<InvocationResult> => {
+      throw new Error('Not implemented in mock');
+    },
+  );
+
+  planWorkflowInvocation = vi.fn(async (_request: InvocationRequest): Promise<InvocationPlan> => {
     throw new Error('Not implemented in mock');
   });
 
@@ -202,11 +210,7 @@ export class MockPlatformClient implements IPlatformClient {
     throw new Error('Not implemented in mock');
   });
 
-  startRun = vi.fn(async (_id: string): Promise<void> => {});
   runCommand = vi.fn(async (_runId: string, _command: RunCommand): Promise<void> => {});
-  forkRun = vi.fn(async (_runId: string, _request?: ForkRunRequest): Promise<WorkflowRun> => {
-    throw new Error('Not implemented in mock');
-  });
   deleteRun = vi.fn(async (_id: string): Promise<void> => {});
 
   // ── HITL Operations ──

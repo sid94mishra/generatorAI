@@ -16,6 +16,7 @@
 // own composition-root.
 // ────────────────────────────────────────────────────────────────
 
+import * as path from 'node:path';
 import type { ILogger, AgentEvent, AgentOverrides, HarnessConfig } from '@generatorai/shared';
 import type {
   ISessionRepository,
@@ -36,7 +37,10 @@ import type {
   IAutomationRepository,
   IAutomationExecutionRepository,
 } from '../services/AutomationService.js';
-import type { IIdempotencyKeyRepository } from '../services/AutomationRecoveryService.js';
+import type { IIdempotencyKeyStore, IInvocationUploadRepository } from '../domain/ports/IInvocationStores.js';
+import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebaseRepository.js';
+import { IdempotencyService } from '../services/IdempotencyService.js';
+import { WorkflowInvocationService } from '../services/workflow-invocation/WorkflowInvocationService.js';
 
 import { EventBus } from '../events/EventBus.js';
 import { ArtifactService } from '../services/ArtifactService.js';
@@ -65,7 +69,7 @@ import { HitlService } from '../services/HitlService.js';
 import { AgentInteractionService } from '../services/AgentInteractionService.js';
 import { PlanService } from '../services/PlanService.js';
 import { DurableExecutionEngine } from '../services/DurableExecutionEngine.js';
-import { WorkflowPreprocessor, type WorkflowScmFlowPort } from '../services/WorkflowPreprocessor.js';
+import { LifecycleSteps, type WorkflowScmFlowPort } from '../services/engine/lifecycle/steps.js';
 import type { WorkspaceManager } from '../services/WorkspaceManager.js';
 import type { AdmissionController } from '../services/AdmissionController.js';
 import type { RegisterRepository, EntryRepository } from '@generatorai/db';
@@ -105,9 +109,15 @@ export interface CoreServicesInputs {
   // Automation repositories
   automationRepo: IAutomationRepository;
   automationExecutionRepo: IAutomationExecutionRepository;
-  /** Track A3 — repository backing the idempotency-key store. Optional
+  /** The idempotency-key store (automation triggers, invocations). Optional
    *  because tests that don't exercise triggers can leave it out. */
-  idempotencyKeyRepo?: IIdempotencyKeyRepository;
+  idempotencyKeyRepo?: IIdempotencyKeyStore;
+  /** Files staged before a run starts (`POST /workflow-invocations/uploads`). */
+  invocationUploadRepo?: IInvocationUploadRepository;
+  /** Project codebases: invocations check the aliases a run mounts. */
+  projectCodebaseRepo?: IProjectCodebaseRepository;
+  /** The web app origin, for invocation result links. */
+  appUrl?: string;
 
   /** The workflow engine's stores over the same database (`createEngineStores(db)`). */
   engineStores: EngineStores;
@@ -224,8 +234,12 @@ export interface CoreServices {
   hitlService: HitlService;
   /** W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix). */
   durableExecutionEngine: DurableExecutionEngine;
-  /** Preprocessing + post-processing steps of orchestrated runs. */
-  workflowPreprocessor: WorkflowPreprocessor;
+  /** THE way a run starts (P04): one service behind one route and one client method. */
+  workflowInvocationService: WorkflowInvocationService;
+  /** Claim-then-finalize idempotency keys (null without an idempotency store). */
+  idempotencyService: IdempotencyService | null;
+  /** The lifecycle's pre- and post-processing steps (commit/push/PR through the source-control flow). */
+  lifecycleSteps: LifecycleSteps;
   /** PLN-01 — present only when the plan repositories were supplied. */
   planService?: PlanService;
   agentInteractionService?: AgentInteractionService;
@@ -413,6 +427,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   // start check is the run facade's, built below (late-bound through the
   // closure).
   let workflowRunService!: WorkflowRunService;
+  // The lifecycle's steps: preprocessing, and commit/push/PR through the flow.
+  const lifecycleSteps = new LifecycleSteps(gitManager, scriptRunner, eventBus, logger, scmFlow);
   const engine = new RunSupervisor({
     stores: inputs.engineStores,
     runRepo: workflowRunRepo,
@@ -430,6 +446,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     artifacts: artifactService,
     ...(inputs.publishEngineEvent ? { publish: inputs.publishEngineEvent } : {}),
     permissionCheck: (run, graph) => workflowRunService.assertPermissionGating(run, graph),
+    // Mounts, project configs and the sandbox are late-wired by the composition root / SDK.
+    lifecyclePlatform: { steps: lifecycleSteps, ...(inputs.invocationUploadRepo ? { uploads: inputs.invocationUploadRepo } : {}) },
     ...(inputs.engineOwnerLabel ? { ownerLabel: inputs.engineOwnerLabel } : {}),
     ...(inputs.engineTiming ? { timing: inputs.engineTiming } : {}),
     ...(inputs.engineOnDecide ? { onDecide: inputs.engineOnDecide } : {}),
@@ -476,11 +494,31 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   // HITL — the operator side of parked instances: resolutions and cancels are run commands.
   const hitlService = new HitlService(stageRunRepo, engine);
 
+  // ── The one invocation path (P04) ──
+  const idempotencyService = idempotencyKeyRepo ? new IdempotencyService(idempotencyKeyRepo, logger) : null;
+  const workflowInvocationService = new WorkflowInvocationService({
+    runs: workflowRunService,
+    runRepo: workflowRunRepo,
+    stageRuns: stageRunRepo,
+    definitions: workflowDefinitionService,
+    versions: runDefinitionReader,
+    eventBus,
+    ...(idempotencyService ? { idempotency: idempotencyService } : {}),
+    ...(inputs.invocationUploadRepo
+      ? { uploads: inputs.invocationUploadRepo, uploadsDir: path.join(config.artifactsDir, 'invocation-uploads') }
+      : {}),
+    ...(inputs.projectCodebaseRepo ? { codebases: inputs.projectCodebaseRepo } : {}),
+    models: () => harness.getModels(),
+    ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+    logger,
+  });
+
   // ── Automation ──
   const automationService = new AutomationService(
     automationRepo,
     automationExecutionRepo,
     workflowRunService,
+    workflowInvocationService,
     workflowRunRepo,
     workflowDefinitionService,
     eventBus,
@@ -508,8 +546,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
       )
     : null;
 
-  // Pre/post-processing of orchestrated runs; commit/push/PR through the flow.
-  const workflowPreprocessor = new WorkflowPreprocessor(gitManager, scriptRunner, eventBus, logger, scmFlow);
 
   return {
     eventBus,
@@ -531,7 +567,9 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     automationRecoveryService,
     hitlService,
     durableExecutionEngine,
-    workflowPreprocessor,
+    workflowInvocationService,
+    idempotencyService,
+    lifecycleSteps,
     ...(planService ? { planService } : {}),
     ...(agentInteractionService ? { agentInteractionService } : {}),
     ...(inputs.agentService ? { agentService: inputs.agentService } : {}),

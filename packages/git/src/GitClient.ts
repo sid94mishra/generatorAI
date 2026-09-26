@@ -328,7 +328,8 @@ export class GitClient implements IGitClient {
 
     const args = ['clone', '--depth', '1'];
     if (branch) args.push('--branch', branch);
-    args.push(repoUrl, targetDir);
+    // `--`: a URL or directory starting with `-` is never read as an option (C-20).
+    args.push('--', repoUrl, targetDir);
 
     const result = await this.runner.run('git', args, {
       cwd: path.dirname(targetDir),

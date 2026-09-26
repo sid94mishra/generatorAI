@@ -85,7 +85,6 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // to list agents to pick one, and BINDING an agent happens through
   // PATCH /chats/:id under `write:chats`.
   { prefix: '/agents', read: ['read:workflows'], write: ['admin:settings'], riskLevel: 'high' },
-  { prefix: '/orchestrator', read: ['read:chats'], write: ['write:chats', 'exec:agent'] },
   { prefix: '/sessions', read: ['read:chats'], write: ['write:chats'] },
 
   { prefix: '/workflow-definitions', read: ['read:workflows'], write: ['write:workflows'] },
@@ -102,7 +101,7 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // and the route itself demands `write:workflows` for every command other
   // than `approve`. Longest-prefix matching means this entry wins over
   // `/workflow-runs` for its own path only; everything else about a run
-  // (create, start, fork, delete) still needs the full write grant.
+  // (delete, the permission mode) still needs the full write grant.
   {
     prefix: '/workflow-runs/:id/commands',
     read: ['read:workflows'],
@@ -117,16 +116,12 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
     write: ['exec:agent'],
   },
   { prefix: '/workflow-runs', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
-  // Running a script materialises a definition AND starts a run — agents
-  // execute, exactly like `POST /workflow-runs/:id/start`. Authoring scripts
-  // (validate, reload, materialize) stays a design-time write, but running
-  // one must carry `exec:agent` too or `write:workflows` alone would launch
-  // agents that the `/workflow-runs` policy deliberately withholds.
-  {
-    prefix: '/workflow-scripts/:id/run',
-    read: ['read:workflows'],
-    write: ['write:workflows', 'exec:agent'],
-  },
+  // THE way a run starts (P04, PD-6): starting a run is a run-time act, so a
+  // default paired phone may do it (`exec:agent` + `read:workflows`; W-60).
+  // The service demands more for what the body asks: `write:workflows` for a
+  // script target (it materializes a definition), `admin:settings` for a
+  // bypass run off loopback or an in-place codebase.
+  { prefix: '/workflow-invocations', read: ['read:workflows'], write: ['exec:agent', 'read:workflows'] },
   // Uploading a script installs code that runs in-process with the server's
   // privileges (A-19): admin only, on top of the operator opt-in flags.
   {

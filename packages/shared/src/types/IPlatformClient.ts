@@ -13,8 +13,11 @@ import type {
   WorkflowGraphInput,
   WorkflowTemplate,
 } from '@generatorai/workflow-spec';
-import type { ForkRunRequest, RunCommand } from '@generatorai/workflow-spec';
-import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams } from './WorkflowRun.js';
+import type { InvocationPlan, InvocationRequest, InvocationResult, RunCommand } from '@generatorai/workflow-spec';
+import type { WorkflowRun, WorkflowRunWithStages } from './WorkflowRun.js';
+
+/** Files a run start uploads before invoking, by category. */
+export type InvocationFiles = Partial<Record<'skills' | 'agents' | 'prompts', Array<Blob & { readonly name: string }>>>;
 
 /** Platform type discriminator */
 export type PlatformType = 'web' | 'cli' | 'desktop';
@@ -100,11 +103,20 @@ export interface IPlatformClient {
   /** Hard delete, or archive when runs pinned the definition. */
   deleteDefinition(id: string): Promise<{ deleted: true } | { archived: true; runs: number }>;
 
-  // ── v2: Workflow Run Operations ──
-  createRun(params: CreateWorkflowRunParams): Promise<WorkflowRun>;
+  // ── Workflow runs ──
+  /**
+   * THE way a run starts (P04): `POST /workflow-invocations`. A definition,
+   * a script or a fork of an earlier run; the server derives the trigger.
+   * `files` are uploaded first and sent as upload ids.
+   */
+  invokeWorkflow(
+    request: InvocationRequest,
+    opts?: { idempotencyKey?: string; files?: InvocationFiles },
+  ): Promise<InvocationResult>;
+  /** What `invokeWorkflow` would do, without writing anything. */
+  planWorkflowInvocation(request: InvocationRequest): Promise<InvocationPlan>;
   listRuns(filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]>;
   getRun(id: string): Promise<WorkflowRunWithStages>;
-  startRun(id: string): Promise<void>;
   /**
    * Every operator action on a run or one of its instances (P03 commands
    * API): pause, resume, cancel, retry, skip, fail and approve (which also
@@ -112,11 +124,6 @@ export interface IPlatformClient {
    * command rejects with the server's 409/400/404 error.
    */
   runCommand(runId: string, command: RunCommand): Promise<void>;
-  /**
-   * Re-run a terminal run as a NEW run (G5 §3.8); the source stays terminal.
-   * Resolves with the fork.
-   */
-  forkRun(runId: string, request?: ForkRunRequest): Promise<WorkflowRun>;
   deleteRun(id: string): Promise<void>;
 
   // ── HITL — permission mode + interrupt resume (HITL-04) ──

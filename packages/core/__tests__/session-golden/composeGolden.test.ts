@@ -337,17 +337,16 @@ async function runStage(
     },
     { canEditCommands: true, status: 'published' },
   );
-  const run = await workflowRunService.createRun({ workflowDefinitionId: def.id });
-  // The run's workspace exists already (the fake manager has one): the prepare phase keeps it.
-  await new DrizzleWorkflowRunRepository(env.db).update(run.id, {
-    variables: {
-      ...run.variables,
-      __workingDirectory: join(env.workDir, 'run'),
-      __artifactsDirectory: join(env.workDir, 'art'),
-      __workflowRunId: run.id,
-      __workspaceId: 'ws-golden',
-    },
+  const run = await workflowRunService.createRun({
+    workflowDefinitionId: def.id,
+    definitionVersionId: def.currentVersionId!,
+    variables: {},
+    trigger: { kind: 'user', client: 'test', principalId: 'local' },
+    // Engine-owned system values (never variables, W-06).
+    systemVars: { workingDirectory: join(env.workDir, 'run'), artifactsDirectory: join(env.workDir, 'art') },
   });
+  // The run's workspace exists already (the fake manager has one): the prepare phase keeps it.
+  await new DrizzleWorkflowRunRepository(env.db).update(run.id, { workspaceId: 'ws-golden' });
   const before = env.calls.filter((c) => c.op === 'create').length;
   await engine.start();
   await workflowRunService.startRun(run.id);

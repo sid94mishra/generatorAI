@@ -1,10 +1,11 @@
 // ────────────────────────────────────────────────────────────────
-// Workflow Scripts Routes — CRUD + materialize + run
+// Workflow Scripts Routes — list, profiles, materialize, reload, upload.
+// Running a script is an invocation (`POST /workflow-invocations`,
+// `target: {kind: 'script'}`), materialized once per script content.
 // ────────────────────────────────────────────────────────────────
 
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
-import type { WorkflowRunPermissionMode } from '@generatorai/shared';
 import type { WorkflowGraph } from '@generatorai/workflow-spec';
 import { ScriptSecurityError } from '@generatorai/core';
 import type { Response } from 'express';
@@ -24,7 +25,7 @@ function respondIfScriptsDisabled(err: unknown, res: Response): boolean {
 
 export function createWorkflowScriptRoutes(container: Container): Router {
   const router = Router();
-  const { workflowScriptLoader, workflowDefinitionService, workflowRunService, logger } = container;
+  const { workflowScriptLoader, workflowDefinitionService, logger } = container;
 
   // GET /workflow-scripts — List all discovered scripts with metadata
   router.get('/', (_req, res, next) => {
@@ -108,63 +109,6 @@ export function createWorkflowScriptRoutes(container: Container): Router {
         stageCount: script.graph.stages.length,
         edgeCount: script.graph.edges.length,
       });
-    } catch (err) {
-      next(err);
-    }
-  });
-
-  // POST /workflow-scripts/:id/run — Materialize (published) + create run + start
-  router.post('/:id/run', async (req, res, next) => {
-    try {
-      const id = String(req.params['id']);
-      const script = workflowScriptLoader.getScript(id);
-      if (!script) {
-        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Script not found: ${id}` } });
-        return;
-      }
-
-      const { profileName, variables, projectId, stageOverrides } = req.body as {
-        profileName?: string;
-        variables?: Record<string, unknown>;
-        projectId?: string;
-        stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }>;
-      };
-
-      let resolvedVars = variables ?? {};
-      let profileOverrides: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }> = [];
-      let resolvedPermissionMode: WorkflowRunPermissionMode | undefined;
-      if (profileName) {
-        const profile = script.profiles.find((p) => p.name === profileName);
-        if (!profile) {
-          res.status(400).json({
-            error: { code: 'INVALID_PROFILE', message: `Profile not found: ${profileName}` },
-          });
-          return;
-        }
-        resolvedVars = { ...profile.variables, ...resolvedVars };
-        // PWS-08 — the profile's stage overrides (by stage key); explicit
-        // ones in the request are applied after them.
-        profileOverrides = profile.stageOverrides ?? [];
-        resolvedPermissionMode = profile.permissionMode;
-      }
-
-      const definition = await workflowDefinitionService.createFromSpec(
-        scriptGraph(id, script.graph, projectId ? { projectId } : {}),
-        { canEditCommands: true, status: 'published' },
-      );
-      const run = await workflowRunService.createRun({
-        workflowDefinitionId: definition.id,
-        variables: resolvedVars,
-        ...(projectId ? { projectId } : {}),
-        stageOverrides: [...profileOverrides, ...(stageOverrides ?? [])],
-        // The profile's permission mode is the run row's own (the script
-        // schema accepts the run vocabulary only).
-        ...(resolvedPermissionMode ? { permissionMode: resolvedPermissionMode } : {}),
-      });
-
-      await workflowRunService.startRun(run.id);
-      logger.info(`[WorkflowScripts] Created and started run from script '${id}': ${run.id}`);
-      res.status(202).json({ definitionId: definition.id, runId: run.id, status: 'running' });
     } catch (err) {
       next(err);
     }

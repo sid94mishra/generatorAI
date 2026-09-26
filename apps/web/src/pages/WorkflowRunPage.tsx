@@ -32,7 +32,7 @@ import { protectStream, useStreamStore } from '@/stores/streamStore.js';
 import { useShallow } from 'zustand/react/shallow';
 import {
   useWorkflowRun, useWorkflowDefinition, useWorkflowDefinitionVersion,
-  useRunCommand, useForkRun,
+  useRunCommand, useInvokeWorkflow,
   useRunWorkspace,
   useResolveStageInteraction,
   useSetRunPermissionMode,
@@ -131,7 +131,7 @@ export function WorkflowRunPage() {
   // ── Mutations ────────────────────────────────────────────────
 
   const runCommand = useRunCommand();
-  const forkRun = useForkRun();
+  const invokeWorkflow = useInvokeWorkflow({ errorTitle: 'Could not re-run' });
   const resolveGate = useResolveStageInteraction();
   const setRunPermissionMode = useSetRunPermissionMode();
   const { confirm, dialog: confirmDialog } = useConfirm();
@@ -384,15 +384,26 @@ export function WorkflowRunPage() {
   // Follow the user to the fork — staying on the ancestor looks inert.
   const forkAndOpen = useCallback((rerunFrom?: string[]) => {
     if (!runId) return;
-    // A refusal is toasted by the mutation (`useForkRun`'s meta).
-    void forkRun.mutateAsync({ runId, request: rerunFrom ? { rerunFrom } : {} }).then(
+    // A refusal is toasted by the mutation (`useInvokeWorkflow`'s meta).
+    void invokeWorkflow.mutateAsync({
+      request: {
+        target: {
+          kind: 'fork',
+          sourceRunId: runId,
+          ...(rerunFrom ? { rerunFrom } : {}),
+          definition: 'pinned',
+          workspace: 'fresh',
+        },
+        variables: {},
+        client: 'web',
+      },
+    }).then(
       (fork) => {
-        const defId = fork.workflowDefinitionId ?? definitionId;
-        if (fork.id !== runId && defId) navigate(`/workflows/${defId}/runs/${fork.id}`);
+        if (fork.runId !== runId) navigate(`/workflows/${fork.workflowDefinitionId}/runs/${fork.runId}`);
       },
       () => undefined,
     );
-  }, [runId, forkRun, navigate, definitionId]);
+  }, [runId, invokeWorkflow, navigate]);
   const handleRetry = useCallback(() => forkAndOpen(), [forkAndOpen]);
 
   /** One verdict at a time per stage; its buttons stay disabled until it settles. */

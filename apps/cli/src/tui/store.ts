@@ -60,7 +60,7 @@ export type OverlayKind =
   | { kind: 'tabs' }
   /** Phase 6 item 5 — global blocked-work/notification queue. See `blockedWorkItems`. */
   | { kind: 'notifications' }
-  | { kind: 'confirm'; message: string; danger: boolean; onAnswer: (value: boolean) => void }
+  | { kind: 'confirm'; message: string; danger: boolean; onAnswer: (value: boolean) => void; /** Overrides the default title. */ title?: string }
   | { kind: 'input'; message: string; initial: string; onSubmit: (value: string) => void }
   | { kind: 'select'; message: string; options: Array<{ value: string; label: string; detail?: string }>; onSelect: (value: string) => void }
   | { kind: 'error'; title: string; message: string; hint?: string }

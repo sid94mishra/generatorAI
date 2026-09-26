@@ -1,5 +1,6 @@
 export { WorkflowFacade } from './WorkflowFacade.js';
-export type { CreateWorkflowOptions, GraphSource, RunOptions, OrchestrateOptions, StreamOptions } from './WorkflowFacade.js';
+export type { CreateWorkflowOptions, GraphSource, RunOptions, StreamOptions } from './WorkflowFacade.js';
+export { SDK_INVOCATION_CONTEXT } from './WorkflowFacade.js';
 
 export { ChatFacade } from './ChatFacade.js';
 export type { CreateChatOptions } from './ChatFacade.js';

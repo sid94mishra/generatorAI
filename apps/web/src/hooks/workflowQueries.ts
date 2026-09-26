@@ -6,9 +6,8 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
-import type { CreateWorkflowRunParams, WorkflowRunPermissionMode } from '@generatorai/shared';
-import type { ForkRunRequest, RunCommand, WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
-import type { StageOverrideWire } from '@generatorai/client-core';
+import type { InvocationFiles, WorkflowRunPermissionMode } from '@generatorai/shared';
+import type { InvocationRequest, RunCommand, WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
 
 // ── Query Keys ──
 export const workflowKeys = {
@@ -193,30 +192,36 @@ export function useWorkflowRun(id: string | undefined) {
   });
 }
 
-/** Create a new workflow run */
-export function useCreateWorkflowRun() {
+/**
+ * Start a run — THE one way (P04): a definition (a draft as a test run), a
+ * script, or a fork of an earlier run. Resolves with the invocation result;
+ * callers navigate to `result.runId`. `inline` is for the run dialog, which
+ * renders the error envelope's message and issues itself; everywhere else a
+ * refusal is toasted.
+ */
+export function useInvokeWorkflow(opts: { inline?: boolean; errorTitle?: string } = {}) {
   const platform = usePlatform();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (params: CreateWorkflowRunParams) => platform.createRun(params),
+    mutationFn: (p: { request: InvocationRequest; idempotencyKey?: string; files?: InvocationFiles }) =>
+      platform.invokeWorkflow(p.request, {
+        ...(p.idempotencyKey ? { idempotencyKey: p.idempotencyKey } : {}),
+        ...(p.files ? { files: p.files } : {}),
+      }),
+    meta: opts.inline ? { silentError: true } : { errorTitle: opts.errorTitle ?? 'Run not started' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
     },
   });
 }
 
-/** Start a created workflow run */
-export function useStartWorkflowRun() {
+/** What a start would do (the run dialog's plan preview); writes nothing. */
+export function usePlanWorkflowInvocation() {
   const platform = usePlatform();
-  const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: (id: string) => platform.startRun(id),
-    onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
-    },
+    mutationFn: (request: InvocationRequest) => platform.planWorkflowInvocation(request),
+    meta: { silentError: true },
   });
 }
 
@@ -237,51 +242,6 @@ export function useRunCommand() {
     onSettled: (_data, _err, { runId }) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
       queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
-    },
-  });
-}
-
-/**
- * Fork a terminal run (WP-3.8): a NEW run re-executes every instance that did
- * not complete (or `rerunFrom` and everything downstream); completed ones are
- * memoized. Resolves with the fork, which callers navigate to.
- */
-export function useForkRun() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: ({ runId, request }: { runId: string; request?: ForkRunRequest }) =>
-      platform.forkRun(runId, request ?? {}),
-    meta: { errorTitle: 'Could not re-run' },
-    onSuccess: (_fork, { runId }) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
-    },
-  });
-}
-
-// ════════════════════════════════════════════════════════════════
-// Orchestrator Queries & Mutations
-// ════════════════════════════════════════════════════════════════
-
-/** Start an orchestrated workflow run (with project codebases + preprocessing) */
-export function useStartOrchestratedRun() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: {
-      workflowDefinitionId: string;
-      variables?: Record<string, unknown>;
-      projectId?: string;
-      selectedCodebases?: string[];
-      uploads?: { prompts: File[]; skills: File[]; agents: File[] };
-      stageOverrides?: StageOverrideWire[];
-      testRun?: boolean;
-    }) => platform.startOrchestratedRun(params),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
     },
   });
 }
@@ -371,22 +331,5 @@ export function useRunFileContent(
     queryFn: () => platform.getRunFileContent(runId!, filePath!, source, worktreeAlias),
     enabled: !!runId && !!filePath,
     staleTime: 60_000,
-  });
-}
-
-/** Upload files (skills/agents/prompts) for a run */
-export function useUploadRunFiles() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: {
-      runId: string;
-      category: 'skills' | 'agents' | 'prompts';
-      files: File[];
-    }) => platform.uploadRunFiles(params.runId, params.category, params.files),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runWorkspace(variables.runId) });
-    },
   });
 }

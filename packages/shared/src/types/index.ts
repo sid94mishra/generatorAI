@@ -152,14 +152,13 @@ export type {
   StageRun,
   StageRunStatus,
   WorkflowRunWithStages,
-  CreateWorkflowRunParams,
   WorkflowRunPermissionMode,
   ArtifactManifestEntry,
 } from './WorkflowRun.js';
-export type { RunProfile, StageRunOverride } from './RunProfile.js';
 
 export type {
   IPlatformClient,
+  InvocationFiles,
   PlatformType,
   PaginatedResult,
   EventSubscriptionOptions,
@@ -254,15 +253,14 @@ export {
   mcpStartupWarnings,
 } from './McpServer.js';
 
-// ── Orchestrator Types ──
+// ── Run lifecycle ──
 export type {
-  OrchestratedRunParams,
-  OrchestratorContext,
   PreprocessingResult,
-  StageValidationResult,
+  RunCodebase,
+  RunPhaseRecord,
+  RunSystemVars,
   RunWorkspaceInfo,
-  RunUploadResult,
-} from './WorkflowOrchestrator.js';
+} from './RunLifecycle.js';
 
 // ── Workspace Management Types ──
 export type {

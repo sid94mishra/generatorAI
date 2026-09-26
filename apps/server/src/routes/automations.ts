@@ -17,13 +17,10 @@ import {
   PreviewIterationsBodySchema,
   ValidationError,
 } from '@generatorai/shared';
-import { previewIterations, hashWebhookToken, toPublicAutomation } from '@generatorai/core';
+import { previewIterations, hashWebhookToken, toPublicAutomation, WEBHOOK_IDEMPOTENCY_TTL_MS } from '@generatorai/core';
 import { getSecretString, setSecretString } from '@generatorai/secrets';
 import { verifySignedPayload, AUTOMATION_SIGNATURE_HEADER } from '../middleware/webhookAuth.js';
 
-/** Idempotency-key TTL — 5 minutes covers typical webhook retry windows. */
-const IDEMPOTENCY_TTL_MS = 5 * 60 * 1000;
-const IDEMPOTENCY_MAX_KEY_LEN = 200;
 
 /** Header a caller may use instead of embedding the token in the URL path. */
 const WEBHOOK_TOKEN_HEADER = 'x-webhook-token';
@@ -42,7 +39,7 @@ const WEBHOOK_SIGNING_NAMESPACE = 'automation-webhook';
 
 export function createAutomationRoutes(container: Container): Router {
   const router = Router();
-  const { automationService, idempotencyKeyRepo, logger } = container;
+  const { automationService, idempotencyService, logger } = container;
   const secretStore = container.security.secretStore;
 
   /**
@@ -77,87 +74,34 @@ export function createAutomationRoutes(container: Container): Router {
   };
 
   /**
-   * Try to reserve an idempotency key for `scope`. When a fresh key,
-   * `execute` runs, receives the fresh execution id, and the id is
-   * persisted so subsequent replays return the same id.
-   *
-   * On replay (same key seen within TTL), the previous execution id is
-   * returned via `onReplay` and `execute` is NOT invoked.
-   *
-   * Track A3: to avoid a "both requests execute" race, we CLAIM the key
-   * with a placeholder id first. If the claim succeeds, we execute and
-   * finalize by rewriting the row to the real id. If the claim shows a
-   * replay hit, we return the winning id without spawning any work.
+   * Run `execute` once per Idempotency-Key within 5 minutes (the shared
+   * `IdempotencyService`, claim-then-finalize). A replay answers the first
+   * execution's id through `onReplay` without executing; a key that is too
+   * long or not printable ASCII is a 400 (thrown as `ValidationError`).
    */
   const runWithIdempotency = async (
     req: Request,
-    res: Response,
+    _res: Response,
     scope: string,
     execute: () => Promise<{ executionId: string; body: unknown; status: number }>,
     onReplay: (executionId: string) => void,
     onFresh: (executionId: string, body: unknown, status: number) => void,
   ): Promise<void> => {
     const key = String(req.header('idempotency-key') ?? req.header('x-idempotency-key') ?? '').trim();
-
-    // Fast path: no key → always a fresh run.
-    if (!key) {
+    if (!idempotencyService) {
       const result = await execute();
       onFresh(result.executionId, result.body, result.status);
       return;
     }
-    if (key.length > IDEMPOTENCY_MAX_KEY_LEN) {
-      res.status(400).json({
-        error: { code: 'VALIDATION_ERROR', message: `Idempotency-Key exceeds ${IDEMPOTENCY_MAX_KEY_LEN} chars` },
-      });
-      return;
-    }
-    // Restrict key to printable ASCII (RFC 7230 tokens) so binary/control
-    // characters can't be smuggled into a scope's key space.
-    if (!/^[!-~]+$/.test(key)) {
-      res.status(400).json({
-        error: { code: 'VALIDATION_ERROR', message: 'Idempotency-Key must contain only printable ASCII (no control chars)' },
-      });
-      return;
-    }
-
-    // Claim first with a temporary placeholder so a concurrent second
-    // request sees the row and treats itself as a replay. This
-    // *provisionally* returns the placeholder id — we swap it to the
-    // real execution id once the caller has produced one.
-    const now = new Date();
-    const placeholderId = `pending-${scope}-${key}`.slice(0, 200);
-    let claim: { executionId: string; replay: boolean };
-    try {
-      claim = await idempotencyKeyRepo.claim({
-        key,
-        scope,
-        executionId: placeholderId,
-        createdAt: now,
-        expiresAt: new Date(now.getTime() + IDEMPOTENCY_TTL_MS),
-      });
-    } catch {
-      // Any unexpected storage error → fall back to a fresh (unclaimed)
-      // run so we don't block legitimate traffic on a transient DB blip.
-      const result = await execute();
-      onFresh(result.executionId, result.body, result.status);
-      return;
-    }
-    if (claim.replay && claim.executionId !== placeholderId) {
-      // Genuine replay — return the winner's id without doing any work.
-      // 202 Accepted matches the fresh-path status so clients can treat
-      // both cases identically (X-Idempotent-Replay header signals dedup).
-      onReplay(claim.executionId);
-      return;
-    }
-
-    // We hold the claim. Execute + upgrade the placeholder to the real id.
-    const result = await execute();
-    try {
-      await idempotencyKeyRepo.updateExecutionId(key, scope, result.executionId);
-    } catch {
-      /* best-effort finalize; replays fall back to placeholder id */
-    }
-    onFresh(result.executionId, result.body, result.status);
+    const outcome = await idempotencyService.run(
+      { key: key || undefined, scope, ttlMs: WEBHOOK_IDEMPOTENCY_TTL_MS },
+      async () => {
+        const r = await execute();
+        return { executionId: r.executionId, value: r };
+      },
+    );
+    if (outcome.replayed) onReplay(outcome.executionId);
+    else onFresh(outcome.executionId, outcome.value.body, outcome.value.status);
   };
 
   // ── CRUD ──

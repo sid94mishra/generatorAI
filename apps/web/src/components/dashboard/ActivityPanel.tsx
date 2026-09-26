@@ -20,7 +20,7 @@ import { cn } from '@/lib/utils.js';
 import { formatRelativeTime } from '@/utils/formatRelativeTime.js';
 import { useTicker, formatElapsed } from './useTicker.js';
 import type { LiveItem, LiveKind } from '@/hooks/useLiveOperations.js';
-import { useForkRun, useRunCommand } from '@/hooks/workflowQueries.js';
+import { useInvokeWorkflow, useRunCommand } from '@/hooks/workflowQueries.js';
 import { useCancelChat } from '@/hooks/queries.js';
 import { useCancelAutomationExecution, useTriggerAutomation } from '@/hooks/automationQueries.js';
 
@@ -59,12 +59,12 @@ export function ActivityPanel({ today, running, attention, isLoading }: Activity
   const now = useTicker(hasLive);
 
   const runCommand = useRunCommand();
-  const forkRun = useForkRun();
+  const invokeWorkflow = useInvokeWorkflow({ errorTitle: 'Could not re-run' });
   const cancelChat = useCancelChat();
   const cancelExec = useCancelAutomationExecution();
   const triggerAutomation = useTriggerAutomation();
   const busy =
-    runCommand.isPending || forkRun.isPending || cancelChat.isPending ||
+    runCommand.isPending || invokeWorkflow.isPending || cancelChat.isPending ||
     cancelExec.isPending || triggerAutomation.isPending;
 
   const items = tab === 'today' ? today : tab === 'running' ? running : attention;
@@ -114,13 +114,16 @@ export function ActivityPanel({ today, running, attention, isLoading }: Activity
                 // "Retry failed" forks a NEW run (the failed one stays
                 // terminal) — open it rather than leaving the card pointing
                 // at the ancestor.
-                void forkRun.mutateAsync({ runId: item.runId! }).then((fork) => {
-                  // `item.href` is `/workflows/<defId>/runs/<runId>`; swap the
-                  // trailing run id for the fork rather than re-deriving it.
-                  if (fork?.id && item.href.includes('/runs/')) {
-                    navigate(item.href.replace(/\/runs\/[^/]+$/, `/runs/${fork.id}`));
-                  }
-                });
+                void invokeWorkflow.mutateAsync({
+                  request: {
+                    target: { kind: 'fork', sourceRunId: item.runId!, definition: 'pinned', workspace: 'fresh' },
+                    variables: {},
+                    client: 'web',
+                  },
+                }).then(
+                  (fork) => navigate(`/workflows/${fork.workflowDefinitionId}/runs/${fork.runId}`),
+                  () => undefined,
+                );
               }}
               onStopChat={() => cancelChat.mutate(item.id)}
               onCancelExec={() =>

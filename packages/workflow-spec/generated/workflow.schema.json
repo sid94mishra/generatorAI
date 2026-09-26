@@ -1039,6 +1039,15 @@
                   "default": false,
                   "description": "Refuse to start without at least one codebase"
                 },
+                "sandbox": {
+                  "type": "string",
+                  "enum": [
+                    "required",
+                    "optional"
+                  ],
+                  "default": "required",
+                  "description": "When the deployment runs stages in a sandbox: required fails the run if the sandbox cannot start; optional runs on the host instead"
+                },
                 "preprocessingSteps": {
                   "type": "array",
                   "items": {

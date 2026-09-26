@@ -49,12 +49,13 @@ function StopChat({ chatId }: { chatId: string }): React.ReactElement {
 }
 
 function RunAction({ action, name }: { action: OperationActionDef; name: string }): React.ReactElement | null {
-  const runControl = useFeature('runControl');
+  // Cancel is a run command; retry forks a new run (an invocation).
+  const gate = useFeature(action.kind === 'cancel-run' ? 'runControl' : 'runStart');
   const { runAction } = useRunMutations(action.id);
   const [confirm, setConfirm] = useState(false);
   // Without the permission the row still opens the run, where the reason and
   // "Request access" live; a dead button here would only be noise.
-  if (!runControl.available) return null;
+  if (!gate.available) return null;
 
   const run = (): void => {
     runAction.mutate(action.kind === 'cancel-run' ? 'cancel' : 'retry', {

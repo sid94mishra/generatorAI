@@ -4,13 +4,22 @@ import type { CliContext } from '../../context/CliContext.js';
 
 const scriptRun = scriptCommands().find((c) => c.id === 'script.run')!;
 
-function fakeContext(overrides: { runsGet?: ReturnType<typeof vi.fn>; subscribed?: { count: number } }): CliContext {
+const INVOKED = { runId: 'run_1', workflowDefinitionId: 'def_1', status: 'starting', replayed: false, warnings: [] };
+
+function fakeContext(overrides: {
+  runsGet?: ReturnType<typeof vi.fn>;
+  invoke?: ReturnType<typeof vi.fn>;
+  subscribed?: { count: number };
+}): CliContext {
   const disposers: Array<() => void> = [];
   return {
     api: {
       scripts: {
         list: vi.fn(async () => [{ id: 'my-script', name: 'my-script', status: 'active', createdAt: 0 }]),
-        run: vi.fn(async () => ({ definitionId: 'def_1', runId: 'run_1', status: 'running' })),
+      },
+      workflows: {
+        invoke: overrides.invoke ?? vi.fn(async () => INVOKED),
+        digest: vi.fn(async () => ({ status: 'completed', outcome: 'completed', finalized: true, error: null, postProcessing: [] })),
       },
       runs: { get: overrides.runsGet ?? vi.fn(async () => ({ id: 'run_1', status: 'completed' })) },
     },
@@ -32,6 +41,7 @@ function fakeContext(overrides: { runsGet?: ReturnType<typeof vi.fn>; subscribed
       for (const fn of disposers.splice(0)) fn();
     }),
     signal: new AbortController().signal,
+    timeoutMs: 0,
   } as unknown as CliContext;
 }
 
@@ -51,16 +61,22 @@ describe('script run --watch', () => {
     expect(result.data).toEqual({ id: 'run_1', status: 'completed' });
   });
 
-  it('without --watch, starts the run and does not subscribe to its stream', async () => {
+  it('without --watch, invokes the script with its profile and does not subscribe to its stream', async () => {
     const subscribed = { count: 0 };
-    const ctx = fakeContext({ subscribed });
+    const invoke = vi.fn(async () => INVOKED);
+    const ctx = fakeContext({ subscribed, invoke });
 
     const result = await scriptRun.handler(ctx, {
       args: { script: 'my-script' },
-      flags: { watch: false, verbosity: 'normal' },
+      flags: { watch: false, verbosity: 'normal', profile: 'quick' },
     } as never);
 
     expect(subscribed.count).toBe(0);
-    expect(result.data).toEqual({ definitionId: 'def_1', runId: 'run_1', status: 'running' });
+    expect(invoke).toHaveBeenCalledWith(
+      expect.objectContaining({ target: { kind: 'script', scriptId: 'my-script' }, profile: 'quick' }),
+      expect.objectContaining({ idempotencyKey: expect.any(String) }),
+    );
+    expect(result.data).toEqual(INVOKED);
+    expect(result.message).toContain('run_1');
   });
 });

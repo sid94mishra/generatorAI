@@ -61,21 +61,27 @@ describe('HttpPlatformClient', () => {
     resetMuxStreamForTests();
   });
 
-  it('sends orchestrated uploads and overrides in one request before execution', async () => {
-    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ workflowRunId: 'r1' }, 201));
+  it('starts a run with its uploads and overrides in one invocation request', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse({ runId: 'r1' }, 202));
     const skill = new File(['skill instructions'], 'review.md', { type: 'text/markdown' });
-    await client.startOrchestratedRun({
-      workflowDefinitionId: 'd1', stageOverrides: [{ stageKey: 'review', skip: true }],
-      uploads: { skills: [skill], prompts: [], agents: [] },
-    });
+    const request = {
+      target: { kind: 'definition' as const, workflowDefinitionId: 'd1' },
+      variables: {},
+      stageOverrides: [{ stageKey: 'review', skip: true }],
+    };
+    // jsdom's FormData drops a Blob part's filename, so read what was appended.
+    const append = vi.spyOn(FormData.prototype, 'append');
+    await client.invokeWorkflow(request, { idempotencyKey: 'k1', files: { skills: [skill] } });
+    expect(append).toHaveBeenCalledWith('skills', expect.any(Blob), 'review.md');
+    append.mockRestore();
     expect(globalThis.fetch).toHaveBeenCalledTimes(1);
-    const init = vi.mocked(globalThis.fetch).mock.calls[0]?.[1];
+    const [url, init] = vi.mocked(globalThis.fetch).mock.calls[0]!;
+    expect(url).toBe('http://localhost:3000/api/workflow-invocations');
     const body = init?.body as FormData;
-    expect(JSON.parse(body.get('config') as string)).toEqual({
-      workflowDefinitionId: 'd1', stageOverrides: [{ stageKey: 'review', skip: true }],
-    });
-    expect((body.get('skills') as File).name).toBe('review.md');
-    expect(new Headers(init?.headers).has('content-type')).toBe(false);
+    expect(JSON.parse(body.get('request') as string)).toEqual(request);
+    const headers = new Headers(init?.headers);
+    expect(headers.has('content-type')).toBe(false);
+    expect(headers.get('idempotency-key')).toBe('k1');
   });
 
   // ── Chat ──

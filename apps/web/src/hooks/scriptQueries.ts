@@ -55,18 +55,6 @@ export function useMaterializeScript() {
   });
 }
 
-export function useRunScript() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ id, options }: { id: string; options?: { profileName?: string; variables?: Record<string, unknown>; projectId?: string } }) =>
-      platform.runScript(id, options),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['runs'] });
-    },
-  });
-}
-
 export function useReloadScripts() {
   const platform = usePlatform();
   const queryClient = useQueryClient();

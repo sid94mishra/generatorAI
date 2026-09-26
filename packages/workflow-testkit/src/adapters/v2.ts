@@ -32,6 +32,7 @@ import {
   SandboxedScriptRunner,
   WorkspaceManager,
   type CoreServices,
+  type InvocationContext,
   type DecideRecord,
   type RunSupervisor,
   type SupervisorTiming,
@@ -65,6 +66,13 @@ import { ScriptedFauxHarness, classifyPrompt, type StageKey, type TurnKind } fro
 import { toGraph } from '../definitions.js';
 import type { AdapterContext, AdapterFactory, CommandResult, EngineAdapter, LogLine, RunCommand, RunSnapshot, StageSnapshot } from '../types.js';
 
+
+/** The testkit starts runs as the local owner through the one invocation path. */
+const TESTKIT_INVOCATION: InvocationContext = {
+  principal: { kind: 'local', id: 'testkit', scopes: ['exec:agent', 'read:workflows', 'write:workflows', 'admin:settings'] },
+  trigger: { kind: 'user', client: 'testkit', principalId: 'testkit' },
+  loopback: true,
+};
 export interface V2AdapterOptions {
   /** Every committed decision batch (replay fixtures, G5 §7.3). */
   onDecide?: (r: DecideRecord) => void;
@@ -362,8 +370,23 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
         return send(cmd.command as unknown as SpecRunCommand);
       case 'retry-run':
         try {
-          const fork = await current.services.workflowRunService.forkRun(runId, cmd.request ?? {});
-          return { status: 201, body: fork, runId: fork.id };
+          // A re-run is an invocation with a fork target (P04).
+          const req = cmd.request ?? {};
+          const result = await current.services.workflowInvocationService.invoke(
+            {
+              target: {
+                kind: 'fork',
+                sourceRunId: runId,
+                ...(req.rerunFrom ? { rerunFrom: req.rerunFrom } : {}),
+                definition: req.definition ?? 'pinned',
+                workspace: req.workspace ?? 'fresh',
+              },
+              variables: req.variablesOverride ?? {},
+              ...(req.idempotencyKey ? { idempotencyKey: req.idempotencyKey } : {}),
+            },
+            TESTKIT_INVOCATION,
+          );
+          return { status: 202, body: result, runId: result.runId };
         } catch (err) {
           return errorResult(err);
         }
@@ -404,13 +427,27 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
     },
     async startRun(definitionId, variables, runOpts = {}) {
       await started;
-      const run = await current.services.workflowRunService.createRun({
+      const { workflowInvocationService, workflowRunService, workflowDefinitionService } = current.services;
+      if (runOpts.start !== false) {
+        // THE way a run starts (P04).
+        const result = await workflowInvocationService.invoke(
+          {
+            target: { kind: 'definition', workflowDefinitionId: definitionId, ...(runOpts.testRun ? { testRun: true } : {}) },
+            variables,
+            ...(runOpts.permissionMode ? { overrides: { permissionMode: runOpts.permissionMode } } : {}),
+          },
+          TESTKIT_INVOCATION,
+        );
+        return result.runId;
+      }
+      // A created run a scenario starts later with the `start` command.
+      const run = await workflowRunService.createRun({
         workflowDefinitionId: definitionId,
+        definitionVersionId: await workflowDefinitionService.resolveVersionForRun(definitionId, { testRun: runOpts.testRun === true }),
         variables,
-        ...(runOpts.testRun ? { testRun: true } : {}),
+        trigger: TESTKIT_INVOCATION.trigger,
         ...(runOpts.permissionMode ? { permissionMode: runOpts.permissionMode } : {}),
       });
-      if (runOpts.start !== false) await current.services.workflowRunService.startRun(run.id);
       return run.id;
     },
     command,

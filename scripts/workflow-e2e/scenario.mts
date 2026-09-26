@@ -13,7 +13,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { api, createRun, createWorkflow, ensurePaired, sleep, subscribeRun, waitRun } from './lib/client.mts';
+import { api, createWorkflow, ensurePaired, invokeRun, sleep, subscribeRun, waitRun } from './lib/client.mts';
 import { openDb } from './lib/db.mjs';
 
 function arg(name: string): string | undefined {
@@ -38,10 +38,8 @@ if (provider !== 'faux') {
 await ensurePaired();
 const t0 = Date.now();
 const wf = await createWorkflow(def, spec.stages, spec.edges ?? []);
-const runId = await createRun(wf.id, spec.variables ?? {});
+const runId = await invokeRun(wf.id, spec.variables ?? {});
 const sub = await subscribeRun(runId);
-await sleep(300);
-const start = await api('POST', `/workflow-runs/${runId}/start`);
 const timeline: string[] = [];
 const seen = new Map<string, string>();
 const res = await waitRun(runId, spec.timeoutMs ?? 900_000, 1000, (_run, stages) => {
@@ -87,7 +85,6 @@ const result = {
   provider,
   defId: wf.id,
   runId,
-  startStatus: start.status,
   runStatus: res.run?.status,
   runError: res.run?.error,
   sessionMode: res.run?.sessionMode,

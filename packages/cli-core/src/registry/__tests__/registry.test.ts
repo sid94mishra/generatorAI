@@ -10,7 +10,7 @@ const all = registry.all();
 describe('command registry', () => {
   it('registers the full documented surface', () => {
     expect(all.length).toBeGreaterThanOrEqual(200);
-    expect(registry.groupList().length).toBe(24);
+    expect(registry.groupList().length).toBe(23);
   });
 
   it('has no duplicate command ids', () => {

@@ -25,7 +25,7 @@ describe('DrizzleIdempotencyKeyRepository (Track A3)', () => {
       expiresAt: new Date(now.getTime() + 60_000),
     };
     const first = await repo.claim(record);
-    expect(first).toEqual({ executionId: 'exec-1', replay: false });
+    expect(first).toEqual({ executionId: 'exec-1', replay: false, requestHash: null });
   });
 
   it('returns the original executionId on replay within TTL', async () => {
@@ -44,7 +44,7 @@ describe('DrizzleIdempotencyKeyRepository (Track A3)', () => {
       createdAt: now,
       expiresAt: new Date(now.getTime() + 60_000),
     });
-    expect(replay).toEqual({ executionId: 'exec-1', replay: true });
+    expect(replay).toEqual({ executionId: 'exec-1', replay: true, requestHash: null });
   });
 
   it('treats different scopes with the same key as independent', async () => {
@@ -77,7 +77,7 @@ describe('DrizzleIdempotencyKeyRepository (Track A3)', () => {
       createdAt: now,
       expiresAt: new Date(now.getTime() + 60_000),
     });
-    expect(fresh).toEqual({ executionId: 'exec-2', replay: false });
+    expect(fresh).toEqual({ executionId: 'exec-2', replay: false, requestHash: null });
   });
 
   it('sweepExpired removes only expired rows', async () => {
@@ -108,7 +108,7 @@ describe('DrizzleIdempotencyKeyRepository (Track A3)', () => {
       createdAt: new Date(now),
       expiresAt: new Date(now + 60_000),
     });
-    expect(replay).toEqual({ executionId: 'e2', replay: true });
+    expect(replay).toEqual({ executionId: 'e2', replay: true, requestHash: null });
   });
 
   it('updateExecutionId rewrites the stored id for an existing claim', async () => {
@@ -128,7 +128,7 @@ describe('DrizzleIdempotencyKeyRepository (Track A3)', () => {
       createdAt: now,
       expiresAt: new Date(now.getTime() + 60_000),
     });
-    expect(replay).toEqual({ executionId: 'real-42', replay: true });
+    expect(replay).toEqual({ executionId: 'real-42', replay: true, requestHash: null });
   });
 
   it('two concurrent claim() calls only one wins', async () => {

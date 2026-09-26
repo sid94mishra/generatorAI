@@ -78,7 +78,7 @@ export function OverlayHost({ registry, keymap, implemented, onRunCommand }: Ove
 
     case 'confirm':
       return (
-        <Overlay title={overlay.danger ? 'Confirm' : 'Are you sure?'} footer="y confirm · n / Esc cancel">
+        <Overlay title={overlay.title ?? (overlay.danger ? 'Confirm' : 'Are you sure?')} footer="y confirm · n / Esc cancel">
           <Confirm
             message={overlay.message}
             danger={overlay.danger}

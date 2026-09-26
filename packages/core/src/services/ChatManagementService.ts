@@ -168,7 +168,7 @@ export class ChatManagementService {
    * P1-45: Tracks in-flight worktree-creation promises keyed by chatId.
    *
    * The physical worktree directory (workspace/source/<alias>) is created
-   * asynchronously via createRunWorktrees, but the SDK's workingDirectory is
+   * asynchronously by the mount service, but the SDK's workingDirectory is
    * set synchronously before that completes.  Any component that needs to
    * use the working directory (e.g. file tools, diff tools) MUST await
    * `waitForWorktree(chatId)` before the first filesystem access.

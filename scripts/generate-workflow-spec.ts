@@ -8,7 +8,10 @@
  *     validation issues);
  *   - docs/workflow-overhaul/generated/FIELDS.md (every field with its type,
  *     default and description, the Expression v2 grammar, the validation
- *     codes and the state tables).
+ *     codes and the state tables);
+ *   - docs/workflow-overhaul/generated/INVOCATION.md (how a run starts: the
+ *     InvocationRequest, the trigger union, scopes, error codes, lifecycle
+ *     phases and run profiles).
  * With `--check` it writes nothing and fails when the committed files
  * differ from a fresh generation (line endings ignored), the same contract
  * as `scripts/generate-schemas.ts`. `pnpm lint` runs the check.
@@ -31,7 +34,7 @@
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { renderFieldsMarkdown, toJSONSchema } from '../packages/workflow-spec/src/jsonschema.ts';
+import { renderFieldsMarkdown, renderInvocationMarkdown, toJSONSchema } from '../packages/workflow-spec/src/jsonschema.ts';
 
 const check = process.argv.includes('--check');
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
@@ -42,6 +45,7 @@ function outputs(): Array<{ path: string; content: string }> {
     files.push({ path: resolve(repoRoot, 'packages/workflow-spec/generated', name), content: `${JSON.stringify(schema, null, 2)}\n` });
   }
   files.push({ path: resolve(repoRoot, 'docs/workflow-overhaul/generated/FIELDS.md'), content: renderFieldsMarkdown() });
+  files.push({ path: resolve(repoRoot, 'docs/workflow-overhaul/generated/INVOCATION.md'), content: renderInvocationMarkdown() });
   return files;
 }
 

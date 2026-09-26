@@ -1,21 +1,30 @@
 // ────────────────────────────────────────────────────────────────
 // WorkflowFacade — ai.workflows.*
+//
+// A run starts through THE invocation (P04): `invoke`, and its shorthands
+// `run` (a definition) and `fork` (a terminal run). The trigger is
+// `external_agent via sdk`; the run goes through the same lifecycle as every
+// other entry point.
 // ────────────────────────────────────────────────────────────────
 
 import {
   RunCommandRefusedError,
   type CoreServices,
+  type IEventRepository,
+  type InvocationContext,
   type WorkflowScriptLoader,
   type IWorkflowRunRepository,
-  type WorkflowOrchestrator,
   type StageGateAnswer,
   type StageMessage,
   type StageSendOutcome,
 } from '@generatorai/core';
 import type { PersistedEvent, WorkflowRun } from '@generatorai/shared';
 import type {
-  ForkRunRequest,
+  InvocationPlan,
+  InvocationRequest,
+  InvocationResult,
   RunCommand,
+  RunDigest,
   ValidationResult,
   WorkflowDefinitionRecord,
   WorkflowDefinitionSummary,
@@ -36,31 +45,22 @@ export interface CreateWorkflowOptions {
   publish?: boolean;
 }
 
-export interface RunOptions {
-  variables?: Record<string, unknown>;
-  projectId?: string;
+/** `run()`'s options: everything an invocation takes but its target. */
+export type RunOptions = Partial<Omit<InvocationRequest, 'target' | 'client'>> & {
   /** Run the working graph as a test version (the only way to run a draft). */
   testRun?: boolean;
-}
-
-export interface OrchestrateOptions {
-  variables?: Record<string, unknown>;
-  projectId?: string;
-  selectedCodebases?: string[];
-  /** Per-stage overrides, by stage key. */
-  stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }>;
-  testRun?: boolean;
-}
+};
 
 export interface StreamOptions {
   fromSequence?: number;
 }
 
-const TERMINAL_KINDS = new Set([
-  'workflow_run.completed',
-  'workflow_run.failed',
-  'workflow_run.cancelled',
-]);
+/** The in-process SDK caller: an external agent over the SDK, trusted like the local owner. */
+export const SDK_INVOCATION_CONTEXT: InvocationContext = {
+  principal: { kind: 'local', id: 'sdk', scopes: ['exec:agent', 'read:workflows', 'write:workflows', 'admin:settings'] },
+  trigger: { kind: 'external_agent', via: 'sdk', principalId: 'sdk' },
+  loopback: true,
+};
 
 const isGraphSource = (v: unknown): v is GraphSource => !!v && typeof (v as { build?: unknown }).build === 'function';
 
@@ -68,7 +68,7 @@ export class WorkflowFacade {
   constructor(
     private services: CoreServices,
     private runRepo: IWorkflowRunRepository,
-    private orchestrator: WorkflowOrchestrator,
+    private eventRepo: IEventRepository,
     private scriptLoader?: WorkflowScriptLoader,
   ) {}
 
@@ -109,113 +109,114 @@ export class WorkflowFacade {
     return this.services.workflowDefinitionService.get(definitionId);
   }
 
+  // ── Starting runs (one invocation path) ──────────────────────
+
   /**
-   * Create a workflow run record WITHOUT executing it. Use this when you want
-   * to stage a run and start it later. To create AND execute in one call, use
-   * `run()`.
+   * Start a run: a definition, a script or a fork of a terminal run. Throws
+   * `InvocationError` (a code and the issues behind it). Resolves once the
+   * run is starting; follow it with `waitFor`, `digest` or `stream`.
    */
-  async createRun(definitionId: string, options?: RunOptions): Promise<WorkflowRun> {
-    return this.services.workflowRunService.createRun({
-      workflowDefinitionId: definitionId,
-      variables: options?.variables,
-      projectId: options?.projectId,
-      ...(options?.testRun ? { testRun: true } : {}),
+  async invoke(request: InvocationRequest): Promise<InvocationResult> {
+    return this.services.workflowInvocationService.invoke({ ...request, client: 'sdk' }, SDK_INVOCATION_CONTEXT);
+  }
+
+  /** Run a definition: `invoke({target: {kind: 'definition', …}, …options})`. */
+  async run(definitionId: string, options: RunOptions = {}): Promise<InvocationResult> {
+    const { testRun, variables, ...rest } = options;
+    return this.invoke({
+      target: { kind: 'definition', workflowDefinitionId: definitionId, ...(testRun ? { testRun: true } : {}) },
+      variables: variables ?? {},
+      ...rest,
     });
   }
 
-  /**
-   * SDK-6: Create a run AND start executing the DAG (PATH B).
-   *
-   * Previously `run()` only created the record and never executed — a foot-gun
-   * next to `orchestrate()`. It now creates the run then calls `startRun`, so
-   * `run()` does what its name implies. For the heavier envelope (clone /
-   * worktrees / preprocessing / post-processing) use `orchestrate()`. To create
-   * a run without starting it, use `createRun()`.
-   *
-   * Returns the run record; execution proceeds in the background — use
-   * `stream(runId)` to observe progress.
-   */
-  async run(definitionId: string, options?: RunOptions): Promise<WorkflowRun> {
-    const run = await this.services.workflowRunService.createRun({
-      workflowDefinitionId: definitionId,
-      variables: options?.variables,
-      projectId: options?.projectId,
-      ...(options?.testRun ? { testRun: true } : {}),
-    });
-    await this.services.workflowRunService.startRun(run.id);
-    return run;
+  /** What an invocation would do, without writing anything. */
+  async plan(request: InvocationRequest): Promise<InvocationPlan> {
+    return this.services.workflowInvocationService.plan({ ...request, client: 'sdk' }, SDK_INVOCATION_CONTEXT);
   }
 
   /**
-   * Start an orchestrated workflow run (full DAG execution).
-   *
-   * Unlike `run()` which only creates the record, `orchestrate()` triggers
-   * the complete pipeline: preprocessing → DAG scheduling → stage execution →
-   * result validation → hooks. Events are emitted throughout.
-   *
-   * Returns the run ID immediately; execution happens in the background.
-   * Use `stream(runId)` to observe progress.
+   * Re-run a terminal run as a NEW run (the source stays as it ended): an
+   * invocation with a fork target. By default every instance that did not
+   * complete runs again; completed ones are copied with their results.
    */
-  async orchestrate(definitionId: string, options?: OrchestrateOptions): Promise<{ workflowRunId: string }> {
-    const result = await this.orchestrator.startOrchestratedRun({
-      workflowDefinitionId: definitionId,
-      variables: options?.variables,
-      projectId: options?.projectId,
-      selectedCodebases: options?.selectedCodebases,
-      stageOverrides: options?.stageOverrides,
-      ...(options?.testRun ? { testRun: true } : {}),
+  async fork(
+    runId: string,
+    request: {
+      rerunFrom?: string[];
+      definition?: 'pinned' | 'latest';
+      workspace?: 'restore_checkpoint' | 'reuse' | 'fresh';
+      variables?: Record<string, unknown>;
+    } = {},
+  ): Promise<InvocationResult> {
+    return this.invoke({
+      target: {
+        kind: 'fork',
+        sourceRunId: runId,
+        ...(request.rerunFrom ? { rerunFrom: request.rerunFrom } : {}),
+        definition: request.definition ?? 'pinned',
+        workspace: request.workspace ?? 'fresh',
+      },
+      variables: request.variables ?? {},
     });
-    return { workflowRunId: result.workflowRunId };
+  }
+
+  /** Wait for the run to finalize (post-processing done), an approval (`stopOnApproval`) or the timeout. */
+  async waitFor(runId: string, opts: { timeoutMs: number; stopOnApproval?: boolean; signal?: AbortSignal }): Promise<RunDigest> {
+    return this.services.workflowInvocationService.waitFor(runId, opts);
+  }
+
+  /** The run's compact state (status, stages, pending approvals, post-processing). */
+  async digest(runId: string, opts?: { detail?: 'brief' | 'full' }): Promise<RunDigest> {
+    return this.services.workflowInvocationService.digest(runId, opts);
   }
 
   /**
-   * Stream events from a running workflow (AsyncIterable).
-   *
-   * Subscribes for live events and completes when the run reaches a
-   * terminal state. A run that is already terminal completes immediately:
-   * history is read through the run stream scope (`/api/stream?scope=run`)
-   * on the server.
+   * The run's events (AsyncIterable): the run scope replayed from the event
+   * log (from `fromSequence` on), then live events, until
+   * `workflow_run.finalized`. It subscribes before it reads, so an event in
+   * between is not lost.
    */
   async *stream(runId: string, options?: StreamOptions): AsyncGenerator<PersistedEvent> {
     const fromSeq = options?.fromSequence ?? 0;
-
-    // Check if run is already in a terminal state
-    const run = await this.runRepo.getById(runId);
-    if (!run) throw new Error(`Workflow run not found: ${runId}`);
-
-    // Already terminal: nothing more will be emitted for it.
-    if (['completed', 'failed', 'cancelled'].includes(run.status)) return;
-
-    // Subscribe for live events
+    await this.runRepo.getById(runId);
     const queue: PersistedEvent[] = [];
-    let resolve: (() => void) | null = null;
-    let done = false;
-
+    let wake: (() => void) | null = null;
     const unsub = this.services.eventBus.subscribeToWorkflowRun(runId, (persisted) => {
-      if (persisted.sequenceId < fromSeq) return;
       queue.push(persisted);
-      if (resolve) {
-        resolve();
-        resolve = null;
-      }
+      const w = wake;
+      wake = null;
+      w?.();
     });
-
+    const seen = new Set<string>();
+    const keyOf = (e: PersistedEvent) => `${e.sessionId}:${e.sequenceId}:${e.kind}`;
     try {
-      while (!done) {
-        if (queue.length > 0) {
-          const event = queue.shift()!;
-          yield event;
-          if (TERMINAL_KINDS.has(event.kind)) {
-            done = true;
-          }
-        } else {
-          await new Promise<void>((r) => { resolve = r; });
+      for (const event of await this.eventRepo.getByWorkflowRunId(runId)) {
+        if (event.sequenceId < fromSeq) continue;
+        seen.add(keyOf(event));
+        yield event;
+        if (event.kind === 'workflow_run.finalized') return;
+      }
+      const run = await this.runRepo.getById(runId);
+      if (['completed', 'failed', 'cancelled'].includes(run.status) && queue.every((e) => seen.has(keyOf(e)))) return;
+      for (;;) {
+        const event = queue.shift();
+        if (!event) {
+          await new Promise<void>((resolve) => {
+            wake = resolve;
+          });
+          continue;
         }
+        if (seen.has(keyOf(event)) || event.sequenceId < fromSeq) continue;
+        yield event;
+        if (event.kind === 'workflow_run.finalized') return;
       }
     } finally {
       unsub();
     }
   }
+
+  // ── A run in flight ──────────────────────────────────────────
 
   /**
    * An operator command on the run or one of its instances: pause, resume,
@@ -253,17 +254,13 @@ export class WorkflowFacade {
     return this.runRepo.getById(runId);
   }
 
-  /**
-   * Re-run a terminal run as a NEW run (the source stays as it ended). By
-   * default every instance that did not complete runs again; completed ones
-   * are copied with their results.
-   */
-  async fork(runId: string, request?: ForkRunRequest): Promise<WorkflowRun> {
-    return this.services.workflowRunService.forkRun(runId, request);
-  }
-
   /** Delete a run */
   async deleteRun(runId: string): Promise<void> {
     return this.services.workflowRunService.deleteRun(runId);
+  }
+
+  /** The loaded script loader, if the SDK discovered scripts. */
+  get scripts(): WorkflowScriptLoader | undefined {
+    return this.scriptLoader;
   }
 }

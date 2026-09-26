@@ -31,7 +31,7 @@ import type { IScriptRunner } from '../domain/ports/IScriptRunner.js';
 import type { IHttpClient } from '../domain/ports/IHttpClient.js';
 import type { EventBus } from '../events/EventBus.js';
 import { renderTemplate } from '@generatorai/workflow-spec';
-import { codebasesOf, userVariables } from './definitions/runScope.js';
+import { userVariables } from './definitions/runScope.js';
 
 export interface HookContext {
   sessionId: string;
@@ -62,8 +62,8 @@ export interface HookContext {
   abortSignal?: AbortSignal;
   /**
    * The Expression v2 scope hook templates render with (`variables`, `run`,
-   * `stages`), as the stage's own templates do. Omitted: derived from
-   * `variables` (user variables, `run.id`, `run.codebases`; no `stages`).
+   * `stages`), as the stage's own templates do; run and stage hooks always
+   * pass it. Omitted (a session hook): the user variables and `run.id` only.
    */
   templateScope?: Record<string, unknown>;
 }
@@ -73,7 +73,7 @@ function hookScope(context: Pick<HookContext, 'variables' | 'workflowRunId' | 't
   if (context.templateScope) return context.templateScope;
   return {
     variables: userVariables(context.variables),
-    run: { id: context.workflowRunId ?? '', name: '', codebases: codebasesOf(context.variables) },
+    run: { id: context.workflowRunId ?? '', name: '', codebases: {} },
     stages: {},
   };
 }

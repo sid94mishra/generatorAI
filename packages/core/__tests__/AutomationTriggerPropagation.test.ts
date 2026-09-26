@@ -5,10 +5,12 @@
 // in the whole repository (`AutomationService.ts`'s default-dataset fallback).
 // It was written onto the execution row and stopped there: `runSingleWorkflow`
 // had no trigger argument, `createRun` had no field for it, and nothing
-// downstream could tell a nightly cron run from a button press.
+// downstream could tell a nightly cron run from a button press. Since P04 the
+// trigger is the invocation's server-derived context (`{kind: 'automation',
+// via}`), never a variable.
 //
 // The second half — what a scheduled run then does differently — is pinned in
-// `ScheduledRunFreshContext.test.ts` against the real `WorkflowRunService`.
+// `ScheduledRunFreshContext.test.ts` against the real invocation.
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -17,6 +19,8 @@ import { AutomationService } from '../src/services/AutomationService.js';
 import { DurableExecutionEngine } from '../src/services/DurableExecutionEngine.js';
 import { EventBus } from '../src/events/EventBus.js';
 import type { WorkflowRunService } from '../src/services/WorkflowRunService.js';
+import type { WorkflowInvocationService } from '../src/services/workflow-invocation/WorkflowInvocationService.js';
+import type { InvocationContext } from '../src/services/workflow-invocation/types.js';
 import type { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
 import type { IAutomationRepository, IAutomationExecutionRepository } from '../src/services/AutomationService.js';
 import type { IWorkflowRunRepository } from '../src/domain/ports/IWorkflowRunRepository.js';
@@ -60,10 +64,10 @@ function automation(overrides: Partial<Automation> = {}): Automation {
 
 describe('X-21 — the trigger reaches the workflow run', () => {
   let service: AutomationService;
-  let createdRunVariables: Array<Record<string, unknown>>;
+  let created: Array<{ variables: Record<string, unknown>; trigger: unknown }>;
 
   beforeEach(() => {
-    createdRunVariables = [];
+    created = [];
     const automations = new Map<string, Automation>([
       [AUTOMATION_ID, automation({ triggerType: 'webhook', webhookToken: 'tok' } as Partial<Automation>)],
     ]);
@@ -95,27 +99,22 @@ describe('X-21 — the trigger reaches the workflow run', () => {
       getExecutionRunsByExecutionId: async () => [],
     } as unknown as IAutomationExecutionRepository;
 
-    const workflowRunService = {
-      createRun: async (params: { workflowDefinitionId: string; variables?: Record<string, unknown>; triggeredBy?: string }) => {
+    const invocation = {
+      invoke: async (req: { target: { workflowDefinitionId: string }; variables?: Record<string, unknown> }, ctx: InvocationContext) => {
         counter += 1;
-        // What the run service records: the user variables plus the typed trigger.
-        createdRunVariables.push({ ...(params.variables ?? {}), __triggeredBy: params.triggeredBy });
-        const run = {
-          id: `run-${counter}`,
-          workflowDefinitionId: params.workflowDefinitionId,
-          status: 'completed',
-          variables: params.variables ?? {},
-        } as unknown as WorkflowRun;
+        created.push({ variables: req.variables ?? {}, trigger: ctx.trigger });
+        const run = { id: `run-${counter}`, workflowDefinitionId: req.target.workflowDefinitionId, status: 'completed', variables: req.variables ?? {} } as unknown as WorkflowRun;
         runs.set(run.id, run);
-        return run;
+        return { runId: run.id };
       },
-      startRun: async () => {},
-    } as unknown as WorkflowRunService;
+      waitFor: async (runId: string) => ({ ...runs.get(runId)!, waited: 'finalized' }),
+    } as unknown as Pick<WorkflowInvocationService, 'invoke' | 'waitFor'>;
 
     service = new AutomationService(
       automationRepo,
       executionRepo,
-      workflowRunService,
+      { command: async () => ({ ok: true }) } as unknown as WorkflowRunService,
+      invocation,
       { getById: async (id: string) => runs.get(id)! } as unknown as IWorkflowRunRepository,
       {} as unknown as WorkflowDefinitionService,
       new EventBus(),
@@ -124,22 +123,23 @@ describe('X-21 — the trigger reaches the workflow run', () => {
     );
   });
 
-  it('stamps __triggeredBy on the run a manual trigger creates', async () => {
+  it('invokes the run a manual trigger creates with an automation trigger', async () => {
     await service.triggerManual(AUTOMATION_ID);
 
     // The execution runs in the background (durable slot claim first).
-    await vi.waitFor(() => expect(createdRunVariables).toHaveLength(1));
-    expect(createdRunVariables[0]!['__triggeredBy']).toBe('manual');
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]!.trigger).toMatchObject({ kind: 'automation', automationId: AUTOMATION_ID, via: 'manual', iterationIndex: 0 });
+    expect(Object.keys(created[0]!.variables).filter((k) => k.startsWith('__'))).toEqual([]);
   });
 
-  it('stamps __triggeredBy on the run a webhook trigger creates', async () => {
+  it('invokes the run a webhook trigger creates with an automation trigger', async () => {
     await service.triggerWebhook('tok', { topic: 'x' });
 
     // The execution runs in the background (durable slot claim first).
-    await vi.waitFor(() => expect(createdRunVariables).toHaveLength(1));
-    expect(createdRunVariables[0]!['__triggeredBy']).toBe('webhook');
+    await vi.waitFor(() => expect(created).toHaveLength(1));
+    expect(created[0]!.trigger).toMatchObject({ kind: 'automation', via: 'webhook' });
     // Without a data schema the payload is recorded on the execution, not
     // spread into run variables (the legacy extraction is gone, P01 WP-1.4).
-    expect(createdRunVariables[0]!['topic']).toBeUndefined();
+    expect(created[0]!.variables['topic']).toBeUndefined();
   });
 });

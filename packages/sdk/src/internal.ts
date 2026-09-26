@@ -34,7 +34,7 @@ export type {
 
 // ── Service classes (advanced composition) ──
 export {
-  WorkflowOrchestrator,
+  WorkflowInvocationService,
   StreamBroker,
   ProjectService,
   CodebaseService,

@@ -1,21 +1,16 @@
 // ────────────────────────────────────────────────────────────────
-// WorkflowRunService — the run facade over engine v2 (P03 WP-3.7/3.8).
+// WorkflowRunService — the run facade over engine v2 (P03 WP-3.7/3.8, P04).
 //
-// create (until P04's invocation), start, command, fork, get, list, delete
-// and the run's permission mode. Everything that EXECUTES a run is the
+// The run records `WorkflowInvocationService` (THE way a run starts, P04)
+// writes — a new run, or a fork — then start, command, delete and the run's
+// permission mode. Everything that EXECUTES a run is the
 // engine's (`RunSupervisor`: actor, `decide()`, executor, timers,
 // recovery): a run's and an instance's status change only through its
 // compare-and-set. Operator actions are run commands (G5 §3.7); re-running a
 // terminal run is a fork (G5 §3.8), never a mutation of the source.
 // ────────────────────────────────────────────────────────────────
 
-import type {
-  CreateWorkflowRunParams,
-  ILogger,
-  StageRun,
-  WorkflowRun,
-  WorkflowRunPermissionMode,
-} from '@generatorai/shared';
+import type { ILogger, RunSystemVars, StageRun, WorkflowRun, WorkflowRunPermissionMode } from '@generatorai/shared';
 import {
   ConflictError,
   generateId,
@@ -40,7 +35,8 @@ import type { EventBus } from '../events/EventBus.js';
 import { getDefaultChatPermissionMode } from './agentModePolicy.js';
 import type { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
 import type { CommandResult, RunSupervisor } from './engine/RunSupervisor.js';
-import { checkPermissionGating, runPermissionMode, TRIGGER_PERMISSION_MODE_KEY } from './session/permissionSource.js';
+import { validateRunVariables } from './workflow-invocation/validateInvocation.js';
+import { checkPermissionGating, runPermissionMode } from './session/permissionSource.js';
 import { ComposeError } from './session/types.js';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
 import type { WorkspaceCheckpointService } from './WorkspaceCheckpointService.js';
@@ -49,22 +45,39 @@ const meter = getMeter('core.workflow');
 const runCounter = meter.createCounter('workflow.runs.total', { description: 'Total workflow runs created' });
 
 /**
- * Variables that describe WHERE a run executed rather than WHAT it was asked
- * to do. A fork into a fresh workspace drops them: `prepare` provisions a
- * workspace only when the directory keys are absent, and the worktree paths
- * point into the source run's checkout.
+ * The system values a fork that REUSES the source workspace keeps: where the
+ * source ran (workspace paths, codebases, uploads, sandbox-free). A fresh
+ * fork keeps only the trigger's permission ceiling; its own lifecycle
+ * provisions everything else.
  */
-const EXECUTION_CONTEXT_KEYS = new Set(['__workingDirectory', '__artifactsDirectory', '__workspaceId', '__workflowRunId']);
-const WORKTREE_VARIABLE_PATTERN = /^repo_(path|branch)_/;
+function forkSystemVars(source: RunSystemVars | undefined, reuse: boolean): RunSystemVars {
+  const sv = source ?? {};
+  if (!reuse) return sv.triggerPermissionMode ? { triggerPermissionMode: sv.triggerPermissionMode } : {};
+  // Not the source's lifecycle journal, staged uploads, sandbox or step results: the fork's own lifecycle writes those.
+  const dropped = new Set<keyof RunSystemVars>(['lifecycle', 'uploads', 'sandbox', 'preprocessing', 'postProcessing']);
+  return Object.fromEntries(Object.entries(sv).filter(([k]) => !dropped.has(k as keyof RunSystemVars))) as RunSystemVars;
+}
 
-export function stripExecutionContext(variables: Record<string, unknown>): { variables: Record<string, unknown>; dropped: string[] } {
-  const kept: Record<string, unknown> = {};
-  const dropped: string[] = [];
-  for (const [key, value] of Object.entries(variables)) {
-    if (EXECUTION_CONTEXT_KEYS.has(key) || WORKTREE_VARIABLE_PATTERN.test(key)) dropped.push(key);
-    else kept[key] = value;
-  }
-  return { variables: kept, dropped };
+/** A new run's record, as the invocation resolved it (trusted: nothing here is validated again). */
+export interface NewRunRecord {
+  workflowDefinitionId: string;
+  definitionVersionId: string;
+  name?: string;
+  variables: Record<string, unknown>;
+  trigger: WorkflowRun['trigger'];
+  invocationId?: string;
+  idempotencyKey?: string;
+  projectId?: string;
+  permissionMode?: WorkflowRunPermissionMode;
+  runOverrides?: WorkflowRun['runOverrides'];
+  stageOverrides?: WorkflowRun['stageOverrides'];
+  codebaseSelection?: WorkflowRun['codebaseSelection'];
+  systemVars?: RunSystemVars;
+  budget?: Record<string, unknown>;
+  parentRunId?: string;
+  parentStageRunId?: string;
+  rootRunId?: string;
+  depth?: number;
 }
 
 /**
@@ -127,44 +140,38 @@ export class WorkflowRunService {
   // ── Create ───────────────────────────────────────────────────
 
   /**
-   * Create a `created` run pinned to an immutable definition version (W-13):
-   * the definition's current published version, or a test version of its
-   * working graph (`testRun`). The engine creates the instances when the
-   * run starts (deterministic ids, one per top-level stage).
+   * Write a `created` run pinned to an immutable definition version (W-13).
+   * Only the invocation calls this: it validated the request, resolved the
+   * version, the trigger, the lineage and the permission mode first. The
+   * engine creates the instances when the run starts.
    */
-  async createRun(params: CreateWorkflowRunParams): Promise<WorkflowRun> {
-    // R-8: engine state (`__*`, codebase checkouts) never comes from caller
-    // variables; it is derived from the typed params below.
-    const reserved = Object.keys(params.variables ?? {}).filter((k) => FORBIDDEN_VARIABLE_NAME_PATTERN.test(k));
-    if (reserved.length > 0) {
-      throw new ValidationError(
-        `Invalid workflow run variables: ${reserved.map((k) => `"${k}"`).join(', ')} ` +
-          'are engine-reserved names (__*, repo_path_*, repo_branch_*) and cannot be supplied',
-      );
-    }
+  async createRun(record: NewRunRecord): Promise<WorkflowRun> {
     return withSpan('core.workflow', 'workflow.createRun', async (span) => {
-      span.setAttribute('workflow.definition_id', params.workflowDefinitionId);
-      const definitionVersionId =
-        params.definitionVersionId ??
-        (await this.definitionService.resolveVersionForRun(params.workflowDefinitionId, { testRun: params.testRun === true }));
-      const graph = await this.definitions.get(definitionVersionId);
-      const variables: Record<string, unknown> = { ...withDefaults(graph, validateVariables(graph, params.variables ?? {})) };
-      if (params.projectId) variables['__projectId'] = params.projectId;
-      // PD-18 — the trigger's declared mode sits under the stage and workflow
-      // session modes (see `runPermissionMode`); it is not the run row.
-      if (params.triggerPermissionMode) variables[TRIGGER_PERMISSION_MODE_KEY] = params.triggerPermissionMode;
+      span.setAttribute('workflow.definition_id', record.workflowDefinitionId);
+      const graph = await this.definitions.get(record.definitionVersionId);
       const now = new Date();
+      const id = generateId();
       const run: WorkflowRun = {
-        id: generateId(),
-        workflowDefinitionId: params.workflowDefinitionId,
-        definitionVersionId,
-        name: `${graph.workflow.name} - Run ${now.getTime()}`,
+        id,
+        workflowDefinitionId: record.workflowDefinitionId,
+        definitionVersionId: record.definitionVersionId,
+        name: record.name?.trim() || `${graph.workflow.name} - Run ${now.getTime()}`,
         status: 'created',
-        variables,
-        trigger: params.triggeredBy ? { kind: 'automation', via: params.triggeredBy } : { kind: 'user' },
-        ...(params.projectId ? { projectId: params.projectId } : {}),
-        ...(params.permissionMode ? { permissionMode: params.permissionMode } : {}),
-        ...(params.stageOverrides && params.stageOverrides.length > 0 ? { stageOverrides: params.stageOverrides } : {}),
+        variables: record.variables,
+        ...(record.trigger ? { trigger: record.trigger } : {}),
+        ...(record.invocationId ? { invocationId: record.invocationId } : {}),
+        ...(record.idempotencyKey ? { idempotencyKey: record.idempotencyKey } : {}),
+        ...(record.projectId ? { projectId: record.projectId } : {}),
+        ...(record.permissionMode ? { permissionMode: record.permissionMode } : {}),
+        ...(record.runOverrides && Object.keys(record.runOverrides).length > 0 ? { runOverrides: record.runOverrides } : {}),
+        ...(record.stageOverrides && record.stageOverrides.length > 0 ? { stageOverrides: record.stageOverrides } : {}),
+        ...(record.codebaseSelection ? { codebaseSelection: record.codebaseSelection } : {}),
+        ...(record.systemVars ? { systemVars: record.systemVars } : {}),
+        ...(record.budget ? { budget: record.budget } : {}),
+        ...(record.parentRunId ? { parentRunId: record.parentRunId } : {}),
+        ...(record.parentStageRunId ? { parentStageRunId: record.parentStageRunId } : {}),
+        rootRunId: record.rootRunId ?? id,
+        depth: record.depth ?? 0,
         createdAt: now,
         updatedAt: now,
       };
@@ -174,7 +181,7 @@ export class WorkflowRunService {
         kind: 'workflow_run.created',
         data: { workflowRunId: run.id, name: run.name, workflowDefinitionId: run.workflowDefinitionId },
       });
-      runCounter.add(1, { definition_id: params.workflowDefinitionId });
+      runCounter.add(1, { definition_id: record.workflowDefinitionId });
       span.setAttribute('workflow.run_id', run.id);
       return run;
     });
@@ -199,30 +206,20 @@ export class WorkflowRunService {
     return this.engine.command(runId, command);
   }
 
-  /**
-   * A setup phase that runs before `start` (the orchestrator's clone and
-   * preprocessing until P04 moves them into `prepare`) failed: the run goes
-   * `created → starting → failed` with `status_reason setup:<phase>`, the
-   * same outcome a failed prepare phase has.
-   */
-  async failSetup(runId: string, phase: string, error: string): Promise<void> {
-    const started = this.engine.stores.runs.transition(runId, ['created'], 'starting');
-    if (!started.ok) return;
-    const failed = this.engine.stores.runs.transition(runId, ['starting'], 'failed', {
-      patch: { statusReason: `setup:${phase}`, outcome: 'failed', error },
-    });
-    if (failed.ok) await this.eventBus.emitGlobal({ kind: 'workflow_run.failed', data: { workflowRunId: runId, error } });
-  }
-
   // ── Fork (G5 §3.8) ───────────────────────────────────────────
 
   /**
    * Re-run a terminal run as a NEW run. Instances not downstream of any
    * `rerunFrom` path are memoized: copied as they ended, with their results,
    * and never re-validated (B-6). The fork carries the source's permission
-   * mode, overrides, project and trigger lineage (W-59).
+   * mode, overrides, project, codebases and trigger lineage (W-59). The
+   * invocation (`target: {kind: 'fork'}`) is its only caller.
    */
-  async forkRun(sourceRunId: string, request: ForkRunRequest = {}): Promise<WorkflowRun> {
+  async forkRun(
+    sourceRunId: string,
+    request: ForkRunRequest = {},
+    meta: { trigger?: WorkflowRun['trigger']; invocationId?: string; name?: string } = {},
+  ): Promise<WorkflowRun> {
     const opts = ForkRunRequestSchema.parse(request);
     return withSpan('core.workflow', 'workflow.forkRun', async (span) => {
       span.setAttribute('workflow.run_id', sourceRunId);
@@ -258,31 +255,41 @@ export class WorkflowRunService {
         }
       }
 
-      // Variables: the source's, minus its execution context unless the fork reuses the workspace.
+      // Variables are the source's user variables (system values live in
+      // `system_vars`), with the override merged over them.
       const reuse = opts.workspace !== 'fresh';
-      const base = reuse ? { ...source.variables } : stripExecutionContext(source.variables ?? {}).variables;
       const userOverride = opts.variablesOverride ?? {};
       const reserved = Object.keys(userOverride).filter((k) => FORBIDDEN_VARIABLE_NAME_PATTERN.test(k));
       if (reserved.length > 0) throw new ValidationError(`variablesOverride: ${reserved.join(', ')} are engine-reserved names`);
-      const variables = { ...base, ...validateVariables(graph, { ...userVariablesOf(base), ...userOverride }, true) };
+      const variables = validateRunVariables(graph, { ...(source.variables ?? {}), ...userOverride }, { partial: true });
 
       const now = new Date();
+      const id = generateId();
       const run: WorkflowRun = {
-        id: generateId(),
+        id,
         workflowDefinitionId: source.workflowDefinitionId,
         definitionVersionId,
-        name: `${graph.workflow.name} - Run ${now.getTime()}`,
+        name: meta.name?.trim() || `${graph.workflow.name} - Run ${now.getTime()}`,
         status: 'created',
         variables,
         ancestorRunId: sourceRunId,
-        trigger: { kind: 'fork', sourceRunId, sourceTrigger: source.trigger ?? null },
+        trigger: meta.trigger ?? { kind: 'fork', sourceRunId, principalId: 'system' },
         forkSpec: { rerunFrom, definition: opts.definition, workspace: opts.workspace, ...(opts.variablesOverride ? { variablesOverride: opts.variablesOverride } : {}) },
+        ...(meta.invocationId ? { invocationId: meta.invocationId } : {}),
         ...(idempotencyKey ? { idempotencyKey } : {}),
         ...(source.projectId ? { projectId: source.projectId } : {}),
         ...(source.permissionMode ? { permissionMode: source.permissionMode } : {}),
+        ...(source.runOverrides ? { runOverrides: source.runOverrides } : {}),
         ...(source.stageOverrides ? { stageOverrides: source.stageOverrides } : {}),
         ...(source.codebaseSelection !== undefined ? { codebaseSelection: source.codebaseSelection } : {}),
+        ...(source.budget ? { budget: source.budget } : {}),
+        systemVars: forkSystemVars(source.systemVars, reuse),
         ...(reuse && source.workspaceId ? { workspaceId: source.workspaceId } : {}),
+        // A fork is a sibling of its source in the run tree: same parent, same root.
+        ...(source.parentRunId ? { parentRunId: source.parentRunId } : {}),
+        ...(source.parentStageRunId ? { parentStageRunId: source.parentStageRunId } : {}),
+        rootRunId: source.parentRunId ? (source.rootRunId ?? id) : id,
+        depth: source.depth ?? 0,
         createdAt: now,
         updatedAt: now,
       };
@@ -314,7 +321,7 @@ export class WorkflowRunService {
 
   /** Roll the source workspace back to the checkpoint taken before the earliest re-run instance's first attempt. */
   private async restoreForFork(source: WorkflowRun, instances: readonly StageRun[], rerun: ReadonlySet<string>): Promise<void> {
-    const workspaceId = source.workspaceId ?? (source.variables?.['__workspaceId'] as string | undefined);
+    const workspaceId = source.workspaceId;
     const earliest = instances
       .filter((i) => rerun.has(i.stageKey) && i.startedAt)
       .sort((a, b) => a.startedAt!.getTime() - b.startedAt!.getTime())[0];
@@ -382,7 +389,7 @@ export class WorkflowRunService {
    * the workflow's. The engine's `prepare` runs it too, for every entry point.
    */
   async assertPermissionGating(run: WorkflowRun, graph: WorkflowGraph): Promise<void> {
-    const projectId = (run.variables?.['__projectId'] as string | undefined) ?? graph.workflow.projectId ?? undefined;
+    const projectId = run.projectId ?? graph.workflow.projectId ?? undefined;
     for (const stage of graph.stages) {
       const session = resolveSessionSpec(graph.workflow.session, stage.session);
       // The bound agent's runtime harness counts too (review R8).
@@ -398,52 +405,6 @@ export class WorkflowRunService {
 }
 
 // ── Helpers ─────────────────────────────────────────────────────
-
-/** The caller's variables checked against the declared ones: types, `required`, choice options. */
-function validateVariables(graph: WorkflowGraph, provided: Record<string, unknown>, partial = false): Record<string, unknown> {
-  const issues: string[] = [];
-  for (const v of graph.workflow.variables) {
-    const raw = provided[v.name];
-    if (raw === undefined || raw === null || raw === '') {
-      if (!partial && v.required && v.defaultValue === undefined) issues.push(`variable "${v.name}" is required`);
-      continue;
-    }
-    switch (v.type) {
-      case 'string':
-      case 'text':
-        if (typeof raw !== 'string') issues.push(`variable "${v.name}" must be a string (got ${typeof raw})`);
-        break;
-      case 'number':
-        if (typeof raw !== 'number' || Number.isNaN(raw)) issues.push(`variable "${v.name}" must be a number (got ${typeof raw})`);
-        break;
-      case 'boolean':
-        if (typeof raw !== 'boolean') issues.push(`variable "${v.name}" must be a boolean (got ${typeof raw})`);
-        break;
-      case 'choice':
-        if (typeof raw !== 'string') issues.push(`variable "${v.name}" must be a string (got ${typeof raw})`);
-        else if (v.options && v.options.length > 0 && !v.options.includes(raw)) {
-          issues.push(`variable "${v.name}" must be one of [${v.options.join(', ')}] (got "${raw}")`);
-        }
-        break;
-    }
-  }
-  if (issues.length > 0) throw new ValidationError(`Invalid workflow run variables: ${issues.join('; ')}`);
-  return provided;
-}
-
-/** The declared `defaultValue` of every variable the caller did not provide. */
-function withDefaults(graph: WorkflowGraph, provided: Record<string, unknown>): Record<string, unknown> {
-  const out = { ...provided };
-  for (const v of graph.workflow.variables) {
-    const current = out[v.name];
-    if ((current === undefined || current === null || current === '') && v.defaultValue !== undefined) out[v.name] = v.defaultValue;
-  }
-  return out;
-}
-
-function userVariablesOf(variables: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.entries(variables).filter(([k]) => !FORBIDDEN_VARIABLE_NAME_PATTERN.test(k)));
-}
 
 /** The stage keys `from` reaches over any edge, `from` included. */
 function downstreamOf(graph: WorkflowGraph, from: readonly string[]): Set<string> {

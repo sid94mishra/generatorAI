@@ -77,6 +77,8 @@ export default function StageScreen(): React.ReactElement {
   const { colors } = useTheme();
   const toast = useToast();
   const runControl = useFeature('runControl');
+  // Retrying a stage of a FINISHED run forks a new run, which needs only runStart.
+  const runStart = useFeature('runStart');
   const [tab, setTab] = useState<Tab>('transcript');
   const [confirmCancel, setConfirmCancel] = useState(false);
   // A message to a completed stage amends it: stream it until the amendment lands.
@@ -139,6 +141,7 @@ export default function StageScreen(): React.ReactElement {
   const workspaceId = run.data.workspaceId;
   const controls = stageControlsFor(stage.status, runStatus);
   const available = (['retry', 'resume', 'cancel'] as const).filter((a) => controls[a]);
+  const stageGate = isTerminal(runStatus) ? runStart : runControl;
   const elapsed = runElapsed(stage, isActive(stage.status) ? null : stage.completedAt);
   const files = (stage.artifactManifest ?? []).filter((f) => !/^unnamed\.[A-Za-z0-9]+$/.test(f.path));
   const outputText = stage.outputText?.trim();
@@ -174,7 +177,7 @@ export default function StageScreen(): React.ReactElement {
           </View>
         ) : null}
         {available.length > 0 ? (
-          runControl.available ? (
+          stageGate.available ? (
             <View className="flex-row flex-wrap gap-2">
               {available.map((action) => (
                 <Button
@@ -194,7 +197,7 @@ export default function StageScreen(): React.ReactElement {
               <Text className="flex-1 text-sm text-muted-foreground">
                 Retrying or resuming stages needs workflow permission on this device.
               </Text>
-              <Button label="Request access" variant="secondary" size="sm" onPress={runControl.requestAccess} />
+              <Button label="Request access" variant="secondary" size="sm" onPress={stageGate.requestAccess} />
             </View>
           )
         ) : null}

@@ -1,7 +1,7 @@
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 
-import { WorkflowPreprocessor, repositoryFromInputs, type PreprocessorContext } from '../WorkflowPreprocessor.js';
+import { LifecycleSteps, repositoryFromInputs, type LifecycleStepContext } from '../engine/lifecycle/steps.js';
 
 const cloneStep = {
   name: 'Clone repository',
@@ -11,19 +11,18 @@ const cloneStep = {
 
 function harness() {
   const cloneToDirectory = vi.fn(async (_url: string, dir: string) => dir);
-  const preprocessor = new WorkflowPreprocessor(
-    { cloneToDirectory, clone: vi.fn() } as never,
+  const preprocessor = new LifecycleSteps(
+    { cloneToDirectory } as never,
     {} as never,
     { emitGlobal: vi.fn(async () => undefined) } as never,
     { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() } as never,
     { run: vi.fn() },
   );
-  const context = (variables: Record<string, unknown>): PreprocessorContext => ({
-    workflowRunId: 'run-1',
+  const context = (variables: Record<string, unknown>, codebases: LifecycleStepContext['codebases'] = {}): LifecycleStepContext => ({
+    runId: 'run-1',
     variables,
-    clonedPaths: {},
-    featureBranches: {},
-    runWorkspaceDir: '/runs/run-1',
+    codebases,
+    workDir: '/runs/run-1',
   });
   return { preprocessor, cloneToDirectory, context };
 }
@@ -37,14 +36,14 @@ describe('clone_repo from the run inputs', () => {
 
     expect(result?.success).toBe(true);
     expect(cloneToDirectory).toHaveBeenCalledWith('https://example.com/shop.git', join('/runs/run-1', 'target'), 'dev');
-    expect(ctx.variables['repo_path_target']).toBe(join('/runs/run-1', 'target'));
+    expect(ctx.codebases['target']?.path).toBe(join('/runs/run-1', 'target'));
   });
 
   it('reuses a checkout the run already has for the alias', async () => {
     const { preprocessor, cloneToDirectory, context } = harness();
     const [result] = await preprocessor.execute(
       [cloneStep as never],
-      context({ repo_path_target: '/ws/source/shop', git_url: 'https://example.com/shop.git' }),
+      context({ git_url: 'https://example.com/shop.git' }, { target: { path: '/ws/source/shop', branch: null, baseRef: null } }),
     );
 
     expect(result?.success).toBe(true);

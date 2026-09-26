@@ -167,45 +167,6 @@ export const statusColumn: ColumnSpec = { key: 'status', header: 'Status', forma
 export const createdColumn: ColumnSpec = { key: 'createdAt', header: 'Created', format: 'relative', priority: 3 };
 export const updatedColumn: ColumnSpec = { key: 'updatedAt', header: 'Updated', format: 'relative', priority: 4 };
 
-// ── Terminal-state helpers ────────────────────────────────────────
-
-export const TERMINAL_RUN_STATES = new Set(['completed', 'failed', 'cancelled']);
-export const TERMINAL_STAGE_STATES = new Set(['completed', 'failed', 'cancelled', 'skipped']);
-
-export function isTerminalRunState(status: string | undefined | null): boolean {
-  return status ? TERMINAL_RUN_STATES.has(status) : false;
-}
-
-/**
- * Waits for a run to leave the non-terminal states.
- *
- * Polls rather than relying purely on the stream because a run can reach its
- * terminal state during a reconnect gap; the poll is the backstop that stops
- * `--watch` hanging forever on a run that already finished.
- */
-export async function waitForRunTerminal(
-  ctx: CliContext,
-  runId: string,
-  options: { intervalMs?: number; timeoutMs?: number } = {},
-): Promise<{ status: string; error?: string | null }> {
-  const interval = options.intervalMs ?? 2000;
-  const deadline = options.timeoutMs ? Date.now() + options.timeoutMs : Infinity;
-
-  for (;;) {
-    ctx.assertNotCancelled();
-    const run = await ctx.api.runs.get(runId);
-    if (isTerminalRunState(run.status)) {
-      return { status: run.status, error: run.error ?? null };
-    }
-    if (Date.now() > deadline) {
-      throw new CliError('TIMEOUT', `Run ${runId} did not finish within the timeout.`, {
-        details: { status: run.status },
-      });
-    }
-    await sleep(interval, ctx.signal);
-  }
-}
-
 export function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
     if (signal?.aborted) {

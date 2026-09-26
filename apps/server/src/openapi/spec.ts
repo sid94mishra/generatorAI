@@ -755,16 +755,29 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
         required: ['command'],
       },
-      ForkRunRequest: {
+      InvocationRequest: {
         type: 'object',
+        description:
+          'The one request that starts a run. The full JSON Schema ships as `@generatorai/workflow-spec/invocation.schema.json`; ' +
+          'fields are listed in docs/workflow-overhaul/generated/INVOCATION.md.',
         properties: {
-          rerunFrom: { type: 'array', items: { type: 'string' }, description: 'Instance paths re-run with everything downstream; default: every instance that did not complete' },
-          definition: { type: 'string', enum: ['pinned', 'latest'] },
-          variablesOverride: { type: 'object', additionalProperties: true },
-          workspace: { type: 'string', enum: ['restore_checkpoint', 'reuse', 'fresh'] },
+          target: {
+            type: 'object',
+            description: "{kind: 'definition', workflowDefinitionId, version?, testRun?} | {kind: 'script', scriptId} | {kind: 'fork', sourceRunId, rerunFrom?, definition?, workspace?}",
+          },
+          variables: { type: 'object', additionalProperties: true, description: 'Engine-reserved names (__*, repo_path_*, repo_branch_*) are refused' },
+          projectId: { type: 'string' },
+          codebases: { type: 'array', items: { type: 'object' }, description: '[{alias, baseRef?, mode: worktree|in_place}]' },
+          stageOverrides: { type: 'array', items: { type: 'object' }, description: '[{stageKey, skip?, variables?, model?}]' },
+          overrides: { type: 'object', description: '{model?, harnessType?, reasoningEffort?, permissionMode?}' },
+          uploads: { type: 'array', items: { type: 'object' }, description: '[{uploadId, category}]' },
+          profile: { type: 'string' },
+          name: { type: 'string' },
+          budget: { type: 'object' },
           idempotencyKey: { type: 'string' },
-          start: { type: 'boolean' },
+          client: { type: 'string', enum: ['web', 'desktop', 'mobile', 'cli', 'tui', 'sdk', 'mcp', 'http'] },
         },
+        required: ['target'],
       },
       Agent: {
         type: 'object',
@@ -1591,40 +1604,72 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     },
 
     '/api/workflow-runs': {
+      get: {
+        tags: ['Runs'],
+        summary: 'List runs (?status, ?definitionId)',
+        responses: {
+          '200': { description: 'Runs', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/WorkflowRun' } } } } },
+        },
+      },
+    },
+    '/api/workflow-invocations': {
       post: {
         tags: ['Runs'],
-        summary: 'Start a workflow run',
-        requestBody: {
-          required: true,
-          content: {
-            'application/json': {
-              schema: {
-                type: 'object',
-                properties: {
-                  workflowDefinitionId: { type: 'string' },
-                  variables: { type: 'object', additionalProperties: true },
-                  projectId: { type: 'string' },
-                  testRun: {
-                    type: 'boolean',
-                    description: 'Run the working graph as a test version; the only way to run a draft',
-                  },
-                  permissionMode: {
-                    type: 'string',
-                    enum: ['bypassPermissions', 'default', 'acceptEdits', 'plan'],
-                    description: 'HITL default — defaults to bypassPermissions',
-                  },
-                },
-                required: ['workflowDefinitionId'],
-              },
-            },
-          },
-        },
+        summary: 'Start a workflow run: THE one run-start route (a definition, a script or a fork)',
+        description:
+          'JSON `InvocationRequest` (full JSON Schema: `@generatorai/workflow-spec/invocation.schema.json`), or multipart with a `request` JSON field ' +
+          'plus `skills|agents|prompts` files. The trigger is derived from the caller. `Idempotency-Key` (or `idempotencyKey`) replays the same run for 24 h; ' +
+          'another body under the same key is a 409. Needs exec:agent + read:workflows; a script target also write:workflows; bypass off loopback or an ' +
+          'in-place codebase admin:settings.',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/InvocationRequest' } } } },
         responses: {
-          '201': {
-            description: 'Run created',
-            content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowRun' } } },
-          },
+          '202': { description: 'InvocationResult: runId, trigger, plan, links' },
+          '400': { description: '{error: {code: VALIDATION_ERROR, message, issues[]}}' },
+          '403': { description: 'FORBIDDEN_SCOPE or PERMISSION_ESCALATION' },
+          '404': { description: 'NOT_FOUND' },
+          '409': { description: 'IDEMPOTENCY_KEY_REUSED, DRAFT_NOT_RUNNABLE or CONFLICT' },
+          '422': { description: 'CODEBASE_REQUIRED, DEPTH_LIMIT, RECURSION, BUDGET_EXHAUSTED or PERMISSION_GATING_UNSUPPORTED' },
+          '503': { description: 'ENGINE_UNAVAILABLE' },
         },
+      },
+    },
+    '/api/workflow-invocations/plan': {
+      post: {
+        tags: ['Runs'],
+        summary: 'What an invocation would do (stages by layer, skips, codebases, phases, post-processing, permission mode); nothing is written',
+        requestBody: { required: true, content: { 'application/json': { schema: { $ref: '#/components/schemas/InvocationRequest' } } } },
+        responses: { '200': { description: 'InvocationPlan' }, '400': { description: 'VALIDATION_ERROR' } },
+      },
+    },
+    '/api/workflow-invocations/uploads': {
+      post: {
+        tags: ['Runs'],
+        summary: 'Stage skills, agents or prompts for a run that has not started (multipart; TTL 1 h)',
+        responses: { '201': { description: '{uploads: [{uploadId, category, name}]}' }, '400': { description: 'VALIDATION_ERROR' } },
+      },
+    },
+    '/api/workflow-invocations/{runId}/digest': {
+      get: {
+        tags: ['Runs'],
+        summary: "The run's digest; `wait=N` (≤ 60 s) long-polls for `finalized` (or an approval with `stopOnApproval=true`)",
+        parameters: [runIdParam],
+        responses: { '200': { description: 'RunDigest' }, '404': { description: 'NOT_FOUND' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/workspace': {
+      get: {
+        tags: ['Runs'],
+        summary: "The run's workspace: root, artifacts, uploads and every mount with its files",
+        parameters: [runIdParam],
+        responses: { '200': { description: 'RunWorkspaceInfo' }, '404': { description: 'No workspace yet' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/workspace/diff': {
+      get: {
+        tags: ['Runs'],
+        summary: "Each mount's change set",
+        parameters: [runIdParam],
+        responses: { '200': { description: '{hasGit, repos: [{alias, files}]}' } },
       },
     },
     '/api/workflow-runs/{runId}': {
@@ -1635,14 +1680,6 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         responses: {
           '200': { description: 'Run', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowRun' } } } },
         },
-      },
-    },
-    '/api/workflow-runs/{runId}/start': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Start a created run',
-        parameters: [runIdParam],
-        responses: { '202': { description: 'Start initiated' }, '409': { description: 'Not a created run' } },
       },
     },
     '/api/workflow-runs/{runId}/commands': {
@@ -1726,21 +1763,6 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         summary: 'A file attached to a stage message',
         parameters: [runIdParam, instanceIdParam, { name: 'artifactId', in: 'path', required: true, schema: { type: 'string' } }],
         responses: { '200': { description: 'The file' }, '404': { description: 'Not an attachment of this stage' } },
-      },
-    },
-    '/api/workflow-runs/{runId}/fork': {
-      post: {
-        tags: ['Runs'],
-        summary: 'Re-run a terminal run as a new run',
-        parameters: [runIdParam],
-        requestBody: {
-          required: false,
-          content: { 'application/json': { schema: { $ref: '#/components/schemas/ForkRunRequest' } } },
-        },
-        responses: {
-          '201': { description: 'The fork', content: { 'application/json': { schema: { $ref: '#/components/schemas/WorkflowRun' } } } },
-          '409': { description: 'The source run is not terminal' },
-        },
       },
     },
     '/api/workflow-runs/{runId}/permission-mode': {

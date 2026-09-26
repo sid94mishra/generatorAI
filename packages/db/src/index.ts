@@ -78,6 +78,7 @@ export { DrizzleAutomationRepository } from './repositories/AutomationRepository
 export { DrizzleAutomationExecutionRepository } from './repositories/AutomationExecutionRepository.js';
 export { DrizzleIdempotencyKeyRepository } from './repositories/IdempotencyKeyRepository.js';
 export type { IdempotencyKeyRecord } from './repositories/IdempotencyKeyRepository.js';
+export { DrizzleInvocationUploadRepository } from './repositories/InvocationUploadRepository.js';
 
 // Security / auth repositories (migration v24)
 export {
@@ -347,6 +348,7 @@ import { DrizzleStageRunRepository } from './repositories/StageRunRepository.js'
 import { DrizzleAutomationRepository } from './repositories/AutomationRepository.js';
 import { DrizzleAutomationExecutionRepository } from './repositories/AutomationExecutionRepository.js';
 import { DrizzleIdempotencyKeyRepository } from './repositories/IdempotencyKeyRepository.js';
+import { DrizzleInvocationUploadRepository } from './repositories/InvocationUploadRepository.js';
 import { DrizzleProjectRepository } from './repositories/ProjectRepository.js';
 import { DrizzleProjectCodebaseRepository } from './repositories/ProjectCodebaseRepository.js';
 import { DrizzleProjectConfigRepository } from './repositories/ProjectConfigRepository.js';
@@ -376,6 +378,7 @@ export function createAllRepositories(db: AppDatabase) {
     automationRepo: new DrizzleAutomationRepository(db),
     automationExecutionRepo: new DrizzleAutomationExecutionRepository(db),
     idempotencyKeyRepo: new DrizzleIdempotencyKeyRepository(db),
+    invocationUploadRepo: new DrizzleInvocationUploadRepository(db),
     projectRepo: new DrizzleProjectRepository(db),
     projectCodebaseRepo: new DrizzleProjectCodebaseRepository(db),
     projectConfigRepo: new DrizzleProjectConfigRepository(db),

@@ -20,11 +20,12 @@ describe('run commands API', () => {
     ]);
   });
 
-  it('admin runs.fork posts the request (default {}) to /fork', async () => {
-    const { calls, fetchImpl } = recorder(201, { id: 'r2' });
-    const fork = await createAdminApi(fetchImpl).runs.fork('r1');
-    expect(fork).toEqual({ id: 'r2' });
-    expect(calls).toEqual([{ path: '/api/workflow-runs/r1/fork', method: 'POST', body: {} }]);
+  it('a re-run is an invocation with a fork target (P04)', async () => {
+    const { calls, fetchImpl } = recorder(202, { runId: 'r2' });
+    const target = { kind: 'fork' as const, sourceRunId: 'r1', definition: 'pinned' as const, workspace: 'fresh' as const };
+    const result = await createAdminApi(fetchImpl).workflows.invoke({ target, variables: {} });
+    expect(result).toEqual({ runId: 'r2' });
+    expect(calls).toEqual([{ path: '/api/workflow-invocations', method: 'POST', body: { target, variables: {} } }]);
   });
 
   it('the mobile client approves through the same route', async () => {

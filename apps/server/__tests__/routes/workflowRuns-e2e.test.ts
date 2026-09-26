@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
-// E2E: Workflow Run API Flow — the run routes over a mocked run service:
-// create, start, the commands API, fork, delete
+// E2E: Workflow Run API Flow — the run routes over mocked services: start
+// (the one invocation route), the commands API, delete
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
@@ -17,40 +17,19 @@ describe('E2E: Workflow Run API Flow', () => {
     ({ app, container } = createTestApp());
   });
 
-  describe('POST /api/workflow-runs — Create Run', () => {
-    it('should create a new workflow run', async () => {
-      const res = await request(app)
-        .post('/api/workflow-runs')
-        .send({
-          workflowDefinitionId: '11111111-1111-1111-1111-111111111111',
-          variables: { target: 'src/', language: 'typescript' },
-          // A draft only runs as a test run (pinning a test version).
-          testRun: true,
-        });
-
-      expect(res.status).toBe(201);
-      expect(res.body).toHaveProperty('id');
-      expect(res.body).toHaveProperty('status', 'created');
-      expect(container.workflowRunService.createRun).toHaveBeenCalledWith(
-        expect.objectContaining({ workflowDefinitionId: '11111111-1111-1111-1111-111111111111', testRun: true }),
-      );
-    });
-
-    it('refuses engine-reserved variables and takes stage overrides as a typed field (R-8)', async () => {
-      for (const key of ['__workingDirectory', '__stageOverrides', 'repo_path_target']) {
-        const res = await request(app)
-          .post('/api/workflow-runs')
-          .send({ workflowDefinitionId: '11111111-1111-1111-1111-111111111111', variables: { [key]: '/elsewhere' } });
-        expect(res.status).toBe(400);
-      }
-      expect(container.workflowRunService.createRun).not.toHaveBeenCalled();
-
-      const ok = await request(app)
-        .post('/api/workflow-runs')
-        .send({ workflowDefinitionId: '11111111-1111-1111-1111-111111111111', stageOverrides: [{ stageKey: 'review', skip: true }] });
-      expect(ok.status).toBe(201);
-      expect(container.workflowRunService.createRun).toHaveBeenCalledWith(
-        expect.objectContaining({ stageOverrides: [{ stageKey: 'review', skip: true }] }),
+  describe('POST /api/workflow-invocations — Start a run', () => {
+    it('hands the request to the invocation service with a server-derived trigger (202)', async () => {
+      const body = {
+        target: { kind: 'definition', workflowDefinitionId: '11111111-1111-1111-1111-111111111111', testRun: true },
+        variables: { target: 'src/', language: 'typescript' },
+        client: 'web',
+      };
+      const res = await request(app).post('/api/workflow-invocations').send(body);
+      expect(res.status).toBe(202);
+      expect(res.body).toMatchObject({ runId: 'run-1', status: 'starting' });
+      expect(container.workflowInvocationService.invoke).toHaveBeenCalledWith(
+        body,
+        expect.objectContaining({ trigger: expect.objectContaining({ kind: 'user', client: 'web' }) }),
       );
     });
   });
@@ -92,16 +71,6 @@ describe('E2E: Workflow Run API Flow', () => {
       expect(res.body).toHaveProperty('status');
       expect(container.runDefinitionReader.get).toHaveBeenCalledWith('ver-1');
       expect(res.body.stageRuns.map((s: { id: string }) => s.id)).toEqual(['sr-plan', 'sr-build']);
-    });
-  });
-
-  describe('POST /api/workflow-runs/:id/start — Start Run', () => {
-    it('should start the run', async () => {
-      const res = await request(app)
-        .post('/api/workflow-runs/run-1/start');
-
-      expect([200, 202]).toContain(res.status);
-      expect(container.workflowRunService.startRun).toHaveBeenCalledWith('run-1');
     });
   });
 
@@ -148,23 +117,15 @@ describe('E2E: Workflow Run API Flow', () => {
     });
   });
 
-  describe('POST /api/workflow-runs/:id/fork — Fork Run', () => {
-    it('forks the terminal run and returns the NEW run (201)', async () => {
-      const res = await request(app).post('/api/workflow-runs/run-1/fork').send({ rerunFrom: ['review'] });
-      expect(res.status).toBe(201);
-      expect(res.body).toMatchObject({ id: 'run-retry-1', ancestorRunId: 'run-1' });
-      expect(container.workflowRunService.forkRun).toHaveBeenCalledWith(
-        'run-1',
-        expect.objectContaining({ rerunFrom: ['review'], definition: 'pinned', workspace: 'fresh', start: true }),
-      );
-    });
-
+  describe('Removed routes', () => {
     it('the per-action routes are gone', async () => {
-      for (const path of ['pause', 'resume', 'cancel', 'retry', 'stages/sr-1/approve', 'stages/sr-1/retry']) {
+      for (const path of ['start', 'fork', 'pause', 'resume', 'cancel', 'retry', 'stages/sr-1/approve', 'stages/sr-1/retry']) {
         const res = await request(app).post(`/api/workflow-runs/run-1/${path}`).send({});
         expect(res.status).toBe(404);
       }
       expect((await request(app).get('/api/workflow-runs/run-1/pending-interrupts')).status).toBe(404);
+      expect((await request(app).post('/api/workflow-runs').send({})).status).toBe(404);
+      expect((await request(app).post('/api/orchestrator/runs').send({})).status).toBe(404);
     });
   });
 
@@ -179,9 +140,9 @@ describe('E2E: Workflow Run API Flow', () => {
   });
 
   describe('Full Run Lifecycle', () => {
-    it('supports create → start → pause → resume → cancel → delete through the commands API', async () => {
-      expect((await request(app).post('/api/workflow-runs').send({ workflowDefinitionId: '11111111-1111-1111-1111-111111111111' })).status).toBe(201);
-      expect((await request(app).post('/api/workflow-runs/run-1/start')).status).toBe(202);
+    it('supports invoke → pause → resume → cancel → delete through the commands API', async () => {
+      const target = { kind: 'definition', workflowDefinitionId: '11111111-1111-1111-1111-111111111111' };
+      expect((await request(app).post('/api/workflow-invocations').send({ target })).status).toBe(202);
       for (const command of ['pause', 'resume', 'cancel']) {
         expect((await request(app).post('/api/workflow-runs/run-1/commands').send({ command })).status).toBe(202);
       }

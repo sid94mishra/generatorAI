@@ -281,7 +281,7 @@ export class AuthenticatedClientRuntime {
     serverId: string;
     pairingToken: string;
     deviceName: string;
-    platform: 'web' | 'desktop' | 'cli' | 'mobile' | 'other';
+    platform: 'web' | 'desktop' | 'cli' | 'mobile' | 'mcp' | 'other';
     connectionMode?: 'loopback' | 'lan' | 'ssh' | 'relay' | 'auto';
   }): Promise<StoredSession> {
     this.setState({ status: 'pairing' });

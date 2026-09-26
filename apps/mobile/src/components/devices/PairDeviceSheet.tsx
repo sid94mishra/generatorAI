@@ -43,6 +43,7 @@ const PLATFORMS: Array<{ value: PairingPlatform; label: string }> = [
   { value: 'desktop', label: 'Desktop' },
   { value: 'web', label: 'Browser' },
   { value: 'cli', label: 'CLI' },
+  { value: 'mcp', label: 'MCP client' },
 ];
 
 async function errorMessage(res: Response): Promise<string> {

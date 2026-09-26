@@ -8,12 +8,18 @@ import {
   runPermissionMode,
   runPermissionSource,
   turnOptionsFrom,
-  TRIGGER_PERMISSION_MODE_KEY,
 } from '../../src/services/session/permissionSource.js';
 import { bootCore, type TestEnv } from './boot.js';
 import { AgentResolver } from '../../src/services/AgentResolver.js';
+import type { InvocationContext } from '../../src/services/workflow-invocation/types.js';
 
 const envs: TestEnv[] = [];
+/** The local owner starting a run (the invocation's trusted context). */
+const LOCAL: InvocationContext = {
+  principal: { kind: 'local', id: 'local', scopes: ['exec:agent', 'read:workflows', 'write:workflows', 'admin:settings'] },
+  trigger: { kind: 'user', client: 'test', principalId: 'local' },
+  loopback: true,
+};
 const posture = getDefaultChatPermissionMode();
 afterEach(() => {
   for (const e of envs.splice(0)) e.dispose();
@@ -22,20 +28,20 @@ afterEach(() => {
 
 describe('run permission layers (W-07, PD-18)', () => {
   it('run row → stage → workflow (under the trigger ceiling) → trigger → posture; never a bypass default', () => {
-    const trigger = { [TRIGGER_PERMISSION_MODE_KEY]: 'acceptEdits' };
-    expect(runPermissionMode({ permissionMode: 'plan', variables: trigger }, { permissionMode: 'default' }, { permissionMode: 'bypassPermissions' })).toBe('plan');
-    expect(runPermissionMode({ variables: trigger }, { permissionMode: 'default' }, { permissionMode: 'bypassPermissions' })).toBe('default');
+    const trigger = { triggerPermissionMode: 'acceptEdits' as const };
+    expect(runPermissionMode({ permissionMode: 'plan', systemVars: trigger }, { permissionMode: 'default' }, { permissionMode: 'bypassPermissions' })).toBe('plan');
+    expect(runPermissionMode({ systemVars: trigger }, { permissionMode: 'default' }, { permissionMode: 'bypassPermissions' })).toBe('default');
     // R5 — the automation's mode is a ceiling: a bypass definition cannot widen it.
-    expect(runPermissionMode({ variables: trigger }, undefined, { permissionMode: 'bypassPermissions' })).toBe('acceptEdits');
-    expect(runPermissionMode({ variables: {} }, undefined, { permissionMode: 'bypassPermissions' })).toBe('bypassPermissions');
-    expect(runPermissionMode({ variables: trigger }, undefined, undefined)).toBe('acceptEdits');
+    expect(runPermissionMode({ systemVars: trigger }, undefined, { permissionMode: 'bypassPermissions' })).toBe('acceptEdits');
+    expect(runPermissionMode({ systemVars: {} }, undefined, { permissionMode: 'bypassPermissions' })).toBe('bypassPermissions');
+    expect(runPermissionMode({ systemVars: trigger }, undefined, undefined)).toBe('acceptEdits');
     // Nothing declared: undefined, which the turn resolves to the posture.
-    expect(runPermissionMode({ variables: {} }, undefined, undefined)).toBeUndefined();
+    expect(runPermissionMode({ systemVars: {} }, undefined, undefined)).toBeUndefined();
   });
 
   it('the source is re-read every turn, and a NULL run resolves to the deployment posture', async () => {
     setDefaultChatPermissionMode('acceptEdits'); // an off-loopback posture
-    const run: { permissionMode?: 'default' | 'bypassPermissions'; variables: Record<string, unknown> } = { variables: {} };
+    const run: { permissionMode?: 'default' | 'bypassPermissions'; systemVars: Record<string, unknown> } = { systemVars: {} };
     const source = runPermissionSource(async () => run, undefined, undefined);
     expect(await turnOptionsFrom('auto', source)).toEqual({ agentMode: 'auto', permissionMode: 'acceptEdits' });
     run.permissionMode = 'default'; // PATCH …/permission-mode mid-run
@@ -76,12 +82,17 @@ describe('PD-17 — gating level vs run mode', () => {
       },
       { canEditCommands: true, status: 'published' },
     );
-    const run = await env.services.workflowRunService.createRun({ workflowDefinitionId: def.id });
-    await expect(env.services.workflowRunService.startRun(run.id)).rejects.toMatchObject({
-      code: 'PERMISSION_GATING_UNSUPPORTED',
-    });
+    await expect(
+      env.services.workflowInvocationService.invoke({ target: { kind: 'definition', workflowDefinitionId: def.id } }, LOCAL),
+    ).rejects.toMatchObject({ code: 'PERMISSION_GATING_UNSUPPORTED' });
     // The same run on accept-edits (the run row) is allowed through the check.
-    const ok = await env.services.workflowRunService.createRun({ workflowDefinitionId: def.id, permissionMode: 'acceptEdits' });
+    const ok = await env.services.workflowRunService.createRun({
+      workflowDefinitionId: def.id,
+      definitionVersionId: def.currentVersionId!,
+      variables: {},
+      trigger: LOCAL.trigger,
+      permissionMode: 'acceptEdits',
+    });
     expect(await env.services.workflowRunService.getPermissionMode(ok.id)).toBe('acceptEdits');
     // R8 — and cannot be switched to a mode the provider cannot hold mid-run.
     await expect(env.services.workflowRunService.setPermissionMode(ok.id, 'default')).rejects.toMatchObject({
@@ -105,10 +116,9 @@ describe('PD-17 — gating level vs run mode', () => {
       },
       { canEditCommands: true, status: 'published' },
     );
-    const run = await env.services.workflowRunService.createRun({ workflowDefinitionId: def.id });
-    await expect(env.services.workflowRunService.startRun(run.id)).rejects.toMatchObject({
-      code: 'PERMISSION_GATING_UNSUPPORTED',
-    });
+    await expect(
+      env.services.workflowInvocationService.invoke({ target: { kind: 'definition', workflowDefinitionId: def.id } }, LOCAL),
+    ).rejects.toMatchObject({ code: 'PERMISSION_GATING_UNSUPPORTED' });
   });
 });
 

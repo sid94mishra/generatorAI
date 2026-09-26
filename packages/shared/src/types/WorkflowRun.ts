@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { StageRunState, WorkflowRunState } from '@generatorai/workflow-spec';
+import type { RunSystemVars } from './RunLifecycle.js';
 
 /** Artifact manifest entry — a file a stage created or modified. */
 export interface ArtifactManifestEntry {
@@ -83,10 +84,23 @@ export interface WorkflowRun {
   forkSpec?: Record<string, unknown>;
   /** A repeated key returns the run it created. */
   idempotencyKey?: string;
-  /** The codebases the run was started with (P04 invocation). */
-  codebaseSelection?: unknown;
-  /** Per-stage overrides of this run, by stage key: skip it, or extra variables for it. */
-  stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }>;
+  /** The codebases the run was started with (`InvocationRequest.codebases`, resolved). */
+  codebaseSelection?: Array<{ alias: string; baseRef?: string; mode: 'worktree' | 'in_place' }>;
+  /** Per-stage overrides of this run, by stage key: skip it, extra variables for it, its model. */
+  stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown>; model?: string }>;
+  /** Run-wide session overrides (model, provider, effort) under every stage's own session. */
+  runOverrides?: { model?: string; harnessType?: string; reasoningEffort?: string };
+  /** Engine-owned values (workspace paths, codebases, uploads, the lifecycle journal); never caller input. */
+  systemVars?: RunSystemVars;
+  /** The invocation that created the run. */
+  invocationId?: string;
+  /** Lineage: the run whose stage invoked this one, the root of the tree, and the depth (root = 0). */
+  parentRunId?: string;
+  parentStageRunId?: string;
+  rootRunId?: string;
+  depth?: number;
+  /** The invocation budget (`maxDurationMs`, `maxChildRuns`, …). */
+  budget?: Record<string, unknown>;
   /** Workspace ID — links to the execution workspace for this run */
   workspaceId?: string;
   /**
@@ -160,31 +174,4 @@ export interface WorkflowRunWithStages extends WorkflowRun {
 }
 
 /** Parameters for creating a WorkflowRun */
-export interface CreateWorkflowRunParams {
-  workflowDefinitionId: string;
-  variables?: Record<string, unknown>;
-  projectId?: string;
-  /**
-   * The version to run. Omitted: the definition's current published version
-   * (or, with `testRun`, a test version of its working graph).
-   */
-  definitionVersionId?: string;
-  /** Run the working graph as a `test` version (the only way to run a draft). */
-  testRun?: boolean;
-  /** Per-stage overrides for this run, by stage key. */
-  stageOverrides?: Array<{ stageKey: string; skip?: boolean; variables?: Record<string, unknown> }>;
-  /** What started the run (an automation trigger); a scheduled run never inherits an execution context. */
-  triggeredBy?: string;
-  /**
-   * The run's own permission mode (the run row; the most specific layer). Omit
-   * to let the stage / workflow / trigger / deployment layers decide.
-   */
-  permissionMode?: WorkflowRunPermissionMode;
-  /**
-   * The trigger's declared mode (an automation's `permissionMode`, PD-18). It
-   * sits UNDER the stage and workflow session modes, above the deployment
-   * posture.
-   */
-  triggerPermissionMode?: WorkflowRunPermissionMode;
-}
 

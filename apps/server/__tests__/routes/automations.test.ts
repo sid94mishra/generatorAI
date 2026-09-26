@@ -16,7 +16,7 @@ import type { Express } from 'express';
 import request from 'supertest';
 import { createAutomationRoutes } from '../../src/routes/automations.js';
 import { createErrorMiddleware } from '../../src/middleware/errorHandler.js';
-import { hashWebhookToken } from '@generatorai/core';
+import { hashWebhookToken, IdempotencyService } from '@generatorai/core';
 import { SECRET_MASK } from '@generatorai/shared';
 import type { Automation } from '@generatorai/shared';
 import type { Container } from '../../src/composition-root.js';
@@ -98,8 +98,10 @@ function buildApp(automationOverrides: Record<string, unknown> = {}) {
     ...automationOverrides,
   };
   const idempotencyKeyRepo = {
-    claim: vi.fn(async (args: { executionId: string }) => ({ executionId: args.executionId, replay: false })),
+    claim: vi.fn(async (args: { executionId: string }) => ({ executionId: args.executionId, replay: false, requestHash: null })),
     updateExecutionId: vi.fn(async () => {}),
+    release: vi.fn(async () => {}),
+    sweepExpired: vi.fn(async () => 0),
   };
   const logger = {
     debug: vi.fn(),
@@ -111,6 +113,8 @@ function buildApp(automationOverrides: Record<string, unknown> = {}) {
   const container = {
     automationService,
     idempotencyKeyRepo,
+    // The route claims keys through the shared service (P04).
+    idempotencyService: new IdempotencyService(idempotencyKeyRepo),
     logger,
     security: { secretStore },
   } as unknown as Container;

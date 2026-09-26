@@ -230,13 +230,15 @@ describe('route policy — other principals keep their authority', () => {
     expect(allowed(DEFAULT_DEVICE_SCOPES, '/workspaces/w1/terminals', 'POST')).toBe(false);
   });
 
-  it('running a workflow script needs exec:agent, not just write:workflows', () => {
-    // POST /workflow-scripts/:id/run materialises a definition and STARTS a
-    // run, so it must match `/workflow-runs` (write:workflows + exec:agent).
+  it('starting a run is one route that needs exec:agent + read:workflows (PD-6, W-60)', () => {
+    // Every run (a definition, a script, a fork) starts through
+    // POST /workflow-invocations; the service asks for more when the body does.
     const designOnly = ['read:workflows', 'write:workflows'];
-    expect(allowed(designOnly, '/workflow-scripts/s1/run', 'POST')).toBe(false);
-    expect(allowed([...designOnly, 'exec:agent'], '/workflow-scripts/s1/run', 'POST')).toBe(true);
-    expect(resolveRoutePolicy('/workflow-scripts/s1/run').write).toEqual(['write:workflows', 'exec:agent']);
+    expect(allowed(designOnly, '/workflow-invocations', 'POST')).toBe(false);
+    expect(allowed(['read:workflows', 'exec:agent'], '/workflow-invocations', 'POST')).toBe(true);
+    expect(resolveRoutePolicy('/workflow-invocations/plan').write).toEqual(['exec:agent', 'read:workflows']);
+    // A default paired phone can start a run.
+    expect(allowed(DEFAULT_MOBILE_SCOPES, '/workflow-invocations', 'POST')).toBe(true);
 
     // Authoring and reading scripts are unchanged.
     expect(allowed(designOnly, '/workflow-scripts/s1/materialize', 'POST')).toBe(true);

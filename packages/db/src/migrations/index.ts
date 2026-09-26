@@ -7,6 +7,7 @@ import type { AppDatabase } from '../index.js';
 import { BASELINE_SQL, BASELINE_VERSION } from './baseline.generated.js';
 import { runV55, V55_LOCK_FILES } from './v55_workflow_definitions_v2.js';
 import { runV57, V57_LOCK_FILES } from './v57_workflow_engine_v2.js';
+import { runV58, V58_LOCK_FILES } from './v58_invocation.js';
 
 export { BASELINE_VERSION };
 
@@ -2640,6 +2641,18 @@ export const MIGRATIONS: readonly Migration[] = [
       disableForeignKeys: true,
       run: runV57,
       lockFiles: V57_LOCK_FILES,
+    },
+    // v58 — workflow overhaul P04 WP-4.3 `invocation`: the idempotency
+    // claim's request hash, the pre-start upload table, and `auth_devices`
+    // rebuilt so an MCP server pairs as a device (PD-22). Chat-safe: no chat
+    // table is touched. The DDL is frozen in ./v58/ddl.ts.
+    {
+      version: 58,
+      name: 'invocation',
+      sql: [],
+      disableForeignKeys: true,
+      run: runV58,
+      lockFiles: V58_LOCK_FILES,
     },
   ];
 

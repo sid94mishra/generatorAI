@@ -14,7 +14,15 @@ import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { ENGINE_LEVEL, WORKFLOW_FORMAT_VERSION } from './constants.js';
 import { EXPRESSION_GRAMMAR, grammarFilters, grammarFunctions, type GrammarRow } from './expr/grammar.js';
-import { InvocationRequestSchema, InvocationTriggerSchema } from './schemas/invocation.js';
+import {
+  FINALIZE_PHASES,
+  INVOCATION_ERROR_CODES,
+  InvocationRequestSchema,
+  InvocationTriggerSchema,
+  MAX_INVOCATION_DEPTH,
+  PREPARE_PHASES,
+  RunProfileSchema,
+} from './schemas/invocation.js';
 import { ForkRunRequestSchema, RunCommandSchema } from './schemas/commands.js';
 import { WorkflowGraphSchema } from './schemas/graph.js';
 import { STAGE_RUN_TRANSITIONS } from './state/stageRun.js';
@@ -218,6 +226,78 @@ export function renderFieldsMarkdown(): string {
     '| From | To | Event | Note |',
     '|---|---|---|---|',
     ...runRows,
+    '',
+  ].join('\n');
+}
+
+// ── INVOCATION.md ────────────────────────────────────────────────
+
+/** How to start a run: the request, the trigger union, the profile, the codes and the lifecycle phases (P04 WP-4.7). */
+export function renderInvocationMarkdown(): string {
+  return [
+    '# Starting a workflow run',
+    '',
+    `<!-- ${GENERATED_NOTE} -->`,
+    '',
+    'Every run starts through ONE path: `WorkflowInvocationService.invoke`, behind `POST /api/workflow-invocations`',
+    'and the client-core method `workflows.invoke`. Web, desktop, mobile, the CLI and TUI, the SDK, the MCP server,',
+    'automations, scripts and forks all send the same `InvocationRequest`.',
+    '',
+    '- `POST /api/workflow-invocations`: JSON, or multipart with a `request` field plus `skills|agents|prompts` files → 202 `InvocationResult`.',
+    '- `POST /api/workflow-invocations/plan`: the same body → `InvocationPlan` (nothing is written).',
+    '- `POST /api/workflow-invocations/uploads`: multipart → `{uploads: [{uploadId, category, name}]}` (kept for 1 hour).',
+    '- `GET /api/workflow-invocations/:runId/digest?wait=N`: the run digest; `wait` long-polls up to N seconds (≤ 60) for `finalized`.',
+    '',
+    'Errors use one envelope: `{error: {code, message, issues: [{code, path, message, severity}]}}`.',
+    '',
+    '## InvocationRequest',
+    '',
+    fieldTable(InvocationRequestSchema),
+    '',
+    '## Trigger (server-derived, never read from the body)',
+    '',
+    'A paired device or the local owner is `user`; a service account or an MCP client is `external_agent`;',
+    'automations, chats, orchestrators, stages and forks build their own trigger in process.',
+    '',
+    fieldTable(InvocationTriggerSchema),
+    '',
+    '## Idempotency',
+    '',
+    'The key is the `Idempotency-Key` header, else `idempotencyKey` in the body, else one derived for in-process',
+    'callers (`chat:<chat>:<tool call>`, `stage:<stage run>:<tool call>`, `auto:<execution>:<iteration>:<attempt>`).',
+    'A replay within 24 hours returns the same run (`replayed: true`); the same key with a different body is',
+    '`409 IDEMPOTENCY_KEY_REUSED`.',
+    '',
+    '## Scopes',
+    '',
+    '- Starting a run: `exec:agent` + `read:workflows`.',
+    '- A `script` target: also `write:workflows` (it materializes a definition, once per script content).',
+    '- `overrides.permissionMode: bypassPermissions` off loopback, or a codebase with `mode: in_place`: also `admin:settings`.',
+    '',
+    `Nested runs are at most ${MAX_INVOCATION_DEPTH} deep; a workflow that is its own ancestor is refused (\`RECURSION\`).`,
+    '',
+    '## Error codes',
+    '',
+    INVOCATION_ERROR_CODES.map((c) => `- \`${c}\``).join('\n'),
+    '',
+    '## Lifecycle phases',
+    '',
+    'The run then goes through ONE lifecycle. `starting` runs, in order, each phase journalled (a crash resumes at',
+    'the phase that did not finish):',
+    '',
+    PREPARE_PHASES.map((p) => `- \`${p}\``).join('\n'),
+    '',
+    '`finalizing` (or `cancelling`) runs:',
+    '',
+    FINALIZE_PHASES.map((p) => `- \`${p}\``).join('\n'),
+    '',
+    '`workflow_run.finalized` fires once, after all of them: every waiter keys on it.',
+    '',
+    '## Run profiles',
+    '',
+    'Saved run inputs: a CLI profile file (`--profile <path>`) or a profile a workflow script exports.',
+    '',
+    fieldTable(RunProfileSchema),
     '',
   ].join('\n');
 }

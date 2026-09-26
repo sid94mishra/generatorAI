@@ -78,18 +78,16 @@ describe('WorkflowFacade', () => {
     expect(fetched.graph.edges).toEqual([{ from: 'build', to: 'test', on: 'success' }]);
   });
 
-  it('createRun produces a run in the created state without executing', async () => {
+  it('plan shows what a run would do without starting one', async () => {
     const sdk = await make();
     const def = await sdk.workflows.create({
       formatVersion: 2,
       workflow: { name: 'SDK Run WF' },
       stages: [{ kind: 'agent', key: 'only', name: 'Only', prompts: [{ label: 'p', text: 'ok' }] }],
     });
-    const run = await sdk.workflows.createRun(def.id);
-    expect(run.id).toBeTruthy();
-    expect(run.status).toBe('created');
-    const status = await sdk.workflows.status(run.id);
-    expect(status.status).toBe('created');
+    const plan = await sdk.workflows.plan({ target: { kind: 'definition', workflowDefinitionId: def.id }, variables: {} });
+    expect(plan.stages.map((s) => s.key)).toEqual(['only']);
+    expect(plan.workflowDefinitionId).toBe(def.id);
   });
 });
 

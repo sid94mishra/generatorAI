@@ -190,10 +190,11 @@ export async function createWorkflow(def: Record<string, unknown>, stages: Stage
   return { id, stageIds: ids };
 }
 
-export async function createRun(defId: string, variables: Record<string, unknown> = {}): Promise<string> {
-  const c = await api('POST', '/workflow-runs', { workflowDefinitionId: defId, variables });
-  if (c.status >= 300) throw new Error(`create run ${c.status} ${JSON.stringify(c.body)}`);
-  return (c.body.id ?? c.body.data?.id) as string;
+/** Start a run through THE invocation (P04): created and started in one request. */
+export async function invokeRun(defId: string, variables: Record<string, unknown> = {}): Promise<string> {
+  const c = await api('POST', '/workflow-invocations', { target: { kind: 'definition', workflowDefinitionId: defId }, variables, client: 'http' });
+  if (c.status >= 300) throw new Error(`invoke ${c.status} ${JSON.stringify(c.body)}`);
+  return c.body.runId as string;
 }
 
 export const TERMINAL = new Set(['completed', 'failed', 'cancelled']);

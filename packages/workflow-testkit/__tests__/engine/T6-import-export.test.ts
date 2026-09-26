@@ -11,7 +11,7 @@
 // the pinned-version test below.
 // ────────────────────────────────────────────────────────────────
 
-import { ConflictError, RevisionConflictError, WorkflowValidationError } from '@generatorai/shared';
+import { RevisionConflictError, WorkflowValidationError } from '@generatorai/shared';
 import { validateWorkflow, type WorkflowGraph } from '@generatorai/workflow-spec';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createTestEngine, type TestEngine } from '../../src/index.js';
@@ -162,7 +162,8 @@ describe('T6 draft, versions and runs', () => {
     const draft = await svc.createFromSpec((await svc.get(definitionId)).graph, { canEditCommands: true });
     expect(draft.status).toBe('draft');
 
-    await expect(engine.runWorkflow({ definitionId: draft.id })).rejects.toBeInstanceOf(ConflictError);
+    // A run starts through the invocation, which refuses a draft (P04).
+    await expect(engine.runWorkflow({ definitionId: draft.id })).rejects.toMatchObject({ code: 'DRAFT_NOT_RUNNABLE' });
 
     const test = await (await engine.runWorkflow({ definitionId: draft.id }, {}, { testRun: true })).waitForTerminal();
     expect(test.run.status).toBe('completed');
@@ -221,7 +222,7 @@ describe('T6 draft, versions and runs', () => {
     await (await engine.runWorkflow({ definitionId })).waitForTerminal();
     expect(await svc.delete(definitionId)).toEqual({ archived: true, runs: 1 });
     expect((await svc.get(definitionId)).archivedAt).not.toBeNull();
-    await expect(engine.runWorkflow({ definitionId })).rejects.toBeInstanceOf(ConflictError);
+    await expect(engine.runWorkflow({ definitionId })).rejects.toMatchObject({ code: 'CONFLICT' });
 
     const { definitionId: unused } = await engine.importDefinition({ ...LINEAR, name: 'unused' });
     expect(await svc.delete(unused)).toEqual({ deleted: true });

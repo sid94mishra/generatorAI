@@ -257,3 +257,10 @@ export type {
   ExpiredLease,
   IEngineQueries,
 } from './IEngineStore.js';
+export type {
+  IdempotencyClaim,
+  IIdempotencyKeyStore,
+  InvocationUploadCategory,
+  InvocationUploadRecord,
+  IInvocationUploadRepository,
+} from './IInvocationStores.js';

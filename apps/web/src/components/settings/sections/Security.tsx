@@ -14,7 +14,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ShieldCheck, ShieldAlert, Smartphone, Monitor, Terminal as TerminalIcon,
-  Globe, Trash2, RefreshCw, Copy, Check, QrCode, KeyRound, AlertTriangle,
+  Globe, Trash2, RefreshCw, Copy, Check, QrCode, KeyRound, AlertTriangle, Plug,
 } from 'lucide-react';
 import { SectionHeader, SettingsCard, InfoRow } from '../shared.js';
 import { ToggleSwitch, useConfirm, Button, Input, Spinner } from '@/components/ui/index.js';
@@ -61,7 +61,7 @@ function StatusPill({
 interface DeviceSummary {
   deviceId: string;
   name: string;
-  platform: 'web' | 'desktop' | 'cli' | 'mobile' | 'other';
+  platform: 'web' | 'desktop' | 'cli' | 'mobile' | 'mcp' | 'other';
   scopes: string[];
   createdAt: number;
   lastSeenAt: number | null;
@@ -158,6 +158,7 @@ const PLATFORM_ICON: Record<string, React.ElementType> = {
   desktop: Monitor,
   cli: TerminalIcon,
   mobile: Smartphone,
+  mcp: Plug,
   other: KeyRound,
 };
 

@@ -510,18 +510,17 @@ describe('browser semantic inspector wire contract', () => {
   });
 });
 
-describe('orchestrator run uploads wire contract', () => {
-  it('posts multipart `category` + `files`, which is what the multer route reads', async () => {
+describe('invocation uploads wire contract', () => {
+  it('posts multipart files under their category field, which is what the multer route reads', async () => {
     const { calls, fetchImpl } = capture();
-    await createAdminApi(fetchImpl).orchestrator.uploadRunFiles('r1', 'skills', [
-      { name: 'skill.md', data: new TextEncoder().encode('# hi'), mimeType: 'text/markdown' },
+    await createAdminApi(fetchImpl).workflows.uploads([
+      { category: 'skills', name: 'skill.md', data: new TextEncoder().encode('# hi'), mimeType: 'text/markdown' },
     ]);
 
-    expect(calls[0]?.path).toBe('/api/orchestrator/runs/r1/uploads');
+    expect(calls[0]?.path).toBe('/api/workflow-invocations/uploads');
     expect(calls[0]?.method).toBe('POST');
     const form = calls[0]?.body as unknown as FormData;
-    expect(form.get('category')).toBe('skills');
-    const files = form.getAll('files') as File[];
+    const files = form.getAll('skills') as File[];
     expect(files).toHaveLength(1);
     expect(files[0]?.name).toBe('skill.md');
   });

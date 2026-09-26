@@ -30,6 +30,7 @@ import {
   countCronRunsBetween,
 } from '@generatorai/shared';
 import type { WorkflowRunService } from './WorkflowRunService.js';
+import type { WorkflowInvocationService } from './workflow-invocation/WorkflowInvocationService.js';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
@@ -155,6 +156,8 @@ export class AutomationService {
     private automationRepo: IAutomationRepository,
     private executionRepo: IAutomationExecutionRepository,
     private workflowRunService: WorkflowRunService,
+    /** THE way a run starts (P04): every iteration's run is an invocation with an automation trigger. */
+    private invocation: Pick<WorkflowInvocationService, 'invoke' | 'waitFor'>,
     private workflowRunRepo: IWorkflowRunRepository,
     private workflowDefinitionService: WorkflowDefinitionService,
     private eventBus: EventBus,
@@ -607,14 +610,8 @@ export class AutomationService {
       // variables + reserved keys.
       return plannedIterations.iterations;
     }
-    return [{
-      variables: {
-        ...automation.variables,
-        __iteration_index: 0,
-        __iteration_total: 1,
-      },
-      label: 'Single run',
-    }];
+    // The iteration index travels in the run's trigger, never as a variable (W-06).
+    return [{ variables: { ...automation.variables }, label: 'Single run' }];
   }
 
   /**
@@ -720,6 +717,7 @@ export class AutomationService {
 
                 try {
                   const success = await this.runSingleWorkflow(
+                    automation.id,
                     execution.id,
                     workflowDefId,
                     iterationVariables,
@@ -941,6 +939,7 @@ export class AutomationService {
    *     doesn't leak in.
    */
   private async runSingleWorkflow(
+    automationId: string,
     executionId: string,
     workflowDefId: string,
     variables: Record<string, unknown>,
@@ -972,16 +971,24 @@ export class AutomationService {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // Fresh workflow-run per attempt so retries don't inherit stage-run
-      // state from the previous failed attempt.
-      const run = await this.workflowRunService.createRun({
-        workflowDefinitionId: workflowDefId,
-        // X-21 — the trigger reaches the run as a typed param (the run
-        // records it as engine state); variables are the user's only.
-        variables,
-        triggeredBy,
-        triggerPermissionMode: permissionMode,
-        ...(projectId ? { projectId } : {}),
-      });
+      // state from the previous failed attempt. One invocation per attempt:
+      // the automation trigger (X-21) and the declared mode (PD-18, the
+      // run's ceiling) are trusted context, the key derived from them makes
+      // a re-driven attempt answer the run it already started.
+      const invoked = await this.invocation.invoke(
+        {
+          target: { kind: 'definition', workflowDefinitionId: workflowDefId },
+          variables,
+          ...(projectId ? { projectId } : {}),
+        },
+        {
+          principal: { kind: 'system', id: `automation:${automationId}`, scopes: [] },
+          trigger: { kind: 'automation', automationId, executionId, via: triggeredBy, iterationIndex },
+          callerPermissionCeiling: permissionMode,
+          attempt,
+        },
+      );
+      const run = { id: invoked.runId };
 
       // Snapshot per attempt. We keep the most recent execRun id so
       // cancellation / final-status updates land on the right row. The
@@ -1003,10 +1010,13 @@ export class AutomationService {
       lastExecRunId = execRun.id;
 
       try {
-        await this.workflowRunService.startRun(run.id);
-        await this.waitForRunCompletion(run.id, 7_200_000);
-
-        const finalRun = await this.workflowRunRepo.getById(run.id);
+        // W-63: wait for `finalized` (after post-processing), subscribed before the read.
+        const finalRun = await this.invocation.waitFor(run.id, {
+          timeoutMs: 7_200_000,
+          ...(this.executionAborts.get(executionId) ? { signal: this.executionAborts.get(executionId)!.signal } : {}),
+        });
+        if (finalRun.waited === 'timeout') throw new Error(`Workflow run ${run.id} timed out after 7200000ms`);
+        if (finalRun.waited === 'aborted') throw new Error(`Workflow run ${run.id} wait was cancelled`);
         if (finalRun.status === 'completed') {
           await this.executionRepo.updateExecutionRun(execRun.id, {
             status: 'completed',
@@ -1131,58 +1141,6 @@ export class AutomationService {
       data: { executionId, iterationIndex, attempt, maxAttempts },
     }).catch(() => {
       /* observability is best-effort */
-    });
-  }
-
-  /**
-   * Wait for a workflow run to reach a terminal state using EventBus
-   * subscription (zero-polling). Falls back to a single DB check on
-   * subscribe in case the run already completed before we subscribed.
-   */
-  private async waitForRunCompletion(runId: string, timeoutMs = 600_000): Promise<void> {
-    const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
-
-    // Fast path: run may already be terminal (e.g. instant failure)
-    const current = await this.workflowRunRepo.getById(runId);
-    if (terminalStatuses.has(current.status)) return;
-
-    return new Promise<void>((resolve, reject) => {
-      let settled = false;
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        unsubscribe();
-        reject(new Error(`Workflow run ${runId} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-
-      // Subscribe to global events for terminal workflow_run events
-      const unsubscribe = this.eventBus.subscribeGlobal((event) => {
-        if (settled) return;
-
-        const isTerminal =
-          event.kind === 'workflow_run.completed' ||
-          event.kind === 'workflow_run.failed' ||
-          event.kind === 'workflow_run.cancelled';
-        if (!isTerminal) return;
-
-        // Check if this event is for our run
-        const eventRunId =
-          event.data && typeof event.data === 'object' && 'workflowRunId' in event.data
-            ? (event.data as { workflowRunId?: string }).workflowRunId
-            : undefined;
-
-        if (eventRunId === runId) {
-          settled = true;
-          clearTimeout(timer);
-          unsubscribe();
-          resolve();
-        }
-      });
-
-      // Cancellation propagates via `executionAborts`: `runSingleWorkflow`
-      // throws when the enclosing execution is cancelled, which unwinds
-      // through this promise's catch handler. Nothing to do here.
     });
   }
 

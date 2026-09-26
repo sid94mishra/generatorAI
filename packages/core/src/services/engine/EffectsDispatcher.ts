@@ -135,6 +135,8 @@ export class EffectsDispatcher {
   private async finalize(runId: string, outcome: RunOutcome, compensate: readonly string[]): Promise<void> {
     try {
       const r = await this.deps.lifecycle.finalize(runId, outcome, compensate);
+      // A cancel superseded this finalize: the cancel's own finalize reports the outcome.
+      if (r.superseded) return;
       this.deps.post(runId, { type: 'finalized', ok: r.ok, ...(r.error ? { error: r.error } : {}) });
     } catch (err) {
       this.deps.post(runId, { type: 'finalized', ok: false, error: err instanceof Error ? err.message : String(err) });

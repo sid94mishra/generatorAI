@@ -1,32 +1,16 @@
 // ────────────────────────────────────────────────────────────────
-// @generatorai/mcp-server — a real MCP server exposing GeneratorAI to
-// external MCP clients (Claude Desktop, another agent's MCP config, etc.)
-// over stdio.
+// @generatorai/mcp-server — an MCP server exposing a RUNNING GeneratorAI
+// server to external MCP clients (Claude Desktop, another agent's MCP
+// config, etc.) over stdio. Remote mode only (P04, W-58):
 //
-//   - `toolAdapter.ts`   — translates `CustomToolRegistry` entries (TOL-05)
-//                          into the MCP `Tool` advertisement shape.
-//   - `server.ts`        — `GeneratorAiMcpServer`, the actual MCP transport:
-//                          three built-in tools (list chats, send a prompt,
-//                          run a workflow) plus every registered custom tool.
-//   - `cli.ts`            — `generatorai-mcp-server` bin entry: boots a
-//                          `@generatorai/sdk` `GeneratorAI` instance and
-//                          serves it over stdio, run the same way a bundled
-//                          MCP server is (`npx @modelcontextprotocol/
-//                          server-x`).
+//   - `server.ts`  — `GeneratorAiMcpServer`, the MCP transport and the
+//                    built-in tools (list chats, send a prompt, run a
+//                    workflow through the one invocation).
+//   - `remote.ts`  — pairing as an `mcp` device (PD-22) and the tools'
+//                    client over `@generatorai/client-core`.
+//   - `cli.ts`     — the `generatorai-mcp` bin: `pair <code>` and `serve`.
 // ────────────────────────────────────────────────────────────────
 
-export {
-  toMcpTool,
-  advertiseRegistry,
-  invokeRegisteredTool,
-} from './toolAdapter.js';
-export type { McpAdvertisedTool } from './toolAdapter.js';
-
 export { GeneratorAiMcpServer } from './server.js';
-export type {
-  McpServerOptions,
-  AiFacade,
-  AiChatApi,
-  AiChatSummary,
-  AiWorkflowApi,
-} from './server.js';
+export type { McpServerOptions, McpAdvertisedTool, AiFacade, AiChatApi, AiChatSummary, AiWorkflowApi } from './server.js';
+export { createMcpRuntime, loadConnection, pairMcp, remoteFacade, mcpConfigDir, type McpConnection } from './remote.js';

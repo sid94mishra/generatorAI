@@ -25,9 +25,9 @@ import { join, resolve, relative, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   ENGINE_LEVEL,
-  ScriptRunProfileSchema,
+  RunProfileSchema,
   validateWorkflow,
-  type ScriptRunProfile,
+  type RunProfile,
   type WorkflowGraph,
 } from '@generatorai/workflow-spec';
 import type { ILogger } from '@generatorai/shared';
@@ -89,7 +89,7 @@ export interface LoadedScript {
   metadata: ScriptMetadata;
   /** The validated graph the script builds. */
   graph: WorkflowGraph;
-  profiles: ScriptRunProfile[];
+  profiles: RunProfile[];
   /** Names of the inline hook handlers this script registered. */
   handlerNames: string[];
 }
@@ -243,9 +243,9 @@ export class WorkflowScriptLoader {
 
     // 4. Validate profiles
     const rawProfiles = moduleExports['profiles'];
-    const validatedProfiles: ScriptRunProfile[] = [];
+    const validatedProfiles: RunProfile[] = [];
     for (const profile of Array.isArray(rawProfiles) ? rawProfiles : []) {
-      const profileParsed = ScriptRunProfileSchema.safeParse(profile);
+      const profileParsed = RunProfileSchema.safeParse(profile);
       if (!profileParsed.success) {
         this.logger.warn(
           `[ScriptLoader] Invalid profile '${(profile as { name?: string })?.name ?? 'unknown'}', skipping`,

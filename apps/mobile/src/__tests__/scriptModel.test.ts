@@ -6,7 +6,6 @@ import {
   parseScriptProfiles,
   parseScriptRows,
   profileSummary,
-  scriptRunIdOf,
   scriptSubtitle,
 } from '../components/work/scriptModel';
 
@@ -56,7 +55,7 @@ describe('script detail', () => {
 
 describe('profiles', () => {
   const profiles = parseScriptProfiles([
-    { name: 'fast', variables: { depth: 1 }, stageOverrides: [{ stageKey: 'a', skip: true }], permissionMode: 'acceptEdits' },
+    { name: 'fast', variables: { depth: 1 }, stageOverrides: [{ stageKey: 'a', skip: true }], overrides: { permissionMode: 'acceptEdits' } },
     { name: 'plain' },
     { description: 'nameless' },
   ]);
@@ -71,13 +70,5 @@ describe('profiles', () => {
     const vars = [{ name: 'depth', defaultValue: 5 }, { name: 'repo' }];
     expect(applyProfileDefaults(vars, profiles[0]!)).toEqual([{ name: 'depth', defaultValue: 1 }, { name: 'repo' }]);
     expect(applyProfileDefaults(vars, null)).toBe(vars);
-  });
-});
-
-describe('scriptRunIdOf', () => {
-  it('reads runId from the 202 body', () => {
-    expect(scriptRunIdOf({ definitionId: 'd', runId: 'r1', status: 'running' })).toBe('r1');
-    expect(scriptRunIdOf({ id: 'r2' })).toBe('r2');
-    expect(scriptRunIdOf({})).toBeNull();
   });
 });

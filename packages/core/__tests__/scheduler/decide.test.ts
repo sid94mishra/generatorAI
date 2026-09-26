@@ -45,7 +45,10 @@ describe('run lifecycle', () => {
 
     const done = s.send({ type: 'finalized', ok: true });
     expect(s.state.run.status).toBe('completed');
-    expect(only(done, 'emit').map((e) => e.event)).toEqual([{ kind: 'workflow_run.completed', data: { workflowRunId: 'run-1' } }]);
+    expect(only(done, 'emit').map((e) => e.event)).toEqual([
+      { kind: 'workflow_run.completed', data: { workflowRunId: 'run-1' } },
+      { kind: 'workflow_run.finalized', data: { workflowRunId: 'run-1', status: 'completed' } },
+    ]);
   });
 
   it('a post-processing failure fails a completed run', () => {
@@ -54,7 +57,10 @@ describe('run lifecycle', () => {
     s.succeed('a');
     const d = s.send({ type: 'finalized', ok: false, error: 'push rejected' });
     expect(s.state.run).toMatchObject({ status: 'failed', outcome: 'failed' });
-    expect(only(d, 'emit').map((e) => e.event)).toEqual([{ kind: 'workflow_run.failed', data: { workflowRunId: 'run-1', error: 'push rejected' } }]);
+    expect(only(d, 'emit').map((e) => e.event)).toEqual([
+      { kind: 'workflow_run.failed', data: { workflowRunId: 'run-1', error: 'push rejected' } },
+      { kind: 'workflow_run.finalized', data: { workflowRunId: 'run-1', status: 'failed' } },
+    ]);
   });
 
   it('a setup failure fails the run from starting', () => {
@@ -379,7 +385,7 @@ describe('commands (desired state first)', () => {
     expect(only(ack, 'finalize')).toEqual([{ t: 'finalize', outcome: 'cancelled', compensate: [] }]);
     s.send({ type: 'finalized', ok: true });
     expect(s.state.run.status).toBe('cancelled');
-    expect(events(s.log.at(-1)!.decisions)).toEqual(['workflow_run.cancelled']);
+    expect(events(s.log.at(-1)!.decisions)).toEqual(['workflow_run.cancelled', 'workflow_run.finalized']);
   });
 
   it('a cancelled or failed run compensates its completed stages, last completed first', () => {

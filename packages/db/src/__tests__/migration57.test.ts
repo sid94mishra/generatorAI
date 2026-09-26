@@ -160,7 +160,7 @@ describe('migration v57 workflow_engine_v2', () => {
 
     // A replay (tests roll `_schema_versions` back) changes nothing.
     s.exec(`DELETE FROM _schema_versions WHERE version = 57`);
-    migrateDB(db);
+    migrateDB(db, { targetVersion: 57 });
     expect(chatHash(s)).toEqual(chatsBefore);
     expect((s.prepare(`SELECT MAX(version) AS v FROM _schema_versions`).get() as { v: number }).v).toBe(57);
   });

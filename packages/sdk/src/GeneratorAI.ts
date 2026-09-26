@@ -15,12 +15,11 @@ import {
   CustomToolRegistry,
   InMemoryMcpHub,
   WorkspaceManager,
-  WorkflowOrchestrator,
   AdmissionController,
-  DefaultRunLifecycle,
   EngineLockedError,
+  MountService,
   runBootHousekeeping,
-  type OrchestratorSandbox,
+  type RunSandbox,
   createRunSandbox,
   SourceControlRegistry,
   SourceControlConfigService,
@@ -94,14 +93,14 @@ import * as path from 'node:path';
 interface GeneratorAIInternals {
   repos: ReturnType<typeof createAllRepositories>;
   /** The run sandbox (its orphan reaper runs at boot), or null. */
-  sandbox: OrchestratorSandbox | null;
+  sandbox: RunSandbox | null;
   eventRetention: EventRetentionService;
   worktreeCleanup: WorktreeCleanupService;
   systemArtifacts: SystemArtifactService;
 }
 
 export class GeneratorAI {
-  /** Workflow operations (create, run, orchestrate, stream, pause, resume, cancel) */
+  /** Workflow operations (create, invoke/run/fork, plan, waitFor, stream, commands) */
   readonly workflows: WorkflowFacade;
   /** Chat operations (create, send, stream) */
   readonly chat: ChatFacade;
@@ -139,11 +138,6 @@ export class GeneratorAI {
    */
   readonly services: CoreServices;
 
-  /**
-   * Direct access to the workflow orchestrator.
-   * @internal UNSTABLE — see `services`. Prefer `workflows.run` / `workflows.orchestrate`.
-   */
-  readonly orchestrator: WorkflowOrchestrator;
 
   /**
    * Direct access to the stream broker for SSE-style pub/sub.
@@ -171,7 +165,6 @@ export class GeneratorAI {
     logger: ILogger,
     runRepo: IWorkflowRunRepository,
     chatRepo: IChatRepository,
-    orchestrator: WorkflowOrchestrator,
     streamBroker: StreamBroker,
     workspaceManager: WorkspaceManager,
     projectService: ProjectService,
@@ -190,11 +183,10 @@ export class GeneratorAI {
     this.logger = logger;
     this._scriptLoader = scriptLoader;
     this._internals = internals;
-    this.orchestrator = orchestrator;
     this.streamBroker = streamBroker;
 
     // Create facades with all dependencies
-    this.workflows = new WorkflowFacade(services, runRepo, orchestrator, scriptLoader);
+    this.workflows = new WorkflowFacade(services, runRepo, internals.repos.eventRepo, scriptLoader);
     this.chat = new ChatFacade(services, chatRepo);
     this.automations = new AutomationFacade(services);
     this.scripts = new ScriptFacade(services, config, scriptLoader);
@@ -469,6 +461,10 @@ export class GeneratorAI {
       automationExecutionRepo: repos.automationExecutionRepo,
       registerRepo: repos.registerRepo,
       entryRepo: repos.entryRepo,
+      // P04 — the invocation path: idempotency, staged uploads, the codebases a run mounts.
+      idempotencyKeyRepo: repos.idempotencyKeyRepo,
+      invocationUploadRepo: repos.invocationUploadRepo,
+      projectCodebaseRepo: repos.projectCodebaseRepo,
       engineStores: createEngineStores(db),
       toHarnessError: harnessErrorOf,
       engineOwnerLabel: `sdk:${process.pid}`,
@@ -512,31 +508,21 @@ export class GeneratorAI {
       logger,
     );
 
-    // The engine's prepare phase creates a project run's codebase worktrees.
-    if (services.engine.lifecycle instanceof DefaultRunLifecycle) {
-      services.engine.lifecycle.setWorktrees({ service: worktreeService, codebases: repos.projectCodebaseRepo });
-    }
+    // The run lifecycle mounts a run's codebases like a chat's (MountService),
+    // wires the project's configs and runs the sandbox, as on the server.
+    const mountService = new MountService({
+      mountRepo: repos.workspaceMountRepo,
+      workspaceRepo: repos.executionWorkspaceRepo,
+      git: gitManager,
+      logger,
+      workspacesDir,
+      codebaseRepo: repos.projectCodebaseRepo,
+      eventBus: services.eventBus,
+    });
+    services.engine.setLifecyclePlatform({ mounts: mountService, projectConfigs: projectConfigService, sandbox });
 
     // ── Stream Broker ──
     const streamBroker = new StreamBroker(repos.streamCursorRepo, logger);
-
-    // ── Workflow Orchestrator (clone/preprocess + post-processing around a run) ──
-    const workflowOrchestrator = new WorkflowOrchestrator(
-      services.workflowRunService,
-      services.workflowDefinitionService,
-      services.runDefinitionReader,
-      services.workflowPreprocessor,
-      repos.workflowRunRepo,
-      services.eventBus,
-      logger,
-      resolved.artifactsDir,
-      workspaceManager,
-      worktreeService,
-      projectService,
-      projectConfigService,
-      services.hookExecutor,
-      sandbox,
-    );
 
     // ── Workflow Script Loader (if scripts directory exists) ──
     let scriptLoader: WorkflowScriptLoader | undefined;
@@ -547,6 +533,8 @@ export class GeneratorAI {
         services.hookExecutor,
       );
       await scriptLoader.discoverScripts();
+      // A script target is materialized from the loaded script.
+      services.workflowInvocationService.setScripts(scriptLoader);
     }
 
     // ── Background lifecycle services (constructed here, started by initialize()) ──
@@ -593,7 +581,6 @@ export class GeneratorAI {
       logger,
       repos.workflowRunRepo,
       repos.chatEntityRepo,
-      workflowOrchestrator,
       streamBroker,
       workspaceManager,
       projectService,

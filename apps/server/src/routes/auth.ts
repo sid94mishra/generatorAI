@@ -42,7 +42,7 @@ import {
   type AdvertisedEndpointCandidate,
 } from '../network/advertisedEndpoints.js';
 
-const PLATFORMS = ['web', 'desktop', 'cli', 'mobile', 'other'] as const;
+const PLATFORMS = ['web', 'desktop', 'cli', 'mobile', 'mcp', 'other'] as const;
 
 const createPairingSchema = z.object({
   deviceName: z.string().min(1).max(64),

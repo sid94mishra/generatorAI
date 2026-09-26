@@ -19,7 +19,7 @@ import { Alert, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { GitBranch, Lock, MoreHorizontal, Play, Trash2, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
-import { epochOr, needsOrchestratedStart, queryKeys } from '@generatorai/client-core';
+import { epochOr, queryKeys } from '@generatorai/client-core';
 
 import type { AgentStage } from '@generatorai/workflow-spec';
 
@@ -55,7 +55,7 @@ export default function WorkflowScreen(): React.ReactElement {
   const api = useApi();
   const navigation = useNavigation();
   const { colors } = useTheme();
-  const runControl = useFeature('runControl');
+  const runStart = useFeature('runStart');
   const workflowEdit = useFeature('workflowEdit');
   const admin = useAdminApi();
   const queryClient = useQueryClient();
@@ -197,7 +197,7 @@ export default function WorkflowScreen(): React.ReactElement {
         ) : sortedRuns.length === 0 ? (
           <EmptyState
             title="Never run"
-            message={runControl.available ? 'Start the first run below.' : 'Runs appear here once it has run.'}
+            message={runStart.available ? 'Start the first run below.' : 'Runs appear here once it has run.'}
             icon={<Play size={22} color={colors['muted-foreground']} />}
           />
         ) : (
@@ -284,7 +284,7 @@ export default function WorkflowScreen(): React.ReactElement {
       </PlainScroll>
 
       <StickyActionBar>
-        {runControl.available ? (
+        {runStart.available ? (
           <Button
             label={isDraft ? (inputs.length > 0 ? 'Test run…' : 'Test run') : inputs.length > 0 ? 'Run…' : 'Run workflow'}
             size="lg"
@@ -298,9 +298,9 @@ export default function WorkflowScreen(): React.ReactElement {
           <View className="flex-row items-center gap-3">
             <Lock size={16} color={colors['muted-foreground']} />
             <Text className="flex-1 text-sm text-muted-foreground">
-              Starting runs needs workflow permission on this device.
+              Starting runs needs agent permission on this device.
             </Text>
-            <Button label="Request access" variant="secondary" size="sm" onPress={runControl.requestAccess} />
+            <Button label="Request access" variant="secondary" size="sm" onPress={runStart.requestAccess} />
           </View>
         )}
       </StickyActionBar>
@@ -313,9 +313,9 @@ export default function WorkflowScreen(): React.ReactElement {
           name: spec.name,
           projectId: spec.projectId ?? null,
           variables: spec.variables,
-          orchestrated: needsOrchestratedStart(spec),
           draft: isDraft,
           stages: stageList,
+          lifecycle: spec.lifecycle,
         }}
       />
 

@@ -1,18 +1,19 @@
 // The remaining domains, each small enough that a file per group would be
 // more navigation than signal: agents, extensions, widgets, review, source
 // control, security, hooks, webhooks, harness, templates, scripts,
-// orchestrator, browser and computer use.
+// browser and computer use.
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { HookDefinition } from '@generatorai/shared';
-import type { ScriptRunProfile } from '@generatorai/workflow-spec';
+import type { RunProfile } from '@generatorai/workflow-spec';
+import { newIdempotencyKey } from '@generatorai/client-core';
 import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
 import { CliError, EXIT_CODES } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
 import type { CliContext } from '../context/CliContext.js';
-import { watchRun } from './run.js';
+import { invocationError, startedRun, watchRun } from './run.js';
 import {
   degradeWidget,
   degradeWidgets,
@@ -26,6 +27,7 @@ import {
   list,
   nameColumn,
   ok,
+  parseKeyValues,
   projectFlag,
   readTextFile,
   record,
@@ -38,7 +40,6 @@ export const GROUPS = [
   { name: 'agent', summary: 'First-class agent definitions', order: 15 },
   { name: 'script', aliases: ['sc'], summary: 'Programmatic workflow scripts (.workflow.mjs)', order: 60 },
   { name: 'template', summary: 'System workflow templates', order: 61 },
-  { name: 'orchestrator', aliases: ['orch'], summary: 'System workflows and orchestrated runs', order: 62 },
   { name: 'extension', aliases: ['ext'], summary: 'Hot-loadable extensions', order: 70 },
   { name: 'widget', summary: 'Agent-rendered widget surfaces', order: 71 },
   { name: 'review', summary: 'Review threads on workspace files', order: 72 },
@@ -250,7 +251,7 @@ export function agentCommands(): CommandSpec[] {
   ];
 }
 
-// ── Scripts / templates / orchestrator ─────────────────────────────
+// ── Scripts / templates ────────────────────────────────────────────
 
 export function scriptCommands(): CommandSpec[] {
   const find = async (ctx: CliContext, ref: string) => {
@@ -317,10 +318,11 @@ export function scriptCommands(): CommandSpec[] {
       },
       async handler(ctx, { args }) {
         const target = await find(ctx, args.script);
-        const profiles = (await ctx.api.scripts.profiles(target.id)) as unknown as ScriptRunProfile[];
+        const profiles: RunProfile[] = await ctx.api.scripts.profiles(target.id);
         return list(
           profiles.map((profile) => ({
             ...profile,
+            permissionMode: profile.overrides?.permissionMode,
             stageOverrides: (profile.stageOverrides ?? [])
               .map((o) => `${o.stageKey}${o.skip ? ' (skip)' : ''}`)
               .join(', '),
@@ -357,15 +359,28 @@ export function scriptCommands(): CommandSpec[] {
       id: 'script.run',
       group: 'script',
       verb: 'run',
-      summary: 'Materialize and start a script',
+      summary: 'Start a run of a script (materialized once per script content)',
       requiresServer: true,
       sinceVersion: '0.2.0',
+      examples: ['generatorai script run nightly --profile quick --var topic=caching --watch'],
       args: [{ name: 'script', description: 'Script reference', required: true, completes: 'script' }],
-      flags: [{ name: 'profile', description: 'Profile name', type: 'string' }, watchFlag, verbosityFlag],
+      flags: [
+        { name: 'profile', description: 'A run profile the script exports (`script profiles`)', type: 'string' },
+        { name: 'var', description: 'Variable as key=value (repeatable); wins over the profile', type: 'string', variadic: true },
+        {
+          name: 'idempotencyKey',
+          description: 'Idempotency key; the same key and request replay the same run (default: a fresh key)',
+          type: 'string',
+        },
+        watchFlag,
+        verbosityFlag,
+      ],
       schema: inputSchema(
         { script: z.string() },
         {
           profile: z.string().optional(),
+          var: z.array(z.string()).optional(),
+          idempotencyKey: z.string().regex(/^[!-~]{1,200}$/, 'printable ASCII without spaces, at most 200 characters').optional(),
           watch: z.boolean().optional(),
           verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal'),
         },
@@ -373,18 +388,24 @@ export function scriptCommands(): CommandSpec[] {
       output: { kind: 'record', successMessage: 'Started run {runId}' },
       async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
         const target = await find(ctx, args.script);
-        // The route answers `{ definitionId, runId, status }`, not a run.
-        const started = (await ctx.api.scripts.run(
-          target.id,
-          compact({ profileName: flags.profile }),
-        )) as unknown as { definitionId: string; runId: string; status: string };
-        if (!flags.watch) {
-          return record(started, `Started run ${started.runId} — \`generatorai run watch ${started.runId}\``);
-        }
-        // Reuses `run start`'s watcher so there is one implementation of
-        // "follow a run".
-        await watchRun(ctx, started.runId, flags.verbosity);
-        return record(await ctx.api.runs.get(started.runId));
+        const result = await ctx.api.workflows
+          .invoke(
+            {
+              target: { kind: 'script', scriptId: target.id },
+              variables: parseKeyValues(flags.var),
+              ...(flags.profile ? { profile: flags.profile } : {}),
+              client: 'cli',
+            },
+            { idempotencyKey: flags.idempotencyKey ?? newIdempotencyKey() },
+          )
+          .catch((error: unknown) => {
+            throw invocationError(error);
+          });
+        const { message, warnings } = startedRun(result);
+        if (!flags.watch) return { data: result, warnings, message };
+        // `run start`'s watcher: one implementation of "follow a run".
+        await watchRun(ctx, result.runId, flags.verbosity);
+        return { data: await ctx.api.runs.get(result.runId), warnings };
       },
     }),
 
@@ -479,28 +500,6 @@ export function templateCommands(): CommandSpec[] {
       output: { kind: 'record' },
       async handler(ctx, { args }) {
         return record(await ctx.api.templates.get(args.template));
-      },
-    }),
-  ];
-}
-
-export function orchestratorCommands(): CommandSpec[] {
-  return [
-    defineCommand({
-      id: 'orchestrator.cancel',
-      group: 'orchestrator',
-      verb: 'cancel',
-      summary: 'Cancel an orchestrated run and everything under it',
-      requiresServer: true,
-      destructive: true,
-      sinceVersion: '0.2.0',
-      args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
-      flags: [],
-      schema: inputSchema({ run: z.string() }, {}),
-      output: { kind: 'void', successMessage: 'Cancelled.' },
-      async handler(ctx, { args }) {
-        await ctx.api.orchestrator.cancel(args.run);
-        return ok('Cancelled orchestrated run.');
       },
     }),
   ];

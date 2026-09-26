@@ -6,11 +6,14 @@ import type { HarnessProviderId } from '@generatorai/shared';
 
 import type {
   IPlatformClient,
+  InvocationFiles,
   PlatformType,
   EventSubscriptionOptions,
 } from '@generatorai/shared';
 import type {
-  ForkRunRequest,
+  InvocationPlan,
+  InvocationRequest,
+  InvocationResult,
   RunCommand,
   WorkflowDefinitionRecord,
   WorkflowDefinitionSummary,
@@ -18,7 +21,13 @@ import type {
   WorkflowGraphInput,
   WorkflowTemplate,
 } from '@generatorai/workflow-spec';
-import type { DefinitionDeleteOutcome, StageOverrideWire } from '@generatorai/client-core';
+import {
+  ApiError as CoreApiError,
+  createAdminApi,
+  type DefinitionDeleteOutcome,
+  type InvocationUploadCategory,
+  type InvocationUploadFiles,
+} from '@generatorai/client-core';
 import type { ChatMessage } from '@generatorai/shared';
 // PLN-01 — plan mode
 import type {
@@ -271,10 +280,7 @@ import type {
   CreateChatParams,
   WorkflowRun,
   WorkflowRunWithStages,
-  CreateWorkflowRunParams,
-  OrchestratorContext,
   RunWorkspaceInfo,
-  RunUploadResult,
   Automation,
   AutomationWithExecutions,
   AutomationExecution,
@@ -314,7 +320,6 @@ import type {
   ReviewSubmitTarget,
   ReviewSubmitResult,
 } from '../types/review.js';
-import { downloadBlobAsFile } from '../utils/downloadBlobAsFile.js';
 
 /**
  * Model metadata surfaced by the agent harness provider via
@@ -408,9 +413,53 @@ export interface PlanSummary {
   fileName?: string;
 }
 
+/**
+ * A client-core call, with its failure re-thrown as this app's `ApiError`:
+ * the global error toast, the retry policy and the inline error views all
+ * read `code`, `status` and the envelope's `issues` from that one class.
+ */
+async function viaClientCore<T>(call: Promise<T>): Promise<T> {
+  try {
+    return await call;
+  } catch (err) {
+    if (!(err instanceof CoreApiError)) throw err;
+    const envelope = (err.body as { error?: { code?: string; message?: string; issues?: unknown } } | undefined)?.error;
+    throw new ApiError(
+      err.status,
+      envelope?.code ?? `HTTP_${String(err.status)}`,
+      envelope?.message ?? err.message,
+      envelope?.issues !== undefined ? { issues: envelope.issues } : undefined,
+    );
+  }
+}
+
+/** Browser files → the bytes client-core uploads. */
+async function uploadFiles(files: InvocationFiles | undefined): Promise<InvocationUploadFiles | undefined> {
+  if (!files) return undefined;
+  const out: InvocationUploadFiles = {};
+  for (const [category, list] of Object.entries(files) as Array<[InvocationUploadCategory, InvocationFiles[InvocationUploadCategory]]>) {
+    if (!list?.length) continue;
+    out[category] = await Promise.all(
+      list.map(async (file) => ({
+        name: file.name,
+        data: new Uint8Array(await file.arrayBuffer()),
+        ...(file.type ? { mimeType: file.type } : {}),
+      })),
+    );
+  }
+  return out;
+}
+
 export class HttpPlatformClient implements IPlatformClient {
   readonly platform: PlatformType = 'web';
   readonly baseUrl: string;
+
+  /**
+   * client-core's typed API over this app's authenticated fetch. Workflow
+   * runs start and are read through it, so the web keeps no second
+   * hand-written client for them (G3 5.13).
+   */
+  private readonly admin = createAdminApi((path, init) => getAuthRuntime().fetch(`${this.baseUrl}${path}`, init));
 
   constructor(baseUrl = '') {
     this.baseUrl = baseUrl;
@@ -1061,12 +1110,27 @@ export class HttpPlatformClient implements IPlatformClient {
 
   // ── v2: Workflow Run Operations ──
 
-  async createRun(params: CreateWorkflowRunParams): Promise<WorkflowRun> {
-    return apiFetch<WorkflowRun>(`${this.baseUrl}/api/workflow-runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(params),
-    });
+  /**
+   * THE way a run starts (P04): a definition, a script or a fork of an
+   * earlier run. Files ride in the same request (multipart) and become the
+   * run's uploads; the idempotency key makes a double click one run.
+   */
+  async invokeWorkflow(
+    request: InvocationRequest,
+    opts: { idempotencyKey?: string; files?: InvocationFiles } = {},
+  ): Promise<InvocationResult> {
+    const files = await uploadFiles(opts.files);
+    return viaClientCore(
+      this.admin.workflows.invoke(request, {
+        ...(opts.idempotencyKey ? { idempotencyKey: opts.idempotencyKey } : {}),
+        ...(files ? { files } : {}),
+      }),
+    );
+  }
+
+  /** What `invokeWorkflow` would do (stages by layer, skips, codebases, phases), without writing anything. */
+  async planWorkflowInvocation(request: InvocationRequest): Promise<InvocationPlan> {
+    return viaClientCore(this.admin.workflows.plan(request));
   }
 
   async listRuns(filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]> {
@@ -1079,10 +1143,6 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async getRun(id: string): Promise<WorkflowRunWithStages> {
     return apiFetch<WorkflowRunWithStages>(`${this.baseUrl}/api/workflow-runs/${id}`);
-  }
-
-  async startRun(id: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}/start`, { method: 'POST' });
   }
 
   async runCommand(runId: string, command: RunCommand): Promise<void> {
@@ -1147,15 +1207,6 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  async forkRun(runId: string, request: ForkRunRequest = {}): Promise<WorkflowRun> {
-    // 201 with the fork (already started); the source run stays terminal.
-    return apiFetch<WorkflowRun>(`${this.baseUrl}/api/workflow-runs/${runId}/fork`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-  }
-
   async deleteRun(id: string): Promise<void> {
     await apiFetch(`${this.baseUrl}/api/workflow-runs/${id}`, { method: 'DELETE' });
   }
@@ -1203,40 +1254,10 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch<{ state: string }>(`${this.baseUrl}/api/copilot/state`);
   }
 
-  // ── Orchestrator API ──
-
-  async startOrchestratedRun(params: {
-    workflowDefinitionId: string;
-    variables?: Record<string, unknown>;
-    projectId?: string;
-    selectedCodebases?: string[];
-    uploads?: { prompts: File[]; skills: File[]; agents: File[] };
-    stageOverrides?: StageOverrideWire[];
-    /** Run the working graph as a test version (the only way to run a draft). */
-    testRun?: boolean;
-  }): Promise<OrchestratorContext> {
-    const { uploads, ...config } = params;
-    if (uploads && Object.values(uploads).some((files) => files.length > 0)) {
-      const body = new FormData();
-      body.append('config', JSON.stringify(config));
-      for (const category of ['prompts', 'skills', 'agents'] as const) {
-        for (const file of uploads[category]) body.append(category, file);
-      }
-      return apiFetch<OrchestratorContext>(`${this.baseUrl}/api/orchestrator/runs`, { method: 'POST', body });
-    }
-    return apiFetch<OrchestratorContext>(`${this.baseUrl}/api/orchestrator/runs`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(config),
-    });
-  }
-
-  async cancelOrchestratedRun(runId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/orchestrator/runs/${runId}/cancel`, { method: 'POST' });
-  }
+  // ── Run workspace: the managed root, artifacts, uploads and every mount ──
 
   async getRunWorkspace(runId: string): Promise<RunWorkspaceInfo> {
-    return apiFetch<RunWorkspaceInfo>(`${this.baseUrl}/api/orchestrator/runs/${runId}/workspace`);
+    return (await viaClientCore(this.admin.runs.workspace(runId))) as unknown as RunWorkspaceInfo;
   }
 
   /**
@@ -1255,42 +1276,10 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch(`${this.baseUrl}/api/workspaces/${workspaceId}/files/content?${params}`);
   }
 
-  async uploadRunFiles(runId: string, category: 'skills' | 'agents' | 'prompts', files: File[]): Promise<RunUploadResult> {
-    const formData = new FormData();
-    formData.append('category', category);
-    for (const file of files) {
-      formData.append('files', file);
-    }
-    return apiFetch<RunUploadResult>(`${this.baseUrl}/api/orchestrator/runs/${runId}/uploads`, {
-      method: 'POST',
-      body: formData,
-    });
-  }
-
-  async downloadRunFile(runId: string, filePath: string, source: 'workspace' | 'artifacts' | 'uploads' | 'worktree', worktreeAlias?: string): Promise<void> {
-    const params = new URLSearchParams({ path: filePath, source });
-    if (source === 'worktree' && worktreeAlias) params.set('worktreeAlias', worktreeAlias);
-    const url = `${this.baseUrl}/api/orchestrator/runs/${runId}/workspace/download?${params}`;
-    const resp = await getAuthRuntime().fetch(url);
-    if (!resp.ok) throw new ApiError(resp.status, 'DOWNLOAD_FAILED', `Download failed: ${resp.statusText}`);
-    const blob = await resp.blob();
-    await downloadBlobAsFile(blob, filePath.split(/[/\\]/).pop() ?? 'download');
-  }
-
   async getRunFileContent(runId: string, filePath: string, source: 'workspace' | 'artifacts' | 'uploads' | 'worktree', worktreeAlias?: string): Promise<{ path: string; content: string | null; truncated: boolean; size: number }> {
-    const params = new URLSearchParams({ path: filePath, source });
-    if (source === 'worktree' && worktreeAlias) params.set('worktreeAlias', worktreeAlias);
-    return apiFetch(`${this.baseUrl}/api/orchestrator/runs/${runId}/workspace/content?${params}`);
-  }
-
-  async getRunDiff(runId: string): Promise<{
-    hasGit: boolean;
-    repos: Array<{
-      alias: string;
-      files: Array<{ path: string; status: string; diff: string }>;
-    }>;
-  }> {
-    return apiFetch(`${this.baseUrl}/api/orchestrator/runs/${runId}/workspace/diff`);
+    return viaClientCore(
+      this.admin.runs.workspaceContent(runId, filePath, source, source === 'worktree' ? worktreeAlias : undefined),
+    );
   }
 
   // ── Centralized change set + source control (workspace-scoped) ──
@@ -2398,14 +2387,6 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async materializeScript(id: string, options?: { name?: string; projectId?: string; variables?: Record<string, unknown> }): Promise<any> {
     return apiFetch<any>(`${this.baseUrl}/api/workflow-scripts/${id}/materialize`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(options ?? {}),
-    });
-  }
-
-  async runScript(id: string, options?: { profileName?: string; variables?: Record<string, unknown>; projectId?: string }): Promise<any> {
-    return apiFetch<any>(`${this.baseUrl}/api/workflow-scripts/${id}/run`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(options ?? {}),

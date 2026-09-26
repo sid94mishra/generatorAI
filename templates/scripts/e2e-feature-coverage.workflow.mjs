@@ -172,7 +172,7 @@ export const profiles = [
     name: 'quick-surface',
     description: 'Fast surface review, skip Branch B keywords stage.',
     variables: { topic: 'quick surface', depth: 'surface', max_findings: 3, enable_tests: false, notes: 'quick path' },
-    permissionMode: 'bypassPermissions',
+    overrides: { permissionMode: 'bypassPermissions' },
     stageOverrides: [{ stageKey: 'keywords', skip: true }],
   },
   {
@@ -185,7 +185,7 @@ export const profiles = [
       enable_tests: true,
       notes: 'thorough path with overrides',
     },
-    permissionMode: 'bypassPermissions',
+    overrides: { permissionMode: 'bypassPermissions' },
     stageOverrides: [{ stageKey: 'summarize', variables: { override_marker: 'branch-a-override' } }],
   },
   {
@@ -198,6 +198,6 @@ export const profiles = [
       enable_tests: true,
       notes: 'full default flow',
     },
-    permissionMode: 'bypassPermissions',
+    overrides: { permissionMode: 'bypassPermissions' },
   },
 ];

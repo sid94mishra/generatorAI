@@ -44,18 +44,13 @@
                 "kind": {
                   "type": "string",
                   "const": "script",
-                  "description": "Materialize and run a workflow script"
+                  "description": "Materialize (once per script content) and run a workflow script"
                 },
                 "scriptId": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 200,
                   "description": "Script id"
-                },
-                "profileName": {
-                  "type": "string",
-                  "maxLength": 200,
-                  "description": "Script run profile"
                 }
               },
               "required": [
@@ -105,8 +100,8 @@
                     "reuse",
                     "fresh"
                   ],
-                  "default": "restore_checkpoint",
-                  "description": "Workspace of the fork"
+                  "default": "fresh",
+                  "description": "fresh provisions a new workspace; reuse runs in the source one; restore_checkpoint reuses it rolled back to before the earliest re-run instance"
                 }
               },
               "required": [
@@ -278,7 +273,7 @@
         "profile": {
           "type": "string",
           "maxLength": 200,
-          "description": "Saved run profile name"
+          "description": "A script target's exported run profile; this request's own inputs win over it"
         },
         "name": {
           "type": "string",
