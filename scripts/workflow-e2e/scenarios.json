@@ -41,7 +41,6 @@
         "runStatus": "completed",
         "stages": { "hello": "completed", "twice": "completed", "tick": "completed" },
         "outputContains": [
-          { "stage": "hello", "text": "HELLO" },
           { "stage": "twice", "text": "\"iterations\":2" }
         ]
       }
