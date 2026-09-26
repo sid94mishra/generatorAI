@@ -82,7 +82,7 @@ generatorai
 │     mode · hitl pending · hitl reject · list · messages · pause ·
 │     profile generate · profile list · profile validate · resume · retry
 │     · show · stage cancel · stage list · stage pause · stage resume ·
-│     stage retry · start · watch · workspace
+│     stage retry · stage send · stage stop · start · watch · workspace
 ├── automation (auto)     # Scheduled, webhook and manual triggers that fan out into runs
 │     create · delete · disable · enable · execution cancel · execution
 │     list · execution show · list · rotate-webhook-token · show · trigger
@@ -235,11 +235,11 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 | `run cancel <run>` | Cancel a run | — |
 | `run delete <run>` | Delete a run record | — |
 | `run diff <run>` | Unified diff of everything a run changed | — |
-| `run hitl approve <run> <stage> [options]` | Approve a waiting stage | `--value` `--reason` `--follow-up` |
-| `run hitl changes-request <run> <stage> [options]` | Send a waiting stage back for changes | `--value` `--reason` `--follow-up` |
+| `run hitl approve <run> <stage> [options]` | Approve a waiting stage | `--value` `--feedback` |
+| `run hitl changes-request <run> <stage> [options]` | Send a waiting stage back for changes | `--value` `--feedback` |
 | `run hitl mode <run> [mode]` | Show or set the run permission mode | — |
 | `run hitl pending <run>` | Gates waiting for a human decision | — |
-| `run hitl reject <run> <stage> [options]` | Reject a waiting stage and fail the run | `--value` `--reason` `--follow-up` |
+| `run hitl reject <run> <stage> [options]` | Reject a waiting stage and fail the run | `--value` `--feedback` |
 | `run list [options]` | List workflow runs | `--status` `--definition` `--limit` |
 | `run messages <run> [options]` | Messages recorded for a run, optionally one stage | `--stage` |
 | `run pause <run>` | Pause a run | — |
@@ -247,13 +247,15 @@ Workflow run lifecycle, stage controls and human-in-the-loop gates
 | `run profile list` | Run profiles visible from here | — |
 | `run profile validate <workflow> <profile>` | Check a run profile against a workflow definition | — |
 | `run resume <run>` | Resume a run | — |
-| `run retry <run> [options]` | Retry a run | `--watch` `--verbosity` |
+| `run retry <run> [options]` | Re-run a finished run as a new run (a fork) | `--from` `--watch` `--verbosity` |
 | `run show <run> [options]` | Show a run and its stages | `--stages` |
 | `run stage cancel <run> <stage>` | Cancel one stage | — |
 | `run stage list <run>` | Stage runs for a run | — |
 | `run stage pause <run> <stage>` | Pause one stage | — |
 | `run stage resume <run> <stage>` | Resume one stage | — |
 | `run stage retry <run> <stage>` | Retry one stage | — |
+| `run stage send <run> <stage> <text\|->` | Send a message to a stage (a stage is a compact chat): its next turn, an amendment of a completed stage, or a retry of a paused one | `--mode` `--attach` |
+| `run stage stop <run> <stage>` | Stop the stage's turn in flight; the stage carries on | `--force` |
 | `run start <workflow> [options]` | Create and start a run<br>⚠️ `--name` — The server has no route that names a run, so this value is accepted and discarded. | `--name` ⚠️ `--var` `--profile` `--skip` `--stage-var` `--test-run` `--project` `--permission-mode` `--watch` `--verbosity` `--no-start` |
 | `run watch <run> [options]` | Stream a run until it reaches a terminal state | `--verbosity` |
 | `run workspace <run>` | Workspace a run executed in | — |
