@@ -362,7 +362,7 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
         if (outcome !== 'approved' && outcome !== 'rejected' && outcome !== 'changes_requested') {
           return { status: 400, body: { error: { code: 'VALIDATION_ERROR', message: 'outcome is required' } } };
         }
-        const feedback = b.followUpPrompt ?? b.reason;
+        const feedback = b.reason;
         const data = b.value && typeof b.value === 'object' && !Array.isArray(b.value) ? (b.value as Record<string, unknown>) : undefined;
         return send({ command: 'approve', instanceId: cmd.stageRunId, outcome, ...(feedback ? { feedback } : {}), ...(data ? { data } : {}) });
       }

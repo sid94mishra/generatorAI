@@ -99,7 +99,6 @@ export interface ApproveBody {
   outcome?: StageReviewOutcome;
   value?: unknown;
   reason?: string;
-  followUpPrompt?: string;
 }
 
 /** Operator commands, as shortcuts over the commands API and fork. */

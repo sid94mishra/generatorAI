@@ -75,7 +75,7 @@ describe('T5 human in the loop (engine)', () => {
     const run = await engine.runWorkflow(HITL);
     await run.waitForStage('p1', 'awaiting_input');
     const p1 = run.stageRunId('p1');
-    const res = await engine.commands.approve(run.runId, p1, { outcome: 'changes_requested', followUpPrompt: 'Append the word REVISED to your line.' });
+    const res = await engine.commands.approve(run.runId, p1, { outcome: 'changes_requested', reason: 'Append the word REVISED to your line.' });
     expect(res.status).toBe(202);
 
     let snap = await run.waitFor(
