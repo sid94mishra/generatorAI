@@ -18,6 +18,7 @@
 import type { StreamBlock } from '@/stores/streamStore.js';
 import type { TimelineStep, StepKind, StepStatus } from '@/components/chat/redesign/types.js';
 import { resolveInlineHunks } from '@/components/chat/changes/changePaths.js';
+import { workflowToolCard, type WorkflowDraftToolCard, type WorkflowRunToolCard } from '@generatorai/client-core';
 
 // ── Step identity ────────────────────────────────────────────────
 //
@@ -762,7 +763,11 @@ export type StreamSegment =
   | { type: 'permission'; id: string; permission: Extract<StreamBlock, { type: 'permission' }> }
   | { type: 'scm_result'; id: string; scmResult: Extract<StreamBlock, { type: 'scm_result' }> }
   /** A message an operator sent into a workflow stage (the stage conversation). */
-  | { type: 'operator'; id: string; text: string };
+  | { type: 'operator'; id: string; text: string }
+  /** The run a `run_workflow` call started (P06 WP-6.2): drawn from the chat's live run cards. */
+  | { type: 'workflow_run'; id: string; run: WorkflowRunToolCard; callId: string }
+  /** The draft a `create_workflow_draft` call submitted: open it in the builder, or publish it. */
+  | { type: 'workflow_draft'; id: string; draft: WorkflowDraftToolCard };
 
 /** Walk stream blocks in order and produce interleaved step / answer /
  *  inline-widget segments that preserve the temporal sequence in which
@@ -849,6 +854,19 @@ export function deriveSegments(
       // thinking / tool_call / system → activity-timeline step block.
       flushText();
       stepBuf.push(b);
+      // A workflow tool's outcome is a card under its call, not a step detail:
+      // the run it started (live status, approvals) or the draft it submitted.
+      if (b.type === 'tool_call' && b.status === 'complete') {
+        const card = workflowToolCard(b.tool, b.result, b.error === true);
+        if (card) {
+          flushSteps();
+          segments.push(
+            card.kind === 'run'
+              ? { type: 'workflow_run', id: `wfrun-${b.blockId}`, run: card, callId: b.callId }
+              : { type: 'workflow_draft', id: `wfdraft-${b.blockId}`, draft: card },
+          );
+        }
+      }
     }
   }
   flushSteps();

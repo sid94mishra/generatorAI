@@ -11,6 +11,7 @@ import type {
   EventSubscriptionOptions,
 } from '@generatorai/shared';
 import type {
+  ChatWorkflowRunCard,
   InvocationPlan,
   InvocationRequest,
   InvocationResult,
@@ -764,6 +765,13 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async getBackgroundTaskDigest(chatId: string, taskId: string): Promise<Record<string, unknown>> {
     return apiFetch(`${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}`);
+  }
+
+  // ── Workflow runs a chat started (P06 WP-6.2) ──
+
+  /** The chat's run cards: status, stage progress, parked decisions. */
+  async getChatWorkflowRuns(chatId: string): Promise<{ runs: ChatWorkflowRunCard[] }> {
+    return apiFetch(`${this.baseUrl}/api/chats/${chatId}/workflow-runs`);
   }
 
   async cancelBackgroundTask(chatId: string, taskId: string): Promise<void> {

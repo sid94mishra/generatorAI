@@ -27,6 +27,7 @@ import { PlanCard } from '@/components/chat/PlanCard.js';
 import { QuestionCard } from '@/components/chat/QuestionCard.js';
 import { PermissionCard } from '@/components/chat/PermissionCard.js';
 import { ScmResultCard } from '@/components/scm/ScmResultCard.js';
+import { WorkflowDraftCard, WorkflowRunCard } from '@/components/chat/WorkflowRunCards.js';
 import type { StreamBlock } from '@/stores/streamStore.js';
 import type { StreamSegment } from '@/components/agent/deriveTimeline.js';
 import type { TimelineStep, UsageInfo } from '@/components/chat/redesign/types.js';
@@ -231,6 +232,12 @@ export function StreamPanel({
                 {...(chatId ? { chatId } : {})}
               />
             );
+          }
+          if (seg.type === 'workflow_run') {
+            return <WorkflowRunCard key={seg.id} run={seg.run} callId={seg.callId} chatId={chatId} />;
+          }
+          if (seg.type === 'workflow_draft') {
+            return <WorkflowDraftCard key={seg.id} draft={seg.draft} />;
           }
           if (seg.type === 'operator') {
             return (

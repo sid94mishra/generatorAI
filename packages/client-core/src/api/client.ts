@@ -915,6 +915,8 @@ export const queryKeys = {
   chatPlans: (id: string) => ['chats', id, 'plans'] as const,
   chatInteractions: (id: string) => ['chats', id, 'interactions'] as const,
   chatTasks: (id: string) => ['chats', id, 'background-tasks'] as const,
+  /** The runs a chat started (`GET /chats/:id/workflow-runs`), patched live by `chat.workflow_run.*`. */
+  chatWorkflowRuns: (id: string) => ['chats', id, 'workflow-runs'] as const,
   models: () => ['models'] as const,
   providers: () => ['harness', 'providers'] as const,
   health: () => ['health'] as const,

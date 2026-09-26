@@ -36,6 +36,7 @@ import { DAGCanvas } from '@/components/workflow/DAGCanvas.js';
 import { StagePropertiesPanel } from '@/components/workflow/StagePropertiesPanel.js';
 import { WorkflowConfigPanel } from '@/components/workflow/WorkflowConfigPanel.js';
 import { RunDialog } from '@/components/workflow/RunDialog.js';
+import { AgentDraftBanner } from '@/components/workflow/builder/AgentDraftBanner.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import {
@@ -696,6 +697,16 @@ export function WorkflowBuilderPage() {
             ))}
           </ul>
         </div>
+      )}
+
+      {/* ── Agent draft (P06): who wrote it, what it may do, what it changes ── */}
+      {definition?.authoredBy && definition.id === definitionId && (
+        <AgentDraftBanner
+          record={definition}
+          graph={definition.graph}
+          onPublish={handlePublish}
+          publishing={isPublishing}
+        />
       )}
 
       {/* ── Validation Errors Banner ── */}

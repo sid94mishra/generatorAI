@@ -10,6 +10,7 @@ import { openMultiplexedStream } from '../platform/muxStream.js';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
 import type { InvocationFiles, WorkflowRunPermissionMode } from '@generatorai/shared';
 import type { InvocationRequest, RunCommand, WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
+import { mergeWorkflowRunCards, type WorkflowRunCardView } from '@generatorai/client-core';
 
 // ── Query Keys ──
 export const workflowKeys = {
@@ -25,6 +26,8 @@ export const workflowKeys = {
   loopIterations: (runId: string, instanceId: string) => ['loop-iterations', runId, instanceId] as const,
   /** The decisions a run waits on, its sub-workflow children's mirrored (P05). */
   pendingDecisions: (runId: string) => ['pending-decisions', runId] as const,
+  /** The runs a chat started (P06 WP-6.2), patched live by `chat.workflow_run.*`. */
+  chatRuns: (chatId: string) => ['chat-workflow-runs', chatId] as const,
 };
 
 // ════════════════════════════════════════════════════════════════
@@ -229,6 +232,29 @@ export function usePlanWorkflowInvocation() {
   return useMutation({
     mutationFn: (request: InvocationRequest) => platform.planWorkflowInvocation(request),
     meta: { silentError: true },
+  });
+}
+
+/**
+ * The runs a chat started, as cards (P06 WP-6.2). The chat stream folds its
+ * `chat.workflow_run.*` events into this cache and refetches it; the finalize
+ * event's summary and PR survive the refetch (the REST card does not repeat
+ * them). Polls only as a fallback while a run is live.
+ */
+export function useChatWorkflowRuns(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: workflowKeys.chatRuns(chatId ?? ''),
+    queryFn: async (): Promise<{ runs: WorkflowRunCardView[] }> => {
+      const { runs } = await platform.getChatWorkflowRuns(chatId!);
+      const prior = queryClient.getQueryData<{ runs: WorkflowRunCardView[] }>(workflowKeys.chatRuns(chatId!));
+      return { runs: mergeWorkflowRunCards(runs, prior?.runs) };
+    },
+    enabled: !!chatId,
+    staleTime: 10_000,
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((r) => !['completed', 'failed', 'cancelled'].includes(r.status)) ? 15_000 : false,
   });
 }
 

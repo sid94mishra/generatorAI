@@ -57,11 +57,13 @@ import type { PersistedEvent } from '@generatorai/shared';
 import type { WorkflowRunStatus, StageRunStatus } from '@generatorai/shared';
 import {
   cancelFrame,
+  foldWorkflowRunEvent,
   partitionEffects,
   scheduleFrame,
   StreamEventRouter,
   type FrameHandle,
   type StreamEffect,
+  type WorkflowRunCardView,
 } from '@generatorai/client-core';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
 import { openMultiplexedStream } from '../platform/muxStream.js';
@@ -563,6 +565,18 @@ function applyHostEffect(
       // `close()` resolves with something current rather than a stale copy.
       widgetBridge.teardown(effect.instanceId, effect.teardownId);
       return;
+
+    case 'workflowRunCard': {
+      // A run this chat started moved (P06 WP-6.2): patch its card now, then
+      // refetch the list — the pending decisions are the server's to say.
+      const key = workflowKeys.chatRuns(effect.chatId);
+      // Only a list someone loaded: seeding an empty one would read as fresh.
+      queryClient.setQueryData<{ runs: WorkflowRunCardView[] }>(key, (old) =>
+        old ? { runs: foldWorkflowRunEvent(old.runs, effect.event) } : old,
+      );
+      scheduleInvalidation(key);
+      return;
+    }
 
     default:
       return;

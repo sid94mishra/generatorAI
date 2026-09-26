@@ -22,6 +22,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ScmFlowResult, TransportCapabilitySet } from '@generatorai/shared';
+import type { WorkflowRunCardEvent } from './workflowRuns.js';
 
 import type {
   BackgroundTaskBlock,
@@ -230,6 +231,13 @@ export type StreamEffect =
   // with no widget runtime drops both.
   | { op: 'widgetInvoke'; instanceId: string; invokeId: string; action: string; args: unknown }
   | { op: 'widgetTeardown'; instanceId: string; teardownId: string }
+
+  /**
+   * A `chat.workflow_run.*` event (P06 WP-6.2): the host folds it into the
+   * chat's run cards (`foldWorkflowRunEvent`) and refetches the REST list,
+   * which is what survives a reload.
+   */
+  | { op: 'workflowRunCard'; chatId: string; event: WorkflowRunCardEvent }
 
   /**
    * The transcript was rewound to the start of `turnId`: the host refetches
@@ -1514,6 +1522,21 @@ export class StreamEventRouter {
             ...(parentCallId ? { parentCallId } : {}),
           },
         });
+        break;
+      }
+
+      // ── Runs this chat started (P06 WP-6.2) ──────────────────────
+      //
+      // Mirrored onto the chat's session scope by the server's
+      // ChatWorkflowRunBridge. The card lives in the host's query cache (the
+      // REST list survives a reload); the stream only nudges it.
+      case 'chat.workflow_run.linked':
+      case 'chat.workflow_run.progress':
+      case 'chat.workflow_run.awaiting_approval':
+      case 'chat.workflow_run.finalized': {
+        const cid = optStr(data['chatId']);
+        if (!cid || !optStr(data['runId'])) break;
+        out.push({ op: 'workflowRunCard', chatId: cid, event: { kind: kind as WorkflowRunCardEvent['kind'], data } });
         break;
       }
 

@@ -15,4 +15,5 @@ export * from './frameScheduler.js';
 export * from './stopController.js';
 export * from './sseParser.js';
 export * from './MuxStreamClient.js';
+export * from './workflowRuns.js';
 export * as streamReducer from './reducer.js';
