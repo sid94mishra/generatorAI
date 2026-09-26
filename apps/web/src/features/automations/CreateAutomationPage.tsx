@@ -214,7 +214,7 @@ export function CreateAutomationPage() {
             ) : null}
 
             {step === 'basics' ? (
-              <FormSection title="Basics" first>
+              <FormSection title="Name & description" first>
                 <form.Field name="name">
                   {(field) => (
                     <Field label="Name *">
@@ -248,7 +248,7 @@ export function CreateAutomationPage() {
             ) : null}
 
             {step === 'trigger' ? (
-              <FormSection title="Trigger" first>
+              <FormSection title="Choose a trigger" first>
                 <form.Field name="triggerType">
                   {(field) => (
                     <ChoiceCardGrid

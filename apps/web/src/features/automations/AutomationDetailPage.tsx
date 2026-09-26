@@ -246,9 +246,9 @@ export function AutomationDetailPage() {
         }
         title={<PageTitle variant="detail" title={automation.name} description={automation.description} />}
         content={
-          <div className="flex flex-col gap-5">
+          <div className="flex min-w-0 flex-col gap-5">
             <StatStrip items={statItems} />
-            <div>
+            <div className="min-w-0">
               <h2 className="mb-3 text-title font-semibold text-fg">Execution history</h2>
               {!executions?.length ? (
                 <EmptyState icon="automations" title="No executions yet" description='Click "Run now" to trigger the first execution.' />

@@ -51,38 +51,44 @@ export function IterationsTable<Row>({
 }: IterationsTableProps<Row>) {
   const tracks = [...columns.map((c) => c.width), ...(rowActions ? [actionsWidth] : [])];
   return (
-    <Table columns={tracks} size={size} inset="compact" label={label} bare className={cn('gap-0', className)} data-testid={testId}>
-      <TableHeader>
-        {columns.map((column) => (
-          <TableHeadCell key={column.id} align={column.align}>
-            {column.header}
-          </TableHeadCell>
-        ))}
-        {rowActions ? (
-          <TableHeadCell>
-            <span className="sr-only">Actions</span>
-          </TableHeadCell>
-        ) : null}
-      </TableHeader>
-      <TableBody>
-        {rows.map((row) => {
-          const id = getRowId(row);
-          return (
-            <TableRow key={id} interactive={onRowClick !== undefined} onClick={onRowClick ? () => onRowClick(row) : undefined}>
-              {columns.map((column) => (
-                <TableCell key={column.id} align={column.align} mono={column.mono}>
-                  {column.cell(row)}
-                </TableCell>
-              ))}
-              {rowActions ? (
-                <TableCell actions onClick={(event: MouseEvent) => event.stopPropagation()}>
-                  {rowActions(row)}
-                </TableCell>
-              ) : null}
-            </TableRow>
-          );
-        })}
-      </TableBody>
-    </Table>
+    // A plain `overflow-x-auto` wrapper (not DataTable's ScrollArea — no
+    // virtualization here): without it the fixed-px column grid overflows
+    // into whatever sits beside this table (e.g. a T-02 DetailPage rail)
+    // instead of scrolling inside its own bordered box.
+    <div className={cn('max-w-full min-w-0 overflow-x-auto rounded-card border border-line-soft', className)}>
+      <Table columns={tracks} size={size} inset="compact" label={label} bare className="gap-0" data-testid={testId}>
+        <TableHeader>
+          {columns.map((column) => (
+            <TableHeadCell key={column.id} align={column.align}>
+              {column.header}
+            </TableHeadCell>
+          ))}
+          {rowActions ? (
+            <TableHeadCell>
+              <span className="sr-only">Actions</span>
+            </TableHeadCell>
+          ) : null}
+        </TableHeader>
+        <TableBody>
+          {rows.map((row) => {
+            const id = getRowId(row);
+            return (
+              <TableRow key={id} interactive={onRowClick !== undefined} onClick={onRowClick ? () => onRowClick(row) : undefined}>
+                {columns.map((column) => (
+                  <TableCell key={column.id} align={column.align} mono={column.mono}>
+                    {column.cell(row)}
+                  </TableCell>
+                ))}
+                {rowActions ? (
+                  <TableCell actions onClick={(event: MouseEvent) => event.stopPropagation()}>
+                    {rowActions(row)}
+                  </TableCell>
+                ) : null}
+              </TableRow>
+            );
+          })}
+        </TableBody>
+      </Table>
+    </div>
   );
 }
