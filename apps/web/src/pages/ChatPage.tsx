@@ -14,11 +14,10 @@ import { LiveActivityStrip, useRunningBackgroundTaskCount } from '@/components/a
 import { PathRootsContext } from '@/blocks/changes/changePaths.js';
 import { EditSourcesDialog } from '@/components/chat/sources/EditSourcesDialog.js';
 import { providerLabel } from '@/components/shared/ModelPicker.js';
-import { PlanDocumentPanel } from '@/components/chat/PlanDocumentPanel.js';
 import type { ChatMessage } from '@generatorai/shared';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { AgentConsole } from '@/components/chat/AgentConsole.js';
-import { WidgetFrame } from '@/components/widgets/WidgetFrame.js';
+import { WidgetFrame } from '@/blocks/widgets/index.js';
 import { ScmResultCard } from '@/components/scm/ScmResultCard.js';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
 import { Composer, type ComposerAttachment } from '@/blocks/composer/index.js';
@@ -28,13 +27,22 @@ import { ChatMessageSkeleton } from '@/components/Skeleton.js';
 import { Dock, useDockOpen, type DockRegistry } from '@/blocks/dock/index.js';
 import { ChangesDockContext, ChangesDockPanel } from '@/blocks/changes/ChangesDockPanel.js';
 import type { ChangesPanelProps } from '@/blocks/changes/ChangesPanel.js';
-import { WidgetHost } from '@/components/widgets/WidgetHost.js';
 import { parseWidgetTabId } from '@/lib/widgetTabId.js';
-import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
 import { Loader2, Bot, User, Archive, ArrowDown, PauseCircle, GitFork } from 'lucide-react';
 import { defaultDockTab, dockAddableTabTypes, dockTabTypes } from '@/platform/surfaceCapabilities.js';
 import { Button } from '@/components/ui/index.js';
-import { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS, ChatTranscript, useChatView } from '@/features/chat/index.js';
+import {
+  CHAT_DOCK_KEYS,
+  CHAT_DOCK_TAB_CAPS,
+  ChatComputerDockPanel,
+  ChatDockContext,
+  ChatPlanDockPanel,
+  ChatTasksDockPanel,
+  ChatTranscript,
+  ChatWidgetDockPanel,
+  useChatView,
+  type ChatDockContextValue,
+} from '@/features/chat/index.js';
 
 // Right-pane-only surfaces, code-split out of the chat route chunk. They pull
 // in the two heaviest dependency trees in the app (xterm + its WebGL addon;
@@ -42,9 +50,6 @@ import { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS, ChatTranscript, useChatView } from 
 // keeping them static delayed the composer and transcript on every chat open.
 const TerminalPanel = React.lazy(() =>
   import('@/components/terminal/TerminalPanel.js').then((m) => ({ default: m.TerminalPanel })),
-);
-const ComputerPanel = React.lazy(() =>
-  import('@/components/chat/ComputerPanel.js').then((m) => ({ default: m.ComputerPanel })),
 );
 
 function PanelFallback() {
@@ -352,11 +357,7 @@ export function ChatPage() {
         pinned: true,
         disabled: !chat?.workspaceId,
         disabledReason: 'No workspace for this chat',
-        render: (ctx) => (
-          <React.Suspense fallback={<PanelFallback />}>
-            <ComputerPanel embedded workspaceId={chat?.workspaceId} active={ctx.active} />
-          </React.Suspense>
-        ),
+        Component: ChatComputerDockPanel,
       },
       widget: {
         label: 'Widget',
@@ -372,20 +373,7 @@ export function ChatPage() {
           const instanceId = parseWidgetTabId(id);
           return instanceId ? widgetLabel(instanceId) : 'Widgets';
         },
-        render: (ctx) => {
-          if (!sessionId) {
-            return <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No active session.</div>;
-          }
-          const instanceId = parseWidgetTabId(ctx.id);
-          return instanceId ? (
-            <WidgetHost sessionId={sessionId} instanceId={instanceId} />
-          ) : (
-            // Unbound tab (added from "+", or stored before widgets got
-            // their own tabs) — a picker, so it never mounts a second live
-            // copy of a widget that already has a tab.
-            <WidgetHost sessionId={sessionId} onOpenWidget={openWidgetTab} />
-          );
-        },
+        Component: ChatWidgetDockPanel,
       },
       tasks: {
         label: 'Tasks',
@@ -395,7 +383,7 @@ export function ChatPage() {
         // Live count of workers running or waiting to start, so the tab says
         // there is something to look at without being opened.
         getTabCount: () => (runningTaskCount > 0 ? runningTaskCount : undefined),
-        render: () => <BackgroundTasksPanel chatId={chatId} />,
+        Component: ChatTasksDockPanel,
       },
       // PLN-01 — the plan document surface. Auto-opens when the agent asks
       // for a review; also addable so a user can revisit an older plan.
@@ -403,12 +391,7 @@ export function ChatPage() {
         label: 'Plan',
         description: 'Review, edit and approve the agent’s implementation plan',
         icon: 'plan',
-        render: () =>
-          chatId ? (
-            <PlanDocumentPanel chatId={chatId} planId={activePlanId} />
-          ) : (
-            <div className="p-4 text-xs text-[var(--color-muted-foreground)]">No chat.</div>
-          ),
+        Component: ChatPlanDockPanel,
       },
     };
     // Only the types this chat has on this surface (Tasks for orchestrators, Computer when enabled …).
@@ -430,8 +413,6 @@ export function ChatPage() {
     messages,
     isOrchestrator,
     runningTaskCount,
-    activePlanId,
-    openWidgetTab,
     widgetTitlesKey,
     changesFocusFile,
   ]);
@@ -453,11 +434,18 @@ export function ChatPage() {
   );
   const requestDockFocus = dock.requestFocus;
   const focusDockTab = useCallback(
-    (type: 'browser' | 'background_tasks') => {
+    (type: 'browser' | 'tasks') => {
       setRightPaneOpen(true);
       requestDockFocus({ type, token: Date.now() });
     },
     [requestDockFocus, setRightPaneOpen],
+  );
+
+  // What the Tasks / Computer / Plan / Widget dock panels read (their
+  // registry `Component`s take only the tab instance).
+  const chatDock = useMemo<ChatDockContextValue>(
+    () => ({ chatId, chat, workspaceId: chat?.workspaceId, sessionId, activePlanId, openWidgetTab }),
+    [chatId, chat, sessionId, activePlanId, openWidgetTab],
   );
 
   // Loading
@@ -491,6 +479,7 @@ export function ChatPage() {
   return (
     <PathRootsContext.Provider value={workspace.pathRoots}>
     <ChangesDockContext.Provider value={changesDockProps}>
+    <ChatDockContext.Provider value={chatDock}>
     <div className="relative flex h-full">
       {/* The right dock (D-27) lays out the main chat column beside it. */}
       <Dock
@@ -560,7 +549,7 @@ export function ChatPage() {
             chat={chat}
             onOpenTasks={() => {
               setRightPaneOpen(true);
-              dock.requestFocus({ type: 'background_tasks', token: Date.now() });
+              dock.requestFocus({ type: 'tasks', token: Date.now() });
             }}
             // D-29: typing is never blocked — while a turn runs, Send is Stop
             // and the draft simply waits (no queue).
@@ -640,6 +629,7 @@ export function ChatPage() {
         chat={chat}
       />
     </div>
+    </ChatDockContext.Provider>
     </ChangesDockContext.Provider>
     </PathRootsContext.Provider>
   );

@@ -12,7 +12,11 @@ export const chatsRoutes: RouteObject[] = [
   ),
   defineRoute(
     'chats/:id',
-    () => import('@/pages/ChatPage.js').then((m) => ({ default: m.ChatPage })),
+    // The Tasks-panel section registrations (03 §1.5) load with the page.
+    () =>
+      Promise.all([import('@/app/registries/tasksSections.js'), import('@/pages/ChatPage.js')]).then(([, m]) => ({
+        default: m.ChatPage,
+      })),
     { legacyHeader: true, nav: 'chats', title: 'Chat' },
   ),
 ];

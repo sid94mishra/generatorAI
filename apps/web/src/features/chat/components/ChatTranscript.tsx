@@ -50,7 +50,7 @@ export interface ChatTranscriptProps {
   renderWidget?: (block: WidgetBlock, sessionId: string) => ReactNode;
   renderScmResult?: (block: ScmResultBlock) => ReactNode;
   /** Focus a dock tab (browser, background tasks). */
-  focusDockTab?: (type: 'browser' | 'background_tasks') => void;
+  focusDockTab?: (type: 'browser' | 'tasks') => void;
 }
 
 /** D-33 fallback: finished turns before the last N start collapsed. */
@@ -204,7 +204,7 @@ export function ChatTranscript({
       onOpenShell: openAgentShell,
       onOpenPlan: openPlanTab,
       ...(focusDockTab
-        ? { onOpenBrowser: () => focusDockTab('browser'), onOpenTasks: () => focusDockTab('background_tasks') }
+        ? { onOpenBrowser: () => focusDockTab('browser'), onOpenTasks: () => focusDockTab('tasks') }
         : {}),
       onApprovePlan: approvePlan,
       onRequestPlanChanges: requestPlanChanges,

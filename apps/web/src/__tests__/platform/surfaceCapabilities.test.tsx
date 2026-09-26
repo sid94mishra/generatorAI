@@ -36,7 +36,7 @@ import {
 } from '@/platform/surfaceCapabilities.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { PlanReadyCard as PlanCard, QuestionCard } from '@/blocks/transcript/index.js';
-import { WidgetFrame } from '@/components/widgets/WidgetFrame.js';
+import { WidgetFrame } from '@/blocks/widgets/index.js';
 import { openMultiplexedStream, resetMuxStreamForTests } from '@/platform/muxStream.js';
 import type { PlanBlock, QuestionBlock, WidgetBlock } from '@/stores/streamStore.js';
 

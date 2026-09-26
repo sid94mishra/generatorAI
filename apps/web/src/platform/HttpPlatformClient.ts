@@ -227,6 +227,48 @@ export interface ComputerRuntime {
   sessionActive: boolean;
 }
 
+/** `POST /api/workspaces/:id/computer/recording` (start | stop | status). */
+export interface ComputerRecordingState {
+  recording: boolean;
+  outputDir?: string;
+  videoPath?: string;
+  detail?: string;
+  turnCount?: number;
+  hasCast?: boolean;
+  cast?: { active: boolean; startedAt?: number; detail?: string };
+  refusal?: { code: string; message: string };
+}
+
+export type ComputerReplayFrameKind = 'before' | 'click' | 'after';
+
+/** One entry of `GET …/computer/recording/turns`: a turn and the captures taken during it. */
+export interface ComputerReplayTurn {
+  turn: string;
+  tool: string | null;
+  at: string;
+  frames: string[];
+}
+
+/** One row of `GET …/computer/activity` (oldest first). */
+export interface ComputerActivityRow {
+  action: string;
+  appLabel: string;
+  target: string | null;
+  path: string | null;
+  verified: boolean;
+  refusalCode: string | null;
+  artifactId: string | null;
+  createdAt: string;
+}
+
+/** One row of `GET …/computer/frames` (newest first). */
+export interface ComputerFrameSummary {
+  id: string;
+  createdAt: string;
+  width?: number;
+  height?: number;
+}
+
 /** Response of `GET|PUT /api/system/computer-use`. */
 export interface ComputerUseSettings {
   enabled: boolean;
@@ -2572,6 +2614,59 @@ export class HttpPlatformClient implements IPlatformClient {
       `${this.baseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/computer/runtime`,
       { method: 'POST', body: JSON.stringify({ action }) },
     );
+  }
+
+  // ── Computer preview: recording, replay, activity, frames (P4-11) ──
+  async computerRecording(
+    workspaceId: string,
+    action: 'start' | 'stop' | 'status',
+    opts: { windowTitle?: string; screenVideo?: boolean } = {},
+  ): Promise<ComputerRecordingState> {
+    return apiFetch<ComputerRecordingState>(this.computerUrl(workspaceId, 'recording'), {
+      method: 'POST',
+      body: JSON.stringify({ action, ...opts }),
+    });
+  }
+
+  async listComputerRecordingTurns(workspaceId: string): Promise<ComputerReplayTurn[]> {
+    const body = await apiFetch<{ turns?: ComputerReplayTurn[] }>(this.computerUrl(workspaceId, 'recording/turns'), {
+      cache: 'no-store',
+    });
+    return body?.turns ?? [];
+  }
+
+  async listComputerActivity(workspaceId: string): Promise<ComputerActivityRow[]> {
+    const body = await apiFetch<{ entries?: ComputerActivityRow[] }>(this.computerUrl(workspaceId, 'activity'), {
+      cache: 'no-store',
+    });
+    return body?.entries ?? [];
+  }
+
+  async listComputerFrames(workspaceId: string): Promise<ComputerFrameSummary[]> {
+    const body = await apiFetch<{ frames?: ComputerFrameSummary[] }>(this.computerUrl(workspaceId, 'frames'), {
+      cache: 'no-store',
+    });
+    return body?.frames ?? [];
+  }
+
+  /** One window capture (PNG) by artifact id. */
+  async getComputerFrame(workspaceId: string, artifactId: string): Promise<Blob> {
+    const response = await getAuthRuntime().fetch(
+      this.computerUrl(workspaceId, `frames/${encodeURIComponent(artifactId)}`),
+      { cache: 'no-store' },
+    );
+    if (!response.ok) throw new ApiError(response.status, `HTTP_${String(response.status)}`, 'Frame not available');
+    return response.blob();
+  }
+
+  /** `src` for a replay turn frame or the screen-cast video (media elements load it themselves). */
+  computerMediaUrl(
+    workspaceId: string,
+    media: { turn: string; kind: ComputerReplayFrameKind } | { video: number },
+  ): string {
+    return 'video' in media
+      ? this.computerUrl(workspaceId, `recording/video?v=${String(media.video)}`)
+      : this.computerUrl(workspaceId, `recording/turns/${encodeURIComponent(media.turn)}/${media.kind}`);
   }
 
   // ── Available Artifacts (system + project merged) ──

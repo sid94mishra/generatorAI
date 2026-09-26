@@ -7,3 +7,25 @@ export { CHAT_PAGE_SIZE, type ChatPromptHistoryEntry } from './hooks/useChatTran
 export type { TurnUsage } from './hooks/useChatStreamState.js';
 export type { PlanImplementAction } from './hooks/useChatGates.js';
 export { ChatTranscript, type ChatTranscriptProps } from './components/ChatTranscript.js';
+
+// Dock panels (P4-11): Tasks (+ its section registry, the D-35 extension point),
+// Computer, Plan and Widget as dock-registry Components.
+export {
+  ChatComputerDockPanel,
+  ChatDockContext,
+  ChatPlanDockPanel,
+  ChatTasksDockPanel,
+  ChatWidgetDockPanel,
+  type ChatDockContextValue,
+} from './dock/chatDockPanels.js';
+export { TasksPanel, type TasksPanelProps } from './dock/TasksPanel.js';
+export {
+  listTasksSections,
+  registerTasksSection,
+  useTasksSections,
+  visibleTasksSections,
+  type RegisterTasksSectionOptions,
+  type TasksSectionContext,
+  type TasksSectionDefinition,
+} from './dock/tasks/tasksSections.js';
+export { BackgroundTasksSection, useBackgroundTasksCount } from './dock/tasks/BackgroundTasksSection.js';
