@@ -2,9 +2,12 @@
 // validateInvocation — everything checked before a run row is written
 // (P04 WP-4.2; G4 §1.3.2 step 3):
 //
-//   scopes          (PD-6) a script target needs `write:workflows`; a
-//                   bypass run off loopback and an in-place codebase need
-//                   `admin:settings`
+//   scopes          (PD-6) a script target needs `write:workflows`; after
+//                   resolution, a bypass run and an in-place mount need
+//                   `admin:settings` whatever set them (the request, a
+//                   profile, a fork's source, the definition's lifecycle or
+//                   the posture); loopback waives bypass, except for an
+//                   agent principal
 //   variables       typed against the definition (moved out of the run
 //                   facade); `__*` names never pass (zod already refused them)
 //   stage overrides the keys exist
@@ -20,7 +23,10 @@
 //                   a sub-workflow's child is published and its outputs
 //                   still fit (`subworkflow-output-drift`); several items of
 //                   a shared map writing at once is a warning
-//   uploads         staged, unexpired, unused, of the declared category
+//   fork            takes no codebases, stage overrides, model/harness/effort
+//                   or budget (it runs as its source did)
+//   uploads         staged by the caller, unexpired, unused, of the declared
+//                   category
 // ────────────────────────────────────────────────────────────────
 
 import type { WorkflowRun } from '@generatorai/shared';
@@ -111,7 +117,11 @@ export function withVariableDefaults(graph: WorkflowGraph, provided: Record<stri
   return out;
 }
 
-/** PD-6 / design decision 5: what the request asks for beyond `exec:agent` + `read:workflows`. */
+/**
+ * PD-6 / design decision 5: what the request asks for beyond `exec:agent` +
+ * `read:workflows`, before resolution. The mode and the mounts are checked
+ * on what resolution made of them (`resolvedScopeIssues`).
+ */
 export function checkInvocationScopes(req: InvocationRequest, ctx: InvocationContext): void {
   const scopes = new Set(ctx.principal.scopes);
   if (ctx.principal.kind === 'system') return;
@@ -120,8 +130,30 @@ export function checkInvocationScopes(req: InvocationRequest, ctx: InvocationCon
   };
   for (const s of ['exec:agent', 'read:workflows']) need(s, 'Starting a workflow run');
   if (req.target.kind === 'script') need('write:workflows', 'Running a workflow script (it materializes a definition)');
-  if (req.overrides?.permissionMode === 'bypassPermissions' && !ctx.loopback) need('admin:settings', 'A bypassPermissions run off loopback');
-  if (req.codebases?.some((c) => c.mode === 'in_place')) need('admin:settings', 'Editing a codebase in place');
+}
+
+/**
+ * PD-6 on what the run will do, whatever set it (CONVINV-R1): a bypass run
+ * and an in-place mount need `admin:settings`. A definition's in-place
+ * lifecycle counts too: `useWorktree: false` is not an admin-gated field, so
+ * it cannot stand in for the scope. Loopback waives bypass for a person or
+ * an in-process caller, never for an agent principal (AGENT-R3).
+ */
+function resolvedScopeIssues(
+  ctx: InvocationContext,
+  mode: RunPermissionMode,
+  codebases: ReadonlyArray<{ alias: string; mode: 'worktree' | 'in_place' }>,
+): InvocationIssue[] {
+  if (ctx.principal.kind === 'system' || ctx.principal.scopes.includes('admin:settings')) return [];
+  const out: InvocationIssue[] = [];
+  const agent = ctx.trigger.kind === 'external_agent';
+  if (mode === 'bypassPermissions' && (agent || !ctx.loopback)) {
+    const why = agent ? 'A bypassPermissions run started by an agent' : 'A bypassPermissions run off loopback';
+    out.push(issue('forbidden-scope', ['overrides', 'permissionMode'], `${why} needs the admin:settings scope`));
+  }
+  const inPlace = codebases.filter((c) => c.mode === 'in_place').map((c) => c.alias);
+  if (inPlace.length > 0) out.push(issue('forbidden-scope', ['codebases'], `Editing ${inPlace.join(', ')} in place needs the admin:settings scope`));
+  return out;
 }
 
 export interface ValidationDeps {
@@ -137,6 +169,8 @@ export interface ValidationDeps {
   subworkflows?: ((graph: WorkflowGraph, projectId: string | null) => Promise<InvocationIssue[]>) | undefined;
   /** An authoring plan (P06) reports a missing required codebase as a warning instead of refusing. */
   codebaseRequired?: 'error' | 'warning' | undefined;
+  /** A plan reports what needs `admin:settings` as a warning; a start refuses it. */
+  resolvedScopes?: 'error' | 'warning' | undefined;
   now: () => number;
 }
 
@@ -181,6 +215,22 @@ export async function validateInvocation(
 
   // ── variables (a fork validates the merged set itself) ──
   if (!target.fork) issues.push(...variableIssues(graph, variables, {}));
+
+  // ── a fork runs as its source did: it takes no other inputs (CONVINV-R16) ──
+  if (target.fork) {
+    const o = req.overrides ?? {};
+    const taken: Array<[unknown, string[]]> = [
+      [req.codebases, ['codebases']],
+      [req.stageOverrides, ['stageOverrides']],
+      [o.model, ['overrides', 'model']],
+      [o.harnessType, ['overrides', 'harnessType']],
+      [o.reasoningEffort, ['overrides', 'reasoningEffort']],
+      [req.budget, ['budget']],
+    ];
+    for (const [value, path] of taken) {
+      if (value !== undefined) issues.push(issue('fork-option', path, `A fork runs with its source run's ${path.join('.')}; it cannot be set on a fork`));
+    }
+  }
 
   // ── stage overrides ──
   const keys = new Set(graph.stages.map((s) => s.key));
@@ -280,8 +330,10 @@ export async function validateInvocation(
       for (const [i, u] of uploads.entries()) {
         const rec = await deps.uploads.get(u.uploadId);
         const path = ['uploads', i, 'uploadId'];
-        if (!rec) issues.push(issue('unknown-upload', path, `Upload ${u.uploadId} does not exist`));
-        else if (rec.consumedByRunId) issues.push(issue('upload-used', path, `Upload ${u.uploadId} was used by another run`));
+        // Another principal's upload answers as unknown (CONVINV-R19).
+        if (!rec || (ctx.principal.kind !== 'system' && rec.principalId !== ctx.principal.id)) {
+          issues.push(issue('unknown-upload', path, `Upload ${u.uploadId} does not exist`));
+        } else if (rec.consumedByRunId) issues.push(issue('upload-used', path, `Upload ${u.uploadId} was used by another run`));
         else if (rec.expiresAt.getTime() < deps.now()) issues.push(issue('upload-expired', path, `Upload ${u.uploadId} expired`));
         else if (rec.category !== u.category) issues.push(issue('upload-category', path, `Upload ${u.uploadId} is a ${rec.category} file, not ${u.category}`));
       }
@@ -295,14 +347,23 @@ export async function validateInvocation(
   // ── permission ceiling ──
   const requestedMode = overridesIn.permissionMode;
   const ceiling = ctx.callerPermissionCeiling;
-  if (requestedMode && ceiling && PERMISSION_ORDER[requestedMode] > PERMISSION_ORDER[ceiling]) {
-    throw new InvocationError('PERMISSION_ESCALATION', `The caller may grant at most '${ceiling}'; '${requestedMode}' was asked for`, [
-      issue('permission-escalation', ['overrides', 'permissionMode'], `above the caller ceiling '${ceiling}'`),
-    ]);
-  }
+  // A fork's inherited mode is explicit too, and the ceiling holds it (CONVINV-R1).
   const explicit = requestedMode ?? (target.fork?.permissionMode as RunPermissionMode | undefined);
+  if (explicit && ceiling && PERMISSION_ORDER[explicit] > PERMISSION_ORDER[ceiling]) {
+    const message = requestedMode
+      ? `The caller may grant at most '${ceiling}'; '${explicit}' was asked for`
+      : `The caller may grant at most '${ceiling}'; the forked run ran under '${explicit}' (pass overrides.permissionMode)`;
+    throw new InvocationError('PERMISSION_ESCALATION', message, [issue('permission-escalation', ['overrides', 'permissionMode'], `above the caller ceiling '${ceiling}'`)]);
+  }
   const declared = graph.workflow.session.permissionMode as RunPermissionMode | undefined;
   const effectivePermissionMode = explicit ?? minMode(declared ?? deps.posture(), ceiling);
+
+  // ── PD-6 on the resolved mode and mounts ──
+  const scopeIssues = resolvedScopeIssues(ctx, effectivePermissionMode, codebases);
+  if (scopeIssues.length > 0) {
+    if (deps.resolvedScopes === 'warning') warnings.push(...scopeIssues.map((i) => ({ ...i, severity: 'warning' as const })));
+    else throw new InvocationError('FORBIDDEN_SCOPE', scopeIssues.map((i) => i.message).join('; '), scopeIssues);
+  }
 
   const runOverrides: NonNullable<WorkflowRun['runOverrides']> = {
     ...(overridesIn.model ? { model: overridesIn.model } : {}),

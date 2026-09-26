@@ -36,7 +36,7 @@ import type { EventBus } from '../events/EventBus.js';
 import { getDefaultChatPermissionMode, resolveTurnPermissionMode } from './agentModePolicy.js';
 import type { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
 import type { CommandResult, RunSupervisor } from './engine/RunSupervisor.js';
-import { validateRunVariables } from './workflow-invocation/validateInvocation.js';
+import { minMode, validateRunVariables } from './workflow-invocation/validateInvocation.js';
 import { checkPermissionGating, runPermissionMode } from './session/permissionSource.js';
 import { ComposeError } from './session/types.js';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
@@ -57,6 +57,11 @@ function forkSystemVars(source: RunSystemVars | undefined, reuse: boolean): RunS
   // Not the source's lifecycle journal, staged uploads, sandbox or step results: the fork's own lifecycle writes those.
   const dropped = new Set<keyof RunSystemVars>(['lifecycle', 'uploads', 'sandbox', 'preprocessing', 'postProcessing']);
   return Object.fromEntries(Object.entries(sv).filter(([k]) => !dropped.has(k as keyof RunSystemVars))) as RunSystemVars;
+}
+
+/** System values whose trigger ceiling is the stricter of theirs and `ceiling`. */
+function withCeiling(sv: RunSystemVars, ceiling: WorkflowRunPermissionMode | undefined): RunSystemVars {
+  return ceiling ? { ...sv, triggerPermissionMode: minMode(ceiling, sv.triggerPermissionMode) } : sv;
 }
 
 /** A new run's record, as the invocation resolved it (trusted: nothing here is validated again). */
@@ -222,7 +227,7 @@ export class WorkflowRunService {
   async forkRun(
     sourceRunId: string,
     request: ForkRunRequest = {},
-    meta: { trigger?: WorkflowRun['trigger']; invocationId?: string; name?: string } = {},
+    meta: { trigger?: WorkflowRun['trigger']; invocationId?: string; name?: string; permissionCeiling?: WorkflowRunPermissionMode } = {},
   ): Promise<WorkflowRun> {
     const opts = ForkRunRequestSchema.parse(request);
     return withSpan('core.workflow', 'workflow.forkRun', async (span) => {
@@ -292,7 +297,8 @@ export class WorkflowRunService {
         ...(source.stageOverrides ? { stageOverrides: source.stageOverrides } : {}),
         ...(source.codebaseSelection !== undefined ? { codebaseSelection: source.codebaseSelection } : {}),
         ...(source.budget ? { budget: source.budget } : {}),
-        systemVars: forkSystemVars(source.systemVars, reuse),
+        // The forking caller's ceiling holds the fork too (CONVINV-R1): the stricter of it and the source's.
+        systemVars: withCeiling(forkSystemVars(source.systemVars, reuse), meta.permissionCeiling),
         ...(reuse && source.workspaceId ? { workspaceId: source.workspaceId } : {}),
         // A fork is a sibling of its source in the run tree: same parent, same root.
         ...(source.parentRunId ? { parentRunId: source.parentRunId } : {}),

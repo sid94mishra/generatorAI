@@ -10,7 +10,10 @@
 //      `body.idempotencyKey`, else a key derived from an in-process trigger
 //      (`chat:<chat>:<tool call>`, `stage:<stage run>:<tool call>`,
 //      `auto:<execution>:<iteration>:<attempt>`); a replay answers the
-//      same run, a replay with another body is a 409 (24 h)
+//      same run, a replay with another body is a 409 (24 h); a claim a
+//      crashed process left answers the run it created, or is freed after
+//      a few minutes. Files of a multipart start are staged by the
+//      execution that holds the claim, and hashed by name and content.
 //   3. resolve the target: a definition (drafts only as a user's test
 //      run), a script (materialized once per content), a fork of a terminal
 //      run (`forkRun`)
@@ -93,6 +96,17 @@ export interface WorkflowInvocationDeps {
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
 const UPLOAD_TTL_MS = 60 * 60 * 1000;
 const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+/** All the files of one staging (CONVINV-R19). */
+export const MAX_UPLOAD_TOTAL_BYTES = 50 * 1024 * 1024;
+/** A claim still pending after this long was left by a crashed process (CONVINV-R7). */
+const STALE_CLAIM_MS = 5 * 60 * 1000;
+
+/** A file sent with a start (a multipart invocation). */
+export interface InvocationFile {
+  category: InvocationUploadCategory;
+  name: string;
+  data: Uint8Array;
+}
 
 /** A target resolved for validation and planning. */
 interface ResolvedTarget {
@@ -120,17 +134,31 @@ export class WorkflowInvocationService {
 
   // ── invoke ───────────────────────────────────────────────────
 
-  /** Start a run. Throws `InvocationError` (one code, the issues behind it). */
-  async invoke(raw: unknown, ctx: InvocationContext): Promise<InvocationResult> {
+  /**
+   * Start a run. Throws `InvocationError` (one code, the issues behind it).
+   * `files` (a multipart start) are staged by the execution that holds the
+   * idempotency claim, so a retry replays instead of staging them again
+   * (CONVINV-R6).
+   */
+  async invoke(raw: unknown, ctx: InvocationContext, files: readonly InvocationFile[] = []): Promise<InvocationResult> {
     const req = parseRequest(raw);
     checkInvocationScopes(req, ctx);
     const key = ctx.idempotencyKey ?? req.idempotencyKey ?? derivedKey(ctx);
-    if (!key || !this.deps.idempotency) return this.execute(req, ctx, key);
+    if (!key || !this.deps.idempotency) return this.executeWithFiles(req, ctx, key, files);
+    const runKey = runKeyOf(req, ctx.principal.id, key);
     try {
       const outcome = await this.deps.idempotency.run(
-        { key, scope: `invoke:${ctx.principal.id}`, ttlMs: INVOCATION_IDEMPOTENCY_TTL_MS, requestHash: requestHash(req) },
+        {
+          key,
+          scope: `invoke:${ctx.principal.id}`,
+          ttlMs: INVOCATION_IDEMPOTENCY_TTL_MS,
+          requestHash: requestHash(req, files),
+          // A claim a crashed process left (CONVINV-R7): the run it created answers.
+          recover: async () => (await this.deps.runRepo.findByIdempotencyKey(runKey))?.id,
+          staleAfterMs: STALE_CLAIM_MS,
+        },
         async () => {
-          const result = await this.execute(req, ctx, key);
+          const result = await this.executeWithFiles(req, ctx, key, files);
           return { executionId: result.runId, value: result };
         },
       );
@@ -150,7 +178,7 @@ export class WorkflowInvocationService {
     const req = parseRequest(raw);
     checkInvocationScopes(req, ctx);
     const target = await this.resolve(req, ctx, { materialize: false });
-    const v = await this.validate(req, ctx, target);
+    const v = await this.validate(req, ctx, target, { resolvedScopes: 'warning' });
     return this.planOf(target, v);
   }
 
@@ -163,8 +191,20 @@ export class WorkflowInvocationService {
     const req = parseRequest({ ...request, target: { kind: 'definition', workflowDefinitionId: '00000000-0000-4000-8000-000000000000' } });
     checkInvocationScopes(req, ctx);
     const resolved: ResolvedTarget = { workflowDefinitionId: target.workflowDefinitionId, definitionVersionId: null, graph: target.graph };
-    const v = await this.validate(req, ctx, resolved, { codebaseRequired: 'warning' });
+    const v = await this.validate(req, ctx, resolved, { codebaseRequired: 'warning', resolvedScopes: 'warning' });
     return this.planOf(resolved, v);
+  }
+
+  /** Stage the files, then execute with them; a refused start takes its staged files with it. */
+  private async executeWithFiles(req: InvocationRequest, ctx: InvocationContext, key: string | undefined, files: readonly InvocationFile[]): Promise<InvocationResult> {
+    if (files.length === 0) return this.execute(req, ctx, key);
+    const staged = await this.stageUploads(files, ctx.principal.id);
+    try {
+      return await this.execute({ ...req, uploads: [...(req.uploads ?? []), ...staged.map((u) => ({ uploadId: u.uploadId, category: u.category }))] }, ctx, key);
+    } catch (err) {
+      await this.dropUploads(staged.map((u) => u.uploadId));
+      throw err;
+    }
   }
 
   private async execute(req: InvocationRequest, ctx: InvocationContext, key: string | undefined): Promise<InvocationResult> {
@@ -173,7 +213,7 @@ export class WorkflowInvocationService {
     const invocationId = randomUUID();
     const trigger: InvocationTrigger =
       req.target.kind === 'fork' ? { kind: 'fork', sourceRunId: req.target.sourceRunId, principalId: ctx.principal.id } : ctx.trigger;
-    const runKey = key ? `invoke:${ctx.principal.id}:${key}` : undefined;
+    const runKey = key ? runKeyOf(req, ctx.principal.id, key) : undefined;
 
     let run: WorkflowRun;
     if (req.target.kind === 'fork') {
@@ -186,13 +226,16 @@ export class WorkflowInvocationService {
             definition: req.target.definition,
             workspace: req.target.workspace,
             ...(Object.keys(req.variables).length > 0 ? { variablesOverride: req.variables } : {}),
+            ...(key ? { idempotencyKey: forkKeyOf(ctx.principal.id, key) } : {}),
             start: false,
           },
-          { trigger, invocationId, ...(v.name ? { name: v.name } : {}) },
+          { trigger, invocationId, ...(v.name ? { name: v.name } : {}), ...(v.permissionCeiling ? { permissionCeiling: v.permissionCeiling } : {}) },
         )
         .catch((err: unknown) => {
           throw toInvocationError(err);
         });
+      // The fork this key already made (an unclaimed re-drive): answer it, never start it twice.
+      if (run.status !== 'created') return this.resultFor(run, true);
       if (v.permissionMode) await this.deps.runs.setPermissionMode(run.id, v.permissionMode);
     } else {
       run = await this.deps.runs.createRun({
@@ -330,7 +373,7 @@ export class WorkflowInvocationService {
         const graph = scriptGraph(t.scriptId, script.graph, projectId);
         const hash = canonicalGraph(graph).hash.slice(0, 16);
         if (!opts.materialize) {
-          const existing = this.scriptDefinitions.get(hash) ?? (await this.findScriptDefinition(hash));
+          const existing = await this.knownScriptDefinition(hash);
           return { workflowDefinitionId: existing ?? `script:${t.scriptId}`, definitionVersionId: null, graph, profile, script: { id: t.scriptId, graph, hash } };
         }
         const definitionId = await this.materializeScript(graph, hash);
@@ -353,7 +396,7 @@ export class WorkflowInvocationService {
 
   /** Materialize a script's graph once per content: a published definition tagged with the content hash. */
   private async materializeScript(graph: WorkflowGraph, hash: string): Promise<string> {
-    const known = this.scriptDefinitions.get(hash) ?? (await this.findScriptDefinition(hash));
+    const known = await this.knownScriptDefinition(hash);
     if (known) {
       this.scriptDefinitions.set(hash, known);
       return known;
@@ -364,21 +407,48 @@ export class WorkflowInvocationService {
     return record.id;
   }
 
+  /** The definition a script's content was materialized as, still holding that content. */
+  private async knownScriptDefinition(hash: string): Promise<string | undefined> {
+    const cached = this.scriptDefinitions.get(hash);
+    if (cached && (await this.isScriptDefinition(cached, hash))) return cached;
+    return this.findScriptDefinition(hash);
+  }
+
   private async findScriptDefinition(hash: string): Promise<string | undefined> {
     let cursor: string | undefined;
     for (let page = 0; page < 20; page += 1) {
       const res = await this.deps.definitions.list({ limit: 200, ...(cursor ? { cursor } : {}) });
-      const hit = res.items.find((d) => d.status === 'published' && d.tags.includes(`script-hash:${hash}`));
-      if (hit) return hit.id;
+      for (const d of res.items) {
+        if (d.status === 'published' && d.tags.includes(`script-hash:${hash}`) && (await this.isScriptDefinition(d.id, hash))) return d.id;
+      }
       if (!res.nextCursor) return undefined;
       cursor = res.nextCursor;
     }
     return undefined;
   }
 
-  private validate(req: InvocationRequest, ctx: InvocationContext, target: ResolvedTarget, opts: { codebaseRequired?: 'error' | 'warning' } = {}): Promise<ValidatedInvocation> {
+  /**
+   * The tag alone proves nothing: anyone may tag a definition, and a person
+   * may edit and republish a materialized one. It is the script's only when
+   * its current published version, without the tag, IS the script's graph.
+   */
+  private async isScriptDefinition(id: string, hash: string): Promise<boolean> {
+    const record = await this.deps.definitions.get(id).catch(() => null);
+    if (!record || record.status !== 'published' || !record.currentVersionId || record.archivedAt) return false;
+    const graph = await this.deps.versions.get(record.currentVersionId);
+    const untagged = { ...graph, workflow: { ...graph.workflow, tags: graph.workflow.tags.filter((t) => t !== `script-hash:${hash}`) } };
+    return canonicalGraph(untagged).hash.slice(0, 16) === hash;
+  }
+
+  private validate(
+    req: InvocationRequest,
+    ctx: InvocationContext,
+    target: ResolvedTarget,
+    opts: { codebaseRequired?: 'error' | 'warning'; resolvedScopes?: 'error' | 'warning' } = {},
+  ): Promise<ValidatedInvocation> {
     return validateInvocation(req, ctx, target, {
       ...(opts.codebaseRequired ? { codebaseRequired: opts.codebaseRequired } : {}),
+      ...(opts.resolvedScopes ? { resolvedScopes: opts.resolvedScopes } : {}),
       codebases: this.deps.codebases,
       uploads: this.deps.uploads,
       models: this.deps.models,
@@ -430,6 +500,10 @@ export class WorkflowInvocationService {
   ): Promise<Array<{ uploadId: string; category: InvocationUploadCategory; name: string }>> {
     const { uploads, uploadsDir } = this.deps;
     if (!uploads || !uploadsDir) throw new InvocationError('VALIDATION_ERROR', 'Uploads are not available in this process');
+    const total = files.reduce((n, f) => n + f.data.byteLength, 0);
+    if (total > MAX_UPLOAD_TOTAL_BYTES) {
+      throw new InvocationError('VALIDATION_ERROR', `The files add up to more than ${MAX_UPLOAD_TOTAL_BYTES / (1024 * 1024)} MB`, [issue('upload-size', ['files'], 'too large in total')]);
+    }
     const out: Array<{ uploadId: string; category: InvocationUploadCategory; name: string }> = [];
     for (const [i, file] of files.entries()) {
       let name: string;
@@ -465,6 +539,18 @@ export class WorkflowInvocationService {
       out.push({ uploadId, category: file.category, name });
     }
     return out;
+  }
+
+  /** Remove staged uploads (a start that was refused after staging them). */
+  private async dropUploads(ids: readonly string[]): Promise<void> {
+    const { uploads } = this.deps;
+    if (!uploads) return;
+    for (const id of ids) {
+      const rec = await uploads.get(id).catch(() => null);
+      if (!rec || rec.consumedByRunId) continue;
+      await fs.rm(path.dirname(rec.path), { recursive: true, force: true }).catch(() => undefined);
+      await uploads.delete(id).catch(() => undefined);
+    }
   }
 
   /** Remove staged uploads no run took within their TTL. */
@@ -572,9 +658,24 @@ function parseRequest(raw: unknown): InvocationRequest {
   throw new InvocationError('VALIDATION_ERROR', `Invalid invocation request: ${issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; ')}`, issues);
 }
 
-/** A person started it (a paired device or the local owner): the only principals that may test-run a draft. */
+/**
+ * A person started it: the only callers that may test-run a draft. The
+ * route derives a `user` trigger from the device platform (an MCP device
+ * is an agent, PD-14), so the trigger says it; in-process callers never
+ * carry `user`.
+ */
 function isPersonPrincipal(ctx: InvocationContext): boolean {
-  return ctx.principal.kind === 'device' || ctx.principal.kind === 'local';
+  return ctx.trigger.kind === 'user' && (ctx.principal.kind === 'device' || ctx.principal.kind === 'local');
+}
+
+/** The run row's idempotency key: what a re-drive after a crash finds the run by (CONVINV-R7). */
+function runKeyOf(req: InvocationRequest, principalId: string, key: string): string {
+  return req.target.kind === 'fork' ? `fork:${req.target.sourceRunId}:${forkKeyOf(principalId, key)}` : `invoke:${principalId}:${key}`;
+}
+
+/** A fork's own key (`forkRun` prefixes it with `fork:<source>:`), bounded in length. */
+function forkKeyOf(principalId: string, key: string): string {
+  return createHash('sha256').update(`invoke:${principalId}:${key}`).digest('hex').slice(0, 40);
 }
 
 /** The key an in-process caller that may retry gets without asking (G4 §1.3.5). */
@@ -586,8 +687,12 @@ function derivedKey(ctx: InvocationContext): string | undefined {
   return undefined;
 }
 
-/** A stable hash of what the request asks for (the key and the client label are not part of it). */
-function requestHash(req: InvocationRequest): string {
+/**
+ * A stable hash of what the request asks for (the key and the client label
+ * are not part of it). Files sent with it count by category, name and
+ * content, never by the upload ids staging gives them.
+ */
+function requestHash(req: InvocationRequest, files: readonly InvocationFile[] = []): string {
   const rest = Object.fromEntries(Object.entries(req).filter(([k]) => k !== 'idempotencyKey' && k !== 'client'));
   const stable = (v: unknown): unknown =>
     Array.isArray(v)
@@ -595,7 +700,9 @@ function requestHash(req: InvocationRequest): string {
       : v && typeof v === 'object'
         ? Object.fromEntries(Object.keys(v as object).sort().map((k) => [k, stable((v as Record<string, unknown>)[k])]))
         : v;
-  return createHash('sha256').update(JSON.stringify(stable(rest))).digest('hex');
+  const h = createHash('sha256').update(JSON.stringify(stable(rest)));
+  for (const f of files) h.update(`\0${f.category}\0${f.name}\0${createHash('sha256').update(f.data).digest('hex')}`);
+  return h.digest('hex');
 }
 
 /** A script's graph as the definition it materializes to. */

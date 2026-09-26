@@ -31,7 +31,7 @@ export class DrizzleIdempotencyKeyRepository {
    * Callers should first invoke {@link sweepExpired} (or call the periodic
    * sweeper) so stale entries don't block fresh writes.
    */
-  async claim(record: IdempotencyKeyRecord): Promise<{ executionId: string; replay: boolean; requestHash: string | null }> {
+  async claim(record: IdempotencyKeyRecord): Promise<{ executionId: string; replay: boolean; requestHash: string | null; createdAt?: Date }> {
     try {
       // Best-effort: opportunistically remove the same (key, scope) if it
       // is already expired. `INSERT OR IGNORE` alone can't distinguish
@@ -69,7 +69,7 @@ export class DrizzleIdempotencyKeyRepository {
         .limit(1);
       const row = existing[0];
       if (row) {
-        return { executionId: row.executionId, replay: true, requestHash: row.requestHash ?? null };
+        return { executionId: row.executionId, replay: true, requestHash: row.requestHash ?? null, createdAt: row.createdAt };
       }
       // No row on read either — genuine storage failure.
       throw new StorageError(
@@ -93,9 +93,17 @@ export class DrizzleIdempotencyKeyRepository {
       .where(and(eq(idempotencyKeys.key, key), eq(idempotencyKeys.scope, scope)));
   }
 
-  /** Drop a claim whose work failed, so the key can be used again. */
-  async release(key: string, scope: string): Promise<void> {
-    await this.db.delete(idempotencyKeys).where(and(eq(idempotencyKeys.key, key), eq(idempotencyKeys.scope, scope)));
+  /** Drop a claim whose work failed, so the key can be used again; `createdBefore` drops only a claim that old. */
+  async release(key: string, scope: string, opts: { createdBefore?: Date } = {}): Promise<void> {
+    await this.db
+      .delete(idempotencyKeys)
+      .where(
+        and(
+          eq(idempotencyKeys.key, key),
+          eq(idempotencyKeys.scope, scope),
+          ...(opts.createdBefore ? [lt(idempotencyKeys.createdAt, opts.createdBefore)] : []),
+        ),
+      );
   }
 
   /** Remove all keys past their expiry across all scopes. */

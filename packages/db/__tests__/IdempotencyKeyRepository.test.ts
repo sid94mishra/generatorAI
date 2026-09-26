@@ -44,7 +44,7 @@ describe('DrizzleIdempotencyKeyRepository (Track A3)', () => {
       createdAt: now,
       expiresAt: new Date(now.getTime() + 60_000),
     });
-    expect(replay).toEqual({ executionId: 'exec-1', replay: true, requestHash: null });
+    expect(replay).toMatchObject({ executionId: 'exec-1', replay: true, requestHash: null });
   });
 
   it('treats different scopes with the same key as independent', async () => {
@@ -108,7 +108,7 @@ describe('DrizzleIdempotencyKeyRepository (Track A3)', () => {
       createdAt: new Date(now),
       expiresAt: new Date(now + 60_000),
     });
-    expect(replay).toEqual({ executionId: 'e2', replay: true, requestHash: null });
+    expect(replay).toMatchObject({ executionId: 'e2', replay: true, requestHash: null });
   });
 
   it('updateExecutionId rewrites the stored id for an existing claim', async () => {
@@ -128,7 +128,7 @@ describe('DrizzleIdempotencyKeyRepository (Track A3)', () => {
       createdAt: now,
       expiresAt: new Date(now.getTime() + 60_000),
     });
-    expect(replay).toEqual({ executionId: 'real-42', replay: true, requestHash: null });
+    expect(replay).toMatchObject({ executionId: 'real-42', replay: true, requestHash: null });
   });
 
   it('two concurrent claim() calls only one wins', async () => {

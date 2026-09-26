@@ -14,12 +14,12 @@ export interface IdempotencyClaim {
 }
 
 export interface IIdempotencyKeyStore {
-  /** Insert the claim, or answer the row a live claim already holds (`replay: true`). */
-  claim(record: IdempotencyClaim): Promise<{ executionId: string; replay: boolean; requestHash: string | null }>;
+  /** Insert the claim, or answer the row a live claim already holds (`replay: true`, with when it was claimed). */
+  claim(record: IdempotencyClaim): Promise<{ executionId: string; replay: boolean; requestHash: string | null; createdAt?: Date }>;
   /** Point a claim at the real execution once it exists. */
   updateExecutionId(key: string, scope: string, executionId: string): Promise<void>;
-  /** Drop a claim whose work failed, so the key can be used again. */
-  release(key: string, scope: string): Promise<void>;
+  /** Drop a claim whose work failed, so the key can be used again; `createdBefore` drops it only when it is that old. */
+  release(key: string, scope: string, opts?: { createdBefore?: Date }): Promise<void>;
   sweepExpired(): Promise<number>;
 }
 

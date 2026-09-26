@@ -30,6 +30,7 @@ describe('E2E: Workflow Run API Flow', () => {
       expect(container.workflowInvocationService.invoke).toHaveBeenCalledWith(
         body,
         expect.objectContaining({ trigger: expect.objectContaining({ kind: 'user', client: 'web' }) }),
+        [],
       );
     });
   });
