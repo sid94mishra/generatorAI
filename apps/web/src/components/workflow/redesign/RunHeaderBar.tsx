@@ -35,6 +35,8 @@ interface RunHeaderBarProps {
   onResume?: () => void;
   onCancel?: () => void;
   onRetry?: () => void;
+  /** A retry fork is being started: the button is off so a double click is one run. */
+  retryBusy?: boolean;
   onOpenGraph?: () => void;
   /** Whether the inline DAG graph panel is currently open (drives the button pressed state). */
   graphOpen?: boolean;
@@ -169,7 +171,7 @@ function StatusPill({ status }: { status: RunView['status'] }) {
 }
 
 export const RunHeaderBar = React.memo(function RunHeaderBar({
-  run, awaitingCount, parallelCount, onPause, onResume, onCancel, onRetry, onOpenGraph, graphOpen,
+  run, awaitingCount, parallelCount, onPause, onResume, onCancel, onRetry, retryBusy, onOpenGraph, graphOpen,
   pipelineOpen, onTogglePipeline, onOpenFiles, filesOpen, onPermissionModeChange, permissionBusy,
   usage, budget, statusReason, onRaiseBudget,
 }: RunHeaderBarProps) {
@@ -294,6 +296,7 @@ export const RunHeaderBar = React.memo(function RunHeaderBar({
         {isTerminal && run.status !== 'completed' && (
           <Button
             onClick={onRetry}
+            disabled={retryBusy}
             title="Re-run every stage that did not complete in a new run"
             variant="ghost"
             size="sm"
