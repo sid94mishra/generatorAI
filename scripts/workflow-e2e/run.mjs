@@ -2,12 +2,14 @@
 // ────────────────────────────────────────────────────────────────
 // Live workflow E2E runner (P00 WP-0.3).
 //
-//   pnpm workflow:e2e --phase 00|smoke|all [--provider claude-agent|faux]
+//   pnpm workflow:e2e --phase 00|smoke|smoke-live|all [--provider claude-agent|faux]
 //                     [--only T1,T5] [--retries 2] [--fresh] [--no-server]
 //                     [--keep-server] [--model <catalog id>]
 //
 // `--phase smoke` is the credential-free smoke (check stages only: create a
-// v2 graph, publish, invoke, wait); `--phase all` runs every listed scenario.
+// v2 graph, publish, invoke, wait); `--phase smoke-live` is the smallest
+// live one (one agent stage, then a two-iteration loop; claude-agent, e.g.
+// `--model` a Haiku id); `--phase all` runs every listed scenario.
 //
 // 1. starts the isolated server on :3111 (server.mjs), unless --no-server;
 // 2. pairs ONE device into a fresh creds file under C:/gaiwf/creds/ (deleted

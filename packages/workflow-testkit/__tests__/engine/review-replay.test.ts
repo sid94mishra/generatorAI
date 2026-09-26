@@ -36,7 +36,7 @@ describe('the approval gate', () => {
     });
     await run.waitForStage('p1', 'awaiting_input');
     const p1 = run.stageRunId('p1');
-    expect((await engine.commands.approve(run.runId, p1, { outcome: 'changes_requested', followUpPrompt: 'Append REVISED.' })).status).toBe(202);
+    expect((await engine.commands.approve(run.runId, p1, { outcome: 'changes_requested', reason: 'Append REVISED.' })).status).toBe(202);
     await run.waitFor((s) => s.stages['p1']!.status === 'awaiting_input' && reviewRound(s, 'p1') === 2, 10_000, 'round 2');
     await engine.killAndRestart();
     expect((await engine.commands.approve(run.runId, p1, { outcome: 'approved' })).status).toBe(202);
@@ -145,7 +145,7 @@ describe('the journal replay of a resumed attempt', () => {
     });
     await run.waitForStage('triage', 'awaiting_input');
     const id = run.stageRunId('triage');
-    expect((await engine.commands.approve(run.runId, id, { outcome: 'changes_requested', followUpPrompt: 'Severity must be high.' })).status).toBe(202);
+    expect((await engine.commands.approve(run.runId, id, { outcome: 'changes_requested', reason: 'Severity must be high.' })).status).toBe(202);
     await run.waitFor((s) => reviewRound(s, 'triage') === 2 && s.stages['triage']!.status === 'awaiting_input', 10_000, 'round 2');
     expect((await engine.commands.approve(run.runId, id, { outcome: 'approved' })).status).toBe(202);
     const snap = await run.waitForTerminal();
@@ -171,7 +171,7 @@ describe('the journal replay of a resumed attempt', () => {
     });
     await run.waitForStage('j1', 'awaiting_input');
     const id = run.stageRunId('j1');
-    expect((await engine.commands.approve(run.runId, id, { outcome: 'changes_requested', followUpPrompt: 'Make it version two.' })).status).toBe(202);
+    expect((await engine.commands.approve(run.runId, id, { outcome: 'changes_requested', reason: 'Make it version two.' })).status).toBe(202);
     const snap = await run.waitFor((s) => reviewRound(s, 'j1') === 2 && s.stages['j1']!.status === 'awaiting_input', 10_000, 'round 2');
     expect((snap.stages['j1']!.interruptData as { output?: string }).output).toBe('VERSION THREE of the answer, repaired.');
   });
@@ -199,7 +199,7 @@ describe('the journal replay of a resumed attempt', () => {
     });
     await run.waitForStage('p1', 'awaiting_input');
     const id = run.stageRunId('p1');
-    expect((await engine.commands.approve(run.runId, id, { outcome: 'changes_requested', followUpPrompt: 'Rewrite it as version two.' })).status).toBe(202);
+    expect((await engine.commands.approve(run.runId, id, { outcome: 'changes_requested', reason: 'Rewrite it as version two.' })).status).toBe(202);
     await run.waitFor((s) => reviewRound(s, 'p1') === 2 && s.stages['p1']!.status === 'awaiting_input', 10_000, 'round 2');
     expect((await engine.commands.approve(run.runId, id, { outcome: 'approved' })).status).toBe(202);
     const snap = await run.waitForTerminal();

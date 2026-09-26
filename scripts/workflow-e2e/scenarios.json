@@ -2,6 +2,7 @@
   "$comment": "Live E2E scenario registry. `phases.NN` lists the scenarios `pnpm workflow:e2e --phase NN` runs (`--phase all` runs every listed scenario once; `--phase smoke` is the credential-free smoke). Every spec holds a v2 workflow document under `graph`, created and published through the definition API, then started through POST /workflow-invocations. `expect` is judged for claude-agent, `expectFaux` (when present) for --provider faux. `knownBugs` records register items whose current behaviour an expectation deliberately encodes; a later phase that fixes one updates the expectation in the same commit.",
   "phases": {
     "smoke": ["SMOKE-check"],
+    "smoke-live": ["SMOKE-loop"],
     "00": ["T1", "T2", "T3", "T7", "T10-small"],
     "01": ["SMOKE-check", "T1"],
     "03": ["T1", "T3", "T10-small"],
@@ -32,6 +33,17 @@
       "expectFaux": {
         "runStatus": "completed",
         "stages": { "first": "completed", "second": "completed" }
+      }
+    },
+    "SMOKE-loop": {
+      "spec": "specs/smoke-loop.json",
+      "expect": {
+        "runStatus": "completed",
+        "stages": { "hello": "completed", "twice": "completed", "tick": "completed" },
+        "outputContains": [
+          { "stage": "hello", "text": "HELLO" },
+          { "stage": "twice", "text": "\"iterations\":2" }
+        ]
       }
     },
     "T1": {

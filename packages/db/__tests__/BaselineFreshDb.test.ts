@@ -151,6 +151,9 @@ const REVERSE_SCHEMA_ALLOWLIST: string[] = [
   // A default that disagrees with schema.ts. The repository always writes
   // the column, so it is never observed.
   "default system_configs.metadata: physical=(none) schema='{}'",
+  // A dead column dropped from schema.ts (final review MAPWAIT-R18); the next
+  // migration drops it physically (an expansion keeps its state in container state).
+  'extra column stage_runs.expansion',
   // Physical indexes created by raw-SQL migrations and never declared.
   'index idx_agent_interactions_pending on agent_interactions: not declared',
   'index idx_chat_messages_chat_time on chat_messages: not declared',
