@@ -26,6 +26,7 @@ import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
 import type { SystemInfo } from '@generatorai/shared';
 import type { ProjectRunListPage } from '@generatorai/shared';
 import type { StatsSummary } from '@generatorai/shared';
+import type { RecentActivityPage } from '@generatorai/shared';
 import {
   chatListSearchParams,
   runChatBulk,
@@ -2424,6 +2425,16 @@ export class HttpPlatformClient implements IPlatformClient {
     if (query.automationId) params.set('automationId', query.automationId);
     if (query.groupBy) params.set('groupBy', query.groupBy);
     return apiFetch<StatsSummary>(`${this.baseUrl}/api/stats/summary?${params}`);
+  }
+
+  // ── Recently finished activity (G-11): Home "Recently finished" ──
+  async getRecentActivity(query?: { since?: string; limit?: number; projectId?: string }): Promise<RecentActivityPage> {
+    const params = new URLSearchParams();
+    if (query?.since) params.set('since', query.since);
+    if (query?.limit !== undefined) params.set('limit', String(query.limit));
+    if (query?.projectId) params.set('projectId', query.projectId);
+    const qs = params.toString();
+    return apiFetch<RecentActivityPage>(`${this.baseUrl}/api/activity/recent${qs ? `?${qs}` : ''}`);
   }
 
   // ── System info (G-12): Home "System" card + Settings › Diagnostics ──

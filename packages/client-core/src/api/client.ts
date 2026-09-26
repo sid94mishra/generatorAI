@@ -26,6 +26,7 @@ import {
   type ProjectSummary as ProjectSummaryDetail,
   type ProjectRunListPage,
   type StatsSummary,
+  type RecentActivityPage,
 } from '@generatorai/shared';
 
 export interface ApiFetch {
@@ -1689,6 +1690,23 @@ export function createApiClient(fetchImpl: ApiFetch) {
         if (query.automationId) q.set('automationId', query.automationId);
         if (query.groupBy) q.set('groupBy', query.groupBy);
         return request<StatsSummary>(fetchImpl, `/api/stats/summary?${q}`);
+      },
+    },
+
+    /**
+     * G-11 — Home "Recently finished". Merges chats' finished turns,
+     * terminal workflow runs and terminal automation executions into one
+     * feed, newest first. Pull-request-/commit-derived items are not built
+     * in this pass (see `packages/shared/src/types/RecentActivity.ts`).
+     */
+    activity: {
+      recent: (query?: { since?: string; limit?: number; projectId?: string }) => {
+        const q = new URLSearchParams();
+        if (query?.since) q.set('since', query.since);
+        if (query?.limit !== undefined) q.set('limit', String(query.limit));
+        if (query?.projectId) q.set('projectId', query.projectId);
+        const suffix = q.toString() ? `?${q}` : '';
+        return request<RecentActivityPage>(fetchImpl, `/api/activity/recent${suffix}`);
       },
     },
 

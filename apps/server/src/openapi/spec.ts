@@ -1107,6 +1107,36 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
       },
     },
+    '/api/activity/recent': {
+      get: {
+        tags: ['Activity'],
+        summary: 'Recently finished activity, merged across chats, runs and automations (G-11)',
+        description:
+          'Home "Recently finished". Merges each chat\'s finished turn, terminal workflow runs and terminal ' +
+          'automation executions into one feed, newest first. Pull-request- and commit-derived items are not ' +
+          'built in this pass (see packages/shared/src/types/RecentActivity.ts).',
+        parameters: [
+          { in: 'query', name: 'since', required: false, schema: { type: 'string', format: 'date-time' } },
+          { in: 'query', name: 'limit', required: false, schema: { type: 'integer', default: 20, maximum: 100 } },
+          { in: 'query', name: 'projectId', required: false, schema: { type: 'string' } },
+        ],
+        responses: {
+          '200': {
+            description: 'Recent activity feed',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { items: { type: 'array', items: { type: 'object' } } },
+                  required: ['items'],
+                },
+              },
+            },
+          },
+          '400': { description: '`since` is not a parseable timestamp', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
     '/api/system/info': {
       get: {
         tags: ['System'],

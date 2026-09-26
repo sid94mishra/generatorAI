@@ -37,7 +37,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-08 | Deep links keep an allowlisted query string — **built (P2-04)** | P4 | P2 (desktop) | S |
 | G-09 | Model-picker provider methods on the platform client — **built (P2-04)** | P4 | P2 | S |
 | G-10 | Stats summary (Home This week, Workflows strip, automation stats) — **built (P2-05)** | P5 (PW later) | P2 | M |
-| G-11 | Recently finished activity | P5 | P2 | M |
+| G-11 | Recently finished activity — **built (P2-05)**, minus PR/commit sources | P5 | P2 | M |
 | G-12 | System info (version, database size, disk, agent capacity) — **built (P2-05)** | P5 | P2 | S |
 | G-13 | Project summaries (Projects columns, tab counts) — **built (P2-05)** | P5 | P2 | S–M |
 | G-14 | ProjectDetail Chats tab (project filter on the client) — **built (P2-02)** | P5 | P2 (via G-02) | S |
@@ -390,6 +390,8 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 
 ### G-11 — Recently finished activity
 
+**Status: built in P2-05**, minus the pull-request/commit sources (see "As built").
+
 **Elements & boards.** Home "Recently finished": `+212 −48 · PR #1176 opened`, `4 of 4 stages · 3 review comments`, `Failed · pnpm typecheck exited 2` with Retry, and "All activity".
 
 **Exists today.** No cross-entity source. PRs are per workspace (`GET /workspaces/:id/pull-requests`, `workspaces.ts:1341`). `useLiveOperations` guesses "today" from the full lists.
@@ -400,6 +402,15 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 - Policy prefix `/activity`. "All activity" is a later list page and is not designed. The link is hidden until then.
 
 **Owner / phase / effort.** P2 · P5 · **M** (after G-02).
+
+**As built — one source deliberately deferred.** Chats' finished turns, terminal workflow runs and terminal automation executions are merged, sorted newest-first and paged exactly as specified: `RecentActivityItem`/`RecentActivityPage` (`packages/shared/src/types/RecentActivity.ts`), `GET /activity/recent` (`apps/server/src/routes/activity.ts`, new `/activity` prefix, `read:activity`). Every source is an existing read-only call (`chatEntityRepo.listPage` for G-02's `lastTurn`; `workflowDefinitionService.listDefinitions` + `workflowRunRepo.getByDefinitionId`; `automationService.listAutomations` + `getExecutionsByAutomation` — the latter two Workflow-Overhaul-owned, called read-only, nothing added to them).
+- **Deferred: workspace PR records.** The only existing PR source (`sourceControlService.listPullRequests`, behind `GET /projects/:id/pull-requests`) makes a **live git-host call per codebase** — fanning that out across every codebase on every Home load would be slow and flaky (rate limits, expired tokens) for a feed that reloads often, and building a cached/batched version responsibly is its own gap, not a sub-task of an **M**-effort one. `pullRequest` is therefore always absent in this pass — never faked — and every consumer must treat the field as "not built yet," not "no PR." Revisit alongside G-16 (which already needs codebase-scoped async status).
+- **`commit.branch`** IS populated, cheaply: for workflow-run items only, resolved from an existing tracked worktree (`worktreeService.listWorktrees(undefined, runId)`) — no live git call, and only for the final page's items (bounded extra reads), never for chats (no `chatId` on `WorktreeInfo`).
+- **`chats.turns`-style copy fields** (`summary`, retry): a chat's `summary` is its last turn's error or a short status line; `retry: 'chat_prompt'` only on a failed chat, `retry: 'run_retry'` only on a failed run — never on an automation execution (no such endpoint exists). `outcome` for an automation's `partial` status reads as `failed` (it never fully succeeded).
+- **Project name** is resolved per item (`projectService.getProject`), again only for the final page, with a per-request cache so a busy feed with one dominant project makes one lookup, not N.
+- **Client:** `HttpPlatformClient.getRecentActivity(query)`, client-core's `api.activity.recent(query)`; not added to `IPlatformClient` (G-12 precedent). Web hook `useRecentActivity(query)` in `hooks/activityQueries.ts`.
+- OpenAPI documents `/api/activity/recent`. New `routePolicy.ts` entry for `/activity` (`read:activity`).
+- **Tests:** `apps/server/src/__tests__/activityRoute.test.ts` (merge + sort, `since`/`limit`, outcome mapping incl. `partial`→`failed`, retry attribution, project/commit enrichment scoped to the final page only, never-invented `pullRequest`, empty run history), `wireContract.test.ts`, `apps/web/src/__tests__/hooks/activityQueries.test.tsx`.
 
 ### G-12 — System info
 

@@ -116,6 +116,25 @@ describe('stats summary wire contract (G-10)', () => {
   });
 });
 
+describe('recent activity wire contract (G-11)', () => {
+  it('reads GET /api/activity/recent with no query string by default', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).activity.recent();
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.path).toBe('/api/activity/recent');
+  });
+
+  it('sends since, limit and projectId when given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).activity.recent({ since: '2026-01-01T00:00:00Z', limit: 10, projectId: 'proj-1' });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.pathname).toBe('/api/activity/recent');
+    expect(url.searchParams.get('since')).toBe('2026-01-01T00:00:00Z');
+    expect(url.searchParams.get('limit')).toBe('10');
+    expect(url.searchParams.get('projectId')).toBe('proj-1');
+  });
+});
+
 describe('project runs wire contract (G-15)', () => {
   it('reads GET /api/projects/:id/runs, not /workflow-runs?projectId= (that route is off-limits)', async () => {
     const { calls, fetchImpl } = capture();

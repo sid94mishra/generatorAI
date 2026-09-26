@@ -39,6 +39,7 @@ import { createComputerRoutes } from './computer.js';
 import { createTerminalRoutes } from './terminals.js';
 import { createAttentionRoutes } from './attention.js';
 import { createStatsRoutes } from './stats.js';
+import { createActivityRoutes } from './activity.js';
 
 // Widgets & Extensions
 import { createExtensionRoutes } from './extensions.js';
@@ -136,6 +137,9 @@ export function createApiRouter(container: Container): Router {
   // Stats summary (G-10) — Home "This week", Workflows stat strip,
   // AutomationDetail stat row, WorkflowDetail rail. Read-only; no SSE.
   router.use('/stats', createStatsRoutes(container));
+
+  // Recently finished activity (G-11) — Home "Recently finished" + retry.
+  router.use('/activity', createActivityRoutes(container));
 
   // Harness — runtime AI provider switching (PRV-02)
   router.use('/harness', createHarnessRoutes(container));

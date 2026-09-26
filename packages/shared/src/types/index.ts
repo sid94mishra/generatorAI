@@ -570,6 +570,16 @@ export type { SystemInfo } from './SystemInfo.js';
 // ── Project-scoped workflow runs (G-15) ──
 export type { ProjectRunListItem, ProjectRunListQuery, ProjectRunListPage } from './ProjectRuns.js';
 
+// ── Recently finished activity (G-11) ──
+export type {
+  ActivityEntity,
+  ActivityOutcome,
+  RecentActivityQuery,
+  RecentActivityChanges,
+  RecentActivityItem,
+  RecentActivityPage,
+} from './RecentActivity.js';
+
 // ── Stats summary (G-10) ──
 export type {
   StatsSummaryQuery,

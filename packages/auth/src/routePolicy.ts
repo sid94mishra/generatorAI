@@ -88,6 +88,10 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // Stats summary (G-10): read-only aggregates over chats, runs and
   // automation executions — same bar as the attention feed above.
   { prefix: '/stats', read: ['read:activity'], write: ['admin:settings'] },
+  // Recently finished activity (G-11): read-only, same bar as /attention
+  // and /stats. Retry uses the existing /chats and /workflow-runs
+  // endpoints, each under their own write scope.
+  { prefix: '/activity', read: ['read:activity'], write: ['admin:settings'] },
 
   { prefix: '/chats', read: ['read:chats'], write: ['write:chats'] },
   // Authoring an agent GRANTS capability (skills, MCP servers, tool policy), so
