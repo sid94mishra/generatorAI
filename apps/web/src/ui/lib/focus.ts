@@ -32,3 +32,17 @@ export const hitSlop =
 
 /** Marks an element whose hit area is its `hitSlop` pseudo-element (09 §9.4). */
 export const HIT_ATTRS = { 'data-gai-hit': '' } as const;
+
+/**
+ * 8px invisible hit area centred on a 1px separator/resize handle (C-20
+ * SplitPane), the same `::before` technique as `hitSlop` but sized for a
+ * draggable line rather than a 24×24 control. Lives here (not in
+ * ui/patterns) because the literal `h-2`/`w-2` pseudo-element sizes are
+ * exempt from the height/arbitrary-value restrictions only in `ui/lib`.
+ */
+export const separatorHitSlop = {
+  /** Separator is a vertical line (splits left/right): widen the hit area horizontally. */
+  vertical: 'relative before:absolute before:inset-y-0 before:left-1/2 before:w-2 before:-translate-x-1/2',
+  /** Separator is a horizontal line (splits top/bottom): widen the hit area vertically. */
+  horizontal: 'relative before:absolute before:inset-x-0 before:top-1/2 before:h-2 before:-translate-y-1/2',
+} as const;

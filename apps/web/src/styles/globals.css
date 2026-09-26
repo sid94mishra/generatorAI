@@ -3231,14 +3231,14 @@
   --surface-hover: #e8e1cb;
 
   /* Interactive — accent axis, default 'blue' */
-  --primary: #20729f;
-  --primary-emphasis: #20729f;
+  --primary: #1f6d99;
+  --primary-emphasis: #1f6d99;
   --primary-foreground: #fdf6e3;
   --secondary: #e8e1cb;
   --secondary-foreground: #073642;
   --muted: #e8e1cb;
   --muted-foreground: #4a6068;
-  --accent: #20729f1a;
+  --accent: #1f6d991a;
   --accent-foreground: #073642;
   --destructive: #c0272b;
   --destructive-foreground: #fdf6e3;
@@ -3247,15 +3247,15 @@
   --border: #c9c1a8;
   --border-muted: #ded7c0;
   --input: #8a8574;
-  --ring: #20729f;
+  --ring: #1f6d99;
 
   /* Status — semantic, never accent-controlled */
-  --success: #4d7a1f;
-  --success-muted: #4d7a1f20;
-  --warning: #96730b;
-  --warning-muted: #96730b20;
-  --info: #20729f;
-  --info-muted: #20729f20;
+  --success: #48731d;
+  --success-muted: #48731d20;
+  --warning: #816309;
+  --warning-muted: #81630920;
+  --info: #1f6d99;
+  --info-muted: #1f6d9920;
   --danger: #c0272b;
   --danger-muted: #c0272b20;
   --done: #5a5fb0;
@@ -3264,28 +3264,28 @@
   --sidebar: #eee8d5;
   --sidebar-foreground: #4a6068;
   --sidebar-border: #c9c1a8;
-  --sidebar-accent: #20729f14;
-  --sidebar-accent-foreground: #20729f;
+  --sidebar-accent: #1f6d9914;
+  --sidebar-accent-foreground: #1f6d99;
 
   /* Canvas (React Flow) */
   --canvas-bg: #fdf6e3;
   --canvas-dot: #c9c1a899;
 
   /* Categorical chart ramp */
-  --chart-1: #20729f;
+  --chart-1: #1f6d99;
   --chart-2: #5a5fb0;
   --chart-3: #bb4410;
-  --chart-4: #4d7a1f;
+  --chart-4: #48731d;
   --chart-5: #1f7f78;
   --chart-6: #bd2f75;
 
   /* Syntax (highlight.js) */
   --syntax-comment: #4a6068;
   --syntax-keyword: #5a5fb0;
-  --syntax-string: #4d7a1f;
+  --syntax-string: #48731d;
   --syntax-number: #bb4410;
-  --syntax-function: #20729f;
-  --syntax-type: #96730b;
+  --syntax-function: #1f6d99;
+  --syntax-type: #816309;
   --syntax-variable: #073642;
   --syntax-constant: #bb4410;
   --syntax-operator: #1b6f7d;
@@ -3293,7 +3293,7 @@
   --syntax-tag: #c0272b;
   --syntax-attribute: #1f7f78;
   --syntax-deleted: #c0272b;
-  --syntax-inserted: #4d7a1f;
+  --syntax-inserted: #48731d;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -5559,13 +5559,13 @@
 }
 
 .light[data-theme="solarized"][data-accent="green"] {
-  --primary: #4d7a1f;
-  --primary-emphasis: #4d7a1f;
+  --primary: #48731d;
+  --primary-emphasis: #48731d;
   --primary-foreground: #fdf6e3;
-  --ring: #4d7a1f;
-  --accent: #4d7a1f1a;
-  --sidebar-accent: #4d7a1f14;
-  --sidebar-accent-foreground: #4d7a1f;
+  --ring: #48731d;
+  --accent: #48731d1a;
+  --sidebar-accent: #48731d14;
+  --sidebar-accent-foreground: #48731d;
 }
 
 [data-theme="solarized"][data-accent="orange"] {
@@ -7211,22 +7211,22 @@
   --gai-fg: #073642;
   --gai-fg-2: #4a6068;
   --gai-fg-3: #4d636a;
-  --gai-accent: #20729f;
+  --gai-accent: #1f6d99;
   --gai-on-accent: #fdf6e3;
-  --gai-focus: #20729f;
-  --gai-run: #20729f;
-  --gai-run-text: #165b7c;
-  --gai-run-bg: #20729f20;
-  --gai-ok: #4d7a1f;
-  --gai-ok-text: #33602c;
-  --gai-ok-bg: #4d7a1f20;
-  --gai-warn: #96730b;
-  --gai-warn-text: #5a5922;
-  --gai-warn-bg: #96730b20;
+  --gai-focus: #1f6d99;
+  --gai-run: #1f6d99;
+  --gai-run-text: #175a7b;
+  --gai-run-bg: #1f6d9920;
+  --gai-ok: #48731d;
+  --gai-ok-text: #345f29;
+  --gai-ok-bg: #48731d20;
+  --gai-warn: #816309;
+  --gai-warn-text: #5f5619;
+  --gai-warn-bg: #81630920;
   --gai-err: #c0272b;
   --gai-err-text: #982b30;
   --gai-err-bg: #c0272b20;
-  --gai-add-bg: #4d7a1f14;
+  --gai-add-bg: #48731d14;
   --gai-del-bg: #c0272b14;
   --gai-scrim: #1414184d;
   --gai-shadow-pop: 0 16px 40px #14141e24, 0 0 0 1px #0736420f;
@@ -8503,9 +8503,9 @@
 }
 
 .light[data-theme="solarized"][data-accent="green"] {
-  --gai-accent: #4d7a1f;
+  --gai-accent: #48731d;
   --gai-on-accent: #fdf6e3;
-  --gai-focus: #4d7a1f;
+  --gai-focus: #48731d;
 }
 
 [data-theme="solarized"][data-accent="orange"] {

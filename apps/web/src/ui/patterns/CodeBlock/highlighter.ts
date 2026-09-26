@@ -1,0 +1,151 @@
+// ────────────────────────────────────────────────────────────────
+// Lazy Shiki 4 highlighting for C-23 CodeBlock (D-33, D-38; 09 §8.1 "Shiki
+// grammars lazy, out of the initial bundle").
+//
+// Nothing here is imported eagerly by CodeBlock.tsx: `getHighlighter()` and
+// `highlightCode()` are only called from inside a `useEffect`, so `shiki/core`,
+// the JS regex engine (no WASM download — `shiki/engine/javascript` trades a
+// little grammar accuracy for a much smaller, dependency-free chunk than
+// `shiki/engine/oniguruma` + its .wasm) and each language grammar land in
+// their own on-demand chunks. `LANG_LOADERS` lists static import specifiers
+// (one `import('shiki/langs/<x>.mjs')` per entry) rather than a templated
+// `import(\`shiki/langs/${lang}.mjs\`)`, so the bundler can see every chunk at
+// build time instead of needing dynamic-import-vars globbing into
+// node_modules — safer and it keeps the supported-language surface explicit.
+//
+// The theme is generated once, mapping standard TextMate scopes to this
+// theme's `--syntax-*` custom properties (globals.css) — not fixed hex
+// values — so highlighted HTML repaints for free across themes/light-dark
+// without re-highlighting (replaces the old `.hljs-*` rules, D-33).
+// ────────────────────────────────────────────────────────────────
+
+import type { HighlighterCore, ThemeRegistrationRaw } from 'shiki/core';
+
+export const SYNTAX_THEME_NAME = 'gai-syntax';
+
+/** Shiki theme whose token colours are `var(--syntax-*)` (globals.css, per-theme values). */
+export const SYNTAX_THEME: ThemeRegistrationRaw = {
+  name: SYNTAX_THEME_NAME,
+  type: 'dark',
+  fg: 'var(--syntax-variable)',
+  bg: 'transparent',
+  settings: [
+    { scope: ['comment', 'punctuation.definition.comment'], settings: { foreground: 'var(--syntax-comment)' } },
+    {
+      scope: ['string', 'string.quoted', 'punctuation.definition.string', 'string.template'],
+      settings: { foreground: 'var(--syntax-string)' },
+    },
+    { scope: ['constant.numeric'], settings: { foreground: 'var(--syntax-number)' } },
+    {
+      scope: ['keyword', 'storage.type', 'storage.modifier', 'keyword.control', 'keyword.other'],
+      settings: { foreground: 'var(--syntax-keyword)' },
+    },
+    {
+      scope: ['entity.name.function', 'support.function', 'meta.function-call', 'variable.function'],
+      settings: { foreground: 'var(--syntax-function)' },
+    },
+    {
+      scope: ['entity.name.type', 'support.type', 'entity.name.class', 'support.class', 'entity.other.inherited-class'],
+      settings: { foreground: 'var(--syntax-type)' },
+    },
+    { scope: ['variable', 'variable.other', 'variable.parameter'], settings: { foreground: 'var(--syntax-variable)' } },
+    {
+      scope: ['constant', 'constant.language', 'support.constant', 'constant.character'],
+      settings: { foreground: 'var(--syntax-constant)' },
+    },
+    { scope: ['keyword.operator'], settings: { foreground: 'var(--syntax-operator)' } },
+    { scope: ['punctuation', 'meta.brace', 'punctuation.separator'], settings: { foreground: 'var(--syntax-punctuation)' } },
+    { scope: ['entity.name.tag'], settings: { foreground: 'var(--syntax-tag)' } },
+    { scope: ['entity.other.attribute-name'], settings: { foreground: 'var(--syntax-attribute)' } },
+    { scope: ['markup.deleted', 'diff.deleted'], settings: { foreground: 'var(--syntax-deleted)' } },
+    { scope: ['markup.inserted', 'diff.inserted'], settings: { foreground: 'var(--syntax-inserted)' } },
+  ],
+};
+
+/**
+ * Supported languages, each its own lazy chunk. Extend by adding one static
+ * `import('shiki/langs/<name>.mjs')` entry — never a templated dynamic import
+ * (breaks bundler chunk analysis for a node_modules path).
+ */
+export const LANG_LOADERS = {
+  typescript: () => import('shiki/langs/typescript.mjs'),
+  tsx: () => import('shiki/langs/tsx.mjs'),
+  javascript: () => import('shiki/langs/javascript.mjs'),
+  jsx: () => import('shiki/langs/jsx.mjs'),
+  json: () => import('shiki/langs/json.mjs'),
+  jsonc: () => import('shiki/langs/jsonc.mjs'),
+  bash: () => import('shiki/langs/bash.mjs'),
+  shellscript: () => import('shiki/langs/shellscript.mjs'),
+  python: () => import('shiki/langs/python.mjs'),
+  yaml: () => import('shiki/langs/yaml.mjs'),
+  markdown: () => import('shiki/langs/markdown.mjs'),
+  css: () => import('shiki/langs/css.mjs'),
+  html: () => import('shiki/langs/html.mjs'),
+  sql: () => import('shiki/langs/sql.mjs'),
+  go: () => import('shiki/langs/go.mjs'),
+  rust: () => import('shiki/langs/rust.mjs'),
+  java: () => import('shiki/langs/java.mjs'),
+  diff: () => import('shiki/langs/diff.mjs'),
+  toml: () => import('shiki/langs/toml.mjs'),
+  dockerfile: () => import('shiki/langs/dockerfile.mjs'),
+} as const;
+
+export type SupportedLang = keyof typeof LANG_LOADERS;
+
+export function isSupportedLang(lang: string | undefined): lang is SupportedLang {
+  return !!lang && Object.hasOwn(LANG_LOADERS, lang);
+}
+
+/** Languages Shiki tokenizes without a grammar (no lazy chunk needed). */
+const PLAIN_LANGS = new Set(['text', 'plain', 'plaintext', 'txt']);
+
+let highlighterPromise: Promise<HighlighterCore> | null = null;
+const loadedLangs = new Set<string>();
+
+async function getHighlighter(): Promise<HighlighterCore> {
+  if (!highlighterPromise) {
+    highlighterPromise = (async () => {
+      const [{ createHighlighterCore }, { createJavaScriptRegexEngine }] = await Promise.all([
+        import('shiki/core'),
+        import('shiki/engine/javascript'),
+      ]);
+      return createHighlighterCore({
+        themes: [SYNTAX_THEME],
+        langs: [],
+        engine: createJavaScriptRegexEngine(),
+      });
+    })();
+  }
+  return highlighterPromise;
+}
+
+async function ensureLanguage(highlighter: HighlighterCore, lang: SupportedLang): Promise<void> {
+  if (loadedLangs.has(lang)) return;
+  const mod = await LANG_LOADERS[lang]();
+  await highlighter.loadLanguage(mod.default);
+  loadedLangs.add(lang);
+}
+
+/**
+ * Highlights `code` as HTML. Falls back to plain (unhighlighted, still
+ * escaped) markup for an unsupported/omitted language rather than throwing —
+ * a code block should never fail to render because a grammar is missing.
+ */
+export async function highlightCode(code: string, lang: string | undefined): Promise<string> {
+  const resolvedLang = lang && (isSupportedLang(lang) || PLAIN_LANGS.has(lang)) ? lang : 'text';
+  const highlighter = await getHighlighter();
+  if (isSupportedLang(resolvedLang)) await ensureLanguage(highlighter, resolvedLang);
+  return highlighter.codeToHtml(code, { lang: resolvedLang, theme: SYNTAX_THEME_NAME });
+}
+
+/**
+ * Shiki always wraps its output in `<pre class="shiki" style="…">…</pre>`.
+ * Rather than reach into that markup from CodeBlock's own className with an
+ * arbitrary `[&_pre]:…` selector (banned outside `ui/lib`), replace the
+ * wrapper's own attributes with the kit's plain chrome classes — CodeBlock
+ * owns the box model, Shiki only supplies the coloured `<code>` inside it.
+ */
+export function withPreChrome(html: string, wrap: boolean): string {
+  const preClass = `m-0 bg-transparent p-0 ${wrap ? 'whitespace-pre-wrap' : 'whitespace-pre'}`;
+  return html.replace(/^<pre[^>]*>/, `<pre class="${preClass}">`);
+}
