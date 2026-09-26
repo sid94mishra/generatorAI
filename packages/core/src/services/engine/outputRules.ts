@@ -76,7 +76,13 @@ export async function evaluateOutputRule(rule: ResultValidationRule, output: str
         logger?.warn(`[outputRules] regex rule has an unsupported pattern (${compiled.error.message}); rule marked as failed`);
         return false;
       }
-      return compiled.regex.test(output);
+      try {
+        return compiled.regex.test(output);
+      } catch (err) {
+        // Input or work over the engine's caps: fail the rule rather than stall.
+        logger?.warn(`[outputRules] regex rule not evaluated (${(err as Error).message}); rule marked as failed`);
+        return false;
+      }
     }
 
     case 'custom_script': {
