@@ -74,9 +74,11 @@ generatorai
 │     delete · export · import · list · resolve · show · usage
 ├── workflow (wf)         # Workflow definitions: documents, versions, stages and edges
 │     clone · create · delete · edge add · edge list · edge remove ·
-│     export · import · list · publish · show · stage add · stage hook add
-│     · stage hook list · stage hook remove · stage list · stage remove ·
-│     stage update · update · validate · versions
+│     export · import · lint · list · plan · publish · show · stage add ·
+│     stage hook add · stage hook list · stage hook remove · stage list ·
+│     stage remove · stage update · update · validate · versions
+├── skill                 # The workflow authoring skill for coding agents (Claude Code, Codex)
+│     install · print
 ├── run                   # Workflow run lifecycle, stage controls and human-in-the-loop gates
 │     cancel · command · delete · diff · hitl approve · hitl
 │     changes-request · hitl mode · hitl pending · hitl reject ·
@@ -210,8 +212,10 @@ Workflow definitions: documents, versions, stages and edges
 | `workflow edge list <workflow>` | Edges in a definition | — |
 | `workflow edge remove <workflow> [options]` | Disconnect two stages | `--from` `--to` `--on` |
 | `workflow export <workflow> [options]` | The canonical document (import gives it back unchanged) | `--out` |
-| `workflow import [file] [options]` | Import a canonical workflow document, or instantiate a template | `--template` `--name` `--project` `--publish` |
+| `workflow import [file] [options]` | Import a canonical workflow document, or instantiate a template | `--template` `--name` `--project` `--draft` `--publish` |
+| `workflow lint <file>` | Validate a document file offline, with the workflow spec alone | — |
 | `workflow list [options]` | List workflow definitions | `--project` `--status` `--search` `--tag` `--archived` `--limit` |
+| `workflow plan <target> [options]` | What a run of a document or a saved workflow would do, without saving or running it | `--var` `--stage-var` `--skip` `--stage-model` `--project` |
 | `workflow publish <workflow>` | Publish the working graph as a new version (runs use the latest) | — |
 | `workflow show <workflow>` | Show a definition: status, revision and its graph | — |
 | `workflow stage add <workflow> [options]` | Add an agent stage | `--name` `--key` `--description` `--prompt` `--prompt-file` `--guard` `--retry-attempts` `--timeout-ms` `--output-format` `--context-from` `--context-mode` `--agent` `--model` `--approval` |
@@ -224,6 +228,15 @@ Workflow definitions: documents, versions, stages and edges
 | `workflow update <workflow> [options]` | Change a definition's name, description or tags | `--name` `--description` `--tags` |
 | `workflow validate <target>` | Validate a document file, or a stored definition | — |
 | `workflow versions <workflow>` | Published and test versions of a definition | — |
+
+### `skill`
+
+The workflow authoring skill for coding agents (Claude Code, Codex)
+
+| Command | What | Flags |
+|---|---|---|
+| `skill install [options]` | Install the workflow authoring skill for Claude Code or Codex, and print the MCP config | `--target` `--project` `--dir` `--from` |
+| `skill print [path] [options]` | Print a file of the workflow authoring skill (SKILL.md by default) | `--from` |
 
 ### `run`
 

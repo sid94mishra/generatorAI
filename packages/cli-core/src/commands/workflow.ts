@@ -1,5 +1,5 @@
 // `generatorai workflow …` — v2 workflow documents: create, import, export,
-// validate, publish, and edit stages and edges.
+// validate, lint (offline), plan, publish, and edit stages and edges.
 //
 // A definition is ONE document (`WorkflowGraph`). Every edit below is a
 // read-modify-write of the whole graph: fetch the record, change the graph,
@@ -16,6 +16,7 @@ import {
   STAGE_KEY_PATTERN,
   validateWorkflow,
   type HookDefinition,
+  type AuthoringPlan,
   type ValidationIssue,
   type WorkflowDefinitionRecord,
   type WorkflowDefinitionSummary,
@@ -33,6 +34,7 @@ import {
   inputSchema,
   list,
   nameColumn,
+  parseKeyValues,
   parseList,
   projectFlag,
   readTextFile,
@@ -40,6 +42,7 @@ import {
   statusColumn,
   updatedColumn,
 } from './_shared.js';
+import { describeInvocationPlan, invocationError, overridesFromFlags } from './run.js';
 
 export const WORKFLOW_GROUP = {
   name: 'workflow',
@@ -129,6 +132,24 @@ function invalidError(what: string, issues: ValidationIssue[], details: Record<s
 }
 
 /**
+ * A 403 from publishing (or `import --publish`) as the rule it is: only a
+ * person publishes, unless the operator lets agents (PD-14). Anything else
+ * passes through to the generic mapping.
+ */
+function publishRefusal(error: unknown): unknown {
+  const api = error as { status?: unknown; message?: unknown } | null;
+  if (api?.status !== 403) return error;
+  const reason = typeof api.message === 'string' && api.message ? api.message : 'The server refused to publish.';
+  return new CliError('FORBIDDEN', reason, {
+    hint:
+      'Only a person publishes a workflow. This device is an agent principal (an `mcp` device or a service account) or lacks ' +
+      'write:workflows. Review and publish the draft in the app, or from a device a person uses; an operator can let agents ' +
+      'publish by starting the server with GENERATORAI_ALLOW_AGENT_PUBLISH=true.',
+    suggestions: ['generatorai device status'],
+  });
+}
+
+/**
  * The same validator the server saves with, run before sending: a 422 from
  * the server reaches the CLI as one sentence, while this names every issue
  * with its JSON pointer.
@@ -137,6 +158,20 @@ function assertValidGraph(graph: unknown, what: string): string[] {
   const result = validateWorkflow(graph);
   if (!result.valid) throw invalidError(what, result.issues);
   return result.issues.filter((issue) => issue.severity === 'warning').map(formatIssue);
+}
+
+/** An authoring plan as readable lines: the run plan, then the guards decided now, unresolved variables and warnings. */
+export function describeAuthoringPlan(result: AuthoringPlan): string[] {
+  const lines = describeInvocationPlan(result.plan);
+  const guards = Object.entries(result.guards);
+  if (guards.length) {
+    lines.push(`Guards decided now: ${guards.map(([key, value]) => `${key} ${value ? 'runs' : 'skipped'}`).join(', ')}`);
+  }
+  if (result.unresolved.length) {
+    lines.push(`Unresolved variables (no value, no default): ${result.unresolved.join(', ')}`);
+  }
+  for (const warning of result.warnings) lines.push(`! ${formatIssue(warning)}`);
+  return lines;
 }
 
 // ── Documents on disk ───────────────────────────────────────────────
@@ -486,7 +521,11 @@ export function workflowCommands(): CommandSpec[] {
       summary: 'Import a canonical workflow document, or instantiate a template',
       requiresServer: true,
       sinceVersion: '0.2.0',
+      description:
+        'A document or template is imported as a draft unless --publish is given. --draft says so explicitly, for ' +
+        'scripts and agents; only a person publishes (an agent principal is refused).',
       examples: [
+        'generatorai wf import review.workflow.json --draft',
         'generatorai wf import exported.json --publish',
         'generatorai wf import --template code-review --name "Review PRs"',
       ],
@@ -495,6 +534,7 @@ export function workflowCommands(): CommandSpec[] {
         { name: 'template', description: 'Template id instead of a file', type: 'string', completes: 'template' },
         { name: 'name', description: 'Name of the new definition', type: 'string' },
         projectFlag,
+        { name: 'draft', description: 'Import as a draft (the default; a person reviews and publishes it)', type: 'boolean' },
         { name: 'publish', description: 'Publish it on import', type: 'boolean' },
       ],
       schema: inputSchema(
@@ -503,6 +543,7 @@ export function workflowCommands(): CommandSpec[] {
           template: z.string().optional(),
           name: z.string().optional(),
           project: z.string().optional(),
+          draft: z.boolean().optional(),
           publish: z.boolean().optional(),
         },
       ),
@@ -511,13 +552,17 @@ export function workflowCommands(): CommandSpec[] {
         if (Boolean(args.file) === Boolean(flags.template)) {
           throw CliError.usage('Pass exactly one of a document file or --template <id>.');
         }
+        if (flags.draft && flags.publish) {
+          throw CliError.usage('--draft and --publish contradict each other.', { hint: 'A draft is the default; drop --publish to import one.' });
+        }
         const projectId = await resolveProjectId(ctx, flags.project);
         if (flags.template) {
           return record(
-            await ctx.api.definitions.importTemplate(
-              flags.template,
-              compact({ name: flags.name, projectId, publish: flags.publish }),
-            ),
+            await ctx.api.definitions
+              .importTemplate(flags.template, compact({ name: flags.name, projectId, publish: flags.publish }))
+              .catch((error: unknown) => {
+                throw publishRefusal(error);
+              }),
           );
         }
         const graph = withSettings(asGraph(await readDocument(args.file!), args.file!), {
@@ -525,8 +570,14 @@ export function workflowCommands(): CommandSpec[] {
           projectId,
         });
         const warnings = assertValidGraph(graph, 'The workflow document is not valid');
-        const imported = await ctx.api.definitions.import(graph, compact({ publish: flags.publish }));
-        return { data: imported, warnings };
+        const imported = await ctx.api.definitions.import(graph, compact({ publish: flags.publish })).catch((error: unknown) => {
+          throw publishRefusal(error);
+        });
+        return {
+          data: imported,
+          warnings,
+          message: imported.status === 'draft' ? `Imported draft ${imported.id}; review and publish it in the app, or \`generatorai workflow publish ${imported.id}\`.` : `Imported and published ${imported.id}`,
+        };
       },
     }),
 
@@ -586,10 +637,108 @@ export function workflowCommands(): CommandSpec[] {
     }),
 
     defineCommand({
+      id: 'workflow.lint',
+      group: 'workflow',
+      verb: 'lint',
+      summary: 'Validate a document file offline, with the workflow spec alone',
+      description:
+        'Runs the spec validator (the schema, stage keys, edges, expressions, variables) without a server, so an agent or a ' +
+        'pre-commit hook can check a document anywhere. `workflow validate` adds the server\'s rules: agents, models, ' +
+        'provider capabilities and commands. Exits non-zero when the document has an error.',
+      requiresServer: false,
+      sinceVersion: '0.2.0',
+      examples: ['generatorai wf lint review.workflow.json', 'cat review.workflow.json | generatorai wf lint -'],
+      args: [{ name: 'file', description: 'Document file, or - for stdin', required: true, completes: 'file' }],
+      flags: [],
+      schema: inputSchema({ file: z.string() }, {}),
+      output: { kind: 'record' },
+      async handler(_ctx, { args }) {
+        const result = validateWorkflow(await readDocument(args.file));
+        if (!result.valid) throw invalidError('Workflow is not valid', result.issues, { file: args.file });
+        return {
+          data: { valid: true, file: args.file, issues: result.issues },
+          warnings: result.issues.map(formatIssue),
+          message: 'Workflow is valid (spec rules; `workflow validate` adds the server\'s).',
+        };
+      },
+    }),
+
+    defineCommand({
+      id: 'workflow.plan',
+      group: 'workflow',
+      verb: 'plan',
+      summary: 'What a run of a document or a saved workflow would do, without saving or running it',
+      description:
+        'Sends a document file (unsaved) or a saved workflow to the authoring plan endpoint: the stages by layer, which are ' +
+        'skipped (overrides, guards decided from the variables), models, codebases, post-processing, the permission mode, ' +
+        'risks, warnings and variables nothing supplies. Nothing is written. `run plan` is the same view of a request to ' +
+        'start a saved workflow, with every run flag.',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      examples: [
+        'generatorai wf plan review.workflow.json --var topic=caching',
+        'generatorai wf plan nightly-e2e --skip lint --stage-var build.target=web',
+      ],
+      args: [{ name: 'target', description: 'Document file (or - for stdin), or a workflow reference', required: true, completes: 'workflow' }],
+      flags: [
+        { name: 'var', description: 'Variable as key=value (repeatable)', type: 'string', variadic: true },
+        {
+          name: 'stageVar',
+          description: 'Variable for one stage as <stageKey>.<name>=<value> (repeatable)',
+          type: 'string',
+          variadic: true,
+        },
+        { name: 'skip', description: 'Skip the stage with this key (repeatable)', type: 'string', variadic: true, completes: 'stage' },
+        { name: 'stageModel', description: 'Model for one stage as <stageKey>=<model> (repeatable)', type: 'string', variadic: true },
+        { ...projectFlag, description: 'Project id or name whose codebases the run would mount' },
+      ],
+      schema: inputSchema(
+        { target: z.string() },
+        {
+          var: z.array(z.string()).optional(),
+          stageVar: z.array(z.string()).optional(),
+          skip: z.array(z.string()).optional(),
+          stageModel: z.array(z.string()).optional(),
+          project: z.string().optional(),
+        },
+      ),
+      // `stream` prints the rendered plan (the message) as is; structured
+      // output carries the plan itself.
+      output: { kind: 'stream' },
+      async handler(ctx, { args, flags }) {
+        let source: { graph: unknown } | { workflowId: string };
+        const warnings: string[] = [];
+        if (await isFile(args.target)) {
+          const graph = await readDocument(args.target);
+          warnings.push(...assertValidGraph(graph, 'The workflow document is not valid'));
+          source = { graph };
+        } else {
+          source = { workflowId: (await findDefinition(ctx, args.target)).id };
+        }
+        const stageOverrides = overridesFromFlags(flags.skip, flags.stageVar, flags.stageModel);
+        const projectId = await resolveProjectId(ctx, flags.project);
+        const result = await ctx.api.definitions
+          .plan({
+            ...source,
+            variables: parseKeyValues(flags.var),
+            ...(stageOverrides.length ? { stageOverrides } : {}),
+            ...(projectId ? { projectId } : {}),
+          })
+          .catch((error: unknown) => {
+            throw invocationError(error);
+          });
+        return { data: result, warnings, message: describeAuthoringPlan(result).join('\n') };
+      },
+    }),
+
+    defineCommand({
       id: 'workflow.publish',
       group: 'workflow',
       verb: 'publish',
       summary: 'Publish the working graph as a new version (runs use the latest)',
+      description:
+        'Only a person publishes: a device of platform `mcp`, a service account or another agent principal is refused ' +
+        'unless the server operator set GENERATORAI_ALLOW_AGENT_PUBLISH=true.',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [workflowArg],
@@ -598,7 +747,9 @@ export function workflowCommands(): CommandSpec[] {
       output: { kind: 'record' },
       async handler(ctx, { args }) {
         const target = await findDefinition(ctx, args.workflow);
-        const published = await ctx.api.definitions.publish(target.id);
+        const published = await ctx.api.definitions.publish(target.id).catch((error: unknown) => {
+          throw publishRefusal(error);
+        });
         return record(published, `Published ${published.graph.workflow.name} (version ${published.currentVersionId}).`);
       },
     }),

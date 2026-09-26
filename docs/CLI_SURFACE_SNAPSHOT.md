@@ -13,9 +13,9 @@ same promise as one that does not.
 
 | Measure | Count |
 |---|---:|
-| Commands | 217 |
-| Groups | 23 |
-| Server-backed commands | 190 |
+| Commands | 221 |
+| Groups | 24 |
+| Server-backed commands | 193 |
 | Destructive commands | 32 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
@@ -187,6 +187,8 @@ same promise as one that does not.
 | `security.audit` | `security audit` | yes | no | yes | yes | — | — |
 | `security.networkAccess` | `security network-access` | yes | no | yes | yes | — | — |
 | `security.posture` | `security posture` | yes | no | yes | yes | — | — |
+| `skill.install` | `skill install` | yes | no | yes | yes | — | --target |
+| `skill.print` | `skill print` | yes | no | yes | yes | — | — |
 | `sourceControl.config` | `source-control config` | yes | no | yes | yes | — | — |
 | `sourceControl.status` | `source-control status` | yes | no | yes | yes | — | — |
 | `system.artifact` | `system artifact` | yes | no | yes | yes | id | — |
@@ -217,7 +219,9 @@ same promise as one that does not.
 | `workflow.edge.remove` | `workflow edge remove` | yes | yes | yes | yes | workflow | --from, --to |
 | `workflow.export` | `workflow export` | yes | no | yes | yes | workflow | — |
 | `workflow.import` | `workflow import` | yes | no | yes | yes | — | — |
+| `workflow.lint` | `workflow lint` | no | no | yes | yes | file | — |
 | `workflow.list` | `workflow list` | yes | no | yes | yes | — | — |
+| `workflow.plan` | `workflow plan` | yes | no | yes | yes | target | — |
 | `workflow.publish` | `workflow publish` | yes | no | yes | yes | workflow | — |
 | `workflow.show` | `workflow show` | yes | no | yes | yes | workflow | — |
 | `workflow.stage.add` | `workflow stage add` | yes | no | yes | yes | workflow | --name |
