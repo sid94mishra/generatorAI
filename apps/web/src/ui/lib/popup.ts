@@ -46,3 +46,19 @@ export const dialogTop = 'top-[13vh] max-h-[calc(87vh-22px)]';
  */
 export const dialogHeightLg = 'h-[640px]';
 export const dialogBoxXl = 'h-[856px] w-[1040px]';
+
+/**
+ * T-04 Workspace (03 §5 T-04): the transcript/timeline column's reading
+ * width when the dock is closed — a fixed literal with no vocabulary entry
+ * (unlike the shell's named widths, `SHELL`/`CONTAINER_NAMES`), so it lives
+ * here alongside the dialog box literals above.
+ */
+export const workspaceMainMaxWidth = 'max-w-[860px]';
+
+/**
+ * T-04 Workspace, D-27: below the 1200px window the dock renders as a
+ * non-modal overlay sheet (380 wide) elsewhere in the tree; `main` reserves
+ * this much right padding so its content never sits under the floating
+ * sheet. Viewport-derived literal, no token.
+ */
+export const workspaceNarrowPadding = 'pr-[404px]';
