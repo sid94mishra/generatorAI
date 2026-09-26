@@ -69,7 +69,6 @@ import type { OutboxPublisher } from '../services/engine/OutboxDispatcher.js';
 import type { DecideRecord } from '../services/engine/RunActor.js';
 import { AutomationService } from '../services/AutomationService.js';
 import { AutomationRecoveryService } from '../services/AutomationRecoveryService.js';
-import { HitlService } from '../services/HitlService.js';
 import { AgentInteractionService } from '../services/AgentInteractionService.js';
 import { PlanService } from '../services/PlanService.js';
 import { DurableExecutionEngine } from '../services/DurableExecutionEngine.js';
@@ -252,8 +251,6 @@ export interface CoreServices {
    *  when the caller didn't supply an idempotency repository. */
   automationRecoveryService: AutomationRecoveryService | null;
 
-  /** HITL — the operator side of parked stage instances. */
-  hitlService: HitlService;
   /** W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix). */
   durableExecutionEngine: DurableExecutionEngine;
   /** THE way a run starts (P04): one service behind one route and one client method. */
@@ -532,7 +529,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   });
 
   // HITL — the operator side of parked instances: resolutions and cancels are run commands.
-  const hitlService = new HitlService(stageRunRepo, engine);
 
   // ── Decisions (P05) ──
   const workflowApprovalService = new WorkflowApprovalService({
@@ -671,7 +667,6 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     stageConversationService,
     automationService,
     automationRecoveryService,
-    hitlService,
     durableExecutionEngine,
     workflowInvocationService,
     workflowApprovalService,

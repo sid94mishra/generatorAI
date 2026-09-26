@@ -116,8 +116,6 @@ export { SandboxLifecycleManager } from './SandboxLifecycleManager.js';
 export type { SandboxSession, SandboxLifecycleConfig } from './SandboxLifecycleManager.js';
 
 // HITL-01..05 — human-in-the-loop interrupt/resume.
-export { HitlService } from './HitlService.js';
-export type { RunCommandPort, StageVerdict } from './HitlService.js';
 export type { InterruptResolution } from './session/StageGatePort.js';
 
 // PLN-01 — plan mode

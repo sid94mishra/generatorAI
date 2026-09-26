@@ -161,6 +161,15 @@ export class WorkflowApprovalService {
     );
   }
 
+  /** Cancel a pending instance, in the run that owns it (`runId` itself or a sub-workflow descendant). */
+  async cancel(runId: string, instanceId: string, opts: { actor?: string } = {}): Promise<CommandResult> {
+    const inst = await this.deps.stageRuns.getById(instanceId).catch(() => null);
+    if (!inst) throw new NotFoundError('Stage instance', instanceId);
+    const owner = await this.ownerWithin(runId, inst.workflowRunId);
+    if (!owner) throw new NotFoundError('Stage instance', `${instanceId} of run ${runId}`);
+    return this.deps.command(owner, { command: 'cancel', instanceId }, opts);
+  }
+
   /** The owning run when it is `runId` or a sub-workflow descendant of it. */
   private async ownerWithin(runId: string, ownerRunId: string): Promise<string | null> {
     let cur: string | undefined = ownerRunId;

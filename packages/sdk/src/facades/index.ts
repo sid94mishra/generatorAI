@@ -28,7 +28,7 @@ export { HookFacade } from './HookFacade.js';
 export type { HookContext, HookResult, HookHandler } from './HookFacade.js';
 
 export { HitlFacade } from './HitlFacade.js';
-export type { StageVerdict } from './HitlFacade.js';
+export type { ApprovalVerdictInput, PendingDecision } from './HitlFacade.js';
 
 export { WorkspaceFacade } from './WorkspaceFacade.js';
 export type { CreateWorkspaceInput, WorkspaceFilters } from './WorkspaceFacade.js';

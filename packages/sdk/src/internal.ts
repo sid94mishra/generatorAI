@@ -41,7 +41,7 @@ export {
   WorktreeService,
   ProjectConfigService,
   WorkspaceManager,
-  HitlService,
+  WorkflowApprovalService,
   WorkflowScriptLoader,
   CustomToolRegistry,
   InMemoryMcpHub,

@@ -58,7 +58,8 @@ export type {
   HookContext,
   HookResult,
   HookHandler,
-  StageVerdict,
+  ApprovalVerdictInput,
+  PendingDecision,
   CreateWorkspaceInput,
   WorkspaceFilters,
 } from './facades/index.js';

@@ -208,8 +208,6 @@ import type {
   AutomationService,
   // Track A1 — boot reconciler + idempotency sweeper
   AutomationRecoveryService,
-  // HITL — the operator side of parked stage instances
-  HitlService,
   AgentInteractionService,
   PlanService,
   ChatManagementServiceExtensions,
@@ -901,7 +899,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     stageConversationService,
     automationService,
     automationRecoveryService,
-    hitlService,
     planService,
     agentInteractionService,
     workflowInvocationService,
@@ -2197,9 +2194,6 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     idempotencyKeyRepo,
     idempotencyService,
 
-    // HITL (Human-in-the-Loop)
-    hitlService,
-
     // PLN-01 — plan mode
     planService,
     agentInteractionService,
@@ -2672,8 +2666,6 @@ export interface Container {
   /** Claim-then-finalize idempotency (automation triggers, invocations). */
   idempotencyService: IdempotencyService | null;
 
-  /** HITL — human-in-the-loop interrupt/resume service. */
-  hitlService: HitlService;
   /** PLN-01 — plan mode. Undefined only if the plan repos were not supplied. */
   planService: PlanService | undefined;
   agentInteractionService: AgentInteractionService | undefined;
