@@ -39,6 +39,7 @@ This lists static environment reads in runtime source, including platform, provi
 | `GENERATORAI_ADVERTISED_URL` | `apps/server/src/index.ts:727`<br>`apps/server/src/routes/auth.ts:733` |
 | `GENERATORAI_ADVERTISED_URLS` | `apps/server/src/index.ts:726`<br>`apps/server/src/routes/auth.ts:732` |
 | `GENERATORAI_AGENT_HOST` | `apps/server/src/composition-root.ts:485` |
+| `GENERATORAI_AGENT_HOST_TURN_LIMIT` | `apps/agent-host/src/index.ts:48` |
 | `GENERATORAI_ALLOW_HOST_SANDBOX` | `apps/server/src/composition-root.ts:660` |
 | `GENERATORAI_ALLOW_SCRIPT_UPLOAD` | `apps/server/src/index.ts:380`<br>`apps/server/src/routes/workflowScripts.ts:162` |
 | `GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK` | `apps/server/src/composition/security.ts:157`<br>`apps/server/src/index.ts:332` |
@@ -88,7 +89,6 @@ This lists static environment reads in runtime source, including platform, provi
 | `GENERATORAI_LOOP_PROBE_INTERVAL_MS` | `apps/server/src/index.ts:650` |
 | `GENERATORAI_LOOP_PROBE_TIMEOUT_MS` | `apps/server/src/index.ts:651` |
 | `GENERATORAI_MAX_COMPUTER_ACTIONS` | `packages/core/src/services/ComputerService.ts:448` |
-| `GENERATORAI_MAX_CONCURRENT_AGENT_TURNS` | `packages/agent-harness-providers/src/AgentHostSupervisor.ts:220` |
 | `GENERATORAI_MAX_CONCURRENT_COLD_STARTS` | `packages/agent-harness-providers/src/AgentHostSupervisor.ts:222` |
 | `GENERATORAI_MAX_PARALLEL_TOOLS` | `packages/agent-harness-providers/src/toolSemaphore.ts:37` |
 | `GENERATORAI_MCP_CONFIG_DIR` | `packages/mcp-server/src/remote.ts:42` |

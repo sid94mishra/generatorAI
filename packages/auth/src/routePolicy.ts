@@ -162,6 +162,10 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // The commands a check stage may run (the builder's picker, P05 §1.2):
   // reading it is authoring; the list itself is operator configuration.
   { prefix: '/settings/script-allowlist', read: ['read:workflows'], write: ['admin:settings'] },
+  // The engine's flow key limits, summary model and trigger debounce (P07
+  // WP-7.2): anyone who reads workflows may see why a stage waits; changing
+  // a limit is operator configuration.
+  { prefix: '/settings/workflow-engine', read: ['read:workflows'], write: ['admin:settings'] },
 
   { prefix: '/projects', read: ['read:projects'], write: ['write:projects'] },
   { prefix: '/source-control', read: ['read:projects'], write: ['write:projects'] },

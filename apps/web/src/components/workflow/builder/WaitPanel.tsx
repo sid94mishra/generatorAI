@@ -12,7 +12,7 @@ import React from 'react';
 import { Clock, Hourglass, Info } from 'lucide-react';
 import type { WaitSpec, WaitStage } from '@generatorai/workflow-spec';
 import type { BuilderIssue, StageUpdate } from '@/stores/workflowBuilderStore.js';
-import { Input, Select, Textarea } from '@/components/ui/index.js';
+import { Input, Select } from '@/components/ui/index.js';
 import { CollapsibleSection } from '../CollapsibleSection.js';
 import { NumberStepper } from '../NumberStepper.js';
 import { ExpressionField, FieldIssues, issuesAt } from '../engineGate.js';
@@ -73,15 +73,17 @@ export function WaitPanel({ stage, onUpdate, issues }: WaitPanelProps) {
                 onChange={(e) => setWait({ ...wait, prompt: { ...wait.prompt, label: e.target.value } })}
                 placeholder="Short label, e.g. Deploy?"
               />
-              <Textarea
-                value={wait.prompt.text}
-                onChange={(e) => setWait({ ...wait, prompt: { ...wait.prompt, text: e.target.value } })}
-                rows={3}
-                aria-label="Approval prompt"
-                className="mt-1.5 resize-y font-mono text-xs"
-                placeholder="What the approver is asked; {{templates}} allowed"
-              />
-              <FieldIssues issues={issuesAt(issues, '/wait/prompt')} />
+              <div className="mt-1.5">
+                <ExpressionField
+                  mode="template"
+                  value={wait.prompt.text}
+                  onChange={(text) => setWait({ ...wait, prompt: { ...wait.prompt, text } })}
+                  rows={3}
+                  ariaLabel="Approval prompt"
+                  placeholder="What the approver is asked; {{ }} completes"
+                  issues={issuesAt(issues, '/wait/prompt')}
+                />
+              </div>
             </div>
             <div>
               <label className="mb-1.5 block text-xs font-medium text-foreground">Form (JSON Schema)</label>

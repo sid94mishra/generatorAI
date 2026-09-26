@@ -361,6 +361,7 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     }),
     getAll: vi.fn().mockResolvedValue([]),
     getByDefinitionId: vi.fn().mockResolvedValue([]),
+    search: vi.fn().mockResolvedValue([]),
     getByStatus: vi.fn().mockResolvedValue([]),
     countByStatus: vi.fn().mockResolvedValue(0),
     update: vi.fn(),

@@ -48,6 +48,15 @@ export type WorkflowRunPermissionMode =
   | 'acceptEdits'
   | 'plan';
 
+/** Usage rolled up over a run's attempts (what providers reported). */
+export interface RunUsage {
+  turns?: number;
+  costUsd?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+  toolCalls?: number;
+}
+
 /** WorkflowRun domain entity — one execution instance of a WorkflowDefinition */
 export interface WorkflowRun {
   id: string;
@@ -99,8 +108,10 @@ export interface WorkflowRun {
   parentStageRunId?: string;
   rootRunId?: string;
   depth?: number;
-  /** The invocation budget (`maxDurationMs`, `maxChildRuns`, …). */
+  /** The effective run budget (`maxTurns`, `maxCostUsd`, `maxTokens`, `maxWallClockMs`). */
   budget?: Record<string, unknown>;
+  /** The run's rolled-up usage; `costUsd` only when a provider reported cost (no pricing table). */
+  usage?: RunUsage;
   /** Workspace ID — links to the execution workspace for this run */
   workspaceId?: string;
   /**

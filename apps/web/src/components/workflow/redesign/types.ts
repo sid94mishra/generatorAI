@@ -89,6 +89,10 @@ export interface StageView {
   segments: StreamSegment[];
   /** The stage's widget blocks (inline ones render in its transcript; `stageRun:<id>` owns them). */
   widgets: Array<Extract<StreamBlock, { type: 'widget' }>>;
+  /** The stage's key in the pinned graph (its history across runs is by key). */
+  stageKey: string;
+  /** A `ready` instance waiting for a launch slot: the flow key at its limit (P07 WP-7.2). */
+  admission?: { flowKey: string; label: string; running: number; limit: number | null; queued: number };
   /** Currently-running-with (parallel batch peer stage ids). */
   parallelWith?: string[];
   /** How long a finished stage ran (running stages have none: the run header holds the one clock). */

@@ -31,6 +31,7 @@ export type SettingsSectionId =
   | 'extensions'
   | 'security'
   | 'storage'
+  | 'workflow-engine'
   | 'diagnostics';
 
 export const SETTINGS_SECTION_IDS: readonly SettingsSectionId[] = [
@@ -48,6 +49,7 @@ export const SETTINGS_SECTION_IDS: readonly SettingsSectionId[] = [
   'extensions',
   'security',
   'storage',
+  'workflow-engine',
   'diagnostics',
 ];
 

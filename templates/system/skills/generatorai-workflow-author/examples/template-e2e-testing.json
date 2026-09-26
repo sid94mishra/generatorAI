@@ -102,7 +102,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -138,7 +139,8 @@
             "value": "PASS",
             "message": "Results should include test status indicators"
           }
-        ]
+        ],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -163,7 +165,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -199,7 +202,8 @@
             "value": "Test Summary",
             "message": "Report should include a test summary section"
           }
-        ]
+        ],
+        "summary": "auto"
       },
       "hooks": []
     }

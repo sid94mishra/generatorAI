@@ -10,6 +10,7 @@
     "start": "node --import ./dist/instrumentation.js dist/index.js",
     "typecheck": "tsc --build --force",
     "test": "vitest run",
+    "bench": "vitest bench --run",
     "lint": "eslint src/",
     "acp": "node --import ./dist/instrumentation.js dist/acp-entry.js",
     "acp:dev": "tsx --env-file-if-exists=.env --import ./src/instrumentation.ts src/acp-entry.ts"
@@ -46,6 +47,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@generatorai/workflow-testkit": "workspace:*",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/multer": "^1.4.12",

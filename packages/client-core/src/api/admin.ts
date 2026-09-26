@@ -68,6 +68,8 @@ import {
   request,
   requestAllowing,
   requestText,
+  runListQuery,
+  type RunListParams,
   type ApiFetch,
   type DeviceScopeRequest,
 } from './client.js';
@@ -315,8 +317,8 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── workflowRuns.ts ─────────────────────────────────────────
     runs: {
-      list: (params?: { definitionId?: string; status?: string; limit?: number }) =>
-        req<RunSummary[]>(`/api/workflow-runs${qs({ ...params })}`),
+      list: (params?: RunListParams) =>
+        req<RunSummary[]>(`/api/workflow-runs${runListQuery(params)}`),
 
       /** The run with its stage runs (instances). */
       get: (id: string) => req<RunSummary & { stageRuns: StageRun[] }>(`/api/workflow-runs/${id}`),

@@ -90,7 +90,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -135,7 +136,8 @@
           }
         },
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     }

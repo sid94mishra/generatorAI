@@ -19,6 +19,23 @@ import type { LoopIteration, PendingDecisionView, WorkflowRun, WorkflowRunWithSt
 /** Files a run start uploads before invoking, by category. */
 export type InvocationFiles = Partial<Record<'skills' | 'agents' | 'prompts', Array<Blob & { readonly name: string }>>>;
 
+/**
+ * A run search (`GET /workflow-runs`); every filter narrows. `status` and
+ * `trigger` match any entry (a run without a trigger is `user`), `from`/`to`
+ * bound the creation time, `q` matches part of the name or the start of the
+ * id, `variables` are `name=value` pairs, `limit` keeps the newest matches.
+ */
+export interface WorkflowRunListFilter {
+  definitionId?: string;
+  status?: string | readonly string[];
+  trigger?: readonly string[];
+  from?: string | number | Date;
+  to?: string | number | Date;
+  q?: string;
+  variables?: Readonly<Record<string, string>>;
+  limit?: number;
+}
+
 /** Platform type discriminator */
 export type PlatformType = 'web' | 'cli' | 'desktop';
 
@@ -115,7 +132,7 @@ export interface IPlatformClient {
   ): Promise<InvocationResult>;
   /** What `invokeWorkflow` would do, without writing anything. */
   planWorkflowInvocation(request: InvocationRequest): Promise<InvocationPlan>;
-  listRuns(filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]>;
+  listRuns(filter?: WorkflowRunListFilter): Promise<WorkflowRun[]>;
   getRun(id: string): Promise<WorkflowRunWithStages>;
   /**
    * Every operator action on a run or one of its instances (P03 commands

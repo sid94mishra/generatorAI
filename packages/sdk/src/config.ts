@@ -66,7 +66,8 @@ export interface GeneratorAIConfig {
   /**
    * Max stages executing concurrently across all runs — bounds how many harness
    * subprocesses spawn at once so a small host isn't overwhelmed by a wide DAG
-   * fan-out. `0` (or negative) means unlimited. Defaults to 8.
+   * fan-out: the admission controller's `global` flow key. `0` (or negative)
+   * means the highest limit the key takes (256). Defaults to 8.
    */
   maxConcurrentStages?: number;
 

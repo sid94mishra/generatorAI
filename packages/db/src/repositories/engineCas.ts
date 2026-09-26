@@ -248,6 +248,11 @@ export function runPatchSets(patch: RunTransitionOptions['patch']): { sets: stri
     sets.push(`${column} = ?`);
     args.push(v);
   }
+  // The run budget is JSON (a run-level raise_budget, P07 WP-7.3).
+  if (patch?.budget !== undefined) {
+    sets.push('budget = ?');
+    args.push(patch.budget === null ? null : JSON.stringify(patch.budget));
+  }
   return { sets, args };
 }
 

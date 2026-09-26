@@ -15,6 +15,7 @@
   "scripts": {
     "typecheck": "tsc --build --force",
     "test": "vitest run",
+    "bench": "vitest bench --run",
     "lint": "eslint src/"
   },
   "dependencies": {

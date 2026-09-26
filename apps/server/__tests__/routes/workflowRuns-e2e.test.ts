@@ -45,13 +45,13 @@ describe('E2E: Workflow Run API Flow', () => {
     it('should filter by definition ID', async () => {
       await request(app).get('/api/workflow-runs?definitionId=def-1');
 
-      expect(container.workflowRunRepo.getByDefinitionId).toHaveBeenCalledWith('def-1');
+      expect(container.workflowRunRepo.search).toHaveBeenCalledWith({ definitionId: 'def-1' });
     });
 
     it('should filter by status', async () => {
       await request(app).get('/api/workflow-runs?status=running');
 
-      expect(container.workflowRunRepo.getByStatus).toHaveBeenCalled();
+      expect(container.workflowRunRepo.search).toHaveBeenCalledWith({ statuses: ['running'] });
     });
   });
 

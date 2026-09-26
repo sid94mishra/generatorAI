@@ -428,6 +428,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stages[].output.rules[].model` | string (1..200 chars) |  |  | Catalog id of the judge's model; omitted uses the stage's |
 | `stages[].output.rules[].include` | 'diff'[] (≤1) |  |  | Extra evidence for the judge: diff = the working-tree diff of the stage mount |
 | `stages[].output.rules[].message` | string (≤1000 chars) |  |  | Message recorded when the rule fails |
+| `stages[].output.summary` | 'none' \| 'auto' \| 'llm' |  | `"auto"` | The summary successors read in context mode summary. none: no summary; auto: json stages use output.summary or the output keys, text stages the first ~1,200 characters plus the headings, with one model turn only when a successor reads the summary and the output is over 6,000 characters; llm: a model summary written after the stage completes (on the workflow summary model), which only the successors that read it wait for |
 | `stages[].retry` | object |  |  | Retry policy for failed attempts |
 | `stages[].retry.maxAttempts` | integer (≥1, ≤10) |  | `2` | Attempts including the first |
 | `stages[].retry.initialDelayMs` | integer (≥0, ≤3600000) |  | `2000` | Delay before the first retry |
@@ -1084,7 +1085,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
 | `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
 | `n` | integer (≥1, ≤50) | yes |  | Iterations to add to the maximum |
-| `command` | "raise_budget" | yes |  | Raise a loop's cumulative budget; a parked loop continues when it can |
+| `command` | "raise_budget" | yes |  | Raise a loop's cumulative budget (a parked loop continues when it can), or, without instanceId, the run budget (a run paused by its exhausted budget resumes) |
 | `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
 | `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
 | `maxTurns` | integer (≥1, ≤100000) |  |  | Turns to add |

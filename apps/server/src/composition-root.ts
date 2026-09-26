@@ -3,10 +3,11 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AppConfig, ILogger, PersistedEvent } from '@generatorai/shared';
-import { createLogger, readBoundedInt } from '@generatorai/shared';
+import { createLogger, getMeter, readBoundedInt } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
+import { WorkflowEngineSettingsStore } from './settings/workflowEngine.js';
 import * as path from 'node:path';
 import { HarnessRegistry, MultiHarness, ALL_HARNESS_TYPES, type HarnessType, AgentHostSupervisor, type ProviderInstanceRegistry, FauxProvider, resolveCodexCommand, harnessErrorOf } from '@generatorai/agent-harness-providers';
 import type { ProviderInstanceId } from '@generatorai/core';
@@ -22,7 +23,7 @@ import { ScreenCast } from './computer/screenCast.js';
 import { createPreviewProducer } from './computer/previewProducer.js';
 import { registerEphemeralProducer } from './streaming/ephemeralScopes.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
-import { deriveStreamScopes } from './composition/streamScopes.js';
+import { deriveStreamScopes, streamRowsFor } from './composition/streamScopes.js';
 import {
   ExpoPushProvider,
   PushDispatcher,
@@ -172,6 +173,7 @@ import {
   buildReloadExtensionTool,
   // M8-fix: W18 admission controller — value import (cannot be `import type`)
   AdmissionController,
+  providerFlowKey,
   // Workspace mounts (chat sources → directories the agent edits)
   MountService,
 } from '@generatorai/core';
@@ -326,7 +328,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   };
 
   // W12 / P0-14 — process-wide supervisor bounding concurrent Claude turns.
-  // maxConcurrentExecutions defaults to 16 (env: GENERATORAI_MAX_CONCURRENT_AGENT_TURNS).
+  // Its turn permits come from the admission controller's
+  // `provider:claude-agent` flow key once that exists (below; P07 WP-7.2).
   // maxConcurrentColdStarts defaults to 4 (env: GENERATORAI_MAX_CONCURRENT_COLD_STARTS).
   //
   // W12-wiring: AgentHostClient (out-of-process) is OPT-IN, not the default,
@@ -496,6 +499,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   const loadTestFauxHarness = process.env['GENERATORAI_LOAD_TEST_FAUX_HARNESS'] === 'true';
   let harness: IAgentHarness;
   let hostSupervisor: HostSupervisor | undefined;
+  /** The out-of-process agent host's client: its turns are admitted on the gateway's flow keys (P07 WP-7.2). */
+  let agentHostTurns: AgentHostClient | undefined;
 
   // §1.Q — the concurrent-load test (agent-tests/concurrent-load-1q.mjs)
   // needs to drive real chat/workflow/automation traffic through the FULL
@@ -551,6 +556,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         onFatal: (reason) => agentHostClient?.handleHostFatal(reason),
       });
       agentHostClient = new AgentHostClient(supervisor, logger);
+      agentHostTurns = agentHostClient;
       hostSupervisor = supervisor;
       harness = agentHostClient;
       logger.info('[Container] AgentHostClient wired — provider runtimes will run out-of-process (L5)');
@@ -784,6 +790,17 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     },
   });
 
+  // P07 WP-7.2 (W-66, O-2) — one concurrency gate. A provider's per-turn
+  // permit IS the admission controller's `provider:<id>` flow key, so chat
+  // turns and workflow stages count against the one limit, and the operator
+  // sets every limit in Settings → Workflow engine (applied live). With the
+  // agent host on, the gateway admits every turn before it crosses IPC.
+  agentHostSupervisor.useExecutionGate(admissionController.flowGate(providerFlowKey('claude-agent')));
+  agentHostTurns?.useTurnGates((provider) => admissionController.flowGate(providerFlowKey(provider)));
+  const workflowEngineSettings = await WorkflowEngineSettingsStore.load(dirname(resolve(config.dbPath)), (s) =>
+    admissionController.setFlowLimits(s.flowLimits),
+  );
+
   // Chat extensions object — passed by reference to createCoreServices.
   // `worktreeService` is set later after project services are created.
   const chatExtensions: ChatManagementServiceExtensions = {
@@ -809,6 +826,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
   // wiring (stream manager, sandbox manager, orchestrator stack) stays
   // here.
   const core = createCoreServices({
+    workflowSummaryModel: () => workflowEngineSettings.get().summaryModel,
     logger,
     harness,
     scriptRunner,
@@ -894,6 +912,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     chatWorkflowRunBridge,
     idempotencyService,
   } = core;
+  // P07 WP-7.2 — the webhook/cron trigger debounce is an engine setting, read per trigger.
+  automationService.setTriggerDebounce(() => workflowEngineSettings.get().triggerDebounceMs);
 
   // STR-01 / CLN-12 — `StreamBroker` is now the only streaming transport.
   // Web clients subscribe via the unified `/api/stream?scope=<s>&id=<id>`
@@ -1022,6 +1042,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     });
   };
 
+  // P07 WP-7.5 — write amplification of workflow events (W-42, accepted at <= 2.2 rows per event).
+  const streamRowsPerEvent = getMeter('generatorai.server').createHistogram('workflow.stream.rows_per_event', {
+    description: 'stream_cursors rows written per workflow event (primary scope + fan-out)',
+  });
+
   const bridgeEvent = (event: {
     sessionId: string;
     kind: string;
@@ -1041,8 +1066,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Secondary scopes stay fire-and-forget: they are additional views of an
     // event that is already durable, so losing one costs a resume on that
     // view alone.
-    for (const target of deriveStreamScopes(event)) {
+    const targets = deriveStreamScopes(event);
+    for (const target of targets) {
       publishToBroker(target.scope, target.id, event.kind, event.data);
+    }
+    // P07 WP-7.5 (W-42): the rows a workflow event costs across its scopes.
+    if (event.data && typeof (event.data as { workflowRunId?: unknown }).workflowRunId === 'string') {
+      streamRowsPerEvent.record(streamRowsFor(event, targets), { family: event.kind.split('.')[0] ?? event.kind });
     }
   };
 
@@ -2247,6 +2277,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // undefined = fell back to in-process MultiHarness.
     hostSupervisor,
     admissionController,
+    workflowEngineSettings,
     streamBroker,
     customToolRegistry,
     mcpHub,
@@ -2737,6 +2768,8 @@ export interface Container {
    * is observable rather than mysterious.
    */
   admissionController: AdmissionController;
+  /** Flow key limits, the summary model and the trigger debounce (Settings → Workflow engine, P07). */
+  workflowEngineSettings: WorkflowEngineSettingsStore;
   streamBroker: StreamBroker;
   /** TOL-01 — harness-agnostic custom tool catalog. Empty by default. */
   customToolRegistry: CustomToolRegistry;

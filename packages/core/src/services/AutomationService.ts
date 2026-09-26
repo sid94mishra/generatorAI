@@ -151,6 +151,14 @@ export class AutomationService {
    * and the iteration loop checks `isCancelled` at every boundary.
    */
   private executionAborts = new Map<string, AbortController>();
+  /**
+   * P07 WP-7.2 — the trigger debounce (Settings → Workflow engine; 0 = off)
+   * and the last webhook/schedule trigger per automation: an identical
+   * trigger within the window (a redelivered webhook, a double cron fire)
+   * gets the execution the first one started instead of a second one.
+   */
+  private triggerDebounceMs: () => number = () => 0;
+  private readonly lastTrigger = new Map<string, { at: number; key: string; execution: AutomationExecution }>();
 
   constructor(
     private automationRepo: IAutomationRepository,
@@ -483,8 +491,34 @@ export class AutomationService {
     return { format: 'json_array', data };
   }
 
+  /** Late wiring (the server's engine settings): the webhook and cron trigger debounce, read per trigger. */
+  setTriggerDebounce(ms: () => number): void {
+    this.triggerDebounceMs = ms;
+  }
+
   /** Core execution logic — creates execution, runs workflows sequentially for each iteration */
   private async executeAutomation(
+    automation: Automation,
+    triggeredBy: AutomationTriggerType,
+    webhookPayload?: string,
+    dataset?: AutomationDataset,
+  ): Promise<AutomationExecution> {
+    if (triggeredBy === 'webhook' || triggeredBy === 'schedule') {
+      const windowMs = this.triggerDebounceMs();
+      const key = `${triggeredBy}:${webhookPayload ?? ''}`;
+      const last = this.lastTrigger.get(automation.id);
+      if (windowMs > 0 && last && last.key === key && Date.now() - last.at < windowMs) {
+        this.logger.info(`[AutomationService] ${triggeredBy} trigger of ${automation.id} debounced onto execution ${last.execution.id} (${windowMs} ms window)`);
+        return last.execution;
+      }
+      const execution = await this.startExecution(automation, triggeredBy, webhookPayload, dataset);
+      this.lastTrigger.set(automation.id, { at: Date.now(), key, execution });
+      return execution;
+    }
+    return this.startExecution(automation, triggeredBy, webhookPayload, dataset);
+  }
+
+  private async startExecution(
     automation: Automation,
     triggeredBy: AutomationTriggerType,
     webhookPayload?: string,

@@ -5,7 +5,7 @@
 // current published version.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ReactFlowProvider } from '@xyflow/react';
 import {
@@ -31,7 +31,7 @@ import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import {
   useWorkflowDefinition,
   useDeleteWorkflowDefinition,
-  useWorkflowRunsByDefinition,
+  useWorkflowRuns,
   usePublishDefinition,
 } from '@/hooks/workflowQueries.js';
 import { cn } from '@/lib/utils.js';
@@ -45,6 +45,13 @@ import {
   PopoverContent,
 } from '@/components/ui/index.js';
 import { EntityListRow } from '@/components/data/index.js';
+import {
+  EMPTY_RUN_FILTERS,
+  RunFilterBar,
+  activeFilterCount,
+  toRunListFilter,
+  type RunFilters,
+} from '@/components/workflow/runs/RunFilterBar.js';
 import type { WorkflowRun } from '@generatorai/shared';
 import type { InvocationRequest, InvocationResult } from '@generatorai/workflow-spec';
 import { usePlatform } from '@/providers/PlatformProvider.js';
@@ -65,7 +72,16 @@ export function WorkflowDefinitionPage() {
   const workflow = definition?.graph.workflow;
 
   usePageTitle(workflow?.name);
-  const { data: runs } = useWorkflowRunsByDefinition(id);
+  // The run list is a server search: typing settles for a moment before it is sent.
+  const [runFilters, setRunFilters] = useState<RunFilters>(EMPTY_RUN_FILTERS);
+  const [searchedFilters, setSearchedFilters] = useState<RunFilters>(EMPTY_RUN_FILTERS);
+  useEffect(() => {
+    const t = setTimeout(() => setSearchedFilters(runFilters), 300);
+    return () => clearTimeout(t);
+  }, [runFilters]);
+  const runSearch = useMemo(() => toRunListFilter(searchedFilters, { definitionId: id }), [searchedFilters, id]);
+  const filtering = !!searchedFilters.q.trim() || activeFilterCount(searchedFilters) > 0;
+  const { data: runs, isFetching: runsFetching } = useWorkflowRuns(runSearch, { enabled: !!id });
   const deleteDefinition = useDeleteWorkflowDefinition();
   const publishDefinition = usePublishDefinition();
 
@@ -367,22 +383,38 @@ export function WorkflowDefinitionPage() {
 
         {/* Runs sidebar */}
         <div className="flex w-80 shrink-0 flex-col overflow-y-auto bg-card xl:w-96">
-          <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-            <h2 className="text-sm font-semibold text-foreground">Recent Runs</h2>
-            {sortedRuns.length > 0 && (
-              <Badge tone="neutral" size="sm">
-                {sortedRuns.length}
-              </Badge>
-            )}
+          <div className="space-y-2 border-b border-border px-4 py-3">
+            <div className="flex items-center gap-2">
+              <h2 className="text-sm font-semibold text-foreground">{filtering ? 'Matching Runs' : 'Recent Runs'}</h2>
+              {sortedRuns.length > 0 && (
+                <Badge tone="neutral" size="sm">
+                  {sortedRuns.length}
+                </Badge>
+              )}
+              {runsFetching && <Spinner size="sm" className="text-muted-foreground" />}
+            </div>
+            <RunFilterBar
+              value={runFilters}
+              onChange={(next) => {
+                setRunFilters(next);
+                setVisibleRunCount(RUNS_PAGE_SIZE);
+              }}
+            />
           </div>
 
           {sortedRuns.length === 0 ? (
             <div className="flex flex-col items-center justify-center py-12 text-center">
               <Play className="mb-2 h-8 w-8 text-muted-foreground" />
-              <p className="text-sm text-muted-foreground">No runs yet</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Run this workflow to see execution history
-              </p>
+              {filtering ? (
+                <p className="text-sm text-muted-foreground">No runs match these filters</p>
+              ) : (
+                <>
+                  <p className="text-sm text-muted-foreground">No runs yet</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Run this workflow to see execution history
+                  </p>
+                </>
+              )}
             </div>
           ) : (
             <div className="space-y-2 p-3">
@@ -432,18 +464,17 @@ export function WorkflowDefinitionPage() {
 }
 
 function RunRow({ run }: { run: WorkflowRun }) {
-  const navigate = useNavigate();
+  const when = run.startedAt
+    ? `Started ${new Date(run.startedAt).toLocaleString()}`
+    : `Created ${new Date(run.createdAt).toLocaleString()}`;
+  const trigger = run.trigger?.kind && run.trigger.kind !== 'user' ? ` · ${run.trigger.kind}` : '';
   return (
     <EntityListRow
       size="sm"
       href={`/workflows/${run.workflowDefinitionId}/runs/${run.id}`}
       leading={<StatusBadge status={run.status} size="sm" />}
       title={<span className="truncate">{runTitle(run.name)}</span>}
-      description={
-        run.startedAt
-          ? `Started ${new Date(run.startedAt).toLocaleString()}`
-          : `Created ${new Date(run.createdAt).toLocaleString()}`
-      }
+      description={`${when}${trigger}`}
     />
   );
 }

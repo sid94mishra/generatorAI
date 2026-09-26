@@ -20,6 +20,7 @@ import {
   STAGE_KEY_PATTERN,
   WORKFLOW_FORMAT_VERSION,
   validateWorkflow,
+  VALIDATION_CODES,
   type AgentStage,
   type CheckStage,
   type DefinitionStatus,
@@ -78,6 +79,8 @@ export interface StageEdgeData extends Record<string, unknown> {
  * the control that edits the field.
  */
 export interface BuilderIssue extends ValidationIssue {
+  /** Found by the server's validation (agents, models, child workflows), not the spec validator here. */
+  server?: boolean;
   edgeId?: string;
   field?: string;
 }
@@ -112,11 +115,15 @@ interface WorkflowBuilderState {
   edges: Edge<StageEdgeData>[];
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
+  /** A request to bring a stage into view on the canvas (an issue was clicked). */
+  focusRequest: { key: string; token: number } | null;
 
   // ── State tracking ──
   isDirty: boolean;
   isSaving: boolean;
   issues: BuilderIssue[];
+  /** The last server validation's own issues (merged into `issues`). */
+  serverIssues: BuilderIssue[];
   lastSavedAt: Date | null;
 
   // ── Undo/Redo ──
@@ -131,6 +138,12 @@ interface WorkflowBuilderState {
 
   // ── Actions: Document ──
   toGraph: () => WorkflowGraph;
+  /**
+   * Load `graph` into the editor as unsaved changes (restore a version as
+   * the draft): the definition's bookkeeping stays, the save makes it the
+   * working graph. Recorded as one undo step.
+   */
+  replaceGraph: (graph: WorkflowGraph) => void;
 
   // ── Actions: Canvas ──
   onNodesChange: (changes: NodeChange<Node<StageNodeData>>[]) => void;
@@ -148,12 +161,20 @@ interface WorkflowBuilderState {
    */
   addStage: (name?: string, opts?: { kind?: StageKind; parentKey?: string }) => string;
   updateStage: (key: string, updates: StageUpdate) => void;
+  /** Rename the stage at `index` alone (a duplicate key names two stages; edges stay with the first). */
+  renameStageAt: (index: number, nextKey: string) => void;
   /** Rename a stage key, updating its edges and context sources. Returns an error message or null. */
   renameStageKey: (key: string, nextKey: string) => string | null;
   /** Remove a stage; a container goes with its whole body. */
   removeStage: (key: string) => void;
   /** Copy a stage under a new key; a container is copied with its body and the edges inside it. */
   duplicateStage: (key: string) => void;
+  /**
+   * Add a group of parsed stages and their edges (a stage template),
+   * laid out beside the canvas. Keys must be free; returns the key of the
+   * first top-level stage.
+   */
+  addFragment: (stages: readonly StageSpec[], edges: readonly EdgeSpec[]) => string | null;
 
   // ── Actions: Containers (P05 loops and maps) ──
   /**
@@ -179,6 +200,8 @@ interface WorkflowBuilderState {
   // ── Actions: Selection ──
   selectNode: (nodeId: string | null) => void;
   selectEdge: (edgeId: string | null) => void;
+  /** Select a stage (alone) and bring it into view. */
+  focusStage: (key: string) => void;
 
   // ── Actions: Workflow settings ──
   updateWorkflow: (updates: Partial<WorkflowSpec>) => void;
@@ -199,6 +222,11 @@ interface WorkflowBuilderState {
   markSaving: (saving: boolean) => void;
   /** Locate issues (from the client validator or a 422) against `graph`, the document they describe. */
   setIssues: (issues: ValidationIssue[], graph: WorkflowGraph) => void;
+  /**
+   * Merge the server's validation of `graph`: the issues only the server can
+   * find (agents, models, capabilities, child workflows) join the live ones.
+   */
+  setServerIssues: (issues: ValidationIssue[], graph: WorkflowGraph) => void;
 
   // ── Actions: Undo/Redo ──
   undo: () => void;
@@ -251,7 +279,7 @@ export function newAgentStage(key: string, name: string): AgentStage {
     prompts: [],
     sessionReuse: 'fresh',
     context: { mode: 'summary' },
-    output: { format: 'text', extraction: 'auto', rules: [] },
+    output: { format: 'text', extraction: 'auto', rules: [], summary: 'auto' },
     hooks: [],
   };
 }
@@ -491,6 +519,24 @@ function locateIssues(issues: ValidationIssue[], graph: WorkflowGraph): BuilderI
   });
 }
 
+/**
+ * Codes only the server decides: its own (unknown agents and models,
+ * capability conflicts) and the spec's that need the child workflows or the
+ * providers. The spec validator here finds every other one live.
+ */
+const SERVER_DECIDED_CODES: ReadonlySet<string> = new Set([
+  'subworkflow-ref',
+  'subworkflow-draft',
+  'subworkflow-input',
+  'subworkflow-depth',
+  'subworkflow-cycle',
+  'budget-cost-unsupported',
+]);
+
+function isServerDecided(code: string): boolean {
+  return !(code in VALIDATION_CODES) || SERVER_DECIDED_CODES.has(code);
+}
+
 const MAX_HISTORY = 50;
 
 /**
@@ -516,9 +562,11 @@ function blankState() {
     edges: [] as Edge<StageEdgeData>[],
     selectedNodeId: null,
     selectedEdgeId: null,
+    focusRequest: null as { key: string; token: number } | null,
     isDirty: false,
     isSaving: false,
     issues: [] as BuilderIssue[],
+    serverIssues: [] as BuilderIssue[],
     lastSavedAt: null,
     commandAllowlist: null as readonly string[] | null,
     // Seed the empty canvas as entry 0. Without it `historyIndex` starts at
@@ -551,6 +599,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       isDirty: false,
       isSaving: false,
       issues: [],
+      serverIssues: [],
       lastSavedAt: null,
       history: [{ nodes: [...nodes], edges: [...edges] }],
       historyIndex: 0,
@@ -593,6 +642,21 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       }),
       edges: edges.flatMap((e) => (e.data ? [e.data.edge] : [])),
     };
+  },
+
+  replaceGraph: (graph) => {
+    const { nodes, edges } = canvasFromGraph(graph);
+    set({
+      workflow: graph.workflow,
+      nodes,
+      edges,
+      selectedNodeId: null,
+      selectedEdgeId: null,
+      isDirty: true,
+      serverIssues: [],
+    });
+    coalesceKey = null;
+    get().pushHistory();
   },
 
   // ── Canvas ──
@@ -709,6 +773,18 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     // structural change. Keyed per stage+field so that holding down a key is
     // one undo step but editing a different field is a new one.
     get().pushHistory(`stage:${key}:${Object.keys(updates).join(',')}`);
+  },
+
+  renameStageAt: (index, nextKey) => {
+    const state = get();
+    if (!state.nodes[index] || !STAGE_KEY_PATTERN.test(nextKey) || state.nodes.some((n) => n.id === nextKey)) return;
+    set((s) => ({
+      nodes: s.nodes.map((n, i) =>
+        i === index ? { ...n, id: nextKey, data: { ...n.data, stage: { ...n.data.stage, key: nextKey } } } : n,
+      ),
+      isDirty: true,
+    }));
+    get().pushHistory();
   },
 
   renameStageKey: (key, nextKey) => {
@@ -831,6 +907,30 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       isDirty: true,
     }));
     get().pushHistory();
+  },
+
+  addFragment: (stages, edges) => {
+    const state = get();
+    if (stages.length === 0 || stages.some((s) => state.nodes.some((n) => n.id === s.key))) return null;
+    const flowEdges = edges.map(edgeToFlowEdge);
+    // Laid out on its own, then placed to the right of what is on the canvas.
+    const laid = canvasNodesFromStages(stages, stageToNode, flowEdges);
+    const top = state.nodes.filter((n) => !n.parentId);
+    const fragmentTop = laid.filter((n) => !n.parentId);
+    const originX = top.length > 0 ? Math.max(...top.map((n) => n.position.x + nodeSize(n).width)) + 80 : 50;
+    const originY = top.length > 0 ? Math.min(...top.map((n) => n.position.y)) : 50;
+    const minX = Math.min(...fragmentTop.map((n) => n.position.x));
+    const minY = Math.min(...fragmentTop.map((n) => n.position.y));
+    const placed = laid.map((n) =>
+      n.parentId ? n : { ...n, position: { x: n.position.x - minX + originX, y: n.position.y - minY + originY } },
+    );
+    set((s) => ({
+      nodes: fitContainers(orderParentsFirst([...s.nodes, ...placed])),
+      edges: [...s.edges, ...flowEdges],
+      isDirty: true,
+    }));
+    get().pushHistory();
+    return fragmentTop[0]?.id ?? null;
   },
 
   // ── Containers ──
@@ -1034,6 +1134,15 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   // ── Selection ──
   selectNode: (nodeId) => set({ selectedNodeId: nodeId, selectedEdgeId: null }),
   selectEdge: (id) => set({ selectedEdgeId: id, selectedNodeId: null }),
+  focusStage: (key) => {
+    if (!get().nodes.some((n) => n.id === key)) return;
+    set((s) => ({
+      nodes: s.nodes.map((n) => (n.selected === (n.id === key) ? n : { ...n, selected: n.id === key })),
+      selectedNodeId: key,
+      selectedEdgeId: null,
+      focusRequest: { key, token: (s.focusRequest?.token ?? 0) + 1 },
+    }));
+  },
 
   // ── Workflow settings ──
   updateWorkflow: (updates) => set((s) => ({ workflow: patch(s.workflow, updates), isDirty: true })),
@@ -1078,6 +1187,15 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   markDirty: () => set({ isDirty: true }),
   markSaving: (saving) => set({ isSaving: saving }),
   setIssues: (issues, graph) => set({ issues: locateIssues(issues, graph) }),
+  setServerIssues: (issues, graph) => {
+    const live = get().issues.filter((i) => !i.server);
+    const seen = new Set(live.map((i) => `${i.code}|${i.path}`));
+    const serverOnly = locateIssues(
+      issues.filter((i) => isServerDecided(i.code) && !seen.has(`${i.code}|${i.path}`)),
+      graph,
+    ).map((i) => ({ ...i, server: true }));
+    set({ serverIssues: serverOnly, issues: [...live, ...serverOnly] });
+  },
 
   // ── Undo/Redo ──
   pushHistory: (key) => {
@@ -1149,7 +1267,9 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     const allowlist = get().commandAllowlist;
     const { issues } = validateWorkflow(graph, { engine: ENGINE_LEVEL, ...(allowlist ? { commandAllowlist: allowlist } : {}) });
     const located = locateIssues(issues, graph);
-    set({ issues: located });
+    // The server's own findings stay until its next answer replaces them.
+    const seen = new Set(located.map((i) => `${i.code}|${i.path}`));
+    set({ issues: [...located, ...get().serverIssues.filter((i) => !seen.has(`${i.code}|${i.path}`))] });
     return located;
   },
 

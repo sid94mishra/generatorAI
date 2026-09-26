@@ -220,6 +220,16 @@ export type StreamEffect =
   // Only the web run store consumes these; every other surface drops them.
   | { op: 'runStatus'; runId?: string; status: string; data: Record<string, unknown> }
   | { op: 'stageStatus'; stageRunId: string; status: string; data: Record<string, unknown> }
+  /**
+   * A `ready` instance waits for an admission slot on a flow key (`wait`),
+   * or got it (`wait: null`). `label` names the key (`provider claude-agent`).
+   */
+  | {
+      op: 'stageAdmission';
+      stageRunId: string;
+      runId?: string;
+      wait: { flowKey: string; label: string; running: number; limit: number | null; queued: number } | null;
+    }
   | { op: 'registerStageSession'; stageRunId: string; sessionId: string }
   | { op: 'selectStageRun'; stageRunId: string }
   /** Terminal stage: settle its stream and refetch the history it produced. */
@@ -1661,6 +1671,31 @@ export class StreamEventRouter {
         const parentRunId = optStr(data['workflowRunId']);
         if (parentRunId) out.push({ op: 'invalidate', resource: 'run', id: parentRunId });
         out.push({ op: 'invalidate', resource: 'runs' });
+        break;
+      }
+
+      // ── Admission (P07 WP-7.2): a launch waiting on a flow key ───
+      case 'stage_run.admission_queued':
+      case 'stage_run.admission_granted': {
+        const stageRunId = stageRunIdOf();
+        if (!stageRunId) break;
+        const runId = optStr(data['workflowRunId']);
+        const flowKey = str(data['flowKey']);
+        out.push({
+          op: 'stageAdmission',
+          stageRunId,
+          ...(runId ? { runId } : {}),
+          wait:
+            kind === 'stage_run.admission_queued'
+              ? {
+                  flowKey,
+                  label: str(data['label'], flowKey),
+                  running: Number(data['running'] ?? 0),
+                  limit: typeof data['limit'] === 'number' ? data['limit'] : null,
+                  queued: Number(data['queued'] ?? 0),
+                }
+              : null,
+        });
         break;
       }
 

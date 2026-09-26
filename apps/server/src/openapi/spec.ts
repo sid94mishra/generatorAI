@@ -1648,10 +1648,49 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
     '/api/workflow-runs': {
       get: {
         tags: ['Runs'],
-        summary: 'List runs (?status, ?definitionId)',
+        summary: 'Search runs, oldest first; every filter narrows',
+        parameters: [
+          { in: 'query', name: 'status', schema: { type: 'string' }, description: 'Comma list of run states' },
+          { in: 'query', name: 'definitionId', schema: { type: 'string' } },
+          { in: 'query', name: 'trigger', schema: { type: 'string' }, description: 'Comma list of trigger kinds (user, automation, fork, stage, …); a run without a trigger is user' },
+          { in: 'query', name: 'from', schema: { type: 'string' }, description: 'Created at or after (ISO date or epoch ms)' },
+          { in: 'query', name: 'to', schema: { type: 'string' }, description: 'Created at or before (ISO date or epoch ms)' },
+          { in: 'query', name: 'q', schema: { type: 'string' }, description: 'Part of the run name, or the start of its id' },
+          { in: 'query', name: 'var', schema: { type: 'array', items: { type: 'string' } }, style: 'form', explode: true, description: 'name=value (repeatable): a variable with that value' },
+          { in: 'query', name: 'limit', schema: { type: 'integer', minimum: 1, maximum: 1000 }, description: 'Only the newest N matches' },
+        ],
         responses: {
           '200': { description: 'Runs', content: { 'application/json': { schema: { type: 'array', items: { $ref: '#/components/schemas/WorkflowRun' } } } } },
+          '400': { description: 'VALIDATION_ERROR (an unknown status, a bad date, var or limit)' },
         },
+      },
+    },
+    '/api/workflow-runs/stage-history': {
+      get: {
+        tags: ['Runs'],
+        summary: "One stage's newest executions across the definition's runs (every instance), newest first: `[{stageRun, run: {id, name, status, createdAt}}]`",
+        parameters: [
+          { in: 'query', name: 'definitionId', required: true, schema: { type: 'string' } },
+          { in: 'query', name: 'stageKey', required: true, schema: { type: 'string' } },
+          { in: 'query', name: 'limit', schema: { type: 'integer', minimum: 1, maximum: 200, default: 20 } },
+        ],
+        responses: { '200': { description: 'The executions' }, '400': { description: 'VALIDATION_ERROR' } },
+      },
+    },
+    '/api/settings/workflow-engine': {
+      get: {
+        tags: ['Runs'],
+        summary: 'The workflow engine settings (P07): flow key limits, the workflow summary model, the trigger debounce, their defaults and every flow key live',
+        description:
+          '`{settings: {flowLimits, summaryModel, triggerDebounceMs}, defaults: {flowLimits, triggerDebounceMs}, flows: [{flowKey, kind, running, queued, limit, configurable, detail?}]}`. ' +
+          'Flow keys: global, provider:<id>, model:<id>, check:global (configurable), worktree:<mountId> and run:<id> (live only). Needs read:workflows.',
+        responses: { '200': { description: 'The settings and the live flow keys' } },
+      },
+      put: {
+        tags: ['Runs'],
+        summary: 'Change the workflow engine settings (applied at once); `flowLimits` is the whole set — a key left out goes back to its default',
+        description: 'Body `{flowLimits?: {<key>: 1..256}, summaryModel?: string | null, triggerDebounceMs?: 0..600000}`. Needs admin:settings.',
+        responses: { '200': { description: 'The settings and the live flow keys' }, '400': { description: 'INVALID_BODY' }, '403': { description: 'FORBIDDEN_SCOPE' } },
       },
     },
     '/api/workflow-invocations': {

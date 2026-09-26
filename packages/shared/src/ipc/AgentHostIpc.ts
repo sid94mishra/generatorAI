@@ -42,8 +42,10 @@ export interface SendTurnRequest {
    * The per-turn options (`SendPromptOptions`): the agent mode and the
    * permission mode the turn runs under. Dropping them made every turn over
    * the host run under the provider's construction-time default.
+   * `admitted` (P07 WP-7.2, RV-26): the gateway already holds the turn's
+   * `provider:<id>` flow key, so the host takes no permit of its own.
    */
-  options?: { agentMode?: string; permissionMode?: string };
+  options?: { agentMode?: string; permissionMode?: string; admitted?: boolean };
 }
 
 export interface AbortSessionRequest {

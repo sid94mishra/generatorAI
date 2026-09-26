@@ -213,6 +213,16 @@ export function DAGCanvas({ readonly, onAddStage }: DAGCanvasProps) {
     }
   }, [nodes.length]);
 
+  // An issue clicked elsewhere brings its stage into view.
+  const focusRequest = useWorkflowBuilderStore((s) => s.focusRequest);
+  useEffect(() => {
+    if (!focusRequest) return;
+    const t = setTimeout(() => {
+      reactFlowInstance.fitView({ nodes: [{ id: focusRequest.key }], padding: 0.8, maxZoom: 1.2, duration: 300 });
+    }, 50);
+    return () => clearTimeout(t);
+  }, [focusRequest, reactFlowInstance]);
+
   // Minimap node color
   const minimapNodeColor = useCallback((node: Node) => {
     if (node.id === selectedNodeId) return 'var(--color-primary)';

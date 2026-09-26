@@ -46,11 +46,12 @@ export function addUsage(a: Usage, b: Usage): Usage {
   return out;
 }
 
-export function overBudget(usage: Usage, budget: { maxTurns?: number; maxCostUsd?: number } | undefined | null): boolean {
+export function overBudget(usage: Usage, budget: { maxTurns?: number; maxCostUsd?: number; maxTokens?: number } | undefined | null): boolean {
   if (!budget) return false;
   return (
     (budget.maxTurns !== undefined && (usage.turns ?? 0) >= budget.maxTurns) ||
-    (budget.maxCostUsd !== undefined && (usage.costUsd ?? 0) >= budget.maxCostUsd)
+    (budget.maxCostUsd !== undefined && (usage.costUsd ?? 0) >= budget.maxCostUsd) ||
+    (budget.maxTokens !== undefined && (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) >= budget.maxTokens)
   );
 }
 
@@ -228,6 +229,7 @@ export class Working {
     this.push({ t: 'run_patch', patch });
     if (patch.statusReason !== undefined) this.run.statusReason = patch.statusReason;
     if (patch.outcome !== undefined) this.run.outcome = patch.outcome;
+    if (patch.budget !== undefined) this.run.budget = patch.budget;
   }
 
   settleAttempt(inst: InstanceState, status: Exclude<AttemptStatus, 'running'>, error?: ClassifiedError): void {

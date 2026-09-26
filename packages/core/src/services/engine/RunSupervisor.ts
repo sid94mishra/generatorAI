@@ -52,10 +52,11 @@ import type { ISessionRepository } from '../../domain/ports/IRepositories.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
 import type { RunMessage, RunOutcome } from '../../domain/scheduler/types.js';
-import { mapStateOf, StateIndex } from '../../domain/scheduler/scope.js';
+import { graphForInstance } from '../../domain/scheduler/expansion.js';
+import { expansionNodes, expansionStateOf, mapStateOf, StateIndex } from '../../domain/scheduler/scope.js';
 import { compile, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import type { EventBus } from '../../events/EventBus.js';
-import type { AdmissionController } from '../AdmissionController.js';
+import { CHECK_FLOW_KEY, GLOBAL_FLOW_KEY, modelFlowKey, providerFlowKey, type AdmissionController } from '../AdmissionController.js';
 import type { RunDefinitionReader } from '../definitions/RunDefinitionReader.js';
 import type { HookExecutor } from '../HookExecutor.js';
 import type { PlanService } from '../PlanService.js';
@@ -63,17 +64,19 @@ import type { SessionComposer } from '../session/SessionComposer.js';
 import type { WorkspaceCheckpointService } from '../WorkspaceCheckpointService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
 import { EffectsDispatcher } from './EffectsDispatcher.js';
+import { EngineTelemetry } from './EngineTelemetry.js';
 import type { LifecycleSteps } from './lifecycle/steps.js';
 import { LoopEffects } from './LoopEffects.js';
 import { MapEffects } from './MapEffects.js';
 import { SubworkflowEffects } from './SubworkflowEffects.js';
+import { SummaryEffects } from './summaries.js';
 import { WorktreeLeases } from './WorktreeLeases.js';
 import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
 import { inFlightIsSafe, LeaseReaper } from './LeaseReaper.js';
 import { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
 import { RunActor, type DecideRecord, type ProcessResult } from './RunActor.js';
 import { DefaultRunLifecycle, type LifecyclePlatform, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';
-import { journalEpoch, StageExecutor, type ExecutorTiming, type StageArtifactReader } from './StageExecutor.js';
+import { journalEpoch, StageExecutor, stageSessionSpec, type ExecutorTiming, type StageArtifactReader } from './StageExecutor.js';
 import { TimerService } from './TimerService.js';
 
 export interface SupervisorTiming {
@@ -114,6 +117,8 @@ export interface RunSupervisorDeps {
   artifacts?: StageArtifactReader | undefined;
   /** Per-wait callback tokens (P05 §4.3). */
   callbacks?: WorkflowCallbacks | undefined;
+  /** The workflow summary model of `llm` summaries (engine settings, read per summary); unset uses the stage's model. */
+  summaryModel?: (() => string | null | undefined) | undefined;
   /** Where engine events go (default: `eventBus.emitGlobal`, awaited). */
   publish?: OutboxPublisher | undefined;
   /** Prepare/finalize (default: `DefaultRunLifecycle`). */
@@ -162,6 +167,9 @@ export class RunSupervisor {
   readonly leases: WorktreeLeases;
   readonly maps: MapEffects;
   readonly subworkflows: SubworkflowEffects;
+  readonly summaries: SummaryEffects;
+  /** Spans and metrics of the engine (P07 WP-7.4). */
+  readonly telemetry = new EngineTelemetry();
   /** The compiled definition of every hosted run (the actors hold the same). */
   private readonly compiledByRun = new Map<string, CompiledWorkflow>();
   private readonly actors = new Map<string, Promise<RunActor | null>>();
@@ -193,6 +201,7 @@ export class RunSupervisor {
       toHarnessError: deps.toHarnessError,
       artifacts: deps.artifacts,
       callbacks: deps.callbacks,
+      telemetry: this.telemetry,
       post,
       logger: deps.logger,
       now: this.now,
@@ -201,7 +210,11 @@ export class RunSupervisor {
     this.timers = new TimerService({ timers: deps.stores.timers, post, now: this.now, logger: deps.logger });
     this.outbox = new OutboxDispatcher({
       outbox: deps.stores.outbox,
-      publish: deps.publish ?? ((e) => deps.eventBus.emitGlobal(e as never)),
+      // The engine's own events drive its run and container spans (P07 WP-7.4).
+      publish: async (e, row) => {
+        this.telemetry.observe(e);
+        await (deps.publish ? deps.publish(e, row) : deps.eventBus.emitGlobal(e as never));
+      },
       now: this.now,
       logger: deps.logger,
     });
@@ -245,6 +258,15 @@ export class RunSupervisor {
       command: (runId, command) => this.command(runId, command).then((r) => (r.ok ? { ok: true } : { ok: false, message: r.message })),
       logger: deps.logger,
     });
+    this.summaries = new SummaryEffects({
+      stores: deps.stores,
+      runRepo: deps.runRepo,
+      definitions: deps.definitions,
+      harness: deps.harness,
+      post,
+      summaryModel: deps.summaryModel,
+      logger: deps.logger,
+    });
     this.effects = new EffectsDispatcher({
       executor: this.executor,
       admission: deps.admission,
@@ -252,12 +274,14 @@ export class RunSupervisor {
       outbox: this.outbox,
       lifecycle: this.lifecycle,
       post,
-      kindOf: (id) => deps.stores.stages.getInstance(id)?.kind,
+      flowKeysOf: (runId, stageRunId) => this.flowKeysOf(runId, stageRunId),
+      notify: (kind, data) => void deps.eventBus.emitGlobal({ kind, data } as never).catch(() => undefined),
       loops: this.loops,
       maps: this.maps,
       leases: this.leases,
       writerLeaseKeys: (runId, stageRunId) => this.writerLeaseKeys(runId, stageRunId),
       subworkflows: this.subworkflows,
+      summaries: this.summaries,
       logger: deps.logger,
     });
     this.reaper = new LeaseReaper({
@@ -322,6 +346,7 @@ export class RunSupervisor {
     this.reaper.stop();
     this.timers.stop();
     this.outbox.stop();
+    this.telemetry.shutdown();
     for (const p of this.actors.values()) void p.then((a) => a?.retire());
     this.actors.clear();
     if (opts.releaseLock !== false && this.started) this.deps.stores.lock.release(this.bootId);
@@ -458,6 +483,7 @@ export class RunSupervisor {
       ...(this.deps.random ? { random: this.deps.random } : {}),
       logger: this.deps.logger,
       onDecide: this.deps.onDecide,
+      telemetry: this.telemetry,
     });
   }
 
@@ -585,6 +611,13 @@ export class RunSupervisor {
           if (settled) await actor.post(settled.msg);
         }
       }
+      // An `llm` summary that died with the process is written again (P07 WP-7.1).
+      const compiledRun = await this.compiled(runId);
+      for (const inst of state.instances) {
+        if (inst.status === 'completed' && inst.summary === null && compiledRun.nodes.get(inst.stageKey)?.summary === 'llm') {
+          this.effects.dispatch(runId, { effects: [{ t: 'summarize', stageRunId: inst.id }], timers: [], outbox: [] });
+        }
+      }
       this.timers.loadRun(runId);
       const run = stores.runs.getRunRow(runId);
       if (run?.status === 'starting') this.effects.dispatch(runId, { effects: [{ t: 'prepare' }], timers: [], outbox: [] });
@@ -598,6 +631,61 @@ export class RunSupervisor {
     await this.outbox.drainAll();
     this.deps.logger?.info?.(`[RunSupervisor] recovered ${runs.length} run(s): ${interrupted} interrupted attempt(s), ${relaunched} relaunch(es)`);
     return { runs: runs.length, interrupted, relaunched };
+  }
+
+  /**
+   * The flow keys a launch is admitted on (P07 WP-7.2): `check:global` for
+   * a check; else `global`, the stage's provider and — when the operator
+   * configured it — its model. The provider is the session's harness type,
+   * else the one its model routes to.
+   */
+  private async flowKeysOf(runId: string, stageRunId: string): Promise<string[]> {
+    const inst = this.deps.stores.stages.getInstance(stageRunId);
+    if (inst?.kind === 'check') return [CHECK_FLOW_KEY];
+    const keys = [GLOBAL_FLOW_KEY];
+    try {
+      const run = await this.deps.runRepo.getById(runId);
+      // A planned stage (P08 §8) reads its spec from its expansion's stored plan.
+      const state = this.deps.stores.runStore.loadRunState(runId);
+      const pinned = await this.deps.definitions.get(run.definitionVersionId);
+      const si = state?.instances.find((i) => i.id === stageRunId);
+      const graph = state && si ? graphForInstance(pinned, state, si) : pinned;
+      const stage = graph.stages.find((s) => s.key === inst?.stageKey);
+      if (stage?.kind !== 'agent') return keys;
+      const spec = stageSessionSpec(graph, stage, run).merged;
+      const provider = spec.harnessType ?? (await this.deps.harness.resolveProvider?.({ ...(spec.model ? { model: spec.model } : {}) }));
+      if (provider) keys.push(providerFlowKey(provider));
+      if (spec.model && this.deps.admission.currentFlowLimits()[modelFlowKey(spec.model)] !== undefined) keys.push(modelFlowKey(spec.model));
+    } catch (err) {
+      this.deps.logger?.warn(`[RunSupervisor] the flow keys of ${stageRunId} could not be resolved (global only): ${String(err)}`);
+    }
+    return keys;
+  }
+
+  /**
+   * `run:<id>` of every hosted run (P07 WP-7.2): its stages in an attempt
+   * against its `maxParallel` (`decide()` enforces it; reported here).
+   */
+  runFlows(): Array<{ flowKey: string; running: number; queued: number; limit: number }> {
+    const out: Array<{ flowKey: string; running: number; queued: number; limit: number }> = [];
+    for (const [runId, compiled] of this.compiledByRun) {
+      const state = this.deps.stores.runStore.loadRunState(runId);
+      if (!state || TERMINAL.has(state.run.status)) continue;
+      // A planned stage's node is in its expansion's stored plan (P08 §8).
+      const byId = new Map(state.instances.map((i) => [i.id, i]));
+      const nodeOf = (i: (typeof state.instances)[number]) => {
+        const base = compiled.nodes.get(i.stageKey);
+        if (base || i.scopeId === null) return base;
+        const container = byId.get(i.scopeId);
+        const xs = container ? expansionStateOf(container) : null;
+        return xs ? expansionNodes(xs).get(i.stageKey) : undefined;
+      };
+      const work = state.instances.filter((i) => nodeOf(i)?.class === 'work');
+      const running = work.filter((i) => i.attemptStatus === 'running' && ['ready', 'starting', 'running', 'validating', 'awaiting_input'].includes(i.status)).length;
+      const queued = work.filter((i) => i.status === 'pending').length;
+      out.push({ flowKey: `run:${runId}`, running, queued, limit: compiled.maxParallel });
+    }
+    return out;
   }
 
   /** The compensation list `decide()` gave the lost `finalize` (completed compensating instances, last first). */

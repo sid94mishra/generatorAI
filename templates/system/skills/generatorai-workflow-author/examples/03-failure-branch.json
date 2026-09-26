@@ -60,7 +60,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "retry": {
         "maxAttempts": 2,
@@ -106,7 +107,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -133,7 +135,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -161,7 +164,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     }

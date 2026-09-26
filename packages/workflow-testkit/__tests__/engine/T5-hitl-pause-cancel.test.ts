@@ -136,7 +136,7 @@ describe('T5 pause / cancel (engine)', () => {
     expect(l1.attempts?.map((a) => `${a.mode}:${a.status}`)).toEqual(['fresh:aborted', 'resume:succeeded']);
     // The resumed attempt re-sent the interrupted turn in the same conversation.
     const l1Calls = snap.calls.filter((c) => c.stageName === 'l1');
-    expect(l1Calls.map((c) => c.kind)).toEqual(['prompt', 'continuation', 'summary']);
+    expect(l1Calls.map((c) => c.kind)).toEqual(['prompt', 'continuation']);
     expect(new Set(l1Calls.map((c) => c.conversationId)).size).toBe(1);
     expect(snap.stages['l2']!.status).toBe('completed');
   });

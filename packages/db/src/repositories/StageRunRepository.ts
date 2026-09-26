@@ -6,11 +6,12 @@
 // reads the instances for the run page, the commands API and forks.
 // ────────────────────────────────────────────────────────────────
 
-import { eq, and, asc, inArray } from 'drizzle-orm';
+import { eq, and, asc, desc, inArray } from 'drizzle-orm';
 import type {
   IStageRunCas,
   IStageRunRepository,
   StageAmendPatch,
+  StageHistoryEntry,
   StageInstanceRow,
   StageTransitionOptions,
   TransitionResult,
@@ -18,7 +19,7 @@ import type {
 import type { StageRunState } from '@generatorai/workflow-spec';
 import type { ExpansionStateView, LoopIteration, LoopStateView, MapStateView, StageRun, StageRunStatus, SubworkflowStateView } from '@generatorai/shared';
 import { NotFoundError } from '@generatorai/shared';
-import { loopIterations, stageRuns } from '../schema.js';
+import { loopIterations, stageRuns, workflowRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { sqliteHandle } from './AuthRepositories.js';
 import { amendStageOutput, getInstanceRow, markStageProgress, renewStageLease, stageTransition } from './engineCas.js';
@@ -96,6 +97,27 @@ export class DrizzleStageRunRepository implements IStageRunRepository, IStageRun
       outcome: r.outcome ?? 'completed',
       startedAt: r.startedAt ? r.startedAt.getTime() : null,
       endedAt: r.endedAt ? r.endedAt.getTime() : null,
+    }));
+  }
+
+  /** The newest `limit` instances of `stageKey` across the definition's runs, newest first. */
+  async getStageHistory(definitionId: string, stageKey: string, limit: number): Promise<StageHistoryEntry[]> {
+    const rows = await this.db
+      .select({
+        stage: stageRuns,
+        runId: workflowRuns.id,
+        runName: workflowRuns.name,
+        runStatus: workflowRuns.status,
+        runCreatedAt: workflowRuns.createdAt,
+      })
+      .from(stageRuns)
+      .innerJoin(workflowRuns, eq(stageRuns.workflowRunId, workflowRuns.id))
+      .where(and(eq(workflowRuns.workflowDefinitionId, definitionId), eq(stageRuns.stageKey, stageKey)))
+      .orderBy(desc(stageRuns.createdAt))
+      .limit(limit);
+    return rows.map((r) => ({
+      stageRun: mapStageRun(r.stage),
+      run: { id: r.runId, name: r.runName, status: r.runStatus, createdAt: r.runCreatedAt },
     }));
   }
 

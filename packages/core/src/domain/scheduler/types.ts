@@ -299,7 +299,7 @@ export interface RunRecord {
   codebases: Record<string, CodebaseScopeState>;
   usage: Usage;
   /** The effective run budget (invocation override, else the workflow's). */
-  budget: { maxTurns?: number; maxCostUsd?: number; maxWallClockMs?: number } | null;
+  budget: { maxTurns?: number; maxCostUsd?: number; maxTokens?: number; maxWallClockMs?: number } | null;
   /** Started by something other than a person (automation, schedule, webhook, agent): pauses expire (PD-2). */
   unattended: boolean;
   startedAt: number | null;
@@ -392,6 +392,8 @@ export type RunMessage =
     }
   /** The `finalize` effect is done (compensation, onExit/onFailure, post-processing). */
   | { type: 'finalized'; ok: boolean; error?: string }
+  /** The `summarize` effect is done: an `llm` summary (or its deterministic fallback), and what the summary turn spent. */
+  | { type: 'summary_ready'; stageRunId: string; summary: string; usage?: Usage }
   /** Backstop and recovery: re-derive what to do from the state alone. */
   | { type: 'tick' };
 
@@ -420,6 +422,8 @@ export interface RunPatch {
   outcome?: RunOutcome | null;
   error?: string | null;
   errorCode?: string | null;
+  /** The run budget after a run-level `raise_budget` (P07 WP-7.3). */
+  budget?: RunRecord['budget'];
 }
 
 export interface NewInstance {
@@ -484,6 +488,8 @@ export type Decision =
   | { t: 'map_release'; stageRunId: string }
   /** Effect: invoke a sub-workflow's child run; posts `child_started` or `child_start_failed`. */
   | { t: 'start_child'; stageRunId: string; inputs: Record<string, unknown> }
+  /** Effect: write a completed stage's `llm` summary (P07 WP-7.1); posts `summary_ready`. */
+  | { t: 'summarize'; stageRunId: string }
   /** Effect: propagate a cancel, pause or resume to a child run. */
   | { t: 'child_command'; stageRunId: string; childRunId: string; command: 'cancel' | 'pause' | 'resume' }
   /** Persisted in the same transaction, dispatched after commit. */
@@ -513,4 +519,5 @@ export const EFFECT_DECISIONS: ReadonlySet<DecisionType> = new Set<DecisionType>
   'map_release',
   'start_child',
   'child_command',
+  'summarize',
 ]);

@@ -149,7 +149,7 @@ export class WorkflowRunService {
    */
   async createRun(record: NewRunRecord): Promise<WorkflowRun> {
     return withSpan('core.workflow', 'workflow.createRun', async (span) => {
-      span.setAttribute('workflow.definition_id', record.workflowDefinitionId);
+      span.setAttribute('workflow.definition.id', record.workflowDefinitionId);
       const graph = await this.definitions.get(record.definitionVersionId);
       const now = new Date();
       const id = generateId();
@@ -185,7 +185,7 @@ export class WorkflowRunService {
         data: { workflowRunId: run.id, name: run.name, workflowDefinitionId: run.workflowDefinitionId },
       });
       runCounter.add(1, { definition_id: record.workflowDefinitionId });
-      span.setAttribute('workflow.run_id', run.id);
+      span.setAttribute('workflow.run.id', run.id);
       return run;
     });
   }
@@ -225,7 +225,7 @@ export class WorkflowRunService {
   ): Promise<WorkflowRun> {
     const opts = ForkRunRequestSchema.parse(request);
     return withSpan('core.workflow', 'workflow.forkRun', async (span) => {
-      span.setAttribute('workflow.run_id', sourceRunId);
+      span.setAttribute('workflow.fork.source_run.id', sourceRunId);
       const idempotencyKey = opts.idempotencyKey ? `fork:${sourceRunId}:${opts.idempotencyKey}` : undefined;
       if (idempotencyKey) {
         const existing = await this.runRepo.findByIdempotencyKey(idempotencyKey);

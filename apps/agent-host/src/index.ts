@@ -30,10 +30,11 @@ async function buildHarness() {
 }
 
 /**
- * Concurrency bounds live here rather than only in the gateway: with the agent
- * host enabled the gateway's in-process `AgentHostSupervisor` is not in the
- * call path at all, so these env vars are the only bound that applies. Same
- * names as the in-process path so an operator tunes one thing, not two.
+ * Concurrency bounds. Turn permits are the gateway's: it admits every turn on
+ * its `provider:<id>` flow key and sends it `admitted` (P07 WP-7.2, RV-26),
+ * so the host's own turn semaphore only bounds a turn sent without the flag;
+ * the gateway hands it the same limit (`GENERATORAI_AGENT_HOST_TURN_LIMIT`,
+ * set from Settings → Workflow engine at spawn). Cold starts stay a host bound.
  */
 function intFromEnv(name: string, fallback: number): number {
   const raw = process.env[name];
@@ -45,7 +46,7 @@ function intFromEnv(name: string, fallback: number): number {
 const server = new AgentHostServer({
   logger,
   createHarness: buildHarness,
-  maxConcurrentExecutions: intFromEnv('GENERATORAI_MAX_CONCURRENT_AGENT_TURNS', 16),
+  maxConcurrentExecutions: intFromEnv('GENERATORAI_AGENT_HOST_TURN_LIMIT', 4),
   maxConcurrentColdStarts: intFromEnv('GENERATORAI_MAX_CONCURRENT_COLD_STARTS', 2),
 });
 

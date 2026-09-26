@@ -53,7 +53,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "budget": {
         "maxTurns": 120
@@ -83,7 +84,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "approval": {
         "prompt": "Approve to commit, push and open the pull request for {{variables.issue_url}}. Reject to stop: nothing is committed.",

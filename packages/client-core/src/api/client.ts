@@ -467,6 +467,10 @@ export interface WorkflowRunSummary {
   statusReason?: string | null;
   /** CAS version (`expectedVersion` on run commands). */
   version?: number;
+  /** The effective run budget (`maxTurns`, `maxCostUsd`, `maxTokens`, `maxWallClockMs`). */
+  budget?: Record<string, unknown> | null;
+  /** Rolled-up usage; `costUsd` only when a provider reported cost. */
+  usage?: { turns?: number; costUsd?: number; inputTokens?: number; outputTokens?: number; toolCalls?: number } | null;
 }
 
 /**
@@ -520,6 +524,47 @@ export interface StageRunSummary {
   iterationIndex?: number;
   /** A loop instance's state (P05 §2.6). */
   loopState?: LoopStateView;
+}
+
+/**
+ * A run search (`GET /workflow-runs`); every filter narrows. `status` and
+ * `trigger` match any of their entries (a run without a trigger is `user`);
+ * `from`/`to` bound the creation time; `q` matches part of the name or the
+ * start of the id; `variables` are `name=value` pairs; `limit` keeps the
+ * newest matches.
+ */
+export interface RunListParams {
+  definitionId?: string;
+  status?: string | readonly string[];
+  trigger?: readonly string[];
+  from?: string | number | Date;
+  to?: string | number | Date;
+  q?: string;
+  variables?: Readonly<Record<string, string>>;
+  limit?: number;
+}
+
+/** The query string of a run search. */
+export function runListQuery(params: RunListParams = {}): string {
+  const q = new URLSearchParams();
+  const time = (t: string | number | Date) => (t instanceof Date ? t.toISOString() : String(t));
+  if (params.definitionId) q.set('definitionId', params.definitionId);
+  const status = typeof params.status === 'string' ? params.status : params.status?.join(',');
+  if (status) q.set('status', status);
+  if (params.trigger?.length) q.set('trigger', params.trigger.join(','));
+  if (params.from !== undefined) q.set('from', time(params.from));
+  if (params.to !== undefined) q.set('to', time(params.to));
+  if (params.q?.trim()) q.set('q', params.q.trim());
+  for (const [name, value] of Object.entries(params.variables ?? {})) q.append('var', `${name}=${value}`);
+  if (params.limit !== undefined) q.set('limit', String(params.limit));
+  const s = q.toString();
+  return s ? `?${s}` : '';
+}
+
+/** One execution of a stage across the definition's runs (`GET /workflow-runs/stage-history`). */
+export interface StageHistoryEntry {
+  stageRun: StageRunSummary & { usage?: Record<string, unknown> | null; createdAt?: Timestamp };
+  run: { id: string; name: string; status: RunStatus; createdAt: Timestamp };
 }
 
 /** How a stage took an operator message (`POST …/instances/:id/messages`). */
@@ -1296,13 +1341,12 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     runs: {
-      list: (params?: { definitionId?: string; status?: string }) => {
-        const q = new URLSearchParams();
-        if (params?.definitionId) q.set('definitionId', params.definitionId);
-        if (params?.status) q.set('status', params.status);
-        const suffix = q.toString() ? `?${q}` : '';
-        return request<WorkflowRunSummary[]>(fetchImpl, `/api/workflow-runs${suffix}`);
-      },
+      list: (params?: RunListParams) =>
+        request<WorkflowRunSummary[]>(fetchImpl, `/api/workflow-runs${runListQuery(params)}`),
+
+      /** One stage's newest executions across a definition's runs, newest first. */
+      stageHistory: (definitionId: string, stageKey: string, limit?: number) =>
+        request<StageHistoryEntry[]>(fetchImpl, `/api/workflow-runs/stage-history${qs({ definitionId, stageKey, limit })}`),
 
       get: (id: string) =>
         request<WorkflowRunSummary & { stageRuns: StageRunSummary[] }>(

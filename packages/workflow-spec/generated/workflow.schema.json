@@ -2175,6 +2175,16 @@
                         "maxItems": 20,
                         "default": [],
                         "description": "Hard rules checked before the stage completes"
+                      },
+                      "summary": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "auto",
+                          "llm"
+                        ],
+                        "default": "auto",
+                        "description": "The summary successors read in context mode summary. none: no summary; auto: json stages use output.summary or the output keys, text stages the first ~1,200 characters plus the headings, with one model turn only when a successor reads the summary and the output is over 6,000 characters; llm: a model summary written after the stage completes (on the workflow summary model), which only the successors that read it wait for"
                       }
                     },
                     "additionalProperties": false,

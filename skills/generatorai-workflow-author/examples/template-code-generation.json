@@ -126,7 +126,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -157,7 +158,8 @@
             "value": 200,
             "message": "Generated code should be substantive"
           }
-        ]
+        ],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -182,7 +184,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -207,7 +210,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     }

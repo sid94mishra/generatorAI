@@ -84,7 +84,8 @@
         },
         "extraction": "auto",
         "instructions": "severity: how bad it is for users; files: repository-relative paths.",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -109,7 +110,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -139,7 +141,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     }

@@ -50,8 +50,21 @@ export {
 } from './IdempotencyService.js';
 
 // W18 — Admission control + concurrency management
-export { AdmissionController, AdmissionTimeoutError, laneFor, sizeLane } from './AdmissionController.js';
+export {
+  AdmissionController,
+  AdmissionTimeoutError,
+  laneFor,
+  sizeLane,
+  defaultFlowLimits,
+  providerFlowKey,
+  modelFlowKey,
+  GLOBAL_FLOW_KEY,
+  CHECK_FLOW_KEY,
+  MAX_FLOW_LIMIT,
+} from './AdmissionController.js';
 export type {
+  FlowGate,
+  FlowState,
   AdmissionLane,
   AdmissionControllerConfig,
   AdmissionClassification,

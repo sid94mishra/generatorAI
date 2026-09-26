@@ -116,6 +116,7 @@ export {
   AgentHostSupervisor,
   defaultAgentHostSupervisor,
   type AgentHostSupervisorOptions,
+  type ExecutionGate,
   type AgentHostSnapshot,
 } from './AgentHostSupervisor.js';
 

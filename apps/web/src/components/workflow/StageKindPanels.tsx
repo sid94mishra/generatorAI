@@ -8,7 +8,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { X, AlertCircle, Layers, Undo2, Zap, Ungroup } from 'lucide-react';
+import { X, Layers, Undo2, Zap, Ungroup } from 'lucide-react';
 import type { StageSpec } from '@generatorai/workflow-spec';
 import { useWorkflowBuilderStore, type BuilderIssue, type StageUpdate } from '@/stores/workflowBuilderStore.js';
 import { Button, Input, Textarea } from '@/components/ui/index.js';
@@ -22,6 +22,7 @@ import { SubworkflowPanel } from './builder/SubworkflowPanel.js';
 import { WaitPanel } from './builder/WaitPanel.js';
 import { isContainerStage } from './builder/containerLayout.js';
 import { KIND_META } from './builder/kindMeta.js';
+import { StageIssueList } from './builder/issueFixes.js';
 
 export interface StageKindPanelProps {
   stage: Exclude<StageSpec, { kind: 'agent' }>;
@@ -32,7 +33,6 @@ export interface StageKindPanelProps {
 
 export function StageKindPanel({ stage, onUpdate, issues, onClose }: StageKindPanelProps) {
   const unwrapContainer = useWorkflowBuilderStore((s) => s.unwrapContainer);
-  const errorCount = issues.filter((i) => i.severity === 'error').length;
   const Icon = KIND_META[stage.kind].icon;
 
   return (
@@ -68,12 +68,7 @@ export function StageKindPanel({ stage, onUpdate, issues, onClose }: StageKindPa
             </Button>
           </div>
         </div>
-        {errorCount > 0 && (
-          <p className="mx-4 mb-2 flex items-center gap-1.5 rounded-md bg-danger-muted px-2 py-1 text-[11px] text-danger">
-            <AlertCircle className="h-3 w-3 shrink-0" />
-            {errorCount} {errorCount === 1 ? 'issue' : 'issues'} in this stage (shown next to each field)
-          </p>
-        )}
+        <StageIssueList issues={issues} />
       </div>
 
       {/* Keyed by stage so local drafts reset on selection. */}

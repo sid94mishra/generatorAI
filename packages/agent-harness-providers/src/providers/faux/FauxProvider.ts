@@ -448,6 +448,7 @@ export class FauxProvider implements IAgentHarness {
                   inputTokens: entry.usage.inputTokens ?? 0,
                   outputTokens: entry.usage.outputTokens ?? 0,
                   cost: entry.usage.cost,
+                  ...(entry.usage.cost !== undefined ? { costUsd: entry.usage.cost } : {}),
                   provider: 'faux',
                 },
               });

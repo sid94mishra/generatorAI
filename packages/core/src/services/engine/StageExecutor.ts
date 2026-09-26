@@ -38,7 +38,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AgentEvent, ExecutionWorkspace, ILogger, ResolvedAgentProjection, Session, WorkflowRun } from '@generatorai/shared';
-import { DEFAULT_AGENT_MODE, generateId } from '@generatorai/shared';
+import { DEFAULT_AGENT_MODE, generateId, runInContext } from '@generatorai/shared';
 import {
   expansionNodeKey,
   expansionPlanJsonSchema,
@@ -86,6 +86,8 @@ import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
 import { waitInterruptOf } from '../../domain/scheduler/waits.js';
 import { StageConversationError } from './StageConversationError.js';
 import { runCheck } from './CheckRunner.js';
+import type { AttemptTrace, EngineTelemetry } from './EngineTelemetry.js';
+import { AUTO_SUMMARY_TURN_THRESHOLD, autoSummary, jsonSummary, summaryPrompt } from './summaries.js';
 import { compile, type CompiledNode, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import { isWrapUp, templateScope } from '../../domain/scheduler/scope.js';
 import { graphForInstance, validateExpansion } from '../../domain/scheduler/expansion.js';
@@ -157,6 +159,8 @@ export interface StageExecutorDeps {
   post: (runId: string, msg: RunMessage) => void;
   /** Per-wait callback tokens: `stages.<wait>.callbackUrl` / `callbackToken` of a waiting event wait (P05 §4.3). */
   callbacks?: WorkflowCallbacks | undefined;
+  /** The `invoke_agent` span of each attempt (P07 WP-7.4). */
+  telemetry?: EngineTelemetry | undefined;
   logger?: ILogger | undefined;
   now?: () => number;
   timing?: Partial<ExecutorTiming>;
@@ -266,6 +270,8 @@ interface AttemptContext {
   /** A forced stop tore the conversation down: re-bind it before the next turn. */
   rebind?: boolean;
   hookContext: string[];
+  /** The attempt's `invoke_agent` span (P07 WP-7.4). */
+  trace?: AttemptTrace;
 }
 
 const RESUME_NOTICE =
@@ -282,7 +288,8 @@ function fenceContext(blocks: string[]): string {
 
 function asUsage(data: Record<string, unknown>): Usage {
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
-  const cost = n(data['cost']) ?? n(data['costUsd']);
+  // Dollars only when the provider reports them (`costUsd`); no pricing table (P07 WP-7.3).
+  const cost = n(data['costUsd']);
   return {
     turns: 1,
     ...(cost !== undefined ? { costUsd: cost } : {}),
@@ -589,7 +596,37 @@ export class StageExecutor {
     if (carried?.operatorTurn) frame.operatorQueue.push(carried.operatorTurn);
 
     const ctx = await this.context(frame, attempt.mode, journalEpoch(attempts, attemptNo));
-    const { stage, workspace } = ctx;
+    const { stage } = ctx;
+    // The attempt's `invoke_agent` span; its turns run in its context, so the
+    // provider's `chat` / `execute_tool` spans nest under it (P07 WP-7.4).
+    const spec = stageSessionSpec(ctx.graph, stage, ctx.run).merged;
+    ctx.trace = this.deps.telemetry?.attempt({
+      runId,
+      stageRunId,
+      instancePath: ctx.instance.instancePath,
+      stageKey: stage.key,
+      attemptNo,
+      mode: attempt.mode,
+      model: spec.model,
+      harnessType: spec.harnessType,
+    });
+    if (!ctx.trace) return this.attemptBody(ctx);
+    const trace = ctx.trace;
+    try {
+      const outcome = await runInContext(trace.ctx, () => this.attemptBody(ctx));
+      trace.end({ kind: outcome.kind });
+      return outcome;
+    } catch (err) {
+      trace.end(err instanceof AttemptStop ? { kind: err.outcome.kind, ...(err.outcome.kind === 'failed' ? { error: err.message } : {}) } : { kind: 'failed', error: err });
+      throw err;
+    }
+  }
+
+  /** The attempt after its context: checkpoint, hooks, session, turns, the output contract. */
+  private async attemptBody(ctx: AttemptContext): Promise<AttemptOutcome> {
+    const { stores } = this.deps;
+    const { frame, stage, workspace } = ctx;
+    const { runId, stageRunId, attemptNo } = frame.req;
 
     // A restart starts from the attempt-1 checkpoint (G5 §3.3).
     if (ctx.mode === 'restart' && (stage.retry?.restoreCheckpointOnRestart ?? true) && this.deps.checkpoints) {
@@ -926,7 +963,9 @@ export class StageExecutor {
       }
       // An amendment has no attempt to roll its usage into.
       if (event.kind === 'harness.usage' && !frame.amend) {
-        this.deps.post(runId, { type: 'usage_tick', stageRunId, attemptNo, usage: asUsage((event.data ?? {}) as Record<string, unknown>) });
+        const usage = asUsage((event.data ?? {}) as Record<string, unknown>);
+        ctx.trace?.usage(usage);
+        this.deps.post(runId, { type: 'usage_tick', stageRunId, attemptNo, usage });
       }
       // Tool calls are a loop signal (P05 §2.5): counted where they start.
       if (event.kind === 'harness.tool_start' && !frame.amend) {
@@ -1051,7 +1090,12 @@ export class StageExecutor {
     }
 
     const baseOptions = await composed!.turnOptions(agentMode);
-    const options: SendPromptOptions = { ...baseOptions, ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}) };
+    // An admitted attempt holds its provider's flow key for all its turns (P07 WP-7.2); an amendment has no admission.
+    const options: SendPromptOptions = {
+      ...baseOptions,
+      ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
+      ...(frame.ticket ? { admitted: true } : {}),
+    };
     const turnId = this.deps.composer.beginTurn(owner!, frame.conversationId!, options, { policy: composed!.turnPolicy });
     ctx.recorder.begin({ turnId, agentMode: options.agentMode ?? agentMode });
     ctx.submittedThisTurn = [];
@@ -1512,7 +1556,8 @@ export class StageExecutor {
         }
       });
       // A tool-less judge turn changes nothing; its verdict is kept on the attempt and a resumed attempt reuses it.
-      const response = await harness.sendPromptAndWait(conversationId, prompt, undefined, ctx.frame.ac.signal); // durability-ok: tool-less judge, verdict journalled on stage_attempts.judge
+      // Inside the attempt's admission: the judge turn runs on the attempt's provider slot (P07 WP-7.2).
+      const response = await harness.sendPromptAndWait(conversationId, prompt, undefined, ctx.frame.ac.signal, ctx.frame.ticket ? { admitted: true } : undefined); // durability-ok: tool-less judge, verdict journalled on stage_attempts.judge
       const parsed = parseJudgeReply(response?.content ?? '');
       const score = parsed?.score ?? null;
       return { round, rule: index, score, threshold: rule.threshold, reasons: parsed?.reasons ?? ['The judge answer could not be read'], passed: score !== null && score >= rule.threshold };
@@ -1537,23 +1582,21 @@ export class StageExecutor {
     );
   }
 
+  /**
+   * The stage's summary under its `output.summary` policy (P07 WP-7.1,
+   * `summaries.ts`): `none` writes none; `llm` is written after completion
+   * by the `summarize` effect (undefined here); `auto` is deterministic,
+   * with one summary turn only when a successor reads the summary and the
+   * text output is over 6,000 characters.
+   */
   private async summary(ctx: AttemptContext, data: unknown): Promise<string | undefined> {
     const name = ctx.stage.name;
-    if (ctx.wrapUp) return undefined;
-    if (ctx.contract.format === 'json') {
-      const keys = data && typeof data === 'object' && !Array.isArray(data) ? Object.keys(data) : [];
-      return keys.length > 0 ? `Stage "${name}" completed. Produced structured output with keys: ${keys.join(', ')}.` : `Stage "${name}" completed.`;
-    }
-    if (!this.successorWantsSummary(ctx)) return undefined;
-    const turn = await this.turn(ctx, {
-      opId: `a${ctx.epoch}/summary`,
-      role: 'summary',
-      text:
-        `Provide a concise summary (max 500 words) of the work you just completed in this stage named "${name}". ` +
-        'Include key actions, files created or modified, decisions and outputs. It is handed to later workflow stages as context.',
-      expect: 'validating',
-    });
-    return turn.content.trim().length > 0 ? turn.content : undefined;
+    const policy = ctx.stage.output.summary;
+    if (ctx.wrapUp || policy === 'none' || policy === 'llm') return undefined;
+    if (ctx.contract.format === 'json') return jsonSummary(name, data);
+    if (ctx.outputText.length <= AUTO_SUMMARY_TURN_THRESHOLD || !this.successorWantsSummary(ctx)) return autoSummary(name, 'text', data, ctx.outputText);
+    const turn = await this.turn(ctx, { opId: `a${ctx.epoch}/summary`, role: 'summary', text: summaryPrompt(name), expect: 'validating' });
+    return turn.content.trim().length > 0 ? turn.content : autoSummary(name, 'text', data, ctx.outputText);
   }
 
   /**

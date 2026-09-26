@@ -201,7 +201,29 @@ function pauseWholeRun(w: Working, mode: 'drain' | 'interrupt', statusReason: st
     else if (mode === 'interrupt' && inAttempt(inst.status)) pauseInstance(w, inst, 'run_paused', false);
   }
   w.emit('workflow_run.paused', { reason: statusReason });
+  // The operator is told the run ran out of budget (a push notification, P07 WP-7.3).
+  if (statusReason === 'budget_exhausted') w.emit('workflow_run.budget_exhausted', { usage: w.run.usage, budget: w.run.budget, name: w.run.name });
   if (w.run.unattended) w.timer('pause_ttl', null, PAUSE_TTL_MS, w.run.version);
+}
+
+/**
+ * A run-level `raise_budget` (P07 WP-7.3): the deltas are added to the run
+ * budget; a run paused by its exhausted budget resumes once it is under the
+ * raised one. A raised wall clock re-arms the run's wall-clock timer.
+ */
+function raiseRunBudget(w: Working, command: Extract<RunCommand, { command: 'raise_budget' }>): void {
+  if (!['running', 'waiting', 'paused'].includes(w.run.status)) return w.reject('invalid_state', `cannot raise the budget of a ${w.run.status} run`);
+  const budget = { ...(w.run.budget ?? {}) };
+  for (const k of ['maxTurns', 'maxCostUsd', 'maxTokens', 'maxWallClockMs'] as const) {
+    if (command[k] !== undefined) budget[k] = (budget[k] ?? 0) + command[k]!;
+  }
+  w.runPatch({ budget });
+  w.emit('workflow_run.budget_raised', { budget });
+  if (command.maxWallClockMs !== undefined && budget.maxWallClockMs !== undefined && w.run.startedAt !== null) {
+    const left = budget.maxWallClockMs - (w.now - w.run.startedAt);
+    if (left > 0) w.timer('run_budget_wall_clock', null, left, w.run.version, { jitter: 'none' });
+  }
+  if (w.run.status === 'paused' && w.run.statusReason === 'budget_exhausted' && !overBudget(w.run.usage, budget)) resumeWholeRun(w);
 }
 
 function resumeWholeRun(w: Working): void {
@@ -276,6 +298,8 @@ function onAttemptSettled(w: Working, msg: Extract<RunMessage, { type: 'attempt_
       });
       w.push({ t: 'cancel_timer', stageRunId: inst.id });
       stageEvent(w, 'stage_run.completed', inst);
+      // An `llm` summary is written after completion (P07 WP-7.1): only the successors that read it wait.
+      if (w.node(inst)?.summary === 'llm' && outcome.output.summary === undefined) w.push({ t: 'summarize', stageRunId: inst.id });
       return;
     }
     case 'failed':
@@ -411,6 +435,8 @@ function onCommand(w: Working, command: RunCommand, actor?: string): void {
           return w.reject('invalid_state', `cannot cancel a ${w.run.status} run`);
         }
         return cancelWholeRun(w, 'user_cancel');
+      case 'raise_budget':
+        return raiseRunBudget(w, command);
       default:
         return w.reject('invalid_command', `${command.command} needs an instanceId`);
     }
@@ -663,6 +689,8 @@ function resolveReadiness(w: Working): boolean {
         stageEvent(w, 'stage_run.skipped', inst, { reason: 'operator' });
         continue;
       }
+      // A reader of a summary still being written waits for `summary_ready` (P07 WP-7.1).
+      if (awaitsSummary(w, inst, node)) continue;
       w.transition(inst, 'ready', { statusReason: null });
       if (node.join.mode !== 'all' && node.join.cancelRemaining) {
         for (const key of exclusiveLosers(w, node)) {
@@ -766,12 +794,42 @@ function settle(w: Working): void {
   // effect in flight, or a sub-workflow whose child works. A wait is not.
   const busy = w.sorted().some((i) => {
     const node = w.node(i);
-    if (node?.class === 'work') return inAttempt(i.status) || i.status === 'ready';
+    if (node?.class === 'work') return inAttempt(i.status) || i.status === 'ready' || summaryPending(w, i);
     if (i.status === 'running' && i.loopState != null && ['starting', 'settling', 'restoring'].includes(i.loopState.phase)) return true;
     return mapBusy(i) || subworkflowBusy(i);
   });
   if (busy && w.run.status === 'waiting') w.runTransition('running');
   else if (!busy && w.run.status === 'running') w.runTransition('waiting');
+}
+
+// ── Summaries written after completion (P07 WP-7.1) ────────────────
+
+/** A completed stage whose `llm` summary is still being written. */
+function summaryPending(w: Working, inst: InstanceState): boolean {
+  return inst.status === 'completed' && inst.summary === null && w.node(inst)?.summary === 'llm';
+}
+
+/** Whether a stage reading its sources' summaries must wait for one still being written. */
+function awaitsSummary(w: Working, inst: InstanceState, node: CompiledNode): boolean {
+  if (node.context?.mode !== 'summary') return false;
+  const from = node.context.from ?? node.incoming.map((e) => e.from);
+  return from.some((key) => {
+    const src = w.sibling(inst, key);
+    if (!src) return false;
+    if (summaryPending(w, src)) return true;
+    // A planner's successors hang off its expansion node but read the planner's summary (P08 §8).
+    const planner = w.node(src)?.plannerKey;
+    const p = planner ? w.sibling(inst, planner) : undefined;
+    return !!p && summaryPending(w, p);
+  });
+}
+
+function onSummaryReady(w: Working, msg: Extract<RunMessage, { type: 'summary_ready' }>): void {
+  const inst = w.get(msg.stageRunId);
+  if (!inst || !summaryPending(w, inst)) return; // a duplicate, or the instance moved on (a fork, a re-run)
+  if (msg.usage) w.usage(inst, msg.usage);
+  w.instancePatch(inst, { summary: msg.summary });
+  stageEvent(w, 'stage_run.summary_ready', inst);
 }
 
 // ── Entry point ───────────────────────────────────────────────────
@@ -848,6 +906,9 @@ export function decide(graph: CompiledWorkflow, state: RunState, msg: RunMessage
       break;
     case 'finalized':
       onFinalized(w, msg);
+      break;
+    case 'summary_ready':
+      onSummaryReady(w, msg);
       break;
     case 'tick':
       break;
@@ -940,6 +1001,7 @@ export function applyDecisions(state: RunState, decisions: readonly Decision[], 
       case 'run_patch':
         if (d.patch.statusReason !== undefined) run.statusReason = d.patch.statusReason;
         if (d.patch.outcome !== undefined) run.outcome = d.patch.outcome;
+        if (d.patch.budget !== undefined) run.budget = d.patch.budget;
         break;
       default:
         break;

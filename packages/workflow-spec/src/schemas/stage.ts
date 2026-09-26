@@ -152,6 +152,12 @@ export const OutputContractSchema = z
       .optional()
       .describe('Description of the expected output, appended to the final prompt'),
     rules: z.array(ResultValidationRuleSchema).max(20).default([]).describe('Hard rules checked before the stage completes'),
+    summary: z
+      .enum(['none', 'auto', 'llm'])
+      .default('auto')
+      .describe(
+        'The summary successors read in context mode summary. none: no summary; auto: json stages use output.summary or the output keys, text stages the first ~1,200 characters plus the headings, with one model turn only when a successor reads the summary and the output is over 6,000 characters; llm: a model summary written after the stage completes (on the workflow summary model), which only the successors that read it wait for',
+      ),
   })
   .strict()
   .describe('The output contract: validated before the stage completes');

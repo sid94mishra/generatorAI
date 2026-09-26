@@ -55,6 +55,24 @@
 // mid-way through, while a queued one only starts late." The wait has its
 // own timeout (default 1800 s) rather than consuming the turn's own
 // deadline, so a throttled start is not misattributed to a hung provider.
+//
+// Flow keys (P05 §1.2, P07 WP-7.2, W-66)
+// --------------------------------------
+// Named concurrency caps, separate from the lanes. A workflow stage launch
+// is admitted on its flow keys ONLY — this is the engine's single gate:
+//   global               every stage of every run (default: the ordinary
+//                        lane's machine-sized limit);
+//   provider:<id>        every turn on a provider — chats included: the
+//                        provider's own per-turn permit IS this gate (the
+//                        formerly hidden claude-agent cap of 4, O-2);
+//   model:<id>           optional, only when configured;
+//   check:global         the `check` stages of every run (default 2).
+// A launch takes all of its keys at once or waits for all of them (no
+// partial holds, so a stage waiting on its provider never sits on a
+// `global` slot another provider's stage could use). The limits are
+// operator settings (`setFlowLimits`), changed at run time. The
+// `worktree:<mountId>` leases (WorktreeLeases) and `run:<id>` (a run's
+// `maxParallel`, enforced by `decide()`) are reported beside them.
 // ────────────────────────────────────────────────────────────────
 
 import * as os from 'node:os';
@@ -105,9 +123,9 @@ export interface AdmissionControllerConfig {
    */
   queueWaitTimeoutMs?: number;
   /**
-   * Flow keys: gates separate from the provider lanes (P05 §1.2). A flow is
-   * a named concurrency cap; `check:global` (default 2) bounds the
-   * `check` stages of every run. P07 surfaces them in settings.
+   * Flow key limits over `defaultFlowLimits()` (P07 WP-7.2): the operator's
+   * settings. A key with no limit (an unconfigured `model:` or `provider:`)
+   * is not gated.
    */
   flowLimits?: Record<string, number>;
   /** Structured logger. INFO on queue, WARN on timeout. */
@@ -217,8 +235,65 @@ export function sizeLane(
   return { lane, limit, boundBy, cpuBound, memoryBound };
 }
 
-/** The default caps of the flow keys (P05 §1.2: `check:global` = 2). */
-export const DEFAULT_FLOW_LIMITS: Readonly<Record<string, number>> = { 'check:global': 2 };
+/** The flow key of every stage launch. */
+export const GLOBAL_FLOW_KEY = 'global';
+/** The flow key of the `check` kind (P05 §1.2). */
+export const CHECK_FLOW_KEY = 'check:global';
+/** The flow key of a provider's turns. */
+export function providerFlowKey(provider: string): string {
+  return `provider:${provider}`;
+}
+/** The flow key of a model's turns (gated only when configured). */
+export function modelFlowKey(model: string): string {
+  return `model:${model}`;
+}
+
+/** The highest limit any flow key accepts. */
+export const MAX_FLOW_LIMIT = 256;
+
+/**
+ * The default flow limits (P07 WP-7.2): `global` is sized like the ordinary
+ * lane, `provider:claude-agent` is 4 (each turn is a ~250 MB CLI process),
+ * `check:global` is 2 (P05 §1.2).
+ */
+export function defaultFlowLimits(probe?: { cpus: number; totalMemBytes: number }): Record<string, number> {
+  return {
+    [GLOBAL_FLOW_KEY]: sizeLane('ordinary', undefined, probe).limit,
+    [providerFlowKey('claude-agent')]: 4,
+    [CHECK_FLOW_KEY]: 2,
+  };
+}
+
+/** A flow key's live state. */
+export interface FlowState {
+  flowKey: string;
+  running: number;
+  /** Callers waiting for this key (one waiter may wait on several keys). */
+  queued: number;
+  /** Undefined: not gated. */
+  limit: number | undefined;
+}
+
+/**
+ * One flow key as a plain permit gate: what a provider's per-turn permit
+ * uses (the AgentHostSupervisor, the agent host client), so a chat turn and
+ * a stage launch count against the same `provider:<id>` limit.
+ */
+export interface FlowGate {
+  readonly flowKey: string;
+  /** A permit only if one is free right now (never waits). */
+  tryAcquire(): (() => void) | undefined;
+  acquire(): Promise<() => void>;
+  state(): FlowState;
+}
+
+/** Told when a caller has to wait: the first key that is full. */
+export type FlowQueuedListener = (blocking: FlowState) => void;
+
+interface FlowWaiter {
+  keys: readonly string[];
+  grant: () => void;
+}
 
 export class AdmissionController {
   private readonly lanes: Record<AdmissionLane, LaneState>;
@@ -226,13 +301,16 @@ export class AdmissionController {
   private readonly sizing: SizingDecision[];
   private readonly queueWaitTimeoutMs: number;
   private readonly logger: AdmissionControllerConfig['logger'];
-  private readonly flows = new Map<string, { semaphore: Semaphore; limit: number; running: number; queued: number }>();
-  private readonly flowLimits: Record<string, number>;
+  private readonly flowRunning = new Map<string, number>();
+  private readonly flowWaiters: FlowWaiter[] = [];
+  private readonly flowDefaults: Record<string, number>;
+  private flowLimits: Record<string, number>;
 
   constructor(cfg: AdmissionControllerConfig = {}) {
     this.logger = cfg.logger;
     this.queueWaitTimeoutMs = cfg.queueWaitTimeoutMs ?? 1_800_000;
-    this.flowLimits = { ...DEFAULT_FLOW_LIMITS, ...(cfg.flowLimits ?? {}) };
+    this.flowDefaults = defaultFlowLimits();
+    this.flowLimits = { ...this.flowDefaults, ...clampFlowLimits(cfg.flowLimits ?? {}) };
 
     this.sizing = [
       sizeLane('interactive', cfg.interactiveConcurrency),
@@ -415,54 +493,135 @@ export class AdmissionController {
     return this.lanes[lane].parked;
   }
 
+  // ── Flow keys ──────────────────────────────────────────────────
+
+  /** The default limits (what "reset to default" restores). */
+  defaultFlowLimits(): Record<string, number> {
+    return { ...this.flowDefaults };
+  }
+
+  /** The limits in force: the defaults under the operator's settings. */
+  currentFlowLimits(): Record<string, number> {
+    return { ...this.flowLimits };
+  }
+
   /**
-   * Run `fn` under a flow key's own concurrency cap (not a lane): FIFO,
-   * queue-don't-reject, no timeout of its own (the caller's queue timer
-   * decides). The ticket yields the permit across an external wait.
+   * Replace the operator's limits (over the defaults), at run time. A
+   * raised limit admits waiters at once; a lowered one lets the holders
+   * finish and admits nobody until they are under it.
    */
-  async admitFlow<T>(flowKey: string, fn: (ticket: AdmissionTicket) => Promise<T>): Promise<T> {
-    let flow = this.flows.get(flowKey);
-    if (!flow) {
-      const limit = Math.max(1, this.flowLimits[flowKey] ?? 1);
-      flow = { semaphore: new Semaphore(limit), limit, running: 0, queued: 0 };
-      this.flows.set(flowKey, flow);
+  setFlowLimits(limits: Record<string, number>): void {
+    this.flowLimits = { ...this.flowDefaults, ...clampFlowLimits(limits) };
+    this.logger?.info?.('[Admission] flow limits set', { ...this.flowLimits });
+    this.pumpFlows();
+  }
+
+  private flowLimit(key: string): number | undefined {
+    return this.flowLimits[key];
+  }
+
+  private flowState(key: string): FlowState {
+    return {
+      flowKey: key,
+      running: this.flowRunning.get(key) ?? 0,
+      queued: this.flowWaiters.filter((w) => w.keys.includes(key)).length,
+      limit: this.flowLimit(key),
+    };
+  }
+
+  private hasRoom(key: string): boolean {
+    const limit = this.flowLimit(key);
+    return limit === undefined || (this.flowRunning.get(key) ?? 0) < limit;
+  }
+
+  private take(keys: readonly string[]): () => void {
+    for (const k of keys) this.flowRunning.set(k, (this.flowRunning.get(k) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      for (const k of keys) {
+        const n = (this.flowRunning.get(k) ?? 1) - 1;
+        if (n <= 0) this.flowRunning.delete(k);
+        else this.flowRunning.set(k, n);
+      }
+      this.pumpFlows();
+    };
+  }
+
+  /**
+   * Admit waiters in FIFO order per key: a waiter is granted when every one
+   * of its keys has room and no earlier waiter still waits on any of them
+   * (a waiter on other keys may pass it).
+   */
+  private pumpFlows(): void {
+    const blocked = new Set<string>();
+    for (let i = 0; i < this.flowWaiters.length; ) {
+      const w = this.flowWaiters[i]!;
+      if (w.keys.some((k) => blocked.has(k)) || !w.keys.every((k) => this.hasRoom(k))) {
+        for (const k of w.keys) blocked.add(k);
+        i += 1;
+        continue;
+      }
+      this.flowWaiters.splice(i, 1);
+      w.grant();
     }
-    const f = flow;
-    f.queued += 1;
-    try {
-      await f.semaphore.acquire();
-    } finally {
-      f.queued -= 1;
-    }
-    f.running += 1;
-    let held = true;
+  }
+
+  /**
+   * Take every key at once, waiting (FIFO per key) until all have room.
+   * Duplicate keys count once. Resolves to the release function.
+   */
+  async acquireFlows(flowKeys: readonly string[], onQueued?: FlowQueuedListener): Promise<() => void> {
+    const keys = [...new Set(flowKeys)];
+    const waitedOn = (k: string) => this.flowWaiters.some((w) => w.keys.includes(k));
+    if (keys.every((k) => this.hasRoom(k) && !waitedOn(k))) return this.take(keys);
+    const blocking = keys.find((k) => !this.hasRoom(k)) ?? keys.find(waitedOn)!;
+    return new Promise<() => void>((resolve) => {
+      this.flowWaiters.push({ keys, grant: () => resolve(this.take(keys)) });
+      onQueued?.(this.flowState(blocking));
+      this.logger?.info?.('[Admission] queued on flow keys', { keys, blocking });
+    });
+  }
+
+  /**
+   * Run `fn` holding every flow key (see `acquireFlows`). The ticket yields
+   * all of them across an external wait and takes all of them back.
+   */
+  async admitFlows<T>(flowKeys: readonly string[], fn: (ticket: AdmissionTicket) => Promise<T>, onQueued?: FlowQueuedListener): Promise<T> {
+    let release: (() => void) | undefined = await this.acquireFlows(flowKeys, onQueued);
     const ticket: AdmissionTicket = {
       pause: () => {
-        if (!held) return;
-        held = false;
-        f.running -= 1;
-        f.semaphore.release();
+        release?.();
+        release = undefined;
       },
       resume: async () => {
-        if (held) return;
-        await f.semaphore.acquire();
-        f.running += 1;
-        held = true;
+        if (release) return;
+        release = await this.acquireFlows(flowKeys);
       },
     };
     try {
       return await fn(ticket);
     } finally {
-      if (held) {
-        f.running -= 1;
-        f.semaphore.release();
-      }
+      release?.();
     }
   }
 
-  /** Flow gates in use: running and queued per key. */
-  flowSnapshot(): Array<{ flowKey: string; running: number; queued: number; limit: number }> {
-    return [...this.flows].map(([flowKey, f]) => ({ flowKey, running: f.running, queued: f.queued, limit: f.limit }));
+  /** One flow key as a permit gate (a provider's per-turn permit). */
+  flowGate(flowKey: string): FlowGate {
+    return {
+      flowKey,
+      tryAcquire: () =>
+        this.hasRoom(flowKey) && !this.flowWaiters.some((w) => w.keys.includes(flowKey)) ? this.take([flowKey]) : undefined,
+      acquire: () => this.acquireFlows([flowKey]),
+      state: () => this.flowState(flowKey),
+    };
+  }
+
+  /** Every configured key and every key in use: running, queued, limit. */
+  flowSnapshot(): FlowState[] {
+    const keys = new Set<string>([...Object.keys(this.flowLimits), ...this.flowRunning.keys(), ...this.flowWaiters.flatMap((w) => w.keys)]);
+    return [...keys].sort().map((k) => this.flowState(k));
   }
 
   /** Full snapshot for observability (health endpoint, metrics). */
@@ -475,4 +634,14 @@ export class AdmissionController {
       concurrencyLimit: this.limits[lane],
     }));
   }
+}
+
+/** Operator limits clamped to 1..MAX_FLOW_LIMIT; a non-number is dropped. */
+function clampFlowLimits(limits: Record<string, number>): Record<string, number> {
+  const out: Record<string, number> = {};
+  for (const [k, v] of Object.entries(limits)) {
+    if (typeof v !== 'number' || !Number.isFinite(v)) continue;
+    out[k] = Math.min(MAX_FLOW_LIMIT, Math.max(1, Math.floor(v)));
+  }
+  return out;
 }

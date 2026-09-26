@@ -441,7 +441,8 @@ export class AgentHostServer {
           // terminal event, because `sendPrompt` is fire-and-forget on every
           // provider: holding the permit only across the await would bound
           // nothing at all.
-          await this.acquireTurnPermit(session);
+          // An admitted turn: the gateway holds its provider flow key (P07 WP-7.2).
+          if (!options?.admitted) await this.acquireTurnPermit(session);
           await runtime.harness.sendPrompt(
             session.conversationId,
             prompt,

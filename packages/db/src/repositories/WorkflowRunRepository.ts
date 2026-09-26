@@ -12,7 +12,7 @@
 // paths, codebases, uploads, the lifecycle journal); callers never write it.
 // ────────────────────────────────────────────────────────────────
 
-import { and, count, eq, inArray, ne } from 'drizzle-orm';
+import { and, count, desc, eq, gte, inArray, lte, ne, or, sql, type SQL } from 'drizzle-orm';
 import type {
   IWorkflowRunCas,
   IWorkflowRunRepository,
@@ -33,6 +33,30 @@ import { claimRunOwnership, getRunRow, renewRunOwnership, runTransition } from '
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
 import { validateJsonColumn } from '../utils/validateJsonColumn.js';
 import { jsonRecord } from '../utils/jsonColumnSchemas.js';
+
+/**
+ * A run search (`GET /workflow-runs` filters). Every field narrows; an empty
+ * search lists every run. `triggerKinds` match the trigger's kind (a run
+ * without a trigger was started by a user); `variables` match the value's
+ * text (`true`/`false` also match a boolean).
+ */
+export interface WorkflowRunSearch {
+  definitionId?: string;
+  statuses?: readonly WorkflowRunStatus[];
+  triggerKinds?: readonly string[];
+  createdFrom?: Date;
+  createdTo?: Date;
+  /** Part of the run name, or the start of its id. */
+  text?: string;
+  variables?: ReadonlyArray<{ name: string; value: string }>;
+  /** Only the newest `limit` matches. */
+  limit?: number;
+}
+
+/** A LIKE operand matching `text` literally (`\` is the escape character). */
+function likeLiteral(text: string): string {
+  return text.replace(/[\\%_]/g, (c) => `\\${c}`);
+}
 
 /** `run_overrides`: the operator's explicit run mode plus the invocation's run-wide session overrides. */
 type RunOverrides = { permissionMode?: WorkflowRunPermissionMode; model?: string; harnessType?: string; reasoningEffort?: string };
@@ -197,6 +221,46 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
     return rows.map((r) => this.mapRow(r));
   }
 
+  /** Runs matching every filter of `search`, oldest first. */
+  async search(search: WorkflowRunSearch): Promise<WorkflowRun[]> {
+    const where: SQL[] = [];
+    if (search.definitionId) where.push(eq(workflowRuns.workflowDefinitionId, search.definitionId));
+    if (search.statuses?.length) where.push(inArray(workflowRuns.status, [...search.statuses]));
+    if (search.triggerKinds?.length) {
+      where.push(inArray(sql`coalesce(json_extract(${workflowRuns.trigger}, '$.kind'), 'user')`, [...search.triggerKinds]));
+    }
+    if (search.createdFrom) where.push(gte(workflowRuns.createdAt, search.createdFrom));
+    if (search.createdTo) where.push(lte(workflowRuns.createdAt, search.createdTo));
+    const text = search.text?.trim();
+    if (text) {
+      const literal = likeLiteral(text);
+      where.push(
+        or(
+          sql`${workflowRuns.name} LIKE ${`%${literal}%`} ESCAPE '\\'`,
+          sql`${workflowRuns.id} LIKE ${`${literal}%`} ESCAPE '\\'`,
+        )!,
+      );
+    }
+    for (const v of search.variables ?? []) {
+      const path = `$."${v.name.replace(/["\\]/g, '')}"`;
+      where.push(
+        sql`(CAST(json_extract(${workflowRuns.variables}, ${path}) AS TEXT) = ${v.value} OR json_type(${workflowRuns.variables}, ${path}) = ${v.value})`,
+      );
+    }
+    const condition = where.length > 0 ? and(...where) : undefined;
+    if (search.limit !== undefined) {
+      const newest = await this.db
+        .select()
+        .from(workflowRuns)
+        .where(condition)
+        .orderBy(desc(workflowRuns.createdAt))
+        .limit(search.limit);
+      return newest.reverse().map((r) => this.mapRow(r));
+    }
+    const rows = await this.db.select().from(workflowRuns).where(condition).orderBy(workflowRuns.createdAt);
+    return rows.map((r) => this.mapRow(r));
+  }
+
   async getByStatus(statuses: WorkflowRunStatus[]): Promise<WorkflowRun[]> {
     const rows = await this.db.select().from(workflowRuns).where(inArray(workflowRuns.status, statuses));
     return rows.map((r) => this.mapRow(r));
@@ -256,6 +320,7 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
     const { permissionMode, ...sessionOverrides } = (row.runOverrides as RunOverrides | null) ?? {};
     const systemVars = row.systemVars as WorkflowRun['systemVars'] | null;
     const budget = row.budget as Record<string, unknown> | null;
+    const usage = row.usage as WorkflowRun['usage'] | null;
     return {
       id: row.id,
       workflowDefinitionId: row.workflowDefinitionId,
@@ -271,6 +336,7 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
       ...(Object.keys(sessionOverrides).length > 0 ? { runOverrides: sessionOverrides } : {}),
       ...(systemVars ? { systemVars } : {}),
       ...(budget ? { budget } : {}),
+      ...(usage && Object.keys(usage).length > 0 ? { usage } : {}),
       ...(row.invocationId ? { invocationId: row.invocationId } : {}),
       ...(row.parentRunId ? { parentRunId: row.parentRunId } : {}),
       ...(row.parentStageRunId ? { parentStageRunId: row.parentStageRunId } : {}),

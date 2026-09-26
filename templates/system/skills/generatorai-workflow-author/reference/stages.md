@@ -79,6 +79,7 @@ are in `lifecycle.md`.
 | `schema` | record<string, any> |  |  | JSON Schema (draft 2020-12) of the structured output; expressions are typed from it |
 | `extraction` | 'auto' \| 'native' \| 'tool' \| 'final_json_block' |  | `"auto"` | How structured output is obtained: auto picks native, then the submit_output tool, then the final JSON block |
 | `instructions` | string (≤5000 chars) |  |  | Description of the expected output, appended to the final prompt |
+| `summary` | 'none' \| 'auto' \| 'llm' |  | `"auto"` | The summary successors read in context mode summary. none: no summary; auto: json stages use output.summary or the output keys, text stages the first ~1,200 characters plus the headings, with one model turn only when a successor reads the summary and the output is over 6,000 characters; llm: a model summary written after the stage completes (on the workflow summary model), which only the successors that read it wait for |
 
 - `format: "text"`: `stages.<key>.output` is a string.
 - `format: "json"`: `stages.<key>.output` is the JSON value, validated against `schema` before the stage

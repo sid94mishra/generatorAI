@@ -9,6 +9,7 @@ import type {
   InvocationFiles,
   PlatformType,
   EventSubscriptionOptions,
+  WorkflowRunListFilter,
 } from '@generatorai/shared';
 import type {
   ChatWorkflowRunCard,
@@ -19,13 +20,17 @@ import type {
   WorkflowDefinitionRecord,
   WorkflowDefinitionSummary,
   WorkflowDefinitionVersionRecord,
+  WorkflowDefinitionVersionSummary,
+  AuthoringValidation,
   WorkflowGraphInput,
   WorkflowTemplate,
 } from '@generatorai/workflow-spec';
 import {
   ApiError as CoreApiError,
   createAdminApi,
+  runListQuery,
   type DefinitionDeleteOutcome,
+  type StageHistoryEntry,
   type InvocationUploadCategory,
   type InvocationUploadFiles,
 } from '@generatorai/client-core';
@@ -274,6 +279,37 @@ export interface WorkspaceRetentionRunResult {
   tracked: number;
   orphans: number;
   failed: number;
+}
+
+/**
+ * A flow key of the workflow engine's admission (P07 WP-7.2): `global`,
+ * `provider:<id>`, `model:<id>`, `check:global`, `worktree:<mountId>` (a
+ * map's leases) and `run:<id>` (a run's `maxParallel`), with its live
+ * counts. `limit` is null when the key has none.
+ */
+export interface WorkflowEngineFlow {
+  flowKey: string;
+  kind: 'global' | 'provider' | 'model' | 'check' | 'worktree' | 'run';
+  running: number;
+  queued: number;
+  limit: number | null;
+  /** Whether the limit is a setting (the worktree and run keys are read-only). */
+  configurable: boolean;
+  detail?: string;
+}
+
+/** The workflow engine's settings (`/api/settings/workflow-engine`) and its live flows. */
+export interface WorkflowEngineSettings {
+  settings: { flowLimits: Record<string, number>; summaryModel: string | null; triggerDebounceMs: number };
+  defaults: { flowLimits: Record<string, number>; triggerDebounceMs: number };
+  flows: WorkflowEngineFlow[];
+}
+
+/** A change of the engine settings; `flowLimits` replaces the configured limits. */
+export interface WorkflowEngineSettingsUpdate {
+  flowLimits?: Record<string, number>;
+  summaryModel?: string | null;
+  triggerDebounceMs?: number;
 }
 import type { PersistedEvent, AgentEventKind } from '@generatorai/shared';
 import type {
@@ -1088,6 +1124,16 @@ export class HttpPlatformClient implements IPlatformClient {
     );
   }
 
+  /** Every published and test version of a definition. */
+  async listDefinitionVersions(id: string): Promise<WorkflowDefinitionVersionSummary[]> {
+    return viaClientCore(this.admin.definitions.versions(id));
+  }
+
+  /** The server's validation of an unsaved graph: the spec's rules plus agents, models, capabilities and child workflows. */
+  async validateDefinitionGraph(graph: WorkflowGraphInput): Promise<AuthoringValidation> {
+    return viaClientCore(this.admin.definitions.validate(graph));
+  }
+
   /** Hard delete, or archive when runs exist (their history stays readable). */
   async deleteDefinition(id: string): Promise<DefinitionDeleteOutcome> {
     return apiFetch<DefinitionDeleteOutcome>(`${this.baseUrl}/api/workflow-definitions/${id}`, { method: 'DELETE' });
@@ -1143,12 +1189,14 @@ export class HttpPlatformClient implements IPlatformClient {
     return viaClientCore(this.admin.workflows.plan(request));
   }
 
-  async listRuns(filter?: { definitionId?: string; status?: string }): Promise<WorkflowRun[]> {
-    const params = new URLSearchParams();
-    if (filter?.definitionId) params.set('definitionId', filter.definitionId);
-    if (filter?.status) params.set('status', filter.status);
-    const qs = params.toString();
-    return apiFetch<WorkflowRun[]>(`${this.baseUrl}/api/workflow-runs${qs ? `?${qs}` : ''}`);
+  async listRuns(filter?: WorkflowRunListFilter): Promise<WorkflowRun[]> {
+    return apiFetch<WorkflowRun[]>(`${this.baseUrl}/api/workflow-runs${runListQuery(filter)}`);
+  }
+
+  /** One stage's newest executions across a definition's runs, newest first. */
+  async getStageHistory(definitionId: string, stageKey: string, limit?: number): Promise<StageHistoryEntry[]> {
+    const qs = new URLSearchParams({ definitionId, stageKey, ...(limit !== undefined ? { limit: String(limit) } : {}) });
+    return apiFetch<StageHistoryEntry[]>(`${this.baseUrl}/api/workflow-runs/stage-history?${qs.toString()}`);
   }
 
   async getRun(id: string): Promise<WorkflowRunWithStages> {
@@ -2340,6 +2388,18 @@ export class HttpPlatformClient implements IPlatformClient {
         body: JSON.stringify(retentionDays === undefined ? {} : { retentionDays }),
       },
     );
+  }
+
+  // ── Workflow engine (flow keys, summary model, trigger debounce) ──
+  async getWorkflowEngineSettings(): Promise<WorkflowEngineSettings> {
+    return apiFetch<WorkflowEngineSettings>(`${this.baseUrl}/api/settings/workflow-engine`);
+  }
+
+  async setWorkflowEngineSettings(update: WorkflowEngineSettingsUpdate): Promise<WorkflowEngineSettings> {
+    return apiFetch<WorkflowEngineSettings>(`${this.baseUrl}/api/settings/workflow-engine`, {
+      method: 'PUT',
+      body: JSON.stringify(update),
+    });
   }
 
   async getComputerRuntime(workspaceId: string): Promise<ComputerRuntime> {

@@ -112,7 +112,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -137,7 +138,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -162,7 +164,8 @@
       "output": {
         "format": "text",
         "extraction": "auto",
-        "rules": []
+        "rules": [],
+        "summary": "auto"
       },
       "hooks": []
     },
@@ -198,7 +201,8 @@
             "value": "Recommendation",
             "message": "Review report should contain recommendations"
           }
-        ]
+        ],
+        "summary": "auto"
       },
       "hooks": []
     }

@@ -10,7 +10,7 @@
 import React from 'react';
 import {
   Settings2, Cpu, Sparkles, Server, LayoutTemplate,
-  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, Bot, MonitorCog, Palette, HardDrive, Mic,
+  GitPullRequest, SquareTerminal, Blocks, HeartPulse, ShieldCheck, Bot, MonitorCog, Palette, HardDrive, Mic, Workflow,
 } from 'lucide-react';
 import type { SettingsSectionId } from '@/stores/settingsUiStore.js';
 
@@ -27,6 +27,7 @@ import { SecuritySection } from './sections/Security.js';
 import { DiagnosticsSection } from './sections/Diagnostics.js';
 import { WorkspaceRetentionSection } from './sections/WorkspaceRetention.js';
 import { AudioSection } from './sections/Audio.js';
+import { WorkflowEngineSection } from './sections/WorkflowEngine.js';
 
 export interface SettingsNavEntry {
   id: SettingsSectionId;
@@ -72,6 +73,7 @@ export const SETTINGS_NAV: SettingsNavGroup[] = [
     items: [
       { id: 'security', label: 'Security & Devices', icon: ShieldCheck },
       { id: 'storage', label: 'Storage', icon: HardDrive },
+      { id: 'workflow-engine', label: 'Workflow Engine', icon: Workflow },
       { id: 'diagnostics', label: 'Diagnostics', icon: HeartPulse },
     ],
   },
@@ -92,6 +94,7 @@ export const SETTINGS_SECTIONS: Record<SettingsSectionId, React.ReactNode> = {
   extensions: <ExtensionsSection />,
   security: <SecuritySection />,
   storage: <WorkspaceRetentionSection />,
+  'workflow-engine': <WorkflowEngineSection />,
   diagnostics: <DiagnosticsSection />,
 };
 

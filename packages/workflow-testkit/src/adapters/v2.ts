@@ -183,7 +183,7 @@ function buildV2Adapter(ctx: AdapterContext, opts: V2AdapterOptions): EngineAdap
       gitManager,
       new DrizzleWorktreeRepository(db),
     );
-    const admission = new AdmissionController(ctx.maxConcurrentStages !== undefined ? { ordinaryConcurrency: ctx.maxConcurrentStages } : {});
+    const admission = new AdmissionController(ctx.maxConcurrentStages !== undefined ? { flowLimits: { global: ctx.maxConcurrentStages } } : {});
     const services = createCoreServices({
       logger,
       harness,

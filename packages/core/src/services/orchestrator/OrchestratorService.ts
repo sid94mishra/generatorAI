@@ -92,7 +92,7 @@ export const DEFAULT_ORCHESTRATOR_CONFIG: OrchestratorConfig = {
   // Each worker is a chat, and on the default (persistent-session) Claude
   // provider each chat is a ~230 MB CLI process. Twelve workers per parent was
   // 2.8 GB of processes per orchestration, three times the turn permit
-  // (`GENERATORAI_MAX_CONCURRENT_AGENT_TURNS`, default 4) — the extra eight
+  // (the `provider:claude-agent` flow key, default 4) — the extra eight
   // could only ever wait for a permit while holding their memory. Four matches
   // the permit; raise `GENERATORAI_ORCH_MAX_WORKERS` on a machine that has the
   // memory for more.

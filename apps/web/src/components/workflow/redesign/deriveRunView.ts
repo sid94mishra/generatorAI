@@ -21,6 +21,7 @@ import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import type { RunView, StageView, StageStatus, RunStatus, HookInvocation, MapView, WaitView } from './types.js';
 import { deriveTimeline, deriveAnswer, deriveSegments, widgetBlocks } from '@/components/agent/deriveTimeline.js';
 import { deriveLoopView, parseLoopPath } from './loopView.js';
+import type { AdmissionWait } from '@/stores/workflowRunStore.js';
 
 // ── Status normalizers ────────────────────────────────────────
 
@@ -210,6 +211,8 @@ export interface DeriveRunViewInput {
   streams: Record<string, StreamState | undefined>;
   /** Effective permission mode (from HitlPanel or run). */
   permissionMode?: WorkflowRunPermissionMode;
+  /** `ready` instances waiting for an admission slot, by instance id (P07). */
+  admission?: Record<string, AdmissionWait>;
   /** Per-stage memo (one per mounted page): unchanged stages keep their StageView object. */
   cache?: StageViewCache;
 }
@@ -227,6 +230,8 @@ interface StageViewInputs {
   vars: Record<string, unknown> | undefined;
   /** The enclosing loop or map instance's id (a body instance). */
   loopId: string | undefined;
+  /** The flow key the instance waits on for a launch slot. */
+  admission: AdmissionWait | undefined;
   /** The enclosing container's kind (`loop`, `map`). */
   containerKind: string | undefined;
   /** An expansion node's planner name (P08 plan-then-execute). */
@@ -243,7 +248,8 @@ function sameInputs(a: StageViewInputs, b: StageViewInputs): boolean {
   return (
     a.sr === b.sr && a.stream === b.stream && a.def === b.def && a.order === b.order && a.depth === b.depth &&
     a.parallel === b.parallel && a.dependsOn === b.dependsOn && a.shared === b.shared && a.vars === b.vars &&
-    a.loopId === b.loopId && a.containerKind === b.containerKind && a.plannerName === b.plannerName
+    a.loopId === b.loopId && a.containerKind === b.containerKind && a.plannerName === b.plannerName &&
+    a.admission === b.admission
   );
 }
 
@@ -257,7 +263,7 @@ function isLive(stream: StreamState | undefined): boolean {
 }
 
 export function deriveRunView(input: DeriveRunViewInput): RunView {
-  const { run, stageDefs, edges, streams, permissionMode, cache } = input;
+  const { run, stageDefs, edges, streams, permissionMode, admission, cache } = input;
 
   const stageDefByKey = new Map(stageDefs.map((s) => [s.key, s]));
   const orderByKey = new Map(stageDefs.map((s, i) => [s.key, i]));
@@ -327,6 +333,7 @@ export function deriveRunView(input: DeriveRunViewInput): RunView {
       loopId: loopIdOf(sr),
       containerKind: def?.parentKey ? stageDefByKey.get(def.parentKey)?.kind : undefined,
       plannerName: sr.kind === 'expansion' ? stageDefByKey.get(plannerKeyOf(sr.stageKey) ?? '')?.name : undefined,
+      admission: admission?.[sr.id],
     };
     seen.add(sr.id);
     const cached = cache?.get(sr.id);
@@ -446,6 +453,8 @@ function stageView(inputs: StageViewInputs, parallelIds: string[], dependsOn: st
     status,
     rawStatus: sr.status,
     instancePath: sr.instancePath,
+    stageKey: sr.stageKey,
+    ...(inputs.admission && sr.status === 'ready' ? { admission: inputs.admission } : {}),
     ...(sr.amendedAt ? { amendedAt: new Date(sr.amendedAt).getTime() } : {}),
     prompt,
     steps,
