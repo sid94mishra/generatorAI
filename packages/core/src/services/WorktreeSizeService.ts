@@ -16,6 +16,7 @@
 // (D-36) rather than a fake `0`.
 // ────────────────────────────────────────────────────────────────
 
+import type { Dirent } from 'node:fs';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ILogger } from '@generatorai/shared';
@@ -84,7 +85,7 @@ export class WorktreeSizeService {
   private static async measureDirSize(dirPath: string): Promise<number> {
     let total = 0;
     const walk = async (dir: string): Promise<void> => {
-      let entries: import('node:fs').Dirent[];
+      let entries: Dirent[];
       try {
         entries = await fs.readdir(dir, { withFileTypes: true });
       } catch {

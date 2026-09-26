@@ -218,6 +218,8 @@ export async function seedAutomation(
     inputMode: opts.inputMode ?? 'single',
     cronExpression: opts.cronExpression,
     variables: {},
+    // Unattended runs must declare a permission mode (Workflow Overhaul PD-18).
+    permissionMode: 'acceptEdits',
   });
   if (!res.ok || !res.data?.id) {
     throw new Error(`seedAutomation failed (${res.status}): ${JSON.stringify(res.data)}`);
