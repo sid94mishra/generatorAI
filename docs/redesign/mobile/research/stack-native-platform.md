@@ -427,9 +427,10 @@ upgraded with Expo) < Control widgets / QS tile (small native code, rarely chang
 **Push path for a self-hosted server.** The app's publisher owns the APNs/FCM credentials; the user's server does
 not.
 1. **Expo Push Service (current):** the user's server posts the device's Expo token to `exp.host`. This is fine for
-   alerts, categories, `interruptionLevel`, `threadId`, `badge`, `channelId`, `mutableContent`. Turn on **Enhanced
-   Push Security** (access token required), then ship the access token how? A token embedded in every self-hosted
-   server can be extracted. So either keep security off (tokens are unguessable), or proxy through a gateway.
+   alerts, categories, `interruptionLevel`, `threadId`, `badge`, `channelId`, `mutableContent`. **Enhanced Push Security**
+   (an access token required on every send) does not fit this model: the token would have to be embedded in every
+   self-hosted server, where anyone can extract it. So either leave it off and rely on push tokens being
+   unguessable, or send through a gateway (option 2) that holds the token.
 2. **Developer-operated push gateway** (a small service beside `apps/relay`): user servers authenticate with their
    host key (Ed25519 identity already used by the relay cell) and the gateway forwards to Expo Push, APNs
    (Live Activity) or FCM (Android data messages for Live Updates). This is the only path that gives iOS Live

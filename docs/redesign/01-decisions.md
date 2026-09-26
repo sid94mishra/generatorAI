@@ -385,6 +385,12 @@ Decided while building P1-T1…T6 where `02` was silent:
 - Browser logic lives in `apps/web/src/blocks/browser/` (REST, descriptor polling, stream events, screencast/live stream, viewport, input mapping, native view driver, occlusion, annotations, capture, device emulation, tab state); the interactivity setting moved to `lib/browserInteractivity.ts`. Added testids `browser-toolbar`, `browser-url`, `browser-live-view`, `browser-empty-state` (03 §6.2). Browser events accept `{kind, payload}` (and `data` until P4-10 drops it).
 - Known defects #1–#6 fixed (reviews/P4-known-defects.md).
 
+### D-62 Changes and ChatPage logic extraction as built (P4-04) — Final
+- Changes logic lives in `apps/web/src/blocks/changes/` (`useChangesModel`, `useChangesViewSettings`, `useCheckpointPanel`, `useFileActions`, `useKeptFiles`, `useChangesNavigation`, `useReviewOverlay`, `useChangesEditor`, `changePaths`, `changeVisibility`, `useDiffSources`, `diffTypes`); Keep/Undo send the summary's repo-relative path unchanged (defect #7); review threads anchor to their own mount's base/head checkpoints (confirmed against the server).
+- ChatPage logic is `useChatView` in `features/chat/hooks/` composed of `useChatWorkspace`, `useChatStreamState`, `useChatTranscript`, `useChatGates`, `useChatStopRewind`, `useChatDockRouting` (`CHAT_DOCK_TAB_CAPS`); transport moved to `hooks/chatSessionQueries.ts`, `hooks/changesQueries.ts`, `useFetchChatTranscript`, `useReadFsGitInfo`. No `fetch('/api` in `features/`/`blocks/`.
+- Migration exception until P4-12: `pages/ChatPage.tsx` may import `features/chat` (eslint).
+- All nine characterization-pinned defects are fixed (reviews/P4-known-defects.md).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
