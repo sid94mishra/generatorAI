@@ -11,6 +11,7 @@ import { createScopeRequestRoutes } from './scopeRequests.js';
 import { createSecurityRoutes } from './security.js';
 import { createCopilotRoutes } from './copilot.js';
 import { createHooksRoutes } from './hooks.js';
+import { createSettingsRoutes } from './settings.js';
 // Phase 4 streaming — unified /api/stream endpoint (STR-03). Replaces the
 // legacy `/events/global` and `/events/stream` multiplexed routes
 // (deleted in CLN-12).
@@ -124,6 +125,9 @@ export function createApiRouter(container: Container): Router {
 
   // Hooks — phases, session hooks, test (3 endpoints)
   router.use('/hooks', createHooksRoutes(container));
+
+  // Settings the builder reads (P05: the check stage's command picker)
+  router.use('/settings', createSettingsRoutes(container));
 
   // Harness — runtime AI provider switching (PRV-02)
   router.use('/harness', createHarnessRoutes(container));

@@ -61,8 +61,8 @@ export interface CreateDefinitionOptions extends DefinitionWriteOptions {
 export type DeleteOutcome = { deleted: true } | { archived: true; runs: number };
 
 /** Parse + validate; throws `WorkflowValidationError` (422) with the issues. */
-export function assertValidGraph(input: unknown, what = 'Workflow'): WorkflowGraph {
-  const result = validateWorkflow(input, { engine: ENGINE_LEVEL });
+export function assertValidGraph(input: unknown, what = 'Workflow', commandAllowlist?: readonly string[]): WorkflowGraph {
+  const result = validateWorkflow(input, { engine: ENGINE_LEVEL, ...(commandAllowlist ? { commandAllowlist } : {}) });
   if (!result.valid || !result.graph) {
     const errors = result.issues.filter((i) => i.severity === 'error');
     throw new WorkflowValidationError(
@@ -80,7 +80,13 @@ export class WorkflowDefinitionService {
   constructor(
     private readonly store: IWorkflowDefinitionStore,
     private readonly templateRegistry: TemplateRegistry,
+    /** The script runner's effective allow-list: a `check` may run the operator's extras too (P05 §1.2). */
+    private readonly commandAllowlist?: () => readonly string[],
   ) {}
+
+  private get allowlist(): readonly string[] | undefined {
+    return this.commandAllowlist?.();
+  }
 
   // ── Reads ──
 
@@ -104,7 +110,8 @@ export class WorkflowDefinitionService {
 
   /** Stateless validation (the builder runs the same validator locally). */
   validate(input: unknown): ValidationResult {
-    return validateWorkflow(input, { engine: ENGINE_LEVEL });
+    const allowlist = this.allowlist;
+    return validateWorkflow(input, { engine: ENGINE_LEVEL, ...(allowlist ? { commandAllowlist: allowlist } : {}) });
   }
 
   /** The canonical export text: `import(export(g))` gives back `g`. */
@@ -120,7 +127,7 @@ export class WorkflowDefinitionService {
    * drafts unless the caller asks otherwise (a published one gets version 1).
    */
   async createFromSpec(input: unknown, opts: CreateDefinitionOptions): Promise<WorkflowDefinitionRecord> {
-    const graph = assertValidGraph(input);
+    const graph = assertValidGraph(input, undefined, this.allowlist);
     if (collectCommandFields(graph).length > 0) this.assertCommandEdit('', commandFingerprint(graph), opts);
     const record = await this.store.insert({ id: generateId(), status: 'draft', graph });
     return opts.status === 'published' ? this.publish(record.id) : record;
@@ -141,7 +148,7 @@ export class WorkflowDefinitionService {
     expectedRevision: number,
     opts: DefinitionWriteOptions,
   ): Promise<WorkflowDefinitionRecord> {
-    const graph = assertValidGraph(input);
+    const graph = assertValidGraph(input, undefined, this.allowlist);
     const current = await this.store.getGraph(id);
     if (current.revision !== expectedRevision) throw this.conflict(current, expectedRevision);
     this.assertCommandEdit(commandFingerprint(current.graph), commandFingerprint(graph), opts);
@@ -156,7 +163,7 @@ export class WorkflowDefinitionService {
    */
   async publish(id: string): Promise<WorkflowDefinitionRecord> {
     const record = await this.store.getGraph(id);
-    const graph = assertValidGraph(record.graph, `Definition '${record.graph.workflow.name}'`);
+    const graph = assertValidGraph(record.graph, `Definition '${record.graph.workflow.name}'`, this.allowlist);
     const { text, hash } = canonicalGraph(graph);
     const existing = await this.store.findVersionByHash(id, 'published', hash);
     const version =
@@ -179,10 +186,10 @@ export class WorkflowDefinitionService {
         );
       }
       // A migrated version may predate validation; never run an invalid one.
-      assertValidGraph((await this.store.getVersion(record.currentVersionId)).graph, `Workflow '${record.graph.workflow.name}'`);
+      assertValidGraph((await this.store.getVersion(record.currentVersionId)).graph, `Workflow '${record.graph.workflow.name}'`, this.allowlist);
       return record.currentVersionId;
     }
-    const graph = assertValidGraph(record.graph, `Workflow '${record.graph.workflow.name}'`);
+    const graph = assertValidGraph(record.graph, `Workflow '${record.graph.workflow.name}'`, this.allowlist);
     const { text, hash } = canonicalGraph(graph);
     const existing = await this.store.findVersionByHash(id, 'test', hash);
     if (existing) return existing.id;
@@ -216,7 +223,7 @@ export class WorkflowDefinitionService {
     input: unknown,
     opts: DefinitionWriteOptions & { publish?: boolean; name?: string; projectId?: string | null },
   ): Promise<WorkflowDefinitionRecord> {
-    const graph = assertValidGraph(input, 'Imported workflow');
+    const graph = assertValidGraph(input, 'Imported workflow', this.allowlist);
     const workflow = {
       ...graph.workflow,
       ...(opts.name ? { name: opts.name } : {}),

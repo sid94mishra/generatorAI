@@ -840,6 +840,13 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       get: (id: string) => req<WorkflowTemplate>(`/api/templates/${id}`),
     },
 
+    // ── settings.ts ─────────────────────────────────────────────
+    settings: {
+      /** The commands a check stage may run: the defaults plus the operator's extras (P05). */
+      scriptAllowlist: () =>
+        req<{ commands: string[]; defaults: string[]; extras: string[] }>('/api/settings/script-allowlist'),
+    },
+
     // ── hooks.ts ────────────────────────────────────────────────
     hooks: {
       /**

@@ -2226,6 +2226,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     mcpCredentialVault,
     templateRegistry,
     hookExecutor,
+    scriptRunner,
     workflowScriptLoader,
 
     // Widgets & Extensions
@@ -2709,6 +2710,8 @@ export interface Container {
   mcpCredentialVault: McpCredentialVault;
   templateRegistry: TemplateRegistry;
   hookExecutor: HookExecutor;
+  /** The policy-checked child-process runner (hooks, lifecycle scripts, check stages). */
+  scriptRunner: SandboxedScriptRunner;
   workflowScriptLoader: WorkflowScriptLoader;
 
   // Widgets & Extensions

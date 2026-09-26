@@ -54,8 +54,20 @@ export function planInvocation(
       ...(harnessType ? { harnessType } : {}),
       ...(agentRef ? { agentRef } : {}),
       approvalRequired: s.kind === 'agent' && !!s.approval,
+      kind: s.kind,
+      ...(s.parentKey ? { parentKey: s.parentKey } : {}),
     };
   });
+  const checks = graph.stages.filter((s) => s.kind === 'check');
+  const risks: InvocationPlan['risks'] = checks.length
+    ? [
+        {
+          code: 'runs_repo_code',
+          stageKeys: checks.map((s) => s.key),
+          message: `Runs repository code: ${checks.map((s) => (s.kind === 'check' ? `${s.key} (${[s.check.command, ...s.check.args].join(' ')})` : s.key)).join('; ')}`,
+        },
+      ]
+    : [];
 
   const lifecycle = graph.workflow.lifecycle;
   const prepare: PreparePhase[] = ['workspace', 'worktrees'];
@@ -76,5 +88,6 @@ export function planInvocation(
     permissionMode: v.effectivePermissionMode,
     lineage: { depth: v.lineage.depth, rootRunId: v.lineage.rootRunId ?? null, parentRunId: v.lineage.parentRunId ?? null },
     warnings: v.warnings,
+    risks,
   };
 }

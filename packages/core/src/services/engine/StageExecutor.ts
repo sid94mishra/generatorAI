@@ -80,6 +80,9 @@ import { TurnRecorder } from '../session/TurnRecorder.js';
 import type { SessionOwner, TurnContext } from '../session/types.js';
 import { runWorkspace, workspaceExposure } from '../session/workspaceExposure.js';
 import { StageConversationError } from './StageConversationError.js';
+import { runCheck } from './CheckRunner.js';
+import { compile } from '../../domain/workflow-graph/compile.js';
+import { templateScope } from '../../domain/scheduler/scope.js';
 import {
   checkOutputContract,
   chooseStrategies,
@@ -561,6 +564,9 @@ export class StageExecutor {
     const attempts = stores.attempts.listByStageRun(stageRunId);
     const attempt = attempts.find((a) => a.attemptNo === attemptNo);
     if (!attempt || attempt.status !== 'running') throw new AttemptStop({ kind: 'aborted', reason: 'superseded' });
+    // A check stage runs one command, no conversation (P05 §1.2).
+    if (stores.stages.getInstance(stageRunId)?.kind === 'check') return this.checkAttempt(frame);
+
     const carried = attempt.overrides as { verdict?: ApprovalVerdict; operatorTurn?: OperatorTurn } | null;
     if (carried?.verdict) frame.carriedVerdict = carried.verdict;
     // A message sent to the paused stage (the retry's `promptOverride`) is its next operator turn.
@@ -601,6 +607,45 @@ export class StageExecutor {
     const output = await this.validateAndReview(ctx);
     await this.postRunHooks(ctx);
     return { kind: 'succeeded', output };
+  }
+
+  /** One attempt of a check stage: starting → running → the command → validating (P05 §1.2). */
+  private async checkAttempt(frame: Frame): Promise<AttemptOutcome> {
+    const { stores } = this.deps;
+    const { runId, stageRunId } = frame.req;
+    const run = await this.deps.runRepo.getById(runId);
+    const graph = await this.deps.definitions.get(run.definitionVersionId);
+    const state = stores.runStore.loadRunState(runId);
+    const instance = state?.instances.find((i) => i.id === stageRunId);
+    const stage = graph.stages.find((s) => s.key === instance?.stageKey);
+    if (!state || !instance || stage?.kind !== 'check') throw new StageError('config_invalid', `Instance ${stageRunId} is not a check stage of the pinned version`);
+    const running = stores.stages.transition(stageRunId, ['starting'], 'running', {
+      lease: { owner: frame.owner, ttlMs: this.timing.leaseTtlMs },
+      runId,
+      now: this.now(),
+    });
+    if (!running.ok) throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
+    await this.deps.eventBus
+      .emitGlobal({
+        kind: 'stage_run.running',
+        data: { stageRunId, workflowRunId: runId, name: stage.name, stageKey: stage.key, instancePath: instance.instancePath, attemptNo: frame.req.attemptNo, version: running.row.version },
+      } as unknown as AgentEvent)
+      .catch(() => undefined);
+    const workspace = await runWorkspace(this.deps.workspaceManager, run);
+    const outcome = await runCheck({
+      stage,
+      run,
+      primaryDir: run.systemVars?.workingDirectory ?? this.deps.workspaceManager.getWorkingDirectory(workspace),
+      scope: templateScope(compile(graph), state, instance, userVariables({ ...(run.variables ?? {}) })),
+      scriptRunner: this.deps.scriptRunner,
+      signal: frame.ac.signal,
+    });
+    if (frame.stop) throw new AttemptStop(frame.stop);
+    if (outcome.kind !== 'succeeded') return outcome;
+    // running → validating: the output is the command's result (no contract to check).
+    const validating = stores.stages.transition(stageRunId, ['running'], 'validating', { runId, now: this.now() });
+    if (!validating.ok) throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
+    return outcome;
   }
 
   /** The run, the pinned stage and everything an attempt (or an amendment) body needs. */

@@ -8,7 +8,8 @@
 //   - `launch` waits for a slot of the admission controller — THE one
 //     concurrency gate of the engine (W-66; there is no stage semaphore) —
 //     while the instance stays `ready`, so the wait never counts as attempt
-//     time; the executor's claim ends it;
+//     time; the executor's claim ends it. A `check` stage waits on its own
+//     flow key `check:global`, not a provider lane (P05 §1.2);
 //   - `abort` drops a launch still queued for its slot, or stops the frame;
 //   - `deliver_input` hands a verdict to a parked frame (with no frame left,
 //     the attempt is settled and the approval is posted again, so it takes
@@ -19,7 +20,7 @@
 import type { ILogger } from '@generatorai/shared';
 import type { ArmedTimer } from '../../domain/ports/IRunStore.js';
 import type { Decision, RunMessage, RunOutcome } from '../../domain/scheduler/types.js';
-import type { AdmissionController } from '../AdmissionController.js';
+import type { AdmissionController, AdmissionTicket } from '../AdmissionController.js';
 import type { OutboxDispatcher } from './OutboxDispatcher.js';
 import { PrepareError, type RunLifecycle } from './RunLifecycle.js';
 import type { StageExecutor } from './StageExecutor.js';
@@ -32,8 +33,13 @@ export interface EffectsDispatcherDeps {
   outbox: OutboxDispatcher;
   lifecycle: RunLifecycle;
   post: (runId: string, msg: RunMessage) => void;
+  /** The stage kind of an instance (a check is admitted on its flow key). */
+  kindOf?: ((stageRunId: string) => string | undefined) | undefined;
   logger?: ILogger | undefined;
 }
+
+/** The admission flow key of the `check` kind (P05 §1.2). */
+export const CHECK_FLOW_KEY = 'check:global';
 
 interface QueuedLaunch {
   attemptNo: number;
@@ -95,12 +101,14 @@ export class EffectsDispatcher {
   launch(runId: string, stageRunId: string, attemptNo: number): void {
     const entry: QueuedLaunch = { attemptNo, dropped: false };
     this.queued.set(stageRunId, entry);
-    const run = this.deps.admission
-      .admit('ordinary', async (ticket) => {
-        if (this.queued.get(stageRunId) === entry) this.queued.delete(stageRunId);
-        if (entry.dropped) return;
-        await this.deps.executor.start({ runId, stageRunId, attemptNo }, ticket);
-      })
+    const body = async (ticket: AdmissionTicket): Promise<void> => {
+      if (this.queued.get(stageRunId) === entry) this.queued.delete(stageRunId);
+      if (entry.dropped) return;
+      await this.deps.executor.start({ runId, stageRunId, attemptNo }, ticket);
+    };
+    const run = (this.deps.kindOf?.(stageRunId) === 'check'
+      ? this.deps.admission.admitFlow(CHECK_FLOW_KEY, body)
+      : this.deps.admission.admit('ordinary', body))
       .catch((err: unknown) => {
         if (this.queued.get(stageRunId) === entry) this.queued.delete(stageRunId);
         // The instance stays `ready`: its queue_timeout timer decides (G5 §5.11).

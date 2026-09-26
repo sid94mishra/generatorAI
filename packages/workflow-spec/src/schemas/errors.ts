@@ -33,6 +33,8 @@ export const STAGE_ERROR_CODE_CLASS = {
   pause_expired: 'deterministic',
   condition_error: 'deterministic',
   queue_timeout: 'deterministic',
+  check_launch_failed: 'deterministic',
+  check_failed: 'deterministic',
   output_schema: 'repairable',
   validation_rule: 'repairable',
   missing_artifact: 'repairable',

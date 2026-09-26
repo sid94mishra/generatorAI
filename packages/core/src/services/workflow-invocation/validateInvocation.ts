@@ -286,6 +286,14 @@ export async function validateInvocation(
     ...(overridesIn.reasoningEffort ? { reasoningEffort: overridesIn.reasoningEffort } : {}),
   };
 
+  // ── P05 §1.2: a check stage runs repository code (the run capability `shell`) ──
+  const checks = graph.stages.filter((s) => s.kind === 'check').map((s) => s.key);
+  if (checks.length > 0 && effectivePermissionMode === 'plan') {
+    throw new InvocationError('PERMISSION_ESCALATION', `A run in plan mode cannot run commands; the check stage(s) ${checks.join(', ')} would run repository code`, [
+      issue('shell-in-plan-mode', ['overrides', 'permissionMode'], `check stages (${checks.join(', ')}) need a mode above plan`),
+    ]);
+  }
+
   // ── PD-17: can the providers hold the mode? ──
   if (deps.permissionGating) {
     const probe = {

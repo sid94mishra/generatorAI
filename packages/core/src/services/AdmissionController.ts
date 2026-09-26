@@ -104,6 +104,12 @@ export interface AdmissionControllerConfig {
    * `0` disables the timeout.
    */
   queueWaitTimeoutMs?: number;
+  /**
+   * Flow keys: gates separate from the provider lanes (P05 §1.2). A flow is
+   * a named concurrency cap; `check:global` (default 2) bounds the
+   * `check` stages of every run. P07 surfaces them in settings.
+   */
+  flowLimits?: Record<string, number>;
   /** Structured logger. INFO on queue, WARN on timeout. */
   logger?: {
     info?: (msg: string, meta?: Record<string, unknown>) => void;
@@ -211,16 +217,22 @@ export function sizeLane(
   return { lane, limit, boundBy, cpuBound, memoryBound };
 }
 
+/** The default caps of the flow keys (P05 §1.2: `check:global` = 2). */
+export const DEFAULT_FLOW_LIMITS: Readonly<Record<string, number>> = { 'check:global': 2 };
+
 export class AdmissionController {
   private readonly lanes: Record<AdmissionLane, LaneState>;
   private readonly limits: Record<AdmissionLane, number>;
   private readonly sizing: SizingDecision[];
   private readonly queueWaitTimeoutMs: number;
   private readonly logger: AdmissionControllerConfig['logger'];
+  private readonly flows = new Map<string, { semaphore: Semaphore; limit: number; running: number; queued: number }>();
+  private readonly flowLimits: Record<string, number>;
 
   constructor(cfg: AdmissionControllerConfig = {}) {
     this.logger = cfg.logger;
     this.queueWaitTimeoutMs = cfg.queueWaitTimeoutMs ?? 1_800_000;
+    this.flowLimits = { ...DEFAULT_FLOW_LIMITS, ...(cfg.flowLimits ?? {}) };
 
     this.sizing = [
       sizeLane('interactive', cfg.interactiveConcurrency),
@@ -401,6 +413,56 @@ export class AdmissionController {
   /** Number of callers in `lane` parked on an external wait. */
   parked(lane: AdmissionLane): number {
     return this.lanes[lane].parked;
+  }
+
+  /**
+   * Run `fn` under a flow key's own concurrency cap (not a lane): FIFO,
+   * queue-don't-reject, no timeout of its own (the caller's queue timer
+   * decides). The ticket yields the permit across an external wait.
+   */
+  async admitFlow<T>(flowKey: string, fn: (ticket: AdmissionTicket) => Promise<T>): Promise<T> {
+    let flow = this.flows.get(flowKey);
+    if (!flow) {
+      const limit = Math.max(1, this.flowLimits[flowKey] ?? 1);
+      flow = { semaphore: new Semaphore(limit), limit, running: 0, queued: 0 };
+      this.flows.set(flowKey, flow);
+    }
+    const f = flow;
+    f.queued += 1;
+    try {
+      await f.semaphore.acquire();
+    } finally {
+      f.queued -= 1;
+    }
+    f.running += 1;
+    let held = true;
+    const ticket: AdmissionTicket = {
+      pause: () => {
+        if (!held) return;
+        held = false;
+        f.running -= 1;
+        f.semaphore.release();
+      },
+      resume: async () => {
+        if (held) return;
+        await f.semaphore.acquire();
+        f.running += 1;
+        held = true;
+      },
+    };
+    try {
+      return await fn(ticket);
+    } finally {
+      if (held) {
+        f.running -= 1;
+        f.semaphore.release();
+      }
+    }
+  }
+
+  /** Flow gates in use: running and queued per key. */
+  flowSnapshot(): Array<{ flowKey: string; running: number; queued: number; limit: number }> {
+    return [...this.flows].map(([flowKey, f]) => ({ flowKey, running: f.running, queued: f.queued, limit: f.limit }));
   }
 
   /** Full snapshot for observability (health endpoint, metrics). */

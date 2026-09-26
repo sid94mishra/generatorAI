@@ -939,6 +939,12 @@ function PlanPreview({ plan, stale }: { plan: InvocationPlan; stale: boolean }) 
       {plan.prepare.length > 0 && <PlanRow label="Prepare">{plan.prepare.join(' → ')}</PlanRow>}
       {plan.preprocessing.length > 0 && <PlanRow label="Before">{plan.preprocessing.join(', ')}</PlanRow>}
       <PlanRow label="After">{plan.postProcessing.length > 0 ? plan.postProcessing.join(', ') : 'Nothing'}</PlanRow>
+      {plan.risks.map((r) => (
+        <p key={r.code} className="flex items-start gap-1 rounded-md bg-warning/10 px-2 py-1 text-warning">
+          <AlertCircle className="mt-0.5 h-3 w-3 shrink-0" />
+          <span>{r.message}</span>
+        </p>
+      ))}
 
       {plan.warnings.length > 0 && (
         <ul className="space-y-0.5 text-warning">

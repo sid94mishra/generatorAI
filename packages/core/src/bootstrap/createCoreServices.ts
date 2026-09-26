@@ -16,6 +16,7 @@
 // own composition-root.
 // ────────────────────────────────────────────────────────────────
 
+import { DEFAULT_COMMAND_ALLOWLIST } from '@generatorai/workflow-spec';
 import * as path from 'node:path';
 import type { ILogger, AgentEvent, AgentOverrides, HarnessConfig } from '@generatorai/shared';
 import type {
@@ -408,7 +409,11 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
 
   // Runs read their pinned definition version through one reader (W-13).
   const runDefinitionReader = new RunDefinitionReader(workflowDefinitionStore);
-  const workflowDefinitionService = new WorkflowDefinitionService(workflowDefinitionStore, templateRegistry);
+  const workflowDefinitionService = new WorkflowDefinitionService(
+    workflowDefinitionStore,
+    templateRegistry,
+    () => scriptRunner.getAllowlist?.() ?? DEFAULT_COMMAND_ALLOWLIST,
+  );
 
   // W22 — Durable execution engine (automations' iteration claims and awakeables).
   const durableExecutionEngine = new DurableExecutionEngine(registerRepo, entryRepo, logger);

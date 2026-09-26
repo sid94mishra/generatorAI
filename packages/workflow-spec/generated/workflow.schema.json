@@ -2191,6 +2191,8 @@
                             "pause_expired",
                             "condition_error",
                             "queue_timeout",
+                            "check_launch_failed",
+                            "check_failed",
                             "output_schema",
                             "validation_rule",
                             "missing_artifact",

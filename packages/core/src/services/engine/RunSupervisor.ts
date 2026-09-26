@@ -206,6 +206,7 @@ export class RunSupervisor {
       outbox: this.outbox,
       lifecycle: this.lifecycle,
       post,
+      kindOf: (id) => deps.stores.stages.getInstance(id)?.kind,
       logger: deps.logger,
     });
     this.reaper = new LeaseReaper({

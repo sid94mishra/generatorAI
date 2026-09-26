@@ -273,7 +273,16 @@ export interface InvocationPlan {
     agentRef?: string;
     /** A completion review parks the stage for a person. */
     approvalRequired: boolean;
+    kind: string;
+    /** The enclosing container (loop body stages). */
+    parentKey?: string;
   }>;
+  /**
+   * What the run may do that deserves a look before it starts. `runs_repo_code`:
+   * check stages execute repository code an agent may have just edited (the run
+   * capability `shell`, P05 §1.2).
+   */
+  risks: Array<{ code: 'runs_repo_code'; stageKeys: string[]; message: string }>;
   codebases: Array<{ alias: string; baseRef: string | null; mode: 'worktree' | 'in_place'; source: 'request' | 'lifecycle' }>;
   /** Prepare phases with work to do, in order. */
   prepare: PreparePhase[];

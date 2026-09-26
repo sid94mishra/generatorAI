@@ -460,6 +460,8 @@ export function describeInvocationPlan(plan: InvocationPlan, options: { maxStage
       stage.model ? `model ${stage.model}` : undefined,
       stage.agentRef ? `agent ${stage.agentRef}` : undefined,
       stage.approvalRequired ? 'needs approval' : undefined,
+      stage.kind && stage.kind !== 'agent' ? stage.kind : undefined,
+      stage.parentKey ? `in ${stage.parentKey}` : undefined,
     ].filter(Boolean);
     const label = stage.name && stage.name !== stage.key ? `${stage.key} — ${stage.name}` : stage.key;
     lines.push(`  ${stage.skipped ? '-' : '•'} L${stage.layer}  ${label}${notes.length ? `  [${notes.join(', ')}]` : ''}`);
@@ -478,6 +480,7 @@ export function describeInvocationPlan(plan: InvocationPlan, options: { maxStage
   if (plan.prepare.length) lines.push(`Prepare: ${plan.prepare.join(' → ')}`);
   if (plan.preprocessing.length) lines.push(`Preprocessing: ${plan.preprocessing.join(', ')}`);
   lines.push(`Post-processing: ${plan.postProcessing.length ? plan.postProcessing.join(', ') : 'none'}`);
+  for (const r of plan.risks ?? []) lines.push(`Risk: ${r.message}`);
   if (plan.lineage.depth > 0) lines.push(`Nested run: depth ${plan.lineage.depth} under ${plan.lineage.parentRunId ?? '?'}`);
   for (const warning of plan.warnings) lines.push(`! ${issueLine(warning)}`);
   return lines;

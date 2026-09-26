@@ -143,6 +143,9 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   { prefix: '/automations', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
   { prefix: '/templates', read: ['read:workflows'], write: ['write:workflows'] },
   { prefix: '/hooks', read: ['read:workflows'], write: ['write:workflows'] },
+  // The commands a check stage may run (the builder's picker, P05 §1.2):
+  // reading it is authoring; the list itself is operator configuration.
+  { prefix: '/settings/script-allowlist', read: ['read:workflows'], write: ['admin:settings'] },
 
   { prefix: '/projects', read: ['read:projects'], write: ['write:projects'] },
   { prefix: '/source-control', read: ['read:projects'], write: ['write:projects'] },
