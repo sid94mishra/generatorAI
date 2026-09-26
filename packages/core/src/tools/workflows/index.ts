@@ -22,7 +22,6 @@ export {
   DEFAULT_WORKFLOW_TOOL_LIMITS,
   compactDigest,
   compactPlan,
-  riskFlags,
   toolError,
   type ChatRunLinker,
   type RunToolArgs,

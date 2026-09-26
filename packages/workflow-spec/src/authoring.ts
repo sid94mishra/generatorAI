@@ -4,6 +4,7 @@
 // server lists. Shared by the server, every client and the MCP server.
 // ────────────────────────────────────────────────────────────────
 
+import type { WorkflowGraph } from './schemas/graph.js';
 import type { InvocationPlan } from './schemas/invocation.js';
 import type { ValidationIssue } from './validate/issues.js';
 
@@ -75,3 +76,37 @@ export interface WorkflowToolAdvert {
 /** The skill bundle's name, its resource URI prefix and the topics of the guide. */
 export const WORKFLOW_AUTHOR_SKILL = 'generatorai-workflow-author';
 export const WORKFLOW_AUTHOR_RESOURCE_PREFIX = 'generatorai://workflow-author/';
+
+/** What a workflow may do that a person should see before it runs or is published (describe_workflow, the agent-draft banner). */
+export const RISK_FLAGS = [
+  'writes_files',
+  'commits',
+  'pushes',
+  'opens_pr',
+  'bypass_permissions',
+  'runs_repo_code',
+  'starts_other_workflows',
+  'worktree_per_item',
+] as const;
+export type RiskFlag = (typeof RISK_FLAGS)[number];
+
+/** What a run of this workflow may do that deserves a look before starting it. */
+export function riskFlags(graph: WorkflowGraph): RiskFlag[] {
+  const wf = graph.workflow;
+  const flags = new Set<RiskFlag>();
+  const writer = graph.stages.some((s) => s.kind === 'agent' && (s.session?.permissionMode ?? wf.session.permissionMode) !== 'plan');
+  if (writer) flags.add('writes_files');
+  const pp = wf.lifecycle.postProcessing;
+  if (pp.autoCommit || pp.autoPush || pp.autoCreatePR || pp.steps.some((s) => s.config.type === 'commit_and_push')) flags.add('commits');
+  if (pp.autoPush || pp.autoCreatePR || pp.steps.some((s) => s.config.type === 'commit_and_push' && s.config.push)) flags.add('pushes');
+  if (pp.autoCreatePR || pp.steps.some((s) => s.config.type === 'create_pr')) flags.add('opens_pr');
+  if ((wf.session.permissionMode ?? '') === 'bypassPermissions' || graph.stages.some((s) => s.kind === 'agent' && s.session?.permissionMode === 'bypassPermissions')) {
+    flags.add('bypass_permissions');
+  }
+  if (graph.stages.some((s) => s.kind === 'check') || wf.lifecycle.preprocessingSteps.length > 0 || pp.steps.some((s) => s.config.type === 'run_script')) {
+    flags.add('runs_repo_code');
+  }
+  if (graph.stages.some((s) => s.kind === 'subworkflow')) flags.add('starts_other_workflows');
+  if (graph.stages.some((s) => s.kind === 'map' && s.map.workspace === 'mount_per_item')) flags.add('worktree_per_item');
+  return [...flags];
+}

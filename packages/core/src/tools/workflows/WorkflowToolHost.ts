@@ -23,6 +23,7 @@
 import type { ChatPrincipal, WorkflowRun } from '@generatorai/shared';
 import {
   MAX_INVOCATION_DEPTH,
+  riskFlags,
   type InvocationPlan,
   type InvocationRequest,
   type InvocationTrigger,
@@ -671,26 +672,6 @@ function postProcessingOf(graph: WorkflowGraph): string[] {
   return out;
 }
 
-/** What a run of this workflow may do that deserves a look before starting it. */
-export function riskFlags(graph: WorkflowGraph): string[] {
-  const wf = graph.workflow;
-  const flags = new Set<string>();
-  const writer = graph.stages.some((s) => s.kind === 'agent' && (s.session?.permissionMode ?? wf.session.permissionMode) !== 'plan');
-  if (writer) flags.add('writes_files');
-  const pp = wf.lifecycle.postProcessing;
-  if (pp.autoCommit || pp.autoPush || pp.autoCreatePR || pp.steps.some((s) => s.config.type === 'commit_and_push')) flags.add('commits');
-  if (pp.autoPush || pp.autoCreatePR || pp.steps.some((s) => s.config.type === 'commit_and_push' && s.config.push)) flags.add('pushes');
-  if (pp.autoCreatePR || pp.steps.some((s) => s.config.type === 'create_pr')) flags.add('opens_pr');
-  if ((wf.session.permissionMode ?? '') === 'bypassPermissions' || graph.stages.some((s) => s.kind === 'agent' && s.session?.permissionMode === 'bypassPermissions')) {
-    flags.add('bypass_permissions');
-  }
-  if (graph.stages.some((s) => s.kind === 'check') || wf.lifecycle.preprocessingSteps.length > 0 || pp.steps.some((s) => s.config.type === 'run_script')) {
-    flags.add('runs_repo_code');
-  }
-  if (graph.stages.some((s) => s.kind === 'subworkflow')) flags.add('starts_other_workflows');
-  if (graph.stages.some((s) => s.kind === 'map' && s.map.workspace === 'mount_per_item')) flags.add('worktree_per_item');
-  return [...flags];
-}
 
 export function compactPlan(plan: InvocationPlan): Record<string, unknown> {
   return {
