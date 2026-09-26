@@ -264,11 +264,34 @@ export async function findIdByName(path: string, name: string): Promise<string |
  * not a bare array like the other list endpoints `findIdByName` handles —
  * so this looks up chats with its own request instead of going through it.
  * `workers: true` so a worker chat created by a test is still findable.
+ *
+ * P2-R22(c) — a plain unfiltered `limit=200` only ever sees the newest 200
+ * chats, so seeding (or any other name lookup) against a DB with more than
+ * that stopped being idempotent: an older fixed-name chat would look
+ * "missing" and get recreated. `q=<name>` uses the server's own substring
+ * filter (case-insensitive, over name/description/tag) to narrow the
+ * candidates, then this still exact-matches `.name` itself (the endpoint has
+ * no exact-match filter), and pages via `cursor` on the rare chance more than
+ * one page of `q` matches exists before the exact one is found.
  */
 export async function findChatIdByName(name: string): Promise<string | undefined> {
-  const res = await apiRequest<{ items: Array<{ id: string; name: string }> }>('GET', '/chats?limit=200&workers=true');
-  if (!res.ok || !Array.isArray(res.data?.items)) return undefined;
-  return res.data.items.find((item) => item.name === name)?.id;
+  let cursor: string | undefined;
+  // A defensive cap, not an expected case: `q` narrows to substring matches
+  // of `name`, so this should resolve within the first page almost always.
+  for (let pagesRead = 0; pagesRead < 50; pagesRead++) {
+    const params = new URLSearchParams({ q: name, workers: 'true', limit: '200' });
+    if (cursor) params.set('cursor', cursor);
+    const res = await apiRequest<{ items: Array<{ id: string; name: string }>; nextCursor?: string | null }>(
+      'GET',
+      `/chats?${params.toString()}`,
+    );
+    if (!res.ok || !Array.isArray(res.data?.items)) return undefined;
+    const match = res.data.items.find((item) => item.name === name);
+    if (match) return match.id;
+    if (!res.data.nextCursor) return undefined;
+    cursor = res.data.nextCursor;
+  }
+  return undefined;
 }
 
 export async function findProjectIdByName(name: string): Promise<string | undefined> {

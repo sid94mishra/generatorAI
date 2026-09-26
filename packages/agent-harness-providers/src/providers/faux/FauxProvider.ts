@@ -44,7 +44,7 @@ import type {
 } from '@generatorai/core';
 import type { AgentEvent, AgentQuestion } from '@generatorai/shared';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join } from 'node:path';
+import { dirname, isAbsolute, relative, resolve as resolvePath } from 'node:path';
 
 // ── Model catalog ────────────────────────────────────────────────
 //
@@ -236,6 +236,18 @@ interface FauxConversationState {
 let callIdSeq = 0;
 function nextCallId(): string {
   return `faux-call-${++callIdSeq}`;
+}
+
+/**
+ * P2-R21(c) — line count for a `fileOp` diff stat. `text.split('\n').length`
+ * over-counts by one whenever `text` ends with a trailing newline (the
+ * common case for a real file): `'a\nb\n'.split('\n')` is `['a', 'b', '']`,
+ * length 3, for what is actually a 2-line file. Empty content is 0 lines.
+ */
+function countLines(text: string): number {
+  if (text === '') return 0;
+  const parts = text.split('\n').length;
+  return text.endsWith('\n') ? parts - 1 : parts;
 }
 
 /**
@@ -511,6 +523,14 @@ export class FauxProvider implements IAgentHarness {
       return { content: assistantText };
     }
 
+    // P2-R21(b) — set when a `permission_request` entry resolves denied, so
+    // the very next `file_edit` entry (the common "propose, ask, apply"
+    // script shape — see fixtures/sandbox.faux.json) is skipped instead of
+    // silently proceeding as if it had been granted. Consumed (reset) by
+    // the next entry regardless of its type, so a later, unrelated
+    // file_edit is never wrongly skipped.
+    let deniedPermissionPending = false;
+
     try {
       for (const entry of script) {
         // Honour abort signal between entries
@@ -522,6 +542,11 @@ export class FauxProvider implements IAgentHarness {
           conv.inFlight = false;
           return { content: assistantText };
         }
+
+        // Consumed by 'file_edit' below; reset for every other entry type so
+        // a denial only ever gates the file_edit immediately following it.
+        const gatedByDeniedPermission = deniedPermissionPending;
+        deniedPermissionPending = false;
 
         switch (entry.type) {
           case 'text': {
@@ -569,9 +594,55 @@ export class FauxProvider implements IAgentHarness {
             const callId = entry.callId ?? nextCallId();
             const isDelete = entry.op === 'delete' || (entry.op === undefined && entry.content === undefined);
             const toolName = entry.toolName ?? (isDelete ? 'Delete' : 'Write');
-            const absPath = isAbsolute(entry.path)
-              ? entry.path
-              : join(conv.params.workingDirectory ?? process.cwd(), entry.path);
+
+            // P2-R21(a) — no `process.cwd()` fallback. In the sandbox that
+            // resolves to wherever this process happens to have been
+            // started from — e.g. apps/server inside a real checkout, not
+            // a sandboxed workspace — so a relative script path (or `../`)
+            // could write into the real checkout instead of a throwaway
+            // dir. A conversation that scripts file_edit must supply a
+            // workspace; this errors the step rather than guessing one.
+            const workspaceDir = conv.params.workingDirectory;
+            if (!workspaceDir) {
+              const message =
+                'FauxProvider: "file_edit" script entry requires CreateConversationParams.workingDirectory — refusing to fall back to process.cwd().';
+              this.broadcast(conversationId, { kind: 'harness.error', data: { message, provider: 'faux' } });
+              conv.inFlight = false;
+              throw new Error(message);
+            }
+            const workspaceRoot = resolvePath(workspaceDir);
+            const absPath = resolvePath(workspaceRoot, entry.path);
+            const relFromWorkspace = relative(workspaceRoot, absPath);
+            // `isAbsolute` also catches path.relative's cross-drive-letter
+            // case on Windows, where it returns the absolute `to` path
+            // instead of one starting with '..'.
+            if (relFromWorkspace.startsWith('..') || isAbsolute(relFromWorkspace)) {
+              const message = `FauxProvider: "file_edit" path "${entry.path}" resolves outside the conversation's workspace (${workspaceRoot}) — refusing to touch it.`;
+              this.broadcast(conversationId, { kind: 'harness.error', data: { message, provider: 'faux' } });
+              conv.inFlight = false;
+              throw new Error(message);
+            }
+
+            // P2-R21(b) — a permission_request denied immediately before
+            // this entry means whatever it was gating must not happen.
+            // Report it the way a real provider's tool reports a denied
+            // permission (a failed tool_complete), and never touch disk.
+            if (gatedByDeniedPermission) {
+              this.broadcast(conversationId, {
+                kind: 'harness.tool_start',
+                data: { tool: toolName, args: { file_path: entry.path }, callId },
+              });
+              this.broadcast(conversationId, {
+                kind: 'harness.tool_complete',
+                data: {
+                  tool: toolName,
+                  result: 'Permission denied — the preceding permission_request was not granted.',
+                  callId,
+                  success: false,
+                },
+              });
+              break;
+            }
 
             this.broadcast(conversationId, {
               kind: 'harness.tool_start',
@@ -593,8 +664,10 @@ export class FauxProvider implements IAgentHarness {
               await writeFile(absPath, entry.content ?? '', 'utf8');
             }
 
-            const oldLines = previousContent ? previousContent.split('\n').length : 0;
-            const newLines = resolvedOp === 'delete' ? 0 : (entry.content ?? '').split('\n').length;
+            // P2-R21(c) — countLines (not a raw split('\n').length) so a
+            // trailing newline doesn't over-count by one.
+            const oldLines = previousContent === undefined ? 0 : countLines(previousContent);
+            const newLines = resolvedOp === 'delete' ? 0 : countLines(entry.content ?? '');
             const fileOp = {
               kind: resolvedOp,
               filePath: entry.path,
@@ -637,7 +710,21 @@ export class FauxProvider implements IAgentHarness {
               });
               break;
             }
-            await handler(entry.request);
+            const decision = await handler(entry.request);
+            // P2-R21(b) — honour the answer instead of discarding it: a
+            // denial must not let the script continue as though it had been
+            // granted. Surface it in the transcript and gate the very next
+            // file_edit entry (see the top of this loop and that case).
+            if (!decision.granted) {
+              deniedPermissionPending = true;
+              this.broadcast(conversationId, {
+                kind: 'harness.warning',
+                data: {
+                  message: `FauxProvider: permission denied for "${entry.request.description}"${decision.reason ? ` (${decision.reason})` : ''}.`,
+                  provider: 'faux',
+                },
+              });
+            }
             break;
           }
 

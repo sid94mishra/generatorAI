@@ -21,8 +21,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { writeFile } from 'node:fs/promises';
+import { realpathSync } from 'node:fs';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import {
   ResourceTracker,
   seedChat,
@@ -211,9 +212,25 @@ async function main(): Promise<void> {
   console.log(`[seed] automation=${result.automationId}`);
 }
 
+// P2-R11 — `import.meta.url === \`file://${process.argv[1]}\`` is false on
+// Windows (`file:///C:/…` vs `C:\…`) and on any path containing characters a
+// raw `file://` template needs percent-encoded (e.g. spaces), so `main()` was
+// silently skipped there and this exited 0 having seeded nothing. Compare
+// realpath'd, URL-encoded forms instead — the same pattern as
+// scripts/redesign/vrt.mjs's `isMain()` — so a symlink or (on macOS) a
+// `/tmp` → `/private/tmp` rewrite doesn't cause a false negative either.
+function isMain(): boolean {
+  if (!process.argv[1]) return false;
+  try {
+    return pathToFileURL(realpathSync(process.argv[1])).href === pathToFileURL(realpathSync(fileURLToPath(import.meta.url))).href;
+  } catch {
+    return false;
+  }
+}
+
 // Runnable directly (`tsx agent-tests/vrt/seed.ts`) as well as importable as
 // a Playwright `globalSetup` default export.
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain()) {
   main().catch((err) => {
     console.error('[seed] failed:', err);
     process.exitCode = 1;

@@ -7,6 +7,8 @@
 //   node scripts/redesign/sandbox.mjs                 → Faux harness (default)
 //   node scripts/redesign/sandbox.mjs --real-harness   → real provider CLIs
 //   node scripts/redesign/sandbox.mjs --clean          → remove old sandbox temp dirs, then exit
+//   node scripts/redesign/sandbox.mjs --help           → resolve and print the commands, start nothing
+//   node scripts/redesign/sandbox.mjs --dry-run         → same as --help (alias)
 //
 // What it does, in order:
 //   1. Bundles the server if apps/server/dist-bundle is missing.
@@ -37,6 +39,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
+import { nodeBinArgs, pnpmCommand } from './lib/spawn-node-bin.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -53,13 +56,49 @@ const WEB_PORT = 5197;
 const SHUTDOWN_BUDGET_MS = 5_000;
 const START_TIMEOUT_MS = 60_000;
 
-function bin(name) {
-  const exe = process.platform === 'win32' ? `${name}.cmd` : name;
-  return path.join(ROOT, 'node_modules', '.bin', exe);
-}
-
 function log(msg) {
   console.log(`[sandbox] ${msg}`);
+}
+
+// P2-R22(b) — `serverLog`/`viteLog` exist only so a startup failure can print
+// recent output; kept as an unbounded `+=` they grew for the whole life of a
+// long-running sandbox. Bounded ring: keep only the tail, in characters
+// (an approximation of bytes good enough for a debug log).
+const LOG_RING_MAX_CHARS = 200 * 1024;
+function appendToRing(current, chunk) {
+  const next = current + chunk;
+  return next.length > LOG_RING_MAX_CHARS ? next.slice(next.length - LOG_RING_MAX_CHARS) : next;
+}
+
+// ── --help / --dry-run ──────────────────────────────────────────
+//
+// P2-R10 — resolves every command this script would spawn (pnpm bundle
+// fallback, tsx for the seed, vite for the web server) through the shared
+// helper and prints them, WITHOUT starting any server or Vite. Lets a
+// developer or CI confirm the spawn helper resolves real, existing files on
+// this OS without touching :3197/:5197.
+
+function printResolvedCommands() {
+  const pnpmBundle = pnpmCommand(['--filter', '@generatorai/server', 'bundle']);
+  console.log('[sandbox] resolved commands (nothing started):');
+  console.log(`  pnpm (bundle fallback): ${pnpmBundle.command} ${pnpmBundle.args.join(' ')}${pnpmBundle.options.shell ? '  (shell: true)' : ''}`);
+  try {
+    const tsx = nodeBinArgs(SERVER_DIR, 'tsx', 'tsx', [SEED_SCRIPT]);
+    console.log(`  seed (tsx):             ${tsx.command} ${tsx.args.join(' ')}`);
+  } catch (err) {
+    console.log(`  seed (tsx):             could not resolve — ${err.message}`);
+  }
+  try {
+    const vite = nodeBinArgs(WEB_DIR, 'vite', 'vite', ['--port', String(WEB_PORT), '--host', '127.0.0.1', '--strictPort']);
+    console.log(`  web (vite):             ${vite.command} ${vite.args.join(' ')}`);
+  } catch (err) {
+    console.log(`  web (vite):             could not resolve — ${err.message}`);
+  }
+}
+
+if (process.argv.includes('--help') || process.argv.includes('--dry-run')) {
+  printResolvedCommands();
+  process.exit(0);
 }
 
 // ── --clean ──────────────────────────────────────────────────────
@@ -92,12 +131,10 @@ let shuttingDown = false;
 
 if (!fs.existsSync(BUNDLE_ENTRY)) {
   log('dist-bundle missing — bundling the server (pnpm --filter @generatorai/server bundle)...');
-  // `pnpm` itself is not a project dependency (no node_modules/.bin/pnpm) —
-  // resolve it from PATH, same as any other globally installed tool.
-  execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['--filter', '@generatorai/server', 'bundle'], {
-    cwd: ROOT,
-    stdio: 'inherit',
-  });
+  // P2-R10 — never spawn a `pnpm.cmd` shim directly (EINVAL on Node
+  // >=18.20.2/20.12.2/22, CVE-2024-27980); see lib/spawn-node-bin.mjs.
+  const pnpm = pnpmCommand(['--filter', '@generatorai/server', 'bundle']);
+  execFileSync(pnpm.command, pnpm.args, { cwd: ROOT, stdio: 'inherit', ...pnpm.options });
 }
 
 // ── 2. Temp DB / artifacts / workspaces / extensions dirs ──────
@@ -145,8 +182,8 @@ const serverChild = spawn(process.execPath, [BUNDLE_ENTRY], {
   stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
 });
 let serverLog = '';
-serverChild.stdout.on('data', (c) => { serverLog += c.toString(); process.stdout.write(`[server] ${c}`); });
-serverChild.stderr.on('data', (c) => { serverLog += c.toString(); process.stderr.write(`[server] ${c}`); });
+serverChild.stdout.on('data', (c) => { serverLog = appendToRing(serverLog, c.toString()); process.stdout.write(`[server] ${c}`); });
+serverChild.stderr.on('data', (c) => { serverLog = appendToRing(serverLog, c.toString()); process.stderr.write(`[server] ${c}`); });
 serverChild.on('exit', (code, signal) => {
   if (!shuttingDown) {
     console.error(`[sandbox] server exited unexpectedly (code=${code} signal=${signal})`);
@@ -192,7 +229,11 @@ log(`server is on the temp DB: ${dbPath}`);
 
 log('seeding...');
 try {
-  execFileSync(bin('tsx'), [SEED_SCRIPT], {
+  // P2-R10 — tsx is apps/server's devDependency; resolve its JS entry point
+  // from there and run it with process.execPath, never node_modules/.bin's
+  // `.cmd` shim (see lib/spawn-node-bin.mjs).
+  const tsx = nodeBinArgs(SERVER_DIR, 'tsx', 'tsx', [SEED_SCRIPT]);
+  execFileSync(tsx.command, tsx.args, {
     cwd: ROOT,
     env: { ...process.env, API_URL: `http://127.0.0.1:${SERVER_PORT}/api` },
     stdio: 'inherit',
@@ -211,14 +252,20 @@ const viteEnv = {
   // apps/web/vite.config.ts — where /api is proxied in dev.
   GENERATORAI_DEV_API_TARGET: `http://localhost:${SERVER_PORT}`,
 };
-const viteChild = spawn(bin('vite'), ['--port', String(WEB_PORT), '--host', '127.0.0.1', '--strictPort'], {
+// P2-R10 — vite is apps/web's devDependency; resolve its JS entry point
+// (vite/bin/vite.js) from there and run it with process.execPath — never
+// node_modules/.bin's `.cmd` shim (see lib/spawn-node-bin.mjs). The child is
+// then plain node running vite.js, with no cmd.exe wrapper hiding the real
+// process, so the SIGTERM/SIGKILL path below reaches it directly.
+const vite = nodeBinArgs(WEB_DIR, 'vite', 'vite', ['--port', String(WEB_PORT), '--host', '127.0.0.1', '--strictPort']);
+const viteChild = spawn(vite.command, vite.args, {
   cwd: WEB_DIR,
   env: viteEnv,
   stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
 });
 let viteLog = '';
-viteChild.stdout.on('data', (c) => { viteLog += c.toString(); process.stdout.write(`[web] ${c}`); });
-viteChild.stderr.on('data', (c) => { viteLog += c.toString(); process.stderr.write(`[web] ${c}`); });
+viteChild.stdout.on('data', (c) => { viteLog = appendToRing(viteLog, c.toString()); process.stdout.write(`[web] ${c}`); });
+viteChild.stderr.on('data', (c) => { viteLog = appendToRing(viteLog, c.toString()); process.stderr.write(`[web] ${c}`); });
 viteChild.on('exit', (code, signal) => {
   if (!shuttingDown) {
     console.error(`[sandbox] vite exited unexpectedly (code=${code} signal=${signal})`);
@@ -239,7 +286,13 @@ console.log('');
 // ── 6. Clean shutdown on every OS ───────────────────────────────
 
 async function stopChild(child, { ipcShutdown = false } = {}) {
-  if (!child || child.exitCode !== null || child.killed) return;
+  // P2-R22(a) — `child.killed` means "kill() was called on this child",
+  // NOT "the child has exited": Node sets it synchronously inside kill(),
+  // before the process has actually gone away. `exitCode`/`signalCode` are
+  // both null until the 'exit' event fires, on every OS, regardless of
+  // whether a signal was already sent — that's the correct "still alive"
+  // check, both here and below for the SIGKILL fallback.
+  if (!child || child.exitCode !== null || child.signalCode !== null) return;
   const exited = new Promise((resolve) => child.once('exit', resolve));
 
   if (ipcShutdown && typeof child.send === 'function') {
@@ -252,7 +305,7 @@ async function stopChild(child, { ipcShutdown = false } = {}) {
     exited.then(() => false),
     delay(SHUTDOWN_BUDGET_MS).then(() => true),
   ]);
-  if (timedOut && child.exitCode === null && !child.killed) {
+  if (timedOut && child.exitCode === null && child.signalCode === null) {
     try { child.kill('SIGKILL'); } catch { /* already gone */ }
     await Promise.race([exited, delay(2_000)]);
   }

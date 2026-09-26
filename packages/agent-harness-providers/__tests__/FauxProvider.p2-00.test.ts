@@ -260,3 +260,214 @@ describe('FauxProvider — GENERATORAI_TEST_FAUX_SCRIPT (scriptSource, P2-00)', 
     expect(warnings.length).toBeGreaterThan(0);
   });
 });
+
+describe('FauxProvider — "file_edit" workspace containment (P2-R21a)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'faux-workspace-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('errors the step instead of falling back to process.cwd() when workingDirectory is unset', async () => {
+    const faux = new FauxProvider();
+    await faux.initialize();
+    await faux.createConversation({ conversationId: 'no-workspace' }); // no workingDirectory
+
+    const events: AgentEvent[] = [];
+    faux.onConversationEvent('no-workspace', (e) => events.push(e));
+    faux.script([
+      { type: 'file_edit', path: 'hello.ts', content: 'export const x = 1;\n' },
+      { type: 'complete' },
+    ], 'no-workspace');
+
+    await expect(faux.sendPromptAndWait('no-workspace', 'write it')).rejects.toThrow(/workingDirectory/);
+    expect(events.some((e) => e.kind === 'harness.error')).toBe(true);
+    // Never written anywhere, including this process's real cwd.
+    await expect(readFile(join(process.cwd(), 'hello.ts'), 'utf8')).rejects.toThrow();
+  });
+
+  it('rejects a path that escapes the workspace via ".."', async () => {
+    const faux = new FauxProvider();
+    await faux.initialize();
+    await faux.createConversation({ conversationId: 'escape', workingDirectory: dir });
+
+    const events: AgentEvent[] = [];
+    faux.onConversationEvent('escape', (e) => events.push(e));
+    faux.script([
+      { type: 'file_edit', path: '../escaped.txt', content: 'nope' },
+      { type: 'complete' },
+    ], 'escape');
+
+    await expect(faux.sendPromptAndWait('escape', 'write it')).rejects.toThrow(/outside the conversation's workspace/);
+    expect(events.some((e) => e.kind === 'harness.error')).toBe(true);
+    await expect(readFile(join(dir, '..', 'escaped.txt'), 'utf8')).rejects.toThrow();
+  });
+
+  it('rejects an absolute path outside the workspace', async () => {
+    const faux = new FauxProvider();
+    await faux.initialize();
+    await faux.createConversation({ conversationId: 'escape-abs', workingDirectory: dir });
+    faux.script([
+      { type: 'file_edit', path: join(tmpdir(), 'faux-absolute-escape.txt'), content: 'nope' },
+      { type: 'complete' },
+    ], 'escape-abs');
+
+    await expect(faux.sendPromptAndWait('escape-abs', 'write it')).rejects.toThrow(/outside the conversation's workspace/);
+    await expect(readFile(join(tmpdir(), 'faux-absolute-escape.txt'), 'utf8')).rejects.toThrow();
+  });
+
+  it('still allows a normal write inside the workspace', async () => {
+    const faux = new FauxProvider();
+    await faux.initialize();
+    await faux.createConversation({ conversationId: 'ok', workingDirectory: dir });
+    faux.script([
+      { type: 'file_edit', path: 'src/inside.ts', content: 'export const ok = true;\n' },
+      { type: 'complete' },
+    ], 'ok');
+
+    await faux.sendPromptAndWait('ok', 'write it');
+    const written = await readFile(join(dir, 'src', 'inside.ts'), 'utf8');
+    expect(written).toBe('export const ok = true;\n');
+  });
+});
+
+describe('FauxProvider — "permission_request" denial (P2-R21b)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'faux-permission-deny-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('skips the following file_edit and reports a failed tool_complete when the permission is denied', async () => {
+    const faux = new FauxProvider();
+    await faux.initialize();
+    const decision: PermissionResponse = { granted: false, reason: 'user said no' };
+    await faux.createConversation({
+      conversationId: 'deny-1',
+      workingDirectory: dir,
+      onPermissionRequest: async () => decision,
+    });
+
+    const events: AgentEvent[] = [];
+    faux.onConversationEvent('deny-1', (e) => events.push(e));
+    faux.script([
+      { type: 'permission_request', request: { type: 'file_write', description: 'Overwrite config' } },
+      { type: 'file_edit', path: 'config.ts', content: 'export const denied = true;\n' },
+      { type: 'complete' },
+    ], 'deny-1');
+
+    await faux.sendPromptAndWait('deny-1', 'go');
+
+    await expect(readFile(join(dir, 'config.ts'), 'utf8')).rejects.toThrow();
+    const complete = events.find(
+      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
+    );
+    expect(complete?.data.success).toBe(false);
+    expect(events.some((e) => e.kind === 'harness.warning')).toBe(true);
+  });
+
+  it('does not gate a later, unrelated file_edit', async () => {
+    const faux = new FauxProvider();
+    await faux.initialize();
+    await faux.createConversation({
+      conversationId: 'deny-2',
+      workingDirectory: dir,
+      onPermissionRequest: async () => ({ granted: false }),
+    });
+
+    faux.script([
+      { type: 'permission_request', request: { type: 'file_write', description: 'Overwrite config' } },
+      { type: 'text', content: 'Skipping that edit.' },
+      { type: 'file_edit', path: 'unrelated.ts', content: 'export const fine = true;\n' },
+      { type: 'complete' },
+    ], 'deny-2');
+
+    await faux.sendPromptAndWait('deny-2', 'go');
+
+    const written = await readFile(join(dir, 'unrelated.ts'), 'utf8');
+    expect(written).toBe('export const fine = true;\n');
+  });
+
+  it('still applies the edit when permission is granted', async () => {
+    const faux = new FauxProvider();
+    await faux.initialize();
+    await faux.createConversation({
+      conversationId: 'grant-1',
+      workingDirectory: dir,
+      onPermissionRequest: async () => ({ granted: true }),
+    });
+
+    faux.script([
+      { type: 'permission_request', request: { type: 'file_write', description: 'Overwrite config' } },
+      { type: 'file_edit', path: 'config.ts', content: 'export const granted = true;\n' },
+      { type: 'complete' },
+    ], 'grant-1');
+
+    await faux.sendPromptAndWait('grant-1', 'go');
+    const written = await readFile(join(dir, 'config.ts'), 'utf8');
+    expect(written).toBe('export const granted = true;\n');
+  });
+});
+
+describe('FauxProvider — "file_edit" line counting (P2-R21c)', () => {
+  let dir: string;
+
+  beforeEach(async () => {
+    dir = await mkdtemp(join(tmpdir(), 'faux-line-count-'));
+  });
+
+  afterEach(async () => {
+    await rm(dir, { recursive: true, force: true });
+  });
+
+  it('does not over-count additions/deletions for trailing-newline content', async () => {
+    await writeFile(join(dir, 'existing.txt'), 'a\nb\n', 'utf8'); // 2 lines
+
+    const faux = new FauxProvider();
+    await faux.initialize();
+    await faux.createConversation({ conversationId: 'lines-1', workingDirectory: dir });
+
+    const events: AgentEvent[] = [];
+    faux.onConversationEvent('lines-1', (e) => events.push(e));
+    faux.script([
+      { type: 'file_edit', path: 'existing.txt', content: 'a\nb\nc\n' }, // 3 lines
+      { type: 'complete' },
+    ], 'lines-1');
+
+    await faux.sendPromptAndWait('lines-1', 'edit it');
+
+    const complete = events.find(
+      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
+    );
+    expect(complete?.data.fileOp?.additions).toBe(3);
+    expect(complete?.data.fileOp?.deletions).toBe(2);
+  });
+
+  it('counts a file with no trailing newline correctly', async () => {
+    const faux = new FauxProvider();
+    await faux.initialize();
+    await faux.createConversation({ conversationId: 'lines-2', workingDirectory: dir });
+
+    const events: AgentEvent[] = [];
+    faux.onConversationEvent('lines-2', (e) => events.push(e));
+    faux.script([
+      { type: 'file_edit', path: 'new.txt', content: 'a\nb' }, // 2 lines, no trailing newline
+      { type: 'complete' },
+    ], 'lines-2');
+
+    await faux.sendPromptAndWait('lines-2', 'create it');
+
+    const complete = events.find(
+      (e): e is Extract<AgentEvent, { kind: 'harness.tool_complete' }> => e.kind === 'harness.tool_complete',
+    );
+    expect(complete?.data.fileOp?.additions).toBe(2);
+  });
+});
