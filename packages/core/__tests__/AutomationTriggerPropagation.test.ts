@@ -142,4 +142,16 @@ describe('X-21 — the trigger reaches the workflow run', () => {
     // spread into run variables (the legacy extraction is gone, P01 WP-1.4).
     expect(created[0]!.variables['topic']).toBeUndefined();
   });
+
+  it('ECON-R8: the trigger debounce keys on the full payload, not its first 5000 chars', async () => {
+    service.setTriggerDebounce(() => 60_000);
+    const prefix = 'x'.repeat(6000);
+    const a = await service.triggerWebhook('tok', { body: `${prefix}-a` }, 'application/json');
+    const b = await service.triggerWebhook('tok', { body: `${prefix}-b` }, 'application/json');
+    expect(b.id).not.toBe(a.id);
+    // A redelivery of the same payload within the window still gets the first execution.
+    const again = await service.triggerWebhook('tok', { body: `${prefix}-b` }, 'application/json');
+    expect(again.id).toBe(b.id);
+    await vi.waitFor(() => expect(created).toHaveLength(2));
+  });
 });
