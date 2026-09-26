@@ -14,7 +14,7 @@ import { Search, X } from 'lucide-react';
 import { Badge, Button, Input } from '@/components/ui/index.js';
 import { Switch } from '@/components/ui/primitives/switch.js';
 import { cn } from '@/lib/utils.js';
-import type { CatalogEntry } from './useAgentCatalog.js';
+import type { CatalogEntry } from '@/hooks/agentQueries.js';
 
 export interface CapabilityToggleListProps {
   entries: CatalogEntry[];

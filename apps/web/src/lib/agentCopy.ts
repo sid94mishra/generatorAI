@@ -6,7 +6,13 @@
 // free of presentation concerns). This module is the web app's copy table.
 // ────────────────────────────────────────────────────────────────
 
-import type { ResolutionWarning, AgentToolPolicy, AgentScope, AgentRole } from '@generatorai/shared';
+import type {
+  ResolutionWarning,
+  AgentToolPolicy,
+  AgentScope,
+  AgentRole,
+  HarnessProviderId,
+} from '@generatorai/shared';
 
 const COPY: Record<ResolutionWarning['code'], (p: Record<string, string | number>) => string> = {
   FIELD_UNSUPPORTED_BY_PROVIDER: (p) =>
@@ -77,3 +83,12 @@ export function scopeTone(scope: AgentScope): 'neutral' | 'info' | 'success' {
   if (scope === 'project') return 'success';
   return 'info';
 }
+
+/** Labels matching the server's `harnessTypeLabel`, so a provider reads the same everywhere. */
+export const PROVIDER_LABELS: Record<HarnessProviderId, string> = {
+  copilot: 'GitHub Copilot',
+  'claude-agent': 'Claude Code',
+  codex: 'Codex',
+  opencode: 'OpenCode',
+  acp: 'ACP Agent',
+};

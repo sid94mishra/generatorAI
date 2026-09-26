@@ -13,9 +13,9 @@ import React from 'react';
 import { FileText, Server } from 'lucide-react';
 import type { Agent, AgentOverrides, AgentToolPolicy } from '@generatorai/shared';
 import { CollapsibleSection, Textarea } from '@/components/ui/index.js';
+import { useAgentCatalog } from '@/hooks/agentQueries.js';
 import { CapabilityToggleList } from './CapabilityToggleList.js';
 import { ToolPolicyEditor } from './ToolPolicyEditor.js';
-import { useAgentCatalog } from './useAgentCatalog.js';
 
 export interface AgentOverridesEditorProps {
   /** The bound agent, when one is selected — supplies the inherited baseline. */
