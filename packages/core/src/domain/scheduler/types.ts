@@ -57,6 +57,13 @@ export interface ApprovalVerdict {
   outcome: 'approved' | 'rejected' | 'changes_requested';
   feedback?: string;
   data?: Record<string, unknown>;
+  /**
+   * A verdict a resume attempt carries (given while no frame was alive): the
+   * completion-review round it answered and the digest of the output shown.
+   * The attempt honours it only at that round with that output.
+   */
+  reviewRound?: number;
+  outputHash?: string;
 }
 
 /**

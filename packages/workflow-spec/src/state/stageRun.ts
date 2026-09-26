@@ -108,6 +108,8 @@ export const STAGE_RUN_TRANSITIONS: readonly StageRunTransition[] = Object.freez
   ...rows('retry_wait', 'cancelled', 'user:cancel', 'actor', WORK, 'retry timer cancelled'),
   ...rows('retry_wait', 'cancelled', 'run:cancel', 'actor', WORK, 'retry timer cancelled'),
   ...rows('paused', 'ready', 'user:resume', 'actor', ALL, 'a new attempt for work nodes'),
+  ...rows('paused', 'retry_wait', 'user:resume', 'actor', WORK, 'a pause taken while waiting to retry: the backoff is waited out again'),
+  ...rows('paused', 'retry_wait', 'run:resume', 'actor', WORK, 'a pause taken while waiting to retry: the backoff is waited out again'),
   ...rows('paused', 'ready', 'user:retry', 'actor', WORK, 'a new attempt (resume or restart)'),
   ...rows('paused', 'skipped', 'user:skip', 'actor', ALL, 'gate_as completed or skipped'),
   ...rows('paused', 'failed', 'user:fail', 'actor', ALL),

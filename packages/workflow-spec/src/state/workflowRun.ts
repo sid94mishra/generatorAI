@@ -42,6 +42,7 @@ export const WORKFLOW_RUN_TRANSITIONS: readonly WorkflowRunTransition[] = Object
   ...rows('created', 'starting', 'user:start', 'idempotent through compare-and-set'),
   ...rows('starting', 'running', 'sys:ready', 'every prepare phase settled (workspace, mounts, uploads, preprocessing, sandbox)'),
   ...rows('starting', 'failed', 'sys:setup_error', 'status_reason setup:<phase>'),
+  ...rows('starting', 'finalizing', 'sys:setup_error', 'a prepare phase failed: the finalize lifecycle runs, then failed(setup:<phase>)'),
   ...rows('running', 'waiting', 'sys:idle', 'computed after every decision'),
   ...rows('waiting', 'running', 'sys:work_available'),
   ...rows(['running', 'waiting'], 'paused', 'user:pause', 'drain stops launches; interrupt also pauses in-flight instances'),

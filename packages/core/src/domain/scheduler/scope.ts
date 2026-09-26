@@ -168,7 +168,7 @@ const stageView = (i: InstanceState) => ({ status: i.status, output: i.output ??
 
 function usageView(u: Usage) {
   const tokens = u.inputTokens !== undefined || u.outputTokens !== undefined ? (u.inputTokens ?? 0) + (u.outputTokens ?? 0) : null;
-  return { turns: u.turns ?? 0, costUsd: u.costUsd ?? null, tokens };
+  return { turns: u.turns ?? 0, costUsd: u.costUsd ?? null, tokens, toolCalls: u.toolCalls ?? 0 };
 }
 
 /** Body stage views of iteration k of a loop (by stage key). */

@@ -37,10 +37,10 @@ function parse<T>(v: unknown): T | null {
   }
 }
 
-/** Add usage fields (turns, cost, tokens). */
+/** Add usage fields (turns, cost, tokens, tool calls). */
 export function addUsage(a: Usage, b: Usage): Usage {
   const out: Usage = { ...a };
-  for (const k of ['turns', 'costUsd', 'inputTokens', 'outputTokens'] as const) {
+  for (const k of ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'toolCalls'] as const) {
     if (b[k] !== undefined) out[k] = (out[k] ?? 0) + b[k]!;
   }
   return out;

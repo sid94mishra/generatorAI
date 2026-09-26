@@ -45,6 +45,8 @@ const ACTION_RANK: Record<string, number> = { fail: 0, complete: 1, pause: 2, ex
 /** Failure codes that mean "the loop ran out", not "the body broke" (P5-7). */
 const LIMIT_CODES = new Set(['budget_exceeded', 'loop_wall_clock']);
 const HARD_CAP = 1.25;
+/** Pauses an operator or the run asked for (they resume), unlike a pause a failure ended in. */
+const OPERATOR_PAUSES = ['user_paused', 'run_paused'];
 
 type LoopInstance = InstanceState & { loopState: LoopState };
 
@@ -140,6 +142,18 @@ function rowOf(w: Working, inst: InstanceState, k: number): LoopIterationRecord 
   return w.iterations.find((r) => r.stageRunId === inst.id && r.k === k);
 }
 
+/** The last iteration whose scope completed (an iteration a budget abort cut short is never accepted); -1 when none. */
+function lastCompletedK(w: Working, inst: InstanceState): number {
+  const rows = w.iterations.filter((r) => r.stageRunId === inst.id && r.outcome === 'completed');
+  return rows.length === 0 ? -1 : Math.max(...rows.map((r) => r.k));
+}
+
+/** The loop's workspace has no mount (its tree hashes are an empty map): there is nothing to restore. */
+function noMounts(row: LoopIterationRecord | undefined): boolean {
+  const hashes = row?.signals?.treeHashes;
+  return !!hashes && Object.keys(hashes).length === 0;
+}
+
 function createScope(w: Working, inst: LoopInstance, node: CompiledNode, k: number): void {
   w.addInstances(
     node.body.map((key) => {
@@ -230,8 +244,9 @@ function computeSignals(w: Working, inst: LoopInstance, k: number, hashes: Recor
   }
   const prev = k === 0 ? inst.loopState.startHashes : (rowOf(w, inst, k - 1)?.signals?.treeHashes ?? null);
   let workspaceChanged: boolean | null = null;
-  if (hashes && prev) {
-    const mounts = new Set([...Object.keys(hashes), ...Object.keys(prev)]);
+  const mounts = new Set([...Object.keys(hashes ?? {}), ...Object.keys(prev ?? {})]);
+  // A workspace with no mounts has nothing to compare: unknown, never "unchanged".
+  if (hashes && prev && mounts.size > 0) {
     let unknown = false;
     let changed = false;
     for (const m of mounts) {
@@ -402,13 +417,14 @@ function exhaust(w: Working, inst: LoopInstance, node: CompiledNode, reason: str
 
 function applyLimit(w: Working, inst: LoopInstance, node: CompiledNode, reason: string): void {
   const loop = node.loop!;
-  const last = lastK(w, inst);
   switch (loop.onLimit.mode) {
     case 'fail':
       return failLoop(w, inst, 'loop_limit', reason, `The loop ran out (${reason}) and its onLimit is fail`);
-    case 'accept_last':
-      if (last < 0) return failLoop(w, inst, 'loop_limit', reason, `The loop ran out (${reason}) before any iteration finished`);
-      return completeLoop(w, inst, node, last, 'accept_last', reason);
+    case 'accept_last': {
+      const done = lastCompletedK(w, inst);
+      if (done < 0) return failLoop(w, inst, 'loop_limit', reason, `The loop ran out (${reason}) before any iteration completed`);
+      return completeLoop(w, inst, node, done, 'accept_last', reason);
+    }
     case 'accept_best': {
       const scored = w.iterations.filter((r) => r.stageRunId === inst.id && r.score !== null);
       if (scored.length === 0) return park(w, inst, node, 'exhaust', reason); // all null behaves as pause
@@ -424,6 +440,8 @@ function applyLimit(w: Working, inst: LoopInstance, node: CompiledNode, reason: 
 function acceptIteration(w: Working, inst: LoopInstance, node: CompiledNode, k: number, action: string, reason: string): void {
   if (k === lastK(w, inst)) return completeLoop(w, inst, node, k, action, reason);
   const row = rowOf(w, inst, k);
+  // No mount: nothing in the workspace to bring back, the iteration is accepted as it is.
+  if (noMounts(row)) return completeLoop(w, inst, node, k, action, reason);
   if (!row?.checkpointTurnId) {
     return failLoop(w, inst, 'restore_failed', reason, `Iteration ${k} has no workspace checkpoint to restore`);
   }
@@ -534,8 +552,13 @@ function abortScope(w: Working, inst: LoopInstance, code: 'budget_exceeded' | 'l
       continue;
     }
     const to = i.status === 'retry_wait' ? 'cancelled' : 'failed';
-    if (i.attemptStatus === 'running' && i.status !== 'ready') w.settleAttempt(i, 'failed', err);
+    // A claimed attempt is settled here; its executor is still told to stop
+    // (stopInstance only aborts an attempt that is still live).
+    const frame = i.attemptStatus === 'running' && i.status !== 'ready';
+    const attemptNo = i.currentAttempt;
+    if (frame) w.settleAttempt(i, 'failed', err);
     stopInstance(w, i, to, { statusReason: code, error: message, errorClass: err.class, errorCode: code }, 'cancel');
+    if (frame) w.push({ t: 'abort', stageRunId: i.id, attemptNo, reason: 'budget' });
     stageEvent(w, to === 'failed' ? 'stage_run.failed' : 'stage_run.cancelled', i, { error: message });
   }
 }
@@ -582,6 +605,11 @@ export function settleLoops(w: Working): boolean {
       }
     } else if (ls.phase === 'wrapping_up') {
       const wrap = w.descendants(inst).find((i) => i.scopeId === inst.id && isWrapUp(i));
+      // A wrap-up that failed into a pause (not an operator's or the run's pause) is over too: onLimit applies anyway.
+      if (wrap && wrap.status === 'paused' && !OPERATOR_PAUSES.some((p) => wrap.statusReason?.startsWith(p))) {
+        stopInstance(w, wrap, 'cancelled', { statusReason: 'wrap_up_ended' }, 'cancel');
+        stageEvent(w, 'stage_run.cancelled', wrap);
+      }
       if (!wrap || isTerminalStageRunState(wrap.status)) {
         const reason = ls.pending?.kind === 'limit' ? ls.pending.reason : 'budget';
         setState(w, inst, { phase: 'running', pending: null });
@@ -658,8 +686,8 @@ export function loopCommand(w: Working, inst: InstanceState, command: RunCommand
     }
     case 'accept': {
       if (!parked) return `only a parked loop can be accepted (it is ${inst.status})`;
-      const last = lastK(w, inst);
-      if (last < 0) return 'no iteration has finished yet';
+      const last = lastCompletedK(w, inst);
+      if (last < 0) return 'no iteration has completed yet';
       setState(w, inst, { streaks: zero });
       applied({ k: last });
       completeLoop(w, inst, node, last, 'accept', 'accepted');
@@ -669,7 +697,7 @@ export function loopCommand(w: Working, inst: InstanceState, command: RunCommand
       if (!parked) return `only a parked loop can accept an iteration (it is ${inst.status})`;
       const row = rowOf(w, inst, command.k);
       if (!row) return `iteration ${command.k} has not finished`;
-      if (command.k !== lastK(w, inst) && !row.checkpointTurnId) {
+      if (command.k !== lastK(w, inst) && !row.checkpointTurnId && !noMounts(row)) {
         return `checkpoint_unavailable: iteration ${command.k} has no workspace checkpoint (turn on checkpointEachIteration)`;
       }
       setState(w, inst, { streaks: zero });

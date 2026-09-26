@@ -46,8 +46,8 @@ describe('run lifecycle', () => {
     const done = s.send({ type: 'finalized', ok: true });
     expect(s.state.run.status).toBe('completed');
     expect(only(done, 'emit').map((e) => e.event)).toEqual([
-      { kind: 'workflow_run.completed', data: { workflowRunId: 'run-1' } },
-      { kind: 'workflow_run.finalized', data: { workflowRunId: 'run-1', status: 'completed' } },
+      { kind: 'workflow_run.completed', data: { workflowRunId: 'run-1', runVersion: s.state.run.version } },
+      { kind: 'workflow_run.finalized', data: { workflowRunId: 'run-1', runVersion: s.state.run.version, status: 'completed' } },
     ]);
   });
 
@@ -58,16 +58,21 @@ describe('run lifecycle', () => {
     const d = s.send({ type: 'finalized', ok: false, error: 'push rejected' });
     expect(s.state.run).toMatchObject({ status: 'failed', outcome: 'failed' });
     expect(only(d, 'emit').map((e) => e.event)).toEqual([
-      { kind: 'workflow_run.failed', data: { workflowRunId: 'run-1', error: 'push rejected' } },
-      { kind: 'workflow_run.finalized', data: { workflowRunId: 'run-1', status: 'failed' } },
+      { kind: 'workflow_run.failed', data: { workflowRunId: 'run-1', runVersion: s.state.run.version, error: 'push rejected' } },
+      { kind: 'workflow_run.finalized', data: { workflowRunId: 'run-1', runVersion: s.state.run.version, status: 'failed' } },
     ]);
   });
 
-  it('a setup failure fails the run from starting', () => {
+  it('a setup failure runs the finalize lifecycle, then fails the run as setup:<phase> (CONVINV-R3)', () => {
     const s = new Sim(graphOf(['a']));
     s.send({ type: 'start' });
-    s.send({ type: 'prepare_failed', phase: 'clone', error: 'no repo' });
+    const d = s.send({ type: 'prepare_failed', phase: 'clone', error: 'no repo' });
+    expect(s.state.run).toMatchObject({ status: 'finalizing', statusReason: 'setup:clone', outcome: 'failed' });
+    expect(only(d, 'finalize')).toEqual([{ t: 'finalize', outcome: 'failed', compensate: [] }]);
+    expect(events(d)).not.toContain('workflow_run.finalized');
+    const done = s.send({ type: 'finalized', ok: true });
     expect(s.state.run).toMatchObject({ status: 'failed', statusReason: 'setup:clone', outcome: 'failed' });
+    expect(events(done)).toEqual(['workflow_run.failed', 'workflow_run.finalized']);
   });
 
   it('goes waiting when only a paused instance is left, running again when work resumes', () => {

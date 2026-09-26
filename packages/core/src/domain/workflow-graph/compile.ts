@@ -294,7 +294,8 @@ export function compileNodes(stages: readonly StageSpec[], edgeSpecs: readonly E
       ...(stage.guard !== undefined ? { guard: compileExpr(stage.guard)! } : {}),
       retry: work?.retry ?? DEFAULT_RETRY,
       repair: agent?.repair ?? DEFAULT_REPAIR,
-      onExhausted: agent?.onExhausted ?? STAGE_DEFAULTS.onExhausted,
+      // A check has no operator conversation to pause for: its exhausted failure fails (a loop's onBodyFailure then applies).
+      onExhausted: agent?.onExhausted ?? (stage.kind === 'check' ? 'fail' : STAGE_DEFAULTS.onExhausted),
       timeouts: {
         queueMs: timeouts?.queueMs ?? STAGE_DEFAULTS.timeouts.queueMs,
         idleMs: timeouts?.idleMs ?? STAGE_DEFAULTS.timeouts.idleMs,

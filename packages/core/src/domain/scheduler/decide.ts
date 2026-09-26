@@ -116,12 +116,50 @@ function operatorTurnOf(interruptData: unknown): OperatorTurn | undefined {
   return undefined;
 }
 
-/** What a new attempt carries from the instance: a verdict, an operator turn, or nothing. */
-function carriedOverrides(interruptData: unknown): { verdict?: ApprovalVerdict; operatorTurn?: OperatorTurn } | undefined {
-  const verdict = verdictOf(interruptData);
+/**
+ * What a new attempt carries from the instance: a verdict (a resume only —
+ * a restart produces a new output nobody reviewed), an operator turn, or
+ * nothing.
+ */
+function carriedOverrides(interruptData: unknown, mode: AttemptMode): { verdict?: ApprovalVerdict; operatorTurn?: OperatorTurn } | undefined {
+  const verdict = mode === 'resume' ? verdictOf(interruptData) : undefined;
   const operatorTurn = operatorTurnOf(interruptData);
   if (!verdict && !operatorTurn) return undefined;
   return { ...(verdict ? { verdict } : {}), ...(operatorTurn ? { operatorTurn } : {}) };
+}
+
+/**
+ * The pause reason of an instance waiting to retry keeps that retry
+ * (`run_paused:retry_wait:restart`; `:retry:` when its launch was already
+ * admitted), so its resume restores the attempt mode and the backoff (ENGINE-R5).
+ */
+function pauseReasonOf(inst: InstanceState, base: string, mode?: AttemptMode): string {
+  if (mode !== undefined) return `${base}:retry_wait:${mode}`;
+  if ((inst.status !== 'retry_wait' && inst.status !== 'ready') || !inst.statusReason?.startsWith('retry:')) return base;
+  return `${base}:${inst.status === 'retry_wait' ? 'retry_wait' : 'retry'}:${inst.statusReason.slice('retry:'.length)}`;
+}
+
+/**
+ * Back from a pause: an instance paused while it waited to retry waits out
+ * its backoff again (`retry_wait`), one whose retry was admitted is ready in
+ * that mode; anything else is ready to resume.
+ */
+function unpause(w: Working, inst: InstanceState, base: string): void {
+  const rest = inst.statusReason?.startsWith(`${base}:`) ? inst.statusReason.slice(base.length + 1) : '';
+  const [phase, mode] = rest.split(':');
+  const node = w.node(inst);
+  if (phase === 'retry_wait' && mode && node) {
+    w.transition(inst, 'retry_wait', { statusReason: `retry:${mode}` });
+    w.timer('retry', inst, retryBaseDelayMs(node.retry, Math.max(1, inst.failedAttempts)), inst.version, { jitter: node.retry.jitter });
+    return;
+  }
+  w.transition(inst, 'ready', { statusReason: phase === 'retry' && mode ? `retry:${mode}` : 'resume' });
+}
+
+/** The run's wall-clock budget left (paused time counts: it bounds the run's duration); undefined without one. */
+function wallClockLeft(w: Working, budget: RunRecord['budget'] = w.run.budget): number | undefined {
+  if (budget?.maxWallClockMs === undefined || w.run.startedAt === null) return undefined;
+  return budget.maxWallClockMs - (w.now - w.run.startedAt);
 }
 
 /** Retry delay before jitter for the n-th retry (n ≥ 1), G5 §3.2. */
@@ -156,12 +194,12 @@ function applyFailure(w: Working, inst: InstanceState, err: ClassifiedError, saf
   const budgetOut = overBudget(inst.usage, node.budget) || overBudget(w.run.usage, w.run.budget);
   const attemptsLeft = inst.failedAttempts < node.retry.maxAttempts && !(err.unclassified && inst.failedAttempts >= 2);
   if (retryableClass && codeAllowed && attemptsLeft && !deadlinePassed && !budgetOut) {
+    const mode: AttemptMode = restartable ? 'restart' : err.class === 'interrupted' ? 'resume' : node.retry.mode;
     if (w.run.status === 'paused') {
-      // The run is paused: the retry waits for its resume.
-      return pauseInstance(w, inst, 'run_paused', false);
+      // The run is paused: the retry (its mode and its backoff) waits for its resume.
+      return pauseInstance(w, inst, pauseReasonOf(inst, 'run_paused', mode), false);
     }
     if (w.run.status === 'running' || w.run.status === 'waiting') {
-      const mode: AttemptMode = restartable ? 'restart' : err.class === 'interrupted' ? 'resume' : node.retry.mode;
       w.transition(inst, 'retry_wait', { statusReason: `retry:${mode}`, ...errorPatch });
       w.timer('retry', inst, retryBaseDelayMs(node.retry, inst.failedAttempts), inst.version, {
         jitter: node.retry.jitter,
@@ -197,7 +235,7 @@ function pauseWholeRun(w: Working, mode: 'drain' | 'interrupt', statusReason: st
   propagateToChildren(w, 'pause');
   for (const inst of w.sorted()) {
     // The run's own pause TTL covers these (PD-2).
-    if (inst.status === 'ready' || inst.status === 'retry_wait') pauseInstance(w, inst, 'run_paused', false);
+    if (inst.status === 'ready' || inst.status === 'retry_wait') pauseInstance(w, inst, pauseReasonOf(inst, 'run_paused'), false);
     else if (mode === 'interrupt' && inAttempt(inst.status)) pauseInstance(w, inst, 'run_paused', false);
   }
   w.emit('workflow_run.paused', { reason: statusReason });
@@ -219,11 +257,11 @@ function raiseRunBudget(w: Working, command: Extract<RunCommand, { command: 'rai
   }
   w.runPatch({ budget });
   w.emit('workflow_run.budget_raised', { budget });
-  if (command.maxWallClockMs !== undefined && budget.maxWallClockMs !== undefined && w.run.startedAt !== null) {
-    const left = budget.maxWallClockMs - (w.now - w.run.startedAt);
-    if (left > 0) w.timer('run_budget_wall_clock', null, left, w.run.version, { jitter: 'none' });
-  }
-  if (w.run.status === 'paused' && w.run.statusReason === 'budget_exhausted' && !overBudget(w.run.usage, budget)) resumeWholeRun(w);
+  const left = wallClockLeft(w, budget);
+  if (command.maxWallClockMs !== undefined && left !== undefined && left > 0) w.timer('run_budget_wall_clock', null, left, w.run.version, { jitter: 'none' });
+  // Resumed only once it is under every limit, the wall clock included (ECON-R5).
+  const wallSpent = left !== undefined && left <= 0;
+  if (w.run.status === 'paused' && w.run.statusReason === 'budget_exhausted' && !overBudget(w.run.usage, budget) && !wallSpent) resumeWholeRun(w);
 }
 
 function resumeWholeRun(w: Working): void {
@@ -231,11 +269,14 @@ function resumeWholeRun(w: Working): void {
   propagateToChildren(w, 'resume');
   w.push({ t: 'cancel_timer', kind: 'pause_ttl', stageRunId: null });
   for (const inst of w.sorted()) {
-    if (inst.status === 'paused' && inst.statusReason === 'run_paused') {
-      w.transition(inst, 'ready', { statusReason: 'resume' });
+    if (inst.status === 'paused' && inst.statusReason?.startsWith('run_paused')) {
+      unpause(w, inst, 'run_paused');
       w.push({ t: 'cancel_timer', kind: 'pause_ttl', stageRunId: inst.id });
     }
   }
+  // The wall-clock timer may have fired while the run was paused (ENGINE-R12): re-armed for what is left.
+  const left = wallClockLeft(w);
+  if (left !== undefined) w.timer('run_budget_wall_clock', null, Math.max(0, left), w.run.version, { jitter: 'none' });
   w.emit('workflow_run.resumed', {});
 }
 
@@ -342,7 +383,8 @@ function onUsage(w: Working, msg: Extract<RunMessage, { type: 'usage_tick' }>): 
   const budget = loopNode?.loop && loopState ? wrapUpAllowance(loopNode.loop, loopNode, loopState) : node.budget;
   if (!loopNode) enforceLoopBudgets(w, inst);
   if (!inAttempt(inst.status)) return; // the loop's hard cap stopped it
-  if (overBudget(inst.usage, budget)) {
+  // A wrap-up may spend exactly its allowance (its one turn): only going past it stops it.
+  if (overBudget(inst.usage, budget, { exceeded: !!loopNode })) {
     const err = classified('budget_exceeded', 'The stage budget is exhausted');
     w.settleAttempt(inst, 'failed', err);
     const attemptNo = inst.currentAttempt;
@@ -427,9 +469,14 @@ function onCommand(w: Working, command: RunCommand, actor?: string): void {
       case 'pause':
         if (!RUN_LIVE.includes(w.run.status)) return w.reject('invalid_state', `cannot pause a ${w.run.status} run`);
         return pauseWholeRun(w, command.mode, `user:${command.mode}`);
-      case 'resume':
+      case 'resume': {
         if (w.run.status !== 'paused') return w.reject('invalid_state', `cannot resume a ${w.run.status} run`);
+        const left = wallClockLeft(w);
+        if (left !== undefined && left <= 0) {
+          return w.reject('invalid_state', `the run's wall-clock budget (${w.run.budget?.maxWallClockMs} ms) is spent; raise it to resume`);
+        }
         return resumeWholeRun(w);
+      }
       case 'cancel':
         if (!['created', 'starting', 'running', 'waiting', 'paused', 'finalizing'].includes(w.run.status)) {
           return w.reject('invalid_state', `cannot cancel a ${w.run.status} run`);
@@ -495,13 +542,13 @@ function onCommand(w: Working, command: RunCommand, actor?: string): void {
 
   switch (command.command) {
     case 'pause':
-      if (inst.status === 'ready' || inst.status === 'retry_wait' || inAttempt(inst.status)) return pauseInstance(w, inst, 'user_paused');
+      if (inst.status === 'ready' || inst.status === 'retry_wait' || inAttempt(inst.status)) return pauseInstance(w, inst, pauseReasonOf(inst, 'user_paused'));
       return refuse();
     case 'resume':
       if (inst.status !== 'paused') return refuse();
-      w.transition(inst, 'ready', { statusReason: 'resume' });
+      unpause(w, inst, inst.statusReason?.startsWith('run_paused') ? 'run_paused' : 'user_paused');
       w.push({ t: 'cancel_timer', kind: 'pause_ttl', stageRunId: inst.id });
-      stageEvent(w, 'stage_run.resumed', inst);
+      stageEvent(w, 'stage_run.resumed', inst, { status: inst.status });
       return;
     case 'retry': {
       if (inst.status !== 'paused') return refuse();
@@ -560,9 +607,15 @@ function onCommand(w: Working, command: RunCommand, actor?: string): void {
         w.push({ t: 'deliver_input', stageRunId: inst.id, attemptNo: inst.currentAttempt, verdict });
         return;
       }
-      // No frame survived (a restart): a resume attempt carries the verdict.
+      // No frame survived (a restart): a resume attempt carries the verdict,
+      // bound to the gate it answers — its review round and the output shown —
+      // so it never approves another round or a changed output (ENGINE-R1).
       const prior = inst.interruptData && typeof inst.interruptData === 'object' ? (inst.interruptData as Record<string, unknown>) : {};
-      w.transition(inst, 'ready', { statusReason: 'resume', interruptData: { ...prior, verdict } });
+      const gate = {
+        ...(typeof prior['reviewRound'] === 'number' ? { reviewRound: prior['reviewRound'] } : {}),
+        ...(typeof prior['outputHash'] === 'string' ? { outputHash: prior['outputHash'] } : {}),
+      };
+      w.transition(inst, 'ready', { statusReason: 'resume', interruptData: { ...prior, verdict: { ...verdict, ...gate } } });
       return;
     }
   }
@@ -725,7 +778,10 @@ function admit(w: Working): void {
     // Only work nodes run attempts; a container starts its scopes (P05).
     if (!node || node.class !== 'work') continue;
     if (node.sessionGroup && busyGroups.has(node.sessionGroup)) continue;
-    w.createAttempt(inst, attemptModeFor(inst), carriedOverrides(inst.interruptData));
+    const mode = attemptModeFor(inst);
+    w.createAttempt(inst, mode, carriedOverrides(inst.interruptData, mode));
+    // What it carried now lives on the attempt row: no later attempt carries it again (ENGINE-R6).
+    if (inst.interruptData != null) w.instancePatch(inst, { interruptData: null });
     w.push({ t: 'launch', stageRunId: inst.id, attemptNo: inst.currentAttempt });
     w.timer('queue_timeout', inst, node.timeouts.queueMs, inst.currentAttempt, { jitter: 'none' });
     capacity -= 1;
@@ -855,11 +911,12 @@ export function decide(graph: CompiledWorkflow, state: RunState, msg: RunMessage
       }
       break;
     case 'prepare_failed':
+      // The whole finalize lifecycle runs (onFailure, onExit, `on_run_failed`,
+      // the release of what earlier phases created), then `failed(setup:<phase>)` (CONVINV-R3).
       if (w.run.status === 'starting') {
-        w.runTransition('failed', { statusReason: `setup:${msg.phase}`, outcome: 'failed', error: msg.error });
+        w.runTransition('finalizing', { statusReason: `setup:${msg.phase}`, outcome: 'failed', error: msg.error });
         w.push({ t: 'cancel_timer' });
-        w.emit('workflow_run.failed', { error: msg.error });
-        w.emit('workflow_run.finalized', { status: 'failed' });
+        w.push({ t: 'finalize', outcome: 'failed', compensate: [] });
       }
       break;
     case 'attempt_settled':

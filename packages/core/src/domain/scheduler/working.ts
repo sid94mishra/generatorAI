@@ -40,18 +40,27 @@ export const byPath = (a: InstanceState, b: InstanceState) => (a.instancePath < 
 
 export function addUsage(a: Usage, b: Usage): Usage {
   const out: Usage = { ...a };
-  for (const k of ['turns', 'costUsd', 'inputTokens', 'outputTokens'] as const) {
+  for (const k of ['turns', 'costUsd', 'inputTokens', 'outputTokens', 'toolCalls'] as const) {
     if (b[k] !== undefined) out[k] = (out[k] ?? 0) + b[k]!;
   }
   return out;
 }
 
-export function overBudget(usage: Usage, budget: { maxTurns?: number; maxCostUsd?: number; maxTokens?: number } | undefined | null): boolean {
+/**
+ * The budget is spent: nothing more may start. `exceeded` asks instead
+ * whether the usage went past it (an allowance spent exactly is not over).
+ */
+export function overBudget(
+  usage: Usage,
+  budget: { maxTurns?: number; maxCostUsd?: number; maxTokens?: number } | undefined | null,
+  opts: { exceeded?: boolean } = {},
+): boolean {
   if (!budget) return false;
+  const over = (used: number, limit: number) => (opts.exceeded ? used > limit : used >= limit);
   return (
-    (budget.maxTurns !== undefined && (usage.turns ?? 0) >= budget.maxTurns) ||
-    (budget.maxCostUsd !== undefined && (usage.costUsd ?? 0) >= budget.maxCostUsd) ||
-    (budget.maxTokens !== undefined && (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0) >= budget.maxTokens)
+    (budget.maxTurns !== undefined && over(usage.turns ?? 0, budget.maxTurns)) ||
+    (budget.maxCostUsd !== undefined && over(usage.costUsd ?? 0, budget.maxCostUsd)) ||
+    (budget.maxTokens !== undefined && over((usage.inputTokens ?? 0) + (usage.outputTokens ?? 0), budget.maxTokens))
   );
 }
 
@@ -271,8 +280,9 @@ export class Working {
     });
   }
 
+  /** An outbox event; it carries the run's CAS version, so a client drops a run status older than the one it shows (D-21b). */
   emit(kind: string, data: Record<string, unknown>): void {
-    this.push({ t: 'emit', event: { kind, data: { workflowRunId: this.run.id, ...data } } });
+    this.push({ t: 'emit', event: { kind, data: { workflowRunId: this.run.id, runVersion: this.run.version, ...data } } });
   }
 
   reject(code: Extract<Decision, { t: 'reject' }>['code'], message: string): void {
