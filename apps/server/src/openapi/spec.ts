@@ -1082,6 +1082,49 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
       },
     },
+    '/api/system/info': {
+      get: {
+        tags: ['System'],
+        summary: 'Server, database, disk and agent-capacity summary (G-12)',
+        description:
+          'Home "System" card + Settings › Diagnostics. `database.sizeBytes` and `disk` are omitted, not zero, ' +
+          'when the server could not measure them (D-36).',
+        responses: {
+          '200': {
+            description: 'System info snapshot',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    serverName: { type: 'string' },
+                    serverVersion: { type: 'string' },
+                    platform: { type: 'string' },
+                    uptimeSec: { type: 'number' },
+                    agents: {
+                      type: 'object',
+                      properties: { running: { type: 'integer' }, max: { type: 'integer' } },
+                      required: ['running', 'max'],
+                    },
+                    database: {
+                      type: 'object',
+                      properties: { kind: { type: 'string', enum: ['sqlite'] }, sizeBytes: { type: 'integer' } },
+                      required: ['kind'],
+                    },
+                    disk: {
+                      type: 'object',
+                      properties: { usedBytes: { type: 'integer' }, totalBytes: { type: 'integer' } },
+                      required: ['usedBytes', 'totalBytes'],
+                    },
+                  },
+                  required: ['serverName', 'serverVersion', 'platform', 'uptimeSec', 'agents', 'database'],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     '/api/openapi.json': {
       get: {
         tags: ['System'],

@@ -59,6 +59,16 @@ describe('chat wire contract', () => {
   });
 });
 
+describe('system info wire contract (G-12)', () => {
+  it('reads GET /api/system/info with no query string', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).system.info();
+
+    expect(calls[0]?.method).toBe('GET');
+    expect(calls[0]?.path).toBe('/api/system/info');
+  });
+});
+
 describe('chat update wire contract', () => {
   it('sends agentRef, matching the field the PATCH /chats/:id route reads to bind an agent', async () => {
     const { calls, fetchImpl } = capture();

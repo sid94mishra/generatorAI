@@ -747,8 +747,13 @@ function buildTransportCapabilities(endpoints: readonly AdvertisedEndpointCandid
   return caps;
 }
 
-/** Friendly host label shown on the pairing consent screen. */
-function serverDisplayName(): string {
+/**
+ * Friendly host label shown on the pairing consent screen. Exported for
+ * `GET /system/info` (G-12), which shows the same name on the Home System
+ * card and Settings › Diagnostics — one implementation, not a second guess
+ * at the hostname.
+ */
+export function serverDisplayName(): string {
   return (process.env['GENERATORAI_SERVER_NAME'] ?? os.hostname() ?? 'GeneratorAI').slice(0, 120);
 }
 

@@ -23,6 +23,7 @@ import type {
 } from '@generatorai/shared';
 import type { Artifact } from '@generatorai/shared';
 import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
+import type { SystemInfo } from '@generatorai/shared';
 import {
   chatListSearchParams,
   runChatBulk,
@@ -2383,6 +2384,11 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async cleanupWorktrees(projectId: string): Promise<{ cleaned: number }> {
     return apiFetch<{ cleaned: number }>(`${this.baseUrl}/api/projects/${projectId}/worktrees/cleanup`, { method: 'POST' });
+  }
+
+  // ── System info (G-12): Home "System" card + Settings › Diagnostics ──
+  async getSystemInfo(): Promise<SystemInfo> {
+    return apiFetch<SystemInfo>(`${this.baseUrl}/api/system/info`);
   }
 
   // ── System Artifacts API ──

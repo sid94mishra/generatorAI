@@ -22,6 +22,7 @@ import {
   type HarnessSetDefaultResult,
   type RunStatus,
   type StageRunStatus,
+  type SystemInfo,
 } from '@generatorai/shared';
 
 export interface ApiFetch {
@@ -1625,6 +1626,14 @@ export function createApiClient(fetchImpl: ApiFetch) {
         request<{ content: string }>(fetchImpl, `/api/system/artifacts/${id}`),
 
       mcpServers: () => request<McpServerEntry[]>(fetchImpl, '/api/system/mcp-servers'),
+
+      /**
+       * G-12 — Home "System" card + Settings › Diagnostics: server name/
+       * version, platform, uptime, agent capacity, database and disk usage.
+       * `database.sizeBytes` and `disk` are absent (not `0`) when the server
+       * could not measure them.
+       */
+      info: () => request<SystemInfo>(fetchImpl, '/api/system/info'),
     },
 
     /**

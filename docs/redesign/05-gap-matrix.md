@@ -38,7 +38,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-09 | Model-picker provider methods on the platform client — **built (P2-04)** | P4 | P2 | S |
 | G-10 | Stats summary (Home This week, Workflows strip, automation stats) | P5 (PW later) | P2 | M |
 | G-11 | Recently finished activity | P5 | P2 | M |
-| G-12 | System info (version, database size, disk, agent capacity) | P5 | P2 | S |
+| G-12 | System info (version, database size, disk, agent capacity) — **built (P2-05)** | P5 | P2 | S |
 | G-13 | Project summaries (Projects columns, tab counts) | P5 | P2 | S–M |
 | G-14 | ProjectDetail Chats tab (project filter on the client) — **built (P2-02)** | P5 | P2 (via G-02) | S |
 | G-15 | ProjectDetail Runs tab (`projectId` filter on runs) | P5 | P2 | S |
@@ -392,6 +392,8 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 
 ### G-12 — System info
 
+**Status: built in P2-05.**
+
 **Elements & boards.** Home System card: Server, Agents "3 running · max 8", Database "SQLite 212 MB", Disk "38% used · 182 / 476 GB", Uptime, Version. Also Settings › Diagnostics.
 
 **Exists today.**
@@ -405,6 +407,12 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 - Same read scope as `/health/config`.
 
 **Owner / phase / effort.** P2 · P5 · **S**.
+
+**As built.**
+- **Wire type** `SystemInfo` (`packages/shared/src/types/SystemInfo.ts`). `database.sizeBytes` and `disk` are absent (not `0`, D-36) when the file/`statfs` call fails.
+- **Route** `GET /system/info` (`apps/server/src/routes/system.ts`) under the existing `/system` prefix (`read:status`, no policy change needed); `serverDisplayName()` is exported from `auth.ts` (was module-private) so the name matches `/auth/server-info` exactly. `agents.running` reads `chatManagementService.getStreamingChatIds().length` — the same live count `/health` uses, not a run-history query, so it stays correct once the Workflow Overhaul drops run history. Database size = main file + `-wal` + `-shm` (0 when a companion is absent, `undefined` when the main file itself can't be `stat`ed). Disk usage via `fs.promises.statfs(dataDir)` (`bavail`, not `bfree`) — same call on Windows/macOS/Linux.
+- **Client:** `HttpPlatformClient.getSystemInfo()` and `client-core`'s `api.system.info()` (`GET /api/system/info`) — deliberately **not** added to `IPlatformClient` (same precedent as `listProjects` / `listSystemArtifacts`: those methods are used only by the web's concrete `HttpPlatformClient` and by client-core's own HTTP surface for CLI/mobile, not by the CLI's in-process `IPlatformClient` calls). Web hook `useSystemInfo()` in `hooks/systemQueries.ts` (30s poll).
+- **Tests:** `apps/server/src/__tests__/systemInfoRoute.test.ts` (real temp SQLite file, real `statfs`; asserts `sizeBytes` is real bytes on disk and is absent — never `0` — when the db file is missing), `packages/client-core/src/api/__tests__/wireContract.test.ts`, `apps/web/src/__tests__/hooks/systemQueries.test.tsx`.
 
 ### G-13 — Project summaries
 
