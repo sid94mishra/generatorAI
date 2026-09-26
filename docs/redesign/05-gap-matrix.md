@@ -46,7 +46,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-17 | Worktree size, linked entity, reclaimable space | P5 | P2 | M |
 | G-18 | Palette entity search (+ recents) | P5 | P2 | M |
 | G-19 | Per-project customization enable/disable on the server | P5 | P2 | M |
-| G-20 | Background-task cancel attribution | P4 (optional) | P2 | S |
+| G-20 | Background-task cancel attribution — **built (P2-04)** | P4 (optional) | P2 | S |
 | G-21 … G-29 | Workflow, automation and script engine features | PW | PW | — |
 
 ---
@@ -496,6 +496,13 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 **Needed.** `cancelledBy: 'user' | 'orchestrator'` and `cancelledAt` on `BackgroundTaskMeta`, set by the cancel route or the orchestrator.
 
 **Owner / phase / effort.** P2 · P4 (optional) · **S**.
+
+**As built (P2-04).**
+- **Types** (`packages/shared/src/types/Chat.ts`): `BACKGROUND_TASK_CANCELLERS = user | orchestrator`, `BackgroundTaskMeta.cancelledBy?` / `cancelledAt?` (epoch ms, present only while `status === 'cancelled'`), `BackgroundTaskCancellation`, `BackgroundTaskListItem` (the `GET /chats/:id/background-tasks` row, replaces client-core's `BackgroundTaskSummary`), `BackgroundTaskCancelResult`. `chat.background_task.status` / `.completed` carry `cancelledBy` / `cancelledAt` when cancelled.
+- **Who:** the Tasks panel's cancel route → `user`; `cancelWorkersForParent` (orchestrator stopped, rewound, archived, deleted) → `orchestrator`; Stop inside the worker chat (a `harness.cancelled` nothing attributed first) → `user`. The first attribution of an activation wins; a follow-up turn (`sendToBackgroundAgent`) clears it (and its stale `lastError`, which used to make the follow-up settle as `cancelled` again).
+- **Storage:** migration **v57** `background_task_cancel_attribution` (`chats.background_task_cancelled_by`, `…_cancelled_at`; no backfill). `IChatRepository.updateBackgroundTaskStatus(id, status, cancellation?)` stores it with `cancelled` and clears it with any other status.
+- **Route:** `POST /chats/:id/background-tasks/:taskId/cancel` → 202 `{ ok, taskId, cancelledBy, cancelledAt }`, 404 for an unknown task (was an unconditional 202). The service now also emits `chat.background_task.status { status: 'cancelled', cancelledBy, cancelledAt }` on the orchestrator's chat scope when a cancel changes the state (cancelling an idle `needs_review` worker used to emit nothing). OpenAPI documents the list and the cancel.
+- **Client:** client-core `BackgroundTaskBlock.cancelledBy` / `cancelledAt` (router + reducer; dropped when the worker runs again), `createApiClient().chats.cancelBackgroundTask(id, taskId)`; `HttpPlatformClient.cancelBackgroundTask` returns the attribution; web `useCancelBackgroundTask(chatId)` writes it into the cached list (legacy `BackgroundTasksPanel` uses it; no new UI).
 
 ---
 

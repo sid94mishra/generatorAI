@@ -2519,6 +2519,79 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
       },
     },
 
+    '/api/chats/{id}/background-tasks': {
+      get: {
+        tags: ['Chats'],
+        summary: "An orchestrator chat's background workers",
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: '`{ tasks }`; a cancelled task carries `cancelledBy` (user | orchestrator) and `cancelledAt` (epoch ms, G-20)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    tasks: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          taskId: { type: 'string' },
+                          taskName: { type: 'string' },
+                          status: { type: 'string', enum: ['spawned', 'running', 'needs_review', 'completed', 'failed', 'cancelled'] },
+                          model: { type: 'string' },
+                          reviewRounds: { type: 'integer' },
+                          cancelledBy: { type: 'string', enum: ['user', 'orchestrator'] },
+                          cancelledAt: { type: 'integer' },
+                        },
+                        required: ['taskId', 'taskName', 'status', 'reviewRounds'],
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+    },
+
+    '/api/chats/{id}/background-tasks/{taskId}/cancel': {
+      post: {
+        tags: ['Chats'],
+        summary: 'Cancel one background worker, attributed to the user (G-20)',
+        description:
+          'The orchestrator chat stream carries the same attribution on `chat.background_task.status` / ' +
+          '`chat.background_task.completed` (`cancelledBy`, `cancelledAt`). A worker stopped because its ' +
+          'orchestrator stopped, rewound, was archived or deleted is attributed to `orchestrator`.',
+        parameters: [
+          { in: 'path', name: 'id', required: true, schema: { type: 'string' } },
+          { in: 'path', name: 'taskId', required: true, schema: { type: 'string' } },
+        ],
+        responses: {
+          '202': {
+            description: 'Cancelled (or already cancelled: the first attribution is kept)',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    ok: { type: 'boolean' },
+                    taskId: { type: 'string' },
+                    cancelledBy: { type: 'string', enum: ['user', 'orchestrator'] },
+                    cancelledAt: { type: 'integer' },
+                  },
+                  required: ['ok', 'taskId', 'cancelledBy', 'cancelledAt'],
+                },
+              },
+            },
+          },
+          '404': { description: 'Unknown task', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
     '/api/harness/providers/{type}/logout': {
       post: {
         tags: ['Harness'],

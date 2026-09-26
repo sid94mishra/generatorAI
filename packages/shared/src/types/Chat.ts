@@ -49,6 +49,46 @@ export interface BackgroundTaskMeta {
   taskIndex?: number;
   /** Current lifecycle status of this background task. */
   status: BackgroundTaskStatus;
+  /** Who cancelled it (G-20); set only while `status === 'cancelled'`. */
+  cancelledBy?: BackgroundTaskCancelledBy;
+  /** When it was cancelled, epoch ms (G-20); set only while `status === 'cancelled'`. */
+  cancelledAt?: number;
+}
+
+/**
+ * Who cancelled a background task (G-20):
+ * - `user` — someone cancelled THIS task: the Tasks panel's Cancel
+ *   (`POST /chats/:id/background-tasks/:taskId/cancel`) or Stop inside the
+ *   worker chat itself.
+ * - `orchestrator` — it was stopped along with its orchestrator: the
+ *   orchestrator chat was stopped, rewound, archived or deleted.
+ */
+export const BACKGROUND_TASK_CANCELLERS = ['user', 'orchestrator'] as const;
+export type BackgroundTaskCancelledBy = (typeof BACKGROUND_TASK_CANCELLERS)[number];
+
+/** A cancel attribution as stored and emitted (G-20). */
+export interface BackgroundTaskCancellation {
+  cancelledBy: BackgroundTaskCancelledBy;
+  /** Epoch ms. */
+  cancelledAt: number;
+}
+
+/** `POST /chats/:id/background-tasks/:taskId/cancel` → 202. */
+export interface BackgroundTaskCancelResult extends BackgroundTaskCancellation {
+  ok: true;
+  taskId: string;
+}
+
+/** One row of `GET /chats/:id/background-tasks` (`{ tasks }`). */
+export interface BackgroundTaskListItem {
+  taskId: string;
+  taskName: string;
+  status: BackgroundTaskStatus;
+  model?: string;
+  reviewRounds: number;
+  /** G-20: present while `status === 'cancelled'`. */
+  cancelledBy?: BackgroundTaskCancelledBy;
+  cancelledAt?: number;
 }
 
 /** Chat domain entity */

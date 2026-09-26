@@ -1023,8 +1023,13 @@ export function createChatApiRoutes(container: Container): Router {
   router.post('/:id/background-tasks/:taskId/cancel', async (req, res, next) => {
     try {
       const taskId = String(req.params['taskId']);
-      await container.orchestratorService.cancelBackgroundAgent(taskId);
-      res.status(202).json({ ok: true });
+      // G-20: cancelled from the Tasks panel — attributed to the user.
+      const cancellation = await container.orchestratorService.cancelBackgroundAgent(taskId, 'user');
+      if (!cancellation) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: `Background task ${taskId} not found` } });
+        return;
+      }
+      res.status(202).json({ ok: true, taskId, ...cancellation });
     } catch (err) {
       next(err);
     }

@@ -334,6 +334,9 @@ export const chats = sqliteTable(
     backgroundTaskName: text('background_task_name'),
     backgroundTaskIndex: integer('background_task_index'),
     backgroundTaskStatus: text('background_task_status'),
+    /** G-20 (v57): who cancelled the task ('user' | 'orchestrator') and when (epoch ms). */
+    backgroundTaskCancelledBy: text('background_task_cancelled_by'),
+    backgroundTaskCancelledAt: integer('background_task_cancelled_at'),
     // ── Agent mode (v21, renamed v22) ──
     /** Sticky per-chat default agent mode; the composer can override per turn. */
     defaultAgentMode: text('default_agent_mode', { enum: ['auto', 'plan'] })

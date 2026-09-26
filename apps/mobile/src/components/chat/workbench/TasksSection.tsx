@@ -16,7 +16,8 @@ import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Ban, ChevronDown, ChevronRight, ExternalLink, ListTree } from 'lucide-react-native';
-import { queryKeys, type BackgroundTaskSummary } from '@generatorai/client-core';
+import { queryKeys } from '@generatorai/client-core';
+import type { BackgroundTaskListItem } from '@generatorai/shared';
 
 import { Badge, type Tone } from '../../ui/primitives';
 import { Button } from '../../ui/Button';
@@ -60,7 +61,7 @@ export function TasksSection({ chatId, active = true }: { chatId: string; active
   const { colors } = useTheme();
   const cancelCap = useCapability('cancelTask');
   const [open, setOpen] = useState<string | null>(null);
-  const [confirmCancel, setConfirmCancel] = useState<BackgroundTaskSummary | null>(null);
+  const [confirmCancel, setConfirmCancel] = useState<BackgroundTaskListItem | null>(null);
 
   const tasks = useQuery({
     queryKey: queryKeys.chatTasks(chatId),
@@ -69,7 +70,7 @@ export function TasksSection({ chatId, active = true }: { chatId: string; active
     refetchInterval: (query) => {
       if (!active) return false;
       const list = query.state.data?.tasks ?? [];
-      return list.some((t: BackgroundTaskSummary) => ACTIVE.has(t.status)) ? 4_000 : false;
+      return list.some((t: BackgroundTaskListItem) => ACTIVE.has(t.status)) ? 4_000 : false;
     },
   });
 

@@ -9,6 +9,7 @@ import type {
   ChatStatus,
   ChatTurnStatus,
   BackgroundTaskStatus,
+  BackgroundTaskCancellation,
 } from '@generatorai/shared';
 
 /** The list row's summary columns (G-02). */
@@ -88,8 +89,15 @@ export interface IChatRepository {
   delete(id: string): Promise<void>;
   /** List all WORKER chats spawned by a given orchestrator chat. */
   listBackgroundTasks(parentChatId: string): Promise<Chat[]>;
-  /** Update just the background-task status of a worker chat. */
-  updateBackgroundTaskStatus(id: string, status: BackgroundTaskStatus): Promise<void>;
+  /**
+   * Update just the background-task status of a worker chat. `cancellation`
+   * (G-20) is stored with a `cancelled` status; any other status clears it.
+   */
+  updateBackgroundTaskStatus(
+    id: string,
+    status: BackgroundTaskStatus,
+    cancellation?: BackgroundTaskCancellation,
+  ): Promise<void>;
   /**
    * W24 fix — durable orchestrator termination state. Returns `null` when
    * the orchestrator chat has never recorded a wave (fresh orchestration).

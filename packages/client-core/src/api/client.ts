@@ -10,6 +10,8 @@ import {
   chatListSearchParams,
   runChatBulk,
   type AttentionFilter,
+  type BackgroundTaskCancelResult,
+  type BackgroundTaskListItem,
   type AttentionSnapshot,
   type ChatBulkResult,
   type ChatListPage,
@@ -384,13 +386,6 @@ export interface ForkChatResponse {
   conversation: 'native' | 'synthetic';
 }
 
-export interface BackgroundTaskSummary {
-  taskId: string;
-  taskName: string;
-  status: string;
-  model?: string;
-  reviewRounds: number;
-}
 
 export interface ModelInfo {
   id: string;
@@ -1193,9 +1188,21 @@ export function createApiClient(fetchImpl: ApiFetch) {
        * bare arrays the other chat list routes return.
        */
       backgroundTasks: (id: string) =>
-        request<{ tasks: BackgroundTaskSummary[] }>(
+        request<{ tasks: BackgroundTaskListItem[] }>(
           fetchImpl,
           `/api/chats/${id}/background-tasks`,
+        ),
+
+      /**
+       * Cancel one worker (G-20). The server attributes it to the user and
+       * answers `{ ok, taskId, cancelledBy, cancelledAt }`; the orchestrator's
+       * chat stream carries the same attribution on `chat.background_task.status`.
+       */
+      cancelBackgroundTask: (id: string, taskId: string) =>
+        request<BackgroundTaskCancelResult>(
+          fetchImpl,
+          `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}/cancel`,
+          { method: 'POST' },
         ),
 
       respond: (

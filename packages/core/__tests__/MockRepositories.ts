@@ -87,10 +87,21 @@ export class MockChatRepository implements IChatRepository {
     return [...this.store.values()].filter((c) => c.parentChatId === parentChatId).map((c) => ({ ...c }));
   }
 
-  async updateBackgroundTaskStatus(id: string, status: BackgroundTaskStatus): Promise<void> {
+  async updateBackgroundTaskStatus(
+    id: string,
+    status: BackgroundTaskStatus,
+    cancellation?: { cancelledBy: 'user' | 'orchestrator'; cancelledAt: number },
+  ): Promise<void> {
     const existing = this.store.get(id);
     if (existing) {
-      existing.backgroundTask = { ...(existing.backgroundTask ?? { orchestratorChatId: existing.parentChatId ?? '', taskName: existing.name }), status };
+      const prior = existing.backgroundTask;
+      existing.backgroundTask = {
+        orchestratorChatId: prior?.orchestratorChatId ?? existing.parentChatId ?? '',
+        taskName: prior?.taskName ?? existing.name,
+        ...(prior?.taskIndex !== undefined ? { taskIndex: prior.taskIndex } : {}),
+        status,
+        ...(status === 'cancelled' && cancellation ? cancellation : {}),
+      };
     }
   }
 

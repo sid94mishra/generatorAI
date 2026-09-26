@@ -18,10 +18,22 @@ import type {
   ChatLocalFolder,
   ChatStatus,
   ChatTurnStatus,
+  BackgroundTaskCancellation,
+  BackgroundTaskCancelledBy,
   BackgroundTaskMeta,
   BackgroundTaskStatus,
 } from '@generatorai/shared';
-import { NotFoundError, StorageError, DEFAULT_AGENT_MODE, coerceAgentMode } from '@generatorai/shared';
+import {
+  BACKGROUND_TASK_CANCELLERS,
+  NotFoundError,
+  StorageError,
+  DEFAULT_AGENT_MODE,
+  coerceAgentMode,
+} from '@generatorai/shared';
+
+function isCanceller(value: string | null): value is BackgroundTaskCancelledBy {
+  return value !== null && (BACKGROUND_TASK_CANCELLERS as readonly string[]).includes(value);
+}
 import { chats } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { safeJsonColumn } from '../utils/safeJsonColumn.js';
@@ -70,6 +82,8 @@ export class DrizzleChatRepository implements IChatRepository {
         backgroundTaskName: chat.backgroundTask?.taskName ?? null,
         backgroundTaskIndex: chat.backgroundTask?.taskIndex ?? null,
         backgroundTaskStatus: chat.backgroundTask?.status ?? null,
+        backgroundTaskCancelledBy: chat.backgroundTask?.cancelledBy ?? null,
+        backgroundTaskCancelledAt: chat.backgroundTask?.cancelledAt ?? null,
         defaultAgentMode: chat.defaultAgentMode ?? DEFAULT_AGENT_MODE,
         permissionMode: chat.permissionMode ?? 'bypassPermissions',
         agentRef: chat.agentRef ?? null,
@@ -214,11 +228,25 @@ export class DrizzleChatRepository implements IChatRepository {
     return rows.map((r) => this.mapRow(r));
   }
 
-  /** Update just the background-task status of a worker chat. */
-  async updateBackgroundTaskStatus(id: string, status: BackgroundTaskStatus): Promise<void> {
+  /**
+   * Update just the background-task status of a worker chat. The cancel
+   * attribution (G-20) is written with a `cancelled` status and cleared by any
+   * other one, so a follow-up turn never keeps a stale "cancelled by".
+   */
+  async updateBackgroundTaskStatus(
+    id: string,
+    status: BackgroundTaskStatus,
+    cancellation?: BackgroundTaskCancellation,
+  ): Promise<void> {
+    const cancelled = status === 'cancelled' ? cancellation : undefined;
     await this.db
       .update(chats)
-      .set({ backgroundTaskStatus: status, updatedAt: new Date() })
+      .set({
+        backgroundTaskStatus: status,
+        backgroundTaskCancelledBy: cancelled?.cancelledBy ?? null,
+        backgroundTaskCancelledAt: cancelled?.cancelledAt ?? null,
+        updatedAt: new Date(),
+      })
       .where(eq(chats.id, id));
   }
 
@@ -370,6 +398,12 @@ export class DrizzleChatRepository implements IChatRepository {
             taskName: row.backgroundTaskName ?? row.name,
             taskIndex: row.backgroundTaskIndex ?? undefined,
             status: (row.backgroundTaskStatus as BackgroundTaskStatus | null) ?? 'spawned',
+            ...(row.backgroundTaskStatus === 'cancelled' && isCanceller(row.backgroundTaskCancelledBy)
+              ? { cancelledBy: row.backgroundTaskCancelledBy }
+              : {}),
+            ...(row.backgroundTaskStatus === 'cancelled' && row.backgroundTaskCancelledAt != null
+              ? { cancelledAt: row.backgroundTaskCancelledAt }
+              : {}),
           }
         : undefined;
     return {

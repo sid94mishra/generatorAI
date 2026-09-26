@@ -8,7 +8,14 @@
 // See docs/ORCHESTRATOR_MODE_RESEARCH_AND_PLAN.md.
 // ────────────────────────────────────────────────────────────────
 
-import type { AgentEvent, TaskBrief, TaskResultDigest, BackgroundTaskStatus } from '@generatorai/shared';
+import type {
+  AgentEvent,
+  TaskBrief,
+  TaskResultDigest,
+  BackgroundTaskStatus,
+  BackgroundTaskCancellation,
+  BackgroundTaskCancelledBy,
+} from '@generatorai/shared';
 import { TaskResultDigestSchema } from '@generatorai/shared';
 import * as path from 'node:path';
 import * as fs from 'node:fs/promises';
@@ -164,6 +171,20 @@ interface TaskRecord {
   waveSlot: boolean;
   /** Epoch ms of the last emitted progress event (the throttle's clock). */
   lastProgressAt: number;
+  /**
+   * G-20 — who cancelled this worker and when. Set by the first cancel of an
+   * activation (the route, the orchestrator cascade, or Stop in the worker
+   * chat); cleared by a follow-up turn.
+   */
+  cancellation?: BackgroundTaskCancellation;
+}
+
+/** The attribution fields an event / list row carries while a task is cancelled. */
+function cancellationFields(
+  status: BackgroundTaskStatus,
+  cancellation: BackgroundTaskCancellation | undefined,
+): Partial<BackgroundTaskCancellation> {
+  return status === 'cancelled' && cancellation ? { ...cancellation } : {};
 }
 
 const delay = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -649,6 +670,8 @@ export class OrchestratorService {
     record.reviewRounds += 1;
     record.status = 'running';
     record.lastAssistantText = '';
+    record.lastError = undefined;
+    record.cancellation = undefined;
     // Back in the wave: its settlement waits on this turn too.
     if (!record.waveSlot) {
       record.waveSlot = true;
@@ -715,11 +738,28 @@ export class OrchestratorService {
 
   async listBackgroundAgents(
     parentChatId: string,
-  ): Promise<Array<{ taskId: string; taskName: string; status: BackgroundTaskStatus; model?: string; reviewRounds: number }>> {
+  ): Promise<
+    Array<{
+      taskId: string;
+      taskName: string;
+      status: BackgroundTaskStatus;
+      model?: string;
+      reviewRounds: number;
+      cancelledBy?: BackgroundTaskCancelledBy;
+      cancelledAt?: number;
+    }>
+  > {
     // Prefer in-memory records; fall back to DB for durability across restarts.
     const mem = [...this.tasks.values()].filter((t) => t.parentChatId === parentChatId);
     if (mem.length > 0) {
-      return mem.map((t) => ({ taskId: t.taskId, taskName: t.taskName, status: t.status, model: t.model, reviewRounds: t.reviewRounds }));
+      return mem.map((t) => ({
+        taskId: t.taskId,
+        taskName: t.taskName,
+        status: t.status,
+        model: t.model,
+        reviewRounds: t.reviewRounds,
+        ...cancellationFields(t.status, t.cancellation),
+      }));
     }
     const rows = await this.chatRepo.listBackgroundTasks(parentChatId).catch(() => []);
     return Promise.all(rows.map(async (c) => {
@@ -743,6 +783,9 @@ export class OrchestratorService {
         status,
         model: c.model,
         reviewRounds: 0,
+        ...(status === 'cancelled' && c.backgroundTask?.cancelledBy && c.backgroundTask.cancelledAt !== undefined
+          ? { cancelledBy: c.backgroundTask.cancelledBy, cancelledAt: c.backgroundTask.cancelledAt }
+          : {}),
       };
     }));
   }
@@ -761,25 +804,67 @@ export class OrchestratorService {
       if (record.parentChatId !== parentChatId) continue;
       if (record.status !== 'running' && record.status !== 'spawned') continue;
       record.lastError = `cancelled:${reason}`;
-      await this.cancelBackgroundAgent(record.taskId);
+      await this.cancelBackgroundAgent(record.taskId, 'orchestrator');
       cancelled.push(record.taskId);
     }
     return cancelled;
   }
 
-  /** Cancel a running worker (abort its turn). */
-  async cancelBackgroundAgent(taskId: string): Promise<void> {
+  /**
+   * Cancel a running worker (abort its turn), attributed to `by` (G-20):
+   * `user` for the Tasks panel's Cancel, `orchestrator` for the cascade when
+   * the orchestrator chat stops. The attribution is recorded BEFORE the turn
+   * is aborted, so the `harness.cancelled` / `harness.idle` the abort produces
+   * keep it instead of reading as a Stop inside the worker chat. Returns the
+   * attribution, or null for an unknown task.
+   */
+  async cancelBackgroundAgent(
+    taskId: string,
+    by: BackgroundTaskCancelledBy = 'user',
+  ): Promise<BackgroundTaskCancellation | null> {
     const record = this.tasks.get(taskId);
+    // Read before the abort: its `harness.idle` may settle the record first.
+    const alreadyCancelled = record?.status === 'cancelled';
+    const cancellation: BackgroundTaskCancellation = record?.cancellation ?? { cancelledBy: by, cancelledAt: Date.now() };
+    if (record) {
+      record.cancellation = cancellation;
+      // So the idle this abort produces settles as `cancelled` even when the
+      // provider sends no `harness.cancelled` first.
+      if (!record.lastError?.startsWith('cancelled:')) record.lastError = `cancelled:${by}`;
+    }
     try {
       await this.chatManagementService.cancelTurn(taskId);
     } catch {
       // Non-fatal.
     }
-    if (record) {
-      record.status = 'cancelled';
-      record.resolveIdle();
-      await this.chatRepo.updateBackgroundTaskStatus(taskId, 'cancelled').catch(() => {});
+    if (!record) {
+      const chat = await this.chatRepo.getById(taskId).catch(() => null);
+      if (!chat?.backgroundTask) return null;
+      const prior = chat.backgroundTask;
+      if (prior.status === 'cancelled' && prior.cancelledBy && prior.cancelledAt !== undefined) {
+        return { cancelledBy: prior.cancelledBy, cancelledAt: prior.cancelledAt };
+      }
+      await this.chatRepo.updateBackgroundTaskStatus(taskId, 'cancelled', cancellation).catch(() => {});
+      return cancellation;
     }
+    const changed = !alreadyCancelled;
+    record.status = 'cancelled';
+    record.resolveIdle();
+    await this.chatRepo.updateBackgroundTaskStatus(taskId, 'cancelled', cancellation).catch(() => {});
+    if (changed) {
+      await this.emitToParent(record.parentSessionId, {
+        kind: 'chat.background_task.status',
+        data: {
+          chatId: record.parentChatId,
+          parentChatId: record.parentChatId,
+          taskId,
+          taskName: record.taskName,
+          status: 'cancelled',
+          ...cancellation,
+        },
+      });
+    }
+    return cancellation;
   }
 
   /**
@@ -1028,6 +1113,9 @@ export class OrchestratorService {
       // may continue the DAG into stages that depend on the cancelled output.
       case 'harness.cancelled':
         record.lastError = `cancelled:${(data?.['reason'] as string) ?? 'user_abort'}`;
+        // G-20: nothing attributed it first (the route and the cascade do), so
+        // this is Stop pressed inside the worker chat — the user's.
+        record.cancellation ??= { cancelledBy: 'user', cancelledAt: Date.now() };
         break;
       case 'harness.idle': {
         // A second idle for the same activation (a stop emits one from the
@@ -1084,7 +1172,13 @@ export class OrchestratorService {
         // through last.
         record.currentStep = undefined;
         this.emitWorkerProgress(record, true);
-        void this.chatRepo.updateBackgroundTaskStatus(record.taskId, finalStatus).catch(() => {});
+        void this.chatRepo
+          .updateBackgroundTaskStatus(
+            record.taskId,
+            finalStatus,
+            finalStatus === 'cancelled' ? record.cancellation : undefined,
+          )
+          .catch(() => {});
         this.scheduleWorkerRelease(record);
         void this.writeScratchpad(record.parentChatId);
         void this.emitToParent(record.parentSessionId, {
@@ -1096,6 +1190,7 @@ export class OrchestratorService {
             taskName: record.taskName,
             status: finalStatus,
             summary: hasDigest ? undefined : this.truncate(record.lastAssistantText, 200),
+            ...cancellationFields(finalStatus, record.cancellation),
           },
         });
         break;

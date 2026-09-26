@@ -4,7 +4,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
-import type { CreateSessionParams, CreateChatParams } from '@generatorai/shared';
+import type { BackgroundTaskListItem, CreateSessionParams, CreateChatParams } from '@generatorai/shared';
 import type { AgentMode, PlanAction } from '@generatorai/shared';
 import type {
   ScmFlowRequest,
@@ -735,6 +735,34 @@ export function useBackgroundTasks(chatId: string | undefined, enabled = true) {
     queryFn: () => platform.getBackgroundTasks(chatId!),
     enabled: !!chatId && enabled,
     refetchInterval: 2500,
+  });
+}
+
+/**
+ * Cancel one background worker (G-20). The server attributes it to the user;
+ * the answer's `cancelledBy` / `cancelledAt` go straight into the cached list
+ * so the row can say "Cancelled · by you at …" before the next poll.
+ */
+export function useCancelBackgroundTask(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: (taskId: string) => platform.cancelBackgroundTask(chatId!, taskId),
+    onSuccess: (result) => {
+      const key = backgroundTasksKeys.list(chatId ?? '');
+      queryClient.setQueryData<{ tasks: BackgroundTaskListItem[] }>(key, (prev) =>
+        prev
+          ? {
+              tasks: prev.tasks.map((t) =>
+                t.taskId === result.taskId
+                  ? { ...t, status: 'cancelled', cancelledBy: result.cancelledBy, cancelledAt: result.cancelledAt }
+                  : t,
+              ),
+            }
+          : prev,
+      );
+      void queryClient.invalidateQueries({ queryKey: key });
+    },
   });
 }
 

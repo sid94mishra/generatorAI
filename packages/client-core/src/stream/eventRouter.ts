@@ -1521,6 +1521,12 @@ export class StreamEventRouter {
             ...(terminal ? { endedAt: Date.now() } : {}),
             ...(optStr(data['summary']) ? { summary: str(data['summary']) } : {}),
             ...(optStr(data['error']) ? { summary: str(data['error']) } : {}),
+            ...(status === 'cancelled' && (data['cancelledBy'] === 'user' || data['cancelledBy'] === 'orchestrator')
+              ? { cancelledBy: data['cancelledBy'] }
+              : {}),
+            ...(status === 'cancelled' && typeof data['cancelledAt'] === 'number'
+              ? { cancelledAt: data['cancelledAt'] }
+              : {}),
             ...(parentCallId ? { parentCallId } : {}),
           },
         });

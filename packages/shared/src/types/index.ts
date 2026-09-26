@@ -108,7 +108,8 @@ export {
 } from './Agent.js';
 
 // ── v2 New Types ──
-export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, ChatPermissionMode } from './Chat.js';
+export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, BackgroundTaskCancelledBy, BackgroundTaskCancellation, BackgroundTaskCancelResult, BackgroundTaskListItem, ChatPermissionMode } from './Chat.js';
+export { BACKGROUND_TASK_CANCELLERS } from './Chat.js';
 export { DEFAULT_CHAT_PERMISSION_MODE } from './Chat.js';
 
 // ── Agent modes (mode registry, plan documents, interactive questions) ──

@@ -2592,6 +2592,18 @@ export const MIGRATIONS: readonly Migration[] = [
            BEGIN SELECT RAISE(ABORT, 'NOT NULL constraint failed: chats.last_activity_at'); END;`,
       ],
     },
+    // G-20 — background-task cancel attribution (DockTasks "Cancelled · by you
+    // at 14:09"). Next free number after v56; the same renumbering rule applies
+    // if the Workflow Overhaul's run-history migration lands first. No backfill:
+    // who cancelled an existing task was never recorded.
+    {
+      version: 57,
+      name: 'background_task_cancel_attribution',
+      sql: [
+        `ALTER TABLE chats ADD COLUMN background_task_cancelled_by TEXT;`,
+        `ALTER TABLE chats ADD COLUMN background_task_cancelled_at INTEGER;`,
+      ],
+    },
   ];
 
 

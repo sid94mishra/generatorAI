@@ -29,6 +29,8 @@ import {
   type ChatBulkResult,
   type ChatListPage,
   type ChatListQuery,
+  type BackgroundTaskCancelResult,
+  type BackgroundTaskListItem,
   type HarnessCatalogModel,
   type HarnessLoginResult,
   type HarnessProvidersResponse,
@@ -738,9 +740,7 @@ export class HttpPlatformClient implements IPlatformClient {
 
   // ── Orchestrator background tasks ──
 
-  async getBackgroundTasks(chatId: string): Promise<{
-    tasks: Array<{ taskId: string; taskName: string; status: string; model?: string; reviewRounds: number }>;
-  }> {
+  async getBackgroundTasks(chatId: string): Promise<{ tasks: BackgroundTaskListItem[] }> {
     return apiFetch(`${this.baseUrl}/api/chats/${chatId}/background-tasks`);
   }
 
@@ -748,10 +748,12 @@ export class HttpPlatformClient implements IPlatformClient {
     return apiFetch(`${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}`);
   }
 
-  async cancelBackgroundTask(chatId: string, taskId: string): Promise<void> {
-    await apiFetch(`${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}/cancel`, {
-      method: 'POST',
-    });
+  /** G-20: the server attributes this cancel to the user and answers who/when. */
+  async cancelBackgroundTask(chatId: string, taskId: string): Promise<BackgroundTaskCancelResult> {
+    return apiFetch<BackgroundTaskCancelResult>(
+      `${this.baseUrl}/api/chats/${chatId}/background-tasks/${taskId}/cancel`,
+      { method: 'POST' },
+    );
   }
 
   async updateChat(chatId: string, updates: { model?: string; gitRepositories?: unknown; codebaseIds?: string[]; harnessConfig?: Record<string, unknown>; defaultAgentMode?: AgentMode; permissionMode?: 'bypassPermissions' | 'default' | 'acceptEdits' | 'plan' }): Promise<Chat> {

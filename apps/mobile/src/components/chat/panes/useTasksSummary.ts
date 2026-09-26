@@ -10,7 +10,8 @@
 
 import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { queryKeys, type BackgroundTaskSummary } from '@generatorai/client-core';
+import { queryKeys } from '@generatorai/client-core';
+import type { BackgroundTaskListItem } from '@generatorai/shared';
 
 import { useApi } from '../../../api/useApi';
 
@@ -33,14 +34,14 @@ export function useTasksSummary(chatId: string, options: { pollPaused?: boolean 
     refetchInterval: (query) => {
       if (pollPaused) return false;
       const list = query.state.data?.tasks ?? [];
-      return list.some((t: BackgroundTaskSummary) => ACTIVE_TASK_STATUSES.has(t.status)) ? 10_000 : false;
+      return list.some((t: BackgroundTaskListItem) => ACTIVE_TASK_STATUSES.has(t.status)) ? 10_000 : false;
     },
   });
   const list = tasks.data?.tasks;
   return useMemo(
     () => ({
       total: list?.length ?? 0,
-      running: (list ?? []).filter((t: BackgroundTaskSummary) => ACTIVE_TASK_STATUSES.has(t.status)).length,
+      running: (list ?? []).filter((t: BackgroundTaskListItem) => ACTIVE_TASK_STATUSES.has(t.status)).length,
     }),
     [list],
   );

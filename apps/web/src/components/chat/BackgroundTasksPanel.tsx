@@ -7,11 +7,9 @@
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router';
 import { CheckCircle2, XCircle, Clock, Eye, ExternalLink, Ban } from 'lucide-react';
-import { useBackgroundTasks, useBackgroundTaskDigest, useChat } from '@/hooks/queries.js';
+import { useBackgroundTasks, useBackgroundTaskDigest, useCancelBackgroundTask, useChat } from '@/hooks/queries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import type { BackgroundTaskBlock } from '@generatorai/client-core';
-import { usePlatform } from '@/providers/PlatformProvider.js';
-import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
 import { cn } from '@/lib/utils.js';
 import { Button, Spinner } from '@/components/ui/index.js';
 
@@ -123,7 +121,7 @@ function LiveProgress({ block }: { block: BackgroundTaskBlock | undefined }) {
 
 export function BackgroundTasksPanel({ chatId }: BackgroundTasksPanelProps) {
   const navigate = useNavigate();
-  const platform = usePlatform() as HttpPlatformClient;
+  const cancelTask = useCancelBackgroundTask(chatId);
   const { data, isLoading } = useBackgroundTasks(chatId);
   const { data: chat } = useChat(chatId);
   const live = useLiveTaskBlocks(chat?.sessionId);
@@ -184,7 +182,7 @@ export function BackgroundTasksPanel({ chatId }: BackgroundTasksPanelProps) {
                           size="icon-sm"
                           title="Cancel"
                           className="h-auto w-auto rounded p-1 text-[var(--color-muted-foreground)] hover:bg-red-500/10 hover:text-red-500"
-                          onClick={(e) => { e.stopPropagation(); if (chatId) void platform.cancelBackgroundTask(chatId, t.taskId); }}
+                          onClick={(e) => { e.stopPropagation(); if (chatId) cancelTask.mutate(t.taskId); }}
                         >
                           <Ban className="h-3.5 w-3.5" />
                         </Button>

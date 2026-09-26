@@ -447,6 +447,8 @@ export function upsertBackgroundTask(
       ...(task.lastText ? { lastText: task.lastText } : {}),
       ...(task.endedAt ? { endedAt: task.endedAt } : {}),
       ...(task.summary ? { summary: task.summary } : {}),
+      ...(task.cancelledBy ? { cancelledBy: task.cancelledBy } : {}),
+      ...(task.cancelledAt ? { cancelledAt: task.cancelledAt } : {}),
       ...(task.parentCallId ? { parentCallId: task.parentCallId } : {}),
     };
     return put(streams, sessionId, {
@@ -470,7 +472,7 @@ export function upsertBackgroundTask(
   let changed = false;
   for (const key of [
     'taskName', 'model', 'status', 'currentStep', 'lastText',
-    'toolCalls', 'startedAt', 'endedAt', 'summary', 'parentCallId',
+    'toolCalls', 'startedAt', 'endedAt', 'summary', 'parentCallId', 'cancelledBy', 'cancelledAt',
   ] as const) {
     const value = task[key];
     if (value === undefined) continue;
@@ -481,6 +483,12 @@ export function upsertBackgroundTask(
   // A settled worker never goes back to a live step line.
   if (task.status && task.status !== 'running' && task.status !== 'spawned' && prior.currentStep) {
     delete (merged as { currentStep?: string }).currentStep;
+    changed = true;
+  }
+  // G-20: the attribution belongs to the cancelled state; a follow-up turn drops it.
+  if (merged.status !== 'cancelled' && (merged.cancelledBy !== undefined || merged.cancelledAt !== undefined)) {
+    delete merged.cancelledBy;
+    delete merged.cancelledAt;
     changed = true;
   }
   if (!changed) return streams;

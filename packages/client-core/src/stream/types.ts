@@ -246,6 +246,10 @@ export interface BackgroundTaskBlock {
   endedAt?: number;
   /** Digest summary, when the completion event carried one. */
   summary?: string;
+  /** G-20: who cancelled the worker ('user' | 'orchestrator'); only while `status === 'cancelled'`. */
+  cancelledBy?: 'user' | 'orchestrator';
+  /** G-20: when it was cancelled, epoch ms. */
+  cancelledAt?: number;
   /** See {@link ToolCallBlock.parentCallId}. */
   parentCallId?: string;
 }

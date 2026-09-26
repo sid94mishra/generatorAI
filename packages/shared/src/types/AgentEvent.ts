@@ -16,6 +16,7 @@ import type { ScmFlowResult } from './SourceControl.js';
 import type { SttEngineKind } from './Voice.js';
 import type { AttentionCountsEventData, AttentionRemoveEventData, AttentionUpsertEventData } from './Attention.js';
 import type { ChatUpdatedEventData } from './ChatList.js';
+import type { BackgroundTaskCancelledBy } from './Chat.js';
 
 /**
  * Per-operation file-change stats, derived from the provider's structured
@@ -201,8 +202,9 @@ export type AgentEvent =
   | { kind: 'chat.scm.result'; data: { chatId: string; turnId: string; alias: string; result: ScmFlowResult } }
   // ── Orchestrator Background-Task Events (routed to the PARENT chat scope) ──
   | { kind: 'chat.background_task.spawned'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; model?: string; taskIndex?: number } }
-  | { kind: 'chat.background_task.status'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; status: string } }
-  | { kind: 'chat.background_task.completed'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; status: string; summary?: string } }
+  // `cancelledBy` / `cancelledAt` (epoch ms) ride along when `status` is 'cancelled' (G-20).
+  | { kind: 'chat.background_task.status'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; status: string; cancelledBy?: BackgroundTaskCancelledBy; cancelledAt?: number } }
+  | { kind: 'chat.background_task.completed'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; status: string; summary?: string; cancelledBy?: BackgroundTaskCancelledBy; cancelledAt?: number } }
   | { kind: 'chat.background_task.failed'; data: { chatId: string; parentChatId: string; taskId: string; taskName: string; error?: string } }
   // Live progress of one background worker, on the PARENT chat scope (throttled by the emitter).
   | {
