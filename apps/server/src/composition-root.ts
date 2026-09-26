@@ -3,7 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { AppConfig, ILogger, PersistedEvent } from '@generatorai/shared';
-import { createLogger, readBoundedInt } from '@generatorai/shared';
+import { createLogger, getMeter, readBoundedInt } from '@generatorai/shared';
 import { existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { resolve, dirname } from 'node:path';
@@ -23,7 +23,7 @@ import { ScreenCast } from './computer/screenCast.js';
 import { createPreviewProducer } from './computer/previewProducer.js';
 import { registerEphemeralProducer } from './streaming/ephemeralScopes.js';
 import { RelayHostBroker } from './relay/RelayHostBroker.js';
-import { deriveStreamScopes } from './composition/streamScopes.js';
+import { deriveStreamScopes, streamRowsFor } from './composition/streamScopes.js';
 import {
   ExpoPushProvider,
   PushDispatcher,
@@ -1042,6 +1042,11 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     });
   };
 
+  // P07 WP-7.5 — write amplification of workflow events (W-42, accepted at <= 2.2 rows per event).
+  const streamRowsPerEvent = getMeter('generatorai.server').createHistogram('workflow.stream.rows_per_event', {
+    description: 'stream_cursors rows written per workflow event (primary scope + fan-out)',
+  });
+
   const bridgeEvent = (event: {
     sessionId: string;
     kind: string;
@@ -1061,8 +1066,13 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // Secondary scopes stay fire-and-forget: they are additional views of an
     // event that is already durable, so losing one costs a resume on that
     // view alone.
-    for (const target of deriveStreamScopes(event)) {
+    const targets = deriveStreamScopes(event);
+    for (const target of targets) {
       publishToBroker(target.scope, target.id, event.kind, event.data);
+    }
+    // P07 WP-7.5 (W-42): the rows a workflow event costs across its scopes.
+    if (event.data && typeof (event.data as { workflowRunId?: unknown }).workflowRunId === 'string') {
+      streamRowsPerEvent.record(streamRowsFor(event, targets), { family: event.kind.split('.')[0] ?? event.kind });
     }
   };
 
