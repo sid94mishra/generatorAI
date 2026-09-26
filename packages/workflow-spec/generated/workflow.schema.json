@@ -379,7 +379,7 @@
                               "type": "string",
                               "maxLength": 4000
                             },
-                            "description": "Request headers; secret values must be secretref: references"
+                            "description": "Request headers; secret values must be references to the server's own credentials, secretref:mcp/<system|project|custom>/<server id>/<name>"
                           },
                           "command": {
                             "type": "string",
@@ -401,7 +401,7 @@
                               "type": "string",
                               "maxLength": 4000
                             },
-                            "description": "Environment (stdio); secret values must be secretref: references"
+                            "description": "Environment (stdio); secret values must be references to the server's own credentials, secretref:mcp/<system|project|custom>/<server id>/<name>"
                           },
                           "cwd": {
                             "type": "string",
@@ -850,7 +850,7 @@
                               "type": "string",
                               "maxLength": 4000
                             },
-                            "description": "Environment variables; values may be templates of non-secret values or secretref: references"
+                            "description": "Environment variables; values may be templates of non-secret values or secretref:workflow/<name> references"
                           }
                         },
                         "required": [
@@ -891,7 +891,7 @@
                               "type": "string",
                               "maxLength": 4000
                             },
-                            "description": "Request headers; secret values must be secretref: references"
+                            "description": "Request headers; secret values must be secretref:workflow/<name> references"
                           },
                           "bodyTemplate": {
                             "type": "string",
@@ -2078,7 +2078,7 @@
                                     "type": "string",
                                     "maxLength": 4000
                                   },
-                                  "description": "Environment; templates of non-secret values or secretref: references. STAGE_OUTPUT is always set"
+                                  "description": "Environment; templates of non-secret values or secretref:workflow/<name> references. STAGE_OUTPUT is always set"
                                 },
                                 "timeoutMs": {
                                   "type": "integer",
@@ -2575,7 +2575,7 @@
                         "additionalProperties": {
                           "type": "string",
                           "maxLength": 100000,
-                          "description": "Value: a template of non-secret values, or a secretref: reference"
+                          "description": "Value: a template of non-secret values, or a secretref:workflow/<name> reference"
                         },
                         "description": "Environment variables: the ONLY place templated values reach the command"
                       },
