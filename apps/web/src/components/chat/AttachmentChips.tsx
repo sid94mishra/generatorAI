@@ -13,18 +13,9 @@ import { Paperclip, Image as ImageIcon, Download } from 'lucide-react';
 import type { ChatMessage } from '@generatorai/shared';
 import { ImageHoverPreview, isPreviewableImage } from '@/components/shared/ImageHoverPreview.js';
 import { cn } from '@/lib/utils.js';
+import { attachmentUrl } from '@/lib/attachmentUrl.js';
 
 type Attachment = NonNullable<ChatMessage['attachments']>[number];
-
-/** URL the web can fetch an attachment from, or `null` when it has none. */
-export function attachmentUrl(att: Attachment, chatId: string | undefined): string | null {
-  if (att.artifactId && chatId) {
-    return `/api/chats/${encodeURIComponent(chatId)}/attachments/${encodeURIComponent(att.artifactId)}`;
-  }
-  // Legacy rows carry a URL-ish path (or a disk path, which is not fetchable).
-  if (/^(https?:)?\//.test(att.path) && !/^[A-Za-z]:\\/.test(att.path)) return att.path;
-  return null;
-}
 
 export function AttachmentChips({
   attachments,

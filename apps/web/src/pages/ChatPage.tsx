@@ -6,31 +6,17 @@
 // ChatInput) but connects to the v2 chat endpoints and SSE streams.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useEffect, useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import { useParams, useNavigate } from 'react-router';
-import { useChat, useChatMessages, useSendChatPrompt, useUpdateChat, useCancelChat, useBackgroundTasks, useHarnessConfig } from '@/hooks/queries.js';
-import { useModels } from '@/hooks/harnessQueries.js';
+import { useChat } from '@/hooks/queries.js';
 import { ChatChangesTray } from '@/components/chat/ChatChangesTray.js';
 import { LiveActivityStrip, useRunningBackgroundTaskCount } from '@/components/agent/LiveActivityStrip.js';
-import { PathRootsContext, toDisplayPath, type PathRoot } from '@/blocks/changes/changePaths.js';
-import { useWorkspaceInfo, usePrepareChatWorkspace } from '@/hooks/sourceQueries.js';
-import { useEditorTarget } from '@/stores/editorTargetStore.js';
+import { PathRootsContext } from '@/blocks/changes/changePaths.js';
 import { EditSourcesDialog } from '@/components/chat/sources/EditSourcesDialog.js';
 import { providerLabel } from '@/components/shared/ModelPicker.js';
-// PLN-01 — plan mode
-import { useDecidePlan, useAnswerQuestion, useAnswerPermission, usePendingInteractions } from '@/hooks/queries.js';
 import { PlanDocumentPanel } from '@/components/chat/PlanDocumentPanel.js';
-import type { AgentMode, ChatMessage } from '@generatorai/shared';
-import { DEFAULT_AGENT_MODE } from '@generatorai/shared';
-import { protectStream, useStreamStore } from '@/stores/streamStore.js';
-import { useChatStore } from '@/stores/chatStore.js';
-import { useRewindStore } from '@/stores/rewindStore.js';
-import { useStickToBottom } from '@/hooks/useStickToBottom.js';
-import { useTwoPhaseStop } from '@/hooks/useTwoPhaseStop.js';
-import { applyStopEffects } from '@/pages/chatStopEffects.js';
-import { useComputerUseSettings } from '@/hooks/composerQueries.js';
-import { usePlatform } from '@/providers/PlatformProvider.js';
-import { connectChatSession } from '@/stores/sseManager.js';
+import type { ChatMessage } from '@generatorai/shared';
+import { useStreamStore } from '@/stores/streamStore.js';
 import { AgentConsole } from '@/components/chat/AgentConsole.js';
 import { ThinkingPlaceholder } from '@/components/chat/ThinkingPlaceholder.js';
 import { ChatMessageList } from '@/components/chat/ChatMessageList.js';
@@ -38,27 +24,26 @@ import { StreamingMessage } from '@/components/chat/StreamingMessage.js';
 import { awaitsUserDecision } from '@/components/agent/deriveTimeline.js';
 import { ChatInput } from '@/components/chat/ChatInput.js';
 import type { ComposerAttachment } from '@/components/chat/composer/types.js';
-import type { PromptHistoryEntry } from '@/components/chat/composer/promptHistory.js';
-import { attachmentUrl } from '@/components/chat/AttachmentChips.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
 import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
 import { ChatMessageSkeleton } from '@/components/Skeleton.js';
 import { RightPane, useRightPaneOpen, type RightPaneTabDef } from '@/components/layout/RightPane.js';
-import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
-import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { WidgetHost } from '@/components/widgets/WidgetHost.js';
-import { widgetTabId, parseWidgetTabId } from '@/components/widgets/widgetTabId.js';
+import { parseWidgetTabId } from '@/lib/widgetTabId.js';
 import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
 import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList, PauseCircle, MonitorCog, GitFork } from 'lucide-react';
-import { openMultiplexedStream } from '@/platform/muxStream.js';
 import {
   addableRightPaneTabs as addableRightPaneTabsFor,
   defaultRightPaneTab,
 } from '@/platform/surfaceCapabilities.js';
-import { cn } from '@/lib/utils.js';
-import { usePageTitle } from '@/hooks/usePageTitle.js';
 import { Button } from '@/components/ui/index.js';
+import {
+  CHAT_DOCK_OPEN_KEY,
+  CHAT_DOCK_TAB_CAPS,
+  CHAT_DOCK_WIDTH_KEY,
+  useChatView,
+} from '@/features/chat/index.js';
 
 // Right-pane-only surfaces, code-split out of the chat route chunk. They pull
 // in the two heaviest dependency trees in the app (xterm + its WebGL addon;
@@ -209,204 +194,70 @@ const AgentShellPanel = React.memo(function AgentShellPanel({
 export function ChatPage() {
   const { id: chatId } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const platform = usePlatform();
 
-  const { data: chat, isLoading: chatLoading, error: chatError } = useChat(chatId);
+  // Unified right side pane — tabs (Changes / Browser / …) are managed inside
+  // RightPane; here we only track whether the pane is open.
+  const [rightPaneOpen, setRightPaneOpen, toggleRightPane] = useRightPaneOpen(CHAT_DOCK_OPEN_KEY, false);
+  const view = useChatView({
+    chatId,
+    dockOpen: rightPaneOpen,
+    setDockOpen: setRightPaneOpen,
+    toggleDock: toggleRightPane,
+  });
+  const { chat, sessionId, workspace, stream, transcript, gates, stopRewind, dock } = view;
+  const {
+    isStreaming,
+    isPending,
+    isWorking: isCopilotWorking,
+    turnUserMessage,
+    pendingUserMessage,
+    hasNewTurnContent,
+    showStreamingMessage,
+    prevUsageRef,
+  } = stream;
+  const {
+    messages,
+    messagesLoading,
+    hasMoreMessages,
+    loadEarlier,
+    displayMessages,
+    promptHistory,
+    showOptimisticUserMessage,
+    scrollRef,
+    showJumpToLatest,
+    jumpToLatest,
+  } = transcript;
+  const { stop, canRewind, restoredDraft } = stopRewind;
+  const isChatActive = view.chatActive;
+  const isInputDisabled = isCopilotWorking;
+  const activeHarnessLabel = workspace.harnessProvider ? providerLabel(workspace.harnessProvider) : null;
 
-  usePageTitle(chat?.name);
-  // The empty-state used to name Copilot unconditionally, which is simply
-  // wrong for a self-hosted install running HARNESS_TYPE=claude-agent — it
-  // told the user they were talking to a provider they had not configured.
-  const { data: harnessConfig } = useHarnessConfig();
-  const { data: catalogModels } = useModels();
-  // The chat's MODEL decides the provider (a `sonnet` chat runs on the Claude
-  // agent even when the server's primary harness is Copilot), so the label
-  // follows the model's provider and only falls back to the server default.
-  const chatModelProvider = chat?.model
-    ? catalogModels?.find((m) => m.id === chat.model)?.provider
-    : undefined;
-  const activeHarnessLabel = chatModelProvider
-    ? providerLabel(chatModelProvider)
-    : harnessConfig?.harness?.type
-      ? providerLabel(harnessConfig.harness.type)
-      : null;
-  // P0-48 fix: pagination — start with the most recent PAGE_SIZE messages.
-  // The "Load more" button increases the limit incrementally so the user can
-  // page back through history without fetching the entire corpus at once.
-  const PAGE_SIZE = 100;
-  const [msgLimit, setMsgLimit] = useState(PAGE_SIZE);
-  const { data: messages, isLoading: messagesLoading } = useChatMessages(chatId, msgLimit);
-  // F3 fix: use `> msgLimit - 1` (equivalent to `>=`) is still a false positive
-  // when exactly msgLimit messages exist. Use `=== msgLimit` instead, which is
-  // true only when the server filled the page — if fewer arrived, there are no
-  // more. This still wastes one round-trip when the total count is a multiple
-  // of PAGE_SIZE, but eliminates the infinite "Load earlier" loop for exact counts.
-  const hasMoreMessages = (messages?.length ?? 0) === msgLimit;
-
-  // The stream store is keyed by sessionId (not chatId).
-  //
-  // W-render — this used to subscribe to the WHOLE per-session record, whose
-  // identity is replaced on every streamed token, which re-rendered this
-  // entire page ~60x/second during a turn. Each selector below returns a
-  // PRIMITIVE (or a value — like `usage` — that only changes when it
-  // genuinely should), so Zustand's default equality check skips the
-  // re-render unless that specific field actually changed. The live,
-  // per-token content (`blocks`, `text`) is read only inside `LiveTranscript`
-  // and `AgentShellPanel` — small leaf components that re-render on every
-  // token so the rest of the page does not have to.
-  const sessionId = chat?.sessionId;
-  const streamStatus = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.status : undefined));
-  const hasStream = useStreamStore((state) => !!sessionId && state.streams[sessionId] != null);
-  const turnUserMessage = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.turnUserMessage : undefined)) ?? null;
-  const pendingUserMessage = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.pendingUserMessage : undefined)) ?? null;
-  const serverTurnId = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.serverTurnId : undefined)) ?? null;
-  const blocksLength = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.blocks.length ?? 0 : 0));
-  const stoppedByUser = useStreamStore((state) => (sessionId ? state.streams[sessionId]?.cancelRequested ?? false : false));
-  const hasNewTurnContent = useStreamStore((state) => {
-    if (!sessionId) return false;
-    const s = state.streams[sessionId];
-    return s != null && s.blocks.some((b) => b.type !== 'widget');
-  });
-  // Widgets keep the transcript "active" even once the turn itself is idle —
-  // the LLM may have rendered one in an earlier turn and it stays live.
-  const hasActiveWidgetBlock = useStreamStore((state) => {
-    if (!sessionId) return false;
-    const s = state.streams[sessionId];
-    return s != null && s.blocks.some((b) => b.type === 'widget' && b.surface === 'inline' && b.status !== 'closed');
-  });
-  // A settled commit / PR / conflict card lives only in the stream and
-  // survives the transcript cleanup; it must keep the transcript visible.
-  const hasScmResultBlock = useStreamStore((state) => {
-    if (!sessionId) return false;
-    const s = state.streams[sessionId];
-    return s != null && s.blocks.some((b) => b.type === 'scm_result');
-  });
+  // The turn is parked on a gate: the agent is idle and the ball is with the
+  // user, so every "generating" affordance must stand down.
   const awaitingUserDecision = useStreamStore((state) =>
     awaitsUserDecision(sessionId ? state.streams[sessionId]?.blocks : undefined),
   );
-  const awaitingPlanId = useStreamStore((state) => {
-    const blocks = sessionId ? state.streams[sessionId]?.blocks : undefined;
-    if (!blocks) return null;
-    for (let i = blocks.length - 1; i >= 0; i -= 1) {
-      const b = blocks[i];
-      if (b?.type === 'plan' && b.status === 'awaiting_review') return b.planId;
-    }
-    return null;
-  });
-  const lastStreamUsage = useStreamStore((state) => {
-    if (!sessionId) return null;
-    const s = state.streams[sessionId];
-    return s?.status === 'complete' ? (s.usage ?? null) : null;
-  });
-  /**
-   * Lightweight proxies for "a block relevant to THIS effect changed" — text
-   * tokens never touch question/plan/permission/full-page-widget blocks, so
-   * these stay referentially idle during ordinary streaming even though the
-   * underlying `blocks` array is replaced every token.
-   */
-  const interactionBlocksKey = useStreamStore((state) => {
-    const blocks = sessionId ? state.streams[sessionId]?.blocks : undefined;
-    if (!blocks) return '';
-    let key = '';
-    for (const b of blocks) {
-      if (b.type === 'question') key += `|q:${b.interactionId}:${b.status}`;
-      else if (b.type === 'permission') key += `|p:${b.interactionId}:${b.status}`;
-      else if (b.type === 'plan') key += `|pl:${b.planId}:${b.status}:${b.interactionId ?? ''}`;
-    }
-    return key;
-  });
-  const widgetSurfaceKey = useStreamStore((state) => {
-    const blocks = sessionId ? state.streams[sessionId]?.blocks : undefined;
-    if (!blocks) return '';
-    let key = '';
-    for (const b of blocks) {
-      if (b.type === 'widget' && b.surface === 'widget') key += `|${b.instanceId}:${b.status}`;
-    }
-    return key;
-  });
-  const widgetTitlesKey = useStreamStore((state) => {
-    const blocks = sessionId ? state.streams[sessionId]?.blocks : undefined;
-    if (!blocks) return '';
-    let key = '';
-    for (const b of blocks) {
-      if (b.type === 'widget') key += `|${b.instanceId}:${b.title ?? ''}:${b.component}`;
-    }
-    return key;
-  });
-  // The stream record is LRU-bounded; exempt the transcript that is on screen
-  // so a busy workflow run streaming twenty stages cannot evict the chat the
-  // user is actually reading.
-  React.useEffect(() => {
-    if (!sessionId) return;
-    return protectStream(sessionId);
-  }, [sessionId]);
-  const sendChatMutation = useSendChatPrompt(chatId ?? '');
-  const updateChatMutation = useUpdateChat(chatId ?? '');
-  const cancelMutation = useCancelChat();
 
-
-  // Model selection, git repos (local paths), and codebase selection state.
-  // Starts empty rather than at a hardcoded id: the composer resolves an
-  // empty selection to the first model the account actually has, whereas a
-  // stale literal (the old `claude-sonnet-4`) matches nothing in the live
-  // catalog and hides every model-derived control.
-  const [selectedModel, setSelectedModel] = useState<string>(chat?.model ?? '');
-  const [reasoningEffort, setReasoningEffort] = useState<string | undefined>(chat?.harnessConfig?.reasoningEffort);
-  const [contextTier, setContextTier] = useState<string | undefined>(chat?.harnessConfig?.contextTier);
-  const [gitRepositories, setGitRepositories] = useState<Array<{ url: string; branch: string; alias: string }>>([]);
-  const [selectedCodebaseIds, setSelectedCodebaseIds] = useState<string[]>(chat?.codebaseIds ?? []);
-  // Unified right side pane — tabs (Changes / Browser / …) are managed
-  // inside RightPane; here we only track whether the pane is open.
-  const [rightPaneOpen, setRightPaneOpen, toggleRightPane] = useRightPaneOpen('generatorai:rightPane:chat', false);
-  // Bridge the pane toggle up to the global Header's side-pane icon.
-  const setRightPaneController = useRightPaneStore((s) => s.setController);
-  useEffect(() => {
-    setRightPaneController({ open: rightPaneOpen, toggle: toggleRightPane });
-    return () => setRightPaneController(null);
-  }, [rightPaneOpen, toggleRightPane, setRightPaneController]);
   // Pending browser/terminal captures — previewed in the composer and attached
   // to the next chat send.
   const [pendingCaptures, setPendingCaptures] = useState<ComposerAttachment[]>([]);
-  /**
-   * Imperative "focus this tab" token — bumped when the server emits a
-   * `browser.session_created` event so the pane pops the Browser tab
-   * open automatically (Phase 2 of the built-in browser tools plan).
-   * Combined with `visibility === 'visible'` from BrowserConfig this
-   * gives users the "watch the agent live" UX with zero clicks.
-   */
-  const [browserTabFocusRequest, setBrowserTabFocusRequest] = useState<{ type: string; token: number; tabId?: string } | null>(null);
-  // React Router reuses this component across /chats/:id, so a focus request
-  // minted for the previous conversation would otherwise open that tab in the
-  // next one (e.g. Background Tasks following you into a worker chat).
-  useEffect(() => {
-    setBrowserTabFocusRequest(null);
-    setBgTabAutoOpened(false);
-  }, [chatId]);
   // Per-instance browser tab state (keyed by the RightPane tab id) so each
   // "Browser" tab renders its own live title + favicon + spinner.
   const [browserTabs, setBrowserTabs] = useState<Record<string, BrowserTabState>>({});
-  // Right-pane tabs are scoped to THIS chat, so opening three browser tabs in
-  // one conversation no longer leaks them into every other conversation.
-  const rightPaneStorageKey = `generatorai:rightPane:chat:${chatId ?? 'unknown'}`;
-  // Namespace for each browser tab's remembered URL (see `browserTabUrls`).
-  const browserUrlScopeKey = `chat:${chatId ?? 'unknown'}`;
-  // Files tab + per-file tabs. Opening a file expands the pane first, so the
-  // gesture works even when the user has it collapsed. Declared before the
-  // close handler because that handler has to forget this tab's selection.
-  // Workspace preparation — the composer's Send is held back while mounts are
-  // still being created, and the error state offers the two ways out.
-  const prepareWorkspace = usePrepareChatWorkspace(chatId);
   const [editingSources, setEditingSources] = useState(false);
 
+  // Files tab + per-file tabs. Opening a file expands the pane first, so the
+  // gesture works even when the user has it collapsed.
   const fileTabs = useFileTabs({
     workspaceId: chat?.workspaceId,
-    requestFocus: setBrowserTabFocusRequest,
+    requestFocus: dock.requestFocus,
     openPane: () => setRightPaneOpen(true),
     onEditSources: () => setEditingSources(true),
   });
 
   // Closing a tab for good drops whatever that tab remembered.
   const forgetFileTab = fileTabs.forgetTab;
+  const forgetBrowserTab = dock.forgetBrowserTab;
   const handleRightPaneTabClose = useCallback(
     (tab: { id: string; type: string }) => {
       if (tab.type === 'files') {
@@ -414,7 +265,7 @@ export function ChatPage() {
         return;
       }
       if (tab.type !== 'browser') return;
-      clearBrowserTabUrl(browserUrlScopeKey, tab.id);
+      forgetBrowserTab(tab.id);
       setBrowserTabs((prev) => {
         if (!(tab.id in prev)) return prev;
         const next = { ...prev };
@@ -422,674 +273,32 @@ export function ChatPage() {
         return next;
       });
     },
-    [browserUrlScopeKey, forgetFileTab],
+    [forgetBrowserTab, forgetFileTab],
   );
 
-  // Orchestrator mode — poll for spawned background tasks. Enabled only for
-  // orchestrator chats. When the first task appears, pop the Background Tasks
-  // tab automatically so the user sees the delegation happen.
-  const isOrchestrator = !!chat?.orchestratorMode;
-  // The Computer tab is only offered when desktop automation is actually on —
-  // otherwise it is a tab that can never show anything.
-  const computerUseEnabled = useComputerUseSettings().data?.enabled === true;
+  const isOrchestrator = view.isOrchestrator;
   // W29 — the panel list is a ledger decision, not a literal. A surface that
   // declares it cannot render the browser or computer live view must not be
   // offered a tab for it; see `platform/surfaceCapabilities.ts`.
   const addableRightPaneTabs = useMemo(
-    () => addableRightPaneTabsFor({ computerUseEnabled, isOrchestrator }),
-    [computerUseEnabled, isOrchestrator],
+    () => addableRightPaneTabsFor({ computerUseEnabled: view.computerUseEnabled, isOrchestrator }),
+    [view.computerUseEnabled, isOrchestrator],
   );
-  const { data: backgroundTasksData } = useBackgroundTasks(chatId, isOrchestrator);
-  const backgroundTaskCount = backgroundTasksData?.tasks?.length ?? 0;
   /** Workers running or waiting to start — the tab's live count badge. */
   const runningTaskCount = useRunningBackgroundTaskCount(sessionId);
-  const [bgTabAutoOpened, setBgTabAutoOpened] = useState(false);
-  useEffect(() => {
-    if (isOrchestrator && backgroundTaskCount > 0 && !bgTabAutoOpened) {
-      setBgTabAutoOpened(true);
-      setRightPaneOpen(true);
-      setBrowserTabFocusRequest({ type: 'background_tasks', token: Date.now() });
-    }
-  }, [isOrchestrator, backgroundTaskCount, bgTabAutoOpened, setRightPaneOpen]);
 
-  // ══════════════════════════════════════════════════════════════
-  // PLN-01 — plan mode
-  // ══════════════════════════════════════════════════════════════
-
-  // Sticky per-chat default, overridable per turn from the composer.
-  const [agentMode, setAgentMode] = useState<AgentMode>(DEFAULT_AGENT_MODE);
-  useEffect(() => {
-    if (chat?.defaultAgentMode) setAgentMode(chat.defaultAgentMode);
-  }, [chat?.defaultAgentMode]);
-
-  const [activePlanId, setActivePlanId] = useState<string | null>(null);
-  const [planTabAutoOpenedFor, setPlanTabAutoOpenedFor] = useState<string | null>(null);
-
-  const decidePlan = useDecidePlan(chatId ?? '');
-  const answerQuestion = useAnswerQuestion(chatId ?? '');
-  const answerPermission = useAnswerPermission(chatId ?? '');
-  // The blocking promise lives server-side, so polling rehydrates the gate
-  // after a reload even when the SSE replay window has moved on.
-  const { data: pendingInteractions, dataUpdatedAt: pendingFetchedAt } = usePendingInteractions(
-    chatId,
-    chat?.status === 'active',
-  );
-  const pendingGate = pendingInteractions?.[0];
-
-  const openPlanTab = useCallback(
-    (planId: string) => {
-      setActivePlanId(planId);
-      setRightPaneOpen(true);
-      setBrowserTabFocusRequest({ type: 'plan', token: Date.now() });
-    },
-    [setRightPaneOpen],
-  );
-
-  // The chat's mounts — the authority for naming a changed file (which mount
-  // it belongs to, and what the chat calls that mount). Falls back to the
-  // legacy local-folder list for chats created before mounts existed.
-  const { data: workspaceInfo } = useWorkspaceInfo(chat?.workspaceId);
-  const workspaceMounts = workspaceInfo?.mounts;
-
-  // The top bar's "Open in editor" opens the chat's PRIMARY mount — the
-  // directory the agent has as its cwd — not the workspace scratch root,
-  // which is where state files live and nothing the user wants to edit.
-  const primaryMountPath = useMemo(() => {
-    const live = (workspaceMounts ?? []).filter((m) => m.status !== 'removed');
-    const sorted = [...live].sort((a, b) => a.position - b.position);
-    return sorted[0]?.path ?? workspaceInfo?.workingDirectory;
-  }, [workspaceMounts, workspaceInfo?.workingDirectory]);
-  useEditorTarget(primaryMountPath, chat?.name ?? 'Chat');
-  const legacyFolders = chat?.gitRepositories;
-  const pathRoots = useMemo<PathRoot[]>(() => {
-    const mounts = (workspaceMounts ?? []).filter((m) => m.status !== 'removed');
-    if (mounts.length > 0) return mounts.map((m) => ({ alias: m.alias, path: m.path }));
-    return (legacyFolders ?? []).map((r) => r.url).filter((u): u is string => !!u);
-  }, [workspaceMounts, legacyFolders]);
-
-
-  // Per-op diff icons, the end-of-turn summary card and the composer tray all
-  // land here. With a path, the Changes tab opens focused on that file.
-  const [changesFocusFile, setChangesFocusFile] = useState<{ path: string; token: number } | null>(null);
-  const openChangesTab = useCallback(
-    (filePath?: string) => {
-      setRightPaneOpen(true);
-      const token = Date.now();
-      setBrowserTabFocusRequest({ type: 'changes', token });
-      if (filePath) setChangesFocusFile({ path: toDisplayPath(filePath, pathRoots), token });
-    },
-    [setRightPaneOpen, pathRoots],
-  );
-
-  /** Which agent shell command the Terminal tab's console is focused on. */
-  const [agentConsoleCallId, setAgentConsoleCallId] = useState<string | null>(null);
-  const openAgentShell = useCallback(
-    (callId: string) => {
-      setAgentConsoleCallId(callId);
-      setRightPaneOpen(true);
-      setBrowserTabFocusRequest({ type: 'terminal', token: Date.now() });
-    },
-    [setRightPaneOpen],
-  );
-
-  // Auto-open the Plan tab the first time a plan asks for review — but only
-  // when the tab is actually visible, matching the browser-tab guard.
-  // (`awaitingPlanId` is one of the narrow stream selectors declared above.)
-  useEffect(() => {
-    if (!awaitingPlanId || planTabAutoOpenedFor === awaitingPlanId) return;
-    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') return;
-    setPlanTabAutoOpenedFor(awaitingPlanId);
-    openPlanTab(awaitingPlanId);
-  }, [awaitingPlanId, planTabAutoOpenedFor, openPlanTab]);
-
-  // Card decisions are applied to the store OPTIMISTICALLY.
-  //
-  // Two reasons: instant feedback, and it closes a race — the pending-gate
-  // poll can observe the resolved gate before the `chat.plan.decided` /
-  // `chat.question.answered` SSE event lands, and the reconciliation effect
-  // below would then wrongly mark the card expired.
-  const handleApprovePlan = useCallback(
-    (planId: string, action: 'implement_interactive' | 'implement_autopilot') => {
-      if (sessionId) {
-        useStreamStore.getState().setPlanStatus(sessionId, planId, 'approved');
-      }
-      decidePlan.mutate({ planId, approved: true, action });
-    },
-    [decidePlan, sessionId],
-  );
-
-  const handleRequestPlanChanges = useCallback(
-    (planId: string, feedback: string) => {
-      if (sessionId) {
-        useStreamStore.getState().setPlanStatus(sessionId, planId, 'changes_requested');
-      }
-      decidePlan.mutate({ planId, approved: false, feedback });
-    },
-    [decidePlan, sessionId],
-  );
-
-  const handleAnswerQuestion = useCallback(
-    (interactionId: string, answers: Record<string, string[]>, freeformResponse?: string) => {
-      if (sessionId) {
-        useStreamStore.getState().answerQuestion(sessionId, interactionId, answers, freeformResponse);
-      }
-      answerQuestion.mutate({
-        interactionId,
-        answers,
-        ...(freeformResponse ? { freeformResponse } : {}),
-      });
-    },
-    [answerQuestion, sessionId],
-  );
-
-  const handleAnswerPermission = useCallback(
-    (interactionId: string, behavior: 'allow' | 'deny', message?: string) => {
-      if (sessionId) {
-        useStreamStore.getState().resolvePermission(sessionId, interactionId, behavior, message);
-      }
-      answerPermission.mutate({
-        interactionId,
-        behavior,
-        ...(message ? { message } : {}),
-      });
-    },
-    [answerPermission, sessionId],
-  );
-
-  /** Human-readable reason the composer is blocked, if it is. */
-  const pendingInteractionLabel = useMemo(() => {
-    if (!pendingGate) return null;
-    if (pendingGate.kind === 'plan_review') {
-      return 'Waiting on your plan review before the agent can continue.';
-    }
-    if (pendingGate.kind === 'tool_permission') {
-      return 'The agent is waiting for you to allow or deny a tool call.';
-    }
-    return 'The agent is waiting for your answer.';
-  }, [pendingGate]);
-
-  // Reconcile optimistic card state against the server's pending gates.
-  //
-  // A card is rendered "pending" from a live SSE event, but the gate can die
-  // server-side without the client hearing about it — a server restart expires
-  // every in-flight chat gate, and the event can also fall outside the replay
-  // window. Without this, the card would sit on "pending" forever and the
-  // user's answer would come back 409. The pending list is authoritative.
-  //
-  // It is only authoritative about gates that already existed when it was
-  // fetched, though: the list polls on an interval, so a card opened by SSE
-  // moments ago is legitimately absent from the last response. Comparing the
-  // card's `openedAt` with the poll's fetch time keeps a stale poll from
-  // instantly killing a live gate.
-  useEffect(() => {
-    if (!sessionId || pendingInteractions === undefined) return;
-    const live = new Set(pendingInteractions.map((i) => i.interactionId));
-    const store = useStreamStore.getState();
-    const isStale = (openedAt: number | undefined) =>
-      openedAt !== undefined && openedAt > pendingFetchedAt;
-    for (const block of store.streams[sessionId]?.blocks ?? []) {
-      if (
-        block.type === 'question' &&
-        block.status === 'pending' &&
-        !live.has(block.interactionId) &&
-        !isStale(block.openedAt)
-      ) {
-        store.expireQuestion(sessionId, block.interactionId);
-      }
-      if (
-        block.type === 'plan' &&
-        block.status === 'awaiting_review' &&
-        block.interactionId &&
-        !live.has(block.interactionId) &&
-        !isStale(block.openedAt)
-      ) {
-        store.setPlanStatus(sessionId, block.planId, 'expired');
-      }
-      if (
-        block.type === 'permission' &&
-        block.status === 'pending' &&
-        !live.has(block.interactionId) &&
-        !isStale(block.openedAt)
-      ) {
-        store.expirePermission(sessionId, block.interactionId);
-      }
-    }
-  }, [sessionId, pendingInteractions, pendingFetchedAt, interactionBlocksKey]);
-
-  // ── Split-pane resize state for chat ↔ right pane ────────────
-  // The width itself is owned by `RightPane` via `useResizablePane`.
-
-  // Sync model and codebaseIds from loaded chat entity
-  useEffect(() => {
-    if (chat?.model) {
-      setSelectedModel(chat.model);
-    }
-    if (chat?.harnessConfig?.reasoningEffort) {
-      setReasoningEffort(chat.harnessConfig.reasoningEffort);
-    }
-    if (chat?.harnessConfig?.contextTier) {
-      setContextTier(chat.harnessConfig.contextTier);
-    }
-    if (chat?.codebaseIds !== undefined) {
-      setSelectedCodebaseIds(chat.codebaseIds);
-    }
-    if (chat?.gitRepositories?.length) {
-      setGitRepositories(chat.gitRepositories.map(r => ({ url: r.url, branch: '', alias: r.alias })));
-    }
-  }, [chat?.model, chat?.harnessConfig?.reasoningEffort, chat?.harnessConfig?.contextTier, chat?.codebaseIds, chat?.gitRepositories]);
-
-  // The chat entity is authoritative until the user picks something else.
-  // `selectedModel` is only synced in an effect, and React runs the composer's
-  // effects before this page's, so reading it directly would hand ChatInput an
-  // empty selection for one commit — long enough for its catalog fallback to
-  // fire and persist the wrong model over the one the chat was created with.
-  const effectiveModel = selectedModel || chat?.model || '';
-
-  // Persist model changes to server
-  const handleModelChange = useCallback((model: string) => {
-    if (!chat) return;
-    setSelectedModel(model);
-    updateChatMutation.mutate({ model });
-  }, [chat, updateChatMutation]);
-
-  // Persist reasoning-effort changes into harnessConfig (merged with existing)
-  const handleReasoningEffortChange = useCallback((effort: string) => {
-    setReasoningEffort(effort);
-    updateChatMutation.mutate({
-      harnessConfig: { ...(chat?.harnessConfig ?? {}), reasoningEffort: effort },
-    });
-  }, [updateChatMutation, chat?.harnessConfig]);
-
-  // Persist context-tier changes into harnessConfig (merged with existing)
-  const handleContextTierChange = useCallback((tier: string) => {
-    setContextTier(tier);
-    updateChatMutation.mutate({
-      harnessConfig: { ...(chat?.harnessConfig ?? {}), contextTier: tier },
-    });
-  }, [updateChatMutation, chat?.harnessConfig]);
-
-  // Connect SSE (depends on stable primitives only to avoid reconnection churn)
-  useEffect(() => {
-    if (!chatId || !sessionId) return;
-    const disconnect = connectChatSession(chatId, sessionId, platform);
-    return () => {
-      disconnect();
-    };
-  }, [chatId, sessionId, platform]);
-
-  // Register chat entity in chatStore cache (can re-run on data updates)
-  useEffect(() => {
-    if (chat && sessionId) {
-      useChatStore.getState().registerChat(chat.id, sessionId, chat);
-    }
-  }, [chat, sessionId]);
-
-  // Set active chat in store
-  useEffect(() => {
-    if (chatId) {
-      useChatStore.getState().setActiveChatId(chatId);
-    }
-    return () => {
-      useChatStore.getState().setActiveChatId(null);
-    };
-  }, [chatId]);
-
-  // Phase 2 of built-in browser tools — auto-open the Browser tab in
-  // the right pane when the workspace signals `browser.session_created`
-  // AND the config says the user wants to watch (`visibility: 'visible'`
-  // OR the legacy `enabled: true` without visibility set which we treat
-  // as opt-in). We subscribe to the unified SSE stream scoped to
-  // `browser:<workspaceId>` — same channel `BrowserPanel` uses for its
-  // reactive updates, but here we react at the page level to change the
-  // right-pane state before the user opens it.
-  const chatWorkspaceId = chat?.workspaceId;
-  useEffect(() => {
-    if (!chatWorkspaceId) return;
-    let cancelled = false;
-    // 1) On-mount probe — chat creation may have already fired
-    //    `browser.session_created` before we subscribed, so query the
-    //    descriptor once. If visibility === 'visible' and the session is
-    //    active, pop the Browser tab.
-    void fetch(`/api/workspaces/${chatWorkspaceId}/browser/descriptor`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((desc: { ready?: boolean; config?: { visibility?: string } } | null) => {
-        if (cancelled || !desc?.ready) return;
-        if (desc.config?.visibility === 'visible') {
-          setRightPaneOpen(true);
-          setBrowserTabFocusRequest({ type: 'browser', token: Date.now() });
-        }
-      })
-      .catch(() => undefined);
-    // 2) Live SSE — for sessions that flip to active *after* the page
-    //    mounts (e.g. LLM calls open_browser_page lazily).
-    const es = openMultiplexedStream(
-      'session',
-      `browser:${chatWorkspaceId}`,
-      {
-        onMessage: (e) => {
-          if (cancelled) return;
-          try {
-            const payload = JSON.parse(e.data) as { kind?: string };
-            if (payload.kind !== 'browser.session_created') return;
-            // Fetch fresh descriptor to check visibility policy before opening.
-            void fetch(`/api/workspaces/${chatWorkspaceId}/browser/descriptor`)
-              .then((r) => (r.ok ? r.json() : null))
-              .then((desc: { config?: { visibility?: string } } | null) => {
-                if (cancelled || !desc) return;
-                // Open when visibility is 'visible' OR unset (backwards compat).
-                const v = desc.config?.visibility;
-                if (v === 'visible' || v === undefined) {
-                  setRightPaneOpen(true);
-                  setBrowserTabFocusRequest({ type: 'browser', token: Date.now() });
-                }
-              })
-              .catch(() => undefined);
-          } catch { /* ignore */ }
-        },
-      },
-      ['browser.session_created'],
-    );
-    return () => {
-      cancelled = true;
-      try { es.close(); } catch { /* noop */ }
-    };
-  }, [chatWorkspaceId, setRightPaneOpen]);
-
-  // Computer Use — pop the Computer tab open when the agent starts driving the
-  // desktop, and unconditionally when it asks for consent. A consent prompt
-  // that renders inside a tab nobody has open is the same as no prompt at all:
-  // it expires into a denial while the user watches an idle chat.
-  useEffect(() => {
-    if (!chatWorkspaceId || !computerUseEnabled) return;
-    let cancelled = false;
-    const es = openMultiplexedStream(
-      'session',
-      `computer:${chatWorkspaceId}`,
-      {
-        onMessage: (e) => {
-          if (cancelled) return;
-          try {
-            const frame = JSON.parse(e.data) as { kind?: string };
-            if (
-              frame.kind !== 'computer.session_started' &&
-              frame.kind !== 'computer.consent_required'
-            ) {
-              return;
-            }
-            setRightPaneOpen(true);
-            setBrowserTabFocusRequest({ type: 'computer', token: Date.now() });
-          } catch { /* ignore */ }
-        },
-      },
-      ['computer.'],
-    );
-    return () => {
-      cancelled = true;
-      try { es.close(); } catch { /* noop */ }
-    };
-  }, [chatWorkspaceId, computerUseEnabled, setRightPaneOpen]);
-
-  // Auto-open a tab per full-page widget. The tab id encodes the instance, so
-  // a second widget gets its OWN tab instead of re-focusing the first one's,
-  // and re-rendering the same widget focuses the tab already showing it.
-  const seenCanvasWidgetsRef = React.useRef<Set<string>>(new Set());
-  useEffect(() => {
-    // Triggered by `widgetSurfaceKey` (a cheap instanceId:status signature)
-    // rather than the live `stream`, so this effect only re-runs when a
-    // full-page widget block actually appears/changes status — not on every
-    // streamed token. The actual blocks are read fresh from the store here.
-    if (!sessionId) return;
-    const blocks = useStreamStore.getState().streams[sessionId]?.blocks ?? [];
-    for (const b of blocks) {
-      if (b.type !== 'widget') continue;
-      if (b.surface !== 'widget') continue;
-      if (b.status === 'closed') continue;
-      if (seenCanvasWidgetsRef.current.has(b.instanceId)) continue;
-      seenCanvasWidgetsRef.current.add(b.instanceId);
-      setRightPaneOpen(true);
-      setBrowserTabFocusRequest({
-        type: 'widget',
-        token: Date.now(),
-        tabId: widgetTabId(b.instanceId),
-      });
-    }
-  }, [sessionId, widgetSurfaceKey, setRightPaneOpen]);
-
-  const openWidgetTab = useCallback(
-    (instanceId: string) => {
-      setRightPaneOpen(true);
-      setBrowserTabFocusRequest({ type: 'widget', token: Date.now(), tabId: widgetTabId(instanceId) });
-    },
-    [setRightPaneOpen],
-  );
-
-  // Stream state — derived from the narrow selectors declared above, not a
-  // full `stream` object, so these stay stable across most streamed tokens.
-  const isStreaming = streamStatus === 'streaming' || streamStatus === 'thinking';
-  const isPending = streamStatus === 'pending';
-  const isCopilotWorking = isStreaming || isPending;
-  const isInputDisabled = isStreaming || isPending;
-  const isChatActive = chat?.status === 'active';
-
-  /**
-   * A rewind hands the prompt back so it can be edited and resent.
-   *
-   * The offer is parked in `rewindStore` by whichever path performed the
-   * rewind (this tab's own request, or a `chat.rewound` event from another
-   * surface) and consumed exactly once here, then forwarded to the composer.
-   * Nothing is auto-sent: re-running the turn would make the destructive
-   * option unreviewable.
-   */
-  const pendingRewindPrompt = useRewindStore((s) => s.pending);
-  const [restoredDraft, setRestoredDraft] = useState<{ text: string; at: number } | null>(null);
-  useEffect(() => {
-    if (!pendingRewindPrompt || pendingRewindPrompt.chatId !== chatId) return;
-    setRestoredDraft({ text: pendingRewindPrompt.prompt, at: pendingRewindPrompt.at });
-    useRewindStore.getState().clear();
-  }, [pendingRewindPrompt, chatId]);
-
-  // A turn in flight is refused by the server (409 CHAT_BUSY), and an
-  // archived chat cannot be moved at all — so the control says so rather
-  // than letting the user find out by pressing it.
-  const canRewind = isChatActive && !isCopilotWorking;
-
-  /**
-   * W30-b — two-phase Stop.
-   *
-   * `isLive` is the BACKEND's view: `stream.status` is driven entirely by the
-   * event stream, so a turn the server has settled returns the control to idle
-   * even when the cancel request itself got no response, and a turn the server
-   * is still running keeps offering escalation regardless of how many times
-   * the button was pressed. That is the fourth rule of W30-b, and it is why
-   * this is not a local `hasPressedStop` boolean.
-   *
-   * `requestCancel` latches the stream out of its live statuses so the events
-   * still draining out of the provider cannot flip it back to `streaming` —
-   * without it the button reappears mid-abort and the click reads as a no-op.
-   * The blocks are KEPT: stopping is how you say "that is enough, let me read
-   * it", and the auto-clear effect swaps them for the persisted message once
-   * the history refetch lands.
-   */
-  const stop = useTwoPhaseStop({
-    isLive: isCopilotWorking,
-    onCancel: ({ force, budgetSeconds }) => {
-      if (!chatId) return;
-      applyStopEffects(useStreamStore.getState(), sessionId, force);
-      // The controller's verdict reaches the server: a forced second press
-      // tears the provider conversation down, not just the abort again.
-      cancelMutation.mutate({ chatId, force, budgetSeconds });
-    },
-  });
-
-  // The turn is parked on a gate: the agent is idle and the ball is with the
-  // user, so every "generating" affordance must stand down.
-  // (`awaitingUserDecision` is one of the narrow stream selectors above.)
-
-  // W30: Track the previous completed turn's usage for the cache-miss notice.
-  // When a turn transitions to 'complete', capture its usage in a ref so the
-  // NEXT turn's UsageChip can compare against it.
-  const prevUsageRef = React.useRef<{ usage: UsageInfo; completedAt: number } | null>(null);
-  React.useEffect(() => {
-    if (streamStatus === 'complete' && lastStreamUsage) {
-      prevUsageRef.current = {
-        usage: {
-          model: lastStreamUsage.model,
-          inputTokens: lastStreamUsage.inputTokens,
-          outputTokens: lastStreamUsage.outputTokens,
-          durationMs: lastStreamUsage.durationMs ?? 0,
-          cacheReadTokens: lastStreamUsage.cacheReadTokens,
-          cacheWriteTokens: lastStreamUsage.cacheWriteTokens,
-          cost: lastStreamUsage.cost,
-          provider: lastStreamUsage.provider,
-        },
-        completedAt: Date.now(),
-      };
-    }
-  }, [lastStreamUsage, streamStatus]);
-
-  // Whether the current turn has produced its OWN content yet (text / tool
-  // steps / answer) — i.e. anything other than blocks carried across the
-  // turn barrier (widgets are preserved from previous turns by startPending).
-  // Used to gate the pending spinner: a follow-up prompt in a widget chat
-  // still has carried widget blocks, which must NOT suppress the "thinking"
-  // indicator, otherwise the user sees no feedback after sending.
-  // (`hasNewTurnContent` is one of the narrow stream selectors above.)
-
-  // Whether the transcript has anything to show right now — gates both the
-  // empty state below and whether `<LiveTranscript>` renders anything.
-  const showStreamingMessage =
-    hasStream &&
-    (blocksLength > 0 || stoppedByUser) &&
-    (streamStatus !== 'idle' || hasActiveWidgetBlock || hasScmResultBlock);
-
-  // Display messages dedup (same logic as ChatView)
-  const isInActiveTurn = hasStream && streamStatus !== 'idle' && !!turnUserMessage;
-
-  const displayMessages = useMemo(() => {
-    if (!messages?.length) return messages ?? [];
-    if (!isInActiveTurn) return messages;
-
-    // Hide the persisted copy of the message this turn is streaming, so it
-    // isn't rendered twice (the optimistic bubble already shows it).
-    //
-    // Prefer the server-generated turnId (WEB-02): it identifies the current
-    // turn's messages exactly. Content matching cannot — if the user repeats a
-    // prompt they sent earlier, the scan lands on the OLDER copy and slicing
-    // there hides every message after it, so the conversation appears to
-    // vanish until the turn ends and this dedup switches off.
-    if (serverTurnId) {
-      const idx = messages.findIndex(
-        (m) => m.role === 'user'
-          && (m as { metadata?: { turnId?: string } }).metadata?.turnId === serverTurnId,
-      );
-      return idx >= 0 ? messages.slice(0, idx) : messages;
-    }
-
-    const targetContent = turnUserMessage?.trim();
-
-    if (targetContent) {
-      // No turnId yet. Only dedup when the match is the very LAST message —
-      // that can only be the copy just persisted for this turn. A match
-      // anywhere earlier is an identical older prompt and must be left alone.
-      const lastIdx = messages.length - 1;
-      const last = messages[lastIdx];
-      if (last?.role === 'user' && last.content?.trim() === targetContent) {
-        return messages.slice(0, lastIdx);
-      }
-      return messages;
-    }
-
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]?.role === 'user') {
-        return messages.slice(0, i + 1);
-      }
-    }
-
-    return messages;
-  }, [messages, isInActiveTurn, turnUserMessage, serverTurnId]);
-
-  // ↑ / ↓ prompt history for the composer — every prompt the human typed in
-  // this chat (widget- and system-originated user rows are not "theirs").
-  const promptHistory = useMemo<PromptHistoryEntry[]>(() => {
-    const out: PromptHistoryEntry[] = [];
-    for (const m of messages ?? []) {
-      if (m.role !== 'user') continue;
-      const origin = m.metadata?.origin;
-      if (origin === 'widget' || origin === 'system') continue;
-      if (!m.content?.trim() && !(m.attachments?.length)) continue;
-      out.push({
-        id: m.id,
-        text: m.content,
-        ts: new Date(m.timestamp).getTime(),
-        attachments: (m.attachments ?? []).flatMap((a) => {
-          const url = attachmentUrl(a, m.chatId ?? chatId);
-          return url ? [{ name: a.name, mimeType: a.mimeType, url }] : [];
-        }),
-      });
-    }
-    return out;
-  }, [messages, chatId]);
-
-  // Optimistic user message
-  const showOptimisticUserMessage = useMemo(
-    () => !!turnUserMessage && streamStatus !== 'idle',
-    [turnUserMessage, streamStatus],
-  );
-
-  // Stick-to-bottom: auto-follow while pinned near the bottom; surface a
-  // "jump to latest" pill when the user scrolls up to read mid-stream.
-  //
-  // `useStickToBottom` re-binds on this signature and then follows content
-  // growth itself via a `ResizeObserver` on the scrolled element — so the
-  // signature only needs to change on message-count/block-count/status
-  // boundaries, NOT on every streamed token (`stream.text` grows every
-  // token; deliberately left out here).
-  const scrollSignature = `${displayMessages.length}:${blocksLength}:${streamStatus ?? ''}`;
-  const { ref: scrollRef, showJumpToLatest, jumpToLatest } = useStickToBottom(scrollSignature);
-
-  // Auto-clear completed stream once chatMessages catches up. Only matters at
-  // the turn-complete boundary, so this is keyed off `streamStatus` (a
-  // primitive) and reads the live blocks/turnUserMessage from a fresh
-  // snapshot rather than subscribing to them reactively.
-  useEffect(() => {
-    if (streamStatus !== 'complete' || !sessionId) return;
-    if (!messages?.length) return;
-
-    const current = useStreamStore.getState().streams[sessionId];
-    if (!current || current.status !== 'complete') return;
-
-    // Preserve stream state when it holds widget blocks — widgets live only
-    // in the event stream (not in chat history), so clearing here would
-    // drop the inline widget iframes the LLM rendered during the turn.
-    const hasWidgetBlocks = current.blocks.some((b) => b.type === 'widget');
-    // Likewise for orchestrator workers still running: their rows exist only
-    // in the stream (rebuilt by replay after a reload) and they outlive the
-    // turn that spawned them, so the history catching up is not a reason to
-    // drop them — `clearStream` would keep the blocks but leave the stream
-    // `idle`, which is the one status the transcript does not render.
-    const hasLiveWorkers = current.blocks.some(
-      (b) => b.type === 'background_task' && (b.status === 'running' || b.status === 'spawned'),
-    );
-    if (hasWidgetBlocks || hasLiveWorkers) return;
-
-    const turnMsg = current.turnUserMessage?.trim();
-    if (!turnMsg) {
-      useStreamStore.getState().clearStream(sessionId);
-      return;
-    }
-
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if (messages[i]?.role === 'user' && messages[i]?.content?.trim() === turnMsg) {
-        for (let j = i + 1; j < messages.length; j++) {
-          if (messages[j]?.role === 'assistant') {
-            useStreamStore.getState().clearStream(sessionId);
-            return;
-          }
-        }
-        return;
-      }
-    }
-  }, [streamStatus, messages, sessionId]);
+  const {
+    activePlanId,
+    openPlanTab,
+    changesFocusFile,
+    openChangesTab,
+    agentConsoleCallId,
+    openAgentShell,
+    closeAgentShell,
+    openWidgetTab,
+    browserUrlScopeKey,
+  } = dock;
+  const widgetTitlesKey = stream.widgetTitlesKey;
 
   // Right-pane tabs — memoised so a token frame (which changes `stream`,
   // deliberately excluded from these deps) does not rebuild all ~10 panel
@@ -1141,7 +350,7 @@ export function ChatPage() {
         description: 'Integrated browser for this chat',
         icon: <BrowserTabIcon state={null} />,
         allowMultiple: true,
-        maxInstances: 5,
+        maxInstances: CHAT_DOCK_TAB_CAPS.browser,
         getTabLabel: ({ id, index }) => {
           const t = (browserTabs[id]?.title ?? '').trim();
           return t || (index <= 1 ? 'Browser' : `Browser ${index}`);
@@ -1197,7 +406,7 @@ export function ChatPage() {
         // ~16 per page before evicting the oldest, at which point earlier
         // terminals silently stop painting. Also one PTY per tab on the
         // host. 4 is above any observed real use of parallel shells.
-        maxInstances: 4,
+        maxInstances: CHAT_DOCK_TAB_CAPS.terminal,
         disabled: !chat?.workspaceId,
         disabledReason: 'No workspace for this chat',
         render: (ctx) => (
@@ -1207,7 +416,7 @@ export function ChatPage() {
                 sessionId={sessionId}
                 messages={messages}
                 callId={agentConsoleCallId}
-                onClose={() => setAgentConsoleCallId(null)}
+                onClose={closeAgentShell}
               />
             ) : (
               <TerminalPanel
@@ -1245,7 +454,7 @@ export function ChatPage() {
         // One tab per widget instance — several widgets in one chat must
         // not compete for a single surface.
         allowMultiple: true,
-        maxInstances: 6,
+        maxInstances: CHAT_DOCK_TAB_CAPS.widget,
         disabled: !sessionId,
         disabledReason: 'Start the chat to enable widgets',
         getTabLabel: ({ id }) => {
@@ -1307,7 +516,7 @@ export function ChatPage() {
     setPendingCaptures,
     isCopilotWorking,
     agentConsoleCallId,
-    setAgentConsoleCallId,
+    closeAgentShell,
     messages,
     isOrchestrator,
     runningTaskCount,
@@ -1327,11 +536,11 @@ export function ChatPage() {
   // nothing else. Waiting on the message page too made the input box appear
   // only after the slower of two round trips — the transcript now streams in
   // under its own skeleton while the rest of the page is already interactive.
-  if (chatLoading) {
+  if (workspace.chatLoading) {
     return <ChatMessageSkeleton />;
   }
 
-  if (chatError || !chat) {
+  if (workspace.chatError || !chat) {
     return (
       <div className="flex h-full flex-col items-center justify-center gap-3">
         <p className="text-sm text-[var(--color-destructive)]">Chat not found</p>
@@ -1346,7 +555,7 @@ export function ChatPage() {
   }
 
   return (
-    <PathRootsContext.Provider value={pathRoots}>
+    <PathRootsContext.Provider value={workspace.pathRoots}>
     <div className="relative flex h-full">
       {/* Main chat column */}
       <div className="flex flex-1 flex-col min-w-0">
@@ -1399,7 +608,7 @@ export function ChatPage() {
           <div className="mb-4 flex justify-center">
             <Button variant="unstyled"
               type="button"
-              onClick={() => setMsgLimit((prev) => prev + PAGE_SIZE)}
+              onClick={loadEarlier}
               className="rounded-md border border-[var(--color-border)] bg-[var(--color-card)] px-4 py-1.5 text-xs text-[var(--color-muted-foreground)] transition hover:bg-[var(--color-subtle)] hover:text-[var(--color-foreground)]"
             >
               Load earlier messages
@@ -1450,11 +659,11 @@ export function ChatPage() {
             onOpenShell={openAgentShell}
             workspaceId={chat?.workspaceId}
             chatId={chatId}
-            onApprovePlan={handleApprovePlan}
-            onRequestPlanChanges={handleRequestPlanChanges}
-            onAnswerQuestion={handleAnswerQuestion}
-            onAnswerPermission={handleAnswerPermission}
-            planBusy={decidePlan.isPending || answerQuestion.isPending || answerPermission.isPending}
+            onApprovePlan={gates.approvePlan}
+            onRequestPlanChanges={gates.requestPlanChanges}
+            onAnswerQuestion={gates.answerQuestion}
+            onAnswerPermission={gates.answerPermission}
+            planBusy={gates.decisionBusy}
           />
         )}
 
@@ -1503,19 +712,19 @@ export function ChatPage() {
             sessionId={sessionId}
             disabled={isInputDisabled}
             placeholder={isInputDisabled ? 'Waiting for response...' : 'What feature are you dreaming up?'}
-            selectedModel={effectiveModel}
-            onModelChange={handleModelChange}
-            reasoningEffort={reasoningEffort}
-            onReasoningEffortChange={handleReasoningEffortChange}
-            contextTier={contextTier}
-            onContextTierChange={handleContextTierChange}
-            gitRepositories={gitRepositories}
+            selectedModel={workspace.effectiveModel}
+            onModelChange={workspace.changeModel}
+            reasoningEffort={workspace.reasoningEffort}
+            onReasoningEffortChange={workspace.changeReasoningEffort}
+            contextTier={workspace.contextTier}
+            onContextTierChange={workspace.changeContextTier}
+            gitRepositories={workspace.gitRepositories}
             projectId={chat?.projectId}
-            codebaseIds={selectedCodebaseIds}
+            codebaseIds={workspace.selectedCodebaseIds}
             workspaceId={chat?.workspaceId}
             {...(chat?.workspacePrep ? { workspacePrep: chat.workspacePrep } : {})}
-            onRetryWorkspacePrep={() => prepareWorkspace.mutate()}
-            workspacePrepRetrying={prepareWorkspace.isPending}
+            onRetryWorkspacePrep={workspace.retryWorkspacePrep}
+            workspacePrepRetrying={workspace.workspacePrepRetrying}
             onEditSources={() => setEditingSources(true)}
             showModelSelector={true}
             showGitConnector={true}
@@ -1526,68 +735,33 @@ export function ChatPage() {
             promptHistory={promptHistory}
             {...(restoredDraft ? { restoredDraft } : {})}
             onRemovePendingCapture={(id) => setPendingCaptures((prev) => prev.filter((c) => c.id !== id))}
-            onBuiltinCommand={async (commandId) => {
-              const wsId = chat?.workspaceId;
-              if (commandId === 'builtin:browser') {
-                // Start the integrated browser in VISIBLE mode so the panel
-                // opens and the user watches the agent drive it. The agent's
-                // subsequent lazy `open_browser_page` reuses this session, so
-                // it stays visible instead of running headless. Then focus the
-                // Browser tab.
-                if (wsId) {
-                  try {
-                    await fetch(`/api/workspaces/${wsId}/browser/start`, {
-                      method: 'POST',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ config: { enabled: true, visibility: 'visible' } }),
-                    });
-                  } catch {
-                    /* non-fatal — the agent still lazy-starts (headless) */
-                  }
-                }
-                setRightPaneOpen(true);
-                setBrowserTabFocusRequest({ type: 'browser', token: Date.now() });
-              } else if (commandId === 'builtin:terminal') {
-                // Surface the integrated terminal so the user can watch the
-                // agent run commands live.
-                setRightPaneOpen(true);
-                setBrowserTabFocusRequest({ type: 'terminal', token: Date.now() });
-              }
-            }}
+            onBuiltinCommand={dock.runBuiltinCommand}
             stopState={stop}
             onStop={stop.press}
             customSendFn={async ({ prompt, attachments, mode }) => {
               const mergedAttachments = pendingCaptures.length
                 ? [...attachments, ...pendingCaptures.map((c) => c.file)]
               : attachments;
-            await sendChatMutation.mutateAsync({
+            await view.sendPrompt({
               prompt,
               attachments: mergedAttachments,
               ...(mode ? { mode } : {}),
             });
             if (pendingCaptures.length) setPendingCaptures([]);
           }}
-          agentMode={agentMode}
+          agentMode={gates.agentMode}
           onAgentModeChange={(mode) => {
-            setAgentMode(mode);
+            gates.setAgentMode(mode);
             // Persist as the chat's sticky default, matching how the model and
             // reasoning-effort pickers behave.
-            if (chatId) updateChatMutation.mutate({ defaultAgentMode: mode });
+            workspace.persistAgentMode(mode);
           }}
           showAgentModePicker={!chat?.parentChatId}
           {...(chat?.agentSnapshot?.driving?.name
             ? { agentName: chat.agentSnapshot.driving.name }
             : {})}
-          pendingInteractionLabel={pendingInteractionLabel}
-          onCancelPendingInteraction={() => {
-            if (!chatId) return;
-            if (sessionId) {
-              const store = useStreamStore.getState();
-              store.clearStream(sessionId);
-              store.requestCancel(sessionId);
-            }
-            cancelMutation.mutate(chatId);
-          }}
+          pendingInteractionLabel={gates.pendingInteractionLabel}
+          onCancelPendingInteraction={stopRewind.cancelPendingInteraction}
           aboveComposer={
             <>
               {/* Workers outlive the orchestrator's turn: keep the strip up while any run. */}
@@ -1609,11 +783,11 @@ export function ChatPage() {
       <RightPane
         open={rightPaneOpen}
         onOpenChange={setRightPaneOpen}
-        storageKey={rightPaneStorageKey}
-        widthStorageKey="generatorai:rightPane:chat:width"
+        storageKey={dock.dockStorageKey}
+        widthStorageKey={CHAT_DOCK_WIDTH_KEY}
         defaultTabType={defaultRightPaneTab()}
         addableTabTypes={addableRightPaneTabs}
-        focusTabRequest={browserTabFocusRequest}
+        focusTabRequest={dock.focusRequest}
         onTabClose={handleRightPaneTabClose}
         tabs={tabs}
       />

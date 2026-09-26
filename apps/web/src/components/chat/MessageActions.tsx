@@ -19,9 +19,7 @@ import { copyTextToClipboard } from '@/utils/copyToClipboard.js';
 import { useNavigate } from 'react-router';
 import { Copy, GitFork } from 'lucide-react';
 import { toast } from '@/components/Toast.js';
-import { fetchChatTranscript, useForkChat } from '@/hooks/queries.js';
-import { usePlatform } from '@/providers/PlatformProvider.js';
-import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
+import { useFetchChatTranscript, useForkChat } from '@/hooks/queries.js';
 import { ApiError } from '@/platform/apiFetch.js';
 import { Button, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
@@ -47,14 +45,14 @@ const BUTTON_CLASS =
 
 export function MessageActions({ chatId, turnId, alwaysVisible, className }: MessageActionsProps) {
   const navigate = useNavigate();
-  const platform = usePlatform() as HttpPlatformClient;
+  const fetchTranscript = useFetchChatTranscript();
   const fork = useForkChat(chatId);
   const [copying, setCopying] = useState(false);
 
   const copyTranscript = useCallback(async () => {
     setCopying(true);
     try {
-      const { markdown } = await fetchChatTranscript(platform, chatId);
+      const { markdown } = await fetchTranscript(chatId);
       await copyTextToClipboard(markdown);
       toast({ variant: 'success', title: 'Transcript copied' });
     } catch (error) {
@@ -67,7 +65,7 @@ export function MessageActions({ chatId, turnId, alwaysVisible, className }: Mes
     } finally {
       setCopying(false);
     }
-  }, [chatId, platform]);
+  }, [chatId, fetchTranscript]);
 
   const forkFromHere = useCallback(() => {
     fork.mutate(

@@ -2,6 +2,7 @@
 // TanStack Query hooks — sessions, workflows, chat, templates, artifacts
 // ────────────────────────────────────────────────────────────────
 
+import { useCallback } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import type { BackgroundTaskListItem, CreateSessionParams, CreateChatParams } from '@generatorai/shared';
@@ -876,19 +877,22 @@ export function useForkChat(chatId: string, workspaceId?: string) {
 /**
  * The whole transcript, for "Copy transcript".
  *
- * Deliberately not a hook: it is fetched on click (an export is never worth a
- * standing subscription) and rendered through client-core's shared markdown
- * formatter so web and mobile produce the same document.
+ * Returns a fetcher rather than a query: it is fetched on click (an export is
+ * never worth a standing subscription) and rendered through client-core's
+ * shared markdown formatter so web and mobile produce the same document.
  */
-export async function fetchChatTranscript(
-  platform: HttpPlatformClient,
-  chatId: string,
-): Promise<{ name: string; markdown: string }> {
-  const transcript = await platform.getChatTranscript(chatId);
-  return {
-    name: transcript.name,
-    markdown: formatTranscriptMarkdown(transcript.name, transcript.messages),
-  };
+export function useFetchChatTranscript() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useCallback(
+    async (chatId: string): Promise<{ name: string; markdown: string }> => {
+      const transcript = await platform.getChatTranscript(chatId);
+      return {
+        name: transcript.name,
+        markdown: formatTranscriptMarkdown(transcript.name, transcript.messages),
+      };
+    },
+    [platform],
+  );
 }
 
 // ── PLN-01: plan mode ──

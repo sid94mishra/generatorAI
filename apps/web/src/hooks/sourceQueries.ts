@@ -8,6 +8,7 @@
 // sseManager), so a worktree finishing preparation refreshes every surface
 // that renders a mount without any polling.
 
+import { useCallback } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { ChatSourceSpec } from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
@@ -50,16 +51,38 @@ export function useFsDirs(path: string | null) {
   });
 }
 
+const fsGitInfoKey = (path: string) => ['fs-git-info', path] as const;
+
 /** Branches / dirty state / nested repos for a folder the user picked. */
 export function useFsGitInfo(path: string | undefined) {
   const platform = usePlatform() as HttpPlatformClient;
   return useQuery<FsGitInfo>({
-    queryKey: ['fs-git-info', path ?? ''],
+    queryKey: fsGitInfoKey(path ?? ''),
     queryFn: () => platform.getFsGitInfo(path!),
     enabled: !!path,
     staleTime: 30_000,
     retry: false,
   });
+}
+
+/**
+ * The same git facts, read on demand — for a picker that must know them
+ * BEFORE it adds the folder (the answer decides what the new row may do).
+ * Shares `useFsGitInfo`'s cache entry.
+ */
+export function useReadFsGitInfo() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useCallback(
+    (path: string) =>
+      queryClient.fetchQuery<FsGitInfo>({
+        queryKey: fsGitInfoKey(path),
+        queryFn: () => platform.getFsGitInfo(path),
+        staleTime: 30_000,
+        retry: false,
+      }),
+    [platform, queryClient],
+  );
 }
 
 /** `PUT /api/chats/:id/sources` — replace the mount plan of an idle chat. */

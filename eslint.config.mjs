@@ -348,6 +348,14 @@ export default [
             { from: { element: { type: 'platform' } }, allow: toTypes('platform', 'data') },
             // Migration scaffolding; deleted in P7.
             { from: { element: { type: 'legacy' } }, allow: toTypes('legacy', 'ui', 'blocks', 'data', 'platform') },
+            // Migration scaffolding; removed in P4-12. P4-04 extracted the chat
+            // page's controller into features/chat (useChatView, 04 §0) while
+            // the page itself is still the legacy view; P4-12 moves the page
+            // into features/chat and this edge disappears.
+            {
+              from: { element: { type: 'legacy' }, file: { path: ['apps/web/src/pages/ChatPage.tsx'] } },
+              allow: { to: { element: { type: 'features', captured: { domain: 'chat' } } } },
+            },
             // `root` too: each loose file is its own element, and main.tsx imports App.tsx.
             { from: { element: { type: 'root' } }, allow: toTypes('root', 'app', 'ui', 'data', 'platform', 'legacy', 'styles') },
           ],

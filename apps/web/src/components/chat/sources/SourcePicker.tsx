@@ -27,9 +27,7 @@ import {
 } from 'lucide-react';
 import { Badge, Button, Checkbox, Input, Select, Spinner, Tooltip } from '@/components/ui/index.js';
 import { useProjects, useProjectCodebases, useCodebaseBranches } from '@/hooks/projectQueries.js';
-import { usePlatform } from '@/providers/PlatformProvider.js';
-import type { HttpPlatformClient } from '@/platform/HttpPlatformClient.js';
-import { useFsGitInfo } from '@/hooks/sourceQueries.js';
+import { useFsGitInfo, useReadFsGitInfo } from '@/hooks/sourceQueries.js';
 import { cn } from '@/lib/utils.js';
 import { DirectoryBrowser } from './DirectoryBrowser.js';
 import {
@@ -71,7 +69,7 @@ export function SourcePicker({
   disabled = false,
   maxSources = 8,
 }: SourcePickerProps) {
-  const platform = usePlatform() as HttpPlatformClient;
+  const readGitInfo = useReadFsGitInfo();
   const { data: projects } = useProjects();
   const { data: codebases, isLoading: codebasesLoading } = useProjectCodebases(projectId || undefined);
   const [browserOpen, setBrowserOpen] = useState(false);
@@ -146,7 +144,7 @@ export function SourcePicker({
       if (atLimit) return;
       let info;
       try {
-        info = await platform.getFsGitInfo(path);
+        info = await readGitInfo(path);
       } catch {
         info = undefined;
       }
@@ -160,7 +158,7 @@ export function SourcePicker({
       onChange(next);
       if (next.length === 1) onPrimaryChange(draft.alias);
     },
-    [atLimit, platform, takenAliases, drafts, onChange, onPrimaryChange],
+    [atLimit, readGitInfo, takenAliases, drafts, onChange, onPrimaryChange],
   );
 
   const selectedCodebaseIds = useMemo(
