@@ -254,6 +254,23 @@ Commits: 21393c6 (v60), a55a1bf (WP-6.1 core with 6.2–6.5 wiring), a569934, 52
 | PD-14 | Agent-authored workflows are drafts; a person publishes (`GENERATORAI_ALLOW_AGENT_PUBLISH` for agents, default off) | 52e5497, 966e114 | `isPersonRequest`, agent-draft banner |
 | PD-23 | Workflow tools opt-in for plain chats, on for orchestrators, off for workers | a55a1bf | composer, `createChat`, resolver |
 
+## Phase 07 closure (2026-09-26, review deferred to the final review)
+
+Commits: 3a93d7f (WP-7.1), f78ac16 (WP-7.2), 6cae36b + 1ead2c0 (WP-7.3), 12d815c (WP-7.4), 92449d5 (WP-7.5), af70b6d (WP-7.6), 0b6c23b (WP-7.7), 39aed2d (no-legacy bans), 6ebfac0; merged into `wf/overhaul` in ff6e4b6. Tests for these items are deferred to the final pass (notes/P07-report.md §5).
+
+| ID | Closed by | Evidence |
+|---|---|---|
+| W-49 (rest) | 3a93d7f | summary policy (auto = no turn for short outputs; llm off the critical path), read-only stage hint, lock-free checkpoint skip; 16.6 ms/stage bench |
+| W-66 (rest) | f78ac16 | stage launches admitted on flow keys only; the provider turn permit is the `provider:claude-agent` flow key; `GENERATORAI_MAX_CONCURRENT_AGENT_TURNS` banned |
+| W-42 | 92449d5 | accepted, measured: 2.00 rows per event on T1 (≤ 2.2) |
+| F O-1 | 3a93d7f | clean-checkout checkpoint skip outside the lock |
+| F O-2 | f78ac16, af70b6d | the 4-turn cap is a visible, configurable flow key; the run page names it |
+| F O-3 | 3a93d7f | no summary turn under auto unless needed |
+| F O-4 | 12d815c | decision latency metric (observability; the gaps were already small) |
+| F O-5 | — | attempt history was kept since P03 (`stage_attempts`); per-attempt `invoke_agent` spans and the stage history tab show it |
+| F O-6 | 3a93d7f | no file-placement rules for read-only stages |
+| D §f gaps | af70b6d | per-node history, raw event log, inline validation, `{{` autocomplete, version history, run search/filters, usage roll-up, "Add stage" menu (no palette). Still open (backlog/P08): run diff, dry-run a stage, re-run from node is P05 |
+
 ## Independent review findings
 
 All 44 findings (RV-1..RV-44) are dispositioned in `REVIEW-LOG.md`. Accepted findings are implemented in the WPs cited there. The coding agent verifies each accepted RV item in the phase PR that implements it.
