@@ -825,7 +825,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `equality` | Strict: '3' == 3 is false (and a type error at save time) |
 | `arithmetic` | None; use functions |
 | `keywords` | Lower case: and, or, not, in, true, false, null |
-| `bounds` | Lists of at most 10,000 elements; 100,000 evaluation steps per expression |
+| `bounds` | Lists of at most 10,000 elements; values of at most 1 MB; 1,000,000 work units per expression (steps, produced elements, compared values) |
 
 ### Roots
 
