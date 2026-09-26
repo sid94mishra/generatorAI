@@ -23,7 +23,9 @@ export interface GaiRouteHandle {
   /** Page name for PageErrorBoundary / Suspense and File ▸ Open Recent
    *  fallback labels. */
   title: string;
-  /** Sidebar nav destination this route belongs to, if any. */
+  /** Sidebar nav destination this route belongs to (P3's active-state source).
+   *  Set on every area route; Settings and the 404 have none. Must agree with
+   *  `navDestinationFor(path)` (tested). */
   nav?: NavDestinationId;
 }
 

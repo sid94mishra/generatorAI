@@ -17,6 +17,7 @@ import { _electron as electron } from 'playwright-core';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { isolatedProfile } from './helpers/desktop-profile.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const UNPACKED = path.resolve(__dirname, '..', 'apps', 'desktop', 'release', 'win-unpacked');
@@ -79,9 +80,12 @@ async function main() {
     'the tsc output would be dead weight and cannot run',
   );
 
+  // A fresh profile: never the installed app's real userData or vault key.
+  const profile = isolatedProfile('gai-packaged-smoke-');
+  process.on('exit', profile.cleanup);
   const app = await electron.launch({
     executablePath,
-    args: [],
+    args: [profile.arg],
     timeout: 180_000,
   });
 

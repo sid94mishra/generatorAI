@@ -279,6 +279,10 @@ export default [
       // Lazy route modules and barrel re-exports cross layers too.
       'boundaries/dependency-nodes': ['import', 'dynamic-import', 'export'],
       'boundaries/elements': [
+        // Storybook-only design-foundations showcase (D-04): not a kit folder.
+        // It may use ui/, and nothing may import it. Listed before `ui` so it
+        // matches first.
+        { type: 'foundations', pattern: 'apps/web/src/ui/foundations', partialMatch: false },
         { type: 'ui', pattern: 'apps/web/src/ui', partialMatch: false },
         { type: 'blocks', pattern: 'apps/web/src/blocks', partialMatch: false },
         { type: 'features', pattern: 'apps/web/src/features/*', partialMatch: false, capture: ['domain'] },
@@ -301,6 +305,8 @@ export default [
           default: 'disallow',
           policies: [
             { from: { element: { type: 'ui' } }, allow: toTypes('ui') },
+            // No policy allows any element INTO foundations.
+            { from: { element: { type: 'foundations' } }, allow: toTypes('ui', 'foundations') },
             { from: { element: { type: 'blocks' } }, allow: toTypes('ui', 'blocks', 'data', 'platform') },
             { from: { element: { type: 'features' } }, allow: toTypes('ui', 'blocks', 'data') },
             {

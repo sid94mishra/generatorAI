@@ -4,11 +4,19 @@
 // Not named *.spec.ts on purpose so the Playwright test runner does not auto-run it.
 
 import { _electron as electron } from '@playwright/test';
+import fs from 'node:fs';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
+import { DESKTOP_DIR as DESKTOP, isolatedProfile } from './helpers/desktop-profile.mjs';
 
-const OUT = process.env.OUT || '.';
-const DESKTOP = path.resolve(process.cwd(), '..', 'apps', 'desktop');
+// Both paths come from this file, not the cwd, so the smoke runs the same from
+// the repo root (09 §6.5) or from agent-tests/.
+const OUT = process.env.OUT || path.join(path.dirname(fileURLToPath(import.meta.url)), 'test-results', 'desktop-smoke');
+fs.mkdirSync(OUT, { recursive: true });
+// A fresh profile: never the developer's userData or vault key.
+const profile = isolatedProfile('gai-desktop-smoke-');
+process.on('exit', profile.cleanup);
 const requireFromDesktop = createRequire(path.join(DESKTOP, 'package.json'));
 const ELECTRON = requireFromDesktop('electron'); // resolves to the electron.exe path
 
@@ -21,7 +29,7 @@ const log = (...a) => console.log('[smoke]', ...a);
 
 const app = await electron.launch({
   executablePath: ELECTRON,
-  args: ['.'],
+  args: ['.', profile.arg],
   cwd: DESKTOP,
   env: { ...process.env, GENERATORAI_DESKTOP_MODE: 'standalone' },
   timeout: 60000,

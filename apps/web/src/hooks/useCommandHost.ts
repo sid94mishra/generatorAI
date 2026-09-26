@@ -7,10 +7,15 @@
 //            listener here: Electron delivers a menu accelerator AND the
 //            keydown, so handling both would run every command twice.
 //   web      one capture-phase keydown listener matches the registry's `web`
-//            bindings. Chords with Mod fire everywhere (Mod+K from inside the
-//            composer is intended); bare keys and sequences ('N', 'G C', '?')
-//            fire only when focus is not in an editable field, a combobox or a
-//            menu, and no dialog or palette is open.
+//            bindings, by rule (the same on every OS — `Mod` is Cmd on macOS
+//            and Ctrl elsewhere, and Ctrl+B / Ctrl+K are editing keys there):
+//            - inside a surface that owns every key (the xterm terminal, any
+//              element under `data-gai-keys="own"`) the host handles nothing;
+//            - in a text field, combobox or menu only chords flagged
+//              `firesInEditable` fire (Mod+K from the composer); every other
+//              chord, bare key and sequence is left to the field;
+//            - bare keys and sequences ('N', 'G C', '?') also wait while a
+//              dialog or palette is open.
 //
 // `HANDLERS` is a `Record<RendererCommandId, …>`, so adding a renderer command
 // to the registry without handling it here is a type error.
@@ -26,6 +31,7 @@ import {
   NAV_DESTINATIONS,
   RENDERER_COMMAND_IDS,
   createSequenceMatcher,
+  firesInEditable,
   isPlainKeyBinding,
   matchesChord,
   type RendererCommandId,
@@ -96,6 +102,18 @@ export function isTypingTarget(target: EventTarget | null): boolean {
   return target.closest('[role="combobox"], [role="listbox"], [role="menu"], [role="textbox"]') !== null;
 }
 
+/**
+ * Surfaces that own every key, chords included: the xterm terminal (readline's
+ * Ctrl+K / Ctrl+B, the tmux prefix) and code editors. Mark a new one with
+ * `data-gai-keys="own"` on its container.
+ */
+export const KEY_OWNER_SELECTOR = '.xterm, [data-gai-keys="own"]';
+
+/** Focus is inside a surface that owns every key (see KEY_OWNER_SELECTOR). */
+export function isKeyOwnerTarget(target: EventTarget | null): boolean {
+  return target instanceof Element && target.closest(KEY_OWNER_SELECTOR) !== null;
+}
+
 /** A dialog, sheet or palette is open (new kit overlays and legacy Radix dialogs). */
 export function modalOverlayOpen(doc: Document = document): boolean {
   return (
@@ -127,14 +145,21 @@ export function installWebKeyHandler(
 
   const onKeyDown = (e: KeyboardEvent) => {
     if (e.defaultPrevented || e.isComposing || e.repeat) return;
+    if (isKeyOwnerTarget(e.target)) {
+      plain.reset();
+      return;
+    }
+    const typing = isTypingTarget(e.target);
     const chord = chordBindings.find((b) => matchesChord(e, b.binding, options.mac));
     if (chord) {
       plain.reset();
+      // Not prevented: the field keeps its own meaning of the key.
+      if (typing && !firesInEditable(chord.id)) return;
       e.preventDefault();
       run(chord.id);
       return;
     }
-    if (isTypingTarget(e.target) || modalOverlayOpen(target.document)) {
+    if (typing || modalOverlayOpen(target.document)) {
       plain.reset();
       return;
     }

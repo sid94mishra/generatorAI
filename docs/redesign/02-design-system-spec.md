@@ -88,10 +88,10 @@ Let `fg = s.foreground`, `minText = theme.textContrast ?? 4.5`, `ap = appearance
 9. Status, for each `(state, hue)` in `run:blue, ok:green, warn:yellow, err:red`:
    - `<state>Bg` = `toHex(withAlpha(s.hues[hue], TINT.status[ap]))` (identical to legacy `infoMuted` / `successMuted` / `warningMuted` / `dangerMuted`);
    - `<state>` (glyph, dot, bar, stroke) = `ensureContrastAll(s.hues[hue], [ground, surface, raised, overlay], 3, fg)`;
-   - `<state>Text` (coloured words) = `ensureContrastAll(s.hues[hue], [flatten(bg, surface), flatten(bg, ground), flatten(bg, raised), ground, surface, raised, overlay], minText, fg)`.
+   - `<state>Text` (coloured words) = `ensureContrastAll(s.hues[hue], [flatten(bg, surface), flatten(bg, ground), flatten(bg, raised), ground, surface, raised, overlay, sunken], minText, fg)` (`sunken` because inputs sit on it).
 10. `addBg` = `toHex(withAlpha(s.hues.green, TINT.diff[ap]))`; `delBg` = same with `red`.
 11. `scrim` = `SCRIM[ap]`; `shadowPop` = `` `0 16px 40px ${SHADOW[ap]}, 0 0 0 1px ${toHex(withAlpha(fg, 6))}` ``.
-12. Accent: `accent` = `fg` for `ink`, else `a.primaryEmphasis`; `onAccent` = `surface` for `ink`, else `s.onAccent`; `focus` = `ensureContrastAll(accent, [ground, surface, raised, overlay], 3, fg)`.
+12. Accent: `accent` = `fg` for `ink`, else `a.primaryEmphasis`; `onAccent` = `surface` for `ink`, else `s.onAccent`; `focus` = `ensureContrastAll(accent, [ground, surface, raised, overlay, sunken], 3, fg)` (inputs sit on `sunken` and take the focus ring there).
 
 `DESIGN_COLOR_VARS: Array<[keyof DesignTokens, string]>` fixes the camelCase → CSS name mapping (`fg2 → --gai-fg-2`, `lineStrong → --gai-line-strong`, `runText → --gai-run-text`, `shadowPop → --gai-shadow-pop`, …).
 
@@ -724,10 +724,10 @@ Unlike today's script (`index.html:17-38`), it validates stored ids (a removed t
 
 ### 11.3 ThemeProvider (`apps/web/src/providers/ThemeProvider.tsx`)
 
-- Context adds `density`/`setDensity`, `fontSize`/`setFontSize`, `reduceMotion: 'system' | 'on'`/`setReduceMotion`, and `designTokens` (memoised `resolveDesignTokens(theme, resolvedTheme, accent)`, for canvases and xterm that need literals).
+- Context adds `density`/`setDensity`, `fontSize`/`setFontSize` and `reduceMotion: 'system' | 'on'`/`setReduceMotion`. (A `designTokens` context value for canvases and xterm was planned but not built: xterm takes `resolveTerminalPalette()` directly and canvases read CSS variables; add it only when a consumer needs `DesignTokens` literals.)
 - Effects (same one-attribute-per-effect pattern as `:135-155`): `data-density`, `data-font-size`, `data-motion` (`reduce` when `on` or the OS media query matches; subscribe to `(prefers-reduced-motion: reduce)` changes).
 - It remains the only DOM writer of these attributes. The native menu (`apps/desktop/src/main/menu.ts:380-389` `setTheme`) keeps sending the preference to the renderer, which applies it through `setMode`. It must stop writing `nativeTheme.themeSource` directly; main sets `themeSource` only in response to the renderer (via the chrome push below).
-- **Desktop background push:** after mount and whenever `themeId`, `resolvedTheme` or `accent` change (debounced 100 ms), call the guarded **`IPC.setAppearance`** with `{ mode, themeId, groundLight, groundDark, fgLight, fgDark }` computed by `chromeColors()` from the token package (hex literals for **both** appearances, never `getComputedStyle`). The IPC contract, validation schema (`SETTING_SCHEMAS.appearance`), `themeSource` mirroring and persistence are owned by `06-desktop-and-shell.md` §6.2–§6.4 — an earlier draft of this bullet used a `setChromeColors` channel; that name is superseded. Main calls `win.setBackgroundColor`, repaints the WCO symbol colour on Windows/Linux-custom, and `window-manager.ts:69-73` returns the persisted ground for the current appearance, else `CHROME_FALLBACK_COLORS[dark ? 'dark' : 'light'].background`.
+- **Desktop background push:** after mount and whenever `themeId`, `resolvedTheme` or `accent` change (debounced 50 ms, `DESKTOP_PUSH_DEBOUNCE_MS`; same as `06` §6.1), call the guarded **`IPC.setAppearance`** with `{ mode, themeId, groundLight, groundDark, fgLight, fgDark }` computed by `chromeColors()` from the token package (hex literals for **both** appearances, never `getComputedStyle`). The IPC contract, validation schema (`SETTING_SCHEMAS.appearance`), `themeSource` mirroring and persistence are owned by `06-desktop-and-shell.md` §6.2–§6.4 — an earlier draft of this bullet used a `setChromeColors` channel; that name is superseded. Main calls `win.setBackgroundColor`, repaints the WCO symbol colour on Windows/Linux-custom, and `window-manager.ts:69-73` returns the persisted ground for the current appearance, else `CHROME_FALLBACK_COLORS[dark ? 'dark' : 'light'].background`.
 
 ---
 
@@ -743,12 +743,13 @@ New file `design.test.ts`. `MATRIX7` = 18 themes × 2 appearances × 7 accents =
 | 4 | `line-strong` ≥ 3 on ground, surface, raised, overlay, sunken (checkbox, switch, input borders) | 36 |
 | 5 | `line` ≥ 1.2 on ground, surface, overlay (mirrors `tokens.test.ts:356-366`) | 36 |
 | 6 | `run/ok/warn/err` (hue) ≥ 3 on ground, surface, raised, overlay | 36 |
-| 7 | `run/ok/warn/err-text` ≥ `min` on `<state>-bg`∘surface, ∘ground, ∘raised, and on ground, surface, raised, overlay | 36 |
+| 7 | `run/ok/warn/err-text` ≥ `min` on `<state>-bg`∘surface, ∘ground, ∘raised, and on ground, surface, raised, overlay, sunken | 36 |
 | 8 | status hues distinguishable (reuse the metric at `tokens.test.ts:246-269`, pairs ok/err, ok/warn, warn/err, run/ok, run/err) on the **hue** tokens | 36 |
 | 9 | `on-accent` on `accent` ≥ 4.5 | **252** |
-| 10 | `focus` ≥ 3 on ground, surface, raised, overlay | **252** |
+| 10 | `focus` ≥ 3 on ground, surface, raised, overlay, sunken | **252** |
 | 11 | ink: `accent === fg`, `onAccent === surface`, `focus === fg` | 36 |
 | 12 | `fg` ≥ `min` on add-bg∘surface and del-bg∘surface | 36 |
+| 12b | dialogs: `overlay` is opaque (so row 1's overlay figure is what the reader sees over the scrim) and `scrim` is translucent and darkens `surface` | 36 |
 | 13 | High Contrast: 1 and 7 at 7:1 | 2 |
 | 14 | Instrument pins: ground/surface/raised/overlay/sunken/fg/fg-2 equal the board hexes; fg-3, line, line-strong, `*-text` equal the §2.3 values | 2 |
 | 15 | `CHROME_FALLBACK_COLORS` equals instrument ground/fg | 2 |

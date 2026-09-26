@@ -324,6 +324,11 @@ export class WindowManager {
       if (this.appUrl) this.createMainWindow(this.appUrl);
       return;
     }
+    WindowManager.reveal(win);
+  }
+
+  /** Restore a minimised window and bring it to the front (also shows one hidden to the tray). */
+  private static reveal(win: BrowserWindow): void {
     if (win.isMinimized()) win.restore();
     win.show();
     win.focus();
@@ -380,12 +385,20 @@ export class WindowManager {
          } catch (e) { window.location.assign(${safe}); } })();`,
       )
       .catch(() => undefined);
-    win.show();
-    win.focus();
+    WindowManager.reveal(win);
   }
 
+  /**
+   * Run a renderer command and bring the window forward. Every caller is a
+   * menu, accelerator, tray or dock action whose result the user must see:
+   * Settings…, New chat or the palette sent to a window that is minimised or
+   * hidden to the tray would open where nobody can see it (P1-R2).
+   */
   sendCommand(command: DesktopCommand): void {
-    this.mainWindow?.webContents.send(IPC_EVENT.command, command);
+    const win = this.mainWindow;
+    if (!win || win.isDestroyed()) return;
+    win.webContents.send(IPC_EVENT.command, command);
+    WindowManager.reveal(win);
   }
 
   /**

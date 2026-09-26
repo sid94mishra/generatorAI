@@ -529,6 +529,9 @@ test.describe('Stream spine', () => {
   test('the UI holds exactly one event stream open for the whole app', async ({ gotoApp, page }) => {
     // W26's acceptance criterion, observed from the client side: navigating
     // between pages must not accumulate one SSE connection per surface.
+    // The navigation is client-side (sidebar links), as a user moves around:
+    // a full reload starts a new document, which rightly opens its own stream,
+    // so reloads would count documents rather than the invariant.
     const streamRequests: string[] = [];
     page.on('request', (r) => {
       const url = r.url();
@@ -536,14 +539,29 @@ test.describe('Stream spine', () => {
     });
 
     await gotoApp('/');
+    // Marks this document; a full reload would drop it.
+    await page.evaluate(() => ((window as { __e2eOneDocument?: boolean }).__e2eOneDocument = true));
     await page.waitForTimeout(2500);
-    await gotoApp('/workflows');
-    await page.waitForTimeout(1500);
-    await gotoApp('/chats');
-    await page.waitForTimeout(1500);
+
+    const nav = page.getByRole('navigation');
+    for (const [name, path] of [
+      ['Workflows', /\/workflows$/],
+      ['Chats', /\/chats$/],
+      ['Projects', /\/projects$/],
+    ] as const) {
+      await nav.getByRole('link', { name, exact: true }).first().click();
+      await expect(page).toHaveURL(path);
+      await page.waitForTimeout(1500);
+    }
+
+    const sameDocument = await page.evaluate(() => (window as { __e2eOneDocument?: boolean }).__e2eOneDocument === true);
+    expect(sameDocument, 'navigation must stay client-side (no full reload)').toBe(true);
 
     const opens = streamRequests.filter((u) => /\/api\/stream(\?|$)/.test(u));
-    // One connection, plus at most one reconnect if the dev server blipped.
+    // The app opens its stream at boot (the attention feed subscribes on every
+    // page), so zero means the stream never connected: fail rather than pass
+    // vacuously. One connection, plus at most one reconnect if the server blipped.
+    expect(opens.length, 'no event stream opened at all').toBeGreaterThanOrEqual(1);
     expect(opens.length, `opened ${opens.length} event streams: ${opens.join(', ')}`).toBeLessThanOrEqual(2);
   });
 });

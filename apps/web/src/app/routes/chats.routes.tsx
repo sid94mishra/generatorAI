@@ -6,11 +6,11 @@ export const chatsRoutes: RouteObject[] = [
   defineRoute(
     'chats',
     () => import('@/pages/ChatsListPage.js').then((m) => ({ default: m.ChatsListPage })),
-    { legacyHeader: true, title: 'Chats' },
+    { legacyHeader: true, nav: 'chats', title: 'Chats' },
   ),
   defineRoute(
     'chats/:id',
     () => import('@/pages/ChatPage.js').then((m) => ({ default: m.ChatPage })),
-    { legacyHeader: true, title: 'Chat' },
+    { legacyHeader: true, nav: 'chats', title: 'Chat' },
   ),
 ];

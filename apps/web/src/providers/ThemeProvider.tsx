@@ -26,6 +26,7 @@
 
 import React, { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useState } from 'react';
 import {
+  ACCENT_IDS,
   ACCENT_STORAGE_KEY,
   DENSITY_STORAGE_KEY,
   FONT_SIZE_STORAGE_KEY,
@@ -116,6 +117,10 @@ function read(key: string): string | null {
   }
 }
 
+function isAccentId(value: string): value is AccentId {
+  return (ACCENT_IDS as readonly string[]).includes(value);
+}
+
 function write(key: string, value: string | null): void {
   if (typeof window === 'undefined') return;
   try {
@@ -165,14 +170,13 @@ export function ThemeProvider({ children }: ThemeProviderProps) {
     write(THEME_STORAGE_KEY, valid);
   }, []);
 
-  const setAccent = useCallback(
-    (next: string) => {
-      const valid = resolveAccentId(theme, next);
-      setStoredAccent(valid);
-      write(ACCENT_STORAGE_KEY, valid);
-    },
-    [theme],
-  );
+  // An unknown id is ignored rather than coerced: storing the theme's default
+  // as an explicit choice would stop an unchosen accent following the theme.
+  const setAccent = useCallback((next: string) => {
+    if (!isAccentId(next)) return;
+    setStoredAccent(next);
+    write(ACCENT_STORAGE_KEY, next);
+  }, []);
 
   const setDensity = useCallback((next: Density) => {
     setDensityState(next);

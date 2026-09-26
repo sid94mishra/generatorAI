@@ -135,7 +135,7 @@ main.tsx
 | Effective sidebar mode | derived hook `app/shell/useSidebarMode.ts` | — | §2.5 |
 | Dock controller `{open, toggle} \| null` | `stores/dockStore.ts` (**renamed** from `rightPaneStore.ts` in P4; P3 keeps the old name) | no | registered by `DockFrame`, and by the legacy `RightPane` until WorkflowRunPageV2 is ported |
 | Dock layout (width, open, active tab, tab list) | `DockFrame` via react-resizable-panels `useDefaultLayout` plus a small per-page JSON | see the key table | D-27 |
-| Appearance (mode, theme, accent, density, fontSize, reduceMotion) | `ThemeProvider` | `generatorai:appearance` | §6 |
+| Appearance (mode, theme, accent, density, fontSize, reduceMotion) | `ThemeProvider` | six `generatorai-*` keys (D-51) | §6 |
 | Settings section | `settingsUiStore.section` | no | `openSettings()` now carries a background location (§2.4) |
 | Window chrome, window state | `<html>` classes and CSS variables | no | written by `useDesktopBridge` and the pre-paint script |
 
@@ -144,7 +144,7 @@ main.tsx
 | Current key | Written by | Target |
 |---|---|---|
 | `generatorai:ui` `{sidebarOpen}` | `uiStore.ts:31` | **renamed** `generatorai:shell` `{sidebarPref: 'expanded'\|'rail'}` (P3) |
-| `generatorai-theme`, `generatorai-theme-palette`, `generatorai-accent` | `design-tokens/src/registry.ts:53-55`, `index.html:21-23` | **dropped**; replaced by one JSON key `generatorai:appearance` `{mode, theme, accent, density, fontSize, reduceMotion}` (P1). `MODE/THEME/ACCENT_STORAGE_KEY` are replaced by `APPEARANCE_STORAGE_KEY`. |
+| `generatorai-theme`, `generatorai-theme-palette`, `generatorai-accent` | `design-tokens/src/registry.ts:53-55`, `index.html:21-23` | **kept** as three of six separate keys (D-51, `02` §11.1): `generatorai-theme` (mode), `generatorai-theme-palette`, `generatorai-accent`, plus `generatorai-density`, `generatorai-font-size`, `generatorai-reduce-motion` (`*_STORAGE_KEY` in `registry.ts`). An earlier draft of this row proposed one JSON key `generatorai:appearance`; it was not built. |
 | `generatorai:rightPane:chat:open` | `ChatPage.tsx:359` via `useRightPaneOpen` | **renamed** `generatorai:dock:chat:open` (P4) |
 | `generatorai:rightPane:chat:<chatId>` (tabs) | `RightPane.tsx:346` | **renamed** `generatorai:dock:chat:<chatId>` (P4) |
 | `generatorai:rightPane:chat:width` | `useResizablePane` | **dropped**; replaced by the react-resizable-panels layout key `generatorai:dock:chat:layout` (P4) |
@@ -569,7 +569,7 @@ Source column: M = `menu.ts` accelerator, D = `DesktopCommand`, W = web key hand
 
 | id | Label | Source today | web | desktop mac | desktop win/linux | runsIn |
 |---|---|---|---|---|---|---|
-| `palette.toggle` | Search or jump to | M `CmdOrCtrl+K`, D `command-palette`, W `AppLayout.tsx:62-73`, P | `Mod+K` (fires while typing) | `Cmd+K` | `Ctrl+K` | renderer |
+| `palette.toggle` | Search or jump to | M `CmdOrCtrl+K`, D `command-palette`, W `AppLayout.tsx:62-73`, P | `Mod+K` (fires while typing; never inside the terminal or a `data-gai-keys="own"` surface) | `Cmd+K` | `Ctrl+K` | renderer |
 | `nav.home` | Home | M Dashboard `Cmd+Shift+D`/`Ctrl+1` | `G H` | `Cmd+Shift+H` | `Ctrl+1` | renderer |
 | `nav.chats` | Chats | M `Cmd+Shift+C`/`Ctrl+3` | `G C` | `Cmd+Shift+C` | `Ctrl+2` | renderer |
 | `nav.projects` | Projects | M `Cmd+Shift+P`/`Ctrl+2` | `G P` | `Cmd+Shift+P` | `Ctrl+3` | renderer |
@@ -611,7 +611,7 @@ Source column: M = `menu.ts` accelerator, D = `DesktopCommand`, W = web key hand
 `focus-search` is dropped. The palette is the search surface. Native roles (undo, cut, copy, paste, select all, zoom, fullscreen, minimize, close, quit, hide, services) stay Electron `role` items and are **not** commands. The help sheet shows them from a static `SYSTEM_SHORTCUTS` display list in the same file.
 
 Rules behind the table:
-- **Web** never uses a Chrome-reserved chord (`CHROME_RESERVED`). Navigation and creation use GitHub/Linear-style sequences and single keys, which no browser reserves on any OS. `Mod+,` is avoided because it is Chrome's preferences shortcut on macOS. Web single-key and sequence bindings fire only when `event.target` is not editable and no `[data-gai-overlay="dialog"|"palette"]` is open. `Mod+K` fires everywhere.
+- **Web** never uses a Chrome-reserved chord (`CHROME_RESERVED`). Navigation and creation use GitHub/Linear-style sequences and single keys, which no browser reserves on any OS. `Mod+,` is avoided because it is Chrome's preferences shortcut on macOS. Web single-key and sequence bindings fire only when `event.target` is not editable and no `[data-gai-overlay="dialog"|"palette"]` is open. In an editable target only chords flagged `firesInEditable` fire (only `Mod+K`); `Mod+B`, `Mod+Alt+B` and the rest are left to the field. Inside a surface that owns every key (`.xterm`, `[data-gai-keys="own"]`: the terminal, code editors) the host handles nothing. The rule is the same on every OS (D-46).
 - **Desktop mac** keeps `Cmd+Shift+<letter>` for sections (the `platform.ts:117-127` rationale). Letters are unified with the web sequences: H C P E W A S. `G` is not used because `Cmd+Shift+G` is Find Previous.
 - **Desktop win/linux** uses `Ctrl+1…7` in `NAV_DESTINATIONS` order. The palette board's "Workflows Ctrl 4" is superseded by the D-22 order, which makes it `Ctrl+5` (§11).
 
@@ -665,7 +665,7 @@ export interface ShellState {
 ### 6.1 Target flow
 
 ```
-ThemeProvider (only writer of <html> appearance + localStorage 'generatorai:appearance')
+ThemeProvider (only writer of <html> appearance + localStorage, six generatorai-* keys)
   │ on any axis change (debounced 50 ms), if isDesktop:
   └─► IPC.setAppearance({ mode, themeId, groundLight, groundDark, fgLight, fgDark })
          main: validate (hex, enum) → saveSettings({ appearance }) → nativeTheme.themeSource = mode
@@ -695,7 +695,7 @@ OS light/dark flip while mode === 'system'
 
 ### 6.3 Axes and the pre-paint script
 
-`ThemeProvider` gains `density: 'comfortable'|'compact'`, `fontSize: 12|13|14`, `reduceMotion: boolean` with setters. All six values are stored in one JSON key.
+`ThemeProvider` gains `density: 'comfortable'|'compact'`, `fontSize: 12|13|14`, `reduceMotion: 'system'|'on'` with setters. Each of the six values has its own storage key (D-51, `02` §11.1).
 
 `<html>` attributes (the tokens CSS keys off these; names are owned by `02-design-system-spec.md`):
 - `class="light|dark"`
@@ -704,35 +704,7 @@ OS light/dark flip while mode === 'system'
 - `data-font-size`
 - `data-motion="reduce"`, set when `reduceMotion` is on **or** `prefers-reduced-motion` matches (D-20)
 
-`apps/web/index.html`: `<body>` gets `class="bg-ground text-fg antialiased"`, and `html { background-color: var(--gai-ground) }` sits in the generated base layer. The script is replaced by (keep it dependency-free and byte-stable):
-
-```html
-<script>
-  (function () {
-    var d = document.documentElement, a = {};
-    try { a = JSON.parse(localStorage.getItem('generatorai:appearance') || '{}') || {}; } catch (e) {}
-    var mode = a.mode || 'dark', theme = a.theme || 'instrument', accent = a.accent || 'ink';
-    var density = a.density === 'compact' ? 'compact' : 'comfortable';
-    var size = a.fontSize === 12 || a.fontSize === 14 ? a.fontSize : 13;
-    var dark = mode === 'system' ? matchMedia('(prefers-color-scheme: dark)').matches : mode === 'dark';
-    d.classList.add(dark ? 'dark' : 'light');
-    d.setAttribute('data-mode', mode); d.setAttribute('data-theme', theme); d.setAttribute('data-accent', accent);
-    d.setAttribute('data-density', density); d.setAttribute('data-font-size', String(size));
-    if (a.reduceMotion === true || matchMedia('(prefers-reduced-motion: reduce)').matches) d.setAttribute('data-motion', 'reduce');
-    var c = window.generatoraiDesktop && window.generatoraiDesktop.chrome;
-    if (c) {
-      d.classList.add('desktop-shell', 'platform-' + c.platform);
-      if (c.titleBarStyle !== 'native') d.classList.add('custom-titlebar');
-      if (c.titleBarStyle === 'overlay') d.classList.add('titlebar-overlay');
-      if (c.titleBarStyle === 'hidden-inset') d.classList.add('titlebar-inset');
-      d.setAttribute('data-layout', c.titleBarStyle === 'overlay' ? 'strip' : c.titleBarStyle === 'hidden-inset' ? 'mac' : 'native');
-      d.style.setProperty('--gai-titlebar-height', c.titleBarHeight + 'px');
-      d.style.setProperty('--gai-titlebar-inset-left', c.insetLeft + 'px');
-      d.style.setProperty('--gai-titlebar-inset-right', c.insetRight + 'px');
-    } else { d.setAttribute('data-layout', 'native'); }
-  })();
-</script>
-```
+`apps/web/index.html`: `<body>` gets `class="bg-ground text-fg antialiased"`, and `html { background-color: var(--gai-ground) }` sits in the generated base layer. The script itself is **generated** by `pnpm tokens:write` between the `@generated-prepaint` markers (`02` §11.2): one ES5 line that reads the six keys, validates stored ids and resolves the theme's default accent exactly as `readStoredAppearance` does (D-51). An earlier draft here sketched a hand-written script over one JSON key; it was superseded. Desktop chrome classes stay out of the pre-paint until P3 (D-51).
 
 The defaults (`dark`, `instrument`, `ink`, `comfortable`, `13`) must equal `DEFAULT_MODE`, `DEFAULT_THEME`, `DEFAULT_ACCENT`, `DEFAULT_DENSITY` and `DEFAULT_FONT_SIZE` in `packages/design-tokens/src/registry.ts`. A web unit test parses `index.html` and asserts this.
 
@@ -890,7 +862,7 @@ Quit GeneratorAI             ⌘Q
   - `overlayNavigation.test.ts`
   - `indexHtmlDefaults.test.ts`
   - `nativeBrowserOcclusion.test.ts` (§4.5)
-  - `useCommandHost.test.tsx` (web sequences ignore editable targets; `Mod+K` works in a textarea; the desktop host ignores menu-bound chords)
+  - `useCommandHost.test.tsx` (web sequences ignore editable targets; `Mod+K` works in a textarea; `Mod+B` does not, with `mac` true and false; nothing fires inside `.xterm` or `[data-gai-keys="own"]`; the desktop host ignores menu-bound chords)
 
 ### 9.3 Per-OS matrix
 

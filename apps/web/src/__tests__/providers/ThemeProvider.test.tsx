@@ -81,6 +81,17 @@ describe('ThemeProvider', () => {
     expect(localStorage.getItem(ACCENT_STORAGE_KEY)).toBe('rose');
   });
 
+  it('an unknown accent id is ignored, so an unchosen accent keeps following the theme', () => {
+    localStorage.setItem(THEME_STORAGE_KEY, 'github');
+    const { ctx } = mount();
+    act(() => ctx().setAccent('no-such-accent'));
+    expect(localStorage.getItem(ACCENT_STORAGE_KEY)).toBeNull();
+    expect(attr('data-accent')).toBe('blue');
+    act(() => ctx().setThemeId('nord'));
+    expect(attr('data-accent')).toBe('teal');
+    expect(localStorage.getItem(ACCENT_STORAGE_KEY)).toBeNull();
+  });
+
   it('density, font size and reduce motion write the DOM and storage', () => {
     const { ctx } = mount();
     act(() => ctx().setDensity('compact'));

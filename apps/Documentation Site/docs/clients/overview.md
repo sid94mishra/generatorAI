@@ -50,6 +50,6 @@ The mobile bundle deliberately resolves the browser-safe shared entry and exclud
 
 ## Evidence and maintenance
 
-Primary sources: `apps/web/src/router.tsx`, `apps/desktop/src/main/index.ts`, `apps/mobile/app/`, `apps/mobile/src/auth/featureGate.ts`, `apps/mobile/src/components/chat/panes/paneModel.ts`, `apps/cli/src/index.tsx`, `packages/cli-core/src/commands/index.ts`, `packages/sdk/src/index.ts`, and `packages/mcp-server/src/cli.ts`.
+Primary sources: `apps/web/src/app/router.tsx` and `apps/web/src/app/routes/`, `apps/desktop/src/main/index.ts`, `apps/mobile/app/`, `apps/mobile/src/auth/featureGate.ts`, `apps/mobile/src/components/chat/panes/paneModel.ts`, `apps/cli/src/index.tsx`, `packages/cli-core/src/commands/index.ts`, `packages/sdk/src/index.ts`, and `packages/mcp-server/src/cli.ts`.
 
 The old mobile About screen and some repository READMEs understate newer review/source-control features or describe older packaging. This matrix follows the implemented screens and current package scripts. Re-check those sources when a capability changes.

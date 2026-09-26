@@ -51,7 +51,7 @@ import '@xterm/xterm/css/xterm.css';
 import { Button, Spinner, Input } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
-import { resolveTerminalPalette } from '@generatorai/design-tokens';
+import { BUNDLED_FONT_FAMILIES, resolveTerminalPalette } from '@generatorai/design-tokens';
 import { buildAuthenticatedSocketUrl } from '@/platform/authTransport.js';
 import type { TerminalSessionDescriptor } from '@generatorai/shared';
 
@@ -156,6 +156,15 @@ async function killSession(workspaceId: string, sid: string): Promise<void> {
 /** ACK the server every ~64 KB of output we've written into xterm. */
 const ACK_BYTE_INTERVAL = 64 * 1024;
 
+/** The bundled mono family (D-16, `styles/fonts.css`). */
+const TERMINAL_FONT = BUNDLED_FONT_FAMILIES[1];
+
+/** Resolves once the bundled mono face is usable (or the browser lacks the Font Loading API). */
+function loadTerminalFont(): Promise<unknown> {
+  const fonts = typeof document === 'undefined' ? undefined : document.fonts;
+  return fonts ? fonts.load(`12px "${TERMINAL_FONT}"`) : Promise.resolve();
+}
+
 // ── Component ────────────────────────────────────────────────
 
 export function TerminalPanel({
@@ -227,16 +236,19 @@ export function TerminalPanel({
   useEffect(() => {
     const container = containerRef.current;
     if (!container) return;
+    let disposed = false;
     const term = new Xterm({
       cursorBlink: true,
       scrollback: 5000,
+      // The bundled JetBrains Mono (D-16) comes first, so every OS — offline
+      // Linux included — renders the same face as the diff and code views.
       // Nerd Font families trail the stack so prompt themes (Powerlevel10k,
       // Starship, Oh My Posh) render their icon glyphs instead of empty boxes:
       // those glyphs live in the Private Use Area, which the primary fonts lack,
       // and Chromium only falls back per glyph to fonts named here. Consolas
       // covers Windows before the generic fallback.
       fontFamily:
-        'JetBrainsMono, "Fira Code", Menlo, Consolas, "MesloLGS NF", "Symbols Nerd Font Mono", ' +
+        `"${TERMINAL_FONT}", "JetBrains Mono", "Fira Code", Menlo, Consolas, "MesloLGS NF", "Symbols Nerd Font Mono", ` +
         '"JetBrainsMono Nerd Font", "FiraCode Nerd Font", "Hack Nerd Font", "CaskaydiaCove Nerd Font", monospace',
       fontSize: 12,
       lineHeight: 1.2,
@@ -248,12 +260,21 @@ export function TerminalPanel({
     term.loadAddon(fit);
     term.loadAddon(search);
     term.loadAddon(new WebLinksAddon());
-    term.open(container);
-    try {
-      // WebGL can fail on some GPUs / when CSP forbids it — fall back
-      // silently to the DOM renderer.
-      term.loadAddon(new WebglAddon());
-    } catch { /* ignore */ }
+    // xterm measures its cell grid once, at open. Opening before the bundled
+    // face has loaded would measure a fallback font and keep that grid, so
+    // wait for it (a local file: milliseconds). Writes made before open are
+    // buffered by xterm and painted on open; a failed load opens anyway.
+    const openTerminal = () => {
+      if (disposed) return;
+      term.open(container);
+      try {
+        // WebGL can fail on some GPUs / when CSP forbids it — fall back
+        // silently to the DOM renderer.
+        term.loadAddon(new WebglAddon());
+      } catch { /* ignore */ }
+      try { fit.fit(); } catch { /* ignore */ }
+    };
+    loadTerminalFont().then(openTerminal, openTerminal);
     xtermRef.current = term;
     fitRef.current = fit;
     searchRef.current = search;
@@ -278,6 +299,7 @@ export function TerminalPanel({
     const fitTimer = setTimeout(() => { try { fit.fit(); } catch { /* ignore */ } }, 50);
 
     return () => {
+      disposed = true;
       clearTimeout(fitTimer);
       try { selectionSub.dispose(); } catch { /* ignore */ }
       // attachCustomKeyEventHandler doesn't expose a disposer — passing a
@@ -760,7 +782,9 @@ export function TerminalPanel({
 
       {/* Error / connecting overlay + xterm host */}
       <div className="relative flex-1 min-h-0 bg-[var(--color-background)]">
-        <div ref={containerRef} className="absolute inset-0" data-testid="terminal-container" />
+        {/* The terminal owns every key, chords included (readline Ctrl+K/Ctrl+B,
+            the tmux prefix): the command host never handles keys in here. */}
+        <div ref={containerRef} className="absolute inset-0" data-testid="terminal-container" data-gai-keys="own" />
 
         {/* Inline search widget — VSCode-style overlay in the top-right of the
             terminal viewport. Focus-managed so typing goes into the search

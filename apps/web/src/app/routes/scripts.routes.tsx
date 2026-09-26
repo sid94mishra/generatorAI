@@ -9,11 +9,11 @@ export const scriptsRoutes: RouteObject[] = [
   defineRoute(
     'scripts',
     () => import('@/pages/ScriptsListPage.js').then((m) => ({ default: m.ScriptsListPage })),
-    { legacyHeader: true, title: 'Scripts' },
+    { legacyHeader: true, nav: 'scripts', title: 'Scripts' },
   ),
   defineRoute(
     'scripts/:id',
     () => import('@/pages/ScriptDetailPage.js').then((m) => ({ default: m.ScriptDetailPage })),
-    { legacyHeader: true, title: 'Script' },
+    { legacyHeader: true, nav: 'scripts', title: 'Script' },
   ),
 ];

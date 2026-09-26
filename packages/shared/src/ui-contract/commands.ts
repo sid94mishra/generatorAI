@@ -50,11 +50,20 @@ export interface CommandDef {
   palette?: boolean;
   /** May be invoked by `generatorai://command/<id>`. */
   deepLink?: boolean;
+  /**
+   * The web chord also fires while focus is in a text field (input, textarea,
+   * contenteditable, combobox). Every other chord is left to the field there:
+   * on Windows and Linux `Mod` is Ctrl, and Ctrl+B / Ctrl+Alt+B are editing
+   * keys. Set only where reaching the command from a field is the point
+   * (`palette.toggle`: jump from the composer). Surfaces that own every key —
+   * the terminal, code editors — never see a host chord, flag or not.
+   */
+  firesInEditable?: true;
 }
 
 export const COMMANDS = {
   // ── Global: dispatched by the host ──────────────────────────────
-  'palette.toggle': { label: 'Search or jump to', group: 'navigate', scope: 'global', runsIn: 'renderer', web: 'Mod+K', desktopMac: 'Cmd+K', desktopWinLinux: 'Ctrl+K', icon: 'search' },
+  'palette.toggle': { label: 'Search or jump to', group: 'navigate', scope: 'global', runsIn: 'renderer', web: 'Mod+K', desktopMac: 'Cmd+K', desktopWinLinux: 'Ctrl+K', icon: 'search', firesInEditable: true },
   'nav.home': { label: 'Home', group: 'navigate', scope: 'global', runsIn: 'renderer', web: 'G H', desktopMac: 'Cmd+Shift+H', desktopWinLinux: 'Ctrl+1', icon: 'home', palette: true },
   'nav.chats': { label: 'Chats', group: 'navigate', scope: 'global', runsIn: 'renderer', web: 'G C', desktopMac: 'Cmd+Shift+C', desktopWinLinux: 'Ctrl+2', icon: 'chats', palette: true },
   'nav.projects': { label: 'Projects', group: 'navigate', scope: 'global', runsIn: 'renderer', web: 'G P', desktopMac: 'Cmd+Shift+P', desktopWinLinux: 'Ctrl+3', icon: 'projects', palette: true },
@@ -126,6 +135,12 @@ export function isCommandId(value: unknown): value is CommandId {
 
 export function isRendererCommandId(value: unknown): value is RendererCommandId {
   return isCommandId(value) && COMMANDS[value].runsIn === 'renderer' && COMMANDS[value].scope === 'global';
+}
+
+/** Whether the command's web chord fires while focus is in a text field. */
+export function firesInEditable(id: CommandId): boolean {
+  const def: CommandDef = COMMANDS[id];
+  return def.firesInEditable === true;
 }
 
 /** The binding for a command on a host (null = unbound there). */

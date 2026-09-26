@@ -6,16 +6,16 @@ export const agentsRoutes: RouteObject[] = [
   defineRoute(
     'agents',
     () => import('@/pages/AgentsListPage.js').then((m) => ({ default: m.AgentsListPage })),
-    { legacyHeader: true, title: 'Agents' },
+    { legacyHeader: true, nav: 'agents', title: 'Agents' },
   ),
   defineRoute(
     'agents/new',
     () => import('@/pages/AgentEditorPage.js').then((m) => ({ default: m.AgentEditorPage })),
-    { legacyHeader: true, title: 'New Agent' },
+    { legacyHeader: true, nav: 'agents', title: 'New Agent' },
   ),
   defineRoute(
     'agents/:id',
     () => import('@/pages/AgentEditorPage.js').then((m) => ({ default: m.AgentEditorPage })),
-    { legacyHeader: true, title: 'Agent' },
+    { legacyHeader: true, nav: 'agents', title: 'Agent' },
   ),
 ];

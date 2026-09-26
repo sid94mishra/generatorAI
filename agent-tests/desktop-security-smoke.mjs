@@ -23,8 +23,11 @@
 import { _electron as electron } from '@playwright/test';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { DESKTOP_DIR as DESKTOP, isolatedProfile } from './helpers/desktop-profile.mjs';
 
-const DESKTOP = path.resolve(process.cwd(), 'apps', 'desktop');
+// A fresh profile: never the developer's userData or vault key.
+const profile = isolatedProfile('gai-security-smoke-');
+process.on('exit', profile.cleanup);
 const requireFromDesktop = createRequire(path.join(DESKTOP, 'package.json'));
 const ELECTRON = requireFromDesktop('electron');
 
@@ -38,7 +41,7 @@ const record = (name, ok, info = '') => {
 
 const app = await electron.launch({
   executablePath: ELECTRON,
-  args: ['.'],
+  args: ['.', profile.arg],
   cwd: DESKTOP,
   env: { ...process.env, GENERATORAI_DESKTOP_MODE: 'standalone' },
   timeout: 90_000,

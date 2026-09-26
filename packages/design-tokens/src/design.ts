@@ -203,7 +203,7 @@ export function resolveDesignTokens(theme: ThemeDef, appearance: Appearance, acc
       text: hex(
         ensureContrastAll(
           hue,
-          [flatten(bg, surface), flatten(bg, ground), flatten(bg, raised), ...fourSurfaces],
+          [flatten(bg, surface), flatten(bg, ground), flatten(bg, raised), ...fiveSurfaces],
           minText,
           fg,
         ),
@@ -215,7 +215,8 @@ export function resolveDesignTokens(theme: ThemeDef, appearance: Appearance, acc
   const a = resolveAccentTokens(theme, accentId, appearance);
   const accent = accentId === 'ink' ? fg : a.primaryEmphasis;
   const onAccent = a.onAccent;
-  const focus = hex(ensureContrastAll(accent, fourSurfaces, NON_TEXT, fg));
+  // Inputs sit on sunken and take the focus ring there (02 §2.3), so it counts.
+  const focus = hex(ensureContrastAll(accent, fiveSurfaces, NON_TEXT, fg));
 
   return {
     ground,

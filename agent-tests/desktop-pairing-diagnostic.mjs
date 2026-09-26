@@ -1,15 +1,18 @@
 // Focused diagnostic: why is the desktop renderer not auto-pairing?
-// Run from agent-tests/:  node desktop-pairing-diagnostic.mjs
+// Run:  node agent-tests/desktop-pairing-diagnostic.mjs  (any cwd)
 import { _electron as electron } from '@playwright/test';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { DESKTOP_DIR as DESKTOP, isolatedProfile } from './helpers/desktop-profile.mjs';
 
-const DESKTOP = path.resolve(process.cwd(), '..', 'apps', 'desktop');
+// A fresh profile: never the developer's userData or vault key.
+const profile = isolatedProfile('gai-pairing-diag-');
+process.on('exit', profile.cleanup);
 const ELECTRON = createRequire(path.join(DESKTOP, 'package.json'))('electron');
 
 const app = await electron.launch({
   executablePath: ELECTRON,
-  args: ['.'],
+  args: ['.', profile.arg],
   cwd: DESKTOP,
   env: { ...process.env, GENERATORAI_DESKTOP_MODE: 'standalone' },
   timeout: 60000,

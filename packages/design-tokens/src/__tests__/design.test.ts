@@ -75,6 +75,8 @@ const fourSurfaces = (t: DesignTokens): Record<string, string> => ({
   raised: t.raised,
   overlay: t.overlay,
 });
+/** The four plus `sunken`, where inputs sit (and take the focus ring and status text). */
+const fiveSurfaces = (t: DesignTokens): Record<string, string> => ({ ...fourSurfaces(t), sunken: t.sunken });
 
 describe('design layer — WCAG suite (252 combinations)', () => {
   it('covers 18 themes × 2 appearances × 7 accents', () => {
@@ -120,7 +122,7 @@ describe('design layer — WCAG suite (252 combinations)', () => {
     }
   });
 
-  it('7: status text clears the text bar on its own tint and on every surface', () => {
+  it('7: status text clears the text bar on its own tint and on every surface, sunken included', () => {
     for (const { label, min, tokens: t } of MATRIX2) {
       for (const state of ['run', 'ok', 'warn', 'err'] as const) {
         const bg = t[`${state}Bg`];
@@ -132,7 +134,7 @@ describe('design layer — WCAG suite (252 combinations)', () => {
             [`${state}-bg∘surface`]: flatten(bg, t.surface),
             [`${state}-bg∘ground`]: flatten(bg, t.ground),
             [`${state}-bg∘raised`]: flatten(bg, t.raised),
-            ...fourSurfaces(t),
+            ...fiveSurfaces(t),
           },
           min,
         );
@@ -164,8 +166,8 @@ describe('design layer — WCAG suite (252 combinations)', () => {
     for (const { label, tokens: t } of MATRIX7) expectOn(label, 'on-accent', t.onAccent, { accent: t.accent }, 4.5);
   });
 
-  it('10: focus clears 3:1 on ground, surface, raised and overlay (all 252)', () => {
-    for (const { label, tokens: t } of MATRIX7) expectOn(label, 'focus', t.focus, fourSurfaces(t), 3);
+  it('10: focus clears 3:1 on ground, surface, raised, overlay and sunken (all 252)', () => {
+    for (const { label, tokens: t } of MATRIX7) expectOn(label, 'focus', t.focus, fiveSurfaces(t), 3);
   });
 
   it('11: ink is the foreground, with surface-coloured text and a foreground focus ring', () => {
@@ -183,11 +185,19 @@ describe('design layer — WCAG suite (252 combinations)', () => {
     }
   });
 
-  it('12b: dialog text stays readable over the scrim (overlay is opaque; scrim sits behind it)', () => {
-    for (const { label, min, tokens: t } of MATRIX2) {
-      const backdrop = flatten(t.scrim, t.surface);
-      expectOn(label, 'fg', t.fg, { overlay: t.overlay }, min);
-      expect(parseHex(t.overlay).a, `${label}: overlay must be opaque over ${fmt(backdrop)}`).toBe(1);
+  it('12b: the scrim dims the page behind a dialog, and the dialog does not let it through', () => {
+    // Row 1 measures text on `overlay` alone. That is what the reader sees only
+    // because overlay is opaque; a translucent overlay would mix in the scrim.
+    for (const { label, tokens: t } of MATRIX2) {
+      const scrim = parseHex(t.scrim);
+      const dimmed = flatten(t.scrim, t.surface);
+      expect(parseHex(t.overlay).a, `${label}: overlay ${t.overlay} must be opaque`).toBe(1);
+      expect(scrim.a, `${label}: scrim ${t.scrim} must be translucent`).toBeGreaterThan(0);
+      expect(scrim.a, `${label}: scrim ${t.scrim} must be translucent`).toBeLessThan(1);
+      expect(
+        relativeLuminance(dimmed),
+        `${label}: scrim ${t.scrim} over surface ${t.surface} → ${fmt(dimmed)} must be darker`,
+      ).toBeLessThan(relativeLuminance(parseHex(t.surface)));
     }
   });
 
@@ -196,7 +206,7 @@ describe('design layer — WCAG suite (252 combinations)', () => {
       if (theme.id !== 'contrast') continue;
       expect(min).toBe(7);
       for (const token of ['fg', 'fg2', 'fg3'] as const) expectOn(label, token, t[token], textBacks(t), 7);
-      for (const token of ['runText', 'okText', 'warnText', 'errText'] as const) expectOn(label, token, t[token], fourSurfaces(t), 7);
+      for (const token of ['runText', 'okText', 'warnText', 'errText'] as const) expectOn(label, token, t[token], fiveSurfaces(t), 7);
     }
   });
 

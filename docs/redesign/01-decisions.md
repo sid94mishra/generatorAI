@@ -39,6 +39,8 @@ LLM sessions follow failing checks far more reliably than style guides. Every ru
       templates/        T-xx page layouts, slot-only (ListPage, DetailPage, FormWithAside, Workspace, MasterDetail)
       icons/            icon registry (concept → lucide component) — reads packages/design-tokens concept list
       lib/              cn(), tailwind-merge config, overlay attribute helper, focus helpers
+      foundations/      Storybook-only showcase of the tokens (colour, type, radius, status). Not a kit folder:
+                        no component lives here and nothing may import it (its own ESLint element, `foundations`)
     blocks/             B-xx query-aware parts shared by ≥2 features (ModelPicker, AgentPicker, CapabilityToggleList,
                         DiffView, FileTree, EntityTable bindings, transcript parts) — AND the composer and the dock
                         panels (Changes, Files, Terminal, Browser, Plan, Widgets; the chat-only Tasks and Computer panels stay in `features/chat`), because the chat page and the
@@ -49,7 +51,7 @@ LLM sessions follow failing checks far more reliably than style guides. Every ru
     app/                router (per-feature route modules), providers, shell wiring (ConnectedSidebar …)
     platform/ stores/ hooks/*Queries.ts   unchanged data layer
   ```
-- **Consequences:** boundaries enforced by `eslint-plugin-boundaries` element types `ui`, `blocks`, `features`, `app`, `data`. Promote `ui/` to a package only if a second DOM consumer appears.
+- **Consequences:** boundaries enforced by `eslint-plugin-boundaries` element types `ui`, `blocks`, `features`, `app`, `data` (plus `foundations`, which may import `ui` and which nothing may import). Promote `ui/` to a package only if a second DOM consumer appears.
 
 ### D-05 Headless primitives: Base UI (replacing Radix) — Final
 - **Options:** Radix (current), Base UI 1.x, React Aria Components, Ark UI.
@@ -242,14 +244,23 @@ Decided for P0 review R6, where the ratchet and ESLint disagreed. `*.stories.tsx
 
 ## F. Mobile readiness
 
+### D-40 Web and mobile share a design contract and logic, not UI components — Final
+- **Evidence:** Bluesky (the flagship react-native-web app) still uses Radix and floating-ui on web; Discord shares logic, not UI; Linear's mobile apps are native; react-native-web's last release was October 2025; GeneratorAI's densest web surfaces (xterm, @xyflow, @pierre/diffs, the Electron WebContentsView) are DOM-only.
+- **Shared now (this pass):** tokens and the generated class vocabulary (D-08), per-platform geometry schema, `CHROME` constants, icon concept registry (D-17), 8-state status map + labels (D-18), nav destinations (D-22), shortcut/command registry (D-24), attention feed and other new read models in `client-core` (D-36), component *contract* types for shared concepts (status badge, tool block, gate cards, composer states, pane tab set) in `packages/shared/src/ui-contract/` — types only.
+- **Next pass (mobile):** Uniwind (Tailwind v4) replacing NativeWind v4 — it consumes the same generated `@theme` vocabulary; React Native Reusables seeded kit; Expo UI native controls; TrueSheet / expo-router form sheets; bundle fonts with the `expo-font` config plugin (JetBrains Mono is referenced in three sheets today but never loaded). Mobile-specific design decisions (ink/neutral vs blue-tinted selected states, pill shapes, builder on phone, multi-server, mobile-only features) are recorded in `08-mobile-readiness.md` and decided at the start of that pass.
+
+## G. As-built details
+
+Decisions made while building, where the plan was silent (one entry per task batch, in build order).
+
 ### D-46 P1 registry and router details — Final
 Decided while building P1-S3, P1-T10, P1-T11, P1-S1 and P1-S2 where the plan was silent:
 - **Status unions.** Client-side status unions (`RunStatus` = `WorkflowRunStatus | 'pending'`, stream/tool/question/permission/hook/widget, `ReviewThreadStatus`) live in `packages/shared/src/status/unions.ts`; `client-core`, `packages/review` and web `types/review.ts` re-export them, so the exhaustive map covers every union.
 - **Icons.** `NAV_DESTINATIONS.icon` uses the real `ICON_CONCEPTS` keys (`chats`, `projects` …). The registry names lucide 0.460 glyphs today and records the three 1.x renames in a `lucide1` field for P1-U5.
 - **Window size.** `sanitizeBounds` clamps restored windows to `CHROME.minWindow` (860×560), per `06` §3.4.
-- **Command host.** `useCommandHost` lives in `hooks/` (the legacy `AppLayout` may not import `app/`); it moves to `app/shell` with the shell in P3. `RendererCommandId` = global commands executed in the renderer; scoped commands (composer, palette) are display-only. On web, `Mod` chords fire everywhere, including inputs; bare keys and sequences never fire in editable fields, comboboxes, menus, or while a dialog/palette overlay is open. The browser-reserved list is `BROWSER_RESERVED_CHORDS` (avoids a clash with `CHROME`). Desktop menu section items keep `navigateTo` because it also restores a window hidden to the tray.
+- **Command host.** `useCommandHost` lives in `hooks/` (the legacy `AppLayout` may not import `app/`); it moves to `app/shell` with the shell in P3. `RendererCommandId` = global commands executed in the renderer; scoped commands (composer, palette) are display-only. On web one rule applies on every OS (a rule, never a platform check; `Mod` is Cmd on macOS and Ctrl elsewhere, where Ctrl+K/Ctrl+B are readline, tmux and editing keys): (1) inside a surface that owns every key — the xterm root `.xterm` or any element under `data-gai-keys="own"` (the terminal container; future code editors must carry it) — the host handles nothing, chords included; (2) in a text field, contenteditable, combobox or menu only chords whose registry entry has `firesInEditable: true` fire, and only `palette.toggle` (`Mod+K`, 06 §5.2 "fires while typing") has it; `Mod+B`, `Mod+Alt+B` and every other chord are left to the field, not prevented; (3) bare keys and sequences never fire in those targets, nor while a dialog/palette overlay is open. (Amended after P1-R1: the first version let every `Mod` chord fire in inputs, which on Windows/Linux took Ctrl+K/Ctrl+B/Ctrl+Alt+B from the terminal and every text field.) Known limit: on **desktop** Windows/Linux the native menu accelerators (`Ctrl+K`, `Ctrl+B`, `Ctrl+Alt+B`) still reach the menu before the page, as they did before P1; recorded as DF-23 and fixed with the terminal/dock port (P4) by applying this same rule there. The browser-reserved list is `BROWSER_RESERVED_CHORDS` (avoids a clash with `CHROME`). Desktop menu section items keep `navigateTo`; both `navigateTo` and `sendCommand` restore, show and focus the window (a minimised or tray-hidden window would otherwise swallow Settings…, New chat or the palette — P1-R2).
 - **ShortcutsSheet** is temporary scaffolding on the legacy `components/ui` Modal + Kbd (design class names only) until the kit exists; rebuilt on `ui/` in P3.
-- **Router.** `app/router.tsx` keeps `<AppLayout/>` as the shell element until P3-04; the 404, route-error and page-loader markup moved into legacy `components/{NotFoundPage,RouteErrorFallback,PageLoader}.tsx` so `app/**` carries no Tailwind classes; `GaiRouteHandle.nav` is typed as `NavDestinationId`.
+- **Router.** `app/router.tsx` keeps `<AppLayout/>` as the shell element until P3-04; the 404, route-error and page-loader markup moved into legacy `components/{NotFoundPage,RouteErrorFallback,PageLoader}.tsx` so `app/**` carries no Tailwind classes; `GaiRouteHandle.nav` (`NavDestinationId`) is set on every area route and agrees with `navDestinationFor(path)` (tested); Settings and the 404 have none. P3's sidebar active state reads it.
 
 ### D-47 P1 token-engine details — Final
 Decided while building P1-T1…T6 where `02` was silent:
@@ -263,6 +274,7 @@ Decided while building P1-T1…T6 where `02` was silent:
 - `INSTRUMENT_SANS`/`BUNDLED_MONO` stacks exist from T4 (system fallback until T7 bundles the fonts); a temporary pre-paint defaults to `instrument` and sets `data-accent` only when stored (replaced by the generated pre-paint in T8; both CSP pins updated).
 - P1-T1 raised `legacyTokenUtility` 2568 → 2622 (+54): the renamed `bg-accent-tint` sites were always legacy but uncountable while named `accent` — a sanctioned ratchet increase (D-02 scaffolding).
 - `SHELL_WIDTHS` (T6, `design.ts`) and `SHELL` (S1, `chrome.ts`) are unified into one source in the next P1 task (fonts/theme batch).
+- `focus` and every `<state>Text` are clamped against `sunken` too (02 §2.2 steps 9 and 12; §12 rows 7 and 10), because inputs sit on `sunken` and take the focus ring there. No emitted value changed (P1-R6: minimums were 3.21:1 and 5.14:1).
 
 ### D-48 Test harness (P2-00) — Final
 - The deterministic provider is enabled with `GENERATORAI_TEST_FAUX_HARNESS=true` (renamed from the load-test name, no alias). It reports as a synthetic, always-ready `faux` provider with one model, merged into the registry at read time and never added to `ALL_HARNESS_TYPES`; `HarnessType` includes `'faux'` inside `agent-harness-providers` only, and the two exhaustive sites that never build a faux adapter (`apps/server/src/composition/harnessInstances.ts`, `packages/sdk/src/GeneratorAI.ts`) use `Exclude<HarnessType,'faux'>`. Production is unchanged when the flag is off. CI e2e sets the flag, so provider-catalog tests run in CI.
@@ -283,7 +295,7 @@ Decided while building P1-T1…T6 where `02` was silent:
 
 ### D-51 Fonts, pre-paint and cn as built (P1-T7…T9) — Final
 - **Fonts:** our own `apps/web/src/styles/fonts.css` declares the 4 latin/latin-ext woff2 faces of `@fontsource-variable/instrument-sans` and `jetbrains-mono` (Fontsource's `wght.css` for JetBrains Mono pulls 6 files); weight ranges are the packages' own. 96.8 KB total; budget 104 KB (measured + 10 %). Google Fonts are removed from both CSPs (`style-src`/`font-src 'self'`). Themes whose first-choice font is not installed now render the bundled family instead of a system font (intended; GitHub keeps system stacks).
-- **Pre-paint:** the six separate storage keys of `02` §11.1 (not the single JSON key sketched in `06` §6.3); emitted as one line so its CSP hash is identical on every OS; `tokens:write` rewrites both CSP pins and `tokens:check` fails when either is stale. With no stored accent the accent follows the current theme's default in-session. Desktop `settings.theme` is replaced by `settings.appearance` without migration (an existing desktop user's mode resets to dark once — accepted, no users yet). Desktop chrome classes stay out of the pre-paint until P3.
+- **Pre-paint:** the six separate storage keys of `02` §11.1 (not the single JSON key sketched in `06` §6.3); emitted as one line so its CSP hash is identical on every OS; `tokens:write` rewrites both CSP pins and `tokens:check` fails when either is stale. With no stored accent the accent follows the current theme's default in-session; `setAccent` ignores an unknown id rather than storing the fallback as a choice (P1-R5). Desktop `settings.theme` is replaced by `settings.appearance` without migration (an existing desktop user's mode resets to dark once — accepted, no users yet). Desktop chrome classes stay out of the pre-paint until P3.
 - **Single writer:** `applyAppearance` (`ui/lib/appearance.ts`) is called only by ThemeProvider (and Storybook); the data layer may import `apps/web/src/ui/lib/*.ts` for this and for `cn`.
 - **cn:** tailwind-merge 3.7 extended from the generated vocabulary (`twMergeExtension()` in design-tokens); legacy `lib/utils` re-exports it (all 2,377 legacy call sites merge as before except 4 design-vocabulary cases 2.6 got wrong).
 - **SHELL:** one source (`SHELL` in `chrome.ts`); the CSS width variables and the geometry table read a projection of it.
@@ -304,11 +316,6 @@ Decided while building P1-T1…T6 where `02` was silent:
 - **Servers (G-03):** `probeServer(endpoint)` in `packages/client-runtime` (public `GET /api/auth/server-info` → connected/offline/unpaired, reusable by mobile). Desktop IPC `getServers`/`switchServer`/`addServer` + `serversChanged`; web `useServers()` uses the desktop list or falls back to the client-runtime catalog on web — same code on every OS.
 - **Updates (G-04):** `UpdateState = { status, currentVersion, nextVersion?, percent?, error? }` via `getUpdateState`/`installUpdate` + `updateStateChanged`; web `useUpdateState()`/`restartToUpdate()`. **R5 fixed:** `before-quit`'s `app.exit(0)` skipped `will-quit`, so `autoInstallOnAppQuit` silently dropped downloaded updates; the shutdown sequence is shared (`quit-coordinator.ts`) and install calls `quitAndInstall()`. The native update dialog shows only when no window is visible.
 - **Badge (G-05):** attention counts ride the existing `setMenuState` push; `badge.ts` sets the macOS dock badge, Linux `setBadgeCount` (no-op where unsupported) and a Windows overlay dot; tray and menu show counts and degrade when the window is gone.
-
-### D-40 Web and mobile share a design contract and logic, not UI components — Final
-- **Evidence:** Bluesky (the flagship react-native-web app) still uses Radix and floating-ui on web; Discord shares logic, not UI; Linear's mobile apps are native; react-native-web's last release was October 2025; GeneratorAI's densest web surfaces (xterm, @xyflow, @pierre/diffs, the Electron WebContentsView) are DOM-only.
-- **Shared now (this pass):** tokens and the generated class vocabulary (D-08), per-platform geometry schema, `CHROME` constants, icon concept registry (D-17), 8-state status map + labels (D-18), nav destinations (D-22), shortcut/command registry (D-24), attention feed and other new read models in `client-core` (D-36), component *contract* types for shared concepts (status badge, tool block, gate cards, composer states, pane tab set) in `packages/shared/src/ui-contract/` — types only.
-- **Next pass (mobile):** Uniwind (Tailwind v4) replacing NativeWind v4 — it consumes the same generated `@theme` vocabulary; React Native Reusables seeded kit; Expo UI native controls; TrueSheet / expo-router form sheets; bundle fonts with the `expo-font` config plugin (JetBrains Mono is referenced in three sheets today but never loaded). Mobile-specific design decisions (ink/neutral vs blue-tinted selected states, pill shapes, builder on phone, multi-server, mobile-only features) are recorded in `08-mobile-readiness.md` and decided at the start of that pass.
 
 ---
 

@@ -28,6 +28,7 @@ Every place where the plan overrides, corrects or completes the design. Implemen
 | DF-20 | SettingsSecurity | "Custom" network exposure the server does not support | Only the server-supported options are offered | D-42 |
 | DF-21 | SettingsAppearance / SettingsSecurity nav | Group label "Agents & models" vs code "Agents" | Board label used (the group does hold providers and agents); section ids unchanged | D-42 |
 | DF-22 | Shared style block | Focus drawn as `0 0 0 2px surface, 0 0 0 4px accent` (accent < 3:1 on some surfaces); switch thumb literal `#ffffff` | `focus-ring` outline in the `focus` token; switch thumb `surface` (off) / `on-accent` (on) | D-12 |
+| DF-23 | Palette, menus (`Ctrl K`, `Ctrl B`, `Ctrl Alt B`) | On Windows/Linux these chords are readline/tmux keys (kill line, back one character, tmux prefix) and editing keys in fields; the boards bind them globally | Web: the terminal (`data-gai-keys="own"`) keeps every key and text fields keep every chord except `Mod+K`. Desktop Windows/Linux: the native menu accelerators still win (pre-P1 behaviour); fixed with the terminal/dock port (P4) by applying the web rule there | D-46 |
 
 ## Mobile artifact (3bBuQ3vGwYbJh7A2yX7kqA) — for the next pass
 

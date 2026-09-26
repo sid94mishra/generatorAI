@@ -59,8 +59,9 @@ describe('chromeColors (18 themes × 2 appearances)', () => {
     expect(chromeColors('no-such-theme', 'dark')).toEqual(chromeColors(DEFAULT_THEME, 'dark'));
   });
 
-  // The Instrument theme lands in P1-T4; until then there is nothing to compare.
-  it.skipIf(!isKnownTheme('instrument'))('CHROME_FALLBACK_COLORS equals Instrument ground/fg', () => {
+  // 02 §12 row 15. Unconditional: a renamed or removed Instrument must fail here, not skip.
+  it('CHROME_FALLBACK_COLORS equals Instrument ground/fg', () => {
+    expect(isKnownTheme('instrument')).toBe(true);
     for (const ap of ['dark', 'light'] as const) {
       const { ground, fg } = chromeColors('instrument', ap);
       expect({ background: ground, symbol: fg }).toEqual(CHROME_FALLBACK_COLORS[ap]);

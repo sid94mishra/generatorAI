@@ -7,11 +7,12 @@ import {
   NAV_DESTINATIONS,
   RENDERER_COMMAND_IDS,
   SYSTEM_SHORTCUTS,
+  firesInEditable,
   isRendererCommandId,
   navDestinationFor,
   type CommandId,
 } from '../commands.js';
-import { isSequence, parseChord, splitSequence, toElectronAccelerator } from '../keys.js';
+import { isPlainKeyBinding, isSequence, parseChord, splitSequence, toElectronAccelerator } from '../keys.js';
 
 const sameChord = (a: string, b: string) => JSON.stringify(parseChord(a)) === JSON.stringify(parseChord(b));
 
@@ -106,6 +107,19 @@ describe('COMMANDS registry (D-24, 06 §5)', () => {
     for (const id of COMMAND_IDS) {
       const def = COMMANDS[id] as { deepLink?: boolean; runsIn: string };
       if (def.deepLink) expect(def.runsIn, id).toBe('renderer');
+    }
+  });
+
+  it('only the palette chord fires inside text fields, and only renderer Mod chords may', () => {
+    // P1-R1: on Windows/Linux Mod is Ctrl, so every other chord (Ctrl+B,
+    // Ctrl+Alt+B …) is an editing key in a field and must be left to it.
+    expect(COMMAND_IDS.filter((id) => firesInEditable(id))).toEqual(['palette.toggle']);
+    for (const id of COMMAND_IDS.filter((c) => firesInEditable(c))) {
+      const web = COMMANDS[id].web;
+      expect(web, id).not.toBeNull();
+      expect(isPlainKeyBinding(web!), `${id} must be a Mod chord`).toBe(false);
+      expect(isSequence(web!), id).toBe(false);
+      expect(isRendererCommandId(id), id).toBe(true);
     }
   });
 

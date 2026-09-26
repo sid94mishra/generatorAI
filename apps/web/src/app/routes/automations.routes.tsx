@@ -9,16 +9,16 @@ export const automationsRoutes: RouteObject[] = [
   defineRoute(
     'automations',
     () => import('@/pages/AutomationsPage.js').then((m) => ({ default: m.AutomationsPage })),
-    { legacyHeader: true, title: 'Automations' },
+    { legacyHeader: true, nav: 'automations', title: 'Automations' },
   ),
   defineRoute(
     'automations/new',
     () => import('@/pages/CreateAutomationPage.js').then((m) => ({ default: m.CreateAutomationPage })),
-    { legacyHeader: true, title: 'Create Automation' },
+    { legacyHeader: true, nav: 'automations', title: 'Create Automation' },
   ),
   defineRoute(
     'automations/:id',
     () => import('@/pages/AutomationDetailPage.js').then((m) => ({ default: m.AutomationDetailPage })),
-    { legacyHeader: true, title: 'Automation' },
+    { legacyHeader: true, nav: 'automations', title: 'Automation' },
   ),
 ];

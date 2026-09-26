@@ -132,6 +132,7 @@ vi.mock('../platform', () => ({
 }));
 
 import { WindowManager, shouldHideOnClose } from '../window-manager';
+import { IPC_EVENT } from '../../shared/ipc';
 
 const APP = 'http://127.0.0.1:3100';
 
@@ -281,6 +282,43 @@ describe('close → tray', () => {
     wm.restoreFromTray();
     expect(FakeBrowserWindow.instances).toHaveLength(2);
     expect(FakeBrowserWindow.instances[1]!.loadURL).toHaveBeenCalledWith(APP);
+  });
+});
+
+describe('menu and tray commands bring the window forward (P1-R2)', () => {
+  it('sendCommand (e.g. Settings… / Cmd+,) shows a window hidden to the tray, then focuses it', () => {
+    settings.minimizeToTray = true;
+    const { wm, win } = makeWindow();
+    win.emit('close', { preventDefault: vi.fn() });
+    expect(win.visible).toBe(false);
+    wm.sendCommand('app.settings');
+    expect(win.webContents.send).toHaveBeenCalledWith(IPC_EVENT.command, 'app.settings');
+    expect(win.visible).toBe(true);
+    expect(win.focus).toHaveBeenCalled();
+  });
+
+  it('sendCommand restores a minimised window', () => {
+    const { wm, win } = makeWindow();
+    win.minimized = true;
+    wm.sendCommand('chat.new');
+    expect(win.restore).toHaveBeenCalled();
+    expect(win.minimized).toBe(false);
+    expect(win.show).toHaveBeenCalled();
+  });
+
+  it('navigateTo restores a minimised window too', () => {
+    const { wm, win } = makeWindow();
+    win.minimized = true;
+    wm.navigateTo('/chats');
+    expect(win.restore).toHaveBeenCalled();
+    expect(win.focus).toHaveBeenCalled();
+  });
+
+  it('sendCommand without a live window does nothing', () => {
+    const { wm, win } = makeWindow();
+    win.destroyed = true;
+    expect(() => wm.sendCommand('app.settings')).not.toThrow();
+    expect(win.webContents.send).not.toHaveBeenCalledWith(IPC_EVENT.command, 'app.settings');
   });
 });
 

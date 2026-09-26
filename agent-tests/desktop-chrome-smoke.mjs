@@ -16,10 +16,16 @@ import { _electron as electron } from 'playwright-core';
 import * as path from 'node:path';
 import * as fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
+import { DESKTOP_DIR as DESKTOP, isolatedProfile } from './helpers/desktop-profile.mjs';
+// The registry is dependency-free TypeScript; Node >= 22.18 strips its types.
+// Commands go over IPC by registry id (CLAUDE.md selector rule 2): a rename
+// there fails this import instead of turning the check into a silent no-op.
+import { COMMANDS } from '../packages/shared/src/ui-contract/commands.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const DESKTOP = path.resolve(__dirname, '..', 'apps', 'desktop');
 const SHOTS = path.resolve(__dirname, 'test-results', 'desktop-chrome');
+const SIDEBAR_TOGGLE = 'sidebar.toggle';
+if (!(SIDEBAR_TOGGLE in COMMANDS)) throw new Error(`registry has no ${SIDEBAR_TOGGLE} command`);
 
 let pass = 0;
 let fail = 0;
@@ -39,8 +45,11 @@ function check(name, ok, detail = '') {
 async function main() {
   fs.mkdirSync(SHOTS, { recursive: true });
 
+  // A fresh profile: never the developer's userData or vault key.
+  const profile = isolatedProfile('gai-chrome-smoke-');
+  process.on('exit', profile.cleanup);
   const app = await electron.launch({
-    args: [DESKTOP],
+    args: [DESKTOP, profile.arg],
     env: {
       ...process.env,
       GENERATORAI_DESKTOP_MODE: 'standalone',
@@ -312,10 +321,20 @@ async function main() {
   );
 
   // ── 4. Menu state mirroring ──
-  const sidebarBefore = await win.evaluate(() =>
-    Boolean(document.querySelector('[data-testid="sidebar-toggle"]')),
-  );
-  check('sidebar is open at boot', sidebarBefore);
+  // The collapsed sidebar stays in the DOM (width transition), and so does
+  // its toggle, so presence proves nothing: read the <aside>'s real state.
+  const sidebarState = () =>
+    win.evaluate(() => {
+      const aside = document.querySelector('[data-testid="sidebar-toggle"]')?.closest('aside');
+      if (!aside) return null;
+      return { hidden: aside.getAttribute('aria-hidden') === 'true', width: Math.round(aside.getBoundingClientRect().width) };
+    });
+  // Collapsed = w-0 plus its 1px right border.
+  const isOpen = (st) => st !== null && !st.hidden && st.width > 1;
+  const isCollapsed = (st) => st !== null && st.hidden && st.width <= 1;
+
+  const sidebarBefore = await sidebarState();
+  check('sidebar is open at boot', isOpen(sidebarBefore), JSON.stringify(sidebarBefore));
 
   const checkedBefore = await app.evaluate(async ({ Menu }) => {
     const m = Menu.getApplicationMenu();
@@ -326,6 +345,8 @@ async function main() {
 
   await win.click('[data-testid="sidebar-toggle"]');
   await new Promise((r) => setTimeout(r, 600));
+  const sidebarHidden = await sidebarState();
+  check('the sidebar toggle collapses the sidebar', isCollapsed(sidebarHidden), JSON.stringify(sidebarHidden));
   const checkedAfter = await app.evaluate(async ({ Menu }) => {
     const m = Menu.getApplicationMenu();
     const view = m?.items.find((i) => (i.label ?? '').replace(/&/g, '') === 'View');
@@ -334,15 +355,19 @@ async function main() {
   check('menu checkmark follows the renderer', checkedAfter === false, String(checkedAfter));
 
   // ── 5. Commands flow main → renderer ──
-  await app.evaluate(async ({ BrowserWindow }) => {
+  await app.evaluate(async ({ BrowserWindow }, command) => {
     const w = BrowserWindow.getAllWindows().find((x) => x.isVisible());
-    w?.webContents.send('desktop:command', 'toggle-sidebar');
-  });
+    w?.webContents.send('desktop:command', command);
+  }, SIDEBAR_TOGGLE);
   await new Promise((r) => setTimeout(r, 600));
-  const sidebarRestored = await win.evaluate(() =>
-    Boolean(document.querySelector('[data-testid="sidebar-toggle"]')),
-  );
-  check('toggle-sidebar command reaches the renderer', sidebarRestored === true, String(sidebarRestored));
+  const sidebarRestored = await sidebarState();
+  check(`${SIDEBAR_TOGGLE} command reopens the sidebar`, isOpen(sidebarRestored), JSON.stringify(sidebarRestored));
+  const checkedRestored = await app.evaluate(async ({ Menu }) => {
+    const m = Menu.getApplicationMenu();
+    const view = m?.items.find((i) => (i.label ?? '').replace(/&/g, '') === 'View');
+    return view?.submenu?.items.find((i) => i.label === 'Toggle Sidebar')?.checked ?? null;
+  });
+  check('menu checkmark follows the command', checkedRestored === true, String(checkedRestored));
 
   await win.screenshot({ path: path.join(SHOTS, 'desktop-chrome.png') });
   console.log(`\n  screenshot → ${path.join(SHOTS, 'desktop-chrome.png')}`);

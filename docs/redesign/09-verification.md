@@ -637,7 +637,7 @@ Vitest (`BrowserPanel.characterization.test.tsx`; mocks `muxStream`, `authTransp
 Vitest (`NativeBrowserView.characterization.test.tsx`; stubs the bridge and `getBoundingClientRect`; fake timers):
 - **Lifecycle.** `create(tabId, workspaceId, false)` on mount and `destroy` on unmount. `restoreUrl` is used only when the current URL is not `http(s)`.
 - **Bounds.** `setBounds` is called on ResizeObserver, window resize and scroll (capture phase), scheduled through rAF and DPR-snapped. It is skipped when the size is under 4 px.
-- **Overlay loop, every 100 ms.** `setVisible(false)` when the container is hidden (`visibility:hidden` on an ancestor, or a size under 4 px). `setVisible(false)` when an element matching the current `OVERLAY_SELECTORS` list intersects the container. On the transition back to visible it calls `setVisible(true)` + `setActiveTab`. On unmount it hides.
+- **Overlay loop, every 100 ms.** `setVisible(false)` when the container is hidden (`visibility:hidden` on an ancestor, or a size under 4 px). `setVisible(false)` when an element matching `OCCLUSION_SELECTOR` (`nativeBrowserOcclusion.ts`; the P0 code called the list `OVERLAY_SELECTORS`) intersects the container. On the transition back to visible it calls `setVisible(true)` + `setActiveTab`. On unmount it hides.
 - **Placeholder.** The screenshot is polled every 2 s while watched and every 1 s otherwise, only while not hidden. Navigation or load events refresh it after 250 ms.
 
 **D-19 tests (written in P4 together with the contract change; they replace the selector-list cases):**
@@ -785,6 +785,8 @@ A PR that ports a page flips its `handle.legacyHeader` off, deletes the old file
 
 Run from the repo root after `pnpm --filter @generatorai/desktop build` (and the server bundle it stages): `node agent-tests/desktop-chrome-smoke.mjs`, `node agent-tests/right-pane-desktop-smoke.mjs`, `node agent-tests/desktop-browser-smoke.mjs`, `node agent-tests/terminal-desktop-smoke.mjs`, `node agent-tests/desktop-diff-review-smoke.mjs`, and `node agent-tests/desktop-dock-browser-smoke.mjs` (from P4-06). Screenshots go to `agent-tests/test-results/<smoke>/`. Inspect them.
 
+Every smoke that launches Electron passes a fresh temp `--user-data-dir` (`agent-tests/helpers/desktop-profile.mjs` `isolatedProfile()`; Electron takes `app.getPath('userData')` from that switch on every OS), so settings, logs, the single-instance lock and the vault key live in a throwaway profile: a smoke never reads or rewrites the developer's profile and never renames its `secret-key.bin`. The same helper resolves `apps/desktop` from the script's own path, so every smoke runs from any cwd.
+
 ### 6.6 SCM features: dummy repo only
 
 `scripts/redesign/make-dummy-repo.mjs` (P0-02; Node, cross-platform, uses `child_process.execFileSync('git', …)`) creates `os.tmpdir()/generatorai-dummy-repo-<stamp>/`:
@@ -803,6 +805,7 @@ Never point the app's SCM features at `/Users/…/generatorAI`. A walkthrough th
 | OS | Configuration | Check |
 |---|---|---|
 | macOS | default | traffic lights centred in the 44 px sidebar row; rail mode leaves a 44 px drag row and the page header gets the 30 px `--gai-page-inset-left` inset (`06` §3.5); dark/light background at launch (D-25) |
+| All | persisted light theme (e.g. Solarized light), relaunch | the **empty window** is the persisted ground (`getBackgroundColor()` = `#EEE8D5`); the **splash page** that loads into it is still the hard-coded GitHub-dark `resources/splash.html` (`error.html`/`prompt.html` likewise) until P5-11 styles the static pages from tokens (`02` §8, `06` §7). So "first frame = persisted ground" is true of the window background only, not of the first painted page; a light user still sees a dark splash between the two |
 | Windows | default (WCO) | 36 px strip; caption buttons 46×36 not covered; overlay symbol colour follows `--gai-fg` after a theme change; drag regions work, `no-drag` controls click |
 | Linux | native frame | strip items in the sidebar header; search stays in the sidebar |
 | Linux | `GENERATORAI_LINUX_CUSTOM_TITLEBAR=1` | Windows layout |
@@ -892,7 +895,7 @@ In P4 the existing `ChatPage.test.tsx` render-isolation test moves to the new ch
 
 ### 9.1 axe per story
 
-`addon-a11y` with `parameters.a11y.test = 'error'` fails `test:stories` on any violation, in every appearance combination the story is tested in. The `vrt-themes` stories run their a11y test under Instrument dark, Instrument light and Solarized light: `test:stories` runs once per combination with `STORYBOOK_A11Y_GLOBALS`, which the vitest setup maps to `initialGlobals`. The only allowed per-story rule disables are for third-party internals (xterm, xyflow canvas), each with a comment.
+`addon-a11y` with `parameters.a11y.test = 'error'` fails `test:stories` on any violation, in every appearance combination the story is tested in. The `vrt-themes` stories run their a11y test under Instrument dark, Instrument light and Solarized light: the Vitest config has one browser project per combination, each setting `initialGlobals`, and `test:stories` lists the three projects (D-53; this replaced the `STORYBOOK_A11Y_GLOBALS` env of the first draft). The only allowed per-story rule disables are for third-party internals (xterm, xyflow canvas), each with a comment.
 
 For routes, `agent-tests/e2e/a11y.spec.ts` (P3; adds the devDependency `@axe-core/playwright`) runs axe (WCAG 2.2 A/AA tags) on each §4.3 route in dark and light, and fails on violations. Known third-party nodes are excluded with `.exclude('.xterm')` and `.exclude('.react-flow__renderer')`.
 

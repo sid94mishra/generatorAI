@@ -9,26 +9,26 @@ export const workflowsRoutes: RouteObject[] = [
   defineRoute(
     'workflows',
     () => import('@/pages/WorkflowListPage.js').then((m) => ({ default: m.WorkflowListPage })),
-    { legacyHeader: true, title: 'Workflows' },
+    { legacyHeader: true, nav: 'workflows', title: 'Workflows' },
   ),
   defineRoute(
     'workflows/new',
     () => import('@/pages/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })),
-    { legacyHeader: true, title: 'Workflow Builder' },
+    { legacyHeader: true, nav: 'workflows', title: 'Workflow Builder' },
   ),
   defineRoute(
     'workflows/:id',
     () => import('@/pages/WorkflowDefinitionPage.js').then((m) => ({ default: m.WorkflowDefinitionPage })),
-    { legacyHeader: true, title: 'Workflow' },
+    { legacyHeader: true, nav: 'workflows', title: 'Workflow' },
   ),
   defineRoute(
     'workflows/:id/edit',
     () => import('@/pages/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })),
-    { legacyHeader: true, title: 'Workflow Builder' },
+    { legacyHeader: true, nav: 'workflows', title: 'Workflow Builder' },
   ),
   defineRoute(
     'workflows/:id/runs/:runId',
     () => import('@/pages/WorkflowRunPageV2.js').then((m) => ({ default: m.WorkflowRunPageV2 })),
-    { legacyHeader: true, title: 'Workflow Run' },
+    { legacyHeader: true, nav: 'workflows', title: 'Workflow Run' },
   ),
 ];

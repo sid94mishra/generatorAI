@@ -6,26 +6,26 @@ export const projectsRoutes: RouteObject[] = [
   defineRoute(
     'projects',
     () => import('@/pages/ProjectsListPage.js').then((m) => ({ default: m.ProjectsListPage })),
-    { legacyHeader: true, title: 'Projects' },
+    { legacyHeader: true, nav: 'projects', title: 'Projects' },
   ),
   defineRoute(
     'projects/new',
     () => import('@/pages/CreateProjectPage.js').then((m) => ({ default: m.CreateProjectPage })),
-    { legacyHeader: true, title: 'Create Project' },
+    { legacyHeader: true, nav: 'projects', title: 'Create Project' },
   ),
   defineRoute(
     'projects/:id',
     () => import('@/pages/ProjectDetailPage.js').then((m) => ({ default: m.ProjectDetailPage })),
-    { legacyHeader: true, title: 'Project' },
+    { legacyHeader: true, nav: 'projects', title: 'Project' },
   ),
   defineRoute(
     'projects/:id/codebases/:cid',
     () => import('@/pages/CodebaseDetailPage.js').then((m) => ({ default: m.CodebaseDetailPage })),
-    { legacyHeader: true, title: 'Codebase' },
+    { legacyHeader: true, nav: 'projects', title: 'Codebase' },
   ),
   defineRoute(
     'projects/:id/codebases/:cid/pull-requests/:number',
     () => import('@/pages/PullRequestPage.js').then((m) => ({ default: m.PullRequestPage })),
-    { legacyHeader: true, title: 'Pull Request' },
+    { legacyHeader: true, nav: 'projects', title: 'Pull Request' },
   ),
 ];
