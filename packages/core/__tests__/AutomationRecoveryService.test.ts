@@ -127,7 +127,6 @@ function baseAutomation(id: string): Automation {
     enabled: true,
     triggerType: 'manual',
     workflowIds: ['wf-1'],
-    inputMode: 'single',
     variables: {},
     maxConcurrency: 1,
     onError: 'continue',

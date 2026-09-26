@@ -89,6 +89,7 @@ const LiveTurn = memo(function LiveTurn({ sessionId, agentName, harnessLabel, pr
       ...(u.cacheReadTokens != null ? { cacheReadTokens: u.cacheReadTokens } : {}),
       ...(u.cacheWriteTokens != null ? { cacheWriteTokens: u.cacheWriteTokens } : {}),
       ...(u.cost != null ? { cost: u.cost } : {}),
+      ...(u.costUsd != null ? { costUsd: u.costUsd } : {}),
       ...(u.provider ? { provider: u.provider } : {}),
     };
   }, [stream?.usage, status]);

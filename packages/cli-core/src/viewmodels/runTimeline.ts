@@ -17,18 +17,10 @@ export type TimelineItemKind =
   | 'thinking'
   | 'tool'
   | 'stage'
-  | 'step'
   | 'hook'
   | 'notice'
   | 'error'
   | 'usage';
-
-export interface StepState {
-  index: number;
-  totalSteps?: number;
-  label?: string;
-  status: 'running' | 'complete';
-}
 
 export interface HookState {
   name: string;
@@ -66,7 +58,6 @@ export interface TimelineItem {
    */
   stageRunId?: string;
   tool?: ToolCallState;
-  step?: StepState;
   hook?: HookState;
   level?: 'info' | 'warn' | 'error';
   usage?: { inputTokens?: number; outputTokens?: number; totalTokens?: number; costUsd?: number };
@@ -99,8 +90,13 @@ export interface PendingQuestion {
  * Real producer for both event families: `ChatManagementService.ts`'s
  * `buildPlanReviewHandler`/`buildQuestionHandler`/`answerQuestion` — verified
  * field-by-field there, not assumed from `AgentEvent.ts`'s type names alone.
+ *
+ * A workflow stage raises the same three gates inside its turns
+ * (`StageGatePort`, `stage.permission.*` / `stage.question.*` /
+ * `stage.plan.*`, P03b): they land here too, with `stageRunId` set, so the
+ * chat's key bindings answer them — through the stage conversation API.
  */
-export type PendingChatInteraction =
+export type PendingChatInteraction = (
   | {
       kind: 'plan';
       interactionId: string;
@@ -127,7 +123,11 @@ export type PendingChatInteraction =
       /** Bounded, secret-redacted rendering of the tool input. */
       inputSummary: string;
       permissionMode: string;
-    };
+    }
+) & {
+  /** Set when a workflow stage raised the gate (answered through the stage's interaction routes). */
+  stageRunId?: string;
+};
 
 export interface TimelineState {
   items: TimelineItem[];
@@ -157,7 +157,12 @@ export interface TimelineState {
     totalContextWindow?: number;
     compactionThreshold?: number;
   } | null;
-  /** The chat-scoped HITL gate currently blocking the turn, if any. See `PendingChatInteraction`. */
+  /**
+   * Every open HITL gate, oldest first, keyed by `interactionId`. A chat has
+   * at most one; a run's parallel stages can each park one (CONVINV-R12).
+   */
+  pendingInteractions: PendingChatInteraction[];
+  /** The gate the key bindings answer: the oldest of `pendingInteractions`. See `PendingChatInteraction`. */
   pendingInteraction: PendingChatInteraction | null;
   /**
    * Bumped every time a `workspace.changed` / `checkpoint.restored` event
@@ -186,6 +191,7 @@ export function emptyTimeline(): TimelineState {
     runStatus: null,
     pendingApproval: null,
     contextUsage: null,
+    pendingInteractions: [],
     pendingInteraction: null,
     workspaceRevision: 0,
   };
@@ -220,6 +226,44 @@ function num(value: unknown): number | undefined {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined;
 }
 
+/** A stage gate's `stageRunId` (`stage.*` events), for `PendingChatInteraction`. */
+function stageOf(data: Record<string, unknown>): { stageRunId?: string } {
+  const id = str(data['stageRunId']);
+  return id ? { stageRunId: id } : {};
+}
+
+/** Opens a gate after any still open (a re-delivered one keeps its place). */
+function openInteraction(base: TimelineState, pending: PendingChatInteraction): TimelineState {
+  const list = base.pendingInteractions.some((p) => p.interactionId === pending.interactionId)
+    ? base.pendingInteractions.map((p) => (p.interactionId === pending.interactionId ? pending : p))
+    : [...base.pendingInteractions, pending];
+  return { ...base, pendingInteractions: list, pendingInteraction: list[0] ?? null };
+}
+
+/** Closes the gates `drop` matches; the next open one becomes the answerable one. */
+function closeInteractions(base: TimelineState, drop: (p: PendingChatInteraction) => boolean): TimelineState {
+  const list = base.pendingInteractions.filter((p) => !drop(p));
+  if (list.length === base.pendingInteractions.length) return base;
+  return { ...base, pendingInteractions: list, pendingInteraction: list[0] ?? null };
+}
+
+/**
+ * Stage lifecycle kinds that end whatever gate the stage had open. A gate
+ * whose frame died with the process gets no resolved/expired event (the
+ * resume re-asks under a new id), so it would otherwise linger forever.
+ */
+const STAGE_GATE_ENDING_KINDS: ReadonlySet<string> = new Set([
+  'stage_run.running',
+  'stage_run.paused',
+  'stage_run.resumed',
+  'stage_run.retrying',
+  'stage_run.completed',
+  'stage_run.failed',
+  'stage_run.cancelled',
+  'stage_run.skipped',
+  'stage_run.turn_cancelled',
+]);
+
 /**
  * Folds one event into the timeline.
  *
@@ -238,7 +282,11 @@ export function reduceEvent(
   // Re-delivered events after a reconnect must not duplicate output.
   if (event.sequence !== undefined && event.sequence <= state.lastSequence) return state;
 
-  const base = { ...state, lastSequence: Math.max(state.lastSequence, sequence) };
+  let base = { ...state, lastSequence: Math.max(state.lastSequence, sequence) };
+  if (STAGE_GATE_ENDING_KINDS.has(kind) && str(data['stageRunId'])) {
+    const stageRunId = str(data['stageRunId']);
+    base = closeInteractions(base, (p) => p.stageRunId === stageRunId);
+  }
   const isInternal = Boolean(data['__isInternalTurn']);
 
   switch (kind) {
@@ -360,7 +408,7 @@ export function reduceEvent(
     case 'stage_run.running': {
       const stageRunId = str(data['stageRunId'] ?? data['stageId'] ?? data['id']);
       const stageName = str(data['name'] ?? data['stageName'] ?? stageRunId);
-      // A retry, or resuming after `.paused`/`.sleeping`, re-fires `.running`
+      // A retry, or resuming after `.paused`, re-fires `.running`
       // for a stage run whose card already exists — update it in place
       // rather than pushing a duplicate card for the same stage run.
       const existing = stageRunId
@@ -397,6 +445,8 @@ export function reduceEvent(
       const stageName = str(data['stageName'] ?? data['name'] ?? base.currentStage);
       return {
         ...base,
+        // A resolved approval wait (P05) completes its instance: its card goes.
+        ...(stageRunId && base.pendingApproval?.stageId === stageRunId ? { pendingApproval: null } : {}),
         items: base.items.map((item) => {
           if (item.kind !== 'stage') return item;
           // Prefer matching by the stage run's own id — a name match is
@@ -437,6 +487,11 @@ export function reduceEvent(
     // real event — generic pause/resume, unrelated to HITL) is deliberately
     // NOT treated as clearing an approval.
     case 'stage_run.awaiting_input': {
+      // A tool permission, question or plan review inside the stage's turn
+      // is the chat-shaped `pendingInteraction` its `stage.*` event already
+      // set (P03b); only the completion review is an approval.
+      const kind = (data['interruptData'] as { kind?: unknown } | undefined)?.kind;
+      if (kind === 'tool_permission' || kind === 'question' || kind === 'plan_review') return base;
       const stageRunId = str(data['stageRunId']);
       const stageName = str(data['name'] ?? base.currentStage ?? stageRunId);
       return push(
@@ -463,54 +518,94 @@ export function reduceEvent(
     }
 
     case 'stage_run.input_received':
+    // A loop decision (P05) answers the loop's parked card: no stage_run.input_received follows.
+    case 'loop.command_applied':
       return { ...base, pendingApproval: null };
 
-    // Phase 6 item 4 — per-stage step progress, for the stage detail view.
-    // Verified against the real producer (`StageExecutionService.ts`):
-    // fields are exactly `stageRunId`/`workflowRunId`/`step`/`totalSteps`/
-    // `label`, matching `AgentEvent.ts`'s declared shape.
-    case 'stage_run.step_started': {
-      // Step/hook progress is the same class of granular noise as a tool
-      // call — gated by the same `showTools` flag (Phase 6 item 4's
-      // per-pane verbosity control derives it from the pane's level) so
-      // "minimal" verbosity actually reduces what a run pane shows, not
-      // just its assistant/thinking text.
-      if (options.showTools === false) return base;
+    // A wait armed (P05 §4.3): an approval wait is an approval card; an event
+    // or timer wait is a notice (an event arrives with `run command … deliver_event`
+    // or the wait's callback URL).
+    case 'stage_run.waiting': {
       const stageRunId = str(data['stageRunId']);
-      const index = num(data['step']) ?? 0;
-      const step: StepState = {
-        index,
-        ...(num(data['totalSteps']) !== undefined ? { totalSteps: num(data['totalSteps']) } : {}),
-        ...(data['label'] ? { label: str(data['label']) } : {}),
-        status: 'running',
-      };
+      const stageName = str(data['name'] ?? data['stageKey'] ?? stageRunId);
+      const wait = (data['interruptData'] ?? {}) as { type?: unknown; prompt?: unknown; label?: unknown; eventKey?: unknown; until?: unknown };
+      const type = typeof wait.type === 'string' ? wait.type : 'approval';
+      const text =
+        type === 'approval'
+          ? `${stageName} is waiting for an approval${typeof wait.label === 'string' ? `: ${wait.label}` : ''}`
+          : type === 'event'
+            ? `${stageName} is waiting for the event ${str(wait.eventKey)}`
+            : `${stageName} waits${typeof wait.until === 'number' ? ` until ${new Date(wait.until).toLocaleTimeString()}` : ''}`;
       return push(
-        base,
-        {
-          id: itemId(),
-          kind: 'step',
-          text: step.label ?? `step ${index + 1}`,
-          complete: false,
-          at: now,
-          ...(stageRunId ? { stageRunId } : {}),
-          step,
-        },
+        type === 'approval'
+          ? {
+              ...base,
+              pendingApproval: { stageId: stageRunId, stageName, ...(typeof wait.prompt === 'string' ? { prompt: wait.prompt } : {}) },
+            }
+          : base,
+        { id: itemId(), kind: 'notice', text, complete: true, at: now, stageName, ...(stageRunId ? { stageRunId } : {}), level: type === 'timer' ? 'info' : 'warn' },
         options,
       );
     }
 
-    case 'stage_run.step_completed': {
-      if (options.showTools === false) return base;
+    // Maps and sub-workflows (P05 §4.1, §4.2): progress notices.
+    case 'map.started':
+    case 'map.item_completed':
+    case 'map.winner_selected':
+    case 'map.winner_settled':
+    case 'expansion.started':
+    case 'subworkflow.child_started': {
       const stageRunId = str(data['stageRunId']);
-      const index = num(data['step']) ?? 0;
-      return {
-        ...base,
-        items: base.items.map((item) =>
-          item.kind === 'step' && item.stageRunId === stageRunId && item.step?.index === index
-            ? { ...item, complete: true, step: { ...item.step, status: 'complete' } }
-            : item,
-        ),
-      };
+      const key = str(data['stageKey'] ?? data['instancePath'] ?? stageRunId);
+      const failed = (kind === 'map.item_completed' && data['status'] !== 'completed') || (kind === 'map.winner_settled' && data['outcome'] === 'failed');
+      const text =
+        kind === 'map.started'
+          ? `${key}: fanning out over ${num(data['count']) ?? 0} item(s)${data['workspace'] === 'mount_per_item' ? ' (a worktree per item)' : ''}`
+          : kind === 'map.item_completed'
+            ? `${key}: item ${str(data['key'] ?? data['index'])} ${str(data['status'])}${data['error'] ? ` — ${str(data['error'])}` : ''}`
+            : kind === 'map.winner_selected'
+              ? `${key}: merging the winner ${str(data['key'])}`
+              : kind === 'map.winner_settled'
+                ? `${key}: winner ${str(data['outcome'])}${data['key'] ? ` (${str(data['key'])})` : ''}${data['error'] ? ` — ${str(data['error'])}` : ''}`
+                : kind === 'expansion.started'
+                  ? `${key}: the plan adds ${num(data['count']) ?? 0} stage(s)${Array.isArray(data['keys']) ? ` (${(data['keys'] as unknown[]).map(str).join(', ')})` : ''}`
+                  : `${key}: child run ${str(data['childRunId'])} started`;
+      return push(
+        base,
+        { id: itemId(), kind: 'notice', text, complete: true, at: now, ...(stageRunId ? { stageRunId } : {}), level: failed ? 'warn' : 'info' },
+        options,
+      );
+    }
+
+    // The stage conversation (P03b): what an operator sent, a stopped turn,
+    // an amendment of a completed stage.
+    case 'stage_run.operator_message': {
+      const stageRunId = str(data['stageRunId']);
+      return push(
+        base,
+        { id: itemId(), kind: 'notice', text: `You: ${str(data['content'])}`, complete: true, at: now, ...(stageRunId ? { stageRunId } : {}), level: 'info' },
+        options,
+      );
+    }
+    case 'stage_run.turn_cancelled':
+    case 'stage_run.amended':
+    case 'stage_run.amend_failed':
+    case 'stage_run.operator_message_dropped': {
+      const stageRunId = str(data['stageRunId']);
+      const text =
+        kind === 'stage_run.turn_cancelled'
+          ? 'Turn stopped — the stage continues from its next step'
+          : kind === 'stage_run.amended'
+            ? 'Output amended — later stages keep what they already used; re-run from here to update them'
+            : kind === 'stage_run.amend_failed'
+              ? `The amendment failed: ${str(data['error'] ?? 'unknown error')} (the previous output is kept)`
+              : `${num(data['count']) ?? 1} queued message(s) not sent: the stage attempt ended first`;
+      const failed = kind === 'stage_run.amend_failed' || kind === 'stage_run.operator_message_dropped';
+      return push(
+        base,
+        { id: itemId(), kind: 'notice', text, complete: true, at: now, ...(stageRunId ? { stageRunId } : {}), level: failed ? 'warn' : 'info' },
+        options,
+      );
     }
 
     // Hooks are correlated to the whole run (`workflowRunId`), NOT to a
@@ -639,20 +734,19 @@ export function reduceEvent(
     // `buildQuestionHandler`/`answerQuestion` — this whole event family had
     // never been consumed by any TUI code before this (`grep` across
     // `apps/cli/src/tui` for it returned nothing).
-    case 'chat.plan.review_requested': {
+    case 'chat.plan.review_requested':
+    case 'stage.plan.review_requested': {
       const rawActions = data['actions'];
-      return {
-        ...base,
-        pendingInteraction: {
-          kind: 'plan',
-          interactionId: str(data['interactionId']),
-          planId: str(data['planId']),
-          title: str(data['title']),
-          summary: str(data['summary']),
-          actions: Array.isArray(rawActions) ? rawActions.map(str) : [],
-          ...(data['recommendedAction'] ? { recommendedAction: str(data['recommendedAction']) } : {}),
-        },
-      };
+      return openInteraction(base, {
+        ...stageOf(data),
+        kind: 'plan',
+        interactionId: str(data['interactionId']),
+        planId: str(data['planId']),
+        title: str(data['title']),
+        summary: str(data['summary']),
+        actions: Array.isArray(rawActions) ? rawActions.map(str) : [],
+        ...(data['recommendedAction'] ? { recommendedAction: str(data['recommendedAction']) } : {}),
+      });
     }
 
     // `chat.plan.decided` (the user answered) and `chat.plan.expired` (the
@@ -660,46 +754,46 @@ export function reduceEvent(
     // chat gates cannot survive a restart, unlike a workflow stage gate)
     // both clear the banner the same way.
     case 'chat.plan.decided':
-    case 'chat.plan.expired': {
-      if (base.pendingInteraction?.kind !== 'plan') return base;
-      if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
-      return { ...base, pendingInteraction: null };
+    case 'chat.plan.expired':
+    case 'stage.plan.decided': {
+      const interactionId = str(data['interactionId']);
+      return closeInteractions(base, (p) => p.kind === 'plan' && p.interactionId === interactionId);
     }
 
-    case 'chat.question.asked': {
+    case 'chat.question.asked':
+    case 'stage.question.asked': {
       const rawQuestions = Array.isArray(data['questions']) ? data['questions'] : [];
-      return {
-        ...base,
-        pendingInteraction: {
-          kind: 'question',
-          interactionId: str(data['interactionId']),
-          questions: rawQuestions.map((raw) => {
-            const q = (raw ?? {}) as Record<string, unknown>;
-            const rawOptions = Array.isArray(q['options']) ? q['options'] : [];
-            return {
-              id: str(q['id']),
-              header: str(q['header']),
-              question: str(q['question']),
-              options: rawOptions.map((raw2) => {
-                const o = (raw2 ?? {}) as Record<string, unknown>;
-                return {
-                  label: str(o['label']),
-                  ...(o['description'] ? { description: str(o['description']) } : {}),
-                };
-              }),
-              multiSelect: Boolean(q['multiSelect']),
-              allowFreeform: Boolean(q['allowFreeform']),
-            };
-          }),
-        },
-      };
+      return openInteraction(base, {
+        ...stageOf(data),
+        kind: 'question',
+        interactionId: str(data['interactionId']),
+        questions: rawQuestions.map((raw) => {
+          const q = (raw ?? {}) as Record<string, unknown>;
+          const rawOptions = Array.isArray(q['options']) ? q['options'] : [];
+          return {
+            id: str(q['id']),
+            header: str(q['header']),
+            question: str(q['question']),
+            options: rawOptions.map((raw2) => {
+              const o = (raw2 ?? {}) as Record<string, unknown>;
+              return {
+                label: str(o['label']),
+                ...(o['description'] ? { description: str(o['description']) } : {}),
+              };
+            }),
+            multiSelect: Boolean(q['multiSelect']),
+            allowFreeform: Boolean(q['allowFreeform']),
+          };
+        }),
+      });
     }
 
     case 'chat.question.answered':
-    case 'chat.question.expired': {
-      if (base.pendingInteraction?.kind !== 'question') return base;
-      if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
-      return { ...base, pendingInteraction: null };
+    case 'chat.question.expired':
+    case 'stage.question.answered':
+    case 'stage.question.expired': {
+      const interactionId = str(data['interactionId']);
+      return closeInteractions(base, (p) => p.kind === 'question' && p.interactionId === interactionId);
     }
 
     // Review finding 5.1 — a chat set to "ask me before each tool"
@@ -708,26 +802,26 @@ export function reduceEvent(
     // it. Same chat-scoped-gate family as plan/question above — real
     // producer is `ChatManagementService.buildPermissionHandler`, event
     // shapes verified against `packages/shared/src/types/AgentEvent.ts`.
-    case 'chat.permission.requested': {
-      return {
-        ...base,
-        pendingInteraction: {
-          kind: 'permission',
-          interactionId: str(data['interactionId']),
-          toolName: str(data['toolName']),
-          permissionType: str(data['type']),
-          description: str(data['description']),
-          inputSummary: str(data['inputSummary']),
-          permissionMode: str(data['permissionMode']),
-        },
-      };
+    case 'chat.permission.requested':
+    case 'stage.permission.requested': {
+      return openInteraction(base, {
+        ...stageOf(data),
+        kind: 'permission',
+        interactionId: str(data['interactionId']),
+        toolName: str(data['toolName']),
+        permissionType: str(data['type']),
+        description: str(data['description']),
+        inputSummary: str(data['inputSummary']),
+        permissionMode: str(data['permissionMode']),
+      });
     }
 
     case 'chat.permission.resolved':
-    case 'chat.permission.expired': {
-      if (base.pendingInteraction?.kind !== 'permission') return base;
-      if (base.pendingInteraction.interactionId !== str(data['interactionId'])) return base;
-      return { ...base, pendingInteraction: null };
+    case 'chat.permission.expired':
+    case 'stage.permission.resolved':
+    case 'stage.permission.expired': {
+      const interactionId = str(data['interactionId']);
+      return closeInteractions(base, (p) => p.kind === 'permission' && p.interactionId === interactionId);
     }
 
     // Phase 6 item 3 — background-task visibility. Real producer:
@@ -739,7 +833,7 @@ export function reduceEvent(
     // Emitted on the PARENT chat's session, so a chat pane open on the
     // parent already receives these through its normal subscription; no
     // new scope needed. Rendered inline as notice/error cards, the same
-    // treatment stage/hook/step events already get, rather than a separate
+    // treatment stage/hook events already get, rather than a separate
     // toast mechanism this reducer has no way to trigger (it is pure).
     case 'chat.background_task.spawned':
       return push(
@@ -931,7 +1025,8 @@ export function reduceEvent(
       //
       // `base` is still returned when it carries a real cursor advance, so
       // resume-after-reconnect does not stall on a run of unmodelled events.
-      return base.lastSequence === state.lastSequence ? state : base;
+      // Likewise when a lifecycle event closed a stage's gates (above).
+      return base.lastSequence === state.lastSequence && base.pendingInteractions === state.pendingInteractions ? state : base;
   }
 }
 

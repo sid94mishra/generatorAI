@@ -12,7 +12,8 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import type { Agent, Automation, Chat, Project, WorkflowDefinition } from '@generatorai/shared';
+import type { Agent, Automation, Chat, Project } from '@generatorai/shared';
+import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
 
 import { createSearchRoutes } from '../routes/search.js';
 
@@ -37,11 +38,12 @@ function agent(name: string, id = name.toLowerCase().replace(/\s+/g, '-')): Agen
   } as unknown as Agent;
 }
 
-function definition(name: string, id = name.toLowerCase().replace(/\s+/g, '-')): WorkflowDefinition {
+function definition(name: string, id = name.toLowerCase().replace(/\s+/g, '-')): WorkflowDefinitionSummary {
   return {
-    id, name, projectId: 'proj-1', stages: [], edges: [], version: 1, variables: [], tags: [],
-    sessionMode: 'single', createdAt: NOW, updatedAt: NOW,
-  } as unknown as WorkflowDefinition;
+    id, name, projectId: 'proj-1', status: 'published', revision: 1, currentVersionId: 'ver-1', tags: [],
+    stageCount: 0, needsAttention: false, agentAuthored: false, archivedAt: null,
+    createdAt: NOW.toISOString(), updatedAt: NOW.toISOString(),
+  };
 }
 
 function automation(name: string, id = name.toLowerCase().replace(/\s+/g, '-')): Automation {
@@ -54,7 +56,7 @@ interface Deps {
   chats?: Array<ReturnType<typeof chatRow>>;
   projects?: Project[];
   agents?: Agent[];
-  definitions?: WorkflowDefinition[];
+  definitions?: WorkflowDefinitionSummary[];
   automations?: Automation[];
   scripts?: Array<{ id: string; name: string; description?: string; tags: string[]; lastModified: Date }>;
   scriptsDisabled?: boolean;
@@ -66,7 +68,7 @@ function makeApp(deps: Deps = {}) {
     chatEntityRepo: { listPage: vi.fn().mockResolvedValue({ rows: deps.chats ?? [] }) },
     projectService: { listProjects: vi.fn().mockResolvedValue(deps.projects ?? []) },
     agentRepo: { list: vi.fn().mockResolvedValue(deps.agents ?? []) },
-    workflowDefinitionService: { listDefinitions: vi.fn().mockResolvedValue(deps.definitions ?? []) },
+    workflowDefinitionService: { list: vi.fn().mockResolvedValue({ items: deps.definitions ?? [] }) },
     automationService: { listAutomations: vi.fn().mockResolvedValue(deps.automations ?? []) },
     workflowScriptLoader: {
       getAllMetadata: deps.scriptsDisabled

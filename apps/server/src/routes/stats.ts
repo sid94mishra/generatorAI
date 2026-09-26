@@ -21,10 +21,11 @@ import type {
   AutomationExecution,
   StatsByDefinitionRow,
   StatsSummary,
-  WorkflowDefinition,
   WorkflowRun,
 } from '@generatorai/shared';
+import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
 import type { Container } from '../composition-root.js';
+import { listAllDefinitionSummaries } from './definitionSummaries.js';
 
 function parseRangeBoundary(raw: unknown): Date | undefined {
   if (typeof raw !== 'string' || raw.trim().length === 0) return undefined;
@@ -92,9 +93,9 @@ export function createStatsRoutes(container: Container): Router {
       }).length;
 
       // ── runs (joined through the definition) ──
-      let definitions: WorkflowDefinition[] = projectId
-        ? await workflowDefinitionService.listDefinitions(projectId)
-        : await workflowDefinitionService.listDefinitions();
+      let definitions: WorkflowDefinitionSummary[] = await listAllDefinitionSummaries(workflowDefinitionService, {
+        projectId,
+      });
       if (definitionId) definitions = definitions.filter((d) => d.id === definitionId);
 
       const runsByDefinition = await Promise.all(

@@ -210,7 +210,7 @@ describe('FauxProvider — W44', () => {
     expect(caps.vision).toBe(false);
     expect(caps.reasoning).toBe(false);
     expect(Array.isArray(caps.reasoningEfforts)).toBe(true);
-    expect(caps.fullToolGating).toBe(true);
+    expect(caps.approvalGating).toBe('per_call');
     expect(caps.sessionPersistence).toBe(false);
   });
 

@@ -40,29 +40,28 @@ Application plan modes and provider-native plan modes are not equivalent capabil
 
 Computer-use consent is a separate authority from ordinary agent execution. Approving a question or tool request does not automatically authorize control of the physical desktop.
 
-Workflow completion review currently releases its stage concurrency permit while waiting, but retains the live `executeStage` frame, allocated agent session, awakeable bookkeeping, and timer. Fully suspending the stage and re-entering it on approval without retaining those resources is not implemented. Durable decision records and recovery therefore do not imply zero-resource waiting; see the approval loop in `StageExecutionService.ts`.
+A stage waiting on a human (completion review, tool permission, question, plan review) parks its executor frame: the instance is `awaiting_input` with the request in `interrupt_data`, its admission slot is handed back and its lease cleared, and the `approve` run command delivers the verdict. The frame itself stays in memory while it waits. After a restart a completion review stays parked and its approval starts a resume attempt; a gate inside a turn pauses the instance (`interrupted`) and a resume re-sends the turn, which asks again.
 
 ## Workflow execution
 
-A workflow definition contains stage definitions, directed edges, variables/defaults, and orchestration configuration. A run stores a definition snapshot so an edit to the reusable definition does not silently rewrite an in-flight graph.
+A workflow definition contains stage definitions, directed edges, variables/defaults, and orchestration configuration. A run pins an immutable definition version, so an edit to the reusable definition never rewrites an in-flight graph.
 
 | Component | Responsibility |
 | --- | --- |
 | `WorkflowDefinitionService` | Definition CRUD and graph-level validation |
-| `WorkflowRunService` | Run state, stage runs, lifecycle operations and scheduling coordination |
-| `DAGScheduler` | Pure readiness/skip/terminal decisions plus repository-backed reconciliation |
-| `StageExecutionService` | Prepare a stage session, execute the selected harness, capture output and settle state |
-| `SessionAllocator` | Decide session reuse/allocation and persist ownership mappings |
-| `WorkflowPreprocessor` | Resolve variables and pre-execution configuration/source setup |
-| `WorkflowOrchestrator` | Workspace/repository preparation, hooks, cleanup and post-processing |
-| `ResultValidator` | Validate configured outputs and surface validation failures |
+| `WorkflowRunService` | The run facade: create, start, run commands, fork, delete, permission mode |
+| `RunSupervisor` | The engine of one process: the single-engine lock, one `RunActor` per live run, timers, the lease reaper, the outbox and recovery |
+| `decide()` (`domain/scheduler`) | The pure scheduler: readiness, precedence, retries, routing, budgets, run status |
+| `StageExecutor` | One attempt of a stage: session, turns (journalled), output contract, repairs, human gates |
+| `RunLifecycle` | The `prepare` (permission check, workspace, worktrees, run hooks) and `finalize` (compensation, exit actions, session release) phases |
+| `WorkflowOrchestrator` | Clone and preprocessing before `start`, commit/PR post-processing after (P04 moves them into the lifecycle) |
 | `WorkflowScriptLoader` | Discover/import/validate programmatic workflow definitions and hooks |
 
-Parallel graph branches can run concurrently subject to global session/stage/provider limits. Parallel edges are not a guarantee that all stages will start simultaneously.
+Parallel graph branches run concurrently subject to the run's `maxParallel` and the admission controller's ordinary lane (the one concurrency gate). Parallel edges are not a guarantee that all stages start simultaneously.
 
 ### Edge semantics
 
-The scheduler centralizes readiness in `resolveStageReadiness` and `reconcileDAG`.
+`decide()` resolves readiness from the compiled graph after every message (`domain/scheduler/readiness.ts`).
 
 | Edge type | Activates when its predecessor is… |
 | --- | --- |
@@ -113,12 +112,12 @@ The production server wires `EventBus` to `StreamBroker` as the durable session 
 
 ## Recovery and shutdown
 
-Startup reconciles interrupted sessions/turns, automations, durable work, and pending workflow post-processing. Workspace/resource cleanup is ordered. Shutdown flushes EventBus/stream writers and tears down managed services and child processes, with bounded fallback flushing during fatal failures.
+Startup reconciles interrupted chat turns, automations, durable work, and pending workflow post-processing, and the workflow engine recovers every live run (it takes the single-engine lock first: a second process on the same database runs without an engine). Workspace/resource cleanup is ordered. Shutdown flushes EventBus/stream writers and tears down managed services and child processes, with bounded fallback flushing during fatal failures.
 
 A client disconnect is not necessarily a cancellation. Reopening a chat must recover authoritative state and resume its event stream. Conversely, a provider process crash is not a successful empty answer: provider adapters and recovery services need to surface an explicit terminal or recoverable failure.
 
 ## Source evidence
 
-`packages/core/src/services/ChatManagementService.ts`, `WorkflowRunService.ts`, `StageExecutionService.ts`, `DAGScheduler.ts`, `WorkflowOrchestrator.ts`, `AutomationService.ts`, `AutomationRecoveryService.ts`, `DurableExecutionEngine.ts`, `InterruptedTurnRecoveryService.ts`, and `StartupRecoveryService.ts`; `packages/core/src/events/EventBus.ts`; `apps/server/src/routes/stream.ts`; `apps/server/src/composition-root.ts`.
+`packages/core/src/services/ChatManagementService.ts`, `WorkflowRunService.ts`, `engine/` (`RunSupervisor.ts`, `RunActor.ts`, `StageExecutor.ts`, `RunLifecycle.ts`), `domain/scheduler/decide.ts`, `WorkflowOrchestrator.ts`, `AutomationService.ts`, `AutomationRecoveryService.ts`, `DurableExecutionEngine.ts`, `InterruptedTurnRecoveryService.ts`, and `BootHousekeeping.ts`; `packages/core/src/events/EventBus.ts`; `apps/server/src/routes/stream.ts`; `apps/server/src/composition-root.ts`.
 
 Related: [Data and storage](./data-and-storage.md), [Providers](./providers.md), [Transport](./transports.md), and [Feature guides](../features/index.md).

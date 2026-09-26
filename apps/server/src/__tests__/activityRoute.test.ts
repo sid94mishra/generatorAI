@@ -20,10 +20,10 @@ import type {
   Chat,
   ChatChangeStats,
   ChatTurnStatus,
-  WorkflowDefinition,
   WorkflowRun,
   WorktreeInfo,
 } from '@generatorai/shared';
+import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
 
 import { createActivityRoutes } from '../routes/activity.js';
 
@@ -54,17 +54,23 @@ function chatRow(overrides: Partial<Chat> = {}, activityOverrides: Partial<TestC
   };
 }
 
-function definition(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
+function definition(overrides: Partial<WorkflowDefinitionSummary> = {}): WorkflowDefinitionSummary {
   return {
     id: 'def-1',
     name: 'Nightly audit',
-    stages: [],
-    edges: [],
-    version: 1,
-    createdAt: new Date('2026-01-01T00:00:00Z'),
-    updatedAt: new Date('2026-01-01T00:00:00Z'),
+    projectId: null,
+    status: 'published',
+    revision: 1,
+    currentVersionId: 'ver-1',
+    tags: [],
+    stageCount: 0,
+    needsAttention: false,
+    agentAuthored: false,
+    archivedAt: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
-  } as WorkflowDefinition;
+  };
 }
 
 function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
@@ -73,7 +79,7 @@ function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
     workflowDefinitionId: 'def-1',
     name: 'Run',
     status: 'completed',
-    sessionMode: 'single',
+    definitionVersionId: 'ver-1',
     variables: {},
     createdAt: new Date('2026-01-01T00:00:00Z'),
     updatedAt: new Date('2026-01-02T00:00:00Z'),
@@ -112,7 +118,7 @@ function execution(overrides: Partial<AutomationExecution> = {}): AutomationExec
 
 function makeApp(opts: {
   chatRows?: ReturnType<typeof chatRow>[];
-  definitions?: WorkflowDefinition[];
+  definitions?: WorkflowDefinitionSummary[];
   runsByDefinition?: Record<string, WorkflowRun[]>;
   automations?: Automation[];
   executionsByAutomation?: Record<string, AutomationExecution[]>;
@@ -131,7 +137,7 @@ function makeApp(opts: {
   };
   const container = {
     chatEntityRepo: { listPage: vi.fn().mockResolvedValue(chatPage) },
-    workflowDefinitionService: { listDefinitions: vi.fn().mockResolvedValue(opts.definitions ?? []) },
+    workflowDefinitionService: { list: vi.fn().mockResolvedValue({ items: opts.definitions ?? [] }) },
     workflowRunRepo: {
       getByDefinitionId: vi.fn((id: string) => Promise.resolve(runsByDefinition[id] ?? [])),
     },

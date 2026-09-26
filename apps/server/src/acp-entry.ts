@@ -100,7 +100,7 @@ async function main(): Promise<void> {
   });
 
   const chats = container.chatManagementService;
-  const sessions = container.sessionService;
+  const sessions = container.sessionRepo;
   const harness = container.harness;
 
   // ── Build the bridge over the container ──────────────────────
@@ -143,7 +143,7 @@ async function main(): Promise<void> {
       // purpose: a client disconnect (editor restart) must not destroy
       // history, so this is `deleteConversation`, NOT `chats.deleteChat`,
       // which would also tear down the workspace.
-      const session = await sessions.getSession(handle.eventSessionId).catch(() => null);
+      const session = await sessions.getById(handle.eventSessionId).catch(() => null);
       if (session?.conversationId) {
         await harness.deleteConversation(session.conversationId);
       }

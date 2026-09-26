@@ -69,8 +69,22 @@ export function transcriptItems(raw: unknown, live: boolean): TranscriptItem[] {
 export function withLiveRows(items: TranscriptItem[], live: TimelineRow[]): TranscriptItem[] {
   if (live.length === 0) return items;
   let lastPrompt = -1;
+  const saved = new Set<string>();
   items.forEach((item, index) => {
-    if (item.kind === 'user') lastPrompt = index;
+    if (item.kind !== 'user') return;
+    lastPrompt = index;
+    saved.add(item.message.content.trim());
   });
-  return [...items.slice(0, lastPrompt + 1), ...live.map((row) => ({ kind: 'row' as const, id: row.id, row }))];
+  // An operator's message streams as a row and is saved as a user message
+  // once its turn starts (P03b): show it once.
+  // The live row appends a "📎 names" line for attachments; the saved text has none.
+  const fresh = live.filter(
+    (row) =>
+      !(
+        row.kind === 'system' &&
+        row.block.category === 'operator' &&
+        saved.has(row.block.message.replace(/\n\n📎 [^\n]*$/u, '').trim())
+      ),
+  );
+  return [...items.slice(0, lastPrompt + 1), ...fresh.map((row) => ({ kind: 'row' as const, id: row.id, row }))];
 }

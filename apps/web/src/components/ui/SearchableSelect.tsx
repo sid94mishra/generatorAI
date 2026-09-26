@@ -2,7 +2,7 @@
 // SearchableSelect — the canonical searchable dropdown picker.
 // Absorbs the bespoke picker family (AgentSelector, SkillSelector,
 // McpServerSelector, ProjectPicker, CodebasePicker, ArtifactPicker,
-// PromptFilePicker, BrowserVisibilityPicker) into one primitive.
+// BrowserVisibilityPicker) into one primitive.
 // Built on Popover + cmdk (keyboard nav, typeahead, ARIA listbox).
 // ────────────────────────────────────────────────────────────────
 

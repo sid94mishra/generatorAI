@@ -22,9 +22,14 @@ export const chatsRoutes: RouteObject[] = [
   ),
   defineRoute(
     'chats/:id',
-    // The Tasks-panel section registrations (03 §1.5) load with the page.
+    // The Tasks-panel section and workflow transcript-card registrations
+    // (03 §1.5, D-35) load with the page.
     () =>
-      Promise.all([import('@/app/registries/tasksSections.js'), import('@/features/chat/ChatPage.js')]).then(([, m]) => ({
+      Promise.all([
+        import('@/app/registries/tasksSections.js'),
+        import('@/app/registries/workflowTranscriptCards.js'),
+        import('@/features/chat/ChatPage.js'),
+      ]).then(([, , m]) => ({
         default: m.ChatPage,
       })),
     // P4-12: the chat workspace renders its own ChatHeader (T-04).

@@ -2,13 +2,13 @@
 // Script — a programmatic workflow (.workflow.mjs): what it runs, the
 // profiles it ships with, and a way to run it.
 //
-// Running a script materialises a fresh definition and starts a run in one
-// call (`POST /workflow-scripts/:id/run { profileName, variables,
-// projectId }`), so the form mirrors StartRunSheet — one field per declared
+// Running a script is one invocation (`workflows.invoke` with a `script`
+// target and the chosen `profile`): the server materialises the definition
+// and starts the run. The form mirrors StartRunSheet — one field per declared
 // input, pre-filled from the chosen profile — and lands on the new run.
 //
-// The run route starts agents, so it needs write:workflows AND exec:agent
-// (the `runControl` feature), matching the route policy.
+// A script target materialises a definition, so it needs write:workflows AND
+// exec:agent (the `scriptRun` feature).
 // ────────────────────────────────────────────────────────────────
 
 import React, { useEffect, useMemo, useState } from 'react';
@@ -20,6 +20,7 @@ import { queryKeys } from '@generatorai/client-core';
 
 import { useAdminApi } from '../../src/api/useAdminApi';
 import { useApi } from '../../src/api/useApi';
+import { useIdempotencyKey } from '../../src/api/useIdempotencyKey';
 import { useFeature } from '../../src/components/runs/useFeature';
 import { usePullRefresh } from '../../src/components/runs/usePullRefresh';
 import { STICKY_BAR_SPACE, StickyActionBar } from '../../src/components/work/StickyActionBar';
@@ -29,7 +30,6 @@ import {
   parseScriptDetail,
   parseScriptProfiles,
   profileSummary,
-  scriptRunIdOf,
 } from '../../src/components/work/scriptModel';
 import { buildVariables, initialDraft, parseVariables, type Draft } from '../../src/components/work/variableForm';
 import { Button } from '../../src/components/ui/Button';
@@ -51,13 +51,14 @@ export default function ScriptScreen(): React.ReactElement {
   const queryClient = useQueryClient();
   const navigation = useNavigation();
   const { colors } = useTheme();
-  const runControl = useFeature('runControl');
+  const scriptRun = useFeature('scriptRun');
 
   const [profileName, setProfileName] = useState<string | null>(null);
   const [draft, setDraft] = useState<Draft>({});
   const [showErrors, setShowErrors] = useState(false);
   const [projectId, setProjectId] = useState<string | null>(null);
   const [serverError, setServerError] = useState<string | null>(null);
+  const idempotencyKey = useIdempotencyKey();
 
   const script = useQuery({
     queryKey: scriptKey(scriptId),
@@ -106,16 +107,20 @@ export default function ScriptScreen(): React.ReactElement {
 
   const run = useMutation({
     mutationFn: async (): Promise<string> => {
-      const response = await admin.scripts.run(scriptId, {
-        ...(profileName ? { profileName } : {}),
-        variables: result.variables,
-        ...(projectId ? { projectId } : {}),
-      });
-      const runId = scriptRunIdOf(response);
-      if (!runId) throw new Error('The server did not return a run.');
-      return runId;
+      const invocation = await admin.workflows.invoke(
+        {
+          target: { kind: 'script', scriptId },
+          variables: result.variables,
+          ...(profileName ? { profile: profileName } : {}),
+          ...(projectId ? { projectId } : {}),
+          client: 'mobile',
+        },
+        { idempotencyKey: idempotencyKey.get() },
+      );
+      return invocation.runId;
     },
     onSuccess: (runId) => {
+      idempotencyKey.settle();
       haptics.success();
       void queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
       // The run materialised a new definition.
@@ -123,6 +128,7 @@ export default function ScriptScreen(): React.ReactElement {
       router.push(`/runs/${runId}`);
     },
     onError: (err) => {
+      idempotencyKey.settle(err);
       haptics.error();
       setServerError(err instanceof Error ? err.message : String(err));
     },
@@ -261,7 +267,7 @@ export default function ScriptScreen(): React.ReactElement {
             <Card className="px-4 py-1">
               {data.stages.map((stage, index) => (
                 <View
-                  key={`${stage.id}:${index}`}
+                  key={stage.key}
                   className={`flex-row gap-3 py-3 ${index > 0 ? 'border-t border-border-muted' : ''}`}
                 >
                   <View className="h-7 w-7 items-center justify-center rounded-full bg-control">
@@ -293,7 +299,7 @@ export default function ScriptScreen(): React.ReactElement {
       </PlainScroll>
 
       <StickyActionBar>
-        {runControl.available ? (
+        {scriptRun.available ? (
           <Button
             label={profileName ? `Run with ${profileName}` : 'Run script'}
             size="lg"
@@ -311,7 +317,7 @@ export default function ScriptScreen(): React.ReactElement {
             <Text className="flex-1 text-sm text-muted-foreground">
               Running scripts needs workflow and agent permission on this device.
             </Text>
-            <Button label="Request access" variant="secondary" size="sm" onPress={runControl.requestAccess} />
+            <Button label="Request access" variant="secondary" size="sm" onPress={scriptRun.requestAccess} />
           </View>
         )}
       </StickyActionBar>

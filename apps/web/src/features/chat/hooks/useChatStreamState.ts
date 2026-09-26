@@ -22,6 +22,8 @@ export interface TurnUsage {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   cost?: number;
+  /** USD, only from a provider that reports one (`cost` may be a multiplier). */
+  costUsd?: number;
   provider?: string;
 }
 
@@ -148,6 +150,7 @@ export function useChatStreamState(sessionId: string | undefined) {
           cacheReadTokens: lastStreamUsage.cacheReadTokens,
           cacheWriteTokens: lastStreamUsage.cacheWriteTokens,
           cost: lastStreamUsage.cost,
+          costUsd: lastStreamUsage.costUsd,
           provider: lastStreamUsage.provider,
         },
         completedAt: Date.now(),

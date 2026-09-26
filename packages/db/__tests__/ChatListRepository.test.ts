@@ -1,12 +1,13 @@
 // ────────────────────────────────────────────────────────────────
-// Chat list v2 (G-02) — migrations v55/v56 and the repository's list page.
+// Chat list v2 (G-02) — migrations v61/v62 (redesign v55/v56, renumbered after
+// the Workflow Overhaul's v55–v60) and the repository's list page.
 //
 // Real temp SQLite file, real migrations. Pinned here:
-//   - v55 backfills existing chats: last activity = newest message (else
+//   - v61 backfills existing chats: last activity = newest message (else
 //     creation), last turn = the newest assistant reply (partial → cancelled,
 //     an `Error:` system line → failed, anything else → succeeded), and a
 //     malformed metadata row does not abort the migration;
-//   - v56 backfills a NULL activity and rejects NULL writes;
+//   - v62 backfills a NULL activity and rejects NULL writes;
 //   - keyset paging walks every row exactly once under each sort, ties
 //     included, and the activity order is index-served (no temp B-tree);
 //   - every filter, the total and the All / Active / Archived counts;
@@ -42,9 +43,9 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('migration v55 — chat list summary columns', () => {
+describe('migration v61 — chat list summary columns', () => {
   it('adds the columns and backfills activity and the last turn from the transcript', () => {
-    migrateDB(db, { targetVersion: 54 });
+    migrateDB(db, { targetVersion: 60 });
     const sqlite = raw(db);
     const insertSession = sqlite.prepare(
       `INSERT INTO sessions (id, name, status, created_at, updated_at) VALUES (?, ?, 'active', 1000, 1000)`,
@@ -88,9 +89,9 @@ describe('migration v55 — chat list summary columns', () => {
   });
 });
 
-describe('migration v56 — index-served activity order, non-NULL activity', () => {
+describe('migration v62 — index-served activity order, non-NULL activity', () => {
   it('backfills a NULL activity, widens the activity index and rejects NULL writes', () => {
-    migrateDB(db, { targetVersion: 55 });
+    migrateDB(db, { targetVersion: 61 });
     const sqlite = raw(db);
     sqlite.prepare(`INSERT INTO sessions (id, name, status, created_at, updated_at) VALUES ('s-n', 'n', 'active', 1000, 1000)`).run();
     sqlite

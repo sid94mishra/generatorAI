@@ -1,40 +1,45 @@
 // ────────────────────────────────────────────────────────────────
-// TanStack Query hooks — Workflow Definitions, Stages, Edges, Runs
+// TanStack Query hooks — Workflow Definitions and Runs
 // All mutations invalidate relevant query caches automatically
 // ────────────────────────────────────────────────────────────────
 
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useEffect } from 'react';
+import { keepPreviousData, useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePlatform } from '../providers/PlatformProvider.js';
+import { openMultiplexedStream } from '../platform/muxStream.js';
 import type { HttpPlatformClient } from '../platform/HttpPlatformClient.js';
-import type {
-  CreateWorkflowDefinitionParams,
-  CreateWorkflowRunParams,
-  CreateStageParams,
-  CreateEdgeParams,
-  StageEdgeType,
-  ImportWorkflowJson,
-} from '@generatorai/shared';
+import type { InvocationFiles, WorkflowRunListFilter, WorkflowRunPermissionMode } from '@generatorai/shared';
+import type { InvocationRequest, RunCommand, WorkflowDefinitionRecord, WorkflowGraphInput } from '@generatorai/workflow-spec';
+import { mergeWorkflowRunCards, type WorkflowRunCardView } from '@generatorai/client-core';
 
 // ── Query Keys ──
 export const workflowKeys = {
   definitions: ['workflow-definitions'] as const,
   definition: (id: string) => ['workflow-definition', id] as const,
+  definitionVersion: (id: string, versionId: string) => ['workflow-definition', id, 'version', versionId] as const,
   runs: ['workflow-runs'] as const,
   runsByDefinition: (defId: string) => ['workflow-runs', 'by-definition', defId] as const,
+  runSearch: (filter: WorkflowRunListFilter) => ['workflow-runs', 'search', filter] as const,
+  /** A definition's versions (the builder's history). */
+  definitionVersions: (id: string) => ['workflow-definition', id, 'versions'] as const,
+  /** One stage's executions across the definition's runs. */
+  stageHistory: (definitionId: string, stageKey: string, limit: number) => ['stage-history', definitionId, stageKey, limit] as const,
   run: (id: string) => ['workflow-run', id] as const,
-  systemWorkflows: ['system-workflows'] as const,
-  systemWorkflow: (id: string) => ['system-workflow', id] as const,
-  orchestratorContext: (runId: string) => ['orchestrator-context', runId] as const,
   runWorkspace: (runId: string) => ['run-workspace', runId] as const,
-  runScratchpad: (runId: string) => ['run-scratchpad', runId] as const,
-  workflowFiles: (defId: string) => ['workflow-files', defId] as const,
+  /** Every loop's finished iterations of a run (the prefix the loop events invalidate). */
+  loopIterationsOfRun: (runId: string) => ['loop-iterations', runId] as const,
+  loopIterations: (runId: string, instanceId: string) => ['loop-iterations', runId, instanceId] as const,
+  /** The decisions a run waits on, its sub-workflow children's mirrored (P05). */
+  pendingDecisions: (runId: string) => ['pending-decisions', runId] as const,
+  /** The runs a chat started (P06 WP-6.2), patched live by `chat.workflow_run.*`. */
+  chatRuns: (chatId: string) => ['chat-workflow-runs', chatId] as const,
 };
 
 // ════════════════════════════════════════════════════════════════
 // Definition Queries & Mutations
 // ════════════════════════════════════════════════════════════════
 
-/** List all workflow definitions */
+/** List workflow definitions (summaries) */
 export function useWorkflowDefinitions() {
   const platform = usePlatform();
   return useQuery({
@@ -44,7 +49,7 @@ export function useWorkflowDefinitions() {
   });
 }
 
-/** Get a single workflow definition with stages and edges */
+/** Get a single workflow definition record (its working graph plus bookkeeping) */
 export function useWorkflowDefinition(id: string | undefined) {
   const platform = usePlatform();
   return useQuery({
@@ -54,37 +59,74 @@ export function useWorkflowDefinition(id: string | undefined) {
   });
 }
 
-/** Create a new workflow definition */
+/** The immutable version a run pinned: the graph the run actually executes. */
+export function useWorkflowDefinitionVersion(id: string | undefined, versionId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useQuery({
+    queryKey: workflowKeys.definitionVersion(id ?? '', versionId ?? ''),
+    queryFn: () => platform.getDefinitionVersion(id!, versionId!),
+    enabled: !!id && !!versionId,
+    // Versions never change.
+    staleTime: Infinity,
+  });
+}
+
+/**
+ * A mutation that returns a definition record: the detail cache is set from
+ * the response (so the builder never refetches its own save) and the list is
+ * invalidated.
+ */
+function useRecordMutation<A>(fn: (args: A) => Promise<WorkflowDefinitionRecord>) {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: fn,
+    onSuccess: (record) => {
+      queryClient.setQueryData(workflowKeys.definition(record.id), record);
+      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
+    },
+  });
+}
+
+/** Create a draft definition from a graph */
 export function useCreateWorkflowDefinition() {
   const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: CreateWorkflowDefinitionParams) => platform.createDefinition(params),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-    },
-  });
+  return useRecordMutation((graph: WorkflowGraphInput) => platform.createDefinition(graph));
 }
 
-/** Update a workflow definition */
-export function useUpdateWorkflowDefinition() {
+/** Replace a definition graph (optimistic concurrency on `expectedRevision`) */
+export function useSaveDefinitionGraph() {
   const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { id: string; params: Partial<CreateWorkflowDefinitionParams> }) =>
-      platform.updateDefinition(args.id, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.id) });
-    },
-  });
+  return useRecordMutation((args: { id: string; graph: WorkflowGraphInput; expectedRevision: number }) =>
+    platform.saveDefinitionGraph(args.id, args.graph, args.expectedRevision),
+  );
 }
 
-/** Delete a workflow definition */
+/** Publish the working graph as the version runs use */
+export function usePublishDefinition() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useRecordMutation((id: string) => platform.publishDefinition(id));
+}
+
+/** Import a canonical workflow document as a new draft */
+export function useImportDefinition() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useRecordMutation((document: unknown) => platform.importDefinition(document));
+}
+
+/** Create a workflow definition from a template (`POST /workflow-definitions/import`) */
+export function useCreateFromTemplate() {
+  const platform = usePlatform() as HttpPlatformClient;
+  return useRecordMutation((args: { templateId: string; name?: string }) =>
+    platform.importTemplate(args.templateId, args.name),
+  );
+}
+
+/**
+ * Delete a workflow definition. The server archives it instead when runs
+ * pinned it; the outcome says which happened.
+ */
 export function useDeleteWorkflowDefinition() {
-  const platform = usePlatform();
+  const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
 
   return useMutation({
@@ -96,23 +138,22 @@ export function useDeleteWorkflowDefinition() {
 }
 
 /**
- * Bulk-delete multiple workflow definitions in parallel.
- * Calls the single-delete endpoint for each ID and invalidates the
- * definitions cache once after all deletions complete.
+ * Bulk-delete multiple workflow definitions in parallel. Resolves with how
+ * many were deleted and how many archived (they had runs).
  */
 export function useBulkDeleteWorkflowDefinitions() {
-  const platform = usePlatform();
+  const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
 
   return useMutation({
     mutationFn: async (ids: string[]) => {
-      const results = await Promise.allSettled(
-        ids.map((id) => platform.deleteDefinition(id)),
-      );
+      const results = await Promise.allSettled(ids.map((id) => platform.deleteDefinition(id)));
       const failed = results.filter((r) => r.status === 'rejected');
       if (failed.length > 0) {
         throw new Error(`Failed to delete ${failed.length} of ${ids.length} workflows`);
       }
+      const archived = results.filter((r) => r.status === 'fulfilled' && 'archived' in r.value).length;
+      return { deleted: ids.length - archived, archived };
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
@@ -124,145 +165,42 @@ export function useBulkDeleteWorkflowDefinitions() {
   });
 }
 
-/** Validate a workflow definition's DAG structure */
-export function useValidateWorkflowDefinition() {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useMutation({
-    mutationFn: (id: string) => platform.validateDefinition(id),
-  });
-}
-
-/** Import a workflow definition from a template */
-export function useImportFromTemplate() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (templateId: string) => platform.importFromTemplate(templateId),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-    },
-  });
-}
-
-/** Import a full workflow from a JSON configuration */
-export function useImportFromJSON() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (data: ImportWorkflowJson) => platform.importFromJSON(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
-    },
-  });
-}
-
-// ════════════════════════════════════════════════════════════════
-// Stage Mutations
-// ════════════════════════════════════════════════════════════════
-
-/** Add a stage to a workflow definition */
-export function useAddStage() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { definitionId: string; params: Omit<CreateStageParams, 'workflowDefinitionId'> }) =>
-      platform.addStage(args.definitionId, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
-    },
-  });
-}
-
-/** Update a stage */
-export function useUpdateStage() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: {
-      definitionId: string;
-      stageId: string;
-      params: Partial<Omit<CreateStageParams, 'workflowDefinitionId'>>;
-    }) => platform.updateStage(args.definitionId, args.stageId, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
-    },
-  });
-}
-
-/** Delete a stage */
-export function useDeleteStage() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { definitionId: string; stageId: string }) =>
-      platform.deleteStage(args.definitionId, args.stageId),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
-    },
-  });
-}
-
-// ════════════════════════════════════════════════════════════════
-// Edge Mutations
-// ════════════════════════════════════════════════════════════════
-
-/** Add an edge between stages */
-export function useAddEdge() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: {
-      definitionId: string;
-      params: { fromStageId: string; toStageId: string; edgeType?: StageEdgeType };
-    }) => platform.addEdge(args.definitionId, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
-    },
-  });
-}
-
-/** Delete an edge */
-export function useDeleteEdge() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { definitionId: string; edgeId: string }) =>
-      platform.deleteEdge(args.definitionId, args.edgeId),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definition(args.definitionId) });
-    },
-  });
-}
-
 // ════════════════════════════════════════════════════════════════
 // Workflow Run Queries & Mutations
 // ════════════════════════════════════════════════════════════════
 
-/** List all workflow runs, optionally filtered by definition or status */
-export function useWorkflowRuns(filter?: { definitionId?: string; status?: string }) {
+/** Search workflow runs (every filter narrows; none lists them all). */
+export function useWorkflowRuns(filter?: WorkflowRunListFilter, opts: { enabled?: boolean } = {}) {
   const platform = usePlatform();
   return useQuery({
-    queryKey: [...workflowKeys.runs, filter?.definitionId ?? 'all', filter?.status ?? 'all'],
+    queryKey: workflowKeys.runSearch(filter ?? {}),
     queryFn: () => platform.listRuns(filter),
+    enabled: opts.enabled ?? true,
+    // A changed filter keeps the previous rows on screen until the new ones arrive.
+    placeholderData: keepPreviousData,
     refetchInterval: 15_000,
   });
 }
 
-/** List workflow runs for a specific definition */
-export function useWorkflowRunsByDefinition(definitionId: string | undefined) {
+/** One stage's newest executions across a definition's runs; fetched only while `enabled`. */
+export function useStageHistory(definitionId: string | undefined, stageKey: string | undefined, opts: { enabled?: boolean; limit?: number } = {}) {
   const platform = usePlatform();
   return useQuery({
-    queryKey: workflowKeys.runsByDefinition(definitionId ?? ''),
-    queryFn: () => platform.listRuns({ definitionId: definitionId! }),
-    enabled: !!definitionId,
-    refetchInterval: 15_000,
+    queryKey: workflowKeys.stageHistory(definitionId ?? '', stageKey ?? '', opts.limit ?? 20),
+    queryFn: () => platform.getStageHistory(definitionId!, stageKey!, opts.limit ?? 20),
+    enabled: !!definitionId && !!stageKey && (opts.enabled ?? true),
+    staleTime: 10_000,
+  });
+}
+
+/** A definition's published and test versions, newest first; fetched only while `enabled`. */
+export function useDefinitionVersions(id: string | undefined, opts: { enabled?: boolean } = {}) {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: workflowKeys.definitionVersions(id ?? ''),
+    queryFn: async () => (await platform.listDefinitionVersions(id!)).sort((a, b) => b.version - a.version),
+    enabled: !!id && (opts.enabled ?? true),
+    staleTime: 10_000,
   });
 }
 
@@ -283,228 +221,217 @@ export function useWorkflowRun(id: string | undefined) {
   });
 }
 
-/** Create a new workflow run */
-export function useCreateWorkflowRun() {
+/**
+ * Start a run — THE one way (P04): a definition (a draft as a test run), a
+ * script, or a fork of an earlier run. Resolves with the invocation result;
+ * callers navigate to `result.runId`. `inline` is for the run dialog, which
+ * renders the error envelope's message and issues itself; everywhere else a
+ * refusal is toasted.
+ */
+export function useInvokeWorkflow(opts: { inline?: boolean; errorTitle?: string } = {}) {
   const platform = usePlatform();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (params: CreateWorkflowRunParams) => platform.createRun(params),
+    mutationFn: (p: { request: InvocationRequest; idempotencyKey?: string; files?: InvocationFiles }) =>
+      platform.invokeWorkflow(p.request, {
+        ...(p.idempotencyKey ? { idempotencyKey: p.idempotencyKey } : {}),
+        ...(p.files ? { files: p.files } : {}),
+      }),
+    meta: opts.inline ? { silentError: true } : { errorTitle: opts.errorTitle ?? 'Run not started' },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
     },
   });
 }
 
-/** Start a created workflow run */
-export function useStartWorkflowRun() {
+/** What a start would do (the run dialog's plan preview); writes nothing. */
+export function usePlanWorkflowInvocation() {
+  const platform = usePlatform();
+  return useMutation({
+    mutationFn: (request: InvocationRequest) => platform.planWorkflowInvocation(request),
+    meta: { silentError: true },
+  });
+}
+
+/**
+ * The runs a chat started, as cards (P06 WP-6.2). The chat stream folds its
+ * `chat.workflow_run.*` events into this cache and refetches it; the finalize
+ * event's summary and PR survive the refetch (the REST card does not repeat
+ * them). Polls only as a fallback while a run is live.
+ */
+export function useChatWorkflowRuns(chatId: string | undefined) {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+  return useQuery({
+    queryKey: workflowKeys.chatRuns(chatId ?? ''),
+    queryFn: async (): Promise<{ runs: WorkflowRunCardView[] }> => {
+      const { runs } = await platform.getChatWorkflowRuns(chatId!);
+      const prior = queryClient.getQueryData<{ runs: WorkflowRunCardView[] }>(workflowKeys.chatRuns(chatId!));
+      return { runs: mergeWorkflowRunCards(runs, prior?.runs) };
+    },
+    enabled: !!chatId,
+    staleTime: 10_000,
+    refetchInterval: (query) =>
+      query.state.data?.runs.some((r) => !['completed', 'failed', 'cancelled'].includes(r.status)) ? 15_000 : false,
+  });
+}
+
+/**
+ * Send a run command (pause, resume, cancel, retry, skip, fail, approve) to
+ * the run or one of its instances. A refused command rejects with the
+ * server's 409/400/404; the run refetches either way.
+ */
+export function useRunCommand() {
   const platform = usePlatform();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (id: string) => platform.startRun(id),
-    onSuccess: (_data, id) => {
+    mutationFn: ({ runId, command }: { runId: string; command: RunCommand }) =>
+      platform.runCommand(runId, command),
+    // D-13: a refused command is toasted by the global handler with the server's reason.
+    meta: { errorTitle: 'Run command not applied' },
+    onSettled: (_data, _err, { runId }) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
+      queryClient.invalidateQueries({ queryKey: workflowKeys.loopIterationsOfRun(runId) });
+      // A decision of a sub-workflow child is mirrored in its parent's list too.
+      queryClient.invalidateQueries({ queryKey: ['pending-decisions'] });
     },
   });
 }
 
-/** Pause a running workflow run */
-export function usePauseWorkflowRun() {
+// ── Loops (P05) ──────────────────────────────────────────────────
+
+/**
+ * A loop instance's finished iterations (`loop_iterations`): carry, exit
+ * values, streaks, signals, score and checkpoint per iteration. Refetched
+ * by `useLoopEventRefetch` when the run's loop events arrive.
+ */
+export function useLoopIterations(runId: string | undefined, instanceId: string | undefined, opts: { enabled?: boolean } = {}) {
   const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => platform.pauseRun(id),
-    onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
-    },
+  return useQuery({
+    queryKey: workflowKeys.loopIterations(runId ?? '', instanceId ?? ''),
+    queryFn: () => platform.listLoopIterations(runId!, instanceId!),
+    enabled: !!runId && !!instanceId && (opts.enabled ?? true),
   });
 }
 
-/** Resume a paused workflow run */
-export function useResumeWorkflowRun() {
+/** The run-stream events of the P05 containers and waits: loops, maps, sub-workflows, waits arming. */
+const LOOP_EVENT_PREFIXES = ['loop.', 'map.', 'subworkflow.', 'stage_run.waiting', 'stage_run.awaiting_input', 'stage_run.completed'] as const;
+
+/**
+ * Keep a run's containers live: on every `loop.*` (iteration started or
+ * completed, exit, parked, command applied, wrap-up, errors), `map.*`
+ * (items started and completed) and `subworkflow.*` event, and when a wait
+ * arms or a decision appears or resolves, the run refetches (the
+ * instances' loop and map state), and so do the loops' iteration rows and
+ * the run's pending decisions.
+ */
+export function useLoopEventRefetch(runId: string | undefined, enabled = true) {
+  const queryClient = useQueryClient();
+  useEffect(() => {
+    if (!runId || !enabled) return;
+    const handle = openMultiplexedStream(
+      'run',
+      runId,
+      {
+        onMessage: () => {
+          void queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
+          void queryClient.invalidateQueries({ queryKey: workflowKeys.loopIterationsOfRun(runId) });
+          void queryClient.invalidateQueries({ queryKey: workflowKeys.pendingDecisions(runId) });
+        },
+      },
+      LOOP_EVENT_PREFIXES,
+    );
+    return () => { handle.close(); };
+  }, [runId, enabled, queryClient]);
+}
+
+/**
+ * The decisions a run waits on (P05): its own and, mirrored, those of its
+ * running sub-workflow children. A child's decisions do not reach the
+ * parent's stream, so the list also polls while the run is live.
+ */
+export function usePendingDecisions(runId: string | undefined, opts: { live?: boolean } = {}) {
   const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => platform.resumeRun(id),
-    onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
-    },
+  return useQuery({
+    queryKey: workflowKeys.pendingDecisions(runId ?? ''),
+    queryFn: () => platform.listPendingDecisions(runId!),
+    enabled: !!runId,
+    refetchInterval: opts.live ? 4_000 : false,
   });
 }
 
-/** Cancel a running/paused workflow run */
-export function useCancelWorkflowRun() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
+// ── A stage is a compact chat (P03b) ─────────────────────────────
 
-  return useMutation({
-    mutationFn: (id: string) => platform.cancelRun(id),
-    onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
-    },
-  });
-}
-
-/** Delete a workflow run */
-export function useDeleteWorkflowRun() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => platform.deleteRun(id),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-    },
-  });
-}
-
-/** PARITY-1: retry a failed workflow run (run-level) */
-export function useRetryWorkflowRun() {
-  const platform = usePlatform();
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (id: string) => platform.retryRun(id),
-    onSuccess: (_data, id) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
-      queryClient.invalidateQueries({ queryKey: workflowKeys.run(id) });
-    },
-  });
-}
-
-// ── PARITY-2: per-stage controls (pause/resume/retry/cancel a single stage) ──
-
-type StageControlArgs = { runId: string; stageId: string };
-
-function useStageControl(action: (runId: string, stageId: string) => Promise<void>) {
+/**
+ * Send an operator message to a stage instance: queued between turns, an
+ * amendment of a completed stage, a retry of a paused one. A refusal (409
+ * STAGE_BUSY mid-turn, INTERACTION_PENDING, …) is toasted as "Message not
+ * sent", like a chat's.
+ */
+export function useSendStageMessage() {
+  const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
   return useMutation({
-    mutationFn: ({ runId, stageId }: StageControlArgs) => action(runId, stageId),
-    onSuccess: (_data, { runId }) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
+    mutationFn: (p: { runId: string; instanceId: string; prompt: string; files?: File[]; mode?: 'auto' | 'plan' }) =>
+      platform.sendStageMessage(p.runId, p.instanceId, p.prompt, p.files, p.mode),
+    meta: { errorTitle: 'Message not sent' },
+    onSettled: (_data, _err, { runId }) => {
       queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
     },
   });
 }
 
-/** Pause a single running stage */
-export function usePauseStageRun() {
-  const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.pauseStageRun(runId, stageId));
-}
-
-/** Resume a single paused stage */
-export function useResumeStageRun() {
-  const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.resumeStageRun(runId, stageId));
-}
-
-/** Wake a single sleeping stage ahead of its scheduled wake time */
-export function useWakeStageRun() {
-  const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.wakeStageRun(runId, stageId));
-}
-
-/** Retry a single failed stage */
-export function useRetryStageRun() {
-  const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.retryStageRun(runId, stageId));
-}
-
-/** Cancel a single running/paused stage */
-export function useCancelStageRun() {
-  const platform = usePlatform();
-  return useStageControl((runId, stageId) => platform.cancelStageRun(runId, stageId));
-}
-
-// ════════════════════════════════════════════════════════════════
-// Orchestrator Queries & Mutations
-// ════════════════════════════════════════════════════════════════
-
-/** List all workflow templates */
-export function useWorkflowTemplates() {
+/** Stop a stage's turn in flight; the stage carries on. */
+export function useCancelStageTurn() {
   const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.systemWorkflows,
-    queryFn: () => platform.getOrchestratorTemplates(),
-    staleTime: 60_000,
+  return useMutation({
+    mutationFn: (p: { runId: string; instanceId: string; force?: boolean }) =>
+      platform.cancelStageTurn(p.runId, p.instanceId, p.force ? { force: true } : {}),
+    meta: { errorTitle: 'Could not stop the turn' },
   });
 }
 
-/** Get a single workflow template */
-export function useWorkflowTemplate(id: string | undefined) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.systemWorkflow(id ?? ''),
-    queryFn: () => platform.getOrchestratorTemplate(id!),
-    enabled: !!id,
-  });
-}
-
-/** Create a workflow definition from a template */
-export function useCreateFromTemplate() {
+/** Answer a stage's in-turn gate (tool permission, question, plan review). */
+export function useResolveStageInteraction() {
   const platform = usePlatform() as HttpPlatformClient;
   const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: (args: {
-      templateId: string;
-      name?: string;
-      variables?: Record<string, unknown>;
-      projectId?: string;
-    }) => platform.createFromTemplate(args.templateId, args),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.definitions });
+    mutationFn: (p: { runId: string; instanceId: string; interactionId: string; answer: Parameters<HttpPlatformClient['resolveStageInteraction']>[3] }) =>
+      platform.resolveStageInteraction(p.runId, p.instanceId, p.interactionId, p.answer),
+    meta: { errorTitle: 'Answer not sent' },
+    onSettled: (_data, _err, { runId }) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
     },
   });
 }
 
-/** Start an orchestrated workflow run (with project codebases + preprocessing) */
-export function useStartOrchestratedRun() {
-  const platform = usePlatform() as HttpPlatformClient;
+/** Change the run row's permission mode (W-65); stages read it from their next turn. */
+export function useSetRunPermissionMode() {
+  const platform = usePlatform();
   const queryClient = useQueryClient();
-
   return useMutation({
-    mutationFn: (params: {
-      workflowDefinitionId: string;
-      variables?: Record<string, unknown>;
-      projectId?: string;
-      selectedCodebases?: string[];
-      uploads?: { prompts: File[]; skills: File[]; agents: File[] };
-      stageOverrides?: Array<{ stageName?: string; stageIndex?: number; agentName?: string; contextFilter?: string; timeoutMs?: number; variables?: Record<string, unknown>; skip?: boolean }>;
-    }) => platform.startOrchestratedRun(params),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runs });
+    mutationFn: (p: { runId: string; mode: WorkflowRunPermissionMode }) => platform.setPermissionMode(p.runId, p.mode),
+    meta: { errorTitle: 'Permission mode not changed' },
+    onSettled: (_data, _err, { runId }) => {
+      queryClient.invalidateQueries({ queryKey: workflowKeys.run(runId) });
     },
   });
 }
 
-/** Get orchestration context for a run */
-export function useOrchestratorContext(runId: string | undefined) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.orchestratorContext(runId ?? ''),
-    queryFn: () => platform.getOrchestratorContext(runId!),
-    enabled: !!runId,
-    refetchInterval: 10_000,
-  });
-}
-
-/** Get workspace/artifact files for a run */
-export function useRunWorkspace(runId: string | undefined) {
+/**
+ * Get workspace/artifact files for a run. Polled while the run is live
+ * only: a finished run's workspace no longer changes (D-24).
+ */
+export function useRunWorkspace(runId: string | undefined, opts: { live?: boolean } = {}) {
   const platform = usePlatform() as HttpPlatformClient;
   return useQuery({
     queryKey: workflowKeys.runWorkspace(runId ?? ''),
     queryFn: () => platform.getRunWorkspace(runId!),
     enabled: !!runId,
-    refetchInterval: 10_000,
+    refetchInterval: opts.live ? 10_000 : false,
   });
 }
 
@@ -521,96 +448,5 @@ export function useRunFileContent(
     queryFn: () => platform.getRunFileContent(runId!, filePath!, source, worktreeAlias),
     enabled: !!runId && !!filePath,
     staleTime: 60_000,
-  });
-}
-
-/**
- * Read the aggregated per-run scratchpad. Each stage's full output text
- * (Claude's response, or a structured JSON block) is aggregated here by
- * `stageRunId`. Used to populate the Inspector's Output tab with the
- * substantive stage output that isn't stored on the DB StageRun row.
- *
- * While the run is active we poll every 3 s so live output shows up in
- * the panel. Terminal runs cache for a minute.
- */
-export function useRunScratchpad(runId: string | undefined, opts?: { isRunning?: boolean }) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.runScratchpad(runId ?? ''),
-    queryFn: () => platform.getRunScratchpad(runId!),
-    enabled: !!runId,
-    staleTime: opts?.isRunning ? 0 : 60_000,
-    refetchInterval: opts?.isRunning ? 3_000 : false,
-  });
-}
-
-/** Get git diff for workspace repos (falls back to hasGit=false if no git) */
-export function useRunDiff(runId: string | undefined) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: ['run-diff', runId],
-    queryFn: () => platform.getRunDiff(runId!),
-    enabled: !!runId,
-    staleTime: 30_000,
-  });
-}
-
-/** Upload files (skills/agents/prompts) for a run */
-export function useUploadRunFiles() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: {
-      runId: string;
-      category: 'skills' | 'agents' | 'prompts';
-      files: File[];
-    }) => platform.uploadRunFiles(params.runId, params.category, params.files),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.runWorkspace(variables.runId) });
-    },
-  });
-}
-
-// ── Workflow-Level File Management ──
-
-/** Get files uploaded at the workflow definition level */
-export function useWorkflowFiles(definitionId: string | undefined) {
-  const platform = usePlatform() as HttpPlatformClient;
-  return useQuery({
-    queryKey: workflowKeys.workflowFiles(definitionId ?? ''),
-    queryFn: () => platform.getWorkflowFiles(definitionId!),
-    enabled: !!definitionId,
-  });
-}
-
-/** Upload files at the workflow definition level */
-export function useUploadWorkflowFiles() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: {
-      definitionId: string;
-      category: 'skills' | 'agents' | 'prompts';
-      files: File[];
-    }) => platform.uploadWorkflowFiles(params.definitionId, params.category, params.files),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.workflowFiles(variables.definitionId) });
-    },
-  });
-}
-
-/** Delete a file from workflow-level uploads */
-export function useDeleteWorkflowFile() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (params: { definitionId: string; filePath: string }) =>
-      platform.deleteWorkflowFile(params.definitionId, params.filePath),
-    onSuccess: (_data, variables) => {
-      queryClient.invalidateQueries({ queryKey: workflowKeys.workflowFiles(variables.definitionId) });
-    },
   });
 }

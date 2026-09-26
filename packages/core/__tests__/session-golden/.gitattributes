@@ -1,0 +1,2 @@
+# Golden snapshots are compared byte for byte; keep LF on every platform.
+__snapshots__/** text eol=lf

@@ -143,7 +143,7 @@ export function resolveAdvertisedEndpoints(
 
 export function selectPairingEndpoint(
   endpoints: readonly AdvertisedEndpointCandidate[],
-  platform: 'web' | 'desktop' | 'cli' | 'mobile' | 'other',
+  platform: 'web' | 'desktop' | 'cli' | 'mobile' | 'mcp' | 'other',
 ): AdvertisedEndpointCandidate | null {
   // A phone can reach neither loopback (that would be the phone itself) nor a
   // host-only virtual switch, so both are excluded rather than merely ranked.

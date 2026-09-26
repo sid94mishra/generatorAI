@@ -3,7 +3,7 @@
 // "Variable 1", which tells whoever starts the run nothing at all.
 
 import { describe, expect, it } from 'vitest';
-import { isAutoLabel } from '@/components/workflow/settings/VariablesTab.js';
+import { isAutoLabel, parseOptions, variableNameError } from '@/components/workflow/settings/VariablesTab.js';
 
 describe('isAutoLabel', () => {
   it('recognises the label generated alongside the name', () => {
@@ -21,5 +21,23 @@ describe('isAutoLabel', () => {
     expect(isAutoLabel('Target module', 'variable1')).toBe(false);
     expect(isAutoLabel('Variable 2', 'variable1')).toBe(false);
     expect(isAutoLabel('Variable 1', 'module')).toBe(false);
+  });
+});
+
+describe('Variables tab parsing', () => {
+  it('choice options are parsed from the raw string (D-11)', () => {
+    expect(parseOptions('a, b,,c , a')).toEqual(['a', 'b', 'c']);
+    expect(parseOptions(' ')).toEqual([]);
+  });
+
+  it('rejects reserved and invalid names inline', () => {
+    expect(variableNameError('module', [])).toBeNull();
+    expect(variableNameError('variables', [])).toMatch(/reserved expression root/);
+    expect(variableNameError('run', [])).toMatch(/reserved expression root/);
+    expect(variableNameError('__secret', [])).toMatch(/reserved/);
+    expect(variableNameError('repo_path_api', [])).toMatch(/reserved/);
+    expect(variableNameError('1st', [])).toMatch(/letters, digits/);
+    expect(variableNameError('dup', ['dup'])).toMatch(/already called/);
+    expect(variableNameError('', [])).toMatch(/required/);
   });
 });

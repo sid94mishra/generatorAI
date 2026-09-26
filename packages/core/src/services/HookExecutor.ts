@@ -30,6 +30,10 @@ import { HookTimeoutError, HookScriptError, HookHttpError, HookConfigError, slee
 import type { IScriptRunner } from '../domain/ports/IScriptRunner.js';
 import type { IHttpClient } from '../domain/ports/IHttpClient.js';
 import type { EventBus } from '../events/EventBus.js';
+import { renderTemplate } from '@generatorai/workflow-spec';
+import { userVariables } from './definitions/runScope.js';
+import type { WorkflowSecretResolver } from '../mcp/McpCredentialVault.js';
+import { redactSecrets, resolveSecretMap } from '../mcp/workflowSecrets.js';
 
 export interface HookContext {
   sessionId: string;
@@ -53,11 +57,34 @@ export interface HookContext {
   stageRunId?: string;
   /**
    * ORC-01/02 — external cancellation signal plumbed from the caller
-   * (StageExecutionService / WorkflowRunService). When this fires BEFORE
+   * (the engine's StageExecutor). When this fires BEFORE
    * the hook's own timeout we cancel the hook's work immediately and
    * re-throw, propagating cancellation up the stage.
    */
   abortSignal?: AbortSignal;
+  /**
+   * The Expression v2 scope hook templates render with (`variables`, `run`,
+   * `stages`), as the stage's own templates do; run and stage hooks always
+   * pass it. Omitted (a session hook): the user variables and `run.id` only.
+   */
+  templateScope?: Record<string, unknown>;
+}
+
+/** The scope a hook's templated fields (env, cwd, url, headers, body) render with. */
+function hookScope(context: Pick<HookContext, 'variables' | 'workflowRunId' | 'templateScope'>): Record<string, unknown> {
+  if (context.templateScope) return context.templateScope;
+  return {
+    variables: userVariables(context.variables),
+    run: { id: context.workflowRunId ?? '', name: '', codebases: {} },
+    stages: {},
+  };
+}
+
+/** Render one templated hook field (Expression v2 templates, like the rest of the document). */
+function renderHookField(text: string, scope: Record<string, unknown>, field: string): string {
+  const result = renderTemplate(text, scope);
+  if (!result.ok) throw new HookConfigError(`Hook ${field}: ${result.error.message}`);
+  return result.text;
 }
 
 /**
@@ -81,6 +108,11 @@ export interface FunctionHookHandlerContext {
   args?: Record<string, unknown>;
   /** Fires when the hook's timeout expires or the caller aborts. */
   signal: AbortSignal;
+  /**
+   * The agent event a session hook fires on (the HookBridge path): the tool
+   * and its arguments / result, or the prompt text. Absent for lifecycle hooks.
+   */
+  event?: { toolName?: string; toolArgs?: unknown; toolResult?: unknown; message?: string };
 }
 
 export type FunctionHookHandler = (ctx: FunctionHookHandlerContext) => Promise<HookResult | void>;
@@ -123,6 +155,12 @@ export class HookExecutor {
     private scriptRunner: IScriptRunner,
     private httpClient: IHttpClient,
     private eventBus: EventBus,
+    /**
+     * Resolves `secretref:workflow/<name>` values in script `env` and http
+     * `headers` (final review PLATFORM R2). Without it a hook carrying one
+     * fails instead of sending the pointer.
+     */
+    private secrets?: WorkflowSecretResolver,
   ) {}
 
   /**
@@ -294,7 +332,14 @@ export class HookExecutor {
       switch (hook.config.type) {
         case 'script': {
           const config = hook.config as ScriptHookConfig;
-          const { cmd, args, cwd } = HookExecutor.resolveScriptInvocation(config, context.workspacePath);
+          let invocation: { cmd: string; args: string[]; cwd: string };
+          try {
+            invocation = HookExecutor.resolveScriptInvocation(config, context.workspacePath, hookScope(context));
+          } catch (err) {
+            entry.errors.push(err instanceof Error ? err.message : String(err));
+            break;
+          }
+          const { cmd, args, cwd } = invocation;
           entry.script = { command: cmd, args, cwd };
           if (!cmd) {
             entry.errors.push('script hook has no command');
@@ -307,7 +352,13 @@ export class HookExecutor {
         }
         case 'http': {
           const config = hook.config as HttpHookConfig;
-          const rendered = this.renderHttpRequest(config, context);
+          let rendered: ReturnType<HookExecutor['renderHttpRequest']>;
+          try {
+            rendered = this.renderHttpRequest(config, context);
+          } catch (err) {
+            entry.errors.push(err instanceof Error ? err.message : String(err));
+            break;
+          }
           entry.http = rendered;
           try {
             const parsed = new URL(rendered.url);
@@ -466,7 +517,17 @@ export class HookExecutor {
     context: HookContext,
     abortSignal: AbortSignal,
   ): Promise<HookResult | void> {
-    const { cmd, args, cwd } = HookExecutor.resolveScriptInvocation(config, context.workspacePath);
+    const scope = hookScope(context);
+    const { cmd, args, cwd } = HookExecutor.resolveScriptInvocation(config, context.workspacePath, scope);
+    // Templated values reach commands only through env (command and args are
+    // literals); a secretref: value is resolved from the vault's workflow
+    // namespace, never passed on verbatim.
+    const resolved = await resolveSecretMap(config.env, this.secrets, 'env', (text) => {
+      const r = renderTemplate(text, scope);
+      return r.ok ? r : { ok: false, error: r.error.message };
+    });
+    if (!resolved.ok) throw new HookConfigError(`Hook ${resolved.error}`);
+    const env = resolved.values;
 
     // ORC-01 — forward the hook-level AbortSignal into the script runner
     // so SIGKILL fires the moment the hook times out, instead of the
@@ -474,7 +535,7 @@ export class HookExecutor {
     const result = await this.scriptRunner.run(cmd, args, {
       cwd,
       env: {
-        ...config.env,
+        ...env,
         SESSION_ID: context.sessionId,
         WORKFLOW_ID: context.workflowId,
       },
@@ -483,12 +544,12 @@ export class HookExecutor {
 
     if (result.exitCode !== 0) {
       throw new HookScriptError(
-        `Script exited with code ${result.exitCode}: ${result.stderr}`,
+        `Script exited with code ${result.exitCode}: ${redactSecrets(result.stderr, resolved.secrets)}`,
       );
     }
 
     // Parse stdout as HookResult JSON if it looks like JSON
-    return HookExecutor.tryParseHookResult(result.stdout);
+    return HookExecutor.tryParseHookResult(redactSecrets(result.stdout, resolved.secrets));
   }
 
   /**
@@ -500,8 +561,9 @@ export class HookExecutor {
   private static resolveScriptInvocation(
     config: ScriptHookConfig,
     workspacePath: string,
+    scope: Record<string, unknown>,
   ): { cmd: string; args: string[]; cwd: string } {
-    const cwd = config.cwd ? path.resolve(workspacePath, config.cwd) : workspacePath;
+    const cwd = config.cwd ? path.resolve(workspacePath, renderHookField(config.cwd, scope, 'cwd')) : workspacePath;
     let cmd = config.command ?? '';
     let args = config.args ?? [];
     if (args.length === 0 && cmd.includes(' ')) {
@@ -513,31 +575,22 @@ export class HookExecutor {
   }
 
   /**
-   * Render an HTTP hook's URL / headers / body. Interpolation table: user
-   * variables + built-in context fields (workflowRunId, sessionId,
-   * workflowId, workspacePath) so HTTP hooks can reference the owning run
-   * without callers having to shove those into `variables` manually.
+   * Render an HTTP hook's URL / headers / body with Expression v2 templates
+   * over the hook scope (`{{variables.x}}`, bare `{{x}}`, `{{run.id}}`,
+   * `{{stages.<key>.output}}`), the grammar the validator checks at save.
    */
   private renderHttpRequest(
     config: HttpHookConfig,
-    context: Pick<HookContext, 'variables' | 'workflowRunId' | 'sessionId' | 'workflowId' | 'workspacePath'>,
+    context: Pick<HookContext, 'variables' | 'workflowRunId' | 'templateScope'>,
   ): { method: string; url: string; headers?: Record<string, string>; body?: string } {
-    const vars: Record<string, string> = {
-      ...context.variables,
-      workflowRunId: context.workflowRunId ?? '',
-      sessionId: context.sessionId,
-      workflowId: context.workflowId,
-      workspacePath: context.workspacePath,
-    };
-    const url = this.interpolateTemplate(config.url, vars);
+    const scope = hookScope(context);
+    const url = renderHookField(config.url, scope, 'url');
     const headers = config.headers
       ? Object.fromEntries(
-          Object.entries(config.headers).map(([k, v]) => [k, this.interpolateTemplate(v, vars)]),
+          Object.entries(config.headers).map(([k, v]) => [k, renderHookField(v, scope, `headers.${k}`)]),
         )
       : undefined;
-    const body = config.bodyTemplate
-      ? this.interpolateTemplate(config.bodyTemplate, vars)
-      : undefined;
+    const body = config.bodyTemplate ? renderHookField(config.bodyTemplate, scope, 'bodyTemplate') : undefined;
     return { method: config.method, url, headers, body };
   }
 
@@ -546,7 +599,12 @@ export class HookExecutor {
     context: HookContext,
     abortSignal: AbortSignal,
   ): Promise<HookResult | void> {
-    const { url, headers, body } = this.renderHttpRequest(config, context);
+    const { url, headers: rendered, body } = this.renderHttpRequest(config, context);
+    // Pointers are resolved here, not in renderHttpRequest: the dry run shows
+    // the rendered request and must never hold a secret value.
+    const resolved = await resolveSecretMap(rendered, this.secrets, 'headers');
+    if (!resolved.ok) throw new HookConfigError(`Hook ${resolved.error}`);
+    const headers = rendered ? resolved.values : undefined;
 
     // ORC-01 — forward the AbortSignal to fetch so the socket is closed
     // on hook timeout. The HTTP client already honours `signal`.
@@ -560,7 +618,7 @@ export class HookExecutor {
 
     if (response.status >= 400) {
       throw new HookHttpError(
-        `HTTP hook returned ${response.status}: ${response.body}`,
+        `HTTP hook returned ${response.status}: ${redactSecrets(response.body, resolved.secrets)}`,
       );
     }
 
@@ -598,6 +656,21 @@ export class HookExecutor {
       // thrown error propagates straight into our try/catch; we wrap so
       // consumers see a consistent HookScriptError.
       try {
+        const sdk = context as HookContext & {
+          toolName?: string;
+          toolArgs?: unknown;
+          toolResult?: unknown;
+          messageContent?: string;
+        };
+        const event =
+          sdk.toolName !== undefined || sdk.messageContent !== undefined
+            ? {
+                ...(sdk.toolName !== undefined ? { toolName: sdk.toolName } : {}),
+                ...(sdk.toolArgs !== undefined ? { toolArgs: sdk.toolArgs } : {}),
+                ...(sdk.toolResult !== undefined ? { toolResult: sdk.toolResult } : {}),
+                ...(sdk.messageContent !== undefined ? { message: sdk.messageContent } : {}),
+              }
+            : undefined;
         const handlerResult = await handler({
           sessionId: context.sessionId,
           workflowId: context.workflowId,
@@ -605,6 +678,7 @@ export class HookExecutor {
           variables: context.variables,
           args: config.args,
           signal: abortSignal,
+          ...(event ? { event } : {}),
         });
         return handlerResult ?? undefined;
       } catch (err) {
@@ -706,7 +780,4 @@ export class HookExecutor {
     }
   }
 
-  private interpolateTemplate(template: string, vars: Record<string, string>): string {
-    return template.replace(/\{\{(\w+)\}\}/g, (_, key: string) => vars[key] ?? '');
-  }
 }

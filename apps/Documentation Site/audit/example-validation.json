@@ -43,20 +43,20 @@
   },
   {
     "id": "review-workflow",
-    "module": "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
-    "schema": "ImportWorkflowJsonSchema",
+    "module": "packages/workflow-spec/src/schemas/graph.ts",
+    "schema": "WorkflowGraphSchema",
     "passed": true
   },
   {
     "id": "workflow-run-profile",
-    "module": "packages/shared/src/config/WorkflowDefinitionSchemas.ts",
-    "schema": "RunProfileSchema",
+    "module": "packages/workflow-spec/src/schemas/invocation.ts",
+    "schema": "InvocationStageOverrideSchema",
     "passed": true
   },
   {
     "id": "request-stage-changes",
-    "module": "packages/shared/src/config/ChatSchemas.ts",
-    "schema": "StageReviewDecisionSchema",
+    "module": "packages/workflow-spec/src/schemas/commands.ts",
+    "schema": "RunCommandSchema",
     "passed": true
   },
   {
@@ -75,12 +75,6 @@
     "id": "group-dataset",
     "module": "packages/shared/src/config/AutomationSchemas.ts",
     "schema": "PreviewIterationsBodySchema",
-    "passed": true
-  },
-  {
-    "id": "http-data-source",
-    "module": "packages/shared/src/config/AutomationSchemas.ts",
-    "schema": "TestDataSourceSchema",
     "passed": true
   },
   {
@@ -121,14 +115,14 @@
   },
   {
     "id": "stage-hook",
-    "module": "packages/shared/src/config/WorkflowTemplate.ts",
+    "module": "packages/workflow-spec/src/schemas/common.ts",
     "schema": "HookDefinitionSchema",
     "passed": true
   },
   {
-    "id": "script-profile",
-    "module": "packages/shared/src/config/WorkflowScriptSchema.ts",
-    "schema": "ScriptRunProfileSchema",
+    "id": "run-profile",
+    "module": "packages/workflow-spec/src/schemas/invocation.ts",
+    "schema": "RunProfileSchema",
     "passed": true
   },
   {

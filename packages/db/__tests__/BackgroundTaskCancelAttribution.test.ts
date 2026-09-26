@@ -1,8 +1,9 @@
 // ────────────────────────────────────────────────────────────────
-// G-20 — background-task cancel attribution: migration v57 and the
+// G-20 — background-task cancel attribution: migration v63 (redesign v57,
+// renumbered after the Workflow Overhaul's v55–v60) and the
 // repository. Real temp SQLite file, real migrations.
 //
-// Pinned: v57 adds the two columns to an existing database without touching
+// Pinned: v63 adds the two columns to an existing database without touching
 // its rows; a `cancelled` status stores who/when and maps them back onto
 // `backgroundTask`; any other status clears them (a follow-up turn); a garbage
 // `cancelled_by` value is not passed through.
@@ -35,9 +36,9 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-describe('migration v57 — background_task_cancel_attribution', () => {
+describe('migration v63 — background_task_cancel_attribution', () => {
   it('adds the columns and leaves existing worker rows as they were', () => {
-    migrateDB(db, { targetVersion: 56 });
+    migrateDB(db, { targetVersion: 62 });
     const sqlite = raw(db);
     sqlite.prepare(`INSERT INTO sessions (id, name, status, created_at, updated_at) VALUES ('s-w', 'w', 'active', 1000, 1000)`).run();
     sqlite

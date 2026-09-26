@@ -118,10 +118,11 @@ export function UsageChip({ usage, prevUsage, prevCompletedAt, scopeId, classNam
       <span title="Output tokens">↓ {usage.outputTokens.toLocaleString()}</span>
       {sep}
       <span title="Duration">{(usage.durationMs / 1000).toFixed(1)}s</span>
-      {usage.cost !== undefined ? (
+      {/* Dollars only from `costUsd`: Copilot's `cost` is a premium-request multiplier. */}
+      {usage.costUsd !== undefined ? (
         <>
           {sep}
-          <span title="Turn cost">${usage.cost.toFixed(4)}</span>
+          <span title="Turn cost">${usage.costUsd.toFixed(4)}</span>
         </>
       ) : null}
       {missLabel ? (

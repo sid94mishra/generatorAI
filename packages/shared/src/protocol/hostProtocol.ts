@@ -20,7 +20,7 @@
  */
 
 export const HOST_PROTOCOL_VERSIONS = {
-  'agent-host': 1,
+  'agent-host': 2,
   'pty-host': 1,
   'browser-host': 1,
   'cua-host': 1,

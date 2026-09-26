@@ -26,12 +26,14 @@ import type { TokenService } from './TokenService.js';
 import { AuditAction, type SecurityAuditService } from './SecurityAuditService.js';
 import {
   DEFAULT_CLI_SCOPES,
+  DEFAULT_MCP_SCOPES,
   DEFAULT_DEVICE_SCOPES,
   DEFAULT_MOBILE_SCOPES,
   HIGH_RISK_SCOPES,
   isScope,
   isScopeSubset,
   normalizeScopes,
+  scopesForbiddenFor,
   type Scope,
 } from './scopes.js';
 import type {
@@ -160,8 +162,18 @@ export function defaultScopesForPlatform(platform: DevicePlatform): readonly Sco
       return DEFAULT_MOBILE_SCOPES;
     case 'cli':
       return DEFAULT_CLI_SCOPES;
+    case 'mcp':
+      return DEFAULT_MCP_SCOPES;
     default:
       return DEFAULT_DEVICE_SCOPES;
+  }
+}
+
+/** An MCP device never holds administration or the terminal (CONVINV-R9). */
+function assertPlatformScopes(platform: DevicePlatform, scopes: readonly string[]): void {
+  const forbidden = scopesForbiddenFor(platform, scopes);
+  if (forbidden.length > 0) {
+    throw new PairingError(`A ${platform} device cannot hold ${forbidden.join(', ')}`, 'SCOPE_ESCALATION');
   }
 }
 
@@ -253,6 +265,7 @@ export class DeviceService {
         'SCOPE_ESCALATION',
       );
     }
+    assertPlatformScopes(params.platform, requested);
 
     await this.deps.pairing.revokePendingFor(params.deviceNameHint, now);
 
@@ -680,6 +693,8 @@ export class DeviceService {
     if (!isScopeSubset(next, principal.scopes)) {
       throw new PairingError('Cannot grant scopes beyond your own', 'SCOPE_ESCALATION');
     }
+    const device = await this.deps.devices.findById(deviceId);
+    if (device) assertPlatformScopes(device.platform, next);
     await this.deps.devices.update(deviceId, { scopes: next });
     // AuthService reads scopes from the live device record on every request,
     // so reductions and grants take effect immediately without invalidating
@@ -958,6 +973,7 @@ export class DeviceService {
     if (!isScopeSubset(next, params.principal.scopes)) {
       throw new PairingError('Cannot grant scopes beyond your own', 'SCOPE_ESCALATION');
     }
+    assertPlatformScopes(device.platform, next);
 
     const now = Date.now();
     const won = await repo.resolve(params.requestId, {

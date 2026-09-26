@@ -121,8 +121,8 @@ export class AutomationRecoveryService {
 
     // ── P0-b: re-drive whatever is left before finalising anything ──
     if (this.onResumeExecution) {
-      // Iterations whose workflow run is still live. StartupRecoveryService
-      // re-drives those, so their slots must keep their claim — reclaiming
+      // Iterations whose workflow run is still live. The workflow engine's
+      // recovery drives those, so their slots must keep their claim — reclaiming
       // them here would run the same iteration twice.
       const activeIterationIndexes = runs
         .filter((_run, idx) => statuses[idx] === 'pending' || statuses[idx] === 'running')
@@ -229,6 +229,7 @@ export class AutomationRecoveryService {
     run: AutomationExecutionRun,
   ): Promise<'completed' | 'failed' | 'cancelled' | 'pending' | 'running'> {
     try {
+      if (!run.workflowRunId) throw new Error('workflow run deleted');
       const wfr = await this.workflowRunRepo.getById(run.workflowRunId);
       switch (wfr.status) {
         case 'completed':

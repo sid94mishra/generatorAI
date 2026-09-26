@@ -3,14 +3,12 @@ import { platformCommands } from '../platform.js';
 import type { CliContext } from '../../context/CliContext.js';
 
 const hookTest = platformCommands().find((c) => c.id === 'hook.test')!;
-const hookList = platformCommands().find((c) => c.id === 'hook.list')!;
 
-function fakeContext(overrides: { test?: ReturnType<typeof vi.fn>; sessionHooks?: ReturnType<typeof vi.fn> }): CliContext {
+function fakeContext(overrides: { test?: ReturnType<typeof vi.fn> }): CliContext {
   return {
     api: {
       hooks: {
         test: overrides.test ?? vi.fn(),
-        sessionHooks: overrides.sessionHooks ?? vi.fn(),
       },
     },
   } as unknown as CliContext;
@@ -99,50 +97,3 @@ describe('hook test', () => {
   });
 });
 
-describe('hook list', () => {
-  it('flattens globalHooks and per-workflow overrides instead of treating the response as a bare array', async () => {
-    const sessionHooks = vi.fn(async () => ({
-      sessionId: 'sess_1',
-      globalHooks: [
-        { id: 'g1', name: 'notify', phase: 'pre_run', type: 'http', priority: 0, enabled: true, failurePolicy: 'continue', timeoutMs: 5000, retries: 0, config: { type: 'http', url: 'x', method: 'POST' } },
-      ],
-      workflowHooks: [
-        { workflowId: 'wf_1', workflowName: 'release', hooks: { g1: { priority: 5 } } },
-      ],
-    }));
-    const ctx = fakeContext({ sessionHooks });
-
-    const result = await hookList.handler(ctx, { args: { session: 'sess_1' }, flags: {} } as never);
-
-    // The workflow row's override only touches `priority` — every other
-    // field must fall back to the matching global hook (`g1`), not render as
-    // undefined. `hookOverrides` is a partial patch, not a full definition.
-    expect(result.data).toEqual([
-      { scope: 'global', workflowId: null, workflowName: null, hookId: 'g1', name: 'notify', phase: 'pre_run', type: 'http', priority: 0, failurePolicy: 'continue', enabled: true },
-      { scope: 'workflow', workflowId: 'wf_1', workflowName: 'release', hookId: 'g1', name: 'notify', phase: 'pre_run', type: 'http', priority: 5, failurePolicy: 'continue', enabled: true },
-    ]);
-  });
-
-  it("falls back to the global hook's identity when a workflow override replaces it entirely", async () => {
-    const sessionHooks = vi.fn(async () => ({
-      sessionId: 'sess_1',
-      globalHooks: [
-        { id: 'g1', name: 'notify', phase: 'pre_run', type: 'http', priority: 0, enabled: true, failurePolicy: 'continue', timeoutMs: 5000, retries: 0, config: { type: 'http', url: 'x', method: 'POST' } },
-      ],
-      workflowHooks: [
-        // This override DOES set its own name/type — those must win over the
-        // global hook's, while the untouched fields (phase, failurePolicy,
-        // enabled) still fall back.
-        { workflowId: 'wf_1', workflowName: 'release', hooks: { g1: { name: 'notify (staging)', type: 'script' } } },
-      ],
-    }));
-    const ctx = fakeContext({ sessionHooks });
-
-    const result = await hookList.handler(ctx, { args: { session: 'sess_1' }, flags: {} } as never);
-
-    expect(result.data).toEqual([
-      { scope: 'global', workflowId: null, workflowName: null, hookId: 'g1', name: 'notify', phase: 'pre_run', type: 'http', priority: 0, failurePolicy: 'continue', enabled: true },
-      { scope: 'workflow', workflowId: 'wf_1', workflowName: 'release', hookId: 'g1', name: 'notify (staging)', phase: 'pre_run', type: 'script', priority: 0, failurePolicy: 'continue', enabled: true },
-    ]);
-  });
-});

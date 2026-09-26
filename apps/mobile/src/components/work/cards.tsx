@@ -106,7 +106,13 @@ export function WorkflowCard({
         tone: 'neutral',
         indicator: latestActive ? 'info' : latestTone === 'warning' ? 'warning' : null,
       }}
-      badge={latestTone === 'danger' ? { label: 'Last run failed', tone: 'danger' } : null}
+      badge={
+        latestTone === 'danger'
+          ? { label: 'Last run failed', tone: 'danger' }
+          : workflow.status === 'draft'
+            ? { label: 'Draft', tone: 'neutral' }
+            : null
+      }
       accessory={accessory}
       separator={separator}
       accessibilityLabel={

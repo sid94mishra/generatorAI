@@ -91,9 +91,20 @@ if (totalGzip > BUDGET_BYTES) {
 // this large on its own; if one legitimately is, split it or raise the cap
 // with the measurement that justifies it.
 const LAZY_CHUNK_BUDGET_BYTES = 300 * 1024; // 300 KB gzipped, per chunk
+// Named chunks with a tighter cap of their own, which must stay lazy.
+// `lazy-codemirror`: the workflow builder's expression editor (P05 WP-5B.5,
+// P5-39) — CodeMirror is an allowed dependency only as a lazy chunk.
+const NAMED_LAZY_BUDGETS = [{ prefix: 'lazy-codemirror-', bytes: 250 * 1024 }];
 const initialFiles = new Set(report.map((r) => r.file.replace(/^\/+/, '')));
 const assetsDir = join(distDir, 'assets');
 let lazyViolations = [];
+for (const r of report) {
+  const name = r.file.replace(/^.*\//, '');
+  if (NAMED_LAZY_BUDGETS.some((b) => name.startsWith(b.prefix))) {
+    console.error(`[check-bundle-size] FAIL — ${r.file} must be lazy, but the initial load fetches it`);
+    process.exit(1);
+  }
+}
 let largestLazy = { file: '', gzip: 0 };
 try {
   for (const name of readdirSync(assetsDir)) {
@@ -102,7 +113,9 @@ try {
     if (initialFiles.has(rel)) continue;
     const gzip = gzipSync(readFileSync(join(assetsDir, name))).length;
     if (gzip > largestLazy.gzip) largestLazy = { file: rel, gzip };
-    if (gzip > LAZY_CHUNK_BUDGET_BYTES) lazyViolations.push({ file: rel, gzip });
+    const named = NAMED_LAZY_BUDGETS.find((b) => name.startsWith(b.prefix));
+    if (named) console.log(`[check-bundle-size] ${name}: ${fmt(gzip)} gzip (budget ${fmt(named.bytes)})`);
+    if (gzip > (named ? named.bytes : LAZY_CHUNK_BUDGET_BYTES)) lazyViolations.push({ file: rel, gzip });
   }
 } catch (err) {
   console.error(`[check-bundle-size] could not scan ${assetsDir}: ${err instanceof Error ? err.message : String(err)}`);

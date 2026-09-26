@@ -12,6 +12,8 @@ export const PLATFORM_ICON: Record<string, IconConcept> = {
   desktop: 'computer',
   cli: 'terminal',
   mobile: 'device',
+  // An MCP server paired as a device (Workflow Overhaul PD-22).
+  mcp: 'mcp',
   other: 'key',
 };
 
@@ -20,6 +22,7 @@ export const PLATFORM_LABEL: Record<string, string> = {
   desktop: 'Desktop',
   cli: 'CLI',
   mobile: 'Mobile',
+  mcp: 'MCP server',
   other: 'Other',
 };
 

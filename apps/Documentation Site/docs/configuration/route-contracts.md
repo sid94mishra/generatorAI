@@ -402,22 +402,43 @@ const SignalBodySchema = z.object({
 });
 ```
 
-## webhooks
+## workflowCallbacks
 
-Source: `apps/server/src/routes/webhooks.ts`. Imported symbols retain their source names; see the linked feature/configuration guides for those values.
+Source: `apps/server/src/routes/workflowCallbacks.ts`. Imported symbols retain their source names; see the linked feature/configuration guides for those values.
 
-### CreateWebhookRegistrationSchema
+### CallbackBodySchema
 
 ```typescript
-const CreateWebhookRegistrationSchema = z.object({
-  name: z.string().min(1),
-  source: z.enum(['github', 'custom']),
-  eventType: z.string().min(1),
-  templateId: z.string().min(1),
-  autoStart: z.boolean().default(true),
-  condition: z.string().optional(),
-  sessionConfig: z.record(z.unknown()).optional(),
-  enabled: z.boolean().default(true),
+const CallbackBodySchema = z
+  .object({
+    data: z.unknown().optional(),
+    idempotencyKey: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+```
+
+## workflowRuns
+
+Source: `apps/server/src/routes/workflowRuns.ts`. Imported symbols retain their source names; see the linked feature/configuration guides for those values.
+
+### StageMessageSchema
+
+```typescript
+const StageMessageSchema = z.object({
+  prompt: z.string().trim().min(1).max(100_000),
+  mode: AgentModeSchema.optional(),
 });
+```
+
+### CancelStageTurnSchema
+
+```typescript
+const CancelStageTurnSchema = z.object({ force: z.boolean().optional() }).strict();
+```
+
+### StagePlanDecisionSchema
+
+```typescript
+const StagePlanDecisionSchema = PlanDecisionSchema.pick({ approved: true, action: true, feedback: true });
 ```
 

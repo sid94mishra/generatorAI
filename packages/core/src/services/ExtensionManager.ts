@@ -37,6 +37,9 @@ import type { IWidgetRegistry } from '../domain/ports/IWidgetRegistry.js';
 import type { CustomToolRegistry } from '../tools/CustomToolRegistry.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { ToolDefinition } from '../domain/ports/IAgentHarness.js';
+import type { HookResult } from '@generatorai/shared';
+import { STAGE_HOOK_PHASES, type StageHookPhase } from '@generatorai/workflow-spec';
+import type { SessionHookRegistry } from './SessionHookRegistry.js';
 import { ExtensionAPI, type ExtensionDisposer, type StagedContributions } from './ExtensionApi.js';
 
 /**
@@ -67,6 +70,11 @@ export interface ExtensionManagerDeps {
   widgetRegistry: IWidgetRegistry;
   customToolRegistry: CustomToolRegistry;
   eventBus: EventBus;
+  /**
+   * Where in-process hooks (`ai.registerHook(phase, fn)`) land. Every agent
+   * session (chat or stage) runs them through its hook bridge (W-54).
+   */
+  sessionHookRegistry?: SessionHookRegistry;
 }
 
 const MANIFEST_FILE = 'extension.json';
@@ -434,7 +442,31 @@ export class ExtensionManager implements IExtensionRegistry {
       customToolRegistry.register(finalDef);
     }
 
-    // NOTE: MCP servers, commands, hooks, skills, prompts registration
+    // In-process hooks run on every agent session through the hook bridge.
+    // Script/HTTP hooks and unknown phases are not session hooks.
+    const sessionHooks = this.deps.sessionHookRegistry;
+    if (sessionHooks) {
+      for (const h of staged.hooks) {
+        if ((h.type ?? 'function') !== 'function' || !h.handler) continue;
+        if (!(STAGE_HOOK_PHASES as readonly string[]).includes(h.phase)) {
+          this.logger?.warn?.(`[ExtensionManager] ${ext.manifest.id}: hook phase '${h.phase}' is not a session hook phase; skipped`);
+          continue;
+        }
+        const handler = h.handler;
+        sessionHooks.register(
+          `extension:${ext.manifest.id}`,
+          h.phase as StageHookPhase,
+          async (ctx) => (await handler(ctx.event ?? {}, ctx)) as HookResult | void,
+          {
+            ...(h.priority !== undefined ? { priority: h.priority } : {}),
+            ...(h.timeoutMs !== undefined ? { timeoutMs: h.timeoutMs } : {}),
+            ...(h.failurePolicy ? { failurePolicy: h.failurePolicy === 'skip_remaining' ? 'skip' : h.failurePolicy } : {}),
+          },
+        );
+      }
+    }
+
+    // NOTE: MCP servers, commands, skills, prompts registration
     // through their respective services is wired in follow-on phases.
     // For now we surface them on the InstalledExtension record and log,
     // so consumers can pick them up without changing the API.
@@ -457,6 +489,7 @@ export class ExtensionManager implements IExtensionRegistry {
   private rollbackStagedContributions(ext: InstalledExtension): void {
     const { widgetRegistry, customToolRegistry } = this.deps;
     widgetRegistry.unregisterByExtension(ext.manifest.id);
+    this.deps.sessionHookRegistry?.unregisterByOwner(`extension:${ext.manifest.id}`);
     // Best-effort: unregister anything with matching owner.
     for (const t of customToolRegistry.list()) {
       if (t.owner === `extension:${ext.manifest.id}@${ext.manifest.version}`) {
@@ -482,6 +515,7 @@ export class ExtensionManager implements IExtensionRegistry {
       this.disposers.delete(ext.manifest.id);
     }
     widgetRegistry.unregisterByExtension(ext.manifest.id);
+    this.deps.sessionHookRegistry?.unregisterByOwner(`extension:${ext.manifest.id}`);
     // Entry-file tools are tagged by owner.
     for (const t of customToolRegistry.list()) {
       if (t.owner === `extension:${ext.manifest.id}@${ext.manifest.version}`) {

@@ -13,7 +13,8 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import type { Chat, Project, WorkflowDefinition, WorkflowRun, WorktreeInfo } from '@generatorai/shared';
+import type { Chat, Project, WorkflowRun, WorktreeInfo } from '@generatorai/shared';
+import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
 
 import { createProjectRoutes } from '../routes/projects.js';
 
@@ -58,18 +59,23 @@ function worktree(overrides: Partial<WorktreeInfo> = {}): WorktreeInfo {
   };
 }
 
-function definition(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
+function definition(overrides: Partial<WorkflowDefinitionSummary> = {}): WorkflowDefinitionSummary {
   return {
     id: 'def-1',
     name: 'Nightly audit',
     projectId: 'proj-1',
-    stages: [],
-    edges: [],
-    version: 1,
-    createdAt: NOW,
-    updatedAt: NOW,
+    status: 'published',
+    revision: 1,
+    currentVersionId: 'ver-1',
+    tags: [],
+    stageCount: 0,
+    needsAttention: false,
+    agentAuthored: false,
+    archivedAt: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
-  } as WorkflowDefinition;
+  };
 }
 
 function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
@@ -78,7 +84,7 @@ function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
     workflowDefinitionId: 'def-1',
     name: 'Run 1',
     status: 'completed',
-    sessionMode: 'single',
+    definitionVersionId: 'ver-1',
     variables: {},
     createdAt: NOW,
     updatedAt: NOW,
@@ -90,7 +96,7 @@ interface Deps {
   codebases?: unknown[];
   chats?: Chat[];
   worktrees?: WorktreeInfo[];
-  definitions?: WorkflowDefinition[];
+  definitions?: WorkflowDefinitionSummary[];
   runsByDefinition?: Record<string, WorkflowRun[]>;
   attentionAvailable?: boolean;
   attentionCounts?: { needsYou: number; running: number };
@@ -117,7 +123,7 @@ function makeApp(deps: Deps = {}) {
     gitManager: {},
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     chatEntityRepo: { getByProjectId: vi.fn().mockResolvedValue(deps.chats ?? []) },
-    workflowDefinitionService: { listDefinitions: vi.fn().mockResolvedValue(deps.definitions ?? []) },
+    workflowDefinitionService: { list: vi.fn().mockResolvedValue({ items: deps.definitions ?? [] }) },
     workflowRunRepo: {
       getByDefinitionId: vi.fn((definitionId: string) => Promise.resolve(runsByDefinition[definitionId] ?? [])),
     },

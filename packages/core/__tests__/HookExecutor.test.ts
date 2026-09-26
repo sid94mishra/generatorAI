@@ -71,6 +71,38 @@ const baseHook: HookDefinition = {
 };
 
 describe('HookExecutor', () => {
+  it('renders script env, cwd and HTTP url/headers/body as Expression v2 templates (P01 review R3)', async () => {
+    const runner = makeScriptRunner();
+    const http = makeHttpClient();
+    const exec = new HookExecutor(runner, http, new EventBus());
+    const templateScope = {
+      variables: { env: 'prod' },
+      run: { id: 'run-9', name: 'r', codebases: { app: { path: '/src/app', branch: 'main', baseRef: null } } },
+      stages: { review: { status: 'completed', output: { verdict: 'ok' }, summary: null } },
+    };
+    const script: HookDefinition = {
+      ...baseHook,
+      config: { type: 'script', command: 'node', args: ['deploy.js'], cwd: 'out/{{env}}', env: { TARGET: '{{variables.env}}', REPO: '{{run.codebases.app.path}}' } },
+    };
+    await exec.executePhase('pre_run', [script], makeContext({ templateScope }));
+    expect(runner.lastOptions?.env).toMatchObject({ TARGET: 'prod', REPO: '/src/app' });
+    expect(runner.lastOptions?.cwd?.split('\\').join('/')).toMatch(/workspace\/out\/prod$/);
+
+    const hook: HookDefinition = {
+      ...baseHook,
+      type: 'http',
+      config: {
+        type: 'http',
+        url: 'https://hooks.test/{{run.id}}',
+        method: 'POST',
+        headers: { 'X-Env': '{{env}}' },
+        bodyTemplate: '{"verdict":"{{stages.review.output.verdict}}"}',
+      },
+    };
+    await exec.executePhase('pre_run', [hook], makeContext({ templateScope }));
+    expect(http.lastOptions).toMatchObject({ url: 'https://hooks.test/run-9', headers: { 'X-Env': 'prod' }, body: '{"verdict":"ok"}' });
+  });
+
   describe('ORC-01 — AbortSignal plumbing', () => {
     it('passes abortSignal to scriptRunner.run', async () => {
       const runner = makeScriptRunner();

@@ -37,15 +37,24 @@ const RETRY_HISTORY = 50;
 
 /**
  * Retry a failed item with the existing endpoints (05 §G-11): a failed chat
- * resends its last prompt (`POST /chats/:id/prompt`), a failed run starts a new
- * run (`POST /workflow-runs/:id/retry`). Resolves to the new run's id for a run.
+ * resends its last prompt (`POST /chats/:id/prompt`), a failed run is forked
+ * (engine v2: a terminal run is never mutated — "Retry failed" is a fork
+ * invocation on the pinned definition with a fresh workspace, like the run
+ * page's). Resolves to the new run's id for a run.
  */
 export function useRetryActivity() {
   const platform = usePlatform();
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (item: Pick<RecentActivityItem, 'entityId' | 'retry'>): Promise<{ runId?: string }> => {
-      if (item.retry === 'run_retry') return platform.retryRun(item.entityId);
+      if (item.retry === 'run_retry') {
+        const fork = await platform.invokeWorkflow({
+          target: { kind: 'fork', sourceRunId: item.entityId, definition: 'pinned', workspace: 'fresh' },
+          variables: {},
+          client: 'web',
+        });
+        return { runId: fork.runId };
+      }
       if (item.retry === 'chat_prompt') {
         const messages = await platform.getChatMessages(item.entityId, RETRY_HISTORY);
         const last = [...messages].reverse().find((m) => m.role === 'user' && m.content.trim());

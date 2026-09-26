@@ -4,6 +4,7 @@
 // contract is in features/chat/dock/tasks/tasksSections.ts.
 
 import { BackgroundTasksSection, registerTasksSection, useBackgroundTasksCount } from '@/features/chat/index.js';
+import { ChatWorkflowRunsSection, useChatWorkflowRunsCount } from '@/components/chat/WorkflowRunCards.js';
 
 registerTasksSection(
   {
@@ -14,5 +15,18 @@ registerTasksSection(
     render: (ctx) => <BackgroundTasksSection {...ctx} />,
   },
   // A hot reload re-runs this file (the route loads it with a new URL).
+  { replace: Boolean(import.meta.hot) },
+);
+
+// Workflow Overhaul P06 WP-6.2: the runs this chat started through its
+// workflow tools (the legacy BackgroundTasksPanel's "Workflow runs" list).
+registerTasksSection(
+  {
+    id: 'workflow-runs',
+    title: 'Workflow runs from this chat',
+    order: 200,
+    useCount: useChatWorkflowRunsCount,
+    render: (ctx) => <ChatWorkflowRunsSection chatId={ctx.chatId} stacked={ctx.stacked} />,
+  },
   { replace: Boolean(import.meta.hot) },
 );

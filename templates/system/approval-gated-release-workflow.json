@@ -1,0 +1,167 @@
+{
+  "id": "approval-gated-release",
+  "category": "deployment",
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Approval-gated release",
+      "description": "Prepare a release, wait for an approval that picks the environment, deploy; escalate when nobody answers in time.",
+      "session": {},
+      "variables": [
+        {
+          "name": "version",
+          "type": "string",
+          "label": "Version",
+          "required": true
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": false,
+        "sandbox": "required",
+        "preprocessingSteps": [],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
+      },
+      "tags": [
+        "wait"
+      ]
+    },
+    "stages": [
+      {
+        "key": "prepare",
+        "name": "Prepare release",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "prepare",
+            "text": "Prepare release {{variables.version}}: build it, write the release notes and summarise the risk."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      },
+      {
+        "key": "approve",
+        "name": "Approve release",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "wait",
+        "wait": {
+          "type": "approval",
+          "prompt": {
+            "label": "Release?",
+            "text": "Approve release {{variables.version}}?\n{{stages.prepare.summary}}"
+          },
+          "form": {
+            "type": "object",
+            "required": [
+              "environment"
+            ],
+            "properties": {
+              "environment": {
+                "enum": [
+                  "staging",
+                  "prod"
+                ]
+              },
+              "notes": {
+                "type": "string"
+              }
+            }
+          },
+          "timeoutMs": 86400000,
+          "onTimeout": "complete"
+        }
+      },
+      {
+        "key": "deploy",
+        "name": "Deploy",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "deploy",
+            "text": "Deploy release {{variables.version}} to {{stages.approve.output.data.environment}}. Approver notes: {{stages.approve.output.data.notes}}"
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      },
+      {
+        "key": "escalate",
+        "name": "Escalate",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "escalate",
+            "text": "Nobody approved release {{variables.version}} in time. Write an escalation note for the release owner."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "prepare",
+        "to": "approve",
+        "on": "success"
+      },
+      {
+        "from": "approve",
+        "to": "deploy",
+        "on": "success",
+        "when": "stages.approve.output.outcome == 'approved'"
+      },
+      {
+        "from": "approve",
+        "to": "escalate",
+        "on": "completion",
+        "when": "stages.approve.output.outcome == 'timeout'"
+      }
+    ]
+  }
+}

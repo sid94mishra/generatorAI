@@ -128,11 +128,8 @@ const RULES = [
     knownDebt: [
       { file: 'packages/core/src/services/agentModePolicy.ts', line: /defaultChatPermissionMode: ChatPermissionMode = 'bypassPermissions'/, reason: 'module-level chat default; WS-A flips to a safe mode' },
       { file: 'packages/shared/src/types/Chat.ts', line: /DEFAULT_CHAT_PERMISSION_MODE: ChatPermissionMode = 'bypassPermissions'/, reason: 'shared chat default constant; WS-A' },
-      { file: 'packages/shared/src/types/WorkflowRun.ts', line: /DEFAULT_WORKFLOW_RUN_PERMISSION_MODE: WorkflowRunPermissionMode = 'bypassPermissions'/, reason: 'shared run default constant; WS-A' },
       { file: 'apps/server/src/composition-root.ts', line: /defaultPermissionMode: config\.harness\?\.claudeAgent\?\.permissionMode \?\? 'bypassPermissions'/, reason: 'provider default when config is silent; WS-A' },
       { file: 'packages/core/src/services/ChatManagementService.ts', line: /permissionMode: params\.permissionMode \?\? 'bypassPermissions'/, reason: 'new-chat default; WS-A' },
-      { file: 'packages/core/src/services/StageExecutionService.ts', line: /run\.permissionMode \?\? 'bypassPermissions'/, reason: 'legacy run rows with a NULL column read as bypass; WS-A decides the read default' },
-      { file: 'packages/core/src/services/WorkflowRunService.ts', line: /run\.permissionMode \?\? 'bypassPermissions'/, reason: 'legacy run rows with a NULL column read as bypass; WS-A' },
       { file: 'packages/db/src/repositories/ChatRepository.ts', line: /chat\.permissionMode \?\? 'bypassPermissions'/, reason: 'legacy chat rows with a NULL column read as bypass; WS-A' },
       { file: 'packages/agent-harness-providers/src/providers/claude-agent/ClaudeAgentProvider.ts', line: /(?:defaultPermissionMode|config\.permissionMode) \?\? 'bypassPermissions'/, reason: 'provider-level fallback when neither turn nor options set a mode; WS-A' },
       { file: 'packages/agent-harness-providers/src/providers/codex/CodexProvider.ts', line: /approvalPolicy: opts\.approvalPolicy \?\? 'never'/, reason: 'Codex approval policy default; WS-A' },

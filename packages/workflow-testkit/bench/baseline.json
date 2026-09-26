@@ -1,0 +1,4 @@
+{
+  "stageOverheadMs": 40,
+  "measured": "16.6 ms median on the dev box (2026-09-26, 10-stage chain); the baseline leaves room for a loaded CI machine"
+}

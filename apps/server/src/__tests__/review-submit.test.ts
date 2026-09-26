@@ -23,7 +23,7 @@ function setup() {
     },
     checkpointService: { getLatest },
     chatManagementService: { sendPrompt },
-    stageExecutionService: {},
+    workflowRunService: { command: async () => ({ ok: true }) },
     logger: { info: vi.fn() },
   } as unknown as Container));
   return { app, markSubmitted, getLatest, sendPrompt };

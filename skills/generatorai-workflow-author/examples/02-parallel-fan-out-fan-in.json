@@ -1,0 +1,200 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Parallel review, one report",
+    "description": "Three read-only reviews run in parallel after a shared analysis; a report stage waits for all three.",
+    "session": {
+      "permissionMode": "plan"
+    },
+    "variables": [
+      {
+        "name": "target",
+        "type": "string",
+        "label": "What to review (path or PR)",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": false,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "maxParallel": 3,
+    "tags": [
+      "example"
+    ]
+  },
+  "stages": [
+    {
+      "key": "analyze",
+      "name": "Analyze",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "analyze",
+          "text": "Map the architecture of {{variables.target}}: modules, entry points, data flow."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "security",
+      "name": "Security review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "security",
+          "text": "Review {{variables.target}} for security problems. Use the analysis you were given."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "performance",
+      "name": "Performance review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "performance",
+          "text": "Review {{variables.target}} for performance problems. Use the analysis you were given."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "quality",
+      "name": "Code quality review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "quality",
+          "text": "Review {{variables.target}} for readability and maintainability. Use the analysis you were given."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "report",
+      "name": "Report",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "report",
+          "text": "Merge the three reviews of {{variables.target}} into one report: deduplicate, rank by severity, one recommendation per finding."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "from": [
+          "security",
+          "performance",
+          "quality"
+        ],
+        "mode": "output"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "analyze",
+      "to": "security",
+      "on": "success"
+    },
+    {
+      "from": "analyze",
+      "to": "performance",
+      "on": "success"
+    },
+    {
+      "from": "analyze",
+      "to": "quality",
+      "on": "success"
+    },
+    {
+      "from": "security",
+      "to": "report",
+      "on": "success"
+    },
+    {
+      "from": "performance",
+      "to": "report",
+      "on": "success"
+    },
+    {
+      "from": "quality",
+      "to": "report",
+      "on": "success"
+    }
+  ]
+}

@@ -95,7 +95,8 @@ export function useStageLive(runId: string, stageRunId: string, live: boolean): 
           if (buffered) buffered.push(event);
           else routeLive(event);
         },
-        { filter: ['harness.'] },
+        // Harness output, plus the stage's chat-shaped gates and conversation events (P03b).
+        { filter: ['harness.', 'stage.', 'stage_run.operator_message', 'stage_run.turn_cancelled', 'stage_run.amend'] },
       );
       const timer = setInterval(() => flush(), FLUSH_INTERVAL_MS);
 

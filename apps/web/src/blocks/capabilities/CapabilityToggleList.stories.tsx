@@ -75,7 +75,7 @@ function TriState() {
       <ToolPolicyTriState
         value={value}
         onChange={setValue}
-        effective={{ browser: true, widgets: true, extensionAuthoring: false, orchestration: false, fileRead: true, fileWrite: true, shell: true, web: false }}
+        effective={{ browser: true, widgets: true, extensionAuthoring: false, orchestration: false, workflows: false, workflowAuthoring: false, fileRead: true, fileWrite: true, shell: true, web: false }}
         labels={TOOL_GROUP_LABELS}
         lockedGroups={{ orchestration: { value: true, reason: 'Always on for orchestrators — they cannot delegate without it.' } }}
         data-testid="agent-capabilities"

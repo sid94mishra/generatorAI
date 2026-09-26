@@ -63,15 +63,22 @@ export interface GeneratorAIConfig {
    */
   templatesDir?: string;
 
-  /** Max concurrent AI sessions. Defaults to 10 */
-  maxConcurrentSessions?: number;
-
   /**
    * Max stages executing concurrently across all runs — bounds how many harness
    * subprocesses spawn at once so a small host isn't overwhelmed by a wide DAG
-   * fan-out. `0` (or negative) means unlimited. Defaults to 8.
+   * fan-out: the admission controller's `global` flow key. `0` (or negative)
+   * means the highest limit the key takes (256). Defaults to 8.
    */
   maxConcurrentStages?: number;
+
+  /**
+   * Admission flow-key limits, merged over the defaults (P07 WP-7.2). Keys:
+   * `global` (every stage launch), `provider:<id>` (e.g. `provider:claude-agent`,
+   * default 4 — each turn is a ~250 MB CLI process), `model:<id>`, and
+   * `check:global` (validation checks, default 2). Each value is clamped to
+   * 1..256. `flowLimits.global` wins over `maxConcurrentStages` when both are given.
+   */
+  flowLimits?: Record<string, number>;
 
   /** Logger configuration. Set to false to disable. */
   logger?: LoggerConfig | false;
@@ -79,15 +86,7 @@ export interface GeneratorAIConfig {
   /** Sandbox configuration */
   sandbox?: SandboxConfig;
 
-  /** Project root for workspace resolution. Defaults to process.cwd() */
-  projectRoot?: string;
 
-  /** Webhook configuration */
-  webhooks?: {
-    enabled?: boolean;
-    githubSecret?: string;
-    webhookToken?: string;
-  };
 }
 
 export interface ResolvedConfig {
@@ -97,16 +96,10 @@ export interface ResolvedConfig {
   artifactsDir: string;
   scriptsDir: string;
   templatesDir: string;
-  maxConcurrentSessions: number;
   maxConcurrentStages: number;
+  flowLimits: Record<string, number>;
   logger: LoggerConfig | false;
   sandbox: SandboxConfig;
-  projectRoot: string;
-  webhooks: {
-    enabled: boolean;
-    githubSecret?: string;
-    webhookToken?: string;
-  };
 }
 
 export function resolveConfig(config: GeneratorAIConfig): ResolvedConfig {
@@ -123,15 +116,9 @@ export function resolveConfig(config: GeneratorAIConfig): ResolvedConfig {
     artifactsDir: config.artifactsDir ?? './artifacts',
     scriptsDir: config.scriptsDir ?? './workflows',
     templatesDir: config.templatesDir ?? './templates',
-    maxConcurrentSessions: config.maxConcurrentSessions ?? 10,
     maxConcurrentStages: config.maxConcurrentStages ?? 8,
+    flowLimits: config.flowLimits ?? {},
     logger: config.logger ?? { level: 'info' },
     sandbox: config.sandbox ?? { enabled: false },
-    projectRoot: config.projectRoot ?? process.cwd(),
-    webhooks: {
-      enabled: config.webhooks?.enabled ?? false,
-      githubSecret: config.webhooks?.githubSecret,
-      webhookToken: config.webhooks?.webhookToken,
-    },
   };
 }

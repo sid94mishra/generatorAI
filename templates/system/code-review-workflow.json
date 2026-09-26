@@ -1,135 +1,231 @@
 {
   "id": "system-code-review",
-  "name": "Code Review Workflow",
-  "description": "Analyze and review code from a git repository. Performs architectural analysis, code quality checks, security review, and generates a comprehensive report.",
   "category": "system",
-  "version": "1.0.0",
-  "requiresCodebase": true,
-  "supportsMultipleCodebases": false,
-  "tags": ["code-review", "quality", "security"],
-  "preprocessingSteps": [
-    {
-      "type": "clone_repo",
-      "name": "Clone repository",
-      "config": { "type": "clone_repo", "repoAlias": "target" },
-      "failOnError": true,
-      "order": 0
-    },
-    {
-      "type": "validate_input",
-      "name": "Validate review focus",
-      "config": {
-        "type": "validate_input",
-        "variableName": "review_focus",
-        "rules": [
-          { "type": "required", "message": "Review focus area is required" }
-        ]
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "Code Review Workflow",
+      "description": "Analyze and review code from a git repository. Performs architectural analysis, code quality checks, security review, and generates a comprehensive report.",
+      "session": {},
+      "variables": [
+        {
+          "name": "git_url",
+          "type": "string",
+          "label": "Repository URL",
+          "description": "HTTPS or SSH URL of the git repository to review",
+          "required": true
+        },
+        {
+          "name": "branch",
+          "type": "string",
+          "label": "Branch",
+          "description": "Branch to review (defaults to main/master)",
+          "required": false,
+          "defaultValue": ""
+        },
+        {
+          "name": "review_focus",
+          "type": "text",
+          "label": "Review Focus",
+          "description": "Specific areas or files to focus the review on",
+          "required": true,
+          "defaultValue": "Overall code quality and architecture"
+        },
+        {
+          "name": "language",
+          "type": "choice",
+          "label": "Primary Language",
+          "description": "Primary programming language of the codebase",
+          "required": true,
+          "defaultValue": "TypeScript",
+          "options": [
+            "TypeScript",
+            "JavaScript",
+            "Python",
+            "Java",
+            "Go",
+            "Rust",
+            "C#",
+            "Other"
+          ]
+        }
+      ],
+      "hooks": [],
+      "lifecycle": {
+        "codebaseAliases": [],
+        "useWorktree": true,
+        "requiresCodebase": true,
+        "preprocessingSteps": [
+          {
+            "name": "Clone repository",
+            "failOnError": true,
+            "config": {
+              "type": "clone_repo",
+              "repoAlias": "target"
+            }
+          },
+          {
+            "name": "Validate review focus",
+            "failOnError": true,
+            "config": {
+              "type": "validate_input",
+              "variableName": "review_focus",
+              "rules": [
+                {
+                  "type": "required",
+                  "message": "Review focus area is required"
+                }
+              ]
+            }
+          }
+        ],
+        "postProcessing": {
+          "autoCommit": false,
+          "autoPush": false,
+          "autoCreatePR": false,
+          "steps": []
+        }
       },
-      "failOnError": true,
-      "order": 1
-    }
-  ],
-  "stages": [
-    {
-      "name": "Architecture Analysis",
-      "description": "Analyze the overall architecture and structure of the codebase",
-      "order": 0,
-      "prompts": [
-        {
-          "label": "Analyze Architecture",
-          "text": "Analyze the architecture of the codebase at {{repo_path_target}}. Focus on: {{review_focus}}. Examine the directory structure, module organization, dependency patterns, and design patterns used. Provide a detailed analysis.",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    },
-    {
-      "name": "Code Quality Review",
-      "description": "Review code quality, patterns, and best practices",
-      "order": 1,
-      "prompts": [
-        {
-          "label": "Review Code Quality",
-          "text": "Review the code quality of the codebase at {{repo_path_target}}. Focus on {{review_focus}}. Check for: code duplication, naming conventions, error handling, testing coverage, documentation, and adherence to best practices. Language: {{language}}.",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    },
-    {
-      "name": "Security Review",
-      "description": "Identify potential security vulnerabilities",
-      "order": 2,
-      "prompts": [
-        {
-          "label": "Security Analysis",
-          "text": "Perform a security review of the codebase at {{repo_path_target}}. Check for common vulnerabilities (OWASP Top 10), insecure configurations, dependency vulnerabilities, authentication/authorization issues, and data handling concerns.",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    },
-    {
-      "name": "Review Report",
-      "description": "Generate comprehensive review report with recommendations",
-      "order": 3,
-      "prompts": [
-        {
-          "label": "Generate Report",
-          "text": "Based on the architecture analysis, code quality review, and security review conducted above, generate a comprehensive code review report. Include:\n1. Executive Summary\n2. Architecture Assessment\n3. Code Quality Findings\n4. Security Findings\n5. Prioritized Recommendations\n6. Action Items\n\nFormat the report in markdown.",
-          "waitForCompletion": true
-        }
-      ],
-      "isLocked": true
-    }
-  ],
-  "edges": [
-    { "fromStageIndex": 0, "toStageIndex": 1, "edgeType": "on_success" },
-    { "fromStageIndex": 0, "toStageIndex": 2, "edgeType": "on_success" },
-    { "fromStageIndex": 1, "toStageIndex": 3, "edgeType": "on_success" },
-    { "fromStageIndex": 2, "toStageIndex": 3, "edgeType": "on_success" }
-  ],
-  "variables": [
-    {
-      "name": "git_url",
-      "type": "git_url",
-      "label": "Repository URL",
-      "description": "HTTPS or SSH URL of the git repository to review",
-      "required": true
-    },
-    {
-      "name": "branch",
-      "type": "string",
-      "label": "Branch",
-      "description": "Branch to review (defaults to main/master)",
-      "required": false,
-      "defaultValue": ""
-    },
-    {
-      "name": "review_focus",
-      "type": "text",
-      "label": "Review Focus",
-      "description": "Specific areas or files to focus the review on",
-      "required": true,
-      "defaultValue": "Overall code quality and architecture"
-    },
-    {
-      "name": "language",
-      "type": "choice",
-      "label": "Primary Language",
-      "description": "Primary programming language of the codebase",
-      "required": true,
-      "defaultValue": "TypeScript",
-      "options": ["TypeScript", "JavaScript", "Python", "Java", "Go", "Rust", "C#", "Other"]
-    }
-  ],
-  "resultValidations": [
-    {
-      "stageIndex": 3,
-      "rules": [
-        { "type": "min_length", "value": 500, "message": "Review report should be at least 500 characters" },
-        { "type": "contains", "value": "Recommendation", "message": "Review report should contain recommendations" }
+      "tags": [
+        "code-review",
+        "quality",
+        "security"
       ]
-    }
-  ]
+    },
+    "stages": [
+      {
+        "key": "architecture_analysis",
+        "name": "Architecture Analysis",
+        "description": "Analyze the overall architecture and structure of the codebase",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Analyze Architecture",
+            "text": "Analyze the architecture of the codebase at {{run.codebases.target.path}}. Focus on: {{review_focus}}. Examine the directory structure, module organization, dependency patterns, and design patterns used. Provide a detailed analysis."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "code_quality_review",
+        "name": "Code Quality Review",
+        "description": "Review code quality, patterns, and best practices",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Review Code Quality",
+            "text": "Review the code quality of the codebase at {{run.codebases.target.path}}. Focus on {{review_focus}}. Check for: code duplication, naming conventions, error handling, testing coverage, documentation, and adherence to best practices. Language: {{language}}."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "security_review",
+        "name": "Security Review",
+        "description": "Identify potential security vulnerabilities",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Security Analysis",
+            "text": "Perform a security review of the codebase at {{run.codebases.target.path}}. Check for common vulnerabilities (OWASP Top 10), insecure configurations, dependency vulnerabilities, authentication/authorization issues, and data handling concerns."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": []
+        },
+        "hooks": []
+      },
+      {
+        "key": "review_report",
+        "name": "Review Report",
+        "description": "Generate comprehensive review report with recommendations",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "Generate Report",
+            "text": "Based on the architecture analysis, code quality review, and security review conducted above, generate a comprehensive code review report. Include:\n1. Executive Summary\n2. Architecture Assessment\n3. Code Quality Findings\n4. Security Findings\n5. Prioritized Recommendations\n6. Action Items\n\nFormat the report in markdown."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": [
+            {
+              "type": "min_length",
+              "value": 500,
+              "message": "Review report should be at least 500 characters"
+            },
+            {
+              "type": "contains",
+              "value": "Recommendation",
+              "message": "Review report should contain recommendations"
+            }
+          ]
+        },
+        "hooks": []
+      }
+    ],
+    "edges": [
+      {
+        "from": "architecture_analysis",
+        "to": "code_quality_review",
+        "on": "success"
+      },
+      {
+        "from": "architecture_analysis",
+        "to": "security_review",
+        "on": "success"
+      },
+      {
+        "from": "code_quality_review",
+        "to": "review_report",
+        "on": "success"
+      },
+      {
+        "from": "security_review",
+        "to": "review_report",
+        "on": "success"
+      }
+    ]
+  }
 }

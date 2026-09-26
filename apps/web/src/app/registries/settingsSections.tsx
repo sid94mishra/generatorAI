@@ -22,6 +22,7 @@ import { ExtensionsSection } from '@/components/settings/sections/Extensions.js'
 import { DiagnosticsSection } from '@/components/settings/sections/Diagnostics.js';
 import { WorkspaceRetentionSection } from '@/components/settings/sections/WorkspaceRetention.js';
 import { AudioSection } from '@/components/settings/sections/Audio.js';
+import { WorkflowEngineSection } from '@/components/settings/sections/WorkflowEngine.js';
 
 const SECTIONS: SettingsSectionDefinition[] = [
   { id: 'general', render: () => <GeneralSection /> },
@@ -46,6 +47,7 @@ const SECTIONS: SettingsSectionDefinition[] = [
     footer: <SettingsStatusFooter icon="shield">Saved to this server · devices need a pairing code to connect</SettingsStatusFooter>,
   },
   { id: 'storage', render: () => <WorkspaceRetentionSection /> },
+  { id: 'workflow-engine', render: () => <WorkflowEngineSection /> },
   { id: 'diagnostics', render: () => <DiagnosticsSection /> },
 ];
 

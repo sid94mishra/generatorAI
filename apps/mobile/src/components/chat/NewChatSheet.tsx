@@ -1279,7 +1279,7 @@ function SourceControlPage({
   );
 }
 
-function PickerRow({
+export function PickerRow({
   icon,
   label,
   value,

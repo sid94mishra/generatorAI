@@ -136,6 +136,11 @@ export class MountService {
     this.baselineCapture = fn;
   }
 
+  /** The git client the mounts are managed with (map snapshots and merges use the same one). */
+  get git(): IGitClient {
+    return this.deps.git;
+  }
+
   // ── Plan ────────────────────────────────────────────────────
 
   /**
@@ -807,6 +812,60 @@ export class MountService {
       }
     }
     return copied;
+  }
+
+  // ── Map items: a mount per item cut from a snapshot (P05 §4.1) ───
+  //
+  // A `mount_per_item` map snapshots every run mount into a commit (the
+  // working tree as it is, uncommitted upstream changes included) and gives
+  // each item its own worktrees on new branches cut from those commits.
+  // Unlike `seedFrom` (best effort per file, for chat forks), this is ALL
+  // OR NOTHING: an item either gets every mount, or none and an error.
+
+  /**
+   * Cut the mounts of `item` (a fresh workspace) from `snapshot` (alias →
+   * commit of the run workspace's mounts). Every run mount must be git
+   * backed and have a snapshot commit. On any failure every mount created
+   * so far is removed (branches included) and the error is thrown.
+   */
+  async forkFromSnapshot(
+    runWorkspaceId: string,
+    snapshot: Readonly<Record<string, string>>,
+    item: ExecutionWorkspace,
+    opts: { branchFor: (alias: string) => string },
+  ): Promise<WorkspaceMount[]> {
+    const runMounts = (await this.list(runWorkspaceId)).filter((m) => m.status !== 'removed').sort((a, b) => a.position - b.position);
+    if (runMounts.length === 0) throw new ValidationError('The run has no mounts to cut item mounts from');
+    const planned: PlannedMount[] = runMounts.map((m) => {
+      const sha = snapshot[m.alias];
+      if (!sha) throw new ValidationError(`Mount "${m.alias}" has no snapshot commit`);
+      if (!m.git?.isRepo) throw new ValidationError(`Mount "${m.alias}" is not a git repository: mount_per_item needs git-backed run mounts`);
+      return {
+        alias: m.alias,
+        position: m.position,
+        originKind: m.originKind,
+        ...(m.codebaseId ? { codebaseId: m.codebaseId } : {}),
+        ...(m.projectId ? { projectId: m.projectId } : {}),
+        // Any worktree of a repository can add another: the run mount itself is the origin.
+        originPath: m.path,
+        mode: 'worktree',
+        path: path.join(item.rootPath, SOURCE_DIR, m.alias),
+        intent: { isRepo: true, newBranch: opts.branchFor(m.alias), baseRef: sha, codebaseType: 'git' as ProjectCodebase['type'] },
+      };
+    });
+    const staged = await this.stage(item.id, planned);
+    try {
+      await this.prepare(item.id);
+      const rows = await this.list(item.id);
+      const failed = rows.filter((r) => r.status !== 'ready');
+      if (failed.length > 0 || rows.length !== planned.length) {
+        throw new ConflictError(`Item mounts could not be cut: ${failed.map((f) => `${f.alias}: ${f.error ?? f.status}`).join('; ') || 'missing mounts'}`);
+      }
+      return rows.sort((a, b) => a.position - b.position);
+    } catch (err) {
+      for (const m of staged) await this.remove(m.id, { deleteBranch: true }).catch(() => undefined);
+      throw err;
+    }
   }
 
   async list(workspaceId: string): Promise<WorkspaceMount[]> {

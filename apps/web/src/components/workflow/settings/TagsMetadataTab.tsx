@@ -8,8 +8,9 @@ import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { Button, Input } from '@/components/ui/index.js';
 
 export function TagsMetadataTab() {
-  const tags = useWorkflowBuilderStore((s) => s.tags);
-  const setTags = useWorkflowBuilderStore((s) => s.setTags);
+  const tags = useWorkflowBuilderStore((s) => s.workflow.tags);
+  const updateWorkflow = useWorkflowBuilderStore((s) => s.updateWorkflow);
+  const setTags = useCallback((next: string[]) => updateWorkflow({ tags: next }), [updateWorkflow]);
   const [tagInput, setTagInput] = useState('');
   const [duplicateHint, setDuplicateHint] = useState(false);
 

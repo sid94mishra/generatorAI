@@ -1,5 +1,6 @@
 // ────────────────────────────────────────────────────────────────
-// Settings IA (D-26, 04 §3.1, DF-21): the 15 sections, their four nav groups
+// Settings IA (D-26, 04 §3.1, DF-21): the 16 sections (Workflow engine added
+// by the Workflow Overhaul merge), their four nav groups
 // and the static search index, shared by web and (next pass) mobile so both
 // keep one information architecture.
 //
@@ -24,6 +25,7 @@ export const SETTINGS_SECTION_IDS = [
   'extensions',
   'security',
   'storage',
+  'workflow-engine',
   'diagnostics',
 ] as const;
 
@@ -93,6 +95,12 @@ export const SETTINGS_NAV: readonly SettingsNavGroup[] = [
         keywords: ['servers', 'network', 'lan', 'loopback', 'pairing', 'pair', 'qr', 'devices', 'revoke', 'access requests'],
       },
       { id: 'storage', label: 'Storage', icon: 'database', keywords: ['workspaces', 'retention', 'cleanup'] },
+      {
+        id: 'workflow-engine',
+        label: 'Workflow engine',
+        icon: 'workflows',
+        keywords: ['concurrency', 'limits', 'slots', 'provider', 'model', 'summaries', 'debounce'],
+      },
       { id: 'diagnostics', label: 'Diagnostics', icon: 'activity', keywords: ['health', 'telemetry', 'sandbox', 'logs'] },
     ],
   },

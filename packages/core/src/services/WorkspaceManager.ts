@@ -1064,7 +1064,6 @@ export class WorkspaceManager {
         'uploads/',
         '.workspace.json',
         'scratchpad.json',
-        'stream-log.jsonl',
         '',
         '# Integrated browser: persistent Chromium profile (cache, cookies,',
         '# service-worker state). Hundreds of binary files that churn on every',

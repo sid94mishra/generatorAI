@@ -13,11 +13,10 @@ import { describe, expect, it } from 'vitest';
 import { layoutDag, toTree, type DagEdge, type DagStage } from '../dagLayout.js';
 
 const stage = (id: string): DagStage => ({ id, name: id.toUpperCase() });
-const edge = (from: string, to: string, edgeType?: string): DagEdge => ({
-  id: `${from}-${to}`,
-  fromStageId: from,
-  toStageId: to,
-  ...(edgeType ? { edgeType } : {}),
+const edge = (from: string, to: string, on?: string): DagEdge => ({
+  from,
+  to,
+  ...(on ? { on } : {}),
 });
 const layerOf = (result: ReturnType<typeof layoutDag>, id: string) =>
   result.nodes.find((n) => n.id === id)?.layer;
@@ -153,10 +152,10 @@ describe('toTree', () => {
   });
 
   it('carries the edge type through so a non-default branch is labelled', () => {
-    const lines = toTree(['a', 'b'].map(stage), [edge('a', 'b', 'on_failure')]);
-    expect(lines.find((l) => l.id === 'b')?.edgeType).toBe('on_failure');
+    const lines = toTree(['a', 'b'].map(stage), [edge('a', 'b', 'failure')]);
+    expect(lines.find((l) => l.id === 'b')?.on).toBe('failure');
     // A root arrives by no edge at all.
-    expect(lines.find((l) => l.id === 'a')?.edgeType).toBeUndefined();
+    expect(lines.find((l) => l.id === 'a')?.on).toBeUndefined();
   });
 
   it('marks the last child at each level, for the box-drawing corner', () => {

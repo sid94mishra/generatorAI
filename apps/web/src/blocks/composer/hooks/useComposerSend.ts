@@ -49,6 +49,13 @@ export interface UseComposerSendOptions {
   /** Whether the host shows a Stop control (a turn is streaming and there is a stop handler). */
   turnLive: boolean;
   stopState: { label: string; enabled: boolean; forceAvailable: boolean } | undefined;
+  /**
+   * Whether a send starts the optimistic turn on `sessionId`'s stream (and
+   * clears it when the send fails). Default true. A workflow stage's composer
+   * passes false: its stream is the stage's whole transcript, and the server
+   * echoes the operator's message into it (Workflow Overhaul P03b).
+   */
+  manageStream?: boolean;
 }
 
 export interface ComposerSend {
@@ -82,6 +89,7 @@ export function useComposerSend({
   onBuiltinCommand,
   turnLive,
   stopState,
+  manageStream = true,
 }: UseComposerSendOptions): ComposerSend {
   const { text, attachments, activeCommand, setText, setAttachments, setActiveCommand, setMenu } = draft;
   const { recordSent, markSentAs } = history;
@@ -171,7 +179,7 @@ export function useComposerSend({
         return;
       }
 
-      startPending(sessionId, prompt);
+      if (manageStream) startPending(sessionId, prompt);
       const files = currentAttachments.map((a) => a.file);
 
       // Built-in commands (`/browser`, `/terminal`) surface their integrated
@@ -201,7 +209,7 @@ export function useComposerSend({
       setText(rawInput);
       setActiveCommand(cmd);
       setAttachments(currentAttachments);
-      clearStream(sessionId);
+      if (manageStream) clearStream(sessionId);
     } finally {
       sendingRef.current = false;
     }
@@ -214,6 +222,7 @@ export function useComposerSend({
     sendMutation,
     startPending,
     clearStream,
+    manageStream,
     onBeforeSend,
     customSendFn,
     onBuiltinCommand,

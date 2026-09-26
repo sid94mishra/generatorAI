@@ -1,14 +1,16 @@
 // ────────────────────────────────────────────────────────────────
-// InlineHitlControls — approve / request-changes / reject.
-// Renders inside a stage card when status = 'awaiting_input'.
+// InlineHitlControls — approve / request-changes / reject a stage's
+// COMPLETION REVIEW (its `approval` gate). In-turn gates (tool permission,
+// question, plan) render as the chat's cards in the stage transcript.
 // Semantics:
-//   • Approve         → outcome 'approved'. Any typed feedback is IGNORED;
-//                       the stage completes and the DAG advances.
-//   • Request changes → outcome 'changes_requested'. The feedback is sent to
-//                       the stage's session as a follow-up prompt; the agent
-//                       responds and the stage re-parks for another review
-//                       round. Feedback is required, and this loop repeats
-//                       until the reviewer approves or rejects.
+//   • Approve         → outcome 'approved'; the stage completes and the DAG
+//                       advances. There is no approve-with-follow-up (PD-9):
+//                       talk to a completed stage through its composer.
+//   • Request changes → outcome 'changes_requested'. The feedback runs as a
+//                       revision turn; the agent responds and the stage
+//                       re-parks for another review round. Feedback is
+//                       required, and this loop repeats until the reviewer
+//                       approves or rejects.
 //   • Reject          → outcome 'rejected'. TERMINAL: the stage fails, which
 //                       blocks every downstream stage and stops the run.
 //                       Confirmed before firing because it is not undoable.
@@ -23,10 +25,12 @@ interface InlineHitlControlsProps {
   reason: string;
   tool?: string;
   args?: Record<string, unknown>;
-  onApprove?: (followUp?: string) => void;
+  onApprove?: () => void;
   onReject?: (feedback?: string) => void;
-  /** Terminal rejection. Omit to hide the action (e.g. legacy interrupts). */
+  /** Terminal rejection. Omit to hide the action. */
   onTerminalReject?: (reason?: string) => void;
+  /** A verdict is in flight: every button is disabled until it settles (D-13). */
+  busy?: boolean;
 }
 
 export function InlineHitlControls({
@@ -36,6 +40,7 @@ export function InlineHitlControls({
   onApprove,
   onReject,
   onTerminalReject,
+  busy = false,
 }: InlineHitlControlsProps) {
   const [feedback, setFeedback] = useState('');
   const [confirmingReject, setConfirmingReject] = useState(false);
@@ -84,7 +89,8 @@ export function InlineHitlControls({
       <div className="flex flex-wrap items-center gap-2">
         <Button
           type="button"
-          onClick={() => onApprove?.(undefined)}
+          onClick={() => onApprove?.()}
+          disabled={busy}
           variant="ghost"
           size="sm"
           className="h-auto flex items-center gap-1.5 rounded-md bg-[var(--color-success)] px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110"
@@ -95,7 +101,7 @@ export function InlineHitlControls({
         <Button
           type="button"
           onClick={() => onReject?.(trimmed.length > 0 ? trimmed : undefined)}
-          disabled={trimmed.length === 0}
+          disabled={busy || trimmed.length === 0}
           title={trimmed.length === 0 ? 'Enter feedback above to request changes' : 'Send feedback as a follow-up prompt'}
           variant="ghost"
           size="sm"
@@ -111,6 +117,7 @@ export function InlineHitlControls({
           <Button
             type="button"
             onClick={() => setConfirmingReject(true)}
+            disabled={busy}
             title="Reject this stage and stop the workflow run"
             variant="ghost"
             size="sm"
@@ -131,6 +138,7 @@ export function InlineHitlControls({
                 setConfirmingReject(false);
                 onTerminalReject(trimmed.length > 0 ? trimmed : undefined);
               }}
+              disabled={busy}
               variant="ghost"
               size="sm"
               className="h-auto rounded-md bg-[var(--color-danger)] px-3 py-1 text-[11.5px] font-semibold text-white hover:brightness-110"

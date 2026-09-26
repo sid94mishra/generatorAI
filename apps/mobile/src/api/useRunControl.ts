@@ -1,20 +1,33 @@
 // ────────────────────────────────────────────────────────────────
-// Run and stage control mutations.
+// Run and stage control mutations: run commands (`POST /commands`) and forks.
 //
-// All of these need `runControl` (write:workflows + exec:agent) EXCEPT
-// `approve`, which the route policy classifies as answering the agent
-// (exec:agent only). Every mutation refetches the run on settle; the server
-// is the only authority on what state the run landed in (a 409 means another
-// device or the sweeper got there first, which the refetch then shows).
+// Commands need `runControl` (write:workflows + exec:agent) EXCEPT
+// `approve`, which the route policy lets through on exec:agent alone
+// (answering the agent). A fork is a new invocation
+// (`POST /workflow-invocations`, target `fork`), so it needs only
+// `runStart`. Every mutation refetches the run on settle; the server is the
+// only authority on what state the run landed in (a 409 means another
+// device or the sweeper got there first, which the refetch then shows). A
+// finished run is never mutated: retrying it forks a NEW run.
 // ────────────────────────────────────────────────────────────────
 
 import { Alert } from 'react-native';
+import { router } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { queryKeys, type ApprovalOutcome } from '@generatorai/client-core';
+import {
+  newIdempotencyKey,
+  queryKeys,
+  type ApprovalOutcome,
+  type StageRunSummary,
+  type WorkflowRunSummary,
+} from '@generatorai/client-core';
+
+import type { InvocationRequest } from '@generatorai/workflow-spec';
 
 import { useAdminApi } from './useAdminApi';
 import { useApi } from './useApi';
 import { haptics } from '../components/ui/haptics';
+import { isTerminal } from '../components/runs/statusStyle';
 import {
   permissionModeOf,
   type RunPermissionMode,
@@ -24,10 +37,25 @@ import {
 export const runPermissionModeKey = (runId: string) => [...queryKeys.run(runId), 'permission-mode'] as const;
 
 export type RunAction = 'pause' | 'resume' | 'cancel' | 'retry';
-export type StageAction = 'retry' | 'resume' | 'wake' | 'cancel';
+export type StageAction = 'retry' | 'resume' | 'cancel';
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
+}
+
+/** A fork of a finished run: pinned definition, fresh workspace. */
+function forkRequest(sourceRunId: string, rerunFrom?: string[]): InvocationRequest {
+  return {
+    target: {
+      kind: 'fork',
+      sourceRunId,
+      definition: 'pinned',
+      workspace: 'fresh',
+      ...(rerunFrom ? { rerunFrom } : {}),
+    },
+    variables: {},
+    client: 'mobile',
+  };
 }
 
 export function useRunMutations(runId: string) {
@@ -43,13 +71,17 @@ export function useRunMutations(runId: string) {
 
   const runAction = useMutation({
     mutationFn: async (action: RunAction): Promise<{ newRunId?: string }> => {
-      const result = (await admin.runs[action](runId)) as unknown;
-      // Retry creates a NEW run (the old one stays as its ancestor).
-      const newRunId =
-        action === 'retry' && result && typeof result === 'object'
-          ? (result as { runId?: unknown }).runId
-          : undefined;
-      return typeof newRunId === 'string' ? { newRunId } : {};
+      if (action === 'retry') {
+        // "Retry failed": a NEW run re-runs every stage that did not complete.
+        const fork = await admin.workflows.invoke(forkRequest(runId), { idempotencyKey: newIdempotencyKey() });
+        return { newRunId: fork.runId };
+      }
+      // Pause in `interrupt` mode so in-flight stages pause too.
+      await admin.runs.command(
+        runId,
+        action === 'pause' ? { command: 'pause', mode: 'interrupt' } : { command: action },
+      );
+      return {};
     },
     onSuccess: () => haptics.commit(),
     onError: (err) => {
@@ -60,9 +92,31 @@ export function useRunMutations(runId: string) {
   });
 
   const stageAction = useMutation({
-    mutationFn: ({ stageRunId, action }: { stageRunId: string; action: StageAction }) =>
-      admin.runs.stage[action](runId, stageRunId),
-    onSuccess: () => haptics.commit(),
+    mutationFn: async ({ stageRunId, action }: { stageRunId: string; action: StageAction }): Promise<{ newRunId?: string }> => {
+      const run = queryClient.getQueryData<WorkflowRunSummary & { stageRuns: StageRunSummary[] }>(
+        queryKeys.run(runId),
+      );
+      if (action === 'retry' && run && isTerminal(run.status)) {
+        // A stage of a finished run re-runs from that stage in a fork.
+        const stage = run.stageRuns.find((s) => s.id === stageRunId);
+        const fork = await admin.workflows.invoke(
+          forkRequest(runId, [stage?.instancePath ?? stage?.stageKey ?? stageRunId]),
+          { idempotencyKey: newIdempotencyKey() },
+        );
+        return { newRunId: fork.runId };
+      }
+      await admin.runs.command(
+        runId,
+        action === 'retry'
+          ? { command: 'retry', instanceId: stageRunId, mode: 'resume' }
+          : { command: action, instanceId: stageRunId },
+      );
+      return {};
+    },
+    onSuccess: ({ newRunId }) => {
+      haptics.commit();
+      if (newRunId && newRunId !== runId) router.push(`/runs/${newRunId}` as never);
+    },
     onError: (err) => {
       haptics.error();
       Alert.alert('Could not update the stage', errorText(err));
@@ -72,14 +126,11 @@ export function useRunMutations(runId: string) {
 
   const approve = useMutation({
     mutationFn: (input: { stageRunId: string; outcome: ApprovalOutcome; feedback?: string }) =>
-      api.runs.approve(runId, input.stageRunId, {
+      api.runs.command(runId, {
+        command: 'approve',
+        instanceId: input.stageRunId,
         outcome: input.outcome,
-        approved: input.outcome === 'approved',
-        ...(input.feedback
-          ? input.outcome === 'rejected'
-            ? { reason: input.feedback }
-            : { followUpPrompt: input.feedback }
-          : {}),
+        ...(input.feedback ? { feedback: input.feedback } : {}),
       }),
     onSuccess: (_data, input) => {
       if (input.outcome === 'approved') haptics.success();

@@ -18,9 +18,14 @@ import { ChevronLeft, Lock, MoreHorizontal, Trash2, Workflow as WorkflowIcon } f
 import { queryKeys, type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
 
 import { useApi } from '../../src/api/useApi';
+import { useAdminApi } from '../../src/api/useAdminApi';
 import { useRunMutations, useRunPermissionMode, type RunAction } from '../../src/api/useRunControl';
 import { useRunStream } from '../../src/stream/useRunStream';
-import { ApprovalCard } from '../../src/components/runs/ApprovalCard';
+import { StageGateCard } from '../../src/components/runs/StageGateCard';
+import { LoopDecisionCard } from '../../src/components/runs/LoopDecisionCard';
+import { CheckOutput } from '../../src/components/runs/CheckOutput';
+import { isCheckStage, isParkedLoop, waitOf, type RunStage } from '../../src/components/runs/loopModel';
+import { WaitDecisionCard, type WaitDecision } from '../../src/components/runs/WaitDecisionCard';
 import { formatDuration, relativeTime, runElapsed } from '../../src/components/runs/formatTime';
 import { StageTimeline } from '../../src/components/runs/StageTimeline';
 import { StageTranscriptInline } from '../../src/components/runs/StageTranscriptInline';
@@ -57,17 +62,20 @@ const ACTION_LABEL: Record<RunAction, string> = {
   pause: 'Pause run',
   resume: 'Resume run',
   cancel: 'Cancel run',
-  retry: 'Retry run',
+  retry: 'Retry failed',
 };
 
 export default function RunDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const runId = String(id);
   const api = useApi();
+  const admin = useAdminApi();
   const navigation = useNavigation();
   const focused = useIsFocused();
   const { colors } = useTheme();
   const runControl = useFeature('runControl');
+  // Retry forks a new run (an invocation), which needs only runStart.
+  const runStart = useFeature('runStart');
   // The workbench: tools for the run's workspace, as on a chat.
   const [panelOpen, setPanelOpen] = useState(false);
   const [tool, setTool] = useState<ToolId | null>(null);
@@ -94,17 +102,58 @@ export default function RunDetailScreen(): React.ReactElement {
   // Only a run that can still call tools has a mode worth showing.
   const live = Boolean(runStatus) && !isTerminal(runStatus ?? '');
   const { mode: permissionMode, setMode } = useRunPermissionMode(runId, live);
-  const interrupts = useQuery({
-    queryKey: queryKeys.runInterrupts(runId),
-    queryFn: () => api.runs.pendingInterrupts(runId),
-    enabled: Boolean(run.data?.stageRuns?.some((s) => awaitsApproval(s.status))),
-    refetchInterval: focused ? pollIntervalFor(runStatus, connected) : false,
-  });
-
-  const pull = usePullRefresh(() => Promise.all([run.refetch(), interrupts.refetch()]));
+  const pull = usePullRefresh(() => run.refetch());
 
   const stages = run.data?.stageRuns ?? [];
-  const approvals = useMemo(() => stages.filter((s) => awaitsApproval(s.status)), [stages]);
+  // A parked loop is answered with the loop's own decisions, not an approval.
+  const approvals = useMemo(
+    () => stages.filter((s) => awaitsApproval(s.status) && !isParkedLoop(s as RunStage)),
+    [stages],
+  );
+  const loopDecisions = useMemo(() => stages.filter((s) => isParkedLoop(s as RunStage)) as RunStage[], [stages]);
+  // Waits (P05 §4.3) and the decisions of sub-workflow children, mirrored here (P05 §4.2).
+  const hasChildren = stages.some((s) => (s as RunStage).kind === 'subworkflow' && s.status === 'running');
+  const pending = useQuery({
+    queryKey: [...queryKeys.run(runId), 'pending-decisions'],
+    queryFn: () => admin.runs.pendingDecisions(runId),
+    enabled: hasChildren,
+    refetchInterval: focused && hasChildren ? 5_000 : false,
+  });
+  const waitDecisions = useMemo<WaitDecision[]>(() => {
+    const out: WaitDecision[] = [];
+    for (const s of stages as RunStage[]) {
+      const w = waitOf(s);
+      if (!w || s.status !== 'waiting' || w.type === 'timer') continue;
+      out.push({
+        runId,
+        instanceId: s.id,
+        name: w.label ?? s.name ?? s.stageKey,
+        type: w.type,
+        prompt: w.prompt,
+        form: w.form,
+        eventKey: w.eventKey,
+        callbackUrl: s.callback?.url ?? null,
+      });
+    }
+    for (const d of pending.data ?? []) {
+      if (d.runId === runId) continue;
+      const i = (d.interruptData && typeof d.interruptData === 'object' ? d.interruptData : {}) as Record<string, unknown>;
+      const type = d.kind === 'wait' ? (d.waitType === 'event' ? 'event' : 'approval') : d.kind === 'stage_completion_review' ? 'completion_review' : null;
+      if (!type) continue;
+      out.push({
+        runId,
+        instanceId: d.instanceId,
+        name: d.name,
+        via: d.via.map((v) => v.name).join(' › '),
+        type,
+        prompt: typeof i['prompt'] === 'string' ? i['prompt'] : typeof i['reason'] === 'string' ? i['reason'] : null,
+        form: i['form'] && typeof i['form'] === 'object' ? (i['form'] as Record<string, unknown>) : null,
+        eventKey: typeof i['eventKey'] === 'string' ? i['eventKey'] : null,
+        callbackUrl: d.callback?.url ?? null,
+      });
+    }
+    return out;
+  }, [stages, pending.data, runId]);
   const controls = runControlsFor(runStatus ?? '');
 
   const doRunAction = useCallback(
@@ -212,30 +261,33 @@ export default function RunDetailScreen(): React.ReactElement {
   const elapsed = runElapsed(data, isActive(data.status) ? null : data.completedAt ?? data.updatedAt);
   const workspaceId = data.workspaceId;
 
-  const menuActions: MenuAction[] = runControl.available
-    ? [
-        ...(['pause', 'resume', 'retry', 'cancel'] as const)
-          .filter((action) => controls[action])
-          .map((action) => ({
-            label: ACTION_LABEL[action],
-            destructive: action === 'cancel',
-            onPress: () => (action === 'cancel' ? setConfirmCancel(true) : doRunAction(action)),
-          })),
-        {
-          label: 'Delete run',
-          destructive: true,
-          icon: <Trash2 size={18} color={colors.danger} />,
-          onPress: () => setConfirmDelete(true),
-        },
-      ]
-    : [
-        {
-          label: 'Request access',
-          detail: 'Pausing, cancelling and retrying runs needs workflow permission on this device.',
-          icon: <Lock size={18} color={colors['muted-foreground']} />,
-          onPress: runControl.requestAccess,
-        },
-      ];
+  const allowed = (action: RunAction): boolean => (action === 'retry' ? runStart.available : runControl.available);
+  const menuActions: MenuAction[] = [
+    ...(['pause', 'resume', 'retry', 'cancel'] as const)
+      .filter((action) => controls[action] && allowed(action))
+      .map((action) => ({
+        label: ACTION_LABEL[action],
+        destructive: action === 'cancel',
+        onPress: () => (action === 'cancel' ? setConfirmCancel(true) : doRunAction(action)),
+      })),
+    ...(runControl.available
+      ? [
+          {
+            label: 'Delete run',
+            destructive: true,
+            icon: <Trash2 size={18} color={colors.danger} />,
+            onPress: () => setConfirmDelete(true),
+          },
+        ]
+      : [
+          {
+            label: 'Request access',
+            detail: 'Pausing, cancelling and deleting runs needs workflow permission on this device.',
+            icon: <Lock size={18} color={colors['muted-foreground']} />,
+            onPress: runControl.requestAccess,
+          },
+        ]),
+  ];
 
   // The single most relevant control, inline, so it is not hidden in a menu.
   const primary: RunAction | null = controls.resume ? 'resume' : controls.retry ? 'retry' : null;
@@ -302,7 +354,7 @@ export default function RunDetailScreen(): React.ReactElement {
               <Text className="text-sm text-foreground">{data.error}</Text>
             </View>
           ) : null}
-          {primary && runControl.available ? (
+          {primary && allowed(primary) ? (
             <Button
               label={ACTION_LABEL[primary]}
               variant={primary === 'retry' ? 'primary' : 'secondary'}
@@ -315,14 +367,29 @@ export default function RunDetailScreen(): React.ReactElement {
           ) : null}
         </Card>
 
-        {approvals.length > 0 ? (
+        {approvals.length + loopDecisions.length + waitDecisions.length > 0 ? (
           <>
             <SectionHeader title="Waiting for you" />
-            {approvals.map((stage) => (
-              <ApprovalCard
+            {/* A loop decision is a run-time act, like an approval (exec:agent, P05). */}
+            {loopDecisions.map((stage) => (
+              <LoopDecisionCard
                 key={stage.id}
+                runId={runId}
                 stage={stage}
-                interruptData={interrupts.data?.find((i) => i.id === stage.id)?.interruptData}
+                canControl={runStart.available}
+                onRequestAccess={runStart.requestAccess}
+              />
+            ))}
+            {waitDecisions.map((d) => (
+              <WaitDecisionCard key={`${d.via ?? ''}:${d.instanceId}`} decision={d} canDecide={runStart.available} />
+            ))}
+            {/* A tool permission, question or plan inside a stage's turn is the
+                chat's card; the completion review is the approval card. */}
+            {approvals.map((stage) => (
+              <StageGateCard
+                key={stage.id}
+                runId={runId}
+                stage={stage}
                 busy={busyStage === stage.id}
                 onDecide={(outcome, feedback) => decide(stage, outcome, feedback)}
                 {...(stage.sessionId ? { onOpenStage: () => openStage(stage) } : {})}
@@ -338,12 +405,15 @@ export default function RunDetailScreen(): React.ReactElement {
           <StageTimeline
             stages={stages}
             runStatus={data.status}
-            canControl={runControl.available}
+            canControl={isTerminal(data.status) ? runStart.available : runControl.available}
             busyStageId={busyStage}
             onOpen={openStage}
             expandedId={expandedStageId}
             onToggle={(stage) => setExpanded(expandedStageId === stage.id ? null : stage.id)}
-            renderExpanded={(stage) => (
+            renderExpanded={(stage) =>
+              isCheckStage(stage as RunStage) ? (
+                <CheckOutput stage={stage as RunStage} />
+              ) : (
               <StageTranscriptInline
                 runId={runId}
                 stage={stage}
@@ -351,7 +421,8 @@ export default function RunDetailScreen(): React.ReactElement {
                 connected={connected}
                 onOpenStage={() => openStage(stage)}
               />
-            )}
+              )
+            }
             onAction={(stage, action) => {
               setBusyStage(stage.id);
               stageAction.mutate(

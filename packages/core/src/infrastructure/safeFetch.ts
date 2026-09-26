@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // safeFetch — SSRF-resistant HTTP(S) client for user-supplied URLs.
 //
-// The previous defence (`DataSourceResolver.validateHttpUrl`) was a regex
+// An earlier defence (a hostname regex in the automation data-source resolver)
 // over the hostname STRING. It could be bypassed three independent ways:
 //   1. numeric hosts (`http://2130706433/`, `0x7f000001`, `0177.0.0.1`)
 //      that never look like `127.` until the socket layer decodes them;

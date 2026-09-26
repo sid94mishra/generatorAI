@@ -41,11 +41,11 @@ import {
   DrizzleAutomationRepository,
   DrizzleChatRepository,
   DrizzleProjectRepository,
-  DrizzleStageDefinitionRepository,
   DrizzleStageRunRepository,
-  DrizzleWorkflowDefinitionRepository,
   DrizzleWorkflowRunRepository,
+  SqliteWorkflowDefinitionStore,
   listAutomationExecutionIdsByStatus,
+  sqliteHandle,
   type AppDatabase,
 } from '@generatorai/db';
 import type {
@@ -55,11 +55,10 @@ import type {
   AutomationExecution,
   Chat,
   PersistedEvent,
-  StageDefinition,
   StageRun,
-  WorkflowDefinition,
   WorkflowRun,
 } from '@generatorai/shared';
+import type { WorkflowGraph } from '@generatorai/workflow-spec';
 import type { Principal } from '@generatorai/auth';
 
 import { createAttentionRoutes } from '../routes/attention.js';
@@ -78,12 +77,14 @@ const repos = () => ({
   projects: new DrizzleProjectRepository(db),
   runs: new DrizzleWorkflowRunRepository(db),
   stageRuns: new DrizzleStageRunRepository(db),
-  definitions: new DrizzleWorkflowDefinitionRepository(db),
+  definitions: new SqliteWorkflowDefinitionStore(db),
   automations: new DrizzleAutomationRepository(db),
   executions: new DrizzleAutomationExecutionRepository(db),
 });
 
 const T0 = new Date('2026-09-26T09:00:00.000Z');
+/** A workflow graph's `projectId` must be a UUID, so the shared project is one. */
+const P1 = '00000000-0000-4000-8000-000000000001';
 
 async function makeProject(id: string, name: string): Promise<void> {
   await repos().projects.create({
@@ -112,69 +113,85 @@ async function makeChat(id: string, over: Partial<Chat> = {}): Promise<Chat> {
   } as Chat);
 }
 
-async function makeDefinition(id: string, over: Partial<WorkflowDefinition> = {}): Promise<void> {
-  await repos().definitions.create({
-    id,
-    name: 'Dependency upgrade',
-    version: 1,
-    sessionMode: 'per-stage',
-    variables: [],
-    tags: [],
-    createdAt: T0,
-    updatedAt: T0,
-    ...over,
-  } as WorkflowDefinition);
+/**
+ * A published definition, the way the definition service stores one: the
+ * working graph (whose `workflow` carries the name and project) plus the
+ * immutable version a run pins.
+ */
+async function makeDefinition(id: string, over: { name?: string; projectId?: string } = {}): Promise<void> {
+  const store = repos().definitions;
+  const graph = {
+    formatVersion: 2,
+    workflow: { name: over.name ?? 'Dependency upgrade', ...(over.projectId ? { projectId: over.projectId } : {}) },
+    stages: [],
+    edges: [],
+  } as unknown as WorkflowGraph;
+  await store.insert({ id, status: 'published', graph });
+  const version = await store.insertVersion({
+    workflowDefinitionId: id,
+    kind: 'published',
+    graph,
+    contentHash: `hash-${id}`,
+    canonical: JSON.stringify(graph),
+  });
+  await store.markPublished(id, version.id);
+}
+
+/** The engine's run-state path from `created` to each state these tests need (CAS transitions). */
+const RUN_PATH: Partial<Record<WorkflowRun['status'], Array<WorkflowRun['status']>>> = {
+  created: [],
+  starting: ['starting'],
+  running: ['starting', 'running'],
+  waiting: ['starting', 'running', 'waiting'],
+  paused: ['starting', 'running', 'paused'],
+  completed: ['starting', 'running', 'finalizing', 'completed'],
+};
+
+/** Moves a run through the engine's legal transitions; the outcome is fixed on entering `finalizing`. */
+function advanceRun(id: string, to: WorkflowRun['status']): void {
+  const runs = repos().runs;
+  const path = RUN_PATH[to]!;
+  const from = runs.getRunRow(id)!.status as WorkflowRun['status'];
+  for (const next of path.slice(path.indexOf(from) + 1)) {
+    const current = runs.getRunRow(id)!.status as WorkflowRun['status'];
+    const result = runs.transition(id, [current], next, next === 'finalizing' ? { patch: { outcome: 'completed' } } : {});
+    if (!result.ok) throw new Error(`run ${id}: ${current} -> ${next} refused`);
+  }
 }
 
 async function makeRun(id: string, definitionId: string, status: WorkflowRun['status']): Promise<void> {
+  const definition = await repos().definitions.getGraph(definitionId);
   await repos().runs.create({
     id,
     workflowDefinitionId: definitionId,
+    definitionVersionId: definition.currentVersionId!,
     name: `Dependency upgrade - Run 1790000000000`,
-    status,
-    sessionMode: 'per-stage',
+    status: 'created',
     variables: {},
     createdAt: T0,
     updatedAt: T0,
-    startedAt: T0,
   });
+  advanceRun(id, status);
 }
 
-async function makeStage(
+/**
+ * One top-level stage instance (a `stage_runs` row). The engine's scheduler
+ * creates these and no repository method inserts one, so the row is written
+ * directly, the way the engine store tests seed instances.
+ */
+function makeStage(
   id: string,
   runId: string,
   name: string,
   status: StageRun['status'],
   interruptData?: unknown,
-): Promise<void> {
-  const run = await repos().runs.getById(runId);
-  await new DrizzleStageDefinitionRepository(db).create({
-    id: `def-${id}`,
-    workflowDefinitionId: run.workflowDefinitionId,
-    name,
-    order: 0,
-    prompts: [],
-    variables: {},
-    hooks: [],
-    createdAt: T0,
-    updatedAt: T0,
-  } as unknown as StageDefinition);
-  await repos().stageRuns.create({
-    id,
-    workflowRunId: runId,
-    stageDefinitionId: `def-${id}`,
-    name,
-    status,
-    currentStep: 0,
-    totalSteps: 1,
-    retryCount: 0,
-    version: 1,
-    createdAt: T0,
-    ...(interruptData !== undefined ? { interruptData } : {}),
-  } as StageRun);
-  if (interruptData !== undefined) {
-    await repos().stageRuns.update(id, { interruptData } as Partial<StageRun>);
-  }
+): void {
+  sqliteHandle(db)
+    .prepare(
+      `INSERT INTO stage_runs (id, workflow_run_id, stage_key, kind, name, instance_path, status, interrupt_data, created_at, updated_at)
+       VALUES (?, ?, ?, 'agent', ?, ?, ?, ?, ?, ?)`,
+    )
+    .run(id, runId, id, name, id, status, interruptData === undefined ? null : JSON.stringify(interruptData), T0.getTime(), T0.getTime());
 }
 
 async function makeAutomation(id: string, projectId?: string): Promise<void> {
@@ -294,8 +311,8 @@ afterEach(() => {
 
 describe('AttentionService — boot rebuild', () => {
   it('lists gates, streaming chats, live runs and running executions; empty run history is fine', async () => {
-    await makeProject('p1', 'Website');
-    await makeChat('c-ask', { projectId: 'p1' });
+    await makeProject(P1, 'Website');
+    await makeChat('c-ask', { projectId: P1 });
     await makeChat('c-run');
     await makeChat('c-orch', { name: 'Orchestrator' });
     await makeChat('c-worker', { parentChatId: 'c-orch', name: 'Worker' } as Partial<Chat>);
@@ -304,19 +321,19 @@ describe('AttentionService — boot rebuild', () => {
     streaming.set('c-run', () => {});
     streaming.set('c-ask', () => {}); // blocked on its gate: Needs you only
 
-    await makeDefinition('d1', { projectId: 'p1' });
+    await makeDefinition('d1', { projectId: P1 });
     await makeRun('r-live', 'd1', 'running');
-    await makeStage('s1', 'r-live', 'Scan', 'completed');
-    await makeStage('s2', 'r-live', 'Plan upgrades', 'running');
-    await makeStage('s3', 'r-live', 'Apply', 'pending');
+    makeStage('s1', 'r-live', 'Scan', 'completed');
+    makeStage('s2', 'r-live', 'Plan upgrades', 'running');
+    makeStage('s3', 'r-live', 'Apply', 'pending');
     await makeRun('r-gate', 'd1', 'running');
-    await makeStage('s4', 'r-gate', 'Apply upgrades', 'awaiting_input', {
+    makeStage('s4', 'r-gate', 'Apply upgrades', 'awaiting_input', {
       kind: 'stage_completion_review',
       reason: '14 packages, 3 majors',
     });
     await makeRun('r-paused', 'd1', 'paused');
     await makeRun('r-done', 'd1', 'completed');
-    await makeAutomation('a1', 'p1');
+    await makeAutomation('a1', P1);
     await makeExecution('e-run', 'a1', 'running');
     await makeExecution('e-done', 'a1', 'completed');
     await vi.waitFor(async () => expect(await interactions.listPendingAll()).toHaveLength(2));
@@ -344,7 +361,7 @@ describe('AttentionService — boot rebuild', () => {
       state: 'needs_you',
       title: 'Chat c-ask',
       href: '/chats/c-ask',
-      project: { id: 'p1', name: 'Website' },
+      project: { id: P1, name: 'Website' },
       stoppable: true,
       ask: { kind: 'tool_permission', summary: 'Allow Bash?', detail: 'git push origin main', actions: ['allow_once', 'deny', 'open'] },
     });
@@ -373,7 +390,7 @@ describe('AttentionService — boot rebuild', () => {
       title: 'Nightly audit',
       href: '/automations/a1',
       state: 'running',
-      project: { id: 'p1', name: 'Website' },
+      project: { id: P1, name: 'Website' },
       progress: { label: 'Iteration 2 of 4', step: 2, of: 4 },
     });
 
@@ -387,8 +404,8 @@ describe('AttentionService — boot rebuild', () => {
       },
     });
     // Project filter: counts follow it.
-    const p1 = service.getSnapshot({ projectId: 'p1' });
-    expect(p1.needsYou.every((i) => i.project?.id === 'p1')).toBe(true);
+    const p1 = service.getSnapshot({ projectId: P1 });
+    expect(p1.needsYou.every((i) => i.project?.id === P1)).toBe(true);
     expect(p1.counts.needsYou).toBe(p1.needsYou.length);
     expect(p1.running.map((i) => i.key).sort()).toEqual(['automation_execution:e-run', 'workflow_run:r-live']);
   });
@@ -451,11 +468,15 @@ describe('AttentionService — live deltas', () => {
   it('follows workflow runs through global events and ignores its own emits', async () => {
     await makeDefinition('d1');
     await makeRun('r1', 'd1', 'running');
-    await makeStage('s1', 'r1', 'Build', 'running');
+    makeStage('s1', 'r1', 'Build', 'running');
     await startService().start();
     expect(service.getSnapshot().running.map((i) => i.key)).toEqual(['workflow_run:r1']);
 
-    await repos().stageRuns.update('s1', { status: 'awaiting_input', interruptData: { prompt: 'Pick a version' } } as Partial<StageRun>);
+    // The executor parks the instance on an input request (running -> awaiting_input).
+    const parked = repos().stageRuns.transition('s1', ['running'], 'awaiting_input', {
+      patch: { interruptData: { prompt: 'Pick a version' } },
+    });
+    expect(parked.ok).toBe(true);
     await bus.emitGlobal({ kind: 'stage_run.awaiting_input', data: { stageRunId: 's1', workflowRunId: 'r1' } } as AgentEvent);
     await service.settled();
     expect(service.getSnapshot().needsYou[0]).toMatchObject({
@@ -463,25 +484,38 @@ describe('AttentionService — live deltas', () => {
       ask: { kind: 'stage_input', summary: 'Answer “Build”', actions: ['answer', 'open'] },
     });
 
-    await repos().runs.updateStatus('r1', 'completed');
+    advanceRun('r1', 'completed');
     await bus.emitGlobal({ kind: 'workflow_run.completed', data: { workflowRunId: 'r1' } } as AgentEvent);
     await service.settled();
     expect(service.getSnapshot().needsYou).toEqual([]);
     expect(service.getSnapshot().running).toEqual([]);
   });
 
+  it('shows a run whose only live instances wait on a timer or a retry as waiting, not running', async () => {
+    await makeDefinition('d1');
+    await makeRun('r1', 'd1', 'waiting');
+    makeStage('s1', 'r1', 'Build', 'completed');
+    makeStage('s2', 'r1', 'Poll deploy', 'waiting');
+    makeStage('s3', 'r1', 'Notify', 'retry_wait');
+    await startService().start();
+    expect(service.getSnapshot().needsYou).toEqual([]);
+    expect(service.getSnapshot().running).toEqual([
+      expect.objectContaining({ key: 'workflow_run:r1', state: 'waiting', stoppable: true, progress: { step: 2, of: 3 } }),
+    ]);
+  });
+
   it('P2-R33: refreshProject drops a deleted project from every item shown under it, runs included', async () => {
-    await makeProject('p1', 'Website');
-    await makeDefinition('d1', { projectId: 'p1' });
+    await makeProject(P1, 'Website');
+    await makeDefinition('d1', { projectId: P1 });
     await makeRun('r1', 'd1', 'running');
-    await makeStage('s1', 'r1', 'Build', 'running');
-    await makeChat('c1', { projectId: 'p1' });
+    makeStage('s1', 'r1', 'Build', 'running');
+    await makeChat('c1', { projectId: P1 });
     streaming.set('c1', () => {});
     await startService().start();
-    expect(service.getSnapshot().running.map((i) => i.project?.id)).toEqual(['p1', 'p1']);
+    expect(service.getSnapshot().running.map((i) => i.project?.id)).toEqual([P1, P1]);
 
-    await repos().projects.delete('p1'); // unlinks the chat and the definition, emits nothing
-    service.refreshProject('p1');
+    await repos().projects.delete(P1); // unlinks the chat and the definition, emits nothing
+    service.refreshProject(P1);
     await service.settled();
     expect(service.getSnapshot().running.map((i) => i.key).sort()).toEqual(['chat:c1', 'workflow_run:r1']);
     expect(service.getSnapshot().running.map((i) => i.project)).toEqual([undefined, undefined]);
@@ -574,11 +608,11 @@ describe('AttentionService — consent without a chat (P2-R19)', () => {
 
 describe('GET /api/attention', () => {
   beforeEach(async () => {
-    await makeProject('p1', 'Website');
-    await makeChat('c1', { projectId: 'p1' });
+    await makeProject(P1, 'Website');
+    await makeChat('c1', { projectId: P1 });
     await makeDefinition('d1');
     await makeRun('r1', 'd1', 'running');
-    await makeStage('s1', 'r1', 'Apply', 'awaiting_input', { kind: 'tool_permission', request: { description: 'rm -rf dist' } });
+    makeStage('s1', 'r1', 'Apply', 'awaiting_input', { kind: 'tool_permission', request: { description: 'rm -rf dist' } });
     openGate('c1', 'tool_permission', { toolName: 'Bash', inputSummary: 'git push --force' });
     await vi.waitFor(async () => expect(await interactions.listPendingAll()).toHaveLength(1));
     await startService().start();
@@ -596,7 +630,7 @@ describe('GET /api/attention', () => {
   });
 
   it('filters by project', async () => {
-    const res = await request(app(undefined)).get('/api/attention?projectId=p1');
+    const res = await request(app(undefined)).get(`/api/attention?projectId=${P1}`);
     expect((res.body as AttentionSnapshot).needsYou.map((i) => i.entityId)).toEqual(['c1']);
     expect((res.body as AttentionSnapshot).counts.needsYou).toBe(1);
   });

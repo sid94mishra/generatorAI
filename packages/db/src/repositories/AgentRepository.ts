@@ -176,11 +176,13 @@ export class DrizzleAgentRepository implements IAgentRepository {
           workflowDefinitionId: stageDefinitions.workflowDefinitionId,
         })
         .from(stageDefinitions)
-        .where(eq(stageDefinitions.agentRef, ref)),
+        // A stage binds its agent through its session (v2 spec).
+        .where(sql`json_extract(${stageDefinitions.spec}, '$.session.agentRef') = ${ref}`),
       this.db
         .select({ id: workflowDefinitions.id, name: workflowDefinitions.name })
         .from(workflowDefinitions)
-        .where(eq(workflowDefinitions.defaultAgentRef, ref)),
+        // A workflow binds its default agent through `session.agentRef`.
+        .where(sql`json_extract(${workflowDefinitions.spec}, '$.session.agentRef') = ${ref}`),
     ]);
     return { chats: chatRows, stages: stageRows, workflows: workflowRows };
   }

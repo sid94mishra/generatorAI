@@ -10,7 +10,7 @@
 
 import React from 'react';
 import {
-  CircleDot, Loader2, Play, Pause, Check, X, Clock, SkipForward, AlertCircle, AlertTriangle, Archive, Hand, Moon,
+  CircleDot, Loader2, Play, Pause, Check, X, Clock, SkipForward, AlertCircle, AlertTriangle, Archive, Hand,
 } from 'lucide-react';
 import { Badge, type BadgeTone, type BadgeSize } from './Badge.js';
 import { cn } from '@/lib/utils.js';
@@ -28,6 +28,8 @@ const STATUS: Record<string, StatusEntry> = {
   starting: { tone: 'info', label: 'Starting', Icon: Loader2, spin: true },
   running: { tone: 'info', label: 'Running', Icon: Play },
   paused: { tone: 'warning', label: 'Paused', Icon: Pause },
+  waiting: { tone: 'warning', label: 'Waiting', Icon: Clock },
+  finalizing: { tone: 'info', label: 'Finalizing', Icon: Loader2, spin: true },
   cancelling: { tone: 'danger', label: 'Cancelling', Icon: Loader2, spin: true },
   completed: { tone: 'success', label: 'Completed', Icon: Check },
   failed: { tone: 'danger', label: 'Failed', Icon: AlertCircle },
@@ -40,8 +42,10 @@ const STATUS: Record<string, StatusEntry> = {
   // StageRun-specific
   pending: { tone: 'neutral', label: 'Pending', Icon: Clock },
   queued: { tone: 'info', label: 'Queued', Icon: Clock },
+  ready: { tone: 'info', label: 'Ready', Icon: Clock },
+  validating: { tone: 'info', label: 'Validating', Icon: Loader2, spin: true },
+  retry_wait: { tone: 'warning', label: 'Retrying', Icon: Clock },
   skipped: { tone: 'neutral', label: 'Skipped', Icon: SkipForward },
-  sleeping: { tone: 'info', label: 'Sleeping', Icon: Moon },
   awaiting_input: { tone: 'warning', label: 'Awaiting input', Icon: Hand },
   // Chat / session
   active: { tone: 'success', label: 'Active', Icon: CircleDot },

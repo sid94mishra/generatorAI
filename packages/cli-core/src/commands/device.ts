@@ -396,6 +396,10 @@ export function deviceCommands(): CommandSpec[] {
       requiresServer: true,
       scopes: ['admin:devices'],
       sinceVersion: '0.2.0',
+      examples: [
+        'generatorai device invite --name "Pixel 9" --platform mobile',
+        'generatorai device invite --name "Claude Desktop MCP" --platform mcp --scopes exec:agent,read:workflows,write:workflows',
+      ],
       args: [],
       flags: [
         { name: 'scopes', description: 'Comma-separated scopes to request', type: 'string' },
@@ -410,7 +414,7 @@ export function deviceCommands(): CommandSpec[] {
         },
         {
           name: 'platform',
-          description: 'Device platform: web, desktop, cli, mobile or other',
+          description: 'Device platform: web, desktop, cli, mobile, mcp (an MCP server in remote mode) or other',
           type: 'string',
           default: 'other',
         },
@@ -429,7 +433,7 @@ export function deviceCommands(): CommandSpec[] {
         {
           scopes: z.string().optional(),
           name: z.string().min(1).max(64).optional(),
-          platform: z.enum(['web', 'desktop', 'cli', 'mobile', 'other']).default('other'),
+          platform: z.enum(['web', 'desktop', 'cli', 'mobile', 'mcp', 'other']).default('other'),
           // Bounded here rather than at the server, so an out-of-range value
           // is a local error naming the limit instead of a round trip that
           // fails validation.
@@ -453,6 +457,24 @@ export function deviceCommands(): CommandSpec[] {
         // solved that at startup by minting its own unclaimed-install grant
         // to `bootstrap-pairing.json` (see composition/bootstrapPairing.ts).
         // Reading it needs no token and touches no network — try it first.
+        //
+        // Neither bootstrap channel carries a platform or scopes (both issue
+        // full access), so an MCP server's credential never takes them: it
+        // is scoped (`exec:agent,read:workflows[,write:workflows]`) and
+        // minted by an already-paired admin through the API.
+        if (flags.platform === 'mcp') {
+          const invite = await ctx.api.devices.createInvite(body);
+          return {
+            data: invite,
+            warnings: [
+              'This code grants pairing access. Treat it like a password and let it expire unused if you do not use it.',
+              ...(typeof invite['pairingUrl'] === 'string'
+                ? [`Pair the MCP server with: generatorai-mcp pair '${invite['pairingUrl']}'`]
+                : []),
+            ],
+          };
+        }
+
         const bootstrap = findBootstrapPairing(flags.dataDir);
         if (bootstrap) {
           return {

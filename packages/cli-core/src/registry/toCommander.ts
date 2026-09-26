@@ -124,6 +124,8 @@ export function attachCommands(
       } else {
         command.option(signature, description);
       }
+      // `hidden` is "accepted but not advertised": keep it out of `--help`.
+      if (flag.hidden) command.options.at(-1)?.hideHelp();
     }
 
     command.action(async (...actionArgs: unknown[]) => {

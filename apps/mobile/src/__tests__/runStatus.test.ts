@@ -86,13 +86,13 @@ describe('status classification', () => {
     for (const status of ['paused', 'awaiting_input', 'failed']) {
       expect(needsAttention(status), status).toBe(true);
     }
-    for (const status of ['running', 'completed', 'queued', 'skipped', 'cancelled']) {
+    for (const status of ['running', 'completed', 'ready', 'skipped', 'cancelled']) {
       expect(needsAttention(status), status).toBe(false);
     }
   });
 
   it('classifies in-flight statuses', () => {
-    for (const status of ['running', 'starting', 'queued']) {
+    for (const status of ['running', 'starting', 'ready', 'validating', 'retry_wait', 'finalizing']) {
       expect(isActive(status), status).toBe(true);
     }
     expect(isActive('completed')).toBe(false);

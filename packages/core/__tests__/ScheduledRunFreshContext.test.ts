@@ -6,129 +6,82 @@
 // `createRun`, nor the workspace, nor the harness, so the requirement had no
 // mechanism behind it at all.
 //
-// Sessions and conversations were already per-run, so the surviving leak was
-// the EXECUTION CONTEXT: `startRun` skips workspace creation entirely when
-// `__workingDirectory` + `__artifactsDirectory` are pre-seeded, and an
-// automation whose variables carry those keys hands every nightly run the same
-// directory — the same scratchpad, the same half-finished files.
+// Since P01 (R-8) caller variables cannot carry engine state at all, and
+// since P04 the trigger is the invocation's trusted context and the run's
+// system values live in `system_vars`: __* / repo_path_* names are refused,
+// so an automation can no longer hand every nightly run the same directory.
 // ────────────────────────────────────────────────────────────────
 
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 import { WorkflowRunService } from '../src/services/WorkflowRunService.js';
 import {
   MockWorkflowRunRepository,
   MockStageRunRepository,
-  MockStageDefinitionRepository,
-  MockStageEdgeRepository,
-  MockWorkflowDefinitionRepository,
+  MockWorkflowDefinitionStore,
+  seedDefinition,
+  testGraph,
 } from './MockRepositories.js';
 import { EventBus } from '../src/events/EventBus.js';
-import { DAGScheduler } from '../src/services/DAGScheduler.js';
-import type { StageExecutionService } from '../src/services/StageExecutionService.js';
-import type { SessionAllocator } from '../src/services/SessionAllocator.js';
-import type { StageDefinition } from '@generatorai/shared';
+import { RunDefinitionReader } from '../src/services/definitions/RunDefinitionReader.js';
+import { WorkflowDefinitionService } from '../src/services/WorkflowDefinitionService.js';
+import type { RunSupervisor } from '../src/services/engine/RunSupervisor.js';
+import type { TemplateRegistry } from '../src/services/TemplateRegistry.js';
+import { WorkflowInvocationService } from '../src/services/workflow-invocation/WorkflowInvocationService.js';
+import type { InvocationContext } from '../src/services/workflow-invocation/types.js';
 
-const DEF_ID = 'def-1';
+const SCHEDULE: InvocationContext = {
+  principal: { kind: 'system', id: 'automation:a-1', scopes: [] },
+  trigger: { kind: 'automation', automationId: 'a-1', executionId: 'e-1', via: 'schedule', iterationIndex: 0 },
+};
 
-function makeStageDef(id: string, order: number): StageDefinition {
-  return {
-    id,
-    workflowDefinitionId: DEF_ID,
-    name: `Stage ${id}`,
-    order,
-    prompts: [{ label: 'P', text: 'go', waitForCompletion: true }],
-    variables: {},
-    hooks: [],
-    createdAt: new Date(),
-  };
-}
+const DEF_ID = '6f2e1b3c-1a2b-4c3d-8e9f-0a1b2c3d4e5f';
 
 describe('X-21 — a scheduled run starts from a clean execution context', () => {
-  let service: WorkflowRunService;
+  let service: WorkflowInvocationService;
   let runRepo: MockWorkflowRunRepository;
 
   beforeEach(async () => {
-    runRepo = new MockWorkflowRunRepository();
     const stageRunRepo = new MockStageRunRepository();
-    const stageDefRepo = new MockStageDefinitionRepository();
-    const defRepo = new MockWorkflowDefinitionRepository();
-    const edgeRepo = new MockStageEdgeRepository();
+    runRepo = new MockWorkflowRunRepository(stageRunRepo);
+    const store = new MockWorkflowDefinitionStore();
+    const definitions = new RunDefinitionReader(store);
 
-    service = new WorkflowRunService(
+    const definitionService = new WorkflowDefinitionService(store, {} as TemplateRegistry);
+    const eventBus = new EventBus();
+    const runs = new WorkflowRunService(
       runRepo,
       stageRunRepo,
-      stageDefRepo,
-      defRepo,
-      new EventBus(),
-      new DAGScheduler(stageDefRepo, edgeRepo, stageRunRepo),
-      { executeStage: vi.fn(async () => {}) } as unknown as StageExecutionService,
-      { releaseAll: vi.fn(async () => {}) } as unknown as SessionAllocator,
+      definitions,
+      definitionService,
+      eventBus,
+      // The engine accepts the start; nothing executes here.
+      { startRun: async () => ({ ok: true }) } as unknown as RunSupervisor,
     );
-
-    await defRepo.create({
-      id: DEF_ID,
-      name: 'Nightly',
-      version: 1,
-      sessionMode: 'per-stage',
-      variables: [],
-      tags: [],
-      createdAt: new Date(),
-      updatedAt: new Date(),
+    service = new WorkflowInvocationService({
+      runs,
+      runRepo,
+      stageRuns: stageRunRepo,
+      definitions: definitionService,
+      versions: definitions,
+      eventBus,
     });
-    await stageDefRepo.create(makeStageDef('s-a', 0));
+
+    await seedDefinition(store, testGraph(['a'], [], { name: 'Nightly' }), DEF_ID);
   });
 
-  /** The execution context an earlier run of the same automation left behind. */
-  const INHERITED = {
-    __workingDirectory: '/ws/executions/previous-run',
-    __artifactsDirectory: '/ws/executions/previous-run/artifacts',
-    __workspaceId: 'ws-previous',
-  };
-
-  it('drops an inherited workspace so the run provisions a fresh one', async () => {
-    const run = await service.createRun({
-      workflowDefinitionId: DEF_ID,
-      variables: { ...INHERITED, __triggeredBy: 'schedule', topic: 'weekly digest' },
-    });
-
-    const stored = await runRepo.getById(run.id);
-    expect(stored.variables?.['__workingDirectory']).toBeUndefined();
-    expect(stored.variables?.['__artifactsDirectory']).toBeUndefined();
-    expect(stored.variables?.['__workspaceId']).toBeUndefined();
-    // Only the execution context is dropped — the automation's real inputs
-    // are what the run is FOR and must survive untouched.
-    expect(stored.variables?.['topic']).toBe('weekly digest');
-  });
-
-  it('CONTROL: a manual run keeps a pinned working directory', async () => {
-    const run = await service.createRun({
-      workflowDefinitionId: DEF_ID,
-      variables: { ...INHERITED, __triggeredBy: 'manual' },
-    });
-
-    // A human who typed a directory meant it.
-    const stored = await runRepo.getById(run.id);
-    expect(stored.variables?.['__workingDirectory']).toBe('/ws/executions/previous-run');
-  });
-
-  it('CONTROL: a run with no trigger marker is unaffected', async () => {
-    const run = await service.createRun({
-      workflowDefinitionId: DEF_ID,
-      variables: { ...INHERITED },
-    });
-
-    const stored = await runRepo.getById(run.id);
-    expect(stored.variables?.['__workspaceId']).toBe('ws-previous');
-  });
-
-  it('is a no-op for a scheduled run that carries no inherited context', async () => {
-    const run = await service.createRun({
-      workflowDefinitionId: DEF_ID,
-      variables: { __triggeredBy: 'schedule', topic: 't' },
-    });
-
-    const stored = await runRepo.getById(run.id);
+  it('records the trigger from the trusted context and keeps the user inputs', async () => {
+    const { runId } = await service.invoke({ target: { kind: 'definition', workflowDefinitionId: DEF_ID }, variables: { topic: 't' } }, SCHEDULE);
+    const stored = await runRepo.getById(runId);
     expect(stored.variables?.['topic']).toBe('t');
-    expect(stored.variables?.['__triggeredBy']).toBe('schedule');
+    expect(stored.trigger).toEqual(SCHEDULE.trigger);
+    expect(Object.keys(stored.variables ?? {}).filter((k) => k.startsWith('__'))).toEqual([]);
+  });
+
+  it('refuses caller variables that would seed an execution context or a codebase path (R-8)', async () => {
+    for (const key of ['__workingDirectory', '__triggeredBy', '__stageOverrides', 'repo_path_target']) {
+      await expect(
+        service.invoke({ target: { kind: 'definition', workflowDefinitionId: DEF_ID }, variables: { [key]: '/elsewhere' } }, SCHEDULE),
+      ).rejects.toThrow(/engine-reserved/i);
+    }
   });
 });

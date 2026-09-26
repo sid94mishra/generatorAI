@@ -1,9 +1,33 @@
 // `generatorai run …` — starting, watching and controlling workflow runs.
+//
+// A run starts through ONE call, `workflows.invoke` (P04): `run start`,
+// `run retry` (a fork) and `script run` all build an `InvocationRequest`
+// and send it with an idempotency key. `run plan` sends the same request to
+// `workflows.plan` and prints what the run would do. The server validates
+// the request (variables, stage keys, codebases, models, the permission
+// ceiling) and answers every problem at once in its `issues[]`.
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import { z } from 'zod';
-import { defineCommand, type CommandResult, type CommandSpec } from '../registry/CommandSpec.js';
+import {
+  REASONING_EFFORTS,
+  RUN_PERMISSION_MODES,
+  RunCommandSchema,
+  RunProfileSchema,
+  type InvocationIssue,
+  type InvocationPlan,
+  type InvocationRequest,
+  type RunDigest,
+  type RunProfile,
+} from '@generatorai/workflow-spec';
+import { newIdempotencyKey, type InvocationUploadFiles } from '@generatorai/client-core';
+import {
+  defineCommand,
+  type CommandFlag,
+  type CommandResult,
+  type CommandSpec,
+} from '../registry/CommandSpec.js';
 import { CliError } from '../errors/CliError.js';
 import { resolveRef } from '../refs/resolveRef.js';
 import type { CliContext } from '../context/CliContext.js';
@@ -13,33 +37,24 @@ import {
   createdColumn,
   idColumn,
   inputSchema,
-  isTerminalRunState,
   list,
   ok,
   parseKeyValues,
   record,
+  sleep,
   statusColumn,
   streamUntil,
   verbosityFlag,
-  waitForRunTerminal,
   watchFlag,
 } from './_shared.js';
+import { findDefinition } from './workflow.js';
+import { readAttachments, readStdin } from './chat.js';
 
 export const RUN_GROUP = {
   name: 'run',
   summary: 'Workflow run lifecycle, stage controls and human-in-the-loop gates',
   order: 30,
 };
-
-const PERMISSION_MODES = ['default', 'acceptEdits', 'bypassPermissions', 'plan'] as const;
-
-export interface RunProfile {
-  variables?: Record<string, unknown>;
-  permissionMode?: string;
-  projectId?: string;
-  name?: string;
-  stageOverrides?: Array<{ stageId: string; patch: Record<string, unknown> }>;
-}
 
 async function findRun(ctx: CliContext, ref: string) {
   const runs = await ctx.api.runs.list({});
@@ -51,36 +66,122 @@ async function findRun(ctx: CliContext, ref: string) {
       status: r.status,
       createdAt: r.createdAt,
     })),
-    activeStatuses: ['running', 'awaiting_input', 'paused', 'starting'],
+    activeStatuses: ['running', 'starting', 'waiting', 'paused', 'finalizing'],
   });
 }
 
-async function findDefinition(ctx: CliContext, ref: string) {
-  const definitions = await ctx.api.definitions.list();
-  return resolveRef(ref, { kind: 'workflow', candidates: definitions });
-}
-
+/** A stage run by its instance path, its stage key, its name, or its own id. */
 async function findStage(ctx: CliContext, runId: string, ref: string) {
   const stages = await ctx.api.runs.stages(runId);
-  return resolveRef(ref, {
+  const view = (s: (typeof stages)[number]) => ({
+    id: s.id,
+    name: s.name,
+    status: s.status,
+    stageKey: s.stageKey,
+    instancePath: s.instancePath,
+  });
+  const byKey = stages.filter((s) => s.instancePath === ref.trim() || s.stageKey === ref.trim());
+  // A loop body has several instances under one key; the latest is the one
+  // an operator means.
+  const latest = byKey[byKey.length - 1];
+  if (latest) return view(latest);
+  const hit = await resolveRef(ref, {
     kind: 'stage',
-    candidates: (stages as unknown as Array<Record<string, unknown>>).map((s) => ({
-      id: String(s['id'] ?? s['stageDefinitionId'] ?? ''),
-      name: (s['name'] ?? s['stageName']) as string | null,
-      status: s['status'] as string | null,
-    })),
+    candidates: stages.map((s) => ({ id: s.id, name: s.name, status: s.status })),
+  });
+  const stage = stages.find((s) => s.id === hit.id);
+  return stage ? view(stage) : { ...hit, stageKey: undefined, instancePath: undefined };
+}
+
+/** What each outcome of `run stage send` means, for the success line. */
+const SEND_OUTCOME: Record<'queued' | 'amending' | 'retrying', string> = {
+  queued: 'queued as the stage’s next turn',
+  amending: 'amending the completed stage’s output (later stages keep what they used; `run retry --from` re-runs them)',
+  retrying: 'the paused stage resumes with it',
+};
+
+/**
+ * A refusal of the stage conversation API, with its code up front and the
+ * next step as the hint (409 STAGE_BUSY, INTERACTION_PENDING, …).
+ */
+function stageConversationError(error: unknown, runId: string, stageRef: string): unknown {
+  const api = error as { status?: unknown; message?: unknown; body?: unknown } | null;
+  if (!api || api.status !== 409) return error;
+  const code = (api.body as { error?: { code?: unknown } } | undefined)?.error?.code;
+  const message = typeof api.message === 'string' ? api.message : 'The stage refused the request.';
+  const hint =
+    code === 'STAGE_BUSY'
+      ? `Stop the turn in flight first: generatorai run stage stop ${runId} ${stageRef}`
+      : code === 'INTERACTION_PENDING'
+        ? `Answer the stage's gate first: generatorai run hitl pending ${runId}`
+        : code === 'STAGE_NOT_CONVERSABLE'
+          ? `Re-run it in a new run: generatorai run retry ${runId} --from ${stageRef}`
+          : undefined;
+  return new CliError('CONFLICT', typeof code === 'string' ? `${code}: ${message}` : message, {
+    ...(hint ? { hint } : {}),
+    details: { runId, stage: stageRef, ...(typeof code === 'string' ? { code } : {}) },
+  });
+}
+
+/** The question an `awaiting_input` stage asks, from its interrupt payload. */
+function gatePrompt(data: unknown): string | undefined {
+  if (typeof data === 'string') return data;
+  if (!data || typeof data !== 'object') return undefined;
+  const r = data as Record<string, unknown>;
+  for (const key of ['prompt', 'reason', 'message', 'question']) {
+    const v = r[key];
+    if (typeof v === 'string' && v.trim()) return v;
+  }
+  return typeof r['kind'] === 'string' ? r['kind'] : undefined;
+}
+
+// ── Invocation requests ─────────────────────────────────────────────
+
+/** `path: message` for one invocation issue. */
+function issueLine(issue: Pick<InvocationIssue, 'path' | 'message'>): string {
+  const where = issue.path.length ? `${issue.path.join('.')}: ` : '';
+  return `${where}${issue.message}`;
+}
+
+/**
+ * A refusal of the invocation API (`{error: {code, message, issues[]}}`) as
+ * a CLI error that lists every issue, rather than only the summary line.
+ */
+export function invocationError(error: unknown): unknown {
+  const api = error as { status?: unknown; message?: unknown; body?: unknown } | null;
+  if (!api || typeof api.status !== 'number') return error;
+  const body = (api.body as { error?: { code?: unknown; message?: unknown; issues?: unknown } } | undefined)?.error;
+  if (!body || typeof body.code !== 'string') return error;
+  const issues = Array.isArray(body.issues) ? (body.issues as InvocationIssue[]) : [];
+  const message = typeof body.message === 'string' ? body.message : String(api.message ?? 'The server refused the run.');
+  const code =
+    api.status === 404
+      ? 'NOT_FOUND'
+      : api.status === 403
+        ? 'FORBIDDEN'
+        : api.status === 409
+          ? 'CONFLICT'
+          : api.status === 503
+            ? 'UNAVAILABLE'
+            : 'VALIDATION';
+  const listed = issues.filter((i) => i.message && !message.includes(i.message));
+  return new CliError(code, `${body.code}: ${message}${listed.length ? `\n${listed.map((i) => `  ${issueLine(i)}`).join('\n')}` : ''}`, {
+    details: { code: body.code, issues },
+    ...(body.code === 'DRAFT_NOT_RUNNABLE' ? { hint: 'Publish it (`generatorai workflow publish`), or run the draft with --test-run.' } : {}),
   });
 }
 
 /**
- * Loads a run profile.
- *
- * Bare names resolve against `./.generatorai/run-profiles/` first and the
- * user directory second, so a repo can ship its own profiles and a user can
- * keep personal ones without collision. A path with a separator is taken
- * literally.
+ * Loads and validates a run profile (`RunProfileSchema`, stage overrides by
+ * KEY). Bare names resolve against `./.generatorai/run-profiles/` first and
+ * the user directory second, so a repo can ship its own profiles and a user
+ * can keep personal ones without collision. A path with a separator is taken
+ * literally. `dir` is where the profile's own file paths are relative to.
  */
-export async function loadRunProfile(ref: string, cwd = process.cwd()): Promise<RunProfile> {
+export async function loadRunProfile(
+  ref: string,
+  cwd = process.cwd(),
+): Promise<{ profile: RunProfile; file: string; dir: string }> {
   const candidates = ref.includes('/') || ref.includes('\\') || ref.endsWith('.json')
     ? [path.resolve(cwd, ref)]
     : [
@@ -89,16 +190,16 @@ export async function loadRunProfile(ref: string, cwd = process.cwd()): Promise<
       ];
 
   for (const candidate of candidates) {
+    let raw: string;
     try {
-      const raw = await fs.readFile(candidate, 'utf8');
-      return JSON.parse(raw) as RunProfile;
+      raw = await fs.readFile(candidate, 'utf8');
     } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-        throw new CliError('VALIDATION', `Could not read profile at ${candidate}.`, {
-          hint: error instanceof Error ? error.message : String(error),
-        });
-      }
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+      throw new CliError('VALIDATION', `Could not read profile at ${candidate}.`, {
+        hint: error instanceof Error ? error.message : String(error),
+      });
     }
+    return { profile: parseRunProfile(raw, candidate), file: candidate, dir: path.dirname(candidate) };
   }
 
   throw CliError.notFound('run profile', ref, {
@@ -107,50 +208,317 @@ export async function loadRunProfile(ref: string, cwd = process.cwd()): Promise<
   });
 }
 
-/** Missing-required and unknown variables, reported together. */
-export function validateVariables(
-  defined: Array<{ name: string; required?: boolean; type?: string; defaultValue?: unknown }>,
-  provided: Record<string, unknown>,
-): { errors: string[]; warnings: string[] } {
-  const errors: string[] = [];
-  const warnings: string[] = [];
-  const known = new Set(defined.map((v) => v.name));
-
-  for (const variable of defined) {
-    const value = provided[variable.name];
-    if (value === undefined) {
-      if (variable.required && variable.defaultValue === undefined) {
-        errors.push(`missing required variable "${variable.name}"`);
-      }
-      continue;
-    }
-    if (variable.type === 'number' && typeof value !== 'number') {
-      errors.push(`variable "${variable.name}" must be a number, got ${typeof value}`);
-    }
-    if (variable.type === 'boolean' && typeof value !== 'boolean') {
-      errors.push(`variable "${variable.name}" must be a boolean, got ${typeof value}`);
-    }
+/** Profile file text → a `RunProfile`, or a VALIDATION error listing every problem. */
+export function parseRunProfile(raw: string, file: string): RunProfile {
+  let json: unknown;
+  try {
+    json = JSON.parse(raw);
+  } catch (error) {
+    throw new CliError('VALIDATION', `Profile ${file} is not valid JSON.`, {
+      hint: error instanceof Error ? error.message : String(error),
+    });
   }
-
-  // Unknown variables are a warning, not an error: a workflow can read a
-  // variable that its definition does not declare, and failing the run for it
-  // would be worse than the typo it usually indicates.
-  for (const name of Object.keys(provided)) {
-    if (!name.startsWith('__') && !known.has(name)) {
-      warnings.push(`variable "${name}" is not declared by this workflow`);
-    }
+  const parsed = RunProfileSchema.safeParse(json);
+  if (!parsed.success) {
+    throw new CliError(
+      'VALIDATION',
+      `Profile ${file} is not valid:\n${parsed.error.issues.map((i) => `  ${issueLine(i)}`).join('\n')}`,
+      { hint: 'Write a fresh one with `generatorai run profile generate <workflow> -o <file>`.' },
+    );
   }
-
-  return { errors, warnings };
+  return parsed.data;
 }
 
-/** Renders a run's event stream and stops at the run's terminal state. */
-/** Streams a run to completion. Exported so any command that starts a run — not just `run start` — can offer `--watch` without duplicating this. */
+type StageOverride = NonNullable<InvocationRequest['stageOverrides']>[number];
+type CodebaseSelection = NonNullable<InvocationRequest['codebases']>[number];
+
+/** Merges stage overrides by key; later sources win field by field. */
+export function mergeStageOverrides(...sources: Array<StageOverride[] | undefined>): StageOverride[] {
+  const merged = new Map<string, StageOverride>();
+  for (const override of sources.flatMap((source) => source ?? [])) {
+    const previous = merged.get(override.stageKey);
+    const variables = previous?.variables || override.variables
+      ? { ...previous?.variables, ...override.variables }
+      : undefined;
+    const model = override.model ?? previous?.model;
+    merged.set(override.stageKey, {
+      stageKey: override.stageKey,
+      ...(override.skip ?? previous?.skip ? { skip: true } : {}),
+      ...(variables ? { variables } : {}),
+      ...(model ? { model } : {}),
+    });
+  }
+  return [...merged.values()];
+}
+
+/** `--skip <key>`, `--stage-var <key>.<name>=<value>` and `--stage-model <key>=<model>` as overrides by key. */
+export function overridesFromFlags(
+  skip: string[] | undefined,
+  stageVars: string[] | undefined,
+  stageModels: string[] | undefined,
+): StageOverride[] {
+  const out: StageOverride[] = (skip ?? []).map((stageKey) => ({ stageKey: stageKey.trim(), skip: true }));
+  for (const pair of stageVars ?? []) {
+    const dot = pair.indexOf('.');
+    const equals = pair.indexOf('=');
+    if (dot <= 0 || equals === -1 || dot > equals) {
+      throw CliError.usage(`Expected <stageKey>.<name>=<value>, got "${pair}".`);
+    }
+    out.push({ stageKey: pair.slice(0, dot).trim(), variables: parseKeyValues([pair.slice(dot + 1)]) });
+  }
+  for (const pair of stageModels ?? []) {
+    const equals = pair.indexOf('=');
+    const stageKey = pair.slice(0, equals).trim();
+    const model = pair.slice(equals + 1).trim();
+    if (equals <= 0 || !stageKey || !model) {
+      throw CliError.usage(`Expected <stageKey>=<model>, got "${pair}".`);
+    }
+    out.push({ stageKey, model });
+  }
+  return out;
+}
+
+/** `alias`, `alias@ref`, `alias:in_place`, `alias@ref:in_place` → a codebase selection. */
+export function parseCodebaseFlag(value: string): CodebaseSelection {
+  let rest = value.trim();
+  let mode: CodebaseSelection['mode'] = 'worktree';
+  const suffix = /:(in_place|worktree)$/.exec(rest);
+  if (suffix) {
+    mode = suffix[1] as CodebaseSelection['mode'];
+    rest = rest.slice(0, suffix.index);
+  }
+  const at = rest.indexOf('@');
+  const alias = (at === -1 ? rest : rest.slice(0, at)).trim();
+  const baseRef = at === -1 ? undefined : rest.slice(at + 1).trim();
+  if (!alias || baseRef === '') {
+    throw CliError.usage(`Expected <alias>[@<ref>][:in_place], got "${value}".`);
+  }
+  return { alias, mode, ...(baseRef ? { baseRef } : {}) };
+}
+
+/** Local files → the multipart parts of an invocation. */
+async function readUploads(
+  paths: Partial<Record<keyof InvocationUploadFiles, string[]>>,
+): Promise<InvocationUploadFiles> {
+  const out: InvocationUploadFiles = {};
+  for (const [category, list] of Object.entries(paths) as Array<[keyof InvocationUploadFiles, string[] | undefined]>) {
+    if (list?.length) out[category] = await readAttachments(list);
+  }
+  return out;
+}
+
+/** The flags `run start` and `run plan` share: everything an `InvocationRequest` carries. */
+const INVOCATION_FLAGS: CommandFlag[] = [
+  { name: 'var', description: 'Variable as key=value (repeatable)', type: 'string', variadic: true },
+  { name: 'profile', description: 'Run profile name or path (RunProfile v2); flags win over its values', type: 'string' },
+  { name: 'skip', description: 'Skip the stage with this key (repeatable)', type: 'string', variadic: true, completes: 'stage' },
+  {
+    name: 'stageVar',
+    description: 'Variable for one stage as <stageKey>.<name>=<value> (repeatable)',
+    type: 'string',
+    variadic: true,
+  },
+  { name: 'stageModel', description: 'Model for one stage as <stageKey>=<model> (repeatable)', type: 'string', variadic: true },
+  { name: 'model', description: 'Model for every stage without its own', type: 'string', completes: 'model' },
+  { name: 'effort', description: 'Reasoning effort', type: 'string', choices: REASONING_EFFORTS },
+  {
+    name: 'codebase',
+    description: 'Codebase to mount as <alias>[@<ref>][:in_place] (repeatable; default: the workflow lifecycle aliases)',
+    type: 'string',
+    variadic: true,
+    completes: 'codebase',
+  },
+  { name: 'project', description: 'Project id or name whose codebases the run may mount', type: 'string', completes: 'project' },
+  {
+    name: 'permissionMode',
+    description: 'Permission mode for the run (capped by your device ceiling)',
+    type: 'string',
+    choices: RUN_PERMISSION_MODES,
+  },
+  { name: 'name', description: 'Name for this run', type: 'string' },
+  // Not `--timeout`: that is the global per-request timeout, and Commander
+  // hands a global option to the program even when it follows the verb.
+  { name: 'runTimeout', description: 'Stop the run after this many minutes (budget.maxDurationMs)', type: 'number' },
+  { name: 'skillFile', description: 'Skill file to upload for the run (repeatable)', type: 'string', variadic: true, completes: 'file' },
+  { name: 'agentFile', description: 'Agent file to upload for the run (repeatable)', type: 'string', variadic: true, completes: 'file' },
+  { name: 'promptFile', description: 'Prompt file to upload for the run (repeatable)', type: 'string', variadic: true, completes: 'file' },
+  { name: 'testRun', description: 'Run the draft (unpublished) graph as a test version', type: 'boolean' },
+  // The client label the server records on the trigger; the TUI sets `tui`.
+  { name: 'client', description: 'Client label', type: 'string', choices: ['cli', 'tui'], hidden: true },
+];
+
+const INVOCATION_FLAG_SCHEMA = {
+  var: z.array(z.string()).optional(),
+  profile: z.string().optional(),
+  skip: z.array(z.string()).optional(),
+  stageVar: z.array(z.string()).optional(),
+  stageModel: z.array(z.string()).optional(),
+  model: z.string().optional(),
+  effort: z.enum(REASONING_EFFORTS).optional(),
+  codebase: z.array(z.string()).optional(),
+  project: z.string().optional(),
+  permissionMode: z.enum(RUN_PERMISSION_MODES).optional(),
+  name: z.string().optional(),
+  runTimeout: z.coerce.number().positive().optional(),
+  skillFile: z.array(z.string()).optional(),
+  agentFile: z.array(z.string()).optional(),
+  promptFile: z.array(z.string()).optional(),
+  testRun: z.boolean().optional(),
+  client: z.enum(['cli', 'tui']).default('cli'),
+};
+
+type InvocationFlags = {
+  [K in keyof typeof INVOCATION_FLAG_SCHEMA]: z.infer<(typeof INVOCATION_FLAG_SCHEMA)[K]>;
+};
+
+/**
+ * `run start`/`run plan` input → one `InvocationRequest` and its files.
+ * Explicit flags sit on top of the profile's values, field by field.
+ */
+export async function buildInvocation(
+  ctx: CliContext,
+  workflowRef: string | undefined,
+  flags: Partial<InvocationFlags>,
+): Promise<{ request: InvocationRequest; files: InvocationUploadFiles }> {
+  const loaded = flags.profile ? await loadRunProfile(flags.profile) : undefined;
+  const profile = loaded?.profile;
+
+  const ref = workflowRef ?? profile?.workflow;
+  if (!ref) {
+    throw CliError.usage('Which workflow? Pass it as an argument, or set `workflow` in the profile.');
+  }
+  const definition = await findDefinition(ctx, ref);
+
+  let projectId = profile?.projectId;
+  if (flags.project) {
+    projectId = resolveRef(flags.project, { kind: 'project', candidates: await ctx.api.projects.list() }).id;
+  }
+
+  const stageOverrides = mergeStageOverrides(
+    profile?.stageOverrides,
+    overridesFromFlags(flags.skip, flags.stageVar, flags.stageModel),
+  );
+
+  const codebases = new Map((profile?.codebases ?? []).map((c) => [c.alias, c]));
+  for (const value of flags.codebase ?? []) {
+    const selection = parseCodebaseFlag(value);
+    codebases.set(selection.alias, selection);
+  }
+
+  const overrides = compact({
+    ...profile?.overrides,
+    model: flags.model ?? profile?.overrides?.model,
+    reasoningEffort: flags.effort ?? profile?.overrides?.reasoningEffort,
+    permissionMode: flags.permissionMode ?? profile?.overrides?.permissionMode,
+  });
+
+  const budget = compact({
+    ...profile?.budget,
+    maxDurationMs: flags.runTimeout !== undefined ? Math.round(flags.runTimeout * 60_000) : profile?.budget?.maxDurationMs,
+  });
+
+  // A profile's file paths are relative to the profile; a flag's to the shell.
+  const fromProfile = (list: string[] | undefined) => (list ?? []).map((p) => path.resolve(loaded!.dir, p));
+  const files = await readUploads({
+    skills: [...fromProfile(profile?.skillFiles), ...(flags.skillFile ?? [])],
+    agents: [...fromProfile(profile?.agentFiles), ...(flags.agentFile ?? [])],
+    prompts: [...fromProfile(profile?.promptFiles), ...(flags.promptFile ?? [])],
+  });
+
+  const name = flags.name ?? profile?.runName;
+  const request: InvocationRequest = {
+    target: {
+      kind: 'definition',
+      workflowDefinitionId: definition.id,
+      ...(flags.testRun ? { testRun: true } : {}),
+    },
+    variables: { ...profile?.variables, ...parseKeyValues(flags.var) },
+    ...(projectId ? { projectId } : {}),
+    ...(codebases.size ? { codebases: [...codebases.values()] } : {}),
+    ...(stageOverrides.length ? { stageOverrides } : {}),
+    ...(Object.keys(overrides).length ? { overrides } : {}),
+    ...(Object.keys(budget).length ? { budget } : {}),
+    ...(name ? { name } : {}),
+    client: flags.client ?? 'cli',
+  };
+  return { request, files };
+}
+
+/** The plan as readable lines: stages by layer, skips, codebases, phases, post-processing, warnings. */
+export function describeInvocationPlan(plan: InvocationPlan, options: { maxStages?: number } = {}): string[] {
+  const lines: string[] = [];
+  const version = plan.definitionVersionId ? `version ${plan.definitionVersionId.slice(0, 8)}` : 'not materialized yet';
+  lines.push(`${plan.workflowName} (${version})`);
+  lines.push(`Permission mode: ${plan.permissionMode}`);
+
+  const runs = plan.stages.filter((s) => !s.skipped).length;
+  lines.push(`Stages: ${runs} to run${plan.stages.length > runs ? `, ${plan.stages.length - runs} skipped` : ''}`);
+  const byLayer = [...plan.stages].sort((a, b) => a.layer - b.layer);
+  const shown = byLayer.slice(0, options.maxStages ?? byLayer.length);
+  for (const stage of shown) {
+    const notes = [
+      stage.skipped ? `skipped${stage.skipReason === 'guard_false' ? ' (guard is false)' : ''}` : undefined,
+      stage.model ? `model ${stage.model}` : undefined,
+      stage.agentRef ? `agent ${stage.agentRef}` : undefined,
+      stage.approvalRequired ? 'needs approval' : undefined,
+      stage.kind && stage.kind !== 'agent' ? stage.kind : undefined,
+      stage.parentKey ? `in ${stage.parentKey}` : undefined,
+    ].filter(Boolean);
+    const label = stage.name && stage.name !== stage.key ? `${stage.key} — ${stage.name}` : stage.key;
+    lines.push(`  ${stage.skipped ? '-' : '•'} L${stage.layer}  ${label}${notes.length ? `  [${notes.join(', ')}]` : ''}`);
+  }
+  if (shown.length < byLayer.length) lines.push(`  … ${byLayer.length - shown.length} more`);
+
+  lines.push(
+    `Codebases: ${
+      plan.codebases.length
+        ? plan.codebases
+            .map((c) => `${c.alias}${c.baseRef ? `@${c.baseRef}` : ''} (${c.mode === 'in_place' ? 'in place' : 'worktree'}${c.source === 'lifecycle' ? ', from the workflow' : ''})`)
+            .join(', ')
+        : 'none'
+    }`,
+  );
+  if (plan.prepare.length) lines.push(`Prepare: ${plan.prepare.join(' → ')}`);
+  if (plan.preprocessing.length) lines.push(`Preprocessing: ${plan.preprocessing.join(', ')}`);
+  lines.push(`Post-processing: ${plan.postProcessing.length ? plan.postProcessing.join(', ') : 'none'}`);
+  for (const r of plan.risks ?? []) lines.push(`Risk: ${r.message}`);
+  if (plan.lineage.depth > 0) lines.push(`Nested run: depth ${plan.lineage.depth} under ${plan.lineage.parentRunId ?? '?'}`);
+  for (const warning of plan.warnings) lines.push(`! ${issueLine(warning)}`);
+  return lines;
+}
+
+// ── Watching ───────────────────────────────────────────────────────
+
+/** Seconds one digest long-poll waits: 30, or less when `--timeout` is shorter. */
+function digestWaitSeconds(ctx: CliContext): number {
+  if (!(ctx.timeoutMs > 0)) return 30;
+  return Math.max(1, Math.min(30, Math.floor(ctx.timeoutMs / 1000) - 5));
+}
+
+/** Long-polls the run digest until the run is finalized (post-processing and release done). */
+export async function waitForFinalized(ctx: CliContext, runId: string): Promise<RunDigest> {
+  const waitSeconds = digestWaitSeconds(ctx);
+  for (;;) {
+    ctx.assertNotCancelled();
+    const started = Date.now();
+    const digest = await ctx.api.workflows.digest(runId, { waitSeconds });
+    if (digest.finalized) return digest;
+    // A server that answers at once (no long-poll) must not become a hot loop.
+    if (Date.now() - started < 1000) await sleep(1000, ctx.signal);
+  }
+}
+
+/**
+ * Streams a run's progress until it is finalized. Exported so any command
+ * that starts a run (`run start`, `run retry`, `script run`) offers `--watch`
+ * through one implementation. A failed or cancelled run is a RESULT_FAILED
+ * error, so the exit code reflects the outcome.
+ */
 export async function watchRun(
   ctx: CliContext,
   runId: string,
   verbosity: 'minimal' | 'normal' | 'verbose',
-): Promise<void> {
+): Promise<RunDigest> {
   const showThinking = verbosity === 'verbose';
   const showTools = verbosity !== 'minimal';
   let internalTurn = false;
@@ -164,14 +532,8 @@ export async function watchRun(
         return;
       }
 
-      // The server's real stage lifecycle: there is no `stage.*`/
-      // `stage_run.started` producer anywhere (confirmed against every
-      // emitter in `packages/core/src/services/*.ts`) — a stage actually
-      // beginning is `stage_run.running`, and HITL's real gate events are
-      // `stage_run.awaiting_input`/`stage_run.input_received`, keyed by
-      // `stageRunId`, not `stage.awaiting_input`/`stageId`. Before this fix,
-      // `run watch`/`--watch` never printed a single "▶ stage" progress
-      // line, nor the "waiting for approval" hint, against a real run.
+      // The server's stage lifecycle: a stage beginning is
+      // `stage_run.running`; HITL gates are `stage_run.awaiting_input`.
       switch (event.kind) {
         case 'stage.started':
         case 'stage_run.running': {
@@ -227,17 +589,46 @@ export async function watchRun(
     },
   });
 
-  // The stream never ends on its own; the poll decides when the run is over.
-  // Racing them means a missed terminal event cannot hang the command.
-  const terminal = await waitForRunTerminal(ctx, runId);
+  // The stream never ends on its own; the digest decides when the run is
+  // over. Racing them means a missed terminal event cannot hang the command,
+  // and waiting for `finalized` (not just a terminal status) means the
+  // commit/PR post-processing has happened when the command returns.
+  const digest = await waitForFinalized(ctx, runId);
   await ctx.dispose();
   await streamed.catch(() => undefined);
 
-  if (terminal.status === 'failed') {
-    throw new CliError('RESULT_FAILED', `Run failed: ${terminal.error ?? 'no error message'}`, {
-      details: { runId, status: terminal.status },
+  for (const step of digest.postProcessing) {
+    ctx.emit({
+      type: 'log',
+      level: step.success ? 'info' : 'error',
+      message: step.success
+        ? `✓ ${step.step}${step.output ? `: ${step.output}` : ''}`
+        : `✗ ${step.step}: ${step.error ?? 'failed'}`,
     });
   }
+
+  if (digest.outcome === 'failed') {
+    throw new CliError('RESULT_FAILED', `Run failed: ${digest.error ?? 'no error message'}`, {
+      details: { runId, status: digest.status },
+    });
+  }
+  if (digest.outcome === 'cancelled') {
+    throw new CliError('RESULT_FAILED', 'Run was cancelled.', { details: { runId, status: digest.status } });
+  }
+  return digest;
+}
+
+/** A started run as the success line and the warnings `run start`/`run retry`/`script run` print. */
+export function startedRun(
+  result: { runId: string; replayed: boolean; warnings: InvocationIssue[] },
+  verb = 'Started',
+): { message: string; warnings: string[] } {
+  return {
+    message: result.replayed
+      ? `Run ${result.runId} was already started with this idempotency key — \`generatorai run watch ${result.runId}\``
+      : `${verb} run ${result.runId} — watch it with \`generatorai run watch ${result.runId}\``,
+    warnings: result.warnings.map(issueLine),
+  };
 }
 
 export function runCommands(): CommandSpec[] {
@@ -288,135 +679,97 @@ export function runCommands(): CommandSpec[] {
       id: 'run.start',
       group: 'run',
       verb: 'start',
-      summary: 'Create and start a run',
+      summary: 'Start a run of a workflow (one invocation)',
+      description:
+        'Sends one InvocationRequest to the server, which validates it and starts the run with its full lifecycle ' +
+        '(workspace, codebases, uploads, post-processing). Flags sit on top of --profile values. Every call carries an ' +
+        'idempotency key (a fresh one unless --idempotency-key is given), so a retried command never starts two runs.',
       requiresServer: true,
       sinceVersion: '0.2.0',
       examples: [
         'generatorai run start nightly-e2e --var topic=caching --watch',
         'generatorai run start a3f2 --profile quick-surface --permission-mode acceptEdits',
+        'generatorai run start review --codebase api@main --skip lint --stage-model review=claude-opus --run-timeout 30',
       ],
       args: [
         {
           name: 'workflow',
-          description: 'Workflow definition reference',
-          required: true,
+          description: 'Workflow definition reference (optional when the profile names one)',
+          required: false,
           completes: 'workflow',
         },
       ],
       flags: [
+        ...INVOCATION_FLAGS,
         {
-          name: 'name',
-          description: 'Name for this run',
+          name: 'idempotencyKey',
+          description: 'Idempotency key; the same key and request replay the same run (default: a fresh key)',
           type: 'string',
-          unsupported: 'The server has no route that names a run, so this value is accepted and discarded.',
-        },
-        { name: 'var', description: 'Variable as key=value (repeatable)', type: 'string', variadic: true },
-        { name: 'profile', description: 'Run profile name or path', type: 'string' },
-        { name: 'project', description: 'Project id or name', type: 'string', completes: 'project' },
-        {
-          name: 'permissionMode',
-          description: 'Permission mode for the run',
-          type: 'string',
-          choices: PERMISSION_MODES,
         },
         watchFlag,
         verbosityFlag,
-        { name: 'noStart', description: 'Create the run but leave it pending', type: 'boolean' },
       ],
       schema: inputSchema(
-        { workflow: z.string() },
+        { workflow: z.string().optional() },
         {
-          name: z.string().optional(),
-          var: z.array(z.string()).optional(),
-          profile: z.string().optional(),
-          project: z.string().optional(),
-          permissionMode: z.enum(PERMISSION_MODES).optional(),
+          ...INVOCATION_FLAG_SCHEMA,
+          idempotencyKey: z.string().regex(/^[!-~]{1,200}$/, 'printable ASCII without spaces, at most 200 characters').optional(),
           watch: z.boolean().optional(),
           verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal'),
-          noStart: z.boolean().optional(),
         },
       ),
-      output: { kind: 'record', successMessage: 'Started run {id}' },
-      async handler(ctx, { args, flags }) {
-        const definition = await findDefinition(ctx, args.workflow);
-        const full = await ctx.api.definitions.get(definition.id);
-
-        const profile = flags.profile ? await loadRunProfile(flags.profile) : {};
-        const variables = { ...profile.variables, ...parseKeyValues(flags.var) };
-
-        const declared = ((full as unknown as Record<string, unknown>)['variables'] ?? []) as Array<{
-          name: string;
-          required?: boolean;
-          type?: string;
-          defaultValue?: unknown;
-        }>;
-        const { errors, warnings } = validateVariables(declared, variables);
-        if (errors.length) {
-          throw new CliError('VALIDATION', `Cannot start run:\n${errors.map((e) => `  ${e}`).join('\n')}`, {
-            hint: declared.length
-              ? `Declared variables: ${declared.map((v) => v.name).join(', ')}`
-              : 'This workflow declares no variables.',
+      output: { kind: 'record', successMessage: 'Started run {runId}' },
+      async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
+        const { request, files } = await buildInvocation(ctx, args.workflow, flags);
+        const result = await ctx.api.workflows
+          .invoke(request, { idempotencyKey: flags.idempotencyKey ?? newIdempotencyKey(), files })
+          .catch((error: unknown) => {
+            throw invocationError(error);
           });
-        }
-
-        let projectId = profile.projectId;
-        if (flags.project) {
-          const projects = await ctx.api.projects.list();
-          projectId = resolveRef(flags.project, { kind: 'project', candidates: projects }).id;
-        }
-
-        // Stage overrides ride in as a reserved variable; that is the channel
-        // the run service reads them from.
-        if (profile.stageOverrides?.length) {
-          (variables as Record<string, unknown>)['__stageOverrides'] = profile.stageOverrides;
-        }
-
-        const created = await ctx.api.runs.create(
-          compact({
-            workflowDefinitionId: definition.id,
-            variables,
-            projectId,
-          }),
-        );
-
-        // `CreateWorkflowRunSchema` accepts only the three fields above, and
-        // the validate() middleware replaces the body with its stripped parse
-        // output — so a name or permission mode sent alongside them would be
-        // dropped without a word. Apply them as follow-ups instead.
-        const permissionMode = flags.permissionMode ?? profile.permissionMode;
-        if (permissionMode) {
-          await ctx.api.runs.permissionMode
-            .set(created.id, permissionMode)
-            .catch((error: unknown) => {
-              warnings.push(
-                `Run created, but the permission mode stayed at the default: ${
-                  error instanceof Error ? error.message : String(error)
-                }`,
-              );
-            });
-        }
-
-        const name = flags.name ?? profile.name;
-        if (name) {
-          warnings.push('Runs are not named server-side yet; --name was not applied.');
-        }
-
-        if (flags.noStart) {
-          return { data: created, warnings, message: `Created run ${created.id} (pending)` };
-        }
-
-        const started = await ctx.api.runs.start(created.id);
+        const { message, warnings } = startedRun(result);
 
         if (flags.watch) {
-          await watchRun(ctx, created.id, flags.verbosity);
-          return { data: await ctx.api.runs.get(created.id), warnings };
+          await watchRun(ctx, result.runId, flags.verbosity);
+          return { data: await ctx.api.runs.get(result.runId), warnings };
         }
+        return { data: result, warnings, message };
+      },
+    }),
 
-        return {
-          data: started,
-          warnings,
-          message: `Started run ${created.id} — watch it with \`generatorai run watch ${created.id}\``,
-        };
+    defineCommand({
+      id: 'run.plan',
+      group: 'run',
+      verb: 'plan',
+      summary: 'Show what `run start` would do, without starting anything',
+      description:
+        'Sends the same request as `run start` to the plan endpoint: the stages by layer (and which are skipped), ' +
+        'the codebases it mounts, the prepare and post-processing phases, the permission mode and every warning.',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      examples: [
+        'generatorai run plan nightly-e2e --var topic=caching',
+        'generatorai run plan review --profile quick-surface --skip lint',
+      ],
+      args: [
+        {
+          name: 'workflow',
+          description: 'Workflow definition reference (optional when the profile names one)',
+          required: false,
+          completes: 'workflow',
+        },
+      ],
+      flags: INVOCATION_FLAGS,
+      schema: inputSchema({ workflow: z.string().optional() }, INVOCATION_FLAG_SCHEMA),
+      // `stream` prints the rendered plan (the message) as is; structured
+      // output carries the plan itself.
+      output: { kind: 'stream' },
+      async handler(ctx, { args, flags }) {
+        const { request } = await buildInvocation(ctx, args.workflow, flags);
+        // Files are uploaded only by `invoke`; the plan sees none of them.
+        const plan = await ctx.api.workflows.plan(request).catch((error: unknown) => {
+          throw invocationError(error);
+        });
+        return { data: plan, message: describeInvocationPlan(plan).join('\n') };
       },
     }),
 
@@ -445,7 +798,7 @@ export function runCommands(): CommandSpec[] {
       id: 'run.watch',
       group: 'run',
       verb: 'watch',
-      summary: 'Stream a run until it reaches a terminal state',
+      summary: 'Stream a run until it is finalized (post-processing done); the exit code reflects its outcome',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
@@ -457,16 +810,16 @@ export function runCommands(): CommandSpec[] {
       output: { kind: 'stream' },
       async handler(ctx, { args, flags }) {
         const target = await findRun(ctx, args.run);
-        const run = await ctx.api.runs.get(target.id);
-        if (isTerminalRunState(run.status)) {
-          return record(run, `Run already ${run.status}.`);
+        const digest = await ctx.api.workflows.digest(target.id);
+        if (digest.finalized) {
+          return record(await ctx.api.runs.get(target.id), `Run already ${digest.status}.`);
         }
         await watchRun(ctx, target.id, flags.verbosity);
         return record(await ctx.api.runs.get(target.id));
       },
     }),
 
-    ...(['pause', 'resume', 'cancel', 'retry'] as const).map((verb) =>
+    ...(['pause', 'resume', 'cancel'] as const).map((verb) =>
       defineCommand({
         id: `run.${verb}`,
         group: 'run',
@@ -476,26 +829,86 @@ export function runCommands(): CommandSpec[] {
         destructive: verb === 'cancel',
         sinceVersion: '0.2.0',
         args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
-        flags: verb === 'retry' ? [watchFlag, verbosityFlag] : [],
-        schema: inputSchema(
-          { run: z.string() },
-          {
-            watch: z.boolean().optional(),
-            verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal'),
-          },
-        ),
+        flags: [],
+        schema: inputSchema({ run: z.string() }, {}),
         output: { kind: 'record', successMessage: `Run {id} ${verb}d.` },
-        async handler(ctx, { args, flags }) {
+        async handler(ctx, { args }) {
           const target = await findRun(ctx, args.run);
-          const result = await ctx.api.runs[verb](target.id);
-          if (verb === 'retry' && flags.watch) {
-            await watchRun(ctx, target.id, flags.verbosity);
-            return record(await ctx.api.runs.get(target.id));
-          }
-          return record(result);
+          // A run command; pause interrupts in-flight stages as well.
+          await ctx.api.runs.command(
+            target.id,
+            verb === 'pause' ? { command: 'pause', mode: 'interrupt' } : { command: verb },
+          );
+          return record(await ctx.api.runs.get(target.id));
         },
       }),
     ),
+
+    // A finished run is never mutated: retry forks a NEW run (an invocation
+    // with a fork target) that re-runs every stage that did not complete
+    // (completed ones are memoized), in a fresh workspace, on the pinned
+    // definition version.
+    defineCommand({
+      id: 'run.retry',
+      group: 'run',
+      verb: 'retry',
+      summary: 'Re-run the failed stages of a finished run as a new run',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
+      flags: [
+        { name: 'from', description: 'Re-run from this stage instance (and everything after it)', type: 'string', completes: 'stage' },
+        {
+          name: 'idempotencyKey',
+          description: 'Idempotency key; the same key and request replay the same run (default: a fresh key)',
+          type: 'string',
+        },
+        watchFlag,
+        verbosityFlag,
+      ],
+      schema: inputSchema(
+        { run: z.string() },
+        {
+          from: z.string().optional(),
+          idempotencyKey: z.string().regex(/^[!-~]{1,200}$/, 'printable ASCII without spaces, at most 200 characters').optional(),
+          watch: z.boolean().optional(),
+          verbosity: z.enum(['minimal', 'normal', 'verbose']).default('normal'),
+        },
+      ),
+      output: { kind: 'record', successMessage: 'Retried as run {runId}' },
+      async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
+        const target = await findRun(ctx, args.run);
+        const from = flags.from ? await findStage(ctx, target.id, flags.from) : undefined;
+        const fromPath = from ? (from.instancePath ?? from.stageKey) : undefined;
+        if (from && !fromPath) {
+          throw new CliError('VALIDATION', `Stage "${flags.from}" has no instance path to re-run from.`);
+        }
+        const result = await ctx.api.workflows
+          .invoke(
+            {
+              target: {
+                kind: 'fork',
+                sourceRunId: target.id,
+                ...(fromPath ? { rerunFrom: [fromPath] } : {}),
+                definition: 'pinned',
+                workspace: 'fresh',
+              },
+              variables: {},
+              client: 'cli',
+            },
+            { idempotencyKey: flags.idempotencyKey ?? newIdempotencyKey() },
+          )
+          .catch((error: unknown) => {
+            throw invocationError(error);
+          });
+        const { message, warnings } = startedRun(result, 'Retried as');
+        if (flags.watch) {
+          await watchRun(ctx, result.runId, flags.verbosity);
+          return { data: await ctx.api.runs.get(result.runId), warnings };
+        }
+        return { data: result, warnings, message };
+      },
+    }),
 
     defineCommand({
       id: 'run.delete',
@@ -531,7 +944,8 @@ export function runCommands(): CommandSpec[] {
         kind: 'list',
         columns: [
           { key: 'id', header: 'Stage Run', format: 'id', priority: 0 },
-          { key: 'stageName', header: 'Stage', priority: 0 },
+          { key: 'stageKey', header: 'Key', priority: 0 },
+          { key: 'name', header: 'Stage', priority: 1 },
           statusColumn,
           { key: 'startedAt', header: 'Started', format: 'relative', priority: 3 },
           { key: 'durationMs', header: 'Duration', format: 'duration', priority: 2 },
@@ -543,6 +957,8 @@ export function runCommands(): CommandSpec[] {
       },
     }),
 
+    // Instance commands. Retry starts a new attempt of a PAUSED stage in a
+    // live run; to re-run a stage of a finished run, use `run retry --from`.
     ...(['pause', 'resume', 'retry', 'cancel'] as const).map((verb) =>
       defineCommand({
         id: `run.stage.${verb}`,
@@ -562,11 +978,260 @@ export function runCommands(): CommandSpec[] {
         async handler(ctx, { args }) {
           const run = await findRun(ctx, args.run);
           const stage = await findStage(ctx, run.id, args.stage);
-          await ctx.api.runs.stage[verb](run.id, stage.id);
+          await ctx.api.runs.command(
+            run.id,
+            verb === 'pause'
+              ? { command: 'pause', instanceId: stage.id, mode: 'interrupt' }
+              : verb === 'retry'
+                ? { command: 'retry', instanceId: stage.id, mode: 'resume' }
+                : { command: verb, instanceId: stage.id },
+          );
           return ok(`Stage ${stage.name ?? stage.id} ${verb}d.`);
         },
       }),
     ),
+
+    // Any operator command, as data (P05): a loop's decisions (grant
+    // iterations, raise the budget, continue with input, accept, accept an
+    // iteration, fail) and every other RunCommand. Operator decisions are run
+    // commands, never chat commands.
+    defineCommand({
+      id: 'run.command',
+      group: 'run',
+      verb: 'command',
+      summary: 'Send an operator command to a run or one of its instances (any run command, fields as JSON)',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      examples: [
+        'generatorai run command @last fix_review grant_iterations --json \'{"n":2}\'',
+        'generatorai run command @last fix_review continue_with_input --json \'{"text":"Focus on the failing parser test"}\'',
+        'generatorai run command @last fix_review accept_iteration --json \'{"k":1}\'',
+        'generatorai run command @last - pause --json \'{"mode":"interrupt"}\'',
+        'generatorai run command @last - deliver_event --eventKey ci:4f2a --idempotencyKey build-77 --data @result.json',
+        'generatorai run command @last approve_release approve --json \'{"outcome":"approved","data":{"environment":"prod"}}\'',
+      ],
+      args: [
+        { name: 'run', description: 'Run reference', required: true, completes: 'run' },
+        { name: 'instance', description: 'Stage key, instance path (fix_review#2/fix) or id; - for the run itself', required: true, completes: 'stage' },
+        { name: 'command', description: 'The command (grant_iterations, raise_budget, continue_with_input, accept, accept_iteration, fail, pause, …)', required: true },
+      ],
+      flags: [
+        { name: 'json', description: "The command's fields as a JSON object", type: 'string' },
+        { name: 'eventKey', description: 'deliver_event: the event key (P05 wait)', type: 'string' },
+        { name: 'idempotencyKey', description: 'deliver_event: the delivery key (a repeat with the same data is a replay)', type: 'string' },
+        { name: 'data', description: 'deliver_event / approve: the data as JSON, or @file to read it from a file', type: 'string', completes: 'file' },
+      ],
+      schema: inputSchema(
+        { run: z.string(), instance: z.string(), command: z.string() },
+        { json: z.string().optional(), eventKey: z.string().optional(), idempotencyKey: z.string().optional(), data: z.string().optional() },
+      ),
+      output: { kind: 'record' },
+      async handler(ctx, { args, flags }) {
+        const run = await findRun(ctx, args.run);
+        let fields: Record<string, unknown> = {};
+        if (flags.json !== undefined) {
+          try {
+            const parsed: unknown = JSON.parse(flags.json);
+            if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('not an object');
+            fields = parsed as Record<string, unknown>;
+          } catch (err) {
+            throw CliError.usage(`--json is not a JSON object: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        // P5-42: the fields of an event (and an approval's form data) as flags.
+        if (flags.eventKey !== undefined) fields['eventKey'] = flags.eventKey;
+        if (flags.idempotencyKey !== undefined) fields['idempotencyKey'] = flags.idempotencyKey;
+        if (flags.data !== undefined) {
+          const raw = flags.data.startsWith('@') ? await fs.readFile(flags.data.slice(1), 'utf8') : flags.data;
+          try {
+            fields['data'] = JSON.parse(raw) as unknown;
+          } catch (err) {
+            throw CliError.usage(`--data is not JSON: ${err instanceof Error ? err.message : String(err)}`);
+          }
+        }
+        const stage = args.instance === '-' ? undefined : await findStage(ctx, run.id, args.instance);
+        const parsed = RunCommandSchema.safeParse({ ...fields, command: args.command, ...(stage ? { instanceId: stage.id } : {}) });
+        if (!parsed.success) {
+          throw CliError.usage(`Invalid ${args.command} command.`, {
+            hint: parsed.error.issues.map((i) => `${i.path.join('.') || '(root)'}: ${i.message}`).join('; '),
+          });
+        }
+        const reply = await ctx.api.runs.command(run.id, parsed.data);
+        const replayed = (reply as { replayed?: boolean } | undefined)?.replayed === true;
+        return record(
+          { runId: run.id, instanceId: stage?.id ?? null, command: args.command, ...(replayed ? { replayed: true } : {}) },
+          `${args.command} ${replayed ? 'was already delivered (a replay)' : 'sent'} to ${stage ? (stage.instancePath ?? stage.name ?? stage.id) : `run ${run.id}`}.`,
+        );
+      },
+    }),
+
+    // The decisions a run waits on (P05): its own and its sub-workflow
+    // children's, mirrored. Answer any of them with `run command` on this run
+    // (an approval reaches the child); a mirrored loop decision or event goes
+    // to the child run (its id is in the `run` column).
+    defineCommand({
+      id: 'run.pending',
+      group: 'run',
+      verb: 'pending',
+      summary: 'The decisions a run waits on: reviews, gates, parked loops, approval and event waits (sub-workflow children included)',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      examples: ['generatorai run pending @last', 'generatorai run pending a3f2 --output json'],
+      args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
+      flags: [],
+      schema: inputSchema({ run: z.string() }, {}),
+      output: {
+        kind: 'list',
+        columns: [
+          { key: 'stage', header: 'Stage', priority: 0 },
+          { key: 'kind', header: 'Kind', priority: 0 },
+          { key: 'via', header: 'Via', priority: 1 },
+          { key: 'detail', header: 'Detail', priority: 2 },
+          { key: 'run', header: 'Run', priority: 3 },
+        ],
+      },
+      async handler(ctx, { args }) {
+        const run = await findRun(ctx, args.run);
+        const rows = await ctx.api.runs.pendingDecisions(run.id);
+        return list(
+          rows.map((d) => {
+            const i = (d.interruptData && typeof d.interruptData === 'object' ? d.interruptData : {}) as Record<string, unknown>;
+            const detail =
+              d.kind === 'wait'
+                ? d.waitType === 'event'
+                  ? `event ${String(i['eventKey'] ?? '')}${d.callback ? ` · callback ${d.callback.url}` : ''}`
+                  : String(i['prompt'] ?? i['label'] ?? '')
+                : d.kind === 'loop_decision'
+                  ? `${String(i['action'] ?? '')}: ${String(i['reason'] ?? '')}`
+                  : String(i['reason'] ?? i['prompt'] ?? '');
+            return {
+              stage: d.instancePath,
+              kind: d.kind === 'wait' ? `${d.waitType ?? 'approval'} wait` : d.kind,
+              via: d.via.map((v) => v.stageKey).join(' > '),
+              detail: detail.length > 120 ? `${detail.slice(0, 117)}...` : detail,
+              run: d.runId,
+              instanceId: d.instanceId,
+            };
+          }),
+        );
+      },
+    }),
+
+    defineCommand({
+      id: 'run.iterations',
+      group: 'run',
+      verb: 'iterations',
+      summary: "A loop's finished iterations: exit-rule values, streaks, score, workspace change, carried state",
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        { name: 'run', description: 'Run reference', required: true, completes: 'run' },
+        { name: 'loop', description: 'The loop stage (key, instance path or id)', required: true, completes: 'stage' },
+      ],
+      flags: [],
+      schema: inputSchema({ run: z.string(), loop: z.string() }, {}),
+      output: {
+        kind: 'list',
+        columns: [
+          { key: 'iteration', header: '#', format: 'number', priority: 0 },
+          { key: 'outcome', header: 'Outcome', priority: 0 },
+          { key: 'rules', header: 'Rules', priority: 1 },
+          { key: 'score', header: 'Score', priority: 2 },
+          { key: 'changed', header: 'Changed', priority: 2 },
+          { key: 'checkpoint', header: 'Ckpt', format: 'boolean', priority: 3 },
+        ],
+      },
+      async handler(ctx, { args }) {
+        const run = await findRun(ctx, args.run);
+        const loop = await findStage(ctx, run.id, args.loop);
+        const rows = await ctx.api.runs.iterations(run.id, loop.id);
+        return list(
+          rows.map((r) => ({
+            iteration: r.k + 1,
+            outcome: r.outcome,
+            rules: Object.entries(r.exitValues)
+              .map(([name, v]) => `${name}=${v === null ? '?' : v}`)
+              .join(' '),
+            score: r.score ?? '',
+            changed: r.signals?.workspaceChanged === null || r.signals === null ? '?' : String(r.signals.workspaceChanged),
+            checkpoint: r.checkpointTurnId !== null,
+            carry: r.carry,
+          })),
+        );
+      },
+    }),
+
+    // A stage is a compact chat (P03b): message it, stop its turn.
+    defineCommand({
+      id: 'run.stage.send',
+      group: 'run',
+      verb: 'stage send',
+      summary: 'Send a message to a stage (the next turn, an amendment of a completed stage, or a retry of a paused one)',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      examples: [
+        'generatorai run stage send @last review "also cover the empty-input case"',
+        'generatorai run stage send a3f2 implement - --attach spec.md',
+      ],
+      args: [
+        { name: 'run', description: 'Run reference', required: true, completes: 'run' },
+        { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
+        { name: 'text', description: 'Message text, or - to read stdin', required: true },
+      ],
+      flags: [
+        { name: 'mode', description: 'Agent mode of this turn (auto or plan)', type: 'string' },
+        { name: 'attach', description: 'Attach a file (repeatable)', type: 'string', variadic: true, completes: 'file' },
+      ],
+      schema: inputSchema(
+        { run: z.string(), stage: z.string(), text: z.string() },
+        { mode: z.enum(['auto', 'plan']).optional(), attach: z.array(z.string()).optional() },
+      ),
+      output: { kind: 'record' },
+      async handler(ctx, { args, flags }) {
+        const run = await findRun(ctx, args.run);
+        const stage = await findStage(ctx, run.id, args.stage);
+        const text = args.text === '-' ? await readStdin() : args.text;
+        if (!text.trim()) throw CliError.usage('The message is empty.');
+        const input = { message: text, ...(flags.mode ? { mode: flags.mode } : {}) };
+        try {
+          const result = flags.attach?.length
+            ? await ctx.api.runs.stageMessageWithAttachments(run.id, stage.id, input, await readAttachments(flags.attach))
+            : await ctx.api.runs.stageMessage(run.id, stage.id, input);
+          return record(
+            { runId: run.id, stageId: stage.id, outcome: result.outcome, attachments: result.attachmentIds.length },
+            `Sent to ${stage.name ?? stage.id}: ${SEND_OUTCOME[result.outcome]}.`,
+          );
+        } catch (error) {
+          throw stageConversationError(error, run.id, args.stage);
+        }
+      },
+    }),
+
+    defineCommand({
+      id: 'run.stage.stop',
+      group: 'run',
+      verb: 'stage stop',
+      summary: 'Stop the turn a stage is taking; the stage continues from its next step',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        { name: 'run', description: 'Run reference', required: true, completes: 'run' },
+        { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
+      ],
+      flags: [{ name: 'force', description: 'Also tear the provider conversation down (re-bound before the next turn)', type: 'boolean' }],
+      schema: inputSchema({ run: z.string(), stage: z.string() }, { force: z.boolean().optional() }),
+      output: { kind: 'void', successMessage: 'Turn stopped.' },
+      async handler(ctx, { args, flags }) {
+        const run = await findRun(ctx, args.run);
+        const stage = await findStage(ctx, run.id, args.stage);
+        try {
+          await ctx.api.runs.cancelStageTurn(run.id, stage.id, flags.force ? { force: true } : {});
+        } catch (error) {
+          throw stageConversationError(error, run.id, args.stage);
+        }
+        return ok(`Stopped the turn of ${stage.name ?? stage.id}; the stage continues from its next step.`);
+      },
+    }),
 
     defineCommand({
       id: 'run.hitl.mode',
@@ -580,7 +1245,7 @@ export function runCommands(): CommandSpec[] {
         { name: 'mode', description: 'New mode; omit to read', required: false },
       ],
       flags: [],
-      schema: inputSchema({ run: z.string(), mode: z.enum(PERMISSION_MODES).optional() }, {}),
+      schema: inputSchema({ run: z.string(), mode: z.enum(RUN_PERMISSION_MODES).optional() }, {}),
       output: { kind: 'record' },
       async handler(ctx, { args }) {
         const target = await findRun(ctx, args.run);
@@ -613,14 +1278,23 @@ export function runCommands(): CommandSpec[] {
       },
       async handler(ctx, { args }) {
         const target = await findRun(ctx, args.run);
-        return list(await ctx.api.runs.pendingInterrupts(target.id));
+        // The pending gates are the run's `awaiting_input` stage runs.
+        const run = await ctx.api.runs.get(target.id);
+        return list(
+          run.stageRuns
+            .filter((s) => s.status === 'awaiting_input')
+            .map((s) => ({
+              stageId: s.id,
+              stageName: s.name ?? s.stageKey,
+              prompt: gatePrompt(s.interruptData),
+              createdAt: s.startedAt ?? null,
+            })),
+        );
       },
     }),
 
-    // Three verdicts, not two. The server only reaches `rejected` — which
-    // terminates the run — through an explicit `outcome`; sending the legacy
-    // `approved: false` silently means "changes requested" instead, so a user
-    // who typed `reject` would watch the run carry on.
+    // Three verdicts, one per command. `rejected` terminates the run;
+    // `changes_requested` sends feedback and re-parks the stage.
     ...(
       [
         { verb: 'approve', outcome: 'approved', past: 'approved' },
@@ -646,20 +1320,14 @@ export function runCommands(): CommandSpec[] {
           { name: 'stage', description: 'Stage reference', required: true, completes: 'stage' },
         ],
         flags: [
-          { name: 'value', description: 'JSON value to hand back to the stage', type: 'string' },
-          { name: 'reason', description: 'Why', type: 'string' },
-          {
-            name: 'followUp',
-            description: 'Follow-up prompt sent to the agent',
-            type: 'string',
-          },
+          { name: 'value', description: 'JSON object to hand back to the stage', type: 'string' },
+          { name: 'feedback', description: 'Reviewer feedback, sent to the agent', type: 'string' },
         ],
         schema: inputSchema(
           { run: z.string(), stage: z.string() },
           {
             value: z.string().optional(),
-            reason: z.string().optional(),
-            followUp: z.string().optional(),
+            feedback: z.string().optional(),
           },
         ),
         output: { kind: 'record', successMessage: `Stage ${past}.` },
@@ -667,22 +1335,29 @@ export function runCommands(): CommandSpec[] {
           const run = await findRun(ctx, args.run);
           const stage = await findStage(ctx, run.id, args.stage);
 
-          let value: unknown;
+          // `data` is an object; a bare (non-object) value is a free-form answer.
+          let data: Record<string, unknown> | undefined;
           if (flags.value !== undefined) {
+            let parsed: unknown;
             try {
-              value = JSON.parse(flags.value);
+              parsed = JSON.parse(flags.value);
             } catch {
-              value = flags.value;
+              parsed = flags.value;
             }
+            data =
+              parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+                ? (parsed as Record<string, unknown>)
+                : { freeformResponse: typeof parsed === 'string' ? parsed : JSON.stringify(parsed) };
           }
 
-          return record(
-            await ctx.api.runs.stage.approve(
-              run.id,
-              stage.id,
-              compact({ outcome, value, reason: flags.reason, followUpPrompt: flags.followUp }),
-            ),
-          );
+          await ctx.api.runs.command(run.id, {
+            command: 'approve',
+            instanceId: stage.id,
+            outcome,
+            ...(flags.feedback ? { feedback: flags.feedback } : {}),
+            ...(data ? { data } : {}),
+          });
+          return record({ runId: run.id, stageId: stage.id, outcome });
         },
       }),
     ),
@@ -691,7 +1366,7 @@ export function runCommands(): CommandSpec[] {
       id: 'run.profile.list',
       group: 'run',
       verb: 'profile list',
-      summary: 'Run profiles visible from here',
+      summary: 'Run profiles visible from here, each checked against the RunProfile schema',
       requiresServer: false,
       sinceVersion: '0.2.0',
       args: [],
@@ -701,24 +1376,35 @@ export function runCommands(): CommandSpec[] {
         kind: 'list',
         columns: [
           { key: 'name', header: 'Name', priority: 0 },
+          { key: 'workflow', header: 'Workflow', priority: 1 },
           { key: 'scope', header: 'Scope', priority: 1 },
+          { key: 'valid', header: 'Valid', format: 'boolean', priority: 0 },
+          { key: 'description', header: 'Description', priority: 2 },
           { key: 'path', header: 'Path', priority: 3 },
         ],
       },
       async handler() {
-        const rows: Array<{ name: string; scope: string; path: string }> = [];
+        const rows: Array<Record<string, unknown>> = [];
         for (const [scope, dir] of [
           ['project', getRunProfilesDir()],
           ['user', getUserRunProfilesDir()],
         ] as const) {
+          let files: string[];
           try {
-            for (const file of await fs.readdir(dir)) {
-              if (file.endsWith('.json')) {
-                rows.push({ name: file.replace(/\.json$/, ''), scope, path: path.join(dir, file) });
-              }
-            }
+            files = await fs.readdir(dir);
           } catch {
             // Directory does not exist — nothing to list from this scope.
+            continue;
+          }
+          for (const file of files.filter((f) => f.endsWith('.json'))) {
+            const full = path.join(dir, file);
+            const base = { file: file.replace(/\.json$/, ''), scope, path: full };
+            try {
+              const profile = parseRunProfile(await fs.readFile(full, 'utf8'), full);
+              rows.push({ ...base, name: profile.name, workflow: profile.workflow, description: profile.description, valid: true });
+            } catch (error) {
+              rows.push({ ...base, name: base.file, valid: false, error: error instanceof Error ? error.message : String(error) });
+            }
           }
         }
         return list(rows);
@@ -729,7 +1415,7 @@ export function runCommands(): CommandSpec[] {
       id: 'run.profile.generate',
       group: 'run',
       verb: 'profile generate',
-      summary: 'Write a run-profile template for a workflow',
+      summary: 'Write a run-profile template (RunProfile v2) for a workflow',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [
@@ -740,15 +1426,16 @@ export function runCommands(): CommandSpec[] {
       output: { kind: 'record' },
       async handler(ctx, { args, flags }): Promise<CommandResult<unknown>> {
         const definition = await findDefinition(ctx, args.workflow);
-        const full = (await ctx.api.definitions.get(definition.id)) as unknown as Record<string, unknown>;
-        const declared = (full['variables'] ?? []) as Array<{ name: string; defaultValue?: unknown }>;
+        const { graph } = await ctx.api.definitions.get(definition.id);
 
-        const profile: RunProfile = {
-          name: `${String(full['name'] ?? 'run')} profile`,
-          variables: Object.fromEntries(declared.map((v) => [v.name, v.defaultValue ?? ''])),
-          permissionMode: 'default',
+        // No permission mode: absent means the deployment posture decides.
+        const profile: RunProfile = RunProfileSchema.parse({
+          version: 2,
+          name: `${graph.workflow.name} profile`.slice(0, 100),
+          workflow: definition.id,
+          variables: Object.fromEntries(graph.workflow.variables.map((v) => [v.name, v.defaultValue ?? ''])),
           stageOverrides: [],
-        };
+        });
 
         if (!flags.out) return record(profile);
 
@@ -763,36 +1450,28 @@ export function runCommands(): CommandSpec[] {
       id: 'run.profile.validate',
       group: 'run',
       verb: 'profile validate',
-      summary: 'Check a run profile against a workflow definition',
+      summary: 'Check a run profile: its schema, then the server plan for a workflow',
+      description:
+        'Parses the profile with the RunProfile schema, then asks the server to plan a run from it — the same ' +
+        'validation `run start` gets (variables, stage keys, codebases, models, permission ceiling).',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [
         { name: 'workflow', description: 'Workflow reference', required: true, completes: 'workflow' },
         { name: 'profile', description: 'Profile name or path', required: true },
       ],
-      flags: [],
-      schema: inputSchema({ workflow: z.string(), profile: z.string() }, {}),
+      flags: [{ name: 'testRun', description: 'Plan against the draft (unpublished) graph', type: 'boolean' }],
+      schema: inputSchema({ workflow: z.string(), profile: z.string() }, { testRun: z.boolean().optional() }),
       output: { kind: 'record' },
-      async handler(ctx, { args }) {
-        const definition = await findDefinition(ctx, args.workflow);
-        const full = (await ctx.api.definitions.get(definition.id)) as unknown as Record<string, unknown>;
-        const declared = (full['variables'] ?? []) as Array<{ name: string; required?: boolean; type?: string }>;
-        const profile = await loadRunProfile(args.profile);
-
-        const { errors, warnings } = validateVariables(declared, profile.variables ?? {});
-
-        const stageIds = new Set(
-          ((full['stages'] ?? []) as Array<{ id: string }>).map((s) => s.id),
-        );
-        for (const override of profile.stageOverrides ?? []) {
-          if (!stageIds.has(override.stageId)) {
-            errors.push(`stage override targets unknown stage "${override.stageId}"`);
-          }
-        }
-
-        if (errors.length) {
-          throw new CliError('VALIDATION', `Profile is not valid:\n${errors.map((e) => `  ${e}`).join('\n')}`);
-        }
+      async handler(ctx, { args, flags }) {
+        const { request } = await buildInvocation(ctx, args.workflow, {
+          profile: args.profile,
+          ...(flags.testRun ? { testRun: true } : {}),
+        });
+        const plan = await ctx.api.workflows.plan(request).catch((error: unknown) => {
+          throw invocationError(error);
+        });
+        const warnings = plan.warnings.map(issueLine);
         return { data: { valid: true, warnings }, warnings, message: 'Profile is valid.' };
       },
     }),
@@ -817,15 +1496,13 @@ export function runCommands(): CommandSpec[] {
       },
       async handler(ctx, { args, flags }) {
         const target = await findRun(ctx, args.run);
-        const stages = (await ctx.api.runs.stages(target.id)) as unknown as Array<Record<string, unknown>>;
+        const stages = await ctx.api.runs.stages(target.id);
 
         const wanted = flags.stage
           ? [await findStage(ctx, target.id, flags.stage)]
-          : stages.map((s) => ({ id: String(s['id']), name: String(s['stageName'] ?? '') }));
+          : stages.map((s) => ({ id: s.id, name: s.name }));
 
-        const sessionByStage = new Map(
-          stages.map((s) => [String(s['id']), s['sessionId'] as string | undefined]),
-        );
+        const sessionByStage = new Map(stages.map((s) => [s.id, s.sessionId]));
 
         const rows: Array<Record<string, unknown>> = [];
         for (const stage of wanted) {
@@ -842,7 +1519,7 @@ export function runCommands(): CommandSpec[] {
       id: 'run.diff',
       group: 'run',
       verb: 'diff',
-      summary: 'Unified diff of everything a run changed',
+      summary: 'Unified diff of everything a run changed, per mounted codebase',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
@@ -851,8 +1528,15 @@ export function runCommands(): CommandSpec[] {
       output: { kind: 'raw' },
       async handler(ctx, { args }) {
         const target = await findRun(ctx, args.run);
-        const diff = await ctx.api.orchestrator.runDiff(target.id);
-        return record(typeof diff === 'string' ? diff : (diff.diff ?? ''));
+        const { repos } = await ctx.api.runs.workspaceDiff(target.id);
+        const text = repos
+          .filter((repo) => repo.files.length > 0)
+          .map((repo) => {
+            const body = repo.files.map((f) => f.diff ?? `${f.status} ${f.path}\n`).join('');
+            return repos.length > 1 ? `# ${repo.alias}\n${body}` : body;
+          })
+          .join('\n');
+        return record(text);
       },
     }),
 
@@ -860,7 +1544,7 @@ export function runCommands(): CommandSpec[] {
       id: 'run.workspace',
       group: 'run',
       verb: 'workspace',
-      summary: 'Workspace a run executed in',
+      summary: 'Workspace a run executed in: its root, artifacts, uploads and every mount with its files',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [{ name: 'run', description: 'Run reference', required: true, completes: 'run' }],
@@ -869,7 +1553,7 @@ export function runCommands(): CommandSpec[] {
       output: { kind: 'record' },
       async handler(ctx, { args }) {
         const target = await findRun(ctx, args.run);
-        return record(await ctx.api.orchestrator.runWorkspace(target.id));
+        return record(await ctx.api.runs.workspace(target.id));
       },
     }),
   ];

@@ -2,7 +2,7 @@
 // G-15 — `GET /api/projects/:id/runs`: the ProjectDetail Runs tab.
 //
 // `WorkflowRun` carries no `projectId` of its own, so this joins through
-// `workflowDefinitionService.listDefinitions(projectId)` and reads each
+// `workflowDefinitionService.list({ projectId })` (paged) and reads each
 // definition's runs with `workflowRunRepo.getByDefinitionId` — both
 // existing read-only calls; `apps/server/src/routes/workflowRuns.ts`
 // (Workflow-Overhaul-owned engine code) is never touched. This test
@@ -14,24 +14,30 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import type { WorkflowDefinition, WorkflowRun } from '@generatorai/shared';
+import type { WorkflowRun } from '@generatorai/shared';
+import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
 
 import { createProjectRoutes } from '../routes/projects.js';
 
 const NOW = new Date('2026-01-01T00:00:00.000Z');
 
-function definition(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
+function definition(overrides: Partial<WorkflowDefinitionSummary> = {}): WorkflowDefinitionSummary {
   return {
     id: 'def-1',
     name: 'Nightly audit',
     projectId: 'proj-1',
-    stages: [],
-    edges: [],
-    version: 1,
-    createdAt: NOW,
-    updatedAt: NOW,
+    status: 'published',
+    revision: 1,
+    currentVersionId: 'ver-1',
+    tags: [],
+    stageCount: 0,
+    needsAttention: false,
+    agentAuthored: false,
+    archivedAt: null,
+    createdAt: '2026-01-01T00:00:00.000Z',
+    updatedAt: '2026-01-01T00:00:00.000Z',
     ...overrides,
-  } as WorkflowDefinition;
+  };
 }
 
 function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
@@ -40,7 +46,7 @@ function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
     workflowDefinitionId: 'def-1',
     name: 'Run',
     status: 'completed',
-    sessionMode: 'single',
+    definitionVersionId: 'ver-1',
     variables: {},
     createdAt: NOW,
     updatedAt: NOW,
@@ -49,7 +55,7 @@ function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
 }
 
 function makeApp(opts: {
-  definitions?: WorkflowDefinition[];
+  definitions?: WorkflowDefinitionSummary[];
   runsByDefinition?: Record<string, WorkflowRun[]>;
 } = {}) {
   const runsByDefinition = opts.runsByDefinition ?? {};
@@ -69,7 +75,7 @@ function makeApp(opts: {
     gitManager: {},
     logger: { debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() },
     chatEntityRepo: {},
-    workflowDefinitionService: { listDefinitions: vi.fn().mockResolvedValue(opts.definitions ?? []) },
+    workflowDefinitionService: { list: vi.fn().mockResolvedValue({ items: opts.definitions ?? [] }) },
     workflowRunRepo: {
       getByDefinitionId: vi.fn((definitionId: string) => Promise.resolve(runsByDefinition[definitionId] ?? [])),
     },

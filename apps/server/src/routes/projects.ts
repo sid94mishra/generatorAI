@@ -36,7 +36,10 @@ import type {
   WorktreeListItem,
   WorktreeRetentionPolicy,
 } from '@generatorai/shared';
+import { WORKFLOW_RUN_STATES } from '@generatorai/workflow-spec';
 import type { Container } from '../composition-root.js';
+import { listAllDefinitionSummaries } from './definitionSummaries.js';
+import { chatPrincipalOf } from './permissionScope.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -103,7 +106,7 @@ export function createProjectRoutes(container: Container): Router {
       codebaseService.getByProjectId(projectId),
       chatEntityRepo.getByProjectId(projectId),
       worktreeService.listWorktrees(projectId),
-      workflowDefinitionService.listDefinitions(projectId),
+      listAllDefinitionSummaries(workflowDefinitionService, { projectId }),
     ]);
 
     const activeChats = chats.filter((c) => c.status === 'active').length;
@@ -698,8 +701,8 @@ export function createProjectRoutes(container: Container): Router {
       // "live name wins" rule G-13's `lastRun` uses) — best effort only.
       let title = run.name;
       try {
-        const definition = await workflowDefinitionService.getDefinition(run.workflowDefinitionId);
-        if (definition.name) title = definition.name;
+        const definition = await workflowDefinitionService.get(run.workflowDefinitionId);
+        if (definition.graph.workflow.name) title = definition.graph.workflow.name;
       } catch {
         // Definition deleted — the run's own name still stands.
       }
@@ -832,9 +835,8 @@ export function createProjectRoutes(container: Container): Router {
   // Workflow runs (G-15) — ProjectDetail Runs tab
   // ════════════════════════════════════════════════════════════════
 
-  const RUN_STATUSES = new Set([
-    'created', 'starting', 'running', 'paused', 'cancelling', 'completed', 'failed', 'cancelled',
-  ]);
+  // The engine v2 run states (workflow-spec `WORKFLOW_RUN_STATES`).
+  const RUN_STATUSES: ReadonlySet<string> = new Set(WORKFLOW_RUN_STATES);
 
   // GET /projects/:id/runs — paged workflow runs for a project, newest first.
   //
@@ -869,7 +871,7 @@ export function createProjectRoutes(container: Container): Router {
       const limit = Number.isFinite(limitParam) && limitParam > 0 ? Math.min(Math.floor(limitParam), 200) : 50;
       const cursor = req.query['cursor'] as string | undefined;
 
-      const definitions = await workflowDefinitionService.listDefinitions(projectId);
+      const definitions = await listAllDefinitionSummaries(workflowDefinitionService, { projectId });
       const definitionNameById = new Map(definitions.map((d) => [d.id, d.name]));
       const runsByDefinition = await Promise.all(
         definitions.map((d) => workflowRunRepo.getByDefinitionId(d.id)),
@@ -1183,6 +1185,7 @@ export function createProjectRoutes(container: Container): Router {
 
       const chat = await chatManagementService.createChat({
         name: `Review PR #${detail.number}: ${detail.title}`,
+        createdByPrincipal: chatPrincipalOf(req),
         projectId,
         sources: [
           {

@@ -412,4 +412,24 @@ describe('replayEventsIntoStore', () => {
       expect(tasks.map((b) => (b as { taskId: string }).taskId)).toEqual(['w-live']);
     });
   });
+
+  it('rebuilds stage gate cards and operator bubbles; a gate ended by a later lifecycle event is not pending', () => {
+    const perm = (interactionId: string) => ({
+      stageRunId: 'sr1', workflowRunId: 'run-1', interactionId, toolName: 'Bash', type: 'shell',
+      description: 'rm', inputSummary: 'rm -rf', permissionMode: 'default',
+    });
+    replayEventsIntoStore('s1', [
+      makeEvent('stage_run.running', { stageRunId: 'sr1', workflowRunId: 'run-1' }, 1),
+      makeEvent('stage_run.operator_message', { stageRunId: 'sr1', workflowRunId: 'run-1', content: 'hi' }, 2),
+      // Asked before a crash: the resume re-asks under a new id.
+      makeEvent('stage.permission.requested', perm('old'), 3),
+      makeEvent('stage_run.paused', { stageRunId: 'sr1', workflowRunId: 'run-1' }, 4),
+      makeEvent('stage_run.resumed', { stageRunId: 'sr1', workflowRunId: 'run-1' }, 5),
+      makeEvent('stage.permission.requested', perm('new'), 6),
+    ]);
+    const blocks = useStreamStore.getState().streams['stageRun:sr1']?.blocks ?? [];
+    expect(blocks.some((b) => b.type === 'system' && (b as { category?: string }).category === 'operator')).toBe(true);
+    const cards = blocks.filter((b) => b.type === 'permission') as Array<{ interactionId: string; status: string }>;
+    expect(cards.map((c) => [c.interactionId, c.status])).toEqual([['old', 'expired'], ['new', 'pending']]);
+  });
 });

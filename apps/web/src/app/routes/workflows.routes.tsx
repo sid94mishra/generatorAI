@@ -29,7 +29,12 @@ export const workflowsRoutes: RouteObject[] = [
   ),
   defineRoute(
     'workflows/:id/runs/:runId',
-    () => import('@/pages/WorkflowRunPageV2.js').then((m) => ({ default: m.WorkflowRunPageV2 })),
+    // A stage transcript draws the workflow tool cards too (D-35 segment-card registry).
+    () =>
+      Promise.all([
+        import('@/app/registries/workflowTranscriptCards.js'),
+        import('@/pages/WorkflowRunPage.js'),
+      ]).then(([, m]) => ({ default: m.WorkflowRunPage })),
     { legacyHeader: true, nav: 'workflows', title: 'Workflow Run' },
   ),
 ];

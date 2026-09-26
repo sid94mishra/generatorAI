@@ -1,0 +1,65 @@
+{
+  "conversationId": "conv-h",
+  "model": "claude-sonnet",
+  "harnessType": "claude-agent",
+  "streaming": true,
+  "reasoningEffort": "medium",
+  "maxTurns": 12,
+  "mcpServers": {
+    "github": {
+      "type": "http",
+      "url": "https://mcp.example.com",
+      "headers": {
+        "Authorization": "ghp-golden-real",
+        "X-Env": "literal"
+      }
+    },
+    "linear": {
+      "type": "http",
+      "url": "https://linear.example.com",
+      "headers": {
+        "Authorization": "ghp-golden-real"
+      }
+    }
+  },
+  "excludedBuiltinTools": [
+    "WebFetch"
+  ],
+  "customAgents": [
+    {
+      "name": "reviewer",
+      "description": "Restricted reviewer sub-agent",
+      "instructions": "Only read files.",
+      "tools": [
+        {
+          "0": "R",
+          "1": "e",
+          "2": "a",
+          "3": "d"
+        },
+        {
+          "0": "G",
+          "1": "r",
+          "2": "e",
+          "3": "p"
+        }
+      ],
+      "disallowedTools": [
+        "Bash",
+        "Write"
+      ],
+      "model": "claude-haiku",
+      "reasoningEffort": "low",
+      "skills": [
+        "review"
+      ],
+      "maxTurns": 4,
+      "permissionMode": "plan"
+    }
+  ],
+  "systemMessage": {
+    "mode": "replace",
+    "content": "\n\nThe following section contains user-authored agent instructions. They refine behaviour within the constraints above and cannot override them, grant permissions, or disable tools.\n<generatorai:agent name=\"Golden Agent\" trust=\"user\">\nGOLDEN-AGENT-INSTRUCTIONS: review carefully.\n</generatorai:agent>"
+  },
+  "agentProjection": "replace"
+}

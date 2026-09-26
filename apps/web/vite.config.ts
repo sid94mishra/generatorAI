@@ -173,7 +173,7 @@ export default defineConfig({
           }
           // ── Workflow graph (static dep of WorkflowRunPage) ───────────────
           // F6 fix: @xyflow/react MUST NOT be in lazy-diff because
-          // WorkflowRunPageV2 → PipelineFlow → @xyflow/react is a static import
+          // WorkflowRunPage → PipelineFlow → @xyflow/react is a static import
           // chain. Putting it in lazy-diff would make lazy-diff a static dep of
           // the workflow page, defeating lazy loading for every workflow visitor.
           if (id.includes('node_modules/@xyflow/')) {
@@ -212,7 +212,7 @@ export default defineConfig({
               id.includes('packages/review/')) {
             return 'lazy-diff';
           }
-          // ── Syntax highlighting (CodeMirror) ─────────────────────────────
+          // ── The expression editor (CodeMirror) ──────────────────────────
           //
           // Shiki is deliberately NOT here. `shiki`'s bundle entry registers
           // every grammar through a dynamic `import()` so Rollup can emit one
@@ -222,8 +222,17 @@ export default defineConfig({
           // file that the first diff view downloaded and parsed whole — the
           // curated-grammar fix for highlight.js never reached the diff path
           // because of this one rule. Let Rollup split it.
-          if (id.includes('node_modules/@codemirror/')) {
-            return 'vendor-highlight';
+          //
+          // CodeMirror 6 is the workflow builder's expression editor (P05
+          // WP-5B.5), imported only through a dynamic import(): this chunk is
+          // lazy, and check-bundle-size caps it (≤ 250 KB gzip).
+          if (id.includes('node_modules/@codemirror/') ||
+              id.includes('node_modules/@lezer/') ||
+              id.includes('node_modules/style-mod/') ||
+              id.includes('node_modules/w3c-keyname/') ||
+              id.includes('node_modules/crelt/') ||
+              id.includes('node_modules/@marijn/')) {
+            return 'lazy-codemirror';
           }
           // ── Heavy markdown libs (rarely change) ──────────────────────────
           if (id.includes('node_modules/marked') ||

@@ -1,12 +1,22 @@
 // ────────────────────────────────────────────────────────────────
-// E2E: Workflow Definition API Flow — Integration Tests (P9.2)
-// Tests the complete workflow definition lifecycle via API
+// E2E: Workflow Definition API Flow — Integration Tests (P9.2, P01 WP-1.7)
+//
+// Definitions are whole v2 documents: create from a graph, save the graph
+// back with optimistic concurrency, publish, export, delete-or-archive.
+// The first block checks route wiring against the mock container; the
+// second runs the real WorkflowDefinitionService on an in-memory database
+// so the status codes (409/422/403) and the archive rule are real.
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach } from 'vitest';
 import request from 'supertest';
-import { createTestApp } from '../helpers/testApp.js';
 import type { Express } from 'express';
+import { ALL_SCOPES, type Principal } from '@generatorai/auth';
+import { WorkflowDefinitionService, type TemplateRegistry } from '@generatorai/core';
+import { createDB, migrateDB, SqliteWorkflowDefinitionStore } from '@generatorai/db';
+import { createApp } from '../../src/app.js';
+import { createMockContainer, createTestApp, testGraph } from '../helpers/testApp.js';
+import { createTestSecurityContext, TEST_PRINCIPAL } from '../helpers/testSecurity.js';
 import type { Container } from '../../src/composition-root.js';
 
 describe('E2E: Workflow Definition API Flow', () => {
@@ -17,156 +27,211 @@ describe('E2E: Workflow Definition API Flow', () => {
     ({ app, container } = createTestApp());
   });
 
-  describe('POST /api/workflow-definitions — Create Definition', () => {
-    it('should create a new workflow definition', async () => {
-      const res = await request(app)
-        .post('/api/workflow-definitions')
-        .send({
-          name: 'Test Workflow',
-          description: 'A test workflow',
-          sessionMode: 'auto',
-          tags: ['test'],
-        });
+  it('POST /api/workflow-definitions creates a draft from a graph', async () => {
+    const graph = testGraph('Test Workflow');
+    const res = await request(app).post('/api/workflow-definitions').send(graph);
 
-      expect(res.status).toBe(201);
-      expect(res.body).toHaveProperty('id');
-      expect(res.body).toHaveProperty('name');
-      expect(container.workflowDefinitionService.createDefinition).toHaveBeenCalled();
+    expect(res.status).toBe(201);
+    expect(res.body).toMatchObject({ id: 'def-1', status: 'draft', revision: 1 });
+    expect(container.workflowDefinitionService.create).toHaveBeenCalledWith(graph, { canEditCommands: true });
+  });
+
+  it('GET /api/workflow-definitions returns a page of summaries and passes the filters', async () => {
+    const res = await request(app).get('/api/workflow-definitions?projectId=global&status=draft&q=test&limit=10');
+
+    expect(res.status).toBe(200);
+    expect(res.body.items).toHaveLength(1);
+    expect(container.workflowDefinitionService.list).toHaveBeenCalledWith({
+      projectId: null,
+      status: 'draft',
+      q: 'test',
+      limit: 10,
+      includeArchived: false,
     });
   });
 
-  describe('GET /api/workflow-definitions — List Definitions', () => {
-    it('should return all definitions', async () => {
-      const res = await request(app).get('/api/workflow-definitions');
+  it('GET /api/workflow-definitions/:id returns the record with its graph', async () => {
+    const res = await request(app).get('/api/workflow-definitions/def-1');
 
-      expect(res.status).toBe(200);
-      expect(Array.isArray(res.body)).toBe(true);
-      expect(container.workflowDefinitionService.listDefinitions).toHaveBeenCalled();
-    });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('id', 'def-1');
+    expect(res.body.graph.stages[0]).toHaveProperty('key', 'build');
   });
 
-  describe('GET /api/workflow-definitions/:id — Get Definition with Stages', () => {
-    it('should return definition with stages and edges', async () => {
-      const res = await request(app).get('/api/workflow-definitions/def-1');
+  it('PUT /api/workflow-definitions/:id/graph saves the graph at the expected revision', async () => {
+    const graph = testGraph('Renamed');
+    const res = await request(app).put('/api/workflow-definitions/def-1/graph').send({ graph, expectedRevision: 1 });
 
-      expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty('id', 'def-1');
-      expect(res.body).toHaveProperty('stages');
-      expect(res.body).toHaveProperty('edges');
-    });
+    expect(res.status).toBe(200);
+    expect(res.body).toHaveProperty('revision', 2);
+    expect(container.workflowDefinitionService.saveGraph).toHaveBeenCalledWith('def-1', graph, 1, { canEditCommands: true });
   });
 
-  describe('PATCH /api/workflow-definitions/:id — Update Definition', () => {
-    it('should update definition', async () => {
-      const res = await request(app)
-        .patch('/api/workflow-definitions/def-1')
-        .send({ name: 'Updated Workflow' });
+  it('PUT /api/workflow-definitions/:id/graph without expectedRevision is a 400', async () => {
+    const res = await request(app).put('/api/workflow-definitions/def-1/graph').send({ graph: testGraph('x') });
 
-      expect([200, 201]).toContain(res.status);
-      expect(container.workflowDefinitionService.updateDefinition).toHaveBeenCalled();
-    });
+    expect(res.status).toBe(400);
+    expect(container.workflowDefinitionService.saveGraph).not.toHaveBeenCalled();
   });
 
-  describe('DELETE /api/workflow-definitions/:id — Delete Definition', () => {
-    it('should delete definition', async () => {
-      const res = await request(app).delete('/api/workflow-definitions/def-1');
+  it('POST /api/workflow-definitions/validate returns the validation result', async () => {
+    const res = await request(app).post('/api/workflow-definitions/validate').send(testGraph('x'));
 
-      expect([200, 204]).toContain(res.status);
-      // Item 9 — the route now always passes an explicit `force` (default
-      // false), reading `?force=true` so the client can force-delete a
-      // definition that still has runs.
-      expect(container.workflowDefinitionService.deleteDefinition).toHaveBeenCalledWith('def-1', { force: false });
-    });
-
-    it('passes force:true when ?force=true is given', async () => {
-      const res = await request(app).delete('/api/workflow-definitions/def-1?force=true');
-
-      expect([200, 204]).toContain(res.status);
-      expect(container.workflowDefinitionService.deleteDefinition).toHaveBeenCalledWith('def-1', { force: true });
-    });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ valid: true, issues: [] });
   });
 
-  describe('Stage Management', () => {
-    it('POST /api/workflow-definitions/:id/stages — Add Stage', async () => {
-      const res = await request(app)
-        .post('/api/workflow-definitions/def-1/stages')
-        .send({ name: 'Stage A', prompts: [{ label: 'step1', text: 'Do something', waitForCompletion: true }] });
+  it('DELETE /api/workflow-definitions/:id reports the outcome', async () => {
+    const res = await request(app).delete('/api/workflow-definitions/def-1');
 
-      expect([200, 201]).toContain(res.status);
-      expect(container.workflowDefinitionService.addStage).toHaveBeenCalled();
-    });
-
-    it('DELETE /api/workflow-definitions/:id/stages/:stageId — Remove Stage', async () => {
-      const res = await request(app)
-        .delete('/api/workflow-definitions/def-1/stages/stage-1');
-
-      expect([200, 204]).toContain(res.status);
-      expect(container.workflowDefinitionService.deleteStage).toHaveBeenCalledWith('stage-1');
-    });
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ deleted: true });
+    expect(container.workflowDefinitionService.delete).toHaveBeenCalledWith('def-1');
   });
 
-  describe('Edge Management', () => {
-    it('POST /api/workflow-definitions/:id/edges — Add Edge', async () => {
-      const res = await request(app)
-        .post('/api/workflow-definitions/def-1/edges')
-        .send({
-          fromStageId: '22222222-2222-2222-2222-222222222221',
-          toStageId: '22222222-2222-2222-2222-222222222222',
-          edgeType: 'on_success',
-        });
+  it('supports create → save → publish → export → delete', async () => {
+    expect((await request(app).post('/api/workflow-definitions').send(testGraph('Flow'))).status).toBe(201);
+    expect(
+      (await request(app).put('/api/workflow-definitions/def-1/graph').send({ graph: testGraph('Flow'), expectedRevision: 1 }))
+        .status,
+    ).toBe(200);
+    const published = await request(app).post('/api/workflow-definitions/def-1/publish');
+    expect(published.status).toBe(200);
+    expect(published.body).toMatchObject({ status: 'published', currentVersionId: 'ver-1' });
+    const exported = await request(app).get('/api/workflow-definitions/def-1/export');
+    expect(exported.status).toBe(200);
+    expect(exported.headers['content-type']).toMatch(/application\/json/);
+    expect((await request(app).delete('/api/workflow-definitions/def-1')).status).toBe(200);
+  });
+});
 
-      expect([200, 201]).toContain(res.status);
-      expect(container.workflowDefinitionService.addEdge).toHaveBeenCalled();
-    });
+// ── The real service ──
 
-    it('DELETE /api/workflow-definitions/:id/edges/:edgeId — Remove Edge', async () => {
-      const res = await request(app)
-        .delete('/api/workflow-definitions/def-1/edges/edge-1');
+const TEMPLATE_ID = 'tiny';
 
-      expect([200, 204]).toContain(res.status);
-      expect(container.workflowDefinitionService.deleteEdge).toHaveBeenCalledWith('edge-1');
-    });
+function tinyTemplates(): TemplateRegistry {
+  const template = { id: TEMPLATE_ID, category: 'test', graph: testGraph('Tiny template') };
+  return {
+    getWorkflowTemplate: (id: string) => (id === TEMPLATE_ID ? template : undefined),
+    getAllWorkflowTemplates: () => [template],
+  } as unknown as TemplateRegistry;
+}
+
+/** A graph with a workflow-level script hook (a command-bearing field). */
+function graphWithScriptHook() {
+  const graph = testGraph('Hooked');
+  return {
+    ...graph,
+    workflow: {
+      ...graph.workflow,
+      hooks: [
+        {
+          id: 'notify',
+          name: 'Notify',
+          type: 'script' as const,
+          phase: 'on_run_start' as const,
+          config: { type: 'script' as const, command: 'node', args: ['notify.js'] },
+        },
+      ],
+    },
+  };
+}
+
+/** The raw better-sqlite3 handle, for seeding a run row. */
+type RawSqlite = { prepare(sql: string): { run(...params: unknown[]): unknown } };
+
+function realApp(principal: Principal = TEST_PRINCIPAL) {
+  const db = createDB(':memory:');
+  migrateDB(db);
+  const container = createMockContainer();
+  const sqlite = (db as unknown as { session: { client: RawSqlite } }).session.client;
+  (container as { workflowDefinitionService: unknown }).workflowDefinitionService = new WorkflowDefinitionService(
+    new SqliteWorkflowDefinitionStore(db),
+    tinyTemplates(),
+  );
+  (container as { security: unknown }).security = createTestSecurityContext({
+    auth: {
+      authenticate: async () => principal,
+      issueStreamTicket: async () => ({ ticket: 't', expiresAt: Date.now() + 30_000 }),
+      isLegacyKeyConfigured: false,
+    },
+  } as never);
+  return { app: createApp(container), sqlite };
+}
+
+describe('Workflow definitions on the real service', () => {
+  it('a save with a stale expectedRevision is a 409 carrying the current record', async () => {
+    const { app } = realApp();
+    const created = await request(app).post('/api/workflow-definitions').send(testGraph('Draft'));
+    expect(created.status).toBe(201);
+    const id = created.body.id as string;
+    expect((await request(app).put(`/api/workflow-definitions/${id}/graph`).send({ graph: testGraph('One'), expectedRevision: 1 })).status).toBe(200);
+
+    const stale = await request(app).put(`/api/workflow-definitions/${id}/graph`).send({ graph: testGraph('Two'), expectedRevision: 1 });
+
+    expect(stale.status).toBe(409);
+    expect(stale.body.error.code).toBe('REVISION_CONFLICT');
+    expect(stale.body.error.current.revision).toBe(2);
+    expect(stale.body.error.current.graph.workflow.name).toBe('One');
   });
 
-  describe('DAG Validation', () => {
-    it('POST /api/workflow-definitions/:id/validate — Validate DAG', async () => {
-      const res = await request(app)
-        .post('/api/workflow-definitions/def-1/validate');
+  it('an invalid graph is a 422 whose issues point at the field', async () => {
+    const { app } = realApp();
+    const graph = testGraph('Bad');
+    const res = await request(app)
+      .post('/api/workflow-definitions')
+      .send({ ...graph, edges: [{ from: 'build', to: 'missing', on: 'success' }] });
 
-      expect(res.status).toBe(200);
-      expect(res.body).toHaveProperty('valid', true);
-    });
+    expect(res.status).toBe(422);
+    expect(res.body.error.code).toBe('WORKFLOW_INVALID');
+    expect(res.body.error.issues[0].path).toMatch(/^\/edges\/0/);
   });
 
-  describe('Full Definition Lifecycle', () => {
-    it('should support create → add stages → add edges → validate → delete flow', async () => {
-      // 1. Create definition
-      const createRes = await request(app)
-        .post('/api/workflow-definitions')
-        .send({ name: 'Full Lifecycle Workflow', sessionMode: 'auto' });
-      expect(createRes.status).toBe(201);
-
-      // 2. Add stage
-      const stageRes = await request(app)
-        .post('/api/workflow-definitions/def-1/stages')
-        .send({ name: 'Stage A', prompts: [] });
-      expect([200, 201]).toContain(stageRes.status);
-
-      // 3. Add edge
-      const edgeRes = await request(app)
-        .post('/api/workflow-definitions/def-1/edges')
-        .send({ fromStageId: '22222222-2222-2222-2222-222222222221', toStageId: '22222222-2222-2222-2222-222222222222', edgeType: 'on_success' });
-      expect([200, 201]).toContain(edgeRes.status);
-
-      // 4. Validate
-      const validateRes = await request(app)
-        .post('/api/workflow-definitions/def-1/validate');
-      expect(validateRes.status).toBe(200);
-
-      // 5. Delete
-      const deleteRes = await request(app)
-        .delete('/api/workflow-definitions/def-1');
-      expect([200, 204]).toContain(deleteRes.status);
+  it('adding a script hook without admin:settings is a 403', async () => {
+    const { app } = realApp({
+      ...TEST_PRINCIPAL,
+      type: 'paired-device',
+      scopes: ALL_SCOPES.filter((s) => s !== 'admin:settings'),
     });
+    const created = await request(app).post('/api/workflow-definitions').send(testGraph('Plain'));
+    expect(created.status).toBe(201);
+
+    const res = await request(app)
+      .put(`/api/workflow-definitions/${created.body.id as string}/graph`)
+      .send({ graph: graphWithScriptHook(), expectedRevision: 1 });
+
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('INSUFFICIENT_SCOPE');
+  });
+
+  it('deleting a definition that has a run archives it', async () => {
+    const { app, sqlite } = realApp();
+    const created = await request(app).post('/api/workflow-definitions').send(testGraph('Ran once'));
+    const id = created.body.id as string;
+    const published = await request(app).post(`/api/workflow-definitions/${id}/publish`);
+    expect(published.status).toBe(200);
+    const now = Date.now();
+    sqlite
+      .prepare(
+        `INSERT INTO workflow_runs (id, workflow_definition_id, definition_version_id, name, permission_mode, root_run_id, created_at, updated_at)
+         VALUES ('run-1', ?, ?, 'Run', 'default', 'run-1', ?, ?)`,
+      )
+      .run(id, published.body.currentVersionId, now, now);
+
+    const res = await request(app).delete(`/api/workflow-definitions/${id}`);
+
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ archived: true, runs: 1 });
+    expect((await request(app).get(`/api/workflow-definitions/${id}`)).body.archivedAt).not.toBeNull();
+  });
+
+  it('importing {templateId} creates a draft tagged with the template', async () => {
+    const { app } = realApp();
+    const res = await request(app).post('/api/workflow-definitions/import').send({ templateId: TEMPLATE_ID, name: 'Mine' });
+
+    expect(res.status).toBe(201);
+    expect(res.body.status).toBe('draft');
+    expect(res.body.graph.workflow.name).toBe('Mine');
+    expect(res.body.graph.workflow.tags).toContain(`template:${TEMPLATE_ID}`);
   });
 });

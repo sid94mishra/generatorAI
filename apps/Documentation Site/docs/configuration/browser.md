@@ -40,8 +40,8 @@ The following source snapshot contains the additional refinements, transformatio
 ```typescript
 // ────────────────────────────────────────────────────────────────
 // BrowserConfigSchema — Zod validator for the workspace/workflow/stage
-// `browserConfig` block. The 3-level ConfigResolver deep-merges this the
-// same way it does `harnessConfig`.
+// `browserConfig` block. Stages read the run workspace's resolved block
+// through `BrowserService.resolveConfig`.
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';

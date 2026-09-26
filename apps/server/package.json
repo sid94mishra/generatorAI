@@ -10,6 +10,7 @@
     "start": "node --import ./dist/instrumentation.js dist/index.js",
     "typecheck": "tsc --build --force",
     "test": "vitest run",
+    "bench": "vitest bench --run",
     "lint": "eslint src/",
     "acp": "node --import ./dist/instrumentation.js dist/acp-entry.js",
     "acp:dev": "tsx --env-file-if-exists=.env --import ./src/instrumentation.ts src/acp-entry.ts"
@@ -23,6 +24,7 @@
     "@generatorai/relay-protocol": "workspace:*",
     "@generatorai/secrets": "workspace:*",
     "@generatorai/shared": "workspace:*",
+    "@generatorai/workflow-spec": "workspace:*",
     "@opentelemetry/exporter-metrics-otlp-proto": "^0.214.0",
     "@opentelemetry/exporter-trace-otlp-proto": "^0.214.0",
     "@opentelemetry/instrumentation-express": "^0.62.0",
@@ -45,6 +47,7 @@
     "ws": "^8.21.3"
   },
   "devDependencies": {
+    "@generatorai/workflow-testkit": "workspace:*",
     "@types/cors": "^2.8.17",
     "@types/express": "^5.0.0",
     "@types/multer": "^1.4.12",

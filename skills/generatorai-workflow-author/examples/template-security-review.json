@@ -1,0 +1,106 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Security review",
+    "description": "Review a target for security problems; the workflow output `verdict` is pass or fail. Publish it to use it as a sub-workflow.",
+    "session": {},
+    "variables": [
+      {
+        "name": "target",
+        "type": "string",
+        "label": "What to review",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": false,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "outputs": {
+      "verdict": "stages.review.output.verdict",
+      "findings": "stages.review.output.findings"
+    },
+    "tags": [
+      "subworkflow-child"
+    ]
+  },
+  "stages": [
+    {
+      "key": "review",
+      "name": "Security review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "review",
+          "text": "Review {{variables.target}} for security problems (injection, secrets, authorization, unsafe dependencies). Verdict fail when anything critical or high is found."
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "verdict",
+            "findings"
+          ],
+          "properties": {
+            "verdict": {
+              "enum": [
+                "pass",
+                "fail"
+              ]
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "severity",
+                  "body"
+                ],
+                "properties": {
+                  "severity": {
+                    "enum": [
+                      "critical",
+                      "high",
+                      "medium",
+                      "low"
+                    ]
+                  },
+                  "body": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    }
+  ],
+  "edges": []
+}

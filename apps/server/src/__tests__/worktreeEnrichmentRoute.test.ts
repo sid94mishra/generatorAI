@@ -14,7 +14,8 @@
 import express from 'express';
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import type { Chat, Project, WorkflowDefinition, WorkflowRun, WorktreeInfo } from '@generatorai/shared';
+import type { Chat, Project, WorkflowRun, WorktreeInfo } from '@generatorai/shared';
+import type { WorkflowDefinitionRecord } from '@generatorai/workflow-spec';
 
 import { createProjectRoutes } from '../routes/projects.js';
 
@@ -65,7 +66,7 @@ function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
     workflowDefinitionId: 'def-1',
     name: 'Run 1',
     status: 'running',
-    sessionMode: 'single',
+    definitionVersionId: 'ver-1',
     variables: {},
     createdAt: NOW,
     updatedAt: NOW,
@@ -73,18 +74,24 @@ function run(overrides: Partial<WorkflowRun> = {}): WorkflowRun {
   } as WorkflowRun;
 }
 
-function definition(overrides: Partial<WorkflowDefinition> = {}): WorkflowDefinition {
+/** A definition record; the route reads only `graph.workflow.name`. */
+function definition(overrides: { id?: string; name?: string; projectId?: string } = {}): WorkflowDefinitionRecord {
   return {
-    id: 'def-1',
-    name: 'Nightly audit',
-    projectId: 'proj-1',
-    stages: [],
-    edges: [],
-    version: 1,
-    createdAt: NOW,
-    updatedAt: NOW,
-    ...overrides,
-  } as WorkflowDefinition;
+    id: overrides.id ?? 'def-1',
+    status: 'published',
+    revision: 1,
+    currentVersionId: 'ver-1',
+    hasUnpublishedChanges: false,
+    archivedAt: null,
+    needsAttention: [],
+    authoredBy: null,
+    createdAt: NOW.toISOString(),
+    updatedAt: NOW.toISOString(),
+    graph: {
+      workflow: { name: overrides.name ?? 'Nightly audit', projectId: overrides.projectId ?? 'proj-1' },
+      stages: [],
+    },
+  } as unknown as WorkflowDefinitionRecord;
 }
 
 interface Deps {
@@ -92,7 +99,7 @@ interface Deps {
   project?: Project;
   chats?: Record<string, Chat>;
   runs?: Record<string, WorkflowRun>;
-  definitions?: Record<string, WorkflowDefinition>;
+  definitions?: Record<string, WorkflowDefinitionRecord>;
   sizes?: Record<string, number>;
 }
 
@@ -128,7 +135,7 @@ function makeApp(deps: Deps = {}) {
       }),
     },
     workflowDefinitionService: {
-      getDefinition: vi.fn((id: string) => {
+      get: vi.fn((id: string) => {
         const found = deps.definitions?.[id];
         return found ? Promise.resolve(found) : Promise.reject(new Error('not found'));
       }),
