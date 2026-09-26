@@ -92,6 +92,13 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // and /stats. Retry uses the existing /chats and /workflow-runs
   // endpoints, each under their own write scope.
   { prefix: '/activity', read: ['read:activity'], write: ['admin:settings'] },
+  // Palette entity search (G-18): the route itself is gated at the same low
+  // bar as /attention, /stats and /activity above, then filters `types`
+  // down to what the calling principal can actually read per-type
+  // (`read:chats` for chat, `read:projects` for project, `read:workflows`
+  // for agent/workflow/automation/script) before running any query — see
+  // `apps/server/src/routes/search.ts`.
+  { prefix: '/search', read: ['read:activity'], write: ['admin:settings'] },
 
   { prefix: '/chats', read: ['read:chats'], write: ['write:chats'] },
   // Authoring an agent GRANTS capability (skills, MCP servers, tool policy), so

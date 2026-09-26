@@ -40,6 +40,7 @@ import { createTerminalRoutes } from './terminals.js';
 import { createAttentionRoutes } from './attention.js';
 import { createStatsRoutes } from './stats.js';
 import { createActivityRoutes } from './activity.js';
+import { createSearchRoutes } from './search.js';
 
 // Widgets & Extensions
 import { createExtensionRoutes } from './extensions.js';
@@ -140,6 +141,10 @@ export function createApiRouter(container: Container): Router {
 
   // Recently finished activity (G-11) — Home "Recently finished" + retry.
   router.use('/activity', createActivityRoutes(container));
+
+  // Palette entity search (G-18) — chats, projects, agents, workflows,
+  // automations, scripts, ranked and merged into one list.
+  router.use('/search', createSearchRoutes(container));
 
   // Harness — runtime AI provider switching (PRV-02)
   router.use('/harness', createHarnessRoutes(container));

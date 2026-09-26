@@ -1137,6 +1137,58 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
       },
     },
+    '/api/search': {
+      get: {
+        tags: ['Search'],
+        summary: "CommandPalette's entity search across chats, projects, agents, workflows, automations and scripts (G-18)",
+        description:
+          'One merged, ranked list. Each type is dropped from the results (never a 403) when the caller lacks its ' +
+          'read scope — `read:chats` (chat), `read:projects` (project), `read:workflows` (agent/workflow/automation/script). ' +
+          'Settings entries and navigation targets are matched client-side and are not part of this response.',
+        parameters: [
+          { in: 'query', name: 'q', required: true, schema: { type: 'string' } },
+          {
+            in: 'query',
+            name: 'types',
+            required: false,
+            schema: { type: 'string' },
+            description: 'Comma-separated subset of chat,project,agent,workflow,automation,script. Default: every readable type.',
+          },
+          { in: 'query', name: 'limit', required: false, schema: { type: 'integer', default: 20, maximum: 50 } },
+        ],
+        responses: {
+          '200': {
+            description: 'Ranked results',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    results: {
+                      type: 'array',
+                      items: {
+                        type: 'object',
+                        properties: {
+                          type: { type: 'string', enum: ['chat', 'project', 'agent', 'workflow', 'automation', 'script'] },
+                          id: { type: 'string' },
+                          title: { type: 'string' },
+                          subtitle: { type: 'string' },
+                          href: { type: 'string' },
+                          status: { type: 'string' },
+                          actions: { type: 'array', items: { type: 'string', enum: ['open', 'run', 'new_chat'] } },
+                        },
+                        required: ['type', 'id', 'title', 'href'],
+                      },
+                    },
+                  },
+                  required: ['results'],
+                },
+              },
+            },
+          },
+        },
+      },
+    },
     '/api/system/info': {
       get: {
         tags: ['System'],

@@ -32,6 +32,8 @@ import {
   type WorktreeInfo,
   type WorktreeListEnriched,
   type ProjectArtifactPrefs,
+  type SearchQuery,
+  type SearchResponse,
 } from '@generatorai/shared';
 
 export interface ApiFetch {
@@ -1782,6 +1784,19 @@ export function createApiClient(fetchImpl: ApiFetch) {
     sourceControl: {
       config: () => request<SourceControlConfig>(fetchImpl, '/api/source-control/config'),
       status: () => request<SourceControlStatus>(fetchImpl, '/api/source-control/status'),
+    },
+
+    /**
+     * G-18 — CommandPalette entity search across chats, projects, agents,
+     * workflows, automations and scripts, ranked and merged server-side.
+     * Each type is simply dropped from the results (never a 403) when the
+     * caller lacks its read scope.
+     */
+    search: (query: SearchQuery) => {
+      const q = new URLSearchParams({ q: query.q });
+      if (query.types?.length) q.set('types', query.types.join(','));
+      if (query.limit !== undefined) q.set('limit', String(query.limit));
+      return request<SearchResponse>(fetchImpl, `/api/search?${q}`);
     },
   };
 }

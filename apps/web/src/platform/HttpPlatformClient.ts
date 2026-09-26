@@ -323,6 +323,8 @@ import type {
   CodebaseLogsResponse,
   FetchCodebaseResult,
   ConfigType,
+  SearchQuery,
+  SearchResponse,
 } from '@generatorai/shared';
 import { apiFetch, ApiError } from './apiFetch.js';
 import { getAuthRuntime } from './authRuntime.js';
@@ -2847,5 +2849,16 @@ export class HttpPlatformClient implements IPlatformClient {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids }),
     });
+  }
+
+  /**
+   * G-18 — CommandPalette entity search across chats, projects, agents,
+   * workflows, automations and scripts, ranked and merged server-side.
+   */
+  async search(query: SearchQuery): Promise<SearchResponse> {
+    const q = new URLSearchParams({ q: query.q });
+    if (query.types?.length) q.set('types', query.types.join(','));
+    if (query.limit !== undefined) q.set('limit', String(query.limit));
+    return apiFetch<SearchResponse>(`${this.baseUrl}/api/search?${q}`, { cache: 'no-store' });
   }
 }

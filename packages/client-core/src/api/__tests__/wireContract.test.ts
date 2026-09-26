@@ -758,3 +758,20 @@ describe('G-19 per-project artifact prefs wire contract', () => {
     expect(calls[0]?.body).toEqual({ disabled: [{ type: 'skill', id: 's1' }] });
   });
 });
+
+describe('G-18 palette entity search wire contract', () => {
+  it('sends `q` and omits `types`/`limit` when not given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).search({ q: 'nightly' });
+    expect(calls[0]?.path).toBe('/api/search?q=nightly');
+  });
+
+  it('joins `types` with commas and sends `limit`', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).search({ q: 'run nig', types: ['workflow', 'automation'], limit: 5 });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.searchParams.get('q')).toBe('run nig');
+    expect(url.searchParams.get('types')).toBe('workflow,automation');
+    expect(url.searchParams.get('limit')).toBe('5');
+  });
+});

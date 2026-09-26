@@ -604,3 +604,13 @@ export type {
   StatsByDefinitionRow,
   StatsSummary,
 } from './StatsSummary.js';
+
+// ── Palette entity search (G-18) ──
+export type {
+  SearchEntityType,
+  SearchResultAction,
+  SearchResult,
+  SearchQuery,
+  SearchResponse,
+} from './EntitySearch.js';
+export { SEARCH_ENTITY_TYPES } from './EntitySearch.js';
