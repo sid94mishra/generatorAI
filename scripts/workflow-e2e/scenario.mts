@@ -3,12 +3,15 @@
 //
 //   tsx scripts/workflow-e2e/scenario.mts --spec specs/t2.json --provider claude-agent --out <file>
 //
-// Generic runner ported from C:/gaimob/wfe2e/runwf.mts: creates the
-// definition through the REST API (definition → stages → edges), creates and
-// starts the run, captures the run-scope SSE stream, polls to a terminal
-// status, then snapshots the run from the API and the stage transcripts from
-// the DB (read-only). Writes the result JSON to --out. Expectations are
-// evaluated by run.mjs, not here, so a result can be re-judged offline.
+// A spec is `{tag, description, timeoutMs, variables?, graph}` where
+// `graph` is a v2 workflow document (formatVersion 2). The runner creates
+// the definition from the whole graph and publishes it, starts the run
+// through THE invocation (`--provider` other than faux becomes the run's
+// `overrides.harnessType`, with E2E_MODEL or the catalog's haiku),
+// captures the run-scope SSE stream, polls to a terminal (or paused)
+// status, then snapshots the stage rows from the API and the stage
+// transcripts from the DB (read-only). Writes the result JSON to --out. Expectations are evaluated by run.mjs, not here, so
+// a result can be re-judged offline.
 // ────────────────────────────────────────────────────────────────
 
 import fs from 'node:fs';
@@ -30,21 +33,31 @@ if (!specFile || !outFile) {
 }
 
 const spec = JSON.parse(fs.readFileSync(specFile, 'utf8'));
-const def = { ...spec.def };
-if (provider !== 'faux') {
-  def.harnessConfig = { model: 'haiku', harnessType: provider, ...(def.harnessConfig ?? {}) };
+if (spec.graph?.formatVersion !== 2) throw new Error(`${specFile}: \`graph\` must be a v2 workflow document (formatVersion 2)`);
+
+/** The model a live run uses: E2E_MODEL, else the provider catalog's first haiku, else the provider default. */
+async function liveModel(): Promise<string | undefined> {
+  if (process.env.E2E_MODEL) return process.env.E2E_MODEL;
+  const r = await api('GET', `/harness/models?provider=${encodeURIComponent(provider)}`);
+  const ids: string[] = Array.isArray(r.body) ? r.body.map((m: { id: string }) => m.id) : [];
+  return ids.find((id) => /haiku/i.test(id));
 }
 
 await ensurePaired();
+let overrides: Record<string, unknown> | undefined;
+if (provider !== 'faux') {
+  const model = await liveModel();
+  overrides = { harnessType: provider, ...(model ? { model } : {}) };
+}
 const t0 = Date.now();
-const wf = await createWorkflow(def, spec.stages, spec.edges ?? []);
-const runId = await invokeRun(wf.id, spec.variables ?? {});
+const wf = await createWorkflow(spec.graph);
+const runId = await invokeRun(wf.id, spec.variables ?? {}, overrides);
 const sub = await subscribeRun(runId);
 const timeline: string[] = [];
 const seen = new Map<string, string>();
 const res = await waitRun(runId, spec.timeoutMs ?? 900_000, 1000, (_run, stages) => {
   for (const s of stages) {
-    const k = `${s.status}/${s.retryCount}`;
+    const k = `${s.status}/${s.currentAttempt}`;
     if (seen.get(s.name) !== k) {
       seen.set(s.name, k);
       timeline.push(`${Date.now() - t0}ms ${s.name}=${k}`);
@@ -57,20 +70,23 @@ await sub.stop();
 const stagesBody = (await api('GET', `/workflow-runs/${runId}/stages`)).body;
 const stageRows: any[] = stagesBody?.data ?? stagesBody ?? [];
 
-// Stage transcripts, read-only from the isolated DB.
+// Stage transcripts, read-only from the isolated DB: each attempt's
+// conversation. Predecessor context is fenced into the first prompt (P03),
+// so a user message carrying the fence is flagged `isContextMessage`.
+const CONTEXT_FENCE = '<generatorai:stage-context';
 const messages: Record<string, Array<{ role: string; content: string; flags: string[] }>> = {};
 const db = openDb();
 try {
   const rows = db
     .prepare(
-      `SELECT sr.name AS stage, m.role, m.content, m.metadata FROM chat_messages m
-         JOIN stage_runs sr ON sr.id = json_extract(m.metadata, '$.stageRunId')
+      `SELECT sr.name AS stage, m.role, m.content FROM chat_messages m
+         JOIN stage_attempts a ON a.session_id = m.session_id
+         JOIN stage_runs sr ON sr.id = a.stage_run_id
         WHERE sr.workflow_run_id = ? ORDER BY m.timestamp, m.rowid`,
     )
-    .all(runId) as Array<{ stage: string; role: string; content: string; metadata: string | null }>;
+    .all(runId) as Array<{ stage: string; role: string; content: string }>;
   for (const r of rows) {
-    const meta = r.metadata ? JSON.parse(r.metadata) : {};
-    const flags = Object.keys(meta).filter((k) => k.startsWith('is') && meta[k] === true);
+    const flags = r.role === 'user' && r.content.includes(CONTEXT_FENCE) ? ['isContextMessage'] : [];
     (messages[r.stage] ??= []).push({ role: r.role, content: r.content.slice(0, 20_000), flags });
   }
 } finally {
@@ -87,14 +103,16 @@ const result = {
   runId,
   runStatus: res.run?.status,
   runError: res.run?.error,
-  sessionMode: res.run?.sessionMode,
   wallMs: Date.now() - t0,
   timeline,
   stages: stageRows.map((s) => ({
     name: s.name,
+    key: s.stageKey,
+    kind: s.kind,
     status: s.status,
-    retryCount: s.retryCount,
+    attempts: s.currentAttempt,
     error: s.error ?? undefined,
+    output: s.kind === 'agent' ? undefined : s.outputData,
     outputText: typeof s.outputText === 'string' ? s.outputText.slice(0, 600) : undefined,
     summary: typeof s.summary === 'string' ? s.summary.slice(0, 300) : undefined,
   })),
@@ -120,7 +138,7 @@ console.log(
     tag: result.tag,
     runStatus: result.runStatus,
     wallMs: result.wallMs,
-    stages: result.stages.map((s) => `${s.name}:${s.status}:r${s.retryCount}`),
+    stages: result.stages.map((s) => `${s.name}:${s.status}:a${s.attempts}`),
   }),
 );
 process.exit(0);

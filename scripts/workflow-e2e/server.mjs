@@ -29,6 +29,7 @@ import { existsSync, mkdirSync, openSync, readFileSync, rmSync, unlinkSync, writ
 import { connect } from 'node:net';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { openDb } from './lib/db.mjs';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 /** The developer server's port. The E2E harness never talks to it. */
@@ -158,6 +159,32 @@ async function waitForHealth(timeoutMs) {
   throw new Error(`server did not become healthy on ${BASE_URL} within ${timeoutMs} ms (last: ${last}); see ${LOG_FILE}`);
 }
 
+/** The engine's single-engine lock is stale after this long without a heartbeat (RunSupervisor, RV-27). */
+const ENGINE_LOCK_STALE_MS = 30_000;
+
+/**
+ * A server killed moments ago (`stop` uses taskkill /F) leaves a fresh
+ * `engine_lock` heartbeat behind, and a server booted before it goes stale
+ * starts WITHOUT the workflow engine (invocations answer 503
+ * ENGINE_UNAVAILABLE). Wait until the lock is stale before booting.
+ */
+async function waitForStaleEngineLock(log) {
+  if (!existsSync(DB_PATH)) return;
+  let heartbeatAt = null;
+  const db = openDb(DB_PATH);
+  try {
+    heartbeatAt = db.prepare('SELECT heartbeat_at AS h FROM engine_lock LIMIT 1').get()?.h ?? null;
+  } catch {
+    return; // an older schema without the lock
+  } finally {
+    db.close();
+  }
+  const waitMs = heartbeatAt === null ? 0 : Number(heartbeatAt) + ENGINE_LOCK_STALE_MS + 1000 - Date.now();
+  if (waitMs <= 0) return;
+  log(`[e2e-server] waiting ${Math.ceil(waitMs / 1000)} s for the previous server's engine lock to go stale`);
+  await new Promise((r) => setTimeout(r, waitMs));
+}
+
 export async function startServer({ provider = 'claude-agent', fresh = false, timeoutMs = 180_000, log = console.log } = {}) {
   if (await isListening(PORT)) {
     const pf = readPidFile();
@@ -170,6 +197,7 @@ export async function startServer({ provider = 'claude-agent', fresh = false, ti
     for (const d of ['data', 'ws', 'art']) rmSync(path.join(E2E_ROOT, d), { recursive: true, force: true });
   }
   for (const d of ['data', 'ws', 'art', 'creds']) mkdirSync(path.join(E2E_ROOT, d), { recursive: true });
+  await waitForStaleEngineLock(log);
 
   const env = { ...process.env };
   delete env.GENERATORAI_SECRET_KEY;

@@ -159,45 +159,41 @@ export async function subscribeRun(runId: string) {
   };
 }
 
-export interface StageSpec {
-  name: string;
-  prompt?: string;
-  [k: string]: unknown;
-}
+/** A v2 workflow document (`formatVersion: 2`), as `@generatorai/workflow-spec` defines it. */
+export type WorkflowGraph = { formatVersion: 2; workflow: Record<string, unknown>; stages: unknown[]; edges?: unknown[] };
 
-/** Create a definition, its stages (by name) and edges (`[from, to, type?]`) through the REST API. */
-export async function createWorkflow(def: Record<string, unknown>, stages: StageSpec[], edges: Array<[string, string, string?]>) {
-  const d = await api('POST', '/workflow-definitions', def);
+/**
+ * Create a definition from a whole v2 graph and publish it (P01: there are
+ * no per-stage or per-edge routes; a run executes a published version).
+ */
+export async function createWorkflow(graph: WorkflowGraph): Promise<{ id: string; versionId: string }> {
+  const d = await api('POST', '/workflow-definitions', graph);
   if (d.status >= 300) throw new Error(`create def ${d.status} ${JSON.stringify(d.body)}`);
-  const id = d.body.id ?? d.body.data?.id;
-  const ids: Record<string, string> = {};
-  let order = 0;
-  for (const s of stages) {
-    const { name, prompt, ...rest } = s;
-    const body: any = { name, order: order++, prompts: prompt ? [{ label: name, text: prompt }] : [], ...rest };
-    const r = await api('POST', `/workflow-definitions/${id}/stages`, body);
-    if (r.status >= 300) throw new Error(`create stage ${name} ${r.status} ${JSON.stringify(r.body)}`);
-    ids[name] = r.body.id ?? r.body.data?.id;
-  }
-  for (const [from, to, type] of edges) {
-    const r = await api('POST', `/workflow-definitions/${id}/edges`, {
-      fromStageId: ids[from],
-      toStageId: ids[to],
-      edgeType: type ?? 'on_success',
-    });
-    if (r.status >= 300) throw new Error(`edge ${from}->${to} ${r.status} ${JSON.stringify(r.body)}`);
-  }
-  return { id, stageIds: ids };
+  const id = d.body.id as string;
+  const p = await api('POST', `/workflow-definitions/${id}/publish`);
+  if (p.status >= 300) throw new Error(`publish def ${p.status} ${JSON.stringify(p.body)}`);
+  return { id, versionId: p.body.currentVersionId as string };
 }
 
 /** Start a run through THE invocation (P04): created and started in one request. */
-export async function invokeRun(defId: string, variables: Record<string, unknown> = {}): Promise<string> {
-  const c = await api('POST', '/workflow-invocations', { target: { kind: 'definition', workflowDefinitionId: defId }, variables, client: 'http' });
+export async function invokeRun(
+  defId: string,
+  variables: Record<string, unknown> = {},
+  overrides?: Record<string, unknown>,
+): Promise<string> {
+  const c = await api('POST', '/workflow-invocations', {
+    target: { kind: 'definition', workflowDefinitionId: defId },
+    variables,
+    ...(overrides ? { overrides } : {}),
+    client: 'http',
+  });
   if (c.status >= 300) throw new Error(`invoke ${c.status} ${JSON.stringify(c.body)}`);
   return c.body.runId as string;
 }
 
 export const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
+/** A paused run waits for an operator command the harness never sends: stop polling there too. */
+const STOP = new Set([...TERMINAL, 'paused']);
 
 export async function waitRun(runId: string, timeoutMs: number, pollMs = 1000, onPoll?: (run: any, stages: any[]) => void) {
   const t = Date.now();
@@ -209,7 +205,7 @@ export async function waitRun(runId: string, timeoutMs: number, pollMs = 1000, o
     const s = (await api('GET', `/workflow-runs/${runId}/stages`)).body;
     stages = s?.data ?? s ?? [];
     onPoll?.(run, stages);
-    if (TERMINAL.has(run?.status)) break;
+    if (STOP.has(run?.status)) break;
     await sleep(pollMs);
   }
   return { run, stages, waitedMs: Date.now() - t };
