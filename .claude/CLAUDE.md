@@ -68,6 +68,8 @@ Storybook/VRT (P1-SB) and the sandbox (P2-00) have landed, so no step is skipped
 on a machine without it, say so in the commit and leave the baselines to CI (D-53).
 Then: old files deleted, README progress table updated.
 
+**Owner override (latest): build fast.** Per task run only typecheck, lint, check:design, build and the existing tests covering touched code; add new tests only for real risk (branchy pure logic, shared contracts, bug fixes). No per-phase review cycles: ONE full review of all phases once the core phases are done, then one fix pass, then one end-to-end verification (e2e, desktop smokes, board comparison). Never test or repair legacy-UI specs.
+
 ## Standing rules
 - Cross-platform: Windows, Linux and macOS are all first-class; no fix for one OS only. Use CHROME constants and
   apps/web/src/lib/desktop.ts; scripts are Node (.mjs) using path/os.tmpdir(), not bash.

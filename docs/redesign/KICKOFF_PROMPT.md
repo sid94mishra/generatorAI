@@ -2,6 +2,8 @@
 
 Paste the kickoff prompt into a new Claude Code session opened in the main checkout on `desktop_redesign`. Paste the resume prompt into any later session.
 
+> **Owner override (2026-09-27) — speed.** Build the core phases back to back with only the tests that protect real risk; no per-phase or per-batch reviews. When the core phases are done, run ONE full review across all phases, fix every gap it finds, then one end-to-end verification (e2e, desktop smokes, design comparison against the boards).
+>
 > **Owner override (2026-09-26) — batching.** Phases are built in batches (P3 + P4, then P5 + P6, then P7 + P8) with one combined e2e/smoke run and one independent review per batch, instead of a review cycle per phase. Per task: fast checks + a short headed look at new UI only. Re-review only when a Critical or Major was found. Never spend time testing or repairing legacy-UI specs; fix a spec when its page is rebuilt.
 >
 > **Owner override (2026-09-25).** All redesign work happens directly on `desktop_redesign` in the main checkout — no `redesign/web-desktop` branch and no separate worktree. The Workflow Overhaul runs on another device on the same branch; its changes arrive by fetching and merging `origin/desktop_redesign`. The kickoff text below has been updated accordingly.
