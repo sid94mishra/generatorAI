@@ -750,6 +750,8 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
         : null;
   // A tool permission, question or plan inside a stage's turn (P03b).
   const stageGate = timeline?.pendingInteraction ?? null;
+  // Parallel stages can each park a gate; they are answered oldest first.
+  const moreGates = Math.max(0, (timeline?.pendingInteractions.length ?? 0) - 1);
 
   return (
     <Panel
@@ -805,7 +807,12 @@ function RunPane({ paneId, content, focused, height }: PaneProps): React.JSX.Ele
           <Text color={theme.c('muted')}>a decide (grant, input, accept) {theme.glyphs.neutral} x fail</Text>
         </Box>
       ) : null}
-      {stageGate ? <PendingInteractionBanner pending={stageGate} hint={`a answer ${theme.glyphs.neutral} the stage is waiting for you`} /> : null}
+      {stageGate ? (
+        <PendingInteractionBanner
+          pending={stageGate}
+          hint={`a answer ${theme.glyphs.neutral} the stage is waiting for you${moreGates > 0 ? ` ${theme.glyphs.neutral} ${moreGates} more waiting` : ''}`}
+        />
+      ) : null}
       {lines.length > 0 ? (
         <Box borderStyle={theme.borderStyle} borderColor={theme.c('border')} paddingX={1} marginBottom={1} flexDirection="column">
           {shownLines.map((line) => (

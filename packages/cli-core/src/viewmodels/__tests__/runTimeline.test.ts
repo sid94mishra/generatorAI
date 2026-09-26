@@ -394,6 +394,26 @@ describe('reduceEvent — chat.permission.* (tool-permission gate)', () => {
     state = reduceEvent(state, evt('chat.permission.resolved', { interactionId: 'i2', behavior: 'allow' }));
     expect(state.pendingInteraction).not.toBeNull();
   });
+
+  // CONVINV-R12: parallel stages each park a gate; answering one must not lose the other.
+  it('keeps every parallel stage gate open, answering them oldest first', () => {
+    const perm = (stageRunId: string, interactionId: string): StreamEvent =>
+      evt('stage.permission.requested', { stageRunId, workflowRunId: 'r', interactionId, toolName: 'Bash', type: 'shell', description: 'x', inputSummary: '', permissionMode: 'default' });
+    const parked = (stageRunId: string, interactionId: string): StreamEvent =>
+      evt('stage_run.awaiting_input', { stageRunId, workflowRunId: 'r', interruptData: { kind: 'tool_permission', interactionId } });
+    let s = reduceEvent(emptyTimeline(), perm('A', 'a1'));
+    s = reduceEvent(s, parked('A', 'a1'));
+    s = reduceEvent(s, perm('B', 'b1'));
+    s = reduceEvent(s, parked('B', 'b1'));
+    expect(s.pendingInteractions.map((p) => p.interactionId)).toEqual(['a1', 'b1']);
+    expect(s.pendingInteraction?.interactionId).toBe('a1');
+    s = reduceEvent(s, evt('stage.permission.resolved', { stageRunId: 'B', interactionId: 'b1', behavior: 'allow' }));
+    expect(s.pendingInteraction?.interactionId).toBe('a1');
+    // A gate whose stage moved on without a verdict event (a crash, then resume) goes too.
+    s = reduceEvent(s, evt('stage_run.paused', { stageRunId: 'A', workflowRunId: 'r' }));
+    expect(s.pendingInteractions).toEqual([]);
+    expect(s.pendingInteraction).toBeNull();
+  });
 });
 
 // Phase 6 item 3 — background-task visibility. Fields verified against the
