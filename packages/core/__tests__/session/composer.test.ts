@@ -12,6 +12,7 @@ import { TurnContextRegistry } from '../../src/services/session/gates.js';
 import type { SessionComposerDeps, SessionOwner } from '../../src/services/session/types.js';
 import type { ComputerService } from '../../src/services/ComputerService.js';
 import type { WorkspaceManager } from '../../src/services/WorkspaceManager.js';
+import type { OrchestratorService, StageOrchestratorParent } from '../../src/services/orchestrator/OrchestratorService.js';
 import type { EventBus } from '../../src/events/EventBus.js';
 import type { PermissionRequest } from '../../src/domain/ports/IAgentHarness.js';
 import { CustomToolRegistry } from '../../src/tools/CustomToolRegistry.js';
@@ -97,6 +98,17 @@ describe('W-19 — the run permission mode reaches Claude and Codex stages (P02-
     await expect(composer().compose(stageInput({ spec: { harnessType: 'opencode' }, mode: 'acceptEdits' }))).resolves.toBeDefined();
   });
 
+  it('opencode is refused on the mode its turns run under, not only the stored one (PD-17, review R6)', async () => {
+    // A `plan` default agent mode runs `plan` turns on an `acceptEdits` run.
+    await expect(
+      composer().compose(stageInput({ spec: { harnessType: 'opencode', defaultAgentMode: 'plan' }, mode: 'acceptEdits' })),
+    ).rejects.toMatchObject({ code: 'PERMISSION_GATING_UNSUPPORTED' });
+    // An operator's `plan` turn on an `auto` stage is refused per turn.
+    const r = await composer().compose(stageInput({ spec: { harnessType: 'opencode' }, mode: 'acceptEdits' }));
+    await expect(r.turnOptions('auto')).resolves.toEqual({ agentMode: 'auto', permissionMode: 'acceptEdits' });
+    await expect(r.turnOptions('plan')).rejects.toMatchObject({ code: 'PERMISSION_GATING_UNSUPPORTED' });
+  });
+
   it("'acceptEdits' lets edits through and parks the rest; the mode is re-read every turn", async () => {
     const parked: Array<{ stageRunId: string; kind: string }> = [];
     let mode = 'acceptEdits';
@@ -144,6 +156,47 @@ describe('composer platform gating', () => {
     // A later stage on the shared conversation that never opted in.
     c.beginTurn(stage, 'conv-1', { agentMode: 'auto', permissionMode: 'acceptEdits' }, { policy: { computerUse: 'off' } });
     await expect(tool.handler({})).rejects.toThrow(/not enabled/);
+  });
+
+  it("a bypass stage orchestrator's worker gets no computer use and is refused per call (PD-5, review R5)", async () => {
+    const parents: StageOrchestratorParent[] = [];
+    const orchestratorService = { registerStageParent: (p: StageOrchestratorParent) => parents.push(p) } as unknown as OrchestratorService;
+    type Tool = { name: string; handler: (a: Record<string, unknown>) => Promise<unknown> };
+    const computerTools = (p: unknown) => ((p as { tools?: Tool[] }).tools ?? []).filter((t) => t.name.startsWith('computer'));
+
+    // The stage's decision travels with the capabilities its workers inherit.
+    await composer({ computerService, workspaceManager, orchestratorService }).compose(
+      stageInput({ workspace, spec: { computerUse: true, orchestrator: true }, mode: 'bypassPermissions' }),
+    );
+    await composer({ computerService, workspaceManager, orchestratorService }).compose(
+      stageInput({ workspace, spec: { orchestrator: true }, mode: 'acceptEdits' }),
+    );
+    expect(parents.map((p) => p.inherited.computerUse)).toEqual(['opted_in', 'off']);
+
+    const worker: SessionOwner = { kind: 'chat', chatId: 'w1', sessionId: 'ws1', parentChatId: 'sr-1' };
+    const workerInput = (computerUse: 'opted_in' | 'off', mode: string): ComposeInput => ({
+      owner: worker,
+      conversationId: 'conv-w',
+      mode: 'create',
+      spec: {},
+      attended: false,
+      workspace,
+      permission: { source: { kind: 'chat', read: async () => mode as never } },
+      platform: { browser: { autoStart: false }, computerUse, orchestrator: false },
+    });
+    // Composed under its parent's decision: never on bypass, never when the stage did not opt in.
+    const onBypass = await composer({ computerService, workspaceManager }).compose(workerInput('opted_in', 'bypassPermissions'));
+    expect(computerTools(onBypass.params)).toHaveLength(0);
+    expect(onBypass.warnings.map((w) => w.code)).toContain('computer_use_blocked_bypass');
+    const notOptedIn = await composer({ computerService, workspaceManager }).compose(workerInput('off', 'acceptEdits'));
+    expect(computerTools(notOptedIn.params)).toHaveLength(0);
+
+    // Bound on acceptEdits, then a bypass turn stamped with the worker's policy is refused per call.
+    const c = composer({ computerService, workspaceManager });
+    const bound = await c.compose(workerInput('opted_in', 'acceptEdits'));
+    expect(bound.turnPolicy.computerUse).toBe('opted_in');
+    c.beginTurn(worker, 'conv-w', { agentMode: 'auto', permissionMode: 'bypassPermissions' }, { policy: bound.turnPolicy });
+    await expect(computerTools(bound.params)[0]!.handler({})).rejects.toThrow(/bypassPermissions/);
   });
 
   it('custom tools reach a stage without the extension-authoring pair; widgets obey the spec switch', async () => {

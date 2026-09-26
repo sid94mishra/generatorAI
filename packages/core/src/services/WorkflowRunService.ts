@@ -13,6 +13,7 @@
 import type { ILogger, RunSystemVars, StageRun, WorkflowRun, WorkflowRunPermissionMode } from '@generatorai/shared';
 import {
   ConflictError,
+  DEFAULT_AGENT_MODE,
   generateId,
   GeneratorAIError,
   getMeter,
@@ -32,7 +33,7 @@ import type { IWorkflowRunRepository, MemoizedInstance, MemoizedIteration } from
 import type { IStageRunRepository } from '../domain/ports/IStageRunRepository.js';
 import { instanceId } from '../domain/scheduler/ids.js';
 import type { EventBus } from '../events/EventBus.js';
-import { getDefaultChatPermissionMode } from './agentModePolicy.js';
+import { getDefaultChatPermissionMode, resolveTurnPermissionMode } from './agentModePolicy.js';
 import type { RunDefinitionReader } from './definitions/RunDefinitionReader.js';
 import type { CommandResult, RunSupervisor } from './engine/RunSupervisor.js';
 import { validateRunVariables } from './workflow-invocation/validateInvocation.js';
@@ -556,8 +557,11 @@ export class WorkflowRunService {
       const session = resolveSessionSpec(graph.workflow.session, stage.session);
       // The bound agent's runtime harness counts too (review R8).
       const provider = this.providerResolver ? await this.providerResolver({ session, ...(projectId ? { projectId } : {}) }) : session.harnessType;
+      const mode = runPermissionMode(run, stage.session, graph.workflow.session);
       try {
-        checkPermissionGating(provider, runPermissionMode(run, stage.session, graph.workflow.session));
+        checkPermissionGating(provider, mode);
+        // The mode its turns run under: a `plan` default agent mode runs `plan` turns (review R6).
+        checkPermissionGating(provider, resolveTurnPermissionMode(session.defaultAgentMode ?? DEFAULT_AGENT_MODE, mode));
       } catch (err) {
         if (err instanceof ComposeError) throw new PermissionGatingUnsupportedError(`Stage "${stage.name}": ${err.message}`);
         throw err;
