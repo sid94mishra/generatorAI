@@ -391,6 +391,12 @@ Decided while building P1-T1…T6 where `02` was silent:
 - Migration exception until P4-12: `pages/ChatPage.tsx` may import `features/chat` (eslint).
 - All nine characterization-pinned defects are fixed (reviews/P4-known-defects.md).
 
+### D-63 Kit batch C as built (P4-05) — Final
+- Primitives Textarea, Switch, Gauge, Callout, InlineCode, Collapsible, Slider, Combobox, Sheet (with a true non-modal variant, no backdrop, for the narrow dock sheet — D-19/D-27); patterns DockTabStrip (overflowing tabs collapse into the "+" menu), SplitPane (react-resizable-panels 4; collapse via `collapsedSize`, never unmount; layout persisted only after user interaction), CodeBlock (Shiki 4, JS regex engine, one lazy chunk per language, theme maps TextMate scopes to `var(--syntax-*)`), TerminalFrame, StepRail, KbdHintRow, GateCardFrame, FindWidget, DiffStat; template T-04 Workspace (the <1200 px dock→sheet swap belongs to S-08/S-09 in P4-06).
+- Callout "info" reuses the `run` pair; Gauge's label sits beside the 14 px ring.
+- Solarized `--syntax-function/-type/-string` darkened 1–8 % to reach AA as 13 px text on light ground.
+- Initial load after P3 + kit C: 435 KB gzip (budget 800 KB) while both UI layers coexist; P7 removes the legacy layer.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
