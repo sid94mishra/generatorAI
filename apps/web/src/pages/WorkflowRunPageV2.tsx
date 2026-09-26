@@ -49,7 +49,7 @@ import { RuntimeDAGCanvas } from '@/components/workflow/RuntimeDAGCanvas.js';
 import { RunTimeline } from '@/components/workflow/RunTimeline.js';
 import { ChangesPanel } from '@/blocks/changes/ChangesPanel.js';
 import { useFileTabs } from '@/blocks/files/useFileTabs.js';
-import { SourcesPanel } from '@/components/chat/sources/SourcesPanel.js';
+import { SourcesBlock } from '@/blocks/files/SourcesBlock.js';
 import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/blocks/browser/BrowserPanel.js';
 import { TerminalPanel, type TerminalWorktreeOption } from '@/blocks/terminal/TerminalPanel.js';
 import { WidgetHost } from '@/blocks/widgets/index.js';
@@ -57,7 +57,7 @@ import { Breadcrumb } from '@/components/layout/Breadcrumb.js';
 import { RightPane, useRightPaneOpen } from '@/components/layout/RightPane.js';
 import { clearBrowserTabUrl } from '@/lib/browserTabUrls.js';
 import { openMultiplexedStream } from '@/platform/muxStream.js';
-import { useRightPaneStore } from '@/stores/rightPaneStore.js';
+import { useDockStore } from '@/stores/dockStore.js';
 import { runTitle } from '@generatorai/client-core';
 
 export function WorkflowRunPageV2() {
@@ -127,7 +127,7 @@ export function WorkflowRunPageV2() {
    */
   const [rightPaneOpen, setRightPaneOpen, toggleRightPane] = useRightPaneOpen('generatorai:rightPane:workflow-run', false);
   // Bridge the pane toggle up to the global Header's side-pane icon.
-  const setRightPaneController = useRightPaneStore((s) => s.setController);
+  const setRightPaneController = useDockStore((s) => s.setController);
   useEffect(() => {
     setRightPaneController({ open: rightPaneOpen, toggle: toggleRightPane });
     return () => setRightPaneController(null);
@@ -153,7 +153,7 @@ export function WorkflowRunPageV2() {
     requestFocus: setBrowserTabFocusRequest,
     openPane: () => setRightPaneOpen(true),
     disabledReason: 'This run has no workspace yet',
-    sources: <SourcesPanel embedded workspaceId={runData?.workspaceId} />,
+    sources: <SourcesBlock embedded workspaceId={runData?.workspaceId} />,
   });
 
   // Closing a tab for good drops whatever that tab remembered.
