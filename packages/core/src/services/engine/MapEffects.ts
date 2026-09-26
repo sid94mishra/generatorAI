@@ -119,7 +119,7 @@ async function deleteRefs(repoDir: string, prefix: string): Promise<void> {
  * `'all'` keeps them, `'branch'` removes the worktrees but keeps the
  * branches, `'none'` removes both.
  */
-function itemKept(map: MapState, merge: string, it: MapItemState): 'all' | 'branch' | 'none' {
+export function itemKept(map: MapState, merge: string, it: MapItemState): 'all' | 'branch' | 'none' {
   if (map.winner && map.winner.phase !== 'done') return 'all';
   if (it.phase === 'merging') return 'all'; // its merge is still in flight (a cancel): finalize releases it
   if (merge === 'pr_per_item') return 'branch';
