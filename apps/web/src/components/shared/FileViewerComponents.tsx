@@ -23,7 +23,7 @@ import { Modal, Button, Spinner } from '@/components/ui/index.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { langFromPath } from '@/ui/patterns/CodeBlock/langFromPath.js';
 import { useHighlightedLines, type HighlightedToken } from '@/ui/patterns/CodeBlock/useHighlightedLines.js';
-import { FileCodeView } from '@/components/diff/FileCodeView.js';
+import { FileCodeView } from '@/blocks/files/FileCodeView.js';
 import { DiffProviders } from '@/blocks/diff/DiffProviders.js';
 import { FileTypeIcon } from '@/components/shared/fileIcons.js';
 

@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // BrowserPanel characterization — screencast live view (P4-01).
 //
-// Pins the CURRENT web/screencast behaviour of components/chat/BrowserPanel.tsx
+// Pins the CURRENT web/screencast behaviour of components/chat/BrowserPanel.tsx (now blocks/browser/BrowserPanel.tsx)
 // before the P4 split (03-component-inventory-domain.md §6.2 →
 // useBrowserViewportResize / useBrowserScrollState / useBrowserLiveStream input
 // dispatch / useBrowserCapture; 09-verification.md §5.2 "Screencast"):
@@ -45,7 +45,7 @@ import {
 } from './helpers/browserHarness.js';
 
 // Import under test — the only line that changes when P4 moves the file.
-import { BrowserPanel } from '@/components/chat/BrowserPanel.js';
+import { BrowserPanel } from '@/blocks/browser/BrowserPanel.js';
 
 vi.mock('@/platform/authTransport.js', () => ({
   buildAuthenticatedSocketUrl: vi.fn(async (url: string) => url),
@@ -83,7 +83,7 @@ class FakeResizeObserver {
 type PanelProps = React.ComponentProps<typeof BrowserPanel>;
 
 function panel(props: Partial<PanelProps> = {}): React.JSX.Element {
-  return <BrowserPanel embedded workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} {...props} />;
+  return <BrowserPanel workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} {...props} />;
 }
 
 async function mountReady(props: Partial<PanelProps> = {}) {

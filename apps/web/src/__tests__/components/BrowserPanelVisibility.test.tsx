@@ -21,9 +21,9 @@ vi.mock('@/platform/authTransport.js', () => ({
 vi.mock('@/platform/muxStream.js', () => ({
   openMultiplexedStream: () => ({ close: () => {} }),
 }));
-vi.mock('./NativeBrowserView.js', () => ({ NativeBrowserView: () => null }));
+vi.mock('@/blocks/browser/NativeBrowserView.js', () => ({ NativeBrowserView: () => null }));
 
-import { BrowserPanel } from '@/components/chat/BrowserPanel.js';
+import { BrowserPanel } from '@/blocks/browser/BrowserPanel.js';
 
 const opened: string[] = [];
 
@@ -70,7 +70,6 @@ afterEach(() => {
 function panel(visible: boolean) {
   return (
     <BrowserPanel
-      embedded
       workspaceId="ws-1"
       tabId="browser-1"
       open

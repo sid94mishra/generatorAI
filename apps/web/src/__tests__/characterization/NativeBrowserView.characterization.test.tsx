@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // NativeBrowserView characterization (P4-01).
 //
-// Pins the CURRENT component behaviour of components/chat/NativeBrowserView.tsx
+// Pins the CURRENT component behaviour of components/chat/NativeBrowserView.tsx (now blocks/browser/NativeBrowserView.tsx)
 // before it moves to blocks/browser/ (03-component-inventory-domain.md §6.2,
 // 09-verification.md §5.2 "NativeBrowserView" + the D-19 cases):
 //   • lifecycle — create(tabId, workspaceId, false) on mount, destroy on
@@ -43,7 +43,7 @@ import {
 } from './helpers/browserHarness.js';
 
 // Import under test — the only line that changes when P4 moves the file.
-import { NativeBrowserView } from '@/components/chat/NativeBrowserView.js';
+import { NativeBrowserView } from '@/blocks/browser/NativeBrowserView.js';
 
 const VIEW_LABEL = 'Native browser view';
 const BADGE = 'Paused (overlay open)';

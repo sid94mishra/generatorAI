@@ -3,7 +3,7 @@
 // ellipsis then removed the only part that answered the question.
 
 import { describe, expect, it } from 'vitest';
-import { shortenPath } from '@/components/terminal/TerminalPanel.js';
+import { shortenPath } from '@/blocks/terminal/shortenPath.js';
 
 describe('shortenPath', () => {
   it('keeps the tail when a long id sits in the middle', () => {

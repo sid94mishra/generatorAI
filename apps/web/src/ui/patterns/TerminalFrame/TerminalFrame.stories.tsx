@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
-import { expect, fn, userEvent } from 'storybook/test';
+import { expect, fn, screen, userEvent } from 'storybook/test';
 import { assertTargetSize } from '../../lib/test/targetSize.js';
 import { Badge } from '../../primitives/Badge/Badge.js';
 import { Button } from '../../primitives/Button/Button.js';
+import { PopoverPopup, PopoverRoot, PopoverTitle, PopoverTrigger } from '../../primitives/Popover/Popover.js';
 import { StatusDot } from '../../primitives/StatusDot/StatusDot.js';
 import { FindWidget } from '../FindWidget/FindWidget.js';
 import { TerminalFrame } from './TerminalFrame.js';
@@ -150,6 +151,37 @@ export const FocusVisible: Story = {
 };
 
 export const Hover: Story = { parameters: { pseudo: { hover: true } } };
+
+/** Dock panel layout: a header row (cwd, host badge) above the toolbar, Kill behind a confirm popover. */
+export const WithHeaderAndKillConfirm: Story = {
+  args: {
+    header: (
+      <>
+        <span className="min-w-0 truncate font-mono text-small text-fg-2">~/payments-service</span>
+        <Badge>pty</Badge>
+      </>
+    ),
+    toolbar: (
+      <Button variant="ghost" size="sm" icon="attach">
+        Attach selection
+      </Button>
+    ),
+    killConfirm: (killButton) => (
+      <PopoverRoot>
+        <PopoverTrigger render={killButton} />
+        <PopoverPopup align="end" className="w-66 p-3">
+          <PopoverTitle className="m-0 text-ui font-semibold text-fg">Kill zsh?</PopoverTitle>
+          <p className="m-0 text-small text-fg-3">Stops the shell and whatever it is running. Scrollback is kept.</p>
+        </PopoverPopup>
+      </PopoverRoot>
+    ),
+  },
+  play: async ({ canvas }) => {
+    await userEvent.click(canvas.getByRole('button', { name: 'Kill the terminal process' }));
+    await expect(await screen.findByText('Kill zsh?')).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+  },
+};
 
 /** Compact density: sm buttons draw 20px and keep a 24px hit area. */
 export const TargetSize: Story = {

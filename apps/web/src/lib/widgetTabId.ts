@@ -4,7 +4,7 @@
 // Encoding the instance in the tab id is what makes "open this widget"
 // idempotent: re-rendering the same widget focuses the tab already showing
 // it instead of stacking duplicates, and the mapping survives a reload for
-// free because RightPane persists tab ids. Mirrors `diff/fileTabId`.
+// free because RightPane persists tab ids. Mirrors `blocks/files/fileTabId`.
 // ────────────────────────────────────────────────────────────────
 
 const PREFIX = 'widget:';

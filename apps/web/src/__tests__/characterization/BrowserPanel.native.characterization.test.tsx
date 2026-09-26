@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // BrowserPanel characterization — desktop native browser (P4-01).
 //
-// Pins the CURRENT desktop-only behaviour of components/chat/BrowserPanel.tsx
+// Pins the CURRENT desktop-only behaviour of components/chat/BrowserPanel.tsx (now blocks/browser/BrowserPanel.tsx)
 // (window.generatoraiDesktop.browser.available() === true) before the P4 split
 // (03-component-inventory-domain.md §6.2, 09-verification.md §5.2 "Native only"
 // and "URL bar"):
@@ -24,7 +24,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ThemeProvider } from '@/providers/ThemeProvider.js';
@@ -42,7 +42,7 @@ import {
 } from './helpers/browserHarness.js';
 
 // Import under test — the only line that changes when P4 moves the file.
-import { BrowserPanel } from '@/components/chat/BrowserPanel.js';
+import { BrowserPanel } from '@/blocks/browser/BrowserPanel.js';
 
 vi.mock('@/platform/authTransport.js', () => ({
   buildAuthenticatedSocketUrl: vi.fn(async (url: string) => url),
@@ -63,7 +63,7 @@ const NATIVE_READY: BrowserDescriptorFixture = {
 type PanelProps = React.ComponentProps<typeof BrowserPanel>;
 
 function panel(props: Partial<PanelProps> = {}): React.JSX.Element {
-  return <BrowserPanel embedded workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} {...props} />;
+  return <BrowserPanel workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} {...props} />;
 }
 
 async function mount(props: Partial<PanelProps> = {}) {
@@ -296,9 +296,9 @@ describe('BrowserPanel native — annotate mode (BrowserPanel.tsx:728-824)', () 
     await mount({ onCapture });
     fireEvent.click(inspectButton());
     await flush();
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Comments (1)' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Comments (1)' }));
     await flush();
-    const menu = screen.getByRole('menu');
+    const menu = screen.getByRole('dialog');
     expect(within(menu).getByText('No comment yet')).toBeInTheDocument();
     expect(within(menu).getByRole('button', { name: 'Send this comment to chat' })).toBeDisabled();
     expect(within(menu).queryByRole('button', { name: /Send all to chat/ })).toBeNull();
@@ -306,7 +306,7 @@ describe('BrowserPanel native — annotate mode (BrowserPanel.tsx:728-824)', () 
     bridge.api.annotatePoll.mockResolvedValue({ total: 1, items: [annotation('a', 1, 'make it blue')], sent: [] });
     await advance(400);
     bridge.api.annotateSend.mockResolvedValueOnce([pick()]);
-    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: /Send all to chat/ }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: /Send all to chat/ }));
     await flush();
     expect(bridge.api.annotateSend).toHaveBeenCalledWith('tab-1', undefined);
     expect(onCapture).toHaveBeenCalledWith(expect.any(File), 'selection');
@@ -317,12 +317,12 @@ describe('BrowserPanel native — annotate mode (BrowserPanel.tsx:728-824)', () 
     await mount({ onCapture: vi.fn() });
     fireEvent.click(inspectButton());
     await flush();
-    fireEvent.keyDown(screen.getByRole('button', { name: 'Comments (1)' }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('button', { name: 'Comments (1)' }));
     await flush();
-    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Send this comment to chat' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Send this comment to chat' }));
     await flush();
     expect(bridge.api.annotateSend).toHaveBeenCalledWith('tab-1', ['k1']);
-    fireEvent.click(within(screen.getByRole('menu')).getByRole('button', { name: 'Delete this comment' }));
+    fireEvent.click(within(screen.getByRole('dialog')).getByRole('button', { name: 'Delete this comment' }));
     await flush();
     expect(bridge.api.annotateRemove).toHaveBeenCalledWith('tab-1', 'k1');
   });
@@ -363,6 +363,30 @@ describe('BrowserPanel native — annotate mode (BrowserPanel.tsx:728-824)', () 
 
 describe('BrowserPanel native — device emulation (BrowserPanel.tsx:851-898, 1857-1948)', () => {
   const toolbarToggle = (): HTMLElement => screen.getByRole('button', { name: /^Toggle device toolbar/ });
+  // P4-10: the native <select>s became kit Menus (menu-button triggers named as
+  // the old selects, radio items as the options); "pick" = open + click the item.
+  const openMenu = async (name: string): Promise<HTMLElement> => {
+    fireEvent.click(screen.getByRole('button', { name }));
+    await flush();
+    return screen.getByRole('menu');
+  };
+  const itemTexts = (menu: HTMLElement): (string | null)[] =>
+    within(menu).getAllByRole('menuitemradio').map((o) => o.textContent);
+  // Base UI unmounts a closed menu on the next animation frame (real time, not
+  // the manual clock) and guards the trigger for a moment after closing.
+  const settle = async (): Promise<void> => {
+    await act(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+    await advance(500);
+  };
+  const closeMenu = async (): Promise<void> => {
+    fireEvent.keyDown(screen.getByRole('menu'), { key: 'Escape' });
+    await settle();
+  };
+  const pick = async (menuName: string, item: string): Promise<void> => {
+    const menu = await openMenu(menuName);
+    fireEvent.click(within(menu).getByRole('menuitemradio', { name: item }));
+    await settle();
+  };
 
   it('the toggle turns the device bar on (responsive = no emulation, zoom 1) and off again', async () => {
     await mount();
@@ -376,14 +400,13 @@ describe('BrowserPanel native — device emulation (BrowserPanel.tsx:851-898, 18
     fireEvent.click(toolbarToggle());
     expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', null);
     expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1);
-    expect(screen.queryByRole('combobox', { name: 'Device preset' })).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Device preset' })).toBeNull();
   });
 
   it('offers the nine presets and the zoom levels 50 % … 200 %', async () => {
     await mount();
     fireEvent.click(toolbarToggle());
-    const presets = within(screen.getByRole('combobox', { name: 'Device preset' })).getAllByRole('option');
-    expect(presets.map((o) => o.textContent)).toEqual([
+    expect(itemTexts(await openMenu('Device preset'))).toEqual([
       'Responsive',
       'Mobile S — 360×640',
       'iPhone 12/13 — 390×844',
@@ -394,18 +417,34 @@ describe('BrowserPanel native — device emulation (BrowserPanel.tsx:851-898, 18
       'Laptop — 1366×768',
       'Desktop — 1920×1080',
     ]);
-    const zooms = within(screen.getByRole('combobox', { name: 'Page zoom' })).getAllByRole('option') as HTMLOptionElement[];
-    expect(zooms.map((o) => o.value)).toEqual(['0.5', '0.67', '0.75', '0.9', '1', '1.1', '1.25', '1.5', '2']);
-    expect(zooms.map((o) => o.textContent)).toEqual(['50%', '67%', '75%', '90%', '100%', '110%', '125%', '150%', '200%']);
-    expect(
-      (within(screen.getByRole('combobox', { name: 'Device pixel ratio' })).getAllByRole('option') as HTMLOptionElement[]).map((o) => o.value),
-    ).toEqual(['1', '1.5', '2', '3']);
-  });
+    await closeMenu();
+
+    const zoomTexts = ['50%', '67%', '75%', '90%', '100%', '110%', '125%', '150%', '200%'];
+    const zoomValues = [0.5, 0.67, 0.75, 0.9, 1, 1.1, 1.25, 1.5, 2];
+    expect(itemTexts(await openMenu('Page zoom'))).toEqual(zoomTexts);
+    await closeMenu();
+    // Each zoom item applies its level.
+    for (const [i, text] of zoomTexts.entries()) {
+      await pick('Page zoom', text);
+      expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', zoomValues[i]);
+    }
+
+    // DPR is disabled under Responsive; pick a device to enable it.
+    await pick('Device preset', 'Laptop — 1366×768');
+    expect(itemTexts(await openMenu('Device pixel ratio'))).toEqual(['1×', '1.5×', '2×', '3×']);
+    await closeMenu();
+    for (const dpr of [1.5, 2, 3, 1]) {
+      await pick('Device pixel ratio', `${dpr}×`);
+      expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 1366, height: 768, deviceScaleFactor: dpr, mobile: false });
+    }
+    // ~20 menu round trips, each waiting a real animation frame: slow under a
+    // loaded parallel run, so it gets more than the default 5 s.
+  }, 20_000);
 
   it('a preset emulates its size + mobile flag; rotate swaps; zoom and DPR re-apply', async () => {
     await mount();
     fireEvent.click(toolbarToggle());
-    fireEvent.change(screen.getByRole('combobox', { name: 'Device preset' }), { target: { value: 'iphone' } });
+    await pick('Device preset', 'iPhone 12/13 — 390×844');
     expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true });
     expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1);
     expect(screen.getByRole('spinbutton', { name: 'Width (px)' })).toHaveValue(390);
@@ -413,27 +452,28 @@ describe('BrowserPanel native — device emulation (BrowserPanel.tsx:851-898, 18
     fireEvent.click(screen.getByRole('button', { name: 'Rotate viewport' }));
     expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 844, height: 390, deviceScaleFactor: 1, mobile: true });
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Page zoom' }), { target: { value: '1.5' } });
+    await pick('Page zoom', '150%');
     expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1.5);
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Device pixel ratio' }), { target: { value: '2' } });
+    await pick('Device pixel ratio', '2×');
     expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 844, height: 390, deviceScaleFactor: 2, mobile: true });
   });
 
   it('editing a dimension switches to a "Custom" preset (minimum 100 px)', async () => {
     await mount();
     fireEvent.click(toolbarToggle());
-    fireEvent.change(screen.getByRole('combobox', { name: 'Device preset' }), { target: { value: 'laptop' } });
+    await pick('Device preset', 'Laptop — 1366×768');
     fireEvent.change(screen.getByRole('spinbutton', { name: 'Width (px)' }), { target: { value: '40' } });
     expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', { width: 100, height: 768, deviceScaleFactor: 1, mobile: false });
-    expect(screen.getByRole('combobox', { name: 'Device preset' })).toHaveValue('custom');
+    expect(screen.getByRole('button', { name: 'Device preset' })).toHaveTextContent('Custom');
+    expect(within(await openMenu('Device preset')).getByRole('menuitemradio', { name: 'Custom' })).toHaveAttribute('aria-checked', 'true');
   });
 
   it('turning the device bar off after emulating resets to no emulation and zoom 1', async () => {
     await mount();
     fireEvent.click(toolbarToggle());
-    fireEvent.change(screen.getByRole('combobox', { name: 'Device preset' }), { target: { value: 'tablet' } });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Page zoom' }), { target: { value: '2' } });
+    await pick('Device preset', 'Tablet — 768×1024');
+    await pick('Page zoom', '200%');
     fireEvent.click(toolbarToggle());
     expect(bridge.api.setEmulation).toHaveBeenLastCalledWith('tab-1', null);
     expect(bridge.api.setZoom).toHaveBeenLastCalledWith('tab-1', 1);

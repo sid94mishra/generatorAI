@@ -1,7 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // BrowserPanel characterization — toolbar (P4-01).
 //
-// Pins the CURRENT toolbar behaviour of components/chat/BrowserPanel.tsx before
+// Pins the CURRENT toolbar behaviour of components/chat/BrowserPanel.tsx (now blocks/browser/BrowserPanel.tsx) before
 // the P4 split (03-component-inventory-domain.md §6.2 → useBrowserNavigation,
 // BrowserToolbar / UrlField / UrlPill / ShareToggle / CaptureButton;
 // 09-verification.md §5.2 "URL bar"): https:// prefixing, start-before-ready,
@@ -38,7 +38,7 @@ import {
 } from './helpers/browserHarness.js';
 
 // Import under test — the only line that changes when P4 moves the file.
-import { BrowserPanel } from '@/components/chat/BrowserPanel.js';
+import { BrowserPanel } from '@/blocks/browser/BrowserPanel.js';
 
 vi.mock('@/platform/authTransport.js', () => ({
   buildAuthenticatedSocketUrl: vi.fn(async (url: string) => url),
@@ -61,7 +61,7 @@ const OFF: BrowserDescriptorFixture = { status: 'off', mode: 'off', ready: false
 type PanelProps = React.ComponentProps<typeof BrowserPanel>;
 
 function panel(props: Partial<PanelProps> = {}): React.JSX.Element {
-  return <BrowserPanel embedded workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} {...props} />;
+  return <BrowserPanel workspaceId="ws-1" tabId="tab-1" open visible onClose={() => {}} {...props} />;
 }
 
 function renderPanel(props: Partial<PanelProps> = {}) {

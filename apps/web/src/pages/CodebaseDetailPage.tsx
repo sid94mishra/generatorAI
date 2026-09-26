@@ -41,7 +41,7 @@ import { ConfirmDialog } from '@/components/ConfirmDialog.js';
 import { useEditorTarget } from '@/stores/editorTargetStore.js';
 import { Markdown } from '@/ui/patterns/Markdown/Markdown.js';
 import { langFromPath } from '@/ui/patterns/CodeBlock/langFromPath.js';
-import { FileCodeView } from '@/components/diff/FileCodeView.js';
+import { FileCodeView } from '@/blocks/files/FileCodeView.js';
 import { DiffProviders } from '@/blocks/diff/DiffProviders.js';
 import { toast } from '@/components/Toast.js';
 import { Modal, Button, Badge, Spinner, Tabs, PageHeader, Popover, PopoverTrigger, PopoverContent, Input, type BadgeTone } from '@/components/ui/index.js';

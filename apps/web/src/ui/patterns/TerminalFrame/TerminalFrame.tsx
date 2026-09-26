@@ -11,9 +11,12 @@
 // over the body, outside the key-owning element so the find field keeps the
 // normal shortcut rules. `status` is a 28h footer (small fg-3), border-t.
 // The xterm host goes in `children`; the frame never knows about xterm.
+// `header` is an optional 40h row above the toolbar (the dock panel's cwd /
+// host badges / quick-cd row); `killConfirm` wraps the Kill button (the
+// ConfirmPopover recipe) instead of `onKill` firing on click.
 // ────────────────────────────────────────────────────────────────
 
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, ReactElement, ReactNode } from 'react';
 import { cn } from '../../lib/cn.js';
 import { Button } from '../../primitives/Button/Button.js';
 
@@ -30,6 +33,10 @@ export interface TerminalFrameProps extends Omit<ComponentProps<'div'>, 'childre
   onClear?: () => void;
   /** Renders the "Kill" danger button. */
   onKill?: () => void;
+  /** Renders Kill and hands it to this wrapper (a confirm Popover) instead of calling `onKill`. */
+  killConfirm?: (killButton: ReactElement) => ReactNode;
+  /** A 40h row above the toolbar (cwd, host badge, quick cd). */
+  header?: ReactNode;
   /** Kill unavailable (no process). */
   killDisabled?: boolean;
   /** Accessible name of Clear; must contain the visible "Clear". Default "Clear scrollback". */
@@ -46,36 +53,44 @@ export function TerminalFrame({
   find,
   onClear,
   onKill,
+  killConfirm,
+  header,
   killDisabled = false,
   clearLabel = 'Clear scrollback',
   killLabel = 'Kill the terminal process',
   className,
   ...rest
 }: TerminalFrameProps) {
+  const killButton =
+    onKill || killConfirm ? (
+      <Button
+        variant="danger"
+        size="sm"
+        icon="power"
+        aria-label={killLabel}
+        disabled={killDisabled}
+        {...(killConfirm ? {} : { onClick: onKill })}
+        // Spec tint: Kill sits on `bg-err-bg` (Button's danger variant is raised).
+        className="bg-err-bg hover:not-disabled:bg-err-bg hover:not-disabled:border-err"
+      >
+        Kill
+      </Button>
+    ) : null;
   return (
     <div className={cn('flex min-h-0 flex-1 flex-col', className)} {...rest}>
+      {header != null ? (
+        <div className="flex h-panel-bar shrink-0 items-center gap-1.5 border-b border-line-soft px-2">{header}</div>
+      ) : null}
       <div className="flex h-panel-bar shrink-0 items-center gap-1.5 border-b border-line-soft px-2">
         <div className="flex min-w-0 flex-1 items-center gap-1.5">{toolbar}</div>
-        {onClear || onKill ? (
+        {onClear || killButton ? (
           <div className="flex shrink-0 items-center gap-1">
             {onClear ? (
               <Button variant="ghost" size="sm" aria-label={clearLabel} onClick={onClear}>
                 Clear
               </Button>
             ) : null}
-            {onKill ? (
-              <Button
-                variant="danger"
-                size="sm"
-                aria-label={killLabel}
-                disabled={killDisabled}
-                onClick={onKill}
-                // Spec tint: Kill sits on `bg-err-bg` (Button's danger variant is raised).
-                className="bg-err-bg hover:not-disabled:bg-err-bg hover:not-disabled:border-err"
-              >
-                Kill
-              </Button>
-            ) : null}
+            {killButton ? (killConfirm ? killConfirm(killButton) : killButton) : null}
           </div>
         ) : null}
       </div>

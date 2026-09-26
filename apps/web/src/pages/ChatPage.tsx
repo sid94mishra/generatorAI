@@ -14,15 +14,16 @@ import { LiveActivityStrip, useRunningBackgroundTaskCount } from '@/components/a
 import { PathRootsContext } from '@/blocks/changes/changePaths.js';
 import { EditSourcesDialog } from '@/components/chat/sources/EditSourcesDialog.js';
 import { providerLabel } from '@/components/shared/ModelPicker.js';
-import type { ChatMessage } from '@generatorai/shared';
 import { useStreamStore } from '@/stores/streamStore.js';
-import { AgentConsole } from '@/components/chat/AgentConsole.js';
 import { WidgetFrame } from '@/blocks/widgets/index.js';
 import { ScmResultCard } from '@/components/scm/ScmResultCard.js';
 import { awaitsUserDecision, type ScmResultBlock, type WidgetBlock } from '@generatorai/client-core';
 import { Composer, type ComposerAttachment } from '@/blocks/composer/index.js';
-import { useFileTabs } from '@/components/diff/useFileTabs.js';
-import { BrowserPanel, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
+import { FileDockPanel, FilesDockPanel, FilesDockProvider, useFileTabs } from '@/blocks/files/useFileTabs.js';
+import { TerminalDockPanel, TerminalDockProvider, terminalTabLabel, type TerminalDockContextValue } from '@/blocks/terminal/terminalDock.js';
+import { BrowserDockPanel, BrowserDockProvider, browserDockTabLabel, type BrowserDockContextValue } from '@/blocks/browser/browserDock.js';
+import type { BrowserTabState } from '@/blocks/browser/useBrowserTabState.js';
+import { SourcesPanel } from '@/components/chat/sources/SourcesPanel.js';
 import { ChatMessageSkeleton } from '@/components/Skeleton.js';
 import { Dock, useDockOpen, type DockRegistry } from '@/blocks/dock/index.js';
 import { ChangesDockContext, ChangesDockPanel } from '@/blocks/changes/ChangesDockPanel.js';
@@ -43,22 +44,6 @@ import {
   useChatView,
   type ChatDockContextValue,
 } from '@/features/chat/index.js';
-
-// Right-pane-only surfaces, code-split out of the chat route chunk. They pull
-// in the two heaviest dependency trees in the app (xterm + its WebGL addon;
-// Shiki grammars via @pierre/diffs) and are never on the path to first paint —
-// keeping them static delayed the composer and transcript on every chat open.
-const TerminalPanel = React.lazy(() =>
-  import('@/components/terminal/TerminalPanel.js').then((m) => ({ default: m.TerminalPanel })),
-);
-
-function PanelFallback() {
-  return (
-    <div className="flex h-full items-center justify-center">
-      <Loader2 className="h-4 w-4 animate-spin text-[var(--color-muted-foreground)]" />
-    </div>
-  );
-}
 
 /**
  * "Forked from <parent>" — where a branched conversation came from.
@@ -86,27 +71,6 @@ function ForkProvenanceChip({ parentChatId }: { parentChatId: string }) {
   );
 }
 
-/**
- * Same idea for the Terminal tab's agent shell console: it needs the live
- * stream to show in-progress shell blocks, but subscribing here — rather
- * than threading `stream` through the (memoised) RightPane `tabs` object —
- * keeps that per-token subscription scoped to exactly when the console is
- * actually mounted, and keeps `stream` out of the tabs memo's dependencies.
- */
-const AgentShellPanel = React.memo(function AgentShellPanel({
-  sessionId,
-  messages,
-  callId,
-  onClose,
-}: {
-  sessionId: string | undefined;
-  messages: readonly ChatMessage[] | undefined;
-  callId: string;
-  onClose: () => void;
-}) {
-  const stream = useStreamStore((state) => (sessionId ? state.streams[sessionId] : undefined));
-  return <AgentConsole messages={messages} stream={stream} selectedCallId={callId} onClose={onClose} />;
-});
 
 export function ChatPage() {
   const { id: chatId } = useParams<{ id: string }>();
@@ -144,11 +108,18 @@ export function ChatPage() {
 
   // Files tab + per-file tabs. Opening a file expands the pane first, so the
   // gesture works even when the user has it collapsed.
+  // The Files tab leads with the chat's Sources block: "which of these
+  // folders am I looking at?" belongs next to the tree.
+  const filesSources = useMemo(
+    () => <SourcesPanel embedded workspaceId={chat?.workspaceId} onEditSources={() => setEditingSources(true)} />,
+    [chat?.workspaceId],
+  );
+  const openDock = useCallback(() => setRightPaneOpen(true), [setRightPaneOpen]);
   const fileTabs = useFileTabs({
     workspaceId: chat?.workspaceId,
     requestFocus: dock.requestFocus,
-    openPane: () => setRightPaneOpen(true),
-    onEditSources: () => setEditingSources(true),
+    openPane: openDock,
+    sources: filesSources,
   });
 
   // Closing a tab for good drops whatever that tab remembered.
@@ -194,6 +165,44 @@ export function ChatPage() {
     browserUrlScopeKey,
   } = dock;
   const widgetTitlesKey = stream.widgetTitlesKey;
+
+  const addCapture = useCallback(
+    (source: 'browser' | 'terminal') => (file: File) =>
+      setPendingCaptures((prev) => [...prev, { id: `${source}:${Date.now()}:${file.name}`, file, source, label: file.name }]),
+    [],
+  );
+  const onBrowserTabState = useCallback((tabId: string, s: BrowserTabState) => {
+    setBrowserTabs((prev) => {
+      const cur = prev[tabId];
+      if (cur && cur.loading === s.loading && cur.title === s.title && cur.favicon === s.favicon && cur.url === s.url) return prev;
+      return { ...prev, [tabId]: s };
+    });
+  }, []);
+  const agentName = chat?.agentSnapshot?.driving?.name;
+  const browserDock = useMemo<BrowserDockContextValue>(
+    () => ({
+      workspaceId: chat?.workspaceId,
+      urlScopeKey: browserUrlScopeKey,
+      onCapture: addCapture('browser'),
+      agentBusy: isCopilotWorking,
+      ...(agentName ? { agentName } : {}),
+      onTabStateChange: onBrowserTabState,
+    }),
+    [chat?.workspaceId, browserUrlScopeKey, addCapture, isCopilotWorking, agentName, onBrowserTabState],
+  );
+  const terminalDock = useMemo<TerminalDockContextValue>(
+    () => ({
+      workspaceId: chat?.workspaceId,
+      onCapture: addCapture('terminal'),
+      agentBusy: isCopilotWorking,
+      // A "Ran" step's terminal icon swaps the shells for the agent's commands.
+      agentConsole:
+        agentConsoleCallId != null
+          ? { callId: agentConsoleCallId, sessionId, messages, onClose: closeAgentShell }
+          : null,
+    }),
+    [chat?.workspaceId, addCapture, isCopilotWorking, agentConsoleCallId, sessionId, messages, closeAgentShell],
+  );
 
   // Right-pane tabs — memoised so a token frame (which changes `stream`,
   // deliberately excluded from these deps) does not rebuild all ~10 panel
@@ -243,19 +252,20 @@ export function ChatPage() {
       },
       // D-27: Files is ONE pinned tab (the tree); opened files get `file` tabs.
       files: {
-        render: fileTabs.filesTab.render!,
         label: 'Files',
-        description: fileTabs.filesTab.description ?? 'Browse every file in the workspace',
+        description: 'Browse every file in the workspace',
         icon: 'files',
         pinned: true,
+        getTabLabel: fileTabs.filesTabLabel,
+        Component: FilesDockPanel,
       },
       file: {
-        render: fileTabs.fileTab.render!,
         label: 'File',
         icon: 'file',
         allowMultiple: true,
         maxInstances: CHAT_DOCK_TAB_CAPS.file,
-        ...(fileTabs.fileTab.getTabLabel ? { getTabLabel: fileTabs.fileTab.getTabLabel } : {}),
+        getTabLabel: fileTabs.fileTabLabel,
+        Component: FileDockPanel,
       },
       browser: {
         label: 'Browser',
@@ -264,50 +274,11 @@ export function ChatPage() {
         pinned: true,
         allowMultiple: true,
         maxInstances: CHAT_DOCK_TAB_CAPS.browser,
-        getTabLabel: ({ id, index }) => {
-          const t = (browserTabs[id]?.title ?? '').trim();
-          return t || (index <= 1 ? 'Browser' : `Browser ${index}`);
-        },
+        getTabLabel: ({ id, index }) => browserDockTabLabel(browserTabs[id], index),
         getTabDot: ({ id }) => (browserTabs[id]?.loading ? { tone: 'run', label: 'Loading' } : undefined),
         disabled: !chat?.workspaceId,
         disabledReason: 'No workspace for this chat',
-        render: (ctx) => (
-          chat?.workspaceId ? (
-            <div className="flex h-full min-h-0 flex-1 flex-col">
-              {/* Pending-capture banner is hoisted above ChatInput for
-                  visibility across all right-pane tabs. */}
-              <div className="flex-1 min-h-0">
-                <BrowserPanel
-                  embedded
-                  workspaceId={chat.workspaceId}
-                  tabId={ctx.id}
-                  urlScopeKey={browserUrlScopeKey}
-                  open={true}
-                  // P1-50 — every tab is mounted; only the selected one
-                  // may hold a live screencast socket.
-                  visible={ctx.active}
-                  onClose={() => setRightPaneOpen(false)}
-                  onCapture={(file) =>
-                    setPendingCaptures((prev) => [
-                      ...prev,
-                      { id: `browser:${Date.now()}:${file.name}`, file, source: 'browser', label: file.name },
-                    ])
-                  }
-                  onTabStateChange={(s) => setBrowserTabs((prev) => {
-                    const cur = prev[ctx.id];
-                    if (cur && cur.loading === s.loading && cur.title === s.title && cur.favicon === s.favicon && cur.url === s.url) return prev;
-                    return { ...prev, [ctx.id]: s };
-                  })}
-                  agentBusy={isCopilotWorking}
-                />
-              </div>
-            </div>
-          ) : (
-            <div className="p-4 text-xs text-[var(--color-muted-foreground)]">
-              Browser is not available until this chat has a workspace.
-            </div>
-          )
-        ),
+        Component: BrowserDockPanel,
       },
       terminal: {
         label: 'Terminal',
@@ -315,7 +286,7 @@ export function ChatPage() {
         icon: 'terminal',
         pinned: true,
         allowMultiple: true,
-        getTabLabel: ({ index }) => (index <= 1 ? 'Terminal' : `Terminal ${index}`),
+        getTabLabel: terminalTabLabel,
         // P2-54 — terminals are the one uncapped WebGL-context consumer:
         // each xterm instance takes a WebGL context, and browsers hand out
         // ~16 per page before evicting the oldest, at which point earlier
@@ -324,31 +295,7 @@ export function ChatPage() {
         maxInstances: CHAT_DOCK_TAB_CAPS.terminal,
         disabled: !chat?.workspaceId,
         disabledReason: 'No workspace for this chat',
-        render: (ctx) => (
-          <React.Suspense fallback={<PanelFallback />}>
-            {agentConsoleCallId != null ? (
-              <AgentShellPanel
-                sessionId={sessionId}
-                messages={messages}
-                callId={agentConsoleCallId}
-                onClose={closeAgentShell}
-              />
-            ) : (
-              <TerminalPanel
-                embedded
-                workspaceId={chat?.workspaceId}
-                tabId={ctx.id}
-                onCapture={(file) =>
-                  setPendingCaptures((prev) => [
-                    ...prev,
-                    { id: `terminal:${Date.now()}:${file.name}`, file, source: 'terminal', label: file.name },
-                  ])
-                }
-                agentBusy={isCopilotWorking}
-              />
-            )}
-          </React.Suspense>
-        ),
+        Component: TerminalDockPanel,
       },
       computer: {
         label: 'Computer',
@@ -401,16 +348,9 @@ export function ChatPage() {
     chat?.workspaceId,
     chatId,
     sessionId,
-    fileTabs.filesTab,
-    fileTabs.fileTab,
+    fileTabs.filesTabLabel,
+    fileTabs.fileTabLabel,
     browserTabs,
-    browserUrlScopeKey,
-    setRightPaneOpen,
-    setPendingCaptures,
-    isCopilotWorking,
-    agentConsoleCallId,
-    closeAgentShell,
-    messages,
     isOrchestrator,
     runningTaskCount,
     widgetTitlesKey,
@@ -481,7 +421,11 @@ export function ChatPage() {
     <ChangesDockContext.Provider value={changesDockProps}>
     <ChatDockContext.Provider value={chatDock}>
     <div className="relative flex h-full">
-      {/* The right dock (D-27) lays out the main chat column beside it. */}
+      {/* The right dock (D-27) lays out the main chat column beside it. The
+          Files / Terminal / Browser panels read their contexts, not closures. */}
+      <FilesDockProvider value={fileTabs.dockContext}>
+      <TerminalDockProvider value={terminalDock}>
+      <BrowserDockProvider value={browserDock}>
       <Dock
         open={rightPaneOpen}
         onOpenChange={setRightPaneOpen}
@@ -620,6 +564,9 @@ export function ChatPage() {
       </div>
         }
       />
+      </BrowserDockProvider>
+      </TerminalDockProvider>
+      </FilesDockProvider>
 
       {/* Source editor — reachable from the preparation banner and from the
           Sources block at the top of the Files tab. */}
