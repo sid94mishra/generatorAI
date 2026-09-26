@@ -23,8 +23,8 @@ import {
   useRemoveSourceControlAccount,
   useStartDeviceLogin,
   useDeviceLoginStatus,
-  useHarnessProviders,
 } from '@/hooks/queries.js';
+import { useHarnessProviders } from '@/hooks/harnessQueries.js';
 import { Badge, Button, Input, Select, Spinner, useConfirm } from '@/components/ui/index.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
 import { toast } from '@/components/Toast.js';

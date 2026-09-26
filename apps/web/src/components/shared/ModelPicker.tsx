@@ -23,9 +23,9 @@ import { ChevronDown, Check, Search, X, Lock, Info, Cpu, Eye, Globe, Gauge, Arro
 import { cn } from '@/lib/utils.js';
 import { Button } from '@/components/ui/index.js';
 import { ProviderBrandIcon } from '@/ui/icons/vendor/VendorIcons.js';
-import { useHarnessProviders } from '@/hooks/queries.js';
+import { useHarnessProviders } from '@/hooks/harnessQueries.js';
 import { resolveModelLimit } from '@generatorai/client-core';
-import type { ChatModel } from '@/platform/HttpPlatformClient.js';
+import { buildModelPickerCatalog, readyCatalogModels } from '@generatorai/client-core';
 
 // ── Agent providers (harness types) ──────────────────────────────
 // The LLM providers this build supports. Readiness (installed / connected /
@@ -179,10 +179,7 @@ export function ModelPicker({
   const primaryProvider = providerData?.primary ?? 'copilot';
 
   /** Every model across every ready provider, tagged with its owner. */
-  const allModels = useMemo(
-    () => providerInfos.flatMap((p) => (p.ready ? p.models.map((m) => ({ ...m, provider: m.provider ?? p.type })) : [])),
-    [providerInfos],
-  );
+  const allModels = useMemo(() => (providerData ? readyCatalogModels(providerData) : []), [providerData]);
 
   const selectedModel = useMemo(
     () => (value ? allModels.find((m) => m.id === value) : undefined),
@@ -226,12 +223,13 @@ export function ModelPicker({
    * common reading of that screen is "starting a chat is broken". This is not
    * specific to any OS — it reproduces wherever the primary provider is
    * unauthenticated — so prefer `primary` while it is ready and otherwise fall
-   * back to the first provider that is.
+   * back to the first provider that is (client-core `buildModelPickerCatalog`,
+   * the rule every picker shares, G-09).
    */
-  const defaultBrowseProvider = useMemo(() => {
-    if (providerInfos.find((p) => p.type === primaryProvider)?.ready) return primaryProvider;
-    return providerInfos.find((p) => p.ready)?.type ?? primaryProvider;
-  }, [providerInfos, primaryProvider]);
+  const defaultBrowseProvider = useMemo(
+    () => (providerData ? buildModelPickerCatalog(providerData).defaultProvider : null) ?? primaryProvider,
+    [providerData, primaryProvider],
+  );
 
   // Browse the selected model's provider by default so opening the picker
   // lands on the tab the user is actually using.

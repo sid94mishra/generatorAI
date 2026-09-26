@@ -4,7 +4,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { useSendPrompt, useModels, useHarnessConfig, useHarnessProviders } from '@/hooks/queries.js';
+import { useSendPrompt, useHarnessConfig } from '@/hooks/queries.js';
+import { useModels, useHarnessProviders } from '@/hooks/harnessQueries.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import { useSlashCommands, useWorkspaceFileIndex } from '@/hooks/composerQueries.js';
@@ -19,7 +20,7 @@ import type {
   ComposerMenuState,
   CaptureSource,
 } from './composer/types.js';
-import type { ChatModel } from '@/platform/HttpPlatformClient.js';
+import type { HarnessCatalogModel } from '@generatorai/shared';
 import type { AgentMode, WorkspacePrepStatus } from '@generatorai/shared';
 import { WorkspacePrepBar, isPreparing } from './sources/WorkspacePrepBar.js';
 import { AGENT_MODES, AGENT_MODE_REGISTRY, DEFAULT_AGENT_MODE } from '@generatorai/shared';
@@ -326,7 +327,7 @@ export function ChatInput({
   const connectedRepoCount =
     (codebaseIds?.length ?? 0) + gitRepositories.filter((r) => r.url.trim()).length;
 
-  const modelList = (models ?? []) as ChatModel[];
+  const modelList = (models ?? []) as HarnessCatalogModel[];
   // Resolve the selection against the LIVE catalog.
   //
   // A chat can carry a model id the account no longer has (a renamed or

@@ -14,6 +14,7 @@
 
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
+import { readyCatalogModels } from '@generatorai/client-core';
 import {
   ConnectionManager,
   createCliClient,
@@ -154,12 +155,9 @@ async function fetchCandidates(
     case 'widget':
       return (await api.widgets.list()).map((w) => ({ id: w.id, label: w.title }));
     case 'model': {
-      const providers = (await api.harness.providers()) as {
-        providers?: Array<{ models?: Array<{ id: string; name?: string }> }>;
-      };
-      return (providers.providers ?? []).flatMap((p) =>
-        (p.models ?? []).map((m) => ({ id: m.id, label: m.name })),
-      );
+      // Only models of READY providers: a signed-out provider's model would be
+      // offered and then refused when the chat starts.
+      return readyCatalogModels(await api.harness.providers()).map((m) => ({ id: m.id, label: m.name }));
     }
     // `stage` and `codebase` are scoped to a parent whose id the shell has not
     // necessarily typed yet. Offering every stage on the server would be

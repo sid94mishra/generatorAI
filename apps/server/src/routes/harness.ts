@@ -11,6 +11,7 @@
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
 import { ALL_HARNESS_TYPES, type HarnessType } from '@generatorai/agent-harness-providers';
+import type { HarnessLoginResult, HarnessProvidersResponse } from '@generatorai/shared';
 
 export function createHarnessRoutes(container: Container): Router {
   const router = Router();
@@ -61,7 +62,9 @@ export function createHarnessRoutes(container: Container): Router {
         statuses = await harnessRegistry.refresh(force);
       }
 
-      res.json({
+      // Typed with the shared wire shape (G-09) so a drift between this body
+      // and what web / mobile / CLI read is a compile error.
+      const body: HarnessProvidersResponse = {
         primary: harnessRegistry.primary,
         // `stale` tells the client this is last-known-good and a fresher
         // answer is being fetched, so it can poll briefly and converge rather
@@ -84,7 +87,8 @@ export function createHarnessRoutes(container: Container): Router {
           // and flips once the probe has run.
           supportsLogin: typeof harnessRegistry.peek?.(s.type as HarnessType)?.startLogin === 'function',
         })),
-      });
+      };
+      res.json(body);
     } catch (err) {
       next(err);
     }
@@ -105,7 +109,7 @@ export function createHarnessRoutes(container: Container): Router {
         res.status(409).json({ error: { code: 'UNSUPPORTED', message: `${type} has no in-app sign-in; use its own CLI to sign in.` } });
         return;
       }
-      const result = await adapter.startLogin();
+      const result: HarnessLoginResult = await adapter.startLogin();
       logger.info(`[HarnessRoutes] ${type} sign-in started`, { requestId: req.requestId, browser: !!result.authUrl });
       if (result.completed) harnessRegistry.requestRefresh();
       res.json(result);

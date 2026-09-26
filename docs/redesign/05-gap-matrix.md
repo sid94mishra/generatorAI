@@ -35,7 +35,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-06 | Transcript view mode Normal / Verbose / Summary | P4 | P4 (client only) | S |
 | G-07 | Computer consent plan + scope; Pause agent / Take over | P4 (degrades) | P2 | M–L |
 | G-08 | Deep links keep an allowlisted query string — **built (P2-04)** | P4 | P2 (desktop) | S |
-| G-09 | Model-picker provider methods on the platform client | P4 | P2 | S |
+| G-09 | Model-picker provider methods on the platform client — **built (P2-04)** | P4 | P2 | S |
 | G-10 | Stats summary (Home This week, Workflows strip, automation stats) | P5 (PW later) | P2 | M |
 | G-11 | Recently finished activity | P5 | P2 | M |
 | G-12 | System info (version, database size, disk, agent capacity) | P5 | P2 | S |
@@ -341,6 +341,13 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 **Needed.** Only client methods: `getHarnessProviders({ refresh? })`, `loginProvider(type)` and `logoutProvider(type)` on the platform client. They replace the raw `fetch` calls in `settings/sections/Providers.tsx:61,84,108,143`.
 
 **Owner / phase / effort.** P2 · P4 · **S**.
+
+**As built (P2-04).**
+- **Wire types** (`packages/shared/src/types/HarnessCatalog.ts`): `HarnessCatalogModel` (replaces web's `ChatModel`), `HarnessProviderStatus` (`supportsLogin` now required), `HarnessProvidersResponse { primary, stale, providers }` (`stale` always a boolean), `HarnessLoginResult`, `HarnessSetDefaultResult`, `MODEL_TIERS = lightweight | versatile | powerful` (the "tier" is `HarnessModel.category`). The server route body is typed with them; OpenAPI documents `/harness/providers`, `…/:type/login`, `…/:type/logout`.
+- **Platform client:** `getHarnessProviders({ refresh? })`, `loginProvider(type)`, `logoutProvider(type)` and also `setDefaultProvider(type)` (the fourth raw `fetch` in Providers.tsx was `/harness/switch`). client-core: `harness.providers(refresh)`, `harness.login`, `harness.logout`, `harness.setDefault`; its `ProviderStatus` / `ProvidersResponse` are replaced by the shared types (mobile updated).
+- **Read model** (`packages/client-core/src/models/pickerCatalog.ts`): `buildModelPickerCatalog(response)` → `{ providers, defaultProvider, models, stale }`: providers ordered ready-first (the configured default first while it is ready), each with `availability: ready | not_installed | signed_out | unavailable`, `error`, `supportsLogin`, and models only when ready; `defaultProvider` is never a provider that is not ready (null when none is). `PickerModel` = `{ tier, description, contextTokens, longContextTokens, maxOutputTokens, vision, reasoningEfforts, defaultReasoningEffort, source }`. `readyCatalogModels` (flat, ready-only, default provider first — so "start on the first model" can never pick an unavailable provider), `findPickerModel`, `modelReasoningEfforts`, `providerAvailability`.
+- **Web hooks** (`hooks/harnessQueries.ts`, moved out of `queries.ts`): `useHarnessProviders`, `useModels`, `useModelPickerCatalog`, `useRefreshHarnessProviders`, `useProviderLogin`, `useProviderLogout`, `useSetDefaultProvider` — one cache entry, polling every 3 s while `stale`. The old relative `fetch('/api/harness/providers')` (which ignored the platform's base URL) is gone.
+- **Consumers:** Providers settings (all raw `fetch` removed), SourceControl, ChatInput, CreateChatDialog, AgentEditorPage, ChatPage, legacy `ModelPicker` (its default tab now comes from `buildModelPickerCatalog`), mobile ModelSheet / providers / useModels, CLI `model` completion (ready providers only; it used to offer signed-out providers' models).
 
 ### G-10 — Stats summary
 

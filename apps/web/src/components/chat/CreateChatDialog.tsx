@@ -17,7 +17,7 @@ import {
 import { getDefaultChatModel } from '@/lib/appPreferences.js';
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { ModelPicker } from '@/components/shared/ModelPicker.js';
-import { useModels } from '@/hooks/queries.js';
+import { useModels } from '@/hooks/harnessQueries.js';
 import {
   SourceControlOptionsFields,
   DEFAULT_SOURCE_CONTROL_OPTIONS,

@@ -25,7 +25,14 @@ import type {
   AttentionSnapshot,
 } from '@generatorai/shared';
 import { emptyAttentionCounts } from '@generatorai/shared';
-import type { ChatBulkResult, ChatListPage, ChatListQuery } from '@generatorai/shared';
+import type {
+  ChatBulkResult,
+  ChatListPage,
+  ChatListQuery,
+  HarnessLoginResult,
+  HarnessProvidersResponse,
+  HarnessSetDefaultResult,
+} from '@generatorai/shared';
 import { vi } from 'vitest';
 
 export function createMockSession(overrides: Partial<Session> = {}): Session {
@@ -296,4 +303,20 @@ export class MockPlatformClient implements IPlatformClient {
   archiveChats = vi.fn(async (chatIds: string[]): Promise<ChatBulkResult> => ({ succeeded: [...chatIds], failed: [] }));
 
   deleteChats = vi.fn(async (chatIds: string[]): Promise<ChatBulkResult> => ({ succeeded: [...chatIds], failed: [] }));
+
+  getHarnessProviders = vi.fn(
+    async (_options?: { refresh?: boolean }): Promise<HarnessProvidersResponse> => ({
+      primary: 'copilot',
+      stale: false,
+      providers: [],
+    }),
+  );
+
+  loginProvider = vi.fn(async (_type: string): Promise<HarnessLoginResult> => ({}));
+
+  logoutProvider = vi.fn(async (_type: string): Promise<void> => undefined);
+
+  setDefaultProvider = vi.fn(
+    async (type: string): Promise<HarnessSetDefaultResult> => ({ message: `Switched to '${type}'`, type, switched: true }),
+  );
 }

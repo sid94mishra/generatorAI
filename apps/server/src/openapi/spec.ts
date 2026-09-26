@@ -953,6 +953,56 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
         required: ['succeeded', 'failed'],
       },
+      HarnessCatalogModel: {
+        type: 'object',
+        description: 'One model a provider serves for the signed-in account (G-09).',
+        properties: {
+          id: { type: 'string' },
+          name: { type: 'string' },
+          provider: { type: 'string' },
+          description: { type: 'string' },
+          category: { type: 'string', description: 'Tier: lightweight | versatile | powerful' },
+          promptTokenLimit: { type: 'integer', description: 'Prompt tokens of the default tier (context gauge)' },
+          totalContextWindow: { type: 'integer' },
+          longContext: {
+            type: 'object',
+            properties: { promptTokenLimit: { type: 'integer' }, totalContextWindow: { type: 'integer' } },
+          },
+          maxOutputTokens: { type: 'integer' },
+          supportsVision: { type: 'boolean' },
+          supportsReasoning: { type: 'boolean' },
+          reasoningEfforts: { type: 'array', items: { type: 'string' } },
+          defaultReasoningEffort: { type: 'string' },
+          supportsLongContext: { type: 'boolean' },
+        },
+        required: ['id', 'name'],
+      },
+      HarnessProviderStatus: {
+        type: 'object',
+        properties: {
+          type: { type: 'string' },
+          label: { type: 'string' },
+          installed: { type: 'boolean' },
+          connected: { type: 'boolean' },
+          authenticated: { type: 'boolean' },
+          ready: { type: 'boolean', description: 'Usable right now; a picker never auto-selects a provider that is not ready' },
+          error: { type: 'string', nullable: true },
+          checkedAt: { type: 'integer' },
+          modelCount: { type: 'integer' },
+          models: { type: 'array', items: { $ref: '#/components/schemas/HarnessCatalogModel' } },
+          supportsLogin: { type: 'boolean' },
+        },
+        required: ['type', 'label', 'installed', 'connected', 'authenticated', 'ready', 'modelCount', 'models', 'supportsLogin'],
+      },
+      HarnessProvidersResponse: {
+        type: 'object',
+        properties: {
+          primary: { type: 'string', description: 'Configured default provider, reported whether or not it is ready' },
+          stale: { type: 'boolean', description: 'Served from the snapshot while a background re-probe runs' },
+          providers: { type: 'array', items: { $ref: '#/components/schemas/HarnessProviderStatus' } },
+        },
+        required: ['primary', 'stale', 'providers'],
+      },
       AttentionSnapshot: {
         type: 'object',
         description:
@@ -2425,6 +2475,59 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             description: 'The attention feed has not started (or failed to): unknown, not empty (ATTENTION_UNAVAILABLE)',
             content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } },
           },
+        },
+      },
+    },
+
+    '/api/harness/providers': {
+      get: {
+        tags: ['Harness'],
+        summary: 'Readiness and model catalog of every agent provider (G-09)',
+        description:
+          'Answered from the last snapshot (`stale: true` while a background re-probe runs; poll until false). ' +
+          '`refresh=1` forces a blocking re-probe that spawns each provider CLI.',
+        parameters: [{ in: 'query', name: 'refresh', required: false, schema: { type: 'string', enum: ['1', 'true'] } }],
+        responses: {
+          '200': {
+            description: 'Providers',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/HarnessProvidersResponse' } } },
+          },
+        },
+      },
+    },
+
+    '/api/harness/providers/{type}/login': {
+      post: {
+        tags: ['Harness'],
+        summary: "Start the provider's own sign-in (G-09)",
+        parameters: [{ in: 'path', name: 'type', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Sign-in started: open `authUrl` when present, then re-probe; `completed` = signed in already',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { authUrl: { type: 'string' }, loginId: { type: 'string' }, completed: { type: 'boolean' } },
+                },
+              },
+            },
+          },
+          '404': { description: 'Unknown provider', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'No in-app sign-in (UNSUPPORTED)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
+    '/api/harness/providers/{type}/logout': {
+      post: {
+        tags: ['Harness'],
+        summary: "Sign the provider's account out (G-09)",
+        parameters: [{ in: 'path', name: 'type', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': { description: 'Signed out' },
+          '404': { description: 'Unknown provider', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'No in-app sign-out (UNSUPPORTED)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },

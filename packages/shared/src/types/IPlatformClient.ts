@@ -14,6 +14,7 @@ import type { WorkflowDefinition, WorkflowDefinitionWithStages, CreateWorkflowDe
 import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams, StageRun } from './WorkflowRun.js';
 import type { AttentionFilter, AttentionSnapshot } from './Attention.js';
 import type { ChatBulkResult, ChatListPage, ChatListQuery } from './ChatList.js';
+import type { HarnessLoginResult, HarnessProvidersResponse, HarnessSetDefaultResult } from './HarnessCatalog.js';
 
 /** Platform type discriminator */
 export type PlatformType = 'web' | 'cli' | 'desktop';
@@ -190,4 +191,20 @@ export interface IPlatformClient {
   archiveChats(chatIds: string[]): Promise<ChatBulkResult>;
   /** Permanently delete several chats in one request; the outcome is per id. */
   deleteChats(chatIds: string[]): Promise<ChatBulkResult>;
+
+  // ── Agent providers / model picker (G-09) ──
+  /**
+   * Every provider's readiness and model catalog (`GET /api/harness/providers`).
+   * Answered from the server's snapshot (`stale: true` while it re-probes);
+   * `refresh: true` forces a blocking re-probe that spawns each provider's CLI,
+   * so pass it only on an explicit user action. Build the picker's view with
+   * client-core's `buildModelPickerCatalog` (ready providers first).
+   */
+  getHarnessProviders(options?: { refresh?: boolean }): Promise<HarnessProvidersResponse>;
+  /** Start the provider's own sign-in; open `authUrl` when present, then re-probe. */
+  loginProvider(type: string): Promise<HarnessLoginResult>;
+  /** Sign the provider's account out. */
+  logoutProvider(type: string): Promise<void>;
+  /** Make a READY provider the default for requests that name none (409 otherwise). */
+  setDefaultProvider(type: string): Promise<HarnessSetDefaultResult>;
 }

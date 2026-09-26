@@ -9,7 +9,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, cleanup } from '@testing-library/react';
 
 const providers = vi.hoisted(() => ({ value: null as unknown }));
-vi.mock('@/hooks/queries.js', () => ({
+vi.mock('@/hooks/harnessQueries.js', () => ({
   useHarnessProviders: () => ({ data: providers.value, isLoading: false, isFetching: false, refetch: vi.fn() }),
 }));
 

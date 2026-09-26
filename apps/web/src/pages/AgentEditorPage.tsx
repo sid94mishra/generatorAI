@@ -36,7 +36,7 @@ import {
 } from '@/hooks/agentQueries.js';
 import { PROVIDERS } from '@/components/shared/ModelPicker.js';
 import { REASONING_EFFORTS } from '@generatorai/shared';
-import { useModels } from '@/hooks/queries.js';
+import { useModels } from '@/hooks/harnessQueries.js';
 import { useProjects } from '@/hooks/projectQueries.js';
 import {
   Button,

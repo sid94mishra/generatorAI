@@ -12,7 +12,8 @@
 
 import { useMemo } from 'react';
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import { queryKeys, type ModelInfo, type ProvidersResponse } from '@generatorai/client-core';
+import { queryKeys, type ModelInfo } from '@generatorai/client-core';
+import type { HarnessProvidersResponse } from '@generatorai/shared';
 
 import { useApi } from './useApi';
 import { groupModels, type ModelGroup } from './modelCatalogue';
@@ -43,7 +44,7 @@ export function useModels(): UseQueryResult<ModelInfo[]> {
  * provider with zero ready models is indistinguishable from one that simply
  * has none, and the picker has to tell the user which it is.
  */
-export function useProviders(): UseQueryResult<ProvidersResponse> {
+export function useProviders(): UseQueryResult<HarnessProvidersResponse> {
   const api = useApi();
   return useQuery({
     queryKey: queryKeys.providers(),

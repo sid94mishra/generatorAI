@@ -17,8 +17,7 @@ import { PlatformContext } from '@/providers/PlatformProvider.js';
 import { SourceControlSection } from '@/components/settings/sections/SourceControl.js';
 import type { IPlatformClient } from '@generatorai/shared';
 
-// The model picker's catalog comes from `fetch('/api/harness/providers')`,
-// not the platform client; stub it so it never reaches the network.
+// The model picker's catalog comes from `platform.getHarnessProviders()` (G-09).
 const harnessResponse = { providers: [], primary: 'copilot', stale: false };
 
 function makePlatform(overrides: Record<string, unknown> = {}) {
@@ -57,6 +56,7 @@ function makePlatform(overrides: Record<string, unknown> = {}) {
       interval: 5,
     }),
     getSourceControlDeviceLogin: vi.fn().mockResolvedValue({ loginId: 'login-1', status: 'pending' }),
+    getHarnessProviders: vi.fn().mockResolvedValue(harnessResponse),
     ...overrides,
   };
 }

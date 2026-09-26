@@ -23,7 +23,17 @@ import type {
 } from '@generatorai/shared';
 import type { Artifact } from '@generatorai/shared';
 import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
-import { chatListSearchParams, runChatBulk, type ChatBulkResult, type ChatListPage, type ChatListQuery } from '@generatorai/shared';
+import {
+  chatListSearchParams,
+  runChatBulk,
+  type ChatBulkResult,
+  type ChatListPage,
+  type ChatListQuery,
+  type HarnessCatalogModel,
+  type HarnessLoginResult,
+  type HarnessProvidersResponse,
+  type HarnessSetDefaultResult,
+} from '@generatorai/shared';
 // AGT-01 — first-class agents
 import type {
   Agent,
@@ -322,45 +332,6 @@ import type {
   ReviewSubmitResult,
 } from '../types/review.js';
 import { downloadBlobAsFile } from '../utils/downloadBlobAsFile.js';
-
-/**
- * Model metadata surfaced by the agent harness provider via
- * `GET /api/copilot/models`. Mirrors `HarnessModel` in
- * `@generatorai/core` — capability/billing fields drive the model picker
- * UI so nothing is hardcoded on the client.
- */
-export interface ChatModel {
-  id: string;
-  name: string;
-  provider?: string;
-  /** Provider blurb — for Claude Code this carries the concrete version + pricing. */
-  description?: string;
-  category?: string;
-  /** Maximum PROMPT tokens (default tier) — the context-gauge denominator. */
-  promptTokenLimit?: number;
-  /** Advertised total window = promptTokenLimit + maxOutputTokens. Display only. */
-  totalContextWindow?: number;
-  /** Long-context tier limits, when the model offers one. */
-  longContext?: { promptTokenLimit?: number; totalContextWindow?: number };
-  /** @deprecated Use `totalContextWindow` / `promptTokenLimit`. */
-  contextWindow?: number;
-  /** @deprecated Use `promptTokenLimit`. */
-  standardContextWindow?: number;
-  maxOutputTokens?: number;
-  supportsVision?: boolean;
-  supportsReasoning?: boolean;
-  reasoningEfforts?: string[];
-  defaultReasoningEffort?: string;
-  priceCategory?: string;
-  billingMultiplier?: number;
-  pricing?: {
-    input?: number;
-    output?: number;
-    cached?: number;
-    batchSize?: number;
-  };
-  supportsLongContext?: boolean;
-}
 
 /**
  * System health snapshot returned by `GET /api/health`. Drives the
@@ -1276,11 +1247,11 @@ export class HttpPlatformClient implements IPlatformClient {
 
   // ── Copilot-specific API calls (not in IPlatformClient but useful for web) ──
 
-  async getModels(): Promise<ChatModel[]> {
+  async getModels(): Promise<HarnessCatalogModel[]> {
     // Canonical catalog endpoint — provider-tagged, with prompt/total token
     // limits and reasoning-effort metadata. (`/api/copilot/models` is a
     // deprecated alias that returns the same merged list.)
-    return apiFetch<ChatModel[]>(`${this.baseUrl}/api/harness/models`);
+    return apiFetch<HarnessCatalogModel[]>(`${this.baseUrl}/api/harness/models`);
   }
 
   /** Active harness/agent provider. */
@@ -2675,6 +2646,32 @@ export class HttpPlatformClient implements IPlatformClient {
 
   async deleteChats(chatIds: string[]): Promise<ChatBulkResult> {
     return runChatBulk(chatIds, (ids) => this.postChatBulk('delete', ids));
+  }
+
+  // G-09: agent providers for the model picker and Settings > Providers.
+  async getHarnessProviders(options?: { refresh?: boolean }): Promise<HarnessProvidersResponse> {
+    return apiFetch<HarnessProvidersResponse>(
+      `${this.baseUrl}/api/harness/providers${options?.refresh ? '?refresh=1' : ''}`,
+    );
+  }
+
+  async loginProvider(type: string): Promise<HarnessLoginResult> {
+    return apiFetch<HarnessLoginResult>(
+      `${this.baseUrl}/api/harness/providers/${encodeURIComponent(type)}/login`,
+      { method: 'POST' },
+    );
+  }
+
+  async logoutProvider(type: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/harness/providers/${encodeURIComponent(type)}/logout`, { method: 'POST' });
+  }
+
+  async setDefaultProvider(type: string): Promise<HarnessSetDefaultResult> {
+    return apiFetch<HarnessSetDefaultResult>(`${this.baseUrl}/api/harness/switch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ type }),
+    });
   }
 
   private postChatBulk(action: 'archive' | 'delete', ids: string[]): Promise<ChatBulkResult> {

@@ -541,3 +541,14 @@ export {
   runChatBulk,
   liveChatIds,
 } from './ChatList.js';
+
+// ── Agent-provider catalog (G-09) ──
+export type {
+  ModelTier,
+  HarnessCatalogModel,
+  HarnessProviderStatus,
+  HarnessProvidersResponse,
+  HarnessLoginResult,
+  HarnessSetDefaultResult,
+} from './HarnessCatalog.js';
+export { MODEL_TIERS } from './HarnessCatalog.js';

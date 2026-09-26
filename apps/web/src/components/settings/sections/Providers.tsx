@@ -16,7 +16,8 @@ import {
   CheckCircle2, AlertTriangle, RefreshCw, Wifi, WifiOff, Cpu, Star, LogIn, LogOut,
 } from 'lucide-react';
 import { usePlatform } from '@/providers/PlatformProvider.js';
-import { useHarnessProviders, type HarnessProviderInfo } from '@/hooks/queries.js';
+import type { HarnessLoginResult, HarnessProviderStatus } from '@generatorai/shared';
+import { useHarnessProviders } from '@/hooks/harnessQueries.js';
 import { Button, Badge, Spinner } from '@/components/ui/index.js';
 import { cn } from '@/lib/utils.js';
 import { SectionHeader, CatalogAccordionRow } from '../shared.js';
@@ -58,9 +59,7 @@ export function ProvidersSection() {
     setSuccess(null);
     setBusy('__all__');
     try {
-      const res = await fetch(`${platform.baseUrl}/api/harness/providers?refresh=1`);
-      if (!res.ok) throw new Error(`Probe failed (${res.status})`);
-      const fresh = (await res.json()) as { providers: HarnessProviderInfo[] };
+      const fresh = await platform.getHarnessProviders({ refresh: true });
       await refetch();
       const ready = fresh.providers.filter((p) => p.ready);
       setSuccess(
@@ -76,14 +75,12 @@ export function ProvidersSection() {
   };
 
   /** Re-probe a single provider and report its result. */
-  const testOne = async (p: HarnessProviderInfo): Promise<void> => {
+  const testOne = async (p: HarnessProviderStatus): Promise<void> => {
     setError(null);
     setSuccess(null);
     setBusy(p.type);
     try {
-      const res = await fetch(`${platform.baseUrl}/api/harness/providers?refresh=1`);
-      if (!res.ok) throw new Error(`Probe failed (${res.status})`);
-      const fresh = (await res.json()) as { providers: HarnessProviderInfo[] };
+      const fresh = await platform.getHarnessProviders({ refresh: true });
       await refetch();
       const me = fresh.providers.find((x) => x.type === p.type);
       if (me?.ready) setSuccess(`${me.label} connected — ${me.modelCount} model${me.modelCount === 1 ? '' : 's'} available.`);
@@ -100,14 +97,18 @@ export function ProvidersSection() {
    * URL to open; we then re-probe until the provider reports authenticated
    * (the sign-in completes in the browser, out of our sight).
    */
-  const signIn = async (p: HarnessProviderInfo): Promise<void> => {
+  const signIn = async (p: HarnessProviderStatus): Promise<void> => {
     setError(null);
     setSuccess(null);
     setBusy(p.type);
     try {
-      const res = await fetch(`${platform.baseUrl}/api/harness/providers/${p.type}/login`, { method: 'POST' });
-      const body = (await res.json()) as { authUrl?: string; completed?: boolean; error?: { message?: string } };
-      if (!res.ok) { setError(body.error?.message ?? 'Could not start sign-in'); return; }
+      let body: HarnessLoginResult;
+      try {
+        body = await platform.loginProvider(p.type);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not start sign-in');
+        return;
+      }
       if (body.authUrl) {
         window.open(body.authUrl, '_blank', 'noopener,noreferrer');
         setSuccess(`Finish signing in to ${p.label} in the browser window that just opened. This page updates when it completes.`);
@@ -116,9 +117,8 @@ export function ProvidersSection() {
       const deadline = Date.now() + 180_000;
       while (Date.now() < deadline) {
         await new Promise((r) => setTimeout(r, body.authUrl ? 4_000 : 1_000));
-        const probe = await fetch(`${platform.baseUrl}/api/harness/providers?refresh=1`);
-        if (!probe.ok) continue;
-        const fresh = (await probe.json()) as { providers: HarnessProviderInfo[] };
+        const fresh = await platform.getHarnessProviders({ refresh: true }).catch(() => null);
+        if (!fresh) continue;
         const me = fresh.providers.find((x) => x.type === p.type);
         if (me?.authenticated) {
           await refetch();
@@ -135,15 +135,13 @@ export function ProvidersSection() {
     }
   };
 
-  const signOut = async (p: HarnessProviderInfo): Promise<void> => {
+  const signOut = async (p: HarnessProviderStatus): Promise<void> => {
     setError(null);
     setSuccess(null);
     setBusy(p.type);
     try {
-      const res = await fetch(`${platform.baseUrl}/api/harness/providers/${p.type}/logout`, { method: 'POST' });
-      const body = (await res.json()) as { error?: { message?: string } };
-      if (!res.ok) { setError(body.error?.message ?? 'Could not sign out'); return; }
-      await fetch(`${platform.baseUrl}/api/harness/providers?refresh=1`);
+      await platform.logoutProvider(p.type);
+      await platform.getHarnessProviders({ refresh: true });
       await refetch();
       setSuccess(`${p.label} signed out.`);
     } catch (err) {
@@ -154,18 +152,12 @@ export function ProvidersSection() {
   };
 
   /** Make this provider the one used when a request doesn't name one. */
-  const makeDefault = async (p: HarnessProviderInfo): Promise<void> => {
+  const makeDefault = async (p: HarnessProviderStatus): Promise<void> => {
     setError(null);
     setSuccess(null);
     setBusy(p.type);
     try {
-      const res = await fetch(`${platform.baseUrl}/api/harness/switch`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: p.type }),
-      });
-      const body = await res.json();
-      if (!res.ok) { setError(body.error?.message ?? 'Could not set default provider'); return; }
+      await platform.setDefaultProvider(p.type);
       setSuccess(`${p.label} is now the default provider.`);
       await refetch();
     } catch (err) {
@@ -255,7 +247,7 @@ export function ProvidersSection() {
 }
 
 /** Live connection state for one provider. */
-function ConnectionPill({ provider, checking }: { provider: HarnessProviderInfo; checking: boolean }) {
+function ConnectionPill({ provider, checking }: { provider: HarnessProviderStatus; checking: boolean }) {
   if (checking) {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
@@ -277,7 +269,7 @@ function ConnectionPill({ provider, checking }: { provider: HarnessProviderInfo;
 function ProviderDetails({
   provider, isDefault, busy, onTest, onMakeDefault, onSignIn, onSignOut,
 }: {
-  provider: HarnessProviderInfo;
+  provider: HarnessProviderStatus;
   isDefault: boolean;
   busy: boolean;
   onTest: () => void;

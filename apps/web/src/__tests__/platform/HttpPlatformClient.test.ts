@@ -465,4 +465,32 @@ describe('HttpPlatformClient', () => {
     ]);
     expect(result).toEqual({ succeeded: ids, failed: [] });
   });
+
+  it('G-09: provider methods hit the harness routes (refresh only on request)', async () => {
+    const providers = { primary: 'copilot', stale: false, providers: [] };
+    vi.mocked(globalThis.fetch).mockResolvedValue(jsonResponse(providers));
+    expect(await client.getHarnessProviders()).toEqual(providers);
+    await client.getHarnessProviders({ refresh: true });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonResponse({ authUrl: 'https://auth.example' }));
+    expect(await client.loginProvider('claude-agent')).toEqual({ authUrl: 'https://auth.example' });
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonResponse({ ok: true }));
+    await client.logoutProvider('codex');
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(jsonResponse({ message: 'm', type: 'codex', switched: true }));
+    expect(await client.setDefaultProvider('codex')).toMatchObject({ switched: true });
+    const calls = vi.mocked(globalThis.fetch).mock.calls.map(([url, init]) => [String(url), init?.method ?? 'GET']);
+    expect(calls).toEqual([
+      ['http://localhost:3000/api/harness/providers', 'GET'],
+      ['http://localhost:3000/api/harness/providers?refresh=1', 'GET'],
+      ['http://localhost:3000/api/harness/providers/claude-agent/login', 'POST'],
+      ['http://localhost:3000/api/harness/providers/codex/logout', 'POST'],
+      ['http://localhost:3000/api/harness/switch', 'POST'],
+    ]);
+  });
+
+  it('G-09: a refused sign-in surfaces the server message', async () => {
+    vi.mocked(globalThis.fetch).mockResolvedValue(
+      jsonResponse({ error: { code: 'UNSUPPORTED', message: 'copilot has no in-app sign-in' } }, 409),
+    );
+    await expect(client.loginProvider('copilot')).rejects.toThrow(/no in-app sign-in/);
+  });
 });

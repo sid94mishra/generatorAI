@@ -12,7 +12,8 @@ import React from 'react';
 import { Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, RefreshCw } from 'lucide-react-native';
-import { queryKeys, type ProviderStatus } from '@generatorai/client-core';
+import { queryKeys } from '@generatorai/client-core';
+import type { HarnessProviderStatus } from '@generatorai/shared';
 
 import { useApi } from '../../src/api/useApi';
 import { requireStepUp } from '../../src/auth/stepUp';
@@ -25,7 +26,7 @@ import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
-function readiness(provider: ProviderStatus): { label: string; tone: Tone } {
+function readiness(provider: HarnessProviderStatus): { label: string; tone: Tone } {
   if (provider.ready) return { label: 'Ready', tone: 'success' };
   if (!provider.installed) return { label: 'Not installed', tone: 'neutral' };
   if (!provider.authenticated) return { label: 'Not signed in', tone: 'warning' };

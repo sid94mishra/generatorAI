@@ -15,6 +15,9 @@ import {
   type ChatListPage,
   type ChatListQuery,
   type ChatListSummary,
+  type HarnessLoginResult,
+  type HarnessProvidersResponse,
+  type HarnessSetDefaultResult,
   type RunStatus,
   type StageRunStatus,
 } from '@generatorai/shared';
@@ -797,24 +800,6 @@ export interface TerminalDescriptor {
 
 // ── Providers / health ──────────────────────────────────────────
 
-export interface ProviderStatus {
-  type: string;
-  label: string;
-  installed: boolean;
-  connected: boolean;
-  authenticated: boolean;
-  ready: boolean;
-  error?: string | null;
-  checkedAt?: number;
-  modelCount: number;
-  models?: ModelInfo[];
-}
-
-export interface ProvidersResponse {
-  primary: string;
-  providers: ProviderStatus[];
-}
-
 /** The full `/api/health` body, not just `{ status }`. */
 export interface HealthSnapshot {
   status: string;
@@ -978,18 +963,26 @@ export function createApiClient(fetchImpl: ApiFetch) {
        * take seconds — so it is only ever passed on an explicit user action.
        */
       providers: (refresh = false) =>
-        request<ProvidersResponse>(
+        request<HarnessProvidersResponse>(
           fetchImpl,
           `/api/harness/providers${refresh ? '?refresh=1' : ''}`,
         ),
 
-      /** Change the DEFAULT provider. Existing chats keep their own. */
+      /** Start the provider's own sign-in; open `authUrl` when present, then re-probe with `providers(true)`. */
+      login: (type: string) =>
+        request<HarnessLoginResult>(fetchImpl, `/api/harness/providers/${encodeURIComponent(type)}/login`, {
+          method: 'POST',
+        }),
+
+      /** Sign the provider's account out. */
+      logout: (type: string) =>
+        request<{ ok: true }>(fetchImpl, `/api/harness/providers/${encodeURIComponent(type)}/logout`, {
+          method: 'POST',
+        }),
+
+      /** Change the DEFAULT provider (must be ready). Existing chats keep their own. */
       setDefault: (type: string) =>
-        request<{ message: string; type: string; switched: boolean }>(
-          fetchImpl,
-          '/api/harness/switch',
-          json({ type }),
-        ),
+        request<HarnessSetDefaultResult>(fetchImpl, '/api/harness/switch', json({ type })),
     },
 
     chats: {

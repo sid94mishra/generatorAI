@@ -32,7 +32,8 @@ import {
   RefreshCw,
   Search,
 } from 'lucide-react-native';
-import type { ModelInfo, ProviderStatus } from '@generatorai/client-core';
+import type { ModelInfo } from '@generatorai/client-core';
+import type { HarnessProviderStatus } from '@generatorai/shared';
 
 import { Sheet } from '../ui/Sheet';
 import { IconButton } from '../ui/Button';
@@ -294,7 +295,7 @@ function ModelRow({
   onSelect,
 }: {
   model: ModelInfo;
-  provider: ProviderStatus;
+  provider: HarnessProviderStatus;
   selected: boolean;
   expanded: boolean;
   onToggleInfo: () => void;

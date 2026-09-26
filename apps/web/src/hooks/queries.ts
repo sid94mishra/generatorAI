@@ -12,7 +12,7 @@ import type {
   OpenInEditorRequest,
   ChatSourceControlOptions,
 } from '@generatorai/shared';
-import type { HttpPlatformClient, ChatModel, RewindScope } from '../platform/HttpPlatformClient.js';
+import type { HttpPlatformClient, RewindScope } from '../platform/HttpPlatformClient.js';
 import { formatTranscriptMarkdown } from '@generatorai/client-core';
 import { toast } from '../components/Toast.js';
 
@@ -112,45 +112,6 @@ export function useArtifacts(sessionId: string | undefined) {
   });
 }
 
-/**
- * The model catalog, derived from the single `/api/harness/providers` fetch.
- *
- * This deliberately shares `useHarnessProviders`' query key rather than
- * calling `/api/harness/models` separately. Both endpoints go through
- * `HarnessRegistry.refresh()`, which spawns each provider's CLI on a cold
- * probe, so having the composer and the picker each fetch their own copy
- * meant two round trips (and two cold probes) every time a chat opened.
- * One cache entry, one request, both consumers stay in sync.
- */
-/**
- * How often to re-ask while the server is still probing in the background.
- *
- * The server now answers instantly from its disk cache after a restart rather
- * than blocking for the length of a cold probe, which is what kept the
- * composer behind a skeleton for ~22 s. The trade is that the first answer can
- * be last-known-good, so we poll at a low rate until `stale` clears and the
- * catalog converges on the live one. Polling STOPS as soon as it does.
- */
-const HARNESS_PROVIDERS_STALE_POLL_MS = 3_000;
-
-export function useModels() {
-  return useQuery({
-    queryKey: ['harness-providers'] as const,
-    queryFn: fetchHarnessProviders,
-    staleTime: 60_000 * 5,
-    refetchOnWindowFocus: false,
-    // Same key as `useHarnessProviders`, so keep the same convergence
-    // behaviour: while the server reports a background re-probe, poll until it
-    // lands. Without this the composer would render from the disk-cached
-    // catalog and then hold it for the full 5-minute staleTime.
-    refetchInterval: (query) => (query.state.data?.stale ? HARNESS_PROVIDERS_STALE_POLL_MS : false),
-    select: (data): ChatModel[] =>
-      data.providers
-        .filter((p) => p.ready)
-        .flatMap((p) => p.models.map((m) => ({ ...m, provider: m.provider ?? p.type }))),
-  });
-}
-
 /** Active harness/agent provider ('copilot' | 'claude-agent'). */
 export function useHarnessConfig() {
   const platform = usePlatform();
@@ -158,56 +119,6 @@ export function useHarnessConfig() {
     queryKey: ['harness-config'] as const,
     queryFn: () => (platform as HttpPlatformClient).getHarnessConfig(),
     staleTime: 60_000 * 10,
-  });
-}
-
-/** Live readiness + model catalog for every agent provider this build knows. */
-export interface HarnessProviderInfo {
-  type: string;
-  label: string;
-  installed: boolean;
-  connected: boolean;
-  authenticated: boolean;
-  /** Usable right now — the provider answered with a live catalog. */
-  ready: boolean;
-  error?: string;
-  checkedAt?: number;
-  modelCount: number;
-  models: ChatModel[];
-  /** The provider can sign the user in from the app (POST /harness/providers/:type/login). */
-  supportsLogin?: boolean;
-}
-
-/**
- * Every provider's live status + catalog.
- *
- * A cold probe spawns each provider's CLI, so this is cached generously and
- * never refetched on window focus; the picker exposes an explicit refresh.
- * `useModels` reads the same cache entry so a chat open costs one request.
- */
-export interface HarnessProvidersResponse {
-  primary: string;
-  providers: HarnessProviderInfo[];
-  /**
-   * The server served a cached snapshot and is re-probing in the background.
-   * Absent on older servers, which always answered from a blocking probe.
-   */
-  stale?: boolean;
-}
-
-async function fetchHarnessProviders(): Promise<HarnessProvidersResponse> {
-  const res = await fetch('/api/harness/providers');
-  if (!res.ok) throw new Error(`Failed to load providers (${res.status})`);
-  return res.json() as Promise<HarnessProvidersResponse>;
-}
-
-export function useHarnessProviders() {
-  return useQuery({
-    queryKey: ['harness-providers'] as const,
-    queryFn: fetchHarnessProviders,
-    staleTime: 60_000 * 5,
-    refetchOnWindowFocus: false,
-    refetchInterval: (query) => (query.state.data?.stale ? HARNESS_PROVIDERS_STALE_POLL_MS : false),
   });
 }
 
