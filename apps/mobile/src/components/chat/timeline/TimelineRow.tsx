@@ -67,6 +67,7 @@ import { InlineDiff } from './InlineDiff';
 import { CARD_ICON_AXIS, NestedRows, RowEnterContext, RowFrame, statusColor, type RowTone } from './RowFrame';
 import { useChatMotion } from '../chatMotion';
 import { ScmResultRow } from './ScmResultRow';
+import { WorkflowDraftRow, WorkflowRunRow } from './WorkflowRunRows';
 import { UserMessageRow } from './UserMessageRow';
 import { useTimelineActions } from './TimelineActions';
 import {
@@ -204,6 +205,10 @@ function RowBody({ row, turnId }: { row: TimelineRow; turnId?: string | undefine
       return <UsageRow usage={row.usage} />;
     case 'scm_result':
       return <ScmResultRow block={row.block} />;
+    case 'workflow_run':
+      return <WorkflowRunRow run={row.run} callId={row.callId} />;
+    case 'workflow_draft':
+      return <WorkflowDraftRow draft={row.draft} />;
     default:
       return null;
   }
