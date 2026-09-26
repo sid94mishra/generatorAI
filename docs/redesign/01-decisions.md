@@ -368,6 +368,11 @@ Decided while building P1-T1…T6 where `02` was silent:
 - `GET /activity/recent` (G-11): finished chat turns + terminal runs + terminal automation executions, newest first; pull-request items deferred (the only PR source is a live git-host call per codebase) — revisit with G-16.
 - These read models are not added to `IPlatformClient` (precedent: `listProjects`); CLI and mobile use client-core's `api.*`. All tolerate empty run history (the Workflow Overhaul's run-history migration).
 
+### D-59 Chats list as built (P3-07) — Final
+- First page on the kit (`features/chats`, T-01, `legacyHeader:false`). `ChatRowModel` lives in `packages/shared/src/ui-contract/chats.ts`, mapped by `toChatRowModel` in client-core. Row unarchive uses a new `unarchiveChat` (`PATCH {status:'active'}`) on IPlatformClient.
+- One `MenuButton` per row instead of the board's split archive-icon + "…" pair; no header overflow menu (nothing real to put there, D-36); Tags is a free-text chip until a distinct-tags endpoint exists.
+- Accessible names: "New chat" (sentence case, F-chats-01) and tab names carry their live count ("Active 62"); specs updated.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
