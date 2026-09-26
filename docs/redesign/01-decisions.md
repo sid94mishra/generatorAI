@@ -472,6 +472,11 @@ Decided while building P1-T1…T6 where `02` was silent:
 - `blocks/sources` (SourcePicker + DirectoryBrowser + model, `compact` mode for the dialog). `components/chat/CreateChatDialog.tsx` and `BrowserVisibilityPicker` deleted. B-03 capability editing is not built (static summary; D-36).
 - Known duplicate to reconcile in the final review: `blocks/directory-browser` (P5-03) vs `blocks/sources` DirectoryBrowser (P5-09).
 
+### D-78 Agents area as built (P5-07, P5-08) — Final
+- `features/agents`: AgentsListPage (T-01 grid; search; scope tabs All/Built-in/Global/Project with counts; role filter; import/export `.agent.md`; delete with confirm) and AgentEditorPage (T-03; Identity, Instructions, Role, Skills, MCP, Capabilities, Team, Runtime; TanStack Form 1 + zod 4 with reactive `defaultValues`; `agentFormSchema` tested). Kit: `ui/primitives/AgentGlyph` (DF-13), `blocks/capabilities` (CapabilityToggleList B-03, EffectiveCapabilities B-27). `useAgentCatalog` → `hooks/agentQueries.ts`.
+- No opacity-based dimming for off/disabled rows (it broke contrast); state is shown by background/badge. A Field around a multi-radio SegmentedControl renames every radio, so those rows use a bare label.
+- Agent "Used by" (`GET /api/agents/:id/usage` exists) is not wired yet — follow-up. Legacy `EffectiveCapabilitiesPanel`/`ToolPolicyEditor`/old CapabilityToggleList/`AgentOverridesEditor` remain while legacy importers exist.
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
