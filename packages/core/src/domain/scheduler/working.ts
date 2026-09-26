@@ -12,7 +12,7 @@ import type { ClassifiedError } from '../errors/StageError.js';
 import type { CompiledNode, CompiledWorkflow } from '../workflow-graph/compile.js';
 import { timerId } from './ids.js';
 import { expressionScope } from './readiness.js';
-import { StateIndex, instanceScope } from './scope.js';
+import { StateIndex, instanceScope, scopeIndexOf } from './scope.js';
 import type {
   AttemptMode,
   AttemptStatus,
@@ -21,6 +21,7 @@ import type {
   InstanceState,
   LoopIterationRecord,
   NewInstance,
+  RunEventRecord,
   RunPatch,
   RunRecord,
   RunState,
@@ -59,6 +60,8 @@ export class Working {
   readonly run: RunRecord;
   private readonly instances = new Map<string, InstanceState>();
   readonly iterations: LoopIterationRecord[];
+  /** Delivered events nobody consumed yet, oldest first (event waits take them). */
+  readonly events: RunEventRecord[];
   rejected = false;
   /** The index over the working copy; rebuilt after any write. */
   private index: StateIndex | null = null;
@@ -71,6 +74,7 @@ export class Working {
     this.run = { ...state.run, usage: { ...state.run.usage } };
     for (const i of state.instances) this.instances.set(i.id, { ...i, usage: { ...i.usage } });
     this.iterations = [...(state.iterations ?? [])]; // a state built by hand (tests) may omit them
+    this.events = [...(state.events ?? [])].sort((a, b) => a.receivedAt - b.receivedAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
   }
 
   // ── reads ──
@@ -124,9 +128,9 @@ export class Working {
   }
 
   /** The instance of a stage key in the same scope as `inst`. */
-  sibling(inst: Pick<InstanceState, 'scopeId' | 'iterationIndex'>, key: string): InstanceState | undefined {
+  sibling(inst: Pick<InstanceState, 'scopeId' | 'iterationIndex' | 'itemIndex'>, key: string): InstanceState | undefined {
     return this.ix()
-      .scope(inst.scopeId, inst.iterationIndex)
+      .scope(inst.scopeId, scopeIndexOf(inst))
       .find((i) => i.stageKey === key);
   }
 
@@ -175,6 +179,13 @@ export class Working {
   recordIteration(row: LoopIterationRecord): void {
     this.push({ t: 'record_iteration', row });
     this.iterations.push(row);
+  }
+
+  /** An event wait takes a delivered event: it leaves the pending list. */
+  consumeEvent(event: RunEventRecord, inst: InstanceState): void {
+    this.push({ t: 'consume_event', eventId: event.id, stageRunId: inst.id });
+    const at = this.events.indexOf(event);
+    if (at >= 0) this.events.splice(at, 1);
   }
 
   transition(inst: InstanceState, to: StageRunState, patch?: InstancePatch, expectedVersion?: number): void {
@@ -289,7 +300,10 @@ export class Working {
         usage: {},
         leaseOwner: null,
         iterationIndex: r.iterationIndex ?? null,
+        itemIndex: r.itemIndex ?? null,
+        itemKey: r.itemKey ?? null,
         loopState: null,
+        containerState: null,
         startedAt: null,
         completedAt: null,
       });
@@ -309,6 +323,7 @@ export function applyPatch(inst: InstanceState, patch: InstancePatch): void {
   if (patch.errorCode !== undefined) inst.errorCode = patch.errorCode;
   if (patch.error !== undefined) inst.error = patch.error;
   if (patch.loopState !== undefined) inst.loopState = patch.loopState;
+  if (patch.containerState !== undefined) inst.containerState = patch.containerState;
 }
 
 // ── Instance-level building blocks ────────────────────────────────
@@ -337,10 +352,28 @@ export function stopInstance(w: Working, inst: InstanceState, to: 'paused' | 'ca
   const claimed = inst.status !== 'ready';
   w.transition(inst, to, patch);
   w.push({ t: 'cancel_timer', stageRunId: inst.id });
+  stopContainer(w, inst);
   if (!live) return;
   // An admitted launch nobody claimed yet has no executor to report back.
   if (!claimed) w.settleAttempt(inst, 'aborted');
   w.push({ t: 'abort', stageRunId: inst.id, attemptNo: inst.currentAttempt, reason });
+}
+
+/**
+ * A map or sub-workflow that stops (cancelled, failed, skipped) releases what
+ * it holds outside the run: a map its worktree leases, a sub-workflow its
+ * child run (cancelled with it; P05 §4.2).
+ */
+export function stopContainer(w: Working, inst: InstanceState): void {
+  const cs = inst.containerState;
+  if (!cs || !isTerminalStageRunState(inst.status)) return;
+  if (cs.kind === 'map' && cs.phase !== 'done') {
+    w.push({ t: 'map_release', stageRunId: inst.id });
+    w.instancePatch(inst, { containerState: { ...cs, phase: 'done' } });
+  } else if (cs.kind === 'subworkflow' && cs.phase !== 'done') {
+    if (cs.childRunId) w.push({ t: 'child_command', stageRunId: inst.id, childRunId: cs.childRunId, command: 'cancel' });
+    w.instancePatch(inst, { containerState: { ...cs, phase: 'done' } });
+  }
 }
 
 export function pauseInstance(w: Working, inst: InstanceState, statusReason: string, ttl = true): void {

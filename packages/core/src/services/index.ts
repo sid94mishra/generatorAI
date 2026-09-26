@@ -30,6 +30,7 @@ export { canonicalGraph } from './definitions/canonical.js';
 export { userVariables } from './definitions/runScope.js';
 export { WorkflowRunService, RunCommandRefusedError } from './WorkflowRunService.js';
 export type { StageProviderResolver, NewRunRecord } from './WorkflowRunService.js';
+export { WorkflowApprovalService, type PendingDecision, type ApprovalVerdictInput, type WorkflowApprovalServiceDeps } from './WorkflowApprovalService.js';
 export * from './workflow-invocation/index.js';
 export {
   IdempotencyService,

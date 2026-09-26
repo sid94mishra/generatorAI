@@ -4,3 +4,6 @@ export { decide, applyDecisions, stateAfter, retryBaseDelayMs, ATTEMPT_STATES, P
 export { readiness, predState, edgeOnMatches, evalCondition, expressionScope, type PredState, type Readiness, type ExprOutcome } from './readiness.js';
 export { computeScopeOutcome, scopeTerminal } from './terminal.js';
 export { uuidv5, instanceId, attemptId, timerId, SCHEDULER_NAMESPACE } from './ids.js';
+export { mapStateOf, scopeIndexOf, mapItemScope, instanceScope, StateIndex } from './scope.js';
+export { waitInterruptOf, type WaitInterrupt } from './waits.js';
+export { subworkflowStateOf } from './subworkflows.js';

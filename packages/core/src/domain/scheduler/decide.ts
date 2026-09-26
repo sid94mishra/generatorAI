@@ -30,6 +30,12 @@
 //   4. ROUTE: an active failure-handler edge → failed (readiness runs it)
 //   5. EXHAUSTED: onExhausted pause (default) or fail
 //   A human rejection skips 2 and the pause of 5: it fails (and routes).
+//
+// The P05 kinds settle in the same fixed point as readiness: loops
+// (loops.ts), maps (maps.ts: item scopes, merges), waits (waits.ts: no
+// executor, no admission slot) and sub-workflows (subworkflows.ts: a child
+// run). Their effects follow the same shape: a decision dispatched after
+// the commit, answered by a message.
 // ────────────────────────────────────────────────────────────────
 
 import { isTerminalStageRunState, type RunCommand, type WorkflowRunState } from '@generatorai/workflow-spec';
@@ -47,7 +53,17 @@ import {
   settleLoops,
   wrapUpAllowance,
 } from './loops.js';
+import { mapBusy, mapScopes, onMapItemMerged, onMapItemPrepared, onMapSnapshotTaken, settleMaps } from './maps.js';
 import { evalCondition, predState, readiness, type PredState } from './readiness.js';
+import {
+  onChildSettled,
+  onChildStarted,
+  onChildStartFailed,
+  propagateToChildren,
+  settleSubworkflows,
+  subworkflowBusy,
+} from './subworkflows.js';
+import { approveWait, onWaitTimer, settleWaits } from './waits.js';
 import { isWrapUp } from './scope.js';
 import { computeScopeOutcome } from './terminal.js';
 import type {
@@ -175,6 +191,7 @@ function applyFailure(w: Working, inst: InstanceState, err: ClassifiedError, saf
 
 function pauseWholeRun(w: Working, mode: 'drain' | 'interrupt', statusReason: string): void {
   w.runTransition('paused', { statusReason });
+  propagateToChildren(w, 'pause');
   for (const inst of w.sorted()) {
     // The run's own pause TTL covers these (PD-2).
     if (inst.status === 'ready' || inst.status === 'retry_wait') pauseInstance(w, inst, 'run_paused', false);
@@ -186,6 +203,7 @@ function pauseWholeRun(w: Working, mode: 'drain' | 'interrupt', statusReason: st
 
 function resumeWholeRun(w: Working): void {
   w.runTransition('running', { statusReason: null });
+  propagateToChildren(w, 'resume');
   w.push({ t: 'cancel_timer', kind: 'pause_ttl', stageRunId: null });
   for (const inst of w.sorted()) {
     if (inst.status === 'paused' && inst.statusReason === 'run_paused') {
@@ -325,7 +343,9 @@ function onTimer(w: Working, msg: Extract<RunMessage, { type: 'timer_fired' }>):
     case 'pause_ttl': {
       if (inst) {
         const parkedLoop = inst.status === 'awaiting_input' && inst.loopState?.phase === 'parked';
-        if (inst.status === 'paused' || parkedLoop) {
+        // An unattended approval or event wait without a timeout expires the same way (P5-41).
+        const waitingWait = inst.status === 'waiting' && w.node(inst)?.wait !== undefined;
+        if (inst.status === 'paused' || parkedLoop || waitingWait) {
           failInstance(w, inst, classified('pause_expired', 'Paused longer than the unattended pause limit'), 'pause_expired');
           if (parkedLoop) w.instancePatch(inst, { loopState: { ...inst.loopState!, phase: 'done', exitAction: 'fail', exitReason: 'pause_expired', parkedSince: null } });
         }
@@ -344,9 +364,13 @@ function onTimer(w: Working, msg: Extract<RunMessage, { type: 'timer_fired' }>):
     case 'run_budget_wall_clock':
       if (!inst && (w.run.status === 'running' || w.run.status === 'waiting')) pauseWholeRun(w, 'drain', 'budget_exhausted');
       return;
-    default:
-      if (msg.kind === 'loop_wall_clock' && inst) onLoopWallClock(w, inst);
-      return; // wait timers arrive with their node kind (P05 5B)
+    case 'wait_timer':
+    case 'wait_timeout':
+      if (inst) onWaitTimer(w, inst, msg.kind);
+      return;
+    case 'loop_wall_clock':
+      if (inst) onLoopWallClock(w, inst);
+      return;
   }
 }
 
@@ -361,7 +385,13 @@ function onLeaseExpired(w: Working, msg: Extract<RunMessage, { type: 'lease_expi
 
 const RUN_LIVE: readonly WorkflowRunState[] = ['running', 'waiting'];
 
-function onCommand(w: Working, command: RunCommand): void {
+function onCommand(w: Working, command: RunCommand, actor?: string): void {
+  // An event was stored by the supervisor before this message (idempotent,
+  // outside the actor); the settle below lets a waiting wait take it.
+  if (command.command === 'deliver_event') {
+    if (!RUN_LIVE.includes(w.run.status) && w.run.status !== 'paused') return w.reject('invalid_state', `the run is ${w.run.status}`);
+    return;
+  }
   if (command.instanceId === undefined) {
     if (command.expectedVersion !== undefined && command.expectedVersion !== w.run.version) {
       return w.reject('version_conflict', `run version is ${w.run.version}, not ${command.expectedVersion}`);
@@ -395,6 +425,28 @@ function onCommand(w: Working, command: RunCommand): void {
 
   // A loop takes its own decisions (P05 §2.3); a work node takes none of them.
   const node = w.node(inst);
+  // A wait is approved (approval waits) or cancelled; a map is cancelled; a
+  // sub-workflow is cancelled, paused or resumed (on its child run).
+  if (node?.wait) {
+    if (command.command === 'cancel') return isTerminalStageRunState(inst.status) ? refuse() : cancelInstance(w, inst, 'user_cancel');
+    if (command.command !== 'approve') return w.reject('invalid_command', `${command.command} does not apply to a wait; approve (an approval wait) or cancel it`);
+    const refusal = approveWait(w, inst, command.outcome, command.data, actor);
+    return refusal ? w.reject('invalid_state', refusal) : undefined;
+  }
+  if (node?.map) {
+    if (command.command === 'cancel') return isTerminalStageRunState(inst.status) ? refuse() : cancelInstance(w, inst, 'user_cancel');
+    return w.reject('invalid_command', `${command.command} does not apply to a map; act on its items, or cancel it`);
+  }
+  if (node?.subworkflow) {
+    if (command.command === 'cancel') return isTerminalStageRunState(inst.status) ? refuse() : cancelInstance(w, inst, 'user_cancel');
+    if (command.command === 'pause' || command.command === 'resume') {
+      const cs = inst.containerState;
+      if (inst.status !== 'running' || cs?.kind !== 'subworkflow' || !cs.childRunId || cs.phase !== 'running') return refuse();
+      w.push({ t: 'child_command', stageRunId: inst.id, childRunId: cs.childRunId, command: command.command });
+      return;
+    }
+    return w.reject('invalid_command', `${command.command} does not apply to a sub-workflow; act on its child run, or cancel, pause or resume it`);
+  }
   if (node?.loop) {
     if (command.command === 'cancel') {
       if (isTerminalStageRunState(inst.status)) return refuse();
@@ -552,7 +604,8 @@ function resolveReadiness(w: Working): boolean {
   let changed = true;
   while (changed) {
     changed = false;
-    const pending = activeScopes(w).flatMap((s) => w.scopeInstances(s.containerId, s.iteration).filter((i) => i.status === 'pending'));
+    const scopes = [...activeScopes(w), ...mapScopes(w)];
+    const pending = scopes.flatMap((s) => w.scopeInstances(s.containerId, s.iteration).filter((i) => i.status === 'pending'));
     for (const inst of pending) {
       if (inst.status !== 'pending') continue;
       const node = w.node(inst);
@@ -646,12 +699,16 @@ function settle(w: Working): void {
   if (!RUN_LIVE.includes(w.run.status)) return;
 
   ensureRootInstances(w);
-  // Readiness and the loops feed each other (a new scope has ready roots; a
-  // finished scope settles its loop): run both to a fixed point.
-  for (let i = 0; i < 64; i++) {
+  // Readiness and the containers feed each other (a new scope has ready
+  // roots; a finished scope settles its loop or map item; a ready wait arms,
+  // a delivered event completes it): run them to a fixed point.
+  for (let i = 0; i < 256; i++) {
     const a = resolveReadiness(w);
     const b = settleLoops(w);
-    if (!a && !b) break;
+    const c = settleMaps(w);
+    const d = settleWaits(w);
+    const e = settleSubworkflows(w);
+    if (!a && !b && !c && !d && !e) break;
   }
 
   const roots = w.roots();
@@ -678,11 +735,13 @@ function settle(w: Working): void {
 
   admit(w);
 
-  // Busy: a work node in an attempt or admitted, or a loop with an effect in flight.
+  // Busy: a work node in an attempt or admitted, a loop or map with an
+  // effect in flight, or a sub-workflow whose child works. A wait is not.
   const busy = w.sorted().some((i) => {
     const node = w.node(i);
     if (node?.class === 'work') return inAttempt(i.status) || i.status === 'ready';
-    return i.status === 'running' && i.loopState != null && ['starting', 'settling', 'restoring'].includes(i.loopState.phase);
+    if (i.status === 'running' && i.loopState != null && ['starting', 'settling', 'restoring'].includes(i.loopState.phase)) return true;
+    return mapBusy(i) || subworkflowBusy(i);
   });
   if (busy && w.run.status === 'waiting') w.runTransition('running');
   else if (!busy && w.run.status === 'running') w.runTransition('waiting');
@@ -734,13 +793,31 @@ export function decide(graph: CompiledWorkflow, state: RunState, msg: RunMessage
       onFrameLost(w, msg);
       break;
     case 'command':
-      onCommand(w, msg.command);
+      onCommand(w, msg.command, msg.actor);
       break;
     case 'iteration_captured':
       onIterationCaptured(w, msg);
       break;
     case 'iteration_restored':
       onIterationRestored(w, msg);
+      break;
+    case 'map_snapshot_taken':
+      onMapSnapshotTaken(w, msg);
+      break;
+    case 'map_item_prepared':
+      onMapItemPrepared(w, msg);
+      break;
+    case 'map_item_merged':
+      onMapItemMerged(w, msg);
+      break;
+    case 'child_started':
+      onChildStarted(w, msg);
+      break;
+    case 'child_start_failed':
+      onChildStartFailed(w, msg);
+      break;
+    case 'child_settled':
+      onChildSettled(w, msg);
       break;
     case 'finalized':
       onFinalized(w, msg);
@@ -766,6 +843,7 @@ export function applyDecisions(state: RunState, decisions: readonly Decision[], 
   const run: RunRecord = { ...state.run, usage: { ...state.run.usage } };
   const instances = new Map(state.instances.map((i) => [i.id, { ...i, usage: { ...i.usage } }]));
   const iterations = [...(state.iterations ?? [])];
+  const events = [...(state.events ?? [])];
   for (const d of decisions) {
     switch (d.t) {
       case 'transition': {
@@ -785,9 +863,13 @@ export function applyDecisions(state: RunState, decisions: readonly Decision[], 
             id: r.id, stageKey: r.stageKey, instancePath: r.instancePath, scopeId: r.scopeId, status: 'pending', statusReason: null,
             version: 0, currentAttempt: 0, attemptStatus: null, failedAttempts: 0, skipReason: null, skipCauseId: null, gateAs: null,
             output: null, summary: null, interruptData: null, errorCode: null, error: null, usage: {}, leaseOwner: null,
-            iterationIndex: r.iterationIndex ?? null, loopState: null, startedAt: null, completedAt: null,
+            iterationIndex: r.iterationIndex ?? null, itemIndex: r.itemIndex ?? null, itemKey: r.itemKey ?? null,
+            loopState: null, containerState: null, startedAt: null, completedAt: null,
           });
         }
+        break;
+      case 'consume_event':
+        events.splice(0, events.length, ...events.filter((e) => e.id !== d.eventId));
         break;
       case 'create_attempt': {
         const i = instances.get(d.stageRunId);
@@ -836,5 +918,5 @@ export function applyDecisions(state: RunState, decisions: readonly Decision[], 
         break;
     }
   }
-  return { run, instances: [...instances.values()], iterations };
+  return { run, instances: [...instances.values()], iterations, events };
 }

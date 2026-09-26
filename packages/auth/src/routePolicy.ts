@@ -96,10 +96,13 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // whose default grant includes `exec:agent` but deliberately excludes
   // `write:workflows` (see DEFAULT_MOBILE_SCOPES).
   //
-  // Every run command (pause, resume, cancel, retry, skip, fail, approve)
-  // goes through one route, so this entry admits the route on `exec:agent`
-  // and the route itself demands `write:workflows` for every command other
-  // than `approve`. Longest-prefix matching means this entry wins over
+  // Every run command (pause, resume, cancel, retry, skip, fail, approve, the
+  // loop decisions, deliver_event) goes through one route, so this entry
+  // admits the route on `exec:agent` and the route itself demands
+  // `write:workflows` for the run-control commands. The operator DECISIONS —
+  // approve, the loop decisions (grant_iterations, raise_budget,
+  // continue_with_input, accept, accept_iteration) and deliver_event — are
+  // run-time acts on a run the caller may start, so `exec:agent` suffices. Longest-prefix matching means this entry wins over
   // `/workflow-runs` for its own path only; everything else about a run
   // (delete, the permission mode) still needs the full write grant.
   {
@@ -140,6 +143,10 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // admin-scoped '/automations' below, the same precedent as
   // '/auth/pair/preview' ahead of '/auth/pair'.
   { prefix: '/automations/webhooks', read: [], write: [], public: true },
+  // An event wait's callback (P05 §4.3): CI and other external systems hold
+  // no credential; the per-wait HMAC token in the path authenticates the one
+  // event it may deliver (routes/workflowCallbacks.ts), rate-limited there.
+  { prefix: '/workflow-callbacks', read: [], write: [], public: true },
   { prefix: '/automations', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
   { prefix: '/templates', read: ['read:workflows'], write: ['write:workflows'] },
   { prefix: '/hooks', read: ['read:workflows'], write: ['write:workflows'] },

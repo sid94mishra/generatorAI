@@ -136,6 +136,11 @@ export class DefaultRunLifecycle implements RunLifecycle {
     this.deps.checkpoints = checkpoints;
   }
 
+  /** The platform services wired so far (the map effects cut item mounts and push item branches with them). */
+  get platform(): LifecyclePlatform {
+    return { mounts: this.deps.mounts, uploads: this.deps.uploads, projectConfigs: this.deps.projectConfigs, steps: this.deps.steps, sandbox: this.deps.sandbox };
+  }
+
   // ── Journal ──────────────────────────────────────────────────
 
   /**

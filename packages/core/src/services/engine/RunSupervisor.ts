@@ -33,6 +33,13 @@
 // then re-arm the run's timers, re-dispatch a lost `prepare`/`finalize`, and
 // post a `tick`. Sessions need no rehydration: `run_sessions` is read at
 // bind time, after every row above was settled (B-20).
+//
+// P05 containers recover the same way: a loop's or a map's effect in flight
+// is dispatched again (all idempotent), a running mount_per_item map re-takes
+// its worktree leases, a sub-workflow re-invokes its child (the same
+// idempotency key finds the same run) or collects a child that finished
+// while no process ran. A run whose actor sees it terminal posts
+// `child_settled` to its parent when it is a sub-workflow child.
 // ────────────────────────────────────────────────────────────────
 
 import { randomUUID } from 'node:crypto';
@@ -45,6 +52,7 @@ import type { ISessionRepository } from '../../domain/ports/IRepositories.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
 import type { RunMessage, RunOutcome } from '../../domain/scheduler/types.js';
+import { mapStateOf, StateIndex } from '../../domain/scheduler/scope.js';
 import { compile, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import type { EventBus } from '../../events/EventBus.js';
 import type { AdmissionController } from '../AdmissionController.js';
@@ -55,7 +63,12 @@ import type { SessionComposer } from '../session/SessionComposer.js';
 import type { WorkspaceCheckpointService } from '../WorkspaceCheckpointService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
 import { EffectsDispatcher } from './EffectsDispatcher.js';
+import type { LifecycleSteps } from './lifecycle/steps.js';
 import { LoopEffects } from './LoopEffects.js';
+import { MapEffects } from './MapEffects.js';
+import { SubworkflowEffects } from './SubworkflowEffects.js';
+import { WorktreeLeases } from './WorktreeLeases.js';
+import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
 import { inFlightIsSafe, LeaseReaper } from './LeaseReaper.js';
 import { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
 import { RunActor, type DecideRecord, type ProcessResult } from './RunActor.js';
@@ -99,6 +112,8 @@ export interface RunSupervisorDeps {
   toHarnessError?: ((provider: string | undefined, raw: unknown) => unknown) | undefined;
   /** Files uploaded to a stage (the stage conversation API's attachments). */
   artifacts?: StageArtifactReader | undefined;
+  /** Per-wait callback tokens (P05 §4.3). */
+  callbacks?: WorkflowCallbacks | undefined;
   /** Where engine events go (default: `eventBus.emitGlobal`, awaited). */
   publish?: OutboxPublisher | undefined;
   /** Prepare/finalize (default: `DefaultRunLifecycle`). */
@@ -130,7 +145,7 @@ export class EngineLockedError extends Error {
 }
 
 export type CommandResult =
-  | { ok: true }
+  | { ok: true; replayed?: boolean }
   | { ok: false; code: 'not_found' | 'invalid_state' | 'version_conflict' | 'invalid_command' | 'fenced' | 'conflict' | 'engine_unavailable'; message: string };
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
@@ -144,6 +159,11 @@ export class RunSupervisor {
   readonly reaper: LeaseReaper;
   readonly lifecycle: RunLifecycle;
   readonly loops: LoopEffects;
+  readonly leases: WorktreeLeases;
+  readonly maps: MapEffects;
+  readonly subworkflows: SubworkflowEffects;
+  /** The compiled definition of every hosted run (the actors hold the same). */
+  private readonly compiledByRun = new Map<string, CompiledWorkflow>();
   private readonly actors = new Map<string, Promise<RunActor | null>>();
   private readonly timing: SupervisorTiming;
   private readonly now: () => number;
@@ -172,6 +192,7 @@ export class RunSupervisor {
       scriptRunner: deps.scriptRunner,
       toHarnessError: deps.toHarnessError,
       artifacts: deps.artifacts,
+      callbacks: deps.callbacks,
       post,
       logger: deps.logger,
       now: this.now,
@@ -202,6 +223,28 @@ export class RunSupervisor {
         now: this.now,
       });
     this.loops = new LoopEffects({ runRepo: deps.runRepo, workspaceManager: deps.workspaceManager, checkpoints: deps.checkpoints, logger: deps.logger });
+    this.leases = new WorktreeLeases();
+    const platform = () => {
+      const p = this.lifecycle instanceof DefaultRunLifecycle ? this.lifecycle.platform : {};
+      return { mounts: p.mounts, steps: p.steps as LifecycleSteps | undefined };
+    };
+    this.maps = new MapEffects({
+      stores: deps.stores,
+      runRepo: deps.runRepo,
+      definitions: deps.definitions,
+      workspaceManager: deps.workspaceManager,
+      leases: this.leases,
+      platform,
+      scriptRunner: deps.scriptRunner,
+      logger: deps.logger,
+    });
+    this.subworkflows = new SubworkflowEffects({
+      stores: deps.stores,
+      runRepo: deps.runRepo,
+      definitions: deps.definitions,
+      command: (runId, command) => this.command(runId, command).then((r) => (r.ok ? { ok: true } : { ok: false, message: r.message })),
+      logger: deps.logger,
+    });
     this.effects = new EffectsDispatcher({
       executor: this.executor,
       admission: deps.admission,
@@ -211,6 +254,10 @@ export class RunSupervisor {
       post,
       kindOf: (id) => deps.stores.stages.getInstance(id)?.kind,
       loops: this.loops,
+      maps: this.maps,
+      leases: this.leases,
+      writerLeaseKeys: (runId, stageRunId) => this.writerLeaseKeys(runId, stageRunId),
+      subworkflows: this.subworkflows,
       logger: deps.logger,
     });
     this.reaper = new LeaseReaper({
@@ -323,10 +370,45 @@ export class RunSupervisor {
     return this.result(await this.send(runId, { type: 'start' }));
   }
 
-  /** An operator command (the P03 commands API calls this). */
-  async command(runId: string, command: RunCommand): Promise<CommandResult> {
+  /**
+   * An operator command (the P03 commands API calls this). `actor` is who
+   * sent it (a wait's `output.by`). `deliver_event` stores the event first
+   * (idempotent per key, outside the actor): a replay answers `replayed`, the
+   * same key with other data is a conflict; the actor then lets a waiting
+   * wait take it (P05 §4.3).
+   */
+  async command(runId: string, command: RunCommand, opts: { actor?: string } = {}): Promise<CommandResult> {
     if (!this.running) return this.unavailable();
-    return this.result(await this.send(runId, { type: 'command', command }));
+    if (command.command === 'deliver_event') {
+      const row = this.deps.stores.runs.getRunRow(runId);
+      if (!row) return { ok: false, code: 'not_found', message: `run ${runId} does not exist` };
+      if (TERMINAL.has(row.status) || row.status === 'created') return { ok: false, code: 'invalid_state', message: `the run is ${row.status}` };
+      const d = this.deps.stores.events.deliver({ runId, eventKey: command.eventKey, idempotencyKey: command.idempotencyKey, data: command.data ?? null, now: this.now() });
+      if (d.outcome === 'conflict') {
+        return { ok: false, code: 'version_conflict', message: `event '${command.eventKey}' was already delivered with idempotency key '${command.idempotencyKey}' and other data` };
+      }
+      if (d.outcome === 'replayed') return { ok: true, replayed: true };
+    }
+    return this.result(await this.send(runId, { type: 'command', command, ...(opts.actor ? { actor: opts.actor } : {}) }));
+  }
+
+  /**
+   * The run-mount leases a launch must hold `write` on (P05 §4.1): none
+   * for a stage inside a mount_per_item map item (it writes its own
+   * worktrees), none while the run has no map; else every run mount.
+   */
+  private async writerLeaseKeys(runId: string, stageRunId: string): Promise<string[]> {
+    const compiled = this.compiledByRun.get(runId);
+    if (!compiled || ![...compiled.nodes.values()].some((n) => n.map?.workspace === 'mount_per_item')) return [];
+    const state = this.deps.stores.runStore.loadRunState(runId);
+    const inst = state?.instances.find((i) => i.id === stageRunId);
+    if (!state || !inst) return [];
+    const ix = new StateIndex(state.run, state.instances, state.iterations ?? []);
+    const inItem = ix.chain(inst).some(({ container, iteration }) => {
+      const ms = mapStateOf(container);
+      return !!ms && iteration !== null && compiled.nodes.get(container.stageKey)?.map?.workspace === 'mount_per_item';
+    });
+    return inItem ? [] : this.maps.leaseKeys(runId);
   }
 
   private unavailable(): CommandResult {
@@ -360,6 +442,7 @@ export class RunSupervisor {
     const epoch = stores.runs.claimOwnership(runId, this.bootId, this.timing.ownershipTtlMs, this.now(), { force: true });
     if (epoch === null) return null;
     const compiled = await this.compiled(runId);
+    this.compiledByRun.set(runId, compiled);
     return new RunActor({
       runId,
       ownerEpoch: epoch,
@@ -367,7 +450,10 @@ export class RunSupervisor {
       store: stores.runStore,
       dispatch: (id, res) => this.effects.dispatch(id, res),
       onFenced: (id) => this.drop(id),
-      onTerminal: (id) => this.drop(id),
+      onTerminal: (id) => {
+        this.drop(id);
+        void this.settleChild(id);
+      },
       now: this.now,
       ...(this.deps.random ? { random: this.deps.random } : {}),
       logger: this.deps.logger,
@@ -380,9 +466,20 @@ export class RunSupervisor {
     return compile(await this.deps.definitions.get(run.definitionVersionId));
   }
 
+  /** A sub-workflow child reached a terminal state: its parent's stage settles (P05 §4.2). */
+  private async settleChild(runId: string): Promise<void> {
+    try {
+      const settled = await this.subworkflows.settledMessage(runId);
+      if (settled) this.post(settled.parentRunId, settled.msg);
+    } catch (err) {
+      this.deps.logger?.warn(`[RunSupervisor] settling the parent of ${runId} failed: ${String(err)}`);
+    }
+  }
+
   private drop(runId: string): void {
     const p = this.actors.get(runId);
     this.actors.delete(runId);
+    this.compiledByRun.delete(runId);
     this.timers.forgetRun(runId);
     void p?.then((a) => a?.retire());
   }
@@ -457,6 +554,27 @@ export class RunSupervisor {
           if (row?.checkpointTurnId) {
             this.effects.dispatch(runId, { effects: [{ t: 'restore_iteration', stageRunId: inst.id, k: row.k, checkpointTurnId: row.checkpointTurnId }], timers: [], outbox: [] });
           }
+        }
+      }
+      // Maps and sub-workflows whose effect died with the process (P05 §4.1, §4.2).
+      for (const inst of state.instances) {
+        const cs = inst.containerState;
+        if (!cs || inst.status !== 'running' || cs.phase === 'done') continue;
+        const again = (d: Parameters<EffectsDispatcher['dispatch']>[1]['effects'][number]) => this.effects.dispatch(runId, { effects: [d], timers: [], outbox: [] });
+        if (cs.kind === 'map') {
+          if (cs.phase === 'snapshotting') again({ t: 'map_snapshot', stageRunId: inst.id });
+          else if (cs.snapshot) await this.maps.reacquire(runId, inst.id);
+          const compiled = this.compiledByRun.get(runId);
+          const merge = compiled?.nodes.get(inst.stageKey)?.map?.merge;
+          for (const it of cs.items) {
+            if (it.phase === 'preparing') again({ t: 'map_prepare_item', stageRunId: inst.id, index: it.index });
+            else if (it.phase === 'merging') again({ t: 'map_merge_item', stageRunId: inst.id, index: it.index, strategy: merge === 'pr_per_item' ? 'pr_per_item' : 'sequential' });
+          }
+        } else if (cs.phase === 'starting') {
+          again({ t: 'start_child', stageRunId: inst.id, inputs: cs.inputs });
+        } else if (cs.childRunId) {
+          const settled = await this.subworkflows.settledMessage(cs.childRunId);
+          if (settled) await actor.post(settled.msg);
         }
       }
       this.timers.loadRun(runId);

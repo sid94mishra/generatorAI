@@ -56,7 +56,8 @@ function tail(text: string, bytes: number): string {
 const TRANSIENT_SPAWN = new Set(['EAGAIN', 'EBUSY']);
 
 export interface CheckRunInput {
-  stage: CheckStage;
+  /** A check stage, or a map's itemSetup entry (only `check` is read). */
+  stage: Pick<CheckStage, 'check'>;
   run: Pick<WorkflowRun, 'permissionMode' | 'systemVars'>;
   /** The run's primary working directory (used when the check names no mount). */
   primaryDir: string;

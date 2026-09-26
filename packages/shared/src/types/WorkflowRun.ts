@@ -127,14 +127,23 @@ export interface StageRun {
   stageKey: string;
   /** `triage`, `review_loop#2/fix`: unique per run; the stage key at the top level. */
   instancePath: string;
-  /** The node kind: agent, check, loop (P05). */
+  /** The node kind: agent, check, loop, map, subworkflow, wait (P05). */
   kind: string;
-  /** The enclosing container instance (a loop body stage); absent at the top level. */
+  /** The enclosing container instance (a loop or map body stage); absent at the top level. */
   scopeId?: string;
   /** The iteration of the enclosing loop this instance belongs to (absent for a wrap-up). */
   iterationIndex?: number;
+  /** The item of the enclosing map this instance belongs to (P05 §4.1), and its stable key. */
+  itemIndex?: number;
+  itemKey?: string;
   /** A loop instance's state (P05 §2.6). */
   loopState?: LoopStateView;
+  /** A map instance's state: its items (P05 §4.1). */
+  mapState?: MapStateView;
+  /** A sub-workflow instance's state: its child run (P05 §4.2). */
+  subworkflowState?: SubworkflowStateView;
+  /** A waiting event wait's callback (P05 §4.3): external systems POST the event here without a credential. */
+  callback?: { url: string; token: string };
   /** The conversation of the current attempt. */
   sessionId?: string;
   name: string;
@@ -192,6 +201,39 @@ export interface LoopStateView {
   parkedMs: number;
   parkedSince: number | null;
   wrappedUp: boolean;
+}
+
+/** One map item as the clients read it (P05 §4.1). `phase`: pending, preparing, running, merge_queued, merging, done. */
+export interface MapItemView {
+  index: number;
+  key: string;
+  item: unknown;
+  phase: string;
+  status: 'completed' | 'failed' | 'cancelled' | null;
+  errorCode: string | null;
+  error: string | null;
+  workspaceId: string | null;
+  mounts: Record<string, string> | null;
+  primaryDir: string | null;
+  branch: string | null;
+  pr: { url: string | null; branch: string } | null;
+}
+
+/** A map instance's state (`stage_runs.loop_state` of a map). `phase`: snapshotting, running, done. */
+export interface MapStateView {
+  kind: 'map';
+  phase: string;
+  count: number;
+  snapshot: Record<string, string> | null;
+  items: MapItemView[];
+}
+
+/** A sub-workflow instance's state. `phase`: starting, running, done. */
+export interface SubworkflowStateView {
+  kind: 'subworkflow';
+  phase: string;
+  childRunId: string | null;
+  inputs: Record<string, unknown>;
 }
 
 /** One finished loop iteration (`loop_iterations`, P05 §2.6). */

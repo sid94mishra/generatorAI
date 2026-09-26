@@ -305,6 +305,8 @@ export type AgentEvent =
   // HITL — human-in-the-loop lifecycle events.
   | { kind: 'stage_run.awaiting_input'; data: { stageRunId: string; workflowRunId: string; interruptData?: unknown; prompt?: string } }
   | { kind: 'stage_run.input_received'; data: { stageRunId: string; workflowRunId: string; value?: unknown } }
+  // A wait stage armed (P05 §4.3): an approval, an event or a timer; resolved by `stage_run.completed`.
+  | { kind: 'stage_run.waiting'; data: { stageRunId: string; workflowRunId: string; interruptData?: unknown } }
   // The stage conversation (P03b): an operator message, a stopped turn, an amendment of a completed stage.
   | { kind: 'stage_run.operator_message'; data: { stageRunId: string; workflowRunId: string; content: string; attachments?: string[] } }
   | { kind: 'stage_run.operator_message_dropped'; data: { stageRunId: string; workflowRunId: string; count: number; outcome: string } }

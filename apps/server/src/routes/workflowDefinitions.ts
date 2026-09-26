@@ -72,9 +72,9 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
   });
 
   // Stateless: returns the ValidationResult (200 whether or not it is valid).
-  router.post('/validate', (req, res, next) => {
+  router.post('/validate', async (req, res, next) => {
     try {
-      const { valid, issues } = workflowDefinitionService.validate(req.body);
+      const { valid, issues } = await workflowDefinitionService.validate(req.body);
       res.json({ valid, issues });
     } catch (err) {
       next(err);

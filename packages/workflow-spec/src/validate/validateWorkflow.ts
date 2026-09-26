@@ -960,9 +960,10 @@ function subworkflowIssues(ctx: GraphContext, s: SubworkflowStage, p: string, se
   const label = 'id' in ref ? `id '${ref.id}'` : `'${ref.name}'`;
   const child = ctx.child(s);
   if (!child || child.status === 'archived') {
+    // A missing child is a warning while drafting (publish and invoke refuse it); an archived one is an error.
     out.push({
       code: 'subworkflow-ref',
-      severity: 'error',
+      severity: child ? 'error' : 'warning',
       path: `${p}/subworkflow/workflowRef`,
       stageKey: k,
       message: child ? `The workflow ${label} is archived` : `No workflow ${label} exists`,

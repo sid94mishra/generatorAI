@@ -31,6 +31,7 @@ import {
   type Decision,
   type InstanceState,
   type IRunStore,
+  type ContainerState,
   type LoopIterationRecord,
   type LoopState,
   type RunRecord,
@@ -44,6 +45,7 @@ import { sqliteHandle } from './AuthRepositories.js';
 import { runPatchSets, runTransition, stagePatchSets, stageTransition } from './engineCas.js';
 import {
   addUsage,
+  RunEventRepository,
   SchedulerJournalRepository,
   StageAttemptRepository,
   WorkflowOutboxRepository,
@@ -86,6 +88,7 @@ export class RunStore implements IRunStore {
   private readonly timers: WorkflowTimerRepository;
   private readonly outbox: WorkflowOutboxRepository;
   private readonly journal: SchedulerJournalRepository;
+  private readonly events: RunEventRepository;
 
   constructor(db: AppDatabase | BetterSqlite3.Database) {
     this.sqlite = 'prepare' in db ? (db as BetterSqlite3.Database) : sqliteHandle(db as AppDatabase);
@@ -93,6 +96,7 @@ export class RunStore implements IRunStore {
     this.timers = new WorkflowTimerRepository(this.sqlite);
     this.outbox = new WorkflowOutboxRepository(this.sqlite);
     this.journal = new SchedulerJournalRepository(this.sqlite);
+    this.events = new RunEventRepository(this.sqlite);
   }
 
   // ── load ─────────────────────────────────────────────────────
@@ -133,6 +137,9 @@ export class RunStore implements IRunStore {
       .all(runId) as Row[];
     const instances: InstanceState[] = rows.map((s) => {
       const data = parse<unknown>(s['output_data'], null);
+      // One container-state column: a loop's LoopState, a map's or a sub-workflow's state.
+      const kind = s['kind'] as string;
+      const state = parse<unknown>(s['loop_state'], null);
       return {
         id: s['id'] as string,
         stageKey: s['stage_key'] as string,
@@ -155,7 +162,10 @@ export class RunStore implements IRunStore {
         leaseOwner: (s['lease_owner'] as string | null) ?? null,
         error: (s['error'] as string | null) ?? null,
         iterationIndex: (s['iteration_index'] as number | null) ?? null,
-        loopState: parse<LoopState | null>(s['loop_state'], null),
+        itemIndex: (s['item_index'] as number | null) ?? null,
+        itemKey: (s['item_key'] as string | null) ?? null,
+        loopState: kind === 'loop' ? (state as LoopState | null) : null,
+        containerState: kind === 'map' || kind === 'subworkflow' ? (state as ContainerState | null) : null,
         startedAt: (s['first_started_at'] as number | null) ?? null,
         completedAt: (s['completed_at'] as number | null) ?? null,
       };
@@ -181,7 +191,7 @@ export class RunStore implements IRunStore {
       startedAt: (r['started_at'] as number | null) ?? null,
       endedAt: (r['ended_at'] as number | null) ?? null,
     }));
-    return { run, instances, iterations };
+    return { run, instances, iterations, events: this.events.listPending(runId) };
   }
 
   // ── apply ────────────────────────────────────────────────────
@@ -317,6 +327,9 @@ export class RunStore implements IRunStore {
               );
             break;
           }
+          case 'consume_event':
+            if (!this.events.consume(runId, d.eventId, d.stageRunId)) throw new ApplyAbort('conflict', `event ${d.eventId} was consumed already`);
+            break;
           case 'emit': {
             const seq = (sql.prepare(`SELECT run_seq FROM workflow_runs WHERE id = ?`).get(runId) as { run_seq: number }).run_seq + 1;
             this.outbox.insert(runId, seq, d.event.kind, d.event.data, now);

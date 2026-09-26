@@ -74,6 +74,8 @@ export interface NewRunRecord {
   codebaseSelection?: WorkflowRun['codebaseSelection'];
   systemVars?: RunSystemVars;
   budget?: Record<string, unknown>;
+  /** A sub-workflow child that inherits its parent's workspace (P05 §4.2). */
+  workspaceId?: string;
   parentRunId?: string;
   parentStageRunId?: string;
   rootRunId?: string;
@@ -168,6 +170,7 @@ export class WorkflowRunService {
         ...(record.codebaseSelection ? { codebaseSelection: record.codebaseSelection } : {}),
         ...(record.systemVars ? { systemVars: record.systemVars } : {}),
         ...(record.budget ? { budget: record.budget } : {}),
+        ...(record.workspaceId ? { workspaceId: record.workspaceId } : {}),
         ...(record.parentRunId ? { parentRunId: record.parentRunId } : {}),
         ...(record.parentStageRunId ? { parentStageRunId: record.parentStageRunId } : {}),
         rootRunId: record.rootRunId ?? id,
@@ -202,8 +205,8 @@ export class WorkflowRunService {
   }
 
   /** An operator command on the run or one of its instances (the commands API). */
-  command(runId: string, command: RunCommand): Promise<CommandResult> {
-    return this.engine.command(runId, command);
+  command(runId: string, command: RunCommand, opts: { actor?: string } = {}): Promise<CommandResult> {
+    return this.engine.command(runId, command, opts);
   }
 
   // ── Fork (G5 §3.8) ───────────────────────────────────────────

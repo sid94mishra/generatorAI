@@ -16,7 +16,7 @@ import type {
   TransitionResult,
 } from '@generatorai/core';
 import type { StageRunState } from '@generatorai/workflow-spec';
-import type { LoopIteration, LoopStateView, StageRun, StageRunStatus } from '@generatorai/shared';
+import type { LoopIteration, LoopStateView, MapStateView, StageRun, StageRunStatus, SubworkflowStateView } from '@generatorai/shared';
 import { NotFoundError } from '@generatorai/shared';
 import { loopIterations, stageRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
@@ -113,7 +113,12 @@ export function mapStageRun(row: typeof stageRuns.$inferSelect): StageRun {
     kind: row.kind,
     ...(row.scopeId ? { scopeId: row.scopeId } : {}),
     ...(row.iterationIndex !== null && row.iterationIndex !== undefined ? { iterationIndex: row.iterationIndex } : {}),
-    ...(row.loopState ? { loopState: row.loopState as LoopStateView } : {}),
+    ...(row.itemIndex !== null && row.itemIndex !== undefined ? { itemIndex: row.itemIndex } : {}),
+    ...(row.itemKey ? { itemKey: row.itemKey } : {}),
+    // One container-state column (P05): a loop's, a map's or a sub-workflow's state, by kind.
+    ...(row.loopState && row.kind === 'loop' ? { loopState: row.loopState as LoopStateView } : {}),
+    ...(row.loopState && row.kind === 'map' ? { mapState: row.loopState as MapStateView } : {}),
+    ...(row.loopState && row.kind === 'subworkflow' ? { subworkflowState: row.loopState as SubworkflowStateView } : {}),
     sessionId: row.sessionId ?? undefined,
     name: row.name,
     status: row.status,

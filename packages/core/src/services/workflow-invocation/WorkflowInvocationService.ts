@@ -33,6 +33,7 @@ import type { ILogger, PersistedEvent, StageRun, WorkflowRun } from '@generatora
 import { ConflictError, NotFoundError, ValidationError } from '@generatorai/shared';
 import {
   InvocationRequestSchema,
+  type InvocationIssue,
   type InvocationPlan,
   type InvocationRequest,
   type InvocationResult,
@@ -54,6 +55,8 @@ import { safeUploadName, UPLOAD_EXTENSIONS } from '../engine/lifecycle/runUpload
 import { IdempotencyKeyReusedError, INVOCATION_IDEMPOTENCY_TTL_MS, type IdempotencyService } from '../IdempotencyService.js';
 import type { WorkflowDefinitionService } from '../WorkflowDefinitionService.js';
 import { RunCommandRefusedError, type WorkflowRunService } from '../WorkflowRunService.js';
+import type { WorkflowApprovalService } from '../WorkflowApprovalService.js';
+import { outputDrift } from '../engine/SubworkflowEffects.js';
 import { planInvocation } from './planInvocation.js';
 import { InvocationError, issue, type InvocationContext } from './types.js';
 import { checkInvocationScopes, validateInvocation, type ValidatedInvocation } from './validateInvocation.js';
@@ -81,6 +84,8 @@ export interface WorkflowInvocationDeps {
   sandboxEnabled?: boolean | undefined;
   /** The web app origin, for result links. */
   appUrl?: string | undefined;
+  /** Pending decisions, sub-workflow children's mirrored (P05). */
+  approvals?: WorkflowApprovalService | undefined;
   logger?: ILogger | undefined;
   now?: () => number;
 }
@@ -193,7 +198,9 @@ export class WorkflowInvocationService {
         systemVars: {
           ...(v.permissionCeiling ? { triggerPermissionMode: v.permissionCeiling } : {}),
           ...(v.uploads.length > 0 ? { uploads: v.uploads } : {}),
+          ...(ctx.inheritWorkspace ? { inheritedWorkspace: ctx.inheritWorkspace } : {}),
         },
+        ...(ctx.inheritWorkspace ? { workspaceId: ctx.inheritWorkspace.workspaceId } : {}),
         ...(v.budget ? { budget: v.budget } : {}),
         ...(v.lineage.parentRunId ? { parentRunId: v.lineage.parentRunId } : {}),
         ...(v.lineage.parentStageRunId ? { parentStageRunId: v.lineage.parentStageRunId } : {}),
@@ -361,8 +368,38 @@ export class WorkflowInvocationService {
       models: this.deps.models,
       permissionGating: (run, graph) => this.deps.runs.assertPermissionGating(run, graph),
       posture: () => getDefaultChatPermissionMode() as RunPermissionMode,
+      subworkflows: (graph, projectId) => this.subworkflowIssues(graph, projectId),
       now: this.now,
     });
+  }
+
+  /**
+   * P05 §4.2 at invoke: every sub-workflow's child resolves, is published
+   * (a draft is refused), and its current outputs still fit this graph's
+   * expressions (`subworkflow-output-drift`). The version pinned at the
+   * stage's start is checked again then.
+   */
+  private async subworkflowIssues(graph: WorkflowGraph, projectId: string | null): Promise<InvocationIssue[]> {
+    const out: InvocationIssue[] = [];
+    for (const [i, s] of graph.stages.entries()) {
+      if (s.kind !== 'subworkflow') continue;
+      const ref = s.subworkflow.workflowRef;
+      const label = 'id' in ref ? `id '${ref.id}'` : `'${ref.name}'`;
+      const path = ['target', 'stages', i, 'subworkflow', 'workflowRef'];
+      const child = await this.deps.definitions.findByRef(ref, projectId);
+      if (!child || child.archivedAt) {
+        out.push(issue('subworkflow-ref', path, `Stage "${s.key}": ${child ? `the workflow ${label} is archived` : `no workflow ${label} exists`}`));
+        continue;
+      }
+      if (child.status !== 'published' || !child.currentVersionId) {
+        out.push(issue('subworkflow-draft', path, `Stage "${s.key}": the workflow ${label} is a draft; publish it first`));
+        continue;
+      }
+      const childGraph = await this.deps.versions.get(child.currentVersionId);
+      const drift = outputDrift(graph, ref, { id: child.id, name: child.graph.workflow.name, graph: childGraph, projectId: childGraph.workflow.projectId ?? null });
+      if (drift.length > 0) out.push(issue('subworkflow-output-drift', path, `Stage "${s.key}": the outputs of ${label} no longer fit: ${drift.join('; ')}`));
+    }
+    return out;
   }
 
   // ── uploads ──────────────────────────────────────────────────
@@ -458,7 +495,15 @@ export class WorkflowInvocationService {
         ...(full ? { output: s.outputData ?? s.outputText ?? null } : {}),
         ...(s.error ? { error: s.error } : {}),
       })),
-      pendingApprovals: stages.filter((s) => s.status === 'awaiting_input').map((s) => ({ instanceId: s.id, key: s.stageKey, name: s.name })),
+      pendingApprovals: this.deps.approvals
+        ? (await this.deps.approvals.listPending(runId)).map((d) => ({
+            instanceId: d.instanceId,
+            key: d.stageKey,
+            name: d.name,
+            kind: d.kind,
+            ...(d.runId !== runId ? { runId: d.runId } : {}),
+          }))
+        : stages.filter((s) => s.status === 'awaiting_input').map((s) => ({ instanceId: s.id, key: s.stageKey, name: s.name })),
       postProcessing: (run.systemVars?.postProcessing ?? []).map((r) => ({
         step: r.stepName,
         success: r.success,
@@ -482,7 +527,7 @@ export class WorkflowInvocationService {
       const data = event.data as Record<string, unknown> | undefined;
       if (data?.['workflowRunId'] !== runId) return;
       if (event.kind === 'workflow_run.finalized') wake('finalized');
-      else if (opts.stopOnApproval && event.kind === 'stage_run.awaiting_input') wake('approval');
+      else if (opts.stopOnApproval && (event.kind === 'stage_run.awaiting_input' || event.kind === 'stage_run.waiting')) wake('approval');
     });
     const timer = setTimeout(() => wake('timeout'), Math.max(0, opts.timeoutMs));
     const onAbort = () => wake('aborted');

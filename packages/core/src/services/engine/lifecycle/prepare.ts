@@ -100,6 +100,14 @@ const worktrees: Phase = async ({ deps, graph, hooks }, run) => {
   if (selection.length === 0 && graph.workflow.lifecycle.requiresCodebase) {
     throw new Error('This workflow requires at least one codebase, and none was selected');
   }
+  // A child inheriting its parent's workspace works in the parent's mounts.
+  const inherited = run.systemVars?.inheritedWorkspace;
+  if (inherited) {
+    const parent = await deps.runRepo.getById(inherited.fromRunId);
+    const codebases = parent.systemVars?.codebases ?? {};
+    const workingDirectory = parent.systemVars?.workingDirectory ?? run.systemVars?.workingDirectory;
+    return { systemVars: { codebases, ...(workingDirectory ? { workingDirectory } : {}) }, detail: `inherited from run ${inherited.fromRunId}` };
+  }
   const mounts = deps.mounts;
   const ws = await runWorkspace(deps.workspaceManager, run);
   if (!mounts) {

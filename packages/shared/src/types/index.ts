@@ -154,6 +154,9 @@ export type {
   WorkflowRunWithStages,
   LoopIteration,
   LoopStateView,
+  MapItemView,
+  MapStateView,
+  SubworkflowStateView,
   WorkflowRunPermissionMode,
   ArtifactManifestEntry,
 } from './WorkflowRun.js';

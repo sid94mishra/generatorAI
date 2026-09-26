@@ -256,6 +256,8 @@ export type {
   IEngineLockStore,
   ExpiredLease,
   IEngineQueries,
+  IRunEventStore,
+  RunEventDeliveryOutcome,
 } from './IEngineStore.js';
 export type {
   IdempotencyClaim,

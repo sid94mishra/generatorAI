@@ -15,6 +15,8 @@
 //   release      the run's sessions (B-15) and turn journals, the sandbox,
 //                and the workspace. Worktrees are never removed here (C-7):
 //                retention reclaims them.
+// A sub-workflow child that inherits its parent's workspace (P05 §4.2)
+// skips post-processing and the workspace release: the parent owns both.
 // ────────────────────────────────────────────────────────────────
 
 import type { HookPhaseResult, WorkflowRun } from '@generatorai/shared';
@@ -122,6 +124,8 @@ export function buildPostProcessingSteps(lifecycle: Lifecycle, hasCodebases: boo
 const postProcess: Phase = async (ctx, run) => {
   const { deps, graph, outcome } = ctx;
   if (outcome !== 'completed') return { detail: `skipped (${outcome})` };
+  // A sub-workflow child in its parent's workspace: the parent commits (P05 §4.2).
+  if (run.systemVars?.inheritedWorkspace) return { detail: 'skipped (the parent run commits)' };
   const codebases = run.systemVars?.codebases ?? {};
   const steps = buildPostProcessingSteps(graph.workflow.lifecycle, Object.keys(codebases).length > 0);
   if (steps.length === 0) return {};
@@ -165,7 +169,8 @@ const release: Phase = async ({ deps, now }, run) => {
     await deps.sandbox.lifecycle.destroyForRun(run.id).catch((err: unknown) => deps.logger?.warn(`[RunLifecycle] ${run.id}: sandbox teardown failed: ${String(err)}`));
     await deps.eventBus.emitGlobal({ kind: 'workflow_run.sandbox_destroyed', data: { workflowRunId: run.id } }).catch(() => undefined);
   }
-  if (run.workspaceId) {
+  // An inherited workspace is the parent run's: it is released with the parent.
+  if (run.workspaceId && !run.systemVars?.inheritedWorkspace) {
     await deps.workspaceManager.completeWorkspace(run.workspaceId).catch((err: unknown) => {
       deps.logger?.warn(`[RunLifecycle] completing the workspace of ${run.id} failed: ${String(err)}`);
     });

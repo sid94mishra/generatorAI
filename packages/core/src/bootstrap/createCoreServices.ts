@@ -17,6 +17,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { DEFAULT_COMMAND_ALLOWLIST } from '@generatorai/workflow-spec';
+import { randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import type { ILogger, AgentEvent, AgentOverrides, HarnessConfig } from '@generatorai/shared';
 import type {
@@ -42,6 +43,8 @@ import type { IIdempotencyKeyStore, IInvocationUploadRepository } from '../domai
 import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebaseRepository.js';
 import { IdempotencyService } from '../services/IdempotencyService.js';
 import { WorkflowInvocationService } from '../services/workflow-invocation/WorkflowInvocationService.js';
+import { WorkflowApprovalService } from '../services/WorkflowApprovalService.js';
+import { WorkflowCallbacks } from '../services/engine/WorkflowCallbacks.js';
 
 import { EventBus } from '../events/EventBus.js';
 import { ArtifactService } from '../services/ArtifactService.js';
@@ -119,6 +122,12 @@ export interface CoreServicesInputs {
   projectCodebaseRepo?: IProjectCodebaseRepository;
   /** The web app origin, for invocation result links. */
   appUrl?: string;
+  /**
+   * The key of the per-wait callback tokens (P05 §4.3). The server keeps it
+   * in its data directory so tokens survive a restart; omitted, a random key
+   * lives as long as the process.
+   */
+  callbackKey?: Buffer;
 
   /** The workflow engine's stores over the same database (`createEngineStores(db)`). */
   engineStores: EngineStores;
@@ -237,6 +246,10 @@ export interface CoreServices {
   durableExecutionEngine: DurableExecutionEngine;
   /** THE way a run starts (P04): one service behind one route and one client method. */
   workflowInvocationService: WorkflowInvocationService;
+  /** The decisions a run waits on (its sub-workflow children's mirrored) and the one way to answer them (P05). */
+  workflowApprovalService: WorkflowApprovalService;
+  /** Per-wait callback tokens (P05 §4.3). */
+  workflowCallbacks: WorkflowCallbacks;
   /** Claim-then-finalize idempotency keys (null without an idempotency store). */
   idempotencyService: IdempotencyService | null;
   /** The lifecycle's pre- and post-processing steps (commit/push/PR through the source-control flow). */
@@ -434,6 +447,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   let workflowRunService!: WorkflowRunService;
   // The lifecycle's steps: preprocessing, and commit/push/PR through the flow.
   const lifecycleSteps = new LifecycleSteps(gitManager, scriptRunner, eventBus, logger, scmFlow);
+  // Per-wait callback tokens (P05 §4.3): the executor exposes them to stage templates.
+  const workflowCallbacks = new WorkflowCallbacks(inputs.callbackKey ?? randomBytes(32), inputs.appUrl);
   const engine = new RunSupervisor({
     stores: inputs.engineStores,
     runRepo: workflowRunRepo,
@@ -449,6 +464,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     scriptRunner,
     toHarnessError: inputs.toHarnessError,
     artifacts: artifactService,
+    callbacks: workflowCallbacks,
     ...(inputs.publishEngineEvent ? { publish: inputs.publishEngineEvent } : {}),
     permissionCheck: (run, graph) => workflowRunService.assertPermissionGating(run, graph),
     // Mounts, project configs and the sandbox are late-wired by the composition root / SDK.
@@ -499,6 +515,14 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   // HITL — the operator side of parked instances: resolutions and cancels are run commands.
   const hitlService = new HitlService(stageRunRepo, engine);
 
+  // ── Decisions (P05) ──
+  const workflowApprovalService = new WorkflowApprovalService({
+    runRepo: workflowRunRepo,
+    stageRuns: stageRunRepo,
+    command: (runId, command, opts) => engine.command(runId, command, opts),
+    callbacks: workflowCallbacks,
+  });
+
   // ── The one invocation path (P04) ──
   const idempotencyService = idempotencyKeyRepo ? new IdempotencyService(idempotencyKeyRepo, logger) : null;
   const workflowInvocationService = new WorkflowInvocationService({
@@ -515,8 +539,11 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     ...(inputs.projectCodebaseRepo ? { codebases: inputs.projectCodebaseRepo } : {}),
     models: () => harness.getModels(),
     ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+    approvals: workflowApprovalService,
     logger,
   });
+  // A sub-workflow stage invokes its child through the same path (P05 §4.2).
+  engine.subworkflows.setInvocation(workflowInvocationService, workflowDefinitionService);
 
   // ── Automation ──
   const automationService = new AutomationService(
@@ -573,6 +600,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     hitlService,
     durableExecutionEngine,
     workflowInvocationService,
+    workflowApprovalService,
+    workflowCallbacks,
     idempotencyService,
     lifecycleSteps,
     ...(planService ? { planService } : {}),

@@ -24,6 +24,7 @@ import { createWorkflowRunRoutes } from './workflowRuns.js';
 import { createWorkflowInvocationRoutes } from './workflowInvocations.js';
 import { createWorkflowRunWorkspaceRoutes } from './workflowRunWorkspace.js';
 import { createAutomationRoutes } from './automations.js';
+import { createWorkflowCallbackRoutes } from './workflowCallbacks.js';
 import { createSessionRoutes } from './sessions.js';
 import { createOpenApiRoutes } from './openapi.js';
 import { createProjectRoutes } from './projects.js';
@@ -67,6 +68,8 @@ export function createApiRouter(container: Container): Router {
 
   // THE way a run starts (P04): one route for every client
   router.use('/workflow-invocations', createWorkflowInvocationRoutes(container));
+  // P05 §4.3 — an event wait's callback: public, authenticated by its token.
+  router.use('/workflow-callbacks', createWorkflowCallbackRoutes(container));
 
   // Projects — CRUD + codebases + configs + worktrees
   router.use('/projects', createProjectRoutes(container));

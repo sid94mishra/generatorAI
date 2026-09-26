@@ -120,7 +120,11 @@ export const VALIDATION_CODES = {
     description: 'A map running several items at once in one shared workspace with body stages that may write',
   },
   'wait-form': { layer: 'references', severity: 'error', description: "An approval wait's form that is not a usable JSON Schema object" },
-  'subworkflow-ref': { layer: 'references', severity: 'error', description: 'A sub-workflow reference that names no workflow, or an archived one' },
+  'subworkflow-ref': {
+    layer: 'references',
+    severity: 'error',
+    description: 'A sub-workflow reference to an archived workflow (error), or to none (a warning at save, an error at publish and invoke)',
+  },
   'subworkflow-draft': { layer: 'references', severity: 'warning', description: 'A sub-workflow whose child is a draft (an error at publish and invoke)' },
   'subworkflow-input': { layer: 'references', severity: 'error', description: "A sub-workflow input the child does not declare, or a required child variable left unset" },
   'subworkflow-depth': { layer: 'references', severity: 'error', description: 'Sub-workflows nested more than 3 deep' },

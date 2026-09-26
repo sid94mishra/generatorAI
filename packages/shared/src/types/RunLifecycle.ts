@@ -68,6 +68,12 @@ export interface RunSystemVars {
   lifecycle?: Record<string, RunPhaseRecord>;
   preprocessing?: PreprocessingResult[];
   postProcessing?: PreprocessingResult[];
+  /**
+   * A sub-workflow child with `workspace: inherit` (P05 §4.2): it works in
+   * its parent run's workspace and mounts. Its own mount preparation,
+   * post-processing and workspace release are skipped: the parent commits.
+   */
+  inheritedWorkspace?: { fromRunId: string; workspaceId: string };
 }
 
 /** Workspace/artifact info for a workflow run (`GET /workflow-runs/:id/workspace`). */

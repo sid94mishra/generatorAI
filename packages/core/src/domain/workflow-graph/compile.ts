@@ -21,14 +21,20 @@ import {
   RetryPolicySchema,
   STAGE_DEFAULTS,
   type Budget,
+  type CheckSpec,
   type EdgeOn,
   type ExprNode,
   type JoinPolicy,
   type LoopSpec,
+  type MapSpec,
+  type PromptDefinition,
   type RepairPolicy,
   type RetryPolicy,
   type StageNodeClass,
+  type SubworkflowSpec,
+  type WaitSpec,
   type WorkflowGraph,
+  type WorkflowRef,
 } from '@generatorai/workflow-spec';
 
 /** A parsed expression, or the parse error to report when it is evaluated. */
@@ -71,6 +77,33 @@ export interface CompiledLoop {
   select: Array<[string, CompiledExpr]>;
 }
 
+/** A map's settings, defaults applied and expressions parsed (P05 §4.1). */
+export interface CompiledMap {
+  items: CompiledExpr;
+  itemKey?: CompiledExpr;
+  maxItems: number;
+  concurrency: number;
+  toleratedFailurePercent: number;
+  workspace: 'shared' | 'mount_per_item';
+  merge: 'none' | 'sequential' | 'pr_per_item';
+  itemSetup: CheckSpec[];
+  select: Array<[string, CompiledExpr]>;
+}
+
+/** A wait's settings (P05 §4.3). */
+export type CompiledWait =
+  | { type: 'approval'; prompt: PromptDefinition; form?: Record<string, unknown>; timeoutMs?: number; onTimeout: 'fail' | 'complete' }
+  | { type: 'event'; eventKey: CompiledExpr; timeoutMs?: number; onTimeout: 'fail' | 'complete' }
+  | { type: 'timer'; durationMs: number };
+
+/** A sub-workflow's settings (P05 §4.2). */
+export interface CompiledSubworkflow {
+  ref: WorkflowRef;
+  version: 'pin_at_run_start' | number;
+  inputs: Array<[string, CompiledExpr]>;
+  workspace: 'inherit' | 'isolated';
+}
+
 export interface CompiledNode {
   key: string;
   kind: string;
@@ -95,6 +128,12 @@ export interface CompiledNode {
   outgoing: CompiledEdge[];
   /** A loop container's settings. */
   loop?: CompiledLoop;
+  /** A map container's settings. */
+  map?: CompiledMap;
+  /** A wait stage's settings. */
+  wait?: CompiledWait;
+  /** A sub-workflow stage's settings. */
+  subworkflow?: CompiledSubworkflow;
   /** A container's direct body stages, in key order. */
   body: readonly string[];
 }
@@ -116,7 +155,7 @@ function compileExpr(source: string | undefined): CompiledExpr | undefined {
 const DEFAULT_RETRY: RetryPolicy = RetryPolicySchema.parse({});
 const DEFAULT_REPAIR: RepairPolicy = RepairPolicySchema.parse({});
 
-/** Container kinds (P05) own child scopes; none exist before P05. */
+/** Node classes: work nodes run attempts, a wait parks, containers own child scopes (a sub-workflow's is its child run). */
 function nodeClass(kind: string): StageNodeClass {
   if (kind === 'wait') return 'wait';
   if (kind === 'loop' || kind === 'map' || kind === 'subworkflow') return 'container';
@@ -126,10 +165,6 @@ function nodeClass(kind: string): StageNodeClass {
 const byKey = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
 
 function compileLoop(spec: LoopSpec): CompiledLoop {
-  const exprs = (rec: Record<string, string> | undefined): Array<[string, CompiledExpr]> =>
-    Object.keys(rec ?? {})
-      .sort(byKey)
-      .map((name) => [name, compileExpr(rec![name])!]);
   return {
     maxIterations: spec.maxIterations,
     exits: spec.exits.map((r) => ({ when: compileExpr(r.when)!, action: r.action, consecutive: r.consecutive, reason: r.reason })),
@@ -143,6 +178,51 @@ function compileLoop(spec: LoopSpec): CompiledLoop {
     checkpointEachIteration: spec.checkpointEachIteration ?? spec.onLimit.mode === 'accept_best',
     select: exprs(spec.output.select),
   };
+}
+
+const exprs = (rec: Record<string, string> | undefined): Array<[string, CompiledExpr]> =>
+  Object.keys(rec ?? {})
+    .sort(byKey)
+    .map((name) => [name, compileExpr(rec![name])!]);
+
+function compileMap(spec: MapSpec): CompiledMap {
+  return {
+    items: compileExpr(spec.items)!,
+    ...(spec.itemKey !== undefined ? { itemKey: compileExpr(spec.itemKey)! } : {}),
+    maxItems: spec.maxItems,
+    concurrency: spec.concurrency,
+    toleratedFailurePercent: spec.toleratedFailurePercent,
+    workspace: spec.workspace,
+    merge: spec.merge,
+    itemSetup: spec.itemSetup ?? [],
+    select: exprs(spec.output.select),
+  };
+}
+
+function compileWait(spec: WaitSpec): CompiledWait {
+  switch (spec.type) {
+    case 'approval':
+      return {
+        type: 'approval',
+        prompt: spec.prompt,
+        ...(spec.form ? { form: spec.form } : {}),
+        ...(spec.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
+        onTimeout: spec.onTimeout,
+      };
+    case 'event':
+      return {
+        type: 'event',
+        eventKey: compileExpr(spec.eventKey)!,
+        ...(spec.timeoutMs !== undefined ? { timeoutMs: spec.timeoutMs } : {}),
+        onTimeout: spec.onTimeout,
+      };
+    case 'timer':
+      return { type: 'timer', durationMs: spec.durationMs };
+  }
+}
+
+function compileSubworkflow(spec: SubworkflowSpec): CompiledSubworkflow {
+  return { ref: spec.workflowRef, version: spec.version, inputs: exprs(spec.inputs), workspace: spec.workspace };
 }
 
 /** Compile a parsed (defaults-applied) `WorkflowGraph`. Pure. */
@@ -176,13 +256,16 @@ export function compile(graph: WorkflowGraph): CompiledWorkflow {
         ...(timeouts?.attemptMs !== undefined ? { attemptMs: timeouts.attemptMs } : {}),
         ...(timeouts?.totalMs !== undefined ? { totalMs: timeouts.totalMs } : {}),
       },
-      ...(stage.kind !== 'check' && stage.budget ? { budget: stage.budget } : {}),
+      ...((stage.kind === 'agent' || stage.kind === 'loop' || stage.kind === 'map' || stage.kind === 'subworkflow') && stage.budget ? { budget: stage.budget } : {}),
       ...(agent?.sessionGroup ? { sessionGroup: agent.sessionGroup } : {}),
       compensates: (stage.compensate?.length ?? 0) > 0,
       incoming: [],
       outgoing: [],
       body: [...(bodies.get(stage.key) ?? [])].sort(byKey),
       ...(stage.kind === 'loop' ? { loop: compileLoop(stage.loop) } : {}),
+      ...(stage.kind === 'map' ? { map: compileMap(stage.map) } : {}),
+      ...(stage.kind === 'wait' ? { wait: compileWait(stage.wait) } : {}),
+      ...(stage.kind === 'subworkflow' ? { subworkflow: compileSubworkflow(stage.subworkflow) } : {}),
     });
   });
   for (const e of graph.edges) {

@@ -13,12 +13,17 @@
 // carry(-1) is the carryInit values (a carry without one is null); a path
 // before the first iteration (`loop.previous` in iteration 0) is null.
 // `stages.<key>` sees the top-level stages and, inside a body, the
-// instances of the SAME iteration of every enclosing loop. `loops.<key>`
-// is every enclosing loop.
+// instances of the SAME iteration of every enclosing loop (and the same
+// item of every enclosing map). `loops.<key>` is every enclosing loop.
+//
+// Inside a map body (P05 §4.1) `item` is the item of the nearest map,
+// `map` its `{index, key, count}`, and `maps.<key>` every enclosing map's
+// `{item, index, key, count}`. A map scope is keyed by the item index
+// (`item_index`), a loop scope by the iteration (`iteration_index`).
 // ────────────────────────────────────────────────────────────────
 
 import type { CompiledWorkflow } from '../workflow-graph/compile.js';
-import type { InstanceState, LoopIterationRecord, LoopSignals, RunRecord, RunState, Usage } from './types.js';
+import type { InstanceState, LoopIterationRecord, LoopSignals, MapState, RunRecord, RunState, Usage } from './types.js';
 
 /** The marker of a loop's wrap-up instance in its path: `<loop>#wrapup/<stage>`. */
 export const WRAP_UP_SEGMENT = '#wrapup/';
@@ -43,7 +48,7 @@ export class StateIndex {
   ) {
     for (const i of instances) {
       this.byId.set(i.id, i);
-      const key = scopeKey(i.scopeId, i.iterationIndex);
+      const key = scopeKey(i.scopeId, scopeIndexOf(i));
       const list = this.byScope.get(key) ?? [];
       list.push(i);
       this.byScope.set(key, list);
@@ -78,7 +83,7 @@ export class StateIndex {
       seen.add(cur.id);
       const container = this.byId.get(cur.scopeId);
       if (!container) break;
-      out.push({ container, iteration: cur.iterationIndex });
+      out.push({ container, iteration: scopeIndexOf(cur) });
       cur = container;
     }
     return out;
@@ -87,6 +92,58 @@ export class StateIndex {
 
 function scopeKey(containerId: string | null, iteration: number | null): string {
   return `${containerId ?? ''}#${iteration ?? ''}`;
+}
+
+/** The scope index of an instance inside its container: a loop iteration or a map item (never both). */
+export function scopeIndexOf(i: Pick<InstanceState, 'iterationIndex' | 'itemIndex'>): number | null {
+  return i.iterationIndex ?? i.itemIndex ?? null;
+}
+
+/** A map instance's state, when it is one. */
+export function mapStateOf(i: InstanceState): MapState | null {
+  return i.containerState?.kind === 'map' ? i.containerState : null;
+}
+
+/** `maps.<key>` (and the nearest map's `item` and `map`) of item `index` of a map. */
+function mapRoot(map: InstanceState, index: number): { item: unknown; index: number; key: string; count: number } | null {
+  const ms = mapStateOf(map);
+  const it = ms?.items[index];
+  if (!ms || !it) return null;
+  return { item: it.item, index, key: it.key, count: ms.count };
+}
+
+/** Adds `item`/`map`/`maps` (maps) and `loop`/`loops` (loops) for a chain of enclosing containers, nearest first. */
+function containerRoots(
+  ix: StateIndex,
+  chain: ReadonlyArray<{ container: InstanceState; iteration: number | null }>,
+  loopK: (container: InstanceState, iteration: number | null) => number,
+  scope: Record<string, unknown>,
+): void {
+  const loops: Record<string, unknown> = {};
+  const maps: Record<string, unknown> = {};
+  let nearestLoop: Record<string, unknown> | undefined;
+  let nearestMap: { item: unknown; index: number; key: string; count: number } | undefined;
+  for (const { container, iteration } of chain) {
+    if (container.loopState != null) {
+      const root = loopRoot(ix, container, 'T', loopK(container, iteration));
+      loops[container.stageKey] = root;
+      nearestLoop ??= root;
+    } else if (iteration !== null) {
+      const root = mapRoot(container, iteration);
+      if (!root) continue;
+      maps[container.stageKey] = root;
+      nearestMap ??= root;
+    }
+  }
+  if (nearestLoop) {
+    scope['loop'] = nearestLoop;
+    scope['loops'] = loops;
+  }
+  if (nearestMap) {
+    scope['item'] = nearestMap.item;
+    scope['map'] = { index: nearestMap.index, key: nearestMap.key, count: nearestMap.count };
+    scope['maps'] = maps;
+  }
 }
 
 const stageView = (i: InstanceState) => ({ status: i.status, output: i.output ?? null, summary: i.summary });
@@ -170,7 +227,7 @@ export function loopRoot(ix: StateIndex, loop: InstanceState, context: LoopConte
   };
 }
 
-/** `stages`: the top level plus the same iteration of every enclosing loop. */
+/** `stages`: the top level plus the same iteration (item) of every enclosing loop (map). */
 function stagesFor(ix: StateIndex, chain: Array<{ container: InstanceState; iteration: number | null }>): Record<string, unknown> {
   const stages: Record<string, unknown> = {};
   for (const i of ix.scope(null, null)) stages[i.stageKey] = stageView(i);
@@ -198,20 +255,24 @@ export function instanceScope(
 ): Record<string, unknown> {
   const chain = ix.chain(inst);
   const scope: Record<string, unknown> = { ...baseScope(ix.run, opts.variables), stages: stagesFor(ix, chain) };
-  const loops: Record<string, unknown> = {};
-  let nearest: Record<string, unknown> | undefined;
-  for (const { container, iteration } of chain) {
-    if (container.loopState == null) continue;
-    const k = iteration ?? (isWrapUp(inst) && container.id === inst.scopeId ? container.loopState.k + 1 : container.loopState.k);
-    const root = loopRoot(ix, container, 'T', k);
-    loops[container.stageKey] = root;
-    nearest ??= root;
-  }
-  if (nearest) {
-    scope['loop'] = nearest;
-    scope['loops'] = loops;
-  }
+  containerRoots(
+    ix,
+    chain,
+    (container, iteration) => iteration ?? (isWrapUp(inst) && container.id === inst.scopeId ? container.loopState!.k + 1 : container.loopState!.k),
+    scope,
+  );
   if (opts.parent) scope['parent'] = { status: opts.parent.status };
+  return scope;
+}
+
+/**
+ * The scope of item `index` of a map, as its body sees it plus the item's
+ * body stages: what the map's per-item `output.select` reads.
+ */
+export function mapItemScope(ix: StateIndex, map: InstanceState, index: number): Record<string, unknown> {
+  const chain = [{ container: map, iteration: index as number | null }, ...ix.chain(map)];
+  const scope: Record<string, unknown> = { ...baseScope(ix.run), stages: stagesFor(ix, chain) };
+  containerRoots(ix, chain, (container, iteration) => iteration ?? container.loopState!.k, scope);
   return scope;
 }
 
@@ -227,17 +288,12 @@ export function loopSettingsScope(
   const stages = stagesFor(ix, chain);
   if (context !== 'init') Object.assign(stages, iterationStages(ix, loop, k));
   const scope: Record<string, unknown> = { ...baseScope(ix.run), stages };
-  const loops: Record<string, unknown> = {};
-  for (const { container, iteration } of chain) {
-    if (container.loopState == null) continue;
-    loops[container.stageKey] = loopRoot(ix, container, 'T', iteration ?? container.loopState.k);
-  }
+  containerRoots(ix, chain, (container, iteration) => iteration ?? container.loopState!.k, scope);
   if (context !== 'init') {
     const own = loopRoot(ix, loop, context, k, current);
     scope['loop'] = own;
-    loops[loop.stageKey] = own;
+    scope['loops'] = { ...((scope['loops'] as Record<string, unknown> | undefined) ?? {}), [loop.stageKey]: own };
   }
-  if (Object.keys(loops).length > 0) scope['loops'] = loops;
   return scope;
 }
 

@@ -96,6 +96,8 @@ const STAGE_PATCH_COLUMNS: ReadonlyArray<[keyof StageRunCasPatch, string, boolea
   ['sessionKey', 'session_key', false],
   ['amendedAt', 'amended_at', false],
   ['loopState', 'loop_state', true],
+  // A map's or a sub-workflow's state lives in the same container-state column (P05).
+  ['containerState', 'loop_state', true],
 ];
 
 /** SET clauses of a patch without a status change (a loop's state, P05). */

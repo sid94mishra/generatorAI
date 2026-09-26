@@ -1535,6 +1535,40 @@ export class GitClient implements IGitClient {
    * back to a real `--no-commit` merge rather than mistaking an empty list for
    * a clean result.
    */
+  async mergeTrees(repoDir: string, base: string, ours: string, theirs: string): Promise<{ supported: boolean; tree: string | null; conflicts: string[] }> {
+    let result;
+    try {
+      result = await this.runner.run('git', ['merge-tree', '--write-tree', '--name-only', `--merge-base=${base}`, ours, theirs], {
+        cwd: repoDir,
+        timeout: 120_000,
+        env: this.snapshotEnv(),
+      });
+    } catch {
+      return { supported: false, tree: null, conflicts: [] };
+    }
+    const lines = result.stdout.split('\n').map((l) => l.replace(/\r$/, ''));
+    const tree = lines[0]?.trim() || null;
+    if (result.exitCode === 0) return { supported: !!tree, tree, conflicts: [] };
+    if (result.exitCode !== 1) return { supported: false, tree: null, conflicts: [] };
+    const conflicts: string[] = [];
+    for (const line of lines.slice(1)) {
+      if (line.trim().length === 0) break; // the informational messages follow a blank line
+      if (!conflicts.includes(line)) conflicts.push(line);
+    }
+    return { supported: true, tree: null, conflicts };
+  }
+
+  async checkoutTree(repoDir: string, fromTree: string, toTree: string, indexFile: string): Promise<void> {
+    await fs.mkdir(path.dirname(indexFile), { recursive: true });
+    const env = this.snapshotEnv(indexFile);
+    const read = await this.runner.run('git', ['read-tree', fromTree], { cwd: repoDir, timeout: 60_000, env });
+    if (read.exitCode !== 0) throw new GitError(`Failed to read tree ${fromTree}: ${read.stderr}`);
+    // Stat data for the fresh index, so the two-way merge sees the files as up to date.
+    await this.runner.run('git', ['update-index', '-q', '--refresh'], { cwd: repoDir, timeout: 120_000, env });
+    const move = await this.runner.run('git', ['read-tree', '-m', '-u', fromTree, toTree], { cwd: repoDir, timeout: 120_000, env });
+    if (move.exitCode !== 0) throw new GitError(`Failed to move ${repoDir} to tree ${toTree}: ${move.stderr || move.stdout}`);
+  }
+
   async mergeTreeConflicts(repoDir: string, ours: string, theirs: string): Promise<GitMergeTreeResult> {
     let result;
     try {

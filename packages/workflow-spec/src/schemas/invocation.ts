@@ -329,7 +329,12 @@ export interface RunDigest {
     error?: string | null;
   }>;
   /** Instances waiting for a person (a completion review or an in-turn gate). */
-  pendingApprovals: Array<{ instanceId: string; key: string; name: string }>;
+  /**
+   * Decisions the run waits on: completion reviews, in-turn gates, parked
+   * loops, approval and event waits — a sub-workflow child's too (`runId` is
+   * then the child run that owns the instance; P05 §4.2).
+   */
+  pendingApprovals: Array<{ instanceId: string; key: string; name: string; kind?: string; runId?: string }>;
   /** Post-processing step results, once finalized. */
   postProcessing: Array<{ step: string; success: boolean; output?: string; error?: string }>;
   /** Why a waiter returned. */

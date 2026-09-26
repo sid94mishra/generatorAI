@@ -295,6 +295,20 @@ export interface IGitClient {
    */
   readBlobById(repoDir: string, sha: string): Promise<string | null>;
   /**
+   * A 3-way merge of two commits against an explicit base, without a working
+   * tree (`git merge-tree --write-tree --merge-base`, git >= 2.40): the
+   * merged tree, or the conflicted paths. `supported: false` when git cannot
+   * answer (too old, an unresolvable commit).
+   */
+  mergeTrees(repoDir: string, base: string, ours: string, theirs: string): Promise<{ supported: boolean; tree: string | null; conflicts: string[] }>;
+  /**
+   * Move the working tree from `fromTree` to `toTree` (a two-way
+   * `read-tree -m -u` through the throwaway `indexFile`): only the paths
+   * that differ are written or removed; the repository's index and HEAD are
+   * untouched. The working tree must match `fromTree`. Throws on failure.
+   */
+  checkoutTree(repoDir: string, fromTree: string, toTree: string, indexFile: string): Promise<void>;
+  /**
    * Restore `paths` in the working tree from `treeish` (binary-safe, via a
    * throwaway index + `git checkout-index`).
    */

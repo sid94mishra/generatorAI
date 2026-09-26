@@ -16,6 +16,7 @@ import { AgentHostClient, HostSupervisor, resolveWorktreePath, sessionHookBridge
 import { createSecurityContext, type SecurityContext } from './composition/security.js';
 import { registerHarnessInstances } from './composition/harnessInstances.js';
 import { mintLocalAdminToken } from './composition/localAdminToken.js';
+import { loadOrCreateCallbackKey } from './composition/callbackKey.js';
 import { installAgentCursorTheme, resolveCuaDriverBinary } from './computer/driverBinary.js';
 import { ScreenCast } from './computer/screenCast.js';
 import { createPreviewProducer } from './computer/previewProducer.js';
@@ -193,6 +194,8 @@ import type {
   OutboxPublisher,
   WorkflowRunService,
   WorkflowInvocationService,
+  WorkflowApprovalService,
+  WorkflowCallbacks,
   IdempotencyService,
   StageConversationService,
   // automation services
@@ -829,6 +832,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // boundary, and the outbox publisher (wired below, once the stream
     // broker exists).
     engineStores: createEngineStores(db),
+    // P05 §4.3 — the key of the per-wait callback tokens (kept in the data dir).
+    callbackKey: loadOrCreateCallbackKey(path.dirname(resolve(config.dbPath))),
     toHarnessError: harnessErrorOf,
     publishEngineEvent: (event, row) => publishEngineEvent(event, row),
     engineOwnerLabel: `server:${process.pid}`,
@@ -873,6 +878,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     planService,
     agentInteractionService,
     workflowInvocationService,
+    workflowApprovalService,
+    workflowCallbacks,
     idempotencyService,
   } = core;
 
@@ -2122,6 +2129,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     stageConversationService,
     // P04 — THE way a run starts.
     workflowInvocationService,
+    // P05 — pending decisions (sub-workflow children mirrored) and per-wait callbacks.
+    workflowApprovalService,
+    workflowCallbacks,
 
     gitManager,
     changeSetService,
@@ -2580,6 +2590,10 @@ export interface Container {
 
   /** THE way a run starts (P04): `POST /workflow-invocations`. */
   workflowInvocationService: WorkflowInvocationService;
+  /** Pending decisions of a run, its sub-workflow children's mirrored, and the one way to answer them (P05). */
+  workflowApprovalService: WorkflowApprovalService;
+  /** Per-wait callback tokens (`/api/workflow-callbacks/:token`, P05 §4.3). */
+  workflowCallbacks: WorkflowCallbacks;
   gitManager: GitManager;
   changeSetService: ChangeSetService;
   sourceControlService: SourceControlService;

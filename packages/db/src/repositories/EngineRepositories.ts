@@ -9,7 +9,19 @@
 // ────────────────────────────────────────────────────────────────
 
 import type BetterSqlite3 from 'better-sqlite3';
-import { attemptId, type AttemptMode, type AttemptStatus, type ClassifiedError, type TimerKind, type Usage } from '@generatorai/core';
+import { randomUUID } from 'node:crypto';
+import {
+  attemptId,
+  type AttemptMode,
+  type AttemptStatus,
+  type ClassifiedError,
+  type IRunEventStore,
+  type RunEventDeliveryOutcome,
+  type RunEventRecord,
+  type TimerKind,
+  type Usage,
+} from '@generatorai/core';
+import { canonicalJson } from '@generatorai/workflow-spec';
 import type { AppDatabase } from '../index.js';
 import { sqliteHandle } from './AuthRepositories.js';
 import { json } from './engineCas.js';
@@ -38,6 +50,52 @@ abstract class SyncRepository {
   protected readonly sqlite: BetterSqlite3.Database;
   constructor(db: AppDatabase | BetterSqlite3.Database) {
     this.sqlite = 'prepare' in db ? (db as BetterSqlite3.Database) : sqliteHandle(db as AppDatabase);
+  }
+}
+
+// ── workflow_run_events (P05 §4.3) ───────────────────────────────
+
+export class RunEventRepository extends SyncRepository implements IRunEventStore {
+  deliver(e: { runId: string; eventKey: string; idempotencyKey: string; data: unknown; now: number }): { outcome: RunEventDeliveryOutcome; id: string } {
+    const data = e.data === undefined ? null : e.data;
+    const id = randomUUID();
+    const inserted = this.sqlite
+      .prepare(
+        `INSERT INTO workflow_run_events (id, run_id, event_key, idempotency_key, data, received_at)
+         VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (run_id, event_key, idempotency_key) DO NOTHING`,
+      )
+      .run(id, e.runId, e.eventKey, e.idempotencyKey, JSON.stringify(data), e.now).changes;
+    if (inserted > 0) return { outcome: 'inserted', id };
+    const existing = this.sqlite
+      .prepare(`SELECT id, data FROM workflow_run_events WHERE run_id = ? AND event_key = ? AND idempotency_key = ?`)
+      .get(e.runId, e.eventKey, e.idempotencyKey) as Row;
+    const same = canonicalJson(parse<unknown>(existing['data']) ?? null) === canonicalJson(data);
+    return { outcome: same ? 'replayed' : 'conflict', id: existing['id'] as string };
+  }
+
+  listPending(runId: string): RunEventRecord[] {
+    return (
+      this.sqlite
+        .prepare(
+          `SELECT * FROM workflow_run_events WHERE run_id = ? AND consumed_by_stage_run_id IS NULL ORDER BY received_at, id`,
+        )
+        .all(runId) as Row[]
+    ).map((r) => ({
+      id: r['id'] as string,
+      eventKey: r['event_key'] as string,
+      idempotencyKey: r['idempotency_key'] as string,
+      data: parse<unknown>(r['data']),
+      receivedAt: r['received_at'] as number,
+    }));
+  }
+
+  /** The CAS of `consume_event` (inside `RunStore.apply`'s transaction). */
+  consume(runId: string, eventId: string, stageRunId: string): boolean {
+    return (
+      this.sqlite
+        .prepare(`UPDATE workflow_run_events SET consumed_by_stage_run_id = ? WHERE id = ? AND run_id = ? AND consumed_by_stage_run_id IS NULL`)
+        .run(stageRunId, eventId, runId).changes > 0
+    );
   }
 }
 

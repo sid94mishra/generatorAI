@@ -437,6 +437,13 @@ export function createMockContainer(configOverrides?: Partial<AppConfig>): Conta
     workflowDefinitionService,
     runDefinitionReader,
     workflowRunService,
+    // P05: decisions go through the approval service (it forwards to the run's command).
+    workflowApprovalService: {
+      respond: vi.fn((runId: string, instanceId: string, verdict: Record<string, unknown>) =>
+        workflowRunService.command(runId, { command: 'approve', instanceId, ...verdict })),
+      listPending: vi.fn().mockResolvedValue([]),
+      callbackFor: vi.fn().mockReturnValue(undefined),
+    },
     chatEntityRepo,
     // The chat LIST route enriches each row with a one-line preview of its
     // newest message, in one batched query. Without this double the route

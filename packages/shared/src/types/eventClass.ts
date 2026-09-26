@@ -185,6 +185,7 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'stage_run.repairing': 'item',
   'stage_run.awaiting_input': 'item',
   'stage_run.input_received': 'item',
+  'stage_run.waiting': 'item',
   'stage_run.operator_message': 'item',
   'stage_run.operator_message_dropped': 'item',
   'stage_run.turn_cancelled': 'item',

@@ -79,6 +79,9 @@ import { StageGatePort } from '../session/StageGatePort.js';
 import { TurnRecorder } from '../session/TurnRecorder.js';
 import type { SessionOwner, TurnContext } from '../session/types.js';
 import { runWorkspace, workspaceExposure } from '../session/workspaceExposure.js';
+import { mapItemPlacement, runForItem } from './MapEffects.js';
+import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
+import { waitInterruptOf } from '../../domain/scheduler/waits.js';
 import { StageConversationError } from './StageConversationError.js';
 import { runCheck } from './CheckRunner.js';
 import { compile, type CompiledNode, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
@@ -149,6 +152,8 @@ export interface StageExecutorDeps {
   artifacts?: StageArtifactReader | undefined;
   /** Deliver a message to the run's actor. */
   post: (runId: string, msg: RunMessage) => void;
+  /** Per-wait callback tokens: `stages.<wait>.callbackUrl` / `callbackToken` of a waiting event wait (P05 §4.3). */
+  callbacks?: WorkflowCallbacks | undefined;
   logger?: ILogger | undefined;
   now?: () => number;
   timing?: Partial<ExecutorTiming>;
@@ -640,11 +645,14 @@ export class StageExecutor {
         data: { stageRunId, workflowRunId: runId, name: stage.name, stageKey: stage.key, instancePath: instance.instancePath, attemptNo: frame.req.attemptNo, version: running.row.version },
       } as unknown as AgentEvent)
       .catch(() => undefined);
+    // Inside a mount_per_item map item the command runs in the item's worktrees (P05 §4.1).
+    const item = mapItemPlacement(state, instance);
+    const placed = item ? runForItem(run, item) : run;
     const workspace = await runWorkspace(this.deps.workspaceManager, run);
     const outcome = await runCheck({
       stage,
-      run,
-      primaryDir: run.systemVars?.workingDirectory ?? this.deps.workspaceManager.getWorkingDirectory(workspace),
+      run: placed,
+      primaryDir: placed.systemVars?.workingDirectory ?? this.deps.workspaceManager.getWorkingDirectory(workspace),
       scope: templateScope(compile(graph), state, instance, userVariables({ ...(run.variables ?? {}) })),
       scriptRunner: this.deps.scriptRunner,
       signal: frame.ac.signal,
@@ -681,12 +689,17 @@ export class StageExecutor {
           : stage.prompts;
 
     const spec = stageSessionSpec(graph, stage, run).merged;
-    const workspace = await runWorkspace(this.deps.workspaceManager, run);
+    // Inside a mount_per_item map item the stage works in the item's own
+    // workspace and worktrees (P05 §4.1); everywhere else in the run's.
+    const item = mapItemPlacement(state, instance);
+    const itemWorkspace = item?.workspaceId ? await this.deps.workspaceManager.getExecutionWorkspace(item.workspaceId) : null;
+    const placed = item && itemWorkspace ? runForItem(run, item) : run;
+    const workspace = itemWorkspace ?? (await runWorkspace(this.deps.workspaceManager, run));
     // The run's primary mount, pinned by the lifecycle's `worktrees` phase (system values, never variables: W-06).
-    const pinned = run.systemVars?.workingDirectory;
+    const pinned = placed.systemVars?.workingDirectory;
     const ctx: AttemptContext = {
       frame,
-      run,
+      run: placed,
       graph,
       stage,
       state,
@@ -1197,7 +1210,21 @@ export class StageExecutor {
 
   /** What the stage's templates read: context T of its enclosing loops (P05 §2.2). */
   private scopeOf(ctx: AttemptContext): Record<string, unknown> {
-    return templateScope(ctx.compiled, ctx.state, ctx.instance, userVariables(ctx.variables));
+    const scope = templateScope(ctx.compiled, ctx.state, ctx.instance, userVariables(ctx.variables));
+    // A waiting event wait this stage can read exposes its callback (P05 §4.3).
+    const callbacks = this.deps.callbacks;
+    const stages = scope['stages'] as Record<string, Record<string, unknown>> | undefined;
+    if (callbacks && stages) {
+      for (const inst of ctx.state.instances) {
+        const view = stages[inst.stageKey];
+        const wait = waitInterruptOf(inst);
+        if (!view || inst.status !== 'waiting' || wait?.type !== 'event') continue;
+        if (inst.scopeId !== null && inst.scopeId !== ctx.instance.scopeId) continue;
+        const cb = callbacks.forWait(ctx.run.id, inst.id, wait.eventKey);
+        if (cb) stages[inst.stageKey] = { ...view, callbackUrl: cb.url, callbackToken: cb.token };
+      }
+    }
+    return scope;
   }
 
   private render(ctx: AttemptContext, text: string): { rendered: string; unresolved: string[] } {

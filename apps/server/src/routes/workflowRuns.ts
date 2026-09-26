@@ -6,9 +6,12 @@
 // Every operator action on a run or one of its instances is ONE route,
 // `POST /:id/commands` (P03 WP-3.6/3.7, G5 §3.7): pause, resume, cancel,
 // retry, skip, fail and approve (which also answers a stage's in-turn
-// tool permission, question or plan review). Pending approvals are the
-// `awaiting_input` instances of `GET /:id` (their `interruptData`). The
-// run's workspace is read under `/:id/workspace*` (workflowRunWorkspace.ts).
+// tool permission, question or plan review, and an approval wait), the
+// loop decisions and deliver_event (P05). `approve` goes through the
+// WorkflowApprovalService (a wait's form is validated; a sub-workflow
+// child's decision is answered through its parent). The pending decisions
+// are `GET /:id/pending-decisions` (the children's mirrored). The run's
+// workspace is read under `/:id/workspace*` (workflowRunWorkspace.ts).
 //
 // A stage is a compact chat (P03b, `StageConversationService`):
 // `/:id/instances/:instanceId/messages` sends an operator message (queued
@@ -55,18 +58,41 @@ const stageUpload = multer({
 });
 
 /**
- * Every command but `approve` is a run-control act (`write:workflows`).
- * Answering a stage's gate is `exec:agent` only (the route policy), so a
- * paired phone can approve without being able to edit or steer workflows.
+ * Operator DECISIONS are run-time acts (`exec:agent`, the route policy): an
+ * approval, the loop decisions and delivering an event act on a run the
+ * caller may start (P05, DEVIATIONS). Every other command is a run-control
+ * act (`write:workflows`), so a paired phone decides without being able to
+ * edit or steer workflows.
  */
+const DECISION_COMMANDS: ReadonlySet<RunCommand['command']> = new Set([
+  'approve',
+  'grant_iterations',
+  'raise_budget',
+  'continue_with_input',
+  'accept',
+  'accept_iteration',
+  'deliver_event',
+]);
+
 function mayControlRuns(req: { principal?: { scopes?: readonly string[] } }): boolean {
   const scopes = req.principal?.scopes;
   return !scopes || scopes.includes('write:workflows');
 }
 
+/** Who sent a command (a wait's `output.by`). */
+function actorOf(req: { principal?: { id?: string; kind?: string } }): string | undefined {
+  return req.principal?.id ? `${req.principal.kind ?? 'principal'}:${req.principal.id}` : undefined;
+}
+
 export function createWorkflowRunRoutes(container: Container): Router {
   const router = Router();
-  const { workflowRunService, stageConversationService, artifactService, stageRunRepo, workflowRunRepo, runDefinitionReader, logger } = container;
+  const { workflowRunService, workflowApprovalService, stageConversationService, artifactService, stageRunRepo, workflowRunRepo, runDefinitionReader, logger } = container;
+
+  /** An event wait's callback on its row (P05 §4.3). */
+  const withCallback = <S extends Parameters<typeof workflowApprovalService.callbackFor>[0]>(s: S): S & { callback?: { url: string; token: string } } => {
+    const callback = workflowApprovalService.callbackFor(s);
+    return callback ? { ...s, callback } : s;
+  };
 
   // ═══════════════════════════════════════════════════════════
   // WorkflowRun CRUD + Lifecycle
@@ -107,7 +133,7 @@ export function createWorkflowRunRoutes(container: Container): Router {
     try {
       const runId = String(req.params['id']);
       const run = await workflowRunRepo.getById(runId);
-      const stageRuns = await stageRunRepo.getByRunId(runId);
+      const stageRuns = (await stageRunRepo.getByRunId(runId)).map(withCallback);
       const graph = await runDefinitionReader.get(run.definitionVersionId);
       res.json({ ...run, stageRuns: orderStageRuns(stageRuns, graph.stages.map((s) => s.key)) });
     } catch (err) {
@@ -122,17 +148,36 @@ export function createWorkflowRunRoutes(container: Container): Router {
     try {
       const runId = String(req.params['id']);
       const command = req.body as RunCommand;
-      if (command.command !== 'approve' && !mayControlRuns(req)) {
+      if (!DECISION_COMMANDS.has(command.command) && !mayControlRuns(req)) {
         res.status(403).json({
           error: { code: 'FORBIDDEN', message: `The ${command.command} command requires the write:workflows scope.` },
         });
         return;
       }
-      const r = await workflowRunService.command(runId, command);
+      const actor = actorOf(req);
+      const r =
+        command.command === 'approve' && command.instanceId
+          ? await workflowApprovalService.respond(
+              runId,
+              command.instanceId,
+              {
+                outcome: command.outcome,
+                ...(command.feedback !== undefined ? { feedback: command.feedback } : {}),
+                ...(command.data !== undefined ? { data: command.data } : {}),
+                ...(command.expectedVersion !== undefined ? { expectedVersion: command.expectedVersion } : {}),
+              },
+              actor ? { actor } : {},
+            )
+          : await workflowRunService.command(runId, command, actor ? { actor } : {});
       if (!r.ok) throw new RunCommandRefusedError(r);
       logger.info(`[WorkflowRunRoutes] ${command.command} on run ${runId}${command.instanceId ? ` / ${command.instanceId}` : ''}`, {
         requestId: req.requestId,
       });
+      // A repeated deliver_event with the same key and data is a replay (200).
+      if (r.replayed) {
+        res.status(200).json({ runId, command: command.command, replayed: true });
+        return;
+      }
       res.status(202).json({ runId, command: command.command });
     } catch (err) {
       next(err);
@@ -158,11 +203,25 @@ export function createWorkflowRunRoutes(container: Container): Router {
   // Stage Run Queries + Controls
   // ═══════════════════════════════════════════════════════════
 
+  // GET /workflow-runs/:id/pending-decisions — every decision the run waits
+  // on (completion reviews, in-turn gates, parked loops, approval and event
+  // waits), its sub-workflow children's mirrored with the chain they came
+  // through (P05 §4.2). Answer them with the commands route of THIS run.
+  router.get('/:id/pending-decisions', async (req, res, next) => {
+    try {
+      const runId = String(req.params['id']);
+      await workflowRunRepo.getById(runId);
+      res.json(await workflowApprovalService.listPending(runId));
+    } catch (err) {
+      next(err);
+    }
+  });
+
   // GET /workflow-runs/:id/stages — List stage runs for a workflow run
   router.get('/:id/stages', async (req, res, next) => {
     try {
       const runId = String(req.params['id']);
-      const stages = await stageRunRepo.getByRunId(runId);
+      const stages = (await stageRunRepo.getByRunId(runId)).map(withCallback);
       res.json(stages);
     } catch (err) {
       next(err);

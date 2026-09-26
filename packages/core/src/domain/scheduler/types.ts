@@ -137,6 +137,70 @@ export interface LoopSignals {
   stages: Record<string, { toolCalls: number | null; outputHash: string | null; status: string | null }>;
 }
 
+// ── Maps and sub-workflows (P05 §4.1, §4.2) ──────────────────────
+
+/**
+ * Where one map item is:
+ *   pending      not started (the map's concurrency holds it back)
+ *   preparing    mount_per_item: its worktrees are being cut from the snapshot and set up
+ *   running      its scope `<map>#<index>` runs
+ *   merge_queued its body completed; its merge waits for the one in flight
+ *   merging      its merge (sequential or pr_per_item) is in flight
+ *   done         settled (`status`)
+ */
+export type MapItemPhase = 'pending' | 'preparing' | 'running' | 'merge_queued' | 'merging' | 'done';
+
+export interface MapItemState {
+  index: number;
+  /** The stable key (`itemKey`, else the index). */
+  key: string;
+  /** The element of the map's list. */
+  item: unknown;
+  phase: MapItemPhase;
+  status: 'completed' | 'failed' | 'cancelled' | null;
+  errorCode: string | null;
+  error: string | null;
+  /** mount_per_item: the item's own workspace, its mounts (alias → directory), primary directory and branch. */
+  workspaceId: string | null;
+  mounts: Record<string, string> | null;
+  primaryDir: string | null;
+  branch: string | null;
+  /** pr_per_item: the pushed branch and the pull request (when one was opened). */
+  pr: { url: string | null; branch: string } | null;
+}
+
+/** A map instance's state (`stage_runs.loop_state`, the container-state column). */
+export interface MapState {
+  kind: 'map';
+  /** snapshotting: mount_per_item captures the run mounts before any item starts. */
+  phase: 'snapshotting' | 'running' | 'done';
+  count: number;
+  /** mount_per_item: the snapshot commit of every run mount (alias → sha). */
+  snapshot: Record<string, string> | null;
+  items: MapItemState[];
+}
+
+/** A sub-workflow instance's state. */
+export interface SubworkflowState {
+  kind: 'subworkflow';
+  /** starting: the child run is being invoked (an effect); running: it runs; done: settled. */
+  phase: 'starting' | 'running' | 'done';
+  childRunId: string | null;
+  /** The evaluated inputs (the child's variables). */
+  inputs: Record<string, unknown>;
+}
+
+export type ContainerState = MapState | SubworkflowState;
+
+/** An event delivered to a run and not consumed yet (`workflow_run_events`, P05 §4.3). */
+export interface RunEventRecord {
+  id: string;
+  eventKey: string;
+  idempotencyKey: string;
+  data: unknown;
+  receivedAt: number;
+}
+
 // ── State ─────────────────────────────────────────────────────────
 
 export interface InstanceState {
@@ -171,6 +235,11 @@ export interface InstanceState {
   iterationIndex: number | null;
   /** A loop instance's state. */
   loopState: LoopState | null;
+  /** The map item this instance belongs to (null outside a map body; P05 §4.1). */
+  itemIndex?: number | null;
+  itemKey?: string | null;
+  /** A map's or a sub-workflow's state. */
+  containerState?: ContainerState | null;
   /** When the first attempt started (the `timeouts.totalMs` deadline runs from it). */
   startedAt: number | null;
   completedAt: number | null;
@@ -209,6 +278,8 @@ export interface RunState {
   instances: InstanceState[];
   /** Every finished loop iteration of the run (`loop_iterations`). */
   iterations: LoopIterationRecord[];
+  /** Events delivered and not consumed yet, oldest first (what event waits take). */
+  events?: RunEventRecord[];
 }
 
 // ── Messages ──────────────────────────────────────────────────────
@@ -245,7 +316,8 @@ export type RunMessage =
    * and its approval starts a resume attempt (G5 §3.10 step 4).
    */
   | { type: 'frame_lost'; stageRunId: string; attemptNo: number }
-  | { type: 'command'; command: RunCommand }
+  /** `actor`: who sent it (a wait's `output.by`), set by the server from the principal. */
+  | { type: 'command'; command: RunCommand; actor?: string }
   /**
    * The `capture_iteration` effect is done: the tree hash of every mount
    * (null when it could not be computed) and the iteration checkpoint.
@@ -253,6 +325,36 @@ export type RunMessage =
   | { type: 'iteration_captured'; stageRunId: string; k: number; at: 'start' | 'end'; treeHashes: Record<string, string | null> | null; checkpointTurnId?: string | null }
   /** The `restore_iteration` effect is done (every mount restored, or rolled back). */
   | { type: 'iteration_restored'; stageRunId: string; k: number; ok: boolean; error?: string }
+  /** The `map_snapshot` effect is done: the snapshot commit per run mount, or why it could not be taken. */
+  | { type: 'map_snapshot_taken'; stageRunId: string; snapshot: Record<string, string> | null; error?: string }
+  /** The `map_prepare_item` effect is done: the item's worktrees are cut and set up, or why not. */
+  | {
+      type: 'map_item_prepared';
+      stageRunId: string;
+      index: number;
+      ok: boolean;
+      workspaceId?: string;
+      mounts?: Record<string, string>;
+      primaryDir?: string;
+      branch?: string | null;
+      code?: string;
+      error?: string;
+    }
+  /** The `map_merge_item` effect is done. */
+  | { type: 'map_item_merged'; stageRunId: string; index: number; ok: boolean; code?: string; error?: string; pr?: { url: string | null; branch: string } | null }
+  /** The `start_child` effect invoked the child run (or failed to). */
+  | { type: 'child_started'; stageRunId: string; childRunId: string }
+  | { type: 'child_start_failed'; stageRunId: string; code: string; error: string }
+  /** A sub-workflow's child run finalized: its declared outputs and its usage. */
+  | {
+      type: 'child_settled';
+      stageRunId: string;
+      childRunId: string;
+      status: RunOutcome;
+      outputs: Record<string, unknown>;
+      usage: Usage;
+      error?: string;
+    }
   /** The `finalize` effect is done (compensation, onExit/onFailure, post-processing). */
   | { type: 'finalized'; ok: boolean; error?: string }
   /** Backstop and recovery: re-derive what to do from the state alone. */
@@ -275,6 +377,7 @@ export interface InstancePatch {
   errorClass?: string | null;
   errorCode?: string | null;
   loopState?: LoopState | null;
+  containerState?: ContainerState | null;
 }
 
 export interface RunPatch {
@@ -334,6 +437,20 @@ export type Decision =
   | { t: 'capture_iteration'; stageRunId: string; k: number; at: 'start' | 'end'; checkpoint: boolean }
   /** Effect: restore every mount to an iteration's checkpoint, all or nothing; posts `iteration_restored`. */
   | { t: 'restore_iteration'; stageRunId: string; k: number; checkpointTurnId: string }
+  /** An event wait took a delivered event (a CAS on `consumed_by_stage_run_id`). */
+  | { t: 'consume_event'; eventId: string; stageRunId: string }
+  /** Effect: snapshot every run mount for a mount_per_item map (and take its shared worktree leases); posts `map_snapshot_taken`. */
+  | { t: 'map_snapshot'; stageRunId: string }
+  /** Effect: cut an item's worktrees from the snapshot (all or nothing) and run its itemSetup; posts `map_item_prepared`. */
+  | { t: 'map_prepare_item'; stageRunId: string; index: number }
+  /** Effect: bring an item's mount back (a sequential merge or a branch and PR); posts `map_item_merged`. */
+  | { t: 'map_merge_item'; stageRunId: string; index: number; strategy: 'sequential' | 'pr_per_item' }
+  /** Effect: the map settled; its worktree leases are released. */
+  | { t: 'map_release'; stageRunId: string }
+  /** Effect: invoke a sub-workflow's child run; posts `child_started` or `child_start_failed`. */
+  | { t: 'start_child'; stageRunId: string; inputs: Record<string, unknown> }
+  /** Effect: propagate a cancel, pause or resume to a child run. */
+  | { t: 'child_command'; stageRunId: string; childRunId: string; command: 'cancel' | 'pause' | 'resume' }
   /** Persisted in the same transaction, dispatched after commit. */
   | { t: 'emit'; event: OutboxEvent }
   /** Effect: the run's prepare phases (P04 lifecycle); posts `prepared` or `prepare_failed`. */
@@ -355,4 +472,10 @@ export const EFFECT_DECISIONS: ReadonlySet<DecisionType> = new Set<DecisionType>
   'reject',
   'capture_iteration',
   'restore_iteration',
+  'map_snapshot',
+  'map_prepare_item',
+  'map_merge_item',
+  'map_release',
+  'start_child',
+  'child_command',
 ]);

@@ -40,6 +40,12 @@ export interface InvocationContext {
   attempt?: number;
   /** The request arrived over loopback (bypass then needs no `admin:settings`). */
   loopback?: boolean;
+  /**
+   * A sub-workflow child with `workspace: inherit` (P05 §4.2): it runs in
+   * the parent run's workspace; its own mounts and post-processing are
+   * skipped (the parent commits).
+   */
+  inheritWorkspace?: { fromRunId: string; workspaceId: string };
 }
 
 const HTTP_STATUS: Record<InvocationErrorCode, number> = {

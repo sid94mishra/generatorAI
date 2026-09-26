@@ -79,7 +79,7 @@ describe('E2E: Workflow Run API Flow', () => {
       const res = await request(app).post('/api/workflow-runs/run-1/commands').send({ command: 'pause', mode: 'interrupt' });
       expect(res.status).toBe(202);
       expect(res.body).toEqual({ runId: 'run-1', command: 'pause' });
-      expect(container.workflowRunService.command).toHaveBeenCalledWith('run-1', { command: 'pause', mode: 'interrupt' });
+      expect(container.workflowRunService.command).toHaveBeenCalledWith('run-1', { command: 'pause', mode: 'interrupt' }, expect.any(Object));
     });
 
     it('answers an instance gate with approve (outcome, feedback, data)', async () => {

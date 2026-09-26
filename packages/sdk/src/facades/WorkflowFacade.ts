@@ -95,7 +95,7 @@ export class WorkflowFacade {
   }
 
   /** Validate a document without storing it. */
-  validate(graph: unknown): ValidationResult {
+  validate(graph: unknown): Promise<ValidationResult> {
     return this.services.workflowDefinitionService.validate(graph);
   }
 

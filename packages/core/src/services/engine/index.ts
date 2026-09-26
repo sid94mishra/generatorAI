@@ -50,3 +50,7 @@ export { LeaseReaper, inFlightIsSafe } from './LeaseReaper.js';
 export { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
 export { EffectsDispatcher } from './EffectsDispatcher.js';
 export { DefaultRunLifecycle, PrepareError, type LifecyclePlatform, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';
+export { MapEffects, mapItemPlacement, runForItem, type MapEffectsDeps } from './MapEffects.js';
+export { SubworkflowEffects, outputDrift, type SubworkflowEffectsDeps, type StartChildResult } from './SubworkflowEffects.js';
+export { WorktreeLeases, worktreeLeaseKey, type LeaseMode } from './WorktreeLeases.js';
+export { WorkflowCallbacks, type CallbackTokenParts } from './WorkflowCallbacks.js';

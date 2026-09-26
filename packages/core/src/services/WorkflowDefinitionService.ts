@@ -13,12 +13,17 @@
 
 import {
   ENGINE_LEVEL,
+  MAX_INVOCATION_DEPTH,
+  WorkflowGraphSchema,
   collectCommandFields,
   commandFingerprint,
   exportGraph,
   validateWorkflow,
   type DefinitionStatus,
+  type ResolvedWorkflowRef,
+  type ValidateOptions,
   type ValidationResult,
+  type WorkflowRef,
   type WorkflowDefinitionRecord,
   type WorkflowDefinitionVersionRecord,
   type WorkflowDefinitionVersionSummary,
@@ -60,10 +65,27 @@ export interface CreateDefinitionOptions extends DefinitionWriteOptions {
 
 export type DeleteOutcome = { deleted: true } | { archived: true; runs: number };
 
-/** Parse + validate; throws `WorkflowValidationError` (422) with the issues. */
-export function assertValidGraph(input: unknown, what = 'Workflow', commandAllowlist?: readonly string[]): WorkflowGraph {
-  const result = validateWorkflow(input, { engine: ENGINE_LEVEL, ...(commandAllowlist ? { commandAllowlist } : {}) });
-  if (!result.valid || !result.graph) {
+/**
+ * Parse + validate; throws `WorkflowValidationError` (422) with the issues.
+ * `refs` resolves sub-workflow references; `publish` makes a draft child an
+ * error (P05 §4.2: a warning at save, an error at publish and invoke).
+ */
+export function assertValidGraph(
+  input: unknown,
+  what = 'Workflow',
+  commandAllowlist?: readonly string[],
+  refs?: Pick<ValidateOptions, 'resolveWorkflowRef' | 'definitionId'> & { publish?: boolean },
+): WorkflowGraph {
+  const result = validateWorkflow(input, {
+    engine: ENGINE_LEVEL,
+    ...(commandAllowlist ? { commandAllowlist } : {}),
+    ...(refs?.resolveWorkflowRef ? { resolveWorkflowRef: refs.resolveWorkflowRef } : {}),
+    ...(refs?.definitionId ? { definitionId: refs.definitionId } : {}),
+  });
+  if (refs?.publish) {
+    for (const i of result.issues) if (i.code === 'subworkflow-draft' || i.code === 'subworkflow-ref') i.severity = 'error';
+  }
+  if (!result.valid || !result.graph || result.issues.some((i) => i.severity === 'error')) {
     const errors = result.issues.filter((i) => i.severity === 'error');
     throw new WorkflowValidationError(
       `${what} is invalid: ${errors
@@ -108,10 +130,84 @@ export class WorkflowDefinitionService {
     return version;
   }
 
-  /** Stateless validation (the builder runs the same validator locally). */
-  validate(input: unknown): ValidationResult {
+  /** Validation with the sub-workflow references resolved (the builder runs the same validator locally, without them). */
+  async validate(input: unknown, opts: { definitionId?: string } = {}): Promise<ValidationResult> {
     const allowlist = this.allowlist;
-    return validateWorkflow(input, { engine: ENGINE_LEVEL, ...(allowlist ? { commandAllowlist: allowlist } : {}) });
+    const resolveWorkflowRef = await this.refResolver(input);
+    return validateWorkflow(input, {
+      engine: ENGINE_LEVEL,
+      ...(allowlist ? { commandAllowlist: allowlist } : {}),
+      resolveWorkflowRef,
+      ...(opts.definitionId ? { definitionId: opts.definitionId } : {}),
+    });
+  }
+
+  // ── Sub-workflow references (P05 §4.2) ──
+
+  /** A `workflowRef`: by id, or by name — the parent's project first, then global definitions (`projectScope` narrows it). */
+  async findByRef(ref: WorkflowRef, fromProjectId: string | null): Promise<WorkflowDefinitionRecord | null> {
+    if ('id' in ref) return this.store.getGraph(ref.id).catch(() => null);
+    const scopes: Array<string | null> =
+      ref.projectScope === 'global' ? [null] : ref.projectScope === 'project' ? (fromProjectId ? [fromProjectId] : [null]) : fromProjectId ? [fromProjectId, null] : [null];
+    for (const projectId of scopes) {
+      const page = await this.store.list({ projectId, q: ref.name, limit: 50 });
+      const hit = page.items.find((d) => d.name === ref.name && !d.archivedAt);
+      if (hit) return this.store.getGraph(hit.id);
+    }
+    return null;
+  }
+
+  /** The graph a run of a child would use: its current published version, else its working draft. */
+  private async runnableGraph(record: WorkflowDefinitionRecord): Promise<WorkflowGraph> {
+    if (record.currentVersionId) {
+      try {
+        return (await this.store.getVersion(record.currentVersionId)).graph;
+      } catch {
+        /* fall back to the working graph */
+      }
+    }
+    return record.graph;
+  }
+
+  /**
+   * Resolve every sub-workflow reference of a document ahead of validation
+   * (the validator is synchronous): the document's own, then its children's,
+   * down to the nesting limit.
+   */
+  async refResolver(input: unknown): Promise<NonNullable<ValidateOptions['resolveWorkflowRef']>> {
+    const resolved = new Map<string, ResolvedWorkflowRef | null>();
+    const keyOf = (ref: WorkflowRef, projectId: string | null) => ('id' in ref ? `id:${ref.id}` : `name:${ref.projectScope ?? ''}:${projectId ?? ''}:${ref.name}`);
+    const parsed = WorkflowGraphSchema.safeParse(input);
+    if (parsed.success) {
+      let frontier: WorkflowGraph[] = [parsed.data];
+      for (let depth = 0; depth <= MAX_INVOCATION_DEPTH && frontier.length > 0; depth++) {
+        const next: WorkflowGraph[] = [];
+        for (const graph of frontier) {
+          const projectId = graph.workflow.projectId ?? null;
+          for (const stage of graph.stages) {
+            if (stage.kind !== 'subworkflow') continue;
+            const key = keyOf(stage.subworkflow.workflowRef, projectId);
+            if (resolved.has(key)) continue;
+            const record = await this.findByRef(stage.subworkflow.workflowRef, projectId);
+            if (!record) {
+              resolved.set(key, null);
+              continue;
+            }
+            const graphOfChild = await this.runnableGraph(record);
+            resolved.set(key, {
+              id: record.id,
+              name: record.graph.workflow.name,
+              status: record.archivedAt ? 'archived' : record.status === 'published' ? 'published' : 'draft',
+              graph: graphOfChild,
+              projectId: record.graph.workflow.projectId ?? null,
+            });
+            next.push(graphOfChild);
+          }
+        }
+        frontier = next;
+      }
+    }
+    return (ref, projectId) => resolved.get(keyOf(ref, projectId)) ?? undefined;
   }
 
   /** The canonical export text: `import(export(g))` gives back `g`. */
@@ -127,7 +223,7 @@ export class WorkflowDefinitionService {
    * drafts unless the caller asks otherwise (a published one gets version 1).
    */
   async createFromSpec(input: unknown, opts: CreateDefinitionOptions): Promise<WorkflowDefinitionRecord> {
-    const graph = assertValidGraph(input, undefined, this.allowlist);
+    const graph = assertValidGraph(input, undefined, this.allowlist, { resolveWorkflowRef: await this.refResolver(input) });
     if (collectCommandFields(graph).length > 0) this.assertCommandEdit('', commandFingerprint(graph), opts);
     const record = await this.store.insert({ id: generateId(), status: 'draft', graph });
     return opts.status === 'published' ? this.publish(record.id) : record;
@@ -148,7 +244,7 @@ export class WorkflowDefinitionService {
     expectedRevision: number,
     opts: DefinitionWriteOptions,
   ): Promise<WorkflowDefinitionRecord> {
-    const graph = assertValidGraph(input, undefined, this.allowlist);
+    const graph = assertValidGraph(input, undefined, this.allowlist, { resolveWorkflowRef: await this.refResolver(input), definitionId: id });
     const current = await this.store.getGraph(id);
     if (current.revision !== expectedRevision) throw this.conflict(current, expectedRevision);
     this.assertCommandEdit(commandFingerprint(current.graph), commandFingerprint(graph), opts);
@@ -163,7 +259,11 @@ export class WorkflowDefinitionService {
    */
   async publish(id: string): Promise<WorkflowDefinitionRecord> {
     const record = await this.store.getGraph(id);
-    const graph = assertValidGraph(record.graph, `Definition '${record.graph.workflow.name}'`, this.allowlist);
+    const graph = assertValidGraph(record.graph, `Definition '${record.graph.workflow.name}'`, this.allowlist, {
+      resolveWorkflowRef: await this.refResolver(record.graph),
+      definitionId: id,
+      publish: true,
+    });
     const { text, hash } = canonicalGraph(graph);
     const existing = await this.store.findVersionByHash(id, 'published', hash);
     const version =
@@ -223,7 +323,7 @@ export class WorkflowDefinitionService {
     input: unknown,
     opts: DefinitionWriteOptions & { publish?: boolean; name?: string; projectId?: string | null },
   ): Promise<WorkflowDefinitionRecord> {
-    const graph = assertValidGraph(input, 'Imported workflow', this.allowlist);
+    const graph = assertValidGraph(input, 'Imported workflow', this.allowlist, { resolveWorkflowRef: await this.refResolver(input) });
     const workflow = {
       ...graph.workflow,
       ...(opts.name ? { name: opts.name } : {}),

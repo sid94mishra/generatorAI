@@ -9,7 +9,7 @@
 // `@generatorai/db` implements them; `createEngineStores(db)` builds the set.
 // ────────────────────────────────────────────────────────────────
 
-import type { AttemptMode, AttemptStatus, TimerKind, Usage } from '../scheduler/types.js';
+import type { AttemptMode, AttemptStatus, RunEventRecord, TimerKind, Usage } from '../scheduler/types.js';
 import type { IRunStore, IStageRunCas, IWorkflowRunCas } from './IRunStore.js';
 
 // ── stage_attempts ───────────────────────────────────────────────
@@ -216,6 +216,21 @@ export interface IEngineLockStore {
   get(): EngineLockRecord | null;
 }
 
+// ── workflow_run_events (P05 §4.3) ───────────────────────────────
+
+export type RunEventDeliveryOutcome = 'inserted' | 'replayed' | 'conflict';
+
+/** Events delivered to a run: what event waits consume (idempotent per `(run, eventKey, idempotencyKey)`). */
+export interface IRunEventStore {
+  /**
+   * Store a delivery. The same key with the same data is `replayed` (nothing
+   * written); the same key with other data is a `conflict`.
+   */
+  deliver(e: { runId: string; eventKey: string; idempotencyKey: string; data: unknown; now: number }): { outcome: RunEventDeliveryOutcome; id: string };
+  /** Events not consumed yet, oldest first. */
+  listPending(runId: string): RunEventRecord[];
+}
+
 // ── Read models the supervisor and the reaper scan ───────────────
 
 export interface ExpiredLease {
@@ -244,4 +259,5 @@ export interface EngineStores {
   turns: ITurnJournal;
   lock: IEngineLockStore;
   queries: IEngineQueries;
+  events: IRunEventStore;
 }

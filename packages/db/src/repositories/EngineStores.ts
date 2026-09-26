@@ -29,6 +29,7 @@ import type { AppDatabase } from '../index.js';
 import { sqliteHandle } from './AuthRepositories.js';
 import { amendStageOutput, claimRunOwnership, getInstanceRow, getRunRow, markStageProgress, renewRunOwnership, renewStageLease, runTransition, stageTransition } from './engineCas.js';
 import {
+  RunEventRepository,
   RunSessionRepository,
   SchedulerJournalRepository,
   StageAttemptRepository,
@@ -240,5 +241,6 @@ export function createEngineStores(db: AppDatabase | BetterSqlite3.Database): En
     turns: new StageTurnJournal(sqlite),
     lock: new EngineLockRepository(sqlite),
     queries: new EngineQueries(sqlite),
+    events: new RunEventRepository(sqlite),
   };
 }

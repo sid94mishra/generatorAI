@@ -16,6 +16,10 @@
 //   provider gating (PD-17) the providers can hold the run's mode
 //   lineage         depth ≤ MAX_INVOCATION_DEPTH, no recursion
 //   budget          the caller has child runs left
+//   control flow    (P05) a mount_per_item map needs git-backed codebases;
+//                   a sub-workflow's child is published and its outputs
+//                   still fit (`subworkflow-output-drift`); several items of
+//                   a shared map writing at once is a warning
 //   uploads         staged, unexpired, unused, of the declared category
 // ────────────────────────────────────────────────────────────────
 
@@ -129,6 +133,8 @@ export interface ValidationDeps {
   permissionGating?: ((run: WorkflowRun, graph: WorkflowGraph) => Promise<void>) | undefined;
   /** The deployment posture (the default mode when nothing is declared). */
   posture: () => RunPermissionMode;
+  /** P05 §4.2: issues of the sub-workflow stages' children (a draft child, output drift). */
+  subworkflows?: ((graph: WorkflowGraph, projectId: string | null) => Promise<InvocationIssue[]>) | undefined;
   now: () => number;
 }
 
@@ -207,6 +213,18 @@ export async function validateInvocation(
         const cb = await deps.codebases.getByAlias(projectId, c.alias);
         if (!cb) issues.push(issue('unknown-codebase', ['codebases', i, 'alias'], `"${c.alias}" is not a codebase of the project`));
         else if (cb.status !== 'ready') issues.push(issue('codebase-not-ready', ['codebases', i, 'alias'], `Codebase "${c.alias}" is ${cb.status}`));
+      }
+    }
+  }
+  // P05 §4.1: item worktrees are cut from git commits of the run mounts.
+  const perItemMaps = graph.stages.filter((s) => s.kind === 'map' && s.map.workspace === 'mount_per_item').map((s) => s.key);
+  if (perItemMaps.length > 0 && projectId && deps.codebases) {
+    for (const [i, c] of codebases.entries()) {
+      const cb = await deps.codebases.getByAlias(projectId, c.alias);
+      if (cb && cb.type === 'local-dir') {
+        issues.push(
+          issue('map-mount-per-item-git', ['codebases', i, 'alias'], `"${c.alias}" is not a git repository; the map(s) ${perItemMaps.join(', ')} cut a worktree per item (mount_per_item)`),
+        );
       }
     }
   }
@@ -331,7 +349,29 @@ export async function validateInvocation(
         }
       : undefined;
 
+  // ── P05 §4.2: sub-workflow children (published, outputs still fitting) ──
+  if (deps.subworkflows) issues.push(...(await deps.subworkflows(graph, projectId ?? null)));
+  if (issues.length > 0) throw new InvocationError('VALIDATION_ERROR', issues.map((i) => i.message).join('; '), issues);
+
   // ── warnings ──
+  // P05 §4.1: several items of a shared map at once, with a body that may write.
+  for (const s of graph.stages) {
+    if (s.kind !== 'map' || s.map.workspace !== 'shared' || s.map.concurrency <= 1) continue;
+    const writers = graph.stages.filter((b) => {
+      let p = b.parentKey;
+      while (p !== undefined && p !== s.key) p = graph.stages.find((x) => x.key === p)?.parentKey;
+      if (p !== s.key) return false;
+      if (b.kind === 'check') return true;
+      if (b.kind !== 'agent') return false;
+      const mode = b.session?.permissionMode ?? (explicit === 'plan' ? 'plan' : undefined) ?? effectivePermissionMode;
+      return mode !== 'plan';
+    });
+    if (writers.length > 0) {
+      warnings.push(
+        issue('map-shared-write-concurrency', ['target'], `The map "${s.key}" runs ${s.map.concurrency} items at once in one shared workspace, and "${writers[0]!.key}" may write to it (run mode ${effectivePermissionMode})`, 'warning'),
+      );
+    }
+  }
   const groups = new Map<string, Set<string>>();
   for (const s of graph.stages) {
     if (s.kind !== 'agent' || !s.sessionGroup) continue;
