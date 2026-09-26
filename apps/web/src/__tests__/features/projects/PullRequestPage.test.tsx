@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// The in-app pull-request view.
+// The in-app pull-request view (features/projects, P5-06).
 //
 // Reading a PR in the app only pays for itself if it answers the questions
 // GitHub's page would — can it merge, did the checks pass, what changed —
@@ -15,7 +15,16 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { createMemoryRouter } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 import { PlatformContext } from '@/providers/PlatformProvider.js';
-import { PullRequestPage } from '@/pages/PullRequestPage.js';
+import { PullRequestPage } from '@/features/projects/PullRequestPage.js';
+
+// The DiffView block renders through @pierre/diffs (shadow DOM + workers),
+// which jsdom cannot host; stand it in with the patch text it was handed.
+vi.mock('@/blocks/diff/index.js', () => ({
+  DiffProviders: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  DiffCodeView: ({ sources }: { sources: Array<{ patch?: string }> }) => (
+    <pre data-testid="pr-file-diff">{sources.map((s) => s.patch).join('\n')}</pre>
+  ),
+}));
 import type { IPlatformClient, PullRequestDetail } from '@generatorai/shared';
 
 const PATH = '/projects/p1/codebases/cb1/pull-requests/12';
@@ -134,10 +143,13 @@ describe('PullRequestPage', () => {
     renderPage(makePlatform());
     const rows = await screen.findAllByTestId('pr-file-row');
     expect(rows).toHaveLength(2);
-    expect(screen.queryByTestId('inline-diff')).toBeNull();
+    expect(screen.queryByTestId('pr-file-diff')).toBeNull();
 
     fireEvent.click(rows[0]!);
-    expect(await screen.findByTestId('inline-diff')).toHaveTextContent('const b = 3;');
+    const diff = await screen.findByTestId('pr-file-diff');
+    expect(diff).toHaveTextContent('const b = 3;');
+    // GitHub sends hunks only; the page adds the file headers the parser needs.
+    expect(diff).toHaveTextContent('+++ b/src/auth.ts');
   });
 
   it('explains a file that carries no patch instead of rendering an empty box', async () => {
@@ -147,8 +159,9 @@ describe('PullRequestPage', () => {
     expect(await screen.findByText(/No diff available for this file/)).toBeInTheDocument();
   });
 
-  it('lists the comments', async () => {
+  it('lists the comments on the Comments tab', async () => {
     renderPage(makePlatform());
+    fireEvent.click(await screen.findByRole('tab', { name: /^Comments/ }));
     expect(await screen.findByText('Looks good, one nit.')).toBeInTheDocument();
     expect(screen.getByText('reviewer')).toBeInTheDocument();
   });

@@ -1,4 +1,4 @@
-// docs/redesign/07-phases.md §P1-S3. Ported in P5.
+// docs/redesign/07-phases.md §P1-S3. Ported in P5 (P5-02…P5-06, features/projects).
 import type { RouteObject } from 'react-router';
 import { defineRoute } from './defineRoute.js';
 
@@ -27,7 +27,7 @@ export const projectsRoutes: RouteObject[] = [
   ),
   defineRoute(
     'projects/:id/codebases/:cid/pull-requests/:number',
-    () => import('@/pages/PullRequestPage.js').then((m) => ({ default: m.PullRequestPage })),
-    { legacyHeader: true, nav: 'projects', title: 'Pull Request' },
+    () => import('@/features/projects/PullRequestPage.js').then((m) => ({ default: m.PullRequestPage })),
+    { legacyHeader: false, nav: 'projects', title: 'Pull request' },
   ),
 ];
