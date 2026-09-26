@@ -44,6 +44,8 @@ Background: `research/mobile-design-analysis.md` (design analysis) and `research
 
 **G-04 / G-05 are desktop-only (P2-03).** The updater state machine (`UpdateState`, `apps/desktop/src/main/updater.ts`) and the dock/taskbar badge (`apps/desktop/src/main/badge.ts`) are Electron main-process concerns with no mobile analogue — app-store auto-update and OS push-badge APIs replace both. Nothing in either gap belongs in a shared package.
 
+**G-08 is desktop-only code, but the rule carries over (P2-04).** `apps/desktop/src/main/deep-link-route.ts` turns `generatorai://…` into a web route and keeps only the query keys `pair`, `dock`, `tab`, `kind`, `run` (`DEEP_LINK_QUERY_KEYS`); `generatorai://pair?code=` becomes `?pair=`. When the mobile pass wires its own `generatorai://` handling (expo-router linking), it applies the same allowlist and treats `pair?code=` as the pairing entry — a deep link is untrusted input from any app on the device.
+
 **Rule for this pass:** when you build anything that mobile will also draw — a status, a verb, a gate card, a composer state, a nav destination, a command — put the *data and types* in `packages/shared` or `packages/client-core` first. The web component then consumes them. This is enforced in review; `07-phases.md` §"Mobile-readiness deliverables → tasks" names the task that owns each M-xx item.
 
 ## 2. What the mobile design contains (summary for planning)

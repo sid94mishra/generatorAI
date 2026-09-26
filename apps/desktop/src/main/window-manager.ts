@@ -50,6 +50,14 @@ export class WindowManager {
    *  does not ask again. */
   private discardConfirmed = false;
   private readonly rendererResetListeners = new Set<() => void>();
+  /** True once the main window's current document is the app page, loaded. */
+  private appPageLoaded = false;
+  /**
+   * A route asked for before the app page could take it (a deep link on a cold
+   * start arrives before the window exists or while it is still loading). The
+   * last one wins; it is applied on the app page's next `did-finish-load`.
+   */
+  private pendingRoute: string | null = null;
 
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
@@ -147,6 +155,7 @@ export class WindowManager {
 
   createMainWindow(appUrl: string, options: CreateMainWindowOptions = {}): BrowserWindow {
     this.appUrl = appUrl;
+    this.appPageLoaded = false;
     const settings = loadSettings();
     const bounds = this.sanitizeBounds(settings.window);
 
@@ -243,18 +252,27 @@ export class WindowManager {
 
     win.on('closed', () => {
       this.mainWindow = null;
+      this.appPageLoaded = false;
       // A window closed without quitting (macOS keeps the app running): the
       // "Discard" answered for it must not carry over to the next window.
       if (!this.quitting) this.discardConfirmed = false;
       this.emitRendererReset();
     });
-    win.webContents.on('render-process-gone', () => this.emitRendererReset());
+    win.webContents.on('render-process-gone', () => {
+      this.appPageLoaded = false;
+      this.emitRendererReset();
+    });
     // `did-navigate`, not `did-start-navigation`: only a committed top-level
     // document replaces the page. A navigation that never commits (an external
     // link `will-navigate` blocks, a download, a 204) leaves the page, and
     // what it pushed, in place (P1-review P2-R39). Same-document navigations
     // fire `did-navigate-in-page` instead, so SPA route changes never reach here.
-    win.webContents.on('did-navigate', () => this.emitRendererReset());
+    // A committed document is not the app page until it finishes loading, so
+    // routes asked for meanwhile are held (G-08).
+    win.webContents.on('did-navigate', () => {
+      this.appPageLoaded = false;
+      this.emitRendererReset();
+    });
 
     // Security: open external links in the OS browser, never new Electron windows.
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -306,8 +324,10 @@ export class WindowManager {
       this.showError(`${errorDescription} (${errorCode})`);
     });
 
-    // Install the native directory-picker shim into the page (main world).
+    // Install the native directory-picker shim into the page (main world),
+    // then hand the page any route that arrived while it was loading.
     win.webContents.on('did-finish-load', () => {
+      this.appPageLoaded = isAppOrigin(win.webContents.getURL(), this.appUrl);
       win.webContents
         .executeJavaScript(
           `(() => { try {
@@ -318,6 +338,11 @@ export class WindowManager {
            } catch (e) { /* ignore */ } })();`,
         )
         .catch(() => undefined);
+      const pending = this.pendingRoute;
+      if (this.appPageLoaded && pending) {
+        this.pendingRoute = null;
+        this.pushRoute(win, pending);
+      }
     });
 
     log.info('Loading app URL', { appUrl });
@@ -341,6 +366,7 @@ export class WindowManager {
    */
   repointMainWindow(url: string): void {
     this.appUrl = url;
+    this.appPageLoaded = false;
     // The new origin's page reports its own state; the old one's is stale now
     // (also covered by `did-navigate`, but not when a window is created).
     this.emitRendererReset();
@@ -414,10 +440,23 @@ export class WindowManager {
     return win;
   }
 
-  /** Navigate the SPA via the History API without a full reload. */
+  /**
+   * Navigate the SPA via the History API without a full reload. When the app
+   * page is not there yet (no window, first load, a repoint or the error page)
+   * the route is kept and applied once the app page finishes loading.
+   */
   navigateTo(routePath: string): void {
     const win = this.mainWindow;
-    if (!win || win.isDestroyed()) return;
+    if (!win || win.isDestroyed() || !this.appPageLoaded) {
+      this.pendingRoute = routePath;
+      if (win && !win.isDestroyed()) WindowManager.reveal(win);
+      return;
+    }
+    this.pushRoute(win, routePath);
+    WindowManager.reveal(win);
+  }
+
+  private pushRoute(win: BrowserWindow, routePath: string): void {
     const safe = JSON.stringify(routePath);
     win.webContents
       .executeJavaScript(
@@ -427,7 +466,6 @@ export class WindowManager {
          } catch (e) { window.location.assign(${safe}); } })();`,
       )
       .catch(() => undefined);
-    WindowManager.reveal(win);
   }
 
   /**

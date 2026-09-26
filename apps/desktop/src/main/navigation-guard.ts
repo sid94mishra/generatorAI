@@ -51,6 +51,12 @@ const SERVER_PATH_PREFIXES: readonly string[] = ['/api/', '/internal/', '/assets
  * returned as `path + query + hash`, ready for `history.pushState`; a server
  * resource (an export, a raw file, a static asset) is not a route and has to
  * be loaded for real.
+ *
+ * Unlike a `generatorai://` deep link (`deep-link-route.ts`), the query is kept
+ * whole: the URL comes from the app page itself (a Cmd/middle click or
+ * `window.open` on its own link), which could set any query with `pushState`
+ * anyway, and in-app links rely on keys outside the deep-link allowlist
+ * (`?projectId=`, `?new=1`, `?legacy=1`). Checked for G-08, deliberately unchanged.
  */
 export function appRouteOf(url: string): string | null {
   let parsed: URL;

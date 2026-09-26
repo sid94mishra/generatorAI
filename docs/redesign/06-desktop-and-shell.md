@@ -804,7 +804,7 @@ Quit GeneratorAI             ⌘Q
 - JumpList: `generatorai://command/chat.new`, `generatorai://command/workflow.new`, `generatorai://` (Home).
 
 **Deep links (`deep-link.ts`).**
-- `urlToRoute` (`:24-33`) keeps stripping query and hash (no parameter injection).
+- `deepLinkToRoute` (`deep-link-route.ts`, G-08 as built in P2-04) drops the hash and keeps only the allowlisted query keys `pair`, `dock`, `tab`, `kind`, `run` (no parameter injection); `generatorai://pair?code=` becomes `/?pair=`. A link that arrives before the app page has loaded is held by `WindowManager.navigateTo` and applied on `did-finish-load`.
 - New: `generatorai://command/<id>` → `sendCommand(id)` **only** if `id in COMMANDS && COMMANDS[id].deepLink === true && runsIn === 'renderer'`. Otherwise the link is ignored and logged.
 - `generatorai://settings/<section>` reaches the renderer through `IPC_EVENT.navigate` → `openSettings(section)`, which opens over the current page (§2.4).
 - Everything else → `navigateTo(route)`.

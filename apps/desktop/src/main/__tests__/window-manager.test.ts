@@ -38,6 +38,8 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
       this.windowOpenHandler = fn;
     }
     send = vi.fn();
+    url = '';
+    getURL = () => this.url;
     loadURL = vi.fn(async () => undefined);
     executeJavaScript = vi.fn(async (_code: string): Promise<unknown> => undefined);
     reload = vi.fn();
@@ -140,12 +142,31 @@ import { IPC_EVENT } from '../../shared/ipc';
 
 const APP = 'http://127.0.0.1:3100';
 
-function makeWindow(url = APP, opts?: { cspFloor?: boolean }) {
+/** The main window's document finished loading `url`. */
+function finishLoad(win: InstanceType<typeof FakeBrowserWindow>, url: string) {
+  win.webContents.url = url;
+  win.webContents.emit('did-finish-load');
+}
+
+/** A main window whose app page has loaded (`loaded: false` = still loading). */
+function makeWindow(url = APP, opts?: { cspFloor?: boolean; loaded?: boolean }) {
   FakeBrowserWindow.instances.length = 0;
   const wm = new WindowManager();
   wm.createMainWindow(url, opts);
   const win = FakeBrowserWindow.instances[0]!;
+  if (opts?.loaded !== false) {
+    finishLoad(win, `${url}/`);
+    win.webContents.executeJavaScript.mockClear();
+  }
   return { wm, win };
+}
+
+/** Routes the window manager pushed into the page, in order. */
+function pushedRoutes(win: InstanceType<typeof FakeBrowserWindow>): string[] {
+  return win.webContents.executeJavaScript.mock.calls
+    .map((c) => String(c[0]))
+    .filter((code) => code.includes('pushState'))
+    .map((code) => JSON.parse(/pushState\(\{\}, '', ("[^"]*")\)/.exec(code)?.[1] ?? '""') as string);
 }
 
 beforeEach(() => {
@@ -474,5 +495,55 @@ describe('confirmDiscard (P2-R37)', () => {
     setUnsavedWork(true);
     expect(await wm.confirmDiscard()).toBe(false);
     expect(showMessageBox).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('navigateTo before the app page is ready (deep-link cold start)', () => {
+  it('holds a route asked for during the first load and applies it once on did-finish-load', () => {
+    const { wm, win } = makeWindow(APP, { loaded: false });
+    wm.navigateTo('/?pair=ABCD-EFGH-JKLM');
+    expect(pushedRoutes(win)).toEqual([]);
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual(['/?pair=ABCD-EFGH-JKLM']);
+    // Applied once: a later reload does not replay it.
+    win.webContents.executeJavaScript.mockClear();
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual([]);
+  });
+
+  it('holds a route asked for before any window exists (macOS open-url before ready)', () => {
+    FakeBrowserWindow.instances.length = 0;
+    const wm = new WindowManager();
+    wm.navigateTo('/chats/c1?dock=changes');
+    wm.createMainWindow(APP);
+    const win = FakeBrowserWindow.instances[0]!;
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual(['/chats/c1?dock=changes']);
+  });
+
+  it('keeps holding the route while the window shows the error page, not the app', () => {
+    const { wm, win } = makeWindow(APP, { loaded: false });
+    wm.navigateTo('/workflows');
+    finishLoad(win, 'file:///resources/error.html?message=x');
+    expect(pushedRoutes(win)).toEqual([]);
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual(['/workflows']);
+  });
+
+  it('holds routes again after a committed cross-document navigation until it finishes', () => {
+    const { wm, win } = makeWindow();
+    win.webContents.emit('did-navigate');
+    wm.navigateTo('/projects');
+    expect(pushedRoutes(win)).toEqual([]);
+    finishLoad(win, `${APP}/`);
+    expect(pushedRoutes(win)).toEqual(['/projects']);
+  });
+
+  it('navigates at once on a loaded page (warm start) and reveals the window', () => {
+    const { wm, win } = makeWindow();
+    win.visible = false;
+    wm.navigateTo('/chats/c1?dock=tasks');
+    expect(pushedRoutes(win)).toEqual(['/chats/c1?dock=tasks']);
+    expect(win.visible).toBe(true);
   });
 });

@@ -34,7 +34,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-05 | Attention counts in the desktop main process (tray, menu, badge) — **built (P2-03)** | P3 | P2 | S |
 | G-06 | Transcript view mode Normal / Verbose / Summary | P4 | P4 (client only) | S |
 | G-07 | Computer consent plan + scope; Pause agent / Take over | P4 (degrades) | P2 | M–L |
-| G-08 | Deep links keep an allowlisted query string | P4 | P2 (desktop) | S |
+| G-08 | Deep links keep an allowlisted query string — **built (P2-04)** | P4 | P2 (desktop) | S |
 | G-09 | Model-picker provider methods on the platform client | P4 | P2 | S |
 | G-10 | Stats summary (Home This week, Workflows strip, automation stats) | P5 (PW later) | P2 | M |
 | G-11 | Recently finished activity | P5 | P2 | M |
@@ -321,6 +321,12 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 **Needed.** Keep the query but pass only the keys `pair`, `dock`, `tab`, `kind` and `run`. Check `appRouteOf` (`apps/desktop/src/main/navigation-guard.ts:55`, used for in-app popups at `window-manager.ts:217`) and apply the same rule there. Add unit tests for both.
 
 **Owner / phase / effort.** P2 (desktop) · P4 · **S**.
+
+**As built (P2-04).**
+- `apps/desktop/src/main/deep-link-route.ts` (Electron-free): `deepLinkToRoute(url)` keeps the path, drops the hash and keeps only `DEEP_LINK_QUERY_KEYS = pair, dock, tab, kind, run` (re-encoded with `URLSearchParams`); dot segments and other schemes → `null`; the scheme is matched case-insensitively. `generatorai://pair?code=X` (also `pair/?code=` as Windows passes it, and `generatorai://?pair=X`) → `/?pair=X`, which `AuthGate` reads. `findDeepLinkInArgv` also unwraps a quoted argument. The route is logged without its query (a pairing code is a secret).
+- Cold start: `registerDeepLinks()` (macOS `open-url`) now runs in `main()` before `whenReady`, because a launching link is emitted during `will-finish-launching`. `WindowManager.navigateTo` holds the route (last one wins) while there is no window, the first load is running, the window shows the error page or a newly committed document (`did-navigate`) has not finished loading, and applies it on the app page's `did-finish-load`. A link that arrives on macOS with every window closed calls `restoreFromTray()` to bring one back. Warm start (`second-instance` argv, `open-url` with a window) navigates at once.
+- `appRouteOf` (in-app popups) was checked and deliberately **keeps the whole query**: its URL comes from the app page itself, which can set any query with `pushState`, and in-app links use keys outside the allowlist (`?projectId=`, `?new=1`, `?legacy=1`).
+- Tests: `deep-link-route.test.ts` (rules, Windows/Linux argv shapes), `deep-link.test.ts` (macOS `open-url` cold/warm, argv cold/warm), `window-manager.test.ts` (held route on cold start, error page, reload).
 
 ### G-09 — Model-picker provider methods
 

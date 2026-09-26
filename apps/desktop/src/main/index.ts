@@ -59,6 +59,9 @@ if (!app.requestSingleInstanceLock()) {
 
 function main(): void {
   registerProtocolClient();
+  // Before `whenReady`: on macOS a link that launches the app arrives as
+  // `open-url` during `will-finish-launching`.
+  registerDeepLinks();
 
   app.on('second-instance', (_event, argv) => {
     const win = getWindowManager().getMainWindow();
@@ -122,7 +125,6 @@ async function onReady(): Promise<void> {
   sm.setElectronIpcToken(ipcToken);
 
   registerIpc(mode);
-  registerDeepLinks();
   registerDownloadHandler(session.defaultSession);
 
   // Trust self-signed/invalid certs on loopback only — for a browser tab
