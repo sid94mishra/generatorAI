@@ -61,6 +61,7 @@ export class DrizzleChatRepository implements IChatRepository {
         agentVersion: chat.agentVersion ?? null,
         agentOverrides: chat.agentOverrides ?? null,
         agentSnapshot: chat.agentSnapshot ?? null,
+        createdByPrincipal: chat.createdByPrincipal ?? null,
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
       });
@@ -283,6 +284,9 @@ export class DrizzleChatRepository implements IChatRepository {
       agentVersion: row.agentVersion ?? undefined,
       agentOverrides: safeJsonColumn(row.agentOverrides, jsonRecord, { fallback: undefined }) as Chat['agentOverrides'],
       agentSnapshot: safeJsonColumn(row.agentSnapshot, jsonRecord, { fallback: undefined }) as Chat['agentSnapshot'],
+      ...(row.createdByPrincipal
+        ? { createdByPrincipal: safeJsonColumn(row.createdByPrincipal, jsonRecord, { fallback: undefined }) as Chat['createdByPrincipal'] }
+        : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

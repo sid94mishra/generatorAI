@@ -265,4 +265,6 @@ export type {
   InvocationUploadCategory,
   InvocationUploadRecord,
   IInvocationUploadRepository,
+  ChatWorkflowRunLink,
+  IChatWorkflowRunRepository,
 } from './IInvocationStores.js';

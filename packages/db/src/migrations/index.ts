@@ -9,6 +9,7 @@ import { runV55, V55_LOCK_FILES } from './v55_workflow_definitions_v2.js';
 import { runV57, V57_LOCK_FILES } from './v57_workflow_engine_v2.js';
 import { runV58, V58_LOCK_FILES } from './v58_invocation.js';
 import { runV59, V59_LOCK_FILES } from './v59_control_flow.js';
+import { runV60, V60_LOCK_FILES } from './v60_agent_integration.js';
 
 export { BASELINE_VERSION };
 
@@ -2665,6 +2666,17 @@ export const MIGRATIONS: readonly Migration[] = [
       sql: [],
       run: runV59,
       lockFiles: V59_LOCK_FILES,
+    },
+    // v60 — workflow overhaul P06 `agent_integration`: the runs a chat started
+    // through its workflow tools, the chat's creating principal, and who
+    // authored a definition. Additive; chat rows keep every value (the new
+    // column is NULL). The DDL is frozen in ./v60/ddl.ts.
+    {
+      version: 60,
+      name: 'agent_integration',
+      sql: [],
+      run: runV60,
+      lockFiles: V60_LOCK_FILES,
     },
   ];
 

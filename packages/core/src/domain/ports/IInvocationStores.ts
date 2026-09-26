@@ -48,3 +48,20 @@ export interface IInvocationUploadRepository {
   listExpired(now: Date): Promise<InvocationUploadRecord[]>;
   delete(id: string): Promise<void>;
 }
+
+/** A run a chat started through its workflow tools (`chat_workflow_runs`, v60; P06 WP-6.2). */
+export interface ChatWorkflowRunLink {
+  chatId: string;
+  runId: string;
+  toolCallId: string | null;
+  createdAt: Date;
+}
+
+export interface IChatWorkflowRunRepository {
+  /** Record the link; a replayed tool call (same chat and run) is a no-op. */
+  link(record: ChatWorkflowRunLink): Promise<void>;
+  /** The chat's runs, oldest first. */
+  listByChat(chatId: string): Promise<ChatWorkflowRunLink[]>;
+  /** The chat that started a run, when a chat did. */
+  chatOf(runId: string): Promise<ChatWorkflowRunLink | null>;
+}

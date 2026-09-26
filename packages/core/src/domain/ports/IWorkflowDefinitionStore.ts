@@ -6,6 +6,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
+  DefinitionAuthor,
   DefinitionStatus,
   VersionKind,
   WorkflowDefinitionRecord,
@@ -36,6 +37,8 @@ export interface NewDefinition {
   id: string;
   status: DefinitionStatus;
   graph: WorkflowGraph;
+  /** An agent-authored draft's author (P06); absent for a person's. */
+  authoredBy?: DefinitionAuthor | undefined;
 }
 
 export type ReplaceGraphResult =

@@ -79,6 +79,10 @@ export interface IWorkflowRunRepository {
   getByStatus(statuses: WorkflowRunStatus[]): Promise<WorkflowRun[]>;
   /** `COUNT(*)` of runs whose status is in `statuses`. */
   countByStatus(statuses: WorkflowRunStatus[]): Promise<number>;
+  /** Runs nested directly under a run (sub-workflow children and stage tool calls). */
+  getByParentRunId(parentRunId: string): Promise<WorkflowRun[]>;
+  /** Runs in a run tree below its root (the root itself not counted): the `maxChildRuns` cap. */
+  countDescendantsOfRoot(rootRunId: string): Promise<number>;
   update(id: string, updates: WorkflowRunUpdate): Promise<WorkflowRun>;
   delete(id: string): Promise<void>;
 }

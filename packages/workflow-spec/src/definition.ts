@@ -14,6 +14,29 @@ export type DefinitionStatus = (typeof DEFINITION_STATUSES)[number];
 export const VERSION_KINDS = ['published', 'test'] as const;
 export type VersionKind = (typeof VERSION_KINDS)[number];
 
+/**
+ * Who authored a definition (P06 WP-6.5). Absent (null) means a person: the
+ * builder, an import, a template. An agent-authored definition is always a
+ * draft first; only a person publishes it (PD-14, `allowAgentPublish`).
+ */
+export interface DefinitionAuthor {
+  kind: 'chat' | 'orchestrator' | 'stage' | 'external_agent';
+  /** The authoring chat (chat, orchestrator). */
+  chatId?: string;
+  /** The authoring stage (stage). */
+  runId?: string;
+  stageRunId?: string;
+  /** The principal the agent acted for. */
+  principalId?: string;
+  /** An external agent's channel and client name (MCP, HTTP). */
+  via?: 'mcp' | 'http' | 'sdk';
+  clientName?: string;
+  /** The published workflow this draft proposes to replace (the builder shows a diff). */
+  replacesWorkflowId?: string;
+  /** When the draft was submitted (ISO). */
+  at: string;
+}
+
 /** A definition: its working graph plus the store's bookkeeping. */
 export interface WorkflowDefinitionRecord {
   id: string;
@@ -27,6 +50,8 @@ export interface WorkflowDefinitionRecord {
   archivedAt: string | null;
   /** Notes a migration left for the author; cleared by the next save. */
   needsAttention: string[];
+  /** An agent-authored definition's author; null for a person's. */
+  authoredBy: DefinitionAuthor | null;
   createdAt: string;
   updatedAt: string;
   graph: WorkflowGraph;
@@ -44,6 +69,8 @@ export interface WorkflowDefinitionSummary {
   tags: string[];
   stageCount: number;
   needsAttention: boolean;
+  /** Submitted by an agent (the record's `authoredBy` says who). */
+  agentAuthored: boolean;
   archivedAt: string | null;
   createdAt: string;
   updatedAt: string;

@@ -76,6 +76,7 @@ export function createMockDefinition(
     hasUnpublishedChanges: false,
     archivedAt: null,
     needsAttention: [],
+    authoredBy: null,
     createdAt: '2026-09-01T00:00:00.000Z',
     updatedAt: '2026-09-01T00:00:00.000Z',
     graph: createMockGraph(name),

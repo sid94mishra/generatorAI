@@ -12,7 +12,7 @@
 // paths, codebases, uploads, the lifecycle journal); callers never write it.
 // ────────────────────────────────────────────────────────────────
 
-import { count, eq, inArray } from 'drizzle-orm';
+import { and, count, eq, inArray, ne } from 'drizzle-orm';
 import type {
   IWorkflowRunCas,
   IWorkflowRunRepository,
@@ -205,6 +205,19 @@ export class DrizzleWorkflowRunRepository implements IWorkflowRunRepository, IWo
   async countByStatus(statuses: WorkflowRunStatus[]): Promise<number> {
     if (statuses.length === 0) return 0;
     const [row] = await this.db.select({ value: count() }).from(workflowRuns).where(inArray(workflowRuns.status, statuses));
+    return row?.value ?? 0;
+  }
+
+  async getByParentRunId(parentRunId: string): Promise<WorkflowRun[]> {
+    const rows = await this.db.select().from(workflowRuns).where(eq(workflowRuns.parentRunId, parentRunId)).orderBy(workflowRuns.createdAt);
+    return rows.map((r) => this.mapRow(r));
+  }
+
+  async countDescendantsOfRoot(rootRunId: string): Promise<number> {
+    const [row] = await this.db
+      .select({ value: count() })
+      .from(workflowRuns)
+      .where(and(eq(workflowRuns.rootRunId, rootRunId), ne(workflowRuns.id, rootRunId)));
     return row?.value ?? 0;
   }
 

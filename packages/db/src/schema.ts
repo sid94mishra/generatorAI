@@ -18,7 +18,9 @@ import type {
   AgentOverrides,
   ResolvedAgentProjection,
   ChatSourceControlOptions,
+  ChatPrincipal,
 } from '@generatorai/shared';
+import type { DefinitionAuthor } from '@generatorai/workflow-spec';
 
 // ── Sessions ──
 
@@ -282,6 +284,9 @@ export const chats = sqliteTable(
     agentSnapshot: text('agent_snapshot', { mode: 'json' }).$type<ResolvedAgentProjection>(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    // ── Agent integration (v60) ──
+    /** The creating principal `{kind, id, scopes}`; the chat's workflow tools act with its scopes. NULL before v60. */
+    createdByPrincipal: text('created_by_principal', { mode: 'json' }).$type<ChatPrincipal>(),
   },
   (table) => ({
     statusIdx: index('idx_chats_status').on(table.status),
@@ -321,6 +326,8 @@ export const workflowDefinitions = sqliteTable(
     spec: text('spec').notNull(),
     createdAt: integer('created_at', { mode: 'timestamp' }).notNull(),
     updatedAt: integer('updated_at', { mode: 'timestamp' }).notNull(),
+    /** Who authored it (v60): an agent-authored draft's chat, stage or external agent. NULL = a person. */
+    authoredBy: text('authored_by', { mode: 'json' }).$type<DefinitionAuthor>(),
   },
   (table) => ({
     createdAtIdx: index('idx_workflow_defs_created_at').on(table.createdAt),
@@ -596,6 +603,27 @@ export const loopIterations = sqliteTable(
   },
   (table) => ({
     pk: primaryKey({ columns: [table.stageRunId, table.k] }),
+  }),
+);
+
+// ── Chat-started runs (v60, P06 WP-6.2): the chat's run cards ──
+
+export const chatWorkflowRuns = sqliteTable(
+  'chat_workflow_runs',
+  {
+    chatId: text('chat_id')
+      .notNull()
+      .references(() => chats.id, { onDelete: 'cascade' }),
+    runId: text('run_id')
+      .notNull()
+      .references(() => workflowRuns.id, { onDelete: 'cascade' }),
+    /** The harness tool call that started the run. */
+    toolCallId: text('tool_call_id'),
+    createdAt: integer('created_at', { mode: 'timestamp_ms' }).notNull(),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.chatId, table.runId] }),
+    runIdx: index('idx_chat_workflow_runs_run').on(table.runId),
   }),
 );
 

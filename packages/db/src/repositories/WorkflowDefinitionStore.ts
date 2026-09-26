@@ -27,6 +27,7 @@ import {
   type DefinitionStatus,
   type VersionKind,
   type WorkflowDefinitionRecord,
+  type DefinitionAuthor,
   type WorkflowDefinitionSummary,
   type WorkflowDefinitionVersionRecord,
   type WorkflowDefinitionVersionSummary,
@@ -44,6 +45,7 @@ interface DefinitionRow {
   current_version_id: string | null;
   archived_at: number | null;
   needs_attention: string | null;
+  authored_by: string | null;
   spec: string;
   created_at: number;
   updated_at: number;
@@ -158,6 +160,7 @@ export class SqliteWorkflowDefinitionStore implements IWorkflowDefinitionStore {
         tags,
         stageCount: r.stage_count,
         needsAttention: r.needs_attention !== null,
+        agentAuthored: r.authored_by !== null,
         archivedAt: toIso(r.archived_at),
         createdAt: toIso(r.created_at)!,
         updatedAt: toIso(r.updated_at)!,
@@ -180,10 +183,10 @@ export class SqliteWorkflowDefinitionStore implements IWorkflowDefinitionStore {
       const { name, description, projectId, ...rest } = graph.workflow;
       this.sqlite
         .prepare(
-          `INSERT INTO workflow_definitions (id, name, description, project_id, status, revision, current_version_id, archived_at, needs_attention, spec, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, 1, NULL, NULL, NULL, ?, ?, ?)`,
+          `INSERT INTO workflow_definitions (id, name, description, project_id, status, revision, current_version_id, archived_at, needs_attention, authored_by, spec, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, 1, NULL, NULL, NULL, ?, ?, ?, ?)`,
         )
-        .run(def.id, name, description ?? null, projectId ?? null, def.status, JSON.stringify(rest), now, now);
+        .run(def.id, name, description ?? null, projectId ?? null, def.status, def.authoredBy ? JSON.stringify(def.authoredBy) : null, JSON.stringify(rest), now, now);
       this.writeStagesAndEdges(def.id, graph, now);
     });
     return this.readRecord(def.id);
@@ -393,6 +396,14 @@ export class SqliteWorkflowDefinitionStore implements IWorkflowDefinitionStore {
         needsAttention = [row.needs_attention];
       }
     }
+    let authoredBy: DefinitionAuthor | null = null;
+    if (row.authored_by) {
+      try {
+        authoredBy = JSON.parse(row.authored_by) as DefinitionAuthor;
+      } catch {
+        /* an unreadable author reads as a person's */
+      }
+    }
     return {
       id: row.id,
       status: row.status,
@@ -401,6 +412,7 @@ export class SqliteWorkflowDefinitionStore implements IWorkflowDefinitionStore {
       hasUnpublishedChanges,
       archivedAt: toIso(row.archived_at),
       needsAttention,
+      authoredBy,
       createdAt: toIso(row.created_at)!,
       updatedAt: toIso(row.updated_at)!,
       graph,

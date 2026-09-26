@@ -365,6 +365,14 @@ export class MockWorkflowRunRepository implements IWorkflowRunRepository {
     return (await this.getByStatus(statuses)).length;
   }
 
+  async getByParentRunId(parentRunId: string): Promise<WorkflowRun[]> {
+    return [...this.store.values()].filter((r) => r.parentRunId === parentRunId).map((r) => ({ ...r }));
+  }
+
+  async countDescendantsOfRoot(rootRunId: string): Promise<number> {
+    return [...this.store.values()].filter((r) => r.rootRunId === rootRunId && r.id !== rootRunId).length;
+  }
+
   async update(id: string, updates: WorkflowRunUpdate): Promise<WorkflowRun> {
     const existing = this.store.get(id);
     if (!existing) throw new Error(`WorkflowRun ${id} not found`);

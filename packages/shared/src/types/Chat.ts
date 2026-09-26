@@ -131,8 +131,24 @@ export interface Chat {
   agentOverrides?: AgentOverrides;
   /** Frozen, redacted projection captured at session creation (audit + replay). */
   agentSnapshot?: ResolvedAgentProjection;
+  /**
+   * The principal that created the chat (v60). The chat's in-process
+   * workflow tools act with its scopes; absent for chats created before v60.
+   */
+  createdByPrincipal?: ChatPrincipal;
   createdAt: Date;
   updatedAt: Date;
+}
+
+/**
+ * Who created a chat, as the workflow tools act for it (P06 WP-6.2): a
+ * paired device, a service account, the local owner, or the platform itself
+ * (orchestrator workers inherit their orchestrator's).
+ */
+export interface ChatPrincipal {
+  kind: 'device' | 'service_account' | 'local' | 'system';
+  id: string;
+  scopes: string[];
 }
 
 /** Parameters for creating a new Chat */
@@ -188,4 +204,6 @@ export interface CreateChatParams {
   /** Set by `forkChat`: the source chat and turn. Never accepted from the API. */
   forkedFromChatId?: string;
   forkedAtTurnId?: string;
+  /** The creating principal (set by the route from the authenticated caller). Never accepted from the body. */
+  createdByPrincipal?: ChatPrincipal;
 }
