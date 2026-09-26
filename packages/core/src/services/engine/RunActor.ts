@@ -47,6 +47,8 @@ export interface RunActorDeps {
   logger?: ILogger | undefined;
   /** Every committed batch (replay fixtures, tests). */
   onDecide?: ((r: DecideRecord) => void) | undefined;
+  /** Scheduler metrics (P07 WP-7.4): decision latency, CAS conflicts. */
+  telemetry?: { decided(ms: number, message: string): void; conflict(): void } | undefined;
 }
 
 const TERMINAL = new Set(['completed', 'failed', 'cancelled']);
@@ -120,6 +122,7 @@ export class RunActor {
       const state = store.loadRunState(runId);
       if (!state) return { ok: false, reason: 'missing', detail: `run ${runId} does not exist` };
       const now = this.now();
+      const started = performance.now();
       const decisions = decide(compiled, state, msg, now);
       if (decisions.length === 0) return { ok: true, decisions };
       const reject = decisions[0]!.t === 'reject' ? (decisions[0] as Extract<Decision, { t: 'reject' }>) : undefined;
@@ -132,6 +135,7 @@ export class RunActor {
         stateHash: stateHash(state),
       });
       if (res.ok) {
+        this.deps.telemetry?.decided(performance.now() - started, msg.type);
         this.deps.onDecide?.({ runId, state, message: msg, now, decisions });
         this.deps.dispatch(runId, res);
         const terminal = decisions.some((d) => d.t === 'run_transition' && TERMINAL.has(d.to));
@@ -144,6 +148,7 @@ export class RunActor {
         return { ok: false, reason: 'fenced', detail: res.detail };
       }
       // conflict: an executor-owned CAS won; re-read and re-decide.
+      this.deps.telemetry?.conflict();
     }
     this.deps.logger?.error(`[RunActor] ${runId}: persistent CAS conflict on ${msg.type}; a tick retries`);
     const t = setTimeout(() => void this.post({ type: 'tick' }), 50);

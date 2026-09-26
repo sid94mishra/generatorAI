@@ -63,6 +63,7 @@ import type { SessionComposer } from '../session/SessionComposer.js';
 import type { WorkspaceCheckpointService } from '../WorkspaceCheckpointService.js';
 import type { WorkspaceManager } from '../WorkspaceManager.js';
 import { EffectsDispatcher } from './EffectsDispatcher.js';
+import { EngineTelemetry } from './EngineTelemetry.js';
 import type { LifecycleSteps } from './lifecycle/steps.js';
 import { LoopEffects } from './LoopEffects.js';
 import { MapEffects } from './MapEffects.js';
@@ -166,6 +167,8 @@ export class RunSupervisor {
   readonly maps: MapEffects;
   readonly subworkflows: SubworkflowEffects;
   readonly summaries: SummaryEffects;
+  /** Spans and metrics of the engine (P07 WP-7.4). */
+  readonly telemetry = new EngineTelemetry();
   /** The compiled definition of every hosted run (the actors hold the same). */
   private readonly compiledByRun = new Map<string, CompiledWorkflow>();
   private readonly actors = new Map<string, Promise<RunActor | null>>();
@@ -197,6 +200,7 @@ export class RunSupervisor {
       toHarnessError: deps.toHarnessError,
       artifacts: deps.artifacts,
       callbacks: deps.callbacks,
+      telemetry: this.telemetry,
       post,
       logger: deps.logger,
       now: this.now,
@@ -205,7 +209,11 @@ export class RunSupervisor {
     this.timers = new TimerService({ timers: deps.stores.timers, post, now: this.now, logger: deps.logger });
     this.outbox = new OutboxDispatcher({
       outbox: deps.stores.outbox,
-      publish: deps.publish ?? ((e) => deps.eventBus.emitGlobal(e as never)),
+      // The engine's own events drive its run and container spans (P07 WP-7.4).
+      publish: async (e, row) => {
+        this.telemetry.observe(e);
+        await (deps.publish ? deps.publish(e, row) : deps.eventBus.emitGlobal(e as never));
+      },
       now: this.now,
       logger: deps.logger,
     });
@@ -337,6 +345,7 @@ export class RunSupervisor {
     this.reaper.stop();
     this.timers.stop();
     this.outbox.stop();
+    this.telemetry.shutdown();
     for (const p of this.actors.values()) void p.then((a) => a?.retire());
     this.actors.clear();
     if (opts.releaseLock !== false && this.started) this.deps.stores.lock.release(this.bootId);
@@ -473,6 +482,7 @@ export class RunSupervisor {
       ...(this.deps.random ? { random: this.deps.random } : {}),
       logger: this.deps.logger,
       onDecide: this.deps.onDecide,
+      telemetry: this.telemetry,
     });
   }
 

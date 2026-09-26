@@ -36,7 +36,7 @@ import type {
   ProviderCapabilities,
 } from '@generatorai/core';
 import type { AgentEvent } from '@generatorai/shared';
-import { HarnessSessionError, withSpan, getMeter } from '@generatorai/shared';
+import { HarnessSessionError, withSpan, getMeter, GenAiTurnSpans } from '@generatorai/shared';
 import { mapSdkEventToAgentEvent } from './event-mapper.js';
 // W41 — `./tool-factory.js` value-imports `defineTool` from the Copilot SDK,
 // so a static import here would defeat the lazy load above. Imported
@@ -306,6 +306,8 @@ export class CopilotProvider implements IAgentHarness {
    * and must rebuild the session instead of short-circuiting.
    */
   private conversationModels = new Map<string, string>();
+  /** P07 WP-7.4 — a `chat <model>` span per turn (GenAI conventions). */
+  private readonly genai = new GenAiTurnSpans('copilot-bridge', 'copilot');
   private clientEventHandlers = new Set<(event: HarnessClientEvent) => void>();
   private clientStatePollingInterval?: ReturnType<typeof setInterval>;
   /** Tracks active event listener cleanup functions per conversation.
@@ -1735,9 +1737,7 @@ export class CopilotProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<void> {
     const start = Date.now();
-    return withSpan('copilot-bridge', 'copilot.sendPrompt', async (span) => {
-      span.setAttribute('copilot.conversation_id', conversationId);
-      span.setAttribute('copilot.prompt.length', prompt.length);
+    return this.genai.chat(conversationId, this.conversationModels.get(conversationId), prompt, async () => {
       promptCounter.add(1, { conversation_id: conversationId });
 
       const session = this.getSession(conversationId);
@@ -1768,9 +1768,7 @@ export class CopilotProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<ConversationResponse> {
     const start = Date.now();
-    return withSpan('copilot-bridge', 'copilot.sendPromptAndWait', async (span) => {
-      span.setAttribute('copilot.conversation_id', conversationId);
-      span.setAttribute('copilot.prompt.length', prompt.length);
+    return this.genai.chat(conversationId, this.conversationModels.get(conversationId), prompt, async (span) => {
       promptCounter.add(1, { conversation_id: conversationId });
 
     // W13-B1 — a turn starts un-truncated. Without this the latch set by a

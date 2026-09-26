@@ -65,7 +65,7 @@ import type {
 } from '@generatorai/core';
 import type { HookBridge } from '@generatorai/core';
 import type { AgentEvent, AgentEventKind } from '@generatorai/shared';
-import { HarnessSessionError, withSpan, getMeter, createAgentEvent } from '@generatorai/shared';
+import { HarnessSessionError, withSpan, getMeter, createAgentEvent, GenAiTurnSpans } from '@generatorai/shared';
 import { lastIterationUsage, mapClaudeAgentMessageToAgentEvents } from './event-mapper.js';
 // W41 — `./tool-factory.js` value-imports `createSdkMcpServer` from the Claude
 // SDK (and `zod`), so importing it statically here would defeat the lazy load
@@ -756,6 +756,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * MAX_PARALLEL_TOOLS=0 (env override) disables limiting (unlimited).
    */
   private readonly toolSemaphore = new ToolSemaphore(MAX_PARALLEL_TOOLS);
+
+  /** P07 WP-7.4 — `chat <model>` spans per turn and `execute_tool` spans per tool call (GenAI conventions). */
+  private readonly genai = new GenAiTurnSpans('claude-agent-bridge', 'claude-agent');
 
   /**
    * W12 / P0-14 / item 4 — optional supervisor gating concurrent turns.
@@ -1741,9 +1744,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<void> {
     const start = Date.now();
-    return withSpan('claude-agent-bridge', 'claude_agent.sendPrompt', async (span) => {
-      span.setAttribute('claude_agent.conversation_id', conversationId);
-      span.setAttribute('claude_agent.prompt.length', prompt.length);
+    return this.genai.chat(conversationId, this.conversations.get(conversationId)?.model ?? this.options.defaultModel, prompt, async () => {
       promptCounter.add(1, { conversation_id: conversationId });
 
       const config = this.getConversationConfig(conversationId);
@@ -1826,9 +1827,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<ConversationResponse> {
     const start = Date.now();
-    return withSpan('claude-agent-bridge', 'claude_agent.sendPromptAndWait', async (span) => {
-      span.setAttribute('claude_agent.conversation_id', conversationId);
-      span.setAttribute('claude_agent.prompt.length', rawPrompt.length);
+    return this.genai.chat(conversationId, this.conversations.get(conversationId)?.model ?? this.options.defaultModel, rawPrompt, async (span) => {
       promptCounter.add(1, { conversation_id: conversationId });
 
       const config = this.getConversationConfig(conversationId);
@@ -3680,6 +3679,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * genuinely pauses reading the next message instead of piling events up.
    */
   private async emitEventToHandlers(conversationId: string, event: AgentEvent): Promise<void> {
+    this.genai.observe(conversationId, event);
     const handlers = this.conversationEventHandlers.get(conversationId);
     if (!handlers) return;
     for (const handler of handlers) {

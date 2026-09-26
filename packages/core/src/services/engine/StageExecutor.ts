@@ -38,7 +38,7 @@ import { createHash } from 'node:crypto';
 import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { AgentEvent, ExecutionWorkspace, ILogger, ResolvedAgentProjection, Session, WorkflowRun } from '@generatorai/shared';
-import { DEFAULT_AGENT_MODE, generateId } from '@generatorai/shared';
+import { DEFAULT_AGENT_MODE, generateId, runInContext } from '@generatorai/shared';
 import {
   renderTemplate,
   resolveSessionSpec,
@@ -84,6 +84,7 @@ import type { WorkflowCallbacks } from './WorkflowCallbacks.js';
 import { waitInterruptOf } from '../../domain/scheduler/waits.js';
 import { StageConversationError } from './StageConversationError.js';
 import { runCheck } from './CheckRunner.js';
+import type { AttemptTrace, EngineTelemetry } from './EngineTelemetry.js';
 import { AUTO_SUMMARY_TURN_THRESHOLD, autoSummary, jsonSummary, summaryPrompt } from './summaries.js';
 import { compile, type CompiledNode, type CompiledWorkflow } from '../../domain/workflow-graph/compile.js';
 import { isWrapUp, templateScope } from '../../domain/scheduler/scope.js';
@@ -155,6 +156,8 @@ export interface StageExecutorDeps {
   post: (runId: string, msg: RunMessage) => void;
   /** Per-wait callback tokens: `stages.<wait>.callbackUrl` / `callbackToken` of a waiting event wait (P05 §4.3). */
   callbacks?: WorkflowCallbacks | undefined;
+  /** The `invoke_agent` span of each attempt (P07 WP-7.4). */
+  telemetry?: EngineTelemetry | undefined;
   logger?: ILogger | undefined;
   now?: () => number;
   timing?: Partial<ExecutorTiming>;
@@ -264,6 +267,8 @@ interface AttemptContext {
   /** A forced stop tore the conversation down: re-bind it before the next turn. */
   rebind?: boolean;
   hookContext: string[];
+  /** The attempt's `invoke_agent` span (P07 WP-7.4). */
+  trace?: AttemptTrace;
 }
 
 const RESUME_NOTICE =
@@ -588,7 +593,37 @@ export class StageExecutor {
     if (carried?.operatorTurn) frame.operatorQueue.push(carried.operatorTurn);
 
     const ctx = await this.context(frame, attempt.mode, journalEpoch(attempts, attemptNo));
-    const { stage, workspace } = ctx;
+    const { stage } = ctx;
+    // The attempt's `invoke_agent` span; its turns run in its context, so the
+    // provider's `chat` / `execute_tool` spans nest under it (P07 WP-7.4).
+    const spec = stageSessionSpec(ctx.graph, stage, ctx.run).merged;
+    ctx.trace = this.deps.telemetry?.attempt({
+      runId,
+      stageRunId,
+      instancePath: ctx.instance.instancePath,
+      stageKey: stage.key,
+      attemptNo,
+      mode: attempt.mode,
+      model: spec.model,
+      harnessType: spec.harnessType,
+    });
+    if (!ctx.trace) return this.attemptBody(ctx);
+    const trace = ctx.trace;
+    try {
+      const outcome = await runInContext(trace.ctx, () => this.attemptBody(ctx));
+      trace.end({ kind: outcome.kind });
+      return outcome;
+    } catch (err) {
+      trace.end(err instanceof AttemptStop ? { kind: err.outcome.kind, ...(err.outcome.kind === 'failed' ? { error: err.message } : {}) } : { kind: 'failed', error: err });
+      throw err;
+    }
+  }
+
+  /** The attempt after its context: checkpoint, hooks, session, turns, the output contract. */
+  private async attemptBody(ctx: AttemptContext): Promise<AttemptOutcome> {
+    const { stores } = this.deps;
+    const { frame, stage, workspace } = ctx;
+    const { runId, stageRunId, attemptNo } = frame.req;
 
     // A restart starts from the attempt-1 checkpoint (G5 §3.3).
     if (ctx.mode === 'restart' && (stage.retry?.restoreCheckpointOnRestart ?? true) && this.deps.checkpoints) {
@@ -923,7 +958,9 @@ export class StageExecutor {
       }
       // An amendment has no attempt to roll its usage into.
       if (event.kind === 'harness.usage' && !frame.amend) {
-        this.deps.post(runId, { type: 'usage_tick', stageRunId, attemptNo, usage: asUsage((event.data ?? {}) as Record<string, unknown>) });
+        const usage = asUsage((event.data ?? {}) as Record<string, unknown>);
+        ctx.trace?.usage(usage);
+        this.deps.post(runId, { type: 'usage_tick', stageRunId, attemptNo, usage });
       }
       // Tool calls are a loop signal (P05 §2.5): counted where they start.
       if (event.kind === 'harness.tool_start' && !frame.amend) {
