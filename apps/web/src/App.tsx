@@ -8,7 +8,6 @@ import { QueryProvider } from '@/providers/QueryProvider.js';
 import { PlatformProvider } from '@/providers/PlatformProvider.js';
 import { ThemeProvider } from '@/providers/ThemeProvider.js';
 import { AuthGate } from '@/app/shell/AuthGate.js';
-import { Toaster } from '@/components/Toast.js';
 import { router } from '@/app/router.js';
 
 export function App() {
@@ -30,7 +29,6 @@ export function App() {
                 bundle instead of the lazy route chunks that actually use it. */}
             <RouterProvider router={router} />
           </AuthGate>
-          <Toaster />
         </PlatformProvider>
       </QueryProvider>
     </ThemeProvider>

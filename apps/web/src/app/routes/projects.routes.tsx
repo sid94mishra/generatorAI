@@ -6,28 +6,28 @@ export const projectsRoutes: RouteObject[] = [
   defineRoute(
     'projects',
     () => import('@/features/projects/ProjectsListPage.js').then((m) => ({ default: m.ProjectsListPage })),
-    { legacyHeader: false, nav: 'projects', title: 'Projects' },
+    { nav: 'projects', title: 'Projects' },
   ),
   defineRoute(
     'projects/new',
     () => import('@/features/projects/CreateProjectPage.js').then((m) => ({ default: m.CreateProjectPage })),
-    { legacyHeader: false, nav: 'projects', title: 'New project' },
+    { nav: 'projects', title: 'New project' },
   ),
   // R-3: tabs are path segments (codebases|chats|runs|pull-requests|
   // customization|settings); the codebase routes below outrank `:tab`.
   defineRoute(
     'projects/:id/:tab?',
     () => import('@/features/projects/ProjectDetailPage.js').then((m) => ({ default: m.ProjectDetailPage })),
-    { legacyHeader: false, nav: 'projects', title: 'Project' },
+    { nav: 'projects', title: 'Project' },
   ),
   defineRoute(
     'projects/:id/codebases/:cid/:tab?',
     () => import('@/features/projects/CodebaseDetailPage.js').then((m) => ({ default: m.CodebaseDetailPage })),
-    { legacyHeader: false, nav: 'projects', title: 'Codebase' },
+    { nav: 'projects', title: 'Codebase' },
   ),
   defineRoute(
     'projects/:id/codebases/:cid/pull-requests/:number',
     () => import('@/features/projects/PullRequestPage.js').then((m) => ({ default: m.PullRequestPage })),
-    { legacyHeader: false, nav: 'projects', title: 'Pull request' },
+    { nav: 'projects', title: 'Pull request' },
   ),
 ];

@@ -15,7 +15,7 @@ import type {
 } from '@generatorai/shared';
 import type { HttpPlatformClient, RewindScope } from '../platform/HttpPlatformClient.js';
 import { formatTranscriptMarkdown } from '@generatorai/client-core';
-import { toast } from '../components/Toast.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
 
 // ── Query Keys ──
 export const queryKeys = {
@@ -853,9 +853,7 @@ export function useDecidePlan(chatId: string) {
       // another tab, or timed out. Clicking used to fail silently and leave
       // an approvable-looking card (observed live after a mid-review server
       // crash). Tell the user, and refetch so the stale card reconciles.
-      toast({
-        variant: 'error',
-        title: 'Plan decision failed',
+      toast.error('Plan decision failed', {
         description:
           error instanceof Error && /409|conflict/i.test(error.message)
             ? 'This plan is no longer awaiting review — it may have expired or been decided elsewhere.'
@@ -1323,7 +1321,7 @@ export function useOpenInEditor() {
       return result;
     },
     onError: (error: Error) => {
-      toast({ variant: 'error', title: 'Could not open the editor', description: error.message });
+      toast.error('Could not open the editor', { description: error.message });
     },
   });
 }

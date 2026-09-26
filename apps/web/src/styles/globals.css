@@ -9006,9 +9006,6 @@ html { scroll-behavior: smooth; }
 [data-slot='page-header'] > :first-child {
   padding-inline-start: max(16px, var(--gai-page-inset-left, 0px));
 }
-[data-slot='legacy-header'] > header {
-  padding-inline-start: max(12px, var(--gai-page-inset-left, 0px));
-}
 
 /* In `@layer base` (was unlayered): unlayered rules beat every Tailwind
    utility regardless of specificity, so this silently overrode all

@@ -12,9 +12,7 @@ import { test, expect } from '../helpers/test';
 //   • Page titles are the <h1> inside <main> (`main-card`). `/` is Home
 //     (P5-10): its H1 is the live headline ("2 need you · 1 running",
 //     "Nothing needs you"), matched by HOME_HEADING.
-//   • Pages not yet ported render the old Header inside `legacy-header`
-//     (the old `app-header` lives on inside it until P7). /chats is being
-//     ported to its own PageHeader (P3-07), so it is not asserted either way.
+//   • Every page renders its own PageHeader (the legacy Header went in P7).
 //   • Settings is the footer gear (`sidebar-settings`, outside the <nav>): a
 //     modal addressed by URL (`/settings/<section>`) over the current page (D-26).
 //   • The sidebar's own Collapse
@@ -24,14 +22,14 @@ import { test, expect } from '../helpers/test';
 /** Home's H1 — the attention headline (features/home/homeModel.ts `homeHeadline`). */
 const HOME_HEADING = /^(Nothing needs you|\d+ needs? you)( · \d+ running)?$/;
 
-const PAGES: Array<{ id: string; nav: string; urlRe: RegExp; heading: string | RegExp; legacyHeader: boolean }> = [
-  { id: 'home', nav: 'Home', urlRe: /\/$/, heading: HOME_HEADING, legacyHeader: false },
-  { id: 'chats', nav: 'Chats', urlRe: /\/chats$/, heading: 'Chats', legacyHeader: false /* P3-07 port: not asserted */ },
-  { id: 'projects', nav: 'Projects', urlRe: /\/projects$/, heading: 'Projects', legacyHeader: false /* P5-02 port */ },
-  { id: 'agents', nav: 'Agents', urlRe: /\/agents$/, heading: 'Agents', legacyHeader: false /* P5-07 port */ },
-  { id: 'workflows', nav: 'Workflows', urlRe: /\/workflows$/, heading: 'Workflows', legacyHeader: false /* PW-a port */ },
-  { id: 'automations', nav: 'Automations', urlRe: /\/automations$/, heading: 'Automations', legacyHeader: true },
-  { id: 'scripts', nav: 'Scripts', urlRe: /\/scripts$/, heading: 'Scripts', legacyHeader: true },
+const PAGES: Array<{ id: string; nav: string; urlRe: RegExp; heading: string | RegExp }> = [
+  { id: 'home', nav: 'Home', urlRe: /\/$/, heading: HOME_HEADING },
+  { id: 'chats', nav: 'Chats', urlRe: /\/chats$/, heading: 'Chats' },
+  { id: 'projects', nav: 'Projects', urlRe: /\/projects$/, heading: 'Projects' },
+  { id: 'agents', nav: 'Agents', urlRe: /\/agents$/, heading: 'Agents' },
+  { id: 'workflows', nav: 'Workflows', urlRe: /\/workflows$/, heading: 'Workflows' },
+  { id: 'automations', nav: 'Automations', urlRe: /\/automations$/, heading: 'Automations' },
+  { id: 'scripts', nav: 'Scripts', urlRe: /\/scripts$/, heading: 'Scripts' },
 ];
 
 const SIDEBAR_FULL = '[data-testid="app-sidebar"][data-collapsed="full"]';
@@ -68,12 +66,6 @@ test.describe('Navigation & layout', () => {
       const main = page.getByRole('main');
       await expect(main).toHaveAttribute('data-testid', 'main-card');
       await expect(main.getByRole('heading', { name: p.heading, exact: true, level: 1 })).toBeVisible();
-      if (p.legacyHeader) {
-        const legacy = page.getByTestId('legacy-header');
-        await expect(legacy).toBeVisible();
-        // The old Header lives on inside the wrapper (breadcrumb, Archive …).
-        await expect(legacy.getByTestId('app-header')).toBeVisible();
-      }
     }
   });
 
@@ -181,8 +173,6 @@ test.describe('Navigation & layout', () => {
 
     const main = page.getByRole('main');
     await expect(main.getByRole('heading', { name: 'Page not found', exact: true, level: 1 })).toBeVisible();
-    // The 404 never gets a legacy header.
-    await expect(page.getByTestId('legacy-header')).toHaveCount(0);
 
     const home = main.getByRole('link', { name: 'Go home', exact: true })
       .or(main.getByRole('button', { name: 'Go home', exact: true }));

@@ -7,7 +7,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RENDERER_COMMAND_IDS, type RendererCommandId } from '@generatorai/shared/ui-contract';
 import { HANDLERS, installWebKeyHandler, isKeyOwnerTarget, isTypingTarget, modalOverlayOpen } from '@/app/shell/useCommandHost.js';
-import { shortcutSections } from '@/components/layout/ShortcutsSheet.js';
+import { shortcutSections } from '@/app/shell/ShortcutsSheet.js';
 
 function press(target: EventTarget, key: string, init: KeyboardEventInit = {}) {
   const code = /^[a-z]$/i.test(key) ? `Key${key.toUpperCase()}` : key === '?' || key === '/' ? 'Slash' : undefined;

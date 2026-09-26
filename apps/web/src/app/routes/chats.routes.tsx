@@ -9,16 +9,15 @@ export const chatsRoutes: RouteObject[] = [
   defineRoute(
     'chats',
     () => import('@/features/chats/ChatsListPage.js').then((m) => ({ default: m.ChatsListPage })),
-    // P3-07: the first page ported to the kit. It renders its own PageHeader
-    // (T-01); RouteSlot's LegacyHeader (P3-04) honours the flag.
-    { legacyHeader: false, nav: 'chats', title: 'Chats' },
+    // P3-07: the first page ported to the kit. It renders its own PageHeader (T-01).
+    { nav: 'chats', title: 'Chats' },
   ),
   defineRoute(
     'chats/new',
     () => import('@/features/chats/create/ChatCreatePage.js').then((m) => ({ default: m.ChatCreatePage })),
     // P5-09 (R-1, R-2): the addressable full form T-03 FormWithAside. It
     // renders its own PageHeader (breadcrumb "Chats / New chat").
-    { legacyHeader: false, nav: 'chats', title: 'New chat' },
+    { nav: 'chats', title: 'New chat' },
   ),
   defineRoute(
     'chats/:id',
@@ -33,6 +32,6 @@ export const chatsRoutes: RouteObject[] = [
         default: m.ChatPage,
       })),
     // P4-12: the chat workspace renders its own ChatHeader (T-04).
-    { legacyHeader: false, nav: 'chats', title: 'Chat' },
+    { nav: 'chats', title: 'Chat' },
   ),
 ];

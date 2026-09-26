@@ -1,30 +1,22 @@
 // ────────────────────────────────────────────────────────────────
-// "Open in editor" — the store and the top-bar button.
+// "Open in editor" — the target store and the editor actions.
 //
-// The button lives in the Header, which knows nothing about chats, runs,
-// projects or codebases: each page publishes its own path into
-// `editorTargetStore` and the Header renders whatever is there. What that
-// buys — and what these tests pin — is that the Header never has to guess:
-// no target, no button; and a route change hands over cleanly instead of
-// one page's unmount wiping the next page's target.
+// Page headers (ChatHeader, RunHeader) know nothing about chats, runs,
+// projects or codebases beyond their own: each page publishes its path into
+// `editorTargetStore`, and `useEditorActions` (blocks/editor) turns whatever
+// is there into the header's actions. What that buys — and what these tests
+// pin — is that a header never has to guess: no target, no action; and a
+// route change hands over cleanly instead of one page's unmount wiping the
+// next page's target.
 // ────────────────────────────────────────────────────────────────
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { renderHook } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { MemoryRouter } from 'react-router';
 import { PlatformContext } from '@/providers/PlatformProvider.js';
-import { ThemeProvider } from '@/providers/ThemeProvider.js';
-import {
-  useEditorTargetStore,
-  useEditorTarget,
-} from '@/stores/editorTargetStore.js';
-import {
-  OpenInEditorButton,
-  resolveDefaultEditor,
-} from '@/components/shared/OpenInEditorButton.js';
+import { useEditorTargetStore, useEditorTarget } from '@/stores/editorTargetStore.js';
+import { resolveDefaultEditor, useEditorActions } from '@/blocks/editor/useEditorActions.js';
 import type { EditorInfo, IPlatformClient } from '@generatorai/shared';
 
 const EDITORS: EditorInfo[] = [
@@ -51,21 +43,16 @@ function makePlatform(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function renderButton(platform: ReturnType<typeof makePlatform>) {
+function renderActions(platform: ReturnType<typeof makePlatform>) {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false, gcTime: 0 }, mutations: { retry: false } },
   });
-  render(
-    <ThemeProvider>
-      <QueryClientProvider client={queryClient}>
-        <PlatformContext.Provider value={platform as unknown as IPlatformClient}>
-          <MemoryRouter>
-            <OpenInEditorButton />
-          </MemoryRouter>
-        </PlatformContext.Provider>
-      </QueryClientProvider>
-    </ThemeProvider>,
+  const wrapper = ({ children }: { children: React.ReactNode }) => (
+    <QueryClientProvider client={queryClient}>
+      <PlatformContext.Provider value={platform as unknown as IPlatformClient}>{children}</PlatformContext.Provider>
+    </QueryClientProvider>
   );
+  return renderHook(() => useEditorActions(), { wrapper }).result;
 }
 
 beforeEach(() => {
@@ -117,24 +104,23 @@ describe('resolveDefaultEditor', () => {
   });
 });
 
-describe('OpenInEditorButton', () => {
-  it('renders nothing when no page has published a target', () => {
-    renderButton(makePlatform());
-    expect(screen.queryByTestId('open-in-editor')).toBeNull();
+describe('useEditorActions', () => {
+  it('offers nothing when no page has published a target', () => {
+    const platform = makePlatform();
+    const result = renderActions(platform);
+    expect(result.current.target).toBeNull();
+    act(() => result.current.open('vscode'));
+    expect(platform.openInEditor).not.toHaveBeenCalled();
   });
 
   it('names the default editor and opens the published path', async () => {
     useEditorTargetStore.setState({ target: { path: '/w/repo', label: 'Chat' } });
     const platform = makePlatform();
-    renderButton(platform);
+    const result = renderActions(platform);
 
-    const primary = await screen.findByTestId('open-in-editor-primary');
-    await waitFor(() => expect(primary).toHaveTextContent('Open in VS Code'));
-
-    fireEvent.click(primary);
-    await waitFor(() =>
-      expect(platform.openInEditor).toHaveBeenCalledWith({ path: '/w/repo', editor: 'vscode' }),
-    );
+    await waitFor(() => expect(result.current.label).toBe('Open in VS Code'));
+    act(() => result.current.open(result.current.preferred?.id));
+    await waitFor(() => expect(platform.openInEditor).toHaveBeenCalledWith({ path: '/w/repo', editor: 'vscode' }));
   });
 
   it('falls back to the URL scheme when the server host could not launch anything', async () => {
@@ -142,50 +128,21 @@ describe('OpenInEditorButton', () => {
     const open = vi.fn();
     vi.stubGlobal('open', open);
     const platform = makePlatform({
-      openInEditor: vi
-        .fn()
-        .mockResolvedValue({ ok: false, fallbackUrl: 'vscode://file//w/repo', error: 'no CLI' }),
+      openInEditor: vi.fn().mockResolvedValue({ ok: false, fallbackUrl: 'vscode://file//w/repo', error: 'no CLI' }),
     });
-    renderButton(platform);
+    const result = renderActions(platform);
 
-    fireEvent.click(await screen.findByTestId('open-in-editor-primary'));
-    await waitFor(() =>
-      expect(open).toHaveBeenCalledWith('vscode://file//w/repo', '_blank', 'noopener'),
-    );
+    act(() => result.current.open('vscode'));
+    await waitFor(() => expect(open).toHaveBeenCalledWith('vscode://file//w/repo', '_blank', 'noopener'));
   });
 
-  it('lists every editor the server knows about in the caret menu', async () => {
+  it('lists every editor the server knows about and opens the one picked, not the default', async () => {
     useEditorTargetStore.setState({ target: { path: '/w/repo', label: 'Chat' } });
     const platform = makePlatform();
-    renderButton(platform);
+    const result = renderActions(platform);
 
-    // Radix opens its menu on pointerdown / keyboard, not a synthetic click.
-    const caret = await screen.findByTestId('open-in-editor-menu');
-    await act(async () => {
-      fireEvent.keyDown(caret, { key: 'Enter' });
-    });
-
-    expect(await screen.findByRole('menuitem', { name: /VS Code/ })).toBeInTheDocument();
-    expect(screen.getByRole('menuitem', { name: /Cursor/ })).toHaveTextContent('not installed');
-    expect(screen.getByRole('menuitem', { name: 'Copy path' })).toBeInTheDocument();
-  });
-
-  it('opens the editor the user picked from the menu, not the default', async () => {
-    useEditorTargetStore.setState({ target: { path: '/w/repo', label: 'Chat' } });
-    const platform = makePlatform();
-    renderButton(platform);
-
-    // Radix opens its menu on pointerdown / keyboard, not a synthetic click.
-    const caret = await screen.findByTestId('open-in-editor-menu');
-    await act(async () => {
-      fireEvent.keyDown(caret, { key: 'Enter' });
-    });
-    await act(async () => {
-      fireEvent.click(await screen.findByRole('menuitem', { name: /Cursor/ }));
-    });
-
-    await waitFor(() =>
-      expect(platform.openInEditor).toHaveBeenCalledWith({ path: '/w/repo', editor: 'cursor' }),
-    );
+    await waitFor(() => expect(result.current.editors.map((e) => e.id)).toEqual(['vscode', 'cursor']));
+    act(() => result.current.open('cursor'));
+    await waitFor(() => expect(platform.openInEditor).toHaveBeenCalledWith({ path: '/w/repo', editor: 'cursor' }));
   });
 });

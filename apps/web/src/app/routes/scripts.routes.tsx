@@ -10,11 +10,11 @@ export const scriptsRoutes: RouteObject[] = [
   defineRoute(
     'scripts',
     () => import('@/features/scripts/ScriptsListPage.js').then((m) => ({ default: m.ScriptsListPage })),
-    { legacyHeader: false, nav: 'scripts', title: 'Scripts' },
+    { nav: 'scripts', title: 'Scripts' },
   ),
   defineRoute(
     'scripts/:id',
     () => import('@/features/scripts/ScriptsListPage.js').then((m) => ({ default: m.ScriptsListPage })),
-    { legacyHeader: false, nav: 'scripts', title: 'Script' },
+    { nav: 'scripts', title: 'Script' },
   ),
 ];

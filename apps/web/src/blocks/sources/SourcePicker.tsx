@@ -41,7 +41,7 @@ import { Icon } from '../../ui/icons/Icon.js';
 import { cn } from '../../ui/lib/cn.js';
 import { useProjects, useProjectCodebases, useCodebaseBranches } from '../../hooks/projectQueries.js';
 import { useFsGitInfo, useReadFsGitInfo } from '../../hooks/sourceQueries.js';
-import { DirectoryBrowser } from './DirectoryBrowser.js';
+import { DirectoryBrowser } from '../directory-browser/DirectoryBrowser.js';
 import {
   defaultNewBranch,
   draftFromCodebase,
@@ -289,7 +289,12 @@ export function SourcePicker({
           {error}
         </Callout>
       )}
-      <DirectoryBrowser open={browserOpen} onClose={() => setBrowserOpen(false)} onPick={(p) => void addFolder(p)} />
+      <DirectoryBrowser
+        open={browserOpen}
+        onClose={() => setBrowserOpen(false)}
+        onPick={(p) => void addFolder(p)}
+        description="The agent will work in the folder you pick."
+      />
     </>
   );
 

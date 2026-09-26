@@ -6,18 +6,17 @@ export const agentsRoutes: RouteObject[] = [
   defineRoute(
     'agents',
     () => import('@/features/agents/AgentsListPage.js').then((m) => ({ default: m.AgentsListPage })),
-    // P5-07: renders its own PageHeader (T-01 grid); RouteSlot's LegacyHeader
-    // (P3-04) honours the flag.
-    { legacyHeader: false, nav: 'agents', title: 'Agents' },
+    // P5-07: renders its own PageHeader (T-01 grid).
+    { nav: 'agents', title: 'Agents' },
   ),
   defineRoute(
     'agents/new',
     () => import('@/features/agents/AgentEditorPage.js').then((m) => ({ default: m.AgentEditorPage })),
-    { legacyHeader: false, nav: 'agents', title: 'New agent' },
+    { nav: 'agents', title: 'New agent' },
   ),
   defineRoute(
     'agents/:id',
     () => import('@/features/agents/AgentEditorPage.js').then((m) => ({ default: m.AgentEditorPage })),
-    { legacyHeader: false, nav: 'agents', title: 'Agent' },
+    { nav: 'agents', title: 'Agent' },
   ),
 ];

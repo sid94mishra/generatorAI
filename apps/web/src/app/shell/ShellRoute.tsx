@@ -9,13 +9,13 @@
 //                 route, the saved preference otherwise
 //   overlays      the flyout (forced rail), the command palette, the find bar,
 //                 the shortcuts sheet and the Settings modal
-//   page          `useRoutes(PAGE_ROUTES, pageLocation)` in the MainCard; its
-//                 RouteSlot adds the LegacyHeader when the route still needs it
-//                 (D-21). `pageLocation` is the URL, except under the Settings
-//                 modal (D-26, 06 §2.4): there it is the page the modal was
-//                 opened over (`state.backgroundLocation`), else the last page
-//                 shown (a plain link or a deep link to /settings/…), else Home
-//                 (a direct load). The page stays mounted while the modal is open.
+//   page          `useRoutes(PAGE_ROUTES, pageLocation)` in the MainCard; each
+//                 page renders its own PageHeader. `pageLocation` is the URL,
+//                 except under the Settings modal (D-26, 06 §2.4): there it
+//                 is the page the modal was opened over
+//                 (`state.backgroundLocation`), else the last page shown (a
+//                 plain link or a deep link to /settings/…), else Home (a
+//                 direct load). The page stays mounted while the modal is open.
 // ────────────────────────────────────────────────────────────────
 
 import { memo, useEffect, useMemo, useRef } from 'react';
@@ -27,12 +27,12 @@ import { MainCard } from '@/ui/shell/MainCard/MainCard.js';
 import { SidebarFlyout } from '@/ui/shell/SidebarFlyout/SidebarFlyout.js';
 import { CommandPalette } from '@/features/palette/index.js';
 import { NewChatDialog } from '@/features/chats/create/NewChatDialog.js';
-import { ShortcutsSheet } from '@/components/layout/ShortcutsSheet.js';
 import { ConnectedRail } from './ConnectedRail.js';
 import { ConnectedSidebar } from './ConnectedSidebar.js';
 import { ConnectedTitleStrip } from './ConnectedTitleStrip.js';
 import { EditSourcesHost } from './EditSourcesHost.js';
 import { FindBar } from './FindBar.js';
+import { ShortcutsSheet } from './ShortcutsSheet.js';
 import { useCommandHost } from './useCommandHost.js';
 import { useDesktopBridge } from './useDesktopBridge.js';
 import { useSidebarMode } from './useSidebarMode.js';

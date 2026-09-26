@@ -1,34 +1,27 @@
 // ────────────────────────────────────────────────────────────────
-// EditSourcesDialog — change what a live chat works on
+// EditSourcesDialog — change what a live chat works on (P7-01: on the kit
+// Dialog; was components/chat/sources). Mounted by app/shell/EditSourcesHost.
 // ────────────────────────────────────────────────────────────────
 //
-// The same editor the new-chat dialog uses, pre-filled from `chat.sources`
-// (falling back to the workspace's realised mounts for chats created before
-// that field existed) and submitted to `PUT /api/chats/:id/sources`.
+// The same B-04 SourcePicker the create flows use, pre-filled from
+// `chat.sources` (falling back to the workspace's realised mounts for chats
+// created before that field existed) and submitted to
+// `PUT /api/chats/:id/sources`.
 //
 // The server refuses with 409 CHAT_BUSY while a turn is running and with 400
 // for a source that does not validate; both come back as a readable message
 // and are shown inline rather than as a toast, because the thing to fix is
 // in this form.
 
-import { useEffect, useMemo, useState } from 'react';
-import { Save } from 'lucide-react';
+import { useEffect, useState } from 'react';
 import type { Chat, ChatSourceControlOptions } from '@generatorai/shared';
-import { Button, Modal } from '@/components/ui/index.js';
 import { useProjectCodebases } from '@/hooks/projectQueries.js';
 import { useUpdateChatSources, useWorkspaceInfo } from '@/hooks/sourceQueries.js';
 import { useUpdateChatSourceControl } from '@/hooks/queries.js';
-import {
-  SourceControlOptionsFields,
-  DEFAULT_SOURCE_CONTROL_OPTIONS,
-} from '@/components/scm/SourceControlOptionsFields.js';
-import {
-  SourcePicker,
-  draftsFromSpecs,
-  draftsToSources,
-  validateDrafts,
-  type DraftSource,
-} from '@/blocks/sources/index.js';
+import { SourcePicker, draftsFromSpecs, draftsToSources, validateDrafts, type DraftSource } from '@/blocks/sources/index.js';
+import { Button } from '@/ui/primitives/Button/Button.js';
+import { Dialog, DialogBody, DialogFooter } from '@/ui/primitives/Dialog/Dialog.js';
+import { DEFAULT_SOURCE_CONTROL_OPTIONS, SourceControlOptionsFields } from './SourceControlOptionsFields.js';
 
 export interface EditSourcesDialogProps {
   open: boolean;
@@ -52,9 +45,7 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
    * it is a property of what the chat works ON, and the mounts above are the
    * repos it would be committing to.
    */
-  const [sourceControl, setSourceControl] = useState<ChatSourceControlOptions>(
-    DEFAULT_SOURCE_CONTROL_OPTIONS,
-  );
+  const [sourceControl, setSourceControl] = useState<ChatSourceControlOptions>(DEFAULT_SOURCE_CONTROL_OPTIONS);
 
   // Re-seed each time the dialog opens so an abandoned edit is not resumed,
   // and again when the mounts arrive (they carry the real branch + dirty
@@ -101,50 +92,43 @@ export function EditSourcesDialog({ open, onClose, chat }: EditSourcesDialogProp
     }
   };
 
-  const summaryCount = useMemo(() => drafts.length, [drafts]);
+  const count = drafts.length;
 
   return (
-    <Modal
+    <Dialog
       open={open}
-      onClose={busy ? () => undefined : onClose}
-      dismissible={!busy}
+      // A save in flight cannot be dismissed (Escape, the scrim, Close).
+      onOpenChange={(next) => {
+        if (!next && !busy) onClose();
+      }}
       title="Edit sources"
-      description="What this chat works on. Changes apply to the next turn; existing mounts keep their history."
-      size="xl"
-      footer={
-        <>
-          <Button variant="secondary" onClick={onClose} disabled={busy}>
-            Cancel
-          </Button>
-          <Button
-            variant="primary"
-            onClick={() => void save()}
-            loading={busy}
-            leftIcon={<Save className="h-4 w-4" />}
-          >
-            Save {summaryCount} {summaryCount === 1 ? 'source' : 'sources'}
-          </Button>
-        </>
-      }
+      size="lg"
     >
-      <SourcePicker
-        chatName={chat.name}
-        projectId={projectId}
-        onProjectIdChange={setProjectId}
-        drafts={drafts}
-        onChange={setDrafts}
-        primaryAlias={primary}
-        onPrimaryChange={setPrimary}
-        error={error}
-        disabled={busy}
-      />
-
-      <SourceControlOptionsFields
-        className="mt-4 border-t border-border pt-4"
-        value={sourceControl}
-        onChange={setSourceControl}
-        disabled={busy}
-      />
-    </Modal>
+      <DialogBody>
+        <p className="text-small text-fg-2">
+          What this chat works on. Changes apply to the next turn; existing mounts keep their history.
+        </p>
+        <SourcePicker
+          chatName={chat.name}
+          projectId={projectId}
+          onProjectIdChange={setProjectId}
+          drafts={drafts}
+          onChange={setDrafts}
+          primaryAlias={primary}
+          onPrimaryChange={setPrimary}
+          error={error}
+          disabled={busy}
+        />
+        <SourceControlOptionsFields value={sourceControl} onChange={setSourceControl} disabled={busy} />
+      </DialogBody>
+      <DialogFooter>
+        <Button onClick={onClose} disabled={busy}>
+          Cancel
+        </Button>
+        <Button variant="primary" icon="save" onClick={() => void save()} loading={busy}>
+          Save {count} {count === 1 ? 'source' : 'sources'}
+        </Button>
+      </DialogFooter>
+    </Dialog>
   );
 }

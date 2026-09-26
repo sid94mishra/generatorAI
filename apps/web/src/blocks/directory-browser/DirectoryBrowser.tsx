@@ -1,8 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // DirectoryBrowser — pick a folder on the SERVER host without typing a path
-// (P5-03; the chat Sources picker and the Projects forms share it, so it is a
-// block). Ported from components/chat/sources/DirectoryBrowser.tsx onto the
-// kit Dialog.
+// (P5-03; the chat SourcePicker and the Projects forms share it, so it is a
+// block) on the kit Dialog.
 //
 // Backed by `GET /api/fs/dirs`, which lists directories only (never file
 // contents) and is gated to local / administrative sessions server-side. A

@@ -4,8 +4,8 @@
 // The kit's toast region, mounted once by S-01 AppFrame: bottom-right, 16px
 // inside the window, on the toast layer, `data-gai-overlay="toast"` (the
 // native browser view hides under it, D-19). Errors and background-job
-// completions only; the legacy sonner toaster (components/Toast.tsx, mounted
-// by App.tsx for the pages not yet ported) keeps its own id until P7.
+// completions only. The app's only toaster: every `toast.*` call (features,
+// blocks and the data layer's global error handlers) lands here.
 // ────────────────────────────────────────────────────────────────
 
 import { Toaster } from '../../primitives/Toast/Toast.js';

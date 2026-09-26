@@ -232,7 +232,6 @@ test.describe('Home', () => {
     await gotoApp('/');
     const main = page.getByRole('main');
     await expect(main.getByRole('heading', { name: HOME_HEADING, level: 1 })).toBeVisible();
-    await expect(page.getByTestId('legacy-header')).toHaveCount(0);
 
     await expect(main.getByRole('button', { name: 'Run workflow', exact: true })).toBeVisible();
     await expect(main.getByRole('button', { name: 'New workflow', exact: true })).toBeVisible();

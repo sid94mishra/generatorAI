@@ -63,8 +63,7 @@ const STORIES = /\.stories\.tsx$/;
 /** The redesign folders (D-04): every rule is hard-zero inside them. */
 const NEW_FOLDERS = /^src\/(?:ui|blocks|features|app)\//;
 
-const LEGACY_PRIMITIVES = /^src\/components\/ui\//;
-/** The new primitives are to the raw-element rules what the legacy ones were. */
+/** The kit primitives render the raw elements by design (D-43). */
 const NEW_PRIMITIVES = /^src\/ui\/primitives\//;
 
 const TS_ONLY = /\.tsx?$/;
@@ -117,37 +116,33 @@ const RULES = {
       /(?:bg|text|border|ring|fill|stroke|from|to|via|shadow|outline|decoration|divide|accent|caret)-(?:red|rose|pink|fuchsia|purple|violet|indigo|blue|sky|cyan|teal|emerald|green|lime|yellow|amber|orange|stone|neutral|zinc|gray|slate)-\d{2,3}\b/g,
     ],
     description: 'Hardcoded Tailwind palette class — use design tokens (D-08: bg-surface, text-fg-2, text-err …).',
-    exempt: [LEGACY_PRIMITIVES],
   },
   handRolledOverlay: {
     patterns: [/fixed inset-0/g],
     description: 'Hand-rolled overlay — use the Dialog / Sheet primitives.',
-    exempt: [LEGACY_PRIMITIVES, NEW_PRIMITIVES],
+    exempt: [NEW_PRIMITIVES],
   },
   legacyGlassClass: {
     patterns: [/\b(?:glass-card|glass-btn|glass-input|glass-subtle|glass-strong|glass-header|glass-sidebar|btn-glow)\b/g],
     description: 'Legacy .glass-* / .btn-glow class — use the kit primitives.',
-    exempt: [LEGACY_PRIMITIVES],
   },
   rawButtonElement: {
     patterns: [/<button[\s>]/g],
     description: 'Raw <button> — use the Button primitive.',
-    exempt: [LEGACY_PRIMITIVES, NEW_PRIMITIVES, STORIES],
+    exempt: [NEW_PRIMITIVES, STORIES],
   },
   rawInputElement: {
     patterns: [/<(?:input|textarea|select)[\s>]/g],
     description: 'Raw <input>/<textarea>/<select> — use the Input / Textarea / Select primitives.',
-    exempt: [LEGACY_PRIMITIVES, NEW_PRIMITIVES, STORIES],
+    exempt: [NEW_PRIMITIVES, STORIES],
   },
   adHocSpinner: {
     patterns: [/Loader2[^\n]*animate-spin|animate-spin[^\n]*Loader2/g],
     description: 'Ad-hoc Loader2 spinner — use <Spinner>.',
-    exempt: [LEGACY_PRIMITIVES],
   },
   nativeConfirm: {
     patterns: [/\bwindow\.confirm\(|[^.\w]confirm\(/g],
     description: 'Native confirm() — use a confirm dialog.',
-    exempt: [LEGACY_PRIMITIVES],
   },
 
   // ── Redesign rules (09 §2.1; regexes verbatim) ──
@@ -208,7 +203,7 @@ const RULES = {
   rawHeadlessImport: {
     patterns: [/from\s+['"](?:@radix-ui\/[\w-]+|radix-ui|@base-ui(?:-components)?\/react[\w/-]*|cmdk)['"]/g],
     description: 'Headless primitive imported directly — use the wrappers in @/ui/primitives (D-05).',
-    exempt: [/^src\/ui\//, LEGACY_PRIMITIVES],
+    exempt: [/^src\/ui\//],
   },
   unstyledVariant: {
     patterns: [/variant=["']unstyled["']|variant:\s*['"]unstyled['"]/g],
@@ -229,8 +224,6 @@ const RULES = {
     patterns: [/data-radix-popper-content-wrapper|--radix-/g],
     description: 'Radix overlay coupling — use data-gai-overlay (D-19).',
     scope: 'new',
-    // LEGACY_OVERLAY_SELECTOR (06 §4.1) keeps legacy Radix menus hiding the
-    // native browser view until components/ui goes; both are deleted in P7-01.
     exempt: [/^src\/ui\/lib\/overlay\.ts$/],
   },
 };

@@ -46,7 +46,7 @@ describe('design-system ratchet', () => {
   };
   const baseline = () => JSON.parse(fs.readFileSync(path.join(web, 'design-system-baseline.json'), 'utf8'));
   const legacy = (n) =>
-    put(web, 'src/components/Legacy.tsx', `export const Legacy = () => (\n  <div>\n${'    <span className="text-xs" />\n'.repeat(n)}  </div>\n);\n`);
+    put(web, 'src/lib/Legacy.tsx', `export const Legacy = () => (\n  <div>\n${'    <span className="text-xs" />\n'.repeat(n)}  </div>\n);\n`);
 
   beforeAll(() => {
     web = tempDir('rails-ratchet-');
@@ -70,8 +70,8 @@ describe('design-system ratchet', () => {
     const r = run();
     expect(r.status).toBe(1);
     expect(r.out).toContain('defaultTextSize: 2 → 3');
-    expect(r.out).toContain('src/components/Legacy.tsx  (2 → 3)');
-    expect(r.out).toMatch(/src\/components\/Legacy\.tsx:5 {2}text-xs/);
+    expect(r.out).toContain('src/lib/Legacy.tsx  (2 → 3)');
+    expect(r.out).toMatch(/src\/lib\/Legacy\.tsx:5 {2}text-xs/);
 
     expect(run('--update').status).toBe(1);
     expect(baseline().counts.defaultTextSize).toBe(2);
@@ -129,7 +129,7 @@ describe('design-system ratchet', () => {
   it('legacyTokenUtility counts LEGACY_UTILITY_NAMES, not design or shared names (P1-T5)', () => {
     put(
       web,
-      'src/components/Tint.tsx',
+      'src/lib/Tint.tsx',
       'export const Tint = () => <div className="hover:bg-accent-tint bg-background bg-surface text-fg-2 bg-chart-1" />;\n',
     );
     const r = run();
@@ -138,7 +138,7 @@ describe('design-system ratchet', () => {
     expect(r.out).toMatch(/Tint\.tsx:1 {2}bg-accent-tint/);
     expect(r.out).toMatch(/Tint\.tsx:1 {2}bg-background/);
     expect(r.out).not.toMatch(/Tint\.tsx:1 {2}(?:bg-surface|text-fg-2|bg-chart-1)/);
-    fs.rmSync(path.join(web, 'src', 'components', 'Tint.tsx'));
+    fs.rmSync(path.join(web, 'src', 'lib', 'Tint.tsx'));
   });
 
   it('a kit component without a story fails storiesPresent', () => {

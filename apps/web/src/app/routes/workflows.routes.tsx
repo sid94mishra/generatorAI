@@ -9,22 +9,22 @@ export const workflowsRoutes: RouteObject[] = [
   defineRoute(
     'workflows',
     () => import('@/features/workflows/list/WorkflowsListPage.js').then((m) => ({ default: m.WorkflowsListPage })),
-    { legacyHeader: false, nav: 'workflows', title: 'Workflows' },
+    { nav: 'workflows', title: 'Workflows' },
   ),
   defineRoute(
     'workflows/new',
     () => import('@/features/workflows/create/WorkflowNewPage.js').then((m) => ({ default: m.WorkflowNewPage })),
-    { legacyHeader: false, nav: 'workflows', title: 'New workflow' },
+    { nav: 'workflows', title: 'New workflow' },
   ),
   defineRoute(
     'workflows/:id',
     () => import('@/features/workflows/detail/WorkflowDetailPage.js').then((m) => ({ default: m.WorkflowDetailPage })),
-    { legacyHeader: false, nav: 'workflows', title: 'Workflow' },
+    { nav: 'workflows', title: 'Workflow' },
   ),
   defineRoute(
     'workflows/:id/edit',
     () => import('@/features/workflows/builder/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })),
-    { legacyHeader: false, forceRail: true, nav: 'workflows', title: 'Workflow Builder' },
+    { forceRail: true, nav: 'workflows', title: 'Workflow Builder' },
   ),
   defineRoute(
     'workflows/:id/runs/:runId',
@@ -36,6 +36,6 @@ export const workflowsRoutes: RouteObject[] = [
         import('@/app/registries/workflowTranscriptCards.js'),
         import('@/features/workflows/run/WorkflowRunPage.js'),
       ]).then(([, m]) => ({ default: m.WorkflowRunPage })),
-    { legacyHeader: false, nav: 'workflows', title: 'Workflow Run' },
+    { nav: 'workflows', title: 'Workflow Run' },
   ),
 ];
