@@ -13,17 +13,17 @@ import {
   AudioSection,
   BrowserTerminalSection,
   ComputerUseSection,
+  DiagnosticsSection,
+  ExtensionsSection,
   SecuritySection,
   SkillsSection,
   SourceControlSection,
   TemplatesSection,
+  StorageSection,
   registerSettingsSection,
   type SettingsSectionDefinition,
 } from '@/features/settings/index.js';
 import { SettingsStatusFooter } from '@/ui/patterns/SettingsSection/SettingsSection.js';
-import { ExtensionsSection } from '@/components/settings/sections/Extensions.js';
-import { DiagnosticsSection } from '@/components/settings/sections/Diagnostics.js';
-import { WorkspaceRetentionSection } from '@/components/settings/sections/WorkspaceRetention.js';
 
 const SECTIONS: SettingsSectionDefinition[] = [
   {
@@ -65,13 +65,21 @@ const SECTIONS: SettingsSectionDefinition[] = [
     render: () => <AudioSection />,
     footer: <SettingsStatusFooter icon="check">Saved to the server · the microphone choice stays on this device</SettingsStatusFooter>,
   },
-  { id: 'extensions', render: () => <ExtensionsSection /> },
+  {
+    id: 'extensions',
+    render: () => <ExtensionsSection />,
+    footer: <SettingsStatusFooter icon="check">Saved to the server</SettingsStatusFooter>,
+  },
   {
     id: 'security',
     render: () => <SecuritySection />,
     footer: <SettingsStatusFooter icon="shield">Saved to this server · devices need a pairing code to connect</SettingsStatusFooter>,
   },
-  { id: 'storage', render: () => <WorkspaceRetentionSection /> },
+  {
+    id: 'storage',
+    render: () => <StorageSection />,
+    footer: <SettingsStatusFooter icon="check">Saved to the server</SettingsStatusFooter>,
+  },
   { id: 'diagnostics', render: () => <DiagnosticsSection /> },
 ];
 

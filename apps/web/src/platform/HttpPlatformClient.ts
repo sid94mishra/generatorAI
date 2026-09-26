@@ -27,6 +27,7 @@ import type { SystemInfo } from '@generatorai/shared';
 import type { ProjectRunListPage } from '@generatorai/shared';
 import type { StatsSummary } from '@generatorai/shared';
 import type { RecentActivityPage } from '@generatorai/shared';
+import type { InstalledExtension, InstallExtensionParams } from '@generatorai/shared';
 import {
   chatListSearchParams,
   runChatBulk,
@@ -415,6 +416,14 @@ export interface SystemHealth {
   /** IDs of chats currently streaming a response (in-flight turn). */
   runningChatIds: string[];
   otel: { enabled: boolean; endpoint?: string; serviceName?: string };
+}
+
+/**
+ * Public (non-sensitive) server configuration returned by `GET
+ * /api/health/config` — Settings › Diagnostics' sandbox-execution readout.
+ */
+export interface HealthConfig {
+  sandbox: { enabled: boolean; provider?: string; image?: string; autoDestroy?: boolean };
 }
 
 /**
@@ -1326,6 +1335,11 @@ export class HttpPlatformClient implements IPlatformClient {
   /** Active harness/agent provider. */
   async getHarnessConfig(): Promise<{ harness: { type: string } }> {
     return apiFetch<{ harness: { type: string } }>(`${this.baseUrl}/api/health/config`);
+  }
+
+  /** Public server configuration — Settings › Diagnostics (telemetry lives on `SystemHealth.otel`). */
+  async getHealthConfig(): Promise<HealthConfig> {
+    return apiFetch<HealthConfig>(`${this.baseUrl}/api/health/config`);
   }
 
   /** System health snapshot — connection heartbeat + live component status. */
@@ -2598,6 +2612,36 @@ export class HttpPlatformClient implements IPlatformClient {
         body: JSON.stringify(retentionDays === undefined ? {} : { retentionDays }),
       },
     );
+  }
+
+  // ── Extensions (F-settings-13) ──
+  async getExtensions(): Promise<InstalledExtension[]> {
+    const body = await apiFetch<{ extensions: InstalledExtension[] }>(`${this.baseUrl}/api/extensions`);
+    return body.extensions;
+  }
+
+  async installExtension(params: InstallExtensionParams): Promise<InstalledExtension> {
+    const body = await apiFetch<{ extension: InstalledExtension }>(`${this.baseUrl}/api/extensions`, {
+      method: 'POST',
+      body: JSON.stringify(params),
+    });
+    return body.extension;
+  }
+
+  async setExtensionEnabled(id: string, enabled: boolean): Promise<InstalledExtension> {
+    const body = await apiFetch<{ extension: InstalledExtension }>(
+      `${this.baseUrl}/api/extensions/${encodeURIComponent(id)}`,
+      { method: 'PATCH', body: JSON.stringify({ enabled }) },
+    );
+    return body.extension;
+  }
+
+  async uninstallExtension(id: string): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/extensions/${encodeURIComponent(id)}`, { method: 'DELETE' });
+  }
+
+  async reloadExtensions(): Promise<{ ok: boolean; count: number }> {
+    return apiFetch<{ ok: boolean; count: number }>(`${this.baseUrl}/api/extensions/reload`, { method: 'POST' });
   }
 
   async getComputerRuntime(workspaceId: string): Promise<ComputerRuntime> {

@@ -150,6 +150,16 @@ export function useHealth() {
   });
 }
 
+/** Public server config (sandbox execution) — Settings › Diagnostics. Rarely changes; not polled. */
+export function useHealthConfig() {
+  const platform = usePlatform();
+  return useQuery({
+    queryKey: ['health-config'] as const,
+    queryFn: () => (platform as HttpPlatformClient).getHealthConfig(),
+    staleTime: 60_000,
+  });
+}
+
 // ── Mutation Hooks ──
 
 export function useCreateSession() {
