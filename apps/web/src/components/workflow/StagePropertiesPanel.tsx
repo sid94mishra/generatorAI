@@ -9,7 +9,7 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   X, Settings2, FileText, Layers, Cpu, Zap, Shield, Bot, Server, Wand2, Webhook, Plus, Trash2,
-  CheckCircle2, Clock, Braces, UserCheck, GitMerge, AlertCircle, Repeat,
+  CheckCircle2, Clock, Braces, UserCheck, GitMerge, AlertCircle, Repeat, Undo2,
 } from 'lucide-react';
 import {
   ApprovalSpecSchema,
@@ -37,7 +37,7 @@ import { Button, Input, Select, Textarea, ToggleSwitch } from '@/components/ui/i
 import { Checkbox } from '@/components/ui/primitives/checkbox.js';
 import { cn } from '@/lib/utils.js';
 import { StageKindPanel } from './StageKindPanels.js';
-import { ArgsEditor, JsonObjectEditor, ParentField, StageKeyField } from './builder/fields.js';
+import { ArgsEditor, CompensationEditor, JoinFields, JsonObjectEditor, ParentField, StageKeyField } from './builder/fields.js';
 
 interface StagePropertiesPanelProps {
   onClose: () => void;
@@ -95,7 +95,7 @@ export function StagePropertiesPanel({ onClose }: StagePropertiesPanelProps) {
     );
   }
 
-  // Check and loop stages have their own panels (P05).
+  // Every other kind (check, loop, map, sub-workflow, wait) has its own panel (P05).
   if (stage.kind !== 'agent') {
     return <StageKindPanel stage={stage} onUpdate={handleUpdate} issues={stageIssues} onClose={onClose} />;
   }
@@ -394,6 +394,7 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
           <label htmlFor="stage-guard" className="mb-1.5 block text-xs font-medium text-foreground">Guard</label>
           <ExpressionField
             id="stage-guard"
+            expect="boolean"
             value={stage.guard ?? ''}
             onChange={(v) => onUpdate({ guard: v.trim() ? v : undefined })}
             // Expression v2: `variables.<path>`, `stages.<key>.status`,
@@ -408,22 +409,7 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
           </p>
         </div>
 
-        <label className="mb-1.5 block text-xs font-medium text-foreground">Join</label>
-        <Select
-          aria-label="Join mode"
-          value={stage.join.mode}
-          onChange={(v) =>
-            onUpdate({
-              join: v === 'all' ? { mode: 'all' } : v === 'any' ? { mode: 'any', cancelRemaining: false } : { mode: 'n_of_m', n: 1, cancelRemaining: false },
-            })
-          }
-          options={[
-            { value: 'all', label: 'All predecessors' },
-            { value: 'any', label: 'Any predecessor' },
-            { value: 'n_of_m', label: 'N of M predecessors' },
-          ]}
-        />
-        <FieldIssues issues={issuesAt(issues, '/join')} />
+        <JoinFields join={stage.join} onChange={(join) => onUpdate({ join })} issues={issues} />
 
         <ContextEditor stage={stage} onUpdate={onUpdate} issues={issues} />
         <FieldIssues issues={issuesAt(issues, '/sessionGroup')} />
@@ -607,16 +593,16 @@ function ExecutionTab({ stage, onUpdate, issues }: SectionProps) {
           min={0}
           max={100_000}
         />
-        {/* Compensation actions are authored in the workflow document; the
-            panel shows whether the stage has any and can remove them. */}
-        <ToggleSwitch
-          checked={!!stage.compensate?.length}
-          disabled={!stage.compensate?.length}
-          onChange={(checked) => { if (!checked) onUpdate({ compensate: undefined }); }}
-          label="Compensation actions"
-          description="Undo actions run when the run fails or is cancelled. Defined in the workflow document; turn off to remove them."
-        />
-        <FieldIssues issues={issuesAt(issues, '/budget', '/compensate')} />
+        <FieldIssues issues={issuesAt(issues, '/budget')} />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Compensation"
+        icon={<Undo2 className="h-3.5 w-3.5" />}
+        defaultOpen={!!stage.compensate?.length}
+        badge={stage.compensate?.length ? String(stage.compensate.length) : undefined}
+      >
+        <CompensationEditor actions={stage.compensate} onChange={(compensate) => onUpdate({ compensate })} issues={issues} />
       </CollapsibleSection>
 
       {/* Hooks */}
@@ -1218,6 +1204,7 @@ function EdgePropertiesPanel({ edgeId, onClose }: { edgeId: string; onClose: () 
           <label htmlFor="edge-when" className="mb-1.5 block text-xs font-medium text-foreground">When</label>
           <ExpressionField
             id="edge-when"
+            expect="boolean"
             value={edge.when ?? ''}
             onChange={(v) => update({ when: v.trim() ? v : undefined })}
             placeholder="e.g. parent.status == 'completed' and variables.env == 'prod'"

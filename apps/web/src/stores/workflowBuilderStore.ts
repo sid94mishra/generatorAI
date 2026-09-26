@@ -24,7 +24,10 @@ import {
   type CheckStage,
   type DefinitionStatus,
   type LoopStage,
+  type MapStage,
   type StageKind,
+  type SubworkflowStage,
+  type WaitStage,
   type StageSpec,
   type EdgeSpec,
   type ValidationIssue,
@@ -50,8 +53,14 @@ import {
 
 // ── Types ──
 
+/** Every field name of any stage kind. */
+type AnyStageField = StageSpec extends infer S ? (S extends StageSpec ? keyof S : never) : never;
+
 /** A property edit of a stage: any field of its kind (`undefined` deletes the field). */
-export type StageUpdate = { [K in keyof AgentStage | keyof Extract<StageSpec, { kind: 'loop' }> | keyof Extract<StageSpec, { kind: 'check' }>]?: unknown };
+export type StageUpdate = { [K in AnyStageField]?: unknown };
+
+/** Container kinds the builder can wrap a selection in. */
+export type ContainerKind = 'loop' | 'map';
 
 export interface StageNodeData extends Record<string, unknown> {
   stage: StageSpec;
@@ -133,7 +142,7 @@ interface WorkflowBuilderState {
   // ── Actions: Stages ──
   /**
    * Add a stage with a generated name and key; returns the key. `kind`
-   * defaults to agent; a new loop gets one agent stage in its body (a
+   * defaults to agent; a new loop or map gets one agent stage in its body (a
    * container without a body is invalid). `parentKey` adds it inside that
    * container.
    */
@@ -146,16 +155,16 @@ interface WorkflowBuilderState {
   /** Copy a stage under a new key; a container is copied with its body and the edges inside it. */
   duplicateStage: (key: string) => void;
 
-  // ── Actions: Containers (P05 loops) ──
+  // ── Actions: Containers (P05 loops and maps) ──
   /**
-   * Put stages of one scope into a new loop. Edges between a wrapped and
-   * an unwrapped stage move to the loop (one per pair), since an edge never
-   * crosses a scope. Returns the loop key, or an error message when the
-   * stages cannot be wrapped.
+   * Put stages of one scope into a new container (a loop or a map). Edges
+   * between a wrapped and an unwrapped stage move to the container (one per
+   * pair), since an edge never crosses a scope. Returns the container key,
+   * or an error message when the stages cannot be wrapped.
    */
-  wrapInLoop: (keys: readonly string[]) => { key: string } | { error: string };
-  /** Remove a loop and move its body to the loop's own scope, rewiring its edges to the body's roots and leaves. */
-  unwrapLoop: (key: string) => void;
+  wrapInContainer: (keys: readonly string[], kind: ContainerKind) => { key: string } | { error: string };
+  /** Remove a container and move its body to its own scope, rewiring its edges to the body's roots and leaves. */
+  unwrapContainer: (key: string) => void;
   /**
    * Move a stage into a container (or to the top level with `undefined`),
    * keeping its canvas position. Its edges to stages of another scope are
@@ -274,6 +283,73 @@ export function newLoopStage(key: string, name: string): LoopStage {
     loop: { maxIterations: 3, exits: [], onLimit: { mode: 'pause' }, onBodyFailure: 'fail', output: {} },
   };
 }
+
+/**
+ * A new map stage in parsed form: it fans out over a list the author picks
+ * (the placeholder `[]` validates; the panel edits it), shared workspace.
+ */
+export function newMapStage(key: string, name: string): MapStage {
+  return {
+    kind: 'map',
+    key,
+    name,
+    join: { mode: 'all' },
+    map: { items: '[]', maxItems: 50, concurrency: 4, toleratedFailurePercent: 0, workspace: 'shared', merge: 'none', output: {} },
+  };
+}
+
+/** A new wait stage in parsed form: an approval with a plain prompt. */
+export function newWaitStage(key: string, name: string): WaitStage {
+  return {
+    kind: 'wait',
+    key,
+    name,
+    join: { mode: 'all' },
+    wait: { type: 'approval', prompt: { label: 'Approve', text: 'Approve to continue.' }, onTimeout: 'fail' },
+  };
+}
+
+/**
+ * A new sub-workflow stage in parsed form. The child name is a placeholder
+ * until the panel's picker sets one (the server reports an unknown name).
+ */
+export function newSubworkflowStage(key: string, name: string): SubworkflowStage {
+  return {
+    kind: 'subworkflow',
+    key,
+    name,
+    join: { mode: 'all' },
+    subworkflow: { workflowRef: { name: 'child-workflow' }, version: 'pin_at_run_start', inputs: {}, workspace: 'inherit' },
+  };
+}
+
+/** A new stage of `kind` in parsed form. */
+export function newStage(kind: StageKind, key: string, name: string): StageSpec {
+  switch (kind) {
+    case 'loop':
+      return newLoopStage(key, name);
+    case 'map':
+      return newMapStage(key, name);
+    case 'check':
+      return newCheckStage(key, name);
+    case 'wait':
+      return newWaitStage(key, name);
+    case 'subworkflow':
+      return newSubworkflowStage(key, name);
+    default:
+      return newAgentStage(key, name);
+  }
+}
+
+/** The display-name prefix of a new stage of `kind` ("Stage 3", "Map 1", …). */
+export const KIND_NAME_PREFIX: Record<StageKind, string> = {
+  agent: 'Stage',
+  check: 'Check',
+  loop: 'Loop',
+  map: 'Map',
+  subworkflow: 'Sub-workflow',
+  wait: 'Wait',
+};
 
 /**
  * The stage key for a display name: lower snake case, starting with a
@@ -595,23 +671,21 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     const names = new Set(state.nodes.map((n) => n.data.stage.name));
     const taken = new Set(state.nodes.map((n) => n.id));
     /** Next unused "<Prefix> N": after a delete, `count + 1` repeated an existing name. */
-    const freshName = (prefix: string) => {
-      let n = state.nodes.filter((node) => node.data.stage.kind === (prefix === 'Stage' ? 'agent' : prefix.toLowerCase())).length + 1;
+    const freshName = (of: StageKind) => {
+      const prefix = KIND_NAME_PREFIX[of];
+      let n = state.nodes.filter((node) => node.data.stage.kind === of).length + 1;
       while (names.has(`${prefix} ${n}`)) n++;
       names.add(`${prefix} ${n}`);
       return `${prefix} ${n}`;
     };
-    const stageName = name || freshName(kind === 'loop' ? 'Loop' : kind === 'check' ? 'Check' : 'Stage');
+    const stageName = name || freshName(kind);
     const key = stageKeyFor(stageName, taken);
     taken.add(key);
-    const stage: StageSpec = withParentKey(
-      kind === 'loop' ? newLoopStage(key, stageName) : kind === 'check' ? newCheckStage(key, stageName) : newAgentStage(key, stageName),
-      parentKey,
-    );
+    const stage: StageSpec = withParentKey(newStage(kind, key, stageName), parentKey);
     const added = [stageToNode(stage, nextPosition(state.nodes, parentKey), parentKey)];
-    if (kind === 'loop') {
+    if (kind === 'loop' || kind === 'map') {
       // A container without a body is invalid (empty-body): start with one stage.
-      const bodyName = freshName('Stage');
+      const bodyName = freshName('agent');
       const bodyKey = stageKeyFor(bodyName, taken);
       added.push(stageToNode(withParentKey(newAgentStage(bodyKey, bodyName), key), { x: GROUP_PAD, y: GROUP_HEADER }, key));
     }
@@ -760,25 +834,26 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   },
 
   // ── Containers ──
-  wrapInLoop: (keys) => {
+  wrapInContainer: (keys, kind) => {
     const state = get();
     const selected = keys.map((k) => state.nodes.find((n) => n.id === k)).filter((n): n is Node<StageNodeData> => !!n);
     if (selected.length === 0) return { error: 'Select the stages to wrap' };
     const scope = scopeOf(selected[0]!.data.stage);
     if (selected.some((n) => scopeOf(n.data.stage) !== scope)) {
-      return { error: 'Only stages of the same scope can be wrapped together (all top level, or all in one loop)' };
+      return { error: 'Only stages of the same scope can be wrapped together (all top level, or all in one container)' };
     }
     const parentId = selected[0]!.parentId;
     const inSel = new Set(selected.map((n) => n.id));
 
+    const prefix = KIND_NAME_PREFIX[kind];
     const names = new Set(state.nodes.map((n) => n.data.stage.name));
-    let n = state.nodes.filter((node) => node.data.stage.kind === 'loop').length + 1;
-    while (names.has(`Loop ${n}`)) n++;
-    const name = `Loop ${n}`;
-    const loopKey = stageKeyFor(name, new Set(state.nodes.map((node) => node.id)));
+    let n = state.nodes.filter((node) => node.data.stage.kind === kind).length + 1;
+    while (names.has(`${prefix} ${n}`)) n++;
+    const name = `${prefix} ${n}`;
+    const containerKey = stageKeyFor(name, new Set(state.nodes.map((node) => node.id)));
 
     // An edge between a wrapped and an unwrapped stage would cross the new
-    // scope: it moves to the loop node. The first such edge of a pair wins,
+    // scope: it moves to the container node. The first such edge of a pair wins,
     // so the document keeps one edge per pair.
     const edges: Edge<StageEdgeData>[] = [];
     const seen = new Set<string>();
@@ -788,8 +863,8 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       const fromIn = inSel.has(from);
       const toIn = inSel.has(to);
       if (fromIn !== toIn) {
-        if (fromIn) from = loopKey;
-        else to = loopKey;
+        if (fromIn) from = containerKey;
+        else to = containerKey;
       }
       const id = edgeId(from, to);
       if (seen.has(id)) continue;
@@ -797,11 +872,11 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
       edges.push(from === e.source && to === e.target ? e : edgeToFlowEdge({ ...e.data.edge, from, to }));
     }
 
-    // The loop sits around the selection's bounding box, in the selection's frame.
+    // The container sits around the selection's bounding box, in the selection's frame.
     const minX = Math.min(...selected.map((node) => node.position.x));
     const minY = Math.min(...selected.map((node) => node.position.y));
     const origin = { x: minX - GROUP_PAD, y: minY - GROUP_HEADER };
-    const loopNode = { ...stageToNode(withParentKey(newLoopStage(loopKey, name), scope || undefined), origin, parentId), selected: true };
+    const loopNode = { ...stageToNode(withParentKey(newStage(kind, containerKey, name), scope || undefined), origin, parentId), selected: true };
 
     const firstIndex = state.nodes.findIndex((node) => inSel.has(node.id));
     const nodes: Node<StageNodeData>[] = [];
@@ -811,9 +886,9 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
         nodes.push({ ...node, selected: false });
         return;
       }
-      const stage = withParentKey(node.data.stage, loopKey);
+      const stage = withParentKey(node.data.stage, containerKey);
       nodes.push({
-        ...withParent(node, loopKey),
+        ...withParent(node, containerKey),
         selected: false,
         position: { x: node.position.x - origin.x, y: node.position.y - origin.y },
         data: { ...node.data, stage },
@@ -829,18 +904,18 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
     set({
       nodes: fitContainers(orderParentsFirst(nodes)),
       edges,
-      selectedNodeId: loopKey,
+      selectedNodeId: containerKey,
       selectedEdgeId: null,
       isDirty: true,
     });
     get().pushHistory();
-    return { key: loopKey };
+    return { key: containerKey };
   },
 
-  unwrapLoop: (key) => {
+  unwrapContainer: (key) => {
     const state = get();
     const loopNode = state.nodes.find((n) => n.id === key);
-    if (!loopNode || loopNode.data.stage.kind !== 'loop') return;
+    if (!loopNode || !isContainerStage(loopNode.data.stage)) return;
     const outerKey = loopNode.data.stage.parentKey;
     const body = state.nodes.filter((n) => n.data.stage.parentKey === key);
     const bodyKeys = new Set(body.map((n) => n.id));

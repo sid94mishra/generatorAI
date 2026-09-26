@@ -14,6 +14,7 @@ import type { StageNodeData } from '@/stores/workflowBuilderStore.js';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useShallow } from 'zustand/react/shallow';
 import { useCanvasReadonly } from './canvasContext.js';
+import { KIND_META } from './builder/kindMeta.js';
 
 /** Color mapping for stage run statuses (used in runtime mode) */
 const statusColors: Record<string, { bg: string; border: string; icon: React.ReactNode }> = {
@@ -99,6 +100,9 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
   // Agent-only fields; a check stage shows its command instead (P05).
   const agent = stage.kind === 'agent' ? stage : undefined;
   const check = stage.kind === 'check' ? stage.check : undefined;
+  const wait = stage.kind === 'wait' ? stage.wait : undefined;
+  const sub = stage.kind === 'subworkflow' ? stage.subworkflow : undefined;
+  const KindIcon = KIND_META[stage.kind].icon;
   // A body agent of a loop: does it continue one conversation across iterations?
   const inLoop = agent !== undefined && stage.parentKey !== undefined;
   const retry = stage.kind === 'agent' || stage.kind === 'check' ? stage.retry : undefined;
@@ -171,8 +175,8 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
           )}>
             {statusStyle ? (
               statusStyle.icon
-            ) : check ? (
-              <SquareTerminal className="h-4 w-4 text-[var(--color-primary)]" />
+            ) : stage.kind !== 'agent' ? (
+              <KindIcon className="h-4 w-4 text-[var(--color-primary)]" />
             ) : (
               <Box className="h-4 w-4 text-[var(--color-primary)]" />
             )}
@@ -233,6 +237,34 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
             <span className="inline-flex max-w-[180px] items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 font-mono cursor-help">
               <SquareTerminal className="h-3 w-3 shrink-0" />
               <span className="truncate">{check.command}</span>
+            </span>
+          </Tooltip>
+        ) : wait ? (
+          <Tooltip
+            content={
+              wait.type === 'approval'
+                ? `Waits for an approval: ${wait.prompt.label}`
+                : wait.type === 'event'
+                  ? `Waits for the event ${wait.eventKey}`
+                  : `Waits ${Math.round(wait.durationMs / 60_000)} min`
+            }
+            side="top"
+          >
+            <span className="inline-flex max-w-[180px] items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <KindIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">
+                {wait.type === 'approval' ? 'approval' : wait.type === 'event' ? 'event' : `timer ${Math.round(wait.durationMs / 60_000)} min`}
+              </span>
+            </span>
+          </Tooltip>
+        ) : sub ? (
+          <Tooltip
+            content={`Runs the workflow ${'id' in sub.workflowRef ? `id ${sub.workflowRef.id}` : `'${sub.workflowRef.name}'`} (${sub.workspace === 'inherit' ? "in this run's mounts" : 'in its own workspace'})`}
+            side="top"
+          >
+            <span className="inline-flex max-w-[200px] items-center gap-1 rounded-md bg-[var(--color-subtle)] px-1.5 py-0.5 cursor-help">
+              <KindIcon className="h-3 w-3 shrink-0" />
+              <span className="truncate">{'id' in sub.workflowRef ? sub.workflowRef.id : sub.workflowRef.name}</span>
             </span>
           </Tooltip>
         ) : agent ? (

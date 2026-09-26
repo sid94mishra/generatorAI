@@ -6,6 +6,8 @@
 // refused: values reach the command through env only), and the output
 // is the exit code plus the tails of stdout/stderr (optionally parsed
 // JSON). A check runs repository code, so saving one needs an admin.
+// `CheckCommandFields` (command, arguments, mount, working directory,
+// environment) is shared with a map's `itemSetup` commands.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
@@ -28,16 +30,77 @@ interface CheckPanelProps {
 
 const TEMPLATE_PATTERN = /\{\{/;
 
+/** `spec` with `updates` merged in; an `undefined` value removes the field. */
+export function mergeCheckSpec(spec: CheckSpec, updates: Partial<CheckSpec>): CheckSpec {
+  const next: Record<string, unknown> = { ...spec, ...updates };
+  for (const [k, v] of Object.entries(updates)) if (v === undefined) delete next[k];
+  return next as CheckSpec;
+}
+
+/** The admin note every command-bearing panel shows. */
+export function CommandAdminNote({ what = 'A check runs a command in the repository' }: { what?: string }) {
+  return (
+    <div className="mx-4 mt-3 flex items-start gap-1.5 rounded-md bg-info-muted px-2 py-1.5 text-[11px] text-info">
+      <Info className="mt-px h-3 w-3 shrink-0" />
+      <span>
+        {what} (the run needs the <code>shell</code> capability). Saving a workflow with one needs an administrator (the{' '}
+        <code>admin:settings</code> scope): the server refuses it otherwise.
+      </span>
+    </div>
+  );
+}
+
 export function CheckPanel({ stage, onUpdate, issues }: CheckPanelProps) {
   const check = stage.check;
+  const setCheck = (updates: Partial<CheckSpec>) => onUpdate({ check: mergeCheckSpec(check, updates) });
+
+  return (
+    <div>
+      <CommandAdminNote />
+
+      <CollapsibleSection title="Command" icon={<SquareTerminal className="h-3.5 w-3.5" />} defaultOpen>
+        <CheckCommandFields spec={check} onChange={setCheck} issues={issues} pointer="/check" idPrefix="check" />
+      </CollapsibleSection>
+
+      <CollapsibleSection
+        title="Environment"
+        icon={<Variable className="h-3.5 w-3.5" />}
+        defaultOpen={!!check.env}
+        badge={check.env ? String(Object.keys(check.env).length) : undefined}
+      >
+        <EnvTable env={check.env} onChange={(env) => setCheck({ env })} issues={issues} pointer="/check/env" />
+      </CollapsibleSection>
+
+      <CheckResultSections stage={stage} onUpdate={onUpdate} issues={issues} setCheck={setCheck} />
+    </div>
+  );
+}
+
+/**
+ * The command of a check (or of a map item setup step): the allow-listed
+ * executable, literal arguments, the mount and the working directory.
+ * `pointer` locates the validator's issues (`/check`, `/map/itemSetup/0`).
+ */
+export function CheckCommandFields({
+  spec,
+  onChange,
+  issues,
+  pointer,
+  idPrefix,
+  label = 'Check',
+}: {
+  spec: CheckSpec;
+  onChange: (updates: Partial<CheckSpec>) => void;
+  issues: readonly BuilderIssue[];
+  pointer: string;
+  idPrefix: string;
+  /** Accessible name prefix of the controls ("Check command"). */
+  label?: string;
+}) {
+  const check = spec;
+  const setCheck = onChange;
   const { data: allowlist, isLoading } = useScriptAllowlist();
   const aliases = useWorkflowBuilderStore(useShallow((s) => s.workflow.lifecycle.codebaseAliases));
-  /** Merge `updates` into `check`; an `undefined` value removes the field. */
-  const setCheck = (updates: Partial<CheckSpec>) => {
-    const next: Record<string, unknown> = { ...check, ...updates };
-    for (const [k, v] of Object.entries(updates)) if (v === undefined) delete next[k];
-    onUpdate({ check: next as CheckSpec });
-  };
 
   // The server's effective list (defaults plus the operator's extras); the
   // spec's defaults until it arrives or when the server does not say.
@@ -52,30 +115,21 @@ export function CheckPanel({ stage, onUpdate, issues }: CheckPanelProps) {
   const templatedArgs = check.args.filter((a) => TEMPLATE_PATTERN.test(a));
 
   return (
-    <div>
-      <div className="mx-4 mt-3 flex items-start gap-1.5 rounded-md bg-info-muted px-2 py-1.5 text-[11px] text-info">
-        <Info className="mt-px h-3 w-3 shrink-0" />
-        <span>
-          A check runs a command in the repository (the run needs the <code>shell</code> capability). Saving a workflow
-          with a check needs an administrator (the <code>admin:settings</code> scope): the server refuses it otherwise.
-        </span>
-      </div>
-
-      <CollapsibleSection title="Command" icon={<SquareTerminal className="h-3.5 w-3.5" />} defaultOpen>
+    <>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Command</label>
-          <Select aria-label="Check command" value={check.command} onChange={(command) => setCheck({ command })} options={commandOptions} />
+          <Select aria-label={`${label} command`} value={check.command} onChange={(command) => setCheck({ command })} options={commandOptions} />
           <p className="mt-1 text-[10px] text-muted-foreground">
             {isLoading ? 'Loading the allow-list…' : 'A bare executable from the allow-list; an operator can add more (scripts.extraAllowlist).'}
           </p>
-          <FieldIssues issues={issuesAt(issues, '/check/command')} />
+          <FieldIssues issues={issuesAt(issues, `${pointer}/command`)} />
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Arguments</label>
           <ArgsEditor
             args={check.args}
             onChange={(args) => setCheck({ args })}
-            ariaLabel="Check arguments"
+            ariaLabel={`${label} arguments`}
             placeholder={'One per line\nexec\nvitest\nrun'}
           />
           <p className="mt-1 text-[10px] text-muted-foreground">
@@ -87,12 +141,12 @@ export function CheckPanel({ stage, onUpdate, issues }: CheckPanelProps) {
               the value to an environment variable.
             </p>
           )}
-          <FieldIssues issues={issuesAt(issues, '/check/args')} />
+          <FieldIssues issues={issuesAt(issues, `${pointer}/args`)} />
         </div>
         <div>
           <label className="mb-1.5 block text-xs font-medium text-foreground">Mount</label>
           <Select
-            aria-label="Check mount"
+            aria-label={`${label} mount`}
             value={check.mount ?? ''}
             onChange={(v) => setCheck({ mount: v || undefined })}
             options={[
@@ -104,31 +158,34 @@ export function CheckPanel({ stage, onUpdate, issues }: CheckPanelProps) {
               })),
             ]}
           />
-          <FieldIssues issues={issuesAt(issues, '/check/mount')} />
+          <FieldIssues issues={issuesAt(issues, `${pointer}/mount`)} />
         </div>
         <div>
-          <label htmlFor="check-cwd" className="mb-1.5 block text-xs font-medium text-foreground">Working directory</label>
+          <label htmlFor={`${idPrefix}-cwd`} className="mb-1.5 block text-xs font-medium text-foreground">Working directory</label>
           <Input
-            id="check-cwd"
+            id={`${idPrefix}-cwd`}
             value={check.cwd ?? ''}
             onChange={(e) => setCheck({ cwd: e.target.value || undefined })}
             className="font-mono text-xs"
             placeholder="Relative to the mount root (e.g. packages/api)"
             spellCheck={false}
           />
-          <FieldIssues issues={issuesAt(issues, '/check/cwd')} />
+          <FieldIssues issues={issuesAt(issues, `${pointer}/cwd`)} />
         </div>
-      </CollapsibleSection>
+    </>
+  );
+}
 
-      <CollapsibleSection
-        title="Environment"
-        icon={<Variable className="h-3.5 w-3.5" />}
-        defaultOpen={!!check.env}
-        badge={check.env ? String(Object.keys(check.env).length) : undefined}
-      >
-        <EnvTable env={check.env} onChange={(env) => setCheck({ env })} issues={issues} />
-      </CollapsibleSection>
-
+/** A check stage's result handling, timeouts and retry. */
+function CheckResultSections({
+  stage,
+  onUpdate,
+  issues,
+  setCheck,
+}: CheckPanelProps & { setCheck: (updates: Partial<CheckSpec>) => void }) {
+  const check = stage.check;
+  return (
+    <>
       <CollapsibleSection title="Result" icon={<Shield className="h-3.5 w-3.5" />} defaultOpen>
         <ToggleSwitch
           checked={check.parseJson}
@@ -192,19 +249,22 @@ export function CheckPanel({ stage, onUpdate, issues }: CheckPanelProps) {
         )}
         <FieldIssues issues={issuesAt(issues, '/retry')} />
       </CollapsibleSection>
-    </div>
+    </>
   );
 }
 
 /** Environment variables: name → template (the only place run values reach the command). */
-function EnvTable({
+export function EnvTable({
   env,
   onChange,
   issues,
+  pointer,
 }: {
   env: Record<string, string> | undefined;
   onChange: (env: Record<string, string> | undefined) => void;
   issues: readonly BuilderIssue[];
+  /** JSON pointer of the env object (`/check/env`). */
+  pointer: string;
 }) {
   // Rows added here stay until removed, even while their value is empty.
   const [pending, setPending] = useState<string[]>([]);
@@ -250,7 +310,7 @@ function EnvTable({
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>
-          <FieldIssues issues={issuesAt(issues, `/check/env/${name}`)} />
+          <FieldIssues issues={issuesAt(issues, `${pointer}/${name}`)} />
         </div>
       ))}
       <Button
@@ -266,7 +326,7 @@ function EnvTable({
       >
         <Plus className="h-3 w-3" /> Add variable
       </Button>
-      <FieldIssues issues={issues.filter((i) => i.field === '/check/env')} />
+      <FieldIssues issues={issues.filter((i) => i.field === pointer)} />
     </div>
   );
 }
