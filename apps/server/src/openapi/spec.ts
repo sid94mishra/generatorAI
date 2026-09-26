@@ -1687,20 +1687,56 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         tags: ['Runs', 'HITL'],
         summary: 'An operator command on the run or one of its instances',
         description:
-          'pause {mode: drain|interrupt}, resume, cancel, retry {mode: resume|restart}, skip {as}, fail, approve {outcome, feedback?, data?}. ' +
-          '`instanceId` targets one instance; `expectedVersion` makes the command conditional. `approve` needs exec:agent; every other command also needs write:workflows.',
+          'pause {mode: drain|interrupt}, resume, cancel, retry {mode: resume|restart}, skip {as}, fail, approve {outcome, feedback?, data?}, ' +
+          'the loop decisions grant_iterations {n}, raise_budget, continue_with_input {text}, accept, accept_iteration {k}, and deliver_event ' +
+          '{eventKey, idempotencyKey, data?} (P05). `instanceId` targets one instance; `expectedVersion` makes the command conditional. ' +
+          '`approve` also resolves an approval wait (its form is validated) and a decision of a sub-workflow child sent to the parent run. ' +
+          'The decisions (approve, the loop decisions, deliver_event) need exec:agent; every other command also needs write:workflows.',
         parameters: [runIdParam],
         requestBody: {
           required: true,
           content: { 'application/json': { schema: { $ref: '#/components/schemas/RunCommand' } } },
         },
         responses: {
+          '200': { description: 'deliver_event: the same key and data were delivered before (`replayed: true`)' },
           '202': { description: 'Accepted by the engine' },
-          '400': { description: 'Invalid command' },
+          '400': { description: 'Invalid command, or approval data that does not match the form schema of the wait' },
           '403': { description: 'A run-control command without write:workflows' },
           '404': { description: 'Unknown run or instance' },
           '409': { description: 'invalid_state, version_conflict or conflict' },
           '503': { description: 'No workflow engine in this process' },
+        },
+      },
+    },
+    '/api/workflow-runs/{runId}/pending-decisions': {
+      get: {
+        tags: ['Runs', 'HITL'],
+        summary: 'Every decision the run waits on, with those of its sub-workflow children (P05)',
+        description:
+          'Completion reviews, in-turn gates, parked loops, approval and event waits: `{runId (the owning run), instanceId, stageKey, instancePath, name, kind, waitType?, ' +
+          'interruptData, version, callback?, via: [{runId, instanceId, stageKey, name}]}`. Answer any of them with the commands route of this run.',
+        parameters: [runIdParam],
+        responses: { '200': { description: 'Pending decisions' }, '404': { description: 'Unknown run' } },
+      },
+    },
+    '/api/workflow-callbacks/{token}': {
+      post: {
+        tags: ['Runs'],
+        summary: "Deliver an event wait's event with its callback token (public; P05 §4.3)",
+        description:
+          'The token (from the waiting wait: `callback.url`) authenticates the delivery: an HMAC over the run, the wait instance and its event key. ' +
+          'Body `{data?, idempotencyKey?}` or the `Idempotency-Key` header; without a key the data is the key. Rate-limited per token and address.',
+        parameters: [{ name: 'token', in: 'path', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: { type: 'object', properties: { data: {}, idempotencyKey: { type: 'string' } } } } },
+        },
+        responses: {
+          '200': { description: 'Replayed (the same key and data were delivered before)' },
+          '202': { description: 'Delivered' },
+          '404': { description: 'Unknown or invalid token' },
+          '409': { description: 'The wait is not waiting any more, or the same key with other data' },
+          '429': { description: 'Rate limited' },
         },
       },
     },
