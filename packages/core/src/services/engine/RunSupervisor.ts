@@ -50,6 +50,7 @@ import type { EngineStores } from '../../domain/ports/IEngineStore.js';
 import type { IAgentHarness } from '../../domain/ports/IAgentHarness.js';
 import type { ISessionRepository } from '../../domain/ports/IRepositories.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
+import type { WorkflowSecretResolver } from '../../mcp/McpCredentialVault.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
 import type { RunMessage, RunOutcome } from '../../domain/scheduler/types.js';
 import { graphForInstance } from '../../domain/scheduler/expansion.js';
@@ -114,6 +115,8 @@ export interface RunSupervisorDeps {
   checkpoints?: WorkspaceCheckpointService | undefined;
   planService?: PlanService | undefined;
   scriptRunner?: IScriptRunner | undefined;
+  /** Resolves `secretref:workflow/<name>` values of check `env` and `custom_script` rule `env` (PLATFORM-R2); without it such a value fails the check. */
+  workflowSecrets?: WorkflowSecretResolver | undefined;
   toHarnessError?: ((provider: string | undefined, raw: unknown) => unknown) | undefined;
   /** Files uploaded to a stage (the stage conversation API's attachments). */
   artifacts?: StageArtifactReader | undefined;
@@ -178,6 +181,8 @@ export class RunSupervisor {
   private readonly timing: SupervisorTiming;
   private readonly now: () => number;
   private lockTimer: ReturnType<typeof setInterval> | undefined;
+  /** The next `start()` try while another process holds the engine lock. */
+  private startRetry: ReturnType<typeof setTimeout> | undefined;
   private providerResolver?: StageProviderResolver;
   private started = false;
   private stopped = false;
@@ -201,6 +206,7 @@ export class RunSupervisor {
       checkpoints: deps.checkpoints,
       planService: deps.planService,
       scriptRunner: deps.scriptRunner,
+      workflowSecrets: deps.workflowSecrets,
       toHarnessError: deps.toHarnessError,
       artifacts: deps.artifacts,
       callbacks: deps.callbacks,
@@ -262,6 +268,7 @@ export class RunSupervisor {
       leases: this.leases,
       platform,
       scriptRunner: deps.scriptRunner,
+      workflowSecrets: deps.workflowSecrets,
       logger: deps.logger,
     });
     this.subworkflows = new SubworkflowEffects({
@@ -363,9 +370,47 @@ export class RunSupervisor {
     this.reaper.start();
   }
 
+  /**
+   * `start()`; while another process holds the lock, try again once its
+   * heartbeat can have gone stale, until the engine starts or is stopped. A
+   * quick restart finds the old process's lock under `lockStaleMs` old: the
+   * engine then starts when it expires instead of never (every run command
+   * would answer ENGINE_UNAVAILABLE). Resolves whether it started now.
+   */
+  async startOrRetry(): Promise<boolean> {
+    try {
+      await this.start();
+      return true;
+    } catch (err) {
+      if (!(err instanceof EngineLockedError)) throw err;
+      this.retryStart(err.holder.heartbeatAt);
+      return false;
+    }
+  }
+
+  private retryStart(heartbeatAt: number | null): void {
+    if (this.stopped || this.started) return;
+    const dueMs = heartbeatAt === null ? this.timing.lockRenewMs : Math.max(1_000, heartbeatAt + this.timing.lockStaleMs - this.now() + 1_000);
+    this.deps.logger?.info(`[RunSupervisor] the engine lock is held; trying again in ${Math.ceil(dueMs / 1000)} s`);
+    this.startRetry = setTimeout(() => {
+      this.startRetry = undefined;
+      if (this.stopped || this.started) return;
+      this.start().then(
+        () => this.deps.logger?.info('[RunSupervisor] the engine lock was free; the engine started'),
+        (err: unknown) => {
+          if (err instanceof EngineLockedError) this.retryStart(err.holder.heartbeatAt);
+          else this.deps.logger?.error(`[RunSupervisor] the engine did not start: ${err instanceof Error ? err.message : String(err)}`);
+        },
+      );
+    }, dueMs);
+    this.startRetry.unref?.();
+  }
+
   /** Stop hosting: timers, the reaper and the lock. Frames are left as they are (a restart recovers them). */
   async stop(opts: { releaseLock?: boolean } = {}): Promise<void> {
     this.stopped = true;
+    if (this.startRetry) clearTimeout(this.startRetry);
+    this.startRetry = undefined;
     if (this.lockTimer) clearInterval(this.lockTimer);
     this.lockTimer = undefined;
     this.reaper.stop();
@@ -570,7 +615,7 @@ export class RunSupervisor {
       for (const inst of stores.runStore.loadRunState(runId)?.instances ?? []) {
         const cs = inst.containerState;
         if (cs?.kind !== 'map' || inst.status !== 'running' || cs.phase === 'done' || cs.phase === 'snapshotting' || !cs.snapshot) continue;
-        void this.leases.acquire(await this.maps.leaseKeys(runId), 'shared', inst.id);
+        void this.leases.acquire(await this.maps.leaseKeys(runId, inst.id), 'shared', inst.id);
       }
     }
     for (const runId of runs) {

@@ -17,7 +17,6 @@ import {
   WorkspaceManager,
   AdmissionController,
   MAX_FLOW_LIMIT,
-  EngineLockedError,
   MountService,
   runBootHousekeeping,
   type RunSandbox,
@@ -260,13 +259,9 @@ export class GeneratorAI {
 
     // 5. The workflow engine. Another live process owning this database's
     //    engine leaves this instance without one: run commands then fail
-    //    with `engine_unavailable`, everything else works.
-    try {
-      await engine.start();
-    } catch (err) {
-      if (!(err instanceof EngineLockedError)) throw err;
-      this.logger.error(`[GeneratorAI] ${err.message}`);
-    }
+    //    with `engine_unavailable`, everything else works, until that
+    //    lock goes stale: the engine then starts.
+    await engine.startOrRetry();
 
     // 6. Automation cron scheduler.
     await automationService.initializeCronJobs();

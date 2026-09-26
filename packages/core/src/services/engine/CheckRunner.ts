@@ -123,7 +123,8 @@ export async function runCheck(input: CheckRunInput): Promise<AttemptOutcome> {
       timeout: check.timeoutMs,
       abortSignal: input.signal,
       confineTo: dirs.root,
-      keepTail: true,
+      // Past the output cap a check keeps the end (its tails) — but `parseJson` needs the start of the document (LOOP-R12).
+      keepTail: !check.parseJson,
     });
   } catch (err) {
     // The runner's policy refused the command line before anything was spawned.

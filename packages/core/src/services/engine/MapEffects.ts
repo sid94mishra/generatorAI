@@ -49,6 +49,7 @@ import type { ILogger, RunCodebase, WorkflowRun, WorkspaceMount } from '@generat
 import type { CheckStage, Lifecycle, PostProcessingStep, WorkflowGraph } from '@generatorai/workflow-spec';
 import type { EngineStores } from '../../domain/ports/IEngineStore.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
+import type { WorkflowSecretResolver } from '../../mcp/McpCredentialVault.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
 import { mapItemScope, mapStateOf, StateIndex } from '../../domain/scheduler/scope.js';
 import type { InstanceState, MapItemState, MapState, RunState } from '../../domain/scheduler/types.js';
@@ -70,6 +71,8 @@ export interface MapEffectsDeps {
   /** The mount service and the post-processing steps (the lifecycle platform; late-wired). */
   platform: () => { mounts?: MountService | undefined; steps?: LifecycleSteps | undefined };
   scriptRunner?: IScriptRunner | undefined;
+  /** Resolves `secretref:workflow/<name>` values of check `env` and `custom_script` rule `env` (PLATFORM-R2); without it such a value fails the check. */
+  workflowSecrets?: WorkflowSecretResolver | undefined;
   logger?: ILogger | undefined;
 }
 
@@ -215,12 +218,6 @@ export class MapEffects {
     }
   }
 
-  /** Re-take a running map's shared leases (recovery: leases are process-local). */
-  async reacquire(runId: string, stageRunId: string): Promise<void> {
-    const keys = await this.leaseKeys(runId, stageRunId);
-    await this.deps.leases.acquire(keys, 'shared', stageRunId);
-  }
-
   /**
    * The map settled (completed, failed, cancelled) or its winner did: its
    * shared lease goes at once (a queued snapshot is withdrawn; a merge in
@@ -315,6 +312,7 @@ export class MapEffects {
           primaryDir: where.primaryDir,
           scope,
           scriptRunner: this.deps.scriptRunner,
+          secrets: this.deps.workflowSecrets,
           signal: new AbortController().signal,
         });
         const data = outcome.kind === 'succeeded' ? (outcome.output.data as { passed?: boolean; exitCode?: number; stderrTail?: string } | undefined) : undefined;

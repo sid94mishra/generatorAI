@@ -89,7 +89,6 @@ import {
   // Bootstrap — shared core services factory
   createCoreServices,
   runBootHousekeeping,
-  EngineLockedError,
   InterruptedTurnRecoveryService,
   OrphanProcessReaper,
   SandboxedScriptRunner,
@@ -2380,13 +2379,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
       // The workflow engine: the single-engine lock, then recovery of every
       // live run (G5 §3.10). Another live process on this database owns the
       // engine; this one serves everything else, and run commands answer
-      // ENGINE_UNAVAILABLE.
-      try {
-        await engine.start();
-      } catch (err) {
-        if (!(err instanceof EngineLockedError)) throw err;
-        logger.error(`[Container] ${err.message}`);
-      }
+      // ENGINE_UNAVAILABLE until its lock goes stale (a quick restart finds
+      // the previous process's lock still fresh): the engine then starts.
+      await engine.startOrRetry();
 
       // Chat turns the previous process died in: persist what streamed and
       // write the terminal events a reconnecting client is waiting for.

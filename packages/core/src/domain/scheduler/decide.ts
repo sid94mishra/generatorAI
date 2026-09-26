@@ -975,15 +975,6 @@ export function decide(graph: CompiledWorkflow, state: RunState, msg: RunMessage
   return w.decisions;
 }
 
-/**
- * The state after applying `decide`'s decisions — what a replay compares
- * (G5 §7.3) and what an in-memory store would hold. Pure.
- */
-export function stateAfter(graph: CompiledWorkflow, state: RunState, msg: RunMessage, now: number): { decisions: Decision[]; state: RunState } {
-  const decisions = decide(graph, state, msg, now);
-  return { decisions, state: applyDecisions(state, decisions, now) };
-}
-
 /** Apply decisions to a state snapshot the way `RunStore.apply` applies them to the DB. Pure. */
 export function applyDecisions(state: RunState, decisions: readonly Decision[], now: number): RunState {
   const run: RunRecord = { ...state.run, usage: { ...state.run.usage } };

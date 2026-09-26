@@ -58,6 +58,7 @@ import type { EngineStores, SettledTurn, TurnJournalEntry, TurnReplayPolicy, Tur
 import type { AttachmentRef, IAgentHarness, SendPromptOptions } from '../../domain/ports/IAgentHarness.js';
 import type { ISessionRepository } from '../../domain/ports/IRepositories.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
+import type { WorkflowSecretResolver } from '../../mcp/McpCredentialVault.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
 import type { HostToolsLevel, StructuredOutputLevel } from '../../domain/ports/IProviderInstance.js';
 import type { ApprovalVerdict, AttemptMode, AttemptOutcome, InstanceState, OperatorTurn, RunMessage, RunState, StageOutput, Usage } from '../../domain/scheduler/types.js';
@@ -149,6 +150,8 @@ export interface StageExecutorDeps {
   checkpoints?: WorkspaceCheckpointService | undefined;
   planService?: PlanService | undefined;
   scriptRunner?: IScriptRunner | undefined;
+  /** Resolves `secretref:workflow/<name>` values of check `env` and `custom_script` rule `env` (PLATFORM-R2); without it such a value fails the check. */
+  workflowSecrets?: WorkflowSecretResolver | undefined;
   /**
    * The harness boundary (P03 WP-3.4): a provider failure becomes a
    * `HarnessError` (`toHarnessError` of `@generatorai/agent-harness-providers`).
@@ -216,6 +219,8 @@ interface Frame {
   conversationId?: string;
   /** `run_sessions.session_key` once the session is bound (a session group's amend check). */
   sessionKey?: string;
+  /** Drops the composed session's registrations (a stage orchestrator parent, the turn context) when the attempt ends (PLATFORM-R17). */
+  disposeSession?: () => void;
   ticket?: AdmissionTicket | undefined;
   waiter?: Waiter;
   /** A verdict carried by a resume attempt (approval given with no frame, after a restart). */
@@ -606,6 +611,12 @@ export class StageExecutor {
     } finally {
       for (const t of frame.timers) clearInterval(t);
       frame.unsubscribe?.();
+      // The session is released with the attempt: its registrations go too (a later attempt composes again).
+      try {
+        frame.disposeSession?.();
+      } catch {
+        /* best effort */
+      }
       if (this.frames.get(req.stageRunId) === frame) this.frames.delete(req.stageRunId);
     }
     if (this.dead) return;
@@ -745,6 +756,7 @@ export class StageExecutor {
       primaryDir: placed.systemVars?.workingDirectory ?? this.deps.workspaceManager.getWorkingDirectory(workspace),
       scope: templateScope(compile(graph), state, instance, userVariables({ ...(run.variables ?? {}) })),
       scriptRunner: this.deps.scriptRunner,
+      secrets: this.deps.workflowSecrets,
       signal: frame.ac.signal,
     });
     if (frame.stop) throw new AttemptStop(frame.stop);
@@ -974,6 +986,7 @@ export class StageExecutor {
 
     ctx.session = session!;
     ctx.composed = composed;
+    ctx.frame.disposeSession = () => composed.dispose();
     ctx.owner = owner;
     ctx.frame.conversationId = conversationId;
     ctx.frame.sessionKey = key;
@@ -1582,6 +1595,7 @@ export class StageExecutor {
       const check = await checkOutputContract(ctx.contract, ctx.strategies, ctx.outputs, ctx.outputText, {
         logger: this.logger,
         scriptRunner: this.deps.scriptRunner,
+        secrets: this.deps.workflowSecrets,
         workspacePath: ctx.workDir,
         stageRunId,
         scope: this.scopeOf(ctx),
@@ -1981,6 +1995,7 @@ export class StageExecutor {
       const check = await checkOutputContract(ctx.contract, ctx.strategies, ctx.outputs, ctx.outputText, {
         logger: this.logger,
         scriptRunner: this.deps.scriptRunner,
+        secrets: this.deps.workflowSecrets,
         workspacePath: ctx.workDir,
         stageRunId,
         scope: this.scopeOf(ctx),

@@ -483,6 +483,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     hookExecutor,
     planService,
     scriptRunner,
+    workflowSecrets: inputs.workflowSecrets,
     toHarnessError: inputs.toHarnessError,
     artifacts: artifactService,
     callbacks: workflowCallbacks,
