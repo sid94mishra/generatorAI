@@ -4,9 +4,11 @@
 // (remote mode, P04 WP-4.4; W-58: the embedded core is gone).
 //
 //   generatorai-mcp pair <code> [--name <device name>]
-//       Redeem a pairing code from `generatorai device invite --platform mcp
-//       --scopes exec:agent,read:workflows[,write:workflows]` (or Settings →
-//       Devices → Pair a device). The device key goes to the OS-backed vault.
+//       Redeem a pairing code from `generatorai device invite --platform mcp`
+//       (default grant: read:status, read:workflows, stream:events,
+//       exec:agent, read:chats, write:chats; add `--scopes …,write:workflows`
+//       to let it draft), or Settings → Devices → Pair a device. The device
+//       key goes to the encrypted vault.
 //   generatorai-mcp [serve]
 //       Serve over stdio, the way a bundled MCP server is spawned: the
 //       server's workflow tools, two chat tools and the authoring skill as
@@ -18,11 +20,25 @@
 //   GENERATORAI_URL             the server (default: the one paired with); a
 //                               short pairing code is resolved against it
 //   GENERATORAI_MCP_CONFIG_DIR  where the pairing lives (default ~/.generatorai/mcp)
+//   GENERATORAI_SECRET_KEY /    seal the vault; `serve` needs the same one
+//   GENERATORAI_SECRET_PASSPHRASE  that `pair` had (or neither)
+//
+// Run from the bundle (`pnpm --filter @generatorai/mcp-server bundle` →
+// `dist-bundle/generatorai-mcp.mjs`, the package's `bin`); the workspace
+// packages it imports are TypeScript source, so the sources only run under tsx.
 // ────────────────────────────────────────────────────────────────
 
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { GeneratorAiMcpServer } from './server.js';
-import { createMcpRuntime, loadConnection, pairMcp, remoteFacade } from './remote.js';
+import { assertSecretBackend, createMcpRuntime, loadConnection, pairMcp, remoteFacade } from './remote.js';
+
+const USAGE = [
+  'Usage:',
+  '  generatorai-mcp pair <pairing code or URL> [--name <device name>]',
+  '  generatorai-mcp [serve]      serve over stdio (spawned by an MCP client)',
+  '',
+  'Env: GENERATORAI_URL, GENERATORAI_MCP_CONFIG_DIR, GENERATORAI_SECRET_KEY / GENERATORAI_SECRET_PASSPHRASE',
+].join('\n');
 
 // stdout is the MCP wire — every diagnostic goes to stderr instead.
 const log = (msg: string, meta?: Record<string, unknown>): void => {
@@ -44,6 +60,7 @@ async function serve(): Promise<void> {
   if (!connection) {
     throw new Error('Not paired. Run `generatorai device invite --platform mcp` on the server, then `generatorai-mcp pair <code>`.');
   }
+  assertSecretBackend(connection);
   const runtime = createMcpRuntime(connection, process.env['GENERATORAI_URL'] ?? connection.endpoint);
   const server = new GeneratorAiMcpServer({ ai: remoteFacade(runtime), log });
   const transport = new StdioServerTransport();
@@ -67,6 +84,10 @@ async function serve(): Promise<void> {
 
 async function main(): Promise<void> {
   const [command, ...rest] = process.argv.slice(2);
+  if (command === '--help' || command === '-h' || command === 'help') {
+    process.stderr.write(`${USAGE}\n`);
+    return;
+  }
   if (command === 'pair') return pair(rest);
   if (!command || command === 'serve') return serve();
   throw new Error(`Unknown command "${command}" (use: pair <code> | serve)`);
