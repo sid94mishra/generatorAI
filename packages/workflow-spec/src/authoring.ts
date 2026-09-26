@@ -4,6 +4,7 @@
 // server lists. Shared by the server, every client and the MCP server.
 // ────────────────────────────────────────────────────────────────
 
+import { collectCommandFields } from './commandBearing.js';
 import type { WorkflowGraph } from './schemas/graph.js';
 import type { InvocationPlan } from './schemas/invocation.js';
 import type { ValidationIssue } from './validate/issues.js';
@@ -90,6 +91,7 @@ export const RISK_FLAGS = [
   'bypass_permissions',
   'runs_repo_code',
   'starts_other_workflows',
+  'uses_workflow_tools',
   'worktree_per_item',
   'plans_stages_at_run_time',
 ] as const;
@@ -108,10 +110,20 @@ export function riskFlags(graph: WorkflowGraph): RiskFlag[] {
   if ((wf.session.permissionMode ?? '') === 'bypassPermissions' || graph.stages.some((s) => s.kind === 'agent' && s.session?.permissionMode === 'bypassPermissions')) {
     flags.add('bypass_permissions');
   }
-  if (graph.stages.some((s) => s.kind === 'check') || wf.lifecycle.preprocessingSteps.length > 0 || pp.steps.some((s) => s.config.type === 'run_script')) {
-    flags.add('runs_repo_code');
-  }
+  // Every command-bearing field: checks, scripts, script and function hooks,
+  // stdio MCP servers, custom_script rules, BYOK providers and the rest of
+  // the privileged registry (final review AGENT R6).
+  if (collectCommandFields(graph).length > 0) flags.add('runs_repo_code');
   if (graph.stages.some((s) => s.kind === 'subworkflow')) flags.add('starts_other_workflows');
+  // Workflow tools let a stage's agent start, answer or author workflows.
+  const grantsWorkflowTools = (t: { workflows?: boolean; workflowAuthoring?: boolean } | undefined) =>
+    t?.workflows === true || t?.workflowAuthoring === true;
+  if (
+    grantsWorkflowTools(wf.session.agentOverrides?.tools) ||
+    graph.stages.some((s) => s.kind === 'agent' && grantsWorkflowTools(s.session?.agentOverrides?.tools))
+  ) {
+    flags.add('uses_workflow_tools');
+  }
   if (graph.stages.some((s) => s.kind === 'map' && s.map.workspace === 'mount_per_item')) flags.add('worktree_per_item');
   if (graph.stages.some((s) => s.kind === 'agent' && s.expands)) flags.add('plans_stages_at_run_time');
   return [...flags];

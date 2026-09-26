@@ -42,7 +42,7 @@ guide (§5).
 | Tool | Arguments | Answer |
 |---|---|---|
 | `list_workflows` | `query?`, `projectId?`, `tag?`, `limit?` (≤ 50) | published workflows (drafts too, flagged, when authoring is on): id, name, variables, stage count, codebase requirement, post-processing |
-| `describe_workflow` | `workflowId` | variables, stages (key, kind, agent, model, approval, guard), edges, codebases, post-processing, outputs, **risk flags** (`writes_files`, `commits`, `pushes`, `opens_pr`, `bypass_permissions`, `runs_repo_code`, `starts_other_workflows`, `worktree_per_item`), warnings |
+| `describe_workflow` | `workflowId` | variables, stages (key, kind, agent, model, approval, guard), edges, codebases, post-processing, outputs, **risk flags** (`writes_files`, `commits`, `pushes`, `opens_pr`, `bypass_permissions`, `runs_repo_code`, `starts_other_workflows`, `uses_workflow_tools`, `worktree_per_item`, `plans_stages_at_run_time`), warnings |
 | `run_workflow` | `workflowId`, `variables?`, `codebases?`, `stageOverrides?`, `model?`, `permissionMode?`, `workspace?` (`isolated` \| `from_chat_branch`), `wait?` (`none` \| `until_done` \| `until_approval_or_done`), `waitSeconds?` (≤ 600), `approvalDelegate?` (`human` \| `invoker`), `reason`, `projectId?` | `{runId, status, link, replayed, plan, digest?, hint?}` |
 | `check_workflow_run` | `runId`, `wait?`, `waitSeconds?` | the run digest: status, stages with summaries (≤ 600 chars), pending decisions (`answerableByYou`), post-processing results, link |
 | `respond_workflow_approval` | `runId`, `instanceId`, `outcome`, `feedback?`, `reason` | `{ok, outcome}`, or `{ok: false, error: 'needs a human', link}` |
