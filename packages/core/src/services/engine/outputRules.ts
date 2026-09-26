@@ -9,6 +9,8 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import { compileSafeRegex, renderTemplate, type ResultValidationRule } from '@generatorai/workflow-spec';
 import type { ILogger } from '@generatorai/shared';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
+import type { WorkflowSecretResolver } from '../../mcp/McpCredentialVault.js';
+import { redactSecrets, resolveSecretMap } from '../../mcp/workflowSecrets.js';
 
 /** Default failure text per rule type, used when a rule carries no `message`. */
 export function describeRule(rule: ResultValidationRule): string {
@@ -52,6 +54,8 @@ export interface RuleContext {
   stageRunId: string;
   /** Renders the templated env values of `custom_script` rules. */
   scope?: Record<string, unknown> | undefined;
+  /** Resolves `secretref:workflow/<name>` env values of `custom_script` rules; without it such a rule fails. */
+  secrets?: WorkflowSecretResolver | undefined;
 }
 
 const ajv = new Ajv2020({ allErrors: false, strict: false });
@@ -90,11 +94,16 @@ export async function evaluateOutputRule(rule: ResultValidationRule, output: str
         logger?.warn('[outputRules] custom_script validation requires a scriptRunner; rule marked as failed');
         return false;
       }
-      const env: Record<string, string> = {};
-      for (const [name, value] of Object.entries(rule.env ?? {})) {
-        const rendered = renderTemplate(value, ctx.scope ?? {});
-        env[name] = rendered.ok ? rendered.text : value;
+      // A secretref: is resolved (never passed on verbatim); an unresolved one or a failed render fails the rule.
+      const resolved = await resolveSecretMap(rule.env, ctx.secrets, 'env', (text) => {
+        const r = renderTemplate(text, ctx.scope ?? {});
+        return r.ok ? r : { ok: false, error: r.error.message };
+      });
+      if (!resolved.ok) {
+        logger?.warn(`[outputRules] custom_script rule not run (${resolved.error}); rule marked as failed`);
+        return false;
       }
+      const env = resolved.values;
       try {
         // Stage output via STAGE_OUTPUT (truncated to 32 KB).
         const result = await ctx.scriptRunner.run(rule.command, [...rule.args], {
@@ -108,7 +117,7 @@ export async function evaluateOutputRule(rule: ResultValidationRule, output: str
           timeout: rule.timeoutMs,
         });
         if (result.exitCode === 0) return true;
-        logger?.info(`[outputRules] custom_script validation failed (exit ${result.exitCode}): ${result.stderr || result.stdout}`);
+        logger?.info(`[outputRules] custom_script validation failed (exit ${result.exitCode}): ${redactSecrets(result.stderr || result.stdout, resolved.secrets)}`);
         return false;
       } catch (err) {
         logger?.warn(`[outputRules] custom_script execution error: ${err instanceof Error ? err.message : String(err)}`);

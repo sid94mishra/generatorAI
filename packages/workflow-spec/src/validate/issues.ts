@@ -165,6 +165,11 @@ export const VALIDATION_CODES = {
   'check-args-literal': { layer: 'security', severity: 'error', description: 'A template in a check argument; pass values through check.env' },
   'secret-not-secretref': { layer: 'security', severity: 'error', description: 'A secret field that is not a secretref: reference' },
   'secret-literal': { layer: 'security', severity: 'error', description: 'A value that looks like a literal secret; use a secretref:' },
+  'secret-namespace': {
+    layer: 'security',
+    severity: 'error',
+    description: 'A secretref: into a namespace this field may not read (commands and hooks: workflow/; an MCP server: its own credentials)',
+  },
 } as const satisfies Record<string, CodeInfo>;
 
 export type ValidationCode = keyof typeof VALIDATION_CODES;

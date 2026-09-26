@@ -47,6 +47,7 @@ export {
   type SafeRegexResult,
 } from './regex/safeRegex.js';
 export { exportGraph, importGraph, parseGraph } from './document.js';
+export * from './secretRefs.js';
 
 // persisted definitions, templates, script profiles
 export * from './definition.js';

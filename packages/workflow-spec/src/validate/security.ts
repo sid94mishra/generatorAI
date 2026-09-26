@@ -3,12 +3,14 @@
 // - commands and arguments are literals: a template there would let a
 //   variable value become shell syntax (Windows `cmd /c` escaping cannot
 //   be made safe); templated values reach commands only through env;
-// - secrets are `secretref:` references, never literals.
+// - secrets are `secretref:` references, never literals, and each field
+//   reads only its own namespace (see secretRefs.ts).
 // ────────────────────────────────────────────────────────────────
 
 import { collectCommandFields } from '../commandBearing.js';
 import type { WorkflowGraph } from '../schemas/graph.js';
 import type { SessionSpec } from '../schemas/session.js';
+import { isOwnMcpSecretRef, isWorkflowSecretRef, MCP_CREDENTIAL_SCOPES, WORKFLOW_SECRET_NAMESPACE } from '../secretRefs.js';
 import { pointerToken, type ValidationIssue } from './issues.js';
 
 const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
@@ -62,6 +64,30 @@ function checkPairs(
   }
 }
 
+/** A `secretref:` value outside the namespace this field may read. */
+function checkRefNamespaces(
+  pairs: Readonly<Record<string, string>> | undefined,
+  allowed: (value: string) => boolean,
+  expected: string,
+  pointer: string,
+  stageKey: string | undefined,
+  out: ValidationIssue[],
+): void {
+  for (const [name, value] of Object.entries(pairs ?? {})) {
+    if (!isSecretRef(value) || allowed(value)) continue;
+    out.push({
+      code: 'secret-namespace',
+      severity: 'error',
+      path: `${pointer}/${pointerToken(name)}`,
+      ...(stageKey ? { stageKey } : {}),
+      message: `'${name}' may only reference ${expected}`,
+      hint: 'A workflow reads only the secrets meant for the field: store the value under that namespace',
+    });
+  }
+}
+
+const WORKFLOW_REF = `secretref:${WORKFLOW_SECRET_NAMESPACE}/<name>`;
+
 function checkSession(session: SessionSpec | undefined, pointer: string, stageKey: string | undefined, out: ValidationIssue[]): void {
   if (!session) return;
   const key = session.provider?.apiKey;
@@ -81,6 +107,12 @@ function checkSession(session: SessionSpec | undefined, pointer: string, stageKe
     const base = `${pointer}/mcp/servers/${pointerToken(id)}`;
     checkPairs(cfg.headers, 'header', `${base}/headers`, stageKey, out);
     checkPairs(cfg.env, 'env', `${base}/env`, stageKey, out);
+    // The server's own credentials only: a pointer to any other secret would
+    // send it to this server's URL or process (final review PLATFORM R1).
+    const own = (v: string) => isOwnMcpSecretRef(id, v);
+    const expected = `the server's own credentials (secretref:mcp/<${MCP_CREDENTIAL_SCOPES.join('|')}>/${id}/<name>)`;
+    checkRefNamespaces(cfg.headers, own, expected, `${base}/headers`, stageKey, out);
+    checkRefNamespaces(cfg.env, own, expected, `${base}/env`, stageKey, out);
   }
 }
 
@@ -113,12 +145,17 @@ export function securityIssues(graph: WorkflowGraph): ValidationIssue[] {
         hint: f.kind === 'check' ? 'Pass values through check.env and read them in the program' : 'Pass values through env and read them in the program',
       });
     });
-    if (f.kind !== 'mcp') checkPairs(f.env, 'env', `${f.pointer}/env`, f.stageKey, out);
+    if (f.kind !== 'mcp') {
+      checkPairs(f.env, 'env', `${f.pointer}/env`, f.stageKey, out);
+      checkRefNamespaces(f.env, isWorkflowSecretRef, WORKFLOW_REF, `${f.pointer}/env`, f.stageKey, out);
+    }
   }
 
   const httpHooks = (list: ReadonlyArray<{ config: { type: string; headers?: Record<string, string> } }> | undefined, pointer: string, stageKey?: string) =>
     list?.forEach((h, i) => {
-      if (h.config.type === 'http') checkPairs(h.config.headers, 'header', `${pointer}/${i}/config/headers`, stageKey, out);
+      if (h.config.type !== 'http') return;
+      checkPairs(h.config.headers, 'header', `${pointer}/${i}/config/headers`, stageKey, out);
+      checkRefNamespaces(h.config.headers, isWorkflowSecretRef, WORKFLOW_REF, `${pointer}/${i}/config/headers`, stageKey, out);
     });
   httpHooks(graph.workflow.hooks, '/workflow/hooks');
   httpHooks(graph.workflow.onExit, '/workflow/onExit');

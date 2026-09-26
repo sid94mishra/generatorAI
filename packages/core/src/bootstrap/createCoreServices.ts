@@ -49,6 +49,7 @@ import { WorkflowCallbacks } from '../services/engine/WorkflowCallbacks.js';
 import { EventBus } from '../events/EventBus.js';
 import { ArtifactService } from '../services/ArtifactService.js';
 import { HookExecutor } from '../services/HookExecutor.js';
+import type { WorkflowSecretResolver } from '../mcp/McpCredentialVault.js';
 import { HookInterceptor } from '../services/HookInterceptor.js';
 import { SessionHookRegistry } from '../services/SessionHookRegistry.js';
 import { TemplateRegistry } from '../services/TemplateRegistry.js';
@@ -190,6 +191,11 @@ export interface CoreServicesInputs {
    */
   chatExtensions?: ChatManagementServiceExtensions;
   /**
+   * Resolves `secretref:workflow/<name>` values of workflow hooks (the
+   * server passes its MCP credential vault). Omitted: such a hook fails.
+   */
+  workflowSecrets?: WorkflowSecretResolver;
+  /**
    * PLN-01 — plan mode. Both are optional so existing embedders keep working;
    * when omitted, plan mode is simply unavailable.
    */
@@ -315,7 +321,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   const templateRegistry = new TemplateRegistry(logger);
 
   // ── Hooks ──
-  const hookExecutor = new HookExecutor(scriptRunner, httpClient, eventBus);
+  const hookExecutor = new HookExecutor(scriptRunner, httpClient, eventBus, inputs.workflowSecrets);
   const hookInterceptor = new HookInterceptor(hookExecutor, eventBus);
   const sessionHookRegistry = new SessionHookRegistry(hookExecutor);
 

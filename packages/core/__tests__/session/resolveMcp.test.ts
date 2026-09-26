@@ -18,7 +18,7 @@ const stage: SessionOwner = {
 
 async function hubWithSecret() {
   const secrets = new MemorySecretStore();
-  await setSecretString(secrets, 'mcp/global/gh', 'header:Authorization', 'Bearer real-token');
+  await setSecretString(secrets, 'mcp/custom/gh', 'header:Authorization', 'Bearer real-token');
   const seen: Array<{ workflowDefinitionId: string; workflowRunId: string }> = [];
   const hub = new InMemoryMcpHub({ vault: new McpCredentialVault(secrets) });
   const spy = {
@@ -40,7 +40,7 @@ describe('resolveMcp (W-18)', () => {
         github: {
           type: 'http',
           url: 'https://mcp.example/gh',
-          headers: { Authorization: mcpSecretRef('mcp/global/gh', 'header:Authorization') },
+          headers: { Authorization: mcpSecretRef('mcp/custom/gh', 'header:Authorization') },
         },
       },
       stage,
@@ -60,7 +60,7 @@ describe('resolveMcp (W-18)', () => {
     const cfg: Record<string, unknown> = {
       // The agent projection's map, with a pointer the vault cannot resolve.
       mcpServers: {
-        lost: { type: 'http', url: 'https://x', headers: { Authorization: mcpSecretRef('mcp/global/none', 'header:A') } },
+        lost: { type: 'http', url: 'https://x', headers: { Authorization: mcpSecretRef('mcp/custom/none', 'header:A') } },
       },
     };
     const warnings = await resolveMcp(cfg, { off: { type: 'http', url: 'https://y' } }, stage, 'conv-1', hub);

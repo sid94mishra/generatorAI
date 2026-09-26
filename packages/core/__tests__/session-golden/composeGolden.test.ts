@@ -504,12 +504,12 @@ describe('session composition golden snapshots', () => {
   it('(h) stage resumed from its frozen agent snapshot keeps a credentialed MCP server (review R2)', async () => {
     const env = fresh();
     const secrets = new MemorySecretStore();
-    await setSecretString(secrets, 'mcp-golden', 'token', 'ghp-golden-real');
+    await setSecretString(secrets, 'mcp/custom/golden', 'header:Authorization', 'ghp-golden-real');
     const credentialed = (): ResolvedAgentProjection => ({
       ...goldenProjection(),
       mcpServers: {
-        github: { type: 'http', url: 'https://mcp.example.com', headers: { Authorization: 'secretref:mcp-golden/token', 'X-Env': 'literal' } },
-        linear: { type: 'http', url: 'https://linear.example.com', headers: { Authorization: 'secretref:mcp-golden/token' } },
+        github: { type: 'http', url: 'https://mcp.example.com', headers: { Authorization: 'secretref:mcp/custom/golden/header:Authorization', 'X-Env': 'literal' } },
+        linear: { type: 'http', url: 'https://linear.example.com', headers: { Authorization: 'secretref:mcp/custom/golden/header:Authorization' } },
       },
     });
     const composer = new SessionComposer(

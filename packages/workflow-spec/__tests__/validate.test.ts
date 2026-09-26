@@ -264,7 +264,7 @@ describe('security layer', () => {
     const env = (e: Record<string, string>) => codes(validateWorkflow(graph([agent('a', { hooks: [scriptHook({ command: 'x', env: e })] })])));
     expect(env({ GITHUB_TOKEN: 'abc123' })).toContain('secret-literal');
     expect(env({ ANYTHING: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789' })).toContain('secret-literal');
-    expect(env({ GITHUB_TOKEN: 'secretref:gh' })).toEqual([]);
+    expect(env({ GITHUB_TOKEN: 'secretref:workflow/gh' })).toEqual([]);
     expect(env({ NODE_ENV: 'production' })).toEqual([]);
     const header = validateWorkflow(
       graph([agent('a')], [], {

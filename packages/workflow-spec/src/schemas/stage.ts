@@ -274,7 +274,7 @@ export const CheckSpecSchema = z
       .default([])
       .describe('Literal arguments; a template is rejected (check-args-literal): pass values through env'),
     env: z
-      .record(TemplateSchema.describe('Value: a template of non-secret values, or a secretref: reference'))
+      .record(TemplateSchema.describe('Value: a template of non-secret values, or a secretref:workflow/<name> reference'))
       .optional()
       .describe('Environment variables: the ONLY place templated values reach the command'),
     mount: CodebaseAliasSchema.optional().describe('Run mount (codebase alias) the command runs in; omitted means the primary mount'),

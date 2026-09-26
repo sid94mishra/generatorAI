@@ -880,6 +880,8 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // factory, every handler here is a no-op at runtime.
     // `worktreeService` is set *after* project service creation below.
     chatExtensions,
+    // `secretref:workflow/<name>` values of workflow hooks (namespace-restricted).
+    workflowSecrets: mcpCredentialVault,
     // PLN-01 — plan mode persistence.
     planRepo: new DrizzlePlanRepository(db),
     agentInteractionRepo: new DrizzleAgentInteractionRepository(db),

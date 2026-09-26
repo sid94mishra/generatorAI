@@ -8,7 +8,10 @@
 // old and the new graph (P01 WP-1.7, W-34). The security layer of the
 // validator walks the same registry, so a new command-bearing field is
 // covered by both once it is registered here. A `check` stage (P05) is one:
-// it runs repository code (the run capability `shell`).
+// it runs repository code (the run capability `shell`). So is anything that
+// sends a stored secret to an endpoint the workflow names (an http hook or a
+// remote MCP server carrying a `secretref:`, final review PLATFORM R1), and
+// `lifecycle.sandbox: 'optional'`, which lets stages run on the host (R12).
 // ────────────────────────────────────────────────────────────────
 
 import type { WorkflowGraph } from './schemas/graph.js';
@@ -27,6 +30,7 @@ export type CommandFieldKind =
   | 'mcp'
   | 'provider'
   | 'bypass'
+  | 'sandbox'
   | 'check';
 
 export interface CommandField {
@@ -46,7 +50,10 @@ export interface CommandField {
 
 export type CommandCollector = (graph: WorkflowGraph, out: CommandField[]) => void;
 
-type HookLike = { config: { type: string } & Record<string, unknown> };
+type HookLike = { config: { type: string } & Record<string, unknown>; enabled?: boolean; phase?: string };
+
+const carriesSecretRef = (map: unknown): boolean =>
+  !!map && Object.values(map as Record<string, unknown>).some((v) => typeof v === 'string' && v.startsWith('secretref:'));
 
 function hookFields(
   list: readonly HookLike[] | undefined,
@@ -59,16 +66,19 @@ function hookFields(
   list?.forEach((h, i) => {
     const c = h.config;
     const base = { kind, pointer: `${pointer}/${i}/config`, stableId: `${stableId}/${i}`, ...(stageKey ? { stageKey } : {}) };
+    // A hook's `enabled` and `phase` decide whether and when it runs, so they
+    // are part of what the fingerprint guards (R11). Actions have neither.
+    const value = 'phase' in h ? { config: c, enabled: h.enabled ?? true, phase: h.phase } : c;
     if (c.type === 'script') {
       out.push({
         ...base,
         command: c['command'] as string,
         args: (c['args'] as string[] | undefined) ?? [],
         ...(c['env'] ? { env: c['env'] as Record<string, string> } : {}),
-        value: c,
+        value,
       });
-    } else if (c.type === 'function') {
-      out.push({ ...base, value: c });
+    } else if (c.type === 'function' || (c.type === 'http' && carriesSecretRef(c['headers']))) {
+      out.push({ ...base, value });
     }
   });
 }
@@ -77,7 +87,19 @@ function mcpFields(session: SessionSpec | undefined, pointer: string, stableId: 
   const servers = session?.mcp?.servers;
   if (!servers) return;
   for (const [id, cfg] of Object.entries(servers) as Array<[string, McpServerConfig]>) {
-    if (cfg.type !== 'stdio') continue;
+    if (cfg.type !== 'stdio') {
+      // A remote server that carries a stored secret sends it to its URL.
+      if (carriesSecretRef(cfg.headers) || carriesSecretRef(cfg.env)) {
+        out.push({
+          kind: 'mcp',
+          pointer: `${pointer}/mcp/servers/${pointerToken(id)}`,
+          stableId: `${stableId}/mcp/${id}`,
+          ...(stageKey ? { stageKey } : {}),
+          value: cfg,
+        });
+      }
+      continue;
+    }
     out.push({
       kind: 'mcp',
       pointer: `${pointer}/mcp/servers/${pointerToken(id)}`,
@@ -130,6 +152,11 @@ export const COMMAND_COLLECTORS: CommandCollector[] = [
   (g, out) => hookFields(g.workflow.onFailure, 'action', '/workflow/onFailure', 'workflow/onFailure', out),
   (g, out) => mcpFields(g.workflow.session, '/workflow/session', 'workflow/session', out),
   (g, out) => sessionPrivilegeFields(g.workflow.session, '/workflow/session', 'workflow/session', out),
+  (g, out) => {
+    if (g.workflow.lifecycle.sandbox === 'optional') {
+      out.push({ kind: 'sandbox', pointer: '/workflow/lifecycle/sandbox', stableId: 'workflow/sandbox', value: 'optional' });
+    }
+  },
   (g, out) =>
     preprocessingFields(g.workflow.lifecycle.preprocessingSteps, '/workflow/lifecycle/preprocessingSteps', 'workflow/pre', out),
   (g, out) =>

@@ -45,7 +45,7 @@ describe('P02 whole-run scenarios', () => {
   });
 
   it('P02-mcp-secret: a secretref MCP header reaches the provider as the stored value', async () => {
-    engine = await createTestEngine({ secrets: { 'mcp-tk/token': 'tk-real-value' } });
+    engine = await createTestEngine({ secrets: { 'mcp/custom/tracker/header:Authorization': 'tk-real-value' } });
     const run = await engine.runWorkflow(
       {
         name: 'p02-mcp-secret',
@@ -54,7 +54,7 @@ describe('P02 whole-run scenarios', () => {
             name: 'Uses_mcp',
             prompt: 'Call the tracker.',
             session: {
-              mcp: { servers: { tracker: { type: 'http', url: 'https://mcp.example.com', headers: { Authorization: 'secretref:mcp-tk/token' } } } },
+              mcp: { servers: { tracker: { type: 'http', url: 'https://mcp.example.com', headers: { Authorization: 'secretref:mcp/custom/tracker/header:Authorization' } } } },
             },
           },
         ],

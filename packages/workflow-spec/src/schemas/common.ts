@@ -213,7 +213,7 @@ const ScriptHookConfigSchema = z
     env: z
       .record(z.string().max(4000))
       .optional()
-      .describe('Environment variables; values may be templates of non-secret values or secretref: references'),
+      .describe('Environment variables; values may be templates of non-secret values or secretref:workflow/<name> references'),
   })
   .strict()
   .describe('Script hook configuration');
@@ -226,7 +226,7 @@ const HttpHookConfigSchema = z
     headers: z
       .record(z.string().max(4000))
       .optional()
-      .describe('Request headers; secret values must be secretref: references'),
+      .describe('Request headers; secret values must be secretref:workflow/<name> references'),
     bodyTemplate: z.string().max(100_000).optional().describe('Request body template'),
   })
   .strict()
@@ -383,7 +383,7 @@ export const ResultValidationRuleSchema = z
         env: z
           .record(z.string().max(4000))
           .optional()
-          .describe('Environment; templates of non-secret values or secretref: references. STAGE_OUTPUT is always set'),
+          .describe('Environment; templates of non-secret values or secretref:workflow/<name> references. STAGE_OUTPUT is always set'),
         timeoutMs: z.number().int().min(1000).max(600_000).default(60_000).describe('Timeout for the command'),
         message: ruleMessage,
       })

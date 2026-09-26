@@ -17,13 +17,13 @@ export const McpServerConfigSchema = z
     headers: z
       .record(z.string().max(4000))
       .optional()
-      .describe('Request headers; secret values must be secretref: references'),
+      .describe("Request headers; secret values must be references to the server's own credentials, secretref:mcp/<system|project|custom>/<server id>/<name>"),
     command: z.string().max(1000).optional().describe('Executable (stdio); a literal'),
     args: z.array(z.string().max(4000)).max(64).optional().describe('Literal arguments (stdio)'),
     env: z
       .record(z.string().max(4000))
       .optional()
-      .describe('Environment (stdio); secret values must be secretref: references'),
+      .describe("Environment (stdio); secret values must be references to the server's own credentials, secretref:mcp/<system|project|custom>/<server id>/<name>"),
     cwd: z.string().max(1000).optional().describe('Working directory (stdio)'),
     tools: z.array(z.string().max(200)).max(500).optional().describe('Allow-list of tool names this server may expose'),
     timeoutMs: z.number().int().min(0).max(600_000).optional().describe('Per-call timeout'),
