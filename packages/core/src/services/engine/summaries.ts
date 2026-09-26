@@ -132,7 +132,7 @@ export class SummaryEffects {
         usage.turns = (usage.turns ?? 0) + 1;
         usage.inputTokens = (usage.inputTokens ?? 0) + n(d['inputTokens']);
         usage.outputTokens = (usage.outputTokens ?? 0) + n(d['outputTokens']);
-        const cost = d['cost'] ?? d['costUsd'];
+        const cost = d['costUsd'];
         if (typeof cost === 'number' && Number.isFinite(cost)) usage.costUsd = (usage.costUsd ?? 0) + cost;
       });
       // A tool-less one-shot over a finished output: nothing to replay; a lost one is written again by recovery.

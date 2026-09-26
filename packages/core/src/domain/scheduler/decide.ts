@@ -198,6 +198,8 @@ function pauseWholeRun(w: Working, mode: 'drain' | 'interrupt', statusReason: st
     else if (mode === 'interrupt' && inAttempt(inst.status)) pauseInstance(w, inst, 'run_paused', false);
   }
   w.emit('workflow_run.paused', { reason: statusReason });
+  // The operator is told the run ran out of budget (a push notification, P07 WP-7.3).
+  if (statusReason === 'budget_exhausted') w.emit('workflow_run.budget_exhausted', { usage: w.run.usage, budget: w.run.budget, name: w.run.name });
   if (w.run.unattended) w.timer('pause_ttl', null, PAUSE_TTL_MS, w.run.version);
 }
 

@@ -280,7 +280,8 @@ function fenceContext(blocks: string[]): string {
 
 function asUsage(data: Record<string, unknown>): Usage {
   const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : undefined);
-  const cost = n(data['cost']) ?? n(data['costUsd']);
+  // Dollars only when the provider reports them (`costUsd`); no pricing table (P07 WP-7.3).
+  const cost = n(data['costUsd']);
   return {
     turns: 1,
     ...(cost !== undefined ? { costUsd: cost } : {}),

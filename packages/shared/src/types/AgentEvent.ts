@@ -95,6 +95,13 @@ export type AgentEvent =
         cacheReadTokens?: number;
         cacheWriteTokens?: number;
         cost?: number;
+        /**
+         * The turn's cost in US dollars, set ONLY by a provider that reports one
+         * (claude-agent's `total_cost_usd`). Budgets and the run page read this,
+         * never `cost` (Copilot's is a premium-request multiplier); there is no
+         * pricing table (P07 WP-7.3).
+         */
+        costUsd?: number;
         durationMs?: number;
         provider?: string;
       };
@@ -303,6 +310,8 @@ export type AgentEvent =
   | { kind: 'workflow_run.starting'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.running'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.paused'; data: { workflowRunId: string; reason?: string } }
+  /** The run paused because its budget ran out (P07 WP-7.3; a push notification). */
+  | { kind: 'workflow_run.budget_exhausted'; data: { workflowRunId: string; name?: string; usage?: Record<string, unknown>; budget?: Record<string, unknown> | null } }
   | { kind: 'workflow_run.resumed'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.cancelling'; data: { workflowRunId: string } }
   | { kind: 'workflow_run.completed'; data: { workflowRunId: string } }
@@ -344,6 +353,14 @@ export type AgentEvent =
   | { kind: 'stage_run.input_received'; data: { stageRunId: string; workflowRunId: string; value?: unknown } }
   // A wait stage armed (P05 §4.3): an approval, an event or a timer; resolved by `stage_run.completed`.
   | { kind: 'stage_run.waiting'; data: { stageRunId: string; workflowRunId: string; interruptData?: unknown } }
+  /** A `ready` stage waits for a flow key of the admission controller (P07 WP-7.2): "waiting for provider claude-agent (4/4)". */
+  | {
+      kind: 'stage_run.admission_queued';
+      data: { stageRunId: string; workflowRunId: string; flowKey: string; label: string; running: number; limit: number | null; queued: number };
+    }
+  | { kind: 'stage_run.admission_granted'; data: { stageRunId: string; workflowRunId: string; flowKey: string } }
+  /** A completed stage's `llm` summary was written (P07 WP-7.1). */
+  | { kind: 'stage_run.summary_ready'; data: { stageRunId: string; workflowRunId: string } }
   // The stage conversation (P03b): an operator message, a stopped turn, an amendment of a completed stage.
   | { kind: 'stage_run.operator_message'; data: { stageRunId: string; workflowRunId: string; content: string; attachments?: string[] } }
   | { kind: 'stage_run.operator_message_dropped'; data: { stageRunId: string; workflowRunId: string; count: number; outcome: string } }
