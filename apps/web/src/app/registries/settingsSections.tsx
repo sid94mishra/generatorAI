@@ -10,6 +10,9 @@ import {
   GeneralSection,
   McpSection,
   ProvidersSection,
+  AudioSection,
+  BrowserTerminalSection,
+  ComputerUseSection,
   SecuritySection,
   SkillsSection,
   SourceControlSection,
@@ -18,12 +21,9 @@ import {
   type SettingsSectionDefinition,
 } from '@/features/settings/index.js';
 import { SettingsStatusFooter } from '@/ui/patterns/SettingsSection/SettingsSection.js';
-import { BrowserTerminalSection } from '@/components/settings/sections/BrowserTerminal.js';
-import { ComputerUseSection } from '@/components/settings/sections/ComputerUse.js';
 import { ExtensionsSection } from '@/components/settings/sections/Extensions.js';
 import { DiagnosticsSection } from '@/components/settings/sections/Diagnostics.js';
 import { WorkspaceRetentionSection } from '@/components/settings/sections/WorkspaceRetention.js';
-import { AudioSection } from '@/components/settings/sections/Audio.js';
 
 const SECTIONS: SettingsSectionDefinition[] = [
   {
@@ -50,9 +50,21 @@ const SECTIONS: SettingsSectionDefinition[] = [
     render: () => <SourceControlSection />,
     footer: <SettingsStatusFooter icon="server">Accounts and defaults are saved to the server</SettingsStatusFooter>,
   },
-  { id: 'browser-terminal', render: () => <BrowserTerminalSection /> },
-  { id: 'computer-use', render: () => <ComputerUseSection /> },
-  { id: 'audio', render: () => <AudioSection /> },
+  {
+    id: 'browser-terminal',
+    render: () => <BrowserTerminalSection />,
+    footer: <SettingsStatusFooter icon="check">Changes apply instantly · Saved on this device</SettingsStatusFooter>,
+  },
+  {
+    id: 'computer-use',
+    render: () => <ComputerUseSection />,
+    footer: <SettingsStatusFooter icon="shield">Saved to the server</SettingsStatusFooter>,
+  },
+  {
+    id: 'audio',
+    render: () => <AudioSection />,
+    footer: <SettingsStatusFooter icon="check">Saved to the server · the microphone choice stays on this device</SettingsStatusFooter>,
+  },
   { id: 'extensions', render: () => <ExtensionsSection /> },
   {
     id: 'security',

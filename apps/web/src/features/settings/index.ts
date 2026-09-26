@@ -16,3 +16,6 @@ export { SkillsSection } from './skills/SkillsSection.js';
 export { McpSection } from './mcp/McpSection.js';
 export { TemplatesSection } from './templates/TemplatesSection.js';
 export { SourceControlSection } from './source-control/SourceControlSection.js';
+export { BrowserTerminalSection } from './sections/BrowserTerminalSection.js';
+export { ComputerUseSection } from './sections/ComputerUseSection.js';
+export { AudioSection } from './sections/AudioSection.js';
