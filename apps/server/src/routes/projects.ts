@@ -8,6 +8,7 @@ import multer from 'multer';
 import { McpServerBodySchema, mcpCredentialNamespace } from '@generatorai/shared';
 import {
   McpCredentialVault,
+  WorktreeCleanupService,
   buildPullRequestReviewPrompt,
   parseRepoSlug,
   redactTokens,
@@ -26,6 +27,11 @@ import type {
   ProjectSummary,
   ScmPullRequestState,
   WorkflowRun,
+  WorktreeInfo,
+  WorktreeLink,
+  WorktreeListEnriched,
+  WorktreeListItem,
+  WorktreeRetentionPolicy,
 } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 
@@ -41,6 +47,7 @@ export function createProjectRoutes(container: Container): Router {
     codebaseService,
     codebaseLogService,
     worktreeService,
+    worktreeSizeService,
     worktreeCleanupService,
     projectConfigService,
     systemArtifactService,
@@ -600,11 +607,98 @@ export function createProjectRoutes(container: Container): Router {
   // Codebase-level Worktree Management
   // ════════════════════════════════════════════════════════════════
 
-  // GET /projects/:id/codebases/:cid/worktrees — List worktrees for codebase
+  /**
+   * G-17 — resolve what a worktree is checked out FOR: a chat mount
+   * (`runType: 'manual'`, `runId` is a chatId) or a workflow/automation run
+   * (`runId` is a `WorkflowRun` id — automation-triggered runs are still
+   * `WorkflowRun` rows, so this covers `runType: 'automation'` too).
+   * `undefined` when the owner no longer exists — never invented (D-36).
+   */
+  async function resolveWorktreeLink(wt: WorktreeInfo): Promise<WorktreeLink | undefined> {
+    if (!wt.runId) return undefined;
+    if (wt.runType === 'manual') {
+      try {
+        const chat = await chatEntityRepo.getById(wt.runId);
+        return { entity: 'chat', id: chat.id, title: chat.name || 'Untitled chat', status: chat.status };
+      } catch {
+        return undefined;
+      }
+    }
+    try {
+      const run = await workflowRunRepo.getById(wt.runId);
+      // Prefer the definition's CURRENT name over the run's frozen one (same
+      // "live name wins" rule G-13's `lastRun` uses) — best effort only.
+      let title = run.name;
+      try {
+        const definition = await workflowDefinitionService.getDefinition(run.workflowDefinitionId);
+        if (definition.name) title = definition.name;
+      } catch {
+        // Definition deleted — the run's own name still stands.
+      }
+      return { entity: 'workflow_run', id: run.id, title: title || 'Workflow run', status: run.status };
+    } catch {
+      return undefined;
+    }
+  }
+
+  // GET /projects/:id/codebases/:cid/worktrees[?include=usage,link] — List
+  // worktrees for a codebase. Bare (no `include`) is UNCHANGED from before
+  // G-17 — the legacy CodebaseDetailPage calls it that way and keeps working
+  // with no changes of its own. `?include=usage,link` (G-17) is the new,
+  // additive shape the P5 CodebaseDetail page will use.
   router.get('/:id/codebases/:cid/worktrees', async (req, res, next) => {
     try {
-      const worktrees = await worktreeService.listWorktreesByCodebase(String(req.params['cid']));
-      res.json(worktrees);
+      const codebaseId = String(req.params['cid']);
+      const worktrees = await worktreeService.listWorktreesByCodebase(codebaseId);
+
+      const include = String(req.query['include'] ?? '').split(',').map((s) => s.trim());
+      const wantUsage = include.includes('usage');
+      const wantLink = include.includes('link');
+      if (!wantUsage && !wantLink) {
+        res.json(worktrees);
+        return;
+      }
+
+      let retention: WorktreeRetentionPolicy | undefined;
+      if (wantUsage) {
+        try {
+          retention = (await projectService.getProject(String(req.params['id']))).settings.worktreeRetention;
+        } catch {
+          // Project gone — expiresAt is simply omitted below.
+        }
+      }
+
+      const items: WorktreeListItem[] = await Promise.all(
+        worktrees.map(async (wt): Promise<WorktreeListItem> => {
+          const item: WorktreeListItem = { ...wt };
+          if (wantUsage) {
+            // Never blocks: returns whatever is cached (possibly nothing yet)
+            // and kicks off a bounded-concurrency remeasurement if stale.
+            worktreeSizeService.requestMeasurement(wt.id, wt.worktreePath);
+            const sizeBytes = worktreeSizeService.getCachedSizeBytes(wt.id);
+            if (sizeBytes !== undefined) item.sizeBytes = sizeBytes;
+            const expiresAt = WorktreeCleanupService.expiresAt(wt, retention);
+            if (expiresAt) item.expiresAt = expiresAt.toISOString();
+          }
+          if (wantLink) {
+            const link = await resolveWorktreeLink(wt);
+            if (link) item.link = link;
+          }
+          return item;
+        }),
+      );
+
+      const response: WorktreeListEnriched = { items };
+      if (wantUsage) {
+        const measured = items.filter((i) => i.sizeBytes !== undefined);
+        if (measured.length > 0) {
+          response.totalBytes = measured.reduce((sum, i) => sum + (i.sizeBytes ?? 0), 0);
+          response.reclaimableBytes = measured
+            .filter((i) => i.status !== 'active')
+            .reduce((sum, i) => sum + (i.sizeBytes ?? 0), 0);
+        }
+      }
+      res.json(response);
     } catch (err) {
       next(err);
     }

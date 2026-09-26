@@ -29,6 +29,8 @@ import {
   type RecentActivityPage,
   type CodebaseLogsResponse,
   type FetchCodebaseResult,
+  type WorktreeInfo,
+  type WorktreeListEnriched,
 } from '@generatorai/shared';
 
 export interface ApiFetch {
@@ -1610,6 +1612,19 @@ export function createApiClient(fetchImpl: ApiFetch) {
       codebaseLogs: (id: string, codebaseId: string, params?: { limit?: number }) => {
         const suffix = params?.limit ? `?limit=${params.limit}` : '';
         return request<CodebaseLogsResponse>(fetchImpl, `/api/projects/${id}/codebases/${codebaseId}/logs${suffix}`);
+      },
+
+      /**
+       * G-17 — bare (no `include`) is the plain array, unchanged. Pass
+       * `include` for `sizeBytes`/`link`/`expiresAt` per item plus the
+       * `totalBytes`/`reclaimableBytes` summary.
+       */
+      codebaseWorktrees: (id: string, codebaseId: string, params?: { include?: Array<'usage' | 'link'> }) => {
+        const suffix = params?.include?.length ? `?include=${params.include.join(',')}` : '';
+        return request<WorktreeInfo[] | WorktreeListEnriched>(
+          fetchImpl,
+          `/api/projects/${id}/codebases/${codebaseId}/worktrees${suffix}`,
+        );
       },
     },
 

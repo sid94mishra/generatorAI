@@ -112,8 +112,9 @@ export { ProjectService } from './ProjectService.js';
 export { CodebaseService } from './CodebaseService.js';
 export { CodebaseLogService } from './CodebaseLogService.js';
 export { WorktreeService } from './WorktreeService.js';
+export { WorktreeSizeService } from './WorktreeSizeService.js';
 export { ProjectConfigService } from './ProjectConfigService.js';
-export { WorktreeCleanupService } from './WorktreeCleanupService.js';
+export { WorktreeCleanupService, RETENTION_MS } from './WorktreeCleanupService.js';
 export { WorkspaceRetentionService } from './WorkspaceRetentionService.js';
 export type {
   WorkspaceRetentionResult,

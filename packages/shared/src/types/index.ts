@@ -287,6 +287,11 @@ export type {
   CodebaseLogLine,
   CodebaseLogsResponse,
   FetchCodebaseResult,
+  // G-17 — worktree enrichment
+  WorktreeLinkEntity,
+  WorktreeLink,
+  WorktreeListItem,
+  WorktreeListEnriched,
 } from './Project.js';
 
 // ── MCP servers (config forwarding, credentials, startup status) ──

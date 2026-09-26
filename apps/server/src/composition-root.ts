@@ -135,6 +135,7 @@ import {
   CodebaseService,
   CodebaseLogService,
   WorktreeService,
+  WorktreeSizeService,
   ProjectConfigService,
   WorktreeCleanupService,
   WorkspaceRetentionService,
@@ -1214,6 +1215,9 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     gitManager,
     logger,
   );
+
+  // G-17 — async, cached worktree disk-usage measurement.
+  const worktreeSizeService = new WorktreeSizeService(logger);
 
   const projectConfigService = new ProjectConfigService(
     projectConfigRepo,
@@ -2424,6 +2428,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     codebaseService,
     codebaseLogService,
     worktreeService,
+    worktreeSizeService,
     projectConfigService,
     worktreeCleanupService,
     workspaceRetentionService,
@@ -2915,6 +2920,7 @@ export interface Container {
   codebaseService: CodebaseService;
   codebaseLogService: CodebaseLogService;
   worktreeService: WorktreeService;
+  worktreeSizeService: WorktreeSizeService;
   worktreeCleanupService: WorktreeCleanupService;
   workspaceRetentionService: WorkspaceRetentionService;
   projectConfigService: ProjectConfigService;

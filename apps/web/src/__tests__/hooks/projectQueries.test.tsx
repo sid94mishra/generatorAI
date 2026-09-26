@@ -12,7 +12,15 @@ import { describe, expect, it, vi } from 'vitest';
 import type { IPlatformClient, Project } from '@generatorai/shared';
 
 import { PlatformContext } from '@/providers/PlatformProvider.js';
-import { useProject, useProjectRuns, useProjects, useCodebaseLogs, useFetchCodebase } from '@/hooks/projectQueries.js';
+import {
+  useProject,
+  useProjectRuns,
+  useProjects,
+  useCodebaseWorktrees,
+  useCodebaseWorktreesUsage,
+  useCodebaseLogs,
+  useFetchCodebase,
+} from '@/hooks/projectQueries.js';
 
 const PROJECT: Project = {
   id: 'proj-1',
@@ -36,6 +44,7 @@ function setup() {
     listProjects: vi.fn().mockResolvedValue([PROJECT]),
     getProject: vi.fn().mockResolvedValue(PROJECT),
     listProjectRuns: vi.fn().mockResolvedValue({ items: [], nextCursor: null, total: 0 }),
+    listCodebaseWorktrees: vi.fn().mockResolvedValue([]),
     getCodebaseLogs: vi.fn().mockResolvedValue({ lines: [] }),
     fetchCodebase: vi.fn().mockResolvedValue({ jobId: 'job-1' }),
   };
@@ -86,6 +95,28 @@ describe('useProjectRuns (G-15)', () => {
     const { result } = renderHook(() => useProjectRuns('proj-1', { status: 'failed', limit: 20 }), { wrapper });
     await waitFor(() => expect(result.current.data).toBeDefined());
     expect(platform.listProjectRuns).toHaveBeenCalledWith('proj-1', { status: 'failed', limit: 20 });
+  });
+});
+
+describe('useCodebaseWorktrees / useCodebaseWorktreesUsage (G-17)', () => {
+  it('the bare hook calls the platform client with no options', async () => {
+    const { platform, wrapper } = setup();
+    const { result } = renderHook(() => useCodebaseWorktrees('proj-1', 'cb-1'), { wrapper });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(platform.listCodebaseWorktrees).toHaveBeenCalledWith('proj-1', 'cb-1');
+  });
+
+  it('the usage hook asks for `include: [usage, link]`', async () => {
+    const { platform, wrapper } = setup();
+    const { result } = renderHook(() => useCodebaseWorktreesUsage('proj-1', 'cb-1'), { wrapper });
+    await waitFor(() => expect(result.current.data).toBeDefined());
+    expect(platform.listCodebaseWorktrees).toHaveBeenCalledWith('proj-1', 'cb-1', { include: ['usage', 'link'] });
+  });
+
+  it('is disabled without both ids', () => {
+    const { platform, wrapper } = setup();
+    renderHook(() => useCodebaseWorktreesUsage(undefined, undefined), { wrapper });
+    expect(platform.listCodebaseWorktrees).not.toHaveBeenCalled();
   });
 });
 

@@ -206,6 +206,40 @@ export interface WorktreeInfo {
   cleanedUpAt?: Date;
 }
 
+// ── Worktree enrichment (G-17) ──
+
+/** What a worktree is checked out for — a chat (mount) or a workflow/automation run. */
+export type WorktreeLinkEntity = 'chat' | 'workflow_run';
+
+export interface WorktreeLink {
+  entity: WorktreeLinkEntity;
+  id: string;
+  title: string;
+  /** The chat's lifecycle status, or the run's status — whichever `entity` says. */
+  status: string;
+}
+
+/**
+ * `WorktreeInfo` plus what `?include=usage,link` asked for. Every added field
+ * is OMITTED (never a fake `0`/placeholder) until it is actually known:
+ * `sizeBytes` before the async directory walk has completed, `link` when the
+ * owning chat/run no longer exists, `expiresAt` under manual retention.
+ */
+export interface WorktreeListItem extends WorktreeInfo {
+  sizeBytes?: number;
+  link?: WorktreeLink;
+  expiresAt?: string;
+}
+
+/** `GET /projects/:id/codebases/:cid/worktrees?include=usage,link`. */
+export interface WorktreeListEnriched {
+  items: WorktreeListItem[];
+  /** Sum of every item's `sizeBytes` that has been measured so far. Omitted when none have. */
+  totalBytes?: number;
+  /** Sum of `sizeBytes` for items eligible for cleanup (non-active, or active-orphaned). */
+  reclaimableBytes?: number;
+}
+
 // ── Scope ──
 
 export type EntityScope = 'global' | string[];

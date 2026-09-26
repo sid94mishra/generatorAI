@@ -5,10 +5,16 @@
 
 import type { IWorktreeRepository, IProjectRepository, IChatRepository } from '../domain/ports/index.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
-import type { ILogger, Project, WorktreeInfo, WorktreeRunType } from '@generatorai/shared';
+import type { ILogger, Project, WorktreeInfo, WorktreeRetentionPolicy, WorktreeRunType } from '@generatorai/shared';
 import type { WorktreeService } from './WorktreeService.js';
 
-const RETENTION_MS: Record<string, number> = {
+/**
+ * Exported for G-17 (`packages/shared/src/types/Project.ts` `WorktreeListItem.expiresAt`):
+ * the worktree list route computes the same "when does this expire" value
+ * this service uses to decide when to actually clean one up, so the two
+ * must never drift apart.
+ */
+export const RETENTION_MS: Record<string, number> = {
   immediate: 0,
   'hours-24': 24 * 60 * 60 * 1000,
   'hours-72': 72 * 60 * 60 * 1000,
@@ -183,6 +189,19 @@ export class WorktreeCleanupService {
   private static isExpired(wt: WorktreeInfo, maxAgeMs: number, now = Date.now()): boolean {
     const since = wt.cleanedUpAt?.getTime() ?? wt.createdAt.getTime();
     return now - since >= maxAgeMs;
+  }
+
+  /**
+   * G-17 — when this worktree's directory is due to be swept, on the SAME
+   * clock `_cleanupProject` sweeps by (`cleanedUpAt` else `createdAt` +
+   * retention). `undefined` under `manual` retention (never swept) or an
+   * unrecognised policy value.
+   */
+  static expiresAt(wt: WorktreeInfo, retention: WorktreeRetentionPolicy | undefined): Date | undefined {
+    const maxAgeMs = RETENTION_MS[retention ?? 'hours-24'];
+    if (maxAgeMs === undefined || maxAgeMs === Infinity) return undefined;
+    const since = wt.cleanedUpAt?.getTime() ?? wt.createdAt.getTime();
+    return new Date(since + maxAgeMs);
   }
 
   /**

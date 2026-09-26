@@ -725,3 +725,17 @@ describe('G-16 codebase fetch/logs wire contract', () => {
     expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/logs');
   });
 });
+
+describe('G-17 worktree enrichment wire contract', () => {
+  it('bare call sends no `include`', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.codebaseWorktrees('p1', 'cb1');
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/worktrees');
+  });
+
+  it('joins `include` with commas', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.codebaseWorktrees('p1', 'cb1', { include: ['usage', 'link'] });
+    expect(calls[0]?.path).toBe('/api/projects/p1/codebases/cb1/worktrees?include=usage,link');
+  });
+});

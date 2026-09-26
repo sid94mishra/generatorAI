@@ -315,6 +315,7 @@ import type {
   ProjectCodebase,
   ProjectConfig,
   WorktreeInfo,
+  WorktreeListEnriched,
   ProjectSettings,
   CodebaseType,
   CodebaseSettings,
@@ -2566,8 +2567,27 @@ export class HttpPlatformClient implements IPlatformClient {
   }
 
   // ── Codebase-level Worktree API ──
-  async listCodebaseWorktrees(projectId: string, codebaseId: string): Promise<WorktreeInfo[]> {
-    return apiFetch<WorktreeInfo[]>(`${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/worktrees`);
+  /**
+   * Bare (no `include`) is UNCHANGED — the legacy CodebaseDetailPage calls it
+   * this way and keeps getting the plain array it always got. Pass `include`
+   * (G-17) to get `sizeBytes`/`link`/`expiresAt` per item plus the
+   * `totalBytes`/`reclaimableBytes` summary.
+   */
+  listCodebaseWorktrees(projectId: string, codebaseId: string): Promise<WorktreeInfo[]>;
+  listCodebaseWorktrees(
+    projectId: string,
+    codebaseId: string,
+    opts: { include: Array<'usage' | 'link'> },
+  ): Promise<WorktreeListEnriched>;
+  async listCodebaseWorktrees(
+    projectId: string,
+    codebaseId: string,
+    opts?: { include: Array<'usage' | 'link'> },
+  ): Promise<WorktreeInfo[] | WorktreeListEnriched> {
+    const qs = opts?.include.length ? `?include=${opts.include.join(',')}` : '';
+    return apiFetch<WorktreeInfo[] | WorktreeListEnriched>(
+      `${this.baseUrl}/api/projects/${projectId}/codebases/${codebaseId}/worktrees${qs}`,
+    );
   }
 
   async removeCodebaseWorktree(projectId: string, codebaseId: string, worktreeId: string): Promise<void> {

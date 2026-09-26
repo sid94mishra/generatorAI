@@ -32,7 +32,8 @@ export const projectKeys = {
     ['project-runs', projectId, query] as const,
   systemArtifacts: (type?: string) => ['system-artifacts', type] as const,
   availableArtifacts: (projectId: string, type?: string) => ['available-artifacts', projectId, type] as const,
-  codebaseWorktrees: (projectId: string, codebaseId: string) => ['codebase-worktrees', projectId, codebaseId] as const,
+  codebaseWorktrees: (projectId: string, codebaseId: string, include?: readonly string[]) =>
+    ['codebase-worktrees', projectId, codebaseId, include] as const,
   codebaseFiles: (projectId: string, codebaseId: string, path?: string) => ['codebase-files', projectId, codebaseId, path] as const,
   codebaseFileContent: (projectId: string, codebaseId: string, filePath: string) => ['codebase-file-content', projectId, codebaseId, filePath] as const,
   artifactContent: (artifactId: string, source: string) => ['artifact-content', artifactId, source] as const,
@@ -350,6 +351,25 @@ export function useCodebaseWorktrees(projectId: string | undefined, codebaseId: 
   return useQuery({
     queryKey: projectKeys.codebaseWorktrees(projectId ?? '', codebaseId ?? ''),
     queryFn: () => platform.listCodebaseWorktrees(projectId!, codebaseId!),
+    enabled: !!projectId && !!codebaseId,
+    refetchInterval: 30_000,
+  });
+}
+
+/**
+ * G-17 — `sizeBytes`/`link`/`expiresAt` per worktree plus the
+ * `totalBytes`/`reclaimableBytes` list summary. Sizes are measured
+ * asynchronously server-side (bounded concurrency, 10-minute cache) — a
+ * worktree whose size has not been measured yet simply omits `sizeBytes`
+ * (never a fake `0`); polling this again is what picks up a size once the
+ * server has one.
+ */
+export function useCodebaseWorktreesUsage(projectId: string | undefined, codebaseId: string | undefined) {
+  const platform = usePlatform();
+  const include = ['usage', 'link'] as const;
+  return useQuery({
+    queryKey: projectKeys.codebaseWorktrees(projectId ?? '', codebaseId ?? '', include),
+    queryFn: () => platform.listCodebaseWorktrees(projectId!, codebaseId!, { include: [...include] }),
     enabled: !!projectId && !!codebaseId,
     refetchInterval: 30_000,
   });
