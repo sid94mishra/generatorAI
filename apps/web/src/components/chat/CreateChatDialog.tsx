@@ -45,9 +45,11 @@ interface CreateChatDialogProps {
    * and its prompt is sent as the chat's first message after it is created.
    */
   initialDraft?: CreateChatDraft;
+  /** Preselects this project when the dialog opens ("New chat in project"). */
+  projectId?: string;
 }
 
-export function CreateChatDialog({ open, onOpenChange, initialDraft }: CreateChatDialogProps) {
+export function CreateChatDialog({ open, onOpenChange, initialDraft, projectId }: CreateChatDialogProps) {
   const navigate = useNavigate();
   const platform = usePlatform();
   const createMutation = useCreateChat();
@@ -94,6 +96,11 @@ export function CreateChatDialog({ open, onOpenChange, initialDraft }: CreateCha
       setTimeout(() => nameInputRef.current?.focus(), 100);
     }
   }, [open]);
+
+  // Project preset (Projects row menu, ProjectDetail "New chat").
+  useEffect(() => {
+    if (open && projectId) setSelectedProjectId(projectId);
+  }, [open, projectId]);
 
   // Seed the model from the user's default-model preference when the dialog
   // opens (empty preference → provider default). Read live so a change in

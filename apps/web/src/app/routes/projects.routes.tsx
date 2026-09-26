@@ -5,8 +5,8 @@ import { defineRoute } from './defineRoute.js';
 export const projectsRoutes: RouteObject[] = [
   defineRoute(
     'projects',
-    () => import('@/pages/ProjectsListPage.js').then((m) => ({ default: m.ProjectsListPage })),
-    { legacyHeader: true, nav: 'projects', title: 'Projects' },
+    () => import('@/features/projects/ProjectsListPage.js').then((m) => ({ default: m.ProjectsListPage })),
+    { legacyHeader: false, nav: 'projects', title: 'Projects' },
   ),
   defineRoute(
     'projects/new',

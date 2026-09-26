@@ -27,7 +27,7 @@ const HOME_HEADING = /^(Nothing needs you|\d+ needs? you)( · \d+ running)?$/;
 const PAGES: Array<{ id: string; nav: string; urlRe: RegExp; heading: string | RegExp; legacyHeader: boolean }> = [
   { id: 'home', nav: 'Home', urlRe: /\/$/, heading: HOME_HEADING, legacyHeader: false },
   { id: 'chats', nav: 'Chats', urlRe: /\/chats$/, heading: 'Chats', legacyHeader: false /* P3-07 port: not asserted */ },
-  { id: 'projects', nav: 'Projects', urlRe: /\/projects$/, heading: 'Projects', legacyHeader: true },
+  { id: 'projects', nav: 'Projects', urlRe: /\/projects$/, heading: 'Projects', legacyHeader: false /* P5-02 port */ },
   { id: 'agents', nav: 'Agents', urlRe: /\/agents$/, heading: 'Agents', legacyHeader: true },
   { id: 'workflows', nav: 'Workflows', urlRe: /\/workflows$/, heading: 'Workflows', legacyHeader: true },
   { id: 'automations', nav: 'Automations', urlRe: /\/automations$/, heading: 'Automations', legacyHeader: true },

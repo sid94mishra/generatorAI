@@ -3,19 +3,23 @@ import { test, expect } from '../helpers/test';
 // Phase W4 — Projects list, create, detail tabs.
 
 test.describe('Projects list', () => {
-  test('renders header, search and New Project action', async ({ page, gotoApp }) => {
+  // P5-02: the kit ListPage — PageTitle h1 "Projects", "New project",
+  // SearchInput "Search projects", Active/Archived scope tabs.
+  test('renders header, search, scope and the New project action', async ({ page, gotoApp }) => {
     await gotoApp('/projects');
-    // Exact + level: on an empty DB the empty state adds an h3 "No projects yet".
     await expect(page.getByRole('heading', { name: 'Projects', exact: true, level: 1 })).toBeVisible();
-    await expect(page.getByRole('button', { name: /New Project/i }).first()).toBeVisible();
-    await expect(page.getByPlaceholder(/Search/i).first()).toBeVisible();
+    await expect(page.getByRole('button', { name: 'New project', exact: true })).toBeVisible();
+    await expect(page.getByRole('textbox', { name: 'Search projects' })).toBeVisible();
+    await expect(page.getByRole('tab', { name: /^Active/ })).toHaveAttribute('aria-selected', 'true');
   });
 
-  test('seeded project appears in the list', async ({ page, gotoApp, seed }) => {
+  test('seeded project appears in the table and opens its detail page', async ({ page, gotoApp, seed }) => {
     const name = `W4 Project ${Date.now()}`;
-    await seed.project({ name });
+    const id = await seed.project({ name });
     await gotoApp('/projects');
-    await expect(page.getByText(name, { exact: false }).first()).toBeVisible({ timeout: 10_000 });
+    const table = page.getByRole('table', { name: 'Projects' });
+    await table.getByRole('link', { name, exact: true }).click();
+    await expect(page).toHaveURL(new RegExp(`/projects/${id}`));
   });
 });
 
