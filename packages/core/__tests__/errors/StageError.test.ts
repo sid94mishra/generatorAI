@@ -5,7 +5,6 @@
 import { STAGE_ERROR_CODE_CLASS } from '@generatorai/workflow-spec';
 import { describe, expect, it } from 'vitest';
 
-import { AdmissionTimeoutError } from '../../src/services/AdmissionController.js';
 import { ComposeError } from '../../src/services/session/types.js';
 import { StageError, classifyStageError, classified, errorClassOf } from '../../src/domain/errors/StageError.js';
 
@@ -23,7 +22,6 @@ describe('classifyStageError', () => {
     ['ComposeError agent_not_found', new ComposeError('agent_not_found', 'no agent'), 'agent_not_found', 'deterministic'],
     ['ComposeError agent_disabled', new ComposeError('agent_disabled', 'off'), 'agent_disabled', 'deterministic'],
     ['ComposeError secret_unresolved', new ComposeError('secret_unresolved', 'no secret'), 'config_invalid', 'deterministic'],
-    ['admission timeout', new AdmissionTimeoutError('ordinary', 1_800_000), 'queue_timeout', 'deterministic'],
     ['human rejection', Object.assign(new Error('rejected'), { rejected: true }), 'rejected_by_human', 'deterministic'],
     // providers (HarnessError, duck-typed)
     ['HarnessError overloaded', harness('overloaded'), 'overloaded', 'transient'],

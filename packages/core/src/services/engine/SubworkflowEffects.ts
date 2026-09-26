@@ -1,10 +1,15 @@
 // ────────────────────────────────────────────────────────────────
 // SubworkflowEffects — a sub-workflow stage's child run (P05 §4.2).
 //
+//   pins          at the parent run's start (the prepare `workspace`
+//                 phase), the version `pin_at_run_start` children run: the
+//                 current published one then, kept in `systemVars`
 //   start         resolve the child (`workflowRef` by id, or by name in the
 //                 parent's project, then global), pin a PUBLISHED version
-//                 (`pin_at_run_start`: the current one; a number: that one;
-//                 a draft child is refused), re-check the parent's use of
+//                 (`pin_at_run_start`: the one pinned at run start, else —
+//                 a child first published after the run started — the
+//                 current one; a number: that one; a draft child is
+//                 refused), re-check the parent's use of
 //                 the child's outputs against that version
 //                 (`subworkflow_output_drift`), then invoke it through the
 //                 ONE invocation service: trigger `{kind: 'stage'}`, the
@@ -12,8 +17,11 @@
 //                 as the ceiling, the stage budget as the run budget, and an
 //                 idempotency key per instance (a re-dispatch after a crash
 //                 finds the same child). `workspace: inherit` hands the child
-//                 the parent's workspace: its mounts and post-processing are
-//                 skipped (the parent commits).
+//                 the workspace the stage works in (the run's, or its
+//                 enclosing mount_per_item item's): its mounts and
+//                 post-processing are skipped (the parent commits). The stage
+//                 holds the `write` lease of those mounts for the child's
+//                 whole run, like any writer (WorktreeLeases).
 //   childCommand  cancel, pause or resume the child (propagation).
 //   settled       a child run finalized: its declared `outputs` (evaluated
 //                 over its top-level stages) and its usage, for the parent.
@@ -26,6 +34,8 @@ import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepo
 import { expressionScope } from '../../domain/scheduler/readiness.js';
 import type { RunMessage, RunOutcome, Usage } from '../../domain/scheduler/types.js';
 import { compile } from '../../domain/workflow-graph/compile.js';
+import { mapItemPlacement } from './MapEffects.js';
+import type { WorktreeLeases } from './WorktreeLeases.js';
 import type { RunDefinitionReader } from '../definitions/RunDefinitionReader.js';
 import type { WorkflowDefinitionService } from '../WorkflowDefinitionService.js';
 import type { WorkflowInvocationService } from '../workflow-invocation/WorkflowInvocationService.js';
@@ -37,6 +47,9 @@ export interface SubworkflowEffectsDeps {
   definitions: RunDefinitionReader;
   /** A run command on the child (cancel, pause, resume). */
   command: (runId: string, command: RunCommand) => Promise<{ ok: boolean; message?: string }>;
+  /** The mount leases an `inherit` child's stage holds `write` on (the parent's writer exclusion). */
+  leases?: WorktreeLeases | undefined;
+  writerLeaseKeys?: ((runId: string, stageRunId: string) => Promise<string[]>) | undefined;
   logger?: ILogger | undefined;
 }
 
@@ -59,13 +72,46 @@ export class SubworkflowEffects {
     this.definitionService = definitions;
   }
 
+  /**
+   * The versions the run's `pin_at_run_start` children run, by stage key:
+   * the current published version of each, resolved when the run starts.
+   * A child that cannot be resolved now is left out (`start` refuses or
+   * resolves it then).
+   */
+  async pinsAtRunStart(run: WorkflowRun, graph: WorkflowGraph): Promise<Record<string, string>> {
+    const out: Record<string, string> = {};
+    if (!this.definitionService) return out;
+    const projectId = run.projectId ?? graph.workflow.projectId ?? null;
+    for (const node of compile(graph).nodes.values()) {
+      if (node.subworkflow?.version !== 'pin_at_run_start') continue;
+      const child = await this.definitionService.findByRef(node.subworkflow.ref, projectId).catch(() => null);
+      if (child && !child.archivedAt && child.status === 'published' && child.currentVersionId) out[node.key] = child.currentVersionId;
+    }
+    return out;
+  }
+
+  /** An `inherit` child's stage takes the `write` lease of the mounts it hands the child (held until the child settles). */
+  private async takeWriterLease(runId: string, stageRunId: string): Promise<void> {
+    const keys = this.deps.leases && this.deps.writerLeaseKeys ? await this.deps.writerLeaseKeys(runId, stageRunId) : [];
+    if (keys.length > 0) await this.deps.leases!.acquire(keys, 'write', stageRunId);
+  }
+
+  /** Recovery: a running `inherit` child's stage takes its lease again (leases are process-local). */
+  reacquire(runId: string, stageRunId: string): void {
+    void this.takeWriterLease(runId, stageRunId).catch(() => undefined);
+  }
+
   async start(runId: string, stageRunId: string, inputs: Record<string, unknown>): Promise<StartChildResult> {
-    const fail = (error: string, code: 'subworkflow_start_failed' | 'subworkflow_output_drift' = 'subworkflow_start_failed'): StartChildResult => ({ ok: false, code, error });
+    const fail = (error: string, code: 'subworkflow_start_failed' | 'subworkflow_output_drift' = 'subworkflow_start_failed'): StartChildResult => {
+      this.deps.leases?.release(stageRunId, 'write');
+      return { ok: false, code, error };
+    };
     if (!this.invocation || !this.definitionService) return fail('Sub-workflows cannot be started in this process (no invocation service)');
     try {
       const run = await this.deps.runRepo.getById(runId);
       const graph = await this.deps.definitions.get(run.definitionVersionId);
-      const inst = this.deps.stores.runStore.loadRunState(runId)?.instances.find((i) => i.id === stageRunId);
+      const runState = this.deps.stores.runStore.loadRunState(runId);
+      const inst = runState?.instances.find((i) => i.id === stageRunId);
       const node = inst ? compile(graph).nodes.get(inst.stageKey) : undefined;
       const stage = inst ? graph.stages.find((s) => s.key === inst.stageKey) : undefined;
       if (!inst || !node?.subworkflow || stage?.kind !== 'subworkflow') return fail(`Instance ${stageRunId} is not a sub-workflow stage`);
@@ -79,7 +125,8 @@ export class SubworkflowEffects {
       if (child.archivedAt) return fail(`The workflow ${label} is archived`);
       if (child.status !== 'published' || !child.currentVersionId) return fail(`The workflow ${label} is a draft: only a published workflow runs as a sub-workflow`);
       const versions = (await this.definitionService.listVersions(child.id)).filter((v) => v.kind === 'published');
-      const pinned = sub.version === 'pin_at_run_start' ? versions.find((v) => v.id === child.currentVersionId) : versions.find((v) => v.version === sub.version);
+      const atRunStart = run.systemVars?.subworkflowPins?.[inst.stageKey] ?? child.currentVersionId;
+      const pinned = sub.version === 'pin_at_run_start' ? versions.find((v) => v.id === atRunStart) : versions.find((v) => v.version === sub.version);
       if (!pinned) return fail(`The workflow ${label} has no published version ${sub.version === 'pin_at_run_start' ? '' : sub.version}`.trim());
       const childGraph = await this.deps.definitions.get(pinned.id);
 
@@ -106,8 +153,14 @@ export class SubworkflowEffects {
         },
         callerPermissionCeiling: (run.effectivePermissionMode ?? run.permissionMode ?? 'default') as NonNullable<InvocationContext['callerPermissionCeiling']>,
         idempotencyKey: `subworkflow:${stageRunId}`,
-        ...(sub.workspace === 'inherit' && run.workspaceId ? { inheritWorkspace: { fromRunId: run.id, workspaceId: run.workspaceId } } : {}),
       };
+      // `inherit`: the workspace the stage works in — inside a mount_per_item item, the item's.
+      const item = runState ? mapItemPlacement(runState, inst) : null;
+      const inherited = sub.workspace === 'inherit' ? (item?.workspaceId ?? run.workspaceId) : null;
+      if (inherited) {
+        ctx.inheritWorkspace = { fromRunId: run.id, workspaceId: inherited };
+        await this.takeWriterLease(runId, stageRunId);
+      }
       const result = await this.invocation.invoke(request, ctx);
       return { ok: true, childRunId: result.runId };
     } catch (err) {
@@ -143,6 +196,8 @@ export class SubworkflowEffects {
     const child = await this.deps.runRepo.getById(childRunId).catch(() => null);
     if (!child?.parentRunId || !child.parentStageRunId) return null;
     if (child.status !== 'completed' && child.status !== 'failed' && child.status !== 'cancelled') return null;
+    // The child no longer writes the mounts it inherited.
+    this.deps.leases?.release(child.parentStageRunId, 'write');
     const state = this.deps.stores.runStore.loadRunState(childRunId);
     const graph = await this.deps.definitions.get(child.definitionVersionId);
     const outputs: Record<string, unknown> = {};

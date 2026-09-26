@@ -472,7 +472,10 @@ export class GeneratorAI {
       workspaceManager,
       // The engine's one concurrency gate (W-66): stage launches use the ordinary lane.
       // The `global` flow key: every stage launch (P07 WP-7.2); 0 = no practical cap.
-      admissionController: new AdmissionController({ flowLimits: { global: resolved.maxConcurrentStages > 0 ? resolved.maxConcurrentStages : MAX_FLOW_LIMIT } }),
+      // The embedder's `flowLimits` (any key, `global` included) win.
+      admissionController: new AdmissionController({
+        flowLimits: { global: resolved.maxConcurrentStages > 0 ? resolved.maxConcurrentStages : MAX_FLOW_LIMIT, ...resolved.flowLimits },
+      }),
       scmFlow,
       config: {
         artifactsDir: resolved.artifactsDir,

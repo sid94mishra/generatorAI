@@ -62,7 +62,7 @@ import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepo
 import type { HostToolsLevel, StructuredOutputLevel } from '../../domain/ports/IProviderInstance.js';
 import type { ApprovalVerdict, AttemptMode, AttemptOutcome, InstanceState, OperatorTurn, RunMessage, RunState, StageOutput, Usage } from '../../domain/scheduler/types.js';
 import type { EventBus } from '../../events/EventBus.js';
-import type { AdmissionTicket } from '../AdmissionController.js';
+import { providerFlowKey, type AdmissionTicket } from '../AdmissionController.js';
 import { redactProjection } from '../AgentResolver.js';
 import { replayPolicyForToolGroups } from '../DurableExecutionEngine.js';
 import type { RunDefinitionReader } from '../definitions/RunDefinitionReader.js';
@@ -195,6 +195,16 @@ class TurnStoppedAtGate extends Error {}
 
 interface Waiter {
   resolve: (verdict: ApprovalVerdict | null) => void;
+}
+
+/**
+ * Whether a turn on `provider` runs inside the attempt's admission: only
+ * when the attempt was admitted holding that provider's flow key (a launch
+ * whose provider could not be resolved, or a judge on another provider,
+ * takes the provider's own per-turn permit).
+ */
+function admittedOn(frame: Pick<Frame, 'ticket'>, provider: string | undefined): boolean {
+  return !!provider && !!frame.ticket?.holds(providerFlowKey(provider));
 }
 
 interface Frame {
@@ -1141,9 +1151,17 @@ export class StageExecutor {
     const options: SendPromptOptions = {
       ...baseOptions,
       ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}),
-      ...(frame.ticket ? { admitted: true } : {}),
+      ...(admittedOn(frame, composed!.provider) ? { admitted: true } : {}),
     };
-    const turnId = this.deps.composer.beginTurn(owner!, frame.conversationId!, options, { policy: composed!.turnPolicy });
+    const turnId = this.deps.composer.beginTurn(owner!, frame.conversationId!, options, {
+      policy: composed!.turnPolicy,
+      // A workflow tool blocking on a run gives the attempt's keys back meanwhile (ECON-R7).
+      yieldKeys: () => {
+        if (!frame.ticket) return undefined;
+        frame.ticket.pause();
+        return () => this.resumeTicket(frame);
+      },
+    });
     ctx.recorder.begin({ turnId, agentMode: options.agentMode ?? agentMode });
     ctx.submittedThisTurn = [];
     const prompt = t.prepare ? composed!.preparePrompt(text, agentMode) : text;
@@ -1683,8 +1701,10 @@ export class StageExecutor {
         }
       });
       // A tool-less judge turn changes nothing; its verdict is kept on the attempt and a resumed attempt reuses it.
-      // Inside the attempt's admission: the judge turn runs on the attempt's provider slot (P07 WP-7.2).
-      const response = await harness.sendPromptAndWait(conversationId, prompt, undefined, ctx.frame.ac.signal, ctx.frame.ticket ? { admitted: true } : undefined); // durability-ok: tool-less judge, verdict journalled on stage_attempts.judge
+      // Inside the attempt's admission: the judge turn runs on the attempt's provider slot (P07 WP-7.2) —
+      // only when it runs on that provider (a judge model routed elsewhere takes its own provider's permit).
+      const judgeProvider = (await harness.resolveProvider?.({ conversationId })) ?? (rule.model ? undefined : ctx.composed?.provider);
+      const response = await harness.sendPromptAndWait(conversationId, prompt, undefined, ctx.frame.ac.signal, admittedOn(ctx.frame, judgeProvider) ? { admitted: true } : undefined); // durability-ok: tool-less judge, verdict journalled on stage_attempts.judge
       const parsed = parseJudgeReply(response?.content ?? '');
       const score = parsed?.score ?? null;
       return { round, rule: index, score, threshold: rule.threshold, reasons: parsed?.reasons ?? ['The judge answer could not be read'], passed: score !== null && score >= rule.threshold };
@@ -1841,14 +1861,19 @@ export class StageExecutor {
         message: 'The verdict given after the restart was for another review round or output; the stage asks again.',
       });
     }
-    const verdict = await this.parkFrame(ctx, interruptData);
+    const verdict = await this.parkFrame(ctx, interruptData, false);
     const version = this.backToRunning(ctx, 'awaiting_input');
     // After the transition, with its version: a client never shows the gate's buttons again for it (CONVINV-R18).
     await this.emitSession(ctx, 'stage_run.input_received', { outcome: verdict.outcome, version });
     return verdict;
   }
 
-  private async parkFrame(ctx: AttemptContext, interruptData: Record<string, unknown>): Promise<ApprovalVerdict> {
+  /**
+   * `inTurn`: a gate inside a turn (tool permission, question, plan) — the
+   * provider's process lives on while it waits, so the attempt keeps its
+   * provider key and gives back only the others (ECON-R4).
+   */
+  private async parkFrame(ctx: AttemptContext, interruptData: Record<string, unknown>, inTurn: boolean): Promise<ApprovalVerdict> {
     const { frame } = ctx;
     const { stageRunId, runId } = frame.req;
     // The waiter is in place BEFORE the instance is written `awaiting_input`:
@@ -1872,7 +1897,8 @@ export class StageExecutor {
       throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
     }
     await this.emitSession(ctx, 'stage_run.awaiting_input', { interruptData, version: r.row.version });
-    frame.ticket?.pause();
+    const provider = ctx.composed?.provider;
+    frame.ticket?.pause(inTurn && provider ? { keep: [providerFlowKey(provider)] } : undefined);
     let verdict: ApprovalVerdict | null;
     try {
       verdict = await answered;
@@ -1884,19 +1910,28 @@ export class StageExecutor {
     }
     if (!verdict && frame.turnStop && !frame.stop) {
       // The operator stopped the turn this gate belongs to: the gate ends, the turn returns.
-      await frame.ticket?.resume();
+      await this.resumeTicket(frame);
       this.backToRunning(ctx, 'awaiting_input');
       throw new TurnStoppedAtGate();
     }
     if (!verdict) throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
-    await frame.ticket?.resume();
+    await this.resumeTicket(frame);
     return verdict;
+  }
+
+  /** Take the given-back flow keys again; an attempt stopped while it waits for them ends (ECON-R6). */
+  private async resumeTicket(frame: Frame): Promise<void> {
+    try {
+      await frame.ticket?.resume(frame.ac.signal);
+    } catch {
+      throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
+    }
   }
 
   /** A tool permission, question or plan gate inside a turn (the StageGatePort `park`). */
   private async park(ctx: AttemptContext, _turn: TurnContext, data: Record<string, unknown>, prompt: string): Promise<InterruptResolution> {
     try {
-      const verdict = await this.parkFrame(ctx, { ...data, prompt });
+      const verdict = await this.parkFrame(ctx, { ...data, prompt }, true);
       const version = this.backToRunning(ctx, 'awaiting_input');
       await this.emitSession(ctx, 'stage_run.input_received', { outcome: verdict.outcome, version });
       return {

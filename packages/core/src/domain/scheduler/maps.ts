@@ -22,12 +22,14 @@
 //                    pr, branch, workdir, ...select (per item scope)}; failures = the failed
 //                    ones; failed% ≤ toleratedFailurePercent → completed,
 //                    else failed (map_tolerance_exceeded); effect
-//                    map_release
+//                    map_release (the shared lease, and the item worktrees
+//                    no later stage reads)
 //   winner merge     (P08 §7, merge {mode: winner, key}) no item merges
 //                    while the map runs; once it completed and the stages
 //                    its key reads (the judge, after the map) settled, the
 //                    key is evaluated and the item it names is merged
-//                    (map_merge_item, sequential). Stages after the judge
+//                    (map_merge_item, sequential; once settled, map_release
+//                    frees the candidates). Stages after the judge
 //                    wait for that merge, and their scope does not end
 //                    before it; a key naming no completed item, or a failed
 //                    merge, fails them and the run (map_winner_failed)
@@ -152,7 +154,11 @@ export function startMap(w: Working, inst: InstanceState, node: CompiledNode): v
 
 export function onMapSnapshotTaken(w: Working, msg: { stageRunId: string; snapshot: Record<string, string> | null; error?: string }): void {
   const inst = w.get(msg.stageRunId);
-  if (!inst || !isMap(inst) || inst.status !== 'running' || inst.containerState.phase !== 'snapshotting') return;
+  if (!inst || !isMap(inst) || inst.status !== 'running' || inst.containerState.phase !== 'snapshotting') {
+    // A map cancelled while its snapshot ran: the shared lease it may have taken after the cancel goes.
+    if (inst && msg.snapshot) w.push({ t: 'map_release', stageRunId: msg.stageRunId });
+    return;
+  }
   if (!msg.snapshot) {
     const err = classified('mount_fork_failed', `The run mounts could not be snapshotted for mount_per_item: ${msg.error ?? 'unknown error'}`);
     setMap(w, inst, { phase: 'done' });
@@ -242,6 +248,8 @@ export function onMapItemMerged(w: Working, msg: { stageRunId: string; index: nu
     const error = msg.ok ? null : `The winner '${win.key}' could not be merged (${msg.code ?? 'merge_failed'}): ${msg.error ?? 'the merge failed'}`;
     setMap(w, inst, { winner: { ...win, phase: 'done', outcome: msg.ok ? 'merged' : 'failed', error } });
     mapEvent(w, 'map.winner_settled', inst, { index: win.index, key: win.key, outcome: msg.ok ? 'merged' : 'failed', ...(error ? { error } : {}) });
+    // The candidates are not read any more: the losers' worktrees go (P05 §4.1 release).
+    w.push({ t: 'map_release', stageRunId: inst.id });
     return;
   }
   if (inst.status !== 'running') return;
@@ -366,6 +374,7 @@ function settleWinner(w: Working, inst: MapInstance, node: CompiledNode): boolea
   const settle = (outcome: 'none' | 'failed', error: string | null) => {
     setMap(w, inst, { winner: { ...win, phase: 'done', outcome, error } });
     mapEvent(w, 'map.winner_settled', inst, { outcome, ...(error ? { error } : {}) });
+    w.push({ t: 'map_release', stageRunId: inst.id });
     return true;
   };
   const unfinished = reads.find((i) => i.status !== 'completed');

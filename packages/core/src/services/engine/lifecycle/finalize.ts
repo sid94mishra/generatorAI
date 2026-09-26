@@ -3,7 +3,9 @@
 //
 //   compensate   compensation of the completed instances `decide()` listed,
 //                last completed first (the saga order); one failure does not
-//                stop the others, and makes the run `failed`
+//                stop the others, and makes the run `failed`. A checkpoint
+//                is restored in the workspace the instance worked in (its
+//                mount_per_item item's, else the run's)
 //   hooks        the workflow's `onFailure` / `onExit` actions, then the run
 //                hooks of the outcome (`on_run_complete|failed|cancelled`)
 //   postProcess  commit, push and PR (the lifecycle's `postProcessing`
@@ -13,8 +15,10 @@
 //                `pre_commit`, `post_commit`, `on_pr_created` hooks. A
 //                failing `failOnError` step fails the run
 //   release      the run's sessions (B-15) and turn journals, the sandbox,
-//                and the workspace. Worktrees are never removed here (C-7):
-//                retention reclaims them.
+//                the map item worktrees still kept (a `pr_per_item` item
+//                keeps its branch) and the maps' snapshot refs, and the
+//                workspace. The run's own worktrees are never removed here
+//                (C-7): retention reclaims them.
 // A sub-workflow child that inherits its parent's workspace (P05 §4.2)
 // skips post-processing and the workspace release: the parent owns both.
 // ────────────────────────────────────────────────────────────────
@@ -22,6 +26,7 @@
 import type { HookPhaseResult, WorkflowRun } from '@generatorai/shared';
 import type { FinalizePhase, Lifecycle, PostProcessingStep, WorkflowGraph, WorkflowHookDefinition } from '@generatorai/workflow-spec';
 import type { RunOutcome } from '../../../domain/scheduler/types.js';
+import { mapItemPlacement, releaseRunMapItems } from '../MapEffects.js';
 import { PhaseFailure, type PhaseResult, type RunLifecycleDeps } from '../RunLifecycle.js';
 import { runAction } from './hooks.js';
 
@@ -52,9 +57,11 @@ const compensate: Phase = async ({ deps, graph, compensate: order }, run) => {
       let ok: boolean;
       if (action.config.type === 'restore_checkpoint') {
         ok = false;
-        if (deps.checkpoints && run.workspaceId) {
+        // Where the instance worked: inside a mount_per_item item, the item's workspace.
+        const workspaceId = (state && inst ? mapItemPlacement(state, inst)?.workspaceId : null) ?? run.workspaceId;
+        if (deps.checkpoints && workspaceId) {
           try {
-            const r = await deps.checkpoints.restoreTurn(run.workspaceId, `attempt:${id}:1`, { workflowRunId: run.id }, 'before');
+            const r = await deps.checkpoints.restoreTurn(workspaceId, `attempt:${id}:1`, { workflowRunId: run.id }, 'before');
             ok = r.mounts.every((m) => m.ok);
           } catch {
             ok = false;
@@ -150,7 +157,7 @@ const postProcess: Phase = async (ctx, run) => {
   return result;
 };
 
-const release: Phase = async ({ deps, now }, run) => {
+const release: Phase = async ({ deps, graph, now }, run) => {
   const { stores, harness, sessionRepo } = deps;
   for (const rs of stores.runSessions.listActive(run.id)) {
     try {
@@ -169,6 +176,7 @@ const release: Phase = async ({ deps, now }, run) => {
     await deps.sandbox.lifecycle.destroyForRun(run.id).catch((err: unknown) => deps.logger?.warn(`[RunLifecycle] ${run.id}: sandbox teardown failed: ${String(err)}`));
     await deps.eventBus.emitGlobal({ kind: 'workflow_run.sandbox_destroyed', data: { workflowRunId: run.id } }).catch(() => undefined);
   }
+  await releaseRunMapItems(deps, run, graph).catch((err: unknown) => deps.logger?.warn(`[RunLifecycle] ${run.id}: releasing the map item worktrees failed: ${String(err)}`));
   // An inherited workspace is the parent run's: it is released with the parent.
   if (run.workspaceId && !run.systemVars?.inheritedWorkspace) {
     await deps.workspaceManager.completeWorkspace(run.workspaceId).catch((err: unknown) => {

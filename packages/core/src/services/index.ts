@@ -52,9 +52,7 @@ export {
 // W18 — Admission control + concurrency management
 export {
   AdmissionController,
-  AdmissionTimeoutError,
-  laneFor,
-  sizeLane,
+  sizeGlobalFlowLimit,
   defaultFlowLimits,
   providerFlowKey,
   modelFlowKey,
@@ -65,12 +63,9 @@ export {
 export type {
   FlowGate,
   FlowState,
-  AdmissionLane,
+  FlowAcquireOptions,
   AdmissionControllerConfig,
-  AdmissionClassification,
   AdmissionTicket,
-  LaneSnapshot,
-  SizingDecision,
 } from './AdmissionController.js';
 
 // Orchestrator mode (background-agent orchestration for Chat)

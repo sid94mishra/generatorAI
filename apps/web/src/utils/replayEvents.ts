@@ -320,6 +320,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           cacheReadTokens: (d['cacheReadTokens'] as number) ?? undefined,
           cacheWriteTokens: (d['cacheWriteTokens'] as number) ?? undefined,
           cost: (d['cost'] as number) ?? undefined,
+          costUsd: (d['costUsd'] as number) ?? undefined,
           provider: (d['provider'] as string) ?? undefined,
         });
         break;
@@ -513,6 +514,7 @@ export function replayEventsIntoStore(sessionId: string, events: PersistedEvent[
           cacheReadTokens: (data['cacheReadTokens'] as number) ?? undefined,
           cacheWriteTokens: (data['cacheWriteTokens'] as number) ?? undefined,
           cost: (data['cost'] as number) ?? undefined,
+          costUsd: (data['costUsd'] as number) ?? undefined,
           provider: (data['provider'] as string) ?? undefined,
         });
         break;

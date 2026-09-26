@@ -157,7 +157,7 @@ export function cacheMissReason(
  * Approximate cost of the missed tokens.
  *
  * KNOWN DEVIATION from §W30, which asks for the rate "actually paid" from the
- * message's own cost breakdown. The wire carries a single `cost` scalar for
+ * message's own cost breakdown. The wire carries a single `costUsd` scalar for
  * the whole turn and no per-component breakdown, and `ChatModel.pricing` is
  * a credit-batch tier that no provider populates — so no exact input rate is
  * reachable from the client. What we can do honestly is divide the turn's cost
@@ -170,10 +170,10 @@ export function cacheMissReason(
  * the token count instead of a dollar figure.
  */
 export function estimateMissCost(usage: UsageInfo, missTokens: number): number | null {
-  if (!usage.cost || missTokens <= 0) return null;
+  if (!usage.costUsd || missTokens <= 0) return null;
   const billedTokens = promptTokensOf(usage) + usage.outputTokens;
   if (billedTokens <= 0) return null;
-  return (usage.cost / billedTokens) * missTokens;
+  return (usage.costUsd / billedTokens) * missTokens;
 }
 
 interface UsageChipProps {
@@ -223,10 +223,11 @@ export function UsageChip({ usage, prevUsage, prevCompletedAt, scopeId }: UsageC
       <span title="Output tokens">↓ {usage.outputTokens.toLocaleString()}</span>
       <span className="h-2.5 w-px bg-[var(--color-border)]/70" />
       <span title="Duration">{(usage.durationMs / 1000).toFixed(1)}s</span>
-      {usage.cost !== undefined && (
+      {/* Dollars only from `costUsd`: Copilot's `cost` is a premium-request multiplier. */}
+      {usage.costUsd !== undefined && (
         <>
           <span className="h-2.5 w-px bg-[var(--color-border)]/70" />
-          <span title="Turn cost">${usage.cost.toFixed(4)}</span>
+          <span title="Turn cost">${usage.costUsd.toFixed(4)}</span>
         </>
       )}
       {/* W30: Cache-miss notice — only shown when miss exceeds the 1024-token

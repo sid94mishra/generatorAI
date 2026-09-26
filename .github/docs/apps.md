@@ -308,7 +308,7 @@ A small, deliberately boring process you run somewhere a GeneratorAI server and 
 | `WS /relay/data?streamId=…` | Per-stream byte pipe |
 | `GET /healthz` | Liveness + capacity |
 
-The relay is a byte pipe: it reads no application payloads. Identity and authorisation are end-to-end between the client and the GeneratorAI server (see the auth/relay implementation notes, internal). Frame lanes mirror `AdmissionController`'s interactive/ordinary/bulk classes so a bulk artifact transfer cannot starve interactive input.
+The relay is a byte pipe: it reads no application payloads. Identity and authorisation are end-to-end between the client and the GeneratorAI server (see the auth/relay implementation notes, internal). Frame lanes (interactive, ordinary, bulk) keep a bulk artifact transfer from starving interactive input.
 
 ---
 

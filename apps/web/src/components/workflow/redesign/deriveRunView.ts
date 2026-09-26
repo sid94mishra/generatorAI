@@ -194,6 +194,7 @@ function usageFrom(stream: StreamState | undefined): UsageInfo | undefined {
     cacheReadTokens: stream.usage.cacheReadTokens,
     cacheWriteTokens: stream.usage.cacheWriteTokens,
     cost: stream.usage.cost,
+    costUsd: stream.usage.costUsd,
     provider: stream.usage.provider,
   };
 }

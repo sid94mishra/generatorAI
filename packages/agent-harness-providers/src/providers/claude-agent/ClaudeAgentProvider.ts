@@ -278,6 +278,12 @@ interface TurnState {
   localCommand: boolean;
   truncationStopReason?: string;
   releaseExecution?: () => void;
+  /**
+   * Whether the turn holds a real `provider:claude-agent` permit (`held`), gave
+   * it back while a tool blocks (`yielded`, see `yieldTurnPermit`), or never had
+   * one (undefined: an admitted workflow-stage turn, or no supervisor).
+   */
+  permit?: 'held' | 'yielded';
   /** Set by Stop. Everything the runtime sends afterwards is discarded. */
   aborted: boolean;
   cancellation?: CancellationInFlight;
@@ -689,6 +695,12 @@ export class ClaudeAgentProvider implements IAgentHarness {
   private readonly sessions = new Map<string, PersistentSession>();
   /** The turn in flight per conversation, for BOTH runtime modes. */
   private readonly turns = new Map<string, TurnState>();
+  /**
+   * Turns still waiting for their execution permit, per conversation. A stop
+   * while queued aborts these, which withdraws the wait: the turn never
+   * starts (ECON-R6).
+   */
+  private readonly queuedTurns = new Map<string, Set<AbortController>>();
   /**
    * Item 16 — SDK session ids of conversations the sweep or the LRU cap
    * evicted. `createConversation` for such a conversation resumes from here
@@ -1744,73 +1756,112 @@ export class ClaudeAgentProvider implements IAgentHarness {
     turnOptions?: SendPromptOptions,
   ): Promise<void> {
     const start = Date.now();
-    return this.genai.chat(conversationId, this.conversations.get(conversationId)?.model ?? this.options.defaultModel, prompt, async () => {
-      promptCounter.add(1, { conversation_id: conversationId });
+    // One turn at a time per conversation. A persistent session would
+    // happily queue a second user message behind the first, but the turn
+    // bookkeeping (permit, plan phase, transcript accumulation) is per
+    // conversation, so a second turn waits for the first to settle.
+    const inFlight = this.turns.get(conversationId);
+    if (inFlight) await inFlight.done;
 
-      const config = this.getConversationConfig(conversationId);
-      config.lastUsedAt = Date.now();
-
-      // One turn at a time per conversation. A persistent session would
-      // happily queue a second user message behind the first, but the turn
-      // bookkeeping (permit, plan phase, transcript accumulation) is per
-      // conversation, so a second turn waits for the first to settle.
-      const inFlight = this.turns.get(conversationId);
-      if (inFlight) await inFlight.done;
-
-      await this.emitToHandlers(conversationId, 'harness.user_message', { content: prompt });
-      this.pushMessage(conversationId, { role: 'user', content: prompt, timestamp: new Date() });
-
-      const persistent = this.persistentSessions;
-      const options = this.buildQueryOptions(config, turnOptions, { persistent });
-
-      // PLN-01 — arm the plan phase for this turn.
-      this.beginPlanTurn(conversationId, turnOptions);
-
-      // Item 4 — the chat path holds an execution permit for the whole turn,
-      // exactly like `sendPromptAndWait` always did. Acquired BEFORE anything
-      // is spawned or pushed, and announced to the user if it has to wait.
-      const releaseExecution = await this.acquireTurnPermit(conversationId, turnOptions?.admitted === true);
-
-      // W13-B1 — a turn starts un-truncated. Without this the latch set by a
-      // previous truncated turn would persist and refuse every tool for the
-      // rest of the conversation.
-      this.toolSemaphore.beginTurn(conversationId);
-      // Likewise for the context breakdown: last turn's describes a window
-      // that no longer exists, and publishing it against this turn's token
-      // total would report a split that does not add up.
-      this.resetContextUsageProbe(conversationId);
-
-      const activeQuery: ActiveQuery = {
-        queryId: crypto.randomUUID(),
-        conversationId,
-        abortController: new AbortController(),
-        status: 'running',
-      };
-      this.activeQueries.set(conversationId, activeQuery);
-      const turn = this.beginTurn(conversationId, activeQuery, start, releaseExecution, prompt);
-
-      if (!persistent) {
-        // One-shot fallback: a string prompt cannot carry content blocks, so
-        // attachments are referenced by path (the model has file tools).
-        const oneShotPrompt = this.describeAttachmentsInline(prompt, attachments);
-        this.runQueryInBackground(conversationId, oneShotPrompt, options, turn).catch((err) => {
-          if (this.verbose) console.error(`[ClaudeAgentAdapter] Background query error for ${conversationId}:`, err);
-        });
-        return;
-      }
-
-      try {
-        const session = await this.ensureSession(conversationId, config, options);
-        turn.session = session;
-        // `closeHandle` is what stop()/cleanup reach for to kill the process.
-        activeQuery.closeHandle = () => {
-          void this.closeSession(session, 'turn handle closed');
-        };
-        session.input.push(await this.buildUserMessage(prompt, attachments, session.sdkSessionId));
-      } catch (err) {
-        await this.failTurn(turn, err);
-      }
+    // The `chat` span covers the whole turn (ECON-R10): it ends when the turn
+    // settles, while this method still resolves as soon as the turn is handed off.
+    return new Promise<void>((handedOff, failed) => {
+      void this.genai.chat(conversationId, this.conversations.get(conversationId)?.model ?? this.options.defaultModel, prompt, async () => {
+        let turn: TurnState | undefined;
+        try {
+          turn = await this.startPromptTurn(conversationId, prompt, start, attachments, turnOptions);
+        } catch (err) {
+          failed(err);
+          throw err;
+        }
+        handedOff();
+        if (!turn) return;
+        await turn.done;
+        if (turn.activeQuery.status === 'failed') throw new Error('turn failed');
+      }).catch(() => {
+        // The span recorded the failure; the caller already has the hand-off outcome.
+      });
     });
+  }
+
+  /**
+   * Start one `sendPrompt` turn and return its bookkeeping once it is handed to
+   * the runtime; `undefined` when a stop withdrew it while it waited for its
+   * execution permit.
+   */
+  private async startPromptTurn(
+    conversationId: string,
+    prompt: string,
+    start: number,
+    attachments?: AttachmentRef[],
+    turnOptions?: SendPromptOptions,
+  ): Promise<TurnState | undefined> {
+    promptCounter.add(1, { conversation_id: conversationId });
+
+    const config = this.getConversationConfig(conversationId);
+    config.lastUsedAt = Date.now();
+
+    await this.emitToHandlers(conversationId, 'harness.user_message', { content: prompt });
+    this.pushMessage(conversationId, { role: 'user', content: prompt, timestamp: new Date() });
+
+    const persistent = this.persistentSessions;
+    const options = this.buildQueryOptions(config, turnOptions, { persistent });
+
+    // PLN-01 — arm the plan phase for this turn.
+    this.beginPlanTurn(conversationId, turnOptions);
+
+    // Item 4 — the chat path holds an execution permit for the whole turn,
+    // exactly like `sendPromptAndWait` always did. Acquired BEFORE anything
+    // is spawned or pushed, and announced to the user if it has to wait.
+    // Withdrawn by a stop while queued: `abortConversation` already emitted
+    // `harness.cancelled` + `harness.idle`, so the turn just never starts.
+    const releaseExecution = await this.acquireTurnPermit(conversationId, turnOptions?.admitted === true);
+    if (!releaseExecution) {
+      this.planPhases.delete(conversationId);
+      return undefined;
+    }
+
+    // W13-B1 — a turn starts un-truncated. Without this the latch set by a
+    // previous truncated turn would persist and refuse every tool for the
+    // rest of the conversation.
+    this.toolSemaphore.beginTurn(conversationId);
+    // Likewise for the context breakdown: last turn's describes a window
+    // that no longer exists, and publishing it against this turn's token
+    // total would report a split that does not add up.
+    this.resetContextUsageProbe(conversationId);
+
+    const activeQuery: ActiveQuery = {
+      queryId: crypto.randomUUID(),
+      conversationId,
+      abortController: new AbortController(),
+      status: 'running',
+    };
+    this.activeQueries.set(conversationId, activeQuery);
+    const turn = this.beginTurn(conversationId, activeQuery, start, releaseExecution, prompt);
+    if (this.supervisor && turnOptions?.admitted !== true) turn.permit = 'held';
+
+    if (!persistent) {
+      // One-shot fallback: a string prompt cannot carry content blocks, so
+      // attachments are referenced by path (the model has file tools).
+      const oneShotPrompt = this.describeAttachmentsInline(prompt, attachments);
+      this.runQueryInBackground(conversationId, oneShotPrompt, options, turn).catch((err) => {
+        if (this.verbose) console.error(`[ClaudeAgentAdapter] Background query error for ${conversationId}:`, err);
+      });
+      return turn;
+    }
+
+    try {
+      const session = await this.ensureSession(conversationId, config, options);
+      turn.session = session;
+      // `closeHandle` is what stop()/cleanup reach for to kill the process.
+      activeQuery.closeHandle = () => {
+        void this.closeSession(session, 'turn handle closed');
+      };
+      session.input.push(await this.buildUserMessage(prompt, attachments, session.sdkSessionId));
+    } catch (err) {
+      await this.failTurn(turn, err);
+    }
+    return turn;
   }
 
   /**
@@ -1919,8 +1970,17 @@ export class ClaudeAgentProvider implements IAgentHarness {
       // spawning the query() process: the `provider:claude-agent` flow key
       // (default 4, P07 WP-7.2). When it is full the turn queues here —
       // visibly, via `harness.warning`/`execution_queued`. A workflow stage
-      // admitted for its whole attempt already holds it (`admitted`).
+      // admitted for its whole attempt already holds it (`admitted`). A stop
+      // while queued withdraws the wait (ECON-R6): nothing is spawned.
       const releaseExecution = await this.acquireTurnPermit(conversationId, turnOptions?.admitted === true);
+      if (!releaseExecution) {
+        activeQuery.status = 'aborted';
+        if (this.activeQueries.get(conversationId) === activeQuery) this.activeQueries.delete(conversationId);
+        this.planPhases.delete(conversationId);
+        if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
+        if (timeoutHandle) clearInterval(timeoutHandle);
+        throw new Error('sendPromptAndWait aborted by caller');
+      }
 
       try {
         if (this.verbose) console.log(`[ClaudeAgentAdapter] Sending prompt to ${conversationId} (${prompt.length} chars)`);
@@ -2072,7 +2132,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
         if (signal && abortHandler) signal.removeEventListener('abort', abortHandler);
         if (timeoutHandle) clearInterval(timeoutHandle);
         // W12 / P0-14 — release the execution slot so the next queued turn can start.
-        releaseExecution?.();
+        releaseExecution();
       }
     });
   }
@@ -2101,6 +2161,28 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * acknowledgement that keeps the session alive.
    */
   async abortConversation(conversationId: string): Promise<void> {
+    // A turn still queued for its execution permit is withdrawn: it never
+    // starts, and the stop is reported exactly like a running turn's.
+    const queued = this.queuedTurns.get(conversationId);
+    if (queued && queued.size > 0) {
+      this.queuedTurns.delete(conversationId);
+      for (const withdraw of queued) withdraw.abort();
+      if (!this.turns.has(conversationId)) {
+        // `sendPromptAndWait` registers its query before it queues.
+        const aq = this.activeQueries.get(conversationId);
+        if (aq) {
+          aq.abortController.abort();
+          aq.status = 'aborted';
+        }
+        await this.emitToHandlers(conversationId, 'harness.cancelled', {
+          reason: 'user_abort',
+          provider: 'claude-agent',
+        });
+        await this.emitEventToHandlers(conversationId, createAgentEvent('harness.idle', {} as Record<string, never>));
+        return;
+      }
+    }
+
     const turn = this.turns.get(conversationId);
     const aq = turn?.activeQuery ?? this.activeQueries.get(conversationId);
     if (!aq) return;
@@ -3089,9 +3171,9 @@ export class ClaudeAgentProvider implements IAgentHarness {
    * the workflow path acquired — so the limit bounded workflow steps and
    * nothing else. Now both paths acquire. A turn that has to wait says so:
    * blocking silently is what turns "too busy" into "the prompt hangs with no
-   * explanation".
+   * explanation". `undefined` when a stop withdrew the wait (`queuedTurns`).
    */
-  private async acquireTurnPermit(conversationId: string, admitted = false): Promise<() => void> {
+  private async acquireTurnPermit(conversationId: string, admitted = false): Promise<(() => void) | undefined> {
     const supervisor = this.supervisor;
     // No supervisor wired (embedded and test use): nothing to bound against.
     // An admitted turn (a workflow stage) already holds the flow key.
@@ -3112,7 +3194,72 @@ export class ClaudeAgentProvider implements IAgentHarness {
       provider: 'claude-agent',
       flowKey: 'provider:claude-agent',
     });
-    return supervisor.acquireExecution();
+    const withdraw = new AbortController();
+    let queued = this.queuedTurns.get(conversationId);
+    if (!queued) {
+      queued = new Set();
+      this.queuedTurns.set(conversationId, queued);
+    }
+    queued.add(withdraw);
+    try {
+      const release = await supervisor.acquireExecution(withdraw.signal);
+      // A gate that granted the permit as the stop landed: hand it straight back.
+      if (withdraw.signal.aborted) {
+        release();
+        return undefined;
+      }
+      return release;
+    } catch (err) {
+      if (withdraw.signal.aborted) return undefined;
+      throw err;
+    } finally {
+      queued.delete(withdraw);
+      if (queued.size === 0 && this.queuedTurns.get(conversationId) === queued) this.queuedTurns.delete(conversationId);
+    }
+  }
+
+  /**
+   * ECON-R7 — give back the permit the turn in flight holds while one of its
+   * tools blocks on other work (a workflow tool waiting for a run that needs
+   * this same provider key). The returned function takes a permit again (it
+   * may wait; a stop withdraws the wait) and puts it back on the turn, so the
+   * turn's settle releases it. `undefined` when the turn holds none, or has
+   * already yielded it.
+   */
+  yieldTurnPermit(conversationId: string): (() => Promise<void>) | undefined {
+    const turn = this.turns.get(conversationId);
+    const supervisor = this.supervisor;
+    if (!turn || turn.settled || turn.permit !== 'held' || !supervisor) return undefined;
+    turn.permit = 'yielded';
+    const release = turn.releaseExecution;
+    turn.releaseExecution = undefined;
+    release?.();
+
+    return async () => {
+      const current = () => !turn.settled && this.turns.get(conversationId) === turn;
+      if (turn.permit !== 'yielded' || !current()) return;
+      const stopSignal = turn.activeQuery.abortController.signal;
+      if (stopSignal.aborted) return;
+      // Withdrawn by a stop, or by the turn settling while it waits.
+      const withdraw = new AbortController();
+      const onEnd = () => withdraw.abort();
+      stopSignal.addEventListener('abort', onEnd, { once: true });
+      void turn.done.then(onEnd);
+      try {
+        const retaken = await supervisor.acquireExecution(withdraw.signal);
+        if (withdraw.signal.aborted || !current()) {
+          retaken();
+          return;
+        }
+        turn.releaseExecution = retaken;
+        turn.permit = 'held';
+      } catch (err) {
+        if (withdraw.signal.aborted) return;
+        throw err;
+      } finally {
+        stopSignal.removeEventListener('abort', onEnd);
+      }
+    };
   }
 
   /** Register per-turn bookkeeping and return it. */

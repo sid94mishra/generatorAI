@@ -3,7 +3,7 @@
 //   cron scheduling, webhook handling, and dataset iterations
 // ────────────────────────────────────────────────────────────────
 
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import type {
@@ -434,6 +434,12 @@ export class AutomationService {
       throw new Error('Invalid or disabled webhook');
     }
 
+    // The debounce key is a hash of the FULL payload and its content type, so two
+    // deliveries that differ only past the recorded 5000-char prefix both run.
+    const serialized = JSON.stringify(payload) ?? '';
+    const triggerKey = createHash('sha256').update(`${contentType ?? ''}
+${serialized}`).digest('hex');
+
     // Schema-driven pipeline: the entire payload becomes the dataset.
     if (automation.dataSchema) {
       const dataset = this.webhookPayloadToDataset(
@@ -444,12 +450,13 @@ export class AutomationService {
       return this.executeAutomation(
         automation,
         'webhook',
-        JSON.stringify(payload).slice(0, 5000),
+        serialized.slice(0, 5000),
         dataset,
+        triggerKey,
       );
     }
 
-    return this.executeAutomation(automation, 'webhook', JSON.stringify(payload).slice(0, 5000));
+    return this.executeAutomation(automation, 'webhook', serialized.slice(0, 5000), undefined, triggerKey);
   }
 
   /**
@@ -502,10 +509,12 @@ export class AutomationService {
     triggeredBy: AutomationTriggerType,
     webhookPayload?: string,
     dataset?: AutomationDataset,
+    /** The debounce identity of a webhook delivery (sha256 of the full payload + content type). */
+    triggerKey?: string,
   ): Promise<AutomationExecution> {
     if (triggeredBy === 'webhook' || triggeredBy === 'schedule') {
       const windowMs = this.triggerDebounceMs();
-      const key = `${triggeredBy}:${webhookPayload ?? ''}`;
+      const key = `${triggeredBy}:${triggerKey ?? ''}`;
       const last = this.lastTrigger.get(automation.id);
       if (windowMs > 0 && last && last.key === key && Date.now() - last.at < windowMs) {
         this.logger.info(`[AutomationService] ${triggeredBy} trigger of ${automation.id} debounced onto execution ${last.execution.id} (${windowMs} ms window)`);

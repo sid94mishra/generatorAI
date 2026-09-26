@@ -459,6 +459,7 @@ function onCommand(w: Working, command: RunCommand, actor?: string): void {
   // outside the actor); the settle below lets a waiting wait take it.
   if (command.command === 'deliver_event') {
     if (!RUN_LIVE.includes(w.run.status) && w.run.status !== 'paused') return w.reject('invalid_state', `the run is ${w.run.status}`);
+    if (actor) w.eventSenders.set(`${command.eventKey}\u0000${command.idempotencyKey}`, actor);
     return;
   }
   if (command.instanceId === undefined) {

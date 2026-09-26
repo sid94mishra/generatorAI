@@ -6,7 +6,7 @@
 // with a bare `parseInt(process.env[X] ?? '8', 10)`, which has two failure
 // modes that both bite silently:
 //
-//   1. A typo'd value (`GENERATORAI_ORDINARY_CONCURRENCY=eight`) parses to
+//   1. A typo'd value (`GENERATORAI_BROWSER_MAX_CONCURRENT=eight`) parses to
 //      `NaN`. `new Semaphore(NaN)` then sets `available = NaN`; `NaN > 0` is
 //      false, so `acquire()` awaits a promise nobody resolves and EVERY
 //      workflow stage hangs forever with no error and no log.

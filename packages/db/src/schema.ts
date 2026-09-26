@@ -546,7 +546,6 @@ export const stageRuns = sqliteTable(
     artifactManifest: text('artifact_manifest', { mode: 'json' }).$type<unknown[]>(),
     /** Container state (P05): iteration, overrides, exit reason, history. */
     loopState: text('loop_state', { mode: 'json' }).$type<unknown>(),
-    expansion: text('expansion', { mode: 'json' }).$type<unknown>(),
     /** What an `awaiting_input` instance asks an approver for. */
     interruptData: text('interrupt_data', { mode: 'json' }).$type<unknown>(),
     usage: text('usage', { mode: 'json' }).$type<Record<string, unknown>>().notNull().default({}),

@@ -351,8 +351,9 @@ Push a change, wait for CI to report on the commit (its callback URL), then depl
 
 - `push` (agent)
 - `wait_ci` (wait event)
+- `notify_ci` (agent)
 - `deploy` (agent)
-- edges: `push` → `wait_ci`; `wait_ci` → `deploy`
+- edges: `push` → `wait_ci`; `push` → `notify_ci`; `wait_ci` → `deploy`
 
 `wait_ci`:
 
@@ -808,7 +809,7 @@ Fix and re-run the test suite until it passes; exhausts when the number of faili
 | `judgePanel` | Judge panel (best of N) | Several agents solve the same task from different angles, each in its own worktree; a read-only judge compares them, and only the winner it picks is merged into the run mount. |
 | `planThenExecute` | Plan, then execute | A planner breaks a goal into a small graph of agent stages (at most maxStages, agents and models from allow-lists); the engine validates the plan, runs it after the planner, and a report summarises the results. |
 | `approvalGatedRelease` | Approval-gated release | Prepare a release, wait for a person to approve it and pick the environment (a form); deploy on approval, escalate when nobody answers in time. |
-| `ciGatedDeploy` | CI-gated deploy | Push a change, wait for the CI result of that commit (CI posts to the wait’s callback URL), then deploy. |
+| `ciGatedDeploy` | CI-gated deploy | Push a change, hand CI the wait’s callback URL, wait for the CI result of that commit (CI posts to the URL), then deploy. |
 | `cooldownThenVerify` | Cool down, then verify | Deploy, wait a fixed time for metrics to settle, then verify the deployment. |
 | `securityReview` | Security review | Review a target for security problems and return a pass/fail verdict (the workflow output `verdict`). |
 | `releaseWithSecurityReview` | Release with a security review | Build, run the security-review workflow on the artifact as a sub-workflow, and release only when its verdict is pass. |

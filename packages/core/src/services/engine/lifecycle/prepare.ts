@@ -2,7 +2,8 @@
 // The prepare phases of `starting` (P04 WP-4.1), in order:
 //
 //   workspace       the run's execution workspace (managed root: plans,
-//                   artifacts, uploads, scratch); `on_run_start` hooks
+//                   artifacts, uploads, scratch); the child versions of its
+//                   `pin_at_run_start` sub-workflows; `on_run_start` hooks
 //   worktrees       the run's mounts through MountService (RV-19): each
 //                   selected codebase (the request's, else the lifecycle's
 //                   `codebaseAliases`; never "all codebases", W-22) as a
@@ -27,6 +28,7 @@ import type { ChatSourceSpec, HookPhaseResult, RunCodebase, WorkflowRun } from '
 import type { PreparePhase, WorkflowGraph } from '@generatorai/workflow-spec';
 import { branchSlugFor } from '../../MountService.js';
 import { runWorkspace } from '../../session/workspaceExposure.js';
+import { mapItemPlacement, runForItem } from '../MapEffects.js';
 import type { PhaseResult, RunLifecycleDeps } from '../RunLifecycle.js';
 import { scanRunUploads, writeRunUpload, type UploadCategory } from './runUploads.js';
 
@@ -76,6 +78,8 @@ const workspace: Phase = async ({ deps, graph, hooks }, run) => {
     });
   }
   const artifactsDirectory = path.join(ws.rootPath, 'artifacts');
+  // `pin_at_run_start` means the version current NOW, not when the stage starts (P05 §4.2).
+  const subworkflowPins = run.systemVars?.subworkflowPins ?? (deps.subworkflowPins ? await deps.subworkflowPins(run, graph) : {});
   const updated: WorkflowRun = {
     ...run,
     workspaceId: ws.id,
@@ -85,7 +89,7 @@ const workspace: Phase = async ({ deps, graph, hooks }, run) => {
   if (!started.shouldContinue) throw new Error(started.mergedResult.abortReason ?? 'The run was aborted by an on_run_start hook');
   return {
     workspaceId: ws.id,
-    systemVars: { artifactsDirectory, workingDirectory: updated.systemVars!.workingDirectory! },
+    systemVars: { artifactsDirectory, workingDirectory: updated.systemVars!.workingDirectory!, ...(Object.keys(subworkflowPins).length > 0 ? { subworkflowPins } : {}) },
     ...(started.mergedResult.variables ? { variables: { ...run.variables, ...userOnly(started.mergedResult.variables) } } : {}),
   };
 };
@@ -100,10 +104,15 @@ const worktrees: Phase = async ({ deps, graph, hooks }, run) => {
   if (selection.length === 0 && graph.workflow.lifecycle.requiresCodebase) {
     throw new Error('This workflow requires at least one codebase, and none was selected');
   }
-  // A child inheriting its parent's workspace works in the parent's mounts.
+  // A child inheriting its parent's workspace works in the parent stage's
+  // mounts: the run's, or inside a mount_per_item item that item's.
   const inherited = run.systemVars?.inheritedWorkspace;
   if (inherited) {
-    const parent = await deps.runRepo.getById(inherited.fromRunId);
+    const parentRun = await deps.runRepo.getById(inherited.fromRunId);
+    const parentState = deps.stores.runStore.loadRunState(parentRun.id);
+    const at = parentState && run.parentStageRunId ? parentState.instances.find((i) => i.id === run.parentStageRunId) : undefined;
+    const item = parentState && at ? mapItemPlacement(parentState, at) : null;
+    const parent = item ? runForItem(parentRun, item) : parentRun;
     const codebases = parent.systemVars?.codebases ?? {};
     const workingDirectory = parent.systemVars?.workingDirectory ?? run.systemVars?.workingDirectory;
     return { systemVars: { codebases, ...(workingDirectory ? { workingDirectory } : {}) }, detail: `inherited from run ${inherited.fromRunId}` };

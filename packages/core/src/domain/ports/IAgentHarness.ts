@@ -610,6 +610,14 @@ export interface IHarnessClientLifecycle {
    * told. The session composer plans capability levels with it.
    */
   resolveProvider?(params: { conversationId?: string; harnessType?: string; model?: string }): Promise<string | undefined>;
+  /**
+   * Give back the provider turn permit the turn in flight holds while one of
+   * its tools blocks on other work (a workflow tool waiting for a run that
+   * needs the same provider, ECON-R7). The returned function takes a permit
+   * again (it may wait). `undefined` when the turn holds none (an admitted
+   * workflow stage turn, or no gate).
+   */
+  yieldTurnPermit?(conversationId: string): (() => Promise<void>) | undefined;
 }
 
 /** Model discovery. */

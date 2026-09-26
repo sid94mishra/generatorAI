@@ -165,4 +165,10 @@ export interface TurnContext {
   cardSequence: Map<string, number>;
   /** The owner's tool policy; absent means the compose-time binding decides. */
   policy?: TurnPolicy | undefined;
+  /**
+   * Give back the flow keys the turn holds while one of its tools blocks on
+   * other work (a workflow tool waiting for a run, ECON-R7); the returned
+   * function takes them back. Absent: the harness's per-turn permit.
+   */
+  yieldKeys?: (() => (() => Promise<void>) | undefined) | undefined;
 }

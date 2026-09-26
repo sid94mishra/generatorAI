@@ -106,7 +106,8 @@ function consumeEvent(w: Working, inst: InstanceState, eventKey: string): boolea
   const event = w.events.find((e) => e.eventKey === eventKey);
   if (!event) return false;
   w.consumeEvent(event, inst);
-  completeWait(w, inst, 'event', event.data, null, event.receivedAt);
+  // The sender is known for an event delivered while the wait waits (not stored with an early one).
+  completeWait(w, inst, 'event', event.data, w.eventSenders.get(`${event.eventKey}\u0000${event.idempotencyKey}`) ?? null, event.receivedAt);
   return true;
 }
 

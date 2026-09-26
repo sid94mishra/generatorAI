@@ -85,6 +85,31 @@
         }
       },
       {
+        "key": "notify_ci",
+        "name": "Hand CI the callback",
+        "join": {
+          "mode": "all"
+        },
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "notify",
+            "text": "Give the CI run of commit {{stages.push.output.sha}} this callback URL, the way this project's CI takes one (a pipeline variable, a status webhook, a comment): {{stages.wait_ci.callbackUrl}}\nCI must POST {\"data\": {...its result...}} to it when the build finishes. Do not post to it yourself."
+          }
+        ],
+        "sessionReuse": "fresh",
+        "context": {
+          "mode": "summary"
+        },
+        "output": {
+          "format": "text",
+          "extraction": "auto",
+          "rules": [],
+          "summary": "auto"
+        },
+        "hooks": []
+      },
+      {
         "key": "deploy",
         "name": "Deploy",
         "join": {
@@ -114,6 +139,11 @@
       {
         "from": "push",
         "to": "wait_ci",
+        "on": "success"
+      },
+      {
+        "from": "push",
+        "to": "notify_ci",
         "on": "success"
       },
       {

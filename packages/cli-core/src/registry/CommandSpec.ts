@@ -68,7 +68,7 @@ export interface OutputSpec {
    * The default spill is right for payloads whose shape the spec cannot know.
    * It is wrong for an endpoint that returns a deep diagnostic object — the
    * one this was added for, `system status`, printed the whole health payload
-   * with `harness`, `memory`, `admission` and `otel` dumped as raw indented
+   * with `harness`, `memory`, `flows` and `otel` dumped as raw indented
    * JSON, so the answer to "is my server healthy?" was buried in a page of
    * machine output. Structured output (`--json`, `--yaml`, `--ndjson`) is
    * unaffected and still carries the complete payload.

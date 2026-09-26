@@ -80,6 +80,8 @@ export interface LifecyclePlatform {
   steps?: LifecycleSteps | undefined;
   /** The run sandbox, when the deployment runs stages in one. */
   sandbox?: RunSandbox | null | undefined;
+  /** The versions `pin_at_run_start` sub-workflows run, resolved at run start (SubworkflowEffects). */
+  subworkflowPins?: ((run: WorkflowRun, graph: WorkflowGraph) => Promise<Record<string, string>>) | undefined;
 }
 
 export interface RunLifecycleDeps extends LifecyclePlatform {

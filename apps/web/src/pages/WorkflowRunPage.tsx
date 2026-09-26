@@ -404,11 +404,13 @@ export function WorkflowRunPage() {
   // A run paused by its exhausted budget: add half of each limit (WP-7.3); the engine resumes it when it is under.
   const runBudget = runData?.budget;
   const handleRaiseBudget = useCallback(() => {
-    const half = (k: string) => {
+    // Turns, tokens and ms round up to whole units; cost rounds up to the cent.
+    // (toFixed trims float noise such as 0.07 * 100 = 7.000000000000001 before the ceil).
+    const half = (k: string, perUnit = 1) => {
       const v = runBudget?.[k];
-      return typeof v === 'number' && v > 0 ? Math.ceil(v / 2) : undefined;
+      return typeof v === 'number' && v > 0 ? Math.ceil(Number(((v / 2) * perUnit).toFixed(6))) / perUnit : undefined;
     };
-    const deltas = { maxTurns: half('maxTurns'), maxTokens: half('maxTokens'), maxCostUsd: half('maxCostUsd'), maxWallClockMs: half('maxWallClockMs') };
+    const deltas = { maxTurns: half('maxTurns'), maxTokens: half('maxTokens'), maxCostUsd: half('maxCostUsd', 100), maxWallClockMs: half('maxWallClockMs') };
     const command = { command: 'raise_budget' as const, ...Object.fromEntries(Object.entries(deltas).filter(([, v]) => v !== undefined)) };
     void sendCommand(command as RunCommand);
   }, [runBudget, sendCommand]);

@@ -90,6 +90,9 @@ export interface UsageInfo {
   /** Turn cost — semantics depend on `provider`: for copilot it's a billing
    *  multiplier (premium-request weight), for claude-agent it's USD. */
   cost?: number;
+  /** The turn's cost in USD, set only by a provider that reports one. The only
+   *  source a dollar figure is rendered from (never `cost`). */
+  costUsd?: number;
   /** Harness provider that produced this usage ('copilot' | 'claude-agent'). */
   provider?: string;
 }
