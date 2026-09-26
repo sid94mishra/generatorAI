@@ -273,6 +273,7 @@ export type {
   WorktreeInfo,
   EntityScope,
   ProjectWithCodebases,
+  ProjectSummary,
   SystemConfig,
   ArtifactSource,
   ArtifactType,

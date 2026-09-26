@@ -69,6 +69,23 @@ describe('system info wire contract (G-12)', () => {
   });
 });
 
+describe('project summary wire contract (G-13)', () => {
+  it('omits ?include=summary by default', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.list();
+    expect(calls[0]?.path).toBe('/api/projects');
+  });
+
+  it('sends ?include=summary when the caller asks for the summary columns', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).projects.list({ includeSummary: true });
+    expect(calls[0]?.path).toBe('/api/projects?include=summary');
+
+    await createApiClient(fetchImpl).projects.get('proj-1', { includeSummary: true });
+    expect(calls[1]?.path).toBe('/api/projects/proj-1?include=summary');
+  });
+});
+
 describe('chat update wire contract', () => {
   it('sends agentRef, matching the field the PATCH /chats/:id route reads to bind an agent', async () => {
     const { calls, fetchImpl } = capture();

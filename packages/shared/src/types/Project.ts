@@ -3,6 +3,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { HarnessConfig } from './Workflow.js';
+import type { WorkflowRunStatus } from './WorkflowRun.js';
 
 // ── Project ──
 
@@ -15,9 +16,37 @@ export interface Project {
   status: ProjectStatus;
   createdAt: Date;
   updatedAt: Date;
+  /**
+   * G-13 — Projects columns + ProjectDetail tab counts. Present only when
+   * the request asked for it (`?include=summary`); absent otherwise, and
+   * absent (never invented) on the fields a service could not answer
+   * (D-36) — `needsYou` / `running` while the attention feed has not
+   * finished its first snapshot.
+   */
+  summary?: ProjectSummary;
 }
 
 export type ProjectStatus = 'active' | 'archived';
+
+/** G-13 — `GET /projects?include=summary` / `GET /projects/:id?include=summary`. */
+export interface ProjectSummary {
+  codebases: number;
+  activeChats: number;
+  /** Omitted (not `0`) while the attention feed is unavailable (D-36). */
+  needsYou?: number;
+  running?: number;
+  worktrees: { active: number; orphaned: number };
+  /** Total workflow runs across every definition in this project. */
+  runs: number;
+  lastRun?: {
+    runId: string;
+    definitionId: string;
+    name: string;
+    status: WorkflowRunStatus;
+    /** ISO timestamp: the run's `completedAt`, else `startedAt`, else `createdAt`. */
+    at: string;
+  };
+}
 
 export interface ProjectSettings {
   defaultModel?: string;

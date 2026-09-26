@@ -2091,15 +2091,19 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
-  async listProjects(): Promise<Project[]> {
+  async listProjects(params?: { includeSummary?: boolean }): Promise<Project[]> {
     // Return every project (active + archived). Consumers that only allow
     // active projects (pickers, chat/workflow/automation) filter client-side;
     // the Projects list shows all so archived ones can be re-activated.
-    return apiFetch<Project[]>(`${this.baseUrl}/api/projects`);
+    // `includeSummary` (G-13) adds each project's `summary` — Codebases,
+    // Active chats, Needs you, Last run, Worktrees — for the Projects columns.
+    const qs = params?.includeSummary ? '?include=summary' : '';
+    return apiFetch<Project[]>(`${this.baseUrl}/api/projects${qs}`);
   }
 
-  async getProject(id: string): Promise<Project> {
-    return apiFetch<Project>(`${this.baseUrl}/api/projects/${id}`);
+  async getProject(id: string, params?: { includeSummary?: boolean }): Promise<Project> {
+    const qs = params?.includeSummary ? '?include=summary' : '';
+    return apiFetch<Project>(`${this.baseUrl}/api/projects/${id}${qs}`);
   }
 
   async updateProject(id: string, params: { name?: string; description?: string; settings?: Partial<ProjectSettings>; status?: 'active' | 'archived' }): Promise<Project> {

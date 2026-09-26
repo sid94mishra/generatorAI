@@ -42,20 +42,28 @@ export const projectKeys = {
 // Project Queries & Mutations
 // ════════════════════════════════════════════════════════════════
 
-export function useProjects() {
+/**
+ * `includeSummary` (G-13) adds each project's `summary` (Codebases, Active
+ * chats + Needs you, Last run, Worktrees) for the Projects list columns.
+ * Kept a separate query key so a plain list (pickers) and the summary list
+ * (Projects page) cache independently.
+ */
+export function useProjects(options?: { includeSummary?: boolean }) {
   const platform = usePlatform();
+  const includeSummary = options?.includeSummary ?? false;
   return useQuery({
-    queryKey: projectKeys.projects,
-    queryFn: () => platform.listProjects(),
+    queryKey: includeSummary ? [...projectKeys.projects, 'summary'] : projectKeys.projects,
+    queryFn: () => platform.listProjects(includeSummary ? { includeSummary: true } : undefined),
     staleTime: 30_000,
   });
 }
 
-export function useProject(id: string | undefined) {
+export function useProject(id: string | undefined, options?: { includeSummary?: boolean }) {
   const platform = usePlatform();
+  const includeSummary = options?.includeSummary ?? false;
   return useQuery({
-    queryKey: projectKeys.project(id ?? ''),
-    queryFn: () => platform.getProject(id!),
+    queryKey: includeSummary ? [...projectKeys.project(id ?? ''), 'summary'] : projectKeys.project(id ?? ''),
+    queryFn: () => platform.getProject(id!, includeSummary ? { includeSummary: true } : undefined),
     enabled: !!id,
   });
 }

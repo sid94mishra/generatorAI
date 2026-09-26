@@ -39,7 +39,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-10 | Stats summary (Home This week, Workflows strip, automation stats) | P5 (PW later) | P2 | M |
 | G-11 | Recently finished activity | P5 | P2 | M |
 | G-12 | System info (version, database size, disk, agent capacity) — **built (P2-05)** | P5 | P2 | S |
-| G-13 | Project summaries (Projects columns, tab counts) | P5 | P2 | S–M |
+| G-13 | Project summaries (Projects columns, tab counts) — **built (P2-05)** | P5 | P2 | S–M |
 | G-14 | ProjectDetail Chats tab (project filter on the client) — **built (P2-02)** | P5 | P2 (via G-02) | S |
 | G-15 | ProjectDetail Runs tab (`projectId` filter on runs) | P5 | P2 | S |
 | G-16 | Codebase fetch/clone logs and live status | P5 | P2 | M |
@@ -416,6 +416,8 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 
 ### G-13 — Project summaries
 
+**Status: built in P2-05.**
+
 **Elements & boards.** Projects columns: Codebases, Active chats ("3 · 1 needs you"), Last run (status + name + #), Worktrees. ProjectDetail tab counts (Codebases 2, Chats 6, Runs 14). Palette project results.
 
 **Exists today.** `GET /projects?status` (`projects.ts:70`) returns `Project` with no counts. Counts would take N calls: codebases (`:161`), worktrees (`:567`), chats `?projectId`.
@@ -423,6 +425,13 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 **Needed.** `GET /projects?status=&include=summary` → each project plus `summary: { codebases, activeChats, needsYou, running, worktrees: { active, orphaned }, runs, lastRun?: { runId, definitionId, name, status, at } }`. Build it with grouped SQL plus G-01 counts by project. `GET /projects/:id?include=summary` takes the same parameter.
 
 **Owner / phase / effort.** P2 · P5 · **S–M**.
+
+**As built.**
+- **Wire type** `ProjectSummary` added to `Project` (`packages/shared/src/types/Project.ts`) as an optional `summary` field — present only when the caller asked for it, matching the gap's shape exactly (`codebases`, `activeChats`, `needsYou?`, `running?`, `worktrees: { active, orphaned }`, `runs`, `lastRun?`).
+- **Route** (`apps/server/src/routes/projects.ts`): `?include=summary` on the existing `GET /projects` and `GET /projects/:id` — no new endpoint, so no new OpenAPI/routePolicy entry (the base routes were never documented in `openapi.ts` either). Deviated from "grouped SQL" — every source is an **existing read-only repository/service call already exposed on `Container`** (`codebaseService.getByProjectId`, `chatEntityRepo.getByProjectId`, `worktreeService.listWorktrees`, `workflowDefinitionService.listDefinitions`, `workflowRunRepo.getByDefinitionId`, `attentionService.getSnapshot({ projectId })`), joined and aggregated in the route handler. This is deliberate, not a shortcut: `workflowRunRepo`/`workflowDefinitionService` are Workflow-Overhaul-owned engine code (07-phases.md §"Running in parallel"), off-limits for new methods or SQL — only their existing read methods may be called. `needsYou`/`running` are omitted (not `0`) while `attentionService.isAvailable()` is false. Tolerates zero definitions / zero runs cleanly (`runs: 0`, no `lastRun`) for the Workflow Overhaul's run-history migration.
+- **Client:** `HttpPlatformClient.listProjects({ includeSummary })` / `getProject(id, { includeSummary })`; client-core's `projects.list/get({ includeSummary })` (its own, narrower `ProjectSummary` interface — a mobile picker row — gained an optional `summary?: ProjectSummaryDetail` field aliasing the shared type to avoid the name clash). Not added to `IPlatformClient` (same precedent as G-12).
+- **Web hook:** `useProjects({ includeSummary })` / `useProject(id, { includeSummary })` in `hooks/projectQueries.ts`, cached under a separate `'summary'` key segment so plain picker queries and the Projects-page summary query don't collide.
+- **Tests:** `apps/server/src/__tests__/projectSummaryRoute.test.ts` (aggregation math, bucket counts, latest-run selection, omitted-attention path, empty-run-history path), `wireContract.test.ts`, `apps/web/src/__tests__/hooks/projectQueries.test.tsx`.
 
 ### G-14 — ProjectDetail Chats tab
 

@@ -18,7 +18,7 @@ import type {
   ISourceControlProvider,
   PullRequestRef,
 } from '@generatorai/core';
-import type { ProjectCodebase, ProjectPullRequest, ScmPullRequestState } from '@generatorai/shared';
+import type { ProjectCodebase, ProjectPullRequest, ProjectSummary, ScmPullRequestState, WorkflowRun } from '@generatorai/shared';
 import type { Container } from '../composition-root.js';
 
 const upload = multer({
@@ -43,9 +43,81 @@ export function createProjectRoutes(container: Container): Router {
     chatListInvalidator,
     gitManager,
     logger,
+    chatEntityRepo,
+    workflowDefinitionService,
+    workflowRunRepo,
+    attentionService,
   } = container;
 
   const mcpVault = new McpCredentialVault(security.secretStore);
+
+  // G-13 — `?include=summary` on GET /projects and GET /projects/:id.
+  const wantsSummary = (req: { query: Record<string, unknown> }): boolean =>
+    String(req.query['include'] ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .includes('summary');
+
+  /**
+   * Projects columns (Codebases, Active chats + Needs you, Last run, Worktrees)
+   * and the ProjectDetail tab counts. Every source is an existing read-only
+   * repository/service call — no new engine code, no migration (05-gap-matrix
+   * §G-13). `needsYou` / `running` are omitted (not `0`, D-36) while the
+   * attention feed has not produced its first snapshot yet.
+   */
+  async function buildProjectSummary(projectId: string): Promise<ProjectSummary> {
+    const [codebases, chats, worktrees, definitions] = await Promise.all([
+      codebaseService.getByProjectId(projectId),
+      chatEntityRepo.getByProjectId(projectId),
+      worktreeService.listWorktrees(projectId),
+      workflowDefinitionService.listDefinitions(projectId),
+    ]);
+
+    const activeChats = chats.filter((c) => c.status === 'active').length;
+
+    let needsYou: number | undefined;
+    let running: number | undefined;
+    if (attentionService.isAvailable()) {
+      const snapshot = attentionService.getSnapshot({ projectId });
+      needsYou = snapshot.needsYou.length;
+      running = snapshot.running.length;
+    }
+
+    const worktreeActive = worktrees.filter((w) => w.status === 'active').length;
+    const worktreeOrphaned = worktrees.filter((w) => w.status === 'orphaned').length;
+
+    // G-10/G-15 note: the Workflow Overhaul's migration drops run history, so
+    // this must tolerate zero definitions / zero runs cleanly (empty arrays
+    // flow straight through to `runs: 0` and no `lastRun`, never invented).
+    const runsByDefinition = await Promise.all(
+      definitions.map((d) => workflowRunRepo.getByDefinitionId(d.id)),
+    );
+    const allRuns: WorkflowRun[] = runsByDefinition.flat();
+    const runAt = (r: WorkflowRun): number => (r.completedAt ?? r.startedAt ?? r.createdAt).getTime();
+
+    let lastRun: ProjectSummary['lastRun'];
+    if (allRuns.length > 0) {
+      const latest = allRuns.reduce((a, b) => (runAt(b) > runAt(a) ? b : a));
+      const definition = definitions.find((d) => d.id === latest.workflowDefinitionId);
+      lastRun = {
+        runId: latest.id,
+        definitionId: latest.workflowDefinitionId,
+        name: definition?.name ?? latest.name,
+        status: latest.status,
+        at: new Date(runAt(latest)).toISOString(),
+      };
+    }
+
+    return {
+      codebases: codebases.length,
+      activeChats,
+      ...(needsYou !== undefined ? { needsYou } : {}),
+      ...(running !== undefined ? { running } : {}),
+      worktrees: { active: worktreeActive, orphaned: worktreeOrphaned },
+      runs: allRuns.length,
+      ...(lastRun ? { lastRun } : {}),
+    };
+  }
 
   // ════════════════════════════════════════════════════════════════
   // Project CRUD
@@ -73,7 +145,14 @@ export function createProjectRoutes(container: Container): Router {
       const status = req.query['status'] as string | undefined;
       const filter = status ? { status: status as 'active' | 'archived' } : undefined;
       const projects = await projectService.listProjects(filter);
-      res.json(projects);
+      if (!wantsSummary(req)) {
+        res.json(projects);
+        return;
+      }
+      const withSummary = await Promise.all(
+        projects.map(async (project) => ({ ...project, summary: await buildProjectSummary(project.id) })),
+      );
+      res.json(withSummary);
     } catch (err) {
       next(err);
     }
@@ -83,7 +162,11 @@ export function createProjectRoutes(container: Container): Router {
   router.get('/:id', async (req, res, next) => {
     try {
       const project = await projectService.getProjectWithCodebases(String(req.params['id']));
-      res.json(project);
+      if (!wantsSummary(req)) {
+        res.json(project);
+        return;
+      }
+      res.json({ ...project, summary: await buildProjectSummary(project.id) });
     } catch (err) {
       next(err);
     }

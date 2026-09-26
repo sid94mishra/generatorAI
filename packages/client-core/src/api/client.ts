@@ -23,6 +23,7 @@ import {
   type RunStatus,
   type StageRunStatus,
   type SystemInfo,
+  type ProjectSummary as ProjectSummaryDetail,
 } from '@generatorai/shared';
 
 export interface ApiFetch {
@@ -664,6 +665,12 @@ export interface ProjectSummary {
   description?: string;
   status?: string;
   createdAt: Timestamp;
+  /**
+   * G-13 — Codebases, Active chats + Needs you, Last run, Worktrees. Present
+   * only when the call passed `includeSummary: true`; absent otherwise, and
+   * absent (never `0`) on fields the server could not answer (D-36).
+   */
+  summary?: ProjectSummaryDetail;
 }
 
 export interface CodebaseSummary {
@@ -1552,12 +1559,17 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     projects: {
-      list: () => request<ProjectSummary[]>(fetchImpl, '/api/projects'),
+      /** `includeSummary` (G-13) adds each project's `summary` for a Projects list screen. */
+      list: (params?: { includeSummary?: boolean }) =>
+        request<ProjectSummary[]>(
+          fetchImpl,
+          `/api/projects${params?.includeSummary ? '?include=summary' : ''}`,
+        ),
 
-      get: (id: string) =>
+      get: (id: string, params?: { includeSummary?: boolean }) =>
         request<ProjectSummary & { codebases: CodebaseSummary[] }>(
           fetchImpl,
-          `/api/projects/${id}`,
+          `/api/projects/${id}${params?.includeSummary ? '?include=summary' : ''}`,
         ),
 
       codebases: (id: string) =>
