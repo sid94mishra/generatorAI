@@ -28,7 +28,8 @@
 
 import { useMemo, useState } from 'react';
 import { Link as RouterLink, useNavigate } from 'react-router';
-import { riskFlags, type RiskFlag } from '@generatorai/workflow-spec';
+import { riskFlags } from '@generatorai/workflow-spec';
+import { DANGER, RISK_LABELS } from '@generatorai/shared/ui-contract';
 import { resolveStatus, type StatusValue } from '@generatorai/shared';
 import {
   appPath,
@@ -56,22 +57,6 @@ import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
 import { Icon } from '@/ui/icons/Icon.js';
 import { cn } from '@/ui/lib/cn.js';
 
-/** What a run may do, in words (shared with the builder's agent-draft banner). */
-export const RISK_LABELS: Record<RiskFlag, string> = {
-  writes_files: 'Writes files',
-  commits: 'Commits',
-  pushes: 'Pushes',
-  opens_pr: 'Opens a pull request',
-  bypass_permissions: 'Bypasses permission prompts',
-  runs_repo_code: "Runs the repository's code",
-  starts_other_workflows: 'Starts other workflows',
-  uses_workflow_tools: 'An agent can run or author workflows',
-  worktree_per_item: 'A worktree per item',
-  plans_stages_at_run_time: 'An agent plans stages at run time',
-};
-
-/** Risks that leave the machine or skip a person: drawn in `err`, the rest in `warn`. */
-export const DANGER: ReadonlySet<RiskFlag> = new Set<RiskFlag>(['pushes', 'opens_pr', 'bypass_permissions']);
 
 const CARD = 'flex flex-col rounded-card border border-line bg-raised text-ui';
 

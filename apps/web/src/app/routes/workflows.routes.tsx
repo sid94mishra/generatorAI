@@ -1,7 +1,7 @@
 // docs/redesign/07-phases.md §P1-S3. The Workflows list, the definition page
 // and New workflow are on the kit (PW-a: `features/workflows`, own PageHeader);
-// the builder and run pages still wear `legacyHeader: true` until their ports
-// land; the builder routes force the rail (06 §2.5).
+// the builder (PW-b, `features/workflows/builder`) and the run page (PW-c) are
+// on the kit too; the builder route forces the rail (06 §2.5).
 import type { RouteObject } from 'react-router';
 import { defineRoute } from './defineRoute.js';
 
@@ -23,8 +23,8 @@ export const workflowsRoutes: RouteObject[] = [
   ),
   defineRoute(
     'workflows/:id/edit',
-    () => import('@/pages/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })),
-    { legacyHeader: true, forceRail: true, nav: 'workflows', title: 'Workflow Builder' },
+    () => import('@/features/workflows/builder/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })),
+    { legacyHeader: false, forceRail: true, nav: 'workflows', title: 'Workflow Builder' },
   ),
   defineRoute(
     'workflows/:id/runs/:runId',

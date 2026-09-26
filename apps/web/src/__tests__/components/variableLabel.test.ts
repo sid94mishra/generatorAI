@@ -3,7 +3,7 @@
 // "Variable 1", which tells whoever starts the run nothing at all.
 
 import { describe, expect, it } from 'vitest';
-import { isAutoLabel, parseOptions, variableNameError } from '@/components/workflow/settings/VariablesTab.js';
+import { isAutoLabel, parseOptions, variableNameError } from '@/features/workflows/builder/settings/variables.js';
 
 describe('isAutoLabel', () => {
   it('recognises the label generated alongside the name', () => {

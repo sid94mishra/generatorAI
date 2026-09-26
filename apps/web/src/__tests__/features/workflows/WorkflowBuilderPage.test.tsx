@@ -13,7 +13,7 @@
 //     AND on error, and `isNew` is false once `id` is present), so A's
 //     content stayed on screen under B's URL.
 //
-// `DAGCanvas` is mocked out: it pulls in `@xyflow/react`'s canvas machinery
+// `BuilderCanvas` is mocked out: it pulls in `@xyflow/react`'s canvas machinery
 // (ResizeObserver-driven layout), which is irrelevant to what this page
 // itself is responsible for — routing the loading/error/loaded states and
 // resetting the builder store on navigation.
@@ -33,17 +33,17 @@ import { RouterProvider } from 'react-router/dom';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { PlatformContext } from '@/providers/PlatformProvider.js';
 import { ThemeProvider } from '@/providers/ThemeProvider.js';
-import { MockPlatformClient, createMockDefinition, createMockGraph } from '../helpers/MockPlatformClient.js';
+import { MockPlatformClient, createMockDefinition, createMockGraph } from '../../helpers/MockPlatformClient.js';
 import { newAgentStage, useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { workflowKeys } from '@/hooks/workflowQueries.js';
 import { ApiError } from '@/platform/apiFetch.js';
 import type { WorkflowDefinitionRecord } from '@generatorai/workflow-spec';
 
-vi.mock('@/components/workflow/DAGCanvas.js', () => ({
-  DAGCanvas: () => <div data-testid="dag-canvas" />,
+vi.mock('@/features/workflows/builder/canvas/BuilderCanvas.js', () => ({
+  BuilderCanvas: () => <div data-testid="dag-canvas" />,
 }));
 
-import { WorkflowBuilderPage } from '@/pages/WorkflowBuilderPage.js';
+import { WorkflowBuilderPage } from '@/features/workflows/builder/WorkflowBuilderPage.js';
 
 /** A definition with one valid stage, so the builder's client validation passes. */
 function makeDefinition(overrides: Partial<WorkflowDefinitionRecord> = {}, name = 'Definition A'): WorkflowDefinitionRecord {

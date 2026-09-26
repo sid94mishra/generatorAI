@@ -313,12 +313,13 @@ export default [
               from: { element: { type: 'features' } },
               allow: { to: { element: { type: 'features', captured: { domain: '{{ from.element.captured.domain }}' } } } },
             },
-            // Migration scaffolding; removed in P5-09. ChatsList's "New chat"
-            // button keeps opening the legacy dialog until the new create-chat
-            // page/dialog lands (07-phases.md P3-07, 04-screen-map.md §2.1 note).
+            // Migration scaffolding (PW-b): the ported workflow builder opens the
+            // legacy Run dialog until its kit port (L-05 RunDialog, PW) lands;
+            // then this entry goes. (The P3-07 CreateChatDialog entry it replaces
+            // was stale: that file was deleted in P5-09.)
             {
               from: { element: { type: 'features' } },
-              allow: { to: { element: { type: 'legacy' }, file: { path: ['apps/web/src/components/chat/CreateChatDialog.tsx'] } } },
+              allow: { to: { element: { type: 'legacy' }, file: { path: ['apps/web/src/components/workflow/RunDialog.tsx'] } } },
             },
             { from: { element: { type: 'app' } }, allow: toTypes('ui', 'blocks', 'features', 'data', 'platform', 'legacy') },
             { from: { element: { type: 'data' } }, allow: toTypes('data', 'platform') },
