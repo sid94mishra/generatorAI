@@ -34,7 +34,7 @@ import { SegmentedControl, type SegmentedItem } from '@/ui/primitives/SegmentedC
 import { Table, TableBody, TableCell, TableHeadCell, TableHeader, TableRow } from '@/ui/primitives/Table/Table.js';
 import { DecisionCard } from './DecisionCard.js';
 import { BodyRows, type ControlFlowNodeProps } from './ControlFlowNode.js';
-import { IterationsTable, outcomeStatus } from './IterationsTable.js';
+import { LoopIterationsTable, outcomeStatus } from './LoopIterationsTable.js';
 import { formatUsd } from '../model/format.js';
 import { loopBadge, loopExitText, loopRulesText } from '../model/loopView.js';
 import type { RenderStage } from '../model/renderStage.js';
@@ -228,7 +228,7 @@ export function LoopRow({ runId, stage, bodies, focusedId, showConnector, render
 
           {tab === 'all' && (
             <>
-              <IterationsTable rows={rows ?? []} liveK={liveK} />
+              <LoopIterationsTable rows={rows ?? []} liveK={liveK} />
               {iterations.map((k) => (
                 <div key={k} className="flex flex-col gap-2">
                   <IterationDivider k={k} row={rowByK.get(k)} />

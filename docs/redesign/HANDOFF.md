@@ -201,7 +201,7 @@ One vocabulary for chats, runs, stages, automations and tasks: `@generatorai/sha
 | WF-16 | StageKindPalette | PW | not built; `primitives/Autocomplete` exists |
 | WF-17 | StageMessageBox | Redesign P4 | **exists**: `Composer variant="stage"` (§4); PW wires `customSendFn` |
 | WF-18 | ExitRuleTable / CarryTable | PW | not built; `NumberField`, `Table`, `SegmentedControl` exist |
-| WF-19 | IterationsTable | PW | **built (PW-c)**: `features/workflows/run/controlFlow/IterationsTable.tsx` |
+| WF-19 | IterationsTable | PW | **exists** (PW-d): `blocks/workflow` `IterationsTable` (column-driven); the run page binds loop iterations in `features/workflows/run/controlFlow/LoopIterationsTable.tsx` |
 | WF-20 | TriggerChip | Redesign P5 | **exists** (PW-a): `blocks/workflow` `TriggerChip` (+ `iconOnly`), `RUN_TRIGGERS` |
 
 Extension points the Overhaul plugs into without reopening chat code: tool-card registry (§3), composer tool toggles
