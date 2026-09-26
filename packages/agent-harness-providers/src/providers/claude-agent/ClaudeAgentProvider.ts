@@ -278,6 +278,12 @@ interface TurnState {
   localCommand: boolean;
   truncationStopReason?: string;
   releaseExecution?: () => void;
+  /**
+   * Whether the turn holds a real `provider:claude-agent` permit (`held`), gave
+   * it back while a tool blocks (`yielded`, see `yieldTurnPermit`), or never had
+   * one (undefined: an admitted workflow-stage turn, or no supervisor).
+   */
+  permit?: 'held' | 'yielded';
   /** Set by Stop. Everything the runtime sends afterwards is discarded. */
   aborted: boolean;
   cancellation?: CancellationInFlight;
@@ -1832,6 +1838,7 @@ export class ClaudeAgentProvider implements IAgentHarness {
     };
     this.activeQueries.set(conversationId, activeQuery);
     const turn = this.beginTurn(conversationId, activeQuery, start, releaseExecution, prompt);
+    if (this.supervisor && turnOptions?.admitted !== true) turn.permit = 'held';
 
     if (!persistent) {
       // One-shot fallback: a string prompt cannot carry content blocks, so
@@ -3209,6 +3216,50 @@ export class ClaudeAgentProvider implements IAgentHarness {
       queued.delete(withdraw);
       if (queued.size === 0 && this.queuedTurns.get(conversationId) === queued) this.queuedTurns.delete(conversationId);
     }
+  }
+
+  /**
+   * ECON-R7 — give back the permit the turn in flight holds while one of its
+   * tools blocks on other work (a workflow tool waiting for a run that needs
+   * this same provider key). The returned function takes a permit again (it
+   * may wait; a stop withdraws the wait) and puts it back on the turn, so the
+   * turn's settle releases it. `undefined` when the turn holds none, or has
+   * already yielded it.
+   */
+  yieldTurnPermit(conversationId: string): (() => Promise<void>) | undefined {
+    const turn = this.turns.get(conversationId);
+    const supervisor = this.supervisor;
+    if (!turn || turn.settled || turn.permit !== 'held' || !supervisor) return undefined;
+    turn.permit = 'yielded';
+    const release = turn.releaseExecution;
+    turn.releaseExecution = undefined;
+    release?.();
+
+    return async () => {
+      const current = () => !turn.settled && this.turns.get(conversationId) === turn;
+      if (turn.permit !== 'yielded' || !current()) return;
+      const stopSignal = turn.activeQuery.abortController.signal;
+      if (stopSignal.aborted) return;
+      // Withdrawn by a stop, or by the turn settling while it waits.
+      const withdraw = new AbortController();
+      const onEnd = () => withdraw.abort();
+      stopSignal.addEventListener('abort', onEnd, { once: true });
+      void turn.done.then(onEnd);
+      try {
+        const retaken = await supervisor.acquireExecution(withdraw.signal);
+        if (withdraw.signal.aborted || !current()) {
+          retaken();
+          return;
+        }
+        turn.releaseExecution = retaken;
+        turn.permit = 'held';
+      } catch (err) {
+        if (withdraw.signal.aborted) return;
+        throw err;
+      } finally {
+        stopSignal.removeEventListener('abort', onEnd);
+      }
+    };
   }
 
   /** Register per-turn bookkeeping and return it. */

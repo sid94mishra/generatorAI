@@ -183,6 +183,21 @@ describe('Stop on a persistent Claude session settles the turn', () => {
     expect(internals.turns.has('q1')).toBe(false);
   });
 
+  it('ECON-R7: a turn yields its permit while a tool blocks and takes it back', async () => {
+    const { turn } = await turnInFlight('y1');
+    (turn as unknown as { permit?: string }).permit = 'held';
+
+    const takeBack = provider.yieldTurnPermit('y1');
+    expect(takeBack).toBeTypeOf('function');
+    expect(supervisor.snapshot().activeExecutions).toBe(0);
+    expect(provider.yieldTurnPermit('y1')).toBeUndefined();
+
+    await takeBack!();
+    expect(supervisor.snapshot().activeExecutions).toBe(1);
+    (provider as unknown as { completeTurn: (t: unknown, s: string) => void }).completeTurn(turn, 'completed');
+    expect(supervisor.snapshot().activeExecutions).toBe(0);
+  });
+
   it('reports the permit accounting in runtime diagnostics', async () => {
     await turnInFlight('c5');
     expect(provider.runtimeDiagnostics()).toMatchObject({ turnsInFlight: 1, maxConcurrentTurns: 1, turnsQueued: 0 });

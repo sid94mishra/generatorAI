@@ -605,6 +605,16 @@ export class MultiHarness implements IAgentHarness {
     return adapter?.getProviderSessionId?.(conversationId);
   }
 
+  /** ECON-R7 — the owning provider gives back the turn permit while a tool blocks. */
+  yieldTurnPermit(conversationId: string): (() => Promise<void>) | undefined {
+    if (this.orphanedInstanceFor(conversationId)) return undefined;
+    const instanceId = this.resolveInstance(conversationId);
+    const adapter = instanceId
+      ? this.registry.peekInstance(instanceId)
+      : this.registry.peek(this.ownerOf(conversationId));
+    return adapter?.yieldTurnPermit?.(conversationId);
+  }
+
   /**
    * A fork stays with the provider that owns the source: the new conversation
    * is recorded under the same owner (and instance) before the adapter is
