@@ -7,7 +7,9 @@ the same validator before anything is stored. Every field, with its type and def
 generated [FIELDS.md](../../docs/workflow-overhaul/generated/FIELDS.md); the JSON Schema is
 `@generatorai/workflow-spec/workflow.schema.json`.
 
-Stage configuration is covered in [feature-stages.md](./feature-stages.md).
+Stage configuration is covered in [feature-stages.md](./feature-stages.md). The control-flow
+kinds — `check`, `loop`, `map`, `subworkflow`, `wait` — their semantics, the operator commands
+and the generated templates are in [feature-workflow-control-flow.md](./feature-workflow-control-flow.md).
 
 ---
 

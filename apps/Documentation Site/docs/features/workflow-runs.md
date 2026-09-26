@@ -75,4 +75,4 @@ For a brownfield change, use stages for source analysis, implementation, indepen
 
 ## Configuration and worked examples
 
-[Workflows](../configuration/workflows.md), [Examples](../configuration/examples.md). See the [feature recipes](../guide/feature-recipes.md) for steps and observable results.
+[Workflows](../configuration/workflows.md), [Examples](../configuration/examples.md), [Control flow and decisions](./workflow-control-flow.md). See the [feature recipes](../guide/feature-recipes.md) for steps and observable results.

@@ -12,6 +12,12 @@ Nested fields apply only when their parent/union variant is present. Arrays use 
 | --- | --- | --- | --- |
 | (value) | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
 
+## CodebaseAliasSchema
+
+| Field | Type / choices | Input / default | Constraints |
+| --- | --- | --- | --- |
+| (value) | string | `required` | min 1; max 50; regex /^[A-Za-z0-9._-]+$/ |
+
 ## ExprSchema
 
 | Field | Type / choices | Input / default | Constraints |
@@ -51,7 +57,7 @@ A `secretref:` reference into the secret store. Literal secrets are never accept
 | Field | Type / choices | Input / default | Constraints |
 | --- | --- | --- | --- |
 | name | string | `required` | min 1; max 64; regex /^[A-Za-z_][A-Za-z0-9_]*$/ |
-| type | "string" / "number" / "boolean" / "choice" / "text" | `required` | — |
+| type | "string" / "number" / "boolean" / "choice" / "text" / "list" / "json" | `required` | — |
 | label | string | `required` | min 1; max 200 |
 | description | string | `optional` | max 2000 |
 | required | boolean | `default false` | — |
@@ -190,7 +196,7 @@ A saga compensation for a completed stage, run in reverse completion order.
 
 | Field | Type / choices | Input / default | Constraints |
 | --- | --- | --- | --- |
-| (value) | variants by type (object / object / object / object / object / object / object) | `required` | — |
+| (value) | variants by type (object / object / object / object / object / object / object / object) | `required` | — |
 | &lt;variant 1&gt; | object | `required` | unknown keys: strict |
 | &lt;variant 1&gt;.type | "contains" | `required` | — |
 | &lt;variant 1&gt;.value | string | `required` | min 1; max 10000 |
@@ -223,6 +229,13 @@ A saga compensation for a completed stage, run in reverse completion order.
 | &lt;variant 7&gt;.type | "json_schema" | `required` | — |
 | &lt;variant 7&gt;.schema | map of unknown | `required` | — |
 | &lt;variant 7&gt;.message | string | `optional` | max 1000 |
+| &lt;variant 8&gt; | object | `required` | unknown keys: strict |
+| &lt;variant 8&gt;.type | "judge" | `required` | — |
+| &lt;variant 8&gt;.rubric | string | `required` | min 1; max 10000 |
+| &lt;variant 8&gt;.threshold | number | `required` | min 0; max 10 |
+| &lt;variant 8&gt;.model | string | `optional` | min 1; max 200 |
+| &lt;variant 8&gt;.include | array of "diff" | `optional` | maxLength 1 |
+| &lt;variant 8&gt;.message | string | `optional` | max 1000 |
 
 ## Complete validation contract
 
@@ -242,6 +255,7 @@ The following source snapshot contains the additional refinements, transformatio
 
 import { z } from 'zod';
 import {
+  CODEBASE_ALIAS_PATTERN,
   FORBIDDEN_VARIABLE_NAME_PATTERN,
   MAX_EXPRESSION_LENGTH,
   MAX_TEMPLATE_LENGTH,
@@ -264,6 +278,13 @@ export const StageKeySchema = z
   .regex(STAGE_KEY_PATTERN, 'Stage keys are lower snake case: a letter, then letters, digits or _ (at most 48)')
   .describe('Stable stage key, unique per workflow; edges, context sources and expressions refer to stages by key');
 export type StageKey = z.infer<typeof StageKeySchema>;
+
+export const CodebaseAliasSchema = z
+  .string()
+  .min(1)
+  .max(50)
+  .regex(CODEBASE_ALIAS_PATTERN, 'Aliases may contain letters, digits, . _ -')
+  .describe('Alias of a project codebase');
 
 export const ExprSchema = z
   .string()
@@ -303,7 +324,8 @@ export type PromptDefinition = z.infer<typeof PromptDefinitionSchema>;
 
 // ── Variables ────────────────────────────────────────────────────
 
-export const VARIABLE_TYPES = ['string', 'number', 'boolean', 'choice', 'text'] as const;
+/** `list` is a list of strings; `json` is any JSON value (P05, P5-23). */
+export const VARIABLE_TYPES = ['string', 'number', 'boolean', 'choice', 'text', 'list', 'json'] as const;
 export type VariableType = (typeof VARIABLE_TYPES)[number];
 
 export const VariableDefinitionSchema = z
@@ -314,7 +336,9 @@ export const VariableDefinitionSchema = z
       .max(64)
       .regex(VARIABLE_NAME_PATTERN, 'Variable names are identifiers')
       .describe('Identifier referenced as variables.<name> (or bare {{name}} in templates)'),
-    type: z.enum(VARIABLE_TYPES).describe('Value type; choice restricts the value to `options`'),
+    type: z
+      .enum(VARIABLE_TYPES)
+      .describe('Value type; choice restricts the value to `options`; list is a list of strings; json is any JSON value'),
     label: z.string().min(1).max(200).describe('Label shown in the run form'),
     description: z.string().max(2000).optional().describe('Help text shown in the run form'),
     required: z.boolean().default(false).describe('Whether a run must supply a value (or rely on the default)'),
@@ -617,6 +641,23 @@ export const ResultValidationRuleSchema = z
       })
       .strict()
       .describe('JSON Schema rule'),
+    z
+      .object({
+        type: z
+          .literal('judge')
+          .describe('A model scores the output 0-10 against a rubric, in a fresh session without tools, after the hard rules; below the threshold the stage repairs with the reasons'),
+        rubric: z.string().min(1).max(10_000).describe('What a good output is: the criteria the judge scores against'),
+        threshold: z.number().min(0).max(10).describe('The lowest passing score (0-10)'),
+        model: z.string().min(1).max(200).optional().describe("Catalog id of the judge's model; omitted uses the stage's"),
+        include: z
+          .array(z.enum(['diff']))
+          .max(1)
+          .optional()
+          .describe('Extra evidence for the judge: diff = the working-tree diff of the stage mount'),
+        message: ruleMessage,
+      })
+      .strict()
+      .describe('Judge rule (use a judge STAGE with a score schema when a loop should decide instead)'),
   ])
   .describe('A hard rule the stage output must satisfy before the stage completes');
 export type ResultValidationRule = z.infer<typeof ResultValidationRuleSchema>;

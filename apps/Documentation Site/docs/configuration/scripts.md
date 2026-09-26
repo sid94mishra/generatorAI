@@ -134,7 +134,7 @@ A template file (`templates/system/*.json`): an id, a category and a graph.
 | graph.workflow.variables | array of object | `default []` | maxLength 50 |
 | graph.workflow.variables[] | object | `required` | unknown keys: strict; refinement |
 | graph.workflow.variables[].name | string | `required` | min 1; max 64; regex /^[A-Za-z_][A-Za-z0-9_]*$/ |
-| graph.workflow.variables[].type | "string" / "number" / "boolean" / "choice" / "text" | `required` | — |
+| graph.workflow.variables[].type | "string" / "number" / "boolean" / "choice" / "text" / "list" / "json" | `required` | — |
 | graph.workflow.variables[].label | string | `required` | min 1; max 200 |
 | graph.workflow.variables[].description | string | `optional` | max 2000 |
 | graph.workflow.variables[].required | boolean | `default false` | — |
@@ -296,12 +296,13 @@ A template file (`templates/system/*.json`): an id, a category and a graph.
 | graph.workflow.budget.maxTurns | number | `optional` | int; min 1; max 100000 |
 | graph.workflow.budget.maxCostUsd | number | `optional` | min 0 (exclusive); max 100000 |
 | graph.workflow.budget.maxWallClockMs | number | `optional` | int; min 1000; max 604800000 |
+| graph.workflow.budget.maxTokens | number | `optional` | int; min 1; max 10000000000 |
 | graph.workflow.maxParallel | number | `optional` | int; min 1; max 32 |
 | graph.workflow.outputs | map of string | `optional` | — |
 | graph.workflow.tags | array of string | `default []` | maxLength 20 |
 | graph.workflow.projectId | string | `optional; null accepted` | uuid |
-| graph.stages | array of variants by kind (object) | `required` | maxLength 100 |
-| graph.stages[] | variants by kind (object) | `required` | — |
+| graph.stages | array of variants by kind (object / object / object / object / object / object) | `required` | maxLength 100 |
+| graph.stages[] | variants by kind (object / object / object / object / object / object) | `required` | — |
 | graph.stages[]&lt;variant 1&gt; | object | `required` | unknown keys: strict |
 | graph.stages[]&lt;variant 1&gt;.key | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
 | graph.stages[]&lt;variant 1&gt;.name | string | `required` | min 1; max 200 |
@@ -432,6 +433,7 @@ A template file (`templates/system/*.json`): an id, a category and a graph.
 | graph.stages[]&lt;variant 1&gt;.session.widgets | boolean | `optional` | — |
 | graph.stages[]&lt;variant 1&gt;.session.orchestrator | boolean | `optional` | — |
 | graph.stages[]&lt;variant 1&gt;.sessionReuse | "fresh" / "continue" | `default "fresh"` | — |
+| graph.stages[]&lt;variant 1&gt;.compactAfter | number | `optional` | int; min 1; max 20 |
 | graph.stages[]&lt;variant 1&gt;.sessionGroup | string | `optional` | regex /^[a-z][a-z0-9_]{0,47}$/ |
 | graph.stages[]&lt;variant 1&gt;.context | object | `default {}` | unknown keys: strict |
 | graph.stages[]&lt;variant 1&gt;.context.from | array of string | `optional` | maxLength 50 |
@@ -441,8 +443,8 @@ A template file (`templates/system/*.json`): an id, a category and a graph.
 | graph.stages[]&lt;variant 1&gt;.output.schema | map of unknown | `optional` | — |
 | graph.stages[]&lt;variant 1&gt;.output.extraction | "auto" / "native" / "tool" / "final_json_block" | `default "auto"` | — |
 | graph.stages[]&lt;variant 1&gt;.output.instructions | string | `optional` | max 5000 |
-| graph.stages[]&lt;variant 1&gt;.output.rules | array of variants by type (object / object / object / object / object / object / object) | `default []` | maxLength 20 |
-| graph.stages[]&lt;variant 1&gt;.output.rules[] | variants by type (object / object / object / object / object / object / object) | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules | array of variants by type (object / object / object / object / object / object / object / object) | `default []` | maxLength 20 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[] | variants by type (object / object / object / object / object / object / object / object) | `required` | — |
 | graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 1&gt; | object | `required` | unknown keys: strict |
 | graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 1&gt;.type | "contains" | `required` | — |
 | graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 1&gt;.value | string | `required` | min 1; max 10000 |
@@ -475,13 +477,20 @@ A template file (`templates/system/*.json`): an id, a category and a graph.
 | graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 7&gt;.type | "json_schema" | `required` | — |
 | graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 7&gt;.schema | map of unknown | `required` | — |
 | graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 7&gt;.message | string | `optional` | max 1000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 8&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 8&gt;.type | "judge" | `required` | — |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 8&gt;.rubric | string | `required` | min 1; max 10000 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 8&gt;.threshold | number | `required` | min 0; max 10 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 8&gt;.model | string | `optional` | min 1; max 200 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 8&gt;.include | array of "diff" | `optional` | maxLength 1 |
+| graph.stages[]&lt;variant 1&gt;.output.rules[]&lt;variant 8&gt;.message | string | `optional` | max 1000 |
 | graph.stages[]&lt;variant 1&gt;.retry | object | `optional` | unknown keys: strict |
 | graph.stages[]&lt;variant 1&gt;.retry.maxAttempts | number | `default 2` | int; min 1; max 10 |
 | graph.stages[]&lt;variant 1&gt;.retry.initialDelayMs | number | `default 2000` | int; min 0; max 3600000 |
 | graph.stages[]&lt;variant 1&gt;.retry.backoffMultiplier | number | `default 2` | min 1; max 10 |
 | graph.stages[]&lt;variant 1&gt;.retry.maxDelayMs | number | `default 60000` | int; min 0; max 3600000 |
 | graph.stages[]&lt;variant 1&gt;.retry.jitter | "full" / "equal" / "none" | `default "full"` | — |
-| graph.stages[]&lt;variant 1&gt;.retry.retryOn | array of "rate_limited" / "overloaded" / "provider_5xx" / "transport" / "provider_crashed" / "idle_timeout" / "attempt_timeout" / "auth" / "model_not_found" / "quota_exhausted" / "context_overflow" / "max_turns" / "budget_exceeded" / "config_invalid" / "agent_not_found" / "agent_disabled" / "pre_run_hook_abort" / "rejected_by_human" / "pause_expired" / "condition_error" / "queue_timeout" / "output_schema" / "validation_rule" / "missing_artifact" / "process_restart_unsafe" / "lease_expired" | `optional` | maxLength 40 |
+| graph.stages[]&lt;variant 1&gt;.retry.retryOn | array of "rate_limited" / "overloaded" / "provider_5xx" / "transport" / "provider_crashed" / "idle_timeout" / "attempt_timeout" / "auth" / "model_not_found" / "quota_exhausted" / "context_overflow" / "max_turns" / "budget_exceeded" / "config_invalid" / "agent_not_found" / "agent_disabled" / "pre_run_hook_abort" / "rejected_by_human" / "pause_expired" / "condition_error" / "queue_timeout" / "check_launch_failed" / "check_failed" / "loop_body_failed" / "loop_exit_fail" / "loop_limit" / "loop_wall_clock" / "loop_carry_too_large" / "restore_failed" / "map_items_invalid" / "map_too_large" / "map_duplicate_item_key" / "map_tolerance_exceeded" / "mount_fork_failed" / "item_setup_failed" / "merge_conflict" / "merge_failed" / "subworkflow_start_failed" / "subworkflow_output_drift" / "subworkflow_failed" / "wait_timeout" / "output_schema" / "validation_rule" / "judge_below_threshold" / "missing_artifact" / "process_restart_unsafe" / "lease_expired" | `optional` | maxLength 40 |
 | graph.stages[]&lt;variant 1&gt;.retry.mode | "resume" / "restart" | `default "resume"` | — |
 | graph.stages[]&lt;variant 1&gt;.retry.restoreCheckpointOnRestart | boolean | `default true` | — |
 | graph.stages[]&lt;variant 1&gt;.repair | object | `optional` | unknown keys: strict |
@@ -497,6 +506,7 @@ A template file (`templates/system/*.json`): an id, a category and a graph.
 | graph.stages[]&lt;variant 1&gt;.budget.maxTurns | number | `optional` | int; min 1; max 100000 |
 | graph.stages[]&lt;variant 1&gt;.budget.maxCostUsd | number | `optional` | min 0 (exclusive); max 100000 |
 | graph.stages[]&lt;variant 1&gt;.budget.maxWallClockMs | number | `optional` | int; min 1000; max 604800000 |
+| graph.stages[]&lt;variant 1&gt;.budget.maxTokens | number | `optional` | int; min 1; max 10000000000 |
 | graph.stages[]&lt;variant 1&gt;.approval | object | `optional` | unknown keys: strict |
 | graph.stages[]&lt;variant 1&gt;.approval.prompt | string | `optional` | max 5000 |
 | graph.stages[]&lt;variant 1&gt;.approval.allowChanges | boolean | `default true` | — |
@@ -530,6 +540,262 @@ A template file (`templates/system/*.json`): an id, a category and a graph.
 | graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 3&gt;.handlerName | string | `optional` | max 200 |
 | graph.stages[]&lt;variant 1&gt;.hooks[].config&lt;variant 3&gt;.args | map of unknown | `optional` | — |
 | graph.stages[]&lt;variant 1&gt;.hooks[].phase | "pre_run" / "post_run" / "pre_prompt" / "post_prompt" / "on_error" / "on_cancel" / "pre_tool_use" / "post_tool_use" / "on_message" / "on_reasoning" / "on_session_start" / "on_session_idle" / "on_session_error" / "on_session_cancelled" | `required` | — |
+| graph.stages[]&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.key | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 2&gt;.name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 2&gt;.description | string | `optional` | max 2000 |
+| graph.stages[]&lt;variant 2&gt;.parentKey | string | `optional` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 2&gt;.guard | string | `optional` | min 1; max 2000 |
+| graph.stages[]&lt;variant 2&gt;.join | variants by mode (object / object / object) | `default {"mode":"all"}` | — |
+| graph.stages[]&lt;variant 2&gt;.join&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.join&lt;variant 1&gt;.mode | "all" | `required` | — |
+| graph.stages[]&lt;variant 2&gt;.join&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.join&lt;variant 2&gt;.mode | "any" | `required` | — |
+| graph.stages[]&lt;variant 2&gt;.join&lt;variant 2&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 2&gt;.join&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.join&lt;variant 3&gt;.mode | "n_of_m" | `required` | — |
+| graph.stages[]&lt;variant 2&gt;.join&lt;variant 3&gt;.n | number | `required` | int; min 1; max 100 |
+| graph.stages[]&lt;variant 2&gt;.join&lt;variant 3&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 2&gt;.position | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.position.x | number | `required` | finite |
+| graph.stages[]&lt;variant 2&gt;.position.y | number | `required` | finite |
+| graph.stages[]&lt;variant 2&gt;.compensate | array of object | `optional` | maxLength 20 |
+| graph.stages[]&lt;variant 2&gt;.compensate[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.compensate[].name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 2&gt;.compensate[].config | union (variants by type (object / object / object) / object) | `required` | — |
+| graph.stages[]&lt;variant 2&gt;.compensate[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.compensate[].config&lt;variant 2&gt;.type | "restore_checkpoint" | `required` | — |
+| graph.stages[]&lt;variant 2&gt;.compensate[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.stages[]&lt;variant 2&gt;.compensate[].retries | number | `default 3` | int; min 0; max 5 |
+| graph.stages[]&lt;variant 2&gt;.kind | "check" | `required` | — |
+| graph.stages[]&lt;variant 2&gt;.check | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.check.command | string | `required` | regex /^(?!.*\.\.)[A-Za-z0-9_][A-Za-z0-9_.+-]{0,99}$/ |
+| graph.stages[]&lt;variant 2&gt;.check.args | array of string | `default []` | maxLength 64 |
+| graph.stages[]&lt;variant 2&gt;.check.env | map of string | `optional` | — |
+| graph.stages[]&lt;variant 2&gt;.check.mount | string | `optional` | min 1; max 50; regex /^[A-Za-z0-9._-]+$/ |
+| graph.stages[]&lt;variant 2&gt;.check.cwd | string | `optional` | min 1; max 1000; regex /^(?![\\/])(?![A-Za-z]:)(?!(.*[\\/])?\.\.([\\/]&#124;$)).+$/ |
+| graph.stages[]&lt;variant 2&gt;.check.timeoutMs | number | `default 600000` | int; min 1000; max 3600000 |
+| graph.stages[]&lt;variant 2&gt;.check.parseJson | boolean | `default false` | — |
+| graph.stages[]&lt;variant 2&gt;.check.failOnNonZero | boolean | `default false` | — |
+| graph.stages[]&lt;variant 2&gt;.check.tailBytes | number | `default 16384` | int; min 1024; max 262144 |
+| graph.stages[]&lt;variant 2&gt;.retry | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.retry.maxAttempts | number | `default 2` | int; min 1; max 10 |
+| graph.stages[]&lt;variant 2&gt;.retry.initialDelayMs | number | `default 2000` | int; min 0; max 3600000 |
+| graph.stages[]&lt;variant 2&gt;.retry.backoffMultiplier | number | `default 2` | min 1; max 10 |
+| graph.stages[]&lt;variant 2&gt;.retry.maxDelayMs | number | `default 60000` | int; min 0; max 3600000 |
+| graph.stages[]&lt;variant 2&gt;.retry.jitter | "full" / "equal" / "none" | `default "full"` | — |
+| graph.stages[]&lt;variant 2&gt;.retry.retryOn | array of "rate_limited" / "overloaded" / "provider_5xx" / "transport" / "provider_crashed" / "idle_timeout" / "attempt_timeout" / "auth" / "model_not_found" / "quota_exhausted" / "context_overflow" / "max_turns" / "budget_exceeded" / "config_invalid" / "agent_not_found" / "agent_disabled" / "pre_run_hook_abort" / "rejected_by_human" / "pause_expired" / "condition_error" / "queue_timeout" / "check_launch_failed" / "check_failed" / "loop_body_failed" / "loop_exit_fail" / "loop_limit" / "loop_wall_clock" / "loop_carry_too_large" / "restore_failed" / "map_items_invalid" / "map_too_large" / "map_duplicate_item_key" / "map_tolerance_exceeded" / "mount_fork_failed" / "item_setup_failed" / "merge_conflict" / "merge_failed" / "subworkflow_start_failed" / "subworkflow_output_drift" / "subworkflow_failed" / "wait_timeout" / "output_schema" / "validation_rule" / "judge_below_threshold" / "missing_artifact" / "process_restart_unsafe" / "lease_expired" | `optional` | maxLength 40 |
+| graph.stages[]&lt;variant 2&gt;.retry.mode | "resume" / "restart" | `default "resume"` | — |
+| graph.stages[]&lt;variant 2&gt;.retry.restoreCheckpointOnRestart | boolean | `default true` | — |
+| graph.stages[]&lt;variant 2&gt;.timeouts | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 2&gt;.timeouts.queueMs | number | `optional` | int; min 1000; max 86400000 |
+| graph.stages[]&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.key | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 3&gt;.name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 3&gt;.description | string | `optional` | max 2000 |
+| graph.stages[]&lt;variant 3&gt;.parentKey | string | `optional` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 3&gt;.guard | string | `optional` | min 1; max 2000 |
+| graph.stages[]&lt;variant 3&gt;.join | variants by mode (object / object / object) | `default {"mode":"all"}` | — |
+| graph.stages[]&lt;variant 3&gt;.join&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.join&lt;variant 1&gt;.mode | "all" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.join&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.join&lt;variant 2&gt;.mode | "any" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.join&lt;variant 2&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 3&gt;.join&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.join&lt;variant 3&gt;.mode | "n_of_m" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.join&lt;variant 3&gt;.n | number | `required` | int; min 1; max 100 |
+| graph.stages[]&lt;variant 3&gt;.join&lt;variant 3&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 3&gt;.position | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.position.x | number | `required` | finite |
+| graph.stages[]&lt;variant 3&gt;.position.y | number | `required` | finite |
+| graph.stages[]&lt;variant 3&gt;.compensate | array of object | `optional` | maxLength 20 |
+| graph.stages[]&lt;variant 3&gt;.compensate[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.compensate[].name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 3&gt;.compensate[].config | union (variants by type (object / object / object) / object) | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.compensate[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.compensate[].config&lt;variant 2&gt;.type | "restore_checkpoint" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.compensate[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.stages[]&lt;variant 3&gt;.compensate[].retries | number | `default 3` | int; min 0; max 5 |
+| graph.stages[]&lt;variant 3&gt;.kind | "loop" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.loop | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.loop.maxIterations | number | `required` | int; min 1; max 50 |
+| graph.stages[]&lt;variant 3&gt;.loop.exits | array of object | `default []` | maxLength 12 |
+| graph.stages[]&lt;variant 3&gt;.loop.exits[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.loop.exits[].when | string | `required` | min 1; max 2000 |
+| graph.stages[]&lt;variant 3&gt;.loop.exits[].action | "complete" / "fail" / "pause" / "exhaust" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.exits[].consecutive | number | `default 1` | int; min 1; max 10 |
+| graph.stages[]&lt;variant 3&gt;.loop.exits[].reason | string | `required` | regex /^[a-z][a-z0-9_]{0,39}$/ |
+| graph.stages[]&lt;variant 3&gt;.loop.carryInit | map of string | `optional` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.carry | map of string | `optional` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.carrySchema | map of map of unknown | `optional` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit | variants by mode (object / object / object / object) | `default {"mode":"pause"}` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit&lt;variant 1&gt;.mode | "pause" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit&lt;variant 2&gt;.mode | "fail" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit&lt;variant 3&gt;.mode | "accept_last" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit&lt;variant 4&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit&lt;variant 4&gt;.mode | "accept_best" | `required` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.onLimit&lt;variant 4&gt;.score | string | `required` | min 1; max 2000 |
+| graph.stages[]&lt;variant 3&gt;.loop.wrapUp | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.loop.wrapUp.stage | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 3&gt;.loop.wrapUp.prompt | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.loop.wrapUp.prompt.label | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 3&gt;.loop.wrapUp.prompt.text | string | `required` | min 1; max 100000 |
+| graph.stages[]&lt;variant 3&gt;.loop.wrapUp.maxTurns | number | `default 1` | int; min 1; max 5 |
+| graph.stages[]&lt;variant 3&gt;.loop.wrapUp.maxCostShare | number | `default 0.1` | min 0; max 0.5 |
+| graph.stages[]&lt;variant 3&gt;.loop.onBodyFailure | "fail" / "next_iteration" | `default "fail"` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.checkpointEachIteration | boolean | `optional` | — |
+| graph.stages[]&lt;variant 3&gt;.loop.output | object | `default {}` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.loop.output.select | map of string | `optional` | — |
+| graph.stages[]&lt;variant 3&gt;.budget | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 3&gt;.budget.maxTurns | number | `optional` | int; min 1; max 100000 |
+| graph.stages[]&lt;variant 3&gt;.budget.maxCostUsd | number | `optional` | min 0 (exclusive); max 100000 |
+| graph.stages[]&lt;variant 3&gt;.budget.maxWallClockMs | number | `optional` | int; min 1000; max 604800000 |
+| graph.stages[]&lt;variant 3&gt;.budget.maxTokens | number | `optional` | int; min 1; max 10000000000 |
+| graph.stages[]&lt;variant 4&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.key | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 4&gt;.name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 4&gt;.description | string | `optional` | max 2000 |
+| graph.stages[]&lt;variant 4&gt;.parentKey | string | `optional` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 4&gt;.guard | string | `optional` | min 1; max 2000 |
+| graph.stages[]&lt;variant 4&gt;.join | variants by mode (object / object / object) | `default {"mode":"all"}` | — |
+| graph.stages[]&lt;variant 4&gt;.join&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.join&lt;variant 1&gt;.mode | "all" | `required` | — |
+| graph.stages[]&lt;variant 4&gt;.join&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.join&lt;variant 2&gt;.mode | "any" | `required` | — |
+| graph.stages[]&lt;variant 4&gt;.join&lt;variant 2&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 4&gt;.join&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.join&lt;variant 3&gt;.mode | "n_of_m" | `required` | — |
+| graph.stages[]&lt;variant 4&gt;.join&lt;variant 3&gt;.n | number | `required` | int; min 1; max 100 |
+| graph.stages[]&lt;variant 4&gt;.join&lt;variant 3&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 4&gt;.position | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.position.x | number | `required` | finite |
+| graph.stages[]&lt;variant 4&gt;.position.y | number | `required` | finite |
+| graph.stages[]&lt;variant 4&gt;.compensate | array of object | `optional` | maxLength 20 |
+| graph.stages[]&lt;variant 4&gt;.compensate[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.compensate[].name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 4&gt;.compensate[].config | union (variants by type (object / object / object) / object) | `required` | — |
+| graph.stages[]&lt;variant 4&gt;.compensate[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.compensate[].config&lt;variant 2&gt;.type | "restore_checkpoint" | `required` | — |
+| graph.stages[]&lt;variant 4&gt;.compensate[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.stages[]&lt;variant 4&gt;.compensate[].retries | number | `default 3` | int; min 0; max 5 |
+| graph.stages[]&lt;variant 4&gt;.kind | "map" | `required` | — |
+| graph.stages[]&lt;variant 4&gt;.map | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.map.items | string | `required` | min 1; max 2000 |
+| graph.stages[]&lt;variant 4&gt;.map.itemKey | string | `optional` | min 1; max 2000 |
+| graph.stages[]&lt;variant 4&gt;.map.maxItems | number | `default 50` | int; min 1; max 200 |
+| graph.stages[]&lt;variant 4&gt;.map.concurrency | number | `default 4` | int; min 1; max 16 |
+| graph.stages[]&lt;variant 4&gt;.map.toleratedFailurePercent | number | `default 0` | min 0; max 100 |
+| graph.stages[]&lt;variant 4&gt;.map.workspace | "shared" / "mount_per_item" | `default "shared"` | — |
+| graph.stages[]&lt;variant 4&gt;.map.merge | "none" / "sequential" / "pr_per_item" | `default "none"` | — |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup | array of object | `optional` | maxLength 5 |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[].command | string | `required` | regex /^(?!.*\.\.)[A-Za-z0-9_][A-Za-z0-9_.+-]{0,99}$/ |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[].args | array of string | `default []` | maxLength 64 |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[].env | map of string | `optional` | — |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[].mount | string | `optional` | min 1; max 50; regex /^[A-Za-z0-9._-]+$/ |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[].cwd | string | `optional` | min 1; max 1000; regex /^(?![\\/])(?![A-Za-z]:)(?!(.*[\\/])?\.\.([\\/]&#124;$)).+$/ |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[].timeoutMs | number | `default 600000` | int; min 1000; max 3600000 |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[].parseJson | boolean | `default false` | — |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[].failOnNonZero | boolean | `default false` | — |
+| graph.stages[]&lt;variant 4&gt;.map.itemSetup[].tailBytes | number | `default 16384` | int; min 1024; max 262144 |
+| graph.stages[]&lt;variant 4&gt;.map.output | object | `default {}` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.map.output.select | map of string | `optional` | — |
+| graph.stages[]&lt;variant 4&gt;.budget | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 4&gt;.budget.maxTurns | number | `optional` | int; min 1; max 100000 |
+| graph.stages[]&lt;variant 4&gt;.budget.maxCostUsd | number | `optional` | min 0 (exclusive); max 100000 |
+| graph.stages[]&lt;variant 4&gt;.budget.maxWallClockMs | number | `optional` | int; min 1000; max 604800000 |
+| graph.stages[]&lt;variant 4&gt;.budget.maxTokens | number | `optional` | int; min 1; max 10000000000 |
+| graph.stages[]&lt;variant 5&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.key | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 5&gt;.name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 5&gt;.description | string | `optional` | max 2000 |
+| graph.stages[]&lt;variant 5&gt;.parentKey | string | `optional` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 5&gt;.guard | string | `optional` | min 1; max 2000 |
+| graph.stages[]&lt;variant 5&gt;.join | variants by mode (object / object / object) | `default {"mode":"all"}` | — |
+| graph.stages[]&lt;variant 5&gt;.join&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.join&lt;variant 1&gt;.mode | "all" | `required` | — |
+| graph.stages[]&lt;variant 5&gt;.join&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.join&lt;variant 2&gt;.mode | "any" | `required` | — |
+| graph.stages[]&lt;variant 5&gt;.join&lt;variant 2&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 5&gt;.join&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.join&lt;variant 3&gt;.mode | "n_of_m" | `required` | — |
+| graph.stages[]&lt;variant 5&gt;.join&lt;variant 3&gt;.n | number | `required` | int; min 1; max 100 |
+| graph.stages[]&lt;variant 5&gt;.join&lt;variant 3&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 5&gt;.position | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.position.x | number | `required` | finite |
+| graph.stages[]&lt;variant 5&gt;.position.y | number | `required` | finite |
+| graph.stages[]&lt;variant 5&gt;.compensate | array of object | `optional` | maxLength 20 |
+| graph.stages[]&lt;variant 5&gt;.compensate[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.compensate[].name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 5&gt;.compensate[].config | union (variants by type (object / object / object) / object) | `required` | — |
+| graph.stages[]&lt;variant 5&gt;.compensate[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.compensate[].config&lt;variant 2&gt;.type | "restore_checkpoint" | `required` | — |
+| graph.stages[]&lt;variant 5&gt;.compensate[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.stages[]&lt;variant 5&gt;.compensate[].retries | number | `default 3` | int; min 0; max 5 |
+| graph.stages[]&lt;variant 5&gt;.kind | "subworkflow" | `required` | — |
+| graph.stages[]&lt;variant 5&gt;.subworkflow | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.subworkflow.workflowRef | union (object / object) | `required` | — |
+| graph.stages[]&lt;variant 5&gt;.subworkflow.workflowRef&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.subworkflow.workflowRef&lt;variant 1&gt;.id | string | `required` | min 1; max 100 |
+| graph.stages[]&lt;variant 5&gt;.subworkflow.workflowRef&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.subworkflow.workflowRef&lt;variant 2&gt;.name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 5&gt;.subworkflow.workflowRef&lt;variant 2&gt;.projectScope | "project" / "global" | `optional` | — |
+| graph.stages[]&lt;variant 5&gt;.subworkflow.version | union ("pin_at_run_start" / number) | `default "pin_at_run_start"` | — |
+| graph.stages[]&lt;variant 5&gt;.subworkflow.inputs | map of string | `default {}` | — |
+| graph.stages[]&lt;variant 5&gt;.subworkflow.workspace | "inherit" / "isolated" | `default "inherit"` | — |
+| graph.stages[]&lt;variant 5&gt;.budget | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 5&gt;.budget.maxTurns | number | `optional` | int; min 1; max 100000 |
+| graph.stages[]&lt;variant 5&gt;.budget.maxCostUsd | number | `optional` | min 0 (exclusive); max 100000 |
+| graph.stages[]&lt;variant 5&gt;.budget.maxWallClockMs | number | `optional` | int; min 1000; max 604800000 |
+| graph.stages[]&lt;variant 5&gt;.budget.maxTokens | number | `optional` | int; min 1; max 10000000000 |
+| graph.stages[]&lt;variant 6&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.key | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 6&gt;.name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 6&gt;.description | string | `optional` | max 2000 |
+| graph.stages[]&lt;variant 6&gt;.parentKey | string | `optional` | regex /^[a-z][a-z0-9_]{0,47}$/ |
+| graph.stages[]&lt;variant 6&gt;.guard | string | `optional` | min 1; max 2000 |
+| graph.stages[]&lt;variant 6&gt;.join | variants by mode (object / object / object) | `default {"mode":"all"}` | — |
+| graph.stages[]&lt;variant 6&gt;.join&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.join&lt;variant 1&gt;.mode | "all" | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.join&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.join&lt;variant 2&gt;.mode | "any" | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.join&lt;variant 2&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 6&gt;.join&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.join&lt;variant 3&gt;.mode | "n_of_m" | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.join&lt;variant 3&gt;.n | number | `required` | int; min 1; max 100 |
+| graph.stages[]&lt;variant 6&gt;.join&lt;variant 3&gt;.cancelRemaining | boolean | `default false` | — |
+| graph.stages[]&lt;variant 6&gt;.position | object | `optional` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.position.x | number | `required` | finite |
+| graph.stages[]&lt;variant 6&gt;.position.y | number | `required` | finite |
+| graph.stages[]&lt;variant 6&gt;.compensate | array of object | `optional` | maxLength 20 |
+| graph.stages[]&lt;variant 6&gt;.compensate[] | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.compensate[].name | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 6&gt;.compensate[].config | union (variants by type (object / object / object) / object) | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.compensate[].config&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.compensate[].config&lt;variant 2&gt;.type | "restore_checkpoint" | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.compensate[].timeoutMs | number | `default 30000` | int; min 100; max 600000 |
+| graph.stages[]&lt;variant 6&gt;.compensate[].retries | number | `default 3` | int; min 0; max 5 |
+| graph.stages[]&lt;variant 6&gt;.kind | "wait" | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.wait | variants by type (object / object / object) | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 1&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 1&gt;.type | "approval" | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 1&gt;.prompt | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 1&gt;.prompt.label | string | `required` | min 1; max 200 |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 1&gt;.prompt.text | string | `required` | min 1; max 100000 |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 1&gt;.form | map of unknown | `optional` | — |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 1&gt;.timeoutMs | number | `optional` | int; min 1000; max 2592000000 |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 1&gt;.onTimeout | "fail" / "complete" | `default "fail"` | — |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 2&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 2&gt;.type | "event" | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 2&gt;.eventKey | string | `required` | min 1; max 2000 |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 2&gt;.timeoutMs | number | `optional` | int; min 1000; max 2592000000 |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 2&gt;.onTimeout | "fail" / "complete" | `default "fail"` | — |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 3&gt; | object | `required` | unknown keys: strict |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 3&gt;.type | "timer" | `required` | — |
+| graph.stages[]&lt;variant 6&gt;.wait&lt;variant 3&gt;.durationMs | number | `required` | int; min 1000; max 2592000000 |
 | graph.edges | array of object | `default []` | maxLength 500 |
 | graph.edges[] | object | `required` | unknown keys: strict |
 | graph.edges[].from | string | `required` | regex /^[a-z][a-z0-9_]{0,47}$/ |

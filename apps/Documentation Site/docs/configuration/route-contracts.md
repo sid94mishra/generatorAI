@@ -402,6 +402,21 @@ const SignalBodySchema = z.object({
 });
 ```
 
+## workflowCallbacks
+
+Source: `apps/server/src/routes/workflowCallbacks.ts`. Imported symbols retain their source names; see the linked feature/configuration guides for those values.
+
+### CallbackBodySchema
+
+```typescript
+const CallbackBodySchema = z
+  .object({
+    data: z.unknown().optional(),
+    idempotencyKey: z.string().min(1).max(200).optional(),
+  })
+  .strict();
+```
+
 ## workflowRuns
 
 Source: `apps/server/src/routes/workflowRuns.ts`. Imported symbols retain their source names; see the linked feature/configuration guides for those values.

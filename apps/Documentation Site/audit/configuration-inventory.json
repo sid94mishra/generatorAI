@@ -4462,7 +4462,7 @@
       },
       {
         "field": "workflow.variables[].type",
-        "type": "\"string\" / \"number\" / \"boolean\" / \"choice\" / \"text\"",
+        "type": "\"string\" / \"number\" / \"boolean\" / \"choice\" / \"text\" / \"list\" / \"json\"",
         "presence": "required",
         "constraints": "—"
       },
@@ -5433,6 +5433,12 @@
         "constraints": "int; min 1000; max 604800000"
       },
       {
+        "field": "workflow.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
+      },
+      {
         "field": "workflow.maxParallel",
         "type": "number",
         "presence": "optional",
@@ -5458,13 +5464,13 @@
       },
       {
         "field": "stages",
-        "type": "array of variants by kind (object)",
+        "type": "array of variants by kind (object / object / object / object / object / object)",
         "presence": "required",
         "constraints": "maxLength 100"
       },
       {
         "field": "stages[]",
-        "type": "variants by kind (object)",
+        "type": "variants by kind (object / object / object / object / object / object)",
         "presence": "required",
         "constraints": "—"
       },
@@ -6249,6 +6255,12 @@
         "constraints": "—"
       },
       {
+        "field": "stages[]<variant 1>.compactAfter",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 20"
+      },
+      {
         "field": "stages[]<variant 1>.sessionGroup",
         "type": "string",
         "presence": "optional",
@@ -6304,13 +6316,13 @@
       },
       {
         "field": "stages[]<variant 1>.output.rules",
-        "type": "array of variants by type (object / object / object / object / object / object / object)",
+        "type": "array of variants by type (object / object / object / object / object / object / object / object)",
         "presence": "default []",
         "constraints": "maxLength 20"
       },
       {
         "field": "stages[]<variant 1>.output.rules[]",
-        "type": "variants by type (object / object / object / object / object / object / object)",
+        "type": "variants by type (object / object / object / object / object / object / object / object)",
         "presence": "required",
         "constraints": "—"
       },
@@ -6507,6 +6519,48 @@
         "constraints": "max 1000"
       },
       {
+        "field": "stages[]<variant 1>.output.rules[]<variant 8>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 1>.output.rules[]<variant 8>.type",
+        "type": "\"judge\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 1>.output.rules[]<variant 8>.rubric",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 10000"
+      },
+      {
+        "field": "stages[]<variant 1>.output.rules[]<variant 8>.threshold",
+        "type": "number",
+        "presence": "required",
+        "constraints": "min 0; max 10"
+      },
+      {
+        "field": "stages[]<variant 1>.output.rules[]<variant 8>.model",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 1>.output.rules[]<variant 8>.include",
+        "type": "array of \"diff\"",
+        "presence": "optional",
+        "constraints": "maxLength 1"
+      },
+      {
+        "field": "stages[]<variant 1>.output.rules[]<variant 8>.message",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 1000"
+      },
+      {
         "field": "stages[]<variant 1>.retry",
         "type": "object",
         "presence": "optional",
@@ -6544,7 +6598,7 @@
       },
       {
         "field": "stages[]<variant 1>.retry.retryOn",
-        "type": "array of \"rate_limited\" / \"overloaded\" / \"provider_5xx\" / \"transport\" / \"provider_crashed\" / \"idle_timeout\" / \"attempt_timeout\" / \"auth\" / \"model_not_found\" / \"quota_exhausted\" / \"context_overflow\" / \"max_turns\" / \"budget_exceeded\" / \"config_invalid\" / \"agent_not_found\" / \"agent_disabled\" / \"pre_run_hook_abort\" / \"rejected_by_human\" / \"pause_expired\" / \"condition_error\" / \"queue_timeout\" / \"output_schema\" / \"validation_rule\" / \"missing_artifact\" / \"process_restart_unsafe\" / \"lease_expired\"",
+        "type": "array of \"rate_limited\" / \"overloaded\" / \"provider_5xx\" / \"transport\" / \"provider_crashed\" / \"idle_timeout\" / \"attempt_timeout\" / \"auth\" / \"model_not_found\" / \"quota_exhausted\" / \"context_overflow\" / \"max_turns\" / \"budget_exceeded\" / \"config_invalid\" / \"agent_not_found\" / \"agent_disabled\" / \"pre_run_hook_abort\" / \"rejected_by_human\" / \"pause_expired\" / \"condition_error\" / \"queue_timeout\" / \"check_launch_failed\" / \"check_failed\" / \"loop_body_failed\" / \"loop_exit_fail\" / \"loop_limit\" / \"loop_wall_clock\" / \"loop_carry_too_large\" / \"restore_failed\" / \"map_items_invalid\" / \"map_too_large\" / \"map_duplicate_item_key\" / \"map_tolerance_exceeded\" / \"mount_fork_failed\" / \"item_setup_failed\" / \"merge_conflict\" / \"merge_failed\" / \"subworkflow_start_failed\" / \"subworkflow_output_drift\" / \"subworkflow_failed\" / \"wait_timeout\" / \"output_schema\" / \"validation_rule\" / \"judge_below_threshold\" / \"missing_artifact\" / \"process_restart_unsafe\" / \"lease_expired\"",
         "presence": "optional",
         "constraints": "maxLength 40"
       },
@@ -6637,6 +6691,12 @@
         "type": "number",
         "presence": "optional",
         "constraints": "int; min 1000; max 604800000"
+      },
+      {
+        "field": "stages[]<variant 1>.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
       },
       {
         "field": "stages[]<variant 1>.approval",
@@ -6835,6 +6895,1542 @@
         "type": "\"pre_run\" / \"post_run\" / \"pre_prompt\" / \"post_prompt\" / \"on_error\" / \"on_cancel\" / \"pre_tool_use\" / \"post_tool_use\" / \"on_message\" / \"on_reasoning\" / \"on_session_start\" / \"on_session_idle\" / \"on_session_error\" / \"on_session_cancelled\"",
         "presence": "required",
         "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 2>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 2>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "stages[]<variant 2>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 2>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 2>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "stages[]<variant 2>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 2>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 2>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "stages[]<variant 2>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 2>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "stages[]<variant 2>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "stages[]<variant 2>.kind",
+        "type": "\"check\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.check",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.check.command",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^(?!.*\\.\\.)[A-Za-z0-9_][A-Za-z0-9_.+-]{0,99}$/"
+      },
+      {
+        "field": "stages[]<variant 2>.check.args",
+        "type": "array of string",
+        "presence": "default []",
+        "constraints": "maxLength 64"
+      },
+      {
+        "field": "stages[]<variant 2>.check.env",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.check.mount",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 50; regex /^[A-Za-z0-9._-]+$/"
+      },
+      {
+        "field": "stages[]<variant 2>.check.cwd",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 1000; regex /^(?![\\\\/])(?![A-Za-z]:)(?!(.*[\\\\/])?\\.\\.([\\\\/]|$)).+$/"
+      },
+      {
+        "field": "stages[]<variant 2>.check.timeoutMs",
+        "type": "number",
+        "presence": "default 600000",
+        "constraints": "int; min 1000; max 3600000"
+      },
+      {
+        "field": "stages[]<variant 2>.check.parseJson",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.check.failOnNonZero",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.check.tailBytes",
+        "type": "number",
+        "presence": "default 16384",
+        "constraints": "int; min 1024; max 262144"
+      },
+      {
+        "field": "stages[]<variant 2>.retry",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.retry.maxAttempts",
+        "type": "number",
+        "presence": "default 2",
+        "constraints": "int; min 1; max 10"
+      },
+      {
+        "field": "stages[]<variant 2>.retry.initialDelayMs",
+        "type": "number",
+        "presence": "default 2000",
+        "constraints": "int; min 0; max 3600000"
+      },
+      {
+        "field": "stages[]<variant 2>.retry.backoffMultiplier",
+        "type": "number",
+        "presence": "default 2",
+        "constraints": "min 1; max 10"
+      },
+      {
+        "field": "stages[]<variant 2>.retry.maxDelayMs",
+        "type": "number",
+        "presence": "default 60000",
+        "constraints": "int; min 0; max 3600000"
+      },
+      {
+        "field": "stages[]<variant 2>.retry.jitter",
+        "type": "\"full\" / \"equal\" / \"none\"",
+        "presence": "default \"full\"",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.retry.retryOn",
+        "type": "array of \"rate_limited\" / \"overloaded\" / \"provider_5xx\" / \"transport\" / \"provider_crashed\" / \"idle_timeout\" / \"attempt_timeout\" / \"auth\" / \"model_not_found\" / \"quota_exhausted\" / \"context_overflow\" / \"max_turns\" / \"budget_exceeded\" / \"config_invalid\" / \"agent_not_found\" / \"agent_disabled\" / \"pre_run_hook_abort\" / \"rejected_by_human\" / \"pause_expired\" / \"condition_error\" / \"queue_timeout\" / \"check_launch_failed\" / \"check_failed\" / \"loop_body_failed\" / \"loop_exit_fail\" / \"loop_limit\" / \"loop_wall_clock\" / \"loop_carry_too_large\" / \"restore_failed\" / \"map_items_invalid\" / \"map_too_large\" / \"map_duplicate_item_key\" / \"map_tolerance_exceeded\" / \"mount_fork_failed\" / \"item_setup_failed\" / \"merge_conflict\" / \"merge_failed\" / \"subworkflow_start_failed\" / \"subworkflow_output_drift\" / \"subworkflow_failed\" / \"wait_timeout\" / \"output_schema\" / \"validation_rule\" / \"judge_below_threshold\" / \"missing_artifact\" / \"process_restart_unsafe\" / \"lease_expired\"",
+        "presence": "optional",
+        "constraints": "maxLength 40"
+      },
+      {
+        "field": "stages[]<variant 2>.retry.mode",
+        "type": "\"resume\" / \"restart\"",
+        "presence": "default \"resume\"",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.retry.restoreCheckpointOnRestart",
+        "type": "boolean",
+        "presence": "default true",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 2>.timeouts",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 2>.timeouts.queueMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 86400000"
+      },
+      {
+        "field": "stages[]<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 3>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 3>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "stages[]<variant 3>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 3>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 3>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "stages[]<variant 3>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 3>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 3>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "stages[]<variant 3>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 3>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "stages[]<variant 3>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "stages[]<variant 3>.kind",
+        "type": "\"loop\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.maxIterations",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 50"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.exits",
+        "type": "array of object",
+        "presence": "default []",
+        "constraints": "maxLength 12"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.exits[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.exits[].when",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.exits[].action",
+        "type": "\"complete\" / \"fail\" / \"pause\" / \"exhaust\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.exits[].consecutive",
+        "type": "number",
+        "presence": "default 1",
+        "constraints": "int; min 1; max 10"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.exits[].reason",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,39}$/"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.carryInit",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.carry",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.carrySchema",
+        "type": "map of map of unknown",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit",
+        "type": "variants by mode (object / object / object / object)",
+        "presence": "default {\"mode\":\"pause\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit<variant 1>.mode",
+        "type": "\"pause\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit<variant 2>.mode",
+        "type": "\"fail\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit<variant 3>.mode",
+        "type": "\"accept_last\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit<variant 4>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit<variant 4>.mode",
+        "type": "\"accept_best\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onLimit<variant 4>.score",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.wrapUp",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.wrapUp.stage",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.wrapUp.prompt",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.wrapUp.prompt.label",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.wrapUp.prompt.text",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 100000"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.wrapUp.maxTurns",
+        "type": "number",
+        "presence": "default 1",
+        "constraints": "int; min 1; max 5"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.wrapUp.maxCostShare",
+        "type": "number",
+        "presence": "default 0.1",
+        "constraints": "min 0; max 0.5"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.onBodyFailure",
+        "type": "\"fail\" / \"next_iteration\"",
+        "presence": "default \"fail\"",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.checkpointEachIteration",
+        "type": "boolean",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.output",
+        "type": "object",
+        "presence": "default {}",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.loop.output.select",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 3>.budget",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 3>.budget.maxTurns",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 100000"
+      },
+      {
+        "field": "stages[]<variant 3>.budget.maxCostUsd",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "min 0 (exclusive); max 100000"
+      },
+      {
+        "field": "stages[]<variant 3>.budget.maxWallClockMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 604800000"
+      },
+      {
+        "field": "stages[]<variant 3>.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
+      },
+      {
+        "field": "stages[]<variant 4>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 4>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 4>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "stages[]<variant 4>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 4>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 4>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "stages[]<variant 4>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 4>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 4>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "stages[]<variant 4>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 4>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "stages[]<variant 4>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "stages[]<variant 4>.kind",
+        "type": "\"map\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.map",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.map.items",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 4>.map.maxItems",
+        "type": "number",
+        "presence": "default 50",
+        "constraints": "int; min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 4>.map.concurrency",
+        "type": "number",
+        "presence": "default 4",
+        "constraints": "int; min 1; max 16"
+      },
+      {
+        "field": "stages[]<variant 4>.map.toleratedFailurePercent",
+        "type": "number",
+        "presence": "default 0",
+        "constraints": "min 0; max 100"
+      },
+      {
+        "field": "stages[]<variant 4>.map.workspace",
+        "type": "\"shared\" / \"mount_per_item\"",
+        "presence": "default \"shared\"",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.map.merge",
+        "type": "\"none\" / \"sequential\" / \"pr_per_item\"",
+        "presence": "default \"none\"",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 5"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[].command",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^(?!.*\\.\\.)[A-Za-z0-9_][A-Za-z0-9_.+-]{0,99}$/"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[].args",
+        "type": "array of string",
+        "presence": "default []",
+        "constraints": "maxLength 64"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[].env",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[].mount",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 50; regex /^[A-Za-z0-9._-]+$/"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[].cwd",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 1000; regex /^(?![\\\\/])(?![A-Za-z]:)(?!(.*[\\\\/])?\\.\\.([\\\\/]|$)).+$/"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[].timeoutMs",
+        "type": "number",
+        "presence": "default 600000",
+        "constraints": "int; min 1000; max 3600000"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[].parseJson",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[].failOnNonZero",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.map.itemSetup[].tailBytes",
+        "type": "number",
+        "presence": "default 16384",
+        "constraints": "int; min 1024; max 262144"
+      },
+      {
+        "field": "stages[]<variant 4>.map.output",
+        "type": "object",
+        "presence": "default {}",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.map.output.select",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 4>.budget",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 4>.budget.maxTurns",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 100000"
+      },
+      {
+        "field": "stages[]<variant 4>.budget.maxCostUsd",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "min 0 (exclusive); max 100000"
+      },
+      {
+        "field": "stages[]<variant 4>.budget.maxWallClockMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 604800000"
+      },
+      {
+        "field": "stages[]<variant 4>.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
+      },
+      {
+        "field": "stages[]<variant 5>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 5>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 5>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "stages[]<variant 5>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 5>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 5>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "stages[]<variant 5>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 5>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 5>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "stages[]<variant 5>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 5>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "stages[]<variant 5>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "stages[]<variant 5>.kind",
+        "type": "\"subworkflow\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow.workflowRef",
+        "type": "union (object / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow.workflowRef<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow.workflowRef<variant 1>.id",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 100"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow.workflowRef<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow.workflowRef<variant 2>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow.workflowRef<variant 2>.projectScope",
+        "type": "\"project\" / \"global\"",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow.version",
+        "type": "union (\"pin_at_run_start\" / number)",
+        "presence": "default \"pin_at_run_start\"",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow.inputs",
+        "type": "map of string",
+        "presence": "default {}",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.subworkflow.workspace",
+        "type": "\"inherit\" / \"isolated\"",
+        "presence": "default \"inherit\"",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 5>.budget",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 5>.budget.maxTurns",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 100000"
+      },
+      {
+        "field": "stages[]<variant 5>.budget.maxCostUsd",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "min 0 (exclusive); max 100000"
+      },
+      {
+        "field": "stages[]<variant 5>.budget.maxWallClockMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 604800000"
+      },
+      {
+        "field": "stages[]<variant 5>.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
+      },
+      {
+        "field": "stages[]<variant 6>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 6>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 6>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "stages[]<variant 6>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "stages[]<variant 6>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 6>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "stages[]<variant 6>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 6>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "stages[]<variant 6>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "stages[]<variant 6>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 6>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "stages[]<variant 6>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "stages[]<variant 6>.kind",
+        "type": "\"wait\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.wait",
+        "type": "variants by type (object / object / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 1>.type",
+        "type": "\"approval\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 1>.prompt",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 1>.prompt.label",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 1>.prompt.text",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 100000"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 1>.form",
+        "type": "map of unknown",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 1>.timeoutMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 2592000000"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 1>.onTimeout",
+        "type": "\"fail\" / \"complete\"",
+        "presence": "default \"fail\"",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 2>.type",
+        "type": "\"event\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 2>.eventKey",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 2>.timeoutMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 2592000000"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 2>.onTimeout",
+        "type": "\"fail\" / \"complete\"",
+        "presence": "default \"fail\"",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 3>.type",
+        "type": "\"timer\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "stages[]<variant 6>.wait<variant 3>.durationMs",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1000; max 2592000000"
       },
       {
         "field": "edges",
@@ -9279,7 +10875,7 @@
       },
       {
         "field": "graph.workflow.variables[].type",
-        "type": "\"string\" / \"number\" / \"boolean\" / \"choice\" / \"text\"",
+        "type": "\"string\" / \"number\" / \"boolean\" / \"choice\" / \"text\" / \"list\" / \"json\"",
         "presence": "required",
         "constraints": "—"
       },
@@ -10250,6 +11846,12 @@
         "constraints": "int; min 1000; max 604800000"
       },
       {
+        "field": "graph.workflow.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
+      },
+      {
         "field": "graph.workflow.maxParallel",
         "type": "number",
         "presence": "optional",
@@ -10275,13 +11877,13 @@
       },
       {
         "field": "graph.stages",
-        "type": "array of variants by kind (object)",
+        "type": "array of variants by kind (object / object / object / object / object / object)",
         "presence": "required",
         "constraints": "maxLength 100"
       },
       {
         "field": "graph.stages[]",
-        "type": "variants by kind (object)",
+        "type": "variants by kind (object / object / object / object / object / object)",
         "presence": "required",
         "constraints": "—"
       },
@@ -11066,6 +12668,12 @@
         "constraints": "—"
       },
       {
+        "field": "graph.stages[]<variant 1>.compactAfter",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 20"
+      },
+      {
         "field": "graph.stages[]<variant 1>.sessionGroup",
         "type": "string",
         "presence": "optional",
@@ -11121,13 +12729,13 @@
       },
       {
         "field": "graph.stages[]<variant 1>.output.rules",
-        "type": "array of variants by type (object / object / object / object / object / object / object)",
+        "type": "array of variants by type (object / object / object / object / object / object / object / object)",
         "presence": "default []",
         "constraints": "maxLength 20"
       },
       {
         "field": "graph.stages[]<variant 1>.output.rules[]",
-        "type": "variants by type (object / object / object / object / object / object / object)",
+        "type": "variants by type (object / object / object / object / object / object / object / object)",
         "presence": "required",
         "constraints": "—"
       },
@@ -11324,6 +12932,48 @@
         "constraints": "max 1000"
       },
       {
+        "field": "graph.stages[]<variant 1>.output.rules[]<variant 8>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 1>.output.rules[]<variant 8>.type",
+        "type": "\"judge\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 1>.output.rules[]<variant 8>.rubric",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 10000"
+      },
+      {
+        "field": "graph.stages[]<variant 1>.output.rules[]<variant 8>.threshold",
+        "type": "number",
+        "presence": "required",
+        "constraints": "min 0; max 10"
+      },
+      {
+        "field": "graph.stages[]<variant 1>.output.rules[]<variant 8>.model",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 1>.output.rules[]<variant 8>.include",
+        "type": "array of \"diff\"",
+        "presence": "optional",
+        "constraints": "maxLength 1"
+      },
+      {
+        "field": "graph.stages[]<variant 1>.output.rules[]<variant 8>.message",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 1000"
+      },
+      {
         "field": "graph.stages[]<variant 1>.retry",
         "type": "object",
         "presence": "optional",
@@ -11361,7 +13011,7 @@
       },
       {
         "field": "graph.stages[]<variant 1>.retry.retryOn",
-        "type": "array of \"rate_limited\" / \"overloaded\" / \"provider_5xx\" / \"transport\" / \"provider_crashed\" / \"idle_timeout\" / \"attempt_timeout\" / \"auth\" / \"model_not_found\" / \"quota_exhausted\" / \"context_overflow\" / \"max_turns\" / \"budget_exceeded\" / \"config_invalid\" / \"agent_not_found\" / \"agent_disabled\" / \"pre_run_hook_abort\" / \"rejected_by_human\" / \"pause_expired\" / \"condition_error\" / \"queue_timeout\" / \"output_schema\" / \"validation_rule\" / \"missing_artifact\" / \"process_restart_unsafe\" / \"lease_expired\"",
+        "type": "array of \"rate_limited\" / \"overloaded\" / \"provider_5xx\" / \"transport\" / \"provider_crashed\" / \"idle_timeout\" / \"attempt_timeout\" / \"auth\" / \"model_not_found\" / \"quota_exhausted\" / \"context_overflow\" / \"max_turns\" / \"budget_exceeded\" / \"config_invalid\" / \"agent_not_found\" / \"agent_disabled\" / \"pre_run_hook_abort\" / \"rejected_by_human\" / \"pause_expired\" / \"condition_error\" / \"queue_timeout\" / \"check_launch_failed\" / \"check_failed\" / \"loop_body_failed\" / \"loop_exit_fail\" / \"loop_limit\" / \"loop_wall_clock\" / \"loop_carry_too_large\" / \"restore_failed\" / \"map_items_invalid\" / \"map_too_large\" / \"map_duplicate_item_key\" / \"map_tolerance_exceeded\" / \"mount_fork_failed\" / \"item_setup_failed\" / \"merge_conflict\" / \"merge_failed\" / \"subworkflow_start_failed\" / \"subworkflow_output_drift\" / \"subworkflow_failed\" / \"wait_timeout\" / \"output_schema\" / \"validation_rule\" / \"judge_below_threshold\" / \"missing_artifact\" / \"process_restart_unsafe\" / \"lease_expired\"",
         "presence": "optional",
         "constraints": "maxLength 40"
       },
@@ -11454,6 +13104,12 @@
         "type": "number",
         "presence": "optional",
         "constraints": "int; min 1000; max 604800000"
+      },
+      {
+        "field": "graph.stages[]<variant 1>.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
       },
       {
         "field": "graph.stages[]<variant 1>.approval",
@@ -11654,6 +13310,1542 @@
         "constraints": "—"
       },
       {
+        "field": "graph.stages[]<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.kind",
+        "type": "\"check\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check.command",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^(?!.*\\.\\.)[A-Za-z0-9_][A-Za-z0-9_.+-]{0,99}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check.args",
+        "type": "array of string",
+        "presence": "default []",
+        "constraints": "maxLength 64"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check.env",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check.mount",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 50; regex /^[A-Za-z0-9._-]+$/"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check.cwd",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 1000; regex /^(?![\\\\/])(?![A-Za-z]:)(?!(.*[\\\\/])?\\.\\.([\\\\/]|$)).+$/"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check.timeoutMs",
+        "type": "number",
+        "presence": "default 600000",
+        "constraints": "int; min 1000; max 3600000"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check.parseJson",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check.failOnNonZero",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.check.tailBytes",
+        "type": "number",
+        "presence": "default 16384",
+        "constraints": "int; min 1024; max 262144"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.retry",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.retry.maxAttempts",
+        "type": "number",
+        "presence": "default 2",
+        "constraints": "int; min 1; max 10"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.retry.initialDelayMs",
+        "type": "number",
+        "presence": "default 2000",
+        "constraints": "int; min 0; max 3600000"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.retry.backoffMultiplier",
+        "type": "number",
+        "presence": "default 2",
+        "constraints": "min 1; max 10"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.retry.maxDelayMs",
+        "type": "number",
+        "presence": "default 60000",
+        "constraints": "int; min 0; max 3600000"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.retry.jitter",
+        "type": "\"full\" / \"equal\" / \"none\"",
+        "presence": "default \"full\"",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.retry.retryOn",
+        "type": "array of \"rate_limited\" / \"overloaded\" / \"provider_5xx\" / \"transport\" / \"provider_crashed\" / \"idle_timeout\" / \"attempt_timeout\" / \"auth\" / \"model_not_found\" / \"quota_exhausted\" / \"context_overflow\" / \"max_turns\" / \"budget_exceeded\" / \"config_invalid\" / \"agent_not_found\" / \"agent_disabled\" / \"pre_run_hook_abort\" / \"rejected_by_human\" / \"pause_expired\" / \"condition_error\" / \"queue_timeout\" / \"check_launch_failed\" / \"check_failed\" / \"loop_body_failed\" / \"loop_exit_fail\" / \"loop_limit\" / \"loop_wall_clock\" / \"loop_carry_too_large\" / \"restore_failed\" / \"map_items_invalid\" / \"map_too_large\" / \"map_duplicate_item_key\" / \"map_tolerance_exceeded\" / \"mount_fork_failed\" / \"item_setup_failed\" / \"merge_conflict\" / \"merge_failed\" / \"subworkflow_start_failed\" / \"subworkflow_output_drift\" / \"subworkflow_failed\" / \"wait_timeout\" / \"output_schema\" / \"validation_rule\" / \"judge_below_threshold\" / \"missing_artifact\" / \"process_restart_unsafe\" / \"lease_expired\"",
+        "presence": "optional",
+        "constraints": "maxLength 40"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.retry.mode",
+        "type": "\"resume\" / \"restart\"",
+        "presence": "default \"resume\"",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.retry.restoreCheckpointOnRestart",
+        "type": "boolean",
+        "presence": "default true",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.timeouts",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 2>.timeouts.queueMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 86400000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.kind",
+        "type": "\"loop\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.maxIterations",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 50"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.exits",
+        "type": "array of object",
+        "presence": "default []",
+        "constraints": "maxLength 12"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.exits[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.exits[].when",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.exits[].action",
+        "type": "\"complete\" / \"fail\" / \"pause\" / \"exhaust\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.exits[].consecutive",
+        "type": "number",
+        "presence": "default 1",
+        "constraints": "int; min 1; max 10"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.exits[].reason",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,39}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.carryInit",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.carry",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.carrySchema",
+        "type": "map of map of unknown",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit",
+        "type": "variants by mode (object / object / object / object)",
+        "presence": "default {\"mode\":\"pause\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit<variant 1>.mode",
+        "type": "\"pause\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit<variant 2>.mode",
+        "type": "\"fail\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit<variant 3>.mode",
+        "type": "\"accept_last\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit<variant 4>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit<variant 4>.mode",
+        "type": "\"accept_best\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onLimit<variant 4>.score",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.wrapUp",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.wrapUp.stage",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.wrapUp.prompt",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.wrapUp.prompt.label",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.wrapUp.prompt.text",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 100000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.wrapUp.maxTurns",
+        "type": "number",
+        "presence": "default 1",
+        "constraints": "int; min 1; max 5"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.wrapUp.maxCostShare",
+        "type": "number",
+        "presence": "default 0.1",
+        "constraints": "min 0; max 0.5"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.onBodyFailure",
+        "type": "\"fail\" / \"next_iteration\"",
+        "presence": "default \"fail\"",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.checkpointEachIteration",
+        "type": "boolean",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.output",
+        "type": "object",
+        "presence": "default {}",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.loop.output.select",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.budget",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.budget.maxTurns",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 100000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.budget.maxCostUsd",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "min 0 (exclusive); max 100000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.budget.maxWallClockMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 604800000"
+      },
+      {
+        "field": "graph.stages[]<variant 3>.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.kind",
+        "type": "\"map\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.items",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.maxItems",
+        "type": "number",
+        "presence": "default 50",
+        "constraints": "int; min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.concurrency",
+        "type": "number",
+        "presence": "default 4",
+        "constraints": "int; min 1; max 16"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.toleratedFailurePercent",
+        "type": "number",
+        "presence": "default 0",
+        "constraints": "min 0; max 100"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.workspace",
+        "type": "\"shared\" / \"mount_per_item\"",
+        "presence": "default \"shared\"",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.merge",
+        "type": "\"none\" / \"sequential\" / \"pr_per_item\"",
+        "presence": "default \"none\"",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 5"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[].command",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^(?!.*\\.\\.)[A-Za-z0-9_][A-Za-z0-9_.+-]{0,99}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[].args",
+        "type": "array of string",
+        "presence": "default []",
+        "constraints": "maxLength 64"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[].env",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[].mount",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 50; regex /^[A-Za-z0-9._-]+$/"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[].cwd",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 1000; regex /^(?![\\\\/])(?![A-Za-z]:)(?!(.*[\\\\/])?\\.\\.([\\\\/]|$)).+$/"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[].timeoutMs",
+        "type": "number",
+        "presence": "default 600000",
+        "constraints": "int; min 1000; max 3600000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[].parseJson",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[].failOnNonZero",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.itemSetup[].tailBytes",
+        "type": "number",
+        "presence": "default 16384",
+        "constraints": "int; min 1024; max 262144"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.output",
+        "type": "object",
+        "presence": "default {}",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.map.output.select",
+        "type": "map of string",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.budget",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.budget.maxTurns",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 100000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.budget.maxCostUsd",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "min 0 (exclusive); max 100000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.budget.maxWallClockMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 604800000"
+      },
+      {
+        "field": "graph.stages[]<variant 4>.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
+      },
+      {
+        "field": "graph.stages[]<variant 5>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.kind",
+        "type": "\"subworkflow\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow.workflowRef",
+        "type": "union (object / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow.workflowRef<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow.workflowRef<variant 1>.id",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 100"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow.workflowRef<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow.workflowRef<variant 2>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow.workflowRef<variant 2>.projectScope",
+        "type": "\"project\" / \"global\"",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow.version",
+        "type": "union (\"pin_at_run_start\" / number)",
+        "presence": "default \"pin_at_run_start\"",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow.inputs",
+        "type": "map of string",
+        "presence": "default {}",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.subworkflow.workspace",
+        "type": "\"inherit\" / \"isolated\"",
+        "presence": "default \"inherit\"",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.budget",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.budget.maxTurns",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 100000"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.budget.maxCostUsd",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "min 0 (exclusive); max 100000"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.budget.maxWallClockMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 604800000"
+      },
+      {
+        "field": "graph.stages[]<variant 5>.budget.maxTokens",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1; max 10000000000"
+      },
+      {
+        "field": "graph.stages[]<variant 6>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.key",
+        "type": "string",
+        "presence": "required",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.description",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.parentKey",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.guard",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join",
+        "type": "variants by mode (object / object / object)",
+        "presence": "default {\"mode\":\"all\"}",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join<variant 1>.mode",
+        "type": "\"all\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join<variant 2>.mode",
+        "type": "\"any\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join<variant 2>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join<variant 3>.mode",
+        "type": "\"n_of_m\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join<variant 3>.n",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1; max 100"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.join<variant 3>.cancelRemaining",
+        "type": "boolean",
+        "presence": "default false",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.position",
+        "type": "object",
+        "presence": "optional",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.position.x",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.position.y",
+        "type": "number",
+        "presence": "required",
+        "constraints": "finite"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.compensate",
+        "type": "array of object",
+        "presence": "optional",
+        "constraints": "maxLength 20"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.compensate[]",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.compensate[].name",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.compensate[].config",
+        "type": "union (variants by type (object / object / object) / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.compensate[].config<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.compensate[].config<variant 2>.type",
+        "type": "\"restore_checkpoint\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.compensate[].timeoutMs",
+        "type": "number",
+        "presence": "default 30000",
+        "constraints": "int; min 100; max 600000"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.compensate[].retries",
+        "type": "number",
+        "presence": "default 3",
+        "constraints": "int; min 0; max 5"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.kind",
+        "type": "\"wait\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait",
+        "type": "variants by type (object / object / object)",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 1>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 1>.type",
+        "type": "\"approval\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 1>.prompt",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 1>.prompt.label",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 1>.prompt.text",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 100000"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 1>.form",
+        "type": "map of unknown",
+        "presence": "optional",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 1>.timeoutMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 2592000000"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 1>.onTimeout",
+        "type": "\"fail\" / \"complete\"",
+        "presence": "default \"fail\"",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 2>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 2>.type",
+        "type": "\"event\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 2>.eventKey",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 2000"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 2>.timeoutMs",
+        "type": "number",
+        "presence": "optional",
+        "constraints": "int; min 1000; max 2592000000"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 2>.onTimeout",
+        "type": "\"fail\" / \"complete\"",
+        "presence": "default \"fail\"",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 3>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 3>.type",
+        "type": "\"timer\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "graph.stages[]<variant 6>.wait<variant 3>.durationMs",
+        "type": "number",
+        "presence": "required",
+        "constraints": "int; min 1000; max 2592000000"
+      },
+      {
         "field": "graph.edges",
         "type": "array of object",
         "presence": "default []",
@@ -11707,6 +14899,19 @@
         "type": "string",
         "presence": "required",
         "constraints": "regex /^[a-z][a-z0-9_]{0,47}$/"
+      }
+    ]
+  },
+  {
+    "file": "packages/workflow-spec/src/schemas/common.ts",
+    "schema": "CodebaseAliasSchema",
+    "page": "configuration/templates",
+    "fields": [
+      {
+        "field": "(value)",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 50; regex /^[A-Za-z0-9._-]+$/"
       }
     ]
   },
@@ -11800,7 +15005,7 @@
       },
       {
         "field": "type",
-        "type": "\"string\" / \"number\" / \"boolean\" / \"choice\" / \"text\"",
+        "type": "\"string\" / \"number\" / \"boolean\" / \"choice\" / \"text\" / \"list\" / \"json\"",
         "presence": "required",
         "constraints": "—"
       },
@@ -12472,7 +15677,7 @@
     "fields": [
       {
         "field": "(value)",
-        "type": "variants by type (object / object / object / object / object / object / object)",
+        "type": "variants by type (object / object / object / object / object / object / object / object)",
         "presence": "required",
         "constraints": "—"
       },
@@ -12664,6 +15869,48 @@
       },
       {
         "field": "<variant 7>.message",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "max 1000"
+      },
+      {
+        "field": "<variant 8>",
+        "type": "object",
+        "presence": "required",
+        "constraints": "unknown keys: strict"
+      },
+      {
+        "field": "<variant 8>.type",
+        "type": "\"judge\"",
+        "presence": "required",
+        "constraints": "—"
+      },
+      {
+        "field": "<variant 8>.rubric",
+        "type": "string",
+        "presence": "required",
+        "constraints": "min 1; max 10000"
+      },
+      {
+        "field": "<variant 8>.threshold",
+        "type": "number",
+        "presence": "required",
+        "constraints": "min 0; max 10"
+      },
+      {
+        "field": "<variant 8>.model",
+        "type": "string",
+        "presence": "optional",
+        "constraints": "min 1; max 200"
+      },
+      {
+        "field": "<variant 8>.include",
+        "type": "array of \"diff\"",
+        "presence": "optional",
+        "constraints": "maxLength 1"
+      },
+      {
+        "field": "<variant 8>.message",
         "type": "string",
         "presence": "optional",
         "constraints": "max 1000"
