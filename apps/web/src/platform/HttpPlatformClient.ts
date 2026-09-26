@@ -25,6 +25,7 @@ import type { Artifact } from '@generatorai/shared';
 import type { AttentionFilter, AttentionSnapshot } from '@generatorai/shared';
 import type { SystemInfo } from '@generatorai/shared';
 import type { ProjectRunListPage } from '@generatorai/shared';
+import type { StatsSummary } from '@generatorai/shared';
 import {
   chatListSearchParams,
   runChatBulk,
@@ -2405,6 +2406,24 @@ export class HttpPlatformClient implements IPlatformClient {
     if (filter?.limit !== undefined) params.set('limit', String(filter.limit));
     const qs = params.toString();
     return apiFetch<ProjectRunListPage>(`${this.baseUrl}/api/projects/${projectId}/runs${qs ? `?${qs}` : ''}`);
+  }
+
+  // ── Stats summary (G-10): Home "This week", Workflows stat strip,
+  // AutomationDetail stat row, WorkflowDetail rail ──
+  async getStatsSummary(query: {
+    from: string;
+    to: string;
+    projectId?: string;
+    definitionId?: string;
+    automationId?: string;
+    groupBy?: 'definition';
+  }): Promise<StatsSummary> {
+    const params = new URLSearchParams({ from: query.from, to: query.to });
+    if (query.projectId) params.set('projectId', query.projectId);
+    if (query.definitionId) params.set('definitionId', query.definitionId);
+    if (query.automationId) params.set('automationId', query.automationId);
+    if (query.groupBy) params.set('groupBy', query.groupBy);
+    return apiFetch<StatsSummary>(`${this.baseUrl}/api/stats/summary?${params}`);
   }
 
   // ── System info (G-12): Home "System" card + Settings › Diagnostics ──

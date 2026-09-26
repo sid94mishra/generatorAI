@@ -36,7 +36,7 @@ Every designed element whose data or behaviour the current API, stores and deskt
 | G-07 | Computer consent plan + scope; Pause agent / Take over — **built (P2-04)** | P4 (degrades) | P2 | M–L |
 | G-08 | Deep links keep an allowlisted query string — **built (P2-04)** | P4 | P2 (desktop) | S |
 | G-09 | Model-picker provider methods on the platform client — **built (P2-04)** | P4 | P2 | S |
-| G-10 | Stats summary (Home This week, Workflows strip, automation stats) | P5 (PW later) | P2 | M |
+| G-10 | Stats summary (Home This week, Workflows strip, automation stats) — **built (P2-05)** | P5 (PW later) | P2 | M |
 | G-11 | Recently finished activity | P5 | P2 | M |
 | G-12 | System info (version, database size, disk, agent capacity) — **built (P2-05)** | P5 | P2 | S |
 | G-13 | Project summaries (Projects columns, tab counts) — **built (P2-05)** | P5 | P2 | S–M |
@@ -359,6 +359,8 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 
 ### G-10 — Stats summary
 
+**Status: built in P2-05.**
+
 **Elements & boards.**
 - Home "This week" (Chats, Workflow runs, Run success rate, Avg run time).
 - Workflows stat strip (Runs 30d, Succeeded 30d, Median run time) and the per-row Last run and Success %.
@@ -376,6 +378,15 @@ The mode is persisted per chat in a device-local zustand store (`stores/transcri
 - Policy prefix `/stats` (`read:activity`).
 
 **Owner / phase / effort.** P2 · P5 (PW consumes it later) · **M**. Coordinate with PW P01: migration v55 drops run history and pins runs to versions, so land this after P01 or write it against the pinned-version model.
+
+**As built.**
+- **Wire types** `StatsSummary`/`StatsSummaryQuery`/`StatsChatsSummary`/`StatsRunsSummary`/`StatsAutomationsSummary`/`StatsByDefinitionRow` (`packages/shared/src/types/StatsSummary.ts`). Deviated from the shape's `chats.turns`: **left out entirely**, not invented as `0` — there is no per-chat cumulative turn counter anywhere in the schema, only the most recent turn (`ChatListActivity.lastTurn`, G-02). Adding one would mean a new column/migration on `chats` (workflow/run-history-adjacent but actually chat-owned, so technically editable) which is out of scope for an **S–M** gap; revisit if a future gap needs it.
+- **Route** `GET /stats/summary` (`apps/server/src/routes/stats.ts`, new `/stats` prefix, `read:activity` — same bar as `/attention`). Deviated from "SQL aggregates in the repositories": `workflowRunRepo` / `workflowDefinitionService` / `automationService` are Workflow-Overhaul-owned engine code (07-phases.md §"Running in parallel") — no aggregate SQL was added to them. Instead the route joins through their existing read methods (`listDefinitions(projectId)` → `getByDefinitionId(id)` per definition; `listAutomations(projectId)` → `getExecutionsByAutomation(id)` per automation) and aggregates in memory. `chatEntityRepo.getAll()`/`getByProjectId()` likewise (chats are redesign-owned, but no new repo method was needed either).
+- `runs.successRate` is `succeeded / (succeeded + failed + cancelled)` — over **terminal** runs, never over `total` (which includes still-running/paused runs in range) — and is absent when that denominator is `0`. `avgDurationMs`/`medianDurationMs` are computed only over runs with both `startedAt` and `completedAt`, absent otherwise. Same "absent, not 0" rule for `automations.avgDurationMs` and every `byDefinition[].successRate`. Tolerates zero definitions / zero automations cleanly (`runs: { total: 0, ... }`, `automations` and `byDefinition` simply absent or empty).
+- `byDefinition[].lastRun` is the definition's absolute most recent run (any status, any time) — not range-scoped, matching the Workflows list's "Last run" column; `successRate` per row IS range-scoped, matching "Success %" next to it.
+- **Client:** `HttpPlatformClient.getStatsSummary(query)`, client-core's `api.stats.summary(query)`; not added to `IPlatformClient` (G-12 precedent). Web hook `useStatsSummary(query)` in `hooks/statsQueries.ts` — disabled until a range is supplied (no default-range guessing, matching "the client computes from/to").
+- OpenAPI documents `/api/stats/summary`. New `routePolicy.ts` entry for `/stats` (`read:activity` / `write: admin:settings`, no write route exists yet).
+- **Tests:** `apps/server/src/__tests__/statsRoute.test.ts` (range filtering, terminal-only success rate, duration stats, byDefinition grouping, empty run history), `wireContract.test.ts`, `apps/web/src/__tests__/hooks/statsQueries.test.tsx`.
 
 ### G-11 — Recently finished activity
 

@@ -569,3 +569,13 @@ export type { SystemInfo } from './SystemInfo.js';
 
 // ── Project-scoped workflow runs (G-15) ──
 export type { ProjectRunListItem, ProjectRunListQuery, ProjectRunListPage } from './ProjectRuns.js';
+
+// ── Stats summary (G-10) ──
+export type {
+  StatsSummaryQuery,
+  StatsChatsSummary,
+  StatsRunsSummary,
+  StatsAutomationsSummary,
+  StatsByDefinitionRow,
+  StatsSummary,
+} from './StatsSummary.js';

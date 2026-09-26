@@ -85,6 +85,9 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
   // the route (`read:chats` / `read:workflows`). Read-only: quick actions use
   // the existing chat, run and consent endpoints.
   { prefix: '/attention', read: ['read:activity'], write: ['admin:settings'] },
+  // Stats summary (G-10): read-only aggregates over chats, runs and
+  // automation executions — same bar as the attention feed above.
+  { prefix: '/stats', read: ['read:activity'], write: ['admin:settings'] },
 
   { prefix: '/chats', read: ['read:chats'], write: ['write:chats'] },
   // Authoring an agent GRANTS capability (skills, MCP servers, tool policy), so

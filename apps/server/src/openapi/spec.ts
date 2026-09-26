@@ -1082,6 +1082,31 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
       },
     },
+    '/api/stats/summary': {
+      get: {
+        tags: ['Stats'],
+        summary: 'Chats/runs/automations aggregate over a time range (G-10)',
+        description:
+          'Home "This week", the Workflows stat strip, AutomationDetail\'s stat row, WorkflowDetail\'s rail. ' +
+          '`from`/`to` are computed by the CLIENT in its own local time zone. `successRate`/`avgDurationMs`/' +
+          '`medianDurationMs` are omitted, not `0`, whenever their denominator is zero (D-36).',
+        parameters: [
+          { in: 'query', name: 'from', required: true, schema: { type: 'string', format: 'date-time' } },
+          { in: 'query', name: 'to', required: true, schema: { type: 'string', format: 'date-time' } },
+          { in: 'query', name: 'projectId', required: false, schema: { type: 'string' } },
+          { in: 'query', name: 'definitionId', required: false, schema: { type: 'string' } },
+          { in: 'query', name: 'automationId', required: false, schema: { type: 'string' } },
+          { in: 'query', name: 'groupBy', required: false, schema: { type: 'string', enum: ['definition'] } },
+        ],
+        responses: {
+          '200': {
+            description: 'Stats summary',
+            content: { 'application/json': { schema: { type: 'object' } } },
+          },
+          '400': { description: '`from`/`to` missing or unparseable', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
     '/api/system/info': {
       get: {
         tags: ['System'],

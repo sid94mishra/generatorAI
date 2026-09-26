@@ -25,6 +25,7 @@ import {
   type SystemInfo,
   type ProjectSummary as ProjectSummaryDetail,
   type ProjectRunListPage,
+  type StatsSummary,
 } from '@generatorai/shared';
 
 export interface ApiFetch {
@@ -1663,6 +1664,32 @@ export function createApiClient(fetchImpl: ApiFetch) {
        * could not measure them.
        */
       info: () => request<SystemInfo>(fetchImpl, '/api/system/info'),
+    },
+
+    /**
+     * G-10 — Home "This week", the Workflows stat strip, AutomationDetail's
+     * stat row, WorkflowDetail's rail. `from`/`to` are computed by the
+     * CALLER in its own local time zone; the server never guesses a range.
+     * `successRate` / `avgDurationMs` / `medianDurationMs` are absent, not
+     * `0`, whenever their denominator is zero (D-36). No SSE: invalidate on
+     * the `global` scope's `attention.remove` and lifecycle events.
+     */
+    stats: {
+      summary: (query: {
+        from: string;
+        to: string;
+        projectId?: string;
+        definitionId?: string;
+        automationId?: string;
+        groupBy?: 'definition';
+      }) => {
+        const q = new URLSearchParams({ from: query.from, to: query.to });
+        if (query.projectId) q.set('projectId', query.projectId);
+        if (query.definitionId) q.set('definitionId', query.definitionId);
+        if (query.automationId) q.set('automationId', query.automationId);
+        if (query.groupBy) q.set('groupBy', query.groupBy);
+        return request<StatsSummary>(fetchImpl, `/api/stats/summary?${q}`);
+      },
     },
 
     /**

@@ -86,6 +86,36 @@ describe('project summary wire contract (G-13)', () => {
   });
 });
 
+describe('stats summary wire contract (G-10)', () => {
+  it('always sends from/to, and the optional filters + groupBy when given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).stats.summary({
+      from: '2026-01-01T00:00:00Z',
+      to: '2026-01-07T23:59:59Z',
+      projectId: 'proj-1',
+      definitionId: 'def-1',
+      automationId: 'auto-1',
+      groupBy: 'definition',
+    });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.pathname).toBe('/api/stats/summary');
+    expect(url.searchParams.get('from')).toBe('2026-01-01T00:00:00Z');
+    expect(url.searchParams.get('to')).toBe('2026-01-07T23:59:59Z');
+    expect(url.searchParams.get('projectId')).toBe('proj-1');
+    expect(url.searchParams.get('definitionId')).toBe('def-1');
+    expect(url.searchParams.get('automationId')).toBe('auto-1');
+    expect(url.searchParams.get('groupBy')).toBe('definition');
+  });
+
+  it('omits the optional filters when not given', async () => {
+    const { calls, fetchImpl } = capture();
+    await createApiClient(fetchImpl).stats.summary({ from: '2026-01-01', to: '2026-01-07' });
+    const url = new URL(calls[0]!.path, 'http://x');
+    expect(url.searchParams.has('projectId')).toBe(false);
+    expect(url.searchParams.has('groupBy')).toBe(false);
+  });
+});
+
 describe('project runs wire contract (G-15)', () => {
   it('reads GET /api/projects/:id/runs, not /workflow-runs?projectId= (that route is off-limits)', async () => {
     const { calls, fetchImpl } = capture();
