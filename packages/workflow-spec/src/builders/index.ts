@@ -17,7 +17,6 @@
 // `buildWithHandlers()` returns them for the script loader to register.
 // ────────────────────────────────────────────────────────────────
 
-import { ENGINE_LEVEL, type EngineLevel } from '../constants.js';
 import type {
   ActionDefinition,
   CompensationAction,
@@ -400,19 +399,19 @@ export class WorkflowBuilder {
     return this.assemble().doc;
   }
 
-  validate(opts: { engine?: EngineLevel } = {}): ValidationResult {
-    return validateWorkflow(this.toDocument(), { engine: opts.engine ?? ENGINE_LEVEL });
+  validate(): ValidationResult {
+    return validateWorkflow(this.toDocument());
   }
 
   /** Validate and return the parsed graph; throws WorkflowBuildError on any error. */
-  build(opts: { engine?: EngineLevel } = {}): WorkflowGraph {
-    return this.buildWithHandlers(opts).graph;
+  build(): WorkflowGraph {
+    return this.buildWithHandlers().graph;
   }
 
   /** Like build(), plus the inline hook handlers keyed by their generated handler names. */
-  buildWithHandlers(opts: { engine?: EngineLevel } = {}): { graph: WorkflowGraph; handlers: Map<string, InlineHookHandler> } {
+  buildWithHandlers(): { graph: WorkflowGraph; handlers: Map<string, InlineHookHandler> } {
     const { doc, handlers } = this.assemble();
-    const r = validateWorkflow(doc, { engine: opts.engine ?? ENGINE_LEVEL });
+    const r = validateWorkflow(doc);
     if (!r.valid || !r.graph) throw new WorkflowBuildError(r.issues);
     return { graph: r.graph, handlers };
   }

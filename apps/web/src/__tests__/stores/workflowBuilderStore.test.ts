@@ -208,10 +208,10 @@ describe('workflowBuilderStore', () => {
     expect(promptIssue?.severity).toBe('error');
   });
 
-  it('validate accepts v2 fields at engine level v2', () => {
+  it('validate accepts v2 fields', () => {
     store().loadRecord(makeRecord());
     store().updateStage('build', { join: { mode: 'any', cancelRemaining: false } });
-    expect(store().validate().find((i) => i.code === 'engine-unsupported')).toBeUndefined();
+    expect(store().validate().filter((i) => i.severity === 'error')).toEqual([]);
   });
 
   // ── Save bookkeeping ──

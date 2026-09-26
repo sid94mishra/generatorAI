@@ -13,7 +13,6 @@ import * as fs from 'node:fs/promises';
 import * as path from 'node:path';
 import type { ILogger } from '@generatorai/shared';
 import {
-  ENGINE_LEVEL,
   WorkflowTemplateSchema,
   validateWorkflow,
   type WorkflowTemplate,
@@ -64,7 +63,7 @@ export class TemplateRegistry {
         .map((i) => `${i.path.join('.')}: ${i.message}`)
         .join('; ');
     }
-    const result = validateWorkflow(parsed.data.graph, { engine: ENGINE_LEVEL });
+    const result = validateWorkflow(parsed.data.graph);
     if (!result.valid) {
       return result.issues
         .filter((i) => i.severity === 'error')

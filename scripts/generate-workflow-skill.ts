@@ -207,7 +207,7 @@ interface Example {
 
 /** Validate, round-trip and canonicalise one example; throws on any error. */
 function canonicalExample(file: string, input: unknown, templateId?: string): Example {
-  const r = validateWorkflow(input, { engine: 'v2' });
+  const r = validateWorkflow(input);
   const errors = r.issues.filter((i) => i.severity === 'error');
   if (!r.valid || !r.graph || errors.length) {
     throw new SourceError(`example ${file} is invalid:\n${errors.map((i) => `  ${i.code} at ${i.path || '/'}: ${i.message}`).join('\n')}`);
@@ -251,7 +251,7 @@ function checkJsonBlocks(name: string, text: string): void {
       if (!item || typeof item !== 'object') continue;
       const o = item as Record<string, unknown>;
       if ('formatVersion' in o) {
-        const r = validateWorkflow(o, { engine: 'v2' });
+        const r = validateWorkflow(o);
         if (!r.valid) throw new SourceError(`${name}: a json example is invalid: ${r.issues.filter((i) => i.severity === 'error').map((i) => `${i.code} ${i.path}`).join(', ')}`);
       } else if ('kind' in o && 'key' in o) {
         const r = StageSpecSchema.safeParse(o);

@@ -8,15 +8,6 @@
 // lists identical.
 // ────────────────────────────────────────────────────────────────
 
-/**
- * The engine generation that runs workflows. `validateWorkflow` rejects
- * spec fields the engine cannot execute yet (`engine-unsupported`), and the
- * builder hides those controls. PHASE-03 flips this one constant to `'v2'`.
- */
-export const ENGINE_LEVELS = ['v1', 'v2'] as const;
-export type EngineLevel = (typeof ENGINE_LEVELS)[number];
-export const ENGINE_LEVEL: EngineLevel = 'v2';
-
 /** The only `formatVersion` a `WorkflowGraph` document may carry. */
 export const WORKFLOW_FORMAT_VERSION = 2 as const;
 

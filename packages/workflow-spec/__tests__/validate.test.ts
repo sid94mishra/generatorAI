@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ENGINE_LEVEL, VALIDATION_CODES, validateWorkflow, type ValidationIssue } from '../src/index.js';
+import { VALIDATION_CODES, validateWorkflow, type ValidationIssue } from '../src/index.js';
 import { agent, codes, graph } from './fixtures.js';
 
 const reviewSchema = {
@@ -35,8 +35,7 @@ describe('a valid workflow', () => {
     expect(r.graph?.stages.map((s) => s.key)).toEqual(['plan', 'review', 'fix']);
   });
 
-  it('defaults to the current engine level', () => {
-    expect(ENGINE_LEVEL).toBe('v2');
+  it('accepts the fields the engine executes', () => {
     const r = validateWorkflow(graph([agent('a', { repair: {} })]));
     expect(codes(r)).toEqual([]);
   });
@@ -127,18 +126,14 @@ describe('references layer', () => {
   });
 
   it('checks joins', () => {
-    const r = validateWorkflow(graph([agent('a'), agent('b'), agent('c', { join: { mode: 'n_of_m', n: 3 } })], [['a', 'c'], ['b', 'c']]), {
-      engine: 'v2',
-    });
+    const r = validateWorkflow(graph([agent('a'), agent('b'), agent('c', { join: { mode: 'n_of_m', n: 3 } })], [['a', 'c'], ['b', 'c']]));
     expect(codes(r)).toEqual(['join-n-exceeds-predecessors']);
-    const w = validateWorkflow(graph([agent('a'), agent('c', { join: { mode: 'any' } })], [['a', 'c']]), { engine: 'v2' });
+    const w = validateWorkflow(graph([agent('a'), agent('c', { join: { mode: 'any' } })], [['a', 'c']]));
     expect(codes(w, 'warning')).toEqual(['join-single-predecessor']);
   });
 
   it('warns about fields that only matter inside loops', () => {
-    const r = validateWorkflow(graph([agent('a', { sessionReuse: 'continue', followUpPrompts: [{ label: 'f', text: 'again' }] })]), {
-      engine: 'v2',
-    });
+    const r = validateWorkflow(graph([agent('a', { sessionReuse: 'continue', followUpPrompts: [{ label: 'f', text: 'again' }] })]));
     expect(codes(r, 'warning').sort()).toEqual(['follow-up-outside-loop', 'session-continue-outside-loop']);
   });
 
@@ -226,7 +221,6 @@ describe('expressions and templates layer', () => {
         outputs: { verdict: 'stages.a.output.verdict', bad: 'stages.zz.output' },
         lifecycle: { postProcessing: { steps: [{ name: 'pr', config: { type: 'create_pr', title: 'Fix {{ stages.a.output.verdict }}', body: '{{nope}}' } }] } },
       }),
-      { engine: 'v2' },
     );
     expect(r.issues.map((i) => [i.code, i.path])).toEqual([
       ['expr-unknown-stage', '/workflow/outputs/bad'],
@@ -266,7 +260,7 @@ describe('security layer', () => {
   it('requires secretref for provider keys and rejects literal secrets', () => {
     const provider = { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'sk-live-abcdefghijklmnopqrstuvwxyz' };
     expect(codes(validateWorkflow(graph([agent('a', { session: { provider } })])))).toContain('secret-not-secretref');
-    expect(codes(validateWorkflow(graph([agent('a')], [], { session: { provider: { ...provider, apiKey: 'secretref:provider/openai' } } }), { engine: 'v2' }))).toEqual([]);
+    expect(codes(validateWorkflow(graph([agent('a')], [], { session: { provider: { ...provider, apiKey: 'secretref:provider/openai' } } })))).toEqual([]);
     const env = (e: Record<string, string>) => codes(validateWorkflow(graph([agent('a', { hooks: [scriptHook({ command: 'x', env: e })] })])));
     expect(env({ GITHUB_TOKEN: 'abc123' })).toContain('secret-literal');
     expect(env({ ANYTHING: 'ghp_abcdefghijklmnopqrstuvwxyz0123456789' })).toContain('secret-literal');
@@ -286,57 +280,6 @@ describe('security layer', () => {
       }),
     );
     expect(find(header.issues, 'secret-literal')?.path).toBe('/workflow/hooks/0/config/headers/Authorization');
-  });
-});
-
-describe('engine capability gate', () => {
-  const v1 = (g: unknown) => validateWorkflow(g, { engine: 'v1' });
-  const v2 = (g: unknown) => validateWorkflow(g, { engine: 'v2' });
-
-  it.each<[string, unknown]>([
-    ['join any', graph([agent('a'), agent('b'), agent('c', { join: { mode: 'any' } })], [['a', 'c'], ['b', 'c']])],
-    ['repair', graph([agent('a', { repair: {} })])],
-    ['onExhausted pause', graph([agent('a', { onExhausted: 'pause' })])],
-    ['sessionReuse continue', graph([agent('a', { sessionReuse: 'continue' })])],
-    ['sessionGroup', graph([agent('a', { sessionGroup: 'g' })])],
-    ['stage budget', graph([agent('a', { budget: { maxTurns: 5 } })])],
-    ['workflow budget', graph([agent('a')], [], { budget: { maxTurns: 5 } })],
-    ['timeouts.idleMs', graph([agent('a', { timeouts: { idleMs: 5000 } })])],
-    ['timeouts.queueMs', graph([agent('a', { timeouts: { queueMs: 5000 } })])],
-    ['timeouts.totalMs', graph([agent('a', { timeouts: { totalMs: 5000 } })])],
-    ['extraction tool', graph([agent('a', { output: { extraction: 'tool' } })])],
-    ['compensate', graph([agent('a', { compensate: [{ name: 'undo', config: { type: 'restore_checkpoint' } }] })])],
-    ['onExit', graph([agent('a')], [], { onExit: [{ name: 'x', config: { type: 'function', handlerName: 'h' } }] })],
-    ['onFailure', graph([agent('a')], [], { onFailure: [{ name: 'x', config: { type: 'function', handlerName: 'h' } }] })],
-    ['maxParallel', graph([agent('a')], [], { maxParallel: 2 })],
-    ['handlesFailure', graph([agent('a'), agent('b')], [{ from: 'a', to: 'b', on: 'always', handlesFailure: true }])],
-    ['retry.maxDelayMs', graph([agent('a', { retry: { maxDelayMs: 1000 } })])],
-    ['retry.jitter', graph([agent('a', { retry: { jitter: 'none' } })])],
-    ['retry.retryOn', graph([agent('a', { retry: { retryOn: ['overloaded'] } })])],
-    ['retry.mode', graph([agent('a', { retry: { mode: 'restart' } })])],
-    ['retry.restoreCheckpointOnRestart', graph([agent('a', { retry: { restoreCheckpointOnRestart: false } })])],
-    ['approval.allowChanges', graph([agent('a', { approval: { allowChanges: false } })])],
-    ['approval.maxRounds', graph([agent('a', { approval: { maxRounds: 1 } })])],
-    ['workflow outputs', graph([agent('a')], [], { outputs: { done: "stages.a.status == 'completed'" } })],
-  ])('%s is rejected on v1 and accepted on v2', (_what, g) => {
-    const r1 = v1(g);
-    expect(codes(r1, 'error')).toEqual(['engine-unsupported']);
-    expect(find(r1.issues, 'engine-unsupported')!.hint).toMatch(/engine upgrade/);
-    expect(codes(v2(g), 'error')).toEqual([]);
-  });
-
-  it('accepts provider credentials and MCP secret references on v1: the session composer resolves them (P02)', () => {
-    const provider = { name: 'p', baseUrl: 'https://api.example.com', apiKey: 'secretref:provider/k' };
-    expect(v1(graph([agent('a', { session: { provider } })])).issues).toEqual([]);
-    const mcp = { servers: { gh: { type: 'http' as const, url: 'https://mcp.test', headers: { Authorization: 'secretref:gh' } } } };
-    expect(v1(graph([agent('a')], [], { session: { mcp } })).issues).toEqual([]);
-  });
-
-  it('accepts what v1 executes: attempt timeouts, retries, approval, fail on exhaustion', () => {
-    const r = v1(
-      graph([agent('a', { timeouts: { attemptMs: 60_000 }, retry: { maxAttempts: 3 }, approval: {}, onExhausted: 'fail', output: { rules: [] } })]),
-    );
-    expect(r.issues).toEqual([]);
   });
 });
 

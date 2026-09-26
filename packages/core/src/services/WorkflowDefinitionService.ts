@@ -12,7 +12,6 @@
 // ────────────────────────────────────────────────────────────────
 
 import {
-  ENGINE_LEVEL,
   MAX_INVOCATION_DEPTH,
   WorkflowGraphSchema,
   collectCommandFields,
@@ -80,7 +79,6 @@ export function assertValidGraph(
   refs?: Pick<ValidateOptions, 'resolveWorkflowRef' | 'definitionId'> & { publish?: boolean },
 ): WorkflowGraph {
   const result = validateWorkflow(input, {
-    engine: ENGINE_LEVEL,
     ...(commandAllowlist ? { commandAllowlist } : {}),
     ...(refs?.resolveWorkflowRef ? { resolveWorkflowRef: refs.resolveWorkflowRef } : {}),
     ...(refs?.definitionId ? { definitionId: refs.definitionId } : {}),
@@ -138,7 +136,6 @@ export class WorkflowDefinitionService {
     const allowlist = this.allowlist;
     const resolveWorkflowRef = await this.refResolver(input);
     return validateWorkflow(input, {
-      engine: ENGINE_LEVEL,
       ...(allowlist ? { commandAllowlist: allowlist } : {}),
       resolveWorkflowRef,
       ...(opts.definitionId ? { definitionId: opts.definitionId } : {}),

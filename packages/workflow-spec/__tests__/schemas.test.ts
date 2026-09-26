@@ -129,7 +129,7 @@ describe('the canonical document', () => {
   it('generated graphs validate with no errors (property)', () => {
     fc.assert(
       fc.property(validGraph, (input) => {
-        const r = validateWorkflow(input, { engine: 'v1' });
+        const r = validateWorkflow(input);
         expect(r.issues.filter((i) => i.severity === 'error')).toEqual([]);
       }),
       { numRuns: 200 },

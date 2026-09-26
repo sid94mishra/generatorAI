@@ -3,7 +3,7 @@
 // of the v2 `WorkflowGraph`. Collapsible accordion sections, a
 // Properties / Execution tab bar, validator issues shown next to the
 // field they point at. Every v2 field is editable: the engine executes
-// all of them (ENGINE_LEVEL v2).
+// all of them.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';

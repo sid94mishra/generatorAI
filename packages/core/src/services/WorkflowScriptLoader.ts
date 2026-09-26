@@ -24,7 +24,6 @@ import { readdir, rm, stat as fsStat, writeFile, mkdir } from 'node:fs/promises'
 import { join, resolve, relative, basename } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  ENGINE_LEVEL,
   RunProfileSchema,
   validateWorkflow,
   type RunProfile,
@@ -96,7 +95,7 @@ export interface LoadedScript {
 
 /** A builder from `@generatorai/workflow-spec/builders` (duck-typed: a script may import its own copy). */
 interface GraphBuilder {
-  buildWithHandlers(opts?: { engine?: 'v1' | 'v2' }): { graph: WorkflowGraph; handlers: Map<string, (ctx: never) => unknown> };
+  buildWithHandlers(): { graph: WorkflowGraph; handlers: Map<string, (ctx: never) => unknown> };
 }
 
 const isBuilder = (v: unknown): v is GraphBuilder =>
@@ -319,12 +318,12 @@ export class WorkflowScriptLoader {
     }
     if (isBuilder(exported)) {
       try {
-        return exported.buildWithHandlers({ engine: ENGINE_LEVEL });
+        return exported.buildWithHandlers();
       } catch (err) {
         throw new ScriptValidationError(`Script workflow is invalid: ${(err as Error).message}`, { scriptPath, zodError: err });
       }
     }
-    const result = validateWorkflow(exported, { engine: ENGINE_LEVEL });
+    const result = validateWorkflow(exported);
     if (!result.valid || !result.graph) {
       throw new ScriptValidationError(
         `Script workflow is invalid: ${result.issues

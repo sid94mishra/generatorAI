@@ -12,7 +12,7 @@
 
 import { z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import { ENGINE_LEVEL, WORKFLOW_FORMAT_VERSION } from './constants.js';
+import { WORKFLOW_FORMAT_VERSION } from './constants.js';
 import { EXPRESSION_GRAMMAR, grammarFilters, grammarFunctions, type GrammarRow } from './expr/grammar.js';
 import {
   FINALIZE_PHASES,
@@ -154,7 +154,7 @@ export function renderFieldsMarkdown(): string {
     '',
     `> ${GENERATED_NOTE}`,
     '',
-    `Document format version: ${WORKFLOW_FORMAT_VERSION}. Engine level: \`${ENGINE_LEVEL}\` (fields the engine cannot execute yet are rejected with \`engine-unsupported\`).`,
+    `Document format version: ${WORKFLOW_FORMAT_VERSION}.`,
     '',
     '## WorkflowGraph',
     '',

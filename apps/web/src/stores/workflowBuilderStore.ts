@@ -15,7 +15,6 @@ import type { Node, Edge, Connection } from '@xyflow/react';
 import { applyNodeChanges, applyEdgeChanges } from '@xyflow/react';
 import type { NodeChange, EdgeChange } from '@xyflow/react';
 import {
-  ENGINE_LEVEL,
   LifecycleSchema,
   STAGE_KEY_PATTERN,
   WORKFLOW_FORMAT_VERSION,
@@ -1265,7 +1264,7 @@ const useWorkflowBuilderStoreImpl = create<WorkflowBuilderState>((set, get) => (
   validate: () => {
     const graph = get().toGraph();
     const allowlist = get().commandAllowlist;
-    const { issues } = validateWorkflow(graph, { engine: ENGINE_LEVEL, ...(allowlist ? { commandAllowlist: allowlist } : {}) });
+    const { issues } = validateWorkflow(graph, allowlist ? { commandAllowlist: allowlist } : {});
     const located = locateIssues(issues, graph);
     // The server's own findings stay until its next answer replaces them.
     const seen = new Set(located.map((i) => `${i.code}|${i.path}`));
