@@ -157,7 +157,7 @@ describe('other shapes', () => {
   it('StageSpec applies defaults', () => {
     const s = StageSpecSchema.parse({ key: 'a', name: 'A', kind: 'agent' });
     expect(s).toMatchObject({ join: { mode: 'all' }, sessionReuse: 'fresh', prompts: [], hooks: [], context: { mode: 'summary' } });
-    expect(s.output).toEqual({ format: 'text', extraction: 'auto', rules: [] });
+    expect(s.output).toEqual({ format: 'text', extraction: 'auto', rules: [], summary: 'auto' });
     expect('onExhausted' in s).toBe(false);
   });
 
