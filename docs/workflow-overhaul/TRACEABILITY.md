@@ -9,11 +9,11 @@ Status values: `open` → `in progress` → `closed (PR #)` / `accepted (rationa
 | ID | Requirement | Phase / WP | Status |
 |---|---|---|---|
 | R1 | One invocation path across clients | P04 WP-4.1–4.5 | closed (6fd9adc: `POST /api/workflow-invocations` / `WorkflowInvocationService` for web, desktop, mobile, CLI, TUI, SDK, MCP, automations, scripts, forks; one lifecycle) |
-| R2 | Streamlined creation, stages and config | P01 WP-1.5–1.8; P02 SessionSpec; P03 WP-3.1, 3.11 | in progress (P01 part done: 1d67d0f, 28f9c5e; P02 SessionSpecEditor a220bb3) |
-| R3 | A stage is a compact chat with every chat capability | P02 (all); P03b; P04 design 7 (mounts) | in progress (P02 done: one SessionComposer, binder, gates, TurnRecorder, permission source — see Phase 02 closure; P03b done: the stage conversation API and clients — see Phase 03b closure) |
+| R2 | Streamlined creation, stages and config | P01 WP-1.5–1.8; P02 SessionSpec; P03 WP-3.1, 3.11 | closed (P01 WP-1.5–1.8 and P02 SessionSpecEditor a220bb3; P03 engine; reviewed in the final review 2026-09-26) |
+| R3 | A stage is a compact chat with every chat capability | P02 (all); P03b; P04 design 7 (mounts) | closed (P02 SessionComposer, P03b stage conversation API and clients, P04 mounts; reviewed in the final review 2026-09-26) |
 | R4 | DAG evaluation; retries; a **generic** loop (fix ↔ review is one example) with a budget | README §5.1; P03 WP-3.3–3.6; P05 §2–§3, WP-5A.1–5A.5 (tests: loop matrix, examples L1–L6, v59 migration, Windows `check`) | closed (P05: loop 0c3f4e2..4d6ba7e, map/sub-workflow/wait 3eb76c9..dcd3b60; tests deferred to the final pass) |
 | R5 | Codex goals and Claude Code dynamic workflows research and support (as DAG constructs, no slash commands) | README §5.3; P05 examples L1–L6, M1–M3; P08 (judge panel + expansion; script runtime gated by PD-21) | done for the ungated scope (P05: templates L1–L6, M1–M3, W1–W3, S1, completeness critic, c46fe80; P08: judge-panel template + winner merge a0c64df, plan-then-execute expansion + template c090f3e; the script runtime WP-8.1/8.2/8.8 stays gated by PD-21) |
-| R6 | Remove legacy and back-compat code | P01 WP-1.1–1.4; P03 WP-3.7; P04 WP-4.1 (orchestrator, worktrees), 4.4 (MCP embedded), 4.6; `check-no-legacy` | in progress (P01–P04 parts done: orchestrator, preprocessor, run-start routes, MCP embedded mode deleted; 110 bans) |
+| R6 | Remove legacy and back-compat code | P01 WP-1.1–1.4; P03 WP-3.7; P04 WP-4.1 (orchestrator, worktrees), 4.4 (MCP embedded), 4.6; `check-no-legacy` | closed (P01–P08 deletions plus the final review: admission lanes, `HitlService`, the v1 capability gate, the testkit alias, dead exports; no-legacy 127 bans, 0 hits) |
 | R7 | Chat and the orchestrator invoke workflows | P06 WP-6.1–6.4 | closed (a55a1bf, 52e5497, 966e114, c44ba88, cf0ac96: one workflow tool set for chats, orchestrators and stages; chat bridge and cards) |
 | R8 | An authoring skill for any agent | P06 WP-6.5–6.8 | closed (52e5497, ba3759a, e0f06ac, fc3f9dc: authoring service and routes, the generated skill, CLI, MCP tools and resources) |
 | R9 | Review the earlier document | README §4 | closed (this plan) |
@@ -270,6 +270,34 @@ Commits: 3a93d7f (WP-7.1), f78ac16 (WP-7.2), 6cae36b + 1ead2c0 (WP-7.3), 12d815c
 | F O-5 | — | attempt history was kept since P03 (`stage_attempts`); per-attempt `invoke_agent` spans and the stage history tab show it |
 | F O-6 | 3a93d7f | no file-placement rules for read-only stages |
 | D §f gaps | af70b6d | per-node history, raw event log, inline validation, `{{` autocomplete, version history, run search/filters, usage roll-up, "Add stage" menu (no palette). Still open (backlog/P08): run diff, dry-run a stage, re-run from node is P05 |
+
+## Final review closure (2026-09-26)
+
+The final review audited phases 00–08 in seven areas: ENGINE, LOOP, CONVINV, AGENT, PLATFORM, ECON and MAPWAIT. The findings are in `C:/gaiwf/review-probes/findings/`. TRACKER "Final review" gives every finding, its disposition and its commits. The reports are `notes/FIX-{A,B,C}-report.md`.
+
+**Commits:**
+- batch A: 57017b4, 04ed0f9, 40e8560, 130f0b2, f8b0778;
+- batch B: merged in 35fb83c;
+- batch C: merged in 9696be3;
+- integration: aec47e0, c77f651, 216571d.
+
+| Area | Closed | Open (recorded) | Evidence |
+|---|---|---|---|
+| ENGINE R1–R17 | R1–R16 fixed; R17 regression tests added | R17's model test, T10 and E2E port: deferred (product owner: minimal testing) | testkit `review-replay` 8/8; core `retryPauseBudget`, `decide.test` |
+| LOOP R1–R14 | all 14 (R11 wired end to end in aec47e0; R12 fixed in aec47e0) | — | core `loops.test`, `SandboxedScriptRunner.test`, `checkRunnerSecrets.test`, `workflowCallerSecurity.test` |
+| CONVINV R1–R21 | R1–R20; R21 by correcting the claim | R19: the attachments GET is unused (note); R21: sessions are not routed through the sandbox | `invocationSecurity.test`, `workflowCallerSecurity.test`, `IdempotencyService.test`, `DeviceService.test`, `replayEvents.test`, `StageComposerStop.test`, `runTimeline.test`, `bin.test` |
+| AGENT R1–R11 | R1–R9, R11 | R10: the skill is not staged as a real skill (DEVIATIONS) | `WorkflowToolHost.test`, `riskFlags.test` |
+| PLATFORM R1–R19 + script-hash | all (R2 and R17 completed in aec47e0; `stateAfter` for R19 deleted in aec47e0) | — | `McpCredentialVault.test`, `secretRefs.test`, `checkRunnerSecrets.test`, `expr.evaluate.test`, `safeRegex.test`, `composer.test`, `workflowE2eJudge.test`, `workflowInvariants.test`, golden (c) |
+| ECON R1–R13 | all 13 | — | `AdmissionController.test`, `AgentHostClient.test`, `claude-stop-settles-turn.test`, `inheritAndToolWaits.test`, `AutomationTriggerPropagation.test` |
+| MAPWAIT R1–R18 | R1–R11, R13–R17; R12 partly; R18 without the migration | R12: an early event's sender needs a column (next migration). R18: the physical column is dropped by the next migration. R13: relay devices share one rate-limit bucket | `worktreeLeases.test`, `inheritAndToolWaits.test`, `workflowCallbacks.test`, `callbackScope.test` |
+| Engine lock after a quick restart (a batch C E2E finding) | `RunSupervisor.startOrRetry` retries until the stale lock can be taken (server and SDK) | — | aec47e0 |
+
+**Register reconciliation (WP-9.4):**
+- Every W-01..W-66 item has a closure row in the phase closures above, except **W-44** (documentation drift).
+- W-44 is partly closed. P01 WP-1.9 and the generated references are clean; `check:workflow-spec`, `check:templates`, `check:workflow-skill` and `check:doc-drift` pass in `pnpm lint`.
+- The rest of W-44 is deferred (product owner: minimal testing): the WP-9.3 rewrite of the feature docs, and about 110 stale class names in `architecture.md` and `packages.md`.
+
+**Live sanity:** `workflow:e2e --phase smoke` PASS; `--phase smoke-live` PASS (Haiku: an agent stage plus a two-iteration loop). See the STATUS "Final review gate".
 
 ## Independent review findings
 

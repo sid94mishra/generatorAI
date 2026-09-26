@@ -4,17 +4,17 @@ The coding agent updates this file in every phase PR.
 
 | Phase | Branch | Status | PR | Gate report | Notes |
 |---|---|---|---|---|---|
-| 00 Baseline | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | Baseline section below | gate pass with the recorded baseline exceptions |
-| 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass ; part B gate 2026-09-25: typecheck 52/52; workflow-spec 359/359; lint green; no-legacy 72 bans, 0 hits; generate:workflow-spec --check clean; **phase gate 2026-09-25 (part C): see "Phase 01 gate" below** | WP-1.6–1.9 done (1d67d0f, 28f9c5e, 9c61ec6, ebb4e82); v55 applied to the dev-DB copy |
-| 02 SessionComposer | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-25: see "Phase 02 gate" below** | WP-2.0–2.11 (0c02b1c..a220bb3), bans/docs c35f905, gate fixes f14cf5a; v56 applied to the dev-DB copy |
-| 03 Engine v2 | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-26: see "Phase 03 gate" below** (part 1 and part 2 gates below it) | WP-3.1–3.9 (dd00852..48cc4ec); the cutover is 5dad4e7; v57 applied to the dev-DB copy |
-| 03b Stage conversation | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **phase gate 2026-09-26: see "Phase 03b gate" below** | WP-3b.1 0254811, WP-3b.4 2529558, WP-3b.2/3b.3 63db929, docs f55692b; no migration |
-| 04 Lifecycle and invocation | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **phase gate 2026-09-26: see "Phase 04 gate" below** | WP-4.1–4.5 6fd9adc, bans a09e3d1, docs 5882780; v58 applied to the dev-DB copy |
-| 05 Control flow (5A, 5B) | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **5A gate and 5B gate 2026-09-26: see "Phase 05A gate" and "Phase 05B gate" below** | 5A: WP-5A.1 0c3f4e2, 5A.4 0eb53ad, 5A.2 5861460, 5A.3 b3fae98, 5A.6 0103a4d, 5A.5 936e7a1 + 4d6ba7e, lint f7b2626; v59 applied to the dev-DB copy. 5B: spec 3eb76c9, engine 5ffd0a4, fork 1d195c3, builder 429933a, expression editor c8640ef, run page 046f193, clients dcd3b60, templates c46fe80, docs 9e41d05 + 51aee1b, fixes/bans ad2f99d; no migration. Handoffs notes/P05A-handoff.md, notes/P05B-handoff.md |
-| 06 Agents and skill | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **phase gate 2026-09-26: see "Phase 06 gate" below** | v60 21393c6; WP-6.1 a55a1bf (+a569934, 4d7869c), 6.2 52e5497/966e114/c44ba88/a7aadc2, 6.3 a55a1bf, 6.4 cf0ac96, 6.5 52e5497, 6.6 ba3759a, 6.7 e0f06ac, 6.8 fc3f9dc, 6.9 3e685fd/f1db906, deviations 59f9b29; v60 applied to the dev-DB copy |
-| 07 Economy and UX | wf/phase-07-economy-ux | not started | | | |
-| 08 Dynamic workflows | wf/overhaul (see DEVIATIONS) | WP-8.3, 8.4 done (review deferred to the final review); WP-8.1/8.2/8.8 gated (PD-21), WP-8.5–8.7 backlog | local only | **phase gate 2026-09-26: see "Phase 08 gate" below** | WP-8.3 a0c64df (judge panel, map winner merge), WP-8.4 c090f3e (plan-then-execute expansion); no migration |
-| 09 Release gate | wf/phase-09-release | not started | | | |
+| 00 Baseline | wf/overhaul (see DEVIATIONS) | done, reviewed | local only | Baseline section below | gate pass with the recorded baseline exceptions |
+| 01 Spec, legacy, definitions | wf/overhaul (see DEVIATIONS) | done, reviewed | local only | part A gate 2026-09-25: typecheck 50/50; tests = the 12 baseline failures only (cli 5, core 3, git 2, server 2); lint green; no-legacy 69 bans, 0 hits, 12 comments (baseline 12); db-baseline + migrations-lock + BaselineFreshDb pass ; part B gate 2026-09-25: typecheck 52/52; workflow-spec 359/359; lint green; no-legacy 72 bans, 0 hits; generate:workflow-spec --check clean; **phase gate 2026-09-25 (part C): see "Phase 01 gate" below** | WP-1.6–1.9 done (1d67d0f, 28f9c5e, 9c61ec6, ebb4e82); v55 applied to the dev-DB copy |
+| 02 SessionComposer | wf/overhaul (see DEVIATIONS) | done, reviewed | local only | **phase gate 2026-09-25: see "Phase 02 gate" below** | WP-2.0–2.11 (0c02b1c..a220bb3), bans/docs c35f905, gate fixes f14cf5a; v56 applied to the dev-DB copy |
+| 03 Engine v2 | wf/overhaul (see DEVIATIONS) | done, reviewed | local only | **phase gate 2026-09-26: see "Phase 03 gate" below** (part 1 and part 2 gates below it) | WP-3.1–3.9 (dd00852..48cc4ec); the cutover is 5dad4e7; v57 applied to the dev-DB copy |
+| 03b Stage conversation | wf/overhaul (see DEVIATIONS) | done, reviewed (final review 2026-09-26) | local only | **phase gate 2026-09-26: see "Phase 03b gate" below** | WP-3b.1 0254811, WP-3b.4 2529558, WP-3b.2/3b.3 63db929, docs f55692b; no migration |
+| 04 Lifecycle and invocation | wf/overhaul (see DEVIATIONS) | done, reviewed (final review 2026-09-26) | local only | **phase gate 2026-09-26: see "Phase 04 gate" below** | WP-4.1–4.5 6fd9adc, bans a09e3d1, docs 5882780; v58 applied to the dev-DB copy |
+| 05 Control flow (5A, 5B) | wf/overhaul (see DEVIATIONS) | done, reviewed (final review 2026-09-26) | local only | **5A gate and 5B gate 2026-09-26: see "Phase 05A gate" and "Phase 05B gate" below** | 5A: WP-5A.1 0c3f4e2, 5A.4 0eb53ad, 5A.2 5861460, 5A.3 b3fae98, 5A.6 0103a4d, 5A.5 936e7a1 + 4d6ba7e, lint f7b2626; v59 applied to the dev-DB copy. 5B: spec 3eb76c9, engine 5ffd0a4, fork 1d195c3, builder 429933a, expression editor c8640ef, run page 046f193, clients dcd3b60, templates c46fe80, docs 9e41d05 + 51aee1b, fixes/bans ad2f99d; no migration. Handoffs notes/P05A-handoff.md, notes/P05B-handoff.md |
+| 06 Agents and skill | wf/overhaul (see DEVIATIONS) | done, reviewed (final review 2026-09-26) | local only | **phase gate 2026-09-26: see "Phase 06 gate" below** | v60 21393c6; WP-6.1 a55a1bf (+a569934, 4d7869c), 6.2 52e5497/966e114/c44ba88/a7aadc2, 6.3 a55a1bf, 6.4 cf0ac96, 6.5 52e5497, 6.6 ba3759a, 6.7 e0f06ac, 6.8 fc3f9dc, 6.9 3e685fd/f1db906, deviations 59f9b29; v60 applied to the dev-DB copy |
+| 07 Economy and UX | wf/p07, merged into wf/overhaul (ff6e4b6) | done, reviewed (final review 2026-09-26) | local only | **phase gate 2026-09-26: see "Phase 07 gate" below** | WP-7.1–7.7 (3a93d7f..6ebfac0); no migration; notes/P07-report.md |
+| 08 Dynamic workflows | wf/overhaul (see DEVIATIONS) | WP-8.3, 8.4 done, reviewed (final review 2026-09-26); WP-8.1/8.2/8.8 gated (PD-21), WP-8.5–8.7 backlog | local only | **phase gate 2026-09-26: see "Phase 08 gate" below** | WP-8.3 a0c64df (judge panel, map winner merge), WP-8.4 c090f3e (plan-then-execute expansion); no migration |
+| 09 Release gate | wf/overhaul (see DEVIATIONS) | done where the gate and smoke cover it; WP-9.1/9.2/9.5 and the docs rewrite deferred (product owner: minimal testing) | local only | **final review gate 2026-09-26: see "Final review gate" below** | fix batches A (on the branch), B (merge 35fb83c), C (merge 9696be3); follow-ups aec47e0; test fixes c77f651, 216571d; smoke PASS, smoke-live (Haiku) PASS |
 
 ## Phase 00 checklist
 
@@ -217,6 +217,38 @@ Run at `wf/overhaul` @ f14cf5a (Windows 11, Node 26.8.2, pnpm 10.29.2).
 - **`pnpm workflow:dbcopy-upgrade`** (`C:/gaiwf/dbcopy/generatorai.db`; the real DB was not opened): v52 → v56 via the legacy route in 2.7 s. Chat rows **UNCHANGED** (362 chats, 392 chat sessions, 841 messages); drift 0. Found and fixed on the way: with the baseline at 56 a v55 database took the legacy route and failed (`VERSIONED_ONLY_FROM = 55`, DEVIATIONS).
 - **W-19 / C7:** covered at composer level (session/composer.test.ts). **Live E2E** (advisory, `P02-perm` and the other P02 scenarios): not run.
 - **Acceptance:** no session-config builders outside `services/session/` (the SES and CMS blocks are deleted and banned); chat and stage bound to one agent get the same tools, blocks and MCP servers apart from the documented owner differences (golden + composer tests); a stage widget now carries its stage run id so the run page Widget tab routes it to that stage (unit-tested; not checked in a browser); an automation cannot be saved without a permission mode (schema + route + web form).
+
+## Final review gate (2026-09-26, after merging fix batches B and C)
+
+Run at `wf/overhaul` after the merges 35fb83c (batch B) and 9696be3 (batch C) and the follow-ups aec47e0 (Windows 11, Node 26.8.2, pnpm 10.29.2). Batch A was already on the branch (786994e). TRACKER "Final review" lists every finding.
+
+- **`pnpm install --frozen-lockfile --offline`:** passes. The lockfile changed for batch C's `mcp-server` bundle.
+- **Generated files:** `generate:workflow-spec`, `generate:templates` and `generate:workflow-skill` were re-run after the merges. The skill validator bundle conflicted and was regenerated, not hand-merged. The scheduler replay fixtures still replay identically, so they were not regenerated (only ids and timestamps would change).
+- **`pnpm turbo typecheck --concurrency=2`:** 51/51.
+  - The first run after the merges failed, in core: recovery called batch B's `maps.leaseKeys(runId, stageRunId)` without the `stageRunId`. Fixed in aec47e0.
+- **`pnpm lint`:** exit 0. This covers turbo lint and every `check:*`: workflow-spec, templates, workflow-skill, migrations-lock, db-baseline, workflow-invariants and doc-drift.
+- **`node scripts/check-no-legacy.mjs`:** 127 banned patterns, 1,986 files scanned, 0 hits. Legacy comments: 0 (baseline 0).
+- **Full `pnpm turbo test --concurrency=2 --continue`, run once:** 27 of 33 tasks passed.
+  - The six failing tasks, and what happened to each:
+    - **`//#test:scripts`**, 2 files: `workflowE2eJudge` and `workflowInvariants` failed with a SyntaxError on import. The imported shebang `.mjs` scripts are checked out with CRLF in this worktree (`core.autocrlf=true`); the blobs are LF. After the working copy was normalized to LF, `pnpm test:scripts` passed alone: 5/5 files, 33 tests. This is environmental and needed no commit.
+    - **`@generatorai/workflow-testkit`**, 4 failures in `review-replay` (R1, R8, R9, R10). This was a cross-batch conflict: batch A's tests used the testkit `followUpPrompt` alias, which batch C deleted. c77f651 fixed it, and the package re-ran at 55/55.
+    - **`@generatorai/db`**, 1 failure in `BaselineFreshDb` reverse schema: batch B dropped `stage_runs.expansion` from `schema.ts`. c77f651 fixed it, and the package re-ran at 155 pass / 4 skipped.
+    - **`@generatorai/server`**, 1 failure: the baseline CSP-hash test (544/545).
+    - **`@generatorai/git`**, 2 failures: baseline (`GitClientScm` merge; 56/58).
+    - **`@generatorai/cli`**, 5 failures: the baseline TUI tests (`tui-e2e`, `tui-sweep`, 3× `narrowWidths`; 318 pass / 8 skipped).
+  - Everything else passed. core: 1,704 pass / 9 skipped, with no Kokoro or voice failure this run.
+    - web 638; mobile 1,097; agent-harness-providers 743; cli-core 888; server 544 + 1 baseline; workflow-spec 341; shared 326; client-core 293.
+    - design-tokens 239; desktop 193; tui-kit 99; source-control 64; client-transport 59; agent-host 50; auth 46; changes 46.
+    - client-runtime 33; review 30; relay 20; checkpoints 19; relay-protocol 18; pty-host 17; secrets 16; cua-host 16; mcp-server 9; sdk 8; browser-host 8.
+- **Live sanity** (isolated server on :3111; `E2E_ROOT=C:/gaiwf/e2e-int`, a fresh data dir deleted afterwards):
+  - `pnpm workflow:e2e --phase smoke --retries 0`: SMOKE-check **PASS**. Three `node --version` check stages, no LLM.
+  - `pnpm workflow:e2e --phase smoke-live --retries 0`: SMOKE-loop **PASS**, on claude-agent with model `haiku`. The run completed in about 20 s:
+    1. the agent stage `hello` answered `HELLO`;
+    2. loop `twice` ran its check body `tick` twice;
+    3. the loop exited `max_iterations`, `accept_last`, `iterations: 2`.
+  - The first smoke-live attempt failed on the scenario's own expectation (agent text is judged from `output`, which only non-agent stages fill). The run itself was correct. The expectation was fixed in 216571d.
+  - Every server started was stopped, and :3111 was free afterwards.
+- **Not run (product owner: minimal testing):** the full live E2E suite (WP-9.1), the `security-review` skill run (WP-9.2), the performance and resource budgets (WP-9.5), the tests the phases deferred, and the model/property tests.
 
 ## Phase 07 gate (2026-09-26, after the merge ff6e4b6)
 
