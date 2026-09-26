@@ -10,7 +10,7 @@
 // existing importers (`@generatorai/core`, `packages/db`) are unaffected.
 // ────────────────────────────────────────────────────────────────
 
-import type { ComputerConsentDecision } from '@generatorai/shared';
+import type { ComputerConsentDecision, ComputerConsentPlanStep, ComputerConsentReach } from '@generatorai/shared';
 import type { ComputerAppIdentity } from './IComputerBridge.js';
 
 /**
@@ -37,7 +37,15 @@ export interface ComputerConsentPrompt {
   scope: ComputerConsentScope;
   /** The exact element this approval covers, when the action is fenced. */
   target?: { snapshotId: string; elementIndex: number; elementLabel: string };
+  /** G-07: the actions of a batched request, approved or denied together. */
+  plan?: ComputerConsentPlanStep[];
   expiresAt: number;
+}
+
+/** What the user answered, and which applications the answer covers (G-07). */
+export interface ComputerConsentOutcome {
+  decision: ComputerConsentDecision;
+  reach: ComputerConsentReach;
 }
 
 /** Persistence + prompting seam. Backed by SQLite + the UI in Phase 5. */
@@ -51,5 +59,5 @@ export interface IComputerConsentStore {
     scope: ComputerConsentScope,
   ): Promise<void>;
   /** Ask the user. The service enforces its own deadline on top of this. */
-  prompt(request: ComputerConsentPrompt): Promise<ComputerConsentDecision>;
+  prompt(request: ComputerConsentPrompt): Promise<ComputerConsentOutcome>;
 }

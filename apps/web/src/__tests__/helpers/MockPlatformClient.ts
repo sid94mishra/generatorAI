@@ -29,6 +29,12 @@ import type {
   ChatBulkResult,
   ChatListPage,
   ChatListQuery,
+  ComputerConsentAnswer,
+  ComputerConsentAnswerResult,
+  ComputerControlMode,
+  ComputerControlState,
+  ComputerGrant,
+  ComputerPendingConsent,
   HarnessLoginResult,
   HarnessProvidersResponse,
   HarnessSetDefaultResult,
@@ -318,5 +324,32 @@ export class MockPlatformClient implements IPlatformClient {
 
   setDefaultProvider = vi.fn(
     async (type: string): Promise<HarnessSetDefaultResult> => ({ message: `Switched to '${type}'`, type, switched: true }),
+  );
+
+  getComputerConsent = vi.fn(async (_workspaceId: string): Promise<ComputerPendingConsent[]> => []);
+
+  answerComputerConsent = vi.fn(
+    async (_workspaceId: string, answer: ComputerConsentAnswer): Promise<ComputerConsentAnswerResult> => ({
+      ok: true,
+      requestId: answer.requestId,
+      decision: answer.decision,
+      scope: answer.scope ?? 'app',
+    }),
+  );
+
+  listComputerGrants = vi.fn(async (_workspaceId: string): Promise<ComputerGrant[]> => []);
+
+  revokeComputerGrant = vi.fn(async (_workspaceId: string, _appIdentity: string): Promise<void> => undefined);
+
+  getComputerControl = vi.fn(
+    async (workspaceId: string): Promise<ComputerControlState> => ({ workspaceId, mode: 'agent', changedAt: null }),
+  );
+
+  setComputerControl = vi.fn(
+    async (workspaceId: string, mode: ComputerControlMode): Promise<ComputerControlState> => ({
+      workspaceId,
+      mode,
+      changedAt: 1,
+    }),
   );
 }

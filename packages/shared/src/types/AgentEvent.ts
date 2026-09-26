@@ -10,6 +10,10 @@ import type {
   ComputerActionPath,
   ComputerConsentDecision,
   ComputerRefusalCode,
+  ComputerConsentPlanStep,
+  ComputerConsentReach,
+  ComputerControlMode,
+  ComputerControlState,
 } from './ComputerUse.js';
 import type { TerminalHostKind } from './Terminal.js';
 import type { ScmFlowResult } from './SourceControl.js';
@@ -566,6 +570,8 @@ export type AgentEvent =
         action: string;
         summary: string;
         path: ComputerActionPath;
+        /** G-07: several actions answered once for the batch. */
+        plan?: ComputerConsentPlanStep[];
         expiresAt: number;
       };
     }
@@ -575,8 +581,12 @@ export type AgentEvent =
         workspaceId: string;
         requestId: string;
         decision: ComputerConsentDecision | 'expired';
+        /** G-07: which apps the answer covers (absent for a denial / expiry). */
+        scope?: ComputerConsentReach;
       };
     }
+  // G-07: "Pause agent" / "Take over" — who drives this workspace's desktop.
+  | { kind: 'computer.control_changed'; data: ComputerControlState & { previous: ComputerControlMode } }
   | { kind: 'computer.error'; data: { workspaceId: string; error: string; kind?: 'crash' | 'timeout' | 'capacity' | 'unknown' } }
   // ── Integrated Terminal Events ──
   // Lifecycle only; raw output stays on the dedicated WebSocket transport

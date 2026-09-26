@@ -60,7 +60,11 @@ export type ComputerRefusalCode =
   /** Concurrency cap reached, or the action exceeded `actionTimeoutMs`. */
   | 'capacity_exhausted'
   /** Provider accepted the call but the target vanished mid-flight. */
-  | 'target_lost';
+  | 'target_lost'
+  /** The user paused the agent on this computer (G-07). */
+  | 'agent_paused'
+  /** The user has taken over this computer (G-07). */
+  | 'user_in_control';
 
 /**
  * Result of reading a property back after writing it.
@@ -221,7 +225,39 @@ export type ComputerConsentDecision = 'allow_once' | 'allow_run' | 'always_allow
 /** Persisted per-app grant. `allow_once` is never stored. */
 export type ComputerGrantDecision = 'always_allow' | 'deny';
 
-export interface ComputerConsentRequest {
+/**
+ * Which applications a consent answer covers (G-07, the board's "Queue
+ * Inspector only / Any app" segment):
+ * - `app` — only the application the prompt named;
+ * - `any` — any application. An `always_allow` with `any` is stored as a
+ *   grant on `COMPUTER_ANY_APP`; an `allow_run` with `any` covers every app for
+ *   the rest of the run. A deny is always per app.
+ *
+ * Omitted, an answer keeps each decision's historical reach
+ * (`defaultConsentReach`): `allow_run` any app, everything else this app.
+ */
+export type ComputerConsentReach = 'app' | 'any';
+
+/** The grant key an `always_allow` for any application is stored under. */
+export const COMPUTER_ANY_APP = '*';
+
+export function defaultConsentReach(decision: ComputerConsentDecision): ComputerConsentReach {
+  return decision === 'allow_run' ? 'any' : 'app';
+}
+
+/** One planned action of a batched request, answered once for the batch (G-07). */
+export interface ComputerConsentPlanStep {
+  /** Action type, e.g. `clickPoint`, `typeText`, `pressKey`. */
+  action: string;
+  /** Human-readable target (element label or point), never typed content. */
+  target?: string;
+}
+
+/**
+ * A consent prompt still awaiting an answer — the `computer.consent_required`
+ * payload and a row of `GET /workspaces/:id/computer/consent` (`{ pending }`).
+ */
+export interface ComputerPendingConsent {
   requestId: string;
   workspaceId: string;
   chatId?: string;
@@ -230,16 +266,59 @@ export interface ComputerConsentRequest {
   action: string;
   /** Short, human-readable description of what is about to happen. */
   summary: string;
-  /** Tier 3 requests can never be answered with `always_allow`. */
-  path: ComputerActionPath;
-  /**
-   * Fence for the exact target this approval covers. A grant is scoped to the
-   * app, but a single prompt must not authorise a re-snapshot-then-act swap:
-   * `ComputerService` re-checks that the dispatched action still carries this
-   * snapshot and element before proceeding.
-   */
-  target?: { snapshotId: string; elementIndex: number; elementLabel: string };
+  /** `synthetic` prompts (they take the pointer/keyboard) can never be answered `always_allow`. */
+  path: 'synthetic' | 'accessibility';
+  /** Present when one request carries several actions; the answer covers all of them. */
+  plan?: ComputerConsentPlanStep[];
   expiresAt: number;
+}
+
+/** `POST /workspaces/:id/computer/consent` body. */
+export interface ComputerConsentAnswer {
+  requestId: string;
+  appIdentity: string;
+  decision: ComputerConsentDecision;
+  /** Omitted = `defaultConsentReach(decision)`. */
+  scope?: ComputerConsentReach;
+}
+
+/** `POST /workspaces/:id/computer/consent` → 200. */
+export interface ComputerConsentAnswerResult {
+  ok: true;
+  requestId: string;
+  decision: ComputerConsentDecision;
+  scope: ComputerConsentReach;
+}
+
+/** A standing grant (`GET /workspaces/:id/computer/grants` → `{ grants }`). */
+export interface ComputerGrant {
+  /** `COMPUTER_ANY_APP` (`'*'`) for a grant that covers any application. */
+  appIdentity: string;
+  appLabel: string;
+  decision: ComputerGrantDecision;
+  /** read = "Screen"; mutate / synthetic = "Keyboard & mouse". */
+  scope: 'read' | 'mutate' | 'synthetic';
+  grantedAt: string;
+  lastUsedAt: string | null;
+}
+
+/**
+ * Who drives the desktop of a workspace (G-07 "Pause agent" / "Take over"):
+ * - `agent`  — the agent may act (default);
+ * - `paused` — the agent is held: every desktop operation is refused
+ *   (`agent_paused`) until the user resumes;
+ * - `user`   — the user has taken over the pointer and keyboard: refused as
+ *   `user_in_control` until the user hands back.
+ */
+export const COMPUTER_CONTROL_MODES = ['agent', 'paused', 'user'] as const;
+export type ComputerControlMode = (typeof COMPUTER_CONTROL_MODES)[number];
+
+/** `GET|POST /workspaces/:id/computer/control`, and the `computer.control_changed` payload. */
+export interface ComputerControlState {
+  workspaceId: string;
+  mode: ComputerControlMode;
+  /** Epoch ms of the last change; null while it has never changed (agent by default). */
+  changedAt: number | null;
 }
 
 export interface ComputerCapabilities {

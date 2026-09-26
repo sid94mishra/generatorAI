@@ -125,7 +125,24 @@ describe('internal computer routes', () => {
       .set('authorization', `Bearer ${TOKEN}`)
       .send({ requestId: 'req-1', appIdentity: 'com.a', decision: 'always_allow' })
       .expect(200);
-    expect(container.computerConsentStore.resolve).toHaveBeenCalledWith('req-1', 'always_allow', 'com.a');
+    // No `scope`: the store applies the decision's own reach (G-07).
+    expect(container.computerConsentStore.resolve).toHaveBeenCalledWith('req-1', 'always_allow', 'com.a', undefined);
+  });
+
+  it('G-07: forwards "this app / any app" and rejects any other scope', async () => {
+    const container = makeContainer();
+    const app = makeApp(container);
+    await request(app)
+      .post('/internal/computer/consent')
+      .set('authorization', `Bearer ${TOKEN}`)
+      .send({ requestId: 'req-1', appIdentity: 'com.a', decision: 'allow_run', scope: 'app' })
+      .expect(200);
+    expect(container.computerConsentStore.resolve).toHaveBeenCalledWith('req-1', 'allow_run', 'com.a', 'app');
+    await request(app)
+      .post('/internal/computer/consent')
+      .set('authorization', `Bearer ${TOKEN}`)
+      .send({ requestId: 'req-1', appIdentity: 'com.a', decision: 'allow_run', scope: 'everything' })
+      .expect(400);
   });
 
   it('reports 503 rather than silently succeeding when computer use is unwired', async () => {

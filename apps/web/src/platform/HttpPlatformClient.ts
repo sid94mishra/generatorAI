@@ -30,6 +30,12 @@ import {
   type ChatListPage,
   type ChatListQuery,
   type BackgroundTaskCancelResult,
+  type ComputerConsentAnswer,
+  type ComputerConsentAnswerResult,
+  type ComputerControlMode,
+  type ComputerControlState,
+  type ComputerGrant,
+  type ComputerPendingConsent,
   type BackgroundTaskListItem,
   type HarnessCatalogModel,
   type HarnessLoginResult,
@@ -2673,6 +2679,49 @@ export class HttpPlatformClient implements IPlatformClient {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ type }),
+    });
+  }
+
+  // G-07: computer consent, grants and control.
+  private computerUrl(workspaceId: string, rest: string): string {
+    return `${this.baseUrl}/api/workspaces/${encodeURIComponent(workspaceId)}/computer/${rest}`;
+  }
+
+  async getComputerConsent(workspaceId: string): Promise<ComputerPendingConsent[]> {
+    const body = await apiFetch<{ pending: ComputerPendingConsent[] }>(this.computerUrl(workspaceId, 'consent'), {
+      cache: 'no-store',
+    });
+    return body.pending;
+  }
+
+  async answerComputerConsent(workspaceId: string, answer: ComputerConsentAnswer): Promise<ComputerConsentAnswerResult> {
+    return apiFetch<ComputerConsentAnswerResult>(this.computerUrl(workspaceId, 'consent'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(answer),
+    });
+  }
+
+  async listComputerGrants(workspaceId: string): Promise<ComputerGrant[]> {
+    const body = await apiFetch<{ grants: ComputerGrant[] }>(this.computerUrl(workspaceId, 'grants'), {
+      cache: 'no-store',
+    });
+    return body.grants;
+  }
+
+  async revokeComputerGrant(workspaceId: string, appIdentity: string): Promise<void> {
+    await apiFetch(this.computerUrl(workspaceId, `grants/${encodeURIComponent(appIdentity)}`), { method: 'DELETE' });
+  }
+
+  async getComputerControl(workspaceId: string): Promise<ComputerControlState> {
+    return apiFetch<ComputerControlState>(this.computerUrl(workspaceId, 'control'), { cache: 'no-store' });
+  }
+
+  async setComputerControl(workspaceId: string, mode: ComputerControlMode): Promise<ComputerControlState> {
+    return apiFetch<ComputerControlState>(this.computerUrl(workspaceId, 'control'), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ mode }),
     });
   }
 

@@ -15,6 +15,14 @@ import type { WorkflowRun, WorkflowRunWithStages, CreateWorkflowRunParams, Stage
 import type { AttentionFilter, AttentionSnapshot } from './Attention.js';
 import type { ChatBulkResult, ChatListPage, ChatListQuery } from './ChatList.js';
 import type { HarnessLoginResult, HarnessProvidersResponse, HarnessSetDefaultResult } from './HarnessCatalog.js';
+import type {
+  ComputerConsentAnswer,
+  ComputerConsentAnswerResult,
+  ComputerControlMode,
+  ComputerControlState,
+  ComputerGrant,
+  ComputerPendingConsent,
+} from './ComputerUse.js';
 
 /** Platform type discriminator */
 export type PlatformType = 'web' | 'cli' | 'desktop';
@@ -207,4 +215,17 @@ export interface IPlatformClient {
   logoutProvider(type: string): Promise<void>;
   /** Make a READY provider the default for requests that name none (409 otherwise). */
   setDefaultProvider(type: string): Promise<HarnessSetDefaultResult>;
+
+  // ── Computer consent, grants and control (G-07) ──
+  /** Prompts still awaiting an answer on a workspace (with `plan` for a batched request). */
+  getComputerConsent(workspaceId: string): Promise<ComputerPendingConsent[]>;
+  /** Answer a prompt; `scope: 'app' | 'any'` picks "this app only" or "any app". */
+  answerComputerConsent(workspaceId: string, answer: ComputerConsentAnswer): Promise<ComputerConsentAnswerResult>;
+  /** Standing grants; `appIdentity: '*'` covers any app. */
+  listComputerGrants(workspaceId: string): Promise<ComputerGrant[]>;
+  revokeComputerGrant(workspaceId: string, appIdentity: string): Promise<void>;
+  /** Who drives the desktop (`agent | paused | user`). */
+  getComputerControl(workspaceId: string): Promise<ComputerControlState>;
+  /** Pause agent (`paused`), Take over (`user`) or hand back (`agent`). */
+  setComputerControl(workspaceId: string, mode: ComputerControlMode): Promise<ComputerControlState>;
 }

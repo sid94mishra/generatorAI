@@ -16,3 +16,4 @@ export * from './runTitle.js';
 export * from './attention/index.js';
 export * from './chats/index.js';
 export * from './models/index.js';
+export * from './computer/index.js';

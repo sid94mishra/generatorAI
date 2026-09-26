@@ -254,6 +254,7 @@ export const EVENT_CLASS: Record<AgentEvent['kind'], EventClass> = {
   'computer.refusal': 'item',
   'computer.consent_required': 'item',
   'computer.consent_resolved': 'item',
+  'computer.control_changed': 'item',
   'computer.error': 'item',
 
   // terminal

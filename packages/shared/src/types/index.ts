@@ -71,9 +71,17 @@ export type {
   ComputerActionResult,
   ComputerConsentDecision,
   ComputerGrantDecision,
-  ComputerConsentRequest,
+  ComputerConsentReach,
+  ComputerConsentPlanStep,
+  ComputerPendingConsent,
+  ComputerConsentAnswer,
+  ComputerConsentAnswerResult,
+  ComputerGrant,
+  ComputerControlMode,
+  ComputerControlState,
   ComputerCapabilities,
 } from './ComputerUse.js';
+export { COMPUTER_ANY_APP, COMPUTER_CONTROL_MODES, defaultConsentReach } from './ComputerUse.js';
 export type { WebhookRegistration, WebhookDelivery } from './Webhook.js';
 export type { CreateSessionParams, McpServerConfig } from './CreateSessionParams.js';
 export type { ILogger } from './ILogger.js';

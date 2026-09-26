@@ -170,7 +170,7 @@ class AllowAll implements IComputerConsentStore {
   denyEverything = false;
   async find() { return this.denyEverything ? ({ decision: 'deny' as const, scope: 'read' as const }) : null; }
   async save() {}
-  async prompt() { return 'allow_once' as const; }
+  async prompt() { return { decision: 'allow_once' as const, reach: 'app' as const }; }
 }
 
 class RecordingAudit implements IComputerAuditSink {

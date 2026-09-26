@@ -43,6 +43,8 @@ const ConsentBodySchema = z.object({
   // mismatch rather than treating it as an answer.
   appIdentity: z.string().min(1),
   decision: z.enum(['allow_once', 'allow_run', 'always_allow', 'deny']),
+  /** G-07 — "this app only" / "any app"; omitted keeps each decision's own reach. */
+  scope: z.enum(['app', 'any']).optional(),
 });
 
 function safeEqual(a: string, b: string): boolean {
@@ -102,7 +104,7 @@ export function createInternalComputerRoutes(container: Container): Router {
     }
     // `false` means nothing was waiting on that id — a replay, an expired
     // prompt, or an answer naming the wrong application.
-    const accepted = store.resolve(parsed.data.requestId, parsed.data.decision, parsed.data.appIdentity);
+    const accepted = store.resolve(parsed.data.requestId, parsed.data.decision, parsed.data.appIdentity, parsed.data.scope);
     res.json({ ok: accepted });
   });
 

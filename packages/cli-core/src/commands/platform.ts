@@ -1277,16 +1277,15 @@ export function computerCommands(): CommandSpec[] {
         columns: [
           { key: 'requestId', header: 'Request', format: 'id', priority: 0 },
           { key: 'appIdentity', header: 'App', priority: 0 },
-          { key: 'reason', header: 'Reason', priority: 1 },
-          { key: 'requestedAt', header: 'Asked', format: 'relative', priority: 2 },
+          { key: 'summary', header: 'Asks to', priority: 1 },
+          { key: 'expiresAt', header: 'Expires', format: 'relative', priority: 2 },
         ],
       },
       async handler(ctx, { args }) {
         const target = await findWorkspace(ctx, args.workspace);
-        const consent = await ctx.api.computer.consent(target.id);
         // `{ pending: [...] }` — an envelope, like every other list route in
-        // this namespace.
-        const pending = (consent as { pending?: Array<Record<string, unknown>> }).pending;
+        // this namespace. A batched request (G-07) lists its steps in `plan`.
+        const { pending } = await ctx.api.computer.consent(target.id);
         return list(pending ?? []);
       },
     }),
@@ -1298,7 +1297,9 @@ export function computerCommands(): CommandSpec[] {
       summary: 'Answer a pending consent prompt',
       description:
         'allow_once permits this action only; allow_run permits it for the rest of the run; ' +
-        'always_allow records a standing grant for the app (see `computer grants`); deny refuses.',
+        'always_allow records a standing grant for the app (see `computer grants`); deny refuses. ' +
+        '--scope any widens allow_run / always_allow to any application (default: allow_run any app, ' +
+        'always_allow this app).',
       requiresServer: true,
       sinceVersion: '0.2.0',
       args: [
@@ -1318,6 +1319,12 @@ export function computerCommands(): CommandSpec[] {
           type: 'string',
           required: true,
         },
+        {
+          name: 'scope',
+          description: 'Which apps the answer covers: this one (app) or any (any)',
+          type: 'string',
+          choices: ['app', 'any'] as const,
+        },
       ],
       schema: inputSchema(
         {
@@ -1325,7 +1332,7 @@ export function computerCommands(): CommandSpec[] {
           request: z.string(),
           decision: z.enum(['allow_once', 'allow_run', 'always_allow', 'deny']),
         },
-        { app: z.string() },
+        { app: z.string(), scope: z.enum(['app', 'any']).optional() },
       ),
       output: { kind: 'record', successMessage: 'Answered.' },
       async handler(ctx, { args, flags }) {
@@ -1335,7 +1342,39 @@ export function computerCommands(): CommandSpec[] {
             requestId: args.request,
             appIdentity: flags.app,
             decision: args.decision,
+            ...(flags.scope ? { scope: flags.scope } : {}),
           }),
+        );
+      },
+    }),
+
+    // G-07 — Pause agent / Take over from a terminal.
+    defineCommand({
+      id: 'computer.control',
+      group: 'computer',
+      verb: 'control',
+      summary: 'Show or set who drives the desktop (agent, paused, user)',
+      description:
+        'Without a mode, prints the current one. paused holds the agent; user means you have taken over. ' +
+        'Either makes every agent desktop action refuse until you set agent again.',
+      requiresServer: true,
+      sinceVersion: '0.2.0',
+      args: [
+        wsArg,
+        { name: 'mode', description: 'New mode', required: false, choices: ['agent', 'paused', 'user'] as const },
+      ],
+      flags: [],
+      schema: inputSchema(
+        { workspace: z.string(), mode: z.enum(['agent', 'paused', 'user']).optional() },
+        {},
+      ),
+      output: { kind: 'record' },
+      async handler(ctx, { args }) {
+        const target = await findWorkspace(ctx, args.workspace);
+        return record(
+          args.mode
+            ? await ctx.api.computer.setControl(target.id, args.mode)
+            : await ctx.api.computer.control(target.id),
         );
       },
     }),

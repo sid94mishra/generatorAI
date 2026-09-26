@@ -13,9 +13,9 @@ same promise as one that does not.
 
 | Measure | Count |
 |---|---:|
-| Commands | 219 |
+| Commands | 220 |
 | Groups | 25 |
-| Server-backed commands | 192 |
+| Server-backed commands | 193 |
 | Destructive commands | 34 |
 | Commands hidden from the palette | 2 |
 | Key bindings | 165 |
@@ -74,6 +74,7 @@ same promise as one that does not.
 | `chat.watch` | `chat watch` | yes | no | yes | yes | chat | — |
 | `computer.activity` | `computer activity` | yes | no | yes | yes | workspace | — |
 | `computer.answer` | `computer answer` | yes | no | yes | yes | workspace, request, decision | --app |
+| `computer.control` | `computer control` | yes | no | yes | yes | workspace | — |
 | `computer.frames` | `computer frames` | yes | no | yes | yes | workspace | — |
 | `computer.grants` | `computer grants` | yes | no | yes | yes | workspace | — |
 | `computer.pending` | `computer pending` | yes | no | yes | yes | workspace | — |

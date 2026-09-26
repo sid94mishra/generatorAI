@@ -166,8 +166,10 @@ class FakeBridge implements IComputerBridge {
 
 class RecordingConsent implements IComputerConsentStore {
   stored = new Map<string, ComputerStoredGrant>();
-  prompts: { appId: string; scope: ComputerConsentScope }[] = [];
+  prompts: { appId: string; scope: ComputerConsentScope; plan?: unknown; summary?: string }[] = [];
   answer: ComputerConsentDecision = 'allow_once';
+  /** G-07: which apps the answer covers. */
+  reach: 'app' | 'any' = 'app';
   /** Set to make prompt() hang, exercising the service-side deadline. */
   hang = false;
 
@@ -183,10 +185,10 @@ class RecordingConsent implements IComputerConsentStore {
   ) {
     this.stored.set(`${workspaceId}:${appIdentity}`, { decision, scope });
   }
-  async prompt(req: { app: ComputerAppIdentity; scope: ComputerConsentScope }) {
-    this.prompts.push({ appId: req.app.appId, scope: req.scope });
-    if (this.hang) return new Promise<ComputerConsentDecision>(() => {});
-    return this.answer;
+  async prompt(req: { app: ComputerAppIdentity; scope: ComputerConsentScope; plan?: unknown; summary?: string }) {
+    this.prompts.push({ appId: req.app.appId, scope: req.scope, plan: req.plan, summary: req.summary });
+    if (this.hang) return new Promise<{ decision: ComputerConsentDecision; reach: 'app' | 'any' }>(() => {});
+    return { decision: this.answer, reach: this.reach };
   }
 }
 
@@ -913,5 +915,161 @@ describe('ComputerService audit and events', () => {
     const result = await service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
     expect(result.refusal?.code).toBe('provider_unavailable');
     expect(events.some((e) => e.kind === 'computer.session_started')).toBe(false);
+  });
+});
+
+// ── G-07: consent plan, "this app / any app", Pause agent / Take over ──
+
+describe('ComputerService control (G-07)', () => {
+  beforeEach(() => { delete process.env['GENERATORAI_COMPUTER_USE']; });
+  const enabled = () => ({ ...baseConfig(), enabled: true });
+
+  it('defaults to the agent and reports an unchanged state as never changed', () => {
+    const { service } = makeService([SLACK], enabled());
+    expect(service.getControl('ws-1')).toEqual({ workspaceId: 'ws-1', mode: 'agent', changedAt: null });
+  });
+
+  it('pausing refuses every agent operation before consent or the driver, and resuming lets them through', async () => {
+    const { service, consent, bridge, events } = makeService([SLACK], enabled());
+    const paused = await service.setControl(CTX.workspaceId, 'paused');
+    expect(paused).toMatchObject({ workspaceId: CTX.workspaceId, mode: 'paused', changedAt: expect.any(Number) });
+    expect(events.find((e) => e.kind === 'computer.control_changed')?.data).toMatchObject({
+      workspaceId: CTX.workspaceId,
+      mode: 'paused',
+      previous: 'agent',
+    });
+
+    expect((await service.snapshot(CTX, { by: 'appId', appId: SLACK.id })).refusal?.code).toBe('agent_paused');
+    expect((await service.listApps(CTX)).refusal?.code).toBe('agent_paused');
+    expect(consent.prompts).toHaveLength(0);
+    expect(bridge.snapshotCalls).toHaveLength(0);
+
+    await service.setControl(CTX.workspaceId, 'agent');
+    expect((await service.snapshot(CTX, { by: 'appId', appId: SLACK.id })).refusal).toBeUndefined();
+  });
+
+  it('taking over refuses as user_in_control and only affects that workspace', async () => {
+    const { service, events } = makeService([SLACK], enabled());
+    await service.setControl(CTX.workspaceId, 'user');
+    await service.setControl(CTX.workspaceId, 'user'); // no-op: no second event
+    expect(events.filter((e) => e.kind === 'computer.control_changed')).toHaveLength(1);
+    expect((await service.snapshot(CTX, { by: 'appId', appId: SLACK.id })).refusal?.code).toBe('user_in_control');
+    const other = { ...CTX, workspaceId: 'ws-2', workspaceRoot: '/tmp/ws-2' };
+    expect((await service.snapshot(other, { by: 'appId', appId: SLACK.id })).refusal).toBeUndefined();
+  });
+});
+
+describe('ComputerService consent reach (G-07)', () => {
+  beforeEach(() => { delete process.env['GENERATORAI_COMPUTER_USE']; });
+  const enabled = () => ({ ...baseConfig(), enabled: true, allowSyntheticFallback: true });
+  const press = (app: FakeApp) => ({
+    type: 'pressKey' as const,
+    target: { app: { appId: app.id, name: app.name, pid: app.pid }, window: { by: 'focused' as const } },
+    key: 'a',
+  });
+
+  it('an always_allow for any app is stored under "*" and covers another app', async () => {
+    const { service, consent } = makeService([SLACK, OTHER], enabled());
+    consent.answer = 'always_allow';
+    consent.reach = 'any';
+    await service.snapshot(CTX, { by: 'appId', appId: SLACK.id });
+    expect(consent.stored.get(`${CTX.workspaceId}:*`)).toEqual({ decision: 'always_allow', scope: 'read' });
+    consent.prompts.length = 0;
+    await service.snapshot(CTX, { by: 'appId', appId: OTHER.id });
+    expect(consent.prompts).toHaveLength(0);
+  });
+
+  it('an any-app grant never beats a per-app deny', async () => {
+    const { service, consent } = makeService([SLACK], enabled());
+    await consent.save(CTX.workspaceId, '*', 'Any app', 'always_allow', 'mutate');
+    await consent.save(CTX.workspaceId, SLACK.id, 'Slack', 'deny', 'read');
+    expect((await service.snapshot(CTX, { by: 'appId', appId: SLACK.id })).refusal?.code).toBe('consent_denied');
+  });
+
+  it('allow_run for this app only still asks for another app', async () => {
+    const { service, consent } = makeService([SLACK, OTHER], enabled());
+    consent.answer = 'allow_run';
+    consent.reach = 'app';
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, press(SLACK));
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, press(SLACK));
+    expect(consent.prompts.map((p) => p.appId)).toEqual([SLACK.id]);
+    consent.answer = 'deny';
+    expect((await service.act(CTX, { by: 'appId', appId: OTHER.id }, press(OTHER))).refusal?.code).toBe(
+      'consent_denied',
+    );
+  });
+
+  it('allow_run for any app covers every app for the run', async () => {
+    const { service, consent } = makeService([SLACK, OTHER], enabled());
+    consent.answer = 'allow_run';
+    consent.reach = 'any';
+    await service.act(CTX, { by: 'appId', appId: SLACK.id }, press(SLACK));
+    consent.answer = 'deny';
+    expect((await service.act(CTX, { by: 'appId', appId: OTHER.id }, press(OTHER))).refusal).toBeUndefined();
+    expect(consent.prompts).toHaveLength(1);
+  });
+});
+
+describe('ComputerService actPlan (G-07)', () => {
+  beforeEach(() => { delete process.env['GENERATORAI_COMPUTER_USE']; });
+  const enabled = () => ({ ...baseConfig(), enabled: true, allowSyntheticFallback: true });
+  const target = { app: { appId: '', name: '', pid: 0 }, window: { by: 'focused' as const } };
+  const steps: ActionRequest[] = [
+    { type: 'clickPoint', target, x: 10, y: 20 },
+    { type: 'typeText', target, text: 'secret words' },
+    { type: 'pressKey', target, key: 'Enter' },
+  ];
+
+  it('asks ONCE with every step listed, then dispatches them in order', async () => {
+    const { service, consent, bridge } = makeService([SLACK], enabled());
+    consent.answer = 'allow_once';
+    const result = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, steps);
+    expect(result.ok).toBe(true);
+    expect(consent.prompts).toHaveLength(1);
+    expect(consent.prompts[0]).toMatchObject({ scope: 'synthetic', summary: '3 actions in Slack' });
+    const plan = consent.prompts[0]!.plan as Array<{ action: string; target?: string }>;
+    expect(plan.map((p) => p.action)).toEqual(['clickPoint', 'typeText', 'pressKey']);
+    // The plan names actions and targets, never typed content.
+    expect(JSON.stringify(plan)).not.toContain('secret words');
+    expect(bridge.actCalls.map((c) => c.type)).toEqual(['clickPoint', 'typeText', 'pressKey']);
+    expect(result.results).toHaveLength(3);
+  });
+
+  it('a denied plan dispatches nothing', async () => {
+    const { service, consent, bridge } = makeService([SLACK], enabled());
+    consent.answer = 'deny';
+    const result = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, steps);
+    expect(result).toMatchObject({ ok: false, refusal: { code: 'consent_denied' }, stoppedAt: 0 });
+    expect(bridge.actCalls).toHaveLength(0);
+  });
+
+  it('stops between steps when the user takes over mid-plan', async () => {
+    const { service, consent, bridge } = makeService([SLACK], enabled());
+    consent.answer = 'allow_once';
+    const original = bridge.act.bind(bridge);
+    bridge.act = async (h, req) => {
+      const out = await original(h, req);
+      if (bridge.actCalls.length === 1) await service.setControl(CTX.workspaceId, 'user');
+      return out;
+    };
+    const result = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, steps);
+    expect(result).toMatchObject({ ok: false, refusal: { code: 'user_in_control' }, stoppedAt: 1 });
+    expect(bridge.actCalls).toHaveLength(1);
+    expect(result.results).toHaveLength(1);
+  });
+
+  it('refuses element-addressed steps and oversized plans without prompting', async () => {
+    const { service, consent } = makeService([SLACK], enabled());
+    const element = await service.actPlan(CTX, { by: 'appId', appId: SLACK.id }, [
+      { type: 'click', snapshotId: 's', elementIndex: 0 },
+    ]);
+    expect(element).toMatchObject({ ok: false, refusal: { code: 'unsupported_action' }, stoppedAt: 0 });
+    const tooMany = await service.actPlan(
+      CTX,
+      { by: 'appId', appId: SLACK.id },
+      Array.from({ length: 11 }, () => steps[2]!),
+    );
+    expect(tooMany.refusal?.code).toBe('unsupported_action');
+    expect(consent.prompts).toHaveLength(0);
   });
 });

@@ -42,12 +42,16 @@ import type {
   ComputerAppInfo,
   ComputerCapabilities,
   ComputerConsentDecision,
+  ComputerConsentPlanStep,
+  ComputerControlMode,
+  ComputerControlState,
   ComputerRefusalCode,
   ComputerWindowInfo,
   ILogger,
   WorkspaceArtifactRecord,
 } from '@generatorai/shared';
 import {
+  COMPUTER_ANY_APP,
   COMPUTER_USE_DISABLE_TOKENS,
   COMPUTER_USE_KILL_SWITCH_ENV,
   buildBlocklist,
@@ -83,12 +87,14 @@ export type ComputerUseConfig = AppConfig['computerUse'];
 // from this service — see `domain/ports/IComputerConsentStore.ts`. Re-exported
 // here so `@generatorai/core` consumers keep the same import path.
 import type {
+  ComputerConsentOutcome,
   ComputerConsentPrompt,
   ComputerConsentScope,
   ComputerStoredGrant,
   IComputerConsentStore,
 } from '../domain/ports/IComputerConsentStore.js';
 export type {
+  ComputerConsentOutcome,
   ComputerConsentPrompt,
   ComputerConsentScope,
   ComputerStoredGrant,
@@ -230,7 +236,33 @@ const REFUSAL_MESSAGES: Record<ComputerRefusalCode, string> = {
   unsupported_action: 'That element does not expose the action you asked for.',
   capacity_exhausted: 'Too many computer-use actions are in flight.',
   target_lost: 'No available application matched that reference.',
+  agent_paused:
+    'The user paused you on this computer. Do not retry: stop, tell the user what you were about to do, and wait for them to resume.',
+  user_in_control:
+    'The user has taken over this computer. Do not send input: tell the user what you were about to do and wait for them to hand control back.',
 };
+
+/** Most actions one `actPlan` (the `computer_run_steps` tool) may carry. */
+export const MAX_PLAN_STEPS = 10;
+
+/** Plans are coordinate/keyboard steps: every action invalidates snapshots, so an element-addressed step could only ever be the first. */
+const PLAN_STEP_TYPES: ReadonlySet<ActionRequest['type']> = new Set(['clickPoint', 'typeText', 'pressKey', 'scroll', 'pasteText']);
+
+/** One run-scoped consent (`allow_run`). `appIdentity` absent = any app. */
+interface RunGrant {
+  chatId?: string;
+  appIdentity?: string;
+  expiresAt: number;
+}
+
+/** Result of `actPlan`: the steps that ran, in order, and why it stopped early if it did. */
+export interface ComputerPlanResult {
+  ok: boolean;
+  results: ComputerActionResult[];
+  refusal?: ComputerRefusal;
+  /** Index of the step that was refused, when one was. */
+  stoppedAt?: number;
+}
 
 /**
  * Rescale every pixel coordinate on a request from the screenshot the model
@@ -399,7 +431,13 @@ export class ComputerService {
    * agent gives up. Dropped when the desktop session ends, so it cannot outlive
    * the work it was granted for, and pinned to the chat that asked.
    */
-  private readonly runGrants = new Map<string, { chatId?: string; expiresAt: number }>();
+  private readonly runGrants = new Map<string, RunGrant[]>();
+  /**
+   * G-07 — who drives each workspace's desktop. Absent = `agent`. Process
+   * lifetime on purpose, like run grants: a restart hands control back to
+   * nobody in particular, and the agent's next call re-reads it.
+   */
+  private readonly control = new Map<string, { mode: ComputerControlMode; changedAt: number }>();
   private readonly bridges: IComputerBridge[];
   private readonly blocklist: ComputerUseBlocklist;
   /**
@@ -789,7 +827,7 @@ export class ComputerService {
    * disclosure.
    */
   async listApps(ctx: ComputerCallContext): Promise<{ apps: ComputerAppInfo[]; refusal?: ComputerRefusal }> {
-    const gate = this.featureGate();
+    const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
       await this.auditGateRefusal(ctx, 'list_apps', gate);
       return { apps: [], refusal: gate };
@@ -847,7 +885,7 @@ export class ComputerService {
     window?: { id: number; title: string };
     refusal?: ComputerRefusal;
   }> {
-    const gate = this.featureGate();
+    const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
       await this.auditGateRefusal(ctx, 'launch_app', gate, { identity: name, label: name });
       return { refusal: gate };
@@ -944,7 +982,7 @@ export class ComputerService {
     expect: VerifyPredicate[],
     opts: { windowId?: number; stableSamples?: number; timeoutMs?: number } = {},
   ): Promise<VerifyResult> {
-    const gate = this.featureGate();
+    const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
       await this.auditGateRefusal(ctx, 'verify', gate, describeRef(ref));
       return { outcome: 'unknown', results: [], refusal: gate };
@@ -994,7 +1032,7 @@ export class ComputerService {
 
   /** Restores and foregrounds an app's window so it can actually be driven. */
   async bringToFront(ctx: ComputerCallContext, ref: ComputerAppRef): Promise<ComputerActionResult> {
-    const gate = this.featureGate();
+    const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
       await this.auditGateRefusal(ctx, 'bring_to_front', gate, describeRef(ref));
       return refusalResult(gate);
@@ -1034,7 +1072,7 @@ export class ComputerService {
     ctx: ComputerCallContext,
     ref: ComputerAppRef,
   ): Promise<{ windows: ComputerWindowInfo[]; refusal?: ComputerRefusal }> {
-    const gate = this.featureGate();
+    const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
       await this.auditGateRefusal(ctx, 'list_windows', gate, describeRef(ref));
       return { windows: [], refusal: gate };
@@ -1080,7 +1118,7 @@ export class ComputerService {
       query?: string;
     } = {},
   ): Promise<ComputerActionResult> {
-    const gate = this.featureGate();
+    const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
       await this.auditGateRefusal(ctx, 'snapshot', gate, describeRef(ref));
       return refusalResult(gate);
@@ -1174,7 +1212,7 @@ export class ComputerService {
    * snapshot fence then proves that app owns the element.
    */
   async act(ctx: ComputerCallContext, ref: ComputerAppRef, req: ActionRequest): Promise<ComputerActionResult> {
-    const gate = this.featureGate();
+    const gate = this.featureGate(ctx.workspaceId);
     if (gate) {
       await this.auditGateRefusal(ctx, req.type, gate, describeRef(ref));
       return refusalResult(gate);
@@ -1217,6 +1255,99 @@ export class ComputerService {
     if (denied) {
       await this.recordRefusal(ctx, app, req.type, denied);
       return refusalResult(denied);
+    }
+
+    return this.dispatch(ctx, session, app, req, targetLabel);
+  }
+
+  /**
+   * G-07 — several coordinate/keyboard actions against one app, approved with
+   * ONE consent prompt that lists every step (`plan`). Stops at the first step
+   * that is refused or fails, and before every step re-checks who is in
+   * control, so Pause / Take over lands between steps.
+   */
+  async actPlan(ctx: ComputerCallContext, ref: ComputerAppRef, steps: readonly ActionRequest[]): Promise<ComputerPlanResult> {
+    const refuse = (refusal: ComputerRefusal, stoppedAt?: number, results: ComputerActionResult[] = []): ComputerPlanResult => ({
+      ok: false,
+      results,
+      refusal,
+      ...(stoppedAt !== undefined ? { stoppedAt } : {}),
+    });
+    if (steps.length === 0 || steps.length > MAX_PLAN_STEPS) {
+      return refuse(this.refusal('unsupported_action', `A plan carries 1 to ${MAX_PLAN_STEPS} steps.`));
+    }
+    const unsupported = steps.findIndex((step) => !PLAN_STEP_TYPES.has(step.type));
+    if (unsupported !== -1) {
+      return refuse(
+        this.refusal(
+          'unsupported_action',
+          'A plan may only contain click_point, type_text, press_key, paste_text and scroll steps. Use the snapshot-based tools one call at a time for element actions.',
+        ),
+        unsupported,
+      );
+    }
+    const gate = this.featureGate(ctx.workspaceId);
+    if (gate) {
+      await this.auditGateRefusal(ctx, 'plan', gate, describeRef(ref));
+      return refuse(gate, 0);
+    }
+
+    const session = await this.ensureSession(ctx);
+    const resolved = await this.resolveApp(ctx, session, ref, 'plan');
+    if ('refusal' in resolved) return refuse(resolved.refusal, 0);
+    const app = resolved.app;
+
+    const synthetic = steps.some((step) => SYNTHETIC_ACTIONS.has(step.type));
+    if (synthetic && !this.syntheticAllowed) {
+      const refusal = this.refusal(
+        'background_unavailable',
+        'Synthetic input is turned off in Settings → Computer Use, so no action may take over the screen.',
+      );
+      await this.recordRefusal(ctx, app, 'plan', refusal);
+      return refuse(refusal, 0);
+    }
+
+    const plan: ComputerConsentPlanStep[] = steps.map((step) => {
+      const target = this.describeTarget(session, step);
+      return { action: step.type, ...(target ? { target } : {}) };
+    });
+    const denied = await this.checkConsent(ctx, app, 'plan', synthetic ? 'synthetic' : 'mutate', undefined, plan);
+    if (denied) {
+      await this.recordRefusal(ctx, app, 'plan', denied);
+      return refuse(denied, 0);
+    }
+
+    const results: ComputerActionResult[] = [];
+    for (const [index, step] of steps.entries()) {
+      const control = this.featureGate(ctx.workspaceId);
+      if (control) {
+        await this.recordRefusal(ctx, app, step.type, control);
+        return refuse(control, index, results);
+      }
+      const result = await this.dispatch(ctx, session, app, step, this.describeTarget(session, step));
+      results.push(result);
+      if (!result.ok) return refuse(result.refusal ?? this.refusal('target_lost'), index, results);
+    }
+    return { ok: true, results };
+  }
+
+  /** Everything after consent: dispatch under a permit, persist, audit, emit. */
+  private async dispatch(
+    ctx: ComputerCallContext,
+    session: SessionRecord,
+    app: ComputerAppIdentity,
+    req: ActionRequest,
+    targetLabel: string | undefined,
+  ): Promise<ComputerActionResult> {
+    const synthetic = SYNTHETIC_ACTIONS.has(req.type);
+    if (synthetic && session.blindStreak >= BLIND_INPUT_LIMIT) {
+      const refusal = this.refusal(
+        'provider_unavailable',
+        `The last ${session.blindStreak} keystrokes and clicks were delivered but could not be confirmed. ` +
+          'Stop sending input and take a computer_snapshot of the target window.',
+      );
+      await this.recordRefusal(ctx, app, req.type, refusal);
+      return refusalResult(refusal);
     }
 
     const started = Date.now();
@@ -1288,9 +1419,43 @@ export class ComputerService {
 
   // ── Gates ────────────────────────────────────────────────────
 
-  private featureGate(): ComputerRefusal | null {
-    if (this.isEnabled()) return null;
-    return this.refusal('provider_unavailable');
+  /**
+   * The feature switch, and — for an agent operation on a workspace — who is
+   * in control of its desktop (G-07). Runtime and recording controls pass no
+   * workspace: the user drives those, whatever the mode.
+   */
+  private featureGate(workspaceId?: string): ComputerRefusal | null {
+    if (!this.isEnabled()) return this.refusal('provider_unavailable');
+    if (workspaceId === undefined) return null;
+    const mode = this.control.get(workspaceId)?.mode ?? 'agent';
+    if (mode === 'paused') return this.refusal('agent_paused');
+    if (mode === 'user') return this.refusal('user_in_control');
+    return null;
+  }
+
+  // ── Control (G-07: Pause agent / Take over) ─────────────────
+
+  getControl(workspaceId: string): ComputerControlState {
+    const current = this.control.get(workspaceId);
+    return { workspaceId, mode: current?.mode ?? 'agent', changedAt: current?.changedAt ?? null };
+  }
+
+  /**
+   * Set who drives the desktop. `paused` and `user` make every agent
+   * operation on this workspace refuse (`agent_paused` / `user_in_control`)
+   * before it reaches consent or the driver; `agent` hands control back.
+   * Emits `computer.control_changed` on the workspace scope when it changes.
+   */
+  async setControl(workspaceId: string, mode: ComputerControlMode): Promise<ComputerControlState> {
+    const previous = this.control.get(workspaceId)?.mode ?? 'agent';
+    if (previous === mode) return this.getControl(workspaceId);
+    const changedAt = Date.now();
+    this.control.set(workspaceId, { mode, changedAt });
+    await this.emit(workspaceId, {
+      kind: 'computer.control_changed',
+      data: { workspaceId, mode, changedAt, previous },
+    });
+    return { workspaceId, mode, changedAt };
   }
 
   private evaluate(app: ComputerAppInfo, windowTitles: readonly string[]) {
@@ -1427,45 +1592,64 @@ export class ComputerService {
     action: string,
     scope: ComputerConsentScope,
     target?: ComputerConsentPrompt['target'],
+    plan?: ComputerConsentPlanStep[],
   ): Promise<ComputerRefusal | null> {
     const stored = await this.consent.find(ctx.workspaceId, app.appId);
     if (stored?.decision === 'deny') return this.refusal('consent_denied');
 
     // A run grant covers synthetic input too — that is the whole reason it
     // exists — so it is checked before the stored grant, which never can.
-    const run = this.runGrants.get(ctx.workspaceId);
-    if (run && run.expiresAt > Date.now() && (run.chatId === undefined || run.chatId === ctx.chatId)) {
-      return null;
-    }
-    if (run) this.runGrants.delete(ctx.workspaceId);
-
-    // A stored grant never covers synthetic input: it takes over the user's
-    // pointer and keyboard, so it re-asks every time.
+    // Scoped to the chat that asked and, when answered for "this app only",
+    // to that app (G-07).
+    const now = Date.now();
+    const live = (this.runGrants.get(ctx.workspaceId) ?? []).filter((g) => g.expiresAt > now);
+    if (live.length > 0) this.runGrants.set(ctx.workspaceId, live);
+    else this.runGrants.delete(ctx.workspaceId);
     if (
-      stored?.decision === 'always_allow' &&
-      scope !== 'synthetic' &&
-      SCOPE_RANK[stored.scope] >= SCOPE_RANK[scope]
+      live.some(
+        (g) =>
+          (g.chatId === undefined || g.chatId === ctx.chatId) &&
+          (g.appIdentity === undefined || g.appIdentity === app.appId),
+      )
     ) {
       return null;
     }
 
+    // A stored grant never covers synthetic input: it takes over the user's
+    // pointer and keyboard, so it re-asks every time. An "any app" grant
+    // (G-07) is stored under COMPUTER_ANY_APP and never beats a per-app deny.
+    if (scope !== 'synthetic') {
+      const covers = (g: ComputerStoredGrant | null) =>
+        g?.decision === 'always_allow' && SCOPE_RANK[g.scope] >= SCOPE_RANK[scope];
+      if (covers(stored)) return null;
+      if (covers(await this.consent.find(ctx.workspaceId, COMPUTER_ANY_APP))) return null;
+    }
+
     const requestId = randomUUID();
     const expiresAt = Date.now() + this.computerConfig.consentTtlSeconds * 1000;
-    const decision = await this.promptWithDeadline({
+    const outcome = await this.promptWithDeadline({
       requestId,
       workspaceId: ctx.workspaceId,
       chatId: ctx.chatId,
       app,
       action,
-      summary: `${action} in ${app.name}`,
+      summary: plan ? `${plan.length} actions in ${app.name}` : `${action} in ${app.name}`,
       scope,
       target,
+      ...(plan ? { plan } : {}),
       expiresAt,
     });
+    const decision = outcome === 'expired' ? 'expired' : outcome.decision;
+    const anyApp = outcome !== 'expired' && outcome.reach === 'any';
 
     await this.emit(ctx.workspaceId, {
       kind: 'computer.consent_resolved',
-      data: { workspaceId: ctx.workspaceId, requestId, decision },
+      data: {
+        workspaceId: ctx.workspaceId,
+        requestId,
+        decision,
+        ...(outcome !== 'expired' && decision !== 'deny' ? { scope: outcome.reach } : {}),
+      },
     });
 
     if (decision === 'deny') {
@@ -1473,13 +1657,23 @@ export class ComputerService {
       return this.refusal('consent_denied');
     }
     if (decision === 'allow_run') {
-      this.runGrants.set(ctx.workspaceId, {
-        ...(ctx.chatId ? { chatId: ctx.chatId } : {}),
-        expiresAt: Date.now() + RUN_GRANT_TTL_MS,
-      });
+      this.runGrants.set(ctx.workspaceId, [
+        ...(this.runGrants.get(ctx.workspaceId) ?? []),
+        {
+          ...(ctx.chatId ? { chatId: ctx.chatId } : {}),
+          ...(anyApp ? {} : { appIdentity: app.appId }),
+          expiresAt: Date.now() + RUN_GRANT_TTL_MS,
+        },
+      ]);
     }
     if (decision === 'always_allow' && scope !== 'synthetic') {
-      await this.consent.save(ctx.workspaceId, app.appId, app.name, 'always_allow', scope);
+      await this.consent.save(
+        ctx.workspaceId,
+        anyApp ? COMPUTER_ANY_APP : app.appId,
+        anyApp ? 'Any app' : app.name,
+        'always_allow',
+        scope,
+      );
     }
     // Allowlist, not denylist: a store that returns undefined, '', or a value
     // that failed to deserialise must not be read as approval.
@@ -1496,14 +1690,17 @@ export class ComputerService {
    */
   private async promptWithDeadline(
     request: ComputerConsentPrompt,
-  ): Promise<ComputerConsentDecision | 'expired'> {
+  ): Promise<ComputerConsentOutcome | 'expired'> {
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = new Promise<'expired'>((resolve) => {
       timer = setTimeout(() => resolve('expired'), Math.max(0, request.expiresAt - Date.now()));
     });
     try {
-      const decision = await Promise.race([this.consent.prompt(request), deadline]);
-      return decision === 'expired' ? 'expired' : decision;
+      const outcome = await Promise.race([this.consent.prompt(request), deadline]);
+      if (outcome === 'expired') return 'expired';
+      // Allowlist the shape too: a store answering a bare string or nothing is a denial.
+      if (!outcome || typeof outcome !== 'object') return { decision: 'deny', reach: 'app' };
+      return { decision: outcome.decision, reach: outcome.reach === 'any' ? 'any' : 'app' };
     } catch (err) {
       this.logger.warn?.(`[ComputerService] consent prompt failed: ${(err as Error).message}`);
       return 'expired';

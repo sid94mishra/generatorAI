@@ -953,6 +953,35 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         },
         required: ['succeeded', 'failed'],
       },
+      ComputerPendingConsent: {
+        type: 'object',
+        properties: {
+          requestId: { type: 'string' },
+          workspaceId: { type: 'string' },
+          chatId: { type: 'string' },
+          appIdentity: { type: 'string' },
+          appLabel: { type: 'string' },
+          action: { type: 'string' },
+          summary: { type: 'string' },
+          path: { type: 'string', enum: ['synthetic', 'accessibility'] },
+          plan: {
+            type: 'array',
+            description: 'G-07: the steps of a batched request, answered once',
+            items: { type: 'object', properties: { action: { type: 'string' }, target: { type: 'string' } }, required: ['action'] },
+          },
+          expiresAt: { type: 'integer' },
+        },
+        required: ['requestId', 'workspaceId', 'appIdentity', 'appLabel', 'action', 'summary', 'path', 'expiresAt'],
+      },
+      ComputerControlState: {
+        type: 'object',
+        properties: {
+          workspaceId: { type: 'string' },
+          mode: { type: 'string', enum: ['agent', 'paused', 'user'] },
+          changedAt: { type: 'integer', nullable: true },
+        },
+        required: ['workspaceId', 'mode', 'changedAt'],
+      },
       HarnessCatalogModel: {
         type: 'object',
         description: 'One model a provider serves for the signed-in account (G-09).',
@@ -2588,6 +2617,115 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
             },
           },
           '404': { description: 'Unknown task', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
+    '/api/workspaces/{id}/computer/consent': {
+      get: {
+        tags: ['Computer'],
+        summary: 'Consent prompts awaiting an answer (G-07: `plan` lists a batched request)',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: '`{ pending }`',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: { pending: { type: 'array', items: { $ref: '#/components/schemas/ComputerPendingConsent' } } },
+                },
+              },
+            },
+          },
+        },
+      },
+      post: {
+        tags: ['Computer'],
+        summary: 'Answer a prompt; `scope` app | any picks "this app only" or "any app" (G-07)',
+        description:
+          'Omitted `scope` keeps each decision’s own reach: allow_run any app, the rest this app. A deny is ' +
+          'always for the app. `always_allow` + `any` stores a grant on appIdentity `*`; synthetic prompts ' +
+          'downgrade `always_allow` to `allow_once`.',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: {
+                  requestId: { type: 'string' },
+                  appIdentity: { type: 'string' },
+                  decision: { type: 'string', enum: ['allow_once', 'allow_run', 'always_allow', 'deny'] },
+                  scope: { type: 'string', enum: ['app', 'any'] },
+                },
+                required: ['requestId', 'appIdentity', 'decision'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: '`{ ok, requestId, decision, scope }`',
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    ok: { type: 'boolean' },
+                    requestId: { type: 'string' },
+                    decision: { type: 'string' },
+                    scope: { type: 'string', enum: ['app', 'any'] },
+                  },
+                },
+              },
+            },
+          },
+          '400': { description: 'Invalid body', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+          '409': { description: 'No longer awaiting an answer (NOT_PENDING)', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
+        },
+      },
+    },
+
+    '/api/workspaces/{id}/computer/control': {
+      get: {
+        tags: ['Computer'],
+        summary: 'Who drives the desktop: agent | paused | user (G-07)',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+        responses: {
+          '200': {
+            description: 'Control state',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ComputerControlState' } } },
+          },
+        },
+      },
+      post: {
+        tags: ['Computer'],
+        summary: 'Pause agent (paused), Take over (user) or hand back (agent) (G-07)',
+        description:
+          'While `paused` or `user`, every agent desktop operation on this workspace is refused (`agent_paused` / ' +
+          '`user_in_control`). A change emits `computer.control_changed` `{ workspaceId, mode, previous, changedAt }` ' +
+          'on the workspace stream scope.',
+        parameters: [{ in: 'path', name: 'id', required: true, schema: { type: 'string' } }],
+        requestBody: {
+          required: true,
+          content: {
+            'application/json': {
+              schema: {
+                type: 'object',
+                properties: { mode: { type: 'string', enum: ['agent', 'paused', 'user'] } },
+                required: ['mode'],
+              },
+            },
+          },
+        },
+        responses: {
+          '200': {
+            description: 'New control state',
+            content: { 'application/json': { schema: { $ref: '#/components/schemas/ComputerControlState' } } },
+          },
+          '400': { description: 'Invalid mode', content: { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } } },
         },
       },
     },

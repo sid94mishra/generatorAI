@@ -156,7 +156,6 @@ export type { ParsedWindowState } from './computer/driverPayloads.js';
 export { PendingConsentStore } from './computer/PendingConsentStore.js';
 export type {
   PendingConsentStoreOptions,
-  PendingConsentEntry,
   IComputerGrantRepository,
 } from './computer/PendingConsentStore.js';
 

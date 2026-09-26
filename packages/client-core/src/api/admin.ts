@@ -17,6 +17,14 @@
 // ────────────────────────────────────────────────────────────────
 
 import type {
+  ComputerConsentAnswer,
+  ComputerConsentAnswerResult,
+  ComputerControlMode,
+  ComputerControlState,
+  ComputerGrant,
+  ComputerPendingConsent,
+} from '@generatorai/shared';
+import type {
   Agent,
   AgentOverrides,
   Automation,
@@ -703,13 +711,20 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── computer.ts ─────────────────────────────────────────────
     computer: {
+      /** Prompts awaiting an answer (G-07 adds `plan` for a batched request). */
       consent: (workspaceId: string) =>
-        req<Record<string, unknown>>(`/api/workspaces/${workspaceId}/computer/consent`),
-      setConsent: (workspaceId: string, body: Record<string, unknown>) =>
-        req<Record<string, unknown>>(
+        req<{ pending: ComputerPendingConsent[] }>(`/api/workspaces/${workspaceId}/computer/consent`),
+      /** Answer one; `scope: 'app' | 'any'` (G-07) — omitted keeps the decision's own reach. */
+      setConsent: (workspaceId: string, body: ComputerConsentAnswer) =>
+        req<ComputerConsentAnswerResult>(
           `/api/workspaces/${workspaceId}/computer/consent`,
           json(body),
         ),
+      /** Who drives the desktop: `agent | paused | user` (G-07 Pause agent / Take over). */
+      control: (workspaceId: string) =>
+        req<ComputerControlState>(`/api/workspaces/${workspaceId}/computer/control`),
+      setControl: (workspaceId: string, mode: ComputerControlMode) =>
+        req<ComputerControlState>(`/api/workspaces/${workspaceId}/computer/control`, json({ mode })),
       // Every list route in this namespace answers an ENVELOPE, not a bare
       // array (`computer.ts`: `res.json({ grants })`, `res.json({ entries })`,
       // `res.json({ enabled, frames })`). Typed as arrays, all three rendered
@@ -717,7 +732,7 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       // `computer activity` and `computer frames` each printed "no rows"
       // regardless of what the server held.
       grants: (workspaceId: string) =>
-        req<{ grants: Array<Record<string, unknown>> }>(
+        req<{ grants: ComputerGrant[] }>(
           `/api/workspaces/${workspaceId}/computer/grants`,
         ).then((body) => body.grants ?? []),
       revokeGrant: (workspaceId: string, appIdentity: string) =>
