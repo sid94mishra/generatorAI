@@ -10,7 +10,7 @@ The coding agent updates this file in every phase PR.
 | 03 Engine v2 | wf/overhaul (see DEVIATIONS) | done (review pending) | local only | **phase gate 2026-09-26: see "Phase 03 gate" below** (part 1 and part 2 gates below it) | WP-3.1–3.9 (dd00852..48cc4ec); the cutover is 5dad4e7; v57 applied to the dev-DB copy |
 | 03b Stage conversation | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **phase gate 2026-09-26: see "Phase 03b gate" below** | WP-3b.1 0254811, WP-3b.4 2529558, WP-3b.2/3b.3 63db929, docs f55692b; no migration |
 | 04 Lifecycle and invocation | wf/overhaul (see DEVIATIONS) | done (review deferred to the final review) | local only | **phase gate 2026-09-26: see "Phase 04 gate" below** | WP-4.1–4.5 6fd9adc, bans a09e3d1, docs 5882780; v58 applied to the dev-DB copy |
-| 05 Control flow (5A, 5B) | wf/phase-05-control-flow | not started | | | |
+| 05 Control flow (5A, 5B) | wf/overhaul (see DEVIATIONS) | 5A done (review deferred to the final review); 5B not started | local only | **5A gate 2026-09-26: see "Phase 05A gate" below** | WP-5A.1 0c3f4e2, 5A.4 0eb53ad, 5A.2 5861460, 5A.3 b3fae98, 5A.6 0103a4d, 5A.5 936e7a1 + 4d6ba7e, lint f7b2626; v59 applied to the dev-DB copy; handoff notes/P05A-handoff.md |
 | 06 Agents and skill | wf/phase-06-agents-skill | not started | | | |
 | 07 Economy and UX | wf/phase-07-economy-ux | not started | | | |
 | 08 Dynamic workflows | wf/phase-08-dynamic | gated (PD-21) | | | |
@@ -218,6 +218,19 @@ Run at `wf/overhaul` @ f14cf5a (Windows 11, Node 26.8.2, pnpm 10.29.2).
 - **W-19 / C7:** covered at composer level (session/composer.test.ts). **Live E2E** (advisory, `P02-perm` and the other P02 scenarios): not run.
 - **Acceptance:** no session-config builders outside `services/session/` (the SES and CMS blocks are deleted and banned); chat and stage bound to one agent get the same tools, blocks and MCP servers apart from the documented owner differences (golden + composer tests); a stage widget now carries its stage run id so the run page Widget tab routes it to that stage (unit-tested; not checked in a browser); an automation cannot be saved without a permission mode (schema + route + web form).
 
+## Phase 05A gate (2026-09-26)
+
+Run at `wf/overhaul` @ 4d6ba7e (Windows 11, Node 26, pnpm 10). IMPLEMENTATION FIRST: one new test (the v59 chat-safety test); the per-phase gate is typecheck, lint, check-no-legacy, the affected package tests and the fresh-DB check.
+
+- **`pnpm turbo typecheck`:** pass, 51/51 (one earlier run hit the known transient: `agent-host` read `@generatorai/workflow-spec` while it rebuilt; re-run clean).
+- **`pnpm lint`:** pass (exit 0) — turbo lint 0 errors (warnings unchanged in kind); security, durability (the judge dispatch carries its waiver), docs, syncio, tokens, workflow-invariants (FAIL mode: 0 direct stage status writes; **no-preset-in-engine: 0**), no-legacy, migrations-lock (59), db-baseline (v59), workflow-spec (JSON Schemas, FIELDS.md, INVOCATION.md regenerated), **check:templates** (6 templates generated from the presets).
+- **`check-no-legacy`:** 112 banned patterns (+2 for P05; two earlier bans narrowed, DEVIATIONS), 0 hits; legacy comments 0.
+- **Affected package tests:** workflow-spec 364, core 1681 / 9 skipped, db 154 / 4 skipped (+ `migration59`), workflow-testkit 47, server 536 + the CSP-hash baseline failure, client-core 293, cli-core 877, cli 318 + the 5 baseline TUI failures (narrowWidths ×3, tui-e2e, tui-sweep), tui-kit 99, web 635 (the `check-bundle-size` "FAIL" lines are the script's own fixtures), mobile 1097, shared 326, auth 45, sdk 8, checkpoints 19.
+- **Fresh DB:** `BaselineFreshDb` passes (an empty DB reaches v59 through the regenerated baseline and matches `schema.ts`); `migration59` passes; `pnpm workflow:dbcopy-upgrade` on `C:/gaiwf/dbcopy`: v52 → v59 via legacy in 3.1 s, chats 362 / chat sessions 392 / messages 841, chat rows UNCHANGED (hashes match), 343 definitions, schema drift 0.
+- **Manual engine checks** (throwaway testkit scripts, deleted): L1 fix/review approves on round 3 with the continuing fix conversation and the follow-up prompt rendering `loop.carry.openComments | bullets`; a loop parked at its cap → `grant_iterations` → parked again → `continue_with_input` (operator turn first) → `accept`; L5 accumulation (`diff`/`unique`/`concat` carry, dry ×2) with a `check` (`node --version`) in the body; a judge rule scoring 4 then 9 (one repair). The Windows launch of `pnpm --version`, `pnpm exec vitest --version`, `tsc -v` through `SandboxedScriptRunner`.
+- **Tests deferred to the final pass** (PHASE-05 "Tests"): every loop, check, judge, example-extraction, preset/lint, property and Playwright test listed there; the Windows CI launch test.
+- **Live E2E** (advisory): not run.
+
 ## Phase 04 gate (2026-09-26)
 
 Run at `wf/overhaul` after 6fd9adc (WP-4.1–4.5) and a09e3d1 (WP-4.6) (Windows 11, Node 26, pnpm 10). IMPLEMENTATION FIRST: one new test (the v58 chat-safety test); the per-phase gate is typecheck, lint, check-no-legacy, the affected package tests and the fresh-DB check.
@@ -295,7 +308,7 @@ Reserve these numbers; do not reuse them.
 | 56 | session_parity | P02 | `chat_messages.complete`; `automations.permission_mode` |
 | 57 | workflow_engine_v2 | P03 | run tables recreated (G5 §6.2, incl. `stage_runs.loop_state`, `scope_id`, `iteration_index`, `item_index`, + invocation and ownership columns); `stage_attempts` (+ `agent_snapshot`, `judge`, `structured_output`), `run_sessions`, timers, outbox, journal, `engine_lock`; `chat_messages.turn_role`; `stage_runs.amended_at` |
 | 58 | invocation | P04 | `idempotency_keys.request_hash`; `invocation_uploads`; `auth_devices` rebuilt with the `mcp` platform (applied 6fd9adc; run mounts need no column: a run's workspace owns them) |
-| 59 | control_flow | P05 | `loop_iterations`; `stage_runs.item_key`; `workflow_run_events` (id, idempotency key, consumed_by); `stage_definitions.parent_key`, `kind` + index |
+| 59 | control_flow | P05 | `loop_iterations`; `stage_runs.item_key`; `workflow_run_events` (id, idempotency key, consumed_by); `stage_definitions.parent_key`, `kind` + index (applied 0eb53ad; `item_key` was not in v57) |
 | 60 | agent_integration | P06 | `chat_workflow_runs`; `chats.created_by_principal`; definitions `authored_by` |
 | 61 | reserved | P07 | only if needed (none planned) |
 | 62 | dynamic_calls | P08 | only if PD-21 = yes |
