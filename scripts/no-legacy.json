@@ -893,6 +893,34 @@
         "packages/cli-core/"
       ],
       "reason": "WP-5A.1/5A.3 (P5-13): a loop has one open exits[] list (complete, fail, pause, exhaust) and loop_state.effectiveMax; the fixed exit slots and override names of the draft are not a shape"
+    },
+    {
+      "phase": "05",
+      "pattern": "\bFUTURE_KINDS\b|is not available yet; the kinds are",
+      "paths": [
+        "apps/",
+        "packages/core/src/",
+        "packages/workflow-spec/src/",
+        "packages/shared/src/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/"
+      ],
+      "reason": "WP-5B.1-5B.3: map, subworkflow and wait are stage kinds; the validator's future-kind placeholder is gone"
+    },
+    {
+      "phase": "05",
+      "pattern": "\b(budgetShare|itemLabel|results_and_failures|child_run_settled)\b",
+      "paths": [
+        "apps/",
+        "packages/core/src/",
+        "packages/workflow-spec/src/",
+        "packages/shared/src/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/"
+      ],
+      "reason": "WP-5B.1/5B.2: the G5 draft shapes of map (itemLabel, output enum) and sub-workflow (budgetShare, child_run_settled) are not shapes: map.output.select, the stage budget, the child_settled message"
     }
   ],
   "comments": {

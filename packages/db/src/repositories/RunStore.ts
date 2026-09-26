@@ -105,7 +105,12 @@ export class RunStore implements IRunStore {
     const r = this.sqlite.prepare(`SELECT * FROM workflow_runs WHERE id = ?`).get(runId) as Row | undefined;
     if (!r) return null;
     const systemVars = parse<Record<string, unknown>>(r['system_vars'], {});
-    const trigger = parse<{ kind?: string } | null>(r['trigger'], null);
+    let trigger = parse<{ kind?: string } | null>(r['trigger'], null);
+    // A sub-workflow child is as attended as the run tree it belongs to (P05 §4.2).
+    if (trigger?.kind === 'stage' && r['root_run_id'] && r['root_run_id'] !== r['id']) {
+      const root = this.sqlite.prepare(`SELECT trigger FROM workflow_runs WHERE id = ?`).get(r['root_run_id']) as Row | undefined;
+      trigger = parse<{ kind?: string } | null>(root?.['trigger'], trigger);
+    }
     const run: RunRecord = {
       id: r['id'] as string,
       name: r['name'] as string,
