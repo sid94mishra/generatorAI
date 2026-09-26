@@ -287,6 +287,8 @@ export interface StreamUsage {
   cacheReadTokens?: number;
   cacheWriteTokens?: number;
   cost?: number;
+  /** USD, set only by a provider that reports one (`cost` may be a multiplier). */
+  costUsd?: number;
   provider?: string;
 }
 

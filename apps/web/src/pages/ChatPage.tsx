@@ -939,6 +939,7 @@ export function ChatPage() {
           cacheReadTokens: lastStreamUsage.cacheReadTokens,
           cacheWriteTokens: lastStreamUsage.cacheWriteTokens,
           cost: lastStreamUsage.cost,
+          costUsd: lastStreamUsage.costUsd,
           provider: lastStreamUsage.provider,
         },
         completedAt: Date.now(),
