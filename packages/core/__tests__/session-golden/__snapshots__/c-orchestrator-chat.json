@@ -157,6 +157,254 @@
       "owner": "orchestrator:<uuid>"
     },
     {
+      "name": "list_workflows",
+      "description": "List the saved GeneratorAI workflows you can run: id, name, description, variables (name, type, required), stage count, whether a codebase is required, post-processing (commit, push, PR). Only published workflows run. Call this before run_workflow.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "query": {
+            "type": "string",
+            "description": "Name contains"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Only this project's workflows"
+          },
+          "tag": {
+            "type": "string",
+            "description": "Only workflows with this tag"
+          },
+          "limit": {
+            "type": "number",
+            "description": "At most this many (1-50, default 20)"
+          }
+        }
+      },
+      "skipPermission": true,
+      "owner": "chat:<uuid>"
+    },
+    {
+      "name": "describe_workflow",
+      "description": "Describe one workflow before running it: its variables (type, required, default, options), stages (key, kind, agent, model, approval, guard), edges, codebases, post-processing, declared outputs and RISK FLAGS (writes_files, commits, pushes, opens_pr, bypass_permissions, runs_repo_code, starts_other_workflows). Tell the user about the risk flags before you run it.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "description": "The workflow id from list_workflows"
+          }
+        },
+        "required": [
+          "workflowId"
+        ]
+      },
+      "skipPermission": true,
+      "owner": "chat:<uuid>"
+    },
+    {
+      "name": "run_workflow",
+      "description": "Start a run of a PUBLISHED workflow. Returns {runId, status, link, replayed, plan}. The run gets its own worktrees (workspace \"isolated\", default); \"from_chat_branch\" cuts them from this chat's branches and is refused while the chat has uncommitted changes. Limits you cannot raise: permissionMode never above your own, runs nest at most 3 deep, a workflow cannot start itself, a chat runs at most 3 at once, your remaining time caps the run. A retried call returns the same run. Completion reviews go to a person unless you pass approvalDelegate \"invoker\"; tool-permission prompts always go to a person. wait \"until_done\" / \"until_approval_or_done\" blocks up to waitSeconds (max 600), then call check_workflow_run.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "workflowId": {
+            "type": "string",
+            "description": "The workflow id"
+          },
+          "variables": {
+            "type": "object",
+            "description": "Variable values by name"
+          },
+          "codebases": {
+            "type": "array",
+            "description": "Project codebases to mount: [{alias, baseRef?}]; omitted means the workflow's own",
+            "items": {
+              "type": "object",
+              "properties": {
+                "alias": {
+                  "type": "string"
+                },
+                "baseRef": {
+                  "type": "string"
+                }
+              },
+              "required": [
+                "alias"
+              ]
+            }
+          },
+          "stageOverrides": {
+            "type": "array",
+            "description": "Per stage: [{stageKey, skip?, model?, variables?}]",
+            "items": {
+              "type": "object",
+              "properties": {
+                "stageKey": {
+                  "type": "string"
+                },
+                "skip": {
+                  "type": "boolean"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "variables": {
+                  "type": "object"
+                }
+              },
+              "required": [
+                "stageKey"
+              ]
+            }
+          },
+          "model": {
+            "type": "string",
+            "description": "Model for every stage without its own"
+          },
+          "permissionMode": {
+            "type": "string",
+            "enum": [
+              "plan",
+              "default",
+              "acceptEdits",
+              "bypassPermissions"
+            ],
+            "description": "At most your own mode"
+          },
+          "workspace": {
+            "type": "string",
+            "enum": [
+              "isolated",
+              "from_chat_branch"
+            ],
+            "description": "Default isolated"
+          },
+          "wait": {
+            "type": "string",
+            "enum": [
+              "none",
+              "until_done",
+              "until_approval_or_done"
+            ],
+            "description": "Default none"
+          },
+          "waitSeconds": {
+            "type": "number",
+            "description": "How long to wait (max 600, default 60)"
+          },
+          "approvalDelegate": {
+            "type": "string",
+            "enum": [
+              "human",
+              "invoker"
+            ],
+            "description": "Who answers completion reviews (default human)"
+          },
+          "reason": {
+            "type": "string",
+            "description": "One line: why you start this run (shown to the user and stored on the run)"
+          },
+          "projectId": {
+            "type": "string",
+            "description": "Project whose codebases the run mounts; default the workflow's or this chat's"
+          }
+        },
+        "required": [
+          "workflowId",
+          "reason"
+        ]
+      },
+      "skipPermission": false,
+      "owner": "chat:<uuid>"
+    },
+    {
+      "name": "check_workflow_run",
+      "description": "The state of a run you started (or one nested under it): status, each stage's status and summary, pending approvals (and whether you may answer them), post-processing results (commit, branch, PR), the link. wait=true blocks until it finishes or parks on an approval, up to waitSeconds (max 600).",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string",
+            "description": "The run id"
+          },
+          "wait": {
+            "type": "boolean",
+            "description": "Block until it finishes or waits for an approval"
+          },
+          "waitSeconds": {
+            "type": "number",
+            "description": "How long to wait (max 600, default 60)"
+          }
+        },
+        "required": [
+          "runId"
+        ]
+      },
+      "skipPermission": true,
+      "owner": "chat:<uuid>"
+    },
+    {
+      "name": "respond_workflow_approval",
+      "description": "Answer a stage COMPLETION REVIEW of a run you started with approvalDelegate \"invoker\" (see check_workflow_run pendingApprovals[].answerableByYou). Anything else (a tool-permission prompt, a question, a loop decision, an approval wait) returns \"needs a human\": tell the user and give them the link.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "instanceId": {
+            "type": "string",
+            "description": "pendingApprovals[].instanceId"
+          },
+          "outcome": {
+            "type": "string",
+            "enum": [
+              "approved",
+              "changes_requested",
+              "rejected"
+            ]
+          },
+          "feedback": {
+            "type": "string",
+            "description": "What to change (changes_requested) or why"
+          },
+          "reason": {
+            "type": "string",
+            "description": "One line: why you decided so"
+          }
+        },
+        "required": [
+          "runId",
+          "instanceId",
+          "outcome",
+          "reason"
+        ]
+      },
+      "skipPermission": false,
+      "owner": "chat:<uuid>"
+    },
+    {
+      "name": "cancel_workflow_run",
+      "description": "Cancel a run you started. Say why in reason.",
+      "parametersSchema": {
+        "type": "object",
+        "properties": {
+          "runId": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "runId",
+          "reason"
+        ]
+      },
+      "skipPermission": true,
+      "owner": "chat:<uuid>"
+    },
+    {
       "name": "record_plan",
       "description": "Record an implementation plan for the user to read. Returns immediately and does NOT pause you — after calling it, continue and implement the plan. Call it at most once per turn, and only when the user asked for a plan or the task is large enough to warrant one.",
       "parametersSchema": {

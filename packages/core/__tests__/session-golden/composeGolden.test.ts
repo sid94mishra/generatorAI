@@ -52,7 +52,7 @@ import {
   createEngineStores,
   type AppDatabase,
 } from '@generatorai/db';
-import type { ILogger, ResolvedAgentProjection } from '@generatorai/shared';
+import type { AgentOverrides, ILogger, ResolvedAgentProjection } from '@generatorai/shared';
 import { createCoreServices, type CoreServices } from '../../src/bootstrap/createCoreServices.js';
 import { AgentResolver } from '../../src/services/AgentResolver.js';
 import { AdmissionController } from '../../src/services/AdmissionController.js';
@@ -158,9 +158,16 @@ function goldenProjection(): ResolvedAgentProjection {
   };
 }
 
+/** The binding site's tool groups fold in as the real resolver folds them (the PD-23 orchestrator default rides on them). */
 const fakeResolver = {
-  resolve: async (input: { agentRef?: string }) =>
-    input.agentRef === AGENT_REF ? goldenProjection() : AgentResolver.empty(),
+  resolve: async (input: { agentRef?: string; overrides?: AgentOverrides }) => {
+    const projection = input.agentRef === AGENT_REF ? goldenProjection() : AgentResolver.empty();
+    const groups = { ...projection.toolPolicy.groups };
+    for (const [group, on] of Object.entries(input.overrides?.tools ?? {})) {
+      if (typeof on === 'boolean') groups[group as keyof typeof groups] = on;
+    }
+    return { ...projection, toolPolicy: { ...projection.toolPolicy, groups } };
+  },
 } as unknown as AgentResolver;
 
 // ── Serialisation ────────────────────────────────────────────────
@@ -413,7 +420,10 @@ describe('session composition golden snapshots', () => {
       orchestratorMode: true,
     });
     const p = lastCreate(env);
-    expect((p as unknown as { tools?: Array<{ name: string }> }).tools?.map((t) => t.name)).toContain('spawn_background_agent');
+    const names = (p as unknown as { tools?: Array<{ name: string }> }).tools?.map((t) => t.name);
+    expect(names).toContain('spawn_background_agent');
+    // PD-23 (P06) — an orchestrator chat gets the workflow tools by default (review R18).
+    expect(names).toContain('run_workflow');
     await expect(golden(p, env.workDir)).toMatchFileSnapshot('__snapshots__/c-orchestrator-chat.json');
   });
 
