@@ -406,7 +406,12 @@ export class WorkflowRunService {
       const ms = src.mapState;
       if (!ms) throw new ValidationError(`rerunFrom: "${path}": the map "${stage.key}" did not start`);
       const byIndex = /^\d+$/.test(idx) ? ms.items.find((it) => it.index === Number(idx)) : undefined;
-      const item = byIndex ?? ms.items.find((it) => it.key === idx);
+      const byKey = ms.items.find((it) => it.key === idx);
+      // A numeric reference that is one item's index and another item's key is ambiguous: refused, never guessed.
+      if (byIndex && byKey && byIndex !== byKey) {
+        throw new ValidationError(`rerunFrom: "${path}": "${idx}" is item ${byIndex.index}'s index and item ${byKey.index}'s key in the map "${stage.key}"; the reference is ambiguous`);
+      }
+      const item = byKey ?? byIndex;
       if (!item) throw new ValidationError(`rerunFrom: "${path}": the map "${stage.key}" has no item "${idx}"`);
       index = item.index;
       containerState = {
