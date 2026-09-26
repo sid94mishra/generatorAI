@@ -133,7 +133,12 @@ const api = {
       const handler = (_e: unknown, state: DesktopUpdateState) => cb(state);
       ipcRenderer.on(IPC_EVENT.updateStateChanged, handler);
       void ipcRenderer.invoke(IPC.watchUpdates, true).catch(() => undefined);
+      // Idempotent: main counts subscriptions, so a second call must not
+      // report a second unsubscribe (P1-review P2-R39).
+      let subscribed = true;
       return () => {
+        if (!subscribed) return;
+        subscribed = false;
         ipcRenderer.removeListener(IPC_EVENT.updateStateChanged, handler);
         void ipcRenderer.invoke(IPC.watchUpdates, false).catch(() => undefined);
       };

@@ -2,7 +2,7 @@
 // DrizzleChatRepository — IChatRepository impl (v2)
 // ────────────────────────────────────────────────────────────────
 
-import { and, asc, count, desc, eq, gt, inArray, isNull, lt, notInArray, or, sql, type SQL } from 'drizzle-orm';
+import { and, asc, count, desc, eq, inArray, isNull, notInArray, or, sql, type SQL } from 'drizzle-orm';
 import type {
   ChatListActivity,
   ChatListFilter,
@@ -117,6 +117,15 @@ export class DrizzleChatRepository implements IChatRepository {
       .select()
       .from(chats)
       .where(eq(chats.projectId, projectId))
+      .orderBy(chats.createdAt);
+    return rows.map((r) => this.mapRow(r));
+  }
+
+  async getByAgentRef(ref: string): Promise<Chat[]> {
+    const rows = await this.db
+      .select()
+      .from(chats)
+      .where(eq(chats.agentRef, ref))
       .orderBy(chats.createdAt);
     return rows.map((r) => this.mapRow(r));
   }
@@ -316,7 +325,7 @@ export class DrizzleChatRepository implements IChatRepository {
   async touchActivity(id: string, at: Date): Promise<void> {
     await this.db
       .update(chats)
-      .set({ lastActivityAt: sql`MAX(COALESCE(${chats.lastActivityAt}, 0), ${at.getTime()})` })
+      .set({ lastActivityAt: sql`MAX(${chats.lastActivityAt}, ${at.getTime()})` })
       .where(eq(chats.id, id));
   }
 
@@ -330,7 +339,7 @@ export class DrizzleChatRepository implements IChatRepository {
         lastTurnStatus: turn.status,
         lastTurnEndedAt: turn.endedAt,
         lastTurnError: turn.status === 'failed' ? (turn.error ?? null) : null,
-        lastActivityAt: sql`MAX(COALESCE(${chats.lastActivityAt}, 0), ${turn.endedAt.getTime()})`,
+        lastActivityAt: sql`MAX(${chats.lastActivityAt}, ${turn.endedAt.getTime()})`,
       })
       .where(eq(chats.id, id));
   }
@@ -412,9 +421,9 @@ function sortKey(sort: ChatListSort): SQL<number | string> {
       return sql<string>`lower(${chats.name})`;
     case 'activity':
     default:
-      // The bare column, so `idx_chats_last_activity` serves the sort (P2-R20).
-      // It is never NULL: `create` stamps it and migration v55 backfilled
-      // every older row.
+      // The bare column, so the v56 composite indexes (… last_activity_at, id)
+      // serve the order with no temp B-tree (P2-R30). It is never NULL:
+      // `create` stamps it, v56 backfilled older rows and rejects NULL writes.
       return sql<number>`${chats.lastActivityAt}`;
   }
 }
@@ -423,9 +432,14 @@ function sortOrder(sort: ChatListSort, key: SQL<number | string>): SQL[] {
   return sort === 'name' ? [asc(key), asc(chats.id)] : [desc(key), desc(chats.id)];
 }
 
+/**
+ * Rows after the cursor, as a row-value comparison: SQLite turns
+ * `(key, id) < (?, ?)` into a range on the composite index, so a cursor page
+ * starts at the cursor instead of scanning (and discarding) every earlier row.
+ */
 function keysetCondition(sort: ChatListSort, key: SQL<number | string>, after: ChatListKeyset): SQL {
-  const past = sort === 'name' ? gt : lt;
-  return or(past(key, after.value), and(eq(key, after.value), past(chats.id, after.id)))!;
+  const past = sort === 'name' ? sql`>` : sql`<`;
+  return sql`(${key}, ${chats.id}) ${past} (${after.value}, ${after.id})`;
 }
 
 /** `!` escapes LIKE's wildcards, so a search for `50%` means the text. */
@@ -472,7 +486,7 @@ function filterConditions(filter: ChatListFilter, withStatus: boolean): SQL[] {
 
 function mapActivity(row: ChatRow): ChatListActivity {
   const activity: ChatListActivity = {
-    lastActivityAt: row.lastActivityAt ?? row.createdAt,
+    lastActivityAt: row.lastActivityAt,
   };
   if (row.lastTurnStatus && row.lastTurnEndedAt) {
     activity.lastTurn = {

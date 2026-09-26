@@ -317,4 +317,51 @@ describe('probeServer', () => {
     const result = await probeServer('https://studio.example:3100', { timeoutMs: 5 });
     expect(result).toEqual({ status: 'offline' });
   });
+
+  // P2-R40
+  it('never follows a redirect: passes redirect: "manual"', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ serverId: 'srv-1' }), { status: 200 }));
+    vi.stubGlobal('fetch', fetchMock);
+    await probeServer('https://studio.example:3100');
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://studio.example:3100/api/auth/server-info',
+      expect.objectContaining({ redirect: 'manual' }),
+    );
+  });
+
+  it('reports unpaired, not connected, on a 3xx (never reaches whatever a redirect would bounce to)', async () => {
+    // A real fetch given redirect: 'manual' surfaces a 3xx directly (Node) or
+    // as an opaque, status-0 response (browsers/Electron's net.fetch) —
+    // either way it must never carry a matching serverId through.
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 302 })));
+    const result = await probeServer('https://studio.example:3100');
+    expect(result).toMatchObject({ status: 'unpaired' });
+  });
+
+  it('reports error (not unpaired) when the timeout cuts the body read short after a 200 status line arrived', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((_url: string, init?: { signal?: AbortSignal }) => {
+        const body = new ReadableStream({
+          start(controller) {
+            init?.signal?.addEventListener('abort', () => controller.error(new DOMException('aborted', 'AbortError')));
+            // Never enqueue/close — the read only ever resolves via the abort above.
+          },
+        });
+        return Promise.resolve(new Response(body, { status: 200 }));
+      }),
+    );
+    const result = await probeServer('https://studio.example:3100', { timeoutMs: 5 });
+    expect(result).toMatchObject({ status: 'error' });
+  });
+
+  it('accepts an injectable fetch (options.fetch) instead of the global one', async () => {
+    const globalFetch = vi.fn();
+    vi.stubGlobal('fetch', globalFetch);
+    const injected = vi.fn(async () => new Response(JSON.stringify({ serverId: 'srv-1' }), { status: 200 }));
+    const result = await probeServer('https://studio.example:3100', { fetch: injected });
+    expect(result).toMatchObject({ status: 'connected' });
+    expect(injected).toHaveBeenCalledTimes(1);
+    expect(globalFetch).not.toHaveBeenCalled();
+  });
 });

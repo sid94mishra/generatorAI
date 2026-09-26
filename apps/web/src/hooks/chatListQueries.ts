@@ -67,8 +67,9 @@ const LIVE_REFETCH_WINDOW_MS = 250;
  * Refetches `key` at most once per window, never cancelling a request in
  * flight: a burst of events faster than one round trip would otherwise
  * cancel every response before it landed (P2-R20). An event that arrives
- * while a refetch is running queues exactly one more after it, so the last
- * change is never missed.
+ * while a refetch is running — ours or any other fetch of the query, such as
+ * `fetchNextPage` — queues exactly one more after it, so the last change is
+ * never missed.
  */
 function coalescedRefetch(queryClient: QueryClient, key: readonly unknown[]) {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -85,7 +86,11 @@ function coalescedRefetch(queryClient: QueryClient, key: readonly unknown[]) {
     running = true;
     try {
       do {
-        dirty = false;
+        // With `cancelRefetch: false` an invalidate joins whatever fetch is
+        // already in flight — a `fetchNextPage` that reloads one page, or a
+        // refetch that left before this event. Wait for it, then refetch for
+        // real, so the event is not lost until the next one (P2-R34).
+        dirty = queryClient.getQueryState(key)?.fetchStatus === 'fetching';
         await queryClient.invalidateQueries({ queryKey: key, exact: true }, { cancelRefetch: false });
       } while (dirty && !disposed);
     } finally {

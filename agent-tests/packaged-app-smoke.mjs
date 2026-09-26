@@ -88,7 +88,12 @@ async function main() {
     args: [profile.arg],
     timeout: 180_000,
   });
+  // P2-R44 — hand the launched app to the profile helper so a SIGINT/SIGTERM
+  // that lands after this point can close Electron before removing the
+  // directory it may still hold files in.
+  profile.attach(app);
 
+  try {
   // The splash window shows first; wait for the one hosting the SPA, which
   // only appears once the embedded server is actually listening.
   let win = null;
@@ -103,7 +108,6 @@ async function main() {
 
   check('embedded server started and SPA loaded', Boolean(win), win ? '' : 'no http window appeared');
   if (!win) {
-    await app.close();
     return;
   }
 
@@ -163,8 +167,12 @@ async function main() {
 
   await win.screenshot({ path: path.join(SHOTS, 'packaged-app.png') });
   console.log(`\n  screenshot → ${path.join(SHOTS, 'packaged-app.png')}`);
-
-  await app.close();
+  } finally {
+    // P2-R44 — close before cleanup: the directory is only removed once
+    // Electron (and the embedded server it spawned) has released its files.
+    await app.close().catch(() => {});
+    profile.cleanup();
+  }
 }
 
 main()

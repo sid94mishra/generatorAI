@@ -273,13 +273,28 @@ export async function findIdByName(path: string, name: string): Promise<string |
  * candidates, then this still exact-matches `.name` itself (the endpoint has
  * no exact-match filter), and pages via `cursor` on the rare chance more than
  * one page of `q` matches exists before the exact one is found.
+ *
+ * P2-R35 — `q=` compares with SQLite `lower()`, which folds only ASCII, so a
+ * name like "Über plan" is not in its answer at all. When `q=` finds no
+ * exact match, every chat is paged through and matched here.
  */
 export async function findChatIdByName(name: string): Promise<string | undefined> {
+  const byQuery = await scanChatsForName(name, { q: name });
+  if (byQuery !== null) return byQuery;
+  return (await scanChatsForName(name, {})) ?? undefined;
+}
+
+/**
+ * Pages `GET /chats` (plus `filter`) for a chat named exactly `name`.
+ * Resolves its id, `null` when every page was read without a match, or
+ * `undefined` when a request failed (a failure is not a "no").
+ */
+async function scanChatsForName(name: string, filter: Record<string, string>): Promise<string | null | undefined> {
   let cursor: string | undefined;
-  // A defensive cap, not an expected case: `q` narrows to substring matches
-  // of `name`, so this should resolve within the first page almost always.
+  // A defensive cap against a server that never ends its cursor chain
+  // (10,000 chats at 200 per page).
   for (let pagesRead = 0; pagesRead < 50; pagesRead++) {
-    const params = new URLSearchParams({ q: name, workers: 'true', limit: '200' });
+    const params = new URLSearchParams({ ...filter, workers: 'true', limit: '200' });
     if (cursor) params.set('cursor', cursor);
     const res = await apiRequest<{ items: Array<{ id: string; name: string }>; nextCursor?: string | null }>(
       'GET',
@@ -288,10 +303,10 @@ export async function findChatIdByName(name: string): Promise<string | undefined
     if (!res.ok || !Array.isArray(res.data?.items)) return undefined;
     const match = res.data.items.find((item) => item.name === name);
     if (match) return match.id;
-    if (!res.data.nextCursor) return undefined;
+    if (!res.data.nextCursor) return null;
     cursor = res.data.nextCursor;
   }
-  return undefined;
+  return null;
 }
 
 export async function findProjectIdByName(name: string): Promise<string | undefined> {

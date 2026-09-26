@@ -175,19 +175,29 @@ export default function ChatsScreen(): React.ReactElement {
     onError: () => toast({ message: 'Could not delete that chat.', tone: 'error' }),
   });
 
+  // Same outcome rules as desktop's list (P2-R36): after a partial failure
+  // only the chats that failed stay selected, so a retry does not resend ids
+  // that are already gone; when the request fails outright nothing was
+  // deleted, so the selection stays as it was.
   const removeMany = useMutation({
     mutationFn: async (ids: string[]) => {
       const result = await api.chats.removeMany(ids);
-      return { failed: result.failed.length, total: ids.length };
+      return { failedIds: result.failed.map((f) => f.id), total: ids.length };
     },
-    onSuccess: ({ failed, total }) => {
+    onSuccess: ({ failedIds, total }) => {
       invalidate();
-      exitSelection();
+      const failed = failedIds.length;
+      if (failed > 0) setSelected(new Set(failedIds));
+      else exitSelection();
       toast(
         failed > 0
           ? { message: `${total - failed} deleted, ${failed} could not be deleted.`, tone: 'error' }
           : { message: `${total} ${total === 1 ? 'chat' : 'chats'} deleted.`, tone: 'success' },
       );
+    },
+    onError: () => {
+      invalidate();
+      toast({ message: 'Could not delete those chats.', tone: 'error' });
     },
   });
 

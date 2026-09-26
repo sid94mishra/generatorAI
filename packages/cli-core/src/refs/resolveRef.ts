@@ -42,6 +42,12 @@ export interface ResolveOptions<T extends Referenceable> {
   activeStatuses?: string[];
   /** Positional history for `#n`, most recent listing first. */
   recent?: string[];
+  /**
+   * `candidates` is every entity of this kind (the default). False when the
+   * caller pre-filtered it, so an empty list says nothing about whether any
+   * exist.
+   */
+  complete?: boolean;
 }
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -83,7 +89,7 @@ export function resolveRef<T extends Referenceable>(ref: string, options: Resolv
     throw CliError.usage(`A ${kind} reference is required.`);
   }
 
-  if (candidates.length === 0) {
+  if (candidates.length === 0 && options.complete !== false) {
     throw CliError.notFound(kind, trimmed, {
       hint: `No ${kind}s exist yet.`,
     });

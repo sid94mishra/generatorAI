@@ -76,31 +76,70 @@ export function nodeBinArgs(fromDir, pkgName, binName, extraArgs = []) {
   return { command: process.execPath, args: [resolveBinScript(fromDir, pkgName, binName), ...extraArgs] };
 }
 
+// P2-R43 — `npm_execpath` is not proof of pnpm: under `npm run`/`npm exec` it
+// points at npm's own JS entry (e.g. `.../npm/bin/npm-cli.js`), and under
+// yarn at yarn's (e.g. `.../yarn/bin/yarn.js`) — both are real, existing
+// `.js` files, so the old check (extension + existence only) happily ran
+// `npm --filter ... bundle` or `yarn --filter ... bundle`, neither of which
+// understands `--filter`. Require the path to actually look like a pnpm
+// entry point: pnpm's own bin script is named `pnpm.cjs`/`pnpm.mjs`/`pnpm.js`
+// (`.../pnpm/bin/pnpm.cjs`), and corepack's generated shim for it also lives
+// under a path segment literally named `pnpm` (e.g.
+// `.../corepack/v1/pnpm/<version>/pnpm.cjs`). Checked case-insensitively and
+// on both `/` and `\` separators so it works from a Windows-style
+// `npm_execpath` too.
+function isPnpmEntryPath(execPath) {
+  const segments = execPath.split(/[\\/]+/).filter(Boolean);
+  const base = (segments[segments.length - 1] ?? '').toLowerCase();
+  const baseIsPnpmEntry = /^pnpm(\.(c|m)?js)?$/.test(base);
+  const hasPnpmSegment = segments.some((seg) => /^pnpm(@.+)?$/i.test(seg));
+  return baseIsPnpmEntry || hasPnpmSegment;
+}
+
+// A fixed argument never contains a shell metacharacter beyond a plain
+// space in this codebase (package names, `--filter`, task names), but quote
+// defensively anyway: double-quote anything outside a safe unquoted-char
+// set, escaping embedded double quotes. Safe for both POSIX `sh -c` and
+// Windows `cmd.exe`, the two shells `{ shell: true }` resolves to.
+function quoteShellArg(arg) {
+  if (/^[A-Za-z0-9@_\-./:]+$/.test(arg)) return arg;
+  return `"${arg.replace(/"/g, '\\"')}"`;
+}
+
 /**
  * Resolve how to invoke `pnpm` itself as a child process without ever
  * spawning a `.cmd`/`.ps1` shim directly.
  *
- * Prefers `process.env.npm_execpath`: pnpm sets this to its OWN JS entry
- * point (a `.js`/`.cjs` file) whenever the current process was itself
- * launched via `pnpm ...` — that is run with `process.execPath`, exactly
- * like `resolveBinScript`'s targets, so it is exempt from the shim problem
- * entirely (it is never a `.cmd`).
+ * Prefers `process.env.npm_execpath`, but only when it both looks like a
+ * `.js`/`.cjs`/`.mjs` file AND resolves to a real pnpm entry point (see
+ * `isPnpmEntryPath`) — pnpm sets this variable to its OWN JS entry point
+ * whenever the current process was itself launched via `pnpm ...`, which is
+ * run with `process.execPath`, exactly like `resolveBinScript`'s targets, so
+ * it is exempt from the shim problem entirely (it is never a `.cmd`).
  *
- * Only when that variable is absent (this script was run directly with
- * `node`, not through `pnpm exec`/`pnpm run`) does this fall back to a bare
- * `pnpm` resolved from PATH. That fallback is spawned with `shell: true` —
- * a deliberate, narrow, documented exception to "never spawn a shim without
- * a shell": every argument here is fixed by this codebase, never end-user or
- * network input, so the usual shell-injection risk of `shell: true` does not
- * apply, and it is the only way to reach a global `pnpm` install (which has
- * no JS entry point of ours to resolve).
+ * Only when that fails (this script was run directly with `node`, or via
+ * `npm run`/`yarn`, none of which point `npm_execpath` at a pnpm entry) does
+ * this fall back to a bare `pnpm` resolved from PATH. That fallback is
+ * spawned with `shell: true` — a deliberate, narrow, documented exception to
+ * "never spawn a shim without a shell": every argument here is fixed by this
+ * codebase, never end-user or network input, so the usual shell-injection
+ * risk of `shell: true` does not apply, and it is the only way to reach a
+ * global `pnpm` install (which has no JS entry point of ours to resolve).
+ * The whole invocation is joined into a single command string with no
+ * separate `args` — Node 24 deprecates (DEP0190) passing an `args` array
+ * together with `shell: true`.
  *
  * @returns {{ command: string, args: string[], options: { shell?: boolean } }}
  */
 export function pnpmCommand(extraArgs = []) {
   const execPath = process.env['npm_execpath'];
-  if (execPath && /\.(m?js|cjs)$/i.test(execPath) && fs.existsSync(execPath)) {
+  if (
+    execPath &&
+    /\.(m?js|cjs)$/i.test(execPath) &&
+    isPnpmEntryPath(execPath) &&
+    fs.existsSync(execPath)
+  ) {
     return { command: process.execPath, args: [execPath, ...extraArgs], options: {} };
   }
-  return { command: 'pnpm', args: extraArgs, options: { shell: true } };
+  return { command: ['pnpm', ...extraArgs].map(quoteShellArg).join(' '), args: [], options: { shell: true } };
 }

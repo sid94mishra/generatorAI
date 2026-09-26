@@ -270,28 +270,90 @@ export interface ProbeServerOptions {
    * entry is not for it.
    */
   expectedServerId?: string;
+  /**
+   * Injectable `fetch` (P2-R40). Defaults to the global `fetch`, which in the
+   * desktop main process is Node's `fetch` (undici) — it ignores the system
+   * proxy and Chromium's certificate policy, so its verdict can disagree with
+   * what the renderer's window would actually be able to load. Main passes
+   * Electron's `net.fetch` instead (`apps/desktop/src/main/server-probe.ts`),
+   * which uses Chrome's network stack and shares its proxy/cert behavior.
+   */
+  fetch?: typeof fetch;
 }
 
 const DEFAULT_PROBE_TIMEOUT_MS = 2500;
 
-/** Probes one server origin for reachability and identity. Never throws. */
+/**
+ * Probes one server origin for reachability and identity. Never throws.
+ *
+ * Reachability mapping (D-54; also documented in
+ * docs/redesign/01-decisions.md):
+ *  - `connected` — a matching `serverId` (or none expected).
+ *  - `unpaired` — a 4xx other than 429, a fully-received body with no
+ *    `serverId` (including one that is not valid JSON — the body still
+ *    finished downloading, it just isn't this API), a different `serverId`
+ *    than expected, OR a 3xx (see below). None of these confirm the
+ *    credential this connection holds is for the server that actually
+ *    answered.
+ *  - `error` — 429/5xx (server is there, answer not confirmed), OR the
+ *    status line arrived but the body read was cut short by the timeout/abort
+ *    (P2-R40): the server IS reachable, just unconfirmed — distinct from
+ *    `offline` (no answer at all) and from `unpaired` (a confirmed mismatch).
+ *  - `offline` — no answer: a network error, or the timeout/abort fired
+ *    before any response (not even a status line) arrived.
+ *
+ * `redirect: 'manual'` (P2-R40): a stored server's URL is data this client
+ * does not otherwise trust, so a 3xx must not be silently followed — that
+ * would let a stored server bounce the request to a different origin and
+ * have ITS `serverName`/`serverId` reach the caller as if they belonged to
+ * the original endpoint. With redirects not followed, a 3xx response never
+ * carries a matching `serverId` and falls through to `unpaired` below, same
+ * as any other unconfirmed answer — it never reaches the redirect target at
+ * all.
+ */
 export async function probeServer(
   endpoint: string,
   options: ProbeServerOptions = {},
 ): Promise<ServerProbeResult> {
+  const doFetch = options.fetch ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS);
   const startedAt = Date.now();
   try {
-    const response = await fetch(`${endpoint}/api/auth/server-info`, { signal: controller.signal });
+    let response: Response;
+    try {
+      response = await doFetch(`${endpoint}/api/auth/server-info`, {
+        signal: controller.signal,
+        redirect: 'manual',
+      });
+    } catch {
+      // No response at all — network error, or the timeout fired before a
+      // status line arrived. Treated the same as "no answer".
+      return { status: 'offline' };
+    }
     const latencyMs = Date.now() - startedAt;
     // Throttled or failing: something is there, but this probe could not
     // confirm what. Not `unpaired`, which would tell the user to pair again.
     if (response.status === 429 || response.status >= 500) return { status: 'error', latencyMs };
     if (!response.ok) return { status: 'unpaired', latencyMs };
-    const body = (await response.json().catch(() => null)) as
-      | { serverId?: unknown; serverName?: unknown }
-      | null;
+    let body: { serverId?: unknown; serverName?: unknown } | null;
+    try {
+      body = (await response.json()) as { serverId?: unknown; serverName?: unknown } | null;
+    } catch {
+      // Two different failures land here and must not be confused:
+      //  - The timeout/abort fired while the body was still streaming in.
+      //    The status line (and thus `response.status`/`.ok` above) DID
+      //    arrive, so the server is genuinely reachable — just unconfirmed.
+      //    That is `error`, not `offline` (no answer) or `unpaired` (a
+      //    confirmed non-matching answer).
+      //  - The body finished downloading but was not valid JSON. The server
+      //    fully answered with something that is not this API — a confirmed
+      //    non-match, i.e. `unpaired`, same as a body with no `serverId`.
+      // `controller.signal.aborted` distinguishes them: this function owns
+      // the controller and only ever aborts it via the timeout above.
+      if (controller.signal.aborted) return { status: 'error', latencyMs };
+      return { status: 'unpaired', latencyMs };
+    }
     if (!body || typeof body.serverId !== 'string' || !body.serverId) {
       return { status: 'unpaired', latencyMs };
     }
@@ -300,8 +362,6 @@ export async function probeServer(
       return { status: 'unpaired', latencyMs, ...serverName };
     }
     return { status: 'connected', latencyMs, ...serverName };
-  } catch {
-    return { status: 'offline' };
   } finally {
     clearTimeout(timer);
   }

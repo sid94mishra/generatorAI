@@ -181,6 +181,41 @@ describe('useChatPages', () => {
     expect(result.current.hasNextPage).toBe(false);
     expect(result.current.data?.total).toBe(4);
   });
+
+  it('P2-R34: an event during an in-flight fetchNextPage still leads to a full refetch after it', async () => {
+    const { platform, wrapper } = setup();
+    platform.listChats.mockResolvedValueOnce(page(['a', 'b'], 'cursor-1'));
+    const { result } = renderHook(() => useChatPages(), { wrapper });
+    await waitFor(() => expect(result.current.data?.items.map((c) => c.id)).toEqual(['a', 'b']));
+
+    // The next page is slow; while it is in flight a list event lands.
+    let resolveNext!: (p: ChatListPage) => void;
+    platform.listChats.mockImplementationOnce(() => new Promise<ChatListPage>((r) => (resolveNext = r)));
+    let nextPage!: Promise<unknown>;
+    act(() => {
+      nextPage = result.current.fetchNextPage();
+    });
+    await waitFor(() => expect(platform.listChats).toHaveBeenCalledTimes(2));
+    expect(platform.listChats).toHaveBeenLastCalledWith({ cursor: 'cursor-1' });
+
+    // The first page changed on the server (a new chat 'z').
+    platform.listChats.mockImplementation(async (q?: { cursor?: string }) =>
+      q?.cursor ? page(['c'], null) : page(['z', 'a'], 'cursor-2'),
+    );
+    act(() => subs[0]!.handlers.onMessage?.(frame('chat.created')));
+    // The coalescing window passes while fetchNextPage is still in flight:
+    // the invalidate only joins it, and nothing new is requested yet.
+    await new Promise((r) => setTimeout(r, 400));
+    expect(platform.listChats).toHaveBeenCalledTimes(2);
+
+    await act(async () => {
+      resolveNext(page(['c'], null));
+      await nextPage;
+    });
+    // After it settles, a real refetch reloads the list from its first page.
+    await waitFor(() => expect(result.current.data?.items.map((c) => c.id)).toEqual(['z', 'a', 'c']));
+    expect(platform.listChats.mock.calls.slice(2).map(([q]) => q)).toEqual([{}, { cursor: 'cursor-2' }]);
+  });
 });
 
 describe('bulk actions', () => {

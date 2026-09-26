@@ -30,7 +30,7 @@ import {
 } from './deep-link';
 import { initAutoUpdates, checkForUpdatesInteractive } from './updater';
 import { repointTarget } from './repoint';
-import { isQuitting, markQuitting, quitApp } from './quit-coordinator';
+import { isQuitting, quitApp } from './quit-coordinator';
 
 const DEV_SERVER_URL = process.env['DESKTOP_DEV_SERVER_URL'] || null;
 const mode: 'dev' | 'standalone' = DEV_SERVER_URL ? 'dev' : 'standalone';
@@ -292,7 +292,9 @@ async function promptVaultReset(sm: ReturnType<typeof getServerManager>): Promis
       'vault file is kept next to it in case the keystore entry can be restored.',
   });
   if (response !== 0) {
-    markQuitting(true);
+    // `before-quit` → `quitApp` sets the quitting flag once the quit is
+    // accepted; setting it here first leaked when the unsaved-work prompt was
+    // declined (P1-review P2-R38).
     app.quit();
     return false;
   }

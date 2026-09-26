@@ -68,11 +68,18 @@ describe('main-module guard (agent-tests/vrt/seed.ts pattern, P2-R11)', () => {
   });
 
   it('the old `file://${argv[1]}` template comparison is not a reliable "is main module" check', () => {
-    // Reproduced here via os.tmpdir()'s own symlink indirection (macOS
-    // rewrites /var -> /private/var); the same class of mismatch is what
-    // breaks it on Windows drive letters and on any percent-encoded path —
-    // the bug is "raw path compared to a URL", not one specific OS quirk.
-    const dir = tempDir('seed-guard-plain-');
+    // Built explicitly rather than relying on an OS-specific quirk (an
+    // earlier version of this test relied on os.tmpdir() resolving through
+    // a symlink, e.g. macOS's /var -> /private/var, which is not portable:
+    // it does not reproduce on Linux, so the assertion only held by
+    // accident on one platform). A directory name containing a space
+    // reproduces the same class of mismatch on every OS: `import.meta.url`
+    // is a real URL, so pathToFileURL percent-encodes the space (`%20`),
+    // while the old guard's raw template (`file://${argv[1]}`) never
+    // encodes anything — the two strings differ regardless of symlinks,
+    // drive letters, or platform. The bug is "raw path compared to a URL",
+    // not one specific OS quirk.
+    const dir = tempDir('seed guard old-guard mismatch ');
     const { oldGuard, newGuard } = runProbe(dir);
     expect(oldGuard).toBe(false);
     expect(newGuard).toBe(true);

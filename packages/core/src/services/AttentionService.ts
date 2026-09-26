@@ -415,6 +415,17 @@ export class AttentionService {
     };
   }
 
+  /**
+   * Re-reads every item shown under `projectId`. A deleted project unlinks its
+   * chats and workflow definitions without an event of their own, so their
+   * items would keep the project until something else touched them (P2-R33).
+   */
+  refreshProject(projectId: string): void {
+    for (const item of this.items.values()) {
+      if (item.project?.id === projectId) this.schedule({ entity: item.entity, id: item.entityId });
+    }
+  }
+
   /** Resolves once every scheduled re-read and every queued emit has settled. Tests and shutdown. */
   async settled(): Promise<void> {
     for (;;) {
@@ -513,8 +524,15 @@ export class AttentionService {
     // (P2-R19): it belongs to the chat that owns that workspace.
     if (kind === 'computer.consent_required' || kind === 'computer.consent_resolved') {
       const workspaceId = str(data['workspaceId']);
+      const requestId = str(data['requestId']);
+      // The answer carries no `chatId`, but the prompt may be listed on a
+      // worker chat that raised it (P2-R32): re-read whatever holds the ask.
+      if (kind === 'computer.consent_resolved' && requestId) {
+        clearTimeout(this.consentTimers.get(requestId));
+        this.consentTimers.delete(requestId);
+        this.scheduleAskHolders(requestId);
+      }
       if (!chatId && workspaceId) {
-        const requestId = str(data['requestId']);
         const expiresAt = typeof data['expiresAt'] === 'number' ? data['expiresAt'] : undefined;
         if (kind === 'computer.consent_required' && requestId && expiresAt !== undefined) {
           this.armConsentExpiry(requestId, undefined, workspaceId, expiresAt);
@@ -563,6 +581,7 @@ export class AttentionService {
     const delay = Math.max(0, expiresAt - this.now()) + 250;
     const timer = setTimeout(() => {
       this.consentTimers.delete(requestId);
+      this.scheduleAskHolders(requestId);
       if (chatId) this.schedule({ entity: 'chat', id: chatId });
       else if (workspaceId) this.scheduleWorkspaceChats(workspaceId);
     }, delay);
@@ -586,6 +605,13 @@ export class AttentionService {
         error: errorText(err),
       });
       return [];
+    }
+  }
+
+  /** Re-reads every entity whose listed ask is `askId`, whichever chat it is keyed on. */
+  private scheduleAskHolders(askId: string): void {
+    for (const item of this.items.values()) {
+      if (item.ask?.id === askId) this.schedule({ entity: item.entity, id: item.entityId });
     }
   }
 

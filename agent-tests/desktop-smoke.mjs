@@ -34,6 +34,10 @@ const app = await electron.launch({
   env: { ...process.env, GENERATORAI_DESKTOP_MODE: 'standalone' },
   timeout: 60000,
 });
+// P2-R44 — hand the launched app to the profile helper so a SIGINT/SIGTERM
+// that lands after this point can close Electron before removing the
+// directory it may still hold files in.
+profile.attach(app);
 app.process().stdout?.on('data', (d) => {
   const s = d.toString();
   if (s.includes('[ERROR]') || s.includes('ready') || s.includes('Loading app URL')) process.stdout.write('  [main] ' + s);
@@ -187,6 +191,9 @@ async function navigate(p, route) {
 
 async function finish() {
   await app.close().catch(() => {});
+  // P2-R44 — close before cleanup: the directory is only removed once
+  // Electron (and the embedded server it spawned) has released its files.
+  profile.cleanup();
   const passed = results.filter((r) => r.ok).length;
   console.log(`\n[smoke] ${passed}/${results.length} checks passed`);
   process.exit(passed === results.length ? 0 : 2);

@@ -80,8 +80,9 @@ function appendToRing(current, chunk) {
 
 function printResolvedCommands() {
   const pnpmBundle = pnpmCommand(['--filter', '@generatorai/server', 'bundle']);
+  const pnpmBundleArgs = pnpmBundle.args.length > 0 ? ` ${pnpmBundle.args.join(' ')}` : '';
   console.log('[sandbox] resolved commands (nothing started):');
-  console.log(`  pnpm (bundle fallback): ${pnpmBundle.command} ${pnpmBundle.args.join(' ')}${pnpmBundle.options.shell ? '  (shell: true)' : ''}`);
+  console.log(`  pnpm (bundle fallback): ${pnpmBundle.command}${pnpmBundleArgs}${pnpmBundle.options.shell ? '  (shell: true)' : ''}`);
   try {
     const tsx = nodeBinArgs(SERVER_DIR, 'tsx', 'tsx', [SEED_SCRIPT]);
     console.log(`  seed (tsx):             ${tsx.command} ${tsx.args.join(' ')}`);
@@ -103,15 +104,29 @@ if (process.argv.includes('--help') || process.argv.includes('--dry-run')) {
 
 // ── --clean ──────────────────────────────────────────────────────
 
+// P2-R44 — the Electron smokes' isolated profile directories
+// (agent-tests/helpers/desktop-profile.mjs's `isolatedProfile()`) leak on
+// Windows when a SIGINT/SIGTERM lands mid-run (no OS temp sweep there), and
+// `--clean` is the one cleanup command most people actually remember to run.
+// Sweep those alongside this script's own sandbox dirs. Matches the prefixes
+// isolatedProfile()'s call sites actually pass: `gai-desktop-smoke-`,
+// `gai-security-smoke-`, `gai-chrome-smoke-`, `gai-packaged-smoke-`,
+// `gai-pairing-diag-` (agent-tests/desktop-smoke.mjs,
+// desktop-security-smoke.mjs, desktop-chrome-smoke.mjs, packaged-app-smoke.mjs,
+// desktop-pairing-diagnostic.mjs). scripts/sweep-temp-workspaces.mjs already
+// sweeps every `gai-*`/`genai-*` prefix on a schedule/age basis; this is the
+// immediate, on-demand counterpart for someone who only knows `--clean`.
+const DESKTOP_PROFILE_PATTERN = /^gai-(desktop-smoke|security-smoke|chrome-smoke|packaged-smoke|pairing-diag)-/;
+
 function clean() {
   const tmp = os.tmpdir();
   let removed = 0;
   for (const name of fs.readdirSync(tmp)) {
-    if (!name.startsWith(PREFIX)) continue;
+    if (!name.startsWith(PREFIX) && !DESKTOP_PROFILE_PATTERN.test(name)) continue;
     fs.rmSync(path.join(tmp, name), { recursive: true, force: true });
     removed += 1;
   }
-  log(`removed ${removed} sandbox temp dir(s) from ${tmp}`);
+  log(`removed ${removed} sandbox/desktop-smoke temp dir(s) from ${tmp}`);
 }
 
 if (process.argv.includes('--clean')) {

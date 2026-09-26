@@ -40,6 +40,7 @@ export function createProjectRoutes(container: Container): Router {
     sourceControlRegistry,
     repoReadinessService,
     chatManagementService,
+    chatListInvalidator,
     gitManager,
     logger,
   } = container;
@@ -107,7 +108,9 @@ export function createProjectRoutes(container: Container): Router {
       const projectId = String(req.params['id']);
       const force = req.query['force'] === 'true';
       if (force) {
-        await projectService.deleteProject(projectId);
+        // Its chats lose the project with no write of their own: live lists
+        // and the attention feed hear it per chat (P2-R33).
+        await chatListInvalidator.deleteProject(projectId, () => projectService.deleteProject(projectId));
       } else {
         await projectService.archiveProject(projectId);
       }

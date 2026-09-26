@@ -1,9 +1,11 @@
 // G-01 — the attention read model: seq rules, buffering, gap → refetch,
 // project filtering, selectors, and the store's fetch/stream wiring.
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { emptyAttentionCounts, type AttentionItem, type AttentionSnapshot } from '@generatorai/shared';
 import {
   applyAttentionEvent,
+  ATTENTION_RETRY_BASE_MS,
+  ATTENTION_RETRY_MAX_MS,
   attentionReducer,
   createAttentionStore,
   initialAttentionState,
@@ -258,6 +260,145 @@ describe('createAttentionStore', () => {
     expect(store.getState().needsResync).toBe(false);
     expect(api.getAttention).toHaveBeenCalledTimes(3);
     store.stop();
+  });
+});
+
+describe('createAttentionStore — retry with backoff (P2-R31)', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  function fakeMux() {
+    let handler: ((e: AttentionStreamEvent) => void) | null = null;
+    const port: AttentionStreamPort = {
+      subscribe: vi.fn((_scope, _id, h) => {
+        handler = h;
+        return () => {
+          handler = null;
+        };
+      }),
+    };
+    return { port, push: (e: AttentionStreamEvent) => handler?.(e) };
+  }
+
+  /** A server whose answers the test scripts: `fail` rejects, otherwise the given snapshot. */
+  function scriptedApi(answers: Array<AttentionSnapshot | 'fail'>) {
+    return {
+      getAttention: vi.fn(async () => {
+        const next = answers.shift() ?? 'fail';
+        if (next === 'fail') throw new Error('503 Service Unavailable');
+        return next;
+      }),
+    };
+  }
+
+  it('retries a failed first fetch on its own; deltas meanwhile wait for the retry and are replayed on it', async () => {
+    vi.useFakeTimers();
+    const mux = fakeMux();
+    const api = scriptedApi(['fail', snapshot(5, [], [item('chat:a')])]);
+    const store = createAttentionStore(api, mux.port);
+    store.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState()).toMatchObject({ snapshot: null, error: '503 Service Unavailable' });
+
+    // The probe: 20 deltas after the failure. None of them fires a request …
+    for (let seq = 6; seq <= 25; seq++) mux.push(upsert(seq, item(`chat:n${seq}`)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.getAttention).toHaveBeenCalledTimes(1);
+
+    // … the store retries after the first backoff step and replays them.
+    await vi.advanceTimersByTimeAsync(ATTENTION_RETRY_BASE_MS);
+    expect(api.getAttention).toHaveBeenCalledTimes(2);
+    expect(store.getState().snapshot?.seq).toBe(25);
+    expect(selectRunning(store.getState())).toHaveLength(21);
+    expect(store.getState()).toMatchObject({ error: null, needsResync: false, buffered: [] });
+
+    // Settled: no further requests on their own.
+    await vi.advanceTimersByTimeAsync(10 * ATTENTION_RETRY_MAX_MS);
+    expect(api.getAttention).toHaveBeenCalledTimes(2);
+    store.stop();
+  });
+
+  it('deltas while the server keeps failing do not each fire a request: requests follow the backoff', async () => {
+    vi.useFakeTimers();
+    const mux = fakeMux();
+    const api = scriptedApi([snapshot(1)]); // then every request fails
+    const store = createAttentionStore(api, mux.port);
+    store.start();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(store.getState().snapshot?.seq).toBe(1);
+
+    // A gap marks the snapshot stale; the resync request fails.
+    mux.push(upsert(3, item('chat:gap')));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.getAttention).toHaveBeenCalledTimes(2);
+    expect(store.getState().needsResync).toBe(true);
+
+    // The probe: 11 more deltas. Before the fix this was 11 more requests.
+    for (let seq = 4; seq <= 14; seq++) mux.push(upsert(seq, item(`chat:n${seq}`)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(api.getAttention).toHaveBeenCalledTimes(2);
+
+    // One request per backoff step: 1 s, 2 s, 4 s …
+    await vi.advanceTimersByTimeAsync(999);
+    expect(api.getAttention).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.getAttention).toHaveBeenCalledTimes(3);
+    mux.push(upsert(15, item('chat:n15')));
+    await vi.advanceTimersByTimeAsync(1_999);
+    expect(api.getAttention).toHaveBeenCalledTimes(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(api.getAttention).toHaveBeenCalledTimes(4);
+    await vi.advanceTimersByTimeAsync(4_000);
+    expect(api.getAttention).toHaveBeenCalledTimes(5);
+
+    // stop() cancels the pending retry.
+    store.stop();
+    await vi.advanceTimersByTimeAsync(10 * ATTENTION_RETRY_MAX_MS);
+    expect(api.getAttention).toHaveBeenCalledTimes(5);
+  });
+
+  it('doubles the delay up to the cap, resets it on success, and refresh() fetches now', async () => {
+    const delays: number[] = [];
+    const pending: Array<() => void> = [];
+    const timers = {
+      setTimeout: (callback: () => void, ms: number) => {
+        delays.push(ms);
+        pending.push(callback);
+        return pending.length;
+      },
+      clearTimeout: vi.fn(),
+    };
+    const answers: Array<AttentionSnapshot | 'fail'> = Array.from({ length: 7 }, () => 'fail' as const);
+    answers.push(snapshot(1), 'fail');
+    const api = scriptedApi(answers);
+    const store = createAttentionStore(api, fakeMux().port, { timers });
+    store.start();
+    for (let i = 0; i < 7; i++) {
+      await vi.waitFor(() => expect(delays).toHaveLength(i + 1));
+      pending.shift()!();
+    }
+    await vi.waitFor(() => expect(store.getState().snapshot?.seq).toBe(1));
+    expect(delays).toEqual([1_000, 2_000, 4_000, 8_000, 16_000, 30_000, 30_000]);
+    expect(api.getAttention).toHaveBeenCalledTimes(8);
+
+    // A live, current view whose refresh fails needs no retry.
+    await store.refresh();
+    expect(store.getState().error).toBe('503 Service Unavailable');
+    expect(delays).toHaveLength(7);
+
+    // Stale again: the backoff starts over from the base, and an explicit
+    // refresh during it cancels the timer and fetches immediately.
+    const mux = fakeMux();
+    const second = createAttentionStore(scriptedApi(['fail', snapshot(9)]), mux.port, { timers, retry: { baseMs: 50, maxMs: 200 } });
+    second.start();
+    await vi.waitFor(() => expect(delays).toHaveLength(8));
+    expect(delays[7]).toBe(50);
+    await second.refresh();
+    expect(timers.clearTimeout).toHaveBeenCalledTimes(1);
+    expect(second.getState().snapshot?.seq).toBe(9);
+    store.stop();
+    second.stop();
   });
 });
 

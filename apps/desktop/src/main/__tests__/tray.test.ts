@@ -5,7 +5,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AttentionCounts } from '@generatorai/shared';
 
-type Item = { label?: string; enabled?: boolean; type?: string };
+type Item = { label?: string; enabled?: boolean; type?: string; click?: () => void };
 
 const state = vi.hoisted(() => ({
   template: [] as Item[],
@@ -40,8 +40,9 @@ vi.mock('electron', () => {
     nativeImage: { createFromPath: () => ({ isEmpty: () => false, resize: () => ({ setTemplateImage() {} }) }) },
   };
 });
+const wmSetQuitting = vi.hoisted(() => vi.fn());
 vi.mock('../window-manager', () => ({
-  getWindowManager: () => ({ restoreFromTray: vi.fn(), sendCommand: vi.fn(), navigateTo: vi.fn(), setQuitting: vi.fn() }),
+  getWindowManager: () => ({ restoreFromTray: vi.fn(), sendCommand: vi.fn(), navigateTo: vi.fn(), setQuitting: wmSetQuitting }),
 }));
 vi.mock('../server-manager', () => ({
   getServerManager: () => ({ getStatus: () => state.status, on: vi.fn(), restart: vi.fn(async () => undefined) }),
@@ -51,6 +52,7 @@ vi.mock('../menu', () => ({ accel: () => undefined }));
 vi.mock('../attention-state', () => ({ getAttention: () => state.attention }));
 vi.mock('../backend-switcher', () => ({ connectionState: () => state.servers }));
 
+import { app } from 'electron';
 import { createTray, destroyTray, refreshTrayMenu, trayStatusLines } from '../tray';
 
 function counts(needsYou: number, runningChats: number): AttentionCounts {
@@ -149,5 +151,15 @@ describe('refreshTrayMenu', () => {
     expect(labels()[0]).toBe('Server: ready (:3100)');
     expect(labels()).not.toContain('Home (2)');
     expect(state.tooltip).toBe('GeneratorAI');
+  });
+});
+
+describe('Quit (P2-R38)', () => {
+  it('only asks the app to quit; the quitting flag is left to quitApp', () => {
+    createTray();
+    const quit = state.template.find((i) => i.label === 'Quit');
+    quit?.click?.();
+    expect(app.quit).toHaveBeenCalled();
+    expect(wmSetQuitting).not.toHaveBeenCalled();
   });
 });

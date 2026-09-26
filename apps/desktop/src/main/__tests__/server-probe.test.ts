@@ -1,8 +1,17 @@
-// probeKnownServers (G-03, P1-review P2-R6): main probes every known server
-// with Node `fetch`, because the renderer's CSP only allows its own origin.
+// probeKnownServers (G-03, P1-review P2-R6): main probes every known server,
+// because the renderer's CSP only allows its own origin. P2-R40 — it probes
+// with Electron's `net.fetch`, not Node's global `fetch`: `net.fetch` shares
+// Chrome's network stack (proxy/cert policy), so its verdict matches what the
+// renderer's window would actually be able to load.
 
 import { describe, expect, it, vi } from 'vitest';
+
+const netFetchMock = vi.hoisted(() => vi.fn());
+
+vi.mock('electron', () => ({ net: { fetch: netFetchMock } }));
+
 import { probeKnownServers, SERVER_PROBE_TIMEOUT_MS, type KnownServer } from '../server-probe';
+import type { ProbeServerOptions } from '@generatorai/client-runtime/connections';
 
 const embedded: KnownServer = {
   id: 'embedded',
@@ -32,9 +41,27 @@ describe('probeKnownServers', () => {
       { id: 'embedded', label: 'This computer', url: embedded.url, kind: 'embedded', active: true, status: 'connected', serverName: 'Mine', latencyMs: 3 },
       { id: 'srv-1', label: 'Studio', url: remote.url, kind: 'remote', active: false, status: 'offline' },
     ]);
-    expect(probe).toHaveBeenCalledWith(embedded.url, { timeoutMs: SERVER_PROBE_TIMEOUT_MS });
+    expect(probe).toHaveBeenCalledWith(embedded.url, {
+      timeoutMs: SERVER_PROBE_TIMEOUT_MS,
+      fetch: expect.any(Function),
+    });
     // The expected identity is passed to the probe, never leaked into the IPC payload.
-    expect(probe).toHaveBeenCalledWith(remote.url, { timeoutMs: SERVER_PROBE_TIMEOUT_MS, expectedServerId: 'host-fp-1' });
+    expect(probe).toHaveBeenCalledWith(remote.url, {
+      timeoutMs: SERVER_PROBE_TIMEOUT_MS,
+      fetch: expect.any(Function),
+      expectedServerId: 'host-fp-1',
+    });
+  });
+
+  it('passes Electron\'s net.fetch (proxy/cert-consistent with the window), not Node\'s global fetch', async () => {
+    const probe = vi.fn(async (_url: string, options?: ProbeServerOptions) => {
+      // Prove it is really wired to `net.fetch`: call it and check the mock saw it.
+      await options?.fetch?.('http://example.invalid/api/auth/server-info');
+      return { status: 'offline' as const };
+    });
+    netFetchMock.mockResolvedValue(new Response(null, { status: 204 }));
+    await probeKnownServers([embedded], probe);
+    expect(netFetchMock).toHaveBeenCalledWith('http://example.invalid/api/auth/server-info', undefined);
   });
 
   it('runs the probes in parallel', async () => {

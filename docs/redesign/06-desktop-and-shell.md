@@ -819,7 +819,7 @@ Quit GeneratorAI             ⌘Q
   - Linux native: `sidebar-nav-row`
   - web: never
 - `checkForUpdatesInteractive` keeps its "up to date" and error dialogs. Those are explicit user requests.
-- Verify with `pnpm --filter @generatorai/desktop mock-update-server` on all three OSes that both `installUpdate` and an ordinary quit with a downloaded update actually install (§11 risk R5). Still owed.
+- Verify with `pnpm --filter @generatorai/desktop mock-update-server` on all three OSes that both `installUpdate` and an ordinary quit with a downloaded update actually install (§11 risk R5), that the embedded server stopped gracefully before the installer ran (its shutdown lines in the log precede the installer), and that the app came back after the install (P1-review P2-R28). Still owed.
 
 **Servers popover (sidebar switcher / strip chip).**
 - On desktop the backend switch must happen in main (a new origin). Add guarded IPC:
@@ -1008,8 +1008,8 @@ Each PR leaves the app working, updates the smokes it breaks, and is verified by
 - **R4. Single-key web bindings.** They must never fire in editable targets or comboboxes. This is tested.
 - **R5. Updater install path.**
   - The worry: `before-quit` ends in `app.exit(0)`, so `quitAndInstall` and `autoInstallOnAppQuit` might not install.
-  - Source reading (P1-review P2-R5): `app.exit` skips only `before-quit` and `will-quit`. Electron's `Browser::ExitWithCode` → `Shutdown()` notifies `OnQuit`, and `App::OnQuit` emits `quit` with the exit code (0), which is the event electron-updater's `autoInstallOnAppQuit` hook (`app.once('quit')`) needs. `quitAndInstall()` on Windows/Linux runs the installer synchronously before its `app.quit()`. On macOS, Squirrel.Mac's ShipIt installs after the process exits. So neither path should be broken by `app.exit(0)`, and the P2-03 claim that it was ("fixed") was wrong.
-  - As built: every quit, an update install included, goes through `before-quit` → `quitApp` (`quit-coordinator.ts`). `installUpdate` does not shut anything down itself; it confirms unsaved work, calls `quitAndInstall()` and treats an electron-updater error or 60 s without a quit as a failure that leaves the app running (05 §G-04).
+  - Source reading (P1-review P2-R5): `app.exit` skips only `before-quit` and `will-quit`. `app.exit` binds to Electron's `Browser::Exit` → `DestroyAllWindows` → `Shutdown()`, which notifies `OnQuit`, and `App::OnQuit` emits `quit` with the exit code (0), which is the event electron-updater's `autoInstallOnAppQuit` hook (`app.once('quit')`) needs. `BaseUpdater.install()` on Windows/Linux starts the installer synchronously (NSIS reports a spawn failure asynchronously). On macOS, Squirrel.Mac's ShipIt installs after the process exits. So neither path should be broken by `app.exit(0)`, and the P2-03 claim that it was ("fixed") was wrong.
+  - As built: every quit, an update install included, goes through `before-quit` → `quitApp` (`quit-coordinator.ts`). On Windows/Linux the install is an exit hand-off that runs after the shutdown and right before `app.exit(0)`, relaunching the current version if the installer does not start; on macOS `quitAndInstall()` runs first and ShipIt installs after exit (D-54, 05 §G-04; P1-review P2-R28).
   - **Still unverified on real installers.** Run `mock-update-server` on each OS (§8); 07 R-10 stays open until then.
 - **R6. Dropped storage keys.** Theme, sidebar and dock preferences reset once. This is accepted.
 - **R7. Hotspots.** `globals.css` chrome block, `app/routes/index.ts` and `COMMANDS` are append-only. P3-S1 and P3-S2 merge together.

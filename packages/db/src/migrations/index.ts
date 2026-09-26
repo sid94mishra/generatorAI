@@ -2553,6 +2553,45 @@ export const MIGRATIONS: readonly Migration[] = [
         `CREATE INDEX IF NOT EXISTS idx_chats_workspace_id ON chats(workspace_id);`,
       ],
     },
+    // v56 — index-served chat list order (P1-review P2-R30).
+    //
+    // The list query always filters `parent_chat_id IS NULL` (workers hidden)
+    // and usually `status = ?`, then orders by `last_activity_at DESC, id
+    // DESC`. v55's single-column index could not serve that: without ANALYZE
+    // (nothing runs it) SQLite searched `idx_chats_parent_chat_id` or
+    // `idx_chats_status` and sorted every match in a temp B-tree. Composite
+    // indexes whose equality prefix matches each filter shape and whose tail is
+    // the full sort key (tie-break included) serve the first page and every
+    // cursor page straight off the index:
+    //   idx_chats_list_activity         (parent_chat_id, last_activity_at, id)
+    //   idx_chats_list_status_activity  (status, parent_chat_id, last_activity_at, id)
+    //   idx_chats_last_activity         (last_activity_at, id) — the "workers
+    //                                   too" list; replaces v55's (last_activity_at)
+    // A new version rather than another in-place edit of v55, so databases that
+    // already ran v55 get the indexes too.
+    //
+    // `last_activity_at` is also made effectively NOT NULL (SQLite cannot add
+    // the constraint without rebuilding `chats`): any row still NULL takes its
+    // creation time, and the triggers reject a NULL write, so a list cursor can
+    // never carry a NULL sort value (a NULL row would sort last and drop out of
+    // `<` keyset pages).
+    {
+      version: 56,
+      name: 'chat_list_activity_indexes',
+      sql: [
+        `UPDATE chats SET last_activity_at = created_at * 1000 WHERE last_activity_at IS NULL;`,
+        `DROP INDEX IF EXISTS idx_chats_last_activity;`,
+        `CREATE INDEX IF NOT EXISTS idx_chats_last_activity ON chats(last_activity_at, id);`,
+        `CREATE INDEX IF NOT EXISTS idx_chats_list_activity ON chats(parent_chat_id, last_activity_at, id);`,
+        `CREATE INDEX IF NOT EXISTS idx_chats_list_status_activity ON chats(status, parent_chat_id, last_activity_at, id);`,
+        `CREATE TRIGGER IF NOT EXISTS chats_last_activity_insert_not_null
+           BEFORE INSERT ON chats WHEN NEW.last_activity_at IS NULL
+           BEGIN SELECT RAISE(ABORT, 'NOT NULL constraint failed: chats.last_activity_at'); END;`,
+        `CREATE TRIGGER IF NOT EXISTS chats_last_activity_update_not_null
+           BEFORE UPDATE OF last_activity_at ON chats WHEN NEW.last_activity_at IS NULL
+           BEGIN SELECT RAISE(ABORT, 'NOT NULL constraint failed: chats.last_activity_at'); END;`,
+      ],
+    },
   ];
 
 

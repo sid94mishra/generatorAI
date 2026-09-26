@@ -1,13 +1,14 @@
 // ────────────────────────────────────────────────────────────────
-// Chat list v2 (G-02) — migration v55 and the repository's list page.
+// Chat list v2 (G-02) — migrations v55/v56 and the repository's list page.
 //
 // Real temp SQLite file, real migrations. Pinned here:
 //   - v55 backfills existing chats: last activity = newest message (else
 //     creation), last turn = the newest assistant reply (partial → cancelled,
 //     an `Error:` system line → failed, anything else → succeeded), and a
 //     malformed metadata row does not abort the migration;
+//   - v56 backfills a NULL activity and rejects NULL writes;
 //   - keyset paging walks every row exactly once under each sort, ties
-//     included;
+//     included, and the activity order is index-served (no temp B-tree);
 //   - every filter, the total and the All / Active / Archived counts;
 //   - the summary columns: activity never moves backwards, turn outcomes,
 //     change stats report whether they moved.
@@ -87,6 +88,33 @@ describe('migration v55 — chat list summary columns', () => {
   });
 });
 
+describe('migration v56 — index-served activity order, non-NULL activity', () => {
+  it('backfills a NULL activity, widens the activity index and rejects NULL writes', () => {
+    migrateDB(db, { targetVersion: 55 });
+    const sqlite = raw(db);
+    sqlite.prepare(`INSERT INTO sessions (id, name, status, created_at, updated_at) VALUES ('s-n', 'n', 'active', 1000, 1000)`).run();
+    sqlite
+      .prepare(`INSERT INTO chats (id, name, session_id, tags, status, created_at, updated_at) VALUES ('n', 'n', 's-n', '[]', 'active', 1234, 1234)`)
+      .run();
+
+    migrateDB(db);
+
+    expect(sqlite.prepare(`SELECT last_activity_at AS a FROM chats WHERE id = 'n'`).get()).toEqual({ a: 1_234_000 });
+    const columns = (index: string) =>
+      (sqlite.prepare(`PRAGMA index_info(${index})`).all() as Array<{ name: string }>).map((c) => c.name);
+    expect(columns('idx_chats_last_activity')).toEqual(['last_activity_at', 'id']);
+    expect(columns('idx_chats_list_activity')).toEqual(['parent_chat_id', 'last_activity_at', 'id']);
+    expect(columns('idx_chats_list_status_activity')).toEqual(['status', 'parent_chat_id', 'last_activity_at', 'id']);
+
+    expect(() =>
+      sqlite
+        .prepare(`INSERT INTO chats (id, name, session_id, tags, status, created_at, updated_at) VALUES ('m', 'm', 's-n', '[]', 'active', 1, 1)`)
+        .run(),
+    ).toThrow(/last_activity_at/);
+    expect(() => sqlite.prepare(`UPDATE chats SET last_activity_at = NULL WHERE id = 'n'`).run()).toThrow(/last_activity_at/);
+  });
+});
+
 describe('DrizzleChatRepository — list page', () => {
   let repo: DrizzleChatRepository;
   const T0 = new Date('2026-09-26T09:00:00.000Z');
@@ -154,6 +182,66 @@ describe('DrizzleChatRepository — list page', () => {
     for (const limit of [1, 2, 3, 50]) {
       expect(await walk('activity', limit), `limit ${limit}`).toEqual(all);
     }
+  });
+
+  // P2-R30: the default list (workers hidden, with or without a status, first
+  // page and cursor page) is read in order straight off an index — no temp
+  // B-tree sort — on a fresh database, i.e. without ANALYZE statistics.
+  it('serves the activity order from an index, with no temp B-tree, first page and cursor page', async () => {
+    const sqlite = raw(db);
+    const insertSession = sqlite.prepare(
+      `INSERT INTO sessions (id, name, status, created_at, updated_at) VALUES (?, ?, 'active', 1000, 1000)`,
+    );
+    const insertChat = sqlite.prepare(
+      `INSERT INTO chats (id, name, session_id, tags, status, parent_chat_id, created_at, updated_at, last_activity_at)
+       VALUES (?, ?, ?, '[]', ?, ?, 1000, 1000, ?)`,
+    );
+    sqlite.transaction(() => {
+      for (let i = 0; i < 300; i += 1) {
+        insertSession.run(`s-bulk-${i}`, `bulk ${i}`);
+        insertChat.run(`bulk-${i}`, `bulk ${i}`, `s-bulk-${i}`, i % 5 === 0 ? 'archived' : 'active', i % 7 === 0 ? 'alpha' : null, 1_000_000 + (i % 40) * 1000);
+      }
+    })();
+
+    const statements: Array<{ sql: string; params: unknown[] }> = [];
+    const prepare = sqlite.prepare.bind(sqlite);
+    const planOf = async (q: ChatListPageQuery) => {
+      statements.length = 0;
+      sqlite.prepare = ((text: string) => {
+        const stmt = prepare(text);
+        const all = stmt.all.bind(stmt);
+        stmt.all = ((...params: unknown[]) => {
+          statements.push({ sql: text, params });
+          return all(...params);
+        }) as typeof stmt.all;
+        return stmt;
+      }) as typeof sqlite.prepare;
+      let page;
+      try {
+        page = await repo.listPage(q);
+      } finally {
+        sqlite.prepare = prepare;
+      }
+      const listed = statements[0]!;
+      const plan = (prepare(`EXPLAIN QUERY PLAN ${listed.sql}`).all(...listed.params) as Array<{ detail: string }>)
+        .map((r) => r.detail)
+        .join(' | ');
+      return { page, plan };
+    };
+
+    for (const filter of [{}, { status: 'active' as const }, { status: 'archived' as const }]) {
+      const first = await planOf(query(filter, { limit: 10 }));
+      expect(first.plan, JSON.stringify(filter)).toMatch(/USING INDEX idx_chats_list_/);
+      expect(first.plan, JSON.stringify(filter)).not.toMatch(/TEMP B-TREE/);
+      expect(first.page.next).not.toBeNull();
+      const next = await planOf(query(filter, { limit: 10, after: first.page.next! }));
+      expect(next.plan, JSON.stringify(filter)).toMatch(/\(last_activity_at,id\)<\(\?,\?\)/);
+      expect(next.plan, JSON.stringify(filter)).not.toMatch(/TEMP B-TREE/);
+    }
+    // Workers included: the plain (last_activity_at, id) index.
+    const workers = await planOf(query({ includeWorkers: true }, { limit: 10 }));
+    expect(workers.plan).toMatch(/USING INDEX idx_chats_last_activity/);
+    expect(workers.plan).not.toMatch(/TEMP B-TREE/);
   });
 
   it('pages by name (case-insensitive, A→Z) and by creation time', async () => {

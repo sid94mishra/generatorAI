@@ -114,6 +114,7 @@ vi.mock('electron', () => ({
   screen: { getAllDisplays: () => [] },
   app: { getPath: () => 'C:/tmp' },
   ipcMain: { handle: vi.fn() },
+  dialog: { showMessageBox: (...a: unknown[]) => showMessageBox(...a) },
 }));
 vi.mock('../config', () => ({
   loadSettings: () => settings,
@@ -131,7 +132,10 @@ vi.mock('../platform', () => ({
   useCustomTitleBar: () => false,
 }));
 
+const showMessageBox = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => ({ response: 1 })));
+
 import { WindowManager, shouldHideOnClose } from '../window-manager';
+import { setUnsavedWork } from '../unsaved-work';
 import { IPC_EVENT } from '../../shared/ipc';
 
 const APP = 'http://127.0.0.1:3100';
@@ -407,13 +411,15 @@ describe('onRendererReset (P1-review P2-R8)', () => {
     expect(reset).toHaveBeenCalledTimes(1);
   });
 
-  it('fires on a new top-level document, not on SPA route changes or subframes', () => {
+  it('fires once a new top-level document commits, not on SPA route changes or navigations that never commit (P2-R39)', () => {
     const { wm, win } = makeWindow();
     const reset = watch(wm);
-    win.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: true });
-    win.webContents.emit('did-start-navigation', { isMainFrame: false, isSameDocument: false });
-    expect(reset).not.toHaveBeenCalled();
+    // A blocked external link, a download or a 204 starts a navigation that
+    // never commits; the page and its pushed state live on.
     win.webContents.emit('did-start-navigation', { isMainFrame: true, isSameDocument: false });
+    win.webContents.emit('did-navigate-in-page', {}, 'http://127.0.0.1:4100/chats', true);
+    expect(reset).not.toHaveBeenCalled();
+    win.webContents.emit('did-navigate', {}, 'http://127.0.0.1:4100/');
     expect(reset).toHaveBeenCalledTimes(1);
   });
 
@@ -433,5 +439,40 @@ describe('onRendererReset (P1-review P2-R8)', () => {
     win.destroyed = true;
     win.emit('closed');
     expect(wm.sendAppearanceRequest('dark')).toBe(false);
+  });
+});
+
+describe('confirmDiscard (P2-R37)', () => {
+  beforeEach(() => {
+    showMessageBox.mockReset().mockResolvedValue({ response: 1 });
+    setUnsavedWork(false);
+  });
+
+  it('is answered once per quit, even when there was nothing to lose the first time', async () => {
+    const { wm } = makeWindow();
+    expect(await wm.confirmDiscard()).toBe(true);
+    // Work opened between the updater's question and before-quit's: not asked again.
+    setUnsavedWork(true);
+    expect(await wm.confirmDiscard()).toBe(true);
+    expect(showMessageBox).not.toHaveBeenCalled();
+  });
+
+  it('an abandoned quit forgets the answer', async () => {
+    const { wm } = makeWindow();
+    expect(await wm.confirmDiscard()).toBe(true);
+    wm.setQuitting(false);
+    setUnsavedWork(true);
+    expect(await wm.confirmDiscard()).toBe(false);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
+  });
+
+  it('a window closed without quitting forgets it too', async () => {
+    const { wm, win } = makeWindow();
+    expect(await wm.confirmDiscard()).toBe(true);
+    win.destroyed = true;
+    win.emit('closed');
+    setUnsavedWork(true);
+    expect(await wm.confirmDiscard()).toBe(false);
+    expect(showMessageBox).toHaveBeenCalledTimes(1);
   });
 });

@@ -79,6 +79,8 @@ export interface IChatRepository {
   /** `COUNT(*)` of chats in `status` — for health/dashboard tiles that only need the number. */
   countByStatus(status: ChatStatus): Promise<number>;
   getByProjectId(projectId: string): Promise<Chat[]>;
+  /** Every chat bound to the agent `ref` (`scope:slug`) — its list row shows that agent. */
+  getByAgentRef(ref: string): Promise<Chat[]>;
   /** Every chat whose workspace is `workspaceId` (an orchestrator's workers share it). */
   getByWorkspaceId(workspaceId: string): Promise<Chat[]>;
   update(id: string, updates: Partial<Chat>): Promise<Chat>;

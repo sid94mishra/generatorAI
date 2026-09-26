@@ -325,7 +325,7 @@ export function parseChatListQuery(query: Record<string, unknown>): Parsed<ChatL
  * change to any of them emits `chat.updated` (archive has its own
  * `chat.archived`).
  */
-const LIST_VISIBLE_CHAT_FIELDS = ['name', 'description', 'tags', 'status', 'projectId', 'agentRef'] as const;
+const LIST_VISIBLE_CHAT_FIELDS = ['name', 'description', 'tags', 'status', 'projectId', 'agentRef', 'model'] as const;
 
 /** Body of `POST /chats/archive` and `POST /chats/delete`. */
 const ChatBulkSchema = z.object({

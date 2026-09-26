@@ -361,8 +361,12 @@ export const chats = sqliteTable(
     /** Frozen, redacted projection captured at session creation. */
     agentSnapshot: text('agent_snapshot', { mode: 'json' }).$type<ResolvedAgentProjection>(),
     // ── Chat list v2 (v55, G-02) — the list row's summary columns ──
-    /** Newest turn start or end (creation time before the first turn). Epoch ms. */
-    lastActivityAt: integer('last_activity_at', { mode: 'timestamp_ms' }),
+    /**
+     * Newest turn start or end (creation time before the first turn). Epoch ms.
+     * Never NULL: v56 backfilled it and its triggers reject a NULL write
+     * (SQLite cannot add the constraint to an existing column).
+     */
+    lastActivityAt: integer('last_activity_at', { mode: 'timestamp_ms' }).notNull(),
     /** How the most recent turn ended; NULL until the first one does. */
     lastTurnStatus: text('last_turn_status', { enum: ['succeeded', 'failed', 'cancelled'] }),
     lastTurnEndedAt: integer('last_turn_ended_at', { mode: 'timestamp_ms' }),
@@ -381,7 +385,16 @@ export const chats = sqliteTable(
     createdAtIdx: index('idx_chats_created_at').on(table.createdAt),
     parentChatIdx: index('idx_chats_parent_chat_id').on(table.parentChatId),
     agentRefIdx: index('idx_chats_agent_ref').on(table.agentRef),
-    lastActivityIdx: index('idx_chats_last_activity').on(table.lastActivityAt),
+    // v56: each list filter shape (workers hidden, ± status) has an index whose
+    // tail is the whole sort key, so the activity order needs no temp B-tree.
+    lastActivityIdx: index('idx_chats_last_activity').on(table.lastActivityAt, table.id),
+    listActivityIdx: index('idx_chats_list_activity').on(table.parentChatId, table.lastActivityAt, table.id),
+    listStatusActivityIdx: index('idx_chats_list_status_activity').on(
+      table.status,
+      table.parentChatId,
+      table.lastActivityAt,
+      table.id,
+    ),
     workspaceIdx: index('idx_chats_workspace_id').on(table.workspaceId),
   }),
 );

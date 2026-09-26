@@ -57,7 +57,12 @@ async function main() {
     },
     timeout: 120_000,
   });
+  // P2-R44 — hand the launched app to the profile helper so a SIGINT/SIGTERM
+  // that lands after this point can close Electron before removing the
+  // directory it may still hold files in.
+  profile.attach(app);
 
+  try {
   // The splash window appears first; wait for the one that actually hosts
   // the SPA rather than whichever window happens to be created first.
   let win = null;
@@ -77,7 +82,6 @@ async function main() {
 
   check('main window loaded the SPA', Boolean(win), win ? '' : 'no http window appeared');
   if (!win) {
-    await app.close();
     return;
   }
 
@@ -371,8 +375,12 @@ async function main() {
 
   await win.screenshot({ path: path.join(SHOTS, 'desktop-chrome.png') });
   console.log(`\n  screenshot → ${path.join(SHOTS, 'desktop-chrome.png')}`);
-
-  await app.close();
+  } finally {
+    // P2-R44 — close before cleanup: the directory is only removed once
+    // Electron (and the embedded server it spawned) has released its files.
+    await app.close().catch(() => {});
+    profile.cleanup();
+  }
 }
 
 main()

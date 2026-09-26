@@ -59,20 +59,25 @@ describe('nodeBinArgs', () => {
 
 describe('pnpmCommand', () => {
   const ORIGINAL = process.env['npm_execpath'];
-  let fakeExecPath;
+  const scratchDirs = [];
 
   afterEach(() => {
     if (ORIGINAL === undefined) delete process.env['npm_execpath'];
     else process.env['npm_execpath'] = ORIGINAL;
-    if (fakeExecPath) {
-      fs.rmSync(fakeExecPath, { force: true });
-      fakeExecPath = undefined;
-    }
+    for (const dir of scratchDirs.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
   });
 
-  it('runs pnpm\'s own JS entry with process.execPath when npm_execpath is a real .js file', () => {
-    fakeExecPath = path.join(os.tmpdir(), `fake-pnpm-${process.pid}.cjs`);
-    fs.writeFileSync(fakeExecPath, '// fake pnpm entry\n');
+  function fakeFile(...segments) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-node-bin-pnpm-test-'));
+    scratchDirs.push(dir);
+    const full = path.join(dir, ...segments);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, '// fake entry\n');
+    return full;
+  }
+
+  it('runs pnpm\'s own JS entry with process.execPath when npm_execpath is a real pnpm.cjs', () => {
+    const fakeExecPath = fakeFile('pnpm', 'bin', 'pnpm.cjs');
     process.env['npm_execpath'] = fakeExecPath;
 
     const { command, args, options } = pnpmCommand(['--filter', 'x', 'bundle']);
@@ -81,25 +86,78 @@ describe('pnpmCommand', () => {
     expect(options.shell).toBeFalsy();
   });
 
-  it('falls back to a bare "pnpm" with shell:true when npm_execpath is unset', () => {
+  it('accepts a corepack-style pnpm shim under a "pnpm" path segment even without a pnpm.* basename', () => {
+    const fakeExecPath = fakeFile('corepack', 'v1', 'pnpm', '9.0.0', 'pnpm.cjs');
+    process.env['npm_execpath'] = fakeExecPath;
+
+    const { command, args, options } = pnpmCommand(['--version']);
+    expect(command).toBe(process.execPath);
+    expect(args).toEqual([fakeExecPath, '--version']);
+    expect(options.shell).toBeFalsy();
+  });
+
+  it('matches case-insensitively and on Windows-style backslash separators', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spawn-node-bin-pnpm-test-'));
+    scratchDirs.push(dir);
+    const full = path.join(dir, 'PNPM.CJS');
+    fs.writeFileSync(full, '// fake entry\n');
+    // Simulate a Windows-style path (backslash separators) pointing at the
+    // same real file, so fs.existsSync still resolves it.
+    const backslashPath = full.replace(/\//g, '\\');
+    process.env['npm_execpath'] = process.platform === 'win32' ? backslashPath : full;
+
+    const { command, options } = pnpmCommand(['--version']);
+    expect(command).toBe(process.execPath);
+    expect(options.shell).toBeFalsy();
+  });
+
+  it('P2-R43 — falls back rather than trusting npm\'s own JS entry (npm run/npm exec)', () => {
+    const fakeExecPath = fakeFile('npm', 'bin', 'npm-cli.js');
+    process.env['npm_execpath'] = fakeExecPath;
+
+    const { command, args, options } = pnpmCommand(['--filter', 'x', 'bundle']);
+    expect(command).toBe(['pnpm', '--filter', 'x', 'bundle'].join(' '));
+    expect(args).toEqual([]);
+    expect(options.shell).toBe(true);
+  });
+
+  it('P2-R43 — falls back rather than trusting yarn\'s own JS entry', () => {
+    const fakeExecPath = fakeFile('yarn', 'bin', 'yarn.js');
+    process.env['npm_execpath'] = fakeExecPath;
+
+    const { command, options } = pnpmCommand(['--version']);
+    expect(command).toBe(['pnpm', '--version'].join(' '));
+    expect(options.shell).toBe(true);
+  });
+
+  it('falls back to a single shell command string (no args array) when npm_execpath is unset', () => {
     delete process.env['npm_execpath'];
     const { command, args, options } = pnpmCommand(['--version']);
-    expect(command).toBe('pnpm');
-    expect(args).toEqual(['--version']);
+    expect(command).toBe('pnpm --version');
+    expect(args).toEqual([]);
+    expect(options.shell).toBe(true);
+  });
+
+  it('quotes a fallback argument containing a space', () => {
+    delete process.env['npm_execpath'];
+    const { command, args, options } = pnpmCommand(['--filter', 'has space']);
+    expect(command).toBe('pnpm --filter "has space"');
+    expect(args).toEqual([]);
     expect(options.shell).toBe(true);
   });
 
   it('falls back when npm_execpath points at a non-JS file (e.g. a .cmd shim)', () => {
     process.env['npm_execpath'] = 'C:\\fake\\pnpm.cmd';
-    const { command, options } = pnpmCommand(['--version']);
-    expect(command).toBe('pnpm');
+    const { command, args, options } = pnpmCommand(['--version']);
+    expect(command).toBe('pnpm --version');
+    expect(args).toEqual([]);
     expect(options.shell).toBe(true);
   });
 
-  it('falls back when npm_execpath points at a .js file that does not exist', () => {
-    process.env['npm_execpath'] = path.join(os.tmpdir(), 'definitely-does-not-exist-pnpm.js');
+  it('falls back when npm_execpath points at a pnpm-shaped .js file that does not exist', () => {
+    process.env['npm_execpath'] = path.join(os.tmpdir(), 'pnpm.js');
     const { command, options } = pnpmCommand(['--version']);
-    expect(command).toBe('pnpm');
+    expect(command).toBe('pnpm --version');
     expect(options.shell).toBe(true);
   });
 });

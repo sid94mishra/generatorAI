@@ -32,31 +32,55 @@ export const CHAT_GROUP = {
   order: 10,
 };
 
-/** Every page of a chat query (the server caps one page at CHAT_LIST_MAX_LIMIT). */
-async function listAllChats(ctx: CliContext, query: ChatListQuery): Promise<ChatListRow[]> {
+/**
+ * Pages through a chat query until at least `count` rows are in hand or the
+ * list ends (the server caps one page at CHAT_LIST_MAX_LIMIT). Rows keep the
+ * server's order: newest activity first unless the query sorts otherwise.
+ */
+async function listChatsUpTo(ctx: CliContext, query: ChatListQuery, count: number): Promise<ChatListRow[]> {
   const items: ChatListRow[] = [];
   let cursor: string | undefined;
   do {
     const page = await ctx.api.chats.list({ ...query, limit: CHAT_LIST_MAX_LIMIT, ...(cursor ? { cursor } : {}) });
     items.push(...page.items);
     cursor = page.nextCursor ?? undefined;
-  } while (cursor);
+  } while (cursor && items.length < count);
   return items;
+}
+
+/** Every page of a chat query. */
+function listAllChats(ctx: CliContext, query: ChatListQuery): Promise<ChatListRow[]> {
+  return listChatsUpTo(ctx, query, Number.POSITIVE_INFINITY);
 }
 
 /** A ref that can only be matched by id prefix, which the server cannot filter on. */
 const ID_PREFIX = /^[0-9a-f][0-9a-f-]{3,}$/i;
 
 /**
+ * A name `resolveRef` takes as an exact match: identical, or equal ignoring
+ * case. JS case folding covers every script; the server's `q=` (SQLite
+ * `lower()`) folds only ASCII, so "Über plan" can be missing from its answer
+ * (P2-R35).
+ */
+function isExactNameMatch(name: string | null | undefined, ref: string): boolean {
+  return !!name && (name === ref || name.toLowerCase() === ref.toLowerCase());
+}
+
+/**
  * Resolves a chat reference, asking the server for as little as it can
  * (P2-R9): listing every chat also schedules a "Changes ±" backfill for each
  * row that never had one.
  *
- *   exact id            one `GET /chats/:id`
- *   #n, @last, @active  the newest page (they are about recent chats)
- *   a name              the server's `q=` search (a name match is always a
- *                       substring match), every page of it
- *   an id prefix        the only case that still needs every chat
+ *   exact id      one `GET /chats/:id`
+ *   #n            the first n chats, newest activity first (as many pages as
+ *                 that takes)
+ *   @active       every active chat (`status=active`)
+ *   @last         every chat: "most recently created or updated" is not a
+ *                 server sort
+ *   a name        the server's `q=` search, every page of it; when that holds
+ *                 no exact (any-script case-insensitive) name match, every
+ *                 chat, matched here (P2-R35)
+ *   an id prefix  every chat: the server cannot filter on it
  *
  * `workers: true` so a ref can still resolve an orchestrator worker chat.
  */
@@ -73,16 +97,18 @@ async function findChat(ctx: CliContext, ref: string) {
     }
   }
   let items: ChatListRow[];
-  if (/^[#@]/.test(trimmed)) {
-    items = (await ctx.api.chats.list({ limit: CHAT_LIST_MAX_LIMIT, workers: true })).items;
+  // False when `items` is pre-filtered, so an empty list does not mean "no chats".
+  let complete = true;
+  if (/^#\d+$/.test(trimmed)) {
+    items = await listChatsUpTo(ctx, { workers: true }, Number(trimmed.slice(1)));
+  } else if (trimmed === '@active') {
+    items = await listAllChats(ctx, { workers: true, status: 'active' });
+    complete = false;
+  } else if (trimmed === '@last' || ID_PREFIX.test(trimmed)) {
+    items = await listAllChats(ctx, { workers: true });
   } else {
     items = await listAllChats(ctx, { workers: true, q: trimmed });
-    if (ID_PREFIX.test(trimmed)) {
-      const byName = new Set(items.map((c) => c.id));
-      for (const chat of await listAllChats(ctx, { workers: true })) {
-        if (chat.id.startsWith(trimmed.toLowerCase()) && !byName.has(chat.id)) items.push(chat);
-      }
-    }
+    if (!items.some((c) => isExactNameMatch(c.name, trimmed))) items = await listAllChats(ctx, { workers: true });
   }
   return resolveRef(ref, {
     kind: 'chat',
@@ -94,6 +120,7 @@ async function findChat(ctx: CliContext, ref: string) {
       updatedAt: c.updatedAt,
     })),
     activeStatuses: ['running', 'active'],
+    complete,
   });
 }
 

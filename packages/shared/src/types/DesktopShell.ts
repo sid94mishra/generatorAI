@@ -107,3 +107,166 @@ export interface DesktopUpdateState {
   /** Message of the most recent failure (check, download or install). */
   error?: string;
 }
+
+// ────────────────────────────────────────────────────────────────
+// P2-R41 — window chrome / find-in-page / browser-IPC payloads.
+//
+// Previously declared twice: once in `apps/desktop/src/shared/ipc.ts` (and
+// `browser-ipc.ts`) for main/preload, and again — by hand, kept in sync only
+// by discipline — in `apps/web/src/types/desktop-bridge.d.ts` for the
+// renderer. `WindowChrome.platform` had already drifted (`NodeJS.Platform`
+// on the desktop side vs. a hand-picked `'darwin' | 'win32' | 'linux'` union
+// on the web side). Single-sourced here; both sides now import these.
+// ────────────────────────────────────────────────────────────────
+
+/**
+ * Where the OS paints its window controls, so the SPA can leave room. The web
+ * app is served in a browser too, where this is simply absent.
+ *
+ * `platform` is one of the three desktop OSes: main maps `process.platform`
+ * onto them (`apps/desktop/src/main/platform.ts` `desktopPlatform()`; any
+ * other Unix is laid out like Linux), and the web app builds its
+ * `platform-*` class from it.
+ */
+export type DesktopPlatform = 'darwin' | 'win32' | 'linux';
+
+export interface WindowChrome {
+  platform: DesktopPlatform;
+  /**
+   * `native` — the OS draws a full title bar above our content (fallback).
+   * `hidden-inset` — macOS: traffic lights float over our header.
+   * `overlay` — Windows/Linux: the OS paints min/max/close INTO our header.
+   */
+  titleBarStyle: 'native' | 'hidden-inset' | 'overlay';
+  /** Height in px the app must reserve for the draggable strip. */
+  titleBarHeight: number;
+  /** Space to keep clear on the LEFT (macOS traffic lights). */
+  insetLeft: number;
+  /** Space to keep clear on the RIGHT (Windows/Linux window controls). */
+  insetRight: number;
+  /** Wayland forbids programmatic move/resize — the UI should not offer it. */
+  isWayland: boolean;
+}
+
+/** Payload of the main→renderer window-state-changed event (maximize/unmaximize/fullscreen/focus). */
+export interface WindowStateChange {
+  maximized: boolean;
+  fullScreen: boolean;
+  focused: boolean;
+}
+
+/** Result of one find-in-page pass, as Chromium reports it. */
+export interface FindInPageResult {
+  activeMatchOrdinal: number;
+  matches: number;
+}
+
+/** Rect in CSS pixels relative to the main BrowserWindow's client area. */
+export interface BrowserBounds {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** DevTools panels the SPA may request when opening the inspector. */
+export type BrowserDevtoolsPanel = 'elements' | 'network' | 'console' | 'sources';
+
+/**
+ * Device-emulation parameters for the native browser view. Mirrors the
+ * subset of Chromium's device metrics that a responsive-design toolbar
+ * needs. `null` (passed to `setEmulation`) disables emulation and restores
+ * the real WebContentsView metrics.
+ */
+export interface BrowserEmulationParams {
+  /** Emulated viewport width in CSS px. */
+  width: number;
+  /** Emulated viewport height in CSS px. */
+  height: number;
+  /** Device pixel ratio (deviceScaleFactor). Default 1. */
+  deviceScaleFactor?: number;
+  /** Emulate a touch/mobile device (screenPosition='mobile'). Default false. */
+  mobile?: boolean;
+}
+
+/** One tab of the native desktop browser host (Phase 2 of the browser integration). */
+export interface NativeBrowserDescriptor {
+  /** Globally-unique browser tab id. */
+  tabId: string;
+  /** Owning workspace. */
+  workspaceId: string;
+  currentUrl: string | null;
+  title: string | null;
+  /** Page favicon as a data URL, when one has loaded. */
+  favicon: string | null;
+  isLoading: boolean;
+  canGoBack: boolean;
+  canGoForward: boolean;
+  /** 'active' when a scoped CDP proxy is running for this tab, else null.
+   *  Diagnostic only — never the real endpoint URL. */
+  cdpEndpoint: string | null;
+}
+
+/** Main→renderer native-browser lifecycle notification. */
+export interface NativeBrowserEvent {
+  /** The browser tab this event belongs to. */
+  tabId: string;
+  workspaceId: string;
+  url?: string;
+  title?: string;
+  isMainFrame?: boolean;
+  errorCode?: number;
+  errorDescription?: string;
+  favicon?: string;
+  /** True while the page is loading (did-start-loading .. did-stop-loading). */
+  loading?: boolean;
+}
+
+/** Element-picker result returned by `pickElement`. Mirrors VS Code's
+ * "select and attach UI elements to chat": the element's identity, HTML and
+ * CSS, plus a cropped screenshot of just that element. */
+export interface BrowserPickResult {
+  url: string;
+  /** Lowercase tag name (e.g. 'div', 'h1', 'button'). */
+  tag: string;
+  /** Element id, or null. */
+  id: string | null;
+  /** Class list. */
+  classes: string[];
+  /** Short human label like `div#hero.container` (DevTools-style). */
+  label: string;
+  /** Trimmed visible text content (truncated). */
+  text: string;
+  cssSelector: string;
+  xpath: string;
+  outerHtml: string;
+  boundingBox: { x: number; y: number; width: number; height: number };
+  /** Curated computed CSS declarations (subset, DevTools-relevant). */
+  computedStyle?: Record<string, string>;
+  /** PNG data URL of just the selected element's box, or null. */
+  screenshot?: string | null;
+  /** Stable key assigned by the in-page annotation overlay. */
+  key?: string;
+  /** User's free-text comment attached to this element. */
+  comment?: string;
+}
+
+/** A lightweight annotation list entry (for the count badge + popover). */
+export interface BrowserAnnotationSummary {
+  key: string;
+  n: number;
+  label: string;
+  tag: string;
+  comment: string;
+  region: boolean;
+}
+
+/** Result of an annotation poll: live comment count + the current list. */
+export interface BrowserAnnotatePollResult {
+  /** Total live annotations currently pinned on the page. */
+  total: number;
+  /** Lightweight list of the current annotations. */
+  items: BrowserAnnotationSummary[];
+  /** Full notes the user pressed the card "Send" button on (drained). */
+  sent: BrowserPickResult[];
+}

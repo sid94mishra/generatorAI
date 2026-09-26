@@ -3,7 +3,9 @@
 // it respects a declined `confirmDiscard`, stops the server only in standalone
 // mode, never lets a hung step block the exit past its deadline, exits
 // exactly once, and a second quit while one is running shares it
-// (P1-review P2-R23) instead of prompting and shutting down twice.
+// (P1-review P2-R23) instead of prompting and shutting down twice. A failed
+// prompt does not wedge later quits (P2-R38), and an update's exit hand-off
+// runs after the whole shutdown, immediately before the exit (P2-R28).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -11,7 +13,7 @@ const state = vi.hoisted(() => ({
   confirmDiscard: vi.fn(async () => true),
   setQuitting: vi.fn(),
   disposeComputerHost: vi.fn(async () => undefined),
-  stopServer: vi.fn(async () => undefined),
+  stopServer: vi.fn(async (): Promise<void> => undefined),
   destroyTray: vi.fn(),
 }));
 
@@ -130,12 +132,88 @@ describe('quitApp', () => {
   });
 });
 
-describe('markQuitting', () => {
-  it('sets isQuitting without running the shutdown sequence', async () => {
-    const { isQuitting, markQuitting } = await load();
+describe('quitApp failure edges (P2-R38)', () => {
+  it('a throwing unsaved-work prompt does not wedge quitting: the next quit runs', async () => {
+    const { quitApp, isQuitting } = await load();
+    const exit = vi.fn();
+    state.confirmDiscard.mockRejectedValueOnce(new Error('dialog failed'));
+    expect(await quitApp('standalone', exit)).toBe(false);
     expect(isQuitting()).toBe(false);
-    markQuitting(true);
-    expect(isQuitting()).toBe(true);
-    expect(state.disposeComputerHost).not.toHaveBeenCalled();
+    expect(exit).not.toHaveBeenCalled();
+
+    expect(await quitApp('standalone', exit)).toBe(true);
+    expect(exit).toHaveBeenCalledWith(0);
+  });
+});
+
+describe('exit hand-off (the Windows/Linux update install, P2-R28)', () => {
+  function handoff(order: string[]) {
+    return {
+      onCommitted: vi.fn(() => void order.push('committed')),
+      onDeclined: vi.fn(() => void order.push('declined')),
+      run: vi.fn(async () => void order.push('installer')),
+    };
+  }
+
+  it('runs after the whole shutdown and immediately before exit', async () => {
+    const { quitApp, setExitHandoff } = await load();
+    const order: string[] = [];
+    const exit = vi.fn(() => void order.push('exit'));
+    state.stopServer.mockImplementation(async () => void order.push('server'));
+    state.destroyTray.mockImplementation(() => void order.push('tray'));
+    const h = handoff(order);
+    setExitHandoff(h);
+
+    expect(await quitApp('standalone', exit)).toBe(true);
+    expect(order).toEqual(['committed', 'server', 'tray', 'installer', 'exit']);
+    expect(h.onDeclined).not.toHaveBeenCalled();
+  });
+
+  it('a declined quit tells the hand-off and runs nothing; a later quit does not reuse it', async () => {
+    const { quitApp, setExitHandoff } = await load();
+    const order: string[] = [];
+    const exit = vi.fn();
+    const h = handoff(order);
+    setExitHandoff(h);
+    state.confirmDiscard.mockResolvedValueOnce(false);
+
+    expect(await quitApp('standalone', exit)).toBe(false);
+    expect(order).toEqual(['declined']);
+    expect(state.stopServer).not.toHaveBeenCalled();
+
+    await quitApp('standalone', exit);
+    expect(h.run).not.toHaveBeenCalled();
+  });
+
+  it('a hand-off registered while the shutdown is running still runs', async () => {
+    const { quitApp, setExitHandoff } = await load();
+    const order: string[] = [];
+    let release!: () => void;
+    state.stopServer.mockImplementation(() => new Promise<void>((r) => (release = r)));
+    const run = quitApp('standalone', vi.fn());
+    await vi.waitFor(() => expect(state.stopServer).toHaveBeenCalled());
+    const h = handoff(order);
+    setExitHandoff(h);
+    release();
+    await run;
+    expect(h.run).toHaveBeenCalledTimes(1);
+  });
+
+  it('a hand-off that hangs or throws does not stop the exit', async () => {
+    const { quitApp, setExitHandoff, HANDOFF_DEADLINE_MS } = await load();
+    const exit = vi.fn();
+    vi.useFakeTimers();
+    setExitHandoff({ onCommitted: vi.fn(), onDeclined: vi.fn(), run: () => new Promise<void>(() => undefined) });
+    const pending = quitApp('standalone', exit);
+    await vi.advanceTimersByTimeAsync(HANDOFF_DEADLINE_MS);
+    expect(await pending).toBe(true);
+    expect(exit).toHaveBeenCalledWith(0);
+    vi.useRealTimers();
+
+    const again = await load();
+    const exit2 = vi.fn();
+    again.setExitHandoff({ onCommitted: vi.fn(), onDeclined: vi.fn(), run: () => Promise.reject(new Error('boom')) });
+    expect(await again.quitApp('standalone', exit2)).toBe(true);
+    expect(exit2).toHaveBeenCalledWith(0);
   });
 });

@@ -79,6 +79,10 @@ export class MockChatRepository implements IChatRepository {
     return [...this.store.values()].filter((c) => c.projectId === projectId).map((c) => ({ ...c }));
   }
 
+  async getByAgentRef(ref: string): Promise<Chat[]> {
+    return [...this.store.values()].filter((c) => c.agentRef === ref).map((c) => ({ ...c }));
+  }
+
   async listBackgroundTasks(parentChatId: string): Promise<Chat[]> {
     return [...this.store.values()].filter((c) => c.parentChatId === parentChatId).map((c) => ({ ...c }));
   }

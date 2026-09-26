@@ -33,6 +33,7 @@ import {
   AttentionService,
   ChangeSummaryService,
   ChatChangeStatsService,
+  ChatListInvalidator,
   ChatListService,
   EventBus,
   GitManager,
@@ -58,6 +59,7 @@ import {
 import type { Chat, ChatListItem, ChatListPage, ILogger, PersistedEvent } from '@generatorai/shared';
 
 import { createChatApiRoutes } from '../routes/chats.js';
+import { createProjectRoutes } from '../routes/projects.js';
 import { createErrorMiddleware } from '../middleware/errorHandler.js';
 
 const REPO_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '..');
@@ -82,6 +84,7 @@ let streaming: StreamingChatRegistry;
 let interactions: AgentInteractionService;
 let attention: AttentionService;
 let changeStats: ChatChangeStatsService;
+let invalidator: ChatListInvalidator;
 let app: express.Express;
 let chatRepo: DrizzleChatRepository;
 let updated: string[];
@@ -166,6 +169,8 @@ beforeEach(async () => {
     logger,
   });
   changeStats.start();
+  invalidator = new ChatListInvalidator({ eventBus: bus, chats: chatRepo, attention, logger });
+  invalidator.start();
 
   const chatListService = new ChatListService({
     chats: chatRepo,
@@ -187,10 +192,23 @@ beforeEach(async () => {
       logger,
     } as never),
   );
+  const projectRepo = new DrizzleProjectRepository(db);
+  app.use(
+    '/api/projects',
+    createProjectRoutes({
+      // The repository delete is the part that unlinks the chats; the service
+      // around it only adds filesystem cleanup.
+      projectService: { deleteProject: (id: string) => projectRepo.delete(id) },
+      security: { secretStore: {} },
+      chatListInvalidator: invalidator,
+      logger,
+    } as never),
+  );
   app.use(createErrorMiddleware(logger));
 });
 
 afterEach(async () => {
+  invalidator.stop();
   attention.stop();
   // A recompute still running would share the dummy repo with the next test.
   await changeStats.settled();
@@ -379,16 +397,60 @@ describe('PATCH /api/chats/:id — live lists (P2-R2)', () => {
     await patch('c-done', { tags: ['qa'] });
     await patch('c-done', { description: 'Covers the parser' });
     await patch('c-archived', { projectId: null }); // moved out of its project
-    expect(updated).toEqual(['c-run', 'c-archived', 'c-done', 'c-done', 'c-archived']);
+    await patch('c-done', { model: 'gpt-5.6-terra' }); // the row shows the model (P2-R33)
+    expect(updated).toEqual(['c-run', 'c-archived', 'c-done', 'c-done', 'c-archived', 'c-done']);
 
     // Not shown by any list: no event.
     await patch('c-done', { harnessConfig: { streaming: true } });
-    expect(updated).toHaveLength(5);
+    expect(updated).toHaveLength(6);
 
     // The list and the attention feed both show the new name.
     expect((await list('q=docs site')).items.map((c) => c.id)).toEqual(['c-run']);
     await attention.settled();
     const running = attention.getSnapshot().running.find((i) => i.entityId === 'c-run');
     expect(running?.title).toBe('Build the docs site');
+  });
+});
+
+describe('indirect list-visible writes (P2-R33)', () => {
+  it('a project delete announces every chat it unlinked, and the attention feed drops the project', async () => {
+    await seed();
+    await attention.settled();
+    expect(attention.getSnapshot().needsYou.find((i) => i.entityId === 'c-ask')?.project).toEqual({ id: 'p1', name: 'Website' });
+    updated.length = 0;
+
+    const res = await request(app).delete('/api/projects/p1?force=true');
+    expect(res.status, JSON.stringify(res.body)).toBe(204);
+
+    expect([...updated].sort()).toEqual(['c-archived', 'c-ask', 'c-done', 'c-dummy', 'c-worker']);
+    await attention.settled();
+    const ask = attention.getSnapshot().needsYou.find((i) => i.entityId === 'c-ask');
+    expect(ask).toBeDefined();
+    expect(ask?.project).toBeUndefined();
+    expect(ids(await list('projectId=p1'))).toEqual([]);
+  });
+
+  it('an agent rename or delete announces every chat bound to that agent', async () => {
+    await makeChat('c-a1', { agentRef: 'global:reviewer' });
+    await makeChat('c-a2', { agentRef: 'global:reviewer', status: 'archived' });
+    await makeChat('c-other', { agentRef: 'global:writer' });
+    await makeChat('c-none');
+    updated.length = 0;
+
+    // The shape AgentService emits through the composition root.
+    await bus.emitGlobal({ kind: 'agent.updated', data: { agentId: 'a1', ref: 'global:reviewer', name: 'Reviewer 2', version: 2 } });
+    await invalidator.settled();
+    expect([...updated].sort()).toEqual(['c-a1', 'c-a2']);
+
+    updated.length = 0;
+    await bus.emitGlobal({ kind: 'agent.deleted', data: { agentId: 'a2', ref: 'global:writer', soft: true } });
+    await invalidator.settled();
+    expect(updated).toEqual(['c-other']);
+
+    // An agent no chat is bound to announces nothing.
+    updated.length = 0;
+    await bus.emitGlobal({ kind: 'agent.updated', data: { agentId: 'a3', ref: 'global:idle', name: 'Idle', version: 3 } });
+    await invalidator.settled();
+    expect(updated).toEqual([]);
   });
 });

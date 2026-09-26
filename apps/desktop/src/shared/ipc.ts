@@ -6,7 +6,7 @@
 
 // The payloads that cross the bridge live in `@generatorai/shared`
 // (`types/DesktopShell.ts`), so the renderer's `desktop-bridge.d.ts` uses the
-// same declarations (P1-review P2-R24). Type-only: erased from both bundles.
+// same declarations (P1-review P2-R24, P2-R41). Type-only: erased from both bundles.
 export type {
   DesktopAppearancePush,
   DesktopAppearanceRequest,
@@ -14,6 +14,9 @@ export type {
   DesktopShellStatePush,
   DesktopThemePreference,
   DesktopUpdateState,
+  WindowChrome,
+  WindowStateChange,
+  FindInPageResult,
 } from '@generatorai/shared';
 import type { DesktopShellStatePush, DesktopThemePreference } from '@generatorai/shared';
 
@@ -57,28 +60,6 @@ export interface SaveFileOptions {
   content?: string;
   encoding?: 'utf8' | 'base64';
   filters?: { name: string; extensions: string[] }[];
-}
-
-/**
- * How the window frame is drawn, so the renderer can lay out its header to
- * match. The web app is served in a browser too, where this is simply absent.
- */
-export interface WindowChrome {
-  platform: NodeJS.Platform;
-  /**
-   * `native` — the OS draws a full title bar above our content (fallback).
-   * `hidden-inset` — macOS: traffic lights float over our header.
-   * `overlay` — Windows/Linux: the OS paints min/max/close INTO our header.
-   */
-  titleBarStyle: 'native' | 'hidden-inset' | 'overlay';
-  /** Height in px the app must reserve for the draggable strip. */
-  titleBarHeight: number;
-  /** Space to keep clear on the LEFT (macOS traffic lights). */
-  insetLeft: number;
-  /** Space to keep clear on the RIGHT (Windows/Linux window controls). */
-  insetRight: number;
-  /** Wayland forbids programmatic move/resize — the UI should not offer it. */
-  isWayland: boolean;
 }
 
 /**
@@ -188,19 +169,6 @@ export const IPC_EVENT = {
   /** Updater state changed (checking/downloading/ready/installing) — G-04. */
   updateStateChanged: 'desktop:update-state-changed',
 } as const;
-
-/** Payload of {@link IPC_EVENT.windowStateChanged}. */
-export interface WindowStateChange {
-  maximized: boolean;
-  fullScreen: boolean;
-  focused: boolean;
-}
-
-/** Result of one find-in-page pass, as Chromium reports it. */
-export interface FindInPageResult {
-  activeMatchOrdinal: number;
-  matches: number;
-}
 
 /**
  * Commands main sends to the renderer (menu items, accelerators, tray): the

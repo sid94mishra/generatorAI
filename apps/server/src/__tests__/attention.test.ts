@@ -470,6 +470,23 @@ describe('AttentionService — live deltas', () => {
     expect(service.getSnapshot().running).toEqual([]);
   });
 
+  it('P2-R33: refreshProject drops a deleted project from every item shown under it, runs included', async () => {
+    await makeProject('p1', 'Website');
+    await makeDefinition('d1', { projectId: 'p1' });
+    await makeRun('r1', 'd1', 'running');
+    await makeStage('s1', 'r1', 'Build', 'running');
+    await makeChat('c1', { projectId: 'p1' });
+    streaming.set('c1', () => {});
+    await startService().start();
+    expect(service.getSnapshot().running.map((i) => i.project?.id)).toEqual(['p1', 'p1']);
+
+    await repos().projects.delete('p1'); // unlinks the chat and the definition, emits nothing
+    service.refreshProject('p1');
+    await service.settled();
+    expect(service.getSnapshot().running.map((i) => i.key).sort()).toEqual(['chat:c1', 'workflow_run:r1']);
+    expect(service.getSnapshot().running.map((i) => i.project)).toEqual([undefined, undefined]);
+  });
+
   it('lists a pending computer consent under its chat and drops it once answered', async () => {
     await makeChat('c1');
     await startService().start();
@@ -518,6 +535,29 @@ describe('AttentionService — consent without a chat (P2-R19)', () => {
     await bus.emit('computer:w2', {
       kind: 'computer.consent_resolved',
       data: { workspaceId: 'w2', requestId: 'rq2' },
+    } as unknown as AgentEvent);
+    await vi.waitFor(() => expect(service.getSnapshot().needsYou).toEqual([]));
+  });
+
+  it('P2-R32: drops a prompt raised by a worker chat once answered, although the answer names no chat', async () => {
+    await makeChat('owner', { workspaceId: 'w4' } as Partial<Chat>);
+    await makeChat('worker', { workspaceId: 'w4', parentChatId: 'owner' } as Partial<Chat>);
+    await startService().start();
+    consents = [
+      { requestId: 'rq4', workspaceId: 'w4', chatId: 'worker', appLabel: 'Safari', action: 'click', summary: 'Click', expiresAt: Date.now() + 60_000 },
+    ];
+    await bus.emit('computer:w4', {
+      kind: 'computer.consent_required',
+      data: { chatId: 'worker', workspaceId: 'w4', requestId: 'rq4', expiresAt: Date.now() + 60_000 },
+    } as unknown as AgentEvent);
+    await service.settled();
+    expect(service.getSnapshot().needsYou.map((i) => i.key)).toEqual(['chat:worker:rq4']);
+
+    consents = [];
+    // The shape ComputerService emits: workspace + request, no chatId.
+    await bus.emit('computer:w4', {
+      kind: 'computer.consent_resolved',
+      data: { workspaceId: 'w4', requestId: 'rq4', decision: 'allow_once' },
     } as unknown as AgentEvent);
     await vi.waitFor(() => expect(service.getSnapshot().needsYou).toEqual([]));
   });

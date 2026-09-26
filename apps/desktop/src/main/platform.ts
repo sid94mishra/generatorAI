@@ -104,11 +104,16 @@ export function titleBarOptions(): Record<string, unknown> {
   };
 }
 
+/** `process.platform` as one of the three desktop OSes; any other Unix is laid out like Linux. */
+export function desktopPlatform(platform: NodeJS.Platform = process.platform): WindowChrome['platform'] {
+  return platform === 'darwin' || platform === 'win32' ? platform : 'linux';
+}
+
 /** Chrome geometry handed to the renderer so its header can match. */
 export function windowChrome(): WindowChrome {
   const custom = useCustomTitleBar();
   return {
-    platform: process.platform,
+    platform: desktopPlatform(),
     titleBarStyle: !custom ? 'native' : isMac ? 'hidden-inset' : 'overlay',
     titleBarHeight: custom ? TITLE_BAR_HEIGHT : 0,
     insetLeft: custom && isMac ? MAC_TRAFFIC_LIGHT_INSET : 0,

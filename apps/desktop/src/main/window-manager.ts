@@ -243,12 +243,18 @@ export class WindowManager {
 
     win.on('closed', () => {
       this.mainWindow = null;
+      // A window closed without quitting (macOS keeps the app running): the
+      // "Discard" answered for it must not carry over to the next window.
+      if (!this.quitting) this.discardConfirmed = false;
       this.emitRendererReset();
     });
     win.webContents.on('render-process-gone', () => this.emitRendererReset());
-    win.webContents.on('did-start-navigation', (details) => {
-      if (details.isMainFrame && !details.isSameDocument) this.emitRendererReset();
-    });
+    // `did-navigate`, not `did-start-navigation`: only a committed top-level
+    // document replaces the page. A navigation that never commits (an external
+    // link `will-navigate` blocks, a download, a 204) leaves the page, and
+    // what it pushed, in place (P1-review P2-R39). Same-document navigations
+    // fire `did-navigate-in-page` instead, so SPA route changes never reach here.
+    win.webContents.on('did-navigate', () => this.emitRendererReset());
 
     // Security: open external links in the OS browser, never new Electron windows.
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -336,7 +342,7 @@ export class WindowManager {
   repointMainWindow(url: string): void {
     this.appUrl = url;
     // The new origin's page reports its own state; the old one's is stale now
-    // (also covered by `did-start-navigation`, but not when a window is created).
+    // (also covered by `did-navigate`, but not when a window is created).
     this.emitRendererReset();
     const win = this.mainWindow;
     if (!win || win.isDestroyed()) {
@@ -508,7 +514,16 @@ export class WindowManager {
    * user said "Discard" must not re-ask.
    */
   async confirmDiscard(win?: BrowserWindow): Promise<boolean> {
-    if (this.discardConfirmed || !hasUnsavedWork()) return true;
+    if (this.discardConfirmed) return true;
+    if (!hasUnsavedWork()) {
+      // Remembered even with nothing to lose, so a quit that asks here and
+      // again at `before-quit` (an update install, P1-review P2-R37) cannot
+      // prompt the second time for work opened in between and strand the
+      // install half-way. `setQuitting(false)` and a window closed without
+      // quitting forget it.
+      this.discardConfirmed = true;
+      return true;
+    }
     const target = win ?? this.mainWindow ?? undefined;
     const opts: MessageBoxOptions = {
       type: 'warning',

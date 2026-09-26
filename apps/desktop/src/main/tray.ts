@@ -132,9 +132,11 @@ export function refreshTrayMenu(): void {
     { type: 'separator' },
     { label: 'Restart Server', click: () => void sm.restart().catch(() => undefined) },
     { type: 'separator' },
-    // `app.quit()` fires `before-quit`, where index.ts marks the WindowManager
-    // as quitting so the minimise-to-tray `close` interception stands aside.
-    { label: 'Quit', click: () => { wm.setQuitting(true); app.quit(); } },
+    // `app.quit()` fires `before-quit`, where `quitApp` asks about unsaved
+    // work and only then marks the WindowManager as quitting. Nothing is
+    // pre-set here: a prevented `before-quit` closes no window, and a flag set
+    // before a declined prompt would stay set (P1-review P2-R38).
+    { label: 'Quit', click: () => app.quit() },
   ]);
   tray.setContextMenu(menu);
   tray.setToolTip(

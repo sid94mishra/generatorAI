@@ -6,10 +6,10 @@
 import React, { useState, useMemo, useLayoutEffect, useRef, useEffect } from 'react';
 import { useSearchParams } from 'react-router';
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useChatPages, useBulkDeleteChats } from '@/hooks/chatListQueries.js';
+import { useChatPages, useBulkDeleteChats, ChatBulkError } from '@/hooks/chatListQueries.js';
 import { CreateChatDialog } from '@/components/chat/CreateChatDialog.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
-import { SearchInput, EmptyState, Button, Spinner, Badge, StatusBadge, PageHeader } from '@/components/ui/index.js';
+import { SearchInput, EmptyState, Button, Spinner, Badge, StatusBadge, PageHeader, toast } from '@/components/ui/index.js';
 import { EntityListRow, FilterTabs } from '@/components/data/index.js';
 import { PageContainer } from '@/components/layout/PageContainer.js';
 import { Toolbar } from '@/components/layout/Toolbar.js';
@@ -169,12 +169,27 @@ export function ChatsListPage() {
     setSelectedIds(new Set());
   };
 
-  /** Confirm and execute bulk chat deletion */
+  /**
+   * Confirm and execute bulk chat deletion. On a partial failure the dialog
+   * closes and only the chats that failed stay selected, so "Delete Selected"
+   * retries exactly those — the deleted ones would come back as NOT_FOUND
+   * (P2-R36). When nothing went through, the selection is left as it was.
+   */
   const confirmBulkDelete = async () => {
     if (selectedIds.size === 0) return;
-    await bulkDelete.mutateAsync(Array.from(selectedIds));
-    setBulkDeleteOpen(false);
-    exitSelectionMode();
+    try {
+      await bulkDelete.mutateAsync(Array.from(selectedIds));
+      setBulkDeleteOpen(false);
+      exitSelectionMode();
+    } catch (err) {
+      setBulkDeleteOpen(false);
+      if (err instanceof ChatBulkError) {
+        setSelectedIds(new Set(err.result.failed.map((f) => f.id)));
+        toast.error(err.message, { description: err.result.failed[0]?.message });
+      } else {
+        toast.error(`Delete failed: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }
   };
 
   return (

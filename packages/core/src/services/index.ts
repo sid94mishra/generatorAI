@@ -308,5 +308,7 @@ export {
 } from './ChatListService.js';
 export type { ChatListRequest, ChatListEntry, ChatListServiceDeps } from './ChatListService.js';
 export { ChatChangeStatsService, netChangeStats } from './ChatChangeStatsService.js';
+export { ChatListInvalidator } from './ChatListInvalidator.js';
+export type { ChatListInvalidatorDeps } from './ChatListInvalidator.js';
 export type { ChatChangeStatsDeps, ChangeStatsRepo } from './ChatChangeStatsService.js';
 export type { StreamingChangeListener } from './StreamingChatRegistry.js';

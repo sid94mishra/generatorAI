@@ -158,6 +158,7 @@ import {
   // G-01 — attention feed
   AttentionService,
   ChatChangeStatsService,
+  ChatListInvalidator,
   ChatListService,
   netChangeStats,
   // Integrated Terminal
@@ -1912,6 +1913,14 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     },
     logger,
   });
+  // P2-R33 — `chat.updated` for rows an agent rename/delete or a project
+  // delete changes without writing the chat.
+  const chatListInvalidator = new ChatListInvalidator({
+    eventBus,
+    chats: chatEntityRepo,
+    attention: attentionService,
+    logger,
+  });
   const chatListService = new ChatListService({
     chats: chatEntityRepo,
     attention: attentionService,
@@ -2451,6 +2460,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     // G-02 — chat list v2
     chatListService,
     chatChangeStatsService,
+    chatListInvalidator,
     // Expose the execution-workspace + artifact repos so routes can read
     // browser artifacts + workspace rows without a full service round-trip.
     executionWorkspaceRepo,
@@ -2735,6 +2745,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
         logger.warn(`[Container] attention feed failed to start: ${err instanceof Error ? err.message : String(err)}`);
       }
       chatChangeStatsService.start();
+      chatListInvalidator.start();
 
       logger.info('[Container] All services initialized');
     },
@@ -2743,6 +2754,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     async shutdown(): Promise<void> {
       attentionService.stop();
       chatChangeStatsService.stop();
+      chatListInvalidator.stop();
       scriptRunner.shutdown();
       automationService.shutdown();
       // Track A1 — stop the idempotency-key sweeper.
@@ -2937,6 +2949,8 @@ export interface Container {
   chatListService: ChatListService;
   /** G-02 — keeps each chat's "Changes ±" columns current. */
   chatChangeStatsService: ChatChangeStatsService;
+  /** P2-R33 — announces chats an agent change or a project delete touched. */
+  chatListInvalidator: ChatListInvalidator;
   screenCast: ScreenCast;
   /** Execution workspace repo — exposed for the browser route (read workspace row). */
   executionWorkspaceRepo: InstanceType<typeof DrizzleExecutionWorkspaceRepository>;

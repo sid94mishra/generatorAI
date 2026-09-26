@@ -496,6 +496,19 @@ export type {
   ServerReachability,
   DesktopServerEntry,
   DesktopUpdateState,
+  // P2-R41 — window chrome / find-in-page / browser-IPC payloads, single-sourced.
+  DesktopPlatform,
+  WindowChrome,
+  WindowStateChange,
+  FindInPageResult,
+  BrowserBounds,
+  BrowserDevtoolsPanel,
+  BrowserEmulationParams,
+  NativeBrowserDescriptor,
+  NativeBrowserEvent,
+  BrowserPickResult,
+  BrowserAnnotationSummary,
+  BrowserAnnotatePollResult,
 } from './DesktopShell.js';
 
 // ── Chat list v2 (G-02) ──
