@@ -194,7 +194,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `workflow.lifecycle.preprocessingSteps[].config.cwd` | string (≤1000 chars) |  |  | Working directory, relative to the run workspace |
 | `workflow.lifecycle.preprocessingSteps[].config.timeoutMs` | integer (≥1000, ≤3600000) |  |  | Timeout (default 60 s) |
 | `workflow.lifecycle.preprocessingSteps[].config.type` | "validate_input" | yes |  | Check an input variable |
-| `workflow.lifecycle.preprocessingSteps[].config.variableName` | string (1..64 chars) | yes |  | Variable to check |
+| `workflow.lifecycle.preprocessingSteps[].config.variableName` | string `^[A-Za-z_][A-Za-z0-9_]*$` (1..64 chars) | yes |  | Variable to check |
 | `workflow.lifecycle.preprocessingSteps[].config.rules` | one of (by `type`)[] (≤20) | yes |  | Rules, all of which must pass |
 | `workflow.lifecycle.preprocessingSteps[].config.rules[].type` | "required" | yes |  | The variable has a non-empty value |
 | `workflow.lifecycle.preprocessingSteps[].config.rules[].message` | string (1..1000 chars) | yes |  | Error shown when the rule fails |
@@ -209,7 +209,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `workflow.lifecycle.preprocessingSteps[].config.rules[].value` | integer (≥0, ≤1000000) | yes |  | Maximum length |
 | `workflow.lifecycle.preprocessingSteps[].config.rules[].message` | string (1..1000 chars) | yes |  | Error shown when the rule fails |
 | `workflow.lifecycle.preprocessingSteps[].config.type` | "set_variable" | yes |  | Set a variable for the rest of the run |
-| `workflow.lifecycle.preprocessingSteps[].config.variableName` | string (1..64 chars) | yes |  | Variable to set (a declared or a new one) |
+| `workflow.lifecycle.preprocessingSteps[].config.variableName` | string `^[A-Za-z_][A-Za-z0-9_]*$` (1..64 chars) | yes |  | Variable to set (a declared or a new one) |
 | `workflow.lifecycle.preprocessingSteps[].config.value` | string (≤100000 chars) | yes |  | Value, a template |
 | `workflow.lifecycle.preprocessingSteps[].config.type` | "conditional" | yes |  | Run steps depending on an expression |
 | `workflow.lifecycle.preprocessingSteps[].config.condition` | string (1..2000 chars) | yes |  | Boolean expression over variables |

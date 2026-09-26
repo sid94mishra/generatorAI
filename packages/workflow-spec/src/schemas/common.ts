@@ -77,6 +77,20 @@ export type PromptDefinition = z.infer<typeof PromptDefinitionSchema>;
 
 // ── Variables ────────────────────────────────────────────────────
 
+/** Report a name that is an expression root or a system name (`__*`, `repo_path_*`, `repo_branch_*`). */
+export function reservedVariableName(name: string, ctx: z.RefinementCtx, path: (string | number)[] = []): void {
+  if ((RESERVED_ROOTS as readonly string[]).includes(name)) {
+    customIssue(ctx, 'reserved-variable-name', `'${name}' is a reserved expression root and cannot be a variable name`, path);
+  } else if (FORBIDDEN_VARIABLE_NAME_PATTERN.test(name)) {
+    customIssue(
+      ctx,
+      'reserved-variable-name',
+      `'${name}' is reserved: names starting with __, repo_path_ or repo_branch_ are system values (use run.codebases.<alias>)`,
+      path,
+    );
+  }
+}
+
 /** `list` is a list of strings; `json` is any JSON value (P05, P5-23). */
 export const VARIABLE_TYPES = ['string', 'number', 'boolean', 'choice', 'text', 'list', 'json'] as const;
 export type VariableType = (typeof VARIABLE_TYPES)[number];
@@ -103,18 +117,7 @@ export const VariableDefinitionSchema = z
       .describe('Allowed values of a choice variable'),
   })
   .strict()
-  .superRefine((v, ctx) => {
-    if ((RESERVED_ROOTS as readonly string[]).includes(v.name)) {
-      customIssue(ctx, 'reserved-variable-name', `'${v.name}' is a reserved expression root and cannot be a variable name`, ['name']);
-    } else if (FORBIDDEN_VARIABLE_NAME_PATTERN.test(v.name)) {
-      customIssue(
-        ctx,
-        'reserved-variable-name',
-        `'${v.name}' is reserved: names starting with __, repo_path_ or repo_branch_ are system values (use run.codebases.<alias>)`,
-        ['name'],
-      );
-    }
-  })
+  .superRefine((v, ctx) => reservedVariableName(v.name, ctx, ['name']))
   .describe('A workflow input variable');
 export type VariableDefinition = z.infer<typeof VariableDefinitionSchema>;
 

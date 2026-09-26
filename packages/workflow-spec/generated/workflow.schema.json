@@ -1140,6 +1140,7 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 64,
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
                                 "description": "Variable to check"
                               },
                               "rules": {
@@ -1288,6 +1289,7 @@
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 64,
+                                "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
                                 "description": "Variable to set (a declared or a new one)"
                               },
                               "value": {
