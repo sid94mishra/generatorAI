@@ -124,7 +124,14 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
   // What a run of a graph (unsaved) or a saved definition would do; nothing is written.
   router.post('/plan', async (req, res, next) => {
     try {
-      const body = (req.body ?? {}) as { graph?: unknown; workflowId?: unknown; variables?: unknown; stageOverrides?: unknown; projectId?: unknown };
+      const body = (req.body ?? {}) as {
+        graph?: unknown;
+        workflowId?: unknown;
+        variables?: unknown;
+        stageOverrides?: unknown;
+        codebases?: unknown;
+        projectId?: unknown;
+      };
       const principal = invocationPrincipal(req);
       const result = await authoring.plan(
         {
@@ -132,6 +139,7 @@ export function createWorkflowDefinitionRoutes(container: Container): Router {
           ...(typeof body.workflowId === 'string' ? { workflowId: body.workflowId } : {}),
           ...(body.variables && typeof body.variables === 'object' ? { variables: body.variables as Record<string, unknown> } : {}),
           ...(Array.isArray(body.stageOverrides) ? { stageOverrides: body.stageOverrides } : {}),
+          ...(Array.isArray(body.codebases) ? { codebases: body.codebases } : {}),
           ...(typeof body.projectId === 'string' ? { projectId: body.projectId } : {}),
         },
         { principal, trigger: invocationTrigger(req, principal, undefined), loopback: isLoopbackRequest(req) },

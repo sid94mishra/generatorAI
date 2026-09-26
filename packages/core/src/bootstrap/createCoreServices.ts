@@ -598,6 +598,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     chats: chatEntityRepo,
     ...(inputs.chatWorkflowRunRepo ? { links: inputs.chatWorkflowRunRepo } : {}),
     ...(chatWorkflowRunBridge ? { linker: chatWorkflowRunBridge } : {}),
+    ...(idempotencyService ? { idempotency: idempotencyService } : {}),
     command: (runId, command, opts) => engine.command(runId, command, opts),
     orchestratorDeadline: (chatId) => orchestratorService.episodeDeadline(chatId),
     chatMounts: async (workspaceId) => {

@@ -163,7 +163,7 @@ export class WorkflowInvocationService {
     const req = parseRequest({ ...request, target: { kind: 'definition', workflowDefinitionId: '00000000-0000-4000-8000-000000000000' } });
     checkInvocationScopes(req, ctx);
     const resolved: ResolvedTarget = { workflowDefinitionId: target.workflowDefinitionId, definitionVersionId: null, graph: target.graph };
-    const v = await this.validate(req, ctx, resolved);
+    const v = await this.validate(req, ctx, resolved, { codebaseRequired: 'warning' });
     return this.planOf(resolved, v);
   }
 
@@ -376,8 +376,9 @@ export class WorkflowInvocationService {
     return undefined;
   }
 
-  private validate(req: InvocationRequest, ctx: InvocationContext, target: ResolvedTarget): Promise<ValidatedInvocation> {
+  private validate(req: InvocationRequest, ctx: InvocationContext, target: ResolvedTarget, opts: { codebaseRequired?: 'error' | 'warning' } = {}): Promise<ValidatedInvocation> {
     return validateInvocation(req, ctx, target, {
+      ...(opts.codebaseRequired ? { codebaseRequired: opts.codebaseRequired } : {}),
       codebases: this.deps.codebases,
       uploads: this.deps.uploads,
       models: this.deps.models,

@@ -320,7 +320,7 @@ export function buildWorkflowToolSet(
         ),
         skipPermission: false,
         owner,
-        handler: wrap((a) =>
+        handler: wrap((a, ctx) =>
           host.createDraft(
             caller,
             {
@@ -328,7 +328,7 @@ export function buildWorkflowToolSet(
               ...(str(a['projectId']) ? { projectId: str(a['projectId'])! } : {}),
               ...(str(a['replacesWorkflowId']) ? { replacesWorkflowId: str(a['replacesWorkflowId'])! } : {}),
             },
-            { turn: turn() },
+            { ...(ctx.toolCallId ? { toolCallId: ctx.toolCallId } : {}), turn: turn() },
           ),
         ),
       },

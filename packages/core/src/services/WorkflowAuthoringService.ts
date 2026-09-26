@@ -184,7 +184,14 @@ export class WorkflowAuthoringService {
 
   /** What a run would do, for a saved definition (its working graph) or an unsaved graph. Nothing is written. */
   async plan(
-    input: { graph?: unknown; workflowId?: string; variables?: Record<string, unknown>; stageOverrides?: unknown[]; projectId?: string },
+    input: {
+      graph?: unknown;
+      workflowId?: string;
+      variables?: Record<string, unknown>;
+      stageOverrides?: unknown[];
+      codebases?: unknown[];
+      projectId?: string;
+    },
     ctx: InvocationContext,
   ): Promise<AuthoringPlan> {
     let graph: WorkflowGraph;
@@ -213,6 +220,7 @@ export class WorkflowAuthoringService {
       {
         variables,
         ...(input.stageOverrides ? { stageOverrides: input.stageOverrides } : {}),
+        ...(input.codebases ? { codebases: input.codebases } : {}),
         ...(input.projectId ? { projectId: input.projectId } : {}),
       },
       ctx,

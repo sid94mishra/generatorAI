@@ -42,6 +42,7 @@ import type { WorkflowDefinitionService } from '../../services/WorkflowDefinitio
 import type { WorkflowInvocationService } from '../../services/workflow-invocation/WorkflowInvocationService.js';
 import { InvocationError, type InvocationContext, type InvocationPrincipal } from '../../services/workflow-invocation/types.js';
 import type { WorkspaceMount } from '@generatorai/shared';
+import { INVOCATION_IDEMPOTENCY_TTL_MS, type IdempotencyService } from '../../services/IdempotencyService.js';
 
 /** Who calls the workflow tools. */
 export type WorkflowToolCaller =
@@ -105,6 +106,8 @@ export interface WorkflowToolHostDeps {
   /** The chat's mounts, their dirty flags refreshed (`workspace: from_chat_branch`). */
   chatMounts?: ((workspaceId: string) => Promise<WorkspaceMount[]>) | undefined;
   limits?: Partial<WorkflowToolLimits> | undefined;
+  /** Replays of `create_workflow_draft` by tool call id answer the same draft. */
+  idempotency?: IdempotencyService | undefined;
   /** The web app origin, for links. */
   appUrl?: string | undefined;
   now?: () => number;
@@ -601,10 +604,29 @@ export class WorkflowToolHost {
   async createDraft(
     caller: WorkflowToolCaller,
     args: { graph: unknown; projectId?: string; replacesWorkflowId?: string },
-    call: { turn?: WorkflowToolTurn | undefined },
+    call: { toolCallId?: string | undefined; turn?: WorkflowToolTurn | undefined },
   ): Promise<unknown> {
     const c = await this.resolve(caller, call.turn, undefined);
     this.need(c, 'write:workflows', 'Creating a workflow draft');
+    // A replayed call (the same tool call id) answers the same draft.
+    const key = call.toolCallId && this.deps.idempotency ? `draft:${c.actor}:${call.toolCallId}`.replace(/[^!-~]/g, '_').slice(0, 200) : undefined;
+    if (key && this.deps.idempotency) {
+      const outcome = await this.deps.idempotency.run({ key, scope: `draft:${c.principal.id}`, ttlMs: INVOCATION_IDEMPOTENCY_TTL_MS }, async () => {
+        const draft = await this.draftOnce(caller, c, args);
+        return { executionId: draft.workflowId, value: draft };
+      });
+      if (!outcome.replayed) return outcome.value;
+      const record = await this.deps.definitions.get(outcome.executionId);
+      return { workflowId: record.id, status: record.status, name: record.graph.workflow.name, reviewLink: this.authoring.reviewLink(record.id), warnings: [], replayed: true };
+    }
+    return this.draftOnce(caller, c, args);
+  }
+
+  private draftOnce(
+    caller: WorkflowToolCaller,
+    c: ResolvedCaller,
+    args: { graph: unknown; projectId?: string; replacesWorkflowId?: string },
+  ): Promise<{ workflowId: string; status: 'draft'; name: string; reviewLink: string; warnings: unknown[] }> {
     const authoredBy =
       caller.kind === 'external'
         ? { kind: 'external_agent' as const, via: caller.via, principalId: caller.principal.id, ...(caller.clientName ? { clientName: caller.clientName } : {}) }

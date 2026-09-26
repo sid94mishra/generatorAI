@@ -135,6 +135,8 @@ export interface ValidationDeps {
   posture: () => RunPermissionMode;
   /** P05 §4.2: issues of the sub-workflow stages' children (a draft child, output drift). */
   subworkflows?: ((graph: WorkflowGraph, projectId: string | null) => Promise<InvocationIssue[]>) | undefined;
+  /** An authoring plan (P06) reports a missing required codebase as a warning instead of refusing. */
+  codebaseRequired?: 'error' | 'warning' | undefined;
   now: () => number;
 }
 
@@ -229,9 +231,13 @@ export async function validateInvocation(
     }
   }
   if (codebases.length === 0 && graph.workflow.lifecycle.requiresCodebase) {
-    throw new InvocationError('CODEBASE_REQUIRED', 'This workflow requires at least one codebase; select one', [
-      issue('codebase-required', ['codebases'], 'Select at least one codebase'),
-    ]);
+    if (deps.codebaseRequired === 'warning') {
+      warnings.push(issue('codebase-required', ['codebases'], 'This workflow requires at least one codebase: a run must select one', 'warning'));
+    } else {
+      throw new InvocationError('CODEBASE_REQUIRED', 'This workflow requires at least one codebase; select one', [
+        issue('codebase-required', ['codebases'], 'Select at least one codebase'),
+      ]);
+    }
   }
 
   // ── models ──

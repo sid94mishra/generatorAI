@@ -275,7 +275,14 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       validate: (graph: unknown) => req<AuthoringValidation>('/api/workflow-definitions/validate', json(graph)),
 
       /** What a run of a graph (unsaved) or a saved definition would do; nothing is written (P06). */
-      plan: (body: { graph?: unknown; workflowId?: string; variables?: Record<string, unknown>; stageOverrides?: unknown[]; projectId?: string }) =>
+      plan: (body: {
+        graph?: unknown;
+        workflowId?: string;
+        variables?: Record<string, unknown>;
+        stageOverrides?: unknown[];
+        codebases?: Array<{ alias: string; baseRef?: string; mode?: 'worktree' | 'in_place' }>;
+        projectId?: string;
+      }) =>
         req<AuthoringPlan>('/api/workflow-definitions/plan', json(body)),
 
       /** The workflow JSON Schema and its hash (a skill compares its `schemaHash`). */

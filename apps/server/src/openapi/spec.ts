@@ -1457,7 +1457,7 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
         tags: ['Workflows'],
         summary: 'What a run of a graph (unsaved) or a saved definition would do; nothing is written',
         description:
-          'Body `{graph | workflowId, variables?, stageOverrides?, projectId?}` → `{plan: InvocationPlan, guards, unresolved, warnings}`. Needs read:workflows only.',
+          'Body `{graph | workflowId, variables?, stageOverrides?, codebases?, projectId?}` (a missing required codebase is a warning here) → `{plan: InvocationPlan, guards, unresolved, warnings}`. Needs read:workflows only.',
         responses: { '200': { description: 'AuthoringPlan' }, '400': { description: 'VALIDATION_ERROR' }, '422': { description: 'The graph is not valid' } },
       },
     },
