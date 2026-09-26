@@ -1,14 +1,16 @@
 // ────────────────────────────────────────────────────────────────
-// Server switcher hooks (G-03) — the sidebar switcher / popover and the
-// Windows title-strip server chip consume this once they land (P3); no UI
-// lives here.
+// Server switcher hooks (G-03) — the Servers menu (app/shell/ServersMenu:
+// the sidebar switcher, the title-strip server chip and the rail mark) and
+// the shell's active-server name; no UI lives here.
 //
 // Desktop: the shell holds the list (main process, `IPC.getServers` — see
 // `@/lib/desktop.js` `desktopServers`) and main probes every entry's
 // reachability with Node `fetch`.
 //
 // Plain browser tab: the client-runtime connection catalog (`authRuntime.ts`,
-// one entry per server this client has paired with). The page may only probe
+// one entry per server this client has paired with), plus the page's own
+// server when the catalog has no entry for it (a loopback or unpaired
+// session is still talking to it). The page may only probe
 // its own origin: the app's CSP is `connect-src 'self'` and other servers send
 // no CORS headers for it, so probing them from here would log a CSP violation
 // and report a false "offline" (P1-review P2-R6). Every other entry is
@@ -67,12 +69,26 @@ function originOf(url: string): string | null {
   }
 }
 
-/** Plain web: the paired-server catalog, probing only the entry on this page's own origin. */
+/** The id of the page's own server when the catalog has no entry for it. */
+export const THIS_ORIGIN_SERVER_ID = 'this-origin';
+
+function isLoopbackHost(hostname: string): boolean {
+  return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '[::1]';
+}
+
+/**
+ * Plain web: the paired-server catalog, probing only the entry on this page's
+ * own origin. A page served by a server it never paired with (loopback dev
+ * auth, an unauthenticated LAN session) is still talking to that server, so
+ * it is listed too — first, active, with the name and status its own
+ * `server-info` reports (probed, never invented).
+ */
 async function loadWebList(): Promise<ServerListItem[]> {
   const active = getActiveConnection();
   const here = typeof window === 'undefined' ? null : window.location.origin;
-  return Promise.all(
-    listConnections().map(async (c): Promise<ServerListItem> => {
+  const catalog = listConnections();
+  const listed = await Promise.all(
+    catalog.map(async (c): Promise<ServerListItem> => {
       const base = {
         id: c.serverId,
         label: c.label,
@@ -86,6 +102,18 @@ async function loadWebList(): Promise<ServerListItem[]> {
       return { ...base, ...probe };
     }),
   );
+  if (!here || catalog.some((c) => originOf(c.endpoint) === here)) return listed;
+  const probe = await probeServer(here, { timeoutMs: WEB_PROBE_TIMEOUT_MS });
+  const hostname = new URL(here).hostname;
+  const self: ServerListItem = {
+    id: THIS_ORIGIN_SERVER_ID,
+    label: probe.serverName ?? new URL(here).host,
+    url: here,
+    kind: isLoopbackHost(hostname) ? 'local' : 'remote',
+    active: !listed.some((s) => s.active),
+    ...probe,
+  };
+  return [self, ...listed];
 }
 
 async function loadServers(): Promise<ServerListItem[]> {
@@ -136,10 +164,16 @@ export function switchServer(id: string): void {
 }
 
 /**
- * Opens the "Add server" flow. Desktop only: a plain web tab pairs with a new
- * server through the pairing screen, not a switcher action — see
- * `AuthGate.tsx`.
+ * Whether this client can add a server from the switcher. Desktop only: a
+ * plain web tab pairs with a new server through the pairing screen, not a
+ * switcher action — see `AuthGate.tsx` — so the switcher offers no "Add
+ * server…" there (never a menu item that does nothing).
  */
+export function canAddServer(): boolean {
+  return isDesktop && desktopServers.isAvailable();
+}
+
+/** Opens the "Add server" flow (the shell's prompt). A no-op where `canAddServer()` is false. */
 export function addServer(): void {
-  if (isDesktop && desktopServers.isAvailable()) desktopServers.add();
+  if (canAddServer()) desktopServers.add();
 }

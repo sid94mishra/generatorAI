@@ -144,7 +144,7 @@ const config = createBuildConfig({
   channel,
   signed: signing.signed,
   env,
-  // Repoints the build at scripts/mock-update-server.mjs so the auto-update
+  // Repoints the build at agent-tests/mock-update-server.mjs so the auto-update
   // path can be exercised before a real release depends on it.
   publish: env['GENERATORAI_UPDATE_URL']
     ? { provider: 'generic', url: env['GENERATORAI_UPDATE_URL'], channel }

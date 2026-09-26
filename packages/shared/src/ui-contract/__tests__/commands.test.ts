@@ -3,12 +3,17 @@ import {
   BROWSER_RESERVED_CHORDS,
   COMMANDS,
   COMMAND_IDS,
+  DEEP_LINK_COMMAND_IDS,
   HOSTS,
+  LAUNCHER_ACTIONS,
   NAV_DESTINATIONS,
   RENDERER_COMMAND_IDS,
   SYSTEM_SHORTCUTS,
   firesInEditable,
+  isDeepLinkCommandId,
   isRendererCommandId,
+  launcherActionLabel,
+  launcherActionLink,
   navDestinationFor,
   type CommandId,
 } from '../commands.js';
@@ -160,5 +165,28 @@ describe('NAV_DESTINATIONS (D-22)', () => {
     expect(navDestinationFor('/chats/abc')?.id).toBe('chats');
     expect(navDestinationFor('/chatsomething')).toBeNull();
     expect(navDestinationFor('/settings/general')).toBeNull();
+  });
+});
+
+describe('deep-link commands and launcher actions (06 §8, P3-06)', () => {
+  it('the generatorai://command/<id> allowlist is exactly the deepLink renderer commands', () => {
+    expect(DEEP_LINK_COMMAND_IDS).toEqual(['chat.new', 'workflow.new']);
+    expect(isDeepLinkCommandId('chat.new')).toBe(true);
+    // A real renderer command that is not flagged, a main command, a scoped one, junk.
+    expect(isDeepLinkCommandId('app.settings')).toBe(false);
+    expect(isDeepLinkCommandId('server.restart')).toBe(false);
+    expect(isDeepLinkCommandId('composer.send')).toBe(false);
+    expect(isDeepLinkCommandId('__proto__')).toBe(false);
+    expect(isDeepLinkCommandId(42)).toBe(false);
+  });
+
+  it('launcher actions: New chat, New workflow, Home — each with a link the deep-link handler accepts', () => {
+    expect(LAUNCHER_ACTIONS.map(launcherActionLabel)).toEqual(['New chat', 'New workflow', 'Home']);
+    expect(LAUNCHER_ACTIONS.map(launcherActionLink)).toEqual([
+      'generatorai://command/chat.new',
+      'generatorai://command/workflow.new',
+      'generatorai://',
+    ]);
+    for (const a of LAUNCHER_ACTIONS) if (a.kind === 'command') expect(isDeepLinkCommandId(a.command)).toBe(true);
   });
 });

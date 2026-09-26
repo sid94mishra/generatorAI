@@ -6,7 +6,8 @@
 // on one row, the centre kept centred by two equal flexible sides:
 //   start   Back, Forward (ib-sm) · Toggle sidebar (margin-left 4)
 //   centre  the 420px Search button (shrinks to 200 in narrow windows)
-//   end     the update pill slot (P3-06) and the server chip
+//   end     the "Restart to update" pill (UpdatePill `strip`, only while an
+//           update is ready) and the server chip (the Servers menu trigger)
 // The right padding is the Window Controls Overlay's caption-button area,
 // `var(--gai-titlebar-inset-right)` (tracked live by lib/desktop.ts; set in
 // globals.css, keyed on `data-slot="title-strip"`), so no control ever sits
@@ -68,7 +69,7 @@ export function TitleStripSearch({ shortcut, className, ...rest }: TitleStripSea
   );
 }
 
-export interface TitleStripServerChipProps extends Omit<ComponentProps<'span'>, 'children'> {
+export interface TitleStripServerChipProps extends Omit<ComponentProps<'button'>, 'children'> {
   /** The active server's name ("This computer"). */
   label: string;
   tone: DotTone;
@@ -77,21 +78,22 @@ export interface TitleStripServerChipProps extends Omit<ComponentProps<'span'>, 
 }
 
 /**
- * The server chip at the right of the strip: dot · name, in the pressed-chip
- * look. Static in P3-04: P3-06 turns it into the Servers popover trigger
- * (adding the chevron), so it is never a button that does nothing.
+ * The server chip at the right of the strip: dot · name · chevron, in the
+ * pressed-chip look (`selected` fill, `line` border). The trigger of the
+ * Servers menu (pass it as `Menu.Trigger`'s `render`).
  */
 export function TitleStripServerChip({ label, tone, toneLabel, className, ...rest }: TitleStripServerChipProps) {
   return (
-    <span
-      className={cn(
-        'flex h-control-sm max-w-60 min-w-0 items-center gap-2 rounded-control-sm bg-selected px-2 text-small font-medium text-fg',
-        className,
-      )}
+    <Button
+      size="sm"
+      trailingIcon="chevron-down"
+      className={cn('max-w-60 min-w-0 gap-2 border-line bg-selected hover:not-disabled:bg-selected', className)}
       {...rest}
     >
-      <StatusDot tone={tone} size="sm" {...(toneLabel ? { label: toneLabel } : {})} />
-      <span className="truncate">{label}</span>
-    </span>
+      <span className="flex min-w-0 items-center gap-2">
+        <StatusDot tone={tone} size="sm" {...(toneLabel ? { label: toneLabel } : {})} />
+        <span className="truncate">{label}</span>
+      </span>
+    </Button>
   );
 }

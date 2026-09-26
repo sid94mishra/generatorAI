@@ -7,7 +7,7 @@
 // parity with the web app, and full CLI parity at the API layer.
 // ────────────────────────────────────────────────────────────────
 
-import { app, dialog, nativeTheme, BrowserWindow, Menu, session } from 'electron';
+import { app, dialog, nativeTheme, BrowserWindow, session } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { log } from './logger';
 import { loadSettings } from './config';
@@ -18,8 +18,8 @@ import { nativeBrowserEnabled } from './browser-host';
 import { initComputerHost } from './computer-host-registry';
 import { setIpcToken } from './cdp/ipc-token';
 import { registerIpc } from './ipc';
-import { NAV_DESTINATIONS } from '@generatorai/shared/ui-contract';
-import { buildMenu, syncMenuThemeFromSettings } from './menu';
+import { buildMenu, setMenuUpdateReady, syncMenuThemeFromSettings } from './menu';
+import { registerLauncherActions } from './launcher-actions';
 import { createTray, refreshTrayMenu } from './tray';
 import { registerDownloadHandler } from './downloads';
 import {
@@ -28,7 +28,12 @@ import {
   handleDeepLink,
   findDeepLinkInArgv,
 } from './deep-link';
-import { initAutoUpdates, checkForUpdatesInteractive } from './updater';
+import {
+  checkForUpdatesInteractive,
+  initAutoUpdates,
+  installUpdateInteractive,
+  onUpdateStateChange,
+} from './updater';
 import { repointTarget } from './repoint';
 import { isQuitting, quitApp } from './quit-coordinator';
 
@@ -111,6 +116,10 @@ function main(): void {
 }
 
 async function onReady(): Promise<void> {
+  // One line per launch with the running version: the update-install run
+  // (agent-tests/mock-update-server.mjs verify-log) reads it to confirm the
+  // app came back on the new version.
+  log.info('GeneratorAI starting', { version: app.getVersion(), platform: process.platform, packaged: app.isPackaged });
   const settings = loadSettings();
   // Mirror the renderer's last mode (D-25) before any window exists, so
   // prefers-color-scheme and the native chrome agree from the first frame.
@@ -141,9 +150,18 @@ async function onReady(): Promise<void> {
     }
     callback(false);
   });
-  buildMenu({ showAbout, checkForUpdates: () => void checkForUpdatesInteractive() });
+  buildMenu({
+    showAbout,
+    checkForUpdates: () => void checkForUpdatesInteractive(),
+    installUpdate: () => void installUpdateInteractive(),
+  });
   syncMenuThemeFromSettings();
-  registerNativeShortcuts();
+  // Help ▸ "Check for Updates…" becomes "Restart to Update (v…)" while an
+  // update is ready (06 §8); the same state feeds the renderer's pill.
+  onUpdateStateChange((s) => setMenuUpdateReady(s.status === 'ready' ? (s.downloadedVersion ?? null) : null));
+  registerAboutPanel();
+  // macOS Dock menu / Windows JumpList from the registry's LAUNCHER_ACTIONS.
+  registerLauncherActions();
   createTray();
 
   wm.showSplash();
@@ -252,12 +270,6 @@ async function onReady(): Promise<void> {
 }
 
 /**
- * Native OS integrations that are not menus: the macOS About panel (so
- * `⌘ + About GeneratorAI` shows the standard sheet rather than a generic
- * dialog), the Dock menu, and the Windows JumpList. Each is a no-op on the
- * platforms that do not have that affordance.
- */
-/**
  * The credential vault cannot be opened with the key this machine still has.
  * That is unrecoverable for the stored credentials, but perfectly recoverable
  * for the app — so ask, rather than leaving the user on an error screen.
@@ -313,59 +325,13 @@ async function promptVaultReset(sm: ReturnType<typeof getServerManager>): Promis
   }
 }
 
-function registerNativeShortcuts(): void {
+function registerAboutPanel(): void {
   app.setAboutPanelOptions({
     applicationName: 'GeneratorAI',
     applicationVersion: app.getVersion(),
     version: `Electron ${process.versions.electron}`,
     copyright: `© ${new Date().getFullYear()} GeneratorAI`,
   });
-
-  const go = (route: string) => {
-    const wm = getWindowManager();
-    const win = wm.getMainWindow();
-    if (win) {
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-    }
-    wm.navigateTo(route);
-  };
-
-  if (process.platform === 'darwin') {
-    app.dock?.setMenu(
-      Menu.buildFromTemplate([
-        { label: 'New Chat', click: () => go('/chats') },
-        { label: 'New Workflow', click: () => go('/workflows/new') },
-        { type: 'separator' },
-        { label: NAV_DESTINATIONS[0].label, click: () => go(NAV_DESTINATIONS[0].path) },
-      ]),
-    );
-  }
-
-  if (process.platform === 'win32') {
-    // JumpList tasks re-launch the exe with a `generatorai://` argument;
-    // `second-instance` picks it out of argv via findDeepLinkInArgv and
-    // routes the already-running window instead of starting a second copy.
-    app.setUserTasks([
-      {
-        program: process.execPath,
-        arguments: 'generatorai://chats',
-        iconPath: process.execPath,
-        iconIndex: 0,
-        title: 'Chats',
-        description: 'Open GeneratorAI chats',
-      },
-      {
-        program: process.execPath,
-        arguments: 'generatorai://workflows/new',
-        iconPath: process.execPath,
-        iconIndex: 0,
-        title: 'New Workflow',
-        description: 'Create a new GeneratorAI workflow',
-      },
-    ]);
-  }
 }
 
 function showAbout(): void {

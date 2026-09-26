@@ -90,7 +90,7 @@ vi.mock('../tray', () => ({ refreshTrayMenu: state.refreshTrayMenu }));
 vi.mock('../attention-state', () => ({ setAttention: state.setAttention, clearAttention: state.clearAttention }));
 vi.mock('../updater', () => ({
   getUpdateState: state.getUpdateState,
-  installUpdate: state.installUpdate,
+  installUpdateInteractive: state.installUpdate,
   setUpdateWatch: state.setUpdateWatch,
   clearUpdateWatchers: state.clearUpdateWatchers,
   onUpdateStateChange: (listener: (s: unknown) => void) => {
@@ -202,7 +202,7 @@ describe('IPC.getUpdateState / installUpdate / watchUpdates (G-04)', () => {
     expect(await call(h, IPC.getUpdateState)).toEqual(ready);
   });
 
-  it('installUpdate delegates to the updater module', async () => {
+  it("installUpdate (the pill) delegates to the updater's user-requested install, which reports a failure", async () => {
     const h = await setup();
     await call(h, IPC.installUpdate);
     expect(state.installUpdate).toHaveBeenCalled();

@@ -13,7 +13,8 @@
 //   nav      P-27 NavItems from NAV_DESTINATIONS, inside SidebarNav
 //   live     SidebarSection "Needs you" / "Running" (only once the attention
 //            feed has loaded, D-36)
-//   footer   SidebarFooter: connection status + Settings
+//   footer   SidebarFooter: connection status + Settings (+ the "Restart to
+//            update" pill above it on macOS and the Linux native frame, D-23)
 // Padding per layout (boards): web & Linux `10 8 8 8`, macOS `0 8 8 8` (the
 // traffic row comes first), Windows `4 8 8 8`. The nav and live lists scroll
 // between the fixed header and footer.
@@ -71,7 +72,7 @@ export function Sidebar({ layout, topRow, header, actions, nav, live, footer, cl
   );
 }
 
-/** Linux native frame (desktop only): the 36px Back / Forward row (+ the update pill slot, P3-06). */
+/** Linux native frame (desktop only): the 36px Back / Forward row. */
 export function SidebarNavRow({ className, ...rest }: ComponentProps<'div'>) {
   return <div className={cn('-mx-1 flex h-strip shrink-0 items-center gap-0.5', className)} {...rest} />;
 }
@@ -91,25 +92,36 @@ export function SidebarBrand({ className, ...rest }: Omit<ComponentProps<'span'>
   );
 }
 
-export interface ServerSwitcherProps extends Omit<ComponentProps<'div'>, 'children'> {
+export interface ServerSwitcherProps extends Omit<ComponentProps<'button'>, 'children'> {
   /** Second line: the active server ("This computer", a remote's name). Omitted until known. */
   server?: ReactNode;
 }
 
 /**
- * "GeneratorAI / This computer": the app identity and the active server. Static
- * in P3-04; P3-06 makes it the trigger of the 280px Servers popover (adding the
- * chevron), so it is never a button that does nothing.
+ * "GeneratorAI / This computer ⌄": the app identity and the active server, and
+ * the trigger of the 280px Servers menu (pass it as `Menu.Trigger`'s
+ * `render`; 36h, `rounded-control`, hover and open states in `hover`).
  */
 export function ServerSwitcher({ server, className, ...rest }: ServerSwitcherProps) {
   return (
-    <div className={cn('flex min-h-9 min-w-0 flex-1 items-center gap-2.5 pr-1.5 pl-0.5', className)} {...rest}>
-      <AppMark className="size-5.5 shrink-0" />
-      <span className="flex min-w-0 flex-col leading-tight">
-        <span className="truncate text-ui font-semibold">GeneratorAI</span>
-        {server != null ? <span className="truncate text-micro text-fg-3">{server}</span> : null}
+    <Button
+      variant="ghost"
+      trailingIcon="chevron-down"
+      className={cn(
+        'h-auto min-h-9 min-w-0 flex-1 justify-start gap-2.5 rounded-control pr-1.5 pl-0.5 font-normal text-fg',
+        'hover:not-disabled:text-fg data-popup-open:bg-hover',
+        className,
+      )}
+      {...rest}
+    >
+      <span className="flex min-w-0 items-center gap-2.5">
+        <AppMark className="size-5.5 shrink-0" />
+        <span className="flex min-w-0 flex-col text-left leading-tight">
+          <span className="truncate text-ui font-semibold">GeneratorAI</span>
+          {server != null ? <span className="truncate text-micro text-fg-3">{server}</span> : null}
+        </span>
       </span>
-    </div>
+    </Button>
   );
 }
 
@@ -175,6 +187,8 @@ export interface SidebarFooterProps extends Omit<ComponentProps<'div'>, 'childre
   address?: string;
   /** Extra block above the row: the missing-events notice. */
   notice?: ReactNode;
+  /** The "Restart to update" pill (UpdatePill `footer`), above the row; only while an update is ready. */
+  update?: ReactNode;
   /** Settings icon button. */
   action?: ReactNode;
 }
@@ -203,10 +217,11 @@ export function SidebarFooterNotice({ message, action, className, ...rest }: Sid
 }
 
 /** The 44h footer: connection dot · label · address · Settings. */
-export function SidebarFooter({ tone, label, address, notice, action, className, ...rest }: SidebarFooterProps) {
+export function SidebarFooter({ tone, label, address, notice, update, action, className, ...rest }: SidebarFooterProps) {
   return (
     <div className={cn('mt-2 flex shrink-0 flex-col border-t border-line-soft', className)} {...rest}>
       {notice}
+      {update != null ? <div className="flex pt-2">{update}</div> : null}
       <div className="flex h-bar items-center gap-2 pt-2 pr-1 pl-2.5">
         <StatusDot tone={tone} size="sm" />
         <span role="status" className="shrink-0 text-small text-fg-2">

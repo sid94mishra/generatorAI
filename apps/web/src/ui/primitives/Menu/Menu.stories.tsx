@@ -3,6 +3,7 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, screen, userEvent, waitFor, within } from 'storybook/test';
 import { Button } from '../Button/Button.js';
 import { IconButton } from '../IconButton/IconButton.js';
+import { StatusDot } from '../StatusDot/StatusDot.js';
 import {
   ContextMenu,
   Menu,
@@ -135,13 +136,27 @@ function ViewMenu() {
         <Menu.Separator />
         <Menu.RadioGroup value={server} onValueChange={(v) => setServer(String(v))}>
           <Menu.GroupLabel>Servers</Menu.GroupLabel>
-          <Menu.RadioItem value="local" description="local:3100">
+          <Menu.RadioItem
+            value="local"
+            icon="computer"
+            description="local:3100"
+            trailing={
+              <>
+                <StatusDot tone="ok" size="sm" />
+                Connected
+              </>
+            }
+          >
             This computer
           </Menu.RadioItem>
-          <Menu.RadioItem value="studio" description="studio.lan:3100">
+          <Menu.RadioItem value="studio" icon="server" description="studio.lan:3100" trailing="Offline">
             Studio Mac
           </Menu.RadioItem>
         </Menu.RadioGroup>
+        <Menu.Separator />
+        <Menu.Item icon="settings" trailing="Security & devices">
+          Manage servers
+        </Menu.Item>
       </Menu.Popup>
     </Menu.Root>
   );

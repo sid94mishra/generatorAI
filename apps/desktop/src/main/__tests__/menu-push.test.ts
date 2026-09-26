@@ -58,7 +58,7 @@ vi.mock('../backend-switcher', () => ({
 async function loadMenu() {
   vi.resetModules();
   const menu = await import('../menu');
-  menu.buildMenu({ showAbout: vi.fn(), checkForUpdates: vi.fn() });
+  menu.buildMenu({ showAbout: vi.fn(), checkForUpdates: vi.fn(), installUpdate: vi.fn() });
   return menu;
 }
 

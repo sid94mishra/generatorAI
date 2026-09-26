@@ -22,6 +22,9 @@ vi.mock('@/hooks/serverQueries.js', () => ({
   useServers: () => ({
     data: [{ id: 'embedded', label: 'This computer', url: 'http://127.0.0.1:3100', kind: 'embedded', active: true, status: 'connected' }],
   }),
+  switchServer: vi.fn(),
+  addServer: vi.fn(),
+  canAddServer: () => false,
 }));
 
 import { ConnectedSidebar } from '@/app/shell/ConnectedSidebar.js';

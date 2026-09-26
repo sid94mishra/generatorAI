@@ -36,7 +36,7 @@ import { probeKnownServers } from './server-probe';
 import {
   clearUpdateWatchers,
   getUpdateState,
-  installUpdate,
+  installUpdateInteractive,
   onUpdateStateChange,
   setUpdateWatch,
 } from './updater';
@@ -371,8 +371,9 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   guardedHandle(IPC.getUpdateState, (): DesktopUpdateState => getUpdateState());
 
   guardedHandle(IPC.installUpdate, async () => {
-    // A failure is reported through the state (`ready` + `error`), not here.
-    await installUpdate();
+    // The "Restart to update" pill: a user request, so a failure gets the
+    // error dialog; the pill also sees it in the state (`ready` + `error`).
+    await installUpdateInteractive();
   });
 
   guardedHandle(IPC.watchUpdates, (e, watching: unknown) => {

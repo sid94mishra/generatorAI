@@ -2,7 +2,7 @@
 // are the rules every OS path (macOS open-url, Windows/Linux argv) goes through.
 
 import { describe, expect, it } from 'vitest';
-import { DEEP_LINK_QUERY_KEYS, deepLinkToRoute, findDeepLinkInArgv, isDeepLink } from '../deep-link-route';
+import { DEEP_LINK_QUERY_KEYS, deepLinkToRoute, findDeepLinkInArgv, isDeepLink, resolveDeepLink } from '../deep-link-route';
 
 describe('deepLinkToRoute', () => {
   it('maps host and empty-host forms to the same route', () => {
@@ -71,5 +71,45 @@ describe('findDeepLinkInArgv (Windows / Linux)', () => {
   it('isDeepLink is a prefix check on the scheme only', () => {
     expect(isDeepLink('generatorai://x')).toBe(true);
     expect(isDeepLink('xgeneratorai://x')).toBe(false);
+  });
+});
+
+describe('resolveDeepLink (06 §8, P3-06)', () => {
+  it('command links resolve to an allowlisted command, in every accepted form', () => {
+    for (const url of [
+      'generatorai://command/chat.new',
+      'GENERATORAI://Command/chat.new',
+      'generatorai:///command/chat.new',
+      'generatorai://command/chat.new/',
+      'generatorai://command/chat.new?x=1#h',
+      'generatorai://command/chat%2Enew',
+    ]) {
+      expect(resolveDeepLink(url), url).toEqual({ kind: 'command', command: 'chat.new' });
+    }
+    expect(resolveDeepLink('generatorai://command/workflow.new')).toEqual({ kind: 'command', command: 'workflow.new' });
+  });
+
+  it('rejects ids that are not deep-link commands (main, scoped, unflagged, unknown, malformed)', () => {
+    for (const [url, command] of [
+      ['generatorai://command/window.reload', 'window.reload'],
+      ['generatorai://command/composer.send', 'composer.send'],
+      ['generatorai://command/app.settings', 'app.settings'],
+      ['generatorai://command/__proto__', '__proto__'],
+      ['generatorai://command/Chat.New', 'Chat.New'],
+      ['generatorai://command/%E0%A4%A', '%E0%A4%A'],
+      ['generatorai://command', ''],
+      ['generatorai://command/chat.new/x', 'chat.new/x'],
+    ] as const) {
+      expect(resolveDeepLink(url), url).toEqual({ kind: 'rejected-command', command });
+    }
+  });
+
+  it('everything else is a route, and non-links are null', () => {
+    expect(resolveDeepLink('generatorai://')).toEqual({ kind: 'route', route: '/' });
+    expect(resolveDeepLink('generatorai://commands/x')).toEqual({ kind: 'route', route: '/commands/x' });
+    expect(resolveDeepLink('generatorai://chats/c1?dock=changes&x=1')).toEqual({ kind: 'route', route: '/chats/c1?dock=changes' });
+    expect(resolveDeepLink('generatorai://pair?code=A')).toEqual({ kind: 'route', route: '/?pair=A' });
+    expect(resolveDeepLink('generatorai://a/../b')).toBeNull();
+    expect(resolveDeepLink('https://example.com/command/chat.new')).toBeNull();
   });
 });

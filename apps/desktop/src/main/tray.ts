@@ -1,10 +1,17 @@
 // ────────────────────────────────────────────────────────────────
 // System tray — quick access to navigation, server status and quit.
+//
+// Items follow the DesktopMac board on every OS (06 §8), in the registry's
+// sentence-case wording: status line(s) · Open GeneratorAI · New chat ·
+// Go to (NAV_DESTINATIONS with `tray`, sidebar order, D-24) · Restart server ·
+// Quit GeneratorAI. Commands and shortcut hints come from the registry; the
+// counts come from `attention-state.ts`, the same source as the dock/taskbar
+// badge (G-05).
 // ────────────────────────────────────────────────────────────────
 
 import { app, Tray, Menu, nativeImage, type MenuItemConstructorOptions, type NativeImage } from 'electron';
 import type { AttentionCounts } from '@generatorai/shared';
-import { NAV_DESTINATIONS } from '@generatorai/shared/ui-contract';
+import { COMMANDS, NAV_DESTINATIONS, SYSTEM_SHORTCUTS, toElectronAccelerator } from '@generatorai/shared/ui-contract';
 import * as path from 'node:path';
 import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
@@ -13,6 +20,7 @@ import { accel } from './menu';
 import { getAttention } from './attention-state';
 import { connectionState } from './backend-switcher';
 import { activeConnection } from './serverConnections';
+import { isMac } from './platform';
 
 const RESOURCES = path.join(__dirname, '..', '..', 'resources');
 
@@ -108,7 +116,7 @@ export function refreshTrayMenu(): void {
     { type: 'separator' },
     { label: 'Open GeneratorAI', click: () => wm.restoreFromTray() },
     {
-      label: 'New Chat',
+      label: COMMANDS['chat.new'].label,
       // Shown for discoverability; tray menus do not register accelerators.
       accelerator: accel('chat.new'),
       registerAccelerator: false,
@@ -130,13 +138,17 @@ export function refreshTrayMenu(): void {
       click: () => wm.navigateTo(d.path),
     })),
     { type: 'separator' },
-    { label: 'Restart Server', click: () => void sm.restart().catch(() => undefined) },
+    { label: COMMANDS['server.restart'].label, click: () => void sm.restart().catch(() => undefined) },
     { type: 'separator' },
     // `app.quit()` fires `before-quit`, where `quitApp` asks about unsaved
     // work and only then marks the WindowManager as quitting. Nothing is
     // pre-set here: a prevented `before-quit` closes no window, and a flag set
     // before a declined prompt would stay set (P1-review P2-R38).
-    { label: 'Quit', click: () => app.quit() },
+    {
+      label: 'Quit GeneratorAI',
+      ...quitHint(),
+      click: () => app.quit(),
+    },
   ]);
   tray.setContextMenu(menu);
   tray.setToolTip(
@@ -144,6 +156,13 @@ export function refreshTrayMenu(): void {
       ? `GeneratorAI — ${attention.needsYou} need${attention.needsYou === 1 ? 's' : ''} you`
       : 'GeneratorAI',
   );
+}
+
+/** The platform's Quit chord (⌘Q on macOS; none elsewhere), displayed only. */
+function quitHint(): Pick<MenuItemConstructorOptions, 'accelerator' | 'registerAccelerator'> {
+  const quit = SYSTEM_SHORTCUTS.find((s) => s.label === 'Quit');
+  const binding = quit?.[isMac ? 'desktopMac' : 'desktopWinLinux'];
+  return binding ? { accelerator: toElectronAccelerator(binding), registerAccelerator: false } : {};
 }
 
 export function destroyTray(): void {

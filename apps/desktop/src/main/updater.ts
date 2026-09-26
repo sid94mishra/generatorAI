@@ -11,8 +11,9 @@
 //
 // The native "update ready" dialog stays until the renderer can tell the
 // user itself: it is skipped only while a renderer has subscribed to
-// `updateStateChanged` AND the window is visible (P2-R3). Nothing in the web
-// app subscribes before the P3-06 pill, so until then the dialog always shows.
+// `updateStateChanged` AND the window is visible (P2-R3). The web shell's
+// "Restart to update" pill (P3-06) is that subscriber: whenever the window is
+// on screen the pill tells the user, and the dialog is for a hidden window.
 //
 // Install: see `installUpdate`.
 // ────────────────────────────────────────────────────────────────
@@ -141,14 +142,25 @@ async function offerInstall(options: { force?: boolean } = {}): Promise<void> {
     detail: 'Restart the app to apply the update.',
   });
   if (res.response !== 0) return;
-  if ((await installUpdate()) === 'failed') {
-    // The user asked for this restart; a failure must not be silent (P2-R37).
+  await installUpdateInteractive();
+}
+
+/**
+ * An install the user asked for — the "Restart to update" pill (IPC), the
+ * menu's "Restart to Update (v…)", the dialog's "Restart Now". Same as
+ * `installUpdate`, but a failure is never silent (P2-R37): the app keeps
+ * running on this version and says so.
+ */
+export async function installUpdateInteractive(): Promise<InstallOutcome> {
+  const outcome = await installUpdate();
+  if (outcome === 'failed') {
     await dialog.showMessageBox({
       type: 'error',
       message: 'The update could not be installed.',
       detail: `${machine.error ?? 'The installer did not start.'}\n\nGeneratorAI keeps running on version ${currentVersion()}.`,
     });
   }
+  return outcome;
 }
 
 async function getUpdater(): Promise<AppUpdater | null> {

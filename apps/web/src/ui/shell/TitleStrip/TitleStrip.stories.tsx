@@ -1,7 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect } from 'storybook/test';
 import { IconButton } from '../../primitives/IconButton/IconButton.js';
-import { Button } from '../../primitives/Button/Button.js';
+import { UpdatePill } from '../UpdatePill/UpdatePill.js';
 import { TitleStrip, TitleStripSearch, TitleStripServerChip } from './TitleStrip.js';
 
 const start = (
@@ -41,9 +41,7 @@ export const UpdateReady: Story = {
   args: {
     end: (
       <>
-        <Button size="sm" icon="download" className="bg-run-bg text-run">
-          Restart to update
-        </Button>
+        <UpdatePill placement="strip" version="0.0.2-alpha.1" />
         <TitleStripServerChip label="This computer" tone="ok" toneLabel="Connected" />
       </>
     ),

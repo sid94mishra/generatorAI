@@ -11,13 +11,16 @@
 // Either way `WindowManager.navigateTo` holds the route until the app page has
 // loaded, so a link that arrives before the window (or during its first load)
 // is applied instead of lost. The route rules live in `deep-link-route.ts`.
+// `generatorai://command/<id>` runs an allowlisted registry command (New chat,
+// New workflow) through `WindowManager.sendCommand`, which holds it the same
+// way until the app page has reported in (06 §8, P3-06).
 // ────────────────────────────────────────────────────────────────
 
 import { app } from 'electron';
 import * as path from 'node:path';
 import { getWindowManager } from './window-manager';
 import { log } from './logger';
-import { DEEP_LINK_PROTOCOL, deepLinkToRoute } from './deep-link-route';
+import { DEEP_LINK_PROTOCOL, resolveDeepLink } from './deep-link-route';
 
 export { findDeepLinkInArgv } from './deep-link-route';
 
@@ -31,12 +34,25 @@ export function registerProtocolClient(): void {
 }
 
 export function handleDeepLink(url: string): void {
-  const route = deepLinkToRoute(url);
-  if (!route) return;
-  // Never log the query: a pairing link carries a one-time code.
-  log.info('Deep link', { route: route.split('?')[0] });
+  const target = resolveDeepLink(url);
+  if (!target) return;
+  if (target.kind === 'rejected-command') {
+    // Only the allowlisted commands (DEEP_LINK_COMMAND_IDS) may be run by a
+    // link another program handed us; the rest are dropped, not routed.
+    log.warn('Deep link ignored: not a deep-link command', { command: target.command.slice(0, 64) });
+    return;
+  }
   const wm = getWindowManager();
-  wm.navigateTo(route);
+  if (target.kind === 'command') {
+    log.info('Deep link', { command: target.command });
+    // Held by the window manager until the app page has reported in (cold
+    // start, a first load, the pairing screen), like a route.
+    wm.sendCommand(target.command);
+  } else {
+    // Never log the query: a pairing link carries a one-time code.
+    log.info('Deep link', { route: target.route.split('?')[0] });
+    wm.navigateTo(target.route);
+  }
   // macOS keeps running with every window closed; a link then has to bring the
   // window back (it loads the app and applies the held route). Before `ready`
   // the startup path creates the window itself.

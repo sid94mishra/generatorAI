@@ -6,7 +6,9 @@
 // Item 30h (h-item), pad 0 8, control-sm radius, gap 8, ui text, 16 icon;
 // highlighted `bg-selected`; trailing Kbd (`shortcut`) or a chevron on
 // submenu triggers; `danger` items in err; disabled fg-3; `description` makes
-// the 40h two-line item (Servers menu). Checkbox/radio items keep a 14px
+// the 40h two-line item (Servers menu); `trailing` is small fg-3 content at
+// the right end (a server's "● Connected", a hint such as "Security &
+// devices"). Checkbox/radio items keep a 14px
 // check column. GroupLabel 28h small fg-3; Separator 1px line-soft, margin 4 0.
 // Every positioner carries `data-gai-overlay="menu"` (D-19) on the dropdown
 // layer (D-41). Triggers take any element through `render`:
@@ -71,9 +73,11 @@ interface ItemDecor {
   danger?: boolean;
   /** Second line (mono micro fg-3): the 40h two-line item. */
   description?: ReactNode;
+  /** Small fg-3 content at the right end: a status ("● Connected") or a hint. */
+  trailing?: ReactNode;
 }
 
-function ItemBody({ icon, shortcut, description, children }: ItemDecor & { children?: ReactNode }) {
+function ItemBody({ icon, shortcut, description, trailing, children }: ItemDecor & { children?: ReactNode }) {
   return (
     <>
       {icon ? <Icon concept={icon} size={16} className="text-current" /> : null}
@@ -85,6 +89,9 @@ function ItemBody({ icon, shortcut, description, children }: ItemDecor & { child
       ) : (
         <span className="min-w-0 flex-1 truncate">{children}</span>
       )}
+      {trailing != null ? (
+        <span className="ml-2 flex shrink-0 items-center gap-1.5 text-small text-fg-3">{trailing}</span>
+      ) : null}
       {shortcut ? <Kbd keys={shortcut} aria-hidden className="ml-4" /> : null}
     </>
   );
@@ -95,13 +102,13 @@ export interface MenuItemProps extends Omit<ComponentProps<typeof BaseMenu.Item>
 }
 
 /** An action row. */
-export function MenuItem({ icon, shortcut, danger = false, description, className, children, ...rest }: MenuItemProps) {
+export function MenuItem({ icon, shortcut, danger = false, description, trailing, className, children, ...rest }: MenuItemProps) {
   return (
     <BaseMenu.Item
       className={cn(itemBase, description != null && 'min-h-10 py-1', danger && 'text-err', className)}
       {...rest}
     >
-      <ItemBody icon={icon} shortcut={shortcut} description={description}>
+      <ItemBody icon={icon} shortcut={shortcut} description={description} trailing={trailing}>
         {children}
       </ItemBody>
     </BaseMenu.Item>
@@ -120,7 +127,7 @@ export interface MenuCheckboxItemProps
 }
 
 /** A toggle row with a check column (`menuitemcheckbox`). */
-export function MenuCheckboxItem({ icon, shortcut, description, className, children, ...rest }: MenuCheckboxItemProps) {
+export function MenuCheckboxItem({ icon, shortcut, description, trailing, className, children, ...rest }: MenuCheckboxItemProps) {
   return (
     <BaseMenu.CheckboxItem className={cn(itemBase, description != null && 'min-h-10 py-1', className)} {...rest}>
       <CheckColumn>
@@ -128,7 +135,7 @@ export function MenuCheckboxItem({ icon, shortcut, description, className, child
           <Icon concept="check" size={14} />
         </BaseMenu.CheckboxItemIndicator>
       </CheckColumn>
-      <ItemBody icon={icon} shortcut={shortcut} description={description}>
+      <ItemBody icon={icon} shortcut={shortcut} description={description} trailing={trailing}>
         {children}
       </ItemBody>
     </BaseMenu.CheckboxItem>
@@ -145,7 +152,7 @@ export interface MenuRadioItemProps
 }
 
 /** One choice in a MenuRadioGroup (`menuitemradio`); `description` = two-line server row. */
-export function MenuRadioItem({ icon, shortcut, description, className, children, ...rest }: MenuRadioItemProps) {
+export function MenuRadioItem({ icon, shortcut, description, trailing, className, children, ...rest }: MenuRadioItemProps) {
   return (
     <BaseMenu.RadioItem className={cn(itemBase, description != null && 'min-h-10 py-1', className)} {...rest}>
       <CheckColumn>
@@ -153,7 +160,7 @@ export function MenuRadioItem({ icon, shortcut, description, className, children
           <Icon concept="check" size={14} />
         </BaseMenu.RadioItemIndicator>
       </CheckColumn>
-      <ItemBody icon={icon} shortcut={shortcut} description={description}>
+      <ItemBody icon={icon} shortcut={shortcut} description={description} trailing={trailing}>
         {children}
       </ItemBody>
     </BaseMenu.RadioItem>

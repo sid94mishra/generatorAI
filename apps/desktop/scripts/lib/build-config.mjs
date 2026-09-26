@@ -416,6 +416,23 @@ function macConfig(arch, signed) {
   };
 }
 
+/**
+ * Launcher actions (the right-click menu of the app in a Linux dock or
+ * launcher): the same entries as the macOS Dock menu and the Windows JumpList
+ * (`src/main/launcher-actions.ts`), from the registry's `LAUNCHER_ACTIONS` in
+ * `@generatorai/shared/ui-contract` — this script cannot import that
+ * TypeScript, so build-config.test.mjs pins the two together. Each opens the
+ * action's deep link through the registered `generatorai://` handler, so it
+ * takes the same path as any link on every desktop: the running app receives
+ * it through `second-instance`, a cold start picks it out of argv, and only
+ * allowlisted commands run (06 §8, P3-06).
+ */
+export const LINUX_DESKTOP_ACTIONS = {
+  NewChat: { Name: 'New Chat', Exec: 'xdg-open generatorai://command/chat.new' },
+  NewWorkflow: { Name: 'New Workflow', Exec: 'xdg-open generatorai://command/workflow.new' },
+  Home: { Name: 'Home', Exec: 'xdg-open generatorai://' },
+};
+
 function linuxConfig(arch, maintainer) {
   return {
     linux: {
@@ -446,7 +463,9 @@ function linuxConfig(arch, maintainer) {
           StartupWMClass: LINUX_EXECUTABLE,
           MimeType: 'x-scheme-handler/generatorai;',
           Keywords: 'ai;agent;developer;automation;',
+          Actions: `${Object.keys(LINUX_DESKTOP_ACTIONS).join(';')};`,
         },
+        desktopActions: LINUX_DESKTOP_ACTIONS,
       },
     },
     deb: {

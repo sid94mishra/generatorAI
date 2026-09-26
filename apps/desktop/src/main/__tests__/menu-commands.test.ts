@@ -26,6 +26,8 @@ const state = vi.hoisted(() => ({
   sendAppearanceRequest: vi.fn(),
   nativeTheme: { shouldUseDarkColors: true, themeSource: 'system' },
   restoreFromTray: vi.fn(),
+  checkForUpdates: vi.fn(),
+  installUpdate: vi.fn(),
 }));
 
 vi.mock('electron', () => {
@@ -94,7 +96,7 @@ async function loadMenu(mac: boolean) {
   state.mac = mac;
   vi.resetModules();
   const menu = await import('../menu');
-  menu.buildMenu({ showAbout: vi.fn(), checkForUpdates: vi.fn() });
+  menu.buildMenu({ showAbout: vi.fn(), checkForUpdates: state.checkForUpdates, installUpdate: state.installUpdate });
   return { menu, items: state.template as Item[] };
 }
 
@@ -111,6 +113,8 @@ const column = (mac: boolean) => (mac ? 'desktopMac' : 'desktopWinLinux');
 const expected = (id: CommandId, mac: boolean) => COMMANDS[id][column(mac)] ?? undefined;
 
 beforeEach(() => {
+  state.checkForUpdates.mockReset();
+  state.installUpdate.mockReset();
   state.sendCommand.mockReset();
   state.navigateTo.mockReset();
   state.restoreFromTray.mockReset();
@@ -186,6 +190,38 @@ describe.each([true, false])('application menu (mac=%s)', (mac) => {
   });
 });
 
+describe.each([true, false])('registry-driven labels and updates (mac=%s, P3-06)', (mac) => {
+  it('File ▸ New lists every global create command, title-cased, each sending its id', async () => {
+    const { items } = await loadMenu(mac);
+    const file = find(items, 'File')!;
+    const labels = (file.submenu ?? []).map((i) => i.label);
+    expect(labels.slice(0, 5)).toEqual(['New Chat', 'New Workflow', 'New Project', 'New Automation', 'New Agent']);
+    find(file.submenu, 'New Agent')!.click?.();
+    expect(state.sendCommand).toHaveBeenCalledWith('agent.new');
+  });
+
+  it('Restart Server (Help ▸ Troubleshooting) is the server.restart command', async () => {
+    const { items } = await loadMenu(mac);
+    expect(find(find(items, 'Help')?.submenu, 'Restart Server')).toBeDefined();
+  });
+
+  it('"Check for Updates…" becomes "Restart to Update (v…)" while an update is ready, and back', async () => {
+    const { menu } = await loadMenu(mac);
+    const help = () => find(state.template as Item[], 'Help')!;
+    expect(find(help().submenu, 'Check for Updates…')).toBeDefined();
+    menu.setMenuUpdateReady('1.4.0');
+    const install = find(help().submenu, 'Restart to Update (v1.4.0)')!;
+    expect(install).toBeDefined();
+    expect(find(help().submenu, 'Check for Updates…')).toBeUndefined();
+    install.click?.();
+    expect(state.installUpdate).toHaveBeenCalledTimes(1);
+    if (mac) expect(find(find(state.template as Item[], 'GeneratorAI')?.submenu, 'Restart to Update (v1.4.0)')).toBeDefined();
+    menu.setMenuUpdateReady(null);
+    find(help().submenu, 'Check for Updates…')!.click?.();
+    expect(state.checkForUpdates).toHaveBeenCalledTimes(1);
+  });
+});
+
 describe('View ▸ Appearance (D-25: the renderer is the only appearance writer)', () => {
   const radio = (label: string) =>
     find(state.template as Item[], 'Appearance')!.submenu!.find((i) => i.label === label) as Item & { checked?: boolean };
@@ -224,7 +260,7 @@ describe('tray', () => {
     find(items, 'Agents')!.click?.();
     expect(state.navigateTo).toHaveBeenCalledWith('/agents');
 
-    const newChat = find(items, 'New Chat')!;
+    const newChat = find(items, 'New chat')!;
     expect(newChat.accelerator).toBe(COMMANDS['chat.new'].desktopWinLinux);
     newChat.click?.();
     expect(state.restoreFromTray).toHaveBeenCalled();

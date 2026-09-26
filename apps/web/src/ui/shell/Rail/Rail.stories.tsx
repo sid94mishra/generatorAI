@@ -52,4 +52,12 @@ export const Tooltips: Story = {
   },
 };
 
+/** An update is ready (macOS, Linux native, collapsed): a run-toned download icon above the connection dot. */
+export const UpdateReady: Story = {
+  parameters: { demo: { layout: 'mac', update: true } },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('button', { name: 'Restart to update' })).toBeVisible();
+  },
+};
+
 export const Compact: Story = { globals: { density: 'compact' }, parameters: { demo: {} } };

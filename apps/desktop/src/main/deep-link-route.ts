@@ -6,8 +6,11 @@
 // JumpList task), so it is untrusted input: the path is kept, the hash is
 // dropped and the query is reduced to the keys the app reads from a link
 // (05-gap-matrix.md G-08). Everything else is discarded, so a link can never
-// inject a parameter some page happens to act on.
+// inject a parameter some page happens to act on. `command/<id>` links run a
+// registry command, and only one on the deep-link allowlist (06 §8).
 // ────────────────────────────────────────────────────────────────
+
+import { isDeepLinkCommandId, type DeepLinkCommandId } from '@generatorai/shared/ui-contract';
 
 export const DEEP_LINK_PROTOCOL = 'generatorai';
 
@@ -76,4 +79,42 @@ export function deepLinkToRoute(url: string): string | null {
   }
 
   return `/${segments.join('/')}${keepAllowed(params)}`;
+}
+
+/** What a deep link asks for: a route to show, or a registry command to run. */
+export type DeepLinkTarget =
+  | { kind: 'route'; route: string }
+  | { kind: 'command'; command: DeepLinkCommandId }
+  /** A `command/<id>` link whose id is not on the allowlist: ignored (and logged). */
+  | { kind: 'rejected-command'; command: string };
+
+/**
+ * Resolve a `generatorai://` URL (06 §8):
+ * - `generatorai://command/<id>` runs `<id>` only if it is a deep-link
+ *   command (`DEEP_LINK_COMMAND_IDS`: global renderer commands flagged
+ *   `deepLink` — New chat, New workflow). Any other id, extra segments or an
+ *   empty id is `rejected-command`: the link is never turned into a route.
+ *   The query and hash of a command link are ignored.
+ * - everything else is a route (`deepLinkToRoute`).
+ * `null` when the URL is not a deep link at all.
+ */
+export function resolveDeepLink(url: string): DeepLinkTarget | null {
+  if (!isDeepLink(url)) return null;
+  const rest = url.slice(PREFIX.length).split('#')[0]!.split('?')[0]!;
+  const segments = rest.split('/').filter((s) => s.length > 0);
+  if (segments[0]?.toLowerCase() === 'command') {
+    const id = segments.length === 2 ? safeDecode(segments[1]!) : '';
+    if (isDeepLinkCommandId(id)) return { kind: 'command', command: id };
+    return { kind: 'rejected-command', command: segments.slice(1).join('/') };
+  }
+  const route = deepLinkToRoute(url);
+  return route === null ? null : { kind: 'route', route };
+}
+
+function safeDecode(segment: string): string {
+  try {
+    return decodeURIComponent(segment);
+  } catch {
+    return '';
+  }
 }

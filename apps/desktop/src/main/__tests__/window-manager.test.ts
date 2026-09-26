@@ -326,6 +326,7 @@ describe('menu and tray commands bring the window forward (P1-R2)', () => {
   it('sendCommand (e.g. Settings… / Cmd+,) shows a window hidden to the tray, then focuses it', () => {
     settings.minimizeToTray = true;
     const { wm, win } = makeWindow();
+    wm.markRendererReady();
     win.emit('close', { preventDefault: vi.fn() });
     expect(win.visible).toBe(false);
     wm.sendCommand('app.settings');
@@ -336,6 +337,7 @@ describe('menu and tray commands bring the window forward (P1-R2)', () => {
 
   it('sendCommand restores a minimised window', () => {
     const { wm, win } = makeWindow();
+    wm.markRendererReady();
     win.minimized = true;
     wm.sendCommand('chat.new');
     expect(win.restore).toHaveBeenCalled();
@@ -351,11 +353,63 @@ describe('menu and tray commands bring the window forward (P1-R2)', () => {
     expect(win.focus).toHaveBeenCalled();
   });
 
-  it('sendCommand without a live window does nothing', () => {
+  it('sendCommand without a live window sends nothing now', () => {
     const { wm, win } = makeWindow();
+    wm.markRendererReady();
     win.destroyed = true;
     expect(() => wm.sendCommand('app.settings')).not.toThrow();
     expect(win.webContents.send).not.toHaveBeenCalledWith(IPC_EVENT.command, 'app.settings');
+  });
+});
+
+describe('held commands (generatorai://command/<id>, dock and JumpList; 06 §8, P3-06)', () => {
+  const commandsSent = (win: InstanceType<typeof FakeBrowserWindow>) =>
+    win.webContents.send.mock.calls.filter((c) => c[0] === IPC_EVENT.command).map((c) => c[1]);
+
+  it('cold start: a command before any window exists runs once the app page reports in', () => {
+    FakeBrowserWindow.instances.length = 0;
+    const wm = new WindowManager();
+    wm.sendCommand('chat.new');
+    wm.createMainWindow(APP);
+    const win = FakeBrowserWindow.instances[0]!;
+    finishLoad(win, `${APP}/`);
+    // Loaded is not enough: the command host subscribes with the shell.
+    expect(commandsSent(win)).toEqual([]);
+    wm.markRendererReady();
+    expect(commandsSent(win)).toEqual(['chat.new']);
+    // Delivered once: later pushes do not replay it.
+    wm.markRendererReady();
+    expect(commandsSent(win)).toEqual(['chat.new']);
+  });
+
+  it('while the window loads (or shows the pairing screen) the command waits, and the last one wins', () => {
+    const { wm, win } = makeWindow(APP, { loaded: false });
+    win.visible = false;
+    wm.sendCommand('workflow.new');
+    wm.sendCommand('chat.new');
+    expect(commandsSent(win)).toEqual([]);
+    expect(win.visible).toBe(true);
+    finishLoad(win, `${APP}/`);
+    wm.markRendererReady();
+    expect(commandsSent(win)).toEqual(['chat.new']);
+  });
+
+  it('warm start: a ready renderer gets the command at once', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    wm.sendCommand('chat.new');
+    expect(commandsSent(win)).toEqual(['chat.new']);
+  });
+
+  it('after a renderer reset (reload, backend switch) commands wait for the new document', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    win.webContents.emit('did-navigate');
+    wm.sendCommand('chat.new');
+    expect(commandsSent(win)).toEqual([]);
+    finishLoad(win, `${APP}/`);
+    wm.markRendererReady();
+    expect(commandsSent(win)).toEqual(['chat.new']);
   });
 });
 

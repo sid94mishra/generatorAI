@@ -137,6 +137,23 @@ export function isRendererCommandId(value: unknown): value is RendererCommandId 
   return isCommandId(value) && COMMANDS[value].runsIn === 'renderer' && COMMANDS[value].scope === 'global';
 }
 
+/**
+ * Commands `generatorai://command/<id>` may run (06 §8): global renderer
+ * commands flagged `deepLink`. A link comes from any program on the machine,
+ * so everything else is ignored — never "the id is a command, run it".
+ */
+export type DeepLinkCommandId = {
+  [K in RendererCommandId]: (typeof COMMANDS)[K] extends { deepLink: true } ? K : never;
+}[RendererCommandId];
+
+export const DEEP_LINK_COMMAND_IDS = RENDERER_COMMAND_IDS.filter(
+  (id): id is DeepLinkCommandId => (COMMANDS[id] as CommandDef).deepLink === true,
+);
+
+export function isDeepLinkCommandId(value: unknown): value is DeepLinkCommandId {
+  return isRendererCommandId(value) && (COMMANDS[value] as CommandDef).deepLink === true;
+}
+
 /** Whether the command's web chord fires while focus is in a text field. */
 export function firesInEditable(id: CommandId): boolean {
   const def: CommandDef = COMMANDS[id];
@@ -173,6 +190,39 @@ export type NavDestinationId = NavDestination['id'];
 export function navDestinationFor(pathname: string): NavDestination | null {
   if (pathname === '/') return NAV_DESTINATIONS[0];
   return NAV_DESTINATIONS.find((d) => d.path !== '/' && (pathname === d.path || pathname.startsWith(`${d.path}/`))) ?? null;
+}
+
+/**
+ * OS launcher shortcuts, in order (06 §8): the macOS Dock menu, the Windows
+ * JumpList tasks and the Linux `.desktop` actions all list these. A command
+ * entry must be a deep-link command (the JumpList and the Linux actions start
+ * the app with its `generatorai://command/<id>` link); a destination entry
+ * opens that section.
+ */
+export type LauncherAction =
+  | { kind: 'command'; command: DeepLinkCommandId }
+  | { kind: 'destination'; destination: NavDestinationId };
+
+export const LAUNCHER_ACTIONS: readonly LauncherAction[] = [
+  { kind: 'command', command: 'chat.new' },
+  { kind: 'command', command: 'workflow.new' },
+  { kind: 'destination', destination: 'home' },
+];
+
+/** The deep link that performs a launcher action: `generatorai://command/chat.new`, `generatorai://` (Home). */
+export function launcherActionLink(action: LauncherAction): string {
+  if (action.kind === 'command') return `generatorai://command/${action.command}`;
+  const dest = NAV_DESTINATIONS.find((d) => d.id === action.destination);
+  if (!dest) throw new Error(`Unknown destination ${action.destination}`);
+  return `generatorai://${dest.path.slice(1)}`;
+}
+
+/** The registry label of a launcher action ("New chat", "Home"). */
+export function launcherActionLabel(action: LauncherAction): string {
+  if (action.kind === 'command') return COMMANDS[action.command].label;
+  const dest = NAV_DESTINATIONS.find((d) => d.id === action.destination);
+  if (!dest) throw new Error(`Unknown destination ${action.destination}`);
+  return dest.label;
 }
 
 /**

@@ -11,8 +11,10 @@ const state = vi.hoisted(() => ({
   listeners: new Map<string, (...args: unknown[]) => void>(),
   window: null as { isDestroyed: () => boolean } | null,
   navigateTo: vi.fn(),
+  sendCommand: vi.fn(),
   restoreFromTray: vi.fn(),
   logInfo: vi.fn(),
+  logWarn: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -25,11 +27,12 @@ vi.mock('electron', () => ({
 vi.mock('../window-manager', () => ({
   getWindowManager: () => ({
     navigateTo: state.navigateTo,
+    sendCommand: state.sendCommand,
     restoreFromTray: state.restoreFromTray,
     getMainWindow: () => state.window,
   }),
 }));
-vi.mock('../logger', () => ({ log: { info: state.logInfo, warn: vi.fn(), error: vi.fn() } }));
+vi.mock('../logger', () => ({ log: { info: state.logInfo, warn: state.logWarn, error: vi.fn() } }));
 
 import { findDeepLinkInArgv, handleDeepLink, registerDeepLinks } from '../deep-link';
 
@@ -38,8 +41,10 @@ beforeEach(() => {
   state.window = null;
   state.listeners.clear();
   state.navigateTo.mockReset();
+  state.sendCommand.mockReset();
   state.restoreFromTray.mockReset();
   state.logInfo.mockReset();
+  state.logWarn.mockReset();
 });
 
 describe('macOS open-url', () => {
@@ -92,5 +97,50 @@ describe('Windows / Linux argv', () => {
     expect(state.navigateTo).not.toHaveBeenCalled();
     handleDeepLink('generatorai://pair?code=SECRET-CODE-1234');
     expect(JSON.stringify(state.logInfo.mock.calls)).not.toContain('SECRET');
+  });
+});
+
+describe('generatorai://command/<id> (06 §8, P3-06)', () => {
+  it('macOS cold start: open-url before ready hands the command to the window manager, which holds it', () => {
+    registerDeepLinks();
+    state.listeners.get('open-url')!({ preventDefault: vi.fn() }, 'generatorai://command/chat.new');
+    expect(state.sendCommand).toHaveBeenCalledWith('chat.new');
+    expect(state.navigateTo).not.toHaveBeenCalled();
+    expect(state.restoreFromTray).not.toHaveBeenCalled();
+  });
+
+  it('macOS warm start with every window closed: brings a window back for the held command', () => {
+    state.ready = true;
+    registerDeepLinks();
+    state.listeners.get('open-url')!({ preventDefault: vi.fn() }, 'generatorai://command/workflow.new');
+    expect(state.sendCommand).toHaveBeenCalledWith('workflow.new');
+    expect(state.restoreFromTray).toHaveBeenCalledTimes(1);
+  });
+
+  it('Windows JumpList / Linux .desktop action: second-instance argv runs the command', () => {
+    state.ready = true;
+    state.window = { isDestroyed: () => false };
+    const link = findDeepLinkInArgv(['C:\\GeneratorAI.exe', '--allow-file-access', '"generatorai://command/chat.new"']);
+    handleDeepLink(link!);
+    expect(state.sendCommand).toHaveBeenCalledWith('chat.new');
+    expect(state.navigateTo).not.toHaveBeenCalled();
+  });
+
+  it('a command that is not allowlisted is ignored and logged, never routed', () => {
+    state.ready = true;
+    state.window = { isDestroyed: () => false };
+    for (const url of [
+      'generatorai://command/app.settings',
+      'generatorai://command/window.reload',
+      'generatorai://command/devtools.toggle',
+      'generatorai://command/nope',
+      'generatorai://command/',
+      'generatorai://command/chat.new/extra',
+    ]) {
+      handleDeepLink(url);
+    }
+    expect(state.sendCommand).not.toHaveBeenCalled();
+    expect(state.navigateTo).not.toHaveBeenCalled();
+    expect(state.logWarn).toHaveBeenCalledTimes(6);
   });
 });

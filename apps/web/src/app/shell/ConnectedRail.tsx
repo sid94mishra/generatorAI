@@ -8,7 +8,9 @@
 // Home carries the needs-you dot and the running counter shows how many
 // things run — both only once the attention feed has loaded (D-36). The
 // counter and Expand open the full sidebar (the flyout while the rail is
-// forced, the preference otherwise).
+// forced, the preference otherwise). The app mark opens the Servers menu; the
+// "Restart to update" icon sits above the connection dot while an update is
+// ready (mac and native layouts — the strip layout's title strip has the pill).
 // ────────────────────────────────────────────────────────────────
 
 import { Link, useLocation } from 'react-router';
@@ -29,6 +31,8 @@ import {
   RailStatusDot,
 } from '@/ui/shell/Rail/Rail.js';
 import { useShellActions } from './shellActions.js';
+import { ConnectedUpdatePill } from './ConnectedUpdatePill.js';
+import { ServersMenu } from './ServersMenu.js';
 import { shortcutFor, useShellStatus } from './useShellStatus.js';
 
 export function ConnectedRail({ layout, covered = false }: { layout: ShellLayout; covered?: boolean }) {
@@ -43,9 +47,14 @@ export function ConnectedRail({ layout, covered = false }: { layout: ShellLayout
   return (
     <Rail covered={covered} topRow={layout === 'mac' ? <MacTrafficLightRow data-testid="rail-drag-row" aria-hidden /> : undefined}>
       {strip ? null : (
-        <RailMark
-          data-testid="rail-server"
-          label={status.serverName ? `GeneratorAI · ${status.serverName}` : 'GeneratorAI'}
+        <ServersMenu
+          side="right"
+          trigger={
+            <RailMark
+              data-testid="rail-server"
+              label={status.serverName ? `GeneratorAI · ${status.serverName}` : 'GeneratorAI'}
+            />
+          }
         />
       )}
       <IconButton
@@ -112,6 +121,7 @@ export function ConnectedRail({ layout, covered = false }: { layout: ShellLayout
         </>
       ) : null}
       <RailSpacer />
+      {strip ? null : <ConnectedUpdatePill placement="rail" />}
       <RailStatusDot data-testid="rail-connection" tone={status.connection.tone} label={connectionLabel} />
       <IconButton
         icon="settings"

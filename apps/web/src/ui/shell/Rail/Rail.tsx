@@ -69,27 +69,27 @@ export function RailGroup({ className, ...rest }: ComponentProps<'div'>) {
   return <div className={cn('flex flex-col items-center gap-0.5', className)} {...rest} />;
 }
 
-export interface RailMarkProps extends Omit<ComponentProps<'span'>, 'children'> {
+export interface RailMarkProps extends Omit<ComponentProps<'button'>, 'children'> {
   /** Accessible name and tooltip, e.g. "GeneratorAI · This computer". */
   label: string;
 }
 
 /**
- * The app mark at the top of the rail, naming the active server. Static in
- * P3-04 like the sidebar's ServerSwitcher; P3-06 makes it the Servers trigger.
+ * The app mark at the top of the rail, naming the active server: the rail's
+ * Servers menu trigger (pass it as `Menu.Trigger`'s `render`), like the
+ * sidebar's ServerSwitcher.
  */
 export function RailMark({ label, className, ...rest }: RailMarkProps) {
   return (
     <Tooltip content={label} side="right">
-      <span
-        role="img"
+      <Button
+        variant="ghost"
         aria-label={label}
-        tabIndex={0}
-        className={cn('flex size-control-lg shrink-0 items-center justify-center rounded-control', focusRing, className)}
+        className={cn('size-control-lg shrink-0 px-0 data-popup-open:bg-hover', className)}
         {...rest}
       >
         <AppMark className="size-5.5" />
-      </span>
+      </Button>
     </Tooltip>
   );
 }

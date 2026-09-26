@@ -2,14 +2,16 @@
 // ConnectedTitleStrip — S-06 wired (Windows; Linux with the custom title
 // bar; 06 §3.5). Back / Forward follow Chromium's session history (main
 // pushes it); the toggle runs `sidebar.toggle`; Search opens the palette; the
-// server chip names the active server with the connection's dot. The update
-// pill (`titlebar-update-pill`) and the Servers popover on the chip land in
-// P3-06.
+// "Restart to update" pill (`titlebar-update-pill`) shows while an update is
+// ready; the server chip names the active server with the connection's dot
+// and opens the Servers menu (P3-06).
 // ────────────────────────────────────────────────────────────────
 
 import { IconButton } from '@/ui/primitives/IconButton/IconButton.js';
 import { TitleStrip, TitleStripSearch, TitleStripServerChip } from '@/ui/shell/TitleStrip/TitleStrip.js';
 import { useShellActions } from './shellActions.js';
+import { ConnectedUpdatePill } from './ConnectedUpdatePill.js';
+import { ServersMenu } from './ServersMenu.js';
 import { useNavHistory } from './useNavHistory.js';
 import { shortcutFor, useShellStatus } from './useShellStatus.js';
 
@@ -61,14 +63,22 @@ export function ConnectedTitleStrip() {
         />
       }
       end={
-        status.serverName ? (
-          <TitleStripServerChip
-            data-testid="titlebar-server"
-            label={status.serverName}
-            tone={status.connection.tone}
-            toneLabel={status.connection.label}
-          />
-        ) : null
+        <>
+          <ConnectedUpdatePill placement="strip" />
+          {status.serverName ? (
+            <ServersMenu
+              align="end"
+              trigger={
+                <TitleStripServerChip
+                  data-testid="titlebar-server"
+                  label={status.serverName}
+                  tone={status.connection.tone}
+                  toneLabel={status.connection.label}
+                />
+              }
+            />
+          ) : null}
+        </>
       }
     />
   );

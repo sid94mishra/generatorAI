@@ -10,7 +10,10 @@
 //           server chip live in the title strip)
 // Then the nav (NAV_DESTINATIONS), the live Needs you / Running lists (only
 // once the attention feed has loaded, and only when non-empty — D-36), and
-// the footer: connection status + Settings.
+// the footer: connection status + Settings, with the "Restart to update" pill
+// above it while an update is ready (mac and native layouts; the strip layout
+// has it in the title strip, D-23). The server switcher opens the Servers
+// menu (P3-06).
 // `inFlyout`: the same sidebar opened over a forced rail; Collapse closes it.
 // ────────────────────────────────────────────────────────────────
 
@@ -40,6 +43,8 @@ import {
   SidebarSection,
 } from '@/ui/shell/Sidebar/Sidebar.js';
 import { useShellActions } from './shellActions.js';
+import { ConnectedUpdatePill } from './ConnectedUpdatePill.js';
+import { ServersMenu } from './ServersMenu.js';
 import { formatElapsed, useNow } from './elapsed.js';
 import { useNavHistory } from './useNavHistory.js';
 import { shortcutFor, useShellStatus } from './useShellStatus.js';
@@ -98,7 +103,7 @@ export function ConnectedSidebar({ layout, inFlyout = false }: ConnectedSidebarP
           </SidebarHeaderRow>
         ) : (
           <SidebarHeaderRow>
-            <ServerSwitcher data-testid="sidebar-server-switcher" server={status.serverName} />
+            <ServersMenu trigger={<ServerSwitcher data-testid="sidebar-server-switcher" server={status.serverName} />} />
             {collapse}
           </SidebarHeaderRow>
         )
@@ -137,6 +142,7 @@ export function ConnectedSidebar({ layout, inFlyout = false }: ConnectedSidebarP
           label={status.connection.label}
           {...(status.address ? { address: status.address } : {})}
           notice={status.unrecoverable > 0 ? <GapNotice count={status.unrecoverable} since={status.lastGapAt} /> : null}
+          update={strip ? null : <ConnectedUpdatePill placement="footer" />}
           action={
             <IconButton
               icon="settings"

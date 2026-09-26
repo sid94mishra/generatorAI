@@ -46,6 +46,16 @@ export const WindowsStrip: Story = {
 /** Linux native frame in the desktop app: the 36px Back / Forward row. */
 export const LinuxDesktop: Story = { args, parameters: { demo: { layout: 'native', desktop: true } } };
 
+/** An update is ready (macOS, Linux native): "Restart to update" above the connection row (D-23, P3-06). */
+export const UpdateReady: Story = {
+  args,
+  parameters: { demo: { layout: 'mac', update: true } },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('button', { name: 'Restart to update' })).toBeVisible();
+    await expect(canvas.getByRole('button', { name: /GeneratorAI/ })).toBeVisible();
+  },
+};
+
 /** The attention feed has not loaded: no Needs you / Running lists (D-36). */
 export const FeedNotLoaded: Story = {
   args,

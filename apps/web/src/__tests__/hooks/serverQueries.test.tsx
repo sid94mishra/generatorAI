@@ -50,7 +50,7 @@ vi.mock('@/platform/authRuntime.js', () => webAuth);
 const probeServer = vi.hoisted(() => vi.fn());
 vi.mock('@generatorai/client-runtime', () => ({ probeServer }));
 
-import { addServer, serverKeys, switchServer, useServers } from '@/hooks/serverQueries.js';
+import { THIS_ORIGIN_SERVER_ID, addServer, serverKeys, switchServer, useServers } from '@/hooks/serverQueries.js';
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -123,6 +123,32 @@ describe('useServers', () => {
     expect(probeServer).toHaveBeenCalledTimes(1);
     expect(probeServer).toHaveBeenCalledWith(here, { timeoutMs: 2500, expectedServerId: 'srv-here' });
     expect(state.list).not.toHaveBeenCalled();
+  });
+
+  it("off desktop: the page's own server is listed (probed, active) when the catalog has no entry for it", async () => {
+    state.isDesktop = false;
+    const here = window.location.origin;
+    webAuth.listConnections.mockReturnValue([{ serverId: 'srv-a', label: 'Home server', endpoint: 'https://home.example', kind: 'remote' }]);
+    const { result } = renderHook(() => useServers(), { wrapper });
+    await waitFor(() => expect(result.current.data).toHaveLength(2));
+    expect(result.current.data![0]).toMatchObject({
+      id: THIS_ORIGIN_SERVER_ID,
+      label: 'Studio',
+      url: here,
+      active: true,
+      status: 'connected',
+      serverName: 'Studio',
+    });
+    expect(result.current.data![1]).toMatchObject({ id: 'srv-a', active: false, status: 'unknown' });
+    expect(probeServer).toHaveBeenCalledWith(here, { timeoutMs: 2500 });
+  });
+
+  it("off desktop: an unreachable own server keeps its host as the label and says so", async () => {
+    state.isDesktop = false;
+    probeServer.mockResolvedValue({ status: 'offline' });
+    const { result } = renderHook(() => useServers(), { wrapper });
+    await waitFor(() => expect(result.current.data).toHaveLength(1));
+    expect(result.current.data![0]).toMatchObject({ label: new URL(window.location.origin).host, status: 'offline', active: true });
   });
 
   it('invalidates the query when the desktop bridge reports a change', async () => {

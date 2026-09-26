@@ -11,6 +11,7 @@ import { NavItem } from '../../primitives/NavItem/NavItem.js';
 import { StatusDot } from '../../primitives/StatusDot/StatusDot.js';
 import type { ShellLayout } from '../AppFrame/AppFrame.js';
 import { MacTrafficLightRow } from '../MacTrafficLightRow/MacTrafficLightRow.js';
+import { UpdatePill } from '../UpdatePill/UpdatePill.js';
 import { Rail, RailCounterButton, RailDivider, RailGroup, RailMark, RailSpacer, RailStatusDot } from '../Rail/Rail.js';
 import {
   ServerSwitcher,
@@ -47,6 +48,8 @@ export interface DemoOptions {
   connection?: 'ok' | 'warn' | 'err';
   /** The flyout covers the rail. */
   covered?: boolean;
+  /** An update is ready: the "Restart to update" pill in the footer / the rail icon (P3-06). */
+  update?: boolean;
 }
 
 const CONNECTION_LABEL = { ok: 'Connected', warn: 'Reconnecting…', err: 'Disconnected' } as const;
@@ -58,6 +61,7 @@ export function demoSidebar({
   live = true,
   gap = false,
   connection = 'ok',
+  update = false,
 }: DemoOptions = {}): ReactNode {
   const strip = layout === 'strip';
   const newChat = (
@@ -147,6 +151,7 @@ export function demoSidebar({
               />
             ) : null
           }
+          update={update && !strip ? <UpdatePill placement="footer" version="0.0.2-alpha.1" /> : null}
           action={<IconButton icon="settings" label="Settings" />}
         />
       }
@@ -154,7 +159,7 @@ export function demoSidebar({
   );
 }
 
-export function demoRail({ layout = 'native', active = 'chats', live = true, covered = false }: DemoOptions = {}): ReactNode {
+export function demoRail({ layout = 'native', active = 'chats', live = true, covered = false, update = false }: DemoOptions = {}): ReactNode {
   const strip = layout === 'strip';
   return (
     <Rail className="h-full" covered={covered} topRow={layout === 'mac' ? <MacTrafficLightRow aria-hidden /> : undefined}>
@@ -185,6 +190,7 @@ export function demoRail({ layout = 'native', active = 'chats', live = true, cov
         </>
       ) : null}
       <RailSpacer />
+      {update && !strip ? <UpdatePill placement="rail" version="0.0.2-alpha.1" /> : null}
       <RailStatusDot tone="ok" label="Connected · local:3100" />
       <IconButton icon="settings" label="Settings" size="lg" tooltipSide="right" />
     </Rail>

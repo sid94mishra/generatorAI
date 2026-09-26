@@ -71,6 +71,13 @@ export class WindowManager {
    * History-API injection (06 §3.4). Cleared with every renderer reset.
    */
   private rendererReady = false;
+  /**
+   * A renderer command asked for before any page could run it (a
+   * `generatorai://command/<id>` link on a cold start, a dock menu action
+   * while the window loads). The last one wins; it is sent when the app page
+   * reports in (`markRendererReady`), after any held route.
+   */
+  private pendingCommand: DesktopCommand | null = null;
 
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
@@ -107,6 +114,12 @@ export class WindowManager {
    */
   markRendererReady(): void {
     this.rendererReady = true;
+    const command = this.pendingCommand;
+    const win = this.mainWindow;
+    if (command && win && !win.isDestroyed()) {
+      this.pendingCommand = null;
+      win.webContents.send(IPC_EVENT.command, command);
+    }
   }
 
   /** The URL the main window is meant to be showing. */
@@ -525,7 +538,15 @@ export class WindowManager {
    */
   sendCommand(command: DesktopCommand): void {
     const win = this.mainWindow;
-    if (!win || win.isDestroyed()) return;
+    if (!win || win.isDestroyed() || !this.rendererReady) {
+      // No page to run it yet: a `generatorai://command/<id>` link on a cold
+      // start, a dock/JumpList action while the window is loading, the pairing
+      // screen. Held (last one wins) and run once the app page reports in
+      // (`markRendererReady`), like a held route.
+      this.pendingCommand = command;
+      if (win && !win.isDestroyed()) WindowManager.reveal(win);
+      return;
+    }
     win.webContents.send(IPC_EVENT.command, command);
     WindowManager.reveal(win);
   }

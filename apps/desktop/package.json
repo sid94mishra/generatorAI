@@ -20,7 +20,7 @@
     "prepack:dist": "pnpm --filter @generatorai/web build && pnpm run build && pnpm run build:server",
     "electron-builder": "node scripts/electron-builder.mjs",
     "verify:release": "node scripts/verify-release-manifest.mjs",
-    "mock-update-server": "node scripts/mock-update-server.mjs",
+    "mock-update-server": "node ../../agent-tests/mock-update-server.mjs serve",
     "package": "pnpm run prepack:dist && node scripts/electron-builder.mjs",
     "package:dir": "pnpm run prepack:dist && node scripts/electron-builder.mjs --dir"
   },

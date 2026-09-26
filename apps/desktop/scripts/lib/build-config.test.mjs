@@ -11,7 +11,10 @@ import {
   assertPublishAllowed,
   requestsPublish,
   UnsignedPublishError,
+  LINUX_DESKTOP_ACTIONS,
 } from './build-config.mjs';
+import { LAUNCHER_ACTIONS, launcherActionLabel, launcherActionLink } from '@generatorai/shared/ui-contract';
+import { menuLabel } from '../../src/main/menu-label.ts';
 
 const base = { platform: 'win', arch: 'x64', channel: 'alpha', signed: false, env: {} };
 
@@ -273,6 +276,16 @@ describe('createBuildConfig', () => {
   it('matches StartupWMClass to the executable so windows bind to the launcher', () => {
     const config = createBuildConfig({ ...base, platform: 'linux', arch: 'x64' });
     expect(config.linux.desktop.entry.StartupWMClass).toBe(config.linux.executableName);
+  });
+
+  it('Linux .desktop actions are the registry launcher actions (06 §8, P3-06)', () => {
+    const config = createBuildConfig({ ...base, platform: 'linux', arch: 'x64' });
+    const actions = Object.values(config.linux.desktop.desktopActions);
+    expect(actions).toEqual(
+      LAUNCHER_ACTIONS.map((a) => ({ Name: menuLabel(launcherActionLabel(a)), Exec: `xdg-open ${launcherActionLink(a)}` })),
+    );
+    expect(config.linux.desktop.desktopActions).toBe(LINUX_DESKTOP_ACTIONS);
+    expect(config.linux.desktop.entry.Actions).toBe(`${Object.keys(LINUX_DESKTOP_ACTIONS).join(';')};`);
   });
 
   it('ships one Chromium locale instead of 55', () => {

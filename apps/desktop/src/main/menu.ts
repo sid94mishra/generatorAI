@@ -9,12 +9,15 @@
 //
 //   1. Navigation lives under `View`, not a bespoke `Go` menu. That is where
 //      Safari, Finder and VS Code put it, so it is where users look.
-//   2. Accelerators come from the shared command registry
-//      (`@generatorai/shared/ui-contract`, D-24), per platform: `Cmd+1..9`
-//      means "switch tab" on macOS, so sections are `Cmd+Shift+<letter>`
-//      there; Windows and Linux get `Ctrl+1..7` in sidebar order. The same
-//      table drives the web key handler and the shortcuts sheet, so the menu,
-//      the palette hints and Help ▸ Keyboard Shortcuts cannot disagree.
+//   2. Every command item comes from the shared command registry
+//      (`@generatorai/shared/ui-contract`, D-24; `commandItem`): its label
+//      (title-cased), its accelerator for this platform (`Cmd+1..9` means
+//      "switch tab" on macOS, so sections are `Cmd+Shift+<letter>` there;
+//      Windows and Linux get `Ctrl+1..7` in sidebar order) and, for renderer
+//      commands, `sendCommand(id)`. Sections come from NAV_DESTINATIONS and
+//      File ▸ New from the registry's `create` commands. The same table drives
+//      the web key handler and the shortcuts sheet, so the menu, the palette
+//      hints and Help ▸ Keyboard Shortcuts cannot disagree.
 //
 // The menu is REBUILT whenever renderer state changes, so checkmarks, radio
 // groups and enabled/disabled items reflect the app rather than decorating it.
@@ -26,7 +29,15 @@ import { getWindowManager } from './window-manager';
 import { getServerManager } from './server-manager';
 import { resolvePaths } from './paths';
 import { loadSettings } from './config';
-import { COMMANDS, NAV_DESTINATIONS, toElectronAccelerator, type CommandId } from '@generatorai/shared/ui-contract';
+import {
+  COMMAND_IDS,
+  COMMANDS,
+  NAV_DESTINATIONS,
+  isRendererCommandId,
+  toElectronAccelerator,
+  type CommandId,
+} from '@generatorai/shared/ui-contract';
+import { menuLabel } from './menu-label';
 import { isMac, mnemonic } from './platform';
 import { log } from './logger';
 import {
@@ -41,6 +52,8 @@ import type { MenuState, DesktopThemePreference } from '../shared/ipc';
 export interface MenuActions {
   showAbout: () => void;
   checkForUpdates: () => void;
+  /** Installs the downloaded update (`update.install`; shown only while one is ready). */
+  installUpdate: () => void;
 }
 
 /**
@@ -81,6 +94,50 @@ function nav(route: string): void {
 export function accel(id: CommandId): string | undefined {
   const binding = COMMANDS[id][isMac ? 'desktopMac' : 'desktopWinLinux'];
   return binding === null ? undefined : toElectronAccelerator(binding);
+}
+
+/**
+ * A menu item for a registry command: the registry label in title case (or a
+ * platform-conventional `label`, e.g. "Settings…"), this platform's
+ * accelerator, and — for renderer commands — `sendCommand(id)` on click. Main
+ * commands pass their own `click`.
+ */
+export function commandItem(
+  id: CommandId,
+  overrides: Omit<MenuItemConstructorOptions, 'accelerator'> = {},
+): MenuItemConstructorOptions {
+  const accelerator = accel(id);
+  return {
+    label: menuLabel(COMMANDS[id].label),
+    ...(accelerator ? { accelerator } : {}),
+    ...(isRendererCommandId(id) ? { click: () => getWindowManager().sendCommand(id) } : {}),
+    ...overrides,
+  };
+}
+
+/** File ▸ New …: the registry's global `create` commands, in registry order. */
+const CREATE_COMMANDS = COMMAND_IDS.filter((id) => COMMANDS[id].group === 'create' && COMMANDS[id].scope === 'global');
+
+/**
+ * The downloaded update's version while one is ready to install, else null.
+ * Fed from the updater's state (`index.ts`); turns "Check for Updates…" into
+ * "Restart to Update (v1.2.3)" (06 §8).
+ */
+let updateReadyVersion: string | null = null;
+
+export function setMenuUpdateReady(version: string | null): void {
+  if (version === updateReadyVersion) return;
+  updateReadyVersion = version;
+  if (cachedActions) buildMenu(cachedActions);
+}
+
+function updateItem(actions: MenuActions): MenuItemConstructorOptions {
+  return updateReadyVersion
+    ? commandItem('update.install', {
+        label: `${menuLabel(COMMANDS['update.install'].label)} (v${updateReadyVersion})`,
+        click: actions.installUpdate,
+      })
+    : commandItem('updates.check', { click: actions.checkForUpdates });
 }
 
 /**
@@ -127,9 +184,9 @@ export function buildMenu(actions: MenuActions): void {
           label: app.name,
           submenu: [
             { label: `About ${app.name}`, click: actions.showAbout },
-            { label: 'Check for Updates…', click: actions.checkForUpdates },
+            updateItem(actions),
             { type: 'separator' },
-            { label: 'Settings…', accelerator: accel('app.settings'), click: () => wm.sendCommand('app.settings') },
+            commandItem('app.settings', { label: 'Settings…' }),
             { type: 'separator' },
             { role: 'services' },
             { type: 'separator' },
@@ -198,20 +255,17 @@ export function buildMenu(actions: MenuActions): void {
       // Routing for these lives in the renderer (useCommandHost), so
       // the menu only announces intent — one source of truth for where
       // "new X" actually goes.
-      { label: 'New Chat', accelerator: accel('chat.new'), click: () => wm.sendCommand('chat.new') },
-      { label: 'New Workflow', accelerator: accel('workflow.new'), click: () => wm.sendCommand('workflow.new') },
-      { label: 'New Project', accelerator: accel('project.new'), click: () => wm.sendCommand('project.new') },
-      { label: 'New Automation', accelerator: accel('automation.new'), click: () => wm.sendCommand('automation.new') },
+      ...CREATE_COMMANDS.map((id) => commandItem(id)),
       { type: 'separator' },
       { label: 'Open Recent', submenu: recentSubmenu },
       { type: 'separator' },
       // Refreshes the scripts list wherever it is shown; no navigation.
-      { label: 'Reload Scripts', accelerator: accel('scripts.reload'), click: () => wm.sendCommand('scripts.reload') },
+      commandItem('scripts.reload'),
       // macOS puts Settings in the app menu; everywhere else it belongs here.
       ...(!isMac
         ? ([
             { type: 'separator' },
-            { label: 'Settings', accelerator: accel('app.settings'), click: () => wm.sendCommand('app.settings') },
+            commandItem('app.settings', { label: 'Settings' }),
           ] as MenuItemConstructorOptions[])
         : []),
       { type: 'separator' },
@@ -237,9 +291,9 @@ export function buildMenu(actions: MenuActions): void {
       // Find means find IN THIS PAGE, as it does in every other desktop app.
       // It used to open the command palette — which already has its own
       // shortcut — and `Find Next` dispatched an event nothing listened to.
-      { label: 'Find…', accelerator: accel('find.open'), click: () => wm.sendCommand('find.open') },
-      { label: 'Find Next', accelerator: accel('find.next'), click: () => wm.sendCommand('find.next') },
-      { label: 'Find Previous', accelerator: accel('find.previous'), click: () => wm.sendCommand('find.previous') },
+      commandItem('find.open'),
+      commandItem('find.next'),
+      commandItem('find.previous'),
       // Speech is a macOS system service, not something we provide.
       ...(isMac
         ? ([
@@ -254,53 +308,31 @@ export function buildMenu(actions: MenuActions): void {
   const viewMenu: MenuItemConstructorOptions = {
     label: mnemonic('View', 'V'),
     submenu: [
-      {
-        label: 'Command Palette…',
-        accelerator: accel('palette.toggle'),
-        click: () => wm.sendCommand('palette.toggle'),
-      },
+      // "Command Palette…" is what desktop menus call it (the registry's
+      // "Search or jump to" is the palette's own wording).
+      commandItem('palette.toggle', { label: 'Command Palette…' }),
       { type: 'separator' },
       // Sections in sidebar order (D-22). `navigateTo` (not the nav command)
       // because it also surfaces a window that was hidden to the tray.
-      ...NAV_DESTINATIONS.map<MenuItemConstructorOptions>((d) => ({
-        label: d.label,
-        accelerator: accel(d.command),
-        click: () => nav(d.path),
-      })),
+      ...NAV_DESTINATIONS.map((d) => commandItem(d.command, { label: d.label, click: () => nav(d.path) })),
       { type: 'separator' },
-      {
-        label: 'Back',
-        accelerator: accel('nav.back'),
+      commandItem('nav.back', {
         enabled: navHistory().back,
         click: () => {
           const wc = wm.getMainWindow()?.webContents;
           if (wc?.navigationHistory.canGoBack()) wc.navigationHistory.goBack();
         },
-      },
-      {
-        label: 'Forward',
-        accelerator: accel('nav.forward'),
+      }),
+      commandItem('nav.forward', {
         enabled: navHistory().forward,
         click: () => {
           const wc = wm.getMainWindow()?.webContents;
           if (wc?.navigationHistory.canGoForward()) wc.navigationHistory.goForward();
         },
-      },
+      }),
       { type: 'separator' },
-      {
-        label: 'Toggle Sidebar',
-        accelerator: accel('sidebar.toggle'),
-        type: 'checkbox',
-        checked: menuState.sidebarOpen,
-        click: () => wm.sendCommand('sidebar.toggle'),
-      },
-      {
-        label: 'Toggle Side Dock',
-        accelerator: accel('dock.toggle'),
-        type: 'checkbox',
-        checked: menuState.rightPaneOpen,
-        click: () => wm.sendCommand('dock.toggle'),
-      },
+      commandItem('sidebar.toggle', { type: 'checkbox', checked: menuState.sidebarOpen }),
+      commandItem('dock.toggle', { type: 'checkbox', checked: menuState.rightPaneOpen }),
       { type: 'separator' },
       {
         label: 'Appearance',
@@ -318,13 +350,9 @@ export function buildMenu(actions: MenuActions): void {
       { type: 'separator' },
       { role: 'togglefullscreen' },
       { type: 'separator' },
-      { label: 'Reload', accelerator: accel('window.reload'), click: () => wm.reload() },
+      commandItem('window.reload', { click: () => wm.reload() }),
       { role: 'forceReload' },
-      {
-        label: 'Toggle Developer Tools',
-        accelerator: accel('devtools.toggle'),
-        click: () => wm.toggleDevtools(),
-      },
+      commandItem('devtools.toggle', { click: () => wm.toggleDevtools() }),
     ],
   };
 
@@ -349,21 +377,16 @@ export function buildMenu(actions: MenuActions): void {
     role: 'help',
     submenu: [
       { label: 'Documentation', click: () => wm.openExternalSafely('https://github.com/') },
-      {
-        label: 'Keyboard Shortcuts',
-        accelerator: accel('shortcuts.show'),
-        click: () => wm.sendCommand('shortcuts.show'),
-      },
+      commandItem('shortcuts.show'),
       { type: 'separator' },
       {
         // Server plumbing is troubleshooting, not a first-class user task,
         // so it is nested rather than occupying a top-level menu.
         label: 'Troubleshooting',
         submenu: [
-          {
-            label: 'Restart Server',
+          commandItem('server.restart', {
             click: () => void sm.restart().catch((e) => log.error('Manual server restart failed', e)),
-          },
+          }),
           {
             label: 'Server Health',
             click: () => { const u = sm.url; if (u) wm.openExternalSafely(`${u}/api/health`); },
@@ -377,7 +400,7 @@ export function buildMenu(actions: MenuActions): void {
         ],
       },
       { type: 'separator' },
-      { label: 'Check for Updates…', click: actions.checkForUpdates },
+      updateItem(actions),
       // macOS already has About in the app menu; duplicating it is wrong there.
       ...(!isMac
         ? ([{ label: `About ${app.name}`, click: actions.showAbout }] as MenuItemConstructorOptions[])

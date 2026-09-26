@@ -49,6 +49,7 @@ vi.mock('../server-manager', () => ({
 }));
 vi.mock('../logger', () => ({ log: { warn: vi.fn() } }));
 vi.mock('../menu', () => ({ accel: () => undefined }));
+vi.mock('../platform', () => ({ isMac: false }));
 vi.mock('../attention-state', () => ({ getAttention: () => state.attention }));
 vi.mock('../backend-switcher', () => ({ connectionState: () => state.servers }));
 
@@ -157,7 +158,7 @@ describe('refreshTrayMenu', () => {
 describe('Quit (P2-R38)', () => {
   it('only asks the app to quit; the quitting flag is left to quitApp', () => {
     createTray();
-    const quit = state.template.find((i) => i.label === 'Quit');
+    const quit = state.template.find((i) => i.label === 'Quit GeneratorAI');
     quit?.click?.();
     expect(app.quit).toHaveBeenCalled();
     expect(wmSetQuitting).not.toHaveBeenCalled();
