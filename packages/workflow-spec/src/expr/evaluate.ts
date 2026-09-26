@@ -247,14 +247,3 @@ export function evaluateSource(src: string, scope: EvalScope, opts: EvalOptions 
   if (!parsed.ok) return { ok: false, error: { code: 'expr_syntax', message: parsed.error.message } };
   return evaluate(parsed.ast, scope, opts);
 }
-
-/**
- * A condition holds only when it evaluates to exactly `true`; null, false,
- * a non-boolean and an evaluation error all mean "does not hold". Callers
- * that must distinguish an error (a guard failing with condition_error)
- * use `evaluate` / `evaluateSource` instead.
- */
-export function conditionHolds(src: string | ExprNode, scope: EvalScope, opts: EvalOptions = {}): boolean {
-  const r = typeof src === 'string' ? evaluateSource(src, scope, opts) : evaluate(src, scope, opts);
-  return r.ok && r.value === true;
-}

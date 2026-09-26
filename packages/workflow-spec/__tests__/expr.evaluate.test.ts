@@ -1,6 +1,6 @@
 import fc from 'fast-check';
 import { describe, expect, it } from 'vitest';
-import { conditionHolds, evaluate, evaluateSource, parseExpression } from '../src/index.js';
+import { evaluate, evaluateSource, parseExpression } from '../src/index.js';
 
 const scope = {
   variables: { env: 'prod', count: 5, flag: false, sflag: 'false', zip: '02134', tags: ['a', 'b'], nested: { deep: { x: 1 } } },
@@ -91,20 +91,6 @@ describe('evaluate: table', () => {
   ];
   it.each(cases)('%s → %j', (src, expected) => {
     expect(value(src)).toEqual(expected);
-  });
-});
-
-describe('conditionHolds', () => {
-  it('holds only for exactly true', () => {
-    expect(conditionHolds("variables.env == 'prod'", scope)).toBe(true);
-    expect(conditionHolds('variables.missing', scope)).toBe(false);
-    expect(conditionHolds('variables.count', scope)).toBe(false);
-    expect(conditionHolds('((( variables.x ==', scope)).toBe(false);
-  });
-
-  it('accepts a parsed AST', () => {
-    const r = parseExpression('variables.count == 5');
-    expect(r.ok && conditionHolds(r.ast, scope)).toBe(true);
   });
 });
 
