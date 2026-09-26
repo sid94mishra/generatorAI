@@ -31,11 +31,6 @@ function isSub(i: InstanceState): i is SubInstance {
   return i.containerState?.kind === 'subworkflow';
 }
 
-/** A sub-workflow instance's state, when it is one. */
-export function subworkflowStateOf(i: InstanceState): SubworkflowState | null {
-  return isSub(i) ? i.containerState : null;
-}
-
 function startSubworkflow(w: Working, inst: InstanceState, node: CompiledNode): void {
   const sub = node.subworkflow!;
   const scope = w.guardScope(inst);
