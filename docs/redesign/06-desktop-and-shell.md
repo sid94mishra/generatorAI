@@ -322,7 +322,7 @@ Also add `chromeColors(themeId: string, appearance: 'light' | 'dark'): { ground:
 Verified on this checkout: esbuild, which tsup uses, bundles `@generatorai/design-tokens` (TypeScript source, `"type":"module"`, `exports` has only an `import` condition, internal `./x.js` specifiers pointing at `.ts` files) into a `format:'cjs', platform:'node'` bundle and runs correctly under Node. esbuild picks the `import` condition from the `import` statement, not from the output format. Required wiring:
 1. `apps/desktop/package.json`: add `"@generatorai/design-tokens": "workspace:*"` and `"@generatorai/shared": "workspace:*"` to **devDependencies**, not dependencies. tsup automatically externalizes `dependencies`, and an externalized TS/ESM workspace package would be `require()`d at runtime and crash.
 2. `apps/desktop/tsup.config.ts`: add `noExternal: [/^@generatorai\//]` so the bundling is explicit and survives someone moving the entry into `dependencies`.
-3. Import only the subpaths `@generatorai/design-tokens/chrome` (constants), `@generatorai/design-tokens` (for `chromeColors` in main, about 30 KB bundled; acceptable) and `@generatorai/shared/ui-contract` (§5). The latter is a new, dependency-free subpath of `packages/shared` (`"./ui-contract": { import, types }`). **Never** import the `@generatorai/shared` root into main, because it pulls zod, protocol and similar packages.
+3. Import only the subpaths `@generatorai/design-tokens/chrome` (constants), `@generatorai/design-tokens` (for `chromeColors` in main, about 30 KB bundled; acceptable) and `@generatorai/shared/ui-contract` (§5). The latter is a new, dependency-free subpath of `packages/shared` (`"./ui-contract": { import, types }`). **Never** import the `@generatorai/shared` root into main, because it pulls zod, protocol and similar packages (`import type` from the root is fine: it is erased). Since P1-review P2-R6 main also imports `probeServer` from `@generatorai/client-runtime/connections` (a devDependency; that subpath has no runtime imports), never the `@generatorai/client-runtime` root.
 4. `pnpm --filter @generatorai/desktop typecheck` must pass. Desktop's tsconfig (`strict`, `noUncheckedIndexedAccess`, `moduleResolution: bundler`) now type-checks the imported TS sources, and they must compile under it.
 5. Desktop vitest resolves the packages through the pnpm symlink, so no config change is needed.
 
@@ -796,8 +796,8 @@ Quit GeneratorAI             ⌘Q
 
 - The Go to items come from `NAV_DESTINATIONS.filter(d => d.tray)`.
 - The board's per-entity badge (Workflows 1) cannot be derived from aggregate counts, so the needs-you count goes on Home.
-- `updateMenuState` also calls `refreshTrayMenu()` when `attention` changes.
-- Badges: `app.dock?.setBadge(String(needsYou) || '')` on macOS and `app.setBadgeCount(needsYou)` on Linux. Windows gets no badge in this pass.
+- As built (P2-03, P1-review fixes): the counts live in `attention-state.ts`, not in `MenuState`; every `setMenuState` push that carries `attention` calls `setAttention`, which refreshes the tray and the badge. The application menu shows no counts, so a counts-only change does not rebuild it (`applyMenuPush`). In remote mode the first line is `{remote label} · {n} agents` and the embedded server gets its own `This computer: {state} (:{port})` line. The counts are cleared (`clearAttention`) when the page that pushed them is gone: window closed, renderer crashed, or a new top-level document such as a backend switch (`WindowManager.onRendererReset`).
+- Badges (`badge.ts`): `app.dock?.setBadge(String(needsYou) || '')` on macOS, `app.setBadgeCount(needsYou)` on Linux (a no-op where the desktop has no launcher API), and on Windows a per-window taskbar overlay dot (`setOverlayIcon`, cleared with `null`).
 
 **macOS dock menu and Windows JumpList** (`index.ts:397-430`):
 - Dock menu: New Chat → `sendCommand('chat.new')` (was `go('/chats')`); New Workflow → `sendCommand('workflow.new')`; Home → `nav('/')`.
@@ -810,19 +810,20 @@ Quit GeneratorAI             ⌘Q
 - Everything else → `navigateTo(route)`.
 
 **Updater (`updater.ts`).**
-- Delete the modal `dialog.showMessageBox` on `update-downloaded` (`:46-55`). Keep a module state `UpdateState = { status: 'idle'|'checking'|'downloading'|'ready'|'error'; version?: string; percent?: number }`, updated from `checking-for-update`, `download-progress`, `update-downloaded` and `error`.
-- New `IPC.getUpdateState` and `IPC.installUpdate` (guarded; calls `updater.quitAndInstall()`), and `IPC_EVENT.updateStateChanged`. Preload: `updates: { getState, install, onChange }`.
+- Keep a module state, `DesktopUpdateState = { status: 'idle'|'checking'|'downloading'|'ready'|'installing'; currentVersion; nextVersion?; downloadedVersion?; percent?; error? }` (`packages/shared/src/types/DesktopShell.ts`), updated from every electron-updater event. `ready` is derived from `downloadedVersion`, so later checks and failures only set `error` (05 §G-04). On macOS `ready` also waits for Electron's native `autoUpdater` `update-downloaded` (Squirrel.Mac).
+- The modal `dialog.showMessageBox` on `update-downloaded` is **kept until the pill exists (P3-06)**. It is skipped only when a renderer has subscribed to `updateStateChanged` (the preload's `updates.onChange` reports it over `IPC.watchUpdates`) and the window is visible. Once P3-06 mounts `useUpdateState` in the pill, the dialog stops showing whenever the window is up, with no further change here.
+- New `IPC.getUpdateState` and `IPC.installUpdate` (guarded), and `IPC_EVENT.updateStateChanged`. Preload: `updates: { getState, install, onChange }`. `installUpdate` asks about unsaved work, calls `quitAndInstall()` and lets the normal `before-quit` shutdown run; if electron-updater reports an error or nothing quits within 60 s, the state returns to `ready` with `error` and the app keeps running (05 §G-04).
 - Pill (`update-pill`, text "Restart to update", `bg-run-bg text-run`, title "Update {version} is ready"):
   - Windows / Linux-custom: in the strip, before the server chip
   - mac: right end of the traffic row, or an icon in the rail
   - Linux native: `sidebar-nav-row`
   - web: never
 - `checkForUpdatesInteractive` keeps its "up to date" and error dialogs. Those are explicit user requests.
-- Verify with `pnpm --filter @generatorai/desktop mock-update-server` on all three OSes that `installUpdate` actually installs, given that `before-quit` (`index.ts:124-175`) ends in `app.exit(0)` (§11 risk R5).
+- Verify with `pnpm --filter @generatorai/desktop mock-update-server` on all three OSes that both `installUpdate` and an ordinary quit with a downloaded update actually install (§11 risk R5). Still owed.
 
 **Servers popover (sidebar switcher / strip chip).**
 - On desktop the backend switch must happen in main (a new origin). Add guarded IPC:
-  - `IPC.getServers` → `connectionState()` plus a per-connection reachability flag
+  - `IPC.getServers` → `connectionState()` plus each entry's reachability (`status`), probed by main with Node `fetch`: the renderer's CSP (`connect-src 'self'`) and CORS allow it to reach only its own origin. On plain web only the page's own origin is probed; other entries are `unknown`.
   - `IPC.switchServer(id | 'embedded')` → `switchToRemote` / `switchToEmbedded`
   - `IPC.addServer()` → `promptForRemoteServer()`
   - `IPC_EVENT.serversChanged`
@@ -1006,9 +1007,10 @@ Each PR leaves the app working, updates the smokes it breaks, and is verified by
 - **R3. Shadowed mac shortcuts.** System-wide tools may shadow `Cmd+Shift+H/E`. There is no user keymap in this pass.
 - **R4. Single-key web bindings.** They must never fire in editable targets or comboboxes. This is tested.
 - **R5. Updater install path.**
-  - `before-quit` ends in `app.exit(0)` (`index.ts:124-175`), so `quitAndInstall` and `autoInstallOnAppQuit` may not install. This is unverified.
-  - Test with `mock-update-server` on each OS.
-  - If it fails, `installUpdate` runs `confirmDiscard()` and the bounded shutdown, sets `quitHandled`, and calls `quitAndInstall()` instead of `app.exit`.
+  - The worry: `before-quit` ends in `app.exit(0)`, so `quitAndInstall` and `autoInstallOnAppQuit` might not install.
+  - Source reading (P1-review P2-R5): `app.exit` skips only `before-quit` and `will-quit`. Electron's `Browser::ExitWithCode` → `Shutdown()` notifies `OnQuit`, and `App::OnQuit` emits `quit` with the exit code (0), which is the event electron-updater's `autoInstallOnAppQuit` hook (`app.once('quit')`) needs. `quitAndInstall()` on Windows/Linux runs the installer synchronously before its `app.quit()`. On macOS, Squirrel.Mac's ShipIt installs after the process exits. So neither path should be broken by `app.exit(0)`, and the P2-03 claim that it was ("fixed") was wrong.
+  - As built: every quit, an update install included, goes through `before-quit` → `quitApp` (`quit-coordinator.ts`). `installUpdate` does not shut anything down itself; it confirms unsaved work, calls `quitAndInstall()` and treats an electron-updater error or 60 s without a quit as a failure that leaves the app running (05 §G-04).
+  - **Still unverified on real installers.** Run `mock-update-server` on each OS (§8); 07 R-10 stays open until then.
 - **R6. Dropped storage keys.** Theme, sidebar and dock preferences reset once. This is accepted.
 - **R7. Hotspots.** `globals.css` chrome block, `app/routes/index.ts` and `COMMANDS` are append-only. P3-S1 and P3-S2 merge together.
 - **R8. Remote mode.**
