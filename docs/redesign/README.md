@@ -145,8 +145,8 @@ Update in every PR (task ID, PR link, date).
 |---|---|---|
 | P0 Documentation & rails | done 2026-09-25 (review: reviews/P0-review.md, 3 rounds, 0 open) | P0-01 ✓ · P0-02 ✓ · P0-03 ✓ CI triggers + e2e env fix + spec repairs + BASELINE · P0-04 ✓ guardrails · P0-05 ✓ dead code · P0-06 owner action |
 | P1 Platform, tokens, registries | implementation done; review rounds 1–2 fixed/fixing; e2e + Electron re-run folded into the P3+P4 batch-end run (owner: batch testing) | U1 ✓ Tailwind 4.3.3 · U2 ✓ TS 6.0.3 · U3 ✓ Vite 7.3.6 + Vitest 4.1.11 · U4 ✓ React Router 8.4 + React 19.3 · S3 ✓ router split · T10 ✓ status map · T11 ✓ icon concepts · S1 ✓ CHROME/SHELL · S2 ✓ command registry + shortcuts sheet · T1–T6 ✓ tokens (Instrument/ink defaults, --gai-* layer, 252-combo WCAG suite, scales) · S5 ✓ overlay contract · U5 ✓ lucide 1.48 + ui/icons · T7 ✓ bundled fonts · T8 ✓ pre-paint + single writer + desktop appearance IPC · T9 ✓ cn/tailwind-merge 3 · SB ✓ Storybook 10.6 + axe + MCP (VRT baselines need CI/Docker) · review round 1 fixed (P1-R1…R6, R8…R11). **Exit blocked on P1-R7 (owner):** download the CI `vrt-stories` artifact, commit the baseline PNGs, record that commit here |
-| P2 Backend track | in progress | P2-00 ✓ Faux test harness (ready provider, scripted replies) + sandbox :3197/:5197 + seed · P2-01 ✓ G-01 attention feed (GET /attention, attention.* SSE, client-core store, web hooks) · P2-02 ✓ G-02/G-14 chat list v2 (migration v55, paged GET /chats, bulk actions) · P2-03 ✓ G-03 server switcher, G-04 update state (+ updater install fix), G-05 attention badge · P2-04 ✓ G-08 deep links, G-09 model catalog, G-20 cancel attribution (v57), G-07 computer consent/control |
-| P3 Slice A — shell + Chats list | in progress (batch P3+P4) | P3-01 ✓ primitives A · P3-02 ✓ primitives B (Base UI) · P3-03 ✓ patterns + ListPage |
+| P2 Backend track | in progress | P2-00 ✓ Faux test harness (ready provider, scripted replies) + sandbox :3197/:5197 + seed · P2-01 ✓ G-01 attention feed (GET /attention, attention.* SSE, client-core store, web hooks) · P2-02 ✓ G-02/G-14 chat list v2 (migration v55, paged GET /chats, bulk actions) · P2-03 ✓ G-03 server switcher, G-04 update state (+ updater install fix), G-05 attention badge · P2-05 G-12 system info partial on `wip/P2-05` (G-13/15/10/11 not started) · P2-04 ✓ G-08 deep links, G-09 model catalog, G-20 cancel attribution (v57), G-07 computer consent/control |
+| P3 Slice A — shell + Chats list | in progress (batch P3+P4) | P3-01 ✓ primitives A · P3-02 ✓ primitives B (Base UI) · P3-03 ✓ patterns + ListPage · **paused 2026-09-26 (weekly usage limit)**: P3-04 app frame (partial, branch `wip/P3-04`), P3-05 palette (partial, `wip/P3-05`), P3-07 Chats list (not started) |
 | P4 Slice B — chat workspace | not started | |
 | Handoff to the Workflow Overhaul Plan | — | |
 | P5 Fan-out | not started | |
@@ -154,3 +154,14 @@ Update in every PR (task ID, PR link, date).
 | PW Workflow surfaces | owned by the Workflow Overhaul Plan | |
 | P7 Lockdown | not started | |
 | P8 Deferred platform | not started | |
+
+## Resume point (2026-09-26)
+
+Work paused when the account hit its weekly usage limit (resets 2026-09-28 02:30 IST). State:
+- `desktop_redesign` @ `7725941` is green (typecheck, lint, check:design, 955 unit + 508 story tests, build, check:css).
+- Done: P0; P1 (review rounds 1–2 fixed; its e2e + Electron re-run is folded into the P3+P4 batch-end run); P2-00…P2-04; P3-01…P3-03.
+- Unverified partial work (WIP commits — review, finish and verify before merging; never merge as-is):
+  - `wip/P3-04` — app frame + desktop chrome: desktop IPC/platform/window-manager edits, `--gai-titlebar-*` work started.
+  - `wip/P3-05` — Dialog, CommandList, early ui/shell pieces, Autocomplete edits for the palette.
+  - `wip/P2-05` — G-12 system info (route, types, client, hook, tests) nearly complete.
+- Next, in order: finish P3-04 (from `wip/P3-04`), P3-05 (from `wip/P3-05`), P3-07; then P3-06; then P4-01…P4-12; P2-05/P2-06 alongside; then the P3+P4 batch-end run (sandbox e2e, Electron smokes incl. the P1 re-run, board comparison) and one combined review; HANDOFF.md; then P5+P6 as the next batch, P7+P8 last.

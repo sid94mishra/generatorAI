@@ -124,7 +124,7 @@ Start now:
 
 ```text
 Resume the GeneratorAI web + desktop redesign.
-1. Read docs/redesign/README.md (progress table), then docs/redesign/01-decisions.md, 07-phases.md, 10-llm-playbook.md and the latest file in docs/redesign/reviews/.
+1. Read docs/redesign/README.md (progress table and the "Resume point" section — it names any unverified wip/* branches to finish first), then docs/redesign/01-decisions.md, 07-phases.md, 10-llm-playbook.md and the latest file in docs/redesign/reviews/.
 2. Fetch origin and merge origin/desktop_redesign into the local desktop_redesign if it has moved, then check the design artifact version (https://claude.ai/artifact/9dDDpwCiWcs5jEUA8ivPUs) against docs/redesign/boards/web/VERSION.
 3. Continue from the first unfinished task, following the execution loop in docs/redesign/KICKOFF_PROMPT.md: build tasks, run the Done loop, then an independent opus reviewer after each phase, then fix-and-re-review until no Critical or Major findings remain.
 4. Stop and ask me only in the cases listed in KICKOFF_PROMPT.md.
