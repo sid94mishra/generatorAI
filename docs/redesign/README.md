@@ -38,7 +38,7 @@ Both PNG folders are gitignored; `shots/**/DIFF.md` is tracked.
 | File | What it holds | Use it when |
 |---|---|---|
 | `00-context-and-analysis.md` | How the web and desktop clients work today, the diagnosis with numbers, the design summary, what the independent review changed, the relationship to the Workflow Overhaul Plan, non-negotiable constraints | Understanding *why* |
-| `01-decisions.md` | D-01…D-78: every decision with options, evidence and consequences; sources | Always |
+| `01-decisions.md` | D-01…D-80: every decision with options, evidence and consequences; sources | Always |
 | `02-design-system-spec.md` | Token architecture; every colour token (derivation, Instrument values); collisions and codemods; Instrument theme and ink accent; type, radius, heights and density, z-index, focus, motion; the status map with the full server→state mapping; `CHROME`; icon concepts; emitters file by file; pre-paint; WCAG suite; the P1 token checklist | Tokens and foundations (P1), any styling question |
 | `03-component-inventory-kit.md` | The presentational kit: 48 primitives, 35 patterns, 13 shell parts, 5 templates, 5 layouts — anatomy, exact sizes, props, Base UI part, board usage counts, what each replaces, phase. **Rosetta table** (board markup → component). Usage matrix, delete list, build order | Building or using any `ui/` component; translating a board |
 | `03-component-inventory-domain.md` | Query-aware parts: 27 blocks, ~90 feature composites, 20 workflow kit pieces, 4 extension registries; the composer state map; decomposition plans and characterization behaviours for the giant files | Building blocks and features; splitting giant files (P4) |
@@ -150,10 +150,11 @@ Update in every PR (task ID, PR link, date).
 | P4 Slice B — chat workspace | in progress (batch P3+P4) | P4-01 ✓ characterization tests (476; 9 defects pinned — reviews/P4-known-defects.md) · P4-02 ✓ composer reducer + hooks · P4-03 ✓ browser logic → blocks/browser · P4-04 ✓ Changes + ChatPage logic (all 9 pinned defects fixed) · P4-05 ✓ kit batch C + T-04 Workspace · P4-06 ✓ DockFrame + dock registry · P4-08 ✓ composer + model/agent pickers (ChatInput deleted) · P4-07 ✓ transcript kit (virtualization no-go → collapse fallback) · P4-09 ✓ Changes panel · P4-11 ✓ Tasks/Computer/Plan/Widget panels · P4-10 ✓ Files/Terminal/Browser panels · P4-12 ✓ ChatPage on T-04 · **P4 implementation complete; HANDOFF.md published** |
 | Handoff to the Workflow Overhaul Plan | published (HANDOFF.md) | |
 | P5 Fan-out | in progress | P5-01 ✓ kit D + T-02/T-03/L-01 · P5-02…P5-06 ✓ Projects area · P5-10 ✓ Home · P5-12 ✓ palette entity search · P5-11 ✓ pairing gate + static pages · P5-09 ✓ New chat dialog + /chats/new · P5-07/08 ✓ Agents list + editor · P5-13 WF pieces deferred until the Workflow Overhaul asks |
-| P6 Settings | in progress | P6-01 ✓ settings kit (NumberField, SettingsSection, ListPane, SettingsModalFrame, MasterDetail) · P6-02 ✓ modal route · P6-03 ✓ Appearance · P6-04 ✓ Security & devices · P6-05…P6-11 next |
+| P6 Settings | in progress | P6-01 ✓ settings kit (NumberField, SettingsSection, ListPane, SettingsModalFrame, MasterDetail) · P6-02 ✓ modal route · P6-03 ✓ Appearance · P6-04 ✓ Security & devices · P6-05…P6-11 ✓ all 15 sections on the recipe; legacy settings deleted |
 | PW Workflow surfaces | owned by the Workflow Overhaul Plan | |
 | P7 Lockdown | not started | |
 | P8 Deferred platform | not started | |
+| Mobile pass (M0–M4, D-80) | planned | after the Workflow Overhaul merge; decisions MD-1…MD-8 settled |
 
 ## Resume point (2026-09-26)
 

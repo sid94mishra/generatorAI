@@ -477,6 +477,18 @@ Decided while building P1-T1…T6 where `02` was silent:
 - No opacity-based dimming for off/disabled rows (it broke contrast); state is shown by background/badge. A Field around a multi-radio SegmentedControl renames every radio, so those rows use a bare label.
 - Agent "Used by" (`GET /api/agents/:id/usage` exists) is not wired yet — follow-up. Legacy `EffectiveCapabilitiesPanel`/`ToolPolicyEditor`/old CapabilityToggleList/`AgentOverridesEditor` remain while legacy importers exist.
 
+### D-79 Settings sections as built (P6-05…P6-11) — Final
+- All 15 sections are `features/settings` components registered in `app/registries/settingsSections.tsx`; `components/settings/` is deleted. A shared `CatalogRow` (on Collapsible with new `endSlot`/`richContent`) serves Providers, Skills and MCP. Provider test/sign-in polling moved to hooks (`useTestAllProviders`, `useTestProviderConnection`, `useSignInProvider`); new `hooks/{audio,extension,storage}Queries.ts`; Diagnostics reads G-12 system info (legacy SystemHealthCard/useTicker deleted).
+- No success toasts (D-30): inline `Callout` state instead. Extensions' dead "contributes" chips removed. Source control keeps a "Use heuristic instead" clear action beside the ModelPicker.
+
+### D-80 Scope change: the mobile redesign is built in this effort — Final (owner, 2026-09-27)
+Supersedes the "next pass" parts of D-39/D-40: after the web/desktop phases, the mobile app (`apps/mobile`, design https://claude.ai/artifact/3bBuQ3vGwYbJh7A2yX7kqA) is redesigned too, following `08-mobile-readiness.md` §4 (M0 foundations → M1 kit → M2 shell → M3 features → M4 system surfaces). Owner answers to 08 §3:
+- **MD-1** selected states match the new desktop (neutral ink wash + chosen accent) — replaces the old blue-tint rule.
+- **MD-2** native platform pill shapes as the mobile design draws them (iOS chips/buttons/pane tabs, Android buttons/drawer items) — replaces "never pills".
+- **MD-4** the list-based workflow builder and stage editors ship on phone, on the Workflow Overhaul's models.
+- **MD-6** mobile-only features only with desktop parity: server-backed ones (Pause agents, notification settings — quiet hours, digest, per-project levels) are built for mobile AND desktop; OS-native integrations (share-to-agent, privacy screen, widgets, Live Activities, tiles, app shortcuts) may be mobile-only.
+- MD-3, MD-5, MD-7, MD-8 follow the 08 §3 recommendations (separate composer chips with glass per design; adopt multi-server switching; Keep/Keep all/Undo all on mobile; Material You as an Android runtime accent via `ensureContrast`).
+
 ## Evidence sources
 - shadcn: [Base UI default (Jul 2026)](https://ui.shadcn.com/docs/changelog/2026-07-base-ui-default) · [monorepo](https://ui.shadcn.com/docs/monorepo) · [forms / TanStack Form](https://ui.shadcn.com/docs/forms/tanstack-form)
 - Base UI: [releases](https://base-ui.com/react/overview/releases) · [v1 (InfoQ)](https://www.infoq.com/news/2026/02/baseui-v1-accessible/) · [Autocomplete](https://base-ui.com/react/components/autocomplete) · Radix: [commits](https://github.com/radix-ui/primitives/commits) · cmdk: [releases](https://github.com/pacocoursey/cmdk/releases)
