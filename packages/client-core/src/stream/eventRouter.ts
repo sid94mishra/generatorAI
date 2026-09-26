@@ -1666,7 +1666,7 @@ export class StreamEventRouter {
         out.push({
           op: 'addSystemMessage',
           key: stageKey,
-          message: '⏸ Awaiting human input — check the HITL panel to approve or reject',
+          message: '⏸ Awaiting your input — answer it below to continue',
           category: 'system',
         });
         break;
@@ -1685,6 +1685,65 @@ export class StreamEventRouter {
           message: '▶ Input received — stage resuming',
           category: 'system',
         });
+        break;
+      }
+
+      // ── The stage conversation (P03b) ─────────────────────────────
+      case 'stage_run.operator_message': {
+        this.flushKey(key, out);
+        const stageRunId = stageRunIdOf();
+        const files = Array.isArray(data['attachments']) ? (data['attachments'] as unknown[]).filter((f): f is string => typeof f === 'string') : [];
+        out.push({
+          op: 'addSystemMessage',
+          key: stageRunId ? `stageRun:${stageRunId}` : key,
+          message: `${str(data['content'])}${files.length ? `
+
+📎 ${files.join(', ')}` : ''}`,
+          category: 'operator',
+        });
+        break;
+      }
+
+      case 'stage_run.operator_message_dropped': {
+        const stageRunId = stageRunIdOf();
+        const n = Number(data['count'] ?? 1);
+        out.push({
+          op: 'addSystemMessage',
+          key: stageRunId ? `stageRun:${stageRunId}` : key,
+          message: `${n === 1 ? 'A queued message was' : `${n} queued messages were`} not sent: the stage attempt ended (${str(data['outcome'], 'stopped')}) before its next turn.`,
+          category: 'warning',
+        });
+        break;
+      }
+
+      case 'stage_run.turn_cancelled': {
+        this.flushKey(key, out);
+        const stageRunId = stageRunIdOf();
+        out.push({
+          op: 'addSystemMessage',
+          key: stageRunId ? `stageRun:${stageRunId}` : key,
+          message: 'Turn stopped — the stage continues from its next step',
+          category: 'system',
+        });
+        break;
+      }
+
+      case 'stage_run.amended':
+      case 'stage_run.amend_failed': {
+        this.flushKey(key, out);
+        const stageRunId = stageRunIdOf();
+        out.push({
+          op: 'addSystemMessage',
+          key: stageRunId ? `stageRun:${stageRunId}` : key,
+          message:
+            kind === 'stage_run.amended'
+              ? 'Output amended — later stages keep the output they already used; re-run from here to update them'
+              : `The amendment failed: ${str(data['error'], 'unknown error')} (the previous output is kept)`,
+          category: kind === 'stage_run.amended' ? 'system' : 'error',
+        });
+        if (stageRunId) out.push({ op: 'stageSettled', stageRunId });
+        const parentRunId = optStr(data['workflowRunId']);
+        if (parentRunId) out.push({ op: 'invalidate', resource: 'run', id: parentRunId });
         break;
       }
 

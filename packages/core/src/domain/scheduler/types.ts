@@ -56,6 +56,16 @@ export interface ApprovalVerdict {
   data?: Record<string, unknown>;
 }
 
+/**
+ * An operator message a stage sends as its next turn (P03b, the stage
+ * conversation API). Attachments are artifact ids uploaded to the stage.
+ */
+export interface OperatorTurn {
+  prompt: string;
+  attachmentIds?: string[];
+  agentMode?: 'auto' | 'plan';
+}
+
 // ── State ─────────────────────────────────────────────────────────
 
 export interface InstanceState {

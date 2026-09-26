@@ -75,6 +75,21 @@ export interface IStageRunCas {
   /** Record harness progress (callers throttle to one write per 10 s). */
   markProgress(id: string, owner: string, at: number): boolean;
   getInstance(id: string): StageInstanceRow | null;
+  /**
+   * Amend a COMPLETED instance's output (PD-4, the stage conversation API):
+   * no status change, so no transition row; `amended_at` is stamped and the
+   * version bumped. False when the instance is not `completed`.
+   */
+  amend(id: string, patch: StageAmendPatch, now?: number): boolean;
+}
+
+/** What an amendment of a completed stage rewrites. */
+export interface StageAmendPatch {
+  outputText: string;
+  /** The checked structured output (json stages); undefined keeps the old one. */
+  outputData?: unknown;
+  /** undefined keeps the old summary. */
+  summary?: string | null;
 }
 
 /** A `workflow_runs` row as the v2 engine reads it. */

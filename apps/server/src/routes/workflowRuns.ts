@@ -8,6 +8,14 @@
 // `POST /:id/fork` (G5 §3.8). Pending approvals are the `awaiting_input`
 // instances of `GET /:id` (their `interruptData`).
 //
+// A stage is a compact chat (P03b, `StageConversationService`):
+// `/:id/instances/:instanceId/messages` sends an operator message (queued
+// between turns, an amendment of a completed stage, a retry of a paused
+// one; 409 STAGE_BUSY mid-turn), `…/turn/cancel` stops the turn in flight,
+// `…/interactions/:interactionId/{permission|answer|plan}` answers an
+// in-turn gate in the chat's body shapes, `…/attachments/:artifactId`
+// serves an attached file.
+//
 // CLN-12 / STR-04 — the `GET /:id/stream` endpoint + its per-run ring
 // buffer, session-id routing map, and EventBus bridge were removed in
 // Phase 4. Web clients now connect to the unified `/api/stream?scope=run&id=<runId>`
@@ -23,7 +31,9 @@ import type { Container } from '../composition-root.js';
 import { z } from 'zod';
 import { StageKeySchema, UserVariablesSchema } from '@generatorai/workflow-spec';
 import { ForkRunRequestSchema, RunCommandSchema, WORKFLOW_RUN_STATES, type RunCommand } from '@generatorai/workflow-spec';
-import { RunCommandRefusedError } from '@generatorai/core';
+import { RunCommandRefusedError, type StageGateAnswer } from '@generatorai/core';
+import { AgentModeSchema, AnswerQuestionSchema, PlanDecisionSchema, ResolveToolPermissionSchema } from '@generatorai/shared';
+import multer from 'multer';
 import { validate } from '../middleware/validate.js';
 
 /** `POST /workflow-runs`. A draft can only start as a test run. */
@@ -40,6 +50,23 @@ const CreateWorkflowRunSchema = z.object({
   stageOverrides: z.array(StageOverrideSchema).max(100).optional(),
 });
 
+/** An operator message to a stage (the multipart fields, as strings). */
+const StageMessageSchema = z.object({
+  prompt: z.string().trim().min(1).max(100_000),
+  mode: AgentModeSchema.optional(),
+});
+
+const CancelStageTurnSchema = z.object({ force: z.boolean().optional() }).strict();
+
+/** A stage's plan review: the chat's decision minus the chat-only edited-content fields. */
+const StagePlanDecisionSchema = PlanDecisionSchema.pick({ approved: true, action: true, feedback: true });
+
+/** Files attached to a stage message: the chat's limits. */
+const stageUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024, files: 10 },
+});
+
 /**
  * Every command but `approve` is a run-control act (`write:workflows`).
  * Answering a stage's gate is `exec:agent` only (the route policy), so a
@@ -52,7 +79,7 @@ function mayControlRuns(req: { principal?: { scopes?: readonly string[] } }): bo
 
 export function createWorkflowRunRoutes(container: Container): Router {
   const router = Router();
-  const { workflowRunService, stageRunRepo, workflowRunRepo, runDefinitionReader, logger } = container;
+  const { workflowRunService, stageConversationService, artifactService, stageRunRepo, workflowRunRepo, runDefinitionReader, logger } = container;
 
   // ═══════════════════════════════════════════════════════════
   // WorkflowRun CRUD + Lifecycle
@@ -218,6 +245,129 @@ export function createWorkflowRunRoutes(container: Container): Router {
       const runId = String(req.params['id']);
       const stages = await stageRunRepo.getByRunId(runId);
       res.json(stages);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // ═══════════════════════════════════════════════════════════
+  // The stage conversation (P03b): a stage is a compact chat.
+  // ═══════════════════════════════════════════════════════════
+
+  // POST /workflow-runs/:id/instances/:instanceId/messages — an operator
+  // message (multipart: `prompt`, `attachments[]`, `mode`; or JSON). 202 with
+  // how it was taken: `queued` (the next turn), `amending` (a completed stage,
+  // PD-4) or `retrying` (a paused stage). 409 STAGE_BUSY mid-turn (PD-3),
+  // INTERACTION_PENDING on an open gate.
+  router.post('/:id/instances/:instanceId/messages', stageUpload.array('attachments', 10), async (req, res, next) => {
+    try {
+      const runId = String(req.params['id']);
+      const instanceId = String(req.params['instanceId']);
+      const parsed = StageMessageSchema.safeParse({
+        prompt: req.body?.['prompt'],
+        ...(typeof req.body?.['mode'] === 'string' && req.body['mode'] ? { mode: req.body['mode'] } : {}),
+      });
+      if (!parsed.success) {
+        res.status(400).json({
+          error: { code: 'VALIDATION_ERROR', message: 'Message validation failed', fields: parsed.error.flatten().fieldErrors },
+        });
+        return;
+      }
+      const files = (req.files ?? []) as Express.Multer.File[];
+      const attachmentIds: string[] = [];
+      if (files.length > 0) {
+        const sessionId = stageConversationService.attachmentSession(runId, instanceId);
+        for (const file of files) {
+          const artifact = await artifactService.createArtifact({
+            sessionId,
+            workflowRunId: runId,
+            stageRunId: instanceId,
+            name: file.originalname,
+            mimeType: file.mimetype,
+            content: file.buffer,
+          });
+          attachmentIds.push(artifact.id);
+        }
+      }
+      const r = await stageConversationService.send(runId, instanceId, {
+        prompt: parsed.data.prompt,
+        ...(attachmentIds.length ? { attachmentIds } : {}),
+        ...(parsed.data.mode ? { agentMode: parsed.data.mode } : {}),
+      });
+      logger.info(`[WorkflowRunRoutes] Message to ${runId} / ${instanceId}: ${r.outcome}`, { requestId: req.requestId });
+      res.status(202).json({ runId, instanceId, outcome: r.outcome, attachmentIds });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workflow-runs/:id/instances/:instanceId/turn/cancel {force?} —
+  // stop the turn in flight; the stage carries on (a stage cancel is the
+  // `cancel` command). 409 NO_ACTIVE_TURN when nothing is in flight.
+  router.post('/:id/instances/:instanceId/turn/cancel', validate(CancelStageTurnSchema), async (req, res, next) => {
+    try {
+      const runId = String(req.params['id']);
+      const instanceId = String(req.params['instanceId']);
+      const force = (req.body as z.infer<typeof CancelStageTurnSchema>).force === true;
+      stageConversationService.cancelTurn(runId, instanceId, { force });
+      logger.info(`[WorkflowRunRoutes] Turn stopped on ${runId} / ${instanceId}`, { requestId: req.requestId, force });
+      res.json({ status: 'cancelled', force });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  // POST /workflow-runs/:id/instances/:instanceId/interactions/:interactionId/{permission|answer|plan}
+  // — answer the stage's in-turn gate, in the chat's body shapes. The route
+  // policy admits these on `exec:agent` (answering the agent), like `approve`.
+  const gateRoute = <S extends z.ZodTypeAny>(verb: string, schema: S, toAnswer: (body: z.infer<S>) => StageGateAnswer) =>
+    router.post(`/:id/instances/:instanceId/interactions/:interactionId/${verb}`, validate(schema), async (req, res, next) => {
+      try {
+        const runId = String(req.params['id']);
+        const instanceId = String(req.params['instanceId']);
+        const interactionId = String(req.params['interactionId']);
+        await stageConversationService.resolveInteraction(runId, instanceId, interactionId, toAnswer(req.body as z.infer<S>));
+        logger.info(`[WorkflowRunRoutes] ${verb} answered on ${runId} / ${instanceId}`, { requestId: req.requestId });
+        res.status(202).json({ runId, instanceId, interactionId });
+      } catch (err) {
+        next(err);
+      }
+    });
+  gateRoute('permission', ResolveToolPermissionSchema, (b) => ({ kind: 'permission', behavior: b.behavior, ...(b.message ? { message: b.message } : {}) }));
+  gateRoute('answer', AnswerQuestionSchema, (b) => ({
+    kind: 'answer',
+    answers: b.answers,
+    ...(b.freeformResponse ? { freeformResponse: b.freeformResponse } : {}),
+  }));
+  gateRoute('plan', StagePlanDecisionSchema, (b) => ({
+    kind: 'plan',
+    approved: b.approved,
+    ...(b.action ? { action: b.action } : {}),
+    ...(b.feedback ? { feedback: b.feedback } : {}),
+  }));
+
+  // GET /workflow-runs/:id/instances/:instanceId/attachments/:artifactId —
+  // the bytes of a file an operator attached to a stage message. Addressed by
+  // artifact id, scoped to the instance (a mismatch is a 404, not a leak).
+  router.get('/:id/instances/:instanceId/attachments/:artifactId', async (req, res, next) => {
+    try {
+      const runId = String(req.params['id']);
+      const instanceId = String(req.params['instanceId']);
+      const artifact = await artifactService.getArtifact(String(req.params['artifactId']));
+      if (!artifact || artifact.stageRunId !== instanceId || artifact.workflowRunId !== runId) {
+        res.status(404).json({ error: { code: 'NOT_FOUND', message: 'Attachment not found' } });
+        return;
+      }
+      const content = await artifactService.readArtifactContent(artifact.id);
+      const mime = artifact.mimeType || 'application/octet-stream';
+      const inline = /^image\/|^text\/plain$|^application\/pdf$/.test(mime);
+      const safeName = encodeURIComponent(artifact.name).replace(/['()]/g, escape);
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Length', String(content.length));
+      res.setHeader('Cache-Control', 'private, max-age=31536000, immutable');
+      res.setHeader('X-Content-Type-Options', 'nosniff');
+      res.setHeader('Content-Disposition', `${inline ? 'inline' : 'attachment'}; filename*=UTF-8''${safeName}`);
+      res.end(content);
     } catch (err) {
       next(err);
     }

@@ -47,6 +47,7 @@ import type {
   InstancePatch,
   InstanceState,
   NewInstance,
+  OperatorTurn,
   RunMessage,
   RunOutcome,
   RunPatch,
@@ -87,6 +88,22 @@ function verdictOf(interruptData: unknown): ApprovalVerdict | undefined {
     return (interruptData as { verdict?: ApprovalVerdict }).verdict;
   }
   return undefined;
+}
+
+/** The operator message a retried attempt sends as its next turn (P03b: a message to a paused stage). */
+function operatorTurnOf(interruptData: unknown): OperatorTurn | undefined {
+  if (interruptData && typeof interruptData === 'object' && 'operatorTurn' in interruptData) {
+    return (interruptData as { operatorTurn?: OperatorTurn }).operatorTurn;
+  }
+  return undefined;
+}
+
+/** What a new attempt carries from the instance: a verdict, an operator turn, or nothing. */
+function carriedOverrides(interruptData: unknown): { verdict?: ApprovalVerdict; operatorTurn?: OperatorTurn } | undefined {
+  const verdict = verdictOf(interruptData);
+  const operatorTurn = operatorTurnOf(interruptData);
+  if (!verdict && !operatorTurn) return undefined;
+  return { ...(verdict ? { verdict } : {}), ...(operatorTurn ? { operatorTurn } : {}) };
 }
 
 /** Retry delay before jitter for the n-th retry (n ≥ 1), G5 §3.2. */
@@ -589,12 +606,20 @@ function onCommand(w: Working, command: RunCommand): void {
       w.push({ t: 'cancel_timer', kind: 'pause_ttl', stageRunId: inst.id });
       stageEvent(w, 'stage_run.resumed', inst);
       return;
-    case 'retry':
+    case 'retry': {
       if (inst.status !== 'paused') return refuse();
-      w.transition(inst, 'ready', { statusReason: `retry:${command.mode}` });
+      const operatorTurn: OperatorTurn | undefined = command.promptOverride
+        ? {
+            prompt: command.promptOverride,
+            ...(command.attachmentIds?.length ? { attachmentIds: command.attachmentIds } : {}),
+            ...(command.agentMode ? { agentMode: command.agentMode } : {}),
+          }
+        : undefined;
+      w.transition(inst, 'ready', { statusReason: `retry:${command.mode}`, ...(operatorTurn ? { interruptData: { operatorTurn } } : {}) });
       w.push({ t: 'cancel_timer', kind: 'pause_ttl', stageRunId: inst.id });
       stageEvent(w, 'stage_run.retrying', inst, { retryCount: inst.failedAttempts });
       return;
+    }
     case 'skip':
       if (inst.status !== 'paused' && inst.status !== 'ready') return refuse();
       stopInstance(
@@ -777,8 +802,7 @@ function admit(w: Working): void {
     const node = w.node(inst);
     if (!node) continue;
     if (node.sessionGroup && busyGroups.has(node.sessionGroup)) continue;
-    const verdict = verdictOf(inst.interruptData);
-    w.createAttempt(inst, attemptModeFor(inst), verdict ? { verdict } : undefined);
+    w.createAttempt(inst, attemptModeFor(inst), carriedOverrides(inst.interruptData));
     w.push({ t: 'launch', stageRunId: inst.id, attemptNo: inst.currentAttempt });
     w.timer('queue_timeout', inst, node.timeouts.queueMs, inst.currentAttempt, { jitter: 'none' });
     capacity -= 1;

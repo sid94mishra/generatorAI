@@ -6,6 +6,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
+import { AGENT_MODES } from '../constants.js';
 
 const target = {
   instanceId: z.string().min(1).max(200).optional().describe('Stage instance the command targets; omitted means the run'),
@@ -32,6 +33,18 @@ export const RunCommandSchema = z
         command: z.literal('retry').describe('Start a new attempt of a paused instance'),
         ...target,
         mode: z.enum(['resume', 'restart']).default('resume').describe('Continue the conversation or restart from the first prompt'),
+        promptOverride: z
+          .string()
+          .min(1)
+          .max(100_000)
+          .optional()
+          .describe('An operator message the new attempt sends as its next turn (a message sent to a paused stage)'),
+        attachmentIds: z
+          .array(z.string().min(1).max(200))
+          .max(10)
+          .optional()
+          .describe('Files uploaded to the stage (artifact ids) attached to promptOverride'),
+        agentMode: z.enum(AGENT_MODES).optional().describe('Agent mode of the promptOverride turn; omitted uses the stage default'),
       })
       .strict()
       .describe('Retry'),

@@ -173,6 +173,8 @@ export interface JournalMessage {
   metadata: Record<string, unknown>;
   /** Assistant rows: true on settlement, false for a turn cut short. */
   complete: boolean;
+  /** Files an operator attached to a user message (the stage conversation API). */
+  attachments?: Array<{ name: string; path: string; mimeType: string; artifactId?: string }>;
 }
 
 /**

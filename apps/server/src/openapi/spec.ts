@@ -90,6 +90,20 @@ const runIdParam = {
   schema: { type: 'string' },
 };
 
+const instanceIdParam = {
+  in: 'path',
+  name: 'instanceId',
+  required: true,
+  schema: { type: 'string' },
+};
+
+const interactionIdParam = {
+  in: 'path',
+  name: 'interactionId',
+  required: true,
+  schema: { type: 'string' },
+};
+
 export const OPENAPI_SPEC: OpenAPIDocument = {
   openapi: '3.1.0',
   info: {
@@ -1651,6 +1665,67 @@ export const OPENAPI_SPEC: OpenAPIDocument = {
           '409': { description: 'invalid_state, version_conflict or conflict' },
           '503': { description: 'No workflow engine in this process' },
         },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/messages': {
+      post: {
+        tags: ['Runs', 'HITL'],
+        summary: 'Send an operator message to a stage (a stage is a compact chat)',
+        description:
+          'multipart (`prompt`, `attachments[]`, `mode`) or JSON. Between turns the message is queued as the next turn; a completed stage is AMENDED ' +
+          '(its output replaced, successors not re-run); a paused stage is retried with the message as its next turn.',
+        parameters: [runIdParam, instanceIdParam],
+        responses: {
+          '202': { description: '`outcome`: queued, amending or retrying' },
+          '400': { description: 'Empty or invalid message' },
+          '404': { description: 'Unknown run or instance' },
+          '409': { description: 'STAGE_BUSY (mid-turn), INTERACTION_PENDING (an open gate), STAGE_NOT_STARTED or STAGE_NOT_CONVERSABLE' },
+          '503': { description: 'No workflow engine in this process' },
+        },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/turn/cancel': {
+      post: {
+        tags: ['Runs'],
+        summary: "Stop the stage's turn in flight without failing the stage",
+        parameters: [runIdParam, instanceIdParam],
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: { type: 'object', properties: { force: { type: 'boolean' } } } } },
+        },
+        responses: { '200': { description: 'Stopped' }, '409': { description: 'NO_ACTIVE_TURN' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/permission': {
+      post: {
+        tags: ['Runs', 'HITL'],
+        summary: "Answer a stage's tool-permission gate ({behavior: allow|deny, message?})",
+        parameters: [runIdParam, instanceIdParam, interactionIdParam],
+        responses: { '202': { description: 'Answered' }, '409': { description: 'INTERACTION_STALE' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/answer': {
+      post: {
+        tags: ['Runs', 'HITL'],
+        summary: "Answer a stage's question gate ({answers, freeformResponse?})",
+        parameters: [runIdParam, instanceIdParam, interactionIdParam],
+        responses: { '202': { description: 'Answered' }, '409': { description: 'INTERACTION_STALE' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/interactions/{interactionId}/plan': {
+      post: {
+        tags: ['Runs', 'HITL'],
+        summary: "Decide a stage's plan review ({approved, action?, feedback?})",
+        parameters: [runIdParam, instanceIdParam, interactionIdParam],
+        responses: { '202': { description: 'Decided' }, '409': { description: 'INTERACTION_STALE' } },
+      },
+    },
+    '/api/workflow-runs/{runId}/instances/{instanceId}/attachments/{artifactId}': {
+      get: {
+        tags: ['Runs'],
+        summary: 'A file attached to a stage message',
+        parameters: [runIdParam, instanceIdParam, { name: 'artifactId', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'The file' }, '404': { description: 'Not an attachment of this stage' } },
       },
     },
     '/api/workflow-runs/{runId}/fork': {

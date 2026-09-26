@@ -1,7 +1,6 @@
 // Engine v2 (P03 WP-3.5/3.6): the executor, the per-run actor and the
 // supervisor that hosts them, with its timers, lease reaper, outbox and
-// lifecycle effects. Wired only through tests and the testkit until the
-// part-3 cutover (WP-3.7).
+// lifecycle effects, plus the stage conversation API (P03b).
 export {
   StageExecutor,
   journalEpoch,
@@ -10,7 +9,17 @@ export {
   type ExecutorTiming,
   type LaunchRequest,
   type AbortReason,
+  type StageArtifactReader,
+  type StageFrameState,
 } from './StageExecutor.js';
+export {
+  StageConversationService,
+  type StageConversationServiceDeps,
+  type StageMessage,
+  type StageSendOutcome,
+  type StageGateAnswer,
+} from './StageConversationService.js';
+export { StageConversationError, type StageConversationErrorCode } from './StageConversationError.js';
 export {
   chooseStrategies,
   extractStructured,

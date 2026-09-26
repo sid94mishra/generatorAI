@@ -19,6 +19,7 @@ import {
 } from '@generatorai/workflow-spec';
 import type {
   RunTransitionOptions,
+  StageAmendPatch,
   StageInstanceRow,
   StageRunCasPatch,
   StageTransitionOptions,
@@ -172,6 +173,22 @@ export function markStageProgress(sqlite: BetterSqlite3.Database, id: string, ow
       .prepare(`UPDATE stage_runs SET last_progress_at = ?, heartbeat_at = ? WHERE id = ? AND lease_owner = ?`)
       .run(at, at, id, owner).changes > 0
   );
+}
+
+/** Rewrite a completed instance's output (PD-4 amend); the status stays `completed`. */
+export function amendStageOutput(sqlite: BetterSqlite3.Database, id: string, patch: StageAmendPatch, now = Date.now()): boolean {
+  const sets = ['output_text = ?', 'amended_at = ?', 'version = version + 1', 'updated_at = ?'];
+  const args: unknown[] = [patch.outputText, now, now];
+  if (patch.outputData !== undefined) {
+    sets.push('output_data = ?');
+    args.push(json(patch.outputData));
+  }
+  if (patch.summary !== undefined) {
+    sets.push('summary = ?');
+    args.push(patch.summary);
+  }
+  args.push(id);
+  return sqlite.prepare(`UPDATE stage_runs SET ${sets.join(', ')} WHERE id = ? AND status = 'completed'`).run(...args).changes > 0;
 }
 
 export function getInstanceRow(sqlite: BetterSqlite3.Database, id: string): StageInstanceRow | null {

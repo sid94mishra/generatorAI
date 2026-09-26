@@ -104,6 +104,30 @@
               ],
               "default": "resume",
               "description": "Continue the conversation or restart from the first prompt"
+            },
+            "promptOverride": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100000,
+              "description": "An operator message the new attempt sends as its next turn (a message sent to a paused stage)"
+            },
+            "attachmentIds": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200
+              },
+              "maxItems": 10,
+              "description": "Files uploaded to the stage (artifact ids) attached to promptOverride"
+            },
+            "agentMode": {
+              "type": "string",
+              "enum": [
+                "auto",
+                "plan"
+              ],
+              "description": "Agent mode of the promptOverride turn; omitted uses the stage default"
             }
           },
           "required": [

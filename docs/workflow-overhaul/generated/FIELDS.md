@@ -711,6 +711,9 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
 | `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
 | `mode` | 'resume' \| 'restart' |  | `"resume"` | Continue the conversation or restart from the first prompt |
+| `promptOverride` | string (1..100000 chars) |  |  | An operator message the new attempt sends as its next turn (a message sent to a paused stage) |
+| `attachmentIds` | string (1..200 chars)[] (≤10) |  |  | Files uploaded to the stage (artifact ids) attached to promptOverride |
+| `agentMode` | 'auto' \| 'plan' |  |  | Agent mode of the promptOverride turn; omitted uses the stage default |
 | `command` | "skip" | yes |  | Skip a paused instance |
 | `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
 | `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |

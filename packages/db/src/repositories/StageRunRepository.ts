@@ -10,6 +10,7 @@ import { eq, and, inArray } from 'drizzle-orm';
 import type {
   IStageRunCas,
   IStageRunRepository,
+  StageAmendPatch,
   StageInstanceRow,
   StageTransitionOptions,
   TransitionResult,
@@ -20,7 +21,7 @@ import { NotFoundError } from '@generatorai/shared';
 import { stageRuns } from '../schema.js';
 import type { AppDatabase } from '../index.js';
 import { sqliteHandle } from './AuthRepositories.js';
-import { getInstanceRow, markStageProgress, renewStageLease, stageTransition } from './engineCas.js';
+import { amendStageOutput, getInstanceRow, markStageProgress, renewStageLease, stageTransition } from './engineCas.js';
 
 /** A drizzle `json` column arrives parsed; a hand-written row may hold the text. */
 function jsonValue<T>(v: unknown): T | undefined {
@@ -53,6 +54,10 @@ export class DrizzleStageRunRepository implements IStageRunRepository, IStageRun
 
   getInstance(id: string): StageInstanceRow | null {
     return getInstanceRow(sqliteHandle(this.db), id);
+  }
+
+  amend(id: string, patch: StageAmendPatch, now?: number): boolean {
+    return amendStageOutput(sqliteHandle(this.db), id, patch, now);
   }
 
   // ── reads ───────────────────────────────────────────────────────
@@ -108,5 +113,6 @@ export function mapStageRun(row: typeof stageRuns.$inferSelect): StageRun {
     updatedAt: row.updatedAt,
     startedAt: row.startedAt ?? undefined,
     completedAt: row.completedAt ?? undefined,
+    amendedAt: row.amendedAt ?? undefined,
   };
 }

@@ -108,6 +108,14 @@ export const ROUTE_POLICIES: RoutePolicy[] = [
     read: ['read:workflows'],
     write: ['exec:agent'],
   },
+  // Answering a stage's in-turn gate (tool permission, question, plan) is the
+  // same run-time act as `approve` (the stage conversation API, P03b).
+  // Sending a message or stopping a turn steers the run: the full write grant.
+  {
+    prefix: '/workflow-runs/:id/instances/:instanceId/interactions',
+    read: ['read:workflows'],
+    write: ['exec:agent'],
+  },
   { prefix: '/workflow-runs', read: ['read:workflows'], write: ['write:workflows', 'exec:agent'] },
   // Running a script materialises a definition AND starts a run — agents
   // execute, exactly like `POST /workflow-runs/:id/start`. Authoring scripts

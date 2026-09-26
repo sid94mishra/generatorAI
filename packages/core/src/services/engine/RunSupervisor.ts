@@ -59,7 +59,7 @@ import { inFlightIsSafe, LeaseReaper } from './LeaseReaper.js';
 import { OutboxDispatcher, type OutboxPublisher } from './OutboxDispatcher.js';
 import { RunActor, type DecideRecord, type ProcessResult } from './RunActor.js';
 import { DefaultRunLifecycle, type RunLifecycle, type RunLifecycleDeps } from './RunLifecycle.js';
-import { journalEpoch, StageExecutor, type ExecutorTiming } from './StageExecutor.js';
+import { journalEpoch, StageExecutor, type ExecutorTiming, type StageArtifactReader } from './StageExecutor.js';
 import { TimerService } from './TimerService.js';
 
 export interface SupervisorTiming {
@@ -96,6 +96,8 @@ export interface RunSupervisorDeps {
   planService?: PlanService | undefined;
   scriptRunner?: IScriptRunner | undefined;
   toHarnessError?: ((provider: string | undefined, raw: unknown) => unknown) | undefined;
+  /** Files uploaded to a stage (the stage conversation API's attachments). */
+  artifacts?: StageArtifactReader | undefined;
   /** Where engine events go (default: `eventBus.emitGlobal`, awaited). */
   publish?: OutboxPublisher | undefined;
   /** Prepare/finalize (default: `DefaultRunLifecycle`). */
@@ -165,6 +167,7 @@ export class RunSupervisor {
       planService: deps.planService,
       scriptRunner: deps.scriptRunner,
       toHarnessError: deps.toHarnessError,
+      artifacts: deps.artifacts,
       post,
       logger: deps.logger,
       now: this.now,

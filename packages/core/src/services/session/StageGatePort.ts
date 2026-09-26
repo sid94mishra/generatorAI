@@ -300,10 +300,9 @@ export class StageGatePort implements GatePort {
 function answerOf(value: unknown): AgentQuestionResponse {
   if (typeof value === 'string') return { answers: {}, freeformResponse: value };
   if (value && typeof value === 'object') {
-    const v = value as { answers?: unknown; freeformResponse?: unknown; followUpPrompt?: unknown };
+    const v = value as { answers?: unknown; freeformResponse?: unknown };
     const answers = v.answers && typeof v.answers === 'object' ? (v.answers as Record<string, string[]>) : {};
-    const free =
-      typeof v.freeformResponse === 'string' ? v.freeformResponse : typeof v.followUpPrompt === 'string' ? v.followUpPrompt : undefined;
+    const free = typeof v.freeformResponse === 'string' ? v.freeformResponse : undefined;
     return { answers, ...(free ? { freeformResponse: free } : {}) };
   }
   return { answers: {} };

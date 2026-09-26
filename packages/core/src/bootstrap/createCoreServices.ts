@@ -56,6 +56,7 @@ import { WorkflowDefinitionService } from '../services/WorkflowDefinitionService
 import { RunDefinitionReader } from '../services/definitions/RunDefinitionReader.js';
 import { WorkflowRunService } from '../services/WorkflowRunService.js';
 import { RunSupervisor, type SupervisorTiming } from '../services/engine/RunSupervisor.js';
+import { StageConversationService } from '../services/engine/StageConversationService.js';
 import type { OutboxPublisher } from '../services/engine/OutboxDispatcher.js';
 import type { DecideRecord } from '../services/engine/RunActor.js';
 import { AutomationService } from '../services/AutomationService.js';
@@ -210,6 +211,8 @@ export interface CoreServices {
    */
   engine: RunSupervisor;
   workflowRunService: WorkflowRunService;
+  /** The stage conversation API (P03b): messages, turn stops, amendments and gate answers of stage instances. */
+  stageConversationService: StageConversationService;
 
   // Automation
   automationService: AutomationService;
@@ -424,6 +427,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     planService,
     scriptRunner,
     toHarnessError: inputs.toHarnessError,
+    artifacts: artifactService,
     ...(inputs.publishEngineEvent ? { publish: inputs.publishEngineEvent } : {}),
     permissionCheck: (run, graph) => workflowRunService.assertPermissionGating(run, graph),
     ...(inputs.engineOwnerLabel ? { ownerLabel: inputs.engineOwnerLabel } : {}),
@@ -441,6 +445,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     engine,
     logger,
   );
+  // A stage is a compact chat (P03b): send, stop, amend, answer its gates.
+  const stageConversationService = new StageConversationService({ engine, stageRuns: stageRunRepo, logger });
 
   // PD-17 — which provider a stage would run on, for the run-start and
   // mode-change checks: the bound agent's runtime (read through the same
@@ -520,6 +526,7 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     runDefinitionReader,
     engine,
     workflowRunService,
+    stageConversationService,
     automationService,
     automationRecoveryService,
     hitlService,

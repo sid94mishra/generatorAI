@@ -1096,6 +1096,58 @@ export class HttpPlatformClient implements IPlatformClient {
     });
   }
 
+  // ── A stage is a compact chat (P03b, the stage conversation API) ──
+
+  /**
+   * An operator message to a stage instance: queued between turns, an
+   * amendment of a completed stage, a retry of a paused one. 409
+   * `STAGE_BUSY` mid-turn and `INTERACTION_PENDING` on an open gate throw
+   * an ApiError the caller surfaces.
+   */
+  async sendStageMessage(
+    runId: string,
+    instanceId: string,
+    prompt: string,
+    files?: File[],
+    mode?: 'auto' | 'plan',
+  ): Promise<{ outcome: 'queued' | 'amending' | 'retrying'; attachmentIds: string[] }> {
+    const formData = new FormData();
+    formData.append('prompt', prompt);
+    if (mode) formData.append('mode', mode);
+    for (const file of files ?? []) formData.append('attachments', file, file.name);
+    return apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/instances/${instanceId}/messages`, {
+      method: 'POST',
+      body: formData,
+    });
+  }
+
+  /** Stop the stage's turn in flight; the stage carries on. */
+  async cancelStageTurn(runId: string, instanceId: string, options: { force?: boolean } = {}): Promise<void> {
+    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/instances/${instanceId}/turn/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(options),
+    });
+  }
+
+  /** Answer a stage's in-turn gate, in the chat's body shapes. */
+  async resolveStageInteraction(
+    runId: string,
+    instanceId: string,
+    interactionId: string,
+    answer:
+      | { kind: 'permission'; behavior: 'allow' | 'deny'; message?: string }
+      | { kind: 'answer'; answers: Record<string, string[]>; freeformResponse?: string }
+      | { kind: 'plan'; approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string },
+  ): Promise<void> {
+    const { kind, ...body } = answer;
+    await apiFetch(`${this.baseUrl}/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/${kind}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+  }
+
   async forkRun(runId: string, request: ForkRunRequest = {}): Promise<WorkflowRun> {
     // 201 with the fork (already started); the source run stays terminal.
     return apiFetch<WorkflowRun>(`${this.baseUrl}/api/workflow-runs/${runId}/fork`, {

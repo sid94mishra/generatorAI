@@ -27,7 +27,7 @@ import type {
 } from '@generatorai/core';
 import type { AppDatabase } from '../index.js';
 import { sqliteHandle } from './AuthRepositories.js';
-import { claimRunOwnership, getInstanceRow, getRunRow, markStageProgress, renewRunOwnership, renewStageLease, runTransition, stageTransition } from './engineCas.js';
+import { amendStageOutput, claimRunOwnership, getInstanceRow, getRunRow, markStageProgress, renewRunOwnership, renewStageLease, runTransition, stageTransition } from './engineCas.js';
 import {
   RunSessionRepository,
   SchedulerJournalRepository,
@@ -65,11 +65,21 @@ export class StageTurnJournal implements ITurnJournal {
   private insertMessage(m: JournalMessage, now: number): void {
     this.sqlite
       .prepare(
-        `INSERT INTO chat_messages (id, session_id, role, content, metadata, complete, turn_role, timestamp)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO chat_messages (id, session_id, role, content, metadata, attachments, complete, turn_role, timestamp)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       // `timestamp` is epoch seconds (drizzle `mode: 'timestamp'`), rowid breaks ties.
-      .run(m.id, m.sessionId, m.role, m.content, JSON.stringify(m.metadata), m.complete ? 1 : 0, m.turnRole, Math.floor(now / 1000));
+      .run(
+        m.id,
+        m.sessionId,
+        m.role,
+        m.content,
+        JSON.stringify(m.metadata),
+        m.attachments?.length ? JSON.stringify(m.attachments) : null,
+        m.complete ? 1 : 0,
+        m.turnRole,
+        Math.floor(now / 1000),
+      );
   }
 
   get(stageRunId: string, opId: string): TurnJournalEntry | null {
@@ -214,6 +224,7 @@ export function createEngineStores(db: AppDatabase | BetterSqlite3.Database): En
       renewLease: (id, owner, ttlMs, now) => renewStageLease(sqlite, id, owner, ttlMs, now),
       markProgress: (id, owner, at) => markStageProgress(sqlite, id, owner, at),
       getInstance: (id) => getInstanceRow(sqlite, id),
+      amend: (id, patch, now) => amendStageOutput(sqlite, id, patch, now),
     },
     runs: {
       transition: (id, from, to, opts) => runTransition(sqlite, id, from, to, opts),

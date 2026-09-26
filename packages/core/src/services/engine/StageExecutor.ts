@@ -26,6 +26,12 @@
 // Provider failures cross into the engine through `toHarnessError` and are
 // classified (`classifyStageError`); the attempt reports one
 // `attempt_settled` message to the actor and never writes a terminal state.
+//
+// The stage conversation (P03b, `StageConversationService`): an operator
+// message sent between two turns is queued on the frame and sent as the
+// next `operator` turn; a stop ends the turn in flight without failing the
+// stage (chat parity); a message to a COMPLETED stage amends its output on
+// the same session key (PD-4): no status change, successors not re-run.
 // ────────────────────────────────────────────────────────────────
 
 import { createHash } from 'node:crypto';
@@ -44,13 +50,13 @@ import {
 } from '@generatorai/workflow-spec';
 import { classifyStageError, classified, StageError } from '../../domain/errors/StageError.js';
 import type { EngineStores, SettledTurn, TurnReplayPolicy, TurnRole } from '../../domain/ports/IEngineStore.js';
-import type { IAgentHarness, SendPromptOptions } from '../../domain/ports/IAgentHarness.js';
+import type { AttachmentRef, IAgentHarness, SendPromptOptions } from '../../domain/ports/IAgentHarness.js';
 import type { ISessionRepository } from '../../domain/ports/IRepositories.js';
 import type { IScriptRunner } from '../../domain/ports/IScriptRunner.js';
 import type { IWorkflowRunRepository } from '../../domain/ports/IWorkflowRunRepository.js';
 import type { HostToolsLevel, StructuredOutputLevel } from '../../domain/ports/IProviderInstance.js';
 import { expressionScope } from '../../domain/scheduler/readiness.js';
-import type { ApprovalVerdict, AttemptMode, AttemptOutcome, InstanceState, RunMessage, RunState, StageOutput, Usage } from '../../domain/scheduler/types.js';
+import type { ApprovalVerdict, AttemptMode, AttemptOutcome, InstanceState, OperatorTurn, RunMessage, RunState, StageOutput, Usage } from '../../domain/scheduler/types.js';
 import type { EventBus } from '../../events/EventBus.js';
 import type { AdmissionTicket } from '../AdmissionController.js';
 import { redactProjection } from '../AgentResolver.js';
@@ -72,6 +78,7 @@ import { StageGatePort } from '../session/StageGatePort.js';
 import { TurnRecorder } from '../session/TurnRecorder.js';
 import type { SessionOwner, TurnContext } from '../session/types.js';
 import { runWorkspace, workspaceExposure } from '../session/workspaceExposure.js';
+import { StageConversationError } from './StageConversationError.js';
 import {
   checkOutputContract,
   chooseStrategies,
@@ -134,6 +141,8 @@ export interface StageExecutorDeps {
    * `HarnessError` (`toHarnessError` of `@generatorai/agent-harness-providers`).
    */
   toHarnessError?: ((provider: string | undefined, raw: unknown) => unknown) | undefined;
+  /** Files uploaded to a stage (the stage conversation API's attachments). */
+  artifacts?: StageArtifactReader | undefined;
   /** Deliver a message to the run's actor. */
   post: (runId: string, msg: RunMessage) => void;
   logger?: ILogger | undefined;
@@ -141,12 +150,31 @@ export interface StageExecutorDeps {
   timing?: Partial<ExecutorTiming>;
 }
 
+/** The artifact rows an operator turn's attachments resolve through. */
+export interface StageArtifactReader {
+  getArtifact(id: string): Promise<{ id: string; name: string; path: string; mimeType?: string | null; sessionId: string; stageRunId?: string | null } | null>;
+}
+
+/** Whether a stage can take an operator message right now (the stage conversation API). */
+export type StageFrameState =
+  /** No frame in this process. */
+  | 'none'
+  /** A turn is in flight (PD-3: refused). */
+  | 'mid_turn'
+  /** Between turns: a message is queued as the next operator turn. */
+  | 'between_turns'
+  /** The attempt already took its last turn: it is reporting its outcome. */
+  | 'closing';
+
 /** Ends the attempt early with an outcome (an abort, a lost CAS, a watchdog). */
 class AttemptStop extends Error {
   constructor(readonly outcome: AttemptOutcome) {
     super(outcome.kind === 'failed' ? outcome.error.message : `attempt ${outcome.kind}`);
   }
 }
+
+/** An operator stopped the turn while it waited on an in-turn gate: the gate answers as cancelled. */
+class TurnStoppedAtGate extends Error {}
 
 interface Waiter {
   resolve: (verdict: ApprovalVerdict | null) => void;
@@ -159,6 +187,8 @@ interface Frame {
   /** Set by `abort()` or a watchdog: how the attempt ends. */
   stop?: AttemptOutcome;
   conversationId?: string;
+  /** `run_sessions.session_key` once the session is bound (a session group's amend check). */
+  sessionKey?: string;
   ticket?: AdmissionTicket | undefined;
   waiter?: Waiter;
   /** A verdict carried by a resume attempt (approval given with no frame, after a restart). */
@@ -169,6 +199,16 @@ interface Frame {
   lastProgressAt: number;
   lastProgressWrite: number;
   turnInFlight: boolean;
+  /** The turn in flight's own abort (a stop ends the turn, not the attempt). */
+  turnAc?: AbortController;
+  /** Set by `cancelTurn`: the turn in flight ends as a stopped turn. */
+  turnStop?: { force: boolean };
+  /** Operator messages waiting for the next turn boundary. */
+  operatorQueue: OperatorTurn[];
+  /** The attempt took its last turn: new operator messages are refused. */
+  closed: boolean;
+  /** An amendment of a completed instance (no attempt, no lease, no status change). */
+  amend: boolean;
   timers: Array<ReturnType<typeof setInterval>>;
   unsubscribe?: () => void;
 }
@@ -203,6 +243,8 @@ interface AttemptContext {
   submittedThisTurn: unknown[];
   /** A recap for a conversation that lost its history (sent in front of the next live turn). */
   recap?: string;
+  /** A forced stop tore the conversation down: re-bind it before the next turn. */
+  rebind?: boolean;
   hookContext: string[];
 }
 
@@ -286,6 +328,122 @@ export class StageExecutor {
     return true;
   }
 
+  // ── The stage conversation (P03b) ────────────────────────────
+
+  /** Whether the instance can take an operator message now (PD-3: never mid-turn). */
+  frameState(stageRunId: string): StageFrameState {
+    const f = this.frames.get(stageRunId);
+    if (!f) return 'none';
+    if (f.stop || f.closed) return 'closing';
+    return f.turnInFlight ? 'mid_turn' : 'between_turns';
+  }
+
+  /** Queue an operator message for the next turn boundary; false when the frame cannot take it. */
+  enqueueOperatorTurn(stageRunId: string, turn: OperatorTurn): boolean {
+    const f = this.frames.get(stageRunId);
+    if (!f || f.stop || f.closed || f.turnInFlight) return false;
+    f.operatorQueue.push(turn);
+    return true;
+  }
+
+  /**
+   * Stop the turn in flight without failing the stage (chat parity): the
+   * turn settles with what it produced and the stage carries on from the
+   * next turn boundary. A turn parked on an in-turn gate has the gate
+   * answered as cancelled first. `force` also tears the provider
+   * conversation down; it is re-bound before the next turn. False when no
+   * turn is in flight.
+   */
+  cancelTurn(stageRunId: string, opts: { force?: boolean } = {}): boolean {
+    const f = this.frames.get(stageRunId);
+    if (!f || f.stop || !f.turnInFlight) return false;
+    f.turnStop = { force: opts.force === true };
+    if (f.waiter) {
+      // An in-turn gate is waiting: it is answered as cancelled (`parkFrame`).
+      const w = f.waiter;
+      f.waiter = undefined;
+      w.resolve(null);
+    }
+    f.turnAc?.abort();
+    if (f.conversationId) {
+      const id = f.conversationId;
+      void this.deps.harness
+        .abortConversation(id)
+        .then(() => (opts.force ? this.deps.harness.destroyConversation(id) : undefined))
+        .catch(() => undefined);
+    }
+    return true;
+  }
+
+  /**
+   * Amend a COMPLETED instance (PD-4, W-55): its conversation is resumed on
+   * the session key of its last attempt, the operator turn runs, and the
+   * output contract is checked again (with repair turns). The new output
+   * replaces the instance's output text/data and stamps `amended_at`; the
+   * status stays `completed` and successors are not re-run (the UI offers
+   * a fork from here). Resolves once the amendment has started; `done`
+   * settles when it ends (an outcome event, `stage_run.amended` or
+   * `stage_run.amend_failed`, reports it). A terminal run's conversation
+   * is released again afterwards (B-15).
+   */
+  async amend(runId: string, stageRunId: string, turn: OperatorTurn): Promise<{ done: Promise<void> }> {
+    if (this.dead) throw new StageConversationError('ENGINE_UNAVAILABLE', 'The workflow engine is stopping');
+    if (this.frames.has(stageRunId)) throw new StageConversationError('STAGE_BUSY', 'The stage is already taking a turn');
+    const row = this.deps.stores.stages.getInstance(stageRunId);
+    if (!row || row.workflowRunId !== runId) throw new StageConversationError('NOT_FOUND', `No instance ${stageRunId} in run ${runId}`);
+    if (row.status !== 'completed') throw new StageConversationError('STAGE_NOT_CONVERSABLE', `Only a completed stage can be amended (it is ${row.status})`);
+    const now = this.now();
+    const frame: Frame = {
+      req: { runId, stageRunId, attemptNo: row.currentAttempt },
+      owner: `${this.deps.bootId}:${stageRunId}:amend`,
+      ac: new AbortController(),
+      startedAt: now,
+      parkedMs: 0,
+      lastProgressAt: now,
+      lastProgressWrite: now,
+      turnInFlight: false,
+      operatorQueue: [turn],
+      closed: false,
+      amend: true,
+      timers: [],
+    };
+    // Registered before the first await: a second message is STAGE_BUSY, not a second amendment.
+    this.frames.set(stageRunId, frame);
+    const release = (): void => {
+      for (const t of frame.timers) clearInterval(t);
+      frame.timers.length = 0;
+      frame.unsubscribe?.();
+      if (this.frames.get(stageRunId) === frame) this.frames.delete(stageRunId);
+    };
+    let ctx: AttemptContext;
+    try {
+      const attempts = this.deps.stores.attempts.listByStageRun(stageRunId);
+      ctx = await this.context(frame, 'resume', journalEpoch(attempts, row.currentAttempt));
+      if (ctx.stage.sessionGroup) {
+        const key = this.sessionKey(ctx);
+        for (const other of this.frames.values()) {
+          if (other !== frame && other.req.runId === runId && other.sessionKey === key) {
+            throw new StageConversationError('STAGE_BUSY', `The stage's session group "${ctx.stage.sessionGroup}" is in use by another stage`);
+          }
+        }
+      }
+    } catch (err) {
+      release();
+      throw err;
+    }
+    const done = this.amendBody(ctx)
+      .catch(async (err: unknown) => {
+        const error = err instanceof AttemptStop ? err.message : classifyStageError(err).message;
+        this.logger?.warn(`[StageExecutor] amending ${stageRunId} failed: ${error}`);
+        await this.emitSession(ctx, 'stage_run.amend_failed', { error });
+      })
+      .finally(async () => {
+        release();
+        await this.releaseAfterAmend(ctx).catch(() => undefined);
+      });
+    return { done };
+  }
+
   /** Stop every frame (process shutdown): each reports `aborted`. */
   shutdown(): void {
     for (const f of this.frames.values()) this.stopFrame(f, { kind: 'aborted', reason: 'superseded' });
@@ -332,6 +490,8 @@ export class StageExecutor {
     let owner = `${this.deps.bootId}:${req.stageRunId}:${req.attemptNo}`;
     const claim = stores.stages.transition(req.stageRunId, ['ready'], 'starting', {
       lease: { owner, ttlMs: this.timing.leaseTtlMs },
+      // A carried verdict or operator turn now lives on the attempt row (its `overrides`).
+      patch: { interruptData: null },
       runId: req.runId,
       now,
     });
@@ -355,6 +515,9 @@ export class StageExecutor {
       lastProgressAt: now,
       lastProgressWrite: now,
       turnInFlight: false,
+      operatorQueue: [],
+      closed: false,
+      amend: false,
       timers: [],
     };
     this.frames.set(req.stageRunId, frame);
@@ -371,6 +534,15 @@ export class StageExecutor {
     if (this.dead) return;
     // A stop wins over whatever the body concluded after it (an aborted turn that resolved).
     if (frame.stop && outcome.kind === 'succeeded') outcome = frame.stop;
+    if (frame.operatorQueue.length > 0) {
+      // The attempt ended before its next turn boundary: say so rather than drop the messages silently.
+      await this.deps.eventBus
+        .emitGlobal({
+          kind: 'stage_run.operator_message_dropped',
+          data: { stageRunId: req.stageRunId, workflowRunId: req.runId, count: frame.operatorQueue.length, outcome: outcome.kind },
+        } as unknown as AgentEvent)
+        .catch(() => undefined);
+    }
     this.deps.post(req.runId, { type: 'attempt_settled', stageRunId: req.stageRunId, attemptNo: req.attemptNo, outcome });
   }
 
@@ -385,52 +557,16 @@ export class StageExecutor {
     const { runId, stageRunId, attemptNo } = frame.req;
     this.armFrameTimers(frame);
 
-    const run = await this.deps.runRepo.getById(runId);
-    const graph = await this.deps.definitions.get(run.definitionVersionId);
-    const state = stores.runStore.loadRunState(runId);
-    const instance = state?.instances.find((i) => i.id === stageRunId);
-    if (!state || !instance) throw new StageError('config_invalid', `Instance ${stageRunId} of run ${runId} does not exist`);
-    const stage = graph.stages.find((s) => s.key === instance.stageKey) as AgentStage | undefined;
-    if (!stage || stage.kind !== 'agent') throw new StageError('config_invalid', `Stage ${instance.stageKey} is not an agent stage of the pinned version`);
-
     const attempts = stores.attempts.listByStageRun(stageRunId);
     const attempt = attempts.find((a) => a.attemptNo === attemptNo);
     if (!attempt || attempt.status !== 'running') throw new AttemptStop({ kind: 'aborted', reason: 'superseded' });
-    const verdict = (attempt.overrides as { verdict?: ApprovalVerdict } | null)?.verdict;
-    if (verdict) frame.carriedVerdict = verdict;
+    const carried = attempt.overrides as { verdict?: ApprovalVerdict; operatorTurn?: OperatorTurn } | null;
+    if (carried?.verdict) frame.carriedVerdict = carried.verdict;
+    // A message sent to the paused stage (the retry's `promptOverride`) is its next operator turn.
+    if (carried?.operatorTurn) frame.operatorQueue.push(carried.operatorTurn);
 
-    const spec = resolveSessionSpec(graph.workflow.session, stage.session);
-    const workspace = await runWorkspace(this.deps.workspaceManager, run);
-    const pinned = typeof run.variables?.['__workingDirectory'] === 'string' ? (run.variables['__workingDirectory'] as string) : undefined;
-    const ctx: AttemptContext = {
-      frame,
-      run,
-      graph,
-      stage,
-      state,
-      instance,
-      mode: attempt.mode,
-      epoch: journalEpoch(attempts, attemptNo),
-      agentMode: spec.defaultAgentMode ?? DEFAULT_AGENT_MODE,
-      // W-41: hook-injected variables are scoped to this attempt, never the run's object.
-      variables: { ...(run.variables ?? {}), ...(run.stageOverrides?.find((o) => o.stageKey === stage.key)?.variables ?? {}) },
-      workspace,
-      workDir: pinned ?? this.deps.workspaceManager.getWorkingDirectory(workspace),
-      permissionSource: runPermissionSource(() => this.deps.runRepo.getById(runId), stage.session, graph.workflow.session),
-      recorder: new TurnRecorder(),
-      replayPolicy: 'never',
-      strategies: [],
-      contract: {
-        format: stage.output.format,
-        schema: stage.output.schema,
-        extraction: stage.output.extraction,
-        rules: stage.output.rules,
-      },
-      outputs: { native: [], submitted: [], texts: [] },
-      outputText: '',
-      submittedThisTurn: [],
-      hookContext: [],
-    };
+    const ctx = await this.context(frame, attempt.mode, journalEpoch(attempts, attemptNo));
+    const { stage, workspace } = ctx;
 
     // A restart starts from the attempt-1 checkpoint (G5 §3.3).
     if (ctx.mode === 'restart' && (stage.retry?.restoreCheckpointOnRestart ?? true) && this.deps.checkpoints) {
@@ -457,6 +593,53 @@ export class StageExecutor {
     const output = await this.validateAndReview(ctx);
     await this.postRunHooks(ctx);
     return { kind: 'succeeded', output };
+  }
+
+  /** The run, the pinned stage and everything an attempt (or an amendment) body needs. */
+  private async context(frame: Frame, mode: AttemptMode, epoch: number): Promise<AttemptContext> {
+    const { stores } = this.deps;
+    const { runId, stageRunId } = frame.req;
+    const run = await this.deps.runRepo.getById(runId);
+    const graph = await this.deps.definitions.get(run.definitionVersionId);
+    const state = stores.runStore.loadRunState(runId);
+    const instance = state?.instances.find((i) => i.id === stageRunId);
+    if (!state || !instance) throw new StageError('config_invalid', `Instance ${stageRunId} of run ${runId} does not exist`);
+    const stage = graph.stages.find((s) => s.key === instance.stageKey) as AgentStage | undefined;
+    if (!stage || stage.kind !== 'agent') throw new StageError('config_invalid', `Stage ${instance.stageKey} is not an agent stage of the pinned version`);
+
+    const spec = resolveSessionSpec(graph.workflow.session, stage.session);
+    const workspace = await runWorkspace(this.deps.workspaceManager, run);
+    const pinned = typeof run.variables?.['__workingDirectory'] === 'string' ? (run.variables['__workingDirectory'] as string) : undefined;
+    const ctx: AttemptContext = {
+      frame,
+      run,
+      graph,
+      stage,
+      state,
+      instance,
+      mode,
+      epoch,
+      agentMode: spec.defaultAgentMode ?? DEFAULT_AGENT_MODE,
+      // W-41: hook-injected variables are scoped to this attempt, never the run's object.
+      variables: { ...(run.variables ?? {}), ...(run.stageOverrides?.find((o) => o.stageKey === stage.key)?.variables ?? {}) },
+      workspace,
+      workDir: pinned ?? this.deps.workspaceManager.getWorkingDirectory(workspace),
+      permissionSource: runPermissionSource(() => this.deps.runRepo.getById(runId), stage.session, graph.workflow.session),
+      recorder: new TurnRecorder(),
+      replayPolicy: 'never',
+      strategies: [],
+      contract: {
+        format: stage.output.format,
+        schema: stage.output.schema,
+        extraction: stage.output.extraction,
+        rules: stage.output.rules,
+      },
+      outputs: { native: [], submitted: [], texts: [] },
+      outputText: '',
+      submittedThisTurn: [],
+      hookContext: [],
+    };
+    return ctx;
   }
 
   // ── Session ──────────────────────────────────────────────────
@@ -490,7 +673,8 @@ export class StageExecutor {
     const key = this.sessionKey(ctx);
     const bound = stores.runSessions.get(runId, key);
     let session: Session | null = null;
-    if (bound && bound.status === 'active') session = await sessionRepo.getById(bound.sessionId).catch(() => null);
+    // An amendment resumes the stage's conversation even after the run released it (B-15).
+    if (bound && (bound.status === 'active' || ctx.frame.amend)) session = await sessionRepo.getById(bound.sessionId).catch(() => null);
 
     const create = !session?.conversationId;
     const sessionId = session?.id ?? generateId();
@@ -572,6 +756,10 @@ export class StageExecutor {
         await harness.resumeConversation(conversationId, composed.params);
       }
       if (!live && !levels.persistent && !session!.providerSessionId) ctx.recap = await this.recapOf(ctx);
+      if (session!.status !== 'active') {
+        await sessionRepo.updateStatus(sessionId, 'active');
+        session!.status = 'active';
+      }
     }
     stores.runSessions.upsert({
       id: bound?.id ?? generateId(),
@@ -591,6 +779,7 @@ export class StageExecutor {
     ctx.composed = composed;
     ctx.owner = owner;
     ctx.frame.conversationId = conversationId;
+    ctx.frame.sessionKey = key;
     ctx.replayPolicy = replayPolicyForToolGroups(composed.projection.toolPolicy.groups);
     for (const w of [...composed.warnings.map((x) => ({ code: x.code, message: x.message })), ...choice.warnings.map((m) => ({ code: 'output_extraction', message: m }))]) {
       await this.emitSession(ctx, 'harness.session_info', { infoType: w.code, message: w.message });
@@ -631,7 +820,8 @@ export class StageExecutor {
         frame.lastProgressWrite = now;
         this.deps.stores.stages.markProgress(stageRunId, frame.owner, now);
       }
-      if (event.kind === 'harness.usage') {
+      // An amendment has no attempt to roll its usage into.
+      if (event.kind === 'harness.usage' && !frame.amend) {
         this.deps.post(runId, { type: 'usage_tick', stageRunId, attemptNo, usage: asUsage((event.data ?? {}) as Record<string, unknown>) });
       }
       const data = { ...((event.data as Record<string, unknown> | undefined) ?? {}), stageRunId, workflowRunId: runId, attemptNo };
@@ -681,7 +871,17 @@ export class StageExecutor {
    */
   private async turn(
     ctx: AttemptContext,
-    t: { opId: string; role: TurnRole; text: string; prepare?: boolean; outputSchema?: Record<string, unknown> | undefined; expect?: 'running' | 'validating' },
+    t: {
+      opId: string;
+      role: TurnRole;
+      text: string;
+      prepare?: boolean;
+      outputSchema?: Record<string, unknown> | undefined;
+      expect?: 'running' | 'validating';
+      /** An operator turn's files and agent mode (the stage conversation API). */
+      attachments?: AttachmentRef[];
+      agentMode?: AgentMode | undefined;
+    },
   ): Promise<SettledTurn> {
     const { stores, harness } = this.deps;
     const { frame, session, composed, owner } = ctx;
@@ -702,38 +902,107 @@ export class StageExecutor {
       text = ctx.recap + text;
       ctx.recap = undefined;
     }
+    if (ctx.rebind) {
+      // A forced stop destroyed the provider conversation: bind it again (same session, resumed).
+      await harness.resumeConversation(frame.conversationId!, composed!.params);
+      ctx.rebind = false;
+    }
 
+    const agentMode = t.agentMode ?? ctx.agentMode;
+    const attachments = t.attachments ?? [];
     const turnMeta = { stageRunId, workflowRunId: runId, attemptNo, opId: t.opId, turnRole: t.role };
     stores.turns.intent(stageRunId, t.opId, {
       role: t.role,
       policy: ctx.replayPolicy,
       now: this.now(),
-      message: { id: generateId(), sessionId: session!.id, role: 'user', content: text, turnRole: t.role, metadata: turnMeta, complete: true },
+      message: {
+        id: generateId(),
+        sessionId: session!.id,
+        role: 'user',
+        content: text,
+        turnRole: t.role,
+        metadata: turnMeta,
+        complete: true,
+        ...(attachments.length > 0
+          ? {
+              attachments: attachments.map((a) => ({
+                name: a.displayName ?? path.basename(a.path),
+                path: a.path,
+                mimeType: a.mimeType ?? 'application/octet-stream',
+                ...(a.artifactId ? { artifactId: a.artifactId } : {}),
+              })),
+            }
+          : {}),
+      },
     });
+    if (t.role === 'operator') {
+      await this.emitSession(ctx, 'stage_run.operator_message', {
+        content: t.text,
+        ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.displayName ?? path.basename(a.path)) } : {}),
+      });
+    }
 
-    const baseOptions = await composed!.turnOptions(ctx.agentMode);
+    const baseOptions = await composed!.turnOptions(agentMode);
     const options: SendPromptOptions = { ...baseOptions, ...(t.outputSchema ? { outputSchema: t.outputSchema } : {}) };
     const turnId = this.deps.composer.beginTurn(owner!, frame.conversationId!, options, { policy: composed!.turnPolicy });
-    ctx.recorder.begin({ turnId, agentMode: options.agentMode ?? ctx.agentMode });
+    ctx.recorder.begin({ turnId, agentMode: options.agentMode ?? agentMode });
     ctx.submittedThisTurn = [];
-    const prompt = t.prepare ? composed!.preparePrompt(text, ctx.agentMode) : text;
+    const prompt = t.prepare ? composed!.preparePrompt(text, agentMode) : text;
 
+    // The turn's own abort: a stop ends this turn; an attempt abort ends it too.
+    const turnAc = new AbortController();
+    const onAttemptAbort = (): void => turnAc.abort();
+    frame.ac.signal.addEventListener('abort', onAttemptAbort, { once: true });
+    frame.turnAc = turnAc;
     frame.turnInFlight = true;
     frame.lastProgressAt = this.now();
-    let response: { content: string; structuredOutput?: unknown };
+    let response: { content: string; structuredOutput?: unknown } | undefined;
+    let failure: unknown;
     try {
-      response = await harness.sendPromptAndWait(frame.conversationId!, prompt, undefined, frame.ac.signal, options);
+      response = await harness.sendPromptAndWait(frame.conversationId!, prompt, attachments.length > 0 ? attachments : undefined, turnAc.signal, options);
     } catch (err) {
+      failure = err ?? new Error('The turn failed');
+    } finally {
       frame.turnInFlight = false;
-      this.persistPartial(ctx, t.role, turnMeta);
-      if (frame.stop) throw new AttemptStop(frame.stop);
-      throw this.harnessFailure(ctx, err);
+      frame.turnAc = undefined;
+      frame.ac.signal.removeEventListener('abort', onAttemptAbort);
     }
-    frame.turnInFlight = false;
     // An aborted turn that RESOLVES (claude-agent) is handled like one that threw.
     if (frame.stop) {
       this.persistPartial(ctx, t.role, turnMeta);
       throw new AttemptStop(frame.stop);
+    }
+    const stopped = frame.turnStop;
+    frame.turnStop = undefined;
+    if (stopped) {
+      // The operator stopped this turn (chat parity): it settles with what it
+      // produced, and the stage continues from the next turn boundary.
+      const partial = ctx.recorder.take({ partial: true });
+      const settled: SettledTurn = { role: t.role, content: partial?.content ?? response?.content ?? '' };
+      stores.turns.settle(stageRunId, t.opId, settled, {
+        now: this.now(),
+        ...(partial
+          ? {
+              message: {
+                id: generateId(),
+                sessionId: session!.id,
+                role: 'assistant' as const,
+                content: partial.content,
+                turnRole: t.role,
+                metadata: { ...partial.metadata, ...turnMeta, stopped: true },
+                complete: true,
+              },
+            }
+          : {}),
+      });
+      if (stopped.force) ctx.rebind = true;
+      await this.emitSession(ctx, 'stage_run.turn_cancelled', { opId: t.opId, force: stopped.force });
+      this.recheck(ctx, t.expect ?? 'running');
+      return settled;
+    }
+    if (failure !== undefined || !response) {
+      this.persistPartial(ctx, t.role, turnMeta);
+      throw this.harnessFailure(ctx, failure);
     }
 
     const recorded = ctx.recorder.take({ fallbackContent: response.content });
@@ -762,9 +1031,41 @@ export class StageExecutor {
     });
     const remembered = await rememberProviderSession(harness, this.deps.sessionRepo, session!);
     if (remembered) session!.providerSessionId = remembered;
-    if (settled.submitted !== undefined) stores.attempts.update(stageRunId, attemptNo, { structuredOutput: settled.submitted });
+    if (settled.submitted !== undefined && !frame.amend) stores.attempts.update(stageRunId, attemptNo, { structuredOutput: settled.submitted });
     this.recheck(ctx, t.expect ?? 'running');
     return settled;
+  }
+
+  /** Files uploaded to this stage (artifact ids), as the harness attaches them; a foreign id is dropped. */
+  private async attachmentsOf(ctx: AttemptContext, ids: readonly string[] | undefined): Promise<AttachmentRef[]> {
+    if (!ids?.length || !this.deps.artifacts) return [];
+    const out: AttachmentRef[] = [];
+    for (const id of ids) {
+      const a = await this.deps.artifacts.getArtifact(id).catch(() => null);
+      if (!a || a.stageRunId !== ctx.frame.req.stageRunId) continue;
+      out.push({ type: 'file', path: a.path, displayName: a.name, artifactId: a.id, ...(a.mimeType ? { mimeType: a.mimeType } : {}) });
+    }
+    return out;
+  }
+
+  /**
+   * Send the queued operator messages, one turn each (the stage conversation
+   * API). The instance is `running`; each answer becomes the output text.
+   */
+  private async operatorTurns(ctx: AttemptContext, opPrefix: string): Promise<void> {
+    const queue = ctx.frame.operatorQueue;
+    while (queue.length > 0) {
+      const op = queue.shift()!;
+      const turn = await this.turn(ctx, {
+        opId: `${opPrefix}/operator/${generateId()}`,
+        role: 'operator',
+        text: op.prompt,
+        prepare: true,
+        attachments: await this.attachmentsOf(ctx, op.attachmentIds),
+        agentMode: op.agentMode,
+      });
+      this.recordOutput(ctx, turn);
+    }
   }
 
   private persistPartial(ctx: AttemptContext, role: TurnRole, meta: Record<string, unknown>): void {
@@ -787,6 +1088,11 @@ export class StageExecutor {
     if (frame.stop) throw new AttemptStop(frame.stop);
     if (this.dead) throw new AttemptStop({ kind: 'aborted', reason: 'superseded' });
     const row = this.deps.stores.stages.getInstance(frame.req.stageRunId);
+    // An amendment holds no lease: it only needs the instance still completed.
+    if (frame.amend) {
+      if (!row || row.status !== 'completed') throw new AttemptStop({ kind: 'aborted', reason: 'superseded' });
+      return;
+    }
     if (!row || row.status !== expect || row.leaseOwner !== frame.owner || row.currentAttempt !== frame.req.attemptNo) {
       throw new AttemptStop({ kind: 'aborted', reason: 'superseded' });
     }
@@ -866,6 +1172,8 @@ export class StageExecutor {
         ...(i === last && ctx.strategies[0] === 'native' ? { outputSchema: ctx.contract.schema ?? { type: 'object' } } : {}),
       });
       this.recordOutput(ctx, turn);
+      // A message the operator sent meanwhile is the next turn (PD-3: never mid-turn).
+      await this.operatorTurns(ctx, `a${ctx.epoch}`);
     }
   }
 
@@ -961,6 +1269,22 @@ export class StageExecutor {
    * validated again before the next round.
    */
   private async validateAndReview(ctx: AttemptContext): Promise<StageOutput> {
+    for (;;) {
+      const out = await this.validateAndReviewOnce(ctx);
+      // No await between this check and `closed`: a message that arrives
+      // later is refused (the stage is finishing) instead of being lost.
+      if (ctx.frame.operatorQueue.length === 0) {
+        ctx.frame.closed = true;
+        return out;
+      }
+      // Messages sent while the output was checked or summarised: send them,
+      // then the output is checked (and reviewed) again.
+      this.backToRunning(ctx, 'validating');
+      await this.operatorTurns(ctx, `a${ctx.epoch}`);
+    }
+  }
+
+  private async validateAndReviewOnce(ctx: AttemptContext): Promise<StageOutput> {
     let checked = await this.validate(ctx);
     let summary = await this.summary(ctx, checked.data);
     const approval = ctx.stage.approval;
@@ -1051,6 +1375,12 @@ export class StageExecutor {
       frame.parkedSince = undefined;
       frame.lastProgressAt = this.now();
     }
+    if (!verdict && frame.turnStop && !frame.stop) {
+      // The operator stopped the turn this gate belongs to: the gate ends, the turn returns.
+      await frame.ticket?.resume();
+      this.backToRunning(ctx, 'awaiting_input');
+      throw new TurnStoppedAtGate();
+    }
     if (!verdict) throw new AttemptStop(frame.stop ?? { kind: 'aborted', reason: 'superseded' });
     await frame.ticket?.resume();
     await this.emitSession(ctx, 'stage_run.input_received', { outcome: verdict.outcome });
@@ -1067,10 +1397,90 @@ export class StageExecutor {
         ...(verdict.data !== undefined ? { value: verdict.data } : verdict.feedback !== undefined ? { value: { feedback: verdict.feedback } } : {}),
         ...(verdict.feedback !== undefined ? { reason: verdict.feedback } : {}),
       };
-    } catch {
+    } catch (err) {
+      if (err instanceof TurnStoppedAtGate) return { outcome: 'rejected', reason: 'The turn was stopped by the operator (cancelled)' };
       // The attempt is stopping: the turn's own abort ends it.
       return { outcome: 'rejected', reason: 'The stage was stopped (cancelled)' };
     }
+  }
+
+  // ── Amendment of a completed stage (PD-4) ────────────────────
+
+  /**
+   * The amendment's turns: the operator message (json stages get the output
+   * instructions again), then the output contract with repair turns. No
+   * status change, no lease; the instance must stay `completed` throughout.
+   */
+  private async amendBody(ctx: AttemptContext): Promise<void> {
+    const { stores } = this.deps;
+    const { stageRunId } = ctx.frame.req;
+    this.armWatchdog(ctx);
+    await this.bindSession(ctx);
+    ctx.outputText = typeof ctx.instance.output === 'string' ? ctx.instance.output : '';
+    const prefix = `amend/${generateId()}`;
+    const queue = ctx.frame.operatorQueue;
+    while (queue.length > 0) {
+      const op = queue.shift()!;
+      const json = ctx.contract.format === 'json';
+      const turn = await this.turn(ctx, {
+        opId: `${prefix}/operator/${generateId()}`,
+        role: 'operator',
+        text: json ? op.prompt + this.outputInstructions(ctx) : op.prompt,
+        prepare: true,
+        attachments: await this.attachmentsOf(ctx, op.attachmentIds),
+        agentMode: op.agentMode,
+        ...(json && ctx.strategies[0] === 'native' ? { outputSchema: ctx.contract.schema ?? { type: 'object' } } : {}),
+      });
+      this.recordOutput(ctx, turn);
+    }
+    const maxRepairs = ctx.stage.repair?.maxRepairs ?? 2;
+    for (let repairs = 0; ; repairs++) {
+      const check = await checkOutputContract(ctx.contract, ctx.strategies, ctx.outputs, ctx.outputText, {
+        logger: this.logger,
+        scriptRunner: this.deps.scriptRunner,
+        workspacePath: ctx.workDir,
+        stageRunId,
+        scope: expressionScope({ ...ctx.state.run, variables: userVariables(ctx.variables) }, ctx.state.instances),
+      });
+      this.recheck(ctx, 'running');
+      if (check.ok) {
+        const summary =
+          ctx.contract.format === 'json'
+            ? await this.summary(ctx, check.data)
+            : undefined;
+        const at = this.now();
+        if (!stores.stages.amend(stageRunId, { outputText: ctx.outputText, ...(check.data !== undefined ? { outputData: check.data } : {}), ...(summary !== undefined ? { summary } : {}) }, at)) {
+          throw new AttemptStop({ kind: 'aborted', reason: 'superseded' });
+        }
+        await this.emitSession(ctx, 'stage_run.amended', {
+          amendedAt: at,
+          outputText: ctx.outputText.length > 4000 ? `${ctx.outputText.slice(0, 4000)}…` : ctx.outputText,
+        });
+        return;
+      }
+      if (repairs >= maxRepairs) throw new AttemptStop({ kind: 'failed', error: check.error });
+      await this.emitSession(ctx, 'stage_run.repairing', { repair: repairs + 1, failures: check.failures, amend: true });
+      const turn = await this.turn(ctx, {
+        opId: `${prefix}/repair/${repairs}`,
+        role: 'repair',
+        text: repairMessage(check.failures, ctx.strategies, ctx.contract.format),
+        prepare: true,
+      });
+      this.recordOutput(ctx, turn);
+    }
+  }
+
+  /** A terminal run keeps no live conversation (B-15): release the one an amendment re-opened. */
+  private async releaseAfterAmend(ctx: AttemptContext): Promise<void> {
+    const { stores, harness, sessionRepo } = this.deps;
+    const { runId, stageRunId } = ctx.frame.req;
+    const run = stores.runs.getRunRow(runId);
+    if (!run || !['completed', 'failed', 'cancelled'].includes(run.status) || !ctx.session || !ctx.frame.sessionKey) return;
+    if (ctx.session.conversationId) await harness.destroyConversation(ctx.session.conversationId).catch(() => undefined);
+    await sessionRepo.updateStatus(ctx.session.id, 'closed');
+    await sessionRepo.update(ctx.session.id, { closedAt: new Date(this.now()) });
+    stores.runSessions.release(runId, ctx.frame.sessionKey, this.now());
+    stores.turns.release(stageRunId);
   }
 
   // ── Hooks and checkpoints ────────────────────────────────────

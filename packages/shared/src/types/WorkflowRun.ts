@@ -150,6 +150,8 @@ export interface StageRun {
   updatedAt?: Date;
   startedAt?: Date;
   completedAt?: Date;
+  /** When an operator follow-up last amended this completed stage's output (PD-4). */
+  amendedAt?: Date;
 }
 
 /** Compound type: WorkflowRun with all its StageRuns */

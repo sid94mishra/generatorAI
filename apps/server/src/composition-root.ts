@@ -193,6 +193,7 @@ import type {
   RunSupervisor,
   OutboxPublisher,
   WorkflowRunService,
+  StageConversationService,
   // automation services
   AutomationService,
   // Track A1 — boot reconciler + idempotency sweeper
@@ -861,6 +862,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     runDefinitionReader,
     engine,
     workflowRunService,
+    stageConversationService,
     automationService,
     automationRecoveryService,
     hitlService,
@@ -2127,6 +2129,7 @@ export async function createContainer(config: AppConfig): Promise<Container> {
     runDefinitionReader,
     engine,
     workflowRunService,
+    stageConversationService,
 
     // Orchestrator
     workflowOrchestrator,
@@ -2591,6 +2594,8 @@ export interface Container {
   /** The workflow engine (P03). */
   engine: RunSupervisor;
   workflowRunService: WorkflowRunService;
+  /** The stage conversation API (P03b): a stage is a compact chat. */
+  stageConversationService: StageConversationService;
 
   // Orchestrator
   workflowOrchestrator: WorkflowOrchestrator;

@@ -12,6 +12,7 @@
 
 import { Router } from 'express';
 import type { Container } from '../composition-root.js';
+import { RunCommandRefusedError } from '@generatorai/core';
 import type {
   ReviewIntent,
   ReviewScope,
@@ -38,6 +39,8 @@ export function createReviewRoutes(container: Container): Router {
     reviewThreadService,
     chatManagementService,
     workflowRunService,
+    stageConversationService,
+    stageRunRepo,
     checkpointService,
     logger,
   } = container;
@@ -280,23 +283,24 @@ export function createReviewRoutes(container: Container): Router {
         typeof target.stageId === 'string'
       ) {
         // A stage parked on its completion review takes the review as a
-        // revision request (the `approve` command, changes_requested). A
-        // follow-up on a finished stage arrives with the stage conversation
-        // API (P03b); until then it is refused rather than lost.
-        const r = await workflowRunService.command(target.runId, {
-          command: 'approve',
-          instanceId: target.stageId,
-          outcome: 'changes_requested',
-          feedback: submission.prompt,
-        });
-        if (!r.ok) {
-          res.status(409).json({
-            error: {
-              code: 'STAGE_NOT_AWAITING_REVIEW',
-              message: `The stage is not waiting for a review (${r.message})`,
-            },
+        // revision request (the `approve` command, changes_requested); any
+        // other stage takes it as an operator message (the stage
+        // conversation API: the next turn, an amendment of a completed
+        // stage, or a retry of a paused one). A refusal (a busy stage, an
+        // open tool gate) is answered as an error and the batch stays
+        // pending: it is marked delivered only once it was taken.
+        const stage = await stageRunRepo.getById(target.stageId).catch(() => null);
+        const review = (stage?.interruptData as { kind?: string } | undefined)?.kind === 'stage_completion_review';
+        if (stage?.status === 'awaiting_input' && review) {
+          const r = await workflowRunService.command(target.runId, {
+            command: 'approve',
+            instanceId: target.stageId,
+            outcome: 'changes_requested',
+            feedback: submission.prompt,
           });
-          return;
+          if (!r.ok) throw new RunCommandRefusedError(r);
+        } else {
+          await stageConversationService.send(target.runId, target.stageId, { prompt: submission.prompt });
         }
         delivered = true;
       }

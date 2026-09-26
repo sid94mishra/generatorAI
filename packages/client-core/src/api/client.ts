@@ -504,6 +504,19 @@ export interface StageRunSummary {
    * separate pending-approvals endpoint.
    */
   interruptData?: unknown;
+  /** When an operator follow-up last amended this completed stage (PD-4). */
+  amendedAt?: Timestamp | null;
+  /** Monotonic CAS version: a poll merges an instance only when it is not older than what the stream applied. */
+  version?: number;
+}
+
+/** How a stage took an operator message (`POST …/instances/:id/messages`). */
+export interface StageMessageResult {
+  runId: string;
+  instanceId: string;
+  /** queued: the next turn; amending: a completed stage's output is being amended; retrying: a paused stage restarted with it. */
+  outcome: 'queued' | 'amending' | 'retrying';
+  attachmentIds: string[];
 }
 
 /** Outcomes the `approve` run command accepts. */
@@ -1299,6 +1312,83 @@ export function createApiClient(fetchImpl: ApiFetch) {
           fetchImpl,
           `/api/workflow-runs/${runId}/commands`,
           json(body),
+        ),
+
+      // ── A stage is a compact chat (P03b) ──────────────────────────
+
+      /**
+       * Send an operator message to a stage instance. Between turns it is
+       * queued as the next turn, a completed stage is AMENDED (its output
+       * replaced; later stages keep what they used), a paused stage is
+       * retried with it. 409 `STAGE_BUSY` mid-turn, `INTERACTION_PENDING`
+       * while a gate waits.
+       */
+      stageMessage: (runId: string, instanceId: string, input: SendMessageInput) =>
+        request<StageMessageResult>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/messages`,
+          json({ prompt: input.message, ...(input.mode ? { mode: input.mode } : {}) }),
+        ),
+
+      /** {@link stageMessage} with files (multipart; the server caps at 10). */
+      stageMessageWithAttachments: (
+        runId: string,
+        instanceId: string,
+        input: SendMessageInput,
+        attachments: Array<{ name: string; data: Uint8Array; mimeType?: string }>,
+      ) => {
+        const form = new FormData();
+        form.set('prompt', input.message);
+        if (input.mode) form.set('mode', input.mode);
+        for (const file of attachments) {
+          form.append('attachments', new Blob([file.data as unknown as ArrayBuffer], { type: file.mimeType || 'application/octet-stream' }), file.name);
+        }
+        return request<StageMessageResult>(fetchImpl, `/api/workflow-runs/${runId}/instances/${instanceId}/messages`, {
+          method: 'POST',
+          body: form,
+        });
+      },
+
+      /** Stop the stage's turn in flight; the stage continues (a stage cancel is the `cancel` command). */
+      cancelStageTurn: (runId: string, instanceId: string, options?: { force?: boolean }) =>
+        request<{ status: string; force: boolean }>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/turn/cancel`,
+          json(options ?? {}),
+        ),
+
+      /** Answer a stage's tool-permission gate (the chat's body shape). */
+      stagePermission: (runId: string, instanceId: string, interactionId: string, response: { behavior: 'allow' | 'deny'; message?: string }) =>
+        request<void>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/permission`,
+          json(response),
+        ),
+
+      /** Answer a stage's question gate (the chat's body shape). */
+      stageAnswer: (
+        runId: string,
+        instanceId: string,
+        interactionId: string,
+        response: { answers: Record<string, string[]>; freeformResponse?: string },
+      ) =>
+        request<void>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/answer`,
+          json(response),
+        ),
+
+      /** Decide a stage's plan review. */
+      stagePlan: (
+        runId: string,
+        instanceId: string,
+        interactionId: string,
+        decision: { approved: boolean; action?: 'exit_only' | 'implement_interactive' | 'implement_autopilot'; feedback?: string },
+      ) =>
+        request<void>(
+          fetchImpl,
+          `/api/workflow-runs/${runId}/instances/${instanceId}/interactions/${interactionId}/plan`,
+          json(decision),
         ),
     },
 

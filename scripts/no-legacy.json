@@ -792,6 +792,11 @@
       "phase": "03",
       "pattern": "\\bhitl(Service)?\\.(interrupt|resume|cancelWaiter|setRedriveRun)\\(",
       "reason": "WP-3.7: stage gates park the executor frame; HitlService answers instances with run commands"
+    },
+    {
+      "phase": "03b",
+      "pattern": "\b(followUpPrompt|STAGE_NOT_AWAITING_REVIEW)\b|HITL panel",
+      "reason": "WP-3b.1 (PD-9): no approve-with-follow-up; a stage takes messages through the stage conversation API"
     }
   ],
   "comments": {

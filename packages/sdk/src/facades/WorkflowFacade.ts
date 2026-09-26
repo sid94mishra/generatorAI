@@ -2,7 +2,16 @@
 // WorkflowFacade — ai.workflows.*
 // ────────────────────────────────────────────────────────────────
 
-import { RunCommandRefusedError, type CoreServices, type WorkflowScriptLoader, type IWorkflowRunRepository, type WorkflowOrchestrator } from '@generatorai/core';
+import {
+  RunCommandRefusedError,
+  type CoreServices,
+  type WorkflowScriptLoader,
+  type IWorkflowRunRepository,
+  type WorkflowOrchestrator,
+  type StageGateAnswer,
+  type StageMessage,
+  type StageSendOutcome,
+} from '@generatorai/core';
 import type { PersistedEvent, WorkflowRun } from '@generatorai/shared';
 import type {
   ForkRunRequest,
@@ -216,6 +225,27 @@ export class WorkflowFacade {
   async command(runId: string, command: RunCommand): Promise<void> {
     const r = await this.services.workflowRunService.command(runId, command);
     if (!r.ok) throw new RunCommandRefusedError(r);
+  }
+
+  /**
+   * Send an operator message to a stage instance (a stage is a compact
+   * chat): queued between turns, an amendment of a completed stage (its
+   * output replaced; successors are not re-run), a retry of a paused one.
+   * Throws `StageConversationError` (`STAGE_BUSY` mid-turn,
+   * `INTERACTION_PENDING` on an open gate, …).
+   */
+  async sendToStage(runId: string, instanceId: string, message: StageMessage): Promise<StageSendOutcome> {
+    return (await this.services.stageConversationService.send(runId, instanceId, message)).outcome;
+  }
+
+  /** Stop a stage's turn in flight without failing the stage. */
+  stopStageTurn(runId: string, instanceId: string, opts?: { force?: boolean }): void {
+    this.services.stageConversationService.cancelTurn(runId, instanceId, opts);
+  }
+
+  /** Answer the in-turn gate (tool permission, question, plan review) a stage is waiting on. */
+  async answerStageGate(runId: string, instanceId: string, interactionId: string, answer: StageGateAnswer): Promise<void> {
+    await this.services.stageConversationService.resolveInteraction(runId, instanceId, interactionId, answer);
   }
 
   /** Get current status of a run */

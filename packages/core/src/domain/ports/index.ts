@@ -223,6 +223,7 @@ export type {
   IWorkflowRunCas,
   StageInstanceRow,
   StageRunCasPatch,
+  StageAmendPatch,
   StageTransitionOptions,
   LeaseOption,
   TransitionResult,

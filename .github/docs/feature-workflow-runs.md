@@ -82,7 +82,7 @@ Every operator action is one route: `POST /api/workflow-runs/:id/commands` with 
 | `pause {mode: drain \| interrupt}` | run or instance | `drain` stops new launches; `interrupt` also stops in-flight attempts (their desired state is written before the executor is aborted) |
 | `resume` | run or instance | a paused instance goes `ready` with a resume attempt |
 | `cancel` | run or instance | every live instance is cancelled, then the run finalizes |
-| `retry {mode: resume \| restart}` | paused instance | a new attempt |
+| `retry {mode: resume \| restart, promptOverride?, attachmentIds?, agentMode?}` | paused instance | a new attempt; `promptOverride` is sent as its next (operator) turn |
 | `skip {as: completed \| skipped, output?}` | paused or ready instance | `completed` lets on-success successors run |
 | `fail` | paused instance | fails it; routing applies |
 | `approve {outcome, feedback?, data?}` | awaiting instance | answers the gate (§4); `data` carries a question's `{answers}` or a plan decision |
@@ -90,6 +90,21 @@ Every operator action is one route: `POST /api/workflow-runs/:id/commands` with 
 Every command takes an optional `expectedVersion`. Answers: `202` accepted; `404` unknown run or instance; `409` `invalid_state` / `version_conflict`; `400` invalid; `503` no engine. `approve` needs `exec:agent` only (a paired phone can answer a gate); every other command also needs `write:workflows`.
 
 `POST /api/workflow-runs/:id/start` starts a created run (the PD-17 check refuses it synchronously). Pending approvals are the `awaiting_input` instances of `GET /api/workflow-runs/:id`. The engine's events (`workflow_run.*`, `stage_run.*`) are published to the run's stream scope and the global bus from the outbox, awaited; the terminal events are `workflow_run.completed | failed | cancelled` with `data.workflowRunId` (RV-5).
+
+### 6.1 The stage conversation (a stage is a compact chat)
+
+`StageConversationService` (P03b) lets an operator talk to one agent instance the way they talk to a chat. Routes under `/api/workflow-runs/:id/instances/:instanceId`:
+
+| Route | Effect |
+|---|---|
+| `POST …/messages` (multipart `prompt`, `attachments[]`, `mode`; or JSON) | by the instance's state: **mid-turn** → 409 `STAGE_BUSY` (PD-3, like a chat's `CHAT_BUSY`); **awaiting a gate** → 409 `INTERACTION_PENDING`; **between turns** (`starting`/`running`/`validating` with no turn in flight) → queued as the next `operator` turn (the output is checked again after it); **completed** → **amended** (PD-4); **paused** → `retry {mode: resume, promptOverride}`; not started → 409 `STAGE_NOT_STARTED`; failed/skipped/cancelled → 409 `STAGE_NOT_CONVERSABLE` (re-run from there is a fork). `202 {outcome: queued \| amending \| retrying}` |
+| `POST …/turn/cancel {force?}` | stops the turn in flight; the turn settles with what it produced and the stage continues from its next step (a stage *cancel* is the `cancel` command). `force` also tears the provider conversation down; it is re-bound before the next turn. 409 `NO_ACTIVE_TURN` |
+| `POST …/interactions/:interactionId/{permission \| answer \| plan}` | answers the in-turn gate the instance is waiting on, in the chat's body shapes (`{behavior, message?}`, `{answers, freeformResponse?}`, `{approved, action?, feedback?}`); a deny or a declined plan is `changes_requested`, never `rejected` (which would fail the stage). 409 `INTERACTION_STALE` for any other interaction. `exec:agent` only, like `approve` |
+| `GET …/attachments/:artifactId` | a file attached to a stage message |
+
+**Amend** (PD-4, W-55): the completed instance's conversation is resumed on the session key of its last attempt (re-opened if the run already released it), the operator turn runs, and the output contract is checked again with repair turns. On success the new text/structured output replaces the instance's output, `amended_at` is stamped and `stage_run.amended` is emitted; the status stays `completed` and successors are **not** re-run (the run page offers **Re-run from here**, a fork). A failed amendment keeps the old output (`stage_run.amend_failed`). A terminal run's conversation is released again afterwards. Operator messages persist as `chat_messages` rows with `turn_role = operator` (and their attachments); the stream shows them as `stage_run.operator_message`.
+
+The review batch route (`target: stage_followup`) delivers to a stage parked on its completion review as `approve {changes_requested}`, and otherwise through `send`; the batch is marked delivered only when the stage took it. There is no approve-with-follow-up (PD-9).
 
 ---
 

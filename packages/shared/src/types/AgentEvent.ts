@@ -309,6 +309,12 @@ export type AgentEvent =
   // HITL — human-in-the-loop lifecycle events.
   | { kind: 'stage_run.awaiting_input'; data: { stageRunId: string; workflowRunId: string; interruptData?: unknown; prompt?: string } }
   | { kind: 'stage_run.input_received'; data: { stageRunId: string; workflowRunId: string; value?: unknown } }
+  // The stage conversation (P03b): an operator message, a stopped turn, an amendment of a completed stage.
+  | { kind: 'stage_run.operator_message'; data: { stageRunId: string; workflowRunId: string; content: string; attachments?: string[] } }
+  | { kind: 'stage_run.operator_message_dropped'; data: { stageRunId: string; workflowRunId: string; count: number; outcome: string } }
+  | { kind: 'stage_run.turn_cancelled'; data: { stageRunId: string; workflowRunId: string; opId: string; force: boolean } }
+  | { kind: 'stage_run.amended'; data: { stageRunId: string; workflowRunId: string; amendedAt: number; outputText: string } }
+  | { kind: 'stage_run.amend_failed'; data: { stageRunId: string; workflowRunId: string; error: string } }
   // ── Session Events ──
   | { kind: 'session.created'; data: { sessionId: string; name?: string } }
   | { kind: 'session.active'; data: { sessionId: string } }
