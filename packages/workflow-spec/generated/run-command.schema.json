@@ -380,6 +380,44 @@
           ],
           "additionalProperties": false,
           "description": "Accept an iteration"
+        },
+        {
+          "type": "object",
+          "properties": {
+            "command": {
+              "type": "string",
+              "const": "deliver_event",
+              "description": "Deliver an external event to the run: the oldest waiting event wait with this key takes it (an early event is buffered)"
+            },
+            "instanceId": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/instanceId"
+            },
+            "expectedVersion": {
+              "$ref": "#/definitions/RunCommand/anyOf/0/properties/expectedVersion"
+            },
+            "eventKey": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 500,
+              "description": "The event key a wait names"
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 200,
+              "description": "A repeated delivery with the same key and data is a replay; the same key with other data is refused (409)"
+            },
+            "data": {
+              "description": "The event's payload (the wait's output.data)"
+            }
+          },
+          "required": [
+            "command",
+            "eventKey",
+            "idempotencyKey"
+          ],
+          "additionalProperties": false,
+          "description": "Deliver an event"
         }
       ],
       "description": "An operator command on a run"

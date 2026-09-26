@@ -1,4 +1,4 @@
-export { validateWorkflow, schemaIssues, type ValidateOptions, type ValidationResult } from './validateWorkflow.js';
+export { validateWorkflow, schemaIssues, type ValidateOptions, type ValidationResult, type ResolvedWorkflowRef } from './validateWorkflow.js';
 export {
   VALIDATION_CODES,
   ValidationIssueSchema,
@@ -19,6 +19,7 @@ export {
   stageTypeOf,
   stageOutputType,
   variableType,
+  waitOutputType,
   USAGE_TYPE,
   type ExprPlace,
   type ScopeContext,

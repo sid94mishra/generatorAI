@@ -1,11 +1,11 @@
 // ────────────────────────────────────────────────────────────────
 // StageSpec v2 (P01 design decision 2; G5 §2.3, §3.2; P05 §1.3).
 //
-// A discriminated union on `kind`: `agent` (P01), `check` and the `loop`
-// container (P05 milestone 5A). Map, sub-workflow and wait (5B) are further
-// members that spread the same `stageBase`. Each kind declares exactly the
-// fields that apply to it (P05 §1.3): a field of another kind is the
-// validator error `field-not-applicable`.
+// A discriminated union on `kind`: `agent` (P01), `check`, the `loop` and
+// `map` containers, `subworkflow` and `wait` (P05). Every kind spreads the
+// same `stageBase` and declares exactly the fields that apply to it (P05
+// §1.3): a field of another kind is the validator error
+// `field-not-applicable`.
 //
 // Fields whose engine default the v1 engine cannot execute (onExhausted,
 // timeouts) are optional here, with the engine default in
@@ -431,22 +431,203 @@ export const LoopStageSchema = z
   .describe('Loop container stage');
 export type LoopStage = z.infer<typeof LoopStageSchema>;
 
+// ── map (P05 §4.1) ───────────────────────────────────────────────
+
+export const MAP_WORKSPACES = ['shared', 'mount_per_item'] as const;
+export const MAP_MERGES = ['none', 'sequential', 'pr_per_item'] as const;
+
+export const MapSpecSchema = z
+  .object({
+    items: ExprSchema.describe('The list to fan out over (evaluated when the map starts, context T of its enclosing loops)'),
+    itemKey: ExprSchema.optional().describe(
+      'A stable key per item (a string, `item` bound); omitted means the index. Duplicate keys fail the map (map_duplicate_item_key)',
+    ),
+    maxItems: z.number().int().min(1).max(200).default(50).describe('More items than this fails the map (map_too_large)'),
+    concurrency: z.number().int().min(1).max(16).default(4).describe('Items whose body runs at the same time'),
+    toleratedFailurePercent: z
+      .number()
+      .min(0)
+      .max(100)
+      .default(0)
+      .describe('Failed items tolerated, in percent of all items; above it the map fails'),
+    workspace: z
+      .enum(MAP_WORKSPACES)
+      .default('shared')
+      .describe(
+        "shared: every item works in the run's mounts; mount_per_item: each item gets its own git worktree cut from a snapshot of the run mounts",
+      ),
+    merge: z
+      .enum(MAP_MERGES)
+      .default('none')
+      .describe(
+        'How item mounts come back (mount_per_item only): none keeps them; sequential merges each into the run mount; pr_per_item pushes a branch per item',
+      ),
+    itemSetup: z
+      .array(CheckSpecSchema)
+      .max(5)
+      .optional()
+      .describe('Commands run in each item mount before its body (for example pnpm install --offline); a failure fails the item'),
+    output: z
+      .object({
+        select: z
+          .record(z.string().regex(VARIABLE_NAME_PATTERN, 'An identifier').max(64), ExprSchema)
+          .optional()
+          .describe('Extra fields of every result entry, evaluated per item (the item and its body stages in scope)'),
+      })
+      .strict()
+      .default({})
+      .describe('The map output'),
+  })
+  .strict()
+  .describe('Map settings: the list, bounds, tolerance, workspaces and merges');
+export type MapSpec = z.infer<typeof MapSpecSchema>;
+
+export const MapStageSchema = z
+  .object({
+    ...stageBase,
+    kind: z.literal('map').describe('Run the body (the stages whose parentKey is this key) once per item of a runtime list'),
+    map: MapSpecSchema,
+    budget: BudgetSchema.optional().describe('Cumulative budget of every item'),
+  })
+  .strict()
+  .describe('Map container stage');
+export type MapStage = z.infer<typeof MapStageSchema>;
+
+// ── sub-workflow (P05 §4.2) ──────────────────────────────────────
+
+export const WorkflowRefSchema = z
+  .union([
+    z.object({ id: z.string().min(1).max(100).describe('Workflow definition id') }).strict().describe('By id'),
+    z
+      .object({
+        name: z.string().min(1).max(200).describe('Workflow name (portable across export and import)'),
+        projectScope: z
+          .enum(['project', 'global'])
+          .optional()
+          .describe("project: the parent's project only; global: workflows without a project; omitted: the project first, then global"),
+      })
+      .strict()
+      .describe('By name'),
+  ])
+  .describe('The child workflow; resolved at save and at invoke');
+export type WorkflowRef = z.infer<typeof WorkflowRefSchema>;
+
+export const SubworkflowSpecSchema = z
+  .object({
+    workflowRef: WorkflowRefSchema,
+    version: z
+      .union([z.literal('pin_at_run_start'), z.number().int().min(1)])
+      .default('pin_at_run_start')
+      .describe('pin_at_run_start: the published version current when the stage starts; a number pins that published version'),
+    inputs: z
+      .record(z.string().regex(VARIABLE_NAME_PATTERN, 'A variable name').max(64), ExprSchema)
+      .default({})
+      .describe("The child's variables, each an expression evaluated when the stage starts"),
+    workspace: z
+      .enum(['inherit', 'isolated'])
+      .default('inherit')
+      .describe(
+        "inherit: the child works in the parent's mounts (its mounts and post-processing are skipped; the parent commits); isolated: a full child lifecycle",
+      ),
+  })
+  .strict()
+  .describe('Sub-workflow settings');
+export type SubworkflowSpec = z.infer<typeof SubworkflowSpecSchema>;
+
+export const SubworkflowStageSchema = z
+  .object({
+    ...stageBase,
+    kind: z.literal('subworkflow').describe("Run another published workflow as this stage; its output is the child's declared outputs"),
+    subworkflow: SubworkflowSpecSchema,
+    budget: BudgetSchema.optional().describe("The child run's budget (its share of the parent's)"),
+  })
+  .strict()
+  .describe('Sub-workflow stage');
+export type SubworkflowStage = z.infer<typeof SubworkflowStageSchema>;
+
+// ── wait (P05 §4.3) ──────────────────────────────────────────────
+
+const waitTimeoutMs = z
+  .number()
+  .int()
+  .min(1000)
+  .max(2_592_000_000)
+  .optional()
+  .describe('Give up after this long (an unattended run without one expires after 72 h)');
+const waitOnTimeout = z
+  .enum(['fail', 'complete'])
+  .default('fail')
+  .describe('fail fails the stage (wait_timeout); complete completes it with outcome timeout (route on stages.<key>.output.outcome)');
+
+export const WaitSpecSchema = z
+  .discriminatedUnion('type', [
+    z
+      .object({
+        type: z.literal('approval').describe('A person approves or rejects, optionally filling a form'),
+        prompt: PromptDefinitionSchema.describe('What the approver is asked (a template)'),
+        form: z.record(z.unknown()).optional().describe("JSON Schema of the approver's input (output.data)"),
+        timeoutMs: waitTimeoutMs,
+        onTimeout: waitOnTimeout,
+      })
+      .strict()
+      .describe('Approval wait'),
+    z
+      .object({
+        type: z.literal('event').describe('An external event: the deliver_event command or the per-wait callback URL'),
+        eventKey: ExprSchema.describe("The event key to wait for (a string expression, for example concat('ci:', stages.push.output.sha))"),
+        timeoutMs: waitTimeoutMs,
+        onTimeout: waitOnTimeout,
+      })
+      .strict()
+      .describe('Event wait'),
+    z
+      .object({
+        type: z.literal('timer').describe('A fixed delay'),
+        durationMs: z.number().int().min(1000).max(2_592_000_000).describe('How long to wait'),
+      })
+      .strict()
+      .describe('Timer wait'),
+  ])
+  .describe('What the stage waits for; it holds no executor, lease or admission slot');
+export type WaitSpec = z.infer<typeof WaitSpecSchema>;
+
+export const WAIT_OUTCOMES = ['approved', 'rejected', 'event', 'timeout', 'elapsed'] as const;
+export type WaitOutcome = (typeof WAIT_OUTCOMES)[number];
+
+export const WaitStageSchema = z
+  .object({
+    ...stageBase,
+    kind: z.literal('wait').describe('Wait for an approval, an external event or a timer; the output is {outcome, data, by, at}'),
+    wait: WaitSpecSchema,
+  })
+  .strict()
+  .describe('Wait stage');
+export type WaitStage = z.infer<typeof WaitStageSchema>;
+
 export const StageSpecSchema = z
-  .discriminatedUnion('kind', [AgentStageSchema, CheckStageSchema, LoopStageSchema])
+  .discriminatedUnion('kind', [AgentStageSchema, CheckStageSchema, LoopStageSchema, MapStageSchema, SubworkflowStageSchema, WaitStageSchema])
   .describe('One stage of the workflow graph');
 export type StageSpec = z.infer<typeof StageSpecSchema>;
 export type StageKind = StageSpec['kind'];
 
 /** Every stage kind the schema knows, in declaration order. */
-export const STAGE_KINDS: readonly StageKind[] = ['agent', 'check', 'loop'];
+export const STAGE_KINDS: readonly StageKind[] = ['agent', 'check', 'loop', 'map', 'subworkflow', 'wait'];
 
-/** Container kinds own a body of child stages (`parentKey`). */
-export const CONTAINER_STAGE_KINDS: readonly string[] = ['loop'];
+/** Container kinds own a body of child stages (`parentKey`); a sub-workflow's scope is its child run, not a body. */
+export const CONTAINER_STAGE_KINDS: readonly string[] = ['loop', 'map'];
+
+const KIND_SHAPES: Readonly<Record<string, Record<string, unknown>>> = {
+  agent: AgentStageSchema.shape,
+  check: CheckStageSchema.shape,
+  loop: LoopStageSchema.shape,
+  map: MapStageSchema.shape,
+  subworkflow: SubworkflowStageSchema.shape,
+  wait: WaitStageSchema.shape,
+};
 
 /** The fields each kind accepts beyond `stageBase` (P05 §1.3), for `field-not-applicable`. */
 export function kindFields(kind: string): readonly string[] {
-  const shape =
-    kind === 'agent' ? AgentStageSchema.shape : kind === 'check' ? CheckStageSchema.shape : kind === 'loop' ? LoopStageSchema.shape : undefined;
+  const shape = KIND_SHAPES[kind];
   return shape ? Object.keys(shape) : [];
 }
 
@@ -465,6 +646,16 @@ export function stageTemplateFields(stage: StageSpec): Array<{ pointer: string; 
       break;
     case 'loop':
       if (stage.loop.wrapUp) out.push({ pointer: '/loop/wrapUp/prompt/text', text: stage.loop.wrapUp.prompt.text });
+      break;
+    case 'map':
+      stage.map.itemSetup?.forEach((c, i) => {
+        for (const [name, text] of Object.entries(c.env ?? {})) out.push({ pointer: `/map/itemSetup/${i}/env/${name}`, text });
+      });
+      break;
+    case 'wait':
+      if (stage.wait.type === 'approval') out.push({ pointer: '/wait/prompt/text', text: stage.wait.prompt.text });
+      break;
+    case 'subworkflow':
       break;
   }
   return out;

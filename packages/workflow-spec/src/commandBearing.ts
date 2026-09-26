@@ -151,6 +151,21 @@ export const COMMAND_COLLECTORS: CommandCollector[] = [
       if (s.kind === 'agent') hookFields(s.hooks, 'hook', `${p}/hooks`, `${id}/hooks`, out, s.key);
       // restore_checkpoint entries are skipped by hookFields (neither script nor function).
       hookFields(s.compensate as HookLike[] | undefined, 'compensation', `${p}/compensate`, `${id}/compensate`, out, s.key);
+      if (s.kind === 'map') {
+        s.map.itemSetup?.forEach((c, j) => {
+          out.push({
+            kind: 'check',
+            pointer: `${p}/map/itemSetup/${j}`,
+            stableId: `${id}/itemSetup/${j}`,
+            stageKey: s.key,
+            command: c.command,
+            args: c.args,
+            ...(c.env ? { env: c.env } : {}),
+            value: { command: c.command, args: c.args, env: c.env ?? null, mount: c.mount ?? null, cwd: c.cwd ?? null },
+          });
+        });
+        return;
+      }
       if (s.kind === 'check') {
         out.push({
           kind: 'check',

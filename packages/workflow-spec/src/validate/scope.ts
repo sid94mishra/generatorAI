@@ -13,15 +13,30 @@
 // `output.select`. `loops.<key>` is every enclosing loop. A body stage sees
 // the stages upstream of it in its body and everything upstream of its
 // container; body stages are never visible outside the loop, which exposes
-// them through `stages.<loop>.output.last`. `item`, `map`, `maps` and
-// `child` report `expr-scope-unavailable` until the 5B kinds bind them.
+// them through `stages.<loop>.output.last`.
+//
+// Inside a map body (P05 §4.1) `item` is the item (the element of the
+// map's list), `map` is `{index, key, count}` of the nearest map and
+// `maps.<key>` is `{item, index, key, count}` of every enclosing map (the
+// outer item of a nested map, M3). A map's `items` reads the map's own
+// place; its `itemKey` also sees `item`; its `output.select` also sees the
+// item's body stages. `child` stays unavailable.
 // ────────────────────────────────────────────────────────────────
 
 import { checkExpression, type TypeEnv } from '../expr/typecheck.js';
 import { T, kindsOf, nullable, typeFromJsonSchema, typeToString, union, withoutNull, type ExprType } from '../expr/types.js';
 import { STAGE_RUN_STATES } from '../state/stageRun.js';
 import type { VariableDefinition } from '../schemas/common.js';
-import { CONTAINER_STAGE_KINDS, LOOP_EXIT_ACTIONS, type CheckStage, type LoopStage, type StageSpec } from '../schemas/stage.js';
+import {
+  CONTAINER_STAGE_KINDS,
+  LOOP_EXIT_ACTIONS,
+  WAIT_OUTCOMES,
+  type CheckStage,
+  type LoopStage,
+  type MapStage,
+  type StageSpec,
+  type WaitStage,
+} from '../schemas/stage.js';
 import type { WorkflowGraph } from '../schemas/graph.js';
 import type { PreprocessingStep } from '../schemas/workflow.js';
 
@@ -80,9 +95,17 @@ export function checkOutputType(stage: CheckStage): ExprType {
   });
 }
 
-/** The output type of an agent or check stage (loops need the graph: `GraphTypes.outputType`). */
+/** `stages.<wait>.output` (P05 §4.3): `{outcome, data, by, at}`. */
+export function waitOutputType(stage: WaitStage): ExprType {
+  const w = stage.wait;
+  const data = w.type === 'timer' ? T.null : w.type === 'approval' && w.form ? nullable(typeFromJsonSchema(w.form)) : T.any;
+  return T.object({ outcome: T.enumOf(WAIT_OUTCOMES), data, by: nullable(T.string), at: T.number });
+}
+
+/** The output type of a stage that needs no graph (loops, maps and sub-workflows do: `GraphTypes.outputType`). */
 export function stageOutputType(stage: StageSpec): ExprType {
   if (stage.kind === 'check') return checkOutputType(stage);
+  if (stage.kind === 'wait') return waitOutputType(stage);
   if (stage.kind === 'agent') {
     if (stage.output.format === 'json') return stage.output.schema ? typeFromJsonSchema(stage.output.schema) : T.any;
     return T.string;
@@ -90,19 +113,26 @@ export function stageOutputType(stage: StageSpec): ExprType {
   return T.any;
 }
 
-export function stageTypeOf(output: ExprType): ExprType {
+export function stageTypeOf(output: ExprType, extra: Record<string, ExprType> = {}): ExprType {
   return T.object({
     status: T.enumOf(STAGE_RUN_STATES),
     output: nullable(output),
     summary: nullable(T.string),
     attempts: T.number,
     usage: USAGE_TYPE,
+    ...extra,
   });
 }
 
-/** `stages.<key>` of an agent or check stage. */
+/** Fields of `stages.<key>` beyond the common ones: an event wait's callback (P05 §4.3). */
+function stageExtras(stage: StageSpec | undefined): Record<string, ExprType> {
+  if (stage?.kind === 'wait' && stage.wait.type === 'event') return { callbackUrl: nullable(T.string), callbackToken: nullable(T.string) };
+  return {};
+}
+
+/** `stages.<key>` of a stage whose output needs no graph. */
 export function stageType(stage: StageSpec): ExprType {
-  return stageTypeOf(stageOutputType(stage));
+  return stageTypeOf(stageOutputType(stage), stageExtras(stage));
 }
 
 const CONTAINER_ROOTS: Record<string, string> = {
@@ -122,6 +152,8 @@ export type ExprPlace =
   | { kind: 'edge'; from: string }
   /** A loop's settings: exits/score/select (E), carry (C), carryInit (before the first iteration). */
   | { kind: 'loop'; key: string; context: 'E' | 'C' | 'init' }
+  /** A map's settings: `items` (the map's place), `itemKey` (plus `item`), `output.select` (plus the item's body). */
+  | { kind: 'map'; key: string; context: 'items' | 'item' | 'select' }
   /** Workflow outputs and post-processing: every top-level stage. */
   | { kind: 'workflow' }
   /** Preprocessing: no stage has run. */
@@ -133,6 +165,8 @@ export interface ScopeContext {
   upstream: (key: string) => ReadonlySet<string>;
   /** Extra variable names (set by preprocessing), typed as nullable strings. */
   extraVariables: readonly string[];
+  /** The output type of a sub-workflow stage (its child's declared outputs), when the child is known. */
+  childOutputType?: ((stage: StageSpec) => ExprType | undefined) | undefined;
 }
 
 export interface CarryIssue {
@@ -150,6 +184,7 @@ export class GraphTypes {
   private readonly children = new Map<string, string[]>();
   private readonly outputs = new Map<string, ExprType>();
   private readonly carries = new Map<string, Record<string, ExprType>>();
+  private readonly items = new Map<string, ExprType>();
   private readonly inProgress = new Set<string>();
   readonly carryIssues = new Map<string, CarryIssue[]>();
   private readonly base: Record<string, ExprType>;
@@ -201,13 +236,18 @@ export class GraphTypes {
     return out;
   }
 
-  /** The output type of any stage; a loop's is its loop output. */
+  /** The output type of any stage; a loop's is its loop output, a map's its results. */
   outputType(key: string): ExprType {
     const cached = this.outputs.get(key);
     if (cached) return cached;
     const stage = this.byKey.get(key);
     if (!stage) return T.any;
-    if (stage.kind !== 'loop') {
+    if (stage.kind === 'subworkflow') {
+      const t = this.ctx.childOutputType?.(stage) ?? T.any;
+      this.outputs.set(key, t);
+      return t;
+    }
+    if (stage.kind !== 'loop' && stage.kind !== 'map') {
       const t = stageOutputType(stage);
       this.outputs.set(key, t);
       return t;
@@ -215,7 +255,7 @@ export class GraphTypes {
     if (this.inProgress.has(key)) return T.any; // a malformed self-reference; reported elsewhere
     this.inProgress.add(key);
     try {
-      const t = this.loopOutputType(stage);
+      const t = stage.kind === 'loop' ? this.loopOutputType(stage) : this.mapOutputType(stage);
       this.outputs.set(key, t);
       return t;
     } finally {
@@ -224,7 +264,56 @@ export class GraphTypes {
   }
 
   private stageRootType(key: string): ExprType {
-    return stageTypeOf(this.outputType(key));
+    return stageTypeOf(this.outputType(key), stageExtras(this.byKey.get(key)));
+  }
+
+  // ── Maps ─────────────────────────────────────────────────────
+
+  /** The element type of a map's list (`any` when the list is untyped or not a list). */
+  itemType(map: MapStage): ExprType {
+    const cached = this.items.get(map.key);
+    if (cached) return cached;
+    this.items.set(map.key, T.any); // a self-reference while computing reads any
+    const t = withoutNull(checkExpression(map.map.items, this.env({ kind: 'map', key: map.key, context: 'items' })).type);
+    const element = t.kind === 'list' ? t.element : T.any;
+    this.items.set(map.key, element);
+    return element;
+  }
+
+  /** `maps.<key>` (and, for the nearest map, `item` and `map`). */
+  private mapRootType(map: MapStage): ExprType {
+    return T.object({ item: this.itemType(map), index: T.number, key: T.string, count: T.number });
+  }
+
+  /** One entry of a map's `results` (P05 §4.1): the item, its status, its body stages (`{status, output, summary}`) and the select fields. */
+  private mapResultType(map: MapStage): ExprType {
+    const stages: Record<string, ExprType> = {};
+    for (const k of this.body(map.key)) {
+      stages[k] = T.object({ status: T.enumOf(STAGE_RUN_STATES), output: nullable(this.outputType(k)), summary: nullable(T.string) });
+    }
+    const fields: Record<string, ExprType> = {
+      index: T.number,
+      key: T.string,
+      item: this.itemType(map),
+      status: T.enumOf(STAGE_RUN_STATES),
+      error: nullable(T.string),
+      stages: { kind: 'object', fields: stages, unknown: { code: 'expr-unknown-stage', noun: 'body stage' } },
+      pr: nullable(T.object({ url: nullable(T.string), branch: T.string })),
+    };
+    const select = map.map.output.select ?? {};
+    if (Object.keys(select).length > 0) {
+      const env = this.env({ kind: 'map', key: map.key, context: 'select' });
+      for (const [name, src] of Object.entries(select)) {
+        if (fields[name]) continue; // select cannot shadow a built-in field (reported by the validator)
+        fields[name] = checkExpression(src, env).type;
+      }
+    }
+    return T.object(fields);
+  }
+
+  private mapOutputType(map: MapStage): ExprType {
+    const entry = this.mapResultType(map);
+    return T.object({ count: T.number, results: T.list(entry), failures: T.list(entry) });
   }
 
   // ── Loops ────────────────────────────────────────────────────
@@ -380,9 +469,12 @@ export class GraphTypes {
       if (shown) {
         fields[s.key] = this.stageRootType(s.key);
       } else if (s.parentKey !== undefined && !inside.has(s.parentKey)) {
+        const viaMap = this.byKey.get(s.parentKey)?.kind === 'map';
         fields[s.key] = T.unavailable(
           'expr-scope-unavailable',
-          `Stage '${s.key}' is in the body of '${s.parentKey}': outside the body read it as stages.${s.parentKey}.output.last.${s.key}`,
+          viaMap
+            ? `Stage '${s.key}' is in the body of the map '${s.parentKey}': outside the body read it through stages.${s.parentKey}.output.results (each entry's stages.${s.key})`
+            : `Stage '${s.key}' is in the body of '${s.parentKey}': outside the body read it as stages.${s.parentKey}.output.last.${s.key}`,
         );
       } else {
         fields[s.key] = T.unavailable(
@@ -404,28 +496,58 @@ export class GraphTypes {
     return { roots, variableNames: this.variableNames };
   }
 
-  /** `loop` and `loops` for a place inside the body of the given containers (nearest first), context T. */
-  private loopRoots(containers: readonly StageSpec[]): Record<string, ExprType> {
+  /**
+   * The container roots of a place inside the body of the given containers
+   * (nearest first): `loop`/`loops` (context T) and `item`/`map`/`maps`.
+   */
+  private containerRoots(containers: readonly StageSpec[]): Record<string, ExprType> {
+    const out: Record<string, ExprType> = {};
     const loops = containers.filter((c): c is LoopStage => c.kind === 'loop');
-    if (loops.length === 0) return {};
-    const byLoop: Record<string, ExprType> = {};
-    for (const l of loops) byLoop[l.key] = this.loopRootType(l, 'T', this.carryTypes(l));
-    return {
-      loop: byLoop[loops[0]!.key]!,
-      loops: { kind: 'object', fields: byLoop, unknown: { code: 'expr-unknown-field', noun: 'enclosing loop' } },
-    };
+    if (loops.length > 0) {
+      const byLoop: Record<string, ExprType> = {};
+      for (const l of loops) byLoop[l.key] = this.loopRootType(l, 'T', this.carryTypes(l));
+      out['loop'] = byLoop[loops[0]!.key]!;
+      out['loops'] = { kind: 'object', fields: byLoop, unknown: { code: 'expr-unknown-field', noun: 'enclosing loop' } };
+    }
+    const maps = containers.filter((c): c is MapStage => c.kind === 'map');
+    if (maps.length > 0) {
+      const byMap: Record<string, ExprType> = {};
+      for (const m of maps) byMap[m.key] = this.mapRootType(m);
+      out['item'] = this.itemType(maps[0]!);
+      out['map'] = T.object({ index: T.number, key: T.string, count: T.number });
+      out['maps'] = { kind: 'object', fields: byMap, unknown: { code: 'expr-unknown-field', noun: 'enclosing map' } };
+    }
+    return out;
   }
 
   /** The environment of a loop's own settings. */
   private loopEnv(loop: LoopStage, context: 'E' | 'C', carry: Record<string, ExprType>): TypeEnv {
     const visible = new Set([...this.ctx.upstream(loop.key), ...this.body(loop.key)]);
-    const outer = this.loopRoots(this.containersOf(loop.key));
+    const outer = this.containerRoots(this.containersOf(loop.key));
     const loopsField = outer['loops'] as Extract<ExprType, { kind: 'object' }> | undefined;
     const own = this.loopRootType(loop, context, carry);
     return this.rootsWith(this.stagesRoot(visible, this.insideOf(loop.key, true)), {
+      ...outer,
       loop: own,
       loops: { kind: 'object', fields: { ...(loopsField?.fields ?? {}), [loop.key]: own }, unknown: { code: 'expr-unknown-field', noun: 'enclosing loop' } },
     });
+  }
+
+  /** The environment of a map's own settings (`items`, `itemKey`, `output.select`). */
+  private mapEnv(map: MapStage, context: 'items' | 'item' | 'select'): TypeEnv {
+    const outer = this.containerRoots(this.containersOf(map.key));
+    if (context === 'items') {
+      return this.rootsWith(this.stagesRoot(new Set(this.ctx.upstream(map.key)), this.insideOf(map.key)), outer);
+    }
+    const mapsField = outer['maps'] as Extract<ExprType, { kind: 'object' }> | undefined;
+    const own = {
+      item: this.itemType(map),
+      map: T.object({ index: T.number, key: T.string, count: T.number }),
+      maps: { kind: 'object', fields: { ...(mapsField?.fields ?? {}), [map.key]: this.mapRootType(map) }, unknown: { code: 'expr-unknown-field', noun: 'enclosing map' } } as ExprType,
+    };
+    const visible = new Set(this.ctx.upstream(map.key));
+    if (context === 'select') for (const k of this.body(map.key)) visible.add(k);
+    return this.rootsWith(this.stagesRoot(visible, this.insideOf(map.key, context === 'select')), { ...outer, ...own });
   }
 
   /** Keys of the containers a place sits in (and the container itself, for its own settings). */
@@ -445,12 +567,12 @@ export class GraphTypes {
       case 'stage': {
         const visible = new Set(this.ctx.upstream(place.key));
         if (place.self) visible.add(place.key);
-        return this.rootsWith(this.stagesRoot(visible, this.insideOf(place.key)), this.loopRoots(this.containersOf(place.key)));
+        return this.rootsWith(this.stagesRoot(visible, this.insideOf(place.key)), this.containerRoots(this.containersOf(place.key)));
       }
       case 'edge': {
         const visible = new Set([...this.ctx.upstream(place.from), place.from]);
         return this.rootsWith(this.stagesRoot(visible, this.insideOf(place.from)), {
-          ...this.loopRoots(this.containersOf(place.from)),
+          ...this.containerRoots(this.containersOf(place.from)),
           parent: T.object({ status: T.enumOf(STAGE_RUN_STATES) }),
         });
       }
@@ -459,11 +581,16 @@ export class GraphTypes {
         if (!loop || loop.kind !== 'loop') return this.rootsWith(this.stagesRoot(new Set()), {});
         if (place.context === 'init') {
           return this.rootsWith(this.stagesRoot(new Set(this.ctx.upstream(loop.key)), this.insideOf(loop.key)), {
-            ...this.loopRoots(this.containersOf(loop.key)),
+            ...this.containerRoots(this.containersOf(loop.key)),
             loop: T.unavailable('expr-scope-unavailable', 'carryInit is evaluated before the first iteration: it cannot read loop'),
           });
         }
         return this.loopEnv(loop, place.context, this.carryTypes(loop));
+      }
+      case 'map': {
+        const map = this.byKey.get(place.key);
+        if (!map || map.kind !== 'map') return this.rootsWith(this.stagesRoot(new Set()), {});
+        return this.mapEnv(map, place.context);
       }
     }
   }

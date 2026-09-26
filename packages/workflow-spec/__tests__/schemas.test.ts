@@ -75,10 +75,10 @@ describe('strictness and hints', () => {
     expect(r2.issues[0]!.hint).toMatch(/maxAttempts/);
   });
 
-  it('explains stage kinds that do not exist yet', () => {
-    const r = validateWorkflow(graph([{ key: 'l', name: 'l', kind: 'map' } as never]));
+  it('lists the stage kinds for an unknown kind', () => {
+    const r = validateWorkflow(graph([{ key: 'l', name: 'l', kind: 'fanout' } as never]));
     expect(r.valid).toBe(false);
-    expect(r.issues[0]!.hint).toMatch(/not available yet/);
+    expect(r.issues[0]!.hint).toMatch(/map, subworkflow, wait/);
   });
 
   it('requires formatVersion 2', () => {

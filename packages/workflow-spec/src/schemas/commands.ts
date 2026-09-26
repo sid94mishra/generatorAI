@@ -1,8 +1,9 @@
 // ────────────────────────────────────────────────────────────────
 // Run commands (P03 WP-3.6): the operator actions on a run or on one
-// instance. One discriminated union behind one route; later phases add
-// members (P05: grant_iterations, raise_budget, continue_with_input,
-// accept, accept_iteration, deliver_event) without new routes.
+// instance. One discriminated union behind one route; P05 added the loop
+// decisions (grant_iterations, raise_budget, continue_with_input, accept,
+// accept_iteration) and deliver_event without new routes. `approve` also
+// resolves an approval wait (its `data` is the form, P05 §4.3).
 // ────────────────────────────────────────────────────────────────
 
 import { z } from 'zod';
@@ -112,6 +113,23 @@ export const RunCommandSchema = z
       })
       .strict()
       .describe('Accept an iteration'),
+    // ── Events (P05 §4.3): what event waits consume. ──
+    z
+      .object({
+        command: z
+          .literal('deliver_event')
+          .describe('Deliver an external event to the run: the oldest waiting event wait with this key takes it (an early event is buffered)'),
+        ...target,
+        eventKey: z.string().min(1).max(500).describe('The event key a wait names'),
+        idempotencyKey: z
+          .string()
+          .min(1)
+          .max(200)
+          .describe('A repeated delivery with the same key and data is a replay; the same key with other data is refused (409)'),
+        data: z.unknown().optional().describe("The event's payload (the wait's output.data)"),
+      })
+      .strict()
+      .describe('Deliver an event'),
   ])
   .describe('An operator command on a run');
 export type RunCommand = z.infer<typeof RunCommandSchema>;

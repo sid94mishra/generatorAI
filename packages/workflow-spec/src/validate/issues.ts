@@ -95,7 +95,7 @@ export const VALIDATION_CODES = {
   'invalid-output-name': {
     layer: 'references',
     severity: 'error',
-    description: 'A workflow output name that is not an identifier, or a loop output.select name that shadows a built-in field',
+    description: 'A workflow output name that is not an identifier, or a loop or map output.select name that shadows a built-in field',
   },
   'compact-without-continue': { layer: 'references', severity: 'error', description: 'compactAfter on a stage that does not continue its conversation' },
   'exit-unbound': {
@@ -111,7 +111,20 @@ export const VALIDATION_CODES = {
     severity: 'error',
     description: 'loop.wrapUp.stage is not a body agent stage with sessionReuse continue (a warning when the loop has no budget)',
   },
-  'check-command': { layer: 'references', severity: 'error', description: 'A check command that is not on the command allow-list' },
+  'check-command': { layer: 'references', severity: 'error', description: 'A check (or map itemSetup) command that is not on the command allow-list' },
+  'map-merge-needs-mount': { layer: 'references', severity: 'error', description: 'A map merge (sequential, pr_per_item) without workspace mount_per_item' },
+  'map-item-setup-needs-mount': { layer: 'references', severity: 'error', description: 'map.itemSetup without workspace mount_per_item' },
+  'map-shared-write-concurrency': {
+    layer: 'references',
+    severity: 'warning',
+    description: 'A map running several items at once in one shared workspace with body stages that may write',
+  },
+  'wait-form': { layer: 'references', severity: 'error', description: "An approval wait's form that is not a usable JSON Schema object" },
+  'subworkflow-ref': { layer: 'references', severity: 'error', description: 'A sub-workflow reference that names no workflow, or an archived one' },
+  'subworkflow-draft': { layer: 'references', severity: 'warning', description: 'A sub-workflow whose child is a draft (an error at publish and invoke)' },
+  'subworkflow-input': { layer: 'references', severity: 'error', description: "A sub-workflow input the child does not declare, or a required child variable left unset" },
+  'subworkflow-depth': { layer: 'references', severity: 'error', description: 'Sub-workflows nested more than 3 deep' },
+  'subworkflow-cycle': { layer: 'references', severity: 'error', description: 'Sub-workflows that run each other in a cycle' },
   'budget-cost-unsupported': {
     layer: 'references',
     severity: 'warning',

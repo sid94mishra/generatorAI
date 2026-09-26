@@ -2248,6 +2248,18 @@
                             "loop_wall_clock",
                             "loop_carry_too_large",
                             "restore_failed",
+                            "map_items_invalid",
+                            "map_too_large",
+                            "map_duplicate_item_key",
+                            "map_tolerance_exceeded",
+                            "mount_fork_failed",
+                            "item_setup_failed",
+                            "merge_conflict",
+                            "merge_failed",
+                            "subworkflow_start_failed",
+                            "subworkflow_output_drift",
+                            "subworkflow_failed",
+                            "wait_timeout",
                             "output_schema",
                             "validation_rule",
                             "judge_below_threshold",
@@ -2861,6 +2873,425 @@
                 ],
                 "additionalProperties": false,
                 "description": "Loop container stage"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/key"
+                  },
+                  "name": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/name"
+                  },
+                  "description": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/description"
+                  },
+                  "parentKey": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/parentKey"
+                  },
+                  "guard": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/guard"
+                  },
+                  "join": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/join"
+                  },
+                  "position": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/position"
+                  },
+                  "compensate": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/compensate"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "map",
+                    "description": "Run the body (the stages whose parentKey is this key) once per item of a runtime list"
+                  },
+                  "map": {
+                    "type": "object",
+                    "properties": {
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 2000,
+                        "description": "The list to fan out over (evaluated when the map starts, context T of its enclosing loops)"
+                      },
+                      "itemKey": {
+                        "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/outputs/additionalProperties",
+                        "description": "A stable key per item (a string, `item` bound); omitted means the index. Duplicate keys fail the map (map_duplicate_item_key)"
+                      },
+                      "maxItems": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 200,
+                        "default": 50,
+                        "description": "More items than this fails the map (map_too_large)"
+                      },
+                      "concurrency": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 16,
+                        "default": 4,
+                        "description": "Items whose body runs at the same time"
+                      },
+                      "toleratedFailurePercent": {
+                        "type": "number",
+                        "minimum": 0,
+                        "maximum": 100,
+                        "default": 0,
+                        "description": "Failed items tolerated, in percent of all items; above it the map fails"
+                      },
+                      "workspace": {
+                        "type": "string",
+                        "enum": [
+                          "shared",
+                          "mount_per_item"
+                        ],
+                        "default": "shared",
+                        "description": "shared: every item works in the run's mounts; mount_per_item: each item gets its own git worktree cut from a snapshot of the run mounts"
+                      },
+                      "merge": {
+                        "type": "string",
+                        "enum": [
+                          "none",
+                          "sequential",
+                          "pr_per_item"
+                        ],
+                        "default": "none",
+                        "description": "How item mounts come back (mount_per_item only): none keeps them; sequential merges each into the run mount; pr_per_item pushes a branch per item"
+                      },
+                      "itemSetup": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/1/properties/check"
+                        },
+                        "maxItems": 5,
+                        "description": "Commands run in each item mount before its body (for example pnpm install --offline); a failure fails the item"
+                      },
+                      "output": {
+                        "type": "object",
+                        "properties": {
+                          "select": {
+                            "type": "object",
+                            "additionalProperties": {
+                              "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/outputs/additionalProperties"
+                            },
+                            "propertyNames": {
+                              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                              "maxLength": 64
+                            },
+                            "description": "Extra fields of every result entry, evaluated per item (the item and its body stages in scope)"
+                          }
+                        },
+                        "additionalProperties": false,
+                        "default": {},
+                        "description": "The map output"
+                      }
+                    },
+                    "required": [
+                      "items"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Map settings: the list, bounds, tolerance, workspaces and merges"
+                  },
+                  "budget": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/budget",
+                    "description": "Cumulative budget of every item"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name",
+                  "kind",
+                  "map"
+                ],
+                "additionalProperties": false,
+                "description": "Map container stage"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/key"
+                  },
+                  "name": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/name"
+                  },
+                  "description": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/description"
+                  },
+                  "parentKey": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/parentKey"
+                  },
+                  "guard": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/guard"
+                  },
+                  "join": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/join"
+                  },
+                  "position": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/position"
+                  },
+                  "compensate": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/compensate"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "subworkflow",
+                    "description": "Run another published workflow as this stage; its output is the child's declared outputs"
+                  },
+                  "subworkflow": {
+                    "type": "object",
+                    "properties": {
+                      "workflowRef": {
+                        "anyOf": [
+                          {
+                            "type": "object",
+                            "properties": {
+                              "id": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 100,
+                                "description": "Workflow definition id"
+                              }
+                            },
+                            "required": [
+                              "id"
+                            ],
+                            "additionalProperties": false,
+                            "description": "By id"
+                          },
+                          {
+                            "type": "object",
+                            "properties": {
+                              "name": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 200,
+                                "description": "Workflow name (portable across export and import)"
+                              },
+                              "projectScope": {
+                                "type": "string",
+                                "enum": [
+                                  "project",
+                                  "global"
+                                ],
+                                "description": "project: the parent's project only; global: workflows without a project; omitted: the project first, then global"
+                              }
+                            },
+                            "required": [
+                              "name"
+                            ],
+                            "additionalProperties": false,
+                            "description": "By name"
+                          }
+                        ],
+                        "description": "The child workflow; resolved at save and at invoke"
+                      },
+                      "version": {
+                        "anyOf": [
+                          {
+                            "type": "string",
+                            "const": "pin_at_run_start"
+                          },
+                          {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        ],
+                        "default": "pin_at_run_start",
+                        "description": "pin_at_run_start: the published version current when the stage starts; a number pins that published version"
+                      },
+                      "inputs": {
+                        "type": "object",
+                        "additionalProperties": {
+                          "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/outputs/additionalProperties"
+                        },
+                        "propertyNames": {
+                          "pattern": "^[A-Za-z_][A-Za-z0-9_]*$",
+                          "maxLength": 64
+                        },
+                        "default": {},
+                        "description": "The child's variables, each an expression evaluated when the stage starts"
+                      },
+                      "workspace": {
+                        "type": "string",
+                        "enum": [
+                          "inherit",
+                          "isolated"
+                        ],
+                        "default": "inherit",
+                        "description": "inherit: the child works in the parent's mounts (its mounts and post-processing are skipped; the parent commits); isolated: a full child lifecycle"
+                      }
+                    },
+                    "required": [
+                      "workflowRef"
+                    ],
+                    "additionalProperties": false,
+                    "description": "Sub-workflow settings"
+                  },
+                  "budget": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/workflow/properties/budget",
+                    "description": "The child run's budget (its share of the parent's)"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name",
+                  "kind",
+                  "subworkflow"
+                ],
+                "additionalProperties": false,
+                "description": "Sub-workflow stage"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "key": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/key"
+                  },
+                  "name": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/name"
+                  },
+                  "description": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/description"
+                  },
+                  "parentKey": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/parentKey"
+                  },
+                  "guard": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/guard"
+                  },
+                  "join": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/join"
+                  },
+                  "position": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/position"
+                  },
+                  "compensate": {
+                    "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/compensate"
+                  },
+                  "kind": {
+                    "type": "string",
+                    "const": "wait",
+                    "description": "Wait for an approval, an external event or a timer; the output is {outcome, data, by, at}"
+                  },
+                  "wait": {
+                    "anyOf": [
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "approval",
+                            "description": "A person approves or rejects, optionally filling a form"
+                          },
+                          "prompt": {
+                            "type": "object",
+                            "properties": {
+                              "label": {
+                                "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/prompts/items/properties/label"
+                              },
+                              "text": {
+                                "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/0/properties/prompts/items/properties/text"
+                              }
+                            },
+                            "required": [
+                              "label",
+                              "text"
+                            ],
+                            "additionalProperties": false,
+                            "description": "What the approver is asked (a template)"
+                          },
+                          "form": {
+                            "type": "object",
+                            "additionalProperties": {},
+                            "description": "JSON Schema of the approver's input (output.data)"
+                          },
+                          "timeoutMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 2592000000,
+                            "description": "Give up after this long (an unattended run without one expires after 72 h)"
+                          },
+                          "onTimeout": {
+                            "type": "string",
+                            "enum": [
+                              "fail",
+                              "complete"
+                            ],
+                            "default": "fail",
+                            "description": "fail fails the stage (wait_timeout); complete completes it with outcome timeout (route on stages.<key>.output.outcome)"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "prompt"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Approval wait"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "event",
+                            "description": "An external event: the deliver_event command or the per-wait callback URL"
+                          },
+                          "eventKey": {
+                            "type": "string",
+                            "minLength": 1,
+                            "maxLength": 2000,
+                            "description": "The event key to wait for (a string expression, for example concat('ci:', stages.push.output.sha))"
+                          },
+                          "timeoutMs": {
+                            "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/5/properties/wait/anyOf/0/properties/timeoutMs"
+                          },
+                          "onTimeout": {
+                            "$ref": "#/definitions/WorkflowGraph/properties/stages/items/anyOf/5/properties/wait/anyOf/0/properties/onTimeout"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "eventKey"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Event wait"
+                      },
+                      {
+                        "type": "object",
+                        "properties": {
+                          "type": {
+                            "type": "string",
+                            "const": "timer",
+                            "description": "A fixed delay"
+                          },
+                          "durationMs": {
+                            "type": "integer",
+                            "minimum": 1000,
+                            "maximum": 2592000000,
+                            "description": "How long to wait"
+                          }
+                        },
+                        "required": [
+                          "type",
+                          "durationMs"
+                        ],
+                        "additionalProperties": false,
+                        "description": "Timer wait"
+                      }
+                    ],
+                    "description": "What the stage waits for; it holds no executor, lease or admission slot"
+                  }
+                },
+                "required": [
+                  "key",
+                  "name",
+                  "kind",
+                  "wait"
+                ],
+                "additionalProperties": false,
+                "description": "Wait stage"
               }
             ],
             "description": "One stage of the workflow graph"

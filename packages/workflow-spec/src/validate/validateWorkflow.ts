@@ -9,7 +9,8 @@
 //   2. the graph (keys, edges, one edge per pair, cycles per scope,
 //      containers: parents, nesting depth, edges crossing a scope, bodies);
 //   3. references (variables, context sources, output contracts, joins,
-//      loop settings, check commands);
+//      loop and map settings, check commands, wait forms, sub-workflow
+//      references when a resolver is given);
 //   4. expressions and templates (parse and type-check, per evaluation
 //      context: P05 §2.2);
 //   5. security (literal commands, secretref-only secrets);
@@ -19,14 +20,25 @@
 
 import { z } from 'zod';
 import { COST_REPORTING_PROVIDERS, DEFAULT_COMMAND_ALLOWLIST, ENGINE_LEVEL, MAX_CONTAINER_DEPTH, type EngineLevel } from '../constants.js';
+import { MAX_INVOCATION_DEPTH } from '../schemas/invocation.js';
 import { walkExpr, type ExprDiagnostic, type ExprNode } from '../expr/ast.js';
 import { parseExpression } from '../expr/parse.js';
 import { checkTemplate } from '../expr/template.js';
 import { checkExpression, type TypeEnv } from '../expr/typecheck.js';
-import { kindsOf, withoutNull } from '../expr/types.js';
+import { T, kindsOf, withoutNull, type ExprType } from '../expr/types.js';
 import { compileSafeRegex } from '../regex/safeRegex.js';
 import { WorkflowGraphSchema, type WorkflowGraph } from '../schemas/graph.js';
-import { TimeoutsSchema, kindFields, stageTemplateFields, STAGE_KINDS, type LoopStage, type StageSpec } from '../schemas/stage.js';
+import {
+  TimeoutsSchema,
+  kindFields,
+  stageTemplateFields,
+  STAGE_KINDS,
+  type LoopStage,
+  type MapStage,
+  type StageSpec,
+  type SubworkflowStage,
+  type WorkflowRef,
+} from '../schemas/stage.js';
 import type { PreprocessingStep } from '../schemas/workflow.js';
 import { unwrap } from '../util/zodWalk.js';
 import { engineIssues } from './capability.js';
@@ -45,6 +57,26 @@ export interface ValidateOptions {
    * extras); offline tools keep the default.
    */
   commandAllowlist?: readonly string[];
+  /**
+   * Resolves a sub-workflow's `workflowRef` (P05 §4.2). With it the
+   * validator checks the reference, the child's status, its inputs, the
+   * nesting depth and cycles, and types `stages.<sub>.output` from the
+   * child's declared outputs. The server pre-resolves the refs of a
+   * document (recursively) before validating; offline tools omit it.
+   */
+  resolveWorkflowRef?: ((ref: WorkflowRef, fromProjectId: string | null) => ResolvedWorkflowRef | undefined) | undefined;
+  /** The id of the definition being validated (a sub-workflow cycle through it is an error). */
+  definitionId?: string | undefined;
+}
+
+/** A resolved sub-workflow reference. */
+export interface ResolvedWorkflowRef {
+  id: string;
+  name: string;
+  status: 'draft' | 'published' | 'archived';
+  /** The graph a run would use: the latest published version, else the draft. */
+  graph: WorkflowGraph;
+  projectId: string | null;
 }
 
 export interface ValidationResult {
@@ -55,9 +87,6 @@ export interface ValidationResult {
   graph?: WorkflowGraph;
 }
 
-/** Stage kinds planned for P05 milestone 5B (a clearer message than "invalid discriminator"). */
-const FUTURE_KINDS = new Set(['map', 'subworkflow', 'wait']);
-
 export function validateWorkflow(input: unknown, opts: ValidateOptions = {}): ValidationResult {
   const engine = opts.engine ?? ENGINE_LEVEL;
   const parsed = WorkflowGraphSchema.safeParse(input);
@@ -66,7 +95,7 @@ export function validateWorkflow(input: unknown, opts: ValidateOptions = {}): Va
   }
   const graph = parsed.data;
   const issues: ValidationIssue[] = [];
-  const ctx = new GraphContext(graph);
+  const ctx = new GraphContext(graph, opts.resolveWorkflowRef);
   issues.push(...ctx.dagIssues());
   issues.push(...referenceIssues(graph, ctx, opts));
   issues.push(...expressionIssues(graph, ctx));
@@ -191,11 +220,9 @@ export function schemaIssues(error: z.ZodError, input: unknown): ValidationIssue
     if (zi.code === z.ZodIssueCode.invalid_union_discriminator && zi.path[zi.path.length - 1] !== 'kind') {
       hint = `Expected one of: ${zi.options.map(String).join(', ')}`;
     }
-    if (zi.path[zi.path.length - 1] === 'kind' || (zi.code === z.ZodIssueCode.invalid_union_discriminator && zi.path[0] === 'stages')) {
-      const kind = valueAt(input, [...zi.path.slice(0, 2), 'kind']);
-      if (typeof kind === 'string' && FUTURE_KINDS.has(kind)) {
-        hint = `Stage kind '${kind}' is not available yet; the kinds are ${STAGE_KINDS.join(', ')}`;
-      }
+    const atKind = zi.path[0] === 'stages' && (zi.path.length === 2 || (zi.path.length === 3 && zi.path[2] === 'kind'));
+    if (zi.code === z.ZodIssueCode.invalid_union_discriminator && atKind) {
+      hint = `The stage kinds are ${STAGE_KINDS.join(', ')}`;
     }
     if (zi.path.length === 1 && zi.path[0] === 'formatVersion') hint = 'Set "formatVersion": 2';
     push({
@@ -222,7 +249,10 @@ class GraphContext {
   readonly scopes = new Map<string, string[]>();
   readonly types: GraphTypes;
 
-  constructor(readonly graph: WorkflowGraph) {
+  constructor(
+    readonly graph: WorkflowGraph,
+    readonly resolveRef?: ValidateOptions['resolveWorkflowRef'],
+  ) {
     graph.stages.forEach((s, i) => {
       if (!this.indexByKey.has(s.key)) this.indexByKey.set(s.key, i);
     });
@@ -240,7 +270,25 @@ class GraphContext {
       graph,
       upstream: (key) => this.upstream(key),
       extraVariables: preprocessingVariableNames(graph.workflow.lifecycle.preprocessingSteps),
+      childOutputType: (stage) => (stage.kind === 'subworkflow' ? this.childOutputType(stage) : undefined),
     });
+  }
+
+  /** The resolved child of a sub-workflow stage, when a resolver is given and knows it. */
+  child(stage: SubworkflowStage): ResolvedWorkflowRef | undefined {
+    return this.resolveRef?.(stage.subworkflow.workflowRef, this.graph.workflow.projectId ?? null);
+  }
+
+  /** `stages.<sub>.output`: the child's declared outputs, typed in the child's own graph. */
+  private childOutputType(stage: SubworkflowStage): ExprType | undefined {
+    const child = this.child(stage);
+    if (!child) return undefined;
+    const outputs = child.graph.workflow.outputs ?? {};
+    // The child's own sub-workflows are not resolved again: their outputs read as any.
+    const env = new GraphContext(child.graph).types.env({ kind: 'workflow' });
+    const fields: Record<string, ExprType> = {};
+    for (const [name, src] of Object.entries(outputs)) fields[name] = checkExpression(src, env).type;
+    return T.object(fields);
   }
 
   sameScope(a: string, b: string): boolean {
@@ -320,7 +368,7 @@ class GraphContext {
             path: `/stages/${i}/parentKey`,
             stageKey: s.key,
             message: `Stage '${s.parentKey}' is a${parent.kind === 'agent' ? 'n' : ''} ${parent.kind} stage and cannot contain other stages`,
-            hint: 'Only container stages (loop, map, sub-workflow) have a body',
+            hint: 'Only container stages (loop, map) have a body; a sub-workflow runs another workflow',
           });
         } else {
           const d = this.depth(s.key);
@@ -342,7 +390,7 @@ class GraphContext {
           path: `/stages/${i}`,
           stageKey: s.key,
           message: `The ${s.kind} '${s.key}' has no body: no stage has parentKey '${s.key}'`,
-          hint: 'Give the stages to repeat parentKey set to this key',
+          hint: s.kind === 'map' ? 'Give the stages to run per item parentKey set to this key' : 'Give the stages to repeat parentKey set to this key',
         });
       }
     });
@@ -568,6 +616,17 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext, opts: Validate
   });
 
   const allowlist = new Set((opts.commandAllowlist ?? DEFAULT_COMMAND_ALLOWLIST).map((c) => c.toLowerCase()));
+  const commandCheck = (command: string, path: string, stageKey: string) => {
+    if (allowlist.has(command.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, ''))) return;
+    out.push({
+      code: 'check-command',
+      severity: 'error',
+      path,
+      stageKey,
+      message: `'${command}' is not on the command allow-list`,
+      hint: `Allowed: ${[...allowlist].sort().join(', ')} (an operator can add commands to scripts.extraAllowlist)`,
+    });
+  };
   const costWarned = new Set<string>();
   const budgetCost = (pointer: string, stageKey: string | undefined, stages: readonly StageSpec[]) => {
     const blind = [...new Set(stages.map((s) => providerOf(graph, s)).filter((p): p is string => !!p && !(COST_REPORTING_PROVIDERS as readonly string[]).includes(p)))];
@@ -686,20 +745,22 @@ function referenceIssues(graph: WorkflowGraph, ctx: GraphContext, opts: Validate
     }
 
     if (s.kind === 'check') {
-      if (!allowlist.has(s.check.command.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, ''))) {
-        out.push({
-          code: 'check-command',
-          severity: 'error',
-          path: `${p}/check/command`,
-          stageKey: k,
-          message: `'${s.check.command}' is not on the command allow-list`,
-          hint: `Allowed: ${[...allowlist].sort().join(', ')} (an operator can add commands to scripts.extraAllowlist)`,
-        });
-      }
+      commandCheck(s.check.command, `${p}/check/command`, k);
       aliasCheck(s.check.mount, `${p}/check/mount`, k);
     }
 
     if (s.kind === 'loop') out.push(...loopIssues(ctx, s, p, budgetCost));
+    if (s.kind === 'map') {
+      s.map.itemSetup?.forEach((c, j) => {
+        commandCheck(c.command, `${p}/map/itemSetup/${j}/command`, k);
+        aliasCheck(c.mount, `${p}/map/itemSetup/${j}/mount`, k);
+      });
+      out.push(...mapIssues(ctx, s, p, budgetCost));
+    }
+    if (s.kind === 'wait' && s.wait.type === 'approval' && s.wait.form !== undefined && !isUsableJsonSchema(s.wait.form)) {
+      out.push({ code: 'wait-form', severity: 'error', path: `${p}/wait/form`, stageKey: k, message: 'wait.form is not a usable JSON Schema object' });
+    }
+    if (s.kind === 'subworkflow' && ctx.resolveRef) out.push(...subworkflowIssues(ctx, s, p, opts.definitionId));
   });
 
   graph.edges.forEach((e, i) => {
@@ -816,6 +877,159 @@ function loopIssues(
   return out;
 }
 
+/** Every body stage of a container, at any depth. */
+function bodyStages(ctx: GraphContext, key: string): StageSpec[] {
+  const out: StageSpec[] = [];
+  const visit = (k: string) => {
+    for (const c of ctx.types.body(k)) {
+      const st = ctx.stage(c);
+      if (!st) continue;
+      out.push(st);
+      visit(c);
+    }
+  };
+  visit(key);
+  return out;
+}
+
+/** A map's own settings: merges and setup need item mounts, shared parallel writers, output names, budget. */
+function mapIssues(
+  ctx: GraphContext,
+  s: MapStage,
+  p: string,
+  budgetCost: (pointer: string, stageKey: string | undefined, stages: readonly StageSpec[]) => void,
+): ValidationIssue[] {
+  const out: ValidationIssue[] = [];
+  const k = s.key;
+  const spec = s.map;
+  if (spec.merge !== 'none' && spec.workspace !== 'mount_per_item') {
+    out.push({
+      code: 'map-merge-needs-mount',
+      severity: 'error',
+      path: `${p}/map/merge`,
+      stageKey: k,
+      message: `merge ${spec.merge} brings item mounts back: it needs workspace mount_per_item`,
+      hint: 'Set workspace to mount_per_item, or merge to none',
+    });
+  }
+  if (spec.itemSetup?.length && spec.workspace !== 'mount_per_item') {
+    out.push({
+      code: 'map-item-setup-needs-mount',
+      severity: 'error',
+      path: `${p}/map/itemSetup`,
+      stageKey: k,
+      message: 'itemSetup runs in each item mount: it needs workspace mount_per_item',
+    });
+  }
+  if (spec.workspace === 'shared' && spec.concurrency > 1) {
+    // Only a save-time warning: an agent's tool groups resolve at run time
+    // (the invocation re-checks them against the agent snapshots).
+    const writers = bodyStages(ctx, k).filter((b) => b.kind === 'check' || (b.kind === 'agent' && b.session?.permissionMode !== 'plan'));
+    if (writers.length > 0) {
+      out.push({
+        code: 'map-shared-write-concurrency',
+        severity: 'warning',
+        path: `${p}/map/concurrency`,
+        stageKey: k,
+        message: `${spec.concurrency} items run at once in one shared workspace, and '${writers[0]!.key}' may write to it`,
+        hint: 'Use workspace mount_per_item, concurrency 1, or read-only body agents (session permissionMode plan)',
+      });
+    }
+  }
+  const builtIn = new Set(['index', 'key', 'item', 'status', 'error', 'stages', 'pr']);
+  for (const name of Object.keys(spec.output.select ?? {})) {
+    if (builtIn.has(name)) {
+      out.push({
+        code: 'invalid-output-name',
+        severity: 'error',
+        path: `${p}/map/output/select/${pointerToken(name)}`,
+        stageKey: k,
+        message: `'${name}' is a field of every map result entry; pick another name`,
+      });
+    }
+  }
+  if (s.budget?.maxCostUsd !== undefined) budgetCost(`${p}/budget/maxCostUsd`, k, bodyStages(ctx, k));
+  return out;
+}
+
+/** A sub-workflow's reference (with a resolver): it exists, is published, takes these inputs, nests at most 3 deep, no cycle. */
+function subworkflowIssues(ctx: GraphContext, s: SubworkflowStage, p: string, selfId: string | undefined): ValidationIssue[] {
+  const out: ValidationIssue[] = [];
+  const k = s.key;
+  const ref = s.subworkflow.workflowRef;
+  const label = 'id' in ref ? `id '${ref.id}'` : `'${ref.name}'`;
+  const child = ctx.child(s);
+  if (!child || child.status === 'archived') {
+    out.push({
+      code: 'subworkflow-ref',
+      severity: 'error',
+      path: `${p}/subworkflow/workflowRef`,
+      stageKey: k,
+      message: child ? `The workflow ${label} is archived` : `No workflow ${label} exists`,
+    });
+    return out;
+  }
+  if (child.status === 'draft') {
+    out.push({
+      code: 'subworkflow-draft',
+      severity: 'warning',
+      path: `${p}/subworkflow/workflowRef`,
+      stageKey: k,
+      message: `The workflow ${label} is a draft: publish it before this workflow is published or run`,
+    });
+  }
+  const vars = new Map(child.graph.workflow.variables.map((v) => [v.name, v]));
+  for (const name of Object.keys(s.subworkflow.inputs)) {
+    if (!vars.has(name)) {
+      out.push({
+        code: 'subworkflow-input',
+        severity: 'error',
+        path: `${p}/subworkflow/inputs/${pointerToken(name)}`,
+        stageKey: k,
+        message: `The workflow ${label} has no variable '${name}'`,
+        hint: `Its variables: ${[...vars.keys()].join(', ') || 'none'}`,
+      });
+    }
+  }
+  for (const v of vars.values()) {
+    if (v.required && v.defaultValue === undefined && s.subworkflow.inputs[v.name] === undefined) {
+      out.push({
+        code: 'subworkflow-input',
+        severity: 'error',
+        path: `${p}/subworkflow/inputs`,
+        stageKey: k,
+        message: `The workflow ${label} needs its variable '${v.name}'`,
+      });
+    }
+  }
+  // Depth and cycles over the chain of children (the root run is depth 0).
+  const stack = [...(selfId ? [selfId] : []), child.id];
+  let problem: { code: 'subworkflow-depth' | 'subworkflow-cycle'; message: string } | undefined;
+  const walk = (graph: WorkflowGraph, depth: number): void => {
+    if (problem) return;
+    if (depth > MAX_INVOCATION_DEPTH) {
+      problem = { code: 'subworkflow-depth', message: `Sub-workflows nest more than ${MAX_INVOCATION_DEPTH} deep through ${label}` };
+      return;
+    }
+    for (const st of graph.stages) {
+      if (st.kind !== 'subworkflow') continue;
+      const next = ctx.resolveRef?.(st.subworkflow.workflowRef, graph.workflow.projectId ?? null);
+      if (!next) continue;
+      if (stack.includes(next.id)) {
+        problem = { code: 'subworkflow-cycle', message: `Sub-workflows form a cycle through '${next.name}'` };
+        return;
+      }
+      stack.push(next.id);
+      walk(next.graph, depth + 1);
+      stack.pop();
+    }
+  };
+  if (selfId !== undefined && child.id === selfId) problem = { code: 'subworkflow-cycle', message: 'A workflow cannot run itself as a sub-workflow' };
+  else walk(child.graph, 2);
+  if (problem) out.push({ ...problem, severity: 'error', path: `${p}/subworkflow/workflowRef`, stageKey: k });
+  return out;
+}
+
 const ITERATION_LOOP_FIELDS = new Set(['carry', 'priorCarry', 'last', 'previous', 'history', 'usage', 'iteration', 'number', 'remaining']);
 
 /** Whether an exit expression reads a per-iteration path: a body stage or a changing loop field (P5-30). */
@@ -866,12 +1080,26 @@ function expressionIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIs
       });
     }
   };
-  const expr = (src: string, e: TypeEnv, path: string, expect: 'boolean' | 'any' | 'number', stageKey?: string) => {
+  const expr = (src: string, e: TypeEnv, path: string, expect: 'boolean' | 'any' | 'number' | 'list' | 'scalar', stageKey?: string) => {
     const r = checkExpression(src, e, { expect: expect === 'boolean' ? 'boolean' : 'any' });
     report(src, r.diagnostics, path, stageKey);
-    if (expect === 'number' && r.diagnostics.length === 0 && r.type.kind !== 'any' && !kindsOf(withoutNull(r.type)).has('number')) {
-      out.push({ code: 'expr-type', severity: 'error', path, ...(stageKey ? { stageKey } : {}), message: 'A score must be a number' });
-    }
+    if (r.diagnostics.length > 0 || r.type.kind === 'any') return;
+    const kinds = kindsOf(withoutNull(r.type));
+    const bad =
+      expect === 'number'
+        ? kinds.has('number')
+          ? null
+          : 'A score must be a number'
+        : expect === 'list'
+          ? kinds.has('list')
+            ? null
+            : 'A map fans out over a list: items must be a list'
+          : expect === 'scalar'
+            ? kinds.has('string') || kinds.has('number')
+              ? null
+              : 'A key must be a string (or a number)'
+            : null;
+    if (bad) out.push({ code: 'expr-type', severity: 'error', path, ...(stageKey ? { stageKey } : {}), message: bad });
   };
   const template = (src: string | undefined, e: TypeEnv, path: string, stageKey?: string) => {
     if (src === undefined || !src.includes('{{')) return;
@@ -894,8 +1122,14 @@ function expressionIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIs
     const p = `/stages/${i}`;
     const stageEnv = env({ kind: 'stage', key: s.key });
     if (s.guard !== undefined) expr(s.guard, stageEnv, `${p}/guard`, 'boolean', s.key);
-    // A loop's wrap-up prompt is sent inside its body (context T of its wrap-up stage).
-    const templateEnv = s.kind === 'loop' && s.loop.wrapUp ? env({ kind: 'stage', key: s.loop.wrapUp.stage }) : stageEnv;
+    // A loop's wrap-up prompt is sent inside its body (context T of its wrap-up stage);
+    // a map's item setup runs per item (`item` bound).
+    const templateEnv =
+      s.kind === 'loop' && s.loop.wrapUp
+        ? env({ kind: 'stage', key: s.loop.wrapUp.stage })
+        : s.kind === 'map'
+          ? env({ kind: 'map', key: s.key, context: 'item' })
+          : stageEnv;
     for (const f of stageTemplateFields(s)) template(f.text, templateEnv, `${p}${f.pointer}`, s.key);
     const selfEnv = env({ kind: 'stage', key: s.key, self: true });
     hookTemplates(s.compensate as ReadonlyArray<Hookish> | undefined, selfEnv, `${p}/compensate`, s.key);
@@ -916,6 +1150,17 @@ function expressionIssues(graph: WorkflowGraph, ctx: GraphContext): ValidationIs
       for (const [name, src] of Object.entries(s.loop.carry ?? {})) expr(src, c, `${lp}/carry/${pointerToken(name)}`, 'any', s.key);
       const init = env({ kind: 'loop', key: s.key, context: 'init' });
       for (const [name, src] of Object.entries(s.loop.carryInit ?? {})) expr(src, init, `${lp}/carryInit/${pointerToken(name)}`, 'any', s.key);
+    }
+    if (s.kind === 'map') {
+      const mp = `${p}/map`;
+      expr(s.map.items, env({ kind: 'map', key: s.key, context: 'items' }), `${mp}/items`, 'list', s.key);
+      if (s.map.itemKey !== undefined) expr(s.map.itemKey, env({ kind: 'map', key: s.key, context: 'item' }), `${mp}/itemKey`, 'scalar', s.key);
+      const sel = env({ kind: 'map', key: s.key, context: 'select' });
+      for (const [name, src] of Object.entries(s.map.output.select ?? {})) expr(src, sel, `${mp}/output/select/${pointerToken(name)}`, 'any', s.key);
+    }
+    if (s.kind === 'wait' && s.wait.type === 'event') expr(s.wait.eventKey, stageEnv, `${p}/wait/eventKey`, 'scalar', s.key);
+    if (s.kind === 'subworkflow') {
+      for (const [name, src] of Object.entries(s.subworkflow.inputs)) expr(src, stageEnv, `${p}/subworkflow/inputs/${pointerToken(name)}`, 'any', s.key);
     }
   });
 

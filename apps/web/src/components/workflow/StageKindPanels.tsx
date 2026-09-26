@@ -95,9 +95,9 @@ export function StageKindPanel({ stage, onUpdate, issues, onClose }: StageKindPa
 
         {stage.kind === 'loop' ? (
           <LoopPanel stage={stage} onUpdate={onUpdate} issues={issues} />
-        ) : (
+        ) : stage.kind === 'check' ? (
           <CheckPanel stage={stage} onUpdate={onUpdate} issues={issues} />
-        )}
+        ) : null}
 
         <CollapsibleSection title="Run condition" icon={<Zap className="h-3.5 w-3.5" />} defaultOpen={!!stage.guard || stage.join.mode !== 'all'}>
           <div>

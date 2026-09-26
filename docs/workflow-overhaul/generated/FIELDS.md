@@ -430,7 +430,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stages[].retry.backoffMultiplier` | number (≥1, ≤10) |  | `2` | Delay multiplier per retry |
 | `stages[].retry.maxDelayMs` | integer (≥0, ≤3600000) |  | `60000` | Upper bound on one delay |
 | `stages[].retry.jitter` | 'full' \| 'equal' \| 'none' |  | `"full"` | full: random 0..delay; equal: delay/2 plus random 0..delay/2; none: exact delay |
-| `stages[].retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'loop_body_failed' \| 'loop_exit_fail' \| 'loop_limit' \| 'loop_wall_clock' \| 'loop_carry_too_large' \| 'restore_failed' \| 'output_schema' \| 'validation_rule' \| 'judge_below_threshold' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
+| `stages[].retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'loop_body_failed' \| 'loop_exit_fail' \| 'loop_limit' \| 'loop_wall_clock' \| 'loop_carry_too_large' \| 'restore_failed' \| 'map_items_invalid' \| 'map_too_large' \| 'map_duplicate_item_key' \| 'map_tolerance_exceeded' \| 'mount_fork_failed' \| 'item_setup_failed' \| 'merge_conflict' \| 'merge_failed' \| 'subworkflow_start_failed' \| 'subworkflow_output_drift' \| 'subworkflow_failed' \| 'wait_timeout' \| 'output_schema' \| 'validation_rule' \| 'judge_below_threshold' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
 | `stages[].retry.mode` | 'resume' \| 'restart' |  | `"resume"` | resume continues the same conversation; restart begins again from the first prompt |
 | `stages[].retry.restoreCheckpointOnRestart` | boolean |  | `true` | Restore the workspace to the first attempt checkpoint before a restart |
 | `stages[].repair` | object |  |  | Repair turns sent when the output fails its contract |
@@ -528,7 +528,7 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stages[].retry.backoffMultiplier` | number (≥1, ≤10) |  | `2` | Delay multiplier per retry |
 | `stages[].retry.maxDelayMs` | integer (≥0, ≤3600000) |  | `60000` | Upper bound on one delay |
 | `stages[].retry.jitter` | 'full' \| 'equal' \| 'none' |  | `"full"` | full: random 0..delay; equal: delay/2 plus random 0..delay/2; none: exact delay |
-| `stages[].retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'loop_body_failed' \| 'loop_exit_fail' \| 'loop_limit' \| 'loop_wall_clock' \| 'loop_carry_too_large' \| 'restore_failed' \| 'output_schema' \| 'validation_rule' \| 'judge_below_threshold' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
+| `stages[].retry.retryOn` | 'rate_limited' \| 'overloaded' \| 'provider_5xx' \| 'transport' \| 'provider_crashed' \| 'idle_timeout' \| 'attempt_timeout' \| 'auth' \| 'model_not_found' \| 'quota_exhausted' \| 'context_overflow' \| 'max_turns' \| 'budget_exceeded' \| 'config_invalid' \| 'agent_not_found' \| 'agent_disabled' \| 'pre_run_hook_abort' \| 'rejected_by_human' \| 'pause_expired' \| 'condition_error' \| 'queue_timeout' \| 'check_launch_failed' \| 'check_failed' \| 'loop_body_failed' \| 'loop_exit_fail' \| 'loop_limit' \| 'loop_wall_clock' \| 'loop_carry_too_large' \| 'restore_failed' \| 'map_items_invalid' \| 'map_too_large' \| 'map_duplicate_item_key' \| 'map_tolerance_exceeded' \| 'mount_fork_failed' \| 'item_setup_failed' \| 'merge_conflict' \| 'merge_failed' \| 'subworkflow_start_failed' \| 'subworkflow_output_drift' \| 'subworkflow_failed' \| 'wait_timeout' \| 'output_schema' \| 'validation_rule' \| 'judge_below_threshold' \| 'missing_artifact' \| 'process_restart_unsafe' \| 'lease_expired'[] (≤40) |  |  | Error codes that retry; omitted means every transient code |
 | `stages[].retry.mode` | 'resume' \| 'restart' |  | `"resume"` | resume continues the same conversation; restart begins again from the first prompt |
 | `stages[].retry.restoreCheckpointOnRestart` | boolean |  | `true` | Restore the workspace to the first attempt checkpoint before a restart |
 | `stages[].timeouts` | object |  |  | Timeouts of a check stage: only the admission wait (the command has check.timeoutMs) |
@@ -601,6 +601,166 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `stages[].budget.maxCostUsd` | number (>0, ≤100000) |  |  | Provider-reported cost in USD |
 | `stages[].budget.maxWallClockMs` | integer (≥1000, ≤604800000) |  |  | Wall clock, excluding time parked for a human |
 | `stages[].budget.maxTokens` | integer (≥1, ≤10000000000) |  |  | Input plus output tokens reported by the provider |
+| `stages[].key` | string `^[a-z][a-z0-9_]{0,47}$` | yes |  | Stable stage key, unique per workflow; edges, context sources and expressions refer to stages by key |
+| `stages[].name` | string (1..200 chars) | yes |  | Display name (free text) |
+| `stages[].description` | string (≤2000 chars) |  |  | What the stage is for |
+| `stages[].parentKey` | string `^[a-z][a-z0-9_]{0,47}$` |  |  | Key of the enclosing container stage; omitted means top level |
+| `stages[].guard` | string (1..2000 chars) |  |  | Boolean expression evaluated once the stage is ready; false skips it (guard_false) |
+| `stages[].join` | one of (by `mode`) |  | `{"mode":"all"}` | How incoming edges combine |
+| `stages[].join.mode` | "all" | yes |  | Every predecessor must be satisfied (a dead predecessor skips the stage) |
+| `stages[].join.mode` | "any" | yes |  | The first satisfied predecessor makes the stage ready |
+| `stages[].join.cancelRemaining` | boolean |  | `false` | Cancel predecessors that only lead here once the join fires |
+| `stages[].join.mode` | "n_of_m" | yes |  | Ready once n predecessors are satisfied |
+| `stages[].join.n` | integer (≥1, ≤100) | yes |  | How many satisfied predecessors are needed |
+| `stages[].join.cancelRemaining` | boolean |  | `false` | Cancel predecessors that only lead here once the join fires |
+| `stages[].position` | object |  |  | Builder canvas position of the node |
+| `stages[].position.x` | number | yes |  | Canvas x coordinate |
+| `stages[].position.y` | number | yes |  | Canvas y coordinate |
+| `stages[].compensate` | object[] (≤20) |  |  | Undo actions run (last completed first) when the run fails or is cancelled |
+| `stages[].compensate[].name` | string (1..200 chars) | yes |  | Display name |
+| `stages[].compensate[].config` | one of | yes |  | What the compensation does: a hook action or restore_checkpoint |
+| `stages[].compensate[].config.type` | "script" | yes |  | Run a local command |
+| `stages[].compensate[].config.command` | string (1..1000 chars) | yes |  | Executable to run; a literal (templates are rejected, pass values through env) |
+| `stages[].compensate[].config.args` | string (≤4000 chars)[] (≤64) |  |  | Literal arguments (templates are rejected, pass values through env) |
+| `stages[].compensate[].config.cwd` | string (≤1000 chars) |  |  | Working directory, relative to the run workspace |
+| `stages[].compensate[].config.env` | record<string, string (≤4000 chars)> |  |  | Environment variables; values may be templates of non-secret values or secretref: references |
+| `stages[].compensate[].config.type` | "http" | yes |  | Call an HTTP endpoint |
+| `stages[].compensate[].config.url` | string url (≤2000 chars) | yes |  | Endpoint URL |
+| `stages[].compensate[].config.method` | 'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' | yes |  | HTTP method |
+| `stages[].compensate[].config.headers` | record<string, string (≤4000 chars)> |  |  | Request headers; secret values must be secretref: references |
+| `stages[].compensate[].config.bodyTemplate` | string (≤100000 chars) |  |  | Request body template |
+| `stages[].compensate[].config.type` | "function" | yes |  | Run a registered in-process handler or a module in a subprocess |
+| `stages[].compensate[].config.modulePath` | string (≤1000 chars) |  |  | Module (relative to the workspace) whose default export is the hook |
+| `stages[].compensate[].config.handlerName` | string (≤200 chars) |  |  | Name of an in-process handler registered with the hook executor |
+| `stages[].compensate[].config.args` | record<string, any> |  |  | Payload passed to the handler as ctx.args |
+| `stages[].compensate[].config.type` | "restore_checkpoint" | yes |  | Restore the workspace to the checkpoint taken before the stage's first attempt |
+| `stages[].compensate[].timeoutMs` | integer (≥100, ≤600000) |  | `30000` | Per-execution timeout |
+| `stages[].compensate[].retries` | integer (≥0, ≤5) |  | `3` | Retries after a failed execution |
+| `stages[].kind` | "map" | yes |  | Run the body (the stages whose parentKey is this key) once per item of a runtime list |
+| `stages[].map` | object | yes |  | Map settings: the list, bounds, tolerance, workspaces and merges |
+| `stages[].map.items` | string (1..2000 chars) | yes |  | The list to fan out over (evaluated when the map starts, context T of its enclosing loops) |
+| `stages[].map.itemKey` | string (1..2000 chars) |  |  | A stable key per item (a string, `item` bound); omitted means the index. Duplicate keys fail the map (map_duplicate_item_key) |
+| `stages[].map.maxItems` | integer (≥1, ≤200) |  | `50` | More items than this fails the map (map_too_large) |
+| `stages[].map.concurrency` | integer (≥1, ≤16) |  | `4` | Items whose body runs at the same time |
+| `stages[].map.toleratedFailurePercent` | number (≥0, ≤100) |  | `0` | Failed items tolerated, in percent of all items; above it the map fails |
+| `stages[].map.workspace` | 'shared' \| 'mount_per_item' |  | `"shared"` | shared: every item works in the run's mounts; mount_per_item: each item gets its own git worktree cut from a snapshot of the run mounts |
+| `stages[].map.merge` | 'none' \| 'sequential' \| 'pr_per_item' |  | `"none"` | How item mounts come back (mount_per_item only): none keeps them; sequential merges each into the run mount; pr_per_item pushes a branch per item |
+| `stages[].map.itemSetup` | object[] (≤5) |  |  | Commands run in each item mount before its body (for example pnpm install --offline); a failure fails the item |
+| `stages[].map.itemSetup[].command` | string `^(?!.*\.\.)[A-Za-z0-9_][A-Za-z0-9_.+-]{0,99}$` | yes |  | Executable to run: a bare name on the command allow-list (a literal; templates are rejected) |
+| `stages[].map.itemSetup[].args` | string (≤4000 chars)[] (≤64) |  | `[]` | Literal arguments; a template is rejected (check-args-literal): pass values through env |
+| `stages[].map.itemSetup[].env` | record<string, string (≤100000 chars)> |  |  | Environment variables: the ONLY place templated values reach the command |
+| `stages[].map.itemSetup[].mount` | string `^[A-Za-z0-9._-]+$` (1..50 chars) |  |  | Run mount (codebase alias) the command runs in; omitted means the primary mount |
+| `stages[].map.itemSetup[].cwd` | string `^(?![\\/])(?![A-Za-z]:)(?!(.*[\\/])?\.\.([\\/]\|$)).+$` (1..1000 chars) |  |  | Working directory inside the mount |
+| `stages[].map.itemSetup[].timeoutMs` | integer (≥1000, ≤3600000) |  | `600000` | Kill the command after this long; the output is then timedOut: true, passed: false |
+| `stages[].map.itemSetup[].parseJson` | boolean |  | `false` | Parse stdout as JSON into output.json (a parse error is output.jsonError) |
+| `stages[].map.itemSetup[].failOnNonZero` | boolean |  | `false` | A non-zero exit (or a timeout) fails the stage instead of completing with passed: false |
+| `stages[].map.itemSetup[].tailBytes` | integer (≥1024, ≤262144) |  | `16384` | How much of the end of stdout and stderr the output keeps (ANSI colours stripped) |
+| `stages[].map.output` | object |  | `{}` | The map output |
+| `stages[].map.output.select` | record<string, string (1..2000 chars)> |  |  | Extra fields of every result entry, evaluated per item (the item and its body stages in scope) |
+| `stages[].budget` | object |  |  | Cumulative budget of every item |
+| `stages[].budget.maxTurns` | integer (≥1, ≤100000) |  |  | Harness turns (one per usage report) |
+| `stages[].budget.maxCostUsd` | number (>0, ≤100000) |  |  | Provider-reported cost in USD |
+| `stages[].budget.maxWallClockMs` | integer (≥1000, ≤604800000) |  |  | Wall clock, excluding time parked for a human |
+| `stages[].budget.maxTokens` | integer (≥1, ≤10000000000) |  |  | Input plus output tokens reported by the provider |
+| `stages[].key` | string `^[a-z][a-z0-9_]{0,47}$` | yes |  | Stable stage key, unique per workflow; edges, context sources and expressions refer to stages by key |
+| `stages[].name` | string (1..200 chars) | yes |  | Display name (free text) |
+| `stages[].description` | string (≤2000 chars) |  |  | What the stage is for |
+| `stages[].parentKey` | string `^[a-z][a-z0-9_]{0,47}$` |  |  | Key of the enclosing container stage; omitted means top level |
+| `stages[].guard` | string (1..2000 chars) |  |  | Boolean expression evaluated once the stage is ready; false skips it (guard_false) |
+| `stages[].join` | one of (by `mode`) |  | `{"mode":"all"}` | How incoming edges combine |
+| `stages[].join.mode` | "all" | yes |  | Every predecessor must be satisfied (a dead predecessor skips the stage) |
+| `stages[].join.mode` | "any" | yes |  | The first satisfied predecessor makes the stage ready |
+| `stages[].join.cancelRemaining` | boolean |  | `false` | Cancel predecessors that only lead here once the join fires |
+| `stages[].join.mode` | "n_of_m" | yes |  | Ready once n predecessors are satisfied |
+| `stages[].join.n` | integer (≥1, ≤100) | yes |  | How many satisfied predecessors are needed |
+| `stages[].join.cancelRemaining` | boolean |  | `false` | Cancel predecessors that only lead here once the join fires |
+| `stages[].position` | object |  |  | Builder canvas position of the node |
+| `stages[].position.x` | number | yes |  | Canvas x coordinate |
+| `stages[].position.y` | number | yes |  | Canvas y coordinate |
+| `stages[].compensate` | object[] (≤20) |  |  | Undo actions run (last completed first) when the run fails or is cancelled |
+| `stages[].compensate[].name` | string (1..200 chars) | yes |  | Display name |
+| `stages[].compensate[].config` | one of | yes |  | What the compensation does: a hook action or restore_checkpoint |
+| `stages[].compensate[].config.type` | "script" | yes |  | Run a local command |
+| `stages[].compensate[].config.command` | string (1..1000 chars) | yes |  | Executable to run; a literal (templates are rejected, pass values through env) |
+| `stages[].compensate[].config.args` | string (≤4000 chars)[] (≤64) |  |  | Literal arguments (templates are rejected, pass values through env) |
+| `stages[].compensate[].config.cwd` | string (≤1000 chars) |  |  | Working directory, relative to the run workspace |
+| `stages[].compensate[].config.env` | record<string, string (≤4000 chars)> |  |  | Environment variables; values may be templates of non-secret values or secretref: references |
+| `stages[].compensate[].config.type` | "http" | yes |  | Call an HTTP endpoint |
+| `stages[].compensate[].config.url` | string url (≤2000 chars) | yes |  | Endpoint URL |
+| `stages[].compensate[].config.method` | 'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' | yes |  | HTTP method |
+| `stages[].compensate[].config.headers` | record<string, string (≤4000 chars)> |  |  | Request headers; secret values must be secretref: references |
+| `stages[].compensate[].config.bodyTemplate` | string (≤100000 chars) |  |  | Request body template |
+| `stages[].compensate[].config.type` | "function" | yes |  | Run a registered in-process handler or a module in a subprocess |
+| `stages[].compensate[].config.modulePath` | string (≤1000 chars) |  |  | Module (relative to the workspace) whose default export is the hook |
+| `stages[].compensate[].config.handlerName` | string (≤200 chars) |  |  | Name of an in-process handler registered with the hook executor |
+| `stages[].compensate[].config.args` | record<string, any> |  |  | Payload passed to the handler as ctx.args |
+| `stages[].compensate[].config.type` | "restore_checkpoint" | yes |  | Restore the workspace to the checkpoint taken before the stage's first attempt |
+| `stages[].compensate[].timeoutMs` | integer (≥100, ≤600000) |  | `30000` | Per-execution timeout |
+| `stages[].compensate[].retries` | integer (≥0, ≤5) |  | `3` | Retries after a failed execution |
+| `stages[].kind` | "subworkflow" | yes |  | Run another published workflow as this stage; its output is the child's declared outputs |
+| `stages[].subworkflow` | object | yes |  | Sub-workflow settings |
+| `stages[].subworkflow.workflowRef` | one of | yes |  | The child workflow; resolved at save and at invoke |
+| `stages[].subworkflow.workflowRef.id` | string (1..100 chars) | yes |  | Workflow definition id |
+| `stages[].subworkflow.workflowRef.name` | string (1..200 chars) | yes |  | Workflow name (portable across export and import) |
+| `stages[].subworkflow.workflowRef.projectScope` | 'project' \| 'global' |  |  | project: the parent's project only; global: workflows without a project; omitted: the project first, then global |
+| `stages[].subworkflow.version` | one of |  | `"pin_at_run_start"` | pin_at_run_start: the published version current when the stage starts; a number pins that published version |
+| `stages[].subworkflow.inputs` | record<string, string (1..2000 chars)> |  | `{}` | The child's variables, each an expression evaluated when the stage starts |
+| `stages[].subworkflow.workspace` | 'inherit' \| 'isolated' |  | `"inherit"` | inherit: the child works in the parent's mounts (its mounts and post-processing are skipped; the parent commits); isolated: a full child lifecycle |
+| `stages[].budget` | object |  |  | The child run's budget (its share of the parent's) |
+| `stages[].budget.maxTurns` | integer (≥1, ≤100000) |  |  | Harness turns (one per usage report) |
+| `stages[].budget.maxCostUsd` | number (>0, ≤100000) |  |  | Provider-reported cost in USD |
+| `stages[].budget.maxWallClockMs` | integer (≥1000, ≤604800000) |  |  | Wall clock, excluding time parked for a human |
+| `stages[].budget.maxTokens` | integer (≥1, ≤10000000000) |  |  | Input plus output tokens reported by the provider |
+| `stages[].key` | string `^[a-z][a-z0-9_]{0,47}$` | yes |  | Stable stage key, unique per workflow; edges, context sources and expressions refer to stages by key |
+| `stages[].name` | string (1..200 chars) | yes |  | Display name (free text) |
+| `stages[].description` | string (≤2000 chars) |  |  | What the stage is for |
+| `stages[].parentKey` | string `^[a-z][a-z0-9_]{0,47}$` |  |  | Key of the enclosing container stage; omitted means top level |
+| `stages[].guard` | string (1..2000 chars) |  |  | Boolean expression evaluated once the stage is ready; false skips it (guard_false) |
+| `stages[].join` | one of (by `mode`) |  | `{"mode":"all"}` | How incoming edges combine |
+| `stages[].join.mode` | "all" | yes |  | Every predecessor must be satisfied (a dead predecessor skips the stage) |
+| `stages[].join.mode` | "any" | yes |  | The first satisfied predecessor makes the stage ready |
+| `stages[].join.cancelRemaining` | boolean |  | `false` | Cancel predecessors that only lead here once the join fires |
+| `stages[].join.mode` | "n_of_m" | yes |  | Ready once n predecessors are satisfied |
+| `stages[].join.n` | integer (≥1, ≤100) | yes |  | How many satisfied predecessors are needed |
+| `stages[].join.cancelRemaining` | boolean |  | `false` | Cancel predecessors that only lead here once the join fires |
+| `stages[].position` | object |  |  | Builder canvas position of the node |
+| `stages[].position.x` | number | yes |  | Canvas x coordinate |
+| `stages[].position.y` | number | yes |  | Canvas y coordinate |
+| `stages[].compensate` | object[] (≤20) |  |  | Undo actions run (last completed first) when the run fails or is cancelled |
+| `stages[].compensate[].name` | string (1..200 chars) | yes |  | Display name |
+| `stages[].compensate[].config` | one of | yes |  | What the compensation does: a hook action or restore_checkpoint |
+| `stages[].compensate[].config.type` | "script" | yes |  | Run a local command |
+| `stages[].compensate[].config.command` | string (1..1000 chars) | yes |  | Executable to run; a literal (templates are rejected, pass values through env) |
+| `stages[].compensate[].config.args` | string (≤4000 chars)[] (≤64) |  |  | Literal arguments (templates are rejected, pass values through env) |
+| `stages[].compensate[].config.cwd` | string (≤1000 chars) |  |  | Working directory, relative to the run workspace |
+| `stages[].compensate[].config.env` | record<string, string (≤4000 chars)> |  |  | Environment variables; values may be templates of non-secret values or secretref: references |
+| `stages[].compensate[].config.type` | "http" | yes |  | Call an HTTP endpoint |
+| `stages[].compensate[].config.url` | string url (≤2000 chars) | yes |  | Endpoint URL |
+| `stages[].compensate[].config.method` | 'GET' \| 'POST' \| 'PUT' \| 'PATCH' \| 'DELETE' | yes |  | HTTP method |
+| `stages[].compensate[].config.headers` | record<string, string (≤4000 chars)> |  |  | Request headers; secret values must be secretref: references |
+| `stages[].compensate[].config.bodyTemplate` | string (≤100000 chars) |  |  | Request body template |
+| `stages[].compensate[].config.type` | "function" | yes |  | Run a registered in-process handler or a module in a subprocess |
+| `stages[].compensate[].config.modulePath` | string (≤1000 chars) |  |  | Module (relative to the workspace) whose default export is the hook |
+| `stages[].compensate[].config.handlerName` | string (≤200 chars) |  |  | Name of an in-process handler registered with the hook executor |
+| `stages[].compensate[].config.args` | record<string, any> |  |  | Payload passed to the handler as ctx.args |
+| `stages[].compensate[].config.type` | "restore_checkpoint" | yes |  | Restore the workspace to the checkpoint taken before the stage's first attempt |
+| `stages[].compensate[].timeoutMs` | integer (≥100, ≤600000) |  | `30000` | Per-execution timeout |
+| `stages[].compensate[].retries` | integer (≥0, ≤5) |  | `3` | Retries after a failed execution |
+| `stages[].kind` | "wait" | yes |  | Wait for an approval, an external event or a timer; the output is {outcome, data, by, at} |
+| `stages[].wait` | one of (by `type`) | yes |  | What the stage waits for; it holds no executor, lease or admission slot |
+| `stages[].wait.type` | "approval" | yes |  | A person approves or rejects, optionally filling a form |
+| `stages[].wait.prompt` | object | yes |  | What the approver is asked (a template) |
+| `stages[].wait.prompt.label` | string (1..200 chars) | yes |  | Short label shown in the builder and run page |
+| `stages[].wait.prompt.text` | string (1..100000 chars) | yes |  | The prompt text, a template |
+| `stages[].wait.form` | record<string, any> |  |  | JSON Schema of the approver's input (output.data) |
+| `stages[].wait.timeoutMs` | integer (≥1000, ≤2592000000) |  |  | Give up after this long (an unattended run without one expires after 72 h) |
+| `stages[].wait.onTimeout` | 'fail' \| 'complete' |  | `"fail"` | fail fails the stage (wait_timeout); complete completes it with outcome timeout (route on stages.<key>.output.outcome) |
+| `stages[].wait.type` | "event" | yes |  | An external event: the deliver_event command or the per-wait callback URL |
+| `stages[].wait.eventKey` | string (1..2000 chars) | yes |  | The event key to wait for (a string expression, for example concat('ci:', stages.push.output.sha)) |
+| `stages[].wait.timeoutMs` | integer (≥1000, ≤2592000000) |  |  | Give up after this long (an unattended run without one expires after 72 h) |
+| `stages[].wait.onTimeout` | 'fail' \| 'complete' |  | `"fail"` | fail fails the stage (wait_timeout); complete completes it with outcome timeout (route on stages.<key>.output.outcome) |
+| `stages[].wait.type` | "timer" | yes |  | A fixed delay |
+| `stages[].wait.durationMs` | integer (≥1000, ≤2592000000) | yes |  | How long to wait |
 | `edges` | object[] (≤500) |  | `[]` | Edges between stage keys |
 | `edges[].from` | string `^[a-z][a-z0-9_]{0,47}$` | yes |  | Key of the source stage |
 | `edges[].to` | string `^[a-z][a-z0-9_]{0,47}$` | yes |  | Key of the target stage |
@@ -756,14 +916,23 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `retry-delay-bounds` | references | warning | retry.maxDelayMs is below retry.initialDelayMs |
 | `unknown-codebase-alias` | references | warning | A codebase alias that lifecycle.codebaseAliases does not declare |
 | `unknown-input-variable` | references | warning | A preprocessing step names an undeclared variable |
-| `invalid-output-name` | references | error | A workflow output name that is not an identifier, or a loop output.select name that shadows a built-in field |
+| `invalid-output-name` | references | error | A workflow output name that is not an identifier, or a loop or map output.select name that shadows a built-in field |
 | `compact-without-continue` | references | error | compactAfter on a stage that does not continue its conversation |
 | `exit-unbound` | references | error | A loop exit rule that reads nothing per iteration (no body stage, no loop.carry/last/previous/history/usage/iteration) |
 | `exit-unreachable` | references | warning | An exit rule needing more iterations in a row than the loop runs |
 | `loop-no-exit` | references | warning | A loop without exit rules (it always runs to maxIterations) |
 | `carry-type` | references | error | A carried value whose type disagrees with its carryInit or carrySchema |
 | `wrapup-stage` | references | error | loop.wrapUp.stage is not a body agent stage with sessionReuse continue (a warning when the loop has no budget) |
-| `check-command` | references | error | A check command that is not on the command allow-list |
+| `check-command` | references | error | A check (or map itemSetup) command that is not on the command allow-list |
+| `map-merge-needs-mount` | references | error | A map merge (sequential, pr_per_item) without workspace mount_per_item |
+| `map-item-setup-needs-mount` | references | error | map.itemSetup without workspace mount_per_item |
+| `map-shared-write-concurrency` | references | warning | A map running several items at once in one shared workspace with body stages that may write |
+| `wait-form` | references | error | An approval wait's form that is not a usable JSON Schema object |
+| `subworkflow-ref` | references | error | A sub-workflow reference that names no workflow, or an archived one |
+| `subworkflow-draft` | references | warning | A sub-workflow whose child is a draft (an error at publish and invoke) |
+| `subworkflow-input` | references | error | A sub-workflow input the child does not declare, or a required child variable left unset |
+| `subworkflow-depth` | references | error | Sub-workflows nested more than 3 deep |
+| `subworkflow-cycle` | references | error | Sub-workflows that run each other in a cycle |
 | `budget-cost-unsupported` | references | warning | A maxCostUsd budget over stages whose provider reports no cost (it can never fire) |
 | `expr-syntax` | expressions | error | An expression does not parse |
 | `expr-unknown-root` | expressions | error | An expression names an unknown root (variables, stages, run, …) |
@@ -918,6 +1087,12 @@ Paths use `[]` for list elements and `{}` for map values. A field reached throug
 | `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
 | `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
 | `k` | integer (≥0, ≤1000) | yes |  | The iteration (0-based) |
+| `command` | "deliver_event" | yes |  | Deliver an external event to the run: the oldest waiting event wait with this key takes it (an early event is buffered) |
+| `instanceId` | string (1..200 chars) |  |  | Stage instance the command targets; omitted means the run |
+| `expectedVersion` | integer (≥0) |  |  | Optimistic-concurrency version; a stale one returns 409 |
+| `eventKey` | string (1..500 chars) | yes |  | The event key a wait names |
+| `idempotencyKey` | string (1..200 chars) | yes |  | A repeated delivery with the same key and data is a replay; the same key with other data is refused (409) |
+| `data` | any |  |  | The event's payload (the wait's output.data) |
 
 ## Fork request
 

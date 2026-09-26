@@ -101,7 +101,7 @@ function StageNodeComponent({ id, data, selected }: NodeProps<Node<StageNodeData
   const check = stage.kind === 'check' ? stage.check : undefined;
   // A body agent of a loop: does it continue one conversation across iterations?
   const inLoop = agent !== undefined && stage.parentKey !== undefined;
-  const retry = stage.kind === 'loop' ? undefined : stage.retry;
+  const retry = stage.kind === 'agent' || stage.kind === 'check' ? stage.retry : undefined;
   const promptCount = agent?.prompts.length ?? 0;
 
   // Capability summary, read from the fields the panel writes (D-30).
