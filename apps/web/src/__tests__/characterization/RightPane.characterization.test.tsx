@@ -25,7 +25,8 @@ import React from 'react';
 import { render, screen, fireEvent, cleanup, waitFor, act } from '@testing-library/react';
 import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 // Import under test — the only line that changes when P4 moves the file.
-import { RightPane, type RightPaneTabDef, type RightPanePanelProps } from '@/components/layout/RightPane.js';
+// P4-06: the chat's right pane is now the dock (blocks/dock); legacy RightPane stays for the run page.
+import { Dock as RightPane, type DockTabDef as RightPaneTabDef, type DockPanelProps as RightPanePanelProps } from '@/blocks/dock/index.js';
 
 afterEach(() => {
   cleanup();
@@ -56,10 +57,11 @@ function makeTabs(opts: { maxInstances?: number; labelBy?: 'index' | 'id' } = {}
     return <div data-testid={`panel-body-${id}`}>{active ? 'live' : 'hidden'}</div>;
   });
   return {
-    changes: { label: 'Changes', icon: <span />, Component: ChangesPanel },
+    // P4-06: dock tab icons are ui/icons concepts (C-19), not elements.
+    changes: { label: 'Changes', icon: 'changes', Component: ChangesPanel },
     terminal: {
       label: 'Terminal',
-      icon: <span />,
+      icon: 'terminal',
       allowMultiple: true,
       maxInstances,
       getTabLabel: labelBy === 'id' ? ({ id }) => id : ({ index }) => `T${index}`,
@@ -328,7 +330,8 @@ describe('RightPane characterization — fullscreen exits when the pane closes (
       <RightPane open={false} onOpenChange={() => {}} storageKey="fs-close" tabs={tabs}
         defaultTabType="changes" addableTabTypes={['terminal']} />,
     );
-    expect(screen.queryByTestId('right-pane')).toBeNull();
+    // P4-06 (D-27): closing collapses the dock instead of unmounting it.
+    expect(screen.getByTestId('right-pane')).toHaveAttribute('data-state', 'closed');
 
     rerender(
       <RightPane open onOpenChange={() => {}} storageKey="fs-close" tabs={tabs}
@@ -445,14 +448,16 @@ describe('RightPane characterization — tab-strip overflow menu (RightPane.tsx:
     // end = 301, i.e. 1px past the strip's right edge (300) — within TOL(2).
     Object.defineProperty(t1El, 'offsetWidth', { configurable: true, value: 301 });
     fireEvent.scroll(list);
-    expect(screen.queryByTestId('right-pane-tab-overflow')).toBeNull();
+    expect(screen.getByTestId('right-pane-add-tab')).toHaveAttribute('aria-label', 'Add tab');
 
     // end = 303, i.e. 3px past — over the tolerance, so it now counts.
     Object.defineProperty(t1El, 'offsetWidth', { configurable: true, value: 303 });
     fireEvent.scroll(list);
 
-    const overflowBtn = screen.getByTestId('right-pane-tab-overflow');
-    expect(overflowBtn).toHaveAttribute('aria-label', 'Show 1 more tab');
+    // P4-06 (C-19): clipped tabs are listed in the "+" menu, whose name counts them
+    // (the separate `right-pane-tab-overflow` button is gone).
+    const overflowBtn = screen.getByTestId('right-pane-add-tab');
+    expect(overflowBtn).toHaveAttribute('aria-label', 'Add tab, 1 more');
     fireEvent.click(overflowBtn);
     expect(screen.getByTestId('right-pane-overflow-terminal').textContent).toContain('T1');
   });

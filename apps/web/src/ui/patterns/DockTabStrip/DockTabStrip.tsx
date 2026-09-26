@@ -122,12 +122,15 @@ function useOverflowIds(listRef: RefObject<HTMLDivElement | null>, layoutKey: st
     const list = listRef.current;
     if (!list) return;
     const measure = () => {
-      const box = list.getBoundingClientRect();
+      // Layout offsets inside the (positioned) row, so transforms and zoom do not skew it.
+      const left = list.scrollLeft;
+      const right = left + list.clientWidth;
       const next: string[] = [];
       for (const el of Array.from(list.querySelectorAll<HTMLElement>('[data-dock-tab]'))) {
-        const r = el.getBoundingClientRect();
+        const start = el.offsetLeft;
+        const end = start + el.offsetWidth;
         // 1px tolerance for sub-pixel layout.
-        if (r.left < box.left - 1 || r.right > box.right + 1) next.push(el.dataset.dockTab ?? '');
+        if (start < left - 1 || end > right + 1) next.push(el.dataset.dockTab ?? '');
       }
       setIds((prev) => (prev.length === next.length && prev.every((id, i) => id === next[i]) ? prev : next));
     };
@@ -226,6 +229,8 @@ export function DockTabStrip({
                 value={tab.id}
                 data-testid={tab.testId}
                 aria-label={iconOnly ? (tab.dot ? `${tab.label} (${tab.dot.label})` : tab.label) : undefined}
+                // Labels truncate at 120px (page titles, file names): the full one on hover.
+                title={iconOnly ? undefined : tab.label}
                 aria-keyshortcuts={closable ? 'Delete' : undefined}
                 onKeyDown={(event) => {
                   if (event.key === 'Delete' && closable) {

@@ -26,24 +26,16 @@ import { ChatInput } from '@/components/chat/ChatInput.js';
 import type { ComposerAttachment } from '@/components/chat/composer/types.js';
 import type { UsageInfo } from '@/components/chat/redesign/types.js';
 import { useFileTabs } from '@/components/diff/useFileTabs.js';
-import { BrowserPanel, BrowserTabIcon, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
+import { BrowserPanel, type BrowserTabState } from '@/components/chat/BrowserPanel.js';
 import { ChatMessageSkeleton } from '@/components/Skeleton.js';
-import { RightPane, useRightPaneOpen, type RightPaneTabDef } from '@/components/layout/RightPane.js';
+import { Dock, useDockOpen, type DockRegistry } from '@/blocks/dock/index.js';
 import { WidgetHost } from '@/components/widgets/WidgetHost.js';
 import { parseWidgetTabId } from '@/lib/widgetTabId.js';
 import { BackgroundTasksPanel } from '@/components/chat/BackgroundTasksPanel.js';
-import { Loader2, Bot, User, Archive, ArrowDown, FolderGit2, TerminalSquare, LayoutGrid, Boxes, ClipboardList, PauseCircle, MonitorCog, GitFork } from 'lucide-react';
-import {
-  addableRightPaneTabs as addableRightPaneTabsFor,
-  defaultRightPaneTab,
-} from '@/platform/surfaceCapabilities.js';
+import { Loader2, Bot, User, Archive, ArrowDown, PauseCircle, GitFork } from 'lucide-react';
+import { defaultDockTab, dockAddableTabTypes, dockTabTypes } from '@/platform/surfaceCapabilities.js';
 import { Button } from '@/components/ui/index.js';
-import {
-  CHAT_DOCK_OPEN_KEY,
-  CHAT_DOCK_TAB_CAPS,
-  CHAT_DOCK_WIDTH_KEY,
-  useChatView,
-} from '@/features/chat/index.js';
+import { CHAT_DOCK_KEYS, CHAT_DOCK_TAB_CAPS, useChatView } from '@/features/chat/index.js';
 
 // Right-pane-only surfaces, code-split out of the chat route chunk. They pull
 // in the two heaviest dependency trees in the app (xterm + its WebGL addon;
@@ -195,9 +187,9 @@ export function ChatPage() {
   const { id: chatId } = useParams<{ id: string }>();
   const navigate = useNavigate();
 
-  // Unified right side pane — tabs (Changes / Browser / …) are managed inside
-  // RightPane; here we only track whether the pane is open.
-  const [rightPaneOpen, setRightPaneOpen, toggleRightPane] = useRightPaneOpen(CHAT_DOCK_OPEN_KEY, false);
+  // The right dock (D-27) — tabs are managed inside `Dock`; here we only track
+  // whether it is open (collapsed, never unmounted, when closed).
+  const [rightPaneOpen, setRightPaneOpen, toggleRightPane] = useDockOpen(CHAT_DOCK_KEYS.open, false);
   const view = useChatView({
     chatId,
     dockOpen: rightPaneOpen,
@@ -280,10 +272,11 @@ export function ChatPage() {
   // W29 — the panel list is a ledger decision, not a literal. A surface that
   // declares it cannot render the browser or computer live view must not be
   // offered a tab for it; see `platform/surfaceCapabilities.ts`.
-  const addableRightPaneTabs = useMemo(
-    () => addableRightPaneTabsFor({ computerUseEnabled: view.computerUseEnabled, isOrchestrator }),
+  const dockTypes = useMemo(
+    () => dockTabTypes({ computerUseEnabled: view.computerUseEnabled, isOrchestrator }),
     [view.computerUseEnabled, isOrchestrator],
   );
+  const addableDockTabs = useMemo(() => dockAddableTabTypes(dockTypes), [dockTypes]);
   /** Workers running or waiting to start — the tab's live count badge. */
   const runningTaskCount = useRunningBackgroundTaskCount(sessionId);
 
@@ -308,7 +301,7 @@ export function ChatPage() {
   // label) reads it narrowly instead of closing over a value captured here —
   // `AgentShellPanel` subscribes itself, and `widgetLabel` below reads a
   // fresh snapshot only when `widgetTitlesKey` actually changes.
-  const tabs = useMemo<Record<string, RightPaneTabDef>>(() => {
+  const tabs = useMemo<DockRegistry>(() => {
     // `widgetTitlesKey` (in the dep array below) is a trigger-only
     // dependency: it is not read here directly, but its identity is what
     // this factory should recompute on — a fresh snapshot is taken from the
@@ -321,11 +314,12 @@ export function ChatPage() {
       return (block && block.type === 'widget' && (block.title ?? block.component)) || 'Widget';
     };
 
-    return {
+    const registry: DockRegistry = {
       changes: {
         label: 'Changes',
         description: 'Files & changes for this chat',
-        icon: <FolderGit2 className="h-3.5 w-3.5" />,
+        icon: 'changes',
+        pinned: true,
         render: () => (
           <React.Suspense fallback={<PanelFallback />}>
             <ChangesSurface
@@ -343,19 +337,34 @@ export function ChatPage() {
           </React.Suspense>
         ),
       },
-      files: fileTabs.filesTab,
-      file: fileTabs.fileTab,
+      // D-27: Files is ONE pinned tab (the tree); opened files get `file` tabs.
+      files: {
+        render: fileTabs.filesTab.render!,
+        label: 'Files',
+        description: fileTabs.filesTab.description ?? 'Browse every file in the workspace',
+        icon: 'files',
+        pinned: true,
+      },
+      file: {
+        render: fileTabs.fileTab.render!,
+        label: 'File',
+        icon: 'file',
+        allowMultiple: true,
+        maxInstances: CHAT_DOCK_TAB_CAPS.file,
+        ...(fileTabs.fileTab.getTabLabel ? { getTabLabel: fileTabs.fileTab.getTabLabel } : {}),
+      },
       browser: {
         label: 'Browser',
         description: 'Integrated browser for this chat',
-        icon: <BrowserTabIcon state={null} />,
+        icon: 'browser',
+        pinned: true,
         allowMultiple: true,
         maxInstances: CHAT_DOCK_TAB_CAPS.browser,
         getTabLabel: ({ id, index }) => {
           const t = (browserTabs[id]?.title ?? '').trim();
           return t || (index <= 1 ? 'Browser' : `Browser ${index}`);
         },
-        getTabIcon: ({ id }) => <BrowserTabIcon state={browserTabs[id] ?? null} />,
+        getTabDot: ({ id }) => (browserTabs[id]?.loading ? { tone: 'run', label: 'Loading' } : undefined),
         disabled: !chat?.workspaceId,
         disabledReason: 'No workspace for this chat',
         render: (ctx) => (
@@ -399,8 +408,10 @@ export function ChatPage() {
       terminal: {
         label: 'Terminal',
         description: 'Integrated shell in this workspace',
-        icon: <TerminalSquare className="h-3.5 w-3.5" />,
+        icon: 'terminal',
+        pinned: true,
         allowMultiple: true,
+        getTabLabel: ({ index }) => (index <= 1 ? 'Terminal' : `Terminal ${index}`),
         // P2-54 — terminals are the one uncapped WebGL-context consumer:
         // each xterm instance takes a WebGL context, and browsers hand out
         // ~16 per page before evicting the oldest, at which point earlier
@@ -438,7 +449,8 @@ export function ChatPage() {
       computer: {
         label: 'Computer',
         description: 'Watch the desktop windows the agent reads and acts on',
-        icon: <MonitorCog className="h-3.5 w-3.5" />,
+        icon: 'computer',
+        pinned: true,
         disabled: !chat?.workspaceId,
         disabledReason: 'No workspace for this chat',
         render: (ctx) => (
@@ -450,7 +462,7 @@ export function ChatPage() {
       widget: {
         label: 'Widget',
         description: 'Agent-rendered interactive widgets in a full-page surface',
-        icon: <LayoutGrid className="h-3.5 w-3.5" />,
+        icon: 'widgets',
         // One tab per widget instance — several widgets in one chat must
         // not compete for a single surface.
         allowMultiple: true,
@@ -476,17 +488,14 @@ export function ChatPage() {
           );
         },
       },
-      background_tasks: {
-        label: 'Background Tasks',
+      tasks: {
+        label: 'Tasks',
         description: 'Background agent tasks spawned by this orchestrator chat',
-        icon: <Boxes className="h-3.5 w-3.5" />,
-        allowMultiple: false,
+        icon: 'tasks',
+        pinned: true,
         // Live count of workers running or waiting to start, so the tab says
         // there is something to look at without being opened.
-        getTabLabel: () =>
-          runningTaskCount > 0 ? `Background Tasks (${runningTaskCount})` : 'Background Tasks',
-        disabled: !isOrchestrator,
-        disabledReason: 'Enable Orchestrate mode on this chat to spawn background tasks',
+        getTabCount: () => (runningTaskCount > 0 ? runningTaskCount : undefined),
         render: () => <BackgroundTasksPanel chatId={chatId} />,
       },
       // PLN-01 — the plan document surface. Auto-opens when the agent asks
@@ -494,8 +503,7 @@ export function ChatPage() {
       plan: {
         label: 'Plan',
         description: 'Review, edit and approve the agent’s implementation plan',
-        icon: <ClipboardList className="h-3.5 w-3.5" />,
-        allowMultiple: false,
+        icon: 'plan',
         render: () =>
           chatId ? (
             <PlanDocumentPanel chatId={chatId} planId={activePlanId} />
@@ -504,7 +512,10 @@ export function ChatPage() {
           ),
       },
     };
+    // Only the types this chat has on this surface (Tasks for orchestrators, Computer when enabled …).
+    return Object.fromEntries(dockTypes.flatMap((type) => (registry[type] ? [[type, registry[type]]] : [])));
   }, [
+    dockTypes,
     chat?.workspaceId,
     chatId,
     sessionId,
@@ -557,7 +568,18 @@ export function ChatPage() {
   return (
     <PathRootsContext.Provider value={workspace.pathRoots}>
     <div className="relative flex h-full">
-      {/* Main chat column */}
+      {/* The right dock (D-27) lays out the main chat column beside it. */}
+      <Dock
+        open={rightPaneOpen}
+        onOpenChange={setRightPaneOpen}
+        storageKey={dock.dockStorageKey}
+        layoutStorageKey={CHAT_DOCK_KEYS.layout}
+        defaultTabType={defaultDockTab()}
+        addableTabTypes={addableDockTabs}
+        focusTabRequest={dock.focusRequest}
+        onTabClose={handleRightPaneTabClose}
+        tabs={tabs}
+        main={
       <div className="flex flex-1 flex-col min-w-0">
       {/* Streaming status banner */}
       {isCopilotWorking && (
@@ -778,18 +800,7 @@ export function ChatPage() {
         </>
       )}
       </div>
-
-      {/* Unified right side pane — Changes (default), Browser (add-able). */}
-      <RightPane
-        open={rightPaneOpen}
-        onOpenChange={setRightPaneOpen}
-        storageKey={dock.dockStorageKey}
-        widthStorageKey={CHAT_DOCK_WIDTH_KEY}
-        defaultTabType={defaultRightPaneTab()}
-        addableTabTypes={addableRightPaneTabs}
-        focusTabRequest={dock.focusRequest}
-        onTabClose={handleRightPaneTabClose}
-        tabs={tabs}
+        }
       />
 
       {/* Source editor — reachable from the preparation banner and from the

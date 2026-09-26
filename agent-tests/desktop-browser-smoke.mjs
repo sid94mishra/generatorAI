@@ -188,16 +188,13 @@ try {
 }
 if (!workspaceId) await finish(1);
 
-// Open the Browser tab in the right pane: "Add tab" → "Integrated browser
-// for this chat" (the UI nests it behind a menu now, not a bare toolbar
-// button — checked live against the running web app before writing this).
+// Open the Browser tab in the dock. Since P4-06 (D-27) Browser is a pinned
+// dock tab (`right-pane-tab-browser`); the "+" menu only adds extra instances.
 try {
   const sidePaneBtn = await page.$('button[aria-label="Show side pane"]');
   if (sidePaneBtn) await sidePaneBtn.click();
   await page.waitForTimeout(300);
-  await page.click('button[aria-label="Add tab"]');
-  await page.waitForSelector('text=Integrated browser for this chat', { timeout: 10_000 });
-  await page.click('text=Integrated browser for this chat');
+  await page.click('[data-testid="right-pane-tab-browser"]');
   const tabVisible = await page.waitForSelector('[role="tab"]:has-text("Browser")', { timeout: 10_000 })
     .then(() => true).catch(() => false);
   record('browser panel opens', tabVisible, tabVisible ? 'Browser tab present' : 'Browser tab missing');

@@ -22,6 +22,7 @@ import {
   type TransportCapabilitySet,
 } from '@generatorai/shared';
 
+import type { DockTabType } from '@generatorai/shared/ui-contract';
 import { isDesktop } from '@/lib/desktop.js';
 
 /**
@@ -40,17 +41,7 @@ export function surfaceCapabilities(): TransportCapabilitySet {
   return capabilitiesFor(currentSurfaceId());
 }
 
-/** Right-pane tab types, in the order the pane offers them. */
-export type RightPaneTabType =
-  | 'files'
-  | 'browser'
-  | 'terminal'
-  | 'computer'
-  | 'widget'
-  | 'plan'
-  | 'background_tasks';
-
-export interface RightPaneTabOptions {
+export interface DockTabOptions {
   /** Computer-use is also behind a server-side feature flag. */
   computerUseEnabled: boolean;
   /** Background tasks only exist for an orchestrator chat. */
@@ -58,34 +49,44 @@ export interface RightPaneTabOptions {
 }
 
 /**
- * The panels this surface offers to add to the right pane.
+ * The dock tab types a chat has on this surface, in strip order (D-27):
+ * Changes · Files · Terminal · Browser, then Tasks (orchestrators) and
+ * Computer (computer use on), then the on-demand Plan, Widget and file tabs.
  *
  * Two independent gates, and they mean different things: the ledger says
  * whether this SURFACE can render the panel at all, the options say whether
  * this CHAT has anything to put in it. Both have to pass, and conflating them
  * is how a surface ends up offering a tab it cannot draw.
  */
-export function addableRightPaneTabs(
-  options: RightPaneTabOptions,
+export function dockTabTypes(
+  options: DockTabOptions,
   caps: TransportCapabilitySet = surfaceCapabilities(),
-): RightPaneTabType[] {
-  const tabs: RightPaneTabType[] = ['files'];
-  if (caps.browserPanelRendering.supported) tabs.push('browser');
+): DockTabType[] {
+  const tabs: DockTabType[] = [];
+  if (caps.diffRendering.supported) tabs.push('changes');
+  tabs.push('files');
   if (caps.terminalRendering.supported) tabs.push('terminal');
+  if (caps.browserPanelRendering.supported) tabs.push('browser');
+  if (options.isOrchestrator) tabs.push('tasks');
   if (caps.computerPanelRendering.supported && options.computerUseEnabled) tabs.push('computer');
-  if (caps.widgetRendering.supported) tabs.push('widget');
   tabs.push('plan');
-  if (options.isOrchestrator) tabs.push('background_tasks');
+  if (caps.widgetRendering.supported) tabs.push('widget');
+  tabs.push('file');
   return tabs;
 }
 
+/** What the dock's "+" menu offers (D-27): extra Terminal / Browser instances and widgets. */
+export function dockAddableTabTypes(types: readonly DockTabType[]): DockTabType[] {
+  return (['terminal', 'browser', 'widget'] as const).filter((t) => types.includes(t));
+}
+
 /**
- * Which tab the right pane opens on.
+ * Which tab the dock opens on.
  *
  * Changes is the diff surface, so a surface that cannot render a diff must
  * not land there — it would open on an empty panel it can never fill.
  */
-export function defaultRightPaneTab(
+export function defaultDockTab(
   caps: TransportCapabilitySet = surfaceCapabilities(),
 ): 'changes' | 'files' {
   return caps.diffRendering.supported ? 'changes' : 'files';

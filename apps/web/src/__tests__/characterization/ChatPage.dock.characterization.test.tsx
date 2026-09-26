@@ -22,7 +22,7 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
-import { addableRightPaneTabs as addableRightPaneTabsFor } from '@/platform/surfaceCapabilities.js';
+import { dockAddableTabTypes, dockTabTypes } from '@/platform/surfaceCapabilities.js';
 import * as H from './helpers/chatPageFakes.js';
 import { renderChatPage } from './helpers/renderChatPage.js';
 
@@ -44,12 +44,19 @@ vi.mock('@/stores/sseManager.js', async (orig) => ({
 // Import under test — the only line that changes when P4 moves the file.
 import { ChatPage } from '@/pages/ChatPage.js';
 
-const OPEN_KEY = 'generatorai:rightPane:chat:open';
-const WIDTH_KEY = 'generatorai:rightPane:chat:width';
-const tabsKey = (chatId: string) => `generatorai:rightPane:chat:${chatId}`;
+// P4-06 (D-27): the dock's keys are `generatorai:dock:chat:*` (was `generatorai:rightPane:chat:*`),
+// and the split layout replaces the px width key.
+const OPEN_KEY = 'generatorai:dock:chat:open';
+const LAYOUT_KEY = 'generatorai:dock:chat:layout';
+const tabsKey = (chatId: string) => `generatorai:dock:chat:${chatId}`;
 
 const store = () => useStreamStore.getState();
-const pane = () => screen.queryByTestId('right-pane');
+// P4-06 (D-27): closing collapses the dock instead of unmounting it, so "the pane is
+// shown" is its open state, not its presence in the DOM.
+const pane = () => {
+  const el = screen.queryByTestId('right-pane');
+  return el?.getAttribute('data-state') === 'open' ? el : null;
+};
 const tabsOf = (type: string) => screen.queryAllByTestId(`right-pane-tab-${type}`);
 const isSelected = (type: string) => tabsOf(type).some((t) => t.getAttribute('aria-selected') === 'true');
 const storedTabs = (chatId: string): Array<{ id: string; type: string }> =>
@@ -92,13 +99,15 @@ function widget(instanceId: string, title: string, surface: 'widget' | 'inline' 
 }
 
 beforeEach(() => {
+  // A desktop window (the dock is an inline panel at >= 1200px, D-27); happy-dom defaults to 1024.
+  (window as unknown as { happyDOM: { setViewport: (v: { width: number; height: number }) => void } }).happyDOM.setViewport({ width: 1440, height: 900 });
   H.resetHarness();
   act(() => useStreamStore.setState({ streams: {} }));
 });
 
 // ════════════════════════════════════════════════════════════════
 describe('right-pane persistence (09 §5.4; ChatPage.tsx:360, 390, 1609-1619)', () => {
-  it('open state lives under `generatorai:rightPane:chat:open` (the header toggle drives it)', () => {
+  it('open state lives under `generatorai:dock:chat:open` (the header toggle drives it)', () => {
     mount();
     expect(pane()).not.toBeInTheDocument();
 
@@ -116,10 +125,11 @@ describe('right-pane persistence (09 §5.4; ChatPage.tsx:360, 390, 1609-1619)', 
     mount();
     expect(pane()).toBeInTheDocument();
     expect(isSelected('changes')).toBe(true);
-    expect(storedTabs(H.CHAT_ID)).toEqual([{ id: 'changes-1', type: 'changes' }]);
+    // P4-06 (D-27): Files, Terminal and Browser are pinned after Changes.
+    expect(storedTabs(H.CHAT_ID).map((t) => t.type)).toEqual(['changes', 'files', 'terminal', 'browser']);
   });
 
-  it('tabs are per chat under `generatorai:rightPane:chat:<chatId>`; switching chats shows the other chat’s tabs', () => {
+  it('tabs are per chat under `generatorai:dock:chat:<chatId>`; switching chats shows the other chat’s tabs', () => {
     seedOpen();
     seedTabs(H.CHAT_ID, [
       { id: 'changes-1', type: 'changes' },
@@ -133,9 +143,9 @@ describe('right-pane persistence (09 §5.4; ChatPage.tsx:360, 390, 1609-1619)', 
     r.navigateTo('/chats/chat-2');
     expect(tabsOf('plan')).toHaveLength(0);
     expect(isSelected('changes')).toBe(true);
-    expect(storedTabs('chat-2')).toEqual([{ id: 'changes-1', type: 'changes' }]);
+    expect(storedTabs('chat-2').map((t) => t.type)).toEqual(['changes', 'files', 'terminal', 'browser']);
     // chat-1's layout is untouched by the visit.
-    expect(storedTabs(H.CHAT_ID).map((t) => t.type)).toEqual(['changes', 'plan']);
+    expect(storedTabs(H.CHAT_ID).map((t) => t.type)).toEqual(['changes', 'files', 'terminal', 'browser', 'plan']);
 
     r.navigateTo(`/chats/${H.CHAT_ID}`);
     expect(tabsOf('plan')).toHaveLength(1);
@@ -148,20 +158,27 @@ describe('right-pane persistence (09 §5.4; ChatPage.tsx:360, 390, 1609-1619)', 
     });
     afterEach(() => restoreWidth());
 
-    it('is ONE global key `generatorai:rightPane:chat:width`, not per chat', async () => {
+    // P4-06 (09 §5.5): rewritten against the react-resizable-panels separator. The split
+    // layout is ONE page-global key `generatorai:dock:chat:layout`, not per chat. happy-dom
+    // has no layout engine, so the drag/keyboard resize and the write to that key are
+    // exercised in a real browser by the DockFrame story `KeyboardResize` (ui/shell).
+    it('is ONE global key `generatorai:dock:chat:layout`, not per chat', () => {
       seedOpen();
+      window.localStorage.setItem(LAYOUT_KEY, JSON.stringify({ 'main,side': { layout: [65, 35] } }));
       H.withChat(H.makeChat({ id: 'chat-2', sessionId: 'sess-2' }));
       const r = mount();
       const handle = screen.getByRole('separator', { name: 'Resize right pane' });
-      handle.focus();
-      await userEvent.keyboard('{End}');
-      const stored = window.localStorage.getItem(WIDTH_KEY);
-      expect(stored).not.toBeNull();
-      expect(window.localStorage.getItem(`${tabsKey(H.CHAT_ID)}:width`)).toBeNull();
+      expect(handle).toHaveAttribute('tabindex', '0');
+      expect(handle).toHaveAttribute('aria-orientation');
 
       r.navigateTo('/chats/chat-2');
-      expect(screen.getByRole('separator', { name: 'Resize right pane' })).toHaveAttribute('aria-valuenow', stored);
-      expect(window.localStorage.getItem(`${tabsKey('chat-2')}:width`)).toBeNull();
+      // Same dock, same split: the separator is the one element, not a per-chat remount.
+      expect(screen.getByRole('separator', { name: 'Resize right pane' })).toBe(handle);
+      expect(JSON.parse(window.localStorage.getItem(LAYOUT_KEY)!)).toEqual({ 'main,side': { layout: [65, 35] } });
+      for (const id of [H.CHAT_ID, 'chat-2']) {
+        expect(window.localStorage.getItem(`${tabsKey(id)}:layout`)).toBeNull();
+        expect(window.localStorage.getItem(`${tabsKey(id)}:width`)).toBeNull();
+      }
     });
   });
 
@@ -171,16 +188,17 @@ describe('right-pane persistence (09 §5.4; ChatPage.tsx:360, 390, 1609-1619)', 
     H.withChat(H.makeChat({ id: 'orch-2', sessionId: 'sess-o2', orchestratorMode: true }));
     const r = mount(H.makeChat({ orchestratorMode: true }));
     expect(pane()).toBeInTheDocument();
-    expect(isSelected('background_tasks')).toBe(true);
+    // P4-06 (M-11): the tab id is `tasks` (was `background_tasks`).
+    expect(isSelected('tasks')).toBe(true);
 
     r.navigateTo('/chats/worker-1');
     expect(pane()).toBeInTheDocument(); // open state is page-global
-    expect(tabsOf('background_tasks')).toHaveLength(0);
-    expect(storedTabs('worker-1').map((t) => t.type)).toEqual(['changes']);
+    expect(tabsOf('tasks')).toHaveLength(0);
+    expect(storedTabs('worker-1').map((t) => t.type)).toEqual(['changes', 'files', 'terminal', 'browser']);
 
     // The once-per-chat latch was reset too: the next orchestrator auto-opens again.
     r.navigateTo('/chats/orch-2');
-    expect(isSelected('background_tasks')).toBe(true);
+    expect(isSelected('tasks')).toBe(true);
   });
 });
 
@@ -345,7 +363,8 @@ describe('auto-open: Plan (03 §6.4 "once per plan id and only while the documen
     });
     expect(isSelected('plan')).toBe(true);
 
-    await userEvent.click(screen.getByRole('button', { name: 'Close Plan tab' }));
+    // C-19: a tab's close x is pointer-only (aria-hidden; keyboard closes with Delete), so it is found by label.
+    await userEvent.click(screen.getByLabelText('Close Plan tab'));
     expect(tabsOf('plan')).toHaveLength(0);
 
     act(() => store().setPlanStatus(H.SESSION_ID, 'p-1', 'changes_requested'));
@@ -379,11 +398,15 @@ describe('auto-open: Background Tasks (03 §6.4 "once per chat, orchestrator onl
     mount(H.makeChat({ orchestratorMode: true }));
     expect(pane()).not.toBeInTheDocument();
     H.setFakeData({ backgroundTasks: [task('t-1')] });
-    expect(isSelected('background_tasks')).toBe(true);
+    expect(isSelected('tasks')).toBe(true);
 
-    await userEvent.click(screen.getByRole('button', { name: /^Close Background Tasks/ }));
+    // P4-06 (D-27): Tasks is pinned in orchestrator chats (no close x), so "only once"
+    // is pinned as: a later task does not take the selection back.
+    expect(screen.queryByLabelText('Close Tasks tab')).toBeNull();
+    await userEvent.click(tabsOf('changes')[0]!);
     H.setFakeData({ backgroundTasks: [task('t-1'), task('t-2')] });
-    expect(tabsOf('background_tasks')).toHaveLength(0);
+    expect(isSelected('changes')).toBe(true);
+    expect(tabsOf('tasks')).toHaveLength(1);
   });
 
   it('never for a non-orchestrator chat (the list is not even polled)', () => {
@@ -404,21 +427,22 @@ describe('tab caps and the addable ledger (09 §5.4 Tab caps; 1139-1297)', () =>
     { computerUseEnabled: true, isOrchestrator: false },
     { computerUseEnabled: false, isOrchestrator: true },
     { computerUseEnabled: true, isOrchestrator: true },
-  ])('the "+" menu is exactly addableRightPaneTabsFor(%o) — Tasks only for orchestrators, Computer only when enabled', async (opts) => {
+  ])('the "+" menu is exactly dockAddableTabTypes(%o); Tasks only for orchestrators and Computer only when enabled, as pinned tabs', async (opts) => {
+    // P4-06 (D-27): the "+" menu offers Widget and extra Terminal/Browser instances only;
+    // Tasks and Computer are pinned tabs when relevant, never "+" entries.
     seedOpen();
     H.setFakeData({ computerUseEnabled: opts.computerUseEnabled });
     mount(H.makeChat({ orchestratorMode: opts.isOrchestrator }));
     await openAddMenu();
-    const expected = addableRightPaneTabsFor(opts);
-    expect(addable()).toEqual(expected);
-    expect(addable().includes('background_tasks')).toBe(opts.isOrchestrator);
-    expect(addable().includes('computer')).toBe(opts.computerUseEnabled);
+    expect(addable()).toEqual(dockAddableTabTypes(dockTabTypes(opts)));
+    expect(tabsOf('tasks')).toHaveLength(opts.isOrchestrator ? 1 : 0);
+    expect(tabsOf('computer')).toHaveLength(opts.computerUseEnabled ? 1 : 0);
   });
 
   it.each([
     ['browser', 5],
     ['widget', 6],
-    ['files', 4],
+    // P4-06 (D-27): Files is one pinned tab; the old 4-instance Files cap is gone.
   ])('%s is capped at %i instances: below the cap it is still offered, at the cap it is not', async (type, cap) => {
     const tabs = (n: number) => [
       { id: 'changes-1', type: 'changes' },
@@ -473,8 +497,8 @@ describe('tab caps and the addable ledger (09 §5.4 Tab caps; 1139-1297)', () =>
       { id: 'plan-x', type: 'plan' },
     ]);
     mount();
-    expect(screen.queryByRole('button', { name: 'Close Changes tab' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Close Plan tab' })).toBeInTheDocument();
+    expect(screen.queryByLabelText('Close Changes tab')).not.toBeInTheDocument();
+    expect(screen.getByLabelText('Close Plan tab')).toBeInTheDocument();
     expect(screen.getByTestId('right-pane-panel-changes')).toHaveAttribute('aria-hidden', 'true');
     expect(screen.getByTestId('right-pane-panel-plan')).toHaveAttribute('aria-hidden', 'false');
   });

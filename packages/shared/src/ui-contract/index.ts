@@ -5,4 +5,5 @@ export * from './chats.js';
 export * from './commands.js';
 export * from './composer.js';
 export * from './keys.js';
+export * from './pane.js';
 export * from './status.js';

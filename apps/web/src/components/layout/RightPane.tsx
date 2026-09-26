@@ -11,8 +11,9 @@
 // navigation and app restarts.
 //
 // Used by:
-//   • ChatPage           — Changes (default) + Browser
 //   • WorkflowRunPageV2  — Changes (default) + Inspector + Browser
+// The chat page moved to `blocks/dock` (P4-06, D-27). This file stays for the
+// legacy run page until PW or the D-35 fallback replaces it (04 §2.1 note).
 // ────────────────────────────────────────────────────────────────
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';

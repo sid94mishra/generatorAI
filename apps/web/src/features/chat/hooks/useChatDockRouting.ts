@@ -9,7 +9,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { DOCK_TAB_CAPS, dockStorageKeys, type DockLinkTab } from '@generatorai/shared/ui-contract';
 import { toDisplayPath, type PathRoot } from '@/blocks/changes/changePaths.js';
+import { useDockLinkParam, type DockFocusRequest } from '@/blocks/dock/index.js';
 import { useBackgroundTasks } from '@/hooks/queries.js';
 import {
   useBrowserSessionEvents,
@@ -21,27 +23,22 @@ import { widgetTabId } from '@/lib/widgetTabId.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 
-/** Dock open state is global to chats: `<key>:open`. */
-export const CHAT_DOCK_OPEN_KEY = 'generatorai:rightPane:chat';
-/** Dock width is global to chats. */
-export const CHAT_DOCK_WIDTH_KEY = 'generatorai:rightPane:chat:width';
+/**
+ * The chat dock's persistence keys (D-27): open state and split layout are
+ * global to chats; the tab list is per chat.
+ */
+export const CHAT_DOCK_KEYS = dockStorageKeys('chat');
 
 /**
- * Per-type instance caps for multi-instance tabs.
- *
- * Terminals are the one uncapped WebGL-context consumer: each xterm takes a
- * WebGL context, and browsers hand out ~16 per page before evicting the
- * oldest, at which point earlier terminals silently stop painting — plus one
- * PTY per tab on the host. 4 is above any observed real use of parallel
- * shells. Browser tabs each hold a live session; widgets one surface each.
+ * Per-type instance caps (D-27, `DOCK_TAB_CAPS`). Terminals are the one
+ * WebGL-context consumer: each xterm takes a context, and browsers hand out
+ * ~16 per page before evicting the oldest (earlier terminals then stop
+ * painting) — plus one PTY per tab on the host. Browser tabs each hold a live
+ * session; widgets one surface each; file tabs one viewer each.
  */
-export const CHAT_DOCK_TAB_CAPS = { browser: 5, terminal: 4, widget: 6 } as const;
+export const CHAT_DOCK_TAB_CAPS = DOCK_TAB_CAPS;
 
-export interface DockFocusRequest {
-  type: string;
-  token: number;
-  tabId?: string;
-}
+export type { DockFocusRequest };
 
 export interface UseChatDockRoutingOptions {
   chatId: string | undefined;
@@ -97,7 +94,7 @@ export function useChatDockRouting({
 
   // Dock tabs are scoped to THIS chat, so three browser tabs opened in one
   // conversation do not leak into every other conversation.
-  const dockStorageKey = `generatorai:rightPane:chat:${chatId ?? 'unknown'}`;
+  const dockStorageKey = CHAT_DOCK_KEYS.tabs(chatId ?? 'unknown');
   // Namespace for each browser tab's remembered URL (see `browserTabUrls`).
   const browserUrlScopeKey = `chat:${chatId ?? 'unknown'}`;
   /** A browser tab closed for good forgets the URL it remembered. */
@@ -114,7 +111,7 @@ export function useChatDockRouting({
     if (isOrchestrator && backgroundTaskCount > 0 && !bgTabAutoOpened) {
       setBgTabAutoOpened(true);
       setDockOpen(true);
-      setFocusRequest({ type: 'background_tasks', token: Date.now() });
+      setFocusRequest({ type: 'tasks', token: Date.now() });
     }
   }, [isOrchestrator, backgroundTaskCount, bgTabAutoOpened, setDockOpen]);
 
@@ -252,6 +249,13 @@ export function useChatDockRouting({
     },
     [workspaceId, startVisibleBrowser, setDockOpen],
   );
+
+  // ── `?dock=<tab>` (R-4) ─────────────────────────────────────────
+  // Home "Review", Needs-you rows, the palette and deep links land on a tab.
+  useDockLinkParam((tab: DockLinkTab) => {
+    setDockOpen(true);
+    setFocusRequest({ type: tab, token: Date.now() });
+  });
 
   return {
     dockStorageKey,

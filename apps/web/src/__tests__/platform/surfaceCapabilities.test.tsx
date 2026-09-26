@@ -27,10 +27,10 @@ import {
 } from '@generatorai/shared';
 
 import {
-  addableRightPaneTabs,
   composerAffordances,
   currentSurfaceId,
-  defaultRightPaneTab,
+  defaultDockTab,
+  dockTabTypes,
   liveViewTransport,
   surfaceCapabilities,
 } from '@/platform/surfaceCapabilities.js';
@@ -93,15 +93,15 @@ describe('W29 — surface identity', () => {
 
 describe('W29 — browserPanelRendering / computerPanelRendering / terminalRendering / widgetRendering', () => {
   // Each tab is asserted present with the capability and absent without it,
-  // through the real `addableRightPaneTabs` decision:
+  // through the real `dockTabTypes` decision:
   //   @capability-proof web/browserPanelRendering
   //   @capability-proof web/computerPanelRendering
   //   @capability-proof web/terminalRendering
   //   @capability-proof web/widgetRendering
   const opts = { computerUseEnabled: true, isOrchestrator: false };
 
-  it('offers each declared panel as a right-pane tab', () => {
-    const tabs = addableRightPaneTabs(opts, WEB_CAPABILITIES);
+  it('offers each declared panel as a dock tab', () => {
+    const tabs = dockTabTypes(opts, WEB_CAPABILITIES);
     expect(tabs).toContain('browser');
     expect(tabs).toContain('computer');
     expect(tabs).toContain('terminal');
@@ -114,13 +114,13 @@ describe('W29 — browserPanelRendering / computerPanelRendering / terminalRende
     ['terminalRendering', 'terminal'],
     ['widgetRendering', 'widget'],
   ] as const)('withholds the %s tab when the ledger says the surface cannot draw it', (field, tab) => {
-    expect(addableRightPaneTabs(opts, withCapability(field, false))).not.toContain(tab);
+    expect(dockTabTypes(opts, withCapability(field, false))).not.toContain(tab);
   });
 
   it('still requires the feature flag on top of the capability', () => {
     // The two gates mean different things and both must hold: the surface CAN
     // draw a computer panel, but this deployment has desktop automation off.
-    const tabs = addableRightPaneTabs(
+    const tabs = dockTabTypes(
       { computerUseEnabled: false, isOrchestrator: false },
       WEB_CAPABILITIES,
     );
@@ -143,12 +143,13 @@ describe('W29 — websocketStreaming', () => {
 
 describe('W29 — diffRendering', () => {
   //   @capability-proof web/diffRendering
-  it('opens the right pane on the diff surface when declared', () => {
-    expect(defaultRightPaneTab(WEB_CAPABILITIES)).toBe('changes');
+  it('opens the dock on the diff surface when declared', () => {
+    expect(defaultDockTab(WEB_CAPABILITIES)).toBe('changes');
   });
 
-  it('opens on the file browser instead when the surface cannot render a diff', () => {
-    expect(defaultRightPaneTab(withCapability('diffRendering', false))).toBe('files');
+  it('opens on the file browser instead when the surface cannot render a diff (and has no Changes tab)', () => {
+    expect(defaultDockTab(withCapability('diffRendering', false))).toBe('files');
+    expect(dockTabTypes({ computerUseEnabled: false, isOrchestrator: false }, withCapability('diffRendering', false))).not.toContain('changes');
   });
 });
 
