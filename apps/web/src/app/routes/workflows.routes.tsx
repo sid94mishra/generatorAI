@@ -29,12 +29,14 @@ export const workflowsRoutes: RouteObject[] = [
   ),
   defineRoute(
     'workflows/:id/runs/:runId',
-    // A stage transcript draws the workflow tool cards too (D-35 segment-card registry).
+    // PW-c: the run workspace on T-04 renders its own RunHeader and the kit
+    // dock. A stage transcript draws the workflow cards too (D-35 segment-card
+    // registry).
     () =>
       Promise.all([
         import('@/app/registries/workflowTranscriptCards.js'),
-        import('@/pages/WorkflowRunPage.js'),
+        import('@/features/workflows/run/WorkflowRunPage.js'),
       ]).then(([, m]) => ({ default: m.WorkflowRunPage })),
-    { legacyHeader: true, nav: 'workflows', title: 'Workflow Run' },
+    { legacyHeader: false, nav: 'workflows', title: 'Workflow Run' },
   ),
 ];

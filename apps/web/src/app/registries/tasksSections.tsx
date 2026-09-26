@@ -4,7 +4,7 @@
 // contract is in features/chat/dock/tasks/tasksSections.ts.
 
 import { BackgroundTasksSection, registerTasksSection, useBackgroundTasksCount } from '@/features/chat/index.js';
-import { ChatWorkflowRunsSection, useChatWorkflowRunsCount } from '@/components/chat/WorkflowRunCards.js';
+import { ChatWorkflowRunsSection, useChatWorkflowRunsCount } from '@/features/workflows/chat/WorkflowRunCards.js';
 
 registerTasksSection(
   {
@@ -19,7 +19,8 @@ registerTasksSection(
 );
 
 // Workflow Overhaul P06 WP-6.2: the runs this chat started through its
-// workflow tools (the former BackgroundTasksPanel's "Workflow runs" list).
+// workflow tools, on the kit (ActivityRow rows; the WF-12…14 cards live in the
+// same features/workflows/chat module).
 registerTasksSection(
   {
     id: 'workflow-runs',

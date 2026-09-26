@@ -33,26 +33,19 @@ test.describe('Run lifecycle + streaming render', () => {
     expect(stages['Second']).toBe('completed');
 
     // UI reflects the persisted/completed run on load (resumability/replay).
+    // The run header's D-18 badge says "Succeeded" for a completed run (PW-c).
     await gotoApp(`/workflows/${def}/runs/${runId}`);
-    await expect(page.getByText('Completed', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('run-status-badge')).toHaveText(/Succeeded/, { timeout: 15_000 });
     await expect(page.getByText('First', { exact: true }).first()).toBeVisible();
     await expect(page.getByText('Second', { exact: true }).first()).toBeVisible();
 
     // Expand the first stage and confirm the prompt replays, and that the
-    // stage's output is reachable.
-    //
-    // The old `getByText('Response')` assertion named a label the run page has
-    // never rendered. StageTimelineItem's expanded body is: a "Stage prompt"
-    // bubble, the StreamPanel, then a chips row whose "Details" chip opens the
-    // right-pane Inspector (tabs: Files / Output / Hooks / Tools). "Output" is
-    // where a completed stage's result lives; there is no "Response" heading.
-    //
-    // FINDING (app, not fixed here): on RELOAD of a completed run the
-    // StreamPanel renders nothing — the assistant answer does not replay
-    // inline, only the prompt does. Reproduced on this run and independently
-    // on a pre-existing completed run (load-1q-workflow). That is why this
-    // test asserts the Inspector's Output tab rather than inline answer text.
-    await page.getByRole('button', { name: /^#0 First/ }).click();
+    // stage's output is reachable. A stage-table row's disclosure button is
+    // named "<stage>, <status>" (StageRow); its expanded body is the "Stage
+    // prompt", the stage transcript, then a chips row whose "Details" button
+    // opens the dock's Inspector tab (tabs: Output / Files / Tools / Hooks /
+    // Events / History).
+    await page.getByRole('button', { name: /^First, / }).click();
     await expect(page.getByText('Stage prompt', { exact: true })).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('Reply with the word DONE.', { exact: true }).first()).toBeVisible();
 
@@ -109,7 +102,7 @@ test.describe('Conditional edge routing', () => {
 
     // UI shows the skipped + failed states.
     await gotoApp(`/workflows/${def}/runs/${runId}`);
-    await expect(page.getByText('Completed', { exact: false }).first()).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByTestId('run-status-badge')).toHaveText(/Succeeded/, { timeout: 15_000 });
     await expect(page.getByText('skipped', { exact: false }).first()).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('failed', { exact: false }).first()).toBeVisible();
   });

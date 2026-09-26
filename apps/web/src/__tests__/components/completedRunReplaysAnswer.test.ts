@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { deriveRunView, type DeriveRunViewInput } from '@/components/workflow/redesign/deriveRunView.js';
+import { deriveRunView, type DeriveRunViewInput } from '@/features/workflows/run/model/deriveRunView.js';
 
 const PERSISTED = 'The persisted answer that was written when the stage finished.';
 const STREAMED = 'The answer as it arrived over SSE.';

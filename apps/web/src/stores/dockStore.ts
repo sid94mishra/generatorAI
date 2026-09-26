@@ -1,11 +1,10 @@
 // ────────────────────────────────────────────────────────────────
 // dockStore — the dock controller of the page on screen (06 §2.2; renamed
 // from rightPaneStore in P4-12). A page with a dock (the chat workspace, the
-// legacy workflow run page) registers `{open, toggle}` while mounted; the
+// workflow run workspace) registers `{open, toggle}` while mounted; the
 // `dock.toggle` command (Ctrl/⌘ Alt B, View ▸ Toggle Side Pane) and the
-// desktop menu's checkmark read it. The legacy Header's side-pane toggle
-// reads it too, for the run page only, until PW ports that page. With no dock
-// on screen the controller is null and those affordances stand down.
+// desktop menu's checkmark read it. With no dock on screen the controller is
+// null and those affordances stand down.
 // ────────────────────────────────────────────────────────────────
 
 import { create } from 'zustand';

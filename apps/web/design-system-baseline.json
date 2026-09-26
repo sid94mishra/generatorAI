@@ -1,24 +1,24 @@
 {
   "counts": {
-    "hardcodedPaletteClass": 216,
+    "hardcodedPaletteClass": 99,
     "handRolledOverlay": 1,
-    "rawInputElement": 6,
-    "adHocSpinner": 2,
-    "defaultTextSize": 512,
-    "whiteBlackClass": 28,
-    "defaultRadius": 351,
-    "defaultShadow": 39,
-    "arbitraryValue": 1305,
-    "varInClassString": 780,
-    "legacyColorVar": 810,
-    "legacyTokenUtility": 1331,
-    "lucideDirectImport": 88,
+    "rawInputElement": 5,
+    "defaultTextSize": 488,
+    "whiteBlackClass": 11,
+    "defaultRadius": 277,
+    "defaultShadow": 33,
+    "arbitraryValue": 623,
+    "varInClassString": 299,
+    "legacyColorVar": 317,
+    "legacyTokenUtility": 1214,
+    "lucideDirectImport": 71,
     "rawHeadlessImport": 1,
-    "unstyledVariant": 24
+    "unstyledVariant": 15
   },
   "locked": [
     "legacyGlassClass",
     "rawButtonElement",
+    "adHocSpinner",
     "nativeConfirm",
     "hexOrRgbInTs"
   ]

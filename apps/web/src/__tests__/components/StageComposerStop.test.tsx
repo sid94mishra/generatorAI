@@ -13,7 +13,6 @@ vi.mock('@/hooks/workflowQueries.js', () => ({
   useSendStageMessage: () => ({ mutateAsync: vi.fn() }),
   useCancelStageTurn: () => ({ mutate: cancelMutate, isPending: false }),
 }));
-vi.mock('@/components/Toast.js', () => ({ toast: vi.fn() }));
 vi.mock('@/blocks/composer/index.js', () => ({
   Composer: (props: { onStop?: () => void }) => {
     chatInputProps = props;
@@ -21,8 +20,8 @@ vi.mock('@/blocks/composer/index.js', () => ({
   },
 }));
 
-import { StageComposer } from '@/components/workflow/redesign/StageComposer.js';
-import type { StageView } from '@/components/workflow/redesign/types.js';
+import { StageComposer } from '@/features/workflows/run/stages/StageComposer.js';
+import type { StageView } from '@/features/workflows/run/model/types.js';
 
 beforeEach(() => {
   vi.useFakeTimers();

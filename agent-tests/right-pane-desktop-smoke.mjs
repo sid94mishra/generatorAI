@@ -146,35 +146,36 @@ try {
   record('chat right pane flow', false, String(e).slice(0, 160));
 }
 
-// ── 2. Workflow Run page — Side pane toggle → Add Inspector tab ──
+// ── 2. Workflow Run page — Side pane toggle → Add Usage tab ──
 try {
   const run = await findFirst('run', '/api/workflow-runs?limit=1');
   if (!run) throw new Error('no run available');
   await navigateSpa(`/workflows/${run.workflowDefinitionId}/runs/${run.id}`);
-  // Wait for the run page's breadcrumb / header before toggling the side pane.
-  // The run page is still on the legacy header, whose side-pane toggle reads
-  // the controller the page registers in stores/dockStore (same `dock-toggle`).
+  // The run page renders its own RunHeader (PW-c): breadcrumb + the kit dock
+  // toggle, which drives the blocks/dock Dock (same `right-pane*` ids).
   await page.waitForSelector('nav[aria-label="Breadcrumb"]', { timeout: 15_000 });
   await page.waitForSelector('[data-testid="dock-toggle"]', { timeout: 15_000 });
   await page.click('[data-testid="dock-toggle"]');
   await page.waitForSelector('[data-testid="right-pane"]', { timeout: 10_000 });
   record('workflow: right pane opens', true);
 
+  // Inspector and Changes are pinned run tabs (board WorkflowRun).
+  await page.waitForSelector('[data-testid="right-pane-tab-inspector"]', { timeout: 3_000 });
   await page.waitForSelector('[data-testid="right-pane-tab-changes"]', { timeout: 3_000 });
-  record('workflow: Changes tab visible by default', true);
+  record('workflow: Inspector and Changes tabs visible by default', true);
 
   await (await page.$('[data-testid="right-pane-add-tab"]')).click();
-  const addInspector = await page.$('[data-testid="right-pane-add-inspector"]');
-  if (!addInspector) throw new Error('Inspector option missing');
-  await addInspector.click();
-  await page.waitForSelector('[data-testid="right-pane-tab-inspector"]', { timeout: 3_000 });
-  record('workflow: Inspector tab added via + menu', true);
+  const addUsage = await page.$('[data-testid="right-pane-add-usage"]');
+  if (!addUsage) throw new Error('Usage option missing');
+  await addUsage.click();
+  await page.waitForSelector('[data-testid="right-pane-tab-usage"]', { timeout: 3_000 });
+  record('workflow: Usage tab added via + menu', true);
 
-  // Close the Inspector tab and confirm Changes remains.
-  await page.click('button[aria-label="Close Inspector tab"]');
+  // Close the Usage tab and confirm Changes remains.
+  await page.click('button[aria-label="Close Usage tab"]');
   const still = await page.$('[data-testid="right-pane-tab-changes"]');
   if (!still) throw new Error('Changes tab disappeared after close');
-  record('workflow: closing Inspector keeps Changes', true);
+  record('workflow: closing Usage keeps Changes', true);
 } catch (e) {
   record('workflow right pane flow', false, String(e).slice(0, 200));
 }

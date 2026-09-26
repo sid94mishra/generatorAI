@@ -1,6 +1,7 @@
 // ────────────────────────────────────────────────────────────────
 // Header — the legacy global header (D-21): section title + context actions
-//          (Open in editor, side-pane toggle). Since P3-04 it renders only
+//          (Open in editor). No page on this header has a dock since
+//          the run page moved to the kit (PW-c). Since P3-04 it renders only
 //          inside app/shell/LegacyHeader, as the first row of the main card,
 //          for routes not yet ported. The chat workspace renders its own
 //          ChatHeader since P4-12 (its breadcrumb, status and Archive left this
@@ -9,12 +10,7 @@
 
 import React from 'react';
 import { useLocation } from 'react-router';
-import { useDockStore } from '@/stores/dockStore.js';
 import { OpenInEditorButton } from '@/components/shared/OpenInEditorButton.js';
-import { cn } from '@/lib/utils.js';
-import { Tooltip } from '@/components/Tooltip.js';
-import { Button } from '@/components/ui/index.js';
-import { PanelRightOpen, PanelRightClose } from 'lucide-react';
 
 /** Section title for a route still on the legacy header. */
 function sectionTitle(pathname: string): string {
@@ -30,10 +26,6 @@ function sectionTitle(pathname: string): string {
 
 export function Header() {
   const location = useLocation();
-  // Registered by a page with a dock (today only the legacy workflow run page
-  // on this header).
-  const dockController = useDockStore((s) => s.controller);
-
   return (
     <header
       data-testid="app-header"
@@ -49,27 +41,6 @@ export function Header() {
             `editorTargetStore`, and the button hides itself when nothing is
             published. */}
         <OpenInEditorButton />
-
-        {dockController && (
-          <Tooltip content={dockController.open ? 'Hide side pane' : 'Show side pane'}>
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={dockController.toggle}
-              aria-pressed={dockController.open}
-              aria-label={dockController.open ? 'Hide side pane' : 'Show side pane'}
-              data-testid="dock-toggle"
-              className={cn(
-                'rounded-md border p-1 transition-colors',
-                dockController.open
-                  ? 'border-[var(--color-primary)]/40 bg-[var(--color-primary)]/10 text-[var(--color-primary)]'
-                  : 'border-border text-[var(--color-muted-foreground)] hover:bg-subtle hover:text-[var(--color-foreground)]',
-              )}
-            >
-              {dockController.open ? <PanelRightClose className="h-4 w-4" /> : <PanelRightOpen className="h-4 w-4" />}
-            </Button>
-          </Tooltip>
-        )}
       </div>
     </header>
   );
