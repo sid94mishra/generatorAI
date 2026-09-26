@@ -15,7 +15,6 @@ import {
   type DesktopShellStatePush,
   type SaveFileOptions,
   type DesktopUpdateState,
-  type WindowChrome,
 } from '../shared/ipc';
 import { BROWSER_IPC, BROWSER_IPC_EVENT, type BrowserBounds, type NativeBrowserEvent } from '../shared/browser-ipc';
 import { getWindowManager } from './window-manager';
@@ -30,7 +29,6 @@ import {
 } from './backend-switcher';
 import { resolvePaths } from './paths';
 import { loadSettings, saveSettings } from './config';
-import { windowChrome } from './platform';
 import { applyMenuPush, updateMenuState } from './menu';
 import { refreshTrayMenu } from './tray';
 import { clearAttention, setAttention } from './attention-state';
@@ -244,12 +242,8 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
     wm.openExternalSafely(url);
   });
 
-  // ── Window chrome ──────────────────────────────────────────────
-  //
-  // The renderer needs to know how much room the OS window controls occupy
-  // so its header can reserve exactly that much — the inset differs by
-  // platform (traffic lights left on macOS, min/max/close right elsewhere).
-  guardedHandle(IPC.getWindowChrome, (): WindowChrome => windowChrome());
+  // Window chrome is not a channel: it is static per process, so the main
+  // window hands it to the preload as a launch argument (06 §3.6).
 
   guardedHandle(IPC.windowMaximizeToggle, () => wm.toggleMaximize());
   guardedHandle(IPC.windowIsMaximized, (): boolean => wm.isMaximized());
@@ -260,6 +254,10 @@ export function registerIpc(mode: 'dev' | 'standalone'): void {
   // pushes its UI state here so `View ▸ Toggle Sidebar` shows a real
   // checkmark, `Back` greys out, and `Open Recent` lists real routes.
   guardedHandle(IPC.setMenuState, (_e, patch: unknown) => {
+    // The guard admits only the main window's current top-level document, and
+    // a push proves its bridge listeners are up: routes can now go to it over
+    // IPC_EVENT.navigate instead of a History-API injection (06 §3.4).
+    wm.markRendererReady();
     if (!patch || typeof patch !== 'object') return;
     const p = patch as Partial<DesktopShellStatePush>;
     const safe: Partial<MenuState> = {};

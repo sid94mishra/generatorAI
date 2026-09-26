@@ -35,8 +35,8 @@ export const commandHost: 'web' | 'desktopMac' | 'desktopWinLinux' = !isDesktop
 
 /**
  * What a plain browser looks like: the OS (or nothing) owns the title bar and
- * the SPA reserves no space. Also the fallback when the shell is too old to
- * expose `getWindowChrome`.
+ * the SPA reserves no space. Also the fallback when the shell did not pass its
+ * chrome (a malformed launch argument).
  */
 export const NATIVE_CHROME: DesktopWindowChrome = {
   platform: 'linux',
@@ -51,16 +51,26 @@ function bridge() {
   return typeof window === 'undefined' ? undefined : window.generatoraiDesktop;
 }
 
-export async function readWindowChrome(): Promise<DesktopWindowChrome> {
-  const api = bridge()?.getWindowChrome;
-  if (!api) return NATIVE_CHROME;
-  try {
-    return await api();
-  } catch {
-    // A shell that fails this call is one we cannot lay out against — better
-    // to render the normal header than a header with a hole in it.
-    return NATIVE_CHROME;
-  }
+/**
+ * The window chrome, synchronously: main hands it to the preload as a launch
+ * argument (06 §3.6), so it is known before the first render.
+ */
+export function windowChrome(): DesktopWindowChrome {
+  return bridge()?.chrome ?? NATIVE_CHROME;
+}
+
+/**
+ * The shell layout a chrome calls for (D-23, 06 §3.5):
+ *   mac     macOS traffic lights over the sidebar's 44px top row, no strip;
+ *   strip   the 36px title strip (Windows; Linux with the custom title bar);
+ *   native  the OS frame (Linux default) and every browser tab.
+ */
+export type ShellLayout = 'mac' | 'strip' | 'native';
+
+export function shellLayoutFor(chrome: DesktopWindowChrome): ShellLayout {
+  if (chrome.titleBarStyle === 'hidden-inset') return 'mac';
+  if (chrome.titleBarStyle === 'overlay') return 'strip';
+  return 'native';
 }
 
 /**
@@ -107,6 +117,17 @@ export function pushDesktopAppearance(appearance: DesktopAppearancePush): void {
   const api = bridge()?.setAppearance;
   if (!api) return;
   void api(appearance).catch(() => undefined);
+}
+
+/**
+ * Subscribe to whether Back / Forward can move (Chromium's session history,
+ * 06 §3.4). Called at once with the last value main reported, then on every
+ * change. A no-op outside the shell (the browser has its own buttons).
+ */
+export function onNavHistoryChanged(cb: (state: { back: boolean; forward: boolean }) => void): () => void {
+  const api = bridge()?.onNavHistoryChanged;
+  if (!api) return () => undefined;
+  return api(cb);
 }
 
 /** Subscribe to maximise/fullscreen/focus changes. */
@@ -192,7 +213,9 @@ export const desktopWindow = {
 };
 
 /**
- * Applies platform + chrome facts to `<html>` as classes and CSS variables.
+ * Applies platform + chrome facts to `<html>` as classes, `data-layout` and
+ * the `--gai-titlebar-*` variables. The generated pre-paint script in
+ * index.html does the same before first paint; this keeps it idempotent.
  *
  * Styling keys off these rather than reading the bridge in every component,
  * which keeps the drag-region and inset rules in plain CSS where the browser
@@ -208,10 +231,11 @@ export function applyChromeToDocument(chrome: DesktopWindowChrome): void {
   root.classList.toggle('custom-titlebar', chrome.titleBarStyle !== 'native');
   root.classList.toggle('titlebar-overlay', chrome.titleBarStyle === 'overlay');
   root.classList.toggle('titlebar-inset', chrome.titleBarStyle === 'hidden-inset');
+  root.setAttribute('data-layout', shellLayoutFor(chrome));
 
-  root.style.setProperty('--titlebar-height', `${chrome.titleBarHeight}px`);
-  root.style.setProperty('--titlebar-inset-left', `${chrome.insetLeft}px`);
-  root.style.setProperty('--titlebar-inset-right', `${chrome.insetRight}px`);
+  root.style.setProperty('--gai-titlebar-height', `${chrome.titleBarHeight}px`);
+  root.style.setProperty('--gai-titlebar-inset-left', `${chrome.insetLeft}px`);
+  root.style.setProperty('--gai-titlebar-inset-right', `${chrome.insetRight}px`);
 }
 
 /**
@@ -228,7 +252,7 @@ interface WindowControlsOverlayApi {
 /**
  * Keeps the reserved insets in sync with the Window Controls Overlay.
  *
- * On Windows and Linux the OS paints minimise/maximise/close into our header
+ * On Windows and Linux the OS paints minimise/maximise/close into our title strip
  * (which is what gives Windows 11 its Snap Layouts flyout on maximise hover).
  * The strip it occupies is not a constant: it disappears in fullscreen and
  * differs between Windows versions and Linux desktop environments. Chromium
@@ -242,7 +266,7 @@ interface WindowControlsOverlayApi {
  *     therefore deferred to the next frame, and `resize` is also observed so
  *     whichever lands last wins.
  *   • A transient frame can still yield an absurd inset, so anything that
- *     would eat more than half the header is rejected rather than applied.
+ *     would eat more than half the strip is rejected rather than applied.
  *
  * Only an `overlay` window has its controls drawn through the overlay. A
  * `hidden-inset` window (macOS traffic lights) still exposes
@@ -266,17 +290,17 @@ export function trackWindowControlsOverlay(chrome: DesktopWindowChrome): () => v
   const read = () => {
     if (!wco.visible) {
       // Fullscreen (or overlay off) — the controls are gone, so nothing to
-      // reserve. Leaving the old inset would strand empty space in the header.
-      root.style.setProperty('--titlebar-inset-left', '0px');
-      root.style.setProperty('--titlebar-inset-right', '0px');
+      // reserve. Leaving the old inset would strand empty space in the strip.
+      root.style.setProperty('--gai-titlebar-inset-left', '0px');
+      root.style.setProperty('--gai-titlebar-inset-right', '0px');
       return;
     }
     const rect = wco.getTitlebarAreaRect();
     const viewport = root.clientWidth;
     const right = viewport - rect.x - rect.width;
     if (viewport <= 0 || right < 0 || right > viewport / 2) return; // mid-resize garbage
-    root.style.setProperty('--titlebar-inset-left', `${Math.max(0, rect.x)}px`);
-    root.style.setProperty('--titlebar-inset-right', `${right}px`);
+    root.style.setProperty('--gai-titlebar-inset-left', `${Math.max(0, rect.x)}px`);
+    root.style.setProperty('--gai-titlebar-inset-right', `${right}px`);
   };
 
   const sync = () => {
@@ -307,6 +331,6 @@ export function applyFullscreenInsets(chrome: DesktopWindowChrome, fullScreen: b
   // arrives from the main process — applying it would wipe the real insets.
   if (typeof document === 'undefined' || chrome.titleBarStyle !== 'hidden-inset') return;
   const root = document.documentElement;
-  root.style.setProperty('--titlebar-inset-left', `${fullScreen ? 0 : chrome.insetLeft}px`);
-  root.style.setProperty('--titlebar-inset-right', `${fullScreen ? 0 : chrome.insetRight}px`);
+  root.style.setProperty('--gai-titlebar-inset-left', `${fullScreen ? 0 : chrome.insetLeft}px`);
+  root.style.setProperty('--gai-titlebar-inset-right', `${fullScreen ? 0 : chrome.insetRight}px`);
 }

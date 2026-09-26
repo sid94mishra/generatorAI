@@ -6,7 +6,7 @@
 // OS — P1-R1: Ctrl+B / Ctrl+K are editing keys on Windows and Linux.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { RENDERER_COMMAND_IDS, type RendererCommandId } from '@generatorai/shared/ui-contract';
-import { HANDLERS, installWebKeyHandler, isKeyOwnerTarget, isTypingTarget, modalOverlayOpen } from '@/hooks/useCommandHost.js';
+import { HANDLERS, installWebKeyHandler, isKeyOwnerTarget, isTypingTarget, modalOverlayOpen } from '@/app/shell/useCommandHost.js';
 import { shortcutSections } from '@/components/layout/ShortcutsSheet.js';
 
 function press(target: EventTarget, key: string, init: KeyboardEventInit = {}) {

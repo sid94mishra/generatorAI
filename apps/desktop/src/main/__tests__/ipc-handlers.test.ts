@@ -30,6 +30,7 @@ const state = vi.hoisted(() => ({
   updateMenuState: vi.fn(),
   applyMenuPush: vi.fn(),
   setUnsavedWork: vi.fn(),
+  markRendererReady: vi.fn(),
 }));
 
 vi.mock('electron', () => ({
@@ -56,6 +57,7 @@ vi.mock('../window-manager', () => ({
     getMainWindow: () => state.mainWindow,
     getAppUrl: () => 'http://127.0.0.1:3100',
     refreshTitleBarTheme: vi.fn(),
+    markRendererReady: state.markRendererReady,
     onRendererReset: (listener: () => void) => {
       state.onRendererResetListener = listener;
       return () => (state.onRendererResetListener = null);
@@ -83,7 +85,6 @@ vi.mock('../backend-switcher', () => ({
 vi.mock('../server-probe', () => ({ probeKnownServers: state.probeKnownServers }));
 vi.mock('../paths', () => ({ resolvePaths: () => ({ dataDir: '/tmp/data' }) }));
 vi.mock('../config', () => ({ loadSettings: () => ({}), saveSettings: vi.fn() }));
-vi.mock('../platform', () => ({ windowChrome: () => ({}) }));
 vi.mock('../menu', () => ({ updateMenuState: state.updateMenuState, applyMenuPush: state.applyMenuPush }));
 vi.mock('../tray', () => ({ refreshTrayMenu: state.refreshTrayMenu }));
 vi.mock('../attention-state', () => ({ setAttention: state.setAttention, clearAttention: state.clearAttention }));

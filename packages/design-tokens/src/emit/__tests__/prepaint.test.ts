@@ -33,17 +33,22 @@ interface Env {
   systemReducedMotion?: boolean;
   /** localStorage access throws (privacy mode). */
   storageThrows?: boolean;
+  /** `window.generatoraiDesktop.chrome` (desktop shell); absent in a browser tab. */
+  chrome?: Record<string, unknown>;
 }
 
 interface Painted {
   classes: string[];
   attrs: Record<string, string>;
+  vars?: Record<string, string>;
 }
 
 function runPrepaint(env: Env): Painted {
   const classes = new Set<string>(['stale-class', 'light']);
   const attrs: Record<string, string> = {};
+  const vars: Record<string, string> = {};
   const documentElement = {
+    style: { setProperty: (k: string, v: string) => (vars[k] = v) },
     classList: {
       add: (...c: string[]) => c.forEach((x) => classes.add(x)),
       remove: (...c: string[]) => c.forEach((x) => classes.delete(x)),
@@ -61,13 +66,15 @@ function runPrepaint(env: Env): Painted {
   const matchMedia = (q: string) => ({
     matches: q.includes('color-scheme') ? Boolean(env.systemDark) : Boolean(env.systemReducedMotion),
   });
-  new Function('document', 'localStorage', 'matchMedia', emitPrepaintScript())(
+  const window = env.chrome ? { generatoraiDesktop: { chrome: env.chrome } } : {};
+  new Function('document', 'localStorage', 'matchMedia', 'window', emitPrepaintScript())(
     { documentElement },
     localStorage,
     matchMedia,
+    window,
   );
   classes.delete('stale-class');
-  return { classes: [...classes].sort(), attrs };
+  return { classes: [...classes].sort(), attrs, ...(Object.keys(vars).length ? { vars } : {}) };
 }
 
 /** What the TypeScript rule says the same storage should paint. */
@@ -80,6 +87,7 @@ function expected(env: Env): Painted {
     'data-accent': s.accent,
     'data-density': s.density,
     'data-font-size': s.fontSize,
+    'data-layout': 'native',
   };
   if (s.reduceMotion === 'on' || env.systemReducedMotion) attrs['data-motion'] = 'reduce';
   return { classes: [resolved], attrs };
@@ -126,8 +134,36 @@ describe('generated pre-paint script', () => {
         'data-accent': 'ink',
         'data-density': 'comfortable',
         'data-font-size': '13',
+        'data-layout': 'native',
       },
     });
+  });
+
+  it('applies the desktop window chrome before first paint (06 §3.6)', () => {
+    const mac = runPrepaint({
+      storage: {},
+      chrome: { platform: 'darwin', titleBarStyle: 'hidden-inset', titleBarHeight: 0, insetLeft: 78, insetRight: 0 },
+    });
+    expect(mac.classes).toEqual(['custom-titlebar', 'dark', 'desktop-shell', 'platform-darwin', 'titlebar-inset']);
+    expect(mac.attrs['data-layout']).toBe('mac');
+    expect(mac.vars).toEqual({
+      '--gai-titlebar-height': '0px',
+      '--gai-titlebar-inset-left': '78px',
+      '--gai-titlebar-inset-right': '0px',
+    });
+    const win = runPrepaint({
+      storage: {},
+      chrome: { platform: 'win32', titleBarStyle: 'overlay', titleBarHeight: 36, insetLeft: 0, insetRight: 138 },
+    });
+    expect(win.classes).toEqual(['custom-titlebar', 'dark', 'desktop-shell', 'platform-win32', 'titlebar-overlay']);
+    expect(win.attrs['data-layout']).toBe('strip');
+    expect(win.vars?.['--gai-titlebar-height']).toBe('36px');
+    const linux = runPrepaint({
+      storage: {},
+      chrome: { platform: 'linux', titleBarStyle: 'native', titleBarHeight: 0, insetLeft: 0, insetRight: 0 },
+    });
+    expect(linux.classes).toEqual(['dark', 'desktop-shell', 'platform-linux']);
+    expect(linux.attrs['data-layout']).toBe('native');
   });
 
   it('is one line of ES5 (no arrow functions, let/const or template strings)', () => {

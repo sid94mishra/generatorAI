@@ -129,10 +129,11 @@ describe('ipc.ts registers every channel through the guard', () => {
     const src = readFileSync(join(__dirname, '..', 'ipc.ts'), 'utf8');
     expect(src).not.toMatch(/ipcMain\.(handle|on)\(/);
     const guarded = src.match(/guardedHandle\(/g) ?? [];
-    // All 50 bridge channels (IPC.* + BROWSER_IPC.*) from the preload contract —
+    // All 49 bridge channels (IPC.* + BROWSER_IPC.*) from the preload contract —
     // 45 at P0, minus getTheme/setTheme plus setAppearance (P1-T8, D-25), plus
     // G-03's getServers/switchServer/addServer, G-04's
-    // getUpdateState/installUpdate (P2-03) and watchUpdates (P1-review P2-R3).
-    expect(guarded.length).toBe(50);
+    // getUpdateState/installUpdate (P2-03) and watchUpdates (P1-review P2-R3),
+    // minus getWindowChrome (P3-04: a preload launch argument now, 06 §3.6).
+    expect(guarded.length).toBe(49);
   });
 });

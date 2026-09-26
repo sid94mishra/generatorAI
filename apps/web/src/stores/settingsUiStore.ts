@@ -6,7 +6,7 @@
 // (so `openSettings()` with no argument returns where the user was) and
 // owns the one-line navigation hop every "open settings" call site uses.
 //
-// The navigator is injected by AppLayout rather than imported from
+// The navigator is injected by the shell (app/shell/ShellRoute) rather than imported from
 // `router.tsx`: the router module imports every page, and every page may
 // import this store, so importing it here would close a cycle. The
 // fallback keeps a call working (full page load) if the layout has not
@@ -70,7 +70,7 @@ type Navigator = (path: string, opts?: { replace?: boolean }) => void;
 interface SettingsUiState {
   /** Last section the user looked at — the target of a bare `openSettings()`. */
   section: SettingsSectionId;
-  /** Injected by AppLayout; null before the shell mounts. */
+  /** Injected by the shell (ShellRoute); null before it mounts. */
   navigator: Navigator | null;
   setNavigator: (navigate: Navigator | null) => void;
   /** Navigate to `/settings/<section>`. */

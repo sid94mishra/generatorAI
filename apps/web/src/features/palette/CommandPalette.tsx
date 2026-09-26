@@ -5,7 +5,7 @@
 // S-10 CommandPaletteFrame + C-21 CommandList over Base UI Autocomplete.
 // Opened by the `palette.toggle` command (Mod+K on the web — also from a text
 // field, D-46 `firesInEditable` — Cmd/Ctrl+K from the desktop menu, the
-// sidebar Search button); open state is `uiStore.commandPaletteOpen`.
+// sidebar Search button); open state is `shellStore.commandPaletteOpen`.
 // Self-contained: mount `<CommandPalette />` once inside the router.
 //
 // Rows run through the command registry (`runCommand`), so a palette row does
@@ -21,7 +21,7 @@ import { chatLiveSets } from '@generatorai/client-core';
 import { CommandPaletteFrame } from '@/ui/shell/CommandPaletteFrame/CommandPaletteFrame.js';
 import { CommandList, type CommandAction, type CommandGroup, type CommandItem } from '@/ui/patterns/CommandList/CommandList.js';
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
-import { useUiStore } from '@/stores/uiStore.js';
+import { useShellStore } from '@/stores/shellStore.js';
 import { useChats } from '@/hooks/chatListQueries.js';
 import { useAttention } from '@/hooks/attentionQueries.js';
 import { useProjects } from '@/hooks/projectQueries.js';
@@ -71,8 +71,8 @@ function liveBadge(entry: PaletteEntry | undefined) {
 
 /** The global command palette. Mount once, inside the router. */
 export function CommandPalette() {
-  const open = useUiStore((s) => s.commandPaletteOpen);
-  const setOpen = useUiStore((s) => s.setCommandPaletteOpen);
+  const open = useShellStore((s) => s.commandPaletteOpen);
+  const setOpen = useShellStore((s) => s.setCommandPaletteOpen);
   return (
     <CommandPaletteFrame open={open} onOpenChange={setOpen}>
       {/* Mounted only while open: every opening starts from an empty query. */}

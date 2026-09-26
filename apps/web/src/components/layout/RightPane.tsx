@@ -291,7 +291,7 @@ export function RightPane({
   // Below the `md` breakpoint a 320 px+ side column would take 85 % of a
   // phone's width and leave the transcript a sliver; the pane then behaves as
   // a full-width sheet over the content instead, the same treatment the
-  // sidebar already gets in AppLayout. The user's own fullscreen toggle is
+  // sidebar already gets in the shell. The user's own fullscreen toggle is
   // meaningless there, so it is hidden and the resize handle with it.
   const narrowViewport = useIsNarrowViewport();
   const [hostNode, setHostNode] = useState<HTMLElement | null>(null);

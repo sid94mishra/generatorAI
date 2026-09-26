@@ -24,9 +24,12 @@ import { applyAppearance, type AppliedAppearance } from '../appearance';
 
 const html = document.documentElement;
 
+/** The appearance axes only: `data-layout` is the window chrome (lib/desktop.ts), not appearance. */
 function snapshot(el: HTMLElement = html) {
   const attrs = Object.fromEntries(
-    [...el.attributes].filter((a) => a.name.startsWith('data-')).map((a) => [a.name, a.value]),
+    [...el.attributes]
+      .filter((a) => a.name.startsWith('data-') && a.name !== 'data-layout')
+      .map((a) => [a.name, a.value]),
   );
   const classes = [...el.classList].filter((c) => c === 'light' || c === 'dark');
   return { classes, attrs };

@@ -7,7 +7,7 @@ export const homeRoutes: RouteObject[] = [
   defineRoute(
     undefined,
     () => import('@/pages/DashboardPage.js').then((m) => ({ default: m.DashboardPage })),
-    { legacyHeader: true, nav: 'home', title: 'Dashboard' },
+    { legacyHeader: true, nav: 'home', title: 'Home' },
     true,
   ),
 ];

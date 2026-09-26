@@ -20,8 +20,7 @@
 // `HANDLERS` is a `Record<RendererCommandId, …>`, so adding a renderer command
 // to the registry without handling it here is a type error.
 //
-// Lives in hooks/ (not app/shell/ as 06 §5.3 sketches) because its caller,
-// the legacy AppLayout, may not import app/; it moves with the shell in P3.
+// Moved from hooks/ to app/shell with the shell (P3-04, D-46).
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useRef } from 'react';
@@ -38,7 +37,7 @@ import {
 } from '@generatorai/shared/ui-contract';
 import { commandHost, isMacOS, onDesktopCommand } from '@/lib/desktop.js';
 import { registerCommandRunner } from '@/lib/commandRunner.js';
-import { useUiStore } from '@/stores/uiStore.js';
+import { useShellStore } from '@/stores/shellStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
 import { useTheme } from '@/providers/ThemeProvider.js';
@@ -62,7 +61,7 @@ const handledElsewhere = () => undefined;
 
 export const HANDLERS: Record<RendererCommandId, (ctx: CommandCtx) => void> = {
   'palette.toggle': () => {
-    const ui = useUiStore.getState();
+    const ui = useShellStore.getState();
     ui.setCommandPaletteOpen(!ui.commandPaletteOpen);
   },
   'nav.home': navDestination('nav.home'),
@@ -79,14 +78,14 @@ export const HANDLERS: Record<RendererCommandId, (ctx: CommandCtx) => void> = {
   'project.new': navTo('/projects/new'),
   'automation.new': navTo('/automations/new'),
   'agent.new': navTo('/agents/new'),
-  'sidebar.toggle': () => useUiStore.getState().toggleSidebar(),
+  'sidebar.toggle': () => useShellStore.getState().toggleSidebar(),
   'dock.toggle': () => useRightPaneStore.getState().controller?.toggle(),
   'theme.toggle': (ctx) => ctx.toggleTheme(),
   // FindBar owns the find-in-page state and subscribes to these directly.
   'find.open': handledElsewhere,
   'find.next': handledElsewhere,
   'find.previous': handledElsewhere,
-  'shortcuts.show': () => useUiStore.getState().setShortcutsOpen(true),
+  'shortcuts.show': () => useShellStore.getState().setShortcutsOpen(true),
   'scripts.reload': (ctx) => ctx.reloadScripts(),
 };
 

@@ -112,7 +112,7 @@ async function main() {
   }
 
   await win.waitForLoadState('domcontentloaded');
-  await win.waitForSelector('[data-testid="app-header"]', { timeout: 120_000 });
+  await win.waitForSelector('[data-testid="app-frame"]', { timeout: 120_000 });
   check('app shell rendered', true);
 
   // ── The embedded server is genuinely serving ──
@@ -159,11 +159,44 @@ async function main() {
   check('native browser enabled by default', nativeBrowser === true, String(nativeBrowser));
 
   // ── Window chrome survived packaging ──
-  const chrome = await win.evaluate(async () =>
-    window.generatoraiDesktop?.getWindowChrome ? await window.generatoraiDesktop.getWindowChrome() : null,
+  // The preload exposes the chrome synchronously as a plain value (06 §3.6);
+  // the old async getWindowChrome() IPC is gone.
+  const chrome = await win.evaluate(() => {
+    const api = window.generatoraiDesktop;
+    return {
+      value: api?.chrome ?? null,
+      legacyGetter: typeof api?.getWindowChrome,
+    };
+  });
+  check(
+    'window chrome bridge works',
+    Boolean(chrome.value) && chrome.value.platform === process.platform,
+    JSON.stringify(chrome.value),
   );
-  check('window chrome bridge works', Boolean(chrome), JSON.stringify(chrome));
-  check('title bar row present', Boolean(await win.$('[data-testid="app-titlebar"]')));
+  check('getWindowChrome() is removed', chrome.legacyGetter === 'undefined', chrome.legacyGetter);
+  // The launched app inherits this process's env, so the Linux opt-in flag
+  // decides the expected chrome the same way platform.ts does.
+  const expectedStyle =
+    process.platform === 'darwin'
+      ? 'hidden-inset'
+      : process.platform === 'win32' || process.env.GENERATORAI_LINUX_CUSTOM_TITLEBAR === '1'
+        ? 'overlay'
+        : 'native';
+  check(
+    `chrome is ${expectedStyle} on ${process.platform}`,
+    chrome.value?.titleBarStyle === expectedStyle,
+    String(chrome.value?.titleBarStyle),
+  );
+  // The 36px title strip exists only in the `overlay` chrome (Windows, Linux
+  // with GENERATORAI_LINUX_CUSTOM_TITLEBAR); macOS and the Linux native frame
+  // have none.
+  const wantsStrip = chrome.value?.titleBarStyle === 'overlay';
+  const hasStrip = Boolean(await win.$('[data-testid="app-titlebar"]'));
+  check(
+    wantsStrip ? 'title strip present (overlay chrome)' : `no title strip (${chrome.value?.titleBarStyle} chrome)`,
+    hasStrip === wantsStrip,
+    `titleBarStyle=${chrome.value?.titleBarStyle}, strip=${hasStrip}`,
+  );
 
   await win.screenshot({ path: path.join(SHOTS, 'packaged-app.png') });
   console.log(`\n  screenshot → ${path.join(SHOTS, 'packaged-app.png')}`);

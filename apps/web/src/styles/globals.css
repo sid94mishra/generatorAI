@@ -8708,6 +8708,7 @@
   --gai-h-panel-bar: 40px;
   --gai-h-dialog-bar: 48px;
   --gai-h-footer: 56px;
+  --gai-h-strip: 36px;
   /* Type — interface font size 13 (D-13) */
   --gai-text-micro: 11px;
   --gai-leading-micro: 1.45;
@@ -8780,6 +8781,7 @@
   --gai-h-panel-bar: 40px;
   --gai-h-dialog-bar: 48px;
   --gai-h-footer: 56px;
+  --gai-h-strip: 36px;
 }
 
 [data-font-size="12"] {
@@ -8969,67 +8971,87 @@
 html { scroll-behavior: smooth; }
 
 /* ==========================================================================
-   Desktop shell chrome
+   Desktop shell chrome (D-23; 06-desktop-and-shell.md §3.5–§3.7)
    ==========================================================================
-   The Electron main process hides the OS title bar, and the SPA draws its own
-   full-width strip (`.app-titlebar`) in its place, above both the sidebar and
-   the content. `applyChromeToDocument()` (apps/web/src/lib/desktop.ts) sets
-   these variables and classes on <html> before first paint.
-
-   Defaults keep every rule inert in a plain browser tab.
+   The Electron main process hides the OS title bar per platform, and the
+   shell (apps/web/src/ui/shell) lays out around the window controls:
+     mac     traffic lights over the sidebar's 44px top row (no strip);
+     strip   a 36px full-width title strip whose right end holds the
+             OS-painted caption buttons (Window Controls Overlay);
+     native  the OS frame (Linux default) and every browser tab.
+   The pre-paint script (index.html) and `applyChromeToDocument()`
+   (apps/web/src/lib/desktop.ts) set the `<html>` classes, `data-layout` and
+   the `--gai-titlebar-*` variables below. Defaults keep every rule inert in a
+   plain browser tab and in Storybook.
    -------------------------------------------------------------------------- */
 :root {
-  --titlebar-height: 0px;
-  --titlebar-inset-left: 0px;
-  --titlebar-inset-right: 0px;
+  --gai-titlebar-height: 0px;
+  --gai-titlebar-inset-left: 0px;
+  --gai-titlebar-inset-right: 0px;
 }
 
 /* Electron treats a draggable region as a window handle: pointer events do
    not reach the DOM inside it, so every interactive child must opt back out.
    `app-region: drag` is the standardised name; the -webkit- prefix is what
-   current Chromium actually honours, so both are emitted. */
-.app-drag-region {
+   current Chromium actually honours, so both are emitted.
+   Shell rows mark themselves `data-drag-region="mac|strip"`; each becomes a
+   handle only under the chrome it belongs to (06 §3.7). The native layout and
+   the web never drag. */
+.app-drag-region,
+.titlebar-inset [data-drag-region='mac'],
+.titlebar-overlay [data-drag-region='strip'] {
   -webkit-app-region: drag;
   app-region: drag;
 }
 
 .app-no-drag,
-.app-drag-region button,
-.app-drag-region a,
-.app-drag-region input,
-.app-drag-region select,
-.app-drag-region textarea,
-.app-drag-region [role='button'],
-.app-drag-region [role='tab'],
-.app-drag-region [role='menuitem'],
-.app-drag-region [contenteditable='true'] {
+:is(.app-drag-region, [data-drag-region])
+  :is(
+    button,
+    a,
+    input,
+    select,
+    textarea,
+    [role='button'],
+    [role='tab'],
+    [role='menuitem'],
+    [role='menuitemradio'],
+    [role='combobox'],
+    [role='switch'],
+    [contenteditable='true'],
+    [tabindex]:not([tabindex='-1']),
+    [data-no-drag]
+  ) {
   -webkit-app-region: no-drag;
   app-region: no-drag;
 }
 
-/* The window-control strip. Padding — not margin — so the row's background
-   still runs edge to edge underneath the OS-drawn buttons.
-
-   This is the ONLY element that reserves inset space. The app header below it
-   keeps its full width, which is what stops the theme toggle and the OS close
-   button from fighting over the same pixels in a narrow window. */
-.custom-titlebar .app-titlebar {
-  height: var(--titlebar-height);
-  padding-left: calc(var(--titlebar-inset-left) + 0.75rem);
-  padding-right: calc(var(--titlebar-inset-right) + 0.75rem);
+/* The strip's right padding is the caption-button area the OS paints over
+   (138px estimated by main, then the live WCO geometry). Padding — not
+   margin — so the strip's background runs under the buttons. */
+[data-slot='title-strip'] {
+  padding-right: var(--gai-titlebar-inset-right);
 }
 
-/* The SPA never draws minimise/maximise/close: on Windows and Linux the OS
-   paints them into our header via Window Controls Overlay (which is what
-   provides the Windows 11 Snap Layouts flyout), and macOS keeps its real
-   traffic lights. We only reserve the space they occupy — tracked live from
-   `navigator.windowControlsOverlay`, which also collapses it in fullscreen. */
+/* An unfocused window reads as inactive, like native apps: the strip's
+   glyphs drop to fg-3 (06 §3.6), not an opacity fade. */
+.window-blurred [data-slot='title-strip'] :is(button, [role='button']) {
+  color: var(--gai-fg-3);
+}
 
-/* An unfocused window should read as inactive, matching native apps. */
-.window-blurred .app-titlebar { opacity: 0.75; }
-
-@media (prefers-reduced-motion: reduce) {
-  .app-titlebar { transition: none; }
+/* macOS rail mode (06 §3.5): the 48px rail cannot hold the traffic lights
+   (they end at x≈68, with breathing room 78 = the titlebar inset), so they
+   float over the main card's first row, which gets the leading space the
+   rail does not give: 78 − 48 − 0 (the card's left margin) = 30px. The
+   inset is zeroed in fullscreen (lib/desktop.ts), so the rule follows. */
+.titlebar-inset [data-testid='app-frame'][data-sidebar='rail'] {
+  --gai-page-inset-left: max(0px, calc(var(--gai-titlebar-inset-left) - var(--gai-w-rail)));
+}
+[data-slot='page-header'] > :first-child {
+  padding-inline-start: max(16px, var(--gai-page-inset-left, 0px));
+}
+[data-slot='legacy-header'] > header {
+  padding-inline-start: max(12px, var(--gai-page-inset-left, 0px));
 }
 
 /* In `@layer base` (was unlayered): unlayered rules beat every Tailwind

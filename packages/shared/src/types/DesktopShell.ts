@@ -148,6 +148,17 @@ export interface WindowChrome {
   isWayland: boolean;
 }
 
+/**
+ * Payload of the main→renderer nav-history-changed event (06 §3.4): whether
+ * the window's session history can go back / forward. Chromium is the
+ * authority; the Windows title strip and the Linux native-frame sidebar row
+ * enable their Back / Forward buttons from it.
+ */
+export interface NavHistoryState {
+  back: boolean;
+  forward: boolean;
+}
+
 /** Payload of the main→renderer window-state-changed event (maximize/unmaximize/fullscreen/focus). */
 export interface WindowStateChange {
   maximized: boolean;

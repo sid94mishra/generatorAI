@@ -55,7 +55,7 @@ import type { NextFunction, Request, Response } from 'express';
  * they diverge, instead of the CSP silently blocking the script and bringing
  * the theme flash back.
  */
-export const THEME_SCRIPT_CSP_HASH = 'sha256-BpWGgYaXfGaPam8MrElJlLsdVbodL0/llrbnaf1H/Po=';
+export const THEME_SCRIPT_CSP_HASH = 'sha256-IblxeDWlQWTI/gpcAeYkMn7J4Eak0638qcgFDEGF/z4=';
 
 export function createCspMiddleware(widgetOrigin?: string) {
   // Only the isolated widget server may be embedded. Parse the configured

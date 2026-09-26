@@ -20,9 +20,11 @@ import {
   type DesktopShellStatePush,
   type FindInPageResult,
   type DesktopUpdateState,
+  type NavHistoryState,
   type WindowChrome,
   type WindowStateChange,
 } from '../shared/ipc';
+import { parseWindowChromeArg } from '../shared/window-chrome-arg';
 import {
   BROWSER_IPC,
   BROWSER_IPC_EVENT,
@@ -32,6 +34,18 @@ import {
 } from '../shared/browser-ipc';
 
 type Unsubscribe = () => void;
+
+/**
+ * The last Back / Forward state main reported for this document. Main sends it
+ * on every navigation and when the page finishes loading, which can be before
+ * a component subscribes (the strip, or a sidebar row mounted later), so each
+ * new subscriber is handed the current value at once. Registered before any
+ * subscriber, so it is always current when theirs runs.
+ */
+let navHistory: NavHistoryState | undefined;
+ipcRenderer.on(IPC_EVENT.navHistoryChanged, (_e: unknown, state: NavHistoryState) => {
+  navHistory = state;
+});
 
 const api = {
   isDesktop: true as const,
@@ -93,8 +107,11 @@ const api = {
   //
   // The app draws its own title bar, so the renderer must know how much room
   // the OS window controls occupy — traffic lights sit top-LEFT on macOS,
-  // min/max/close sit top-RIGHT everywhere else.
-  getWindowChrome: (): Promise<WindowChrome> => ipcRenderer.invoke(IPC.getWindowChrome),
+  // min/max/close sit top-RIGHT everywhere else. Static per process, so main
+  // passes it as a launch argument and it is a plain value here, readable
+  // before first paint (06 §3.6). `undefined` when the argument is missing or
+  // malformed: the web app then uses its native layout.
+  chrome: parseWindowChromeArg(process.argv) as WindowChrome | undefined,
 
   window: {
     toggleMaximize: (): Promise<void> => ipcRenderer.invoke(IPC.windowMaximizeToggle),
@@ -160,6 +177,17 @@ const api = {
     const handler = (_e: unknown, command: DesktopCommand) => cb(command);
     ipcRenderer.on(IPC_EVENT.command, handler);
     return () => ipcRenderer.removeListener(IPC_EVENT.command, handler);
+  },
+  /**
+   * Whether Back / Forward can move, from Chromium's session history (06 §3.4).
+   * Calls `cb` at once with the current value when main has reported one for
+   * this document, then on every change.
+   */
+  onNavHistoryChanged: (cb: (state: NavHistoryState) => void): Unsubscribe => {
+    const handler = (_e: unknown, state: NavHistoryState) => cb(state);
+    ipcRenderer.on(IPC_EVENT.navHistoryChanged, handler);
+    if (navHistory) cb(navHistory);
+    return () => ipcRenderer.removeListener(IPC_EVENT.navHistoryChanged, handler);
   },
   /** Maximise/fullscreen/focus changes, so a custom title bar can restyle. */
   onWindowStateChanged: (cb: (state: WindowStateChange) => void): Unsubscribe => {

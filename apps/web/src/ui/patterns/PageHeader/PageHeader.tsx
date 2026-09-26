@@ -9,8 +9,9 @@
 // spacer, `actions` (buttons, icon buttons, separators), `dockToggle` (an
 // IconButton `pressed` while the dock is open). `subbar` adds a 38px second
 // row (run header: permission menu, budget meter, gauge, trigger text).
-// The shell (S-05, P3-04) applies the macOS drag region and title-bar
-// insets around it; the header itself only lays out.
+// It carries `data-slot="page-header"` + `data-drag-region="mac"`, the hooks
+// the shell's desktop-chrome CSS uses (S-05, P3-04): a drag region on macOS
+// and, in macOS rail mode, a leading inset that clears the traffic lights.
 // ────────────────────────────────────────────────────────────────
 
 import type { ComponentProps, ReactNode } from 'react';
@@ -48,7 +49,12 @@ export function PageHeader({
   ...rest
 }: PageHeaderProps) {
   return (
-    <header className={cn('flex shrink-0 flex-col border-b border-line-soft', className)} {...rest}>
+    <header
+      data-slot="page-header"
+      data-drag-region="mac"
+      className={cn('flex shrink-0 flex-col border-b border-line-soft', className)}
+      {...rest}
+    >
       <div className="flex h-bar min-w-0 items-center gap-2.5 pr-2.5 pl-4">
         <div className="flex min-w-0 items-center gap-2.5">
           {breadcrumb ??

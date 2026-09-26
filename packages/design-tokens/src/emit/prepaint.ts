@@ -11,6 +11,8 @@
 //   data-density comfortable | compact
 //   data-font-size 12 | 13 | 14
 //   data-motion  reduce              (stored "always", or the OS asks)
+//   data-layout  mac | strip | native (desktop window chrome; native on the web)
+//   + the desktop chrome classes and --gai-titlebar-* variables (06 §3.6)
 //
 // It is generated so its id lists, defaults and storage keys come from the
 // registry and cannot drift; `readStoredAppearance()` (appearance.ts) is the
@@ -64,6 +66,19 @@ export function emitPrepaintScript(): string {
     'r.setAttribute("data-mode",m);r.setAttribute("data-theme",t);r.setAttribute("data-accent",a);',
     'r.setAttribute("data-density",d);r.setAttribute("data-font-size",f);',
     `if(g(${j(REDUCE_MOTION_STORAGE_KEY)})===${j(REDUCE_MOTION_ON)}||q("(prefers-reduced-motion: reduce)"))r.setAttribute("data-motion","reduce");`,
+    // Desktop window chrome (06 §3.6): the preload exposes it synchronously, so
+    // the title strip / traffic-light geometry is right on the first frame.
+    // Mirrors applyChromeToDocument() in apps/web/src/lib/desktop.ts.
+    'var c=null;try{c=window.generatoraiDesktop&&window.generatoraiDesktop.chrome}catch(e){}',
+    'var s=c&&c.titleBarStyle;',
+    'if(s){r.classList.add("platform-"+c.platform,"desktop-shell");',
+    'if(s!=="native")r.classList.add("custom-titlebar");',
+    'if(s==="overlay")r.classList.add("titlebar-overlay");',
+    'if(s==="hidden-inset")r.classList.add("titlebar-inset");',
+    'r.style.setProperty("--gai-titlebar-height",c.titleBarHeight+"px");',
+    'r.style.setProperty("--gai-titlebar-inset-left",c.insetLeft+"px");',
+    'r.style.setProperty("--gai-titlebar-inset-right",c.insetRight+"px");}',
+    'r.setAttribute("data-layout",s==="overlay"?"strip":s==="hidden-inset"?"mac":"native");',
     '})();',
   ].join('');
 }

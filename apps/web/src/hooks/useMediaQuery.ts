@@ -10,11 +10,16 @@
 import { useCallback, useSyncExternalStore } from 'react';
 
 /**
- * Tailwind's `md` breakpoint. Below it the app's side surfaces (the sidebar,
- * the right pane) must not sit beside the content — they overlay it. Keep in
- * step with the `md:` utilities used in `layout/AppLayout.tsx`.
+ * Tailwind's `md` breakpoint. Below it the right pane must not sit beside the
+ * content — it overlays it.
  */
 export const NARROW_VIEWPORT_QUERY = '(max-width: 767.98px)';
+
+/**
+ * Below `CHROME.railBreakpoint` (1200) the sidebar collapses to the rail and
+ * the dock becomes a sheet (D-22, D-27; 06 §2.5).
+ */
+export const RAIL_QUERY = '(max-width: 1199.98px)';
 
 function subscribe(query: string, onChange: () => void): () => void {
   if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') return () => {};

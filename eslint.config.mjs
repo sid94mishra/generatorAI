@@ -341,13 +341,6 @@ export default [
             { from: { element: { type: 'platform' } }, allow: toTypes('platform', 'data') },
             // Migration scaffolding; deleted in P7.
             { from: { element: { type: 'legacy' } }, allow: toTypes('legacy', 'ui', 'blocks', 'data', 'platform') },
-            // Migration scaffolding (P3-05): the legacy AppLayout mounts the
-            // command palette feature until the P3-04 shell (app/shell) takes
-            // the mount over and AppLayout is deleted. This file → that entry only.
-            {
-              from: { element: { type: 'legacy' }, file: { path: 'apps/web/src/components/layout/AppLayout.tsx' } },
-              allow: { to: { element: { type: 'features' }, file: { path: 'apps/web/src/features/palette/index.ts' } } },
-            },
             // `root` too: each loose file is its own element, and main.tsx imports App.tsx.
             { from: { element: { type: 'root' } }, allow: toTypes('root', 'app', 'ui', 'data', 'platform', 'legacy', 'styles') },
           ],

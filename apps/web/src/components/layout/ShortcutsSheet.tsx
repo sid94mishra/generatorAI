@@ -24,7 +24,7 @@ import {
 } from '@generatorai/shared/ui-contract';
 import { Modal } from '@/components/ui/Modal.js';
 import { Kbd } from '@/components/ui/Kbd.js';
-import { useUiStore } from '@/stores/uiStore.js';
+import { useShellStore } from '@/stores/shellStore.js';
 import { commandHost, isMacOS } from '@/lib/desktop.js';
 
 interface Row {
@@ -89,8 +89,8 @@ function Binding({ binding, host }: { binding: string; host: Host }) {
 }
 
 export function ShortcutsSheet() {
-  const open = useUiStore((s) => s.shortcutsOpen);
-  const setOpen = useUiStore((s) => s.setShortcutsOpen);
+  const open = useShellStore((s) => s.shortcutsOpen);
+  const setOpen = useShellStore((s) => s.setShortcutsOpen);
   const sections = useMemo(() => shortcutSections(commandHost), []);
 
   return (

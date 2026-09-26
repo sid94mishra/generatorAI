@@ -63,6 +63,22 @@ export function AnthropicMark({ className }: VendorIconProps): React.JSX.Element
   );
 }
 
+/**
+ * The GeneratorAI app mark (sidebar server switcher, rail, title strip): a
+ * square with round corners in `fg` with two nodes joined by a branch in `ground`, so it
+ * inverts with the theme. Sized by the caller (`size-5.5` in the sidebar).
+ */
+export function AppMark({ className }: VendorIconProps): React.JSX.Element {
+  return (
+    <svg viewBox="0 0 20 20" className={className} aria-hidden>
+      <rect width="20" height="20" rx="5" className="fill-fg" />
+      <circle cx="6.5" cy="6.5" r="2.1" className="fill-ground" />
+      <circle cx="13.5" cy="13.5" r="2.1" className="fill-ground" />
+      <path d="M6.5 8.8v2.4a2.3 2.3 0 0 0 2.3 2.3h2.4" fill="none" strokeWidth="1.6" strokeLinecap="round" className="stroke-ground" />
+    </svg>
+  );
+}
+
 /** GitHub's mark — "Connect GitHub" affordances and the `copilot` harness provider. */
 export function GitHubMark({ className }: VendorIconProps): React.JSX.Element {
   return (

@@ -35,7 +35,7 @@ import {
   type ThemeDef,
 } from './themes/types.js';
 import { DEFAULT_FONT_SIZE, type Density, type FontSizeSetting } from './registry.js';
-import { SHELL } from './chrome.js';
+import { CHROME, SHELL } from './chrome.js';
 import { MOTION } from './tokens.js';
 import {
   RADIUS_STEPS,
@@ -339,6 +339,7 @@ export const HEIGHTS = {
     'panel-bar': 40,
     'dialog-bar': 48,
     footer: 56,
+    strip: CHROME.strip.height,
   },
   compact: {
     'control-sm': 20,
@@ -356,6 +357,7 @@ export const HEIGHTS = {
     'panel-bar': 40,
     'dialog-bar': 48,
     footer: 56,
+    strip: CHROME.strip.height,
   },
 } as const satisfies Record<Density, Record<HeightName, number>>;
 

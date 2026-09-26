@@ -1,42 +1,29 @@
 // ────────────────────────────────────────────────────────────────
-// Header — Context-aware actions for Chats,
-//          connection status, dark mode toggle
+// Header — the legacy global header (D-21): breadcrumb + context actions
+//          (Open in editor, chat Archive, side-pane toggle). Since P3-04 it
+//          renders only inside app/shell/LegacyHeader, as the first row of
+//          the main card, for routes not yet ported. The sidebar toggle moved
+//          to the sidebar/rail, the theme toggle to the palette and Settings,
+//          connection status to the sidebar footer. Deleted in P7.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useCallback } from 'react';
 import { useParams, useNavigate, useLocation } from 'react-router';
 import { useChat, useArchiveChat } from '@/hooks/queries.js';
 import { ConfirmDialog } from '@/components/ConfirmDialog.js';
-import { useTheme } from '@/providers/ThemeProvider.js';
 import { useStreamStore } from '@/stores/streamStore.js';
 import { awaitsUserDecision } from '@/components/agent/deriveTimeline.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
-import { ConnectionStatus } from '@/components/status/ConnectionStatus.js';
 import { OpenInEditorButton } from '@/components/shared/OpenInEditorButton.js';
 import { cn } from '@/lib/utils.js';
 import { Tooltip } from '@/components/Tooltip.js';
 import { Badge, type BadgeTone, Button } from '@/components/ui/index.js';
-import {
-  Sun,
-  Moon,
-  PanelLeftOpen,
-  PanelRightOpen,
-  PanelRightClose,
-  Monitor,
-  Archive,
-  MessageSquare,
-} from 'lucide-react';
+import { PanelRightOpen, PanelRightClose, Archive, MessageSquare } from 'lucide-react';
 
-interface HeaderProps {
-  sidebarOpen: boolean;
-  onToggleSidebar: () => void;
-}
-
-export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
+export function Header() {
   const { id: routeId } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const location = useLocation();
-  const { mode, setMode } = useTheme();
   const rightPaneController = useRightPaneStore((s) => s.controller);
 
   // Determine context: chat vs dashboard
@@ -93,29 +80,14 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
   return (
     <header
       data-testid="app-header"
-      className="@container flex h-10 min-w-0 items-center justify-between gap-2 border-b border-border bg-background px-3"
+      className="@container flex h-11 min-w-0 items-center justify-between gap-2 border-b border-border px-3"
     >
-      {/* Left: sidebar toggle (only when collapsed — the open-state toggle
-          lives on the sidebar itself) + breadcrumb */}
+      {/* Left: breadcrumb */}
       <div className="flex min-w-0 flex-1 items-center gap-3">
-        {!sidebarOpen && (
-          <Tooltip content="Show sidebar">
-            <Button
-              variant="ghost"
-              size="icon-sm"
-              onClick={onToggleSidebar}
-              aria-label="Show sidebar"
-              data-testid="header-toggle-sidebar"
-              className="rounded-md border border-border p-1 text-[var(--color-muted-foreground)] transition-colors hover:bg-subtle hover:text-[var(--color-foreground)]"
-            >
-              <PanelLeftOpen className="h-4 w-4" />
-            </Button>
-          </Tooltip>
-        )}
         <div className="flex min-w-0 items-center gap-2 whitespace-nowrap text-sm">
           {isDashboard ? (
             <>
-              <span className="font-medium text-[var(--color-foreground)]">Dashboard</span>
+              <span className="font-medium text-[var(--color-foreground)]">Home</span>
             </>
           ) : isChatsListContext ? (
             <>
@@ -144,15 +116,8 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
         </div>
       </div>
 
-      {/* Right: actions + connection status + theme toggle */}
+      {/* Right: actions */}
       <div className="flex shrink-0 items-center gap-2">
-        {/* Live-stream health + the "events are missing" badge (N4). Quietly
-            absent while everything is connected and complete; a server restart
-            or dropped socket used to be completely invisible (observed live:
-            server killed mid-turn, page showed nothing), and a resume that had
-            to skip past a hole was never surfaced at all. */}
-        <ConnectionStatus quietWhenHealthy />
-
         {/* Open the page's subject in a real editor. Page-agnostic: chat,
             workflow run, project and codebase pages each publish their own
             path into `editorTargetStore`, and the button hides itself when
@@ -174,33 +139,6 @@ export function Header({ sidebarOpen, onToggleSidebar }: HeaderProps) {
             )}
           </div>
         )}
-
-        {/* Separator */}
-        {chatId && <div className="mx-1 h-5 w-px bg-[var(--color-border)]" />}
-
-        {/* Light/dark/system cycle. The PALETTE is not cycled here — with six
-            themes a blind rotation stops being a shortcut and starts being a
-            way to lose the theme you had. That lives in Settings. */}
-        <Tooltip content={`Appearance: ${mode}`}>
-          <Button
-            variant="ghost"
-            size="icon-sm"
-            onClick={() => {
-              const next = mode === 'dark' ? 'light' : mode === 'light' ? 'system' : 'dark';
-              setMode(next);
-            }}
-            aria-label={`Appearance: ${mode}. Click to change.`}
-            className="rounded-md border border-border p-1 text-[var(--color-muted-foreground)] hover:bg-subtle hover:text-[var(--color-foreground)]"
-          >
-          {mode === 'dark' ? (
-            <Moon className="h-4 w-4" />
-          ) : mode === 'light' ? (
-            <Sun className="h-4 w-4" />
-          ) : (
-            <Monitor className="h-4 w-4" />
-          )}
-          </Button>
-        </Tooltip>
 
         {/* Right side pane toggle — shown only when the current page
             registers a right pane (chat detail, workflow run). */}

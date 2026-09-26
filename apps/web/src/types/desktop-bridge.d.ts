@@ -65,6 +65,7 @@ type GeneratorAIDesktopAppearancePush = import('@generatorai/shared/client').Des
 type GeneratorAIDesktopAppearanceRequest = import('@generatorai/shared/client').DesktopAppearanceRequest;
 type GeneratorAIDesktopWindowChrome = import('@generatorai/shared/client').WindowChrome;
 type GeneratorAIDesktopWindowStateChange = import('@generatorai/shared/client').WindowStateChange;
+type GeneratorAIDesktopNavHistoryState = import('@generatorai/shared/client').NavHistoryState;
 type GeneratorAIDesktopFindInPageResult = import('@generatorai/shared/client').FindInPageResult;
 type GeneratorAIDesktopBrowserBounds = import('@generatorai/shared/client').BrowserBounds;
 type GeneratorAIDesktopBrowserDevtoolsPanel = import('@generatorai/shared/client').BrowserDevtoolsPanel;
@@ -114,7 +115,12 @@ interface GeneratorAIDesktopBridge {
   restartServer?: () => Promise<void>;
 
   // ── Window chrome / native menu integration ──
-  getWindowChrome?: () => Promise<GeneratorAIDesktopWindowChrome>;
+  /**
+   * Static per process: main passes it as a launch argument, so it is readable
+   * before first paint (06 §3.6). Undefined when the argument was missing or
+   * malformed; the web app then uses its native layout.
+   */
+  chrome?: GeneratorAIDesktopWindowChrome;
   window?: GeneratorAIDesktopWindowApi;
   setMenuState?: (state: Partial<GeneratorAIDesktopShellStatePush>) => Promise<void>;
   servers?: GeneratorAIDesktopServersApi;
@@ -124,6 +130,8 @@ interface GeneratorAIDesktopBridge {
   ) => () => void;
   onCommand?: (cb: (command: GeneratorAIDesktopCommand) => void) => () => void;
   onNavigate?: (cb: (path: string) => void) => () => void;
+  /** Whether Back / Forward can move (Chromium's session history); called at once with the last value. */
+  onNavHistoryChanged?: (cb: (state: GeneratorAIDesktopNavHistoryState) => void) => () => void;
   /** A mode picked in the native View ▸ Appearance menu; ThemeProvider applies it. */
   onAppearanceRequest?: (cb: (request: GeneratorAIDesktopAppearanceRequest) => void) => () => void;
   /** Mirror the applied appearance into the shell (background, caption glyphs, themeSource). */

@@ -42,6 +42,8 @@ export const navItemVariants = cva(
 
 export interface NavItemProps extends Omit<useRender.ComponentProps<'a'>, 'children'> {
   icon?: IconConcept;
+  /** A leading glyph other than a plain icon (e.g. a run-coloured spinner); replaces `icon`. */
+  leading?: ReactNode;
   label: ReactNode;
   /** Second line: turns the row into the 44h two-line form. */
   subtitle?: ReactNode;
@@ -58,6 +60,7 @@ export interface NavItemProps extends Omit<useRender.ComponentProps<'a'>, 'child
 /** One navigation row (sidebar, settings nav, link cards). */
 export function NavItem({
   icon,
+  leading,
   label,
   subtitle,
   dot,
@@ -76,7 +79,7 @@ export function NavItem({
     children: (
       <>
         {dot ? <StatusDot state={dot} className={twoLine ? 'mx-1 mt-1.25' : undefined} /> : null}
-        {icon ? <Icon concept={icon} size={16} /> : null}
+        {leading ?? (icon ? <Icon concept={icon} size={16} /> : null)}
         {twoLine ? (
           <span className="flex min-w-0 flex-1 flex-col">
             <span className="truncate text-ui/tight text-fg">{label}</span>

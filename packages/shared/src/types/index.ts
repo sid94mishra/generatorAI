@@ -509,6 +509,7 @@ export type {
   DesktopPlatform,
   WindowChrome,
   WindowStateChange,
+  NavHistoryState,
   FindInPageResult,
   BrowserBounds,
   BrowserDevtoolsPanel,

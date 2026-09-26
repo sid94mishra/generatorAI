@@ -44,6 +44,11 @@ const { FakeBrowserWindow, openExternal } = vi.hoisted(() => {
     executeJavaScript = vi.fn(async (_code: string): Promise<unknown> => undefined);
     reload = vi.fn();
     isDevToolsOpened = () => false;
+    history = { back: false, forward: false };
+    navigationHistory = {
+      canGoBack: () => this.history.back,
+      canGoForward: () => this.history.forward,
+    };
     emit(event: string, ...args: unknown[]) {
       for (const fn of this.listeners.get(event) ?? []) fn(...args);
     }
@@ -130,8 +135,15 @@ vi.mock('../platform', () => ({
   isWayland: true,
   titleBarOptions: () => ({}),
   titleBarSymbolColor: () => '#000',
-  TITLE_BAR_HEIGHT: 36,
   useCustomTitleBar: () => false,
+  windowChrome: () => ({
+    platform: 'win32',
+    titleBarStyle: 'overlay',
+    titleBarHeight: 36,
+    insetLeft: 0,
+    insetRight: 138,
+    isWayland: false,
+  }),
 }));
 
 const showMessageBox = vi.hoisted(() => vi.fn(async (..._a: unknown[]) => ({ response: 1 })));
@@ -545,5 +557,52 @@ describe('navigateTo before the app page is ready (deep-link cold start)', () =>
     wm.navigateTo('/chats/c1?dock=tasks');
     expect(pushedRoutes(win)).toEqual(['/chats/c1?dock=tasks']);
     expect(win.visible).toBe(true);
+  });
+});
+
+describe('navigateTo once the renderer has reported in (06 §3.4)', () => {
+  function sentRoutes(win: InstanceType<typeof FakeBrowserWindow>): string[] {
+    return win.webContents.send.mock.calls
+      .filter((c) => c[0] === IPC_EVENT.navigate)
+      .map((c) => String(c[1]));
+  }
+
+  it('sends routes over IPC_EVENT.navigate instead of injecting pushState', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    wm.navigateTo('/agents');
+    expect(sentRoutes(win)).toEqual(['/agents']);
+    expect(pushedRoutes(win)).toEqual([]);
+  });
+
+  it('falls back to pushState after a renderer reset until the new document reports in', () => {
+    const { wm, win } = makeWindow();
+    wm.markRendererReady();
+    win.webContents.emit('did-navigate');
+    finishLoad(win, `${APP}/`);
+    win.webContents.executeJavaScript.mockClear();
+    wm.navigateTo('/scripts');
+    expect(pushedRoutes(win)).toEqual(['/scripts']);
+    expect(sentRoutes(win)).toEqual([]);
+    wm.markRendererReady();
+    wm.navigateTo('/projects');
+    expect(sentRoutes(win)).toEqual(['/projects']);
+  });
+});
+
+describe('nav history push (06 §3.4)', () => {
+  function historyPushes(win: InstanceType<typeof FakeBrowserWindow>): unknown[] {
+    return win.webContents.send.mock.calls.filter((c) => c[0] === IPC_EVENT.navHistoryChanged).map((c) => c[1]);
+  }
+
+  it('reports Chromium back/forward on in-page navigation and after a load', () => {
+    const { win } = makeWindow();
+    const wc = win.webContents as unknown as { history: { back: boolean; forward: boolean } };
+    wc.history.back = true;
+    win.webContents.emit('did-navigate-in-page');
+    expect(historyPushes(win).at(-1)).toEqual({ back: true, forward: false });
+    wc.history.forward = true;
+    finishLoad(win, `${APP}/`);
+    expect(historyPushes(win).at(-1)).toEqual({ back: true, forward: true });
   });
 });

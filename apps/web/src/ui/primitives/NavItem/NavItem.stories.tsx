@@ -1,6 +1,7 @@
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, userEvent } from 'storybook/test';
 import { Count } from '../Count/Count.js';
+import { Icon } from '../../icons/Icon.js';
 import { NavItem } from './NavItem.js';
 
 const meta = {
@@ -32,6 +33,12 @@ export const Matrix: Story = {
       <NavItem label="Nightly dependency audit" subtitle="Approve “Apply upgrades”" dot="needs_you" href="#n1" />
       <NavItem label="Fix flaky checkout test" subtitle="Allow git push?" dot="needs_you" href="#n2" />
       <NavItem icon="status-running" label="Upgrade React Flow to v12" count={<Count>4:12</Count>} href="#r1" />
+      <NavItem
+        leading={<Icon concept="status-running" size={16} className="text-run" />}
+        label="PR review pipeline 311"
+        count={<Count>1:05</Count>}
+        href="#r2"
+      />
       <NavItem label="Appearance" dense href="#s1" active />
       <NavItem label="Security" dense href="#s2" />
     </nav>

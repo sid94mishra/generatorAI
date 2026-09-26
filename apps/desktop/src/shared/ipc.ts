@@ -14,6 +14,7 @@ export type {
   DesktopShellStatePush,
   DesktopThemePreference,
   DesktopUpdateState,
+  NavHistoryState,
   WindowChrome,
   WindowStateChange,
   FindInPageResult,
@@ -109,9 +110,11 @@ export const IPC = {
    * itself as a device. Returns null when the server is not running.
    */
   requestPairingCode: 'desktop:requestPairingCode',
-  /** Window chrome geometry so the renderer can lay out its header. */
-  getWindowChrome: 'desktop:getWindowChrome',
-  /** Renderer pushes UI state up so the native menu can mirror it. */
+  /**
+   * Renderer pushes UI state up so the native menu can mirror it. The first
+   * push from a document also tells main that document's bridge listeners are
+   * up, so routes can go over {@link IPC_EVENT.navigate} (06 §3.4).
+   */
   setMenuState: 'desktop:setMenuState',
   /** Native window controls, used only when we draw our own title bar. */
   windowMaximizeToggle: 'desktop:windowMaximizeToggle',
@@ -168,6 +171,13 @@ export const IPC_EVENT = {
   serversChanged: 'desktop:servers-changed',
   /** Updater state changed (checking/downloading/ready/installing) — G-04. */
   updateStateChanged: 'desktop:update-state-changed',
+  /**
+   * Whether the window's session history can go back / forward
+   * ({@link NavHistoryState}), from Chromium's own history. Sent on every
+   * navigation and when a document finishes loading (06 §3.4); drives the
+   * title strip's and the native-frame sidebar row's Back / Forward buttons.
+   */
+  navHistoryChanged: 'desktop:nav-history-changed',
 } as const;
 
 /**

@@ -86,6 +86,8 @@ export const HEIGHT_NAMES = [
   'panel-bar',
   'dialog-bar',
   'footer',
+  // Windows / Linux-custom title strip (D-23): fixed, never density-shrunk.
+  'strip',
 ] as const;
 export type HeightName = (typeof HEIGHT_NAMES)[number];
 

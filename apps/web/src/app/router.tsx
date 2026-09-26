@@ -1,29 +1,26 @@
 // ────────────────────────────────────────────────────────────────
-// Router — React Router 8 route configuration (P1-S3 router split)
+// Router — React Router 8 route configuration.
 //
-// docs/redesign/07-phases.md §P1-S3, docs/redesign/06-desktop-and-shell.md
-// §2.4. Replaces the old apps/web/src/router.tsx. `<AppLayout/>` stays the
-// shell element until P3-04 replaces it with `<ShellRoute/>` — this task is
-// a mechanical split with no behaviour change. A `'*'` data route plus
-// nested children (rather than a bare `'*'` wrapping `useRoutes`) keeps
-// `useBlocker` working in WorkflowBuilderPage (06 §2.4).
+// docs/redesign/06-desktop-and-shell.md §2.1, §2.4. `<ShellRoute/>` (P3-04)
+// is the app frame; the pages render into its main card through <Outlet/>.
+// A data route with nested children (rather than a bare `'*'` wrapping
+// `useRoutes`) keeps `useBlocker` working in WorkflowBuilderPage (06 §2.4).
+//
+// Errors (04 R-6): a failing page route is caught by the pathless layer's
+// errorElement and shown inside the main card (the sidebar stays); only a
+// failure of the shell itself takes the whole window.
 // ────────────────────────────────────────────────────────────────
 
 import { createBrowserRouter } from 'react-router';
-import { AppLayout } from '@/components/layout/AppLayout.js';
-import { ErrorBoundary } from '@/components/ErrorBoundary.js';
-import { RouteErrorFallback } from '@/components/RouteErrorFallback.js';
+import { ShellRoute } from './shell/ShellRoute.js';
+import { RouteErrorPage, ShellErrorPage } from './shell/RouteErrors.js';
 import { PAGE_ROUTES } from './routes/index.js';
 
 export const router = createBrowserRouter([
   {
     path: '/',
-    element: <AppLayout />,
-    errorElement: (
-      <ErrorBoundary>
-        <RouteErrorFallback />
-      </ErrorBoundary>
-    ),
-    children: PAGE_ROUTES,
+    element: <ShellRoute />,
+    errorElement: <ShellErrorPage />,
+    children: [{ errorElement: <RouteErrorPage />, children: PAGE_ROUTES }],
   },
 ]);

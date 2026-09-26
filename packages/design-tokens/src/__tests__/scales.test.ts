@@ -69,7 +69,7 @@ describe('heights and density (D-15)', () => {
   });
 
   it('compact shrinks rows and controls, never bars, badges or kbd', () => {
-    const fixed = ['bar', 'badge', 'kbd', 'panel-bar', 'dialog-bar', 'footer'];
+    const fixed = ['bar', 'badge', 'kbd', 'panel-bar', 'dialog-bar', 'footer', 'strip'];
     for (const name of HEIGHT_NAMES) {
       const drop = HEIGHTS.comfortable[name] - HEIGHTS.compact[name];
       if (fixed.includes(name)) expect(drop, name).toBe(0);

@@ -19,7 +19,7 @@
 //
 // Consumers: the sidebar and rail (P3), ChatsList status (P3), Home, the
 // ProjectDetail banner and the palette (P5), the desktop badge/tray feed
-// (`useDesktopIntegration`). No UI lives here. Until `data` is defined the
+// (`app/shell/useDesktopBridge`). No UI lives here. Until `data` is defined the
 // lists are UNKNOWN, not empty — render nothing rather than "Nothing needs
 // you" (D-36).
 // ────────────────────────────────────────────────────────────────

@@ -84,6 +84,7 @@
   --height-panel-bar: var(--gai-h-panel-bar);
   --height-dialog-bar: var(--gai-h-dialog-bar);
   --height-footer: var(--gai-h-footer);
+  --height-strip: var(--gai-h-strip);
   --size-control-sm: var(--gai-h-control-sm);
   --size-control: var(--gai-h-control);
   --size-control-lg: var(--gai-h-control-lg);

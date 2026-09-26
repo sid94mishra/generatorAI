@@ -14,11 +14,17 @@ import {
   isWayland,
   titleBarOptions,
   titleBarSymbolColor,
-  TITLE_BAR_HEIGHT,
   useCustomTitleBar,
+  windowChrome,
 } from './platform';
-import type { DesktopAppearanceRequest, DesktopCommand, DesktopThemePreference } from '../shared/ipc';
+import type {
+  DesktopAppearanceRequest,
+  DesktopCommand,
+  DesktopThemePreference,
+  NavHistoryState,
+} from '../shared/ipc';
 import { IPC_EVENT } from '../shared/ipc';
+import { windowChromeArg } from '../shared/window-chrome-arg';
 import { appearanceMirror } from './appearance';
 import { appRouteOf, isAppOrigin, isExternalUrlAllowed } from './navigation-guard';
 import { hasUnsavedWork } from './unsaved-work';
@@ -58,6 +64,13 @@ export class WindowManager {
    * last one wins; it is applied on the app page's next `did-finish-load`.
    */
   private pendingRoute: string | null = null;
+  /**
+   * True once the main window's current document has pushed `setMenuState`,
+   * which proves its bridge listeners (`onNavigate` among them) are up. Routes
+   * then go over `IPC_EVENT.navigate` into React Router instead of a
+   * History-API injection (06 §3.4). Cleared with every renderer reset.
+   */
+  private rendererReady = false;
 
   getMainWindow(): BrowserWindow | null {
     return this.mainWindow;
@@ -77,6 +90,8 @@ export class WindowManager {
   }
 
   private emitRendererReset(): void {
+    // The next document has to report in before it is sent routes over IPC.
+    this.rendererReady = false;
     for (const listener of this.rendererResetListeners) {
       try {
         listener();
@@ -84,6 +99,14 @@ export class WindowManager {
         log.warn('renderer-reset listener failed', e);
       }
     }
+  }
+
+  /**
+   * The main window's current document pushed its first `setMenuState` (the
+   * IPC guard admits only that document), so its bridge listeners are live.
+   */
+  markRendererReady(): void {
+    this.rendererReady = true;
   }
 
   /** The URL the main window is meant to be showing. */
@@ -156,6 +179,7 @@ export class WindowManager {
   createMainWindow(appUrl: string, options: CreateMainWindowOptions = {}): BrowserWindow {
     this.appUrl = appUrl;
     this.appPageLoaded = false;
+    this.rendererReady = false;
     const settings = loadSettings();
     const bounds = this.sanitizeBounds(settings.window);
 
@@ -187,6 +211,10 @@ export class WindowManager {
         sandbox: true,
         webSecurity: true,
         spellcheck: true,
+        // The window chrome is static per process, so the preload reads it
+        // synchronously from argv and the renderer lays out its title strip or
+        // traffic-light row on the first frame (06 §3.6).
+        additionalArguments: [windowChromeArg(windowChrome())],
       },
     });
     this.mainWindow = win;
@@ -272,7 +300,12 @@ export class WindowManager {
     win.webContents.on('did-navigate', () => {
       this.appPageLoaded = false;
       this.emitRendererReset();
+      this.emitNavHistory(win);
     });
+    // Back / Forward enabled state for the title strip and the native-frame
+    // sidebar row. Chromium's session history is the authority (as for the
+    // menu, see `menu.ts`); SPA route changes arrive here.
+    win.webContents.on('did-navigate-in-page', () => this.emitNavHistory(win));
 
     // Security: open external links in the OS browser, never new Electron windows.
     win.webContents.setWindowOpenHandler(({ url }) => {
@@ -338,10 +371,13 @@ export class WindowManager {
            } catch (e) { /* ignore */ } })();`,
         )
         .catch(() => undefined);
+      // A fresh document's preload was not listening yet on `did-navigate`;
+      // it is now, and it keeps the value for later subscribers.
+      this.emitNavHistory(win);
       const pending = this.pendingRoute;
       if (this.appPageLoaded && pending) {
         this.pendingRoute = null;
-        this.pushRoute(win, pending);
+        this.deliverRoute(win, pending);
       }
     });
 
@@ -441,9 +477,9 @@ export class WindowManager {
   }
 
   /**
-   * Navigate the SPA via the History API without a full reload. When the app
-   * page is not there yet (no window, first load, a repoint or the error page)
-   * the route is kept and applied once the app page finishes loading.
+   * Navigate the SPA without a full reload. When the app page is not there yet
+   * (no window, first load, a repoint or the error page) the route is kept and
+   * applied once the app page finishes loading.
    */
   navigateTo(routePath: string): void {
     const win = this.mainWindow;
@@ -452,8 +488,21 @@ export class WindowManager {
       if (win && !win.isDestroyed()) WindowManager.reveal(win);
       return;
     }
-    this.pushRoute(win, routePath);
+    this.deliverRoute(win, routePath);
     WindowManager.reveal(win);
+  }
+
+  /**
+   * Hands a route to the loaded app page: through the bridge (`onNavigate` →
+   * React Router) once the document has reported in, otherwise by injecting a
+   * History-API push, which works before any React listener exists.
+   */
+  private deliverRoute(win: BrowserWindow, routePath: string): void {
+    if (this.rendererReady) {
+      win.webContents.send(IPC_EVENT.navigate, routePath);
+      return;
+    }
+    this.pushRoute(win, routePath);
   }
 
   private pushRoute(win: BrowserWindow, routePath: string): void {
@@ -497,6 +546,14 @@ export class WindowManager {
     });
   }
 
+  /** Tells the renderer whether Back / Forward can move (06 §3.4). */
+  private emitNavHistory(win: BrowserWindow): void {
+    if (win.isDestroyed()) return;
+    const history = win.webContents.navigationHistory;
+    const state: NavHistoryState = { back: history.canGoBack(), forward: history.canGoForward() };
+    win.webContents.send(IPC_EVENT.navHistoryChanged, state);
+  }
+
   /** Re-emits current window state. Used when the renderer (re)connects. */
   publishWindowState(): void {
     const win = this.mainWindow;
@@ -528,7 +585,7 @@ export class WindowManager {
       win.setTitleBarOverlay({
         color: '#00000000',
         symbolColor: titleBarSymbolColor(),
-        height: TITLE_BAR_HEIGHT,
+        height: CHROME.strip.height,
       });
     } catch {
       // Not supported by this window manager — the native frame still works.

@@ -543,13 +543,15 @@ test.describe('Stream spine', () => {
     await page.evaluate(() => ((window as { __e2eOneDocument?: boolean }).__e2eOneDocument = true));
     await page.waitForTimeout(2500);
 
-    const nav = page.getByRole('navigation');
+    // The shell's main nav (P3: `sidebar-nav`); other <nav> landmarks
+    // (breadcrumbs, settings sections) must not be able to satisfy this.
+    const nav = page.getByTestId('sidebar-nav');
     for (const [name, path] of [
       ['Workflows', /\/workflows$/],
       ['Chats', /\/chats$/],
       ['Projects', /\/projects$/],
     ] as const) {
-      await nav.getByRole('link', { name, exact: true }).first().click();
+      await nav.getByRole('link', { name, exact: true }).click();
       await expect(page).toHaveURL(path);
       await page.waitForTimeout(1500);
     }

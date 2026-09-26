@@ -1,11 +1,12 @@
 // ────────────────────────────────────────────────────────────────
-// defineRoute — per-area route module helper (P1-S3 router split)
+// defineRoute — per-area route module helper (P1-S3 router split; the
+// LegacyHeader slot since P3-04).
 //
 // docs/redesign/06-desktop-and-shell.md §2.3–§2.4, docs/redesign/04-screen-map.md §0.
-// Replaces the old router.tsx's `withBoundary()`. `RouteSlot` is the place
-// LegacyHeader will render once the shell lands in P3 (D-21) — for now it
-// renders the page unchanged, so every route's `legacyHeader: true` is
-// recorded but not yet acted on.
+// `RouteSlot` renders the old global Header (D-21) as the first row of the
+// main card for every route whose handle says `legacyHeader: true`, then the
+// lazy page in its error boundary. Each ported page turns the flag off and
+// renders its own PageHeader.
 // ────────────────────────────────────────────────────────────────
 
 import type { ComponentType, ReactElement } from 'react';
@@ -14,24 +15,29 @@ import type { RouteObject } from 'react-router';
 import type { NavDestinationId } from '@generatorai/shared/ui-contract';
 import { PageErrorBoundary } from '@/components/PageErrorBoundary.js';
 import { PageLoader } from '@/components/PageLoader.js';
+import { MainCardBody } from '@/ui/shell/MainCard/MainCard.js';
+import { LegacyHeader } from '../shell/LegacyHeader.js';
 
 export interface GaiRouteHandle {
-  /** Render the old global Header (components/layout/Header.tsx) above the
-   *  page (D-21). Removed per route as it is ported. Not yet consumed by
-   *  RouteSlot — LegacyHeader lands in P3. */
+  /** Render the old global Header (components/layout/Header.tsx) as the first
+   *  row of the main card (D-21). Removed per route as it is ported. */
   legacyHeader: boolean;
+  /** Collapse the sidebar to the rail at every window width (workflow
+   *  builder, 06 §2.5); Expand then opens the flyout. */
+  forceRail?: boolean;
   /** Page name for PageErrorBoundary / Suspense and File ▸ Open Recent
    *  fallback labels. */
   title: string;
-  /** Sidebar nav destination this route belongs to (P3's active-state source).
-   *  Set on every area route; Settings and the 404 have none. Must agree with
-   *  `navDestinationFor(path)` (tested). */
+  /** Sidebar nav destination this route belongs to (the sidebar's active
+   *  state reads `navDestinationFor(path)`, which agrees — tested). Set on
+   *  every area route; Settings and the 404 have none. */
   nav?: NavDestinationId;
 }
 
 /** The element wrapper every route renders through. Replaces `withBoundary()`.
  *  Sits inside the `children` of the shell route (not next to `useRoutes`), so
- *  `useParams()` still resolves route params for the page it wraps. */
+ *  `useParams()` still resolves route params for the page — and for the
+ *  LegacyHeader — it wraps. */
 export function RouteSlot({
   handle,
   children,
@@ -40,9 +46,14 @@ export function RouteSlot({
   children: ReactElement;
 }) {
   return (
-    <PageErrorBoundary pageName={handle.title}>
-      <Suspense fallback={<PageLoader />}>{children}</Suspense>
-    </PageErrorBoundary>
+    <>
+      {handle.legacyHeader ? <LegacyHeader /> : null}
+      <MainCardBody>
+        <PageErrorBoundary pageName={handle.title}>
+          <Suspense fallback={<PageLoader />}>{children}</Suspense>
+        </PageErrorBoundary>
+      </MainCardBody>
+    </>
   );
 }
 

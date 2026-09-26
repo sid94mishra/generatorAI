@@ -47,62 +47,59 @@ async function waitForRunComplete(runId: string, timeoutMs = 90_000) {
 // ═══════════════════════════════════════════════════════════════
 
 test.describe('1. Navigation & Layout', () => {
+  // P3 shell: the sidebar <nav> (`sidebar-nav`) holds React Router links
+  // (Home … Scripts); Settings is the footer gear (`sidebar-settings`); there
+  // is no Templates entry or /templates route (Settings ▸ Templates).
   test('dashboard loads', async ({ page }) => {
     await page.goto(WEB_URL);
-    await page.waitForLoadState('networkidle');
-    // Scope to the sidebar nav to avoid matching quick-action cards
-    const nav = page.getByRole('navigation');
-    await expect(nav.getByRole('button', { name: 'Dashboard', exact: true })).toBeVisible();
-    await expect(nav.getByRole('button', { name: 'Workflows', exact: true })).toBeVisible();
-    await expect(nav.getByRole('button', { name: 'Chats', exact: true })).toBeVisible();
-    await expect(nav.getByRole('button', { name: 'Automations', exact: true })).toBeVisible();
+    await page.waitForLoadState('load');
+    const nav = page.getByTestId('sidebar-nav');
+    await expect(nav.getByRole('link', { name: 'Home', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Workflows', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Chats', exact: true })).toBeVisible();
+    await expect(nav.getByRole('link', { name: 'Automations', exact: true })).toBeVisible();
   });
 
   test('navigate to every main page', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(WEB_URL);
-    await page.waitForLoadState('networkidle');
-    const nav = page.getByRole('navigation');
+    await page.waitForLoadState('load');
+    const nav = page.getByTestId('sidebar-nav');
 
     // Workflows
-    await nav.getByRole('button', { name: 'Workflows', exact: true }).click();
+    await nav.getByRole('link', { name: 'Workflows', exact: true }).click();
     await expect(page).toHaveURL(/\/workflows/);
 
     // Chats
-    await nav.getByRole('button', { name: 'Chats', exact: true }).click();
+    await nav.getByRole('link', { name: 'Chats', exact: true }).click();
     await expect(page).toHaveURL(/\/chats/);
 
     // Automations
-    await nav.getByRole('button', { name: 'Automations', exact: true }).click();
+    await nav.getByRole('link', { name: 'Automations', exact: true }).click();
     await expect(page).toHaveURL(/\/automations/);
 
-    // Templates + Settings live below <nav> in a separate section of the sidebar aside
-    const sidebar = page.getByRole('complementary');
-    await sidebar.getByRole('button', { name: 'Templates', exact: true }).click();
-    await expect(page).toHaveURL(/\/templates/);
-
-    await sidebar.getByRole('button', { name: 'Settings', exact: true }).click();
+    // Settings is the sidebar footer gear, outside the <nav>
+    await page.getByTestId('sidebar-settings').click();
     await expect(page).toHaveURL(/\/settings/);
 
     // Projects
-    await nav.getByRole('button', { name: 'Projects', exact: true }).click();
+    await nav.getByRole('link', { name: 'Projects', exact: true }).click();
     await expect(page).toHaveURL(/\/projects/);
 
-    // Dashboard
-    await nav.getByRole('button', { name: 'Dashboard', exact: true }).click();
-    await expect(page).toHaveURL(/\//);
+    // Home
+    await nav.getByRole('link', { name: 'Home', exact: true }).click();
+    await expect(page).toHaveURL(/\/$/);
   });
 
   test('sidebar collapse/expand', async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.goto(WEB_URL);
-    await page.waitForLoadState('networkidle');
+    await page.waitForLoadState('load');
 
-    // Click collapse button
-    const collapseBtn = page.locator('button:has-text("Collapse sidebar")');
-    if (await collapseBtn.isVisible()) {
-      await collapseBtn.click();
-      // Sidebar text should be hidden
-      await page.waitForTimeout(500);
-    }
+    await page.getByRole('button', { name: 'Hide sidebar', exact: true }).click();
+    await expect(page.locator('[data-testid="app-sidebar"][data-collapsed="rail"]')).toBeVisible();
+    await page.getByRole('button', { name: 'Show sidebar', exact: true }).click();
+    await expect(page.locator('[data-testid="app-sidebar"][data-collapsed="full"]')).toBeVisible();
   });
 });
 

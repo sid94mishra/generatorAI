@@ -1,9 +1,11 @@
 // ────────────────────────────────────────────────────────────────
-// useDesktopIntegration — binds the SPA to the Electron shell.
+// useDesktopBridge — binds the SPA to the Electron shell (06 §2.1, §3.6;
+// was hooks/useDesktopIntegration.ts).
 //
 // Jobs, all no-ops in a plain browser tab:
-//   1. Read the window chrome once and publish it to <html> so CSS can
-//      reserve space for the OS window controls.
+//   1. Publish the window chrome to <html> (classes, `data-layout`,
+//      `--gai-titlebar-*`) — the pre-paint script already did it before first
+//      paint; this keeps it true and tracks the live Window Controls Overlay.
 //   2. Follow route pushes from the menu, tray, dock menu and deep links.
 //   3. Mirror renderer state back into the native menu, so checkmarks and
 //      enablement stay truthful.
@@ -11,26 +13,23 @@
 // for desktop IPC and the web key handler, D-24).
 // ────────────────────────────────────────────────────────────────
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import {
-  NATIVE_CHROME,
   applyChromeToDocument,
   applyFullscreenInsets,
   isDesktop,
   onDesktopNavigate,
   onWindowStateChanged,
   pushMenuState,
-  readWindowChrome,
   trackWindowControlsOverlay,
-  type DesktopWindowChrome,
+  windowChrome,
 } from '@/lib/desktop.js';
 import { navDestinationFor } from '@generatorai/shared/ui-contract';
-import { useUiStore } from '@/stores/uiStore.js';
 import { useRightPaneStore } from '@/stores/rightPaneStore.js';
 import { usePageTitleStore } from '@/stores/pageTitleStore.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
-import { useAttentionCounts } from './attentionQueries.js';
+import { useAttentionCounts } from '@/hooks/attentionQueries.js';
 
 /** `File ▸ Open Recent` label for a route without a page title: its section (D-22). */
 function routeLabel(pathname: string): string {
@@ -38,12 +37,15 @@ function routeLabel(pathname: string): string {
   return navDestinationFor(pathname)?.label ?? pathname;
 }
 
-export function useDesktopIntegration(): DesktopWindowChrome {
-  const [chrome, setChrome] = useState<DesktopWindowChrome>(NATIVE_CHROME);
+export interface DesktopBridgeOptions {
+  /** The full sidebar is showing (the native `View ▸ Toggle Sidebar` checkmark). */
+  sidebarExpanded: boolean;
+}
+
+export function useDesktopBridge({ sidebarExpanded }: DesktopBridgeOptions): void {
   const navigate = useNavigate();
   const location = useLocation();
 
-  const sidebarOpen = useUiStore((s) => s.sidebarOpen);
   const rightPaneController = useRightPaneStore((s) => s.controller);
   const rightPaneOpen = rightPaneController?.open ?? false;
 
@@ -60,42 +62,34 @@ export function useDesktopIntegration(): DesktopWindowChrome {
   // counts instead of keeping a previous server's numbers (G-05, P2-R8).
   const attentionCounts = useAttentionCounts({ enabled: isDesktop });
 
-  // ── 1. Publish window chrome ──
+  // ── 1. Window chrome and window state ──
   useEffect(() => {
-    let cancelled = false;
-    let untrack: (() => void) | undefined;
-    void readWindowChrome().then((c) => {
-      if (cancelled) return;
-      setChrome(c);
-      applyChromeToDocument(c);
-      // The main process only knows the *expected* control width; Chromium
-      // knows the real one and reports changes. Prefer it once it is live.
-      untrack = trackWindowControlsOverlay(c);
-    });
-    return () => {
-      cancelled = true;
-      untrack?.();
-    };
-  }, []);
-
-  // Fullscreen and maximise change how the title bar should look (a maximised
-  // window loses its rounded corners; an unfocused one dims).
-  useEffect(() => {
-    if (!isDesktop) return undefined;
+    const chrome = windowChrome();
+    applyChromeToDocument(chrome);
+    // The main process only knows the *expected* control width; Chromium
+    // knows the real one and reports changes. Prefer it once it is live.
+    const untrack = trackWindowControlsOverlay(chrome);
+    if (!isDesktop) return untrack;
+    // Fullscreen and maximise change how the chrome should look (a maximised
+    // window loses its corner radius; an unfocused one dims).
     const root = document.documentElement;
-    return onWindowStateChanged((s) => {
+    const unsubscribe = onWindowStateChanged((s) => {
       applyFullscreenInsets(chrome, s.fullScreen);
       root.classList.toggle('window-fullscreen', s.fullScreen);
       root.classList.toggle('window-maximized', s.maximized);
       root.classList.toggle('window-blurred', !s.focused);
     });
-  }, [chrome]);
+    return () => {
+      untrack();
+      unsubscribe();
+    };
+  }, []);
 
   // ── 2. Route pushes from the menu, tray, dock menu, JumpList and deep links ──
   useEffect(() => {
     if (!isDesktop) return undefined;
     return onDesktopNavigate((path) => {
-      if (typeof path === 'string' && path.startsWith('/')) navigate(path);
+      if (typeof path === 'string' && path.startsWith('/')) void navigate(path);
     });
   }, [navigate]);
 
@@ -110,16 +104,14 @@ export function useDesktopIntegration(): DesktopWindowChrome {
     recentRef.current = next;
 
     pushMenuState({
-      sidebarOpen,
+      sidebarOpen: sidebarExpanded,
       rightPaneOpen,
       recent: next,
       hasUnsavedWork,
       attention: attentionCounts ?? null,
     });
-  }, [location.pathname, sidebarOpen, rightPaneOpen, pageTitle, hasUnsavedWork, attentionCounts]);
+  }, [location.pathname, sidebarExpanded, rightPaneOpen, pageTitle, hasUnsavedWork, attentionCounts]);
 
   // Appearance is not handled here: ThemeProvider is its only writer and owns
   // the desktop appearance IPC in both directions (D-25).
-
-  return chrome;
 }

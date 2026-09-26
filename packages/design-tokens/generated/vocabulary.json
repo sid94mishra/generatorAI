@@ -230,7 +230,8 @@
         "kbd",
         "panel-bar",
         "dialog-bar",
-        "footer"
+        "footer",
+        "strip"
       ]
     },
     {

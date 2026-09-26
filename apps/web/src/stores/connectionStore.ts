@@ -19,10 +19,10 @@ interface ConnectionInfo {
    * fill clamps past it: those events are gone from this tab's view of the
    * transcript for good. That is data loss, and it used to be completely
    * invisible — the comment in `sseManager.gapFill` acknowledged it and
-   * nothing said so to the user. This is what makes it sayable — and
-   * `components/status/ConnectionStatus.tsx`, mounted in the app header, is
-   * what says it: an "events may be missing since <time> — refresh" badge
-   * whose click refetches every query and then calls `clearGap`.
+   * nothing said so to the user. This is what makes it sayable — and the
+   * sidebar footer (app/shell, via `hooks/useConnectionSummary.ts`) is what
+   * says it: an "events may be missing since <time>" notice whose Refresh
+   * refetches every query and then calls `clearGap`.
    */
   unrecoverableEvents: number;
   /** When the most recent unrecoverable gap was detected (epoch ms). */
