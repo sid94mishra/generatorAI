@@ -39,7 +39,7 @@ import {
   StatusFilterChip,
   TagsFilterChip,
 } from './ChatsFilterControls.js';
-import { CHATS_COLUMNS, chatRowActions } from './chatsColumns.js';
+import { CHATS_COLUMNS, chatRowActions } from '@/blocks/chats-table/chatsColumns.js';
 
 type Scope = 'all' | 'active' | 'archived';
 const SCOPE_ITEMS: readonly Omit<SegmentedItem<Scope>, 'count'>[] = [

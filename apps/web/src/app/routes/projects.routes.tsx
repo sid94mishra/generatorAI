@@ -13,10 +13,12 @@ export const projectsRoutes: RouteObject[] = [
     () => import('@/features/projects/CreateProjectPage.js').then((m) => ({ default: m.CreateProjectPage })),
     { legacyHeader: false, nav: 'projects', title: 'New project' },
   ),
+  // R-3: tabs are path segments (codebases|chats|runs|pull-requests|
+  // customization|settings); the codebase routes below outrank `:tab`.
   defineRoute(
-    'projects/:id',
-    () => import('@/pages/ProjectDetailPage.js').then((m) => ({ default: m.ProjectDetailPage })),
-    { legacyHeader: true, nav: 'projects', title: 'Project' },
+    'projects/:id/:tab?',
+    () => import('@/features/projects/ProjectDetailPage.js').then((m) => ({ default: m.ProjectDetailPage })),
+    { legacyHeader: false, nav: 'projects', title: 'Project' },
   ),
   defineRoute(
     'projects/:id/codebases/:cid',

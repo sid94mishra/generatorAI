@@ -1,6 +1,8 @@
 import { test, expect } from '../helpers/test';
 
-// Phase W4 — Projects list, create, detail tabs.
+// Phase W4 — Projects list, create, detail tabs. Rewritten for the P5 ports
+// (features/projects: T-01 list, T-03 create, T-02 detail with path-segment
+// tabs, R-3).
 
 test.describe('Projects list', () => {
   // P5-02: the kit ListPage — PageTitle h1 "Projects", "New project",
@@ -45,31 +47,36 @@ test.describe('Create project', () => {
 });
 
 test.describe('Project detail', () => {
-  // The tab strip is a real <Tabs> widget: role=tablist / role=tab with
-  // aria-selected — not the buttons this spec used to look for, which is why
-  // every click here timed out. It also used to "assert" only that the tab it
-  // had just clicked was still visible, which is true whether or not the tab
-  // did anything; each tab now has to prove its own panel rendered.
-  const PANELS: Array<{ tab: string; assert: (page: import('@playwright/test').Page) => Promise<void> }> = [
+  // P5-04: tabs are path segments (R-3). A tab's accessible name may carry
+  // its count ("Codebases 0"), hence the anchored regexes. Each tab has to
+  // prove its own panel rendered, not only that it was selected.
+  const PANELS: Array<{ tab: string; segment: string; assert: (page: import('@playwright/test').Page) => Promise<void> }> = [
     {
       tab: 'Codebases',
+      segment: 'codebases',
       assert: async (page) => {
-        await expect(page.getByRole('heading', { name: 'Linked Repositories', exact: true })).toBeVisible();
+        await expect(page.getByText('Repositories are cloned under the project root.', { exact: false })).toBeVisible();
       },
     },
     {
-      tab: 'Project Customization',
+      tab: 'Chats',
+      segment: 'chats',
       assert: async (page) => {
-        await expect(page.getByPlaceholder('Search skills…')).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Custom Agents', exact: true })).toBeVisible();
+        await expect(page.getByRole('tablist', { name: 'Chat status' })).toBeVisible();
       },
     },
     {
-      // Added with the SCM work (ProjectDetailPage → ProjectPullRequestsTab).
-      // A seeded project has no codebases, so the panel must render its
-      // Open/Closed/All filter and settle on the empty (or "unavailable")
-      // state rather than spin forever.
+      tab: 'Runs',
+      segment: 'runs',
+      assert: async (page) => {
+        await expect(page.getByText('No runs yet', { exact: true })).toBeVisible();
+      },
+    },
+    {
+      // A seeded project has no codebases, so the panel must settle on the
+      // empty (or "unavailable") state rather than spin forever.
       tab: 'Pull requests',
+      segment: 'pull-requests',
       assert: async (page) => {
         const panel = page.getByTestId('project-pull-requests');
         await expect(panel).toBeVisible();
@@ -80,53 +87,54 @@ test.describe('Project detail', () => {
       },
     },
     {
-      tab: 'Settings',
+      tab: 'Customization',
+      segment: 'customization',
       assert: async (page) => {
-        await expect(page.getByRole('heading', { name: 'Project Settings', exact: true })).toBeVisible();
-        await expect(page.getByRole('button', { name: 'Save Settings', exact: true })).toBeVisible();
+        await expect(page.getByRole('tablist', { name: 'Customization kind' }).getByRole('tab', { name: /^Skills/ })).toBeVisible();
+        await expect(page.getByRole('textbox', { name: 'Filter skills' })).toBeVisible();
+      },
+    },
+    {
+      tab: 'Settings',
+      segment: 'settings',
+      assert: async (page) => {
+        await expect(page.getByRole('heading', { name: 'Worktrees', exact: true })).toBeVisible();
+        await expect(page.getByRole('button', { name: 'Save settings', exact: true })).toBeVisible();
       },
     },
   ];
 
-  test('switches between Codebases, Project Customization, Pull requests and Settings tabs', async ({ page, gotoApp, seed }) => {
+  test('switches between the six tabs, each addressed by its own path segment', async ({ page, gotoApp, seed }) => {
     const id = await seed.project({ name: `W4 Detail ${Date.now()}` });
     await gotoApp(`/projects/${id}`);
 
-    // The Pull requests panel renders its own (nested) state tablist, so pin
-    // the page-level one by its first tab.
-    const tablist = page
-      .getByRole('tablist')
-      .filter({ has: page.getByRole('tab', { name: 'Codebases', exact: true }) });
-    await expect(tablist.getByRole('tab')).toHaveText(PANELS.map((p) => p.tab));
+    const tablist = page.getByRole('tablist', { name: 'Project sections' });
+    await expect(tablist.getByRole('tab')).toHaveText(PANELS.map((p) => new RegExp(`^${p.tab}`)));
 
-    for (const { tab, assert } of PANELS) {
-      const t = tablist.getByRole('tab', { name: tab, exact: true });
+    for (const { tab, segment, assert } of PANELS) {
+      const t = tablist.getByRole('tab', { name: new RegExp(`^${tab}`) });
       await t.click();
       await expect(t).toHaveAttribute('aria-selected', 'true');
+      await expect(page).toHaveURL(new RegExp(`/projects/${id}/${segment}$`));
       await assert(page);
     }
+
+    // A deep link lands on its tab.
+    await gotoApp(`/projects/${id}/settings`);
+    await expect(tablist.getByRole('tab', { name: /^Settings/ })).toHaveAttribute('aria-selected', 'true');
   });
 
-  // Feature present but RENAMED: there is no "Link Codebase" control anywhere
-  // in the shipped app — the Codebases tab exposes "Add Repository", which
-  // reveals the inline link-a-codebase form (alias / type / URL). Retargeted
-  // rather than deleted, and strengthened to open the form so the assertion
-  // covers the action rather than only the button's existence.
-  test('Codebases tab exposes an Add Repository action that opens the link form', async ({ page, gotoApp, seed }) => {
+  test('Codebases tab: Add codebase opens the inline form, gated until valid', async ({ page, gotoApp, seed }) => {
     const id = await seed.project({ name: `W4 Codebases ${Date.now()}` });
-    await gotoApp(`/projects/${id}`);
-    await page.getByRole('tab', { name: 'Codebases', exact: true }).click();
+    await gotoApp(`/projects/${id}/codebases`);
 
-    // Only one "Add Repository" button exists until the form opens — after it
-    // opens the form's own submit button shares the label, hence .first().
-    const addRepo = page.getByRole('button', { name: 'Add Repository', exact: true });
-    await expect(addRepo).toHaveCount(1);
-    await addRepo.click();
-
-    await expect(page.getByRole('heading', { name: 'Add New Repository', exact: true })).toBeVisible();
-    await expect(page.getByPlaceholder('frontend')).toBeVisible();
-    await expect(page.getByPlaceholder('https://github.com/org/repo.git')).toBeVisible();
-    // Submit is gated until the form is valid.
-    await expect(page.getByRole('button', { name: 'Add Repository', exact: true }).last()).toBeDisabled();
+    await page.getByRole('button', { name: 'Add codebase', exact: true }).first().click();
+    const card = page.getByTestId('add-codebase-card');
+    await expect(card).toBeVisible();
+    const submit = card.getByRole('button', { name: 'Add codebase', exact: true });
+    await expect(submit).toBeDisabled();
+    await card.getByRole('textbox', { name: 'Alias' }).fill('frontend');
+    await card.getByRole('textbox', { name: 'Repository URL' }).fill('https://github.com/org/repo.git');
+    await expect(submit).toBeEnabled();
   });
 });

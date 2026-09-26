@@ -3,6 +3,7 @@
 // inventory-domain.md §2.5): checkbox · Title flex · Project 140 ·
 // Agent 150 (Avatar 20 + name) · Status 96 · Changes 88 (± mono) ·
 // Activity 72 · actions 56. Row menu: Archive/Unarchive, Delete.
+// A block since P5-04: ChatsList and the ProjectDetail Chats tab share it.
 // ────────────────────────────────────────────────────────────────
 
 import { Link as RouterLink } from 'react-router';
