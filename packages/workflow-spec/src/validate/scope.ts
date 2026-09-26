@@ -500,6 +500,14 @@ export class GraphTypes {
             ? `Stage '${s.key}' is in the body of the map '${s.parentKey}': outside the body read it through stages.${s.parentKey}.output.results (each entry's stages.${s.key})`
             : `Stage '${s.key}' is in the body of '${s.parentKey}': outside the body read it as stages.${s.parentKey}.output.last.${s.key}`,
         );
+      } else if (s.kind === 'wait' && s.wait.type === 'event') {
+        // An event wait that runs beside this stage: only its callback (P05 §4.3), which
+        // exists once the wait waits (null before) — how a stage hands CI the URL.
+        fields[s.key] = {
+          kind: 'object',
+          fields: { callbackUrl: nullable(T.string), callbackToken: nullable(T.string) },
+          unknown: { code: 'expr-stage-not-upstream', noun: `field of '${s.key}' here (it has not run yet: only its callbackUrl and callbackToken can be read; add an edge so that it runs first)` },
+        };
       } else {
         fields[s.key] = T.unavailable(
           'expr-stage-not-upstream',

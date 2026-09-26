@@ -1075,11 +1075,13 @@ export const approvalGatedRelease = define({
 export const ciGatedDeploy = define({
   name: 'ciGatedDeploy',
   title: 'CI-gated deploy',
-  description: 'Push a change, wait for the CI result of that commit (CI posts to the wait’s callback URL), then deploy.',
+  description: 'Push a change, hand CI the wait’s callback URL, wait for the CI result of that commit (CI posts to the URL), then deploy.',
   params: z
     .object({
       pushKey: key.default('push'),
       key: key.default('wait_ci').describe('Key of the event wait'),
+      // The callback URL exists once the wait waits: a stage beside it (not before it) hands it to CI.
+      notifyKey: key.default('notify_ci').describe('Key of the stage that hands CI the callback URL'),
       deployKey: key.default('deploy'),
       timeoutMs: z.number().int().min(1000).max(2_592_000_000).default(3_600_000),
     })
@@ -1100,6 +1102,19 @@ export const ciGatedDeploy = define({
         wait: { type: 'event', eventKey: `concat('ci:', stages.${v.pushKey}.output.sha)`, timeoutMs: v.timeoutMs, onTimeout: 'fail' },
       },
       {
+        key: v.notifyKey,
+        name: 'Hand CI the callback',
+        kind: 'agent',
+        prompts: [
+          {
+            label: 'notify',
+            text:
+              `Give the CI run of commit {{stages.${v.pushKey}.output.sha}} this callback URL, the way this project's CI takes one (a pipeline variable, a status webhook, a comment): {{stages.${v.key}.callbackUrl}}\n` +
+              'CI must POST {"data": {...its result...}} to it when the build finishes. Do not post to it yourself.',
+          },
+        ],
+      },
+      {
         key: v.deployKey,
         name: 'Deploy',
         kind: 'agent',
@@ -1108,6 +1123,7 @@ export const ciGatedDeploy = define({
     ],
     edges: [
       { from: v.pushKey, to: v.key },
+      { from: v.pushKey, to: v.notifyKey },
       { from: v.key, to: v.deployKey },
     ],
   }),
