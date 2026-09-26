@@ -10,9 +10,12 @@
 //
 // Rows run through the command registry (`runCommand`), so a palette row does
 // exactly what the menu item and the key binding do. Recent chats are real
-// (useChats + the attention feed for the live badge), fetched only while the
-// palette is open (the body mounts with the dialog). Tab on a row lists its actions (Open, Open in new tab and
-// Copy link in a browser tab, Archive on a chat). No entity search (P5-12).
+// (useChats sorted by activity + the attention feed for the live badge),
+// fetched only while the palette is open (the body mounts with the dialog).
+// Typing also runs the server's entity search (G-18, `useSearch`, debounced
+// 120 ms): one group per type above Go to (P5-12). Tab on a row lists its
+// actions (Open, Open in new tab and Copy link in a browser tab, Archive on a
+// recent chat).
 // ────────────────────────────────────────────────────────────────
 
 import { useMemo, useState } from 'react';
@@ -23,6 +26,7 @@ import { CommandList, type CommandAction, type CommandGroup, type CommandItem } 
 import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
 import { useShellStore } from '@/stores/shellStore.js';
 import { useChats } from '@/hooks/chatListQueries.js';
+import { useSearch } from '@/hooks/searchQueries.js';
 import { useAttention } from '@/hooks/attentionQueries.js';
 import { useProjects } from '@/hooks/projectQueries.js';
 import { useArchiveChat } from '@/hooks/queries.js';
@@ -47,7 +51,7 @@ const ACTION_FOOTER_HINTS = paletteActionFooterHints(HOST);
 
 /** The newest active chats with project names and live state; undefined while loading. */
 function useRecentChats(): readonly RecentChat[] | undefined {
-  const chats = useChats({ status: 'active', limit: RECENT_CHAT_LIMIT });
+  const chats = useChats({ status: 'active', sort: 'activity', limit: RECENT_CHAT_LIMIT });
   const attention = useAttention();
   const projects = useProjects();
   return useMemo(() => {
@@ -63,10 +67,16 @@ function useRecentChats(): readonly RecentChat[] | undefined {
   }, [chats.data, attention.data, projects.data]);
 }
 
-/** A chat's live state as the board's trailing badge. */
+/** How many entity hits the palette asks the server for. */
+const SEARCH_LIMIT = 20;
+
+/** A chat's live state as the board's trailing badge (recent chats and chat search hits). */
 function liveBadge(entry: PaletteEntry | undefined) {
-  if (entry?.kind !== 'chat' || !entry.live) return null;
-  return entry.live === 'needs_you' ? <StatusBadge state="needs_you" context="chat" /> : <StatusBadge state="running" context="chat" />;
+  const live =
+    entry?.kind === 'chat' ? entry.live : entry?.kind === 'entity' && entry.type === 'chat' ? entry.status : undefined;
+  if (live === 'needs_you') return <StatusBadge state="needs_you" context="chat" />;
+  if (live === 'running') return <StatusBadge state="running" context="chat" />;
+  return null;
 }
 
 /** The global command palette. Mount once, inside the router. */
@@ -87,10 +97,13 @@ function PaletteBody({ close }: { close: () => void }) {
   const archiveChat = useArchiveChat();
   const recentChats = useRecentChats();
   const [query, setQuery] = useState('');
+  const search = useSearch(query, { limit: SEARCH_LIMIT });
+  // Hits belong to the query they answered; none while the box is empty.
+  const searchResults = query.trim() ? search.data?.results : undefined;
 
   const model = useMemo(
-    () => buildPaletteModel({ ...HOST, resolvedTheme, recentChats }),
-    [resolvedTheme, recentChats],
+    () => buildPaletteModel({ ...HOST, resolvedTheme, recentChats, searchResults }),
+    [resolvedTheme, recentChats, searchResults],
   );
   const groups = useMemo<CommandGroup[]>(
     () =>

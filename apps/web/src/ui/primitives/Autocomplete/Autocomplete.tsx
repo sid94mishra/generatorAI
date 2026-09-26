@@ -36,6 +36,11 @@ export interface AutocompleteItem {
   shortcut?: readonly string[];
   /** Extra words that match the query but are not shown. */
   keywords?: readonly string[];
+  /**
+   * The caller already matched this item against the query (a server search
+   * that also looks at descriptions and tags): the local filter keeps it.
+   */
+  preMatched?: boolean;
   disabled?: boolean;
 }
 
@@ -95,7 +100,7 @@ export const optionSecondaryText = 'text-fg-3 group-data-highlighted/option:text
 /** Case-insensitive match on label and keywords (Base UI filter signature). */
 export function matchesQuery(item: AutocompleteItem, query: string): boolean {
   const q = query.trim().toLowerCase();
-  if (!q) return true;
+  if (!q || item.preMatched) return true;
   return item.label.toLowerCase().includes(q) || (item.keywords ?? []).some((k) => k.toLowerCase().includes(q));
 }
 

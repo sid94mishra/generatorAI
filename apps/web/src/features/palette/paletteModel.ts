@@ -2,6 +2,13 @@
 // Command palette model (F-palette-01) — pure: registry + real data in,
 // CommandList groups out. React-free so the host rules are unit-tested.
 //
+//   <entities>    while a query is typed: the server's entity search (G-18)
+//                 as one group per type — Chats, Projects, Agents, Workflows,
+//                 Automations, Scripts — in the order of each type's best
+//                 hit, above everything else (board CommandPalette). The
+//                 server already matched them (title, description, tags), so
+//                 the rows are `preMatched`; a chat already listed under
+//                 Recent chats is not repeated.
 //   Go to         NAV_DESTINATIONS (D-22 order) with the host's binding
 //   Actions       `palette: true` registry commands that are not a
 //                 destination, board order first (New chat, New workflow,
@@ -10,7 +17,7 @@
 //                 badge from the attention feed; a note row when none
 //
 // Hints follow the host (D-24): web shows sequences ("G then C"), desktop
-// macOS ⌘ chords, desktop Windows/Linux Ctrl chords. Entity search is P5-12.
+// macOS ⌘ chords, desktop Windows/Linux Ctrl chords.
 // ────────────────────────────────────────────────────────────────
 
 import {
@@ -25,7 +32,8 @@ import {
   type RendererCommandId,
 } from '@generatorai/shared/ui-contract';
 import type { IconConcept } from '@generatorai/design-tokens';
-import type { Chords, CommandAction, CommandGroup, CommandHint } from '@/ui/patterns/CommandList/CommandList.js';
+import type { SearchEntityType, SearchResult, StatusState } from '@generatorai/shared';
+import type { Chords, CommandAction, CommandGroup, CommandHint, CommandItem } from '@/ui/patterns/CommandList/CommandList.js';
 
 export interface PaletteHost {
   host: Host;
@@ -45,7 +53,9 @@ export interface RecentChat {
 export type PaletteEntry =
   /** `path`: the route a Go to row opens (for Open in new tab / Copy link). */
   | { kind: 'command'; id: RendererCommandId; path?: string }
-  | { kind: 'chat'; chatId: string; path: string; live?: RecentChat['live'] };
+  | { kind: 'chat'; chatId: string; path: string; live?: RecentChat['live'] }
+  /** A server search hit (G-18); `status` is the entity's D-18 state when it has one. */
+  | { kind: 'entity'; type: SearchEntityType; id: string; path: string; status?: StatusState };
 
 export type PaletteActionId = 'open' | 'open-new-tab' | 'copy-link' | 'archive';
 
@@ -53,6 +63,48 @@ export interface PaletteModelInput extends PaletteHost {
   resolvedTheme: 'dark' | 'light';
   /** `undefined` while loading (no group), `[]` when there are none (note row). */
   recentChats: readonly RecentChat[] | undefined;
+  /** Entity search hits for the typed query (server-ranked); absent or empty = no entity groups. */
+  searchResults?: readonly SearchResult[];
+}
+
+/** Group label and row icon per searchable entity type. */
+export const ENTITY_GROUPS: Record<SearchEntityType, { label: string; icon: IconConcept }> = {
+  chat: { label: 'Chats', icon: 'chats' },
+  project: { label: 'Projects', icon: 'projects' },
+  agent: { label: 'Agents', icon: 'agents' },
+  workflow: { label: 'Workflows', icon: 'workflows' },
+  automation: { label: 'Automations', icon: 'automations' },
+  script: { label: 'Scripts', icon: 'scripts' },
+};
+
+/**
+ * Entity search hits as one group per type, ordered by each type's best
+ * (first) hit. Chats already shown under Recent chats are dropped.
+ */
+function entityGroups(
+  results: readonly SearchResult[],
+  recentChatIds: ReadonlySet<string>,
+  host: Host,
+  entries: Map<string, PaletteEntry>,
+): CommandGroup[] {
+  const byType = new Map<SearchEntityType, CommandItem[]>();
+  for (const hit of results) {
+    if (hit.type === 'chat' && recentChatIds.has(hit.id)) continue;
+    const value = `entity:${hit.type}:${hit.id}`;
+    if (entries.has(value)) continue;
+    entries.set(value, { kind: 'entity', type: hit.type, id: hit.id, path: hit.href, ...(hit.status ? { status: hit.status } : {}) });
+    const rows = byType.get(hit.type) ?? [];
+    rows.push({
+      value,
+      label: hit.title,
+      icon: ENTITY_GROUPS[hit.type].icon,
+      ...(hit.subtitle ? { meta: hit.subtitle } : {}),
+      preMatched: true,
+      actions: linkActions(host),
+    });
+    byType.set(hit.type, rows);
+  }
+  return [...byType].map(([type, items]) => ({ label: ENTITY_GROUPS[type].label, items }));
 }
 
 /** Actions listed first, in the CommandPalette board's order. */
@@ -123,6 +175,11 @@ export interface PaletteModel {
 export function buildPaletteModel(input: PaletteModelInput): PaletteModel {
   const entries = new Map<string, PaletteEntry>();
   const groups: CommandGroup[] = [];
+
+  if (input.searchResults?.length) {
+    const recentIds = new Set((input.recentChats ?? []).map((c) => c.id));
+    groups.push(...entityGroups(input.searchResults, recentIds, input.host, entries));
+  }
 
   groups.push({
     label: 'Go to',
