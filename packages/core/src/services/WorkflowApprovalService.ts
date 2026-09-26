@@ -13,8 +13,9 @@
 // decision of its running children (recursively, the run tree is at most 3
 // deep), each with the chain of sub-workflow instances it came through, and
 // an answer sent to the parent reaches the child that owns the instance.
-// The commands route, the run page, the digest and (P06) the chat tools all
-// go through here.
+// Runs an agent stage started through its workflow tools (P06 WP-6.4) are
+// mirrored the same way. The commands route, the run page, the digest and
+// the workflow tools all go through here.
 // ────────────────────────────────────────────────────────────────
 
 import type { StageRun } from '@generatorai/shared';
@@ -61,6 +62,8 @@ export interface WorkflowApprovalServiceDeps {
   command: (runId: string, command: RunCommand, opts: { actor?: string }) => Promise<CommandResult>;
   callbacks?: WorkflowCallbacks | undefined;
 }
+
+const TERMINAL_RUN = new Set(['completed', 'failed', 'cancelled']);
 
 function waitOf(s: Pick<StageRun, 'kind' | 'status' | 'interruptData'>): WaitInterrupt | null {
   if (s.kind !== 'wait' || s.status !== 'waiting') return null;
@@ -110,6 +113,18 @@ export class WorkflowApprovalService {
         const child = s.subworkflowState?.childRunId;
         if (child && s.status === 'running' && depth < MAX_INVOCATION_DEPTH) {
           await visit(child, [...via, { runId: id, instanceId: s.id, stageKey: s.stageKey, name: s.name }], depth + 1);
+        }
+      }
+      // P06 WP-6.4 — runs an agent stage started through its workflow tools
+      // (trigger `stage` with a tool call) are mirrored like sub-workflow
+      // children, so an operator sees one queue.
+      if (depth < MAX_INVOCATION_DEPTH) {
+        const byId = new Map(stages.map((s) => [s.id, s]));
+        for (const run of (await this.deps.runRepo.getByParentRunId?.(id).catch(() => [])) ?? []) {
+          const t = (run.trigger ?? {}) as { kind?: unknown; toolCallId?: unknown };
+          const parent = run.parentStageRunId ? byId.get(run.parentStageRunId) : undefined;
+          if (t.kind !== 'stage' || !t.toolCallId || !parent || TERMINAL_RUN.has(run.status)) continue;
+          await visit(run.id, [...via, { runId: id, instanceId: parent.id, stageKey: parent.stageKey, name: parent.name }], depth + 1);
         }
       }
     };
