@@ -1,0 +1,310 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Fix and review until approved",
+    "description": "Triage an issue, then fix and review in a loop until the reviewer approves, then open a pull request.",
+    "session": {},
+    "variables": [
+      {
+        "name": "issue_url",
+        "type": "string",
+        "label": "Issue",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": false,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "loop"
+    ]
+  },
+  "stages": [
+    {
+      "key": "triage",
+      "name": "Triage",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "triage",
+          "text": "Triage the issue {{variables.issue_url}}: summarise it, find the files involved and propose a plan."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "summary",
+            "plan"
+          ],
+          "properties": {
+            "summary": {
+              "type": "string"
+            },
+            "plan": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "fix_review",
+      "name": "Fix and review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "loop",
+      "loop": {
+        "maxIterations": 5,
+        "exits": [
+          {
+            "when": "stages.review.output.verdict == 'approve'",
+            "action": "complete",
+            "consecutive": 1,
+            "reason": "approved"
+          },
+          {
+            "when": "not loop.last.signals.workspaceChanged",
+            "action": "exhaust",
+            "consecutive": 2,
+            "reason": "no_changes"
+          }
+        ],
+        "carry": {
+          "openComments": "stages.review.output.comments"
+        },
+        "onLimit": {
+          "mode": "pause"
+        },
+        "onBodyFailure": "fail",
+        "output": {
+          "select": {
+            "summary": "loop.last.stages.review.output.summary"
+          }
+        }
+      },
+      "budget": {
+        "maxTurns": 250,
+        "maxCostUsd": 12
+      }
+    },
+    {
+      "key": "fix",
+      "name": "Fix",
+      "parentKey": "fix_review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "fix",
+          "text": "Fix issue {{variables.issue_url}}. Triage: {{stages.triage.output.summary}}\nPlan:\n{{stages.triage.output.plan | bullets}}"
+        }
+      ],
+      "followUpPrompts": [
+        {
+          "label": "address",
+          "text": "The reviewer requested changes:\n{{loop.carry.openComments | bullets}}\nAddress each one, run the tests, and report per comment id in `addressed`."
+        }
+      ],
+      "sessionReuse": "continue",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "changes",
+            "addressed"
+          ],
+          "properties": {
+            "changes": {
+              "type": "string"
+            },
+            "addressed": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "resolution"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "resolution": {
+                    "enum": [
+                      "fixed",
+                      "wontfix"
+                    ]
+                  },
+                  "note": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "review",
+      "name": "Review",
+      "parentKey": "fix_review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "review",
+          "text": "Review the diff for {{variables.issue_url}}.{{#if loop.previous}} Verify these earlier comments were addressed: {{loop.carry.openComments | json}}. Fix report: {{stages.fix.output.addressed | json}}{{/if}}"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "verdict",
+            "comments",
+            "summary"
+          ],
+          "properties": {
+            "verdict": {
+              "enum": [
+                "approve",
+                "changes_requested"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "comments": {
+              "type": "array",
+              "maxItems": 50,
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "severity",
+                  "body"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "severity": {
+                    "enum": [
+                      "blocker",
+                      "major",
+                      "minor",
+                      "nit"
+                    ]
+                  },
+                  "file": {
+                    "type": "string"
+                  },
+                  "line": {
+                    "type": "integer"
+                  },
+                  "body": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "open_pr",
+      "name": "Open pull request",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "pr",
+          "text": "Open a pull request for {{variables.issue_url}}. Review summary: {{stages.fix_review.output.summary}}"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "fix",
+      "to": "review",
+      "on": "success"
+    },
+    {
+      "from": "triage",
+      "to": "fix_review",
+      "on": "success"
+    },
+    {
+      "from": "fix_review",
+      "to": "open_pr",
+      "on": "success"
+    }
+  ]
+}

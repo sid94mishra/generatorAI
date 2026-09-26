@@ -1,0 +1,164 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Triage with a typed handoff",
+    "description": "A triage stage returns typed JSON; a guard reads it to decide whether the fix runs; the report reads fields of both.",
+    "session": {
+      "permissionMode": "acceptEdits"
+    },
+    "variables": [
+      {
+        "name": "bug_report",
+        "type": "text",
+        "label": "Bug report",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": true,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "example"
+    ]
+  },
+  "stages": [
+    {
+      "key": "triage",
+      "name": "Triage",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "triage",
+          "text": "Triage this bug report. Find the files involved.\n{{variables.bug_report}}"
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "severity",
+            "summary",
+            "files"
+          ],
+          "properties": {
+            "severity": {
+              "enum": [
+                "low",
+                "medium",
+                "high",
+                "critical"
+              ]
+            },
+            "summary": {
+              "type": "string"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "instructions": "severity: how bad it is for users; files: repository-relative paths.",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "fix",
+      "name": "Fix",
+      "guard": "stages.triage.output.severity in ['high', 'critical']",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "fix",
+          "text": "Fix this bug: {{stages.triage.output.summary}}\nStart with these files:\n{{stages.triage.output.files | bullets}}"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "structured"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "report",
+      "name": "Report",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "report",
+          "text": "Report on the bug ({{stages.triage.output.severity}}): {{stages.triage.output.summary}}\n{{#if stages.fix.summary}}Fix: {{stages.fix.summary}}{{else}}No fix was attempted (severity below high).{{/if}}"
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "from": [
+          "triage"
+        ],
+        "mode": "structured"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "triage",
+      "to": "fix",
+      "on": "success"
+    },
+    {
+      "from": "triage",
+      "to": "report",
+      "on": "success"
+    },
+    {
+      "from": "fix",
+      "to": "report",
+      "on": "always"
+    }
+  ]
+}

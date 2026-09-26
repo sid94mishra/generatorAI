@@ -66,7 +66,8 @@ export function toJSONSchema(): Record<string, Record<string, unknown>> {
 
 const cell = (s: string) => s.replace(/\|/g, '\\|').replace(/\n/g, ' ');
 
-function typeLabel(schema: z.ZodTypeAny): string {
+/** A short type label of a field (bounds, patterns, enum values). */
+export function typeLabel(schema: z.ZodTypeAny): string {
   const s = unwrap(schema);
   if (s instanceof z.ZodString) {
     const checks = s._def.checks as Array<{ kind: string; value?: number; regex?: RegExp }>;
@@ -107,7 +108,8 @@ function typeLabel(schema: z.ZodTypeAny): string {
   return s.constructor.name.replace(/^Zod/, '').toLowerCase();
 }
 
-function defaultOf(schema: z.ZodTypeAny): string {
+/** The zod default of a field, as inline code, or empty. */
+export function defaultOf(schema: z.ZodTypeAny): string {
   let s: z.ZodTypeAny = schema;
   for (let i = 0; i < 10; i++) {
     if (s instanceof z.ZodDefault) return `\`${JSON.stringify(s._def.defaultValue())}\``;
@@ -133,7 +135,8 @@ function fieldTable(root: z.ZodTypeAny, prefix = ''): string {
   return rows.join('\n');
 }
 
-function grammarTable(rows: GrammarRow[]): string {
+/** A grammar table (syntax, meaning) as markdown. */
+export function grammarTable(rows: GrammarRow[]): string {
   return ['| Syntax | Meaning |', '|---|---|', ...rows.map((r) => `| \`${cell(r.syntax)}\` | ${cell(r.meaning)} |`)].join('\n');
 }
 

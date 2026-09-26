@@ -1,0 +1,146 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Multi-source research",
+    "description": "Research a topic in several sources in parallel (read-only), then synthesize what they say.",
+    "session": {},
+    "variables": [
+      {
+        "name": "topic",
+        "type": "text",
+        "label": "Topic",
+        "required": true
+      },
+      {
+        "name": "sources",
+        "type": "list",
+        "label": "Sources (URLs or documents)",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": false,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "map"
+    ]
+  },
+  "stages": [
+    {
+      "key": "sources_map",
+      "name": "Per source",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "map",
+      "map": {
+        "items": "variables.sources",
+        "maxItems": 20,
+        "concurrency": 4,
+        "toleratedFailurePercent": 25,
+        "workspace": "shared",
+        "merge": "none",
+        "output": {}
+      }
+    },
+    {
+      "key": "research",
+      "name": "Research source",
+      "parentKey": "sources_map",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "research",
+          "text": "Research {{variables.topic}} in this source: {{item}}. Report what it says, with quotes and links."
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "summary",
+            "findings"
+          ],
+          "properties": {
+            "summary": {
+              "type": "string"
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "claim"
+                ],
+                "properties": {
+                  "claim": {
+                    "type": "string"
+                  },
+                  "evidence": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "synthesize",
+      "name": "Synthesize",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "synthesize",
+          "text": "Synthesize what the sources say about {{variables.topic}}. Note agreements and contradictions.\n{{ map(stages.sources_map.output.results, r => r.stages.research.output) | json }}"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "sources_map",
+      "to": "synthesize",
+      "on": "success"
+    }
+  ]
+}

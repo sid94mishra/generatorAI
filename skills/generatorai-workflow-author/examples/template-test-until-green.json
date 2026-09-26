@@ -1,0 +1,122 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Test until green",
+    "description": "Fix and re-run the test suite until it passes; exhausts when the number of failing tests stops decreasing.",
+    "session": {},
+    "variables": [],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": false,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "loop"
+    ]
+  },
+  "stages": [
+    {
+      "key": "green",
+      "name": "Test until green",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "loop",
+      "loop": {
+        "maxIterations": 6,
+        "exits": [
+          {
+            "when": "stages.tests.output.passed",
+            "action": "complete",
+            "consecutive": 1,
+            "reason": "tests_pass"
+          },
+          {
+            "when": "not stages.tests.output.passed and stages.tests.output.json.numFailedTests >= loop.previous.stages.tests.output.json.numFailedTests",
+            "action": "exhaust",
+            "consecutive": 2,
+            "reason": "no_fewer_failures"
+          }
+        ],
+        "carry": {
+          "failures": "map(filter(coalesce(stages.tests.output.json.testResults, []), r => r.status == 'failed'), r => r.message)"
+        },
+        "onLimit": {
+          "mode": "pause"
+        },
+        "onBodyFailure": "fail",
+        "output": {}
+      }
+    },
+    {
+      "key": "fix",
+      "name": "Fix",
+      "parentKey": "green",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "fix",
+          "text": "Make the test suite pass without weakening tests."
+        }
+      ],
+      "followUpPrompts": [
+        {
+          "label": "retry",
+          "text": "Tests still fail:\n{{loop.carry.failures | bullets}}\nFix the root cause."
+        }
+      ],
+      "sessionReuse": "continue",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "tests",
+      "name": "Tests",
+      "parentKey": "green",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "check",
+      "check": {
+        "command": "pnpm",
+        "args": [
+          "exec",
+          "vitest",
+          "run",
+          "--reporter=json",
+          "--silent"
+        ],
+        "timeoutMs": 600000,
+        "parseJson": true,
+        "failOnNonZero": false,
+        "tailBytes": 16384
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "fix",
+      "to": "tests",
+      "on": "success"
+    }
+  ]
+}

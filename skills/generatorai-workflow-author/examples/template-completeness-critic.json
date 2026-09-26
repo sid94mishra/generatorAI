@@ -1,0 +1,139 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Completeness critic",
+    "description": "Work on a task until a fresh critic finds nothing missing.",
+    "session": {},
+    "variables": [
+      {
+        "name": "task",
+        "type": "text",
+        "label": "Task",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": false,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "loop"
+    ]
+  },
+  "stages": [
+    {
+      "key": "complete",
+      "name": "Until complete",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "loop",
+      "loop": {
+        "maxIterations": 5,
+        "exits": [
+          {
+            "when": "len(stages.critic.output.missing) == 0",
+            "action": "complete",
+            "consecutive": 1,
+            "reason": "complete"
+          }
+        ],
+        "carry": {
+          "todo": "stages.critic.output.missing"
+        },
+        "onLimit": {
+          "mode": "pause"
+        },
+        "onBodyFailure": "fail",
+        "output": {}
+      }
+    },
+    {
+      "key": "work",
+      "name": "Work",
+      "parentKey": "complete",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "task",
+          "text": "Complete this task: {{variables.task}}"
+        }
+      ],
+      "followUpPrompts": [
+        {
+          "label": "todo",
+          "text": "A reviewer found these still missing:\n{{loop.carry.todo | bullets}}\nComplete them."
+        }
+      ],
+      "sessionReuse": "continue",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "critic",
+      "name": "Critic",
+      "parentKey": "complete",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "critique",
+          "text": "Task: {{variables.task}}\nInspect the current workspace and list everything the task asks for that is still missing or incomplete. Return an empty list only when nothing is missing."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "missing"
+          ],
+          "properties": {
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "work",
+      "to": "critic",
+      "on": "success"
+    }
+  ]
+}

@@ -1,0 +1,191 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Upgrade with a failure branch",
+    "description": "Upgrade a dependency; on failure a read-only stage diagnoses it instead of failing the run; a notice runs on either path.",
+    "session": {
+      "permissionMode": "acceptEdits"
+    },
+    "variables": [
+      {
+        "name": "package_name",
+        "type": "string",
+        "label": "Package",
+        "required": true
+      },
+      {
+        "name": "version",
+        "type": "string",
+        "label": "Target version",
+        "required": false,
+        "defaultValue": "latest"
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": true,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "example"
+    ]
+  },
+  "stages": [
+    {
+      "key": "upgrade",
+      "name": "Upgrade",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "upgrade",
+          "text": "Upgrade {{variables.package_name}} to {{variables.version}}, fix the breaking changes and run the tests. Stop if the tests still fail."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "retry": {
+        "maxAttempts": 2,
+        "initialDelayMs": 2000,
+        "backoffMultiplier": 2,
+        "maxDelayMs": 60000,
+        "jitter": "full",
+        "retryOn": [
+          "rate_limited",
+          "overloaded",
+          "provider_5xx",
+          "idle_timeout"
+        ],
+        "mode": "resume",
+        "restoreCheckpointOnRestart": true
+      },
+      "onExhausted": "fail",
+      "timeouts": {
+        "attemptMs": 1800000
+      },
+      "hooks": []
+    },
+    {
+      "key": "summarize",
+      "name": "Summarize the upgrade",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "summary",
+          "text": "Summarize what changed in the upgrade of {{variables.package_name}}."
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "diagnose",
+      "name": "Diagnose the failure",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "diagnose",
+          "text": "The upgrade of {{variables.package_name}} failed (status {{stages.upgrade.status}}). Explain the most likely cause and what a person should try next."
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "notice",
+      "name": "Write the notice",
+      "join": {
+        "mode": "any",
+        "cancelRemaining": false
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "notice",
+          "text": "Write a three-line notice for the team about the upgrade of {{variables.package_name}}, from the result you were given."
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "upgrade",
+      "to": "summarize",
+      "on": "success"
+    },
+    {
+      "from": "upgrade",
+      "to": "diagnose",
+      "on": "failure"
+    },
+    {
+      "from": "summarize",
+      "to": "notice",
+      "on": "success"
+    },
+    {
+      "from": "diagnose",
+      "to": "notice",
+      "on": "success"
+    }
+  ]
+}

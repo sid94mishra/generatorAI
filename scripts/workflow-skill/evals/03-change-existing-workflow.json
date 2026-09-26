@@ -1,0 +1,22 @@
+{
+  "id": "change-existing-workflow",
+  "title": "Propose a change to an existing workflow",
+  "prompt": "Our Code Review workflow should also check dependencies for known vulnerabilities, in parallel with the other reviews, and the final report must include that section. Change it for me.",
+  "channels": ["generatorai-chat", "mcp"],
+  "setup": "The server has the Code Review template imported and published (generatorai workflow import --template code-review --publish, done by a person).",
+  "expected": {
+    "stageKinds": ["agent"],
+    "shape": [
+      "the agent calls list_workflows and describe_workflow on Code Review before drafting",
+      "the existing stage keys are kept unchanged; one new read-only stage (for example dependency_review) is added in parallel with the other reviews",
+      "the report stage gets an edge from the new stage and its prompt mentions the new section",
+      "the draft is created with replacesWorkflowId set to the Code Review workflow id"
+    ]
+  },
+  "pass": [
+    "validation passes within 3 validate calls",
+    "the plan is shown to the user before the draft is created",
+    "the draft replaces the existing workflow (replacesWorkflowId); the agent does not publish it",
+    "no forbidden fields (as in eval 01); no existing stage key renamed"
+  ]
+}

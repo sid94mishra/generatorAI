@@ -1,0 +1,166 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Plan, implement, review",
+    "description": "Plan a change read-only, implement it, then review the result read-only. Linear, no commit.",
+    "session": {
+      "permissionMode": "acceptEdits"
+    },
+    "variables": [
+      {
+        "name": "task",
+        "type": "text",
+        "label": "What to change",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": true,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "example"
+    ]
+  },
+  "stages": [
+    {
+      "key": "plan",
+      "name": "Plan",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "plan",
+          "text": "Read the code and plan this change: {{variables.task}}\nList the steps and the files each step touches."
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "steps",
+            "files"
+          ],
+          "properties": {
+            "steps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "implement",
+      "name": "Implement",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "implement",
+          "text": "Implement {{variables.task}} following this plan:\n{{stages.plan.output.steps | bullets}}\nRun the tests that cover the files you change."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "retry": {
+        "maxAttempts": 2,
+        "initialDelayMs": 2000,
+        "backoffMultiplier": 2,
+        "maxDelayMs": 60000,
+        "jitter": "full",
+        "mode": "resume",
+        "restoreCheckpointOnRestart": true
+      },
+      "budget": {
+        "maxTurns": 80
+      },
+      "hooks": []
+    },
+    {
+      "key": "review",
+      "name": "Review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "review",
+          "text": "Review the working-tree diff for {{variables.task}}. Report problems by severity, most important first."
+        }
+      ],
+      "session": {
+        "permissionMode": "plan"
+      },
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [
+          {
+            "type": "min_length",
+            "value": 200,
+            "message": "The review is too short to be useful"
+          }
+        ]
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "plan",
+      "to": "implement",
+      "on": "success"
+    },
+    {
+      "from": "implement",
+      "to": "review",
+      "on": "success"
+    }
+  ]
+}

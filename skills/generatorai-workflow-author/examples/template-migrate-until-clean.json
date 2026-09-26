@@ -1,0 +1,185 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Migrate until clean",
+    "description": "Plan, migrate the files in parallel (a worktree per file, merged back), typecheck; repeat until the typecheck passes.",
+    "session": {},
+    "variables": [],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": true,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "loop",
+      "map"
+    ]
+  },
+  "stages": [
+    {
+      "key": "migrate_until_clean",
+      "name": "Migrate until clean",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "loop",
+      "loop": {
+        "maxIterations": 3,
+        "exits": [
+          {
+            "when": "stages.typecheck.output.passed",
+            "action": "complete",
+            "consecutive": 1,
+            "reason": "clean"
+          }
+        ],
+        "onLimit": {
+          "mode": "pause"
+        },
+        "onBodyFailure": "fail",
+        "output": {}
+      }
+    },
+    {
+      "key": "plan",
+      "name": "Plan",
+      "parentKey": "migrate_until_clean",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "plan",
+          "text": "List every file that must change to migrate to the new API."
+        }
+      ],
+      "followUpPrompts": [
+        {
+          "label": "replan",
+          "text": "Typecheck still fails:\n{{loop.previous.stages.typecheck.output.stdoutTail}}\nList only the files that still need changes."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "files"
+          ],
+          "properties": {
+            "files": {
+              "type": "array",
+              "maxItems": 100,
+              "items": {
+                "type": "object",
+                "required": [
+                  "path"
+                ],
+                "properties": {
+                  "path": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "per_file",
+      "name": "Per file",
+      "parentKey": "migrate_until_clean",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "map",
+      "map": {
+        "items": "stages.plan.output.files",
+        "itemKey": "item.path",
+        "maxItems": 100,
+        "concurrency": 4,
+        "toleratedFailurePercent": 0,
+        "workspace": "mount_per_item",
+        "merge": "sequential",
+        "output": {}
+      }
+    },
+    {
+      "key": "edit",
+      "name": "Edit",
+      "parentKey": "per_file",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "edit",
+          "text": "Migrate {{item.path}} to the new API. Reason: {{item.reason}}"
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": []
+      },
+      "hooks": []
+    },
+    {
+      "key": "typecheck",
+      "name": "Typecheck",
+      "parentKey": "migrate_until_clean",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "check",
+      "check": {
+        "command": "pnpm",
+        "args": [
+          "typecheck"
+        ],
+        "timeoutMs": 900000,
+        "parseJson": false,
+        "failOnNonZero": false,
+        "tailBytes": 16384
+      }
+    }
+  ],
+  "edges": [
+    {
+      "from": "plan",
+      "to": "per_file",
+      "on": "success"
+    },
+    {
+      "from": "per_file",
+      "to": "typecheck",
+      "on": "success"
+    }
+  ]
+}
