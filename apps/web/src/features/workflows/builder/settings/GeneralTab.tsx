@@ -9,7 +9,7 @@ import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { Input } from '@/ui/primitives/Input/Input.js';
 import { Textarea } from '@/ui/primitives/Textarea/Textarea.js';
 import { FieldIssues } from '../fields/FieldIssues.js';
-import { InspectorRow, InspectorSection } from '../fields/InspectorLayout.js';
+import { InspectorNote, InspectorRow, InspectorSection } from '../fields/InspectorLayout.js';
 import { SessionSpecEditor } from '../inspector/agent/session/index.js';
 import { applySessionPatch } from '../model/sessionPatch.js';
 
@@ -53,7 +53,8 @@ export function GeneralTab() {
         </InspectorRow>
       </InspectorSection>
 
-      <InspectorSection title="Session" hint="Defaults every stage inherits; a stage can override each one.">
+      <InspectorSection title="Session">
+        <InspectorNote>Defaults every stage inherits; a stage can override each one.</InspectorNote>
         <SessionSpecEditor value={session} onChange={setSession} scope="workflow" projectId={projectId} />
         <FieldIssues issues={issues.filter((i) => i.path.startsWith('/workflow/session'))} />
       </InspectorSection>

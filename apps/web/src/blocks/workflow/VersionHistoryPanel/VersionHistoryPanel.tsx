@@ -29,8 +29,7 @@ import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { Inspector } from '@/ui/patterns/Inspector/Inspector.js';
 import { MenuButton } from '@/ui/patterns/MenuButton/MenuButton.js';
 import { SectionHeader } from '@/ui/patterns/SectionHeader/SectionHeader.js';
-import { KeyChip } from '../KeyChip/KeyChip.js';
-import { LiveChip } from '../VersionChip/VersionChip.js';
+import { KeyChip } from '../chips/WorkflowChips.js';
 
 /** The id of the editor's working copy in `selected`. */
 export const DRAFT_ID = 'draft';
@@ -120,14 +119,14 @@ const OP: Record<VersionDiffRow['op'], { letter: string; tone: string; label: st
 };
 
 function Subject({ subject }: { subject: VersionDiffSubject }) {
-  if (subject.kind === 'stage') return <KeyChip stageKey={subject.key} />;
+  if (subject.kind === 'stage') return <KeyChip outlined stageKey={subject.key} />;
   if (subject.kind === 'edge') {
     return (
       <span className="inline-flex min-w-0 items-center gap-1">
         <span className="text-fg-3">edge</span>
-        <KeyChip stageKey={subject.from} />
+        <KeyChip outlined stageKey={subject.from} />
         <span className="text-fg-3">→</span>
-        <KeyChip stageKey={subject.to} />
+        <KeyChip outlined stageKey={subject.to} />
       </span>
     );
   }
@@ -268,7 +267,7 @@ export function VersionHistoryPanel({
                 >
                   <Checkbox checked={ticked} onCheckedChange={(checked) => toggle(v.id, checked)} aria-label={`Compare v${v.version}`} />
                   <span className="w-8 shrink-0 font-mono text-ui font-semibold text-fg">v{v.version}</span>
-                  {v.live ? <LiveChip /> : null}
+                  {v.live ? <Badge tone="ok">Live</Badge> : null}
                   {v.kind === 'test' ? <Badge>test</Badge> : null}
                   <span className="min-w-0 flex-1 truncate text-small text-fg-2" title={fullDate(v.createdAt)}>
                     {shortDate(v.createdAt)}

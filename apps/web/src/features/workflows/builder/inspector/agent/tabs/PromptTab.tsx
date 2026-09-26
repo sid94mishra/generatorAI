@@ -102,7 +102,7 @@ function ContextSection({ stage, onUpdate, issues }: AgentTabProps) {
           </div>
         </Row>
       ) : null}
-      <Row label="Mode" hint={CONTEXT_HINTS[stage.context.mode]}>
+      <Row label="Mode" stacked hint={CONTEXT_HINTS[stage.context.mode]}>
         <SegmentedControl
           label="Context mode"
           value={stage.context.mode}

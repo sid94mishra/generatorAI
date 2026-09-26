@@ -95,7 +95,7 @@ export function ProblemsPanel({ rows, checkedAt, onCheckAgain, onClose, classNam
         )}
         <span className="min-w-0 flex-1 truncate text-small text-fg-3">
           {errors > 0
-            ? 'Publish and Run are blocked until the errors are fixed. Save still works.'
+            ? 'Save, Publish and Run are blocked until the errors are fixed.'
             : rows.length > 0
               ? "Warnings don't block Publish or Run."
               : 'Publish and Run are not blocked.'}

@@ -138,8 +138,7 @@ export function WorkflowSettingsInspector({ tab, onTabChange }: WorkflowSettings
           className="justify-start"
           title="Edit the workflow session on the General tab"
         >
-          <span className="text-fg-3">Default session</span>
-          <span className="min-w-0 flex-1 truncate text-left">{sessionSummary}</span>
+          {`Default session · ${sessionSummary}`}
         </Button>
       ) : null}
       {body}

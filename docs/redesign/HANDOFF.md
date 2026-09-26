@@ -34,7 +34,7 @@ Tokens, spacing, radii and the Rosetta table for translating a board: `02-design
 | S-08/S-09 | `shell/DockFrame`, `shell/NarrowDockSheet` | dock chrome; used through `blocks/dock` Dock |
 | S-12 | `shell/FindBarFrame` | desktop find bar (wired once in `app/shell/FindBar`, nothing to do per page) |
 
-Not built yet (PW owns it): L-04 CanvasEditor (builder canvas). L-05 `templates/ModalWithAside` (the Run dialog body) landed with PW-a.
+L-04 `templates/CanvasEditor` (header · canvas · banner · problems · inspector) landed with PW-b (the builder); L-05 `templates/ModalWithAside` (the Run dialog body) landed with PW-a. C-18 `patterns/Inspector` gained an `eyebrow` row and is a named `complementary` region.
 
 ## 3. Transcript kit and the tool-card registry (P4-07)
 
@@ -185,22 +185,22 @@ One vocabulary for chats, runs, stages, automations and tasks: `@generatorai/sha
 |---|---|---|---|
 | WF-01 | VersionChip / DraftChip | Redesign P5 | **exists** (PW-a): `blocks/workflow` `VersionChip` |
 | WF-02 | KeyChip | Redesign P5 | **exists** (PW-a): `blocks/workflow` `KeyChip` |
-| WF-03 | ProblemsPanel | Redesign P5 | not built yet |
+| WF-03 | ProblemsPanel | Redesign P5 | **built (PW-b)**: `blocks/workflow/ProblemsPanel` (+ `features/workflows/builder/problems/BuilderProblems`) |
 | WF-04 | StageTableRow | PW | **built (PW-c)**: `features/workflows/run/stages/StageRow.tsx` |
 | WF-05 | RunLifecycleCard | PW | not built; `patterns/StepRail` exists |
 | WF-06 | BudgetMeter | Redesign P5 (view) | **built (PW-c)**: `features/workflows/run/header/BudgetMeter.tsx` (tokens-only without reported cost) |
 | WF-07 | ContextGauge (stage) | reuse B-13 | **exists**: `blocks/composer/parts/ContextGauge` |
 | WF-08 | DecisionCard | PW | **built (PW-c)**: `features/workflows/run/controlFlow/DecisionCard.tsx` |
 | WF-09 | ReviewCard | PW | **built (PW-c)**: `features/workflows/run/stages/ReviewCard.tsx` |
-| WF-10 | VersionHistoryPanel | PW | not built |
+| WF-10 | VersionHistoryPanel | PW | **built (PW-b)**: `blocks/workflow/VersionHistoryPanel` (+ `builder/history/VersionHistoryInspector`); version authors not shown (no API field, D-36) |
 | WF-11 | RunDialogPlanPreview | PW | **exists** (PW-a): `blocks/workflow` `RunPlanPreview` inside the query-aware `RunDialog` (L-05 ModalWithAside) — the builder opens the same dialog (`prepareTarget` saves first) |
 | WF-12 | Chat run card | PW | **built (PW-c)**: `features/workflows/chat/WorkflowRunCards.tsx` via the segment-card registry |
 | WF-13 | Chat approval card | PW | **built (PW-c)**: inside the WF-12 card (GateCardFrame) |
 | WF-14 | Chat draft card | PW | **built (PW-c)**: `features/workflows/chat/WorkflowRunCards.tsx` |
-| WF-15 | CanvasGroupNode | PW | not built (L-04 CanvasEditor not built) |
-| WF-16 | StageKindPalette | PW | not built; `primitives/Autocomplete` exists |
+| WF-15 | CanvasGroupNode | PW | **built (PW-b)**: `blocks/workflow/CanvasGroupNode` (xyflow adapter `builder/canvas/GroupNode`) |
+| WF-16 | StageKindPalette | PW | **built (PW-b)**: `blocks/workflow/StageKindPalette` (kinds + stage templates, `A` opens it) |
 | WF-17 | StageMessageBox | Redesign P4 | **exists**: `Composer variant="stage"` (§4); PW wires `customSendFn` |
-| WF-18 | ExitRuleTable / CarryTable | PW | not built; `NumberField`, `Table`, `SegmentedControl` exist |
+| WF-18 | ExitRuleTable / CarryTable | PW | **built (PW-b)**: `blocks/workflow/{ExitRuleTable,CarryTable}` (render slots for the feature's expression editor) |
 | WF-19 | IterationsTable | PW | **exists** (PW-d): `blocks/workflow` `IterationsTable` (column-driven); the run page binds loop iterations in `features/workflows/run/controlFlow/LoopIterationsTable.tsx` |
 | WF-20 | TriggerChip | Redesign P5 | **exists** (PW-a): `blocks/workflow` `TriggerChip` (+ `iconOnly`), `RUN_TRIGGERS` |
 

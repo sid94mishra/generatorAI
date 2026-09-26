@@ -115,7 +115,7 @@ function StageEdgeComponent({
             <Menu.Popup align="center" aria-label="Edge condition">
               <Menu.RadioGroup value={on} onValueChange={(value) => updateEdge(id, { on: value as EdgeOn })}>
                 {EDGE_ORDER.map((kind) => (
-                  <Menu.RadioItem key={kind} value={kind} description={EDGE_HINTS[kind]}>
+                  <Menu.RadioItem key={kind} value={kind} closeOnClick description={EDGE_HINTS[kind]}>
                     {EDGE_LABELS[kind]}
                   </Menu.RadioItem>
                 ))}

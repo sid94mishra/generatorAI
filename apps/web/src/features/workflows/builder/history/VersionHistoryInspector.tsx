@@ -14,7 +14,7 @@ import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useDefinitionVersions, useWorkflowDefinition, useWorkflowDefinitionVersion } from '@/hooks/workflowQueries.js';
 import { useFetchDefinitionVersion } from '@/hooks/workflowBuilderQueries.js';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
-import { DraftChip } from '@/blocks/workflow/VersionChip/VersionChip.js';
+import { VersionChip } from '@/blocks/workflow/chips/WorkflowChips.js';
 import {
   DRAFT_ID,
   VersionHistoryPanel,
@@ -135,7 +135,7 @@ export function VersionHistoryInspector({ definitionId, currentGraph, onRestore,
       draft={{
         badges: (
           <>
-            <DraftChip />
+            <VersionChip status="draft" />
             {record?.authoredBy ? <Badge icon="agents">Agent draft</Badge> : null}
           </>
         ),

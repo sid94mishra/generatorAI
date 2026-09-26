@@ -43,6 +43,7 @@ export function StageBasics({ stage, issues, onUpdate }: StageBasicsProps) {
           rows={1}
           autosize={{ minRows: 1, maxRows: 4 }}
           placeholder="What this stage is for"
+          aria-label="Description"
         />
       </Field>
       <ParentField stage={stage} issues={issuesAt(issues, '/parentKey')} />

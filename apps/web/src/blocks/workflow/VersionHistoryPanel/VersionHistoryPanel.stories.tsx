@@ -2,7 +2,7 @@ import { useState } from 'react';
 import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, fn, userEvent, within } from 'storybook/test';
 import { Badge } from '@/ui/primitives/Badge/Badge.js';
-import { DraftChip } from '../VersionChip/VersionChip.js';
+import { VersionChip } from '../chips/WorkflowChips.js';
 import { DRAFT_ID, VersionHistoryPanel, type VersionHistoryPanelProps, type VersionHistoryRow } from './VersionHistoryPanel.js';
 
 const VERSIONS: VersionHistoryRow[] = [
@@ -18,7 +18,7 @@ const VERSIONS: VersionHistoryRow[] = [
 const DRAFT: VersionHistoryPanelProps['draft'] = {
   badges: (
     <>
-      <DraftChip />
+      <VersionChip status="draft" />
       <Badge icon="agents">Agent draft</Badge>
     </>
   ),

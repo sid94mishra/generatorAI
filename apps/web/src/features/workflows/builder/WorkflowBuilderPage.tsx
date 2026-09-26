@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// WorkflowBuilderPage — /workflows/new and /workflows/:id/edit on L-04
+// WorkflowBuilderPage — /workflows/:id/edit on L-04
 // CanvasEditor (WorkflowBuilder, WorkflowStage*, WorkflowSettingsPanel,
 // WorkflowValidate, WorkflowLoopBuilder, WorkflowAgentDraft boards).
 //
@@ -24,8 +24,7 @@ import type { InvocationResult, StageKind, WorkflowDefinitionVersionSummary, Wor
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { isOverlayNavigation } from '@/lib/overlayNavigation.js';
 import { usePageTitle } from '@/hooks/usePageTitle.js';
-// Migration scaffolding (eslint.config.mjs): the legacy Run dialog until its kit port lands.
-import { RunDialog } from '@/components/workflow/RunDialog.js';
+import { RunDialog, VersionChip } from '@/blocks/workflow/index.js';
 import { CanvasEditor } from '@/ui/templates/CanvasEditor/CanvasEditor.js';
 import { AlertDialog, useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
@@ -43,9 +42,9 @@ import { BuilderProblems } from './problems/BuilderProblems.js';
 import { useBuilderDocument, RUN_LABELS } from './useBuilderDocument.js';
 
 export function WorkflowBuilderPage() {
-  const { id } = useParams<{ id: string }>();
+  // New workflow creates the draft on the server first, so the builder always edits a saved definition.
+  const { id = '' } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const isNew = !id;
   const doc = useBuilderDocument(id);
   const { definition } = doc;
 
@@ -230,8 +229,7 @@ export function WorkflowBuilderPage() {
           data-testid="workflow-builder"
           header={
             <BuilderHeader
-              isNew={isNew}
-              loading={!isNew && !definition}
+              loading={!definition}
               isAgentDraft={isAgentDraft}
               runMode={doc.runMode}
               isPublishing={doc.isPublishing}
@@ -334,15 +332,24 @@ export function WorkflowBuilderPage() {
 
       <RunDialog
         open={runDialogOpen}
-        onClose={() => setRunDialogOpen(false)}
-        variables={variables}
+        onOpenChange={setRunDialogOpen}
         workflowName={name || 'Untitled Workflow'}
+        badge={<VersionChip status={doc.runMode === 'test' ? 'draft' : 'published'} />}
+        variables={variables}
         stages={stages}
         projectId={projectId}
         lifecycle={runLifecycle}
         target={doc.runTarget}
-        prepareTarget={doc.prepareRunTarget}
         submitLabel={RUN_LABELS[doc.runMode]}
+        {...(doc.testRunTarget ? { testRunTarget: doc.testRunTarget } : {})}
+        prepareTarget={doc.prepareRunTarget}
+        hint={
+          doc.runMode === 'test'
+            ? 'A draft runs its working graph as a test run.'
+            : doc.runMode === 'run'
+              ? 'Runs use the published version.'
+              : 'Run saves and publishes your changes first. Test run runs the working graph without publishing.'
+        }
         onStarted={handleRunStarted}
       />
     </BuilderInspectorContext.Provider>

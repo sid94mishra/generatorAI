@@ -8,8 +8,9 @@
 //     D-25) and the server's validation 1.5 s after (agents, models,
 //     capabilities, child workflows);
 //   • the server's check-command allow-list for check stages;
-//   • save (POST the first time, then PUT with the loaded revision; a 409
-//     offers "Reload theirs" / "Overwrite", a 422 shows its issues),
+//   • save (PUT with the loaded revision — a workflow is created as a draft by
+//     New workflow before the builder opens it; a 409 offers "Reload theirs" /
+//     "Overwrite", a 422 shows its issues),
 //     publish (saves first; an agent draft that replaces a workflow opens
 //     that workflow), export, the Run button's mode and run preparation;
 //   • the shell's unsaved-work flag.
@@ -25,7 +26,6 @@ import type {
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useUnsavedWorkStore } from '@/stores/unsavedWorkStore.js';
 import {
-  useCreateWorkflowDefinition,
   usePublishDefinition,
   useSaveDefinitionGraph,
   useWorkflowDefinition,
@@ -42,7 +42,7 @@ import { exportFileName } from '@/utils/workflowExport.js';
 
 /**
  * What the Run button does for the current definition state:
- * - `test`: a draft (or an unsaved new workflow) runs only as a test run;
+ * - `test`: a draft runs only as a test run;
  * - `save-run`: a published workflow with unsaved edits is saved, published, then run (D-17);
  * - `publish-run`: saved but unpublished changes are published, then run;
  * - `run`: the published version runs as is.
@@ -85,12 +85,14 @@ export interface BuilderDocument {
   publish: () => void;
   exportJson: () => void;
   runTarget: InvocationRequest['target'] | undefined;
-  prepareRunTarget: () => Promise<InvocationRequest['target'] | null>;
+  /** A test run of the working graph beside Run, for a published workflow with unpublished edits. */
+  testRunTarget: InvocationRequest['target'] | undefined;
+  /** On Start: bring the server up to what the canvas shows (save, or save and publish), then start `target`. */
+  prepareRunTarget: (target: InvocationRequest['target'] | undefined) => Promise<InvocationRequest['target'] | null>;
 }
 
-export function useBuilderDocument(id: string | undefined): BuilderDocument {
+export function useBuilderDocument(id: string): BuilderDocument {
   const navigate = useNavigate();
-  const isNew = !id;
   const definitionId = useWorkflowBuilderStore((s) => s.definitionId);
   const status = useWorkflowBuilderStore((s) => s.status);
   const isDirty = useWorkflowBuilderStore((s) => s.isDirty);
@@ -98,7 +100,6 @@ export function useBuilderDocument(id: string | undefined): BuilderDocument {
   const name = useWorkflowBuilderStore((s) => s.workflow.name);
 
   const { data: definition, isLoading, error: loadError, refetch } = useWorkflowDefinition(id);
-  const createDefinition = useCreateWorkflowDefinition();
   const saveDefinition = useSaveDefinitionGraph();
   const publishDefinition = usePublishDefinition();
   const validateOnServer = useValidateDefinitionGraph();
@@ -121,11 +122,10 @@ export function useBuilderDocument(id: string | undefined): BuilderDocument {
     status !== 'published' ? 'test' : isDirty ? 'save-run' : hasUnpublishedChanges ? 'publish-run' : 'run';
 
   // ── Load ──
-  // Reset whenever the URL names a different definition than the store holds.
-  // The first save of a new workflow navigates to its own id; the store holds
-  // it then, so the canvas, selection and undo history survive.
+  // Reset whenever the URL names a different definition than the store holds
+  // (never A's content under B's URL, even when B fails to load).
   useEffect(() => {
-    if (useWorkflowBuilderStore.getState().definitionId !== (id ?? null)) useWorkflowBuilderStore.getState().resetBuilder();
+    if (useWorkflowBuilderStore.getState().definitionId !== id) useWorkflowBuilderStore.getState().resetBuilder();
   }, [id]);
 
   useEffect(() => {
@@ -234,16 +234,13 @@ export function useBuilderDocument(id: string | undefined): BuilderDocument {
       }
       const graph: WorkflowGraph = useWorkflowBuilderStore.getState().toGraph();
       const existingId = store.definitionId;
+      // Nothing is loaded yet: never save a blank canvas over the workflow.
+      if (!existingId) return null;
       store.markSaving(true);
       try {
-        const record = existingId
-          ? await saveDefinition.mutateAsync({ id: existingId, graph, expectedRevision: expectedRevision ?? store.revision ?? 1 })
-          : await createDefinition.mutateAsync(graph);
+        const record = await saveDefinition.mutateAsync({ id: existingId, graph, expectedRevision: expectedRevision ?? store.revision ?? 1 });
         useWorkflowBuilderStore.getState().applySaved(record, graph);
         flashSaved();
-        // The first save switches to update mode: the URL now names the new
-        // definition, and the next save is a PUT rather than a second POST (D-5).
-        if (!existingId) navigate(`/workflows/${record.id}/edit`, { replace: true });
         return record;
       } catch (err) {
         useWorkflowBuilderStore.getState().markSaving(false);
@@ -260,7 +257,7 @@ export function useBuilderDocument(id: string | undefined): BuilderDocument {
         return null;
       }
     },
-    [validate, saveDefinition, createDefinition, flashSaved, showError, navigate],
+    [validate, saveDefinition, flashSaved, showError],
   );
 
   const save = useCallback(() => void saveGraph(), [saveGraph]);
@@ -333,27 +330,37 @@ export function useBuilderDocument(id: string | undefined): BuilderDocument {
     [definitionId, runMode],
   );
 
-  // On Start: bring the server up to what the canvas shows, then run that.
-  const prepareRunTarget = useCallback(async (): Promise<InvocationRequest['target'] | null> => {
-    const mode = runMode;
-    if (mode === 'save-run' || mode === 'publish-run') {
-      if (!(await publishRecord())) return null;
-    } else {
-      const current = useWorkflowBuilderStore.getState();
-      if (current.isDirty || !current.definitionId) {
+  // Beside Run: a test run of the working graph while edits are unpublished.
+  const testRunTarget = useMemo(
+    (): InvocationRequest['target'] | undefined =>
+      definitionId && (runMode === 'save-run' || runMode === 'publish-run')
+        ? { kind: 'definition', workflowDefinitionId: definitionId, testRun: true }
+        : undefined,
+    [definitionId, runMode],
+  );
+
+  // On Start: bring the server up to what the canvas shows, then run that. A
+  // test run only needs the working graph saved; Run of a published workflow
+  // with edits saves AND publishes first (D-17).
+  const prepareRunTarget = useCallback(
+    async (target: InvocationRequest['target'] | undefined): Promise<InvocationRequest['target'] | null> => {
+      const test = !!target && 'testRun' in target && target.testRun === true;
+      if (!test && (runMode === 'save-run' || runMode === 'publish-run')) {
+        if (!(await publishRecord())) return null;
+      } else if (useWorkflowBuilderStore.getState().isDirty) {
         if (!(await saveGraph())) return null;
       }
-    }
-    // Fresh snapshot — the save above may have created the definition.
-    const defId = useWorkflowBuilderStore.getState().definitionId;
-    if (!defId) return null;
-    return { kind: 'definition', workflowDefinitionId: defId, ...(mode === 'test' ? { testRun: true } : {}) };
-  }, [runMode, publishRecord, saveGraph]);
+      const defId = useWorkflowBuilderStore.getState().definitionId;
+      if (!defId) return null;
+      return { kind: 'definition', workflowDefinitionId: defId, ...(test || runMode === 'test' ? { testRun: true } : {}) };
+    },
+    [runMode, publishRecord, saveGraph],
+  );
 
   return {
-    definition: isNew ? undefined : definition,
-    isLoading: !isNew && isLoading,
-    loadError: isNew ? null : loadError,
+    definition,
+    isLoading,
+    loadError,
     refetch: () => void refetch(),
     runMode,
     isPublishing,
@@ -373,6 +380,7 @@ export function useBuilderDocument(id: string | undefined): BuilderDocument {
     publish,
     exportJson,
     runTarget,
+    testRunTarget,
     prepareRunTarget,
   };
 }

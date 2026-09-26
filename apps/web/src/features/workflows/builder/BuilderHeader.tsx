@@ -13,7 +13,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useWorkflowBuilderStore } from '@/stores/workflowBuilderStore.js';
 import { useDefinitionVersions } from '@/hooks/workflowQueries.js';
 import { isMacOS } from '@/lib/desktop.js';
-import { DraftChip, VersionChip } from '@/blocks/workflow/VersionChip/VersionChip.js';
+import { VersionChip } from '@/blocks/workflow/chips/WorkflowChips.js';
 import { Breadcrumb } from '@/ui/patterns/Breadcrumb/Breadcrumb.js';
 import { MenuButton } from '@/ui/patterns/MenuButton/MenuButton.js';
 import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
@@ -31,7 +31,6 @@ const UNDO_KEYS = [MOD, 'Z'] as const;
 const REDO_KEYS = isMacOS ? (['⇧', '⌘', 'Z'] as const) : (['Ctrl', 'Shift', 'Z'] as const);
 
 export interface BuilderHeaderProps {
-  isNew: boolean;
   /** An existing workflow whose record has not loaded yet: nothing may be saved over it. */
   loading: boolean;
   isAgentDraft: boolean;
@@ -53,7 +52,6 @@ export interface BuilderHeaderProps {
 }
 
 export function BuilderHeader({
-  isNew,
   loading,
   isAgentDraft,
   runMode,
@@ -123,20 +121,20 @@ export function BuilderHeader({
       status={
         <>
           {status === 'published' ? (
-            <VersionChip
-              version={liveVersion}
-              hasUnpublishedChanges={hasUnpublishedChanges}
-              title={hasUnpublishedChanges ? 'Runs use the published version; saved changes are not published yet' : 'Runs use this version'}
-            />
+            <span title={hasUnpublishedChanges ? 'Runs use the published version; saved changes are not published yet' : 'Runs use this version'}>
+              <VersionChip status="published" version={liveVersion} />
+            </span>
           ) : status ? (
-            <DraftChip revision={revision ?? undefined} title="A draft runs only as a test run" />
+            <span title="A draft runs only as a test run">
+              <VersionChip status="draft" revision={revision ?? undefined} />
+            </span>
           ) : null}
           {isAgentDraft ? <Badge icon="agents">Agent draft</Badge> : null}
         </>
       }
       meta={
         <>
-          {isDirty ? <span>Unsaved changes</span> : null}
+          {isDirty ? <span>Unsaved changes</span> : status === 'published' && hasUnpublishedChanges ? <span>Unpublished changes</span> : null}
           {saveSuccess ? (
             <span role="status" className="flex items-center gap-1 text-ok">
               <Icon concept="status-succeeded" size={12} /> Saved
@@ -207,7 +205,7 @@ export function BuilderHeader({
                 id: 'export',
                 label: isDirty ? 'Export the saved version' : 'Export as JSON',
                 icon: 'download',
-                disabled: isNew || !definitionId,
+                disabled: !definitionId,
                 onSelect: onExport,
               },
             ]}

@@ -296,7 +296,7 @@ export function OutputTab({ stage, onUpdate, issues }: AgentTabProps) {
           />
           <FieldIssues issues={issuesAt(issues, '/output/schema', '/output/format')} />
         </Row>
-        <Row label="Extraction" hint="Auto picks native, then the submit_output tool, then the final JSON block.">
+        <Row label="Extraction" stacked hint="Auto picks native, then the submit_output tool, then the final JSON block.">
           <SegmentedControl
             label="Output extraction"
             value={output.extraction}

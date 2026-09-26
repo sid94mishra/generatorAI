@@ -313,14 +313,6 @@ export default [
               from: { element: { type: 'features' } },
               allow: { to: { element: { type: 'features', captured: { domain: '{{ from.element.captured.domain }}' } } } },
             },
-            // Migration scaffolding (PW-b): the ported workflow builder opens the
-            // legacy Run dialog until its kit port (L-05 RunDialog, PW) lands;
-            // then this entry goes. (The P3-07 CreateChatDialog entry it replaces
-            // was stale: that file was deleted in P5-09.)
-            {
-              from: { element: { type: 'features' } },
-              allow: { to: { element: { type: 'legacy' }, file: { path: ['apps/web/src/components/workflow/RunDialog.tsx'] } } },
-            },
             { from: { element: { type: 'app' } }, allow: toTypes('ui', 'blocks', 'features', 'data', 'platform', 'legacy') },
             { from: { element: { type: 'data' } }, allow: toTypes('data', 'platform') },
             // Migration scaffolding; removed in P7. The only data → legacy edge

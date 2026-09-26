@@ -36,7 +36,7 @@ import { Badge } from '@/ui/primitives/Badge/Badge.js';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Link } from '@/ui/primitives/Link/Link.js';
 import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
-import { KeyChip } from '@/blocks/workflow/KeyChip/KeyChip.js';
+import { KeyChip } from '@/blocks/workflow/chips/WorkflowChips.js';
 
 export type DraftNodeTag = 'added' | 'changed';
 
@@ -89,7 +89,7 @@ function Keys({ keys, max = 3 }: { keys: readonly string[]; max?: number }) {
   return (
     <>
       {keys.slice(0, max).map((k) => (
-        <KeyChip key={k} stageKey={k} />
+        <KeyChip key={k} stageKey={k} outlined />
       ))}
       {keys.length > max ? <span className="text-fg-3">+{keys.length - max}</span> : null}
     </>

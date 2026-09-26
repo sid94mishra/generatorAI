@@ -32,8 +32,6 @@ export { Kbd, isMacPlatform, type KbdProps, type KbdKey } from './Kbd.js';
 export { SearchableSelect, type SearchableSelectProps } from './SearchableSelect.js';
 
 // Existing primitives re-exported here so '@/components/ui' is the one entry point
-export { NumberStepper } from '@/components/workflow/NumberStepper.js';
-export { CollapsibleSection } from '@/components/workflow/CollapsibleSection.js';
 export { ConfirmDialog, type ConfirmDialogProps } from './ConfirmDialog.js';
 export { Drawer, type DrawerProps, type DrawerSide } from './Drawer.js';
 export { useConfirm, type ConfirmOptions, type UseConfirmResult } from './useConfirm.js';
