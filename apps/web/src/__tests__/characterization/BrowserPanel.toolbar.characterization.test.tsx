@@ -128,9 +128,9 @@ describe('BrowserPanel — URL bar (web)', () => {
     ]);
   });
 
-  // DEFECT: navigate tests the scheme case-sensitively (BrowserPanel.tsx:652) while start is
+  // Was P4 defect #5 (fixed in P4-03): navigate tested the scheme case-sensitively (BrowserPanel.tsx:652) while start is
   // case-insensitive (608), so "HTTP://EXAMPLE.COM" becomes "https://HTTP://EXAMPLE.COM".
-  it.fails('does not double-prefix an upper-case scheme on navigate', async () => {
+  it('does not double-prefix an upper-case scheme on navigate', async () => {
     renderPanel();
     await flush();
     await submitUrl('HTTP://EXAMPLE.COM');
@@ -232,10 +232,10 @@ describe('BrowserPanel — URL bar (web)', () => {
 });
 
 describe('BrowserPanel — URL pill (web, restricted)', () => {
-  // DEFECT: the restricted pill renders `descriptor.currentUrl` verbatim (BrowserPanel.tsx:1605),
+  // Was P4 defect #6 (fixed in P4-03): the restricted pill rendered `descriptor.currentUrl` verbatim (BrowserPanel.tsx:1605),
   // so the internal `about:blank#gai-<id>` discovery marker that isInternalBrowserUrl (274-277)
   // says must never surface is shown to the user.
-  it.fails('never shows the internal #gai- marker', async () => {
+  it('never shows the internal #gai- marker', async () => {
     fetchStub.setDescriptor({ ...READY, currentUrl: 'about:blank#gai-ws-1' });
     renderPanel();
     await flush();

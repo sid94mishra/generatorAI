@@ -6,7 +6,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { getWebBrowserInteractivity, setWebBrowserInteractivity } from '@/components/chat/BrowserPanel.js';
+import { getWebBrowserInteractivity, setWebBrowserInteractivity } from '@/lib/browserInteractivity.js';
 import { Input, ToggleSwitch } from '@/components/ui/index.js';
 import { SectionHeader, SettingsCard } from '../shared.js';
 import { useHealth } from '@/hooks/queries.js';

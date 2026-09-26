@@ -7,9 +7,9 @@ Recorded as `it.fails` in `apps/web/src/__tests__/characterization/` on `desktop
 | 1 | Enter during IME composition sends | `ChatInput.tsx:1299-1311` | **Fixed in P4-02** (`useComposerKeymap`) |
 | 2 | Bare "scratch that" dropped with a streaming STT engine | `ChatInput.tsx:985-993, 1046-1072` | **Fixed in P4-02** (`useDictation`) |
 | 3 | …and inserted as text with a non-streaming engine | `ChatInput.tsx:1149-1153` | **Fixed in P4-02** (`useDictation`) |
-| 4 | Inspect picks never attach: panel reads `payload.data`, stream delivers `{kind,payload}` | `BrowserPanel.tsx:472-487` | P4-03 |
-| 5 | `HTTP://x` → `https://HTTP://x` (case-sensitive scheme check) | `BrowserPanel.tsx:652` | P4-03 |
-| 6 | Restricted-mode URL pill shows internal `#gai-` URL | `BrowserPanel.tsx:1605` | P4-03/P4-10 |
+| 4 | Inspect picks never attach: panel reads `payload.data`, stream delivers `{kind,payload}` | `BrowserPanel.tsx:472-487` | **Fixed P4-03** (`blocks/browser/browserEvents.ts` reads `payload`, then `data`) |
+| 5 | `HTTP://x` → `https://HTTP://x` (case-sensitive scheme check) | `BrowserPanel.tsx:652` | **Fixed P4-03** (`normaliseBrowserUrl`, one case-insensitive check) |
+| 6 | Restricted-mode URL pill shows internal `#gai-` URL | `BrowserPanel.tsx:1605` | **Fixed P4-03** (`displayBrowserUrl`) |
 | 7 | Keep/Undo may target the wrong file: mount alias stripped from an already repo-relative path | `ChangesSurface.tsx:869, 898, 915` | P4-04/P4-09 |
 | 8 | Mount-group click can lose its scroll | `ChangesSurface.tsx:1533-1534` | P4-09 |
 | 9 | Focusing a comment on a kept file does not open the Kept group | `ChangesSurface.tsx:706-717` | P4-09 |

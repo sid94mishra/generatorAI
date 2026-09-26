@@ -477,10 +477,10 @@ describe('BrowserPanel — browser event stream (BrowserPanel.tsx:464-507)', () 
     expect(inspectButton()).toHaveAttribute('aria-pressed', 'true');
   });
 
-  // DEFECT: the real mux stream delivers `{kind, payload}` (platform/muxStream.ts:524, and
+  // Was P4 defect #4 (fixed in P4-03): the real mux stream delivers `{kind, payload}` (platform/muxStream.ts:524, and
   // ComputerPanel.tsx:645 reads `payload`), but BrowserPanel reads `payload.data?.artifactId`
   // (BrowserPanel.tsx:472-487), so an inspector pick arriving through the mux never attaches.
-  it.fails('browser.selection in the mux wire shape ({kind, payload}) attaches the element', async () => {
+  it('browser.selection in the mux wire shape ({kind, payload}) attaches the element', async () => {
     const onCapture = vi.fn();
     renderPanel({ onCapture });
     await flush();

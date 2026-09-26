@@ -3,7 +3,7 @@
 // containment relations; rects and CSS visibility come from fake deps.
 import { afterEach, describe, expect, it } from 'vitest';
 
-import { isObscured, OCCLUSION_SELECTOR, type OcclusionDeps } from '@/components/chat/nativeBrowserOcclusion.js';
+import { isObscured, OCCLUSION_SELECTOR, type OcclusionDeps } from './nativeBrowserOcclusion.js';
 import { overlayProps } from '@/ui/lib/overlay.js';
 
 interface Box { left: number; top: number; width: number; height: number }
