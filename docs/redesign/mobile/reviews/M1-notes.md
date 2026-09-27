@@ -1,0 +1,30 @@
+# M1 — Safety net and tooling
+
+## Phase start (2026-09-27)
+
+M0 native launch acceptance passed on both phones. `git merge desktop_redesign` is already up to date at 744f3a02; `pnpm install` passed. No shared additions were lost. Current desktop contracts remain those reviewed in M0.
+
+Public mobile artifact opens in the in-app browser and now embeds version **1790488181-a0f4**, newer than committed **1790412505-d42b**. Inspected Home/navigation and pairing content; no new contradiction affecting M1's nonvisual task was identified. The committed snapshot remains authoritative and was not rewritten. Owner follow-up: refresh the snapshot if the newer artifact is intended for implementation. All committed mobile boards and the desktop parity boards were rendered and reviewed during M0.
+
+## M1-01 — SDK patch and development clients (complete)
+
+- Expo 57.0.25, React Native 0.86.3, SDK-matched Expo modules and Worklets 0.10.1.
+- Added expo-dev-client 57.0.19; removed unused direct dependencies `@gorhom/bottom-sheet`, `@gorhom/portal`, `expo-application`. No runtime imports use them. The bundle denylist intentionally still rejects Gorhom; Sheet's historical explanation remains relevant.
+- Added EAS `development-device` and `e2e` profiles per 06 §8.4; removed inactive update channels from preview/production. E2E extends preview and only adds the build label, simulator and APK settings.
+- Regenerated ignored iOS/Android projects through `expo prebuild --clean --no-install`; no generated native source was hand-edited. SceneLifecycle and ShadowNodeRaceFix plugins remain until the SDK 58 task.
+- Added the SDK-matched expo-asset peer and its config plugin. Removed three accidentally tracked .expo metadata/generated files from Git (local files remain ignored). Targeted pnpm peer re-resolution and a clean relink removed duplicate native installations; expo-modules-autolinking verify passes. The root override and all shared runtime contracts remain unchanged.
+- Updated iOS development client built successfully with normal ad-hoc simulator signing. Installed, loaded from Metro and displays **Pair this phone**; agent-device's text assertion passed in 950 ms. Evidence: `.expo/m1-ios-progress2.png`, `.expo/m1-ios-pairing-assert.json`, `.expo/m1-ios-build-resume.log`. Android also built successfully (618 Gradle tasks, 32m 29s), installed and displays **Pair this phone** after dismissing Expo’s first-run tutorial; native assertion passed in 52 ms. Evidence: `.expo/m1-android-build.log`, `.expo/m1-android-pairing.png`, `.expo/m1-android-pairing-assert.json`. Both build fingerprints were recorded and compare as rebuild=no. Builds ran sequentially on this 8 GB host.
+
+Validation so far: mobile typecheck passed; lint passed with the two pre-existing warnings (unused SectionHeader in scope-request, console in secureItemStore.web); **105 test files / 1,097 tests passed**. Expo's dependency check has one existing workspace exception: the root pnpm override forces `@types/react` 19.3.0 while SDK 57 recommends ~19.2.4. The mobile type declaration now matches that existing shared override; typecheck and tests pass against the actual overridden version. All native runtime dependencies pass the Expo version check. Existing lucide React peer range remains until the planned M3 icon migration; RN CLI's optional Metro-config peer remains 0.86.2, while Expo uses its own Metro config.
+
+Bootstrap Done-loop skips: step 3 until M1-05; step 4 Jest until M1-06; step 6 fingerprint until M1-02; step 7 scripted walkthrough until M1-02/M1-03; step 8 Maestro until M1-04. Native build/launch acceptance passed on both platforms.
+
+## M1-02 — Tooling prepared during native compilation (in progress)
+
+The additive shared sandbox change is committed separately as **004071ef**. Its four option tests pass; actual API/web startup on 3297/5297, temporary database/identity verification, same-server reuse and graceful IPC shutdown pass. Default ports and the desktop Faux fixture are preserved.
+
+Mobile tooling is uncommitted pending native pairing acceptance. Doctor checks native tool versions, committed device models, ports and owner setup requirements. Fingerprint uses the SDK-owned package: recording the successful iOS build and comparing again returns rebuild=no. Sandbox-pair creates mobile fixtures and a guarded throwaway repository; two live seed runs reuse the same chats. The pairing helper opens the consent screen and verifies the resulting device record. The Maestro passthrough reads flow metadata, creates fresh conversations per flow and passes sandbox IDs. Six mobile helper tests pass (pair URL identity preservation, temporary path guards, fixture merge, Maestro metadata, suite discovery/order and JUnit aggregation). Windows and Linux execution remains unverified on this macOS host.
+
+The initial agent-device open command times out after 90 seconds during cold XCTest runner setup. A separate runner build passed; explicit `prepare ios-runner --timeout 300000` then succeeded (about 110 seconds of connection/health checking). The pairing helper now prepares the iOS runner before opening the app and handles only the observed OS “Open in GeneratorAI?” prompt. No app authentication behavior was changed. Local evidence is under ignored `apps/mobile/.expo/m1-*`.
+
+Live gate validation passes: a fresh Gate conversation preserves the other fixture IDs, appears as a tool permission in `/api/attention`, and resumes after Allow. The first run exposed an existing shared-directory checkpoint issue (`GitShadowRefStore` maps source directories to one shadow store; parallel fixture workspaces overwrite that registration). MD-98 gives each fixture conversation an independent disposable repository and waits for workspace readiness. The repeated isolated smoke passes **without checkpoint creation errors** (`.expo/m1-fixture-isolated-smoke.log`). No server/shared checkpoint code was edited. Desktop follow-up: investigate simultaneous in-place workspaces on the same source directory.

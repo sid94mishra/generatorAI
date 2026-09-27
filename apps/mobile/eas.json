@@ -11,16 +11,26 @@
       "android": { "buildType": "apk" },
       "ios": { "simulator": true }
     },
+    "development-device": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": { "APS_ENVIRONMENT": "development" },
+      "android": { "buildType": "apk" }
+    },
+    "e2e": {
+      "extends": "preview",
+      "env": { "EXPO_PUBLIC_E2E": "1" },
+      "android": { "buildType": "apk" },
+      "ios": { "simulator": true }
+    },
     "preview": {
       "distribution": "internal",
       "env": { "APS_ENVIRONMENT": "production" },
-      "android": { "buildType": "apk" },
-      "channel": "preview"
+      "android": { "buildType": "apk" }
     },
     "production": {
       "autoIncrement": true,
-      "env": { "APS_ENVIRONMENT": "production" },
-      "channel": "production"
+      "env": { "APS_ENVIRONMENT": "production" }
     }
   },
   "submit": {

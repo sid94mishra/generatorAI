@@ -159,6 +159,7 @@ const config: ExpoConfig = {
 
   plugins: [
     'expo-router',
+    'expo-asset',
     [
       // Splash configuration moved out of the top-level `splash` key in
       // SDK 57. Dark is the product default, so the launch background must

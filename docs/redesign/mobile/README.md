@@ -75,7 +75,7 @@ Update this in every task commit (task ID, date).
 | Phase | Status | Notes |
 |---|---|---|
 | M0 Kickoff & environment | complete (2026-09-27) | M0-01…04 complete. Both native builds display the pairing screen; iOS required normal ad-hoc simulator signing for Keychain access. Desktop foundations/designs and sandbox reviewed. API 36 fallback until API 37 is published. See `reviews/M0-notes.md`. |
-| M1 Safety net & tooling (SDK 57) | not started | |
+| M1 Safety net & tooling (SDK 57) | in progress (2026-09-27) | M1-01 complete: code checks and both native development-client launches pass. M1-02 shared sandbox extension committed (004071ef); mobile pairing/tooling prepared and under verification. |
 | M2 Shared-logic adoption (SDK 57) | not started | |
 | M3 Platform upgrade & foundations (SDK 58+) | not started | waits for SDK 58 stable (see 07 §1 fallback) |
 | *Batch A review (M1–M3)* | — | |
@@ -94,4 +94,4 @@ Update this in every task commit (task ID, date).
 
 ## Resume point
 
-2026-09-27: M0 complete. Begin M1-01. Android and iOS pairing-screen launches are visually verified; normal simulator signing (`CODE_SIGNING_ALLOWED=YES CODE_SIGN_IDENTITY=-`) fixes the iOS Keychain entitlement error. Use the fresh gai-iphone (A7E28FC9-BAC6-4D32-895A-31B06B505DB5); preserve the failed original. Run one native platform at a time, Metro with NODE_OPTIONS=--dns-result-order=ipv4first. Owner-authorized temp cleanup is complete. Desktop merge d68687de at 744f3a02 (MD-97); designs and mobile-facing foundations reviewed. No immediate owner machine action is needed. Pairing with the sandbox and baseline screenshots are M1-04. See reviews/M0-notes.md.
+2026-09-27: M0 and M1-01 complete. Expo 57.0.25 / RN 0.86.3 and SDK-matched dependencies installed, expo-dev-client added, unused Gorhom packages and direct expo-application removed. EAS development-device/e2e profiles added; inactive channel keys removed. CNG regenerated; mobile typecheck/lint and 1,097 tests pass. Both development clients build and display “Pair this phone” (native assertions pass). Continue M1-02 native pairing verification, pinning agent-device for M1-03 first. Native platforms run sequentially; iOS simulator signing must remain enabled for Keychain access. Cold agent-device iOS startup needs `prepare ios-runner --timeout 300000` before open on this host. M1-02's shared sandbox extension is committed as 004071ef; mobile scripts remain uncommitted pending pairing/driver checks, with live seed/reuse/stop and helper tests passing. See `reviews/M1-notes.md`. M1 phase-start merge is already up to date at desktop 744f3a02. Public mobile artifact now 1790488181-a0f4; committed 1790412505-d42b remains authoritative and untouched. No contradiction affecting this nonvisual task identified. Baseline characterization remains M1-04.
