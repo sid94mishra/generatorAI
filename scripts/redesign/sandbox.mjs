@@ -5,6 +5,7 @@
 // touches :3100/:5173 or the developer's real database.
 //
 //   node scripts/redesign/sandbox.mjs                 → Faux harness (default)
+//   node scripts/redesign/sandbox.mjs --port=3297 --web-port=5297 → second isolated sandbox
 //   node scripts/redesign/sandbox.mjs --real-harness   → real provider CLIs
 //   node scripts/redesign/sandbox.mjs --clean          → remove old sandbox temp dirs, then exit
 //   node scripts/redesign/sandbox.mjs --help           → resolve and print the commands, start nothing
@@ -40,6 +41,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { nodeBinArgs, pnpmCommand } from './lib/spawn-node-bin.mjs';
+import { sandboxOptions } from './lib/sandbox-options.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -51,8 +53,7 @@ const SEED_SCRIPT = path.join(ROOT, 'agent-tests', 'vrt', 'seed.ts');
 
 // Not `gai-`/`genai-` — those prefixes are what scripts/sweep-temp-workspaces.mjs deletes.
 const PREFIX = 'generatorai-sandbox-';
-const SERVER_PORT = 3197;
-const WEB_PORT = 5197;
+const { serverPort: SERVER_PORT, webPort: WEB_PORT } = sandboxOptions();
 const SHUTDOWN_BUDGET_MS = 5_000;
 const START_TIMEOUT_MS = 60_000;
 
@@ -82,6 +83,7 @@ function printResolvedCommands() {
   const pnpmBundle = pnpmCommand(['--filter', '@generatorai/server', 'bundle']);
   const pnpmBundleArgs = pnpmBundle.args.length > 0 ? ` ${pnpmBundle.args.join(' ')}` : '';
   console.log('[sandbox] resolved commands (nothing started):');
+  console.log(`  ports: API ${SERVER_PORT}, widget ${SERVER_PORT + 1}, web ${WEB_PORT}`);
   console.log(`  pnpm (bundle fallback): ${pnpmBundle.command}${pnpmBundleArgs}${pnpmBundle.options.shell ? '  (shell: true)' : ''}`);
   try {
     const tsx = nodeBinArgs(SERVER_DIR, 'tsx', 'tsx', [SEED_SCRIPT]);
@@ -141,6 +143,14 @@ const realHarness = process.argv.includes('--real-harness');
 // path (dbPath assertion, seed failure) that stops a child before reaching
 // the bottom of this file — can read it safely.
 let shuttingDown = false;
+// Queue an early supervisor shutdown until both child handles exist.
+let ipcShutdownReady = false;
+let ipcShutdownRequested = false;
+process.on('message', (message) => {
+  if (message?.type !== 'shutdown') return;
+  if (ipcShutdownReady) void shutdown('IPC');
+  else ipcShutdownRequested = true;
+});
 
 // ── 1. Bundle the server if missing ─────────────────────────────
 
@@ -182,7 +192,7 @@ const serverEnv = {
     ? {}
     : {
         GENERATORAI_TEST_FAUX_HARNESS: 'true',
-        GENERATORAI_TEST_FAUX_SCRIPT: FAUX_SCRIPT_FIXTURE,
+        GENERATORAI_TEST_FAUX_SCRIPT: process.env.GENERATORAI_SANDBOX_FAUX_SCRIPT ?? FAUX_SCRIPT_FIXTURE,
       }),
 };
 
@@ -340,6 +350,9 @@ async function shutdown(signal) {
 
 process.on('SIGINT', () => { void shutdown('SIGINT'); });
 process.on('SIGTERM', () => { void shutdown('SIGTERM'); });
+// Mobile's supervisor uses IPC so Windows also shuts down both children.
+ipcShutdownReady = true;
+if (ipcShutdownRequested) void shutdown('IPC');
 
 // Keep the process alive until a signal arrives.
 await new Promise(() => {});
