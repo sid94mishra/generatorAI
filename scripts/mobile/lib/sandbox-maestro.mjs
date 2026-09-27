@@ -1,0 +1,206 @@
+import fs from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { createRequire } from 'node:module';
+import { spawn } from 'node:child_process';
+import { setTimeout as delay } from 'node:timers/promises';
+import { ROOT } from './sandbox-session.mjs';
+import { assertDummyRepo } from './sandbox-data.mjs';
+import { CHAT_NAMES, seedSandbox } from './sandbox-seed.mjs';
+import { APP_ID, ADB, run, targetId, targetHost, mintPair, installedBuild, recordPairing, releaseAgent } from './sandbox-devices.mjs';
+
+// The workspace already pins this parser; do not implement a second YAML parser.
+const { parseAllDocuments, stringify } = createRequire(path.join(ROOT, 'packages/core/package.json'))('yaml');
+
+async function flowFiles(input) {
+  const stat = await fs.stat(input);
+  if (!stat.isDirectory()) return /\.ya?ml$/.test(input) ? [input] : [];
+  const children = await fs.readdir(input, { withFileTypes: true });
+  return (await Promise.all(children.filter(entry => !entry.name.startsWith('.') && entry.name !== '_subflows' && entry.name !== 'config.yaml')
+    .map(entry => flowFiles(path.join(input, entry.name))))).flat().sort();
+}
+
+export async function flowMetadata(file) {
+  const docs = parseAllDocuments(await fs.readFile(file, 'utf8'));
+  if (docs.some(doc => doc.errors.length)) throw new Error(`Invalid Maestro YAML: ${file}`);
+  const config = docs[0]?.toJSON();
+  if (!config?.appId) return null; // runFlow fragments are not top-level flows.
+  const fresh = config.env?.FRESH_CHAT == null ? [] : String(config.env.FRESH_CHAT).split(',').map(key => key.trim());
+  for (const key of fresh) if (!(key in CHAT_NAMES)) throw new Error(`Unknown FRESH_CHAT '${key}' in ${file}`);
+  return { fresh, pending: config.env?.PENDING_GATE === true || config.env?.PENDING_GATE === 'true', tags: config.tags ?? [], name: config.name ?? path.basename(file).replace(/\.ya?ml$/, '') };
+}
+
+export function combineJunitReports(reports) {
+  const suites = reports.map(xml => {
+    const body = xml.replace(/^\s*<\?xml[^>]*\?>\s*/, '').trim();
+    const group = body.match(/^<testsuites\b[^>]*>([\s\S]*)<\/testsuites>$/);
+    if (group) return group[1];
+    if (/^<testsuites\b[^>]*\/>$/.test(body)) return '';
+    if (/^<testsuite\b[^>]*\/>$/.test(body)) return body;
+    if (/^<testsuite\b[^>]*>[\s\S]*<\/testsuite>$/.test(body)) return body;
+    throw new Error('Unexpected Maestro JUnit report; individual reports are preserved');
+  });
+  return `<?xml version="1.0" encoding="UTF-8"?>\n<testsuites>\n${suites.join('\n')}\n</testsuites>\n`;
+}
+
+export async function discoverFlows(input, configPath) {
+  const directory = (await fs.stat(input)).isDirectory();
+  const base = directory ? input : path.dirname(input);
+  let config = {};
+  let selectedConfig = configPath;
+  if (!selectedConfig) {
+    let current = base;
+    while (true) {
+      const candidate = path.join(current, 'config.yaml');
+      try { await fs.access(candidate); selectedConfig = candidate; break; }
+      catch (error) { if (error.code !== 'ENOENT') throw error; }
+      if (current === ROOT || path.dirname(current) === current) break;
+      current = path.dirname(current);
+    }
+  }
+  if (selectedConfig) {
+    const document = parseAllDocuments(await fs.readFile(selectedConfig, 'utf8'))[0];
+    if (document.errors.length) throw new Error(`Invalid Maestro config: ${selectedConfig}`);
+    config = document.toJSON() ?? {};
+  }
+  const patterns = directory ? config.flows ?? ['**'] : ['**'];
+  if (!Array.isArray(patterns) || patterns.some(pattern => typeof pattern !== 'string')) throw new Error('Maestro config flows must be an array of patterns');
+  const positive = patterns.filter(pattern => !pattern.startsWith('!'));
+  const negative = patterns.filter(pattern => pattern.startsWith('!')).map(pattern => pattern.slice(1));
+  const files = (await flowFiles(input)).filter(file => {
+    const relative = path.relative(selectedConfig ? path.dirname(selectedConfig) : base, file).split(path.sep).join('/');
+    return positive.some(pattern => path.matchesGlob(relative, pattern)) && !negative.some(pattern => path.matchesGlob(relative, pattern));
+  });
+  const entries = [];
+  for (const file of files) { const metadata = await flowMetadata(file); if (metadata) entries.push({ file, ...metadata }); }
+  const order = config.executionOrder?.flowsOrder ?? [];
+  const rank = entry => {
+    const index = order.findIndex(name => name === entry.name || name === path.basename(entry.file).replace(/\.ya?ml$/, ''));
+    return index < 0 ? Infinity : index;
+  };
+  // 08 §5.1 requires pairing last because it rotates the installed app's pairing.
+  entries.sort((a, b) => Number(a.tags.includes('pairing')) - Number(b.tags.includes('pairing')) || rank(a) - rank(b) || a.file.localeCompare(b.file));
+  return { entries, config };
+}
+
+async function pendingGate(session) {
+  const chat = session.state.chats.gate;
+  await session.api(`/chats/${chat}/prompt`, { prompt: 'Run the mobile approval fixture.' });
+  const deadline = Date.now() + 30000;
+  while (Date.now() < deadline) {
+    const feed = await session.api('/attention');
+    const item = feed.needsYou.find(item => item.entity === 'chat' && item.entityId === chat && item.ask?.kind === 'tool_permission');
+    if (item) return item.ask.id;
+    await delay(300);
+  }
+  throw new Error('The fresh gate fixture did not produce an attention interaction');
+}
+
+export async function runMaestro(session, target, args, { verify } = {}) {
+  if (args[0] !== 'test') throw new Error('Maestro passthrough supports test only');
+  if (verify && verify !== 'commit') throw new Error('--verify supports commit only');
+  const inputs = [];
+  const valueFlags = new Set(['--config', '--debug-output', '--format', '--output', '--test-output-dir',
+    '--test-suite-name', '--include-tags', '--exclude-tags', '-e', '--env', '--screen-size']);
+  for (let index = 1; index < args.length; index++) {
+    if (valueFlags.has(args[index])) { index++; continue; }
+    if (args[index].startsWith('-')) continue;
+    const candidate = path.resolve(ROOT, args[index]);
+    try {
+      const stat = await fs.stat(candidate);
+      if (stat.isDirectory() || /\.ya?ml$/.test(candidate)) inputs.push({ index, path: candidate });
+    } catch (error) { if (error.code !== 'ENOENT') throw error; }
+  }
+  if (inputs.length !== 1) throw new Error('Pass exactly one Maestro flow file or directory');
+  const input = inputs[0];
+  const option = name => {
+    const inline = args.find(value => value.startsWith(`--${name}=`));
+    const index = args.indexOf(`--${name}`);
+    return inline?.slice(name.length + 3) ?? (index >= 0 ? args[index + 1] : undefined);
+  };
+  const suite = await discoverFlows(input.path, option('config') ? path.resolve(ROOT, option('config')) : undefined);
+  const tags = (name) => {
+    const inline = args.find(value => value.startsWith(`--${name}=`));
+    const index = args.indexOf(`--${name}`);
+    return (inline?.split('=')[1] ?? (index >= 0 ? args[index + 1] : '')).split(',').filter(Boolean);
+  };
+  const includes = option('include-tags') ? tags('include-tags') : suite.config.includeTags ?? [];
+  const excludes = [...(suite.config.excludeTags ?? []), ...tags('exclude-tags')];
+  const build = await installedBuild(target);
+  await releaseAgent(target);
+  const id = targetId(target), host = targetHost(target);
+  if (target.physical && build === 'dev') await run(ADB, ['-s', id, 'reverse', 'tcp:8081', 'tcp:8081']);
+  const maestro = process.env.MAESTRO_BIN ?? path.join(os.homedir(), '.maestro', 'bin', process.platform === 'win32' ? 'maestro.bat' : 'maestro');
+  const runtimeDir = await fs.mkdtemp(path.join(os.tmpdir(), 'generatorai-maestro-run-'));
+  const runtimeConfig = path.join(runtimeDir, 'config.yaml');
+  const runtimeSettings = { ...suite.config };
+  delete runtimeSettings.executionOrder;
+  delete runtimeSettings.flows;
+  await fs.writeFile(runtimeConfig, stringify(runtimeSettings), { mode: 0o600 });
+  const reports = [];
+  const reportTarget = option('output');
+  const junit = option('format')?.toUpperCase() === 'JUNIT';
+  let count = 0;
+  try {
+    for (const metadata of suite.entries) {
+      const { file } = metadata;
+      if ((includes.length && !includes.some(tag => metadata.tags.includes(tag))) || excludes.some(tag => metadata.tags.includes(tag))) continue;
+      const fresh = new Set(metadata.fresh);
+      if (metadata.pending) fresh.add('gate');
+      await seedSandbox(session, [...fresh]);
+      const env = { APP_ID, PLATFORM: target.platform, BUILD: build, METRO_URL: encodeURIComponent(`http://${host}:8081`),
+        SERVER_URL: `http://${host}:${session.port}`, DEVICE_NAME: target.name, DUMMY_REPO: assertDummyRepo(session.state.dummyRepo),
+        ...Object.fromEntries(Object.entries(session.state.chats).map(([key, id]) => [`CHAT_${key.toUpperCase()}_ID`, id])) };
+      const pairing = metadata.tags.includes('pairing');
+      const devicesBefore = pairing ? new Set((await session.api('/auth/devices')).devices.map(device => device.deviceId)) : null;
+      if (pairing) env.PAIR_URL = await mintPair(session, target);
+      if (metadata.pending) env.INTERACTION_ID = await pendingGate(session);
+      const commandArgs = [];
+      for (let index = 0; index < args.length; index++) {
+        if (args[index] === '--config') { index++; continue; }
+        if (args[index].startsWith('--config=')) continue;
+        commandArgs.push(index === input.index ? file : args[index]);
+      }
+      commandArgs.push('--config', runtimeConfig);
+      // Run separately so every turn-consuming flow receives a fresh conversation.
+      // Unique reports avoid a directory suite overwriting its preceding result.
+      let flowReport;
+      if (reportTarget && suite.entries.length > 1) {
+        const report = path.parse(reportTarget);
+        flowReport = path.join(report.dir, `${report.name}-${count + 1}${report.ext}`);
+        for (let index = 0; index < commandArgs.length; index++) {
+          if (commandArgs[index] === '--output') commandArgs[index + 1] = flowReport;
+          else if (commandArgs[index].startsWith('--output=')) commandArgs[index] = `--output=${flowReport}`;
+        }
+      }
+      const argv = ['--device', id, ...commandArgs, ...Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`])];
+      // Invoke the pinned distribution's Java entry directly on Windows. A .bat/cmd
+      // wrapper would re-expand percent-encoded Metro URLs and parse grant arguments.
+      const windows = process.platform === 'win32';
+      const executable = windows ? (process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin/java.exe') : 'java.exe') : maestro;
+      const spawnArgs = windows ? ['--enable-native-access=ALL-UNNAMED', '-classpath',
+        path.join(path.dirname(path.dirname(maestro)), 'lib', '*'), 'maestro.cli.AppKt', ...argv] : argv;
+      const started = Date.now();
+      const code = await new Promise((resolve, reject) => {
+        const child = spawn(executable, spawnArgs, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, MAESTRO_CLI_NO_ANALYTICS: '1', MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000' } });
+        child.once('error', reject); child.once('exit', (code, signal) => resolve(signal ? 1 : code));
+      });
+      if (junit && flowReport) {
+        try { reports.push(await fs.readFile(path.resolve(ROOT, flowReport), 'utf8')); }
+        catch (error) { if (code === 0 || error.code !== 'ENOENT') throw error; }
+      }
+      if (code !== 0) throw new Error(`Maestro failed for ${path.relative(ROOT, file)} (${code})`);
+      if (pairing) await recordPairing(session, target, devicesBefore, started);
+      count++;
+    }
+  } finally {
+    await fs.rm(runtimeDir, { recursive: true, force: true });
+    if (reports.length) await fs.writeFile(path.resolve(ROOT, reportTarget), combineJunitReports(reports));
+  }
+  if (!count) throw new Error('No Maestro flows matched the supplied path and tags');
+  if (verify === 'commit') {
+    const subject = await run('git', ['-C', assertDummyRepo(session.state.dummyRepo), 'log', '-1', '--format=%s']);
+    if (subject !== 'mobile characterization commit') throw new Error('Dummy repository did not receive the expected characterization commit');
+  }
+  console.log(`Maestro: ${count} flow(s) passed on ${target.platform}`);
+}

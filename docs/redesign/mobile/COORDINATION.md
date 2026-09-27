@@ -18,9 +18,10 @@ It also records every merge of `desktop_redesign` into this branch.
 
 | 2026-09-27 | M1-02 | `scripts/redesign/sandbox.mjs`, `scripts/redesign/lib/sandbox-options.mjs`, its Node test | additive options and IPC shutdown | Support a second isolated sandbox (3297/5297), the mobile Faux fixture override, and graceful supervisor shutdown on Windows. Existing default ports/fixture unchanged. Owner-confirm item for Batch A as required by 08 §2.4. |
 
-## Merges of `desktop_redesign`
+| 2026-09-27 | M1-03 | root `package.json`, `pnpm-lock.yaml` | additive devDependency | Exact `agent-device@0.21.15` pin (ef96a9cc), bootstrapped for M1-02 pairing. CLI and frozen install pass; all existing importer resolutions preserved. |
+| 2026-09-27 | M1-02 | `scripts/mobile/doctor.mjs`, `fingerprint.mjs`, `sandbox-pair.mjs`, `lib/*.mjs` | new mobile-only tooling | Native environment checks, SDK fingerprints, guarded sandbox/fixture lifecycle, consent automation and per-flow Maestro seeding/report aggregation. |
 
-M1-03 tooling addition (2026-09-27): root `package.json` and `pnpm-lock.yaml` add exact devDependency `agent-device@0.21.15`. Its ESM CLI resolves and reports 0.21.15; frozen install passes. Existing importer resolutions and shared dependency snapshots are preserved. Added before completing M1-02 so the pairing command uses the pinned driver.
+## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |
 |---|---|---|---|
