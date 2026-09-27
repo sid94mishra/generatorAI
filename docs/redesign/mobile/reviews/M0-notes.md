@@ -42,7 +42,7 @@ Owner resolved the previous Xcode-selection and JDK blockers:
 | Xcode selection | /Applications/Xcode.app/Contents/Developer |
 | Xcode | 27.0, build 27A266a |
 | iOS runtime | 27.0 (24A434) |
-| gai-iphone | iPhone 18 Pro; Xcode identifies the simulator, but full startup fails with Data Migration Failed; repair approval pending |
+| gai-iphone | iPhone 18 Pro; fresh A7E28FC9-BAC6-4D32-895A-31B06B505DB5 completed migration, installed and launched GeneratorAI; pairing screen still unverified (recovery below) |
 | gai-ipad | iPad Pro 13-inch (M5) (16GB), created |
 | JDK | Zulu 17.0.20.1 |
 | Android SDK | /Users/sidmishra/Library/Android/sdk |
@@ -74,6 +74,14 @@ iOS launch is blocked before GeneratorAI starts. The phone remained on the Apple
 
 Requested approval to erase and recreate only the task-created gai-iphone (6C70CB8C-B744-4E07-AEFF-26D2F805D1C2), because its data lives outside the worktree and playbook §8 requires confirmation. No erase performed. Other simulators and compiled artifacts are preserved. Android verification can proceed independently. Pairing and baseline screenshots remain M1-04.
 
+## Disk recovery (owner-authorized, 2026-09-27)
+
+The owner asked to inspect storage and clean temporary files. Removed 287,113 stale regular cache files (7,888,448,954 bytes, about 7.35 GiB): Chrome HTTP/code caches, Homebrew download cache, Node compile cache and four abandoned Playwright download archives. Each file was older than 24 hours and rechecked for unchanged size/mtime before removal; symlinks were not followed. Browser profiles, downloads, personal media, SDKs, simulator data, current dependencies and active updater caches were preserved. Local report: apps/mobile/.expo/cleanup-report.json.
+
+The broad read-only scan found large personal media/download folders and many older agent worktrees. Dependency cleanup is limited to unlocked, inactive worktrees with clean source state, unchanged HEAD, ignored/untracked node_modules, no patch directory and no active process or open file under the worktree. Only their root node_modules directories are removed; source, branches and worktree registrations remain. pnpm install can restore the dependencies. Current mobile and desktop dependencies and active/locked agent worktrees are excluded. Local manifests and verification results are in apps/mobile/.expo/worktree-cleanup-*.json. Completed all 16 eligible worktrees and rechecked every one afterward: source status clean, HEAD unchanged, root node_modules absent. Free space was 12.5 GiB at cleanup completion while iOS and Metro were running, versus roughly 2.6 GiB at this session start. The growing system swap means this is a net free-space reading, not a precise total of bytes reclaimed from dependencies.
+
+Rebooting the original gai-iphone after cleanup still returned Data Migration Failed. Preserved it as gai-iphone-migration-failed (6C70CB8C-B744-4E07-AEFF-26D2F805D1C2); created a fresh gai-iphone (A7E28FC9-BAC6-4D32-895A-31B06B505DB5). No simulator was erased. The fresh phone completed first-boot migration in 5m50s (bootstatus Finished), installed the already-built app successfully, launched GeneratorAI and loaded its 2,958-module JS bundle. Preferences initialized, but the last inspected screen still shows the app splash. No fatal app error was logged; the blank/splash startup cause is not established. Local evidence: .expo/m0-fresh-ios-boot.log, m0-ios-install.log, m0-ios-launch.log, m0-final-metro.log and m0-ios-pairing.png (despite that filename, it shows the splash, not a passing pairing screen). Android's retry reached the app splash and downloaded its Metro bundle, but did not complete the pairing-screen check before it was stopped. Host swap reached about 9 GB on an 8 GB Mac, and Device Hub UI inspection timed out. Native process sampling took minutes; after interruption it produced .expo/m0-ios-sample.txt. Its limited sample shows UIKit keyboard preloading on the main thread and React runtime scheduling on the JS thread; it does not establish a deadlock or identify a code fix. Both phones, Metro and the sandbox are stopped at handoff (simctl Shutdown, adb has no devices, port 8081 has no listener). Final df reading after shutdown: about 12 GiB available; macOS swap reclamation is asynchronous. Neither pairing-screen launch is counted as passing. This recovery record supersedes the earlier request to erase gai-iphone: no erase is needed to repeat the next check on the fresh phone.
+
 ## Owner-confirm defaults and designer handoff (M0-04)
 
 Use the written defaults: MD-04 workflow list editing without edge editing; MD-42 opt-in crash reporting off by default; MD-96 no mobile Widget pane tab. No alternative is adopted.
@@ -82,6 +90,6 @@ Designer handoff: [10-design-feedback.md §3](../10-design-feedback.md#3-send-to
 
 ## Next
 
-Owner actions: free at least 20 GB; approve erasing/recreating only the new gai-iphone, or repair its failed migration manually. Then restart Metro with IPv4-first DNS, boot one phone at a time, and reuse the built APK/.app to verify both pairing screens. Record results and close M0 before M1-01. Keep the API 37 limitation explicit. Native baseline screenshots and characterization belong to M1-04.
+Owner action: save work and restart the Mac to clear the persistent host memory pressure; leave unused apps and other builds closed for the native checks. Then restart Metro with IPv4-first DNS, boot one phone at a time, and reuse the built APK/.app to verify both pairing screens. Use the fresh gai-iphone above, preserving the failed original. If the splash remains after the host recovers, debug the app startup with native logs/inspector before M1. M0 remains blocked under playbook §8 (exit criterion fails after reasonable effort); the cleanup is complete, but no M1 source change is claimed. Keep the API 37 limitation explicit. Native baseline screenshots and characterization belong to M1-04.
 
 Documentation-only Done-loop: typecheck/lint already passed; related TS/token tests do not apply. Bootstrap skips: design ratchet until M1-05, Jest until M1-06, fingerprint until M1-02, device walkthrough tooling until M1-02/M1-03, Maestro until M1-04.
