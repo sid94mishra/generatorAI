@@ -419,7 +419,7 @@ Severity words: `blocker` (wrong behaviour, data or security), `major` (a11y min
 |---|---|
 | start / attach | `agent-device open dev.generatorai.app --platform ios --foreground` |
 | deep link | `agent-device open "generatorai:///chats/<id>?server=<sid>" --platform ios` |
-| interactive tree | `agent-device snapshot -i` (refs `@e12`); `--json` for scripts; `snapshot --diff` after an action |
+| interactive tree | `agent-device snapshot -i` (refs `@e12`); `--json` for scripts; on iOS use `snapshot --raw --json` for the pinned driver’s toolbar presentation defect (MD-100); `snapshot --diff` after an action |
 | act | `press`, `fill`, `type`, `longpress`, `scroll`, `back`, `gesture pinch …`, all with `--settle` where allowed |
 | assert | `wait text "…" <ms>`, `wait 'id="…"' <ms>`, `wait absent '…'`, `is visible 'id="…"'`, `get text 'id="…"'` |
 | appearance / text / motion | `settings appearance dark\|light`, `settings text-size <category>`, `settings animations off` |
@@ -452,7 +452,9 @@ Severity words: `blocker` (wrong behaviour, data or security), `major` (a11y min
 
 `a11y-allow.json` lists exceptions as `{ rule, selector, reason, decision }` (for example a widget-constrained button, or
 a `hitSlop` use under MD-91). Output: a table on stdout; exit 1 on any error. It has its own vitest over fixture
-snapshots.
+snapshots. Native XCUITest exceptions use `rule: "native-audit"` plus one explicit `auditType`
+(`contrast`, `elementDetection`, `hitRegion`, `sufficientElementDescription`, `dynamicType`, `textClipped`, `trait`);
+the exact selector, reason and MD decision are still mandatory. The initial allowlist is empty.
 
 ### 4.2 Maestro (committed flows)
 
@@ -641,8 +643,10 @@ plus one `ThemeMatrix` story, not screenshots (SE §5).
 
 **XCUITest audit (iOS, built in M1-03).** `plugins/withA11yAuditTarget.js` (added to plugins only when `GAI_A11Y_AUDIT=1`) adds a UI
 test target `GeneratorAIUITests` with `A11yAuditTests.swift`: for each route in `apps/mobile/e2e/a11y-routes.json` it
-calls `app.open(URL(string: "generatorai:///<route>")!)`, waits for `vrt-ready` or the route's main testID, then
+opens `generatorai:///<route>`, waits for `vrt-ready` or the route's main testID, then
 `try app.performAccessibilityAudit(for: .all) { issue in AllowList.matches(issue) }`.
+Debug audits activate the app and select Metro through `XCUIDevice.shared.system.open`, then use the same API to preserve the loaded development
+client; Release audits use `app.open(routeURL)` (MD-101). Metro defaults to 127.0.0.1:8081.
 
 ```sh
 cd apps/mobile

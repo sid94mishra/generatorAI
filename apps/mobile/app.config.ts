@@ -158,6 +158,7 @@ const config: ExpoConfig = {
   },
 
   plugins: [
+    ...(process.env['GAI_A11Y_AUDIT'] === '1' ? ['./plugins/withA11yAuditTarget'] : []),
     'expo-router',
     'expo-asset',
     [

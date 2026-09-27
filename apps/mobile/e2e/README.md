@@ -86,10 +86,13 @@ Run only one script at a time against a persistent profile. Cold Metro navigatio
   `workflow.id`, `automation.id`, and `chatId` from an isolated server. It inspects dependencies/prompts,
   starts a workflow, visits chat tools, or triggers a manual automation and checks the response/history.
   Workflow definitions and any associated test project must be created separately.
-- `native-audit.mjs inspect NAME` captures the installed Android application's screenshot and
-  accessibility hierarchy. `tap LABEL`, `route /path`, `text VALUE`, and `back` perform native actions.
-  Set `ANDROID_HOME` or `ADB` and `E2E_OUT`. It never installs an APK or pairs implicitly.
-  A screenshot must be inspected for the expected destination; absence of an error is not proof of navigation.
+- Native interaction now uses the root-pinned `agent-device` CLI on both platforms. Pair with
+  `node scripts/mobile/sandbox-pair.mjs --platform=ios|android` before a walkthrough.
+  Capture `snapshot --raw --json` on iOS (MD-100), or `snapshot -i --json` on Android, then run
+  `node apps/mobile/e2e/a11y-check.mjs <snapshot.json> --platform ios|android` from the repo root.
+  Android density is read from adb; use `--serial` when more than one device is connected.
+  `--logs <file>` checks messages after the last driver log marker. `--modal-open --modal-selector 'id="drawer"'`
+  checks the complete native tree for focus leakage. Assertions verify navigation; screenshots provide visual evidence.
 
 The audit report and selected native/web evidence are in `docs/mobile-audit/`. Pairing files and browser
 profiles contain credentials and must stay outside the repository. Native iOS execution needs Xcode;
@@ -104,3 +107,21 @@ URL as before. Session tools are no longer pages beside the transcript — open 
 `computer`, `tasks`, `plan`, `session`), and switch in place with the sheet's chip strip. The
 composer's setup row is `composer-model`, `composer-effort`, `composer-mode` (only in plan mode) and
 `composer-options`. Design record: `docs/mobile-redesign/DESIGN.md`.
+
+## Native accessibility audit (M1-03)
+
+The checker exits 1 for missing labels/roles, undersized native targets, focus leakage or scoped runtime errors.
+Duplicate siblings, unlabelled images and status glyph/word mismatches are advisory. Failed, empty, sparse,
+truncated and foreign-app captures cannot pass. `a11y-allow.json` starts empty; any exception needs an exact
+id/label selector, reason and MD decision. `native-audit` entries also specify one `auditType`.
+
+The iOS harness is opt-in: `GAI_A11Y_AUDIT=1` enables `plugins/withA11yAuditTarget.js` during prebuild.
+It adds `GeneratorAIUITests`, copies the Swift harness and JSON resources, and adds a shared test scheme.
+Regenerate after changing route/exception data. The test opens each route in `a11y-routes.json`, waits for its
+main identifier (or an exact `readyLabel` on legacy screens), captures a screenshot and performs Apple's full
+accessibility audit. Existing app pairing survives native reinstall through the simulator keychain.
+
+Run the build/test/restore commands in `docs/redesign/mobile/08-verification.md` §4.8. Keep Metro running for
+an installed development client. The default prebuild omits the audit plugin; test resources never enter
+normal application builds. Add routes as each redesigned feature lands. Dynamic chat routes are covered
+by their characterization journeys until the audit route list is extended with sandbox fixture routing.
