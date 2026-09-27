@@ -1,21 +1,22 @@
-// docs/redesign/07-phases.md §P1-S3. Ported in P5.
+// docs/redesign/07-phases.md §P1-S3. Ported in P5 (P5-07 list, P5-08 editor).
 import type { RouteObject } from 'react-router';
 import { defineRoute } from './defineRoute.js';
 
 export const agentsRoutes: RouteObject[] = [
   defineRoute(
     'agents',
-    () => import('@/pages/AgentsListPage.js').then((m) => ({ default: m.AgentsListPage })),
-    { legacyHeader: true, nav: 'agents', title: 'Agents' },
+    () => import('@/features/agents/AgentsListPage.js').then((m) => ({ default: m.AgentsListPage })),
+    // P5-07: renders its own PageHeader (T-01 grid).
+    { nav: 'agents', title: 'Agents' },
   ),
   defineRoute(
     'agents/new',
-    () => import('@/pages/AgentEditorPage.js').then((m) => ({ default: m.AgentEditorPage })),
-    { legacyHeader: true, nav: 'agents', title: 'New Agent' },
+    () => import('@/features/agents/AgentEditorPage.js').then((m) => ({ default: m.AgentEditorPage })),
+    { nav: 'agents', title: 'New agent' },
   ),
   defineRoute(
     'agents/:id',
-    () => import('@/pages/AgentEditorPage.js').then((m) => ({ default: m.AgentEditorPage })),
-    { legacyHeader: true, nav: 'agents', title: 'Agent' },
+    () => import('@/features/agents/AgentEditorPage.js').then((m) => ({ default: m.AgentEditorPage })),
+    { nav: 'agents', title: 'Agent' },
   ),
 ];

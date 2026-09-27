@@ -5,7 +5,8 @@
 // PageHeader + PageTitle "Chats · N" + FilterBar (search, All/Active/Archived
 // seg with server counts, Project/Agent/Status/Tags chips, sort) + a
 // virtualized DataTable with infinite paging + a floating BulkActionBar.
-// "New chat" keeps opening the legacy CreateChatDialog until P5-09.
+// "New chat" opens the NewChatDialog (features/chats/create) via
+// useNewChatStore — the dialog itself is mounted once by app/ShellRoute.
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect, useMemo, useState } from 'react';
@@ -13,7 +14,7 @@ import { useLocation, useSearchParams } from 'react-router';
 import { chatLiveSets, toChatRowModel } from '@generatorai/client-core';
 import type { ChatBulkResult, ChatListSort, ChatListState } from '@generatorai/shared';
 import type { ChatRowModel, CreateChatDraft } from '@generatorai/shared/ui-contract';
-import { CreateChatDialog } from '@/components/chat/CreateChatDialog.js';
+import { useNewChatStore } from '@/stores/newChatStore.js';
 import { useBulkArchiveChats, useBulkDeleteChats, ChatBulkError, useChatPages } from '@/hooks/chatListQueries.js';
 import { useArchiveChat, useDeleteChat, useUnarchiveChat } from '@/hooks/queries.js';
 import { useAttention } from '@/hooks/attentionQueries.js';
@@ -39,7 +40,7 @@ import {
   StatusFilterChip,
   TagsFilterChip,
 } from './ChatsFilterControls.js';
-import { CHATS_COLUMNS, chatRowActions } from './chatsColumns.js';
+import { CHATS_COLUMNS, chatRowActions } from '@/blocks/chats-table/chatsColumns.js';
 
 type Scope = 'all' | 'active' | 'archived';
 const SCOPE_ITEMS: readonly Omit<SegmentedItem<Scope>, 'count'>[] = [
@@ -51,18 +52,17 @@ const SCOPE_ITEMS: readonly Omit<SegmentedItem<Scope>, 'count'>[] = [
 export function ChatsListPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const location = useLocation();
-  const [createChatOpen, setCreateChatOpen] = useState(false);
+  const openNewChat = useNewChatStore((s) => s.open);
   // `?new=1` opens the dialog; Home's "More options" also hands over its draft
-  // in the navigation state (04 R-1). Kept until the dialog closes.
-  const [createDraft, setCreateDraft] = useState<CreateChatDraft | undefined>(undefined);
+  // in the navigation state (04 R-1) — kept as a fallback alongside the direct
+  // `/chats/new` route link.
   useEffect(() => {
     if (searchParams.get('new') !== '1') return;
-    setCreateDraft((location.state as { draft?: CreateChatDraft } | null)?.draft);
-    setCreateChatOpen(true);
+    openNewChat((location.state as { draft?: Partial<CreateChatDraft> } | null)?.draft);
     const next = new URLSearchParams(searchParams);
     next.delete('new');
     setSearchParams(next, { replace: true });
-  }, [searchParams, setSearchParams, location.state]);
+  }, [searchParams, setSearchParams, openNewChat, location.state]);
 
   // ── Filters ──
   const [search, setSearch] = useState('');
@@ -210,7 +210,7 @@ export function ChatsListPage() {
             title="Chats"
             count={chatList ? chatList.total : undefined}
             actions={
-              <Button variant="primary" icon="plus" shortcut={['Ctrl', 'N']} onClick={() => setCreateChatOpen(true)}>
+              <Button variant="primary" icon="plus" shortcut={['Ctrl', 'N']} onClick={() => openNewChat()}>
                 New chat
               </Button>
             }
@@ -301,7 +301,7 @@ export function ChatsListPage() {
                       Clear filters
                     </Button>
                   ) : (
-                    <Button size="sm" variant="primary" icon="plus" onClick={() => setCreateChatOpen(true)}>
+                    <Button size="sm" variant="primary" icon="plus" onClick={() => openNewChat()}>
                       New chat
                     </Button>
                   )
@@ -339,14 +339,6 @@ export function ChatsListPage() {
             }
           />
         }
-      />
-      <CreateChatDialog
-        open={createChatOpen}
-        onOpenChange={(next) => {
-          setCreateChatOpen(next);
-          if (!next) setCreateDraft(undefined);
-        }}
-        initialDraft={createDraft}
       />
       {confirmer.dialog}
     </>

@@ -242,3 +242,38 @@ describe('AgentHostClient', () => {
     expect(client.hasLiveConversation(id)).toBe(false);
   });
 });
+
+describe('AgentHostClient turn gates (P07 WP-7.2)', () => {
+  // ECON-R3: a session routed by model counts against its own provider, not claude-agent.
+  it("admits a turn on the provider the session's model routes to, and a stop withdraws a queued turn", async () => {
+    const supervisor = new FakeSupervisor();
+    const client = new AgentHostClient(supervisor.as(), silentLogger());
+    const asked: string[] = [];
+    let release: (() => void) | undefined;
+    client.useTurnGates(
+      (provider) => {
+        asked.push(provider);
+        return {
+          tryAcquire: () => undefined,
+          acquire: (signal?: AbortSignal) =>
+            new Promise<() => void>((resolve, reject) => {
+              release = () => resolve(() => undefined);
+              signal?.addEventListener('abort', () => reject(Object.assign(new Error('withdrawn'), { name: 'AbortError' })));
+            }),
+        };
+      },
+      async (model) => (model.startsWith('gpt') ? 'copilot' : 'claude-agent'),
+    );
+    const id = await client.createConversation({ model: 'gpt-5' } as unknown as CreateConversationParams);
+    const events: string[] = [];
+    client.onConversationEvent(id, (e) => events.push(String((e as { kind?: string }).kind)));
+    const turn = client.sendPrompt(id, 'hi');
+    await new Promise((r) => setTimeout(r, 0));
+    expect(asked).toEqual(['copilot']);
+    await client.abortConversation(id);
+    await turn;
+    expect(events).toContain('harness.cancelled');
+    expect(supervisor.requests.some((r) => r.type === 'send_turn')).toBe(false);
+    expect(release).toBeDefined();
+  });
+});

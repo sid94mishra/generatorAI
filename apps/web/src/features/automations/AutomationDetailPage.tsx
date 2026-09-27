@@ -1,0 +1,450 @@
+// ────────────────────────────────────────────────────────────────
+// AutomationDetailPage (T-02 DetailPage, G-10-style stats computed
+// client-side from the already-fetched execution list — no automation stats
+// endpoint exists, so this is real data aggregated in the browser, not fake
+// data (D-36); 04-screen-map.md §2.6 AutomationDetail, §4.7 #58) — ports
+// pages/AutomationDetailPage.tsx onto the kit (D-35 fallback port).
+// ────────────────────────────────────────────────────────────────
+
+import { useState } from 'react';
+import { useNavigate, useParams } from 'react-router';
+import { Link as RouterLink } from 'react-router';
+import { resolveStatus, type AutomationExecution, type AutomationExecutionWithRuns } from '@generatorai/shared';
+import {
+  useAutomation,
+  useAutomationExecution,
+  useAutomationExecutions,
+  useCancelAutomationExecution,
+  useDeleteAutomation,
+  useDisableAutomation,
+  useEnableAutomation,
+  useRotateWebhookToken,
+  useTriggerAutomation,
+} from '@/hooks/automationQueries.js';
+import { useAutomationExecutionStream } from '@/hooks/useAutomationExecutionStream.js';
+import { useWorkflowRun } from '@/hooks/workflowQueries.js';
+import { ChangesPanel } from '@/blocks/changes/ChangesPanel.js';
+import { IterationsTable, type IterationsColumn } from '@/blocks/workflow/index.js';
+import { AutomationTriggerBadge } from './AutomationTriggerBadge.js';
+import { useConfirm } from '@/ui/primitives/AlertDialog/AlertDialog.js';
+import { Button } from '@/ui/primitives/Button/Button.js';
+import { Callout } from '@/ui/primitives/Callout/Callout.js';
+import { Card } from '@/ui/primitives/Card/Card.js';
+import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
+import { InlineCode } from '@/ui/primitives/InlineCode/InlineCode.js';
+import { Link } from '@/ui/primitives/Link/Link.js';
+import { StatusBadge } from '@/ui/primitives/StatusBadge/StatusBadge.js';
+import { Breadcrumb } from '@/ui/patterns/Breadcrumb/Breadcrumb.js';
+import { KeyValueList } from '@/ui/patterns/KeyValueList/KeyValueList.js';
+import { MenuButton } from '@/ui/patterns/MenuButton/MenuButton.js';
+import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
+import { PageTitle } from '@/ui/patterns/PageTitle/PageTitle.js';
+import { StatStrip, type StatTileItem } from '@/ui/patterns/StatStrip/StatStrip.js';
+import { DetailPage } from '@/ui/templates/DetailPage/DetailPage.js';
+import { formatNextRun } from '@/lib/nextRun.js';
+import { TriggerAutomationDialog } from './TriggerAutomationDialog.js';
+import { WebhookCredentialsDialog, type WebhookCredentials } from './WebhookCredentialsDialog.js';
+
+const PERMISSION_MODE_LABEL: Record<string, string> = {
+  acceptEdits: 'Accept edits',
+  default: 'Ask',
+  plan: 'Plan (read-only)',
+  bypassPermissions: 'Bypass',
+};
+
+function formatDate(date: Date | string | undefined): string {
+  if (!date) return '—';
+  const d = typeof date === 'string' ? new Date(date) : date;
+  return d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+
+function formatDuration(ms: number): string {
+  const totalSeconds = Math.round(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return minutes > 0 ? `${minutes}m ${seconds}s` : `${seconds}s`;
+}
+
+/** Client-side equivalent of D-58's G-10 stats: no automation-stats endpoint
+ *  exists, so this aggregates the already-fetched execution list — real
+ *  data, computed in the browser (D-36). */
+function computeStats(executions: readonly AutomationExecution[] | undefined) {
+  const list = executions ?? [];
+  const since = Date.now() - 30 * 24 * 60 * 60_000;
+  const last30d = list.filter((e) => new Date(e.createdAt).getTime() >= since);
+  const terminal = list.filter((e) => e.status === 'completed' || e.status === 'partial' || e.status === 'failed' || e.status === 'cancelled');
+  const succeeded = terminal.filter((e) => e.status === 'completed');
+  const durations = list
+    .filter((e) => e.startedAt && e.completedAt)
+    .map((e) => new Date(e.completedAt!).getTime() - new Date(e.startedAt!).getTime());
+  const avgDurationMs = durations.length > 0 ? durations.reduce((a, b) => a + b, 0) / durations.length : undefined;
+  return {
+    executions30d: last30d.length,
+    successRate: terminal.length > 0 ? Math.round((succeeded.length / terminal.length) * 100) : undefined,
+    successOf: terminal.length,
+    avgDurationMs,
+  };
+}
+
+export function AutomationDetailPage() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+  const { data: automation, isLoading } = useAutomation(id);
+  const { data: executions } = useAutomationExecutions(id);
+  const triggerMutation = useTriggerAutomation();
+  const enableMutation = useEnableAutomation();
+  const disableMutation = useDisableAutomation();
+  const deleteMutation = useDeleteAutomation();
+  const rotateWebhookToken = useRotateWebhookToken();
+  const cancelExecution = useCancelAutomationExecution();
+  const confirmer = useConfirm();
+
+  const [selectedExecutionId, setSelectedExecutionId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [triggerDialogOpen, setTriggerDialogOpen] = useState(false);
+  const [webhookCredentials, setWebhookCredentials] = useState<WebhookCredentials | null>(null);
+  const [rotateError, setRotateError] = useState<string | null>(null);
+
+  const { data: selectedExecution } = useAutomationExecution(selectedExecutionId ? id : undefined, selectedExecutionId ?? undefined);
+  useAutomationExecutionStream(id, selectedExecutionId ?? undefined, {
+    enabled: Boolean(selectedExecutionId) && (selectedExecution?.status === 'running' || selectedExecution?.status === 'pending'),
+  });
+  const selectedRun = selectedExecution?.runs.find((r) => r.id === selectedRunId);
+  const { data: selectedRunData } = useWorkflowRun(selectedRun?.workflowRunId ?? undefined);
+
+  if (isLoading) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <StatusBadge state="running" label="Loading…" />
+      </div>
+    );
+  }
+  if (!automation) {
+    return (
+      <EmptyState
+        icon="warning"
+        title="Automation not found"
+        action={
+          <Button size="sm" onClick={() => navigate('/automations')}>
+            Back to automations
+          </Button>
+        }
+      />
+    );
+  }
+
+  const stats = computeStats(executions);
+  const nextRun = formatNextRun(automation.nextRunAt, { enabled: automation.enabled });
+  const hasSchema = Boolean(automation.dataSchema);
+
+  const statItems: StatTileItem[] = [
+    { value: stats.executions30d, label: 'Executions · 30 days' },
+    { value: stats.successRate != null ? `${stats.successRate}%` : '—', label: stats.successOf > 0 ? `Success · ${stats.successOf} runs` : 'Success', numeric: false },
+    { value: stats.avgDurationMs != null ? formatDuration(stats.avgDurationMs) : '—', label: 'Avg duration', numeric: false },
+    { value: nextRun.short, label: 'Next run', tone: nextRun.none ? undefined : 'run', numeric: false },
+  ];
+
+  const handleRunNow = () => {
+    if (hasSchema) {
+      setTriggerDialogOpen(true);
+      return;
+    }
+    triggerMutation.mutate({ id: automation.id });
+  };
+
+  const handleRotateWebhookToken = async () => {
+    setRotateError(null);
+    try {
+      const result = await rotateWebhookToken.mutateAsync(automation.id);
+      setWebhookCredentials({
+        webhookUrl: `${window.location.origin}/api/automations/webhooks/${result.token}`,
+        token: result.token,
+        signingSecret: result.signingSecret,
+      });
+    } catch (err) {
+      setRotateError(err instanceof Error ? err.message : String(err));
+    }
+  };
+
+  const handleDelete = async () => {
+    const ok = await confirmer.confirm({
+      title: `Delete "${automation.name}"?`,
+      description: 'This cannot be undone.',
+      confirmLabel: 'Delete automation',
+    });
+    if (!ok) return;
+    await deleteMutation.mutateAsync(automation.id);
+    navigate('/automations');
+  };
+
+  // Executions arrive newest-first; number them by creation order (no
+  // sequential "execution number" field exists server-side).
+  const numberedExecutions = new Map((executions ?? []).map((exec, i) => [exec.id, (executions?.length ?? 0) - i]));
+
+  const executionColumns: IterationsColumn<AutomationExecution>[] = [
+    { id: 'index', header: '#', width: 48, mono: true, cell: (row: AutomationExecution) => `#${numberedExecutions.get(row.id) ?? ''}` },
+    {
+      id: 'status',
+      header: 'Status',
+      width: 130,
+      cell: (row: AutomationExecution) => {
+        const resolved = resolveStatus('automationExecution', row.status);
+        return resolved ? <StatusBadge state={resolved.state} label={resolved.label} context="run" /> : null;
+      },
+    },
+    { id: 'trigger', header: 'Trigger', width: 130, cell: (row: AutomationExecution) => <AutomationTriggerBadge triggerType={row.triggeredBy} /> },
+    {
+      id: 'iterations',
+      header: 'Iterations',
+      width: 130,
+      mono: true as const,
+      cell: (row: AutomationExecution) => (
+        <span>
+          {row.completedIterations}/{row.totalIterations}
+          {row.failedIterations > 0 ? <span className="text-err"> ({row.failedIterations} failed)</span> : null}
+        </span>
+      ),
+    },
+    {
+      id: 'duration',
+      header: 'Duration',
+      width: 100,
+      align: 'end' as const,
+      mono: true as const,
+      cell: (row: AutomationExecution) => (row.startedAt && row.completedAt ? formatDuration(new Date(row.completedAt).getTime() - new Date(row.startedAt).getTime()) : '—'),
+    },
+    { id: 'started', header: 'Started', width: 150, align: 'end' as const, mono: true as const, cell: (row: AutomationExecution) => formatDate(row.createdAt) },
+  ];
+
+  return (
+    <>
+      <DetailPage
+        header={
+          <PageHeader
+            breadcrumb={<Breadcrumb items={[{ label: 'Automations', render: <RouterLink to="/automations" /> }, { label: automation.name }]} />}
+            status={<StatusBadge state={automation.enabled ? 'succeeded' : 'skipped'} label={automation.enabled ? 'Enabled' : 'Disabled'} />}
+            actions={
+              <>
+                <Button variant="primary" icon="play" onClick={handleRunNow} disabled={!automation.enabled || triggerMutation.isPending} loading={triggerMutation.isPending}>
+                  Run now
+                </Button>
+                <MenuButton
+                  label="More actions"
+                  iconOnly
+                  icon="more"
+                  items={[
+                    automation.enabled
+                      ? { id: 'disable', label: 'Disable', icon: 'pause', onSelect: () => disableMutation.mutate(automation.id) }
+                      : { id: 'enable', label: 'Enable', icon: 'play', onSelect: () => enableMutation.mutate(automation.id) },
+                    { type: 'separator' },
+                    { id: 'delete', label: 'Delete', icon: 'trash', danger: true, onSelect: () => void handleDelete() },
+                  ]}
+                />
+              </>
+            }
+          />
+        }
+        title={<PageTitle variant="detail" title={automation.name} description={automation.description} />}
+        content={
+          <div className="flex min-w-0 flex-col gap-5">
+            <StatStrip items={statItems} />
+            <div className="min-w-0">
+              <h2 className="mb-3 text-title font-semibold text-fg">Execution history</h2>
+              {!executions?.length ? (
+                <EmptyState icon="automations" title="No executions yet" description='Click "Run now" to trigger the first execution.' />
+              ) : (
+                <IterationsTable
+                  label="Execution history"
+                  size="md"
+                  columns={executionColumns}
+                  rows={executions}
+                  getRowId={(row) => row.id}
+                  onRowClick={(row) => {
+                    setSelectedExecutionId((current) => (current === row.id ? null : row.id));
+                    setSelectedRunId(null);
+                  }}
+                  rowActions={(row) =>
+                    row.status === 'running' || row.status === 'pending' ? (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        icon="x"
+                        onClick={async (e) => {
+                          e.stopPropagation();
+                          const ok = await confirmer.confirm({
+                            title: 'Cancel execution',
+                            description: 'Cancel this execution? Any running workflows will be stopped.',
+                            confirmLabel: 'Cancel execution',
+                            tone: 'danger',
+                          });
+                          if (ok) cancelExecution.mutate({ automationId: automation.id, executionId: row.id });
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                    ) : null
+                  }
+                />
+              )}
+            </div>
+            {selectedExecutionId && selectedExecution ? (
+              <Card data-testid="execution-detail">
+                <Card.Header title={`Execution #${selectedExecutionId.slice(0, 8)}…`} action={<Button variant="ghost" size="sm" onClick={() => setSelectedExecutionId(null)}>Close</Button>} />
+                <Card.Body>
+                  {selectedExecution.error ? <Callout tone="err">{selectedExecution.error}</Callout> : null}
+                  {selectedExecution.runs.length === 0 ? (
+                    <p className="text-small text-fg-3">No workflow runs yet.</p>
+                  ) : (
+                    <IterationsTable
+                      label={`Execution #${selectedExecutionId.slice(0, 8)} iterations`}
+                      columns={[
+                        {
+                          id: 'status',
+                          header: 'Status',
+                          width: 110,
+                          cell: (row: AutomationExecutionWithRuns['runs'][number]) => {
+                            const resolved = resolveStatus('automationRunItem', row.status);
+                            return resolved ? <StatusBadge state={resolved.state} label={resolved.label} context="run" /> : null;
+                          },
+                        },
+                        {
+                          id: 'iteration',
+                          header: 'Iteration',
+                          width: 'minmax(160px,1fr)',
+                          cell: (row: AutomationExecutionWithRuns['runs'][number]) => (
+                            <span className="font-mono text-micro">
+                              {row.iterationIndex + 1}
+                              {row.iterationLabel ? <span className="text-fg"> ({row.iterationLabel})</span> : null}
+                            </span>
+                          ),
+                        },
+                      ]}
+                      rows={selectedExecution.runs}
+                      getRowId={(row) => row.id}
+                      rowActions={(row) => (
+                        <span className="flex items-center gap-2">
+                          <Button variant="ghost" size="sm" icon="diff" onClick={() => setSelectedRunId((current) => (current === row.id ? null : row.id))}>
+                            Changes
+                          </Button>
+                          {row.workflowRunId ? (
+                            <Link render={<RouterLink to={`/workflows/${row.workflowDefinitionId}/runs/${row.workflowRunId}`} />} className="text-small">
+                              Run: {row.workflowRunId.slice(0, 8)}…
+                            </Link>
+                          ) : null}
+                        </span>
+                      )}
+                    />
+                  )}
+                  {selectedRunId ? (
+                    <div className="max-h-96 overflow-hidden rounded-card border border-line-soft">
+                      {selectedRunData?.workspaceId ? (
+                        <ChangesPanel
+                          workspaceId={selectedRunData.workspaceId}
+                          enableReview
+                          reviewScope={{ scope: 'automation', scopeId: selectedExecutionId }}
+                          reviewDisabledReason="Automation runs have no live session. Open the workflow run to send review feedback."
+                        />
+                      ) : (
+                        <div className="flex h-full items-center justify-center p-4 text-center text-small text-fg-3">
+                          {selectedRunData ? 'This run has no workspace, so there are no file changes to show.' : 'Loading changes…'}
+                        </div>
+                      )}
+                    </div>
+                  ) : null}
+                </Card.Body>
+              </Card>
+            ) : null}
+          </div>
+        }
+        rail={
+          <>
+            <Card>
+              <Card.Header title="Trigger" />
+              <Card.Body>
+                <AutomationTriggerBadge triggerType={automation.triggerType} label={automation.triggerType === 'schedule' ? automation.cronExpression : undefined} />
+                {automation.triggerType === 'webhook' ? (
+                  <div className="flex flex-col gap-2">
+                    <p className="text-small text-fg-3">
+                      The token and signing secret are shown once, when the webhook is created or rotated. Send a signed POST with{' '}
+                      <InlineCode>X-Signature-256</InlineCode>.
+                    </p>
+                    {rotateError ? <Callout tone="err">{rotateError}</Callout> : null}
+                    <Button variant="secondary" size="sm" onClick={() => void handleRotateWebhookToken()} disabled={rotateWebhookToken.isPending} loading={rotateWebhookToken.isPending}>
+                      Rotate token &amp; secret
+                    </Button>
+                  </div>
+                ) : null}
+              </Card.Body>
+            </Card>
+            <Card>
+              <Card.Header title="Workflow" />
+              <Card.Body>
+                <KeyValueList
+                  labelWidth={92}
+                  items={[
+                    { label: 'Workflows', value: `${automation.workflowIds.length} workflow${automation.workflowIds.length === 1 ? '' : 's'}` },
+                    { label: 'Permission', value: PERMISSION_MODE_LABEL[automation.permissionMode] ?? automation.permissionMode },
+                    { label: 'On error', value: automation.onError === 'stop' ? 'Stop on error' : 'Continue on error' },
+                    { label: 'Concurrency', value: String(automation.maxConcurrency) },
+                  ]}
+                />
+              </Card.Body>
+            </Card>
+            {automation.dataSchema ? (
+              <Card>
+                <Card.Header title="Dataset" meta={`${automation.dataSchema.fields.length} fields`} />
+                <Card.Body>
+                  <KeyValueList
+                    labelWidth={92}
+                    items={[
+                      { label: 'Format', value: automation.dataSchema.format },
+                      {
+                        label: 'Iteration',
+                        value:
+                          automation.iterationMode?.kind === 'each_row'
+                            ? 'Each row'
+                            : automation.iterationMode?.kind === 'group_by'
+                              ? `Grouped by ${automation.iterationMode.fields.join(', ')}`
+                              : 'Whole dataset',
+                      },
+                      ...(automation.defaultDataset?.parsedRowCount != null
+                        ? [{ label: 'Default rows', value: String(automation.defaultDataset.parsedRowCount) }]
+                        : []),
+                    ]}
+                  />
+                </Card.Body>
+              </Card>
+            ) : null}
+            {Object.keys(automation.variables).length > 0 ? (
+              <Card>
+                <Card.Header title="Base variables" />
+                <Card.Body>
+                  <pre className="max-h-40 overflow-auto rounded-control bg-sunken p-2.5 font-mono text-micro text-fg">{JSON.stringify(automation.variables, null, 2)}</pre>
+                </Card.Body>
+              </Card>
+            ) : null}
+            {automation.retryPolicy ? (
+              <Card>
+                <Card.Header title="Retry policy" />
+                <Card.Body>
+                  <KeyValueList
+                    labelWidth={92}
+                    items={[
+                      { label: 'Attempts', value: String(automation.retryPolicy.maxAttempts) },
+                      { label: 'Backoff', value: `${automation.retryPolicy.initialBackoffMs}ms × ${automation.retryPolicy.backoffMultiplier}`, mono: true },
+                      { label: 'Max backoff', value: `${automation.retryPolicy.maxBackoffMs}ms`, mono: true },
+                      { label: 'Retry on', value: automation.retryPolicy.retryOn.join(', ') },
+                    ]}
+                  />
+                </Card.Body>
+              </Card>
+            ) : null}
+          </>
+        }
+      />
+      {confirmer.dialog}
+      <TriggerAutomationDialog key={triggerDialogOpen ? 'open' : 'closed'} open={triggerDialogOpen} onClose={() => setTriggerDialogOpen(false)} automation={automation} />
+      <WebhookCredentialsDialog open={webhookCredentials !== null} credentials={webhookCredentials} onClose={() => setWebhookCredentials(null)} />
+    </>
+  );
+}

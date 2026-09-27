@@ -627,7 +627,8 @@ async function main() {
     const q = (id) => document.querySelector(`[data-testid="${id}"]`);
     const dragRow = q('rail-drag-row');
     const s = dragRow ? getComputedStyle(dragRow) : null;
-    const legacy = q('legacy-header');
+    // The page's own header row (PageHeader, `data-slot="page-header"`).
+    const pageHeaderRow = document.querySelector('[data-slot="page-header"] > :first-child');
     return {
       dragRow: dragRow
         ? {
@@ -638,7 +639,7 @@ async function main() {
       server: Boolean(q('rail-server')),
       search: Boolean(q('rail-search')),
       expandLabel: q('rail-expand')?.getAttribute('aria-label') ?? null,
-      legacyHeaderPaddingLeft: legacy ? parseFloat(getComputedStyle(legacy).paddingLeft) : null,
+      pageHeaderPaddingLeft: pageHeaderRow ? parseFloat(getComputedStyle(pageHeaderRow).paddingInlineStart) : null,
     };
   });
   check('rail-expand is labelled "Show sidebar"', rail.expandLabel === 'Show sidebar', String(rail.expandLabel));
@@ -649,9 +650,9 @@ async function main() {
     // The lights overflow the 48px rail into the card: the header gets a
     // 78 − 48 = 30px leading inset (06 §3.5) so they never cover its text.
     check(
-      `rail-mode legacy header clears the traffic lights (>= ${MAC_RAIL_PAGE_INSET}px)`,
-      rail.legacyHeaderPaddingLeft !== null && rail.legacyHeaderPaddingLeft >= MAC_RAIL_PAGE_INSET - 0.5,
-      `padding-left ${rail.legacyHeaderPaddingLeft}px`,
+      `rail-mode page header clears the traffic lights (>= ${MAC_RAIL_PAGE_INSET}px)`,
+      rail.pageHeaderPaddingLeft !== null && rail.pageHeaderPaddingLeft >= MAC_RAIL_PAGE_INSET - 0.5,
+      `padding-left ${rail.pageHeaderPaddingLeft}px`,
     );
   } else {
     check('no rail-drag-row outside macOS', rail.dragRow === null);

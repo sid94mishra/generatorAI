@@ -43,18 +43,13 @@ export type {
   FunctionHookConfig,
   WorkflowHookPhase,
   WorkflowHookDefinition,
-  HooksFileConfig,
   HookResult,
   HookPhaseResult,
 } from './HookDefinition.js';
 
-export type { Session, SessionWithWorkflows, SessionOwnerType, SessionStatus } from './Session.js';
-export type { SessionTransition } from './SessionStateMachine.js';
+export type { Session, SessionOwnerType, SessionStatus } from './Session.js';
 
-export type { Workflow, HarnessConfig } from './Workflow.js';
-export type { WorkflowStatus, WorkflowTransition } from './WorkflowStateMachine.js';
-export type { WorkflowRunTransition } from './WorkflowRunStateMachine.js';
-export type { StageRunTransition } from './StageRunStateMachine.js';
+export type { HarnessConfig } from './Workflow.js';
 
 export type { ChatMessage, ChatMessageMetadata } from './ChatMessage.js';
 export type { Artifact } from './Artifact.js';
@@ -82,8 +77,7 @@ export type {
   ComputerCapabilities,
 } from './ComputerUse.js';
 export { COMPUTER_ANY_APP, COMPUTER_CONTROL_MODES, defaultConsentReach } from './ComputerUse.js';
-export type { WebhookRegistration, WebhookDelivery } from './Webhook.js';
-export type { CreateSessionParams, McpServerConfig } from './CreateSessionParams.js';
+export type { McpServerConfig } from './McpServerConfig.js';
 export type { ILogger } from './ILogger.js';
 
 // ── Agents (first-class agent entity) ──
@@ -116,7 +110,7 @@ export {
 } from './Agent.js';
 
 // ── v2 New Types ──
-export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, BackgroundTaskCancelledBy, BackgroundTaskCancellation, BackgroundTaskCancelResult, BackgroundTaskListItem, ChatPermissionMode } from './Chat.js';
+export type { Chat, ChatStatus, ChatLocalFolder, CreateChatParams, BackgroundTaskStatus, BackgroundTaskMeta, BackgroundTaskCancelledBy, BackgroundTaskCancellation, BackgroundTaskCancelResult, BackgroundTaskListItem, ChatPermissionMode, ChatPrincipal } from './Chat.js';
 export { BACKGROUND_TASK_CANCELLERS } from './Chat.js';
 export { DEFAULT_CHAT_PERMISSION_MODE } from './Chat.js';
 
@@ -155,7 +149,6 @@ export {
   DEFAULT_AGENT_MODE,
   AGENT_MODES,
   isAgentMode,
-  coerceAgentMode,
   PLAN_ACTIONS,
   isPlanAction,
   TERMINAL_INTERACTION_STATUSES,
@@ -163,51 +156,31 @@ export {
   isStageReviewOutcome,
 } from './AgentMode.js';
 export type {
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  WorkflowSessionMode,
-  VariableDefinition,
-  SkillReference,
-  AgentReference,
-  CreateWorkflowDefinitionParams,
-  UpdateWorkflowDefinitionParams,
-} from './WorkflowDefinition.js';
-export type {
-  StageDefinition,
-  StageEdge,
-  StageEdgeType,
-  PromptDefinition,
-  PromptType,
-  RetryPolicy,
-  StageCondition,
-  CreateStageParams,
-  CreateEdgeParams,
-  ContextFilter,
-  StageSkillReference,
-  IterationConfig,
-  ArtifactManifestEntry,
-} from './StageDefinition.js';
-export type {
   WorkflowRun,
+  RunUsage,
   WorkflowRunStatus,
   StageRun,
   StageRunStatus,
   WorkflowRunWithStages,
-  CreateWorkflowRunParams,
+  LoopIteration,
+  LoopStateView,
+  MapItemView,
+  MapStateView,
+  MapWinnerView,
+  SubworkflowStateView,
+  ExpansionStateView,
+  PendingDecisionView,
   WorkflowRunPermissionMode,
-  WorkflowDefinitionSnapshot,
-  RunScratchpad,
-  RunScratchpadEntry,
+  ArtifactManifestEntry,
 } from './WorkflowRun.js';
-export { DEFAULT_WORKFLOW_RUN_PERMISSION_MODE } from './WorkflowRun.js';
-export type { RunProfile, StageRunOverride } from './RunProfile.js';
 
 export type {
   IPlatformClient,
+  InvocationFiles,
+  WorkflowRunListFilter,
   PlatformType,
   PaginatedResult,
   EventSubscriptionOptions,
-  WorkflowTemplateSummary,
 } from './IPlatformClient.js';
 
 // ── Automation Types ──
@@ -218,7 +191,6 @@ export type {
   AutomationExecutionWithRuns,
   AutomationWithExecutions,
   AutomationTriggerType,
-  AutomationInputMode,
   AutomationErrorPolicy,
   AutomationExecutionStatus,
   AutomationRunItemStatus,
@@ -231,16 +203,6 @@ export type {
   UpdateAutomationParams,
   TriggerAutomationBody,
   // E1 — Dynamic Data Source types
-  DataSourceType,
-  DataSourceOutputFormat,
-  DataSourceConfig,
-  StaticDataSourceConfig,
-  ScriptDataSourceConfig,
-  HttpDataSourceConfig,
-  FileDataSourceConfig,
-  WorkflowScriptDataSourceConfig,
-  DataSourceSchema,
-  DataSourceTestResult,
   // Track C — Schema-driven pipeline
   DataFieldType,
   DataFieldDef,
@@ -326,38 +288,14 @@ export {
   mcpStartupWarnings,
 } from './McpServer.js';
 
-// ── Orchestrator Types ──
+// ── Run lifecycle ──
 export type {
-  GitRepositoryConfig,
-  PreprocessingStep,
-  PreprocessingStepType,
-  PreprocessingStepConfig,
-  CloneRepoStepConfig,
-  RunScriptStepConfig,
-  ValidateInputStepConfig,
-  SetVariableStepConfig,
-  ConditionalStepConfig,
-  ValidationRule,
-  StageResultValidation,
-  ResultValidationRule,
-  WorkflowCategory,
-  PostProcessingStep,
-  PostProcessingStepType,
-  PostProcessingStepConfig,
-  CommitAndPushStepConfig,
-  CreatePRStepConfig,
-  PostRunScriptStepConfig,
-  OrchestratorConfig,
-  OrchestratedRunParams,
-  OrchestratorContext,
   PreprocessingResult,
-  StageValidationResult,
-  SystemWorkflowTemplate,
-  SystemStageTemplate,
-  ConfigurableVariable,
+  RunCodebase,
+  RunPhaseRecord,
+  RunSystemVars,
   RunWorkspaceInfo,
-  RunUploadResult,
-} from './WorkflowOrchestrator.js';
+} from './RunLifecycle.js';
 
 // ── Workspace Management Types ──
 export type {

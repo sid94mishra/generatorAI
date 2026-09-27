@@ -16,11 +16,14 @@ import type {
   AgentEvent,
   AgentEventNotification,
   SessionEndedNotification,
+  CallbackInvokeNotification,
+  CallbackResultRequest,
   SpawnSessionRequest,
   SendTurnRequest,
   AbortSessionRequest,
   DeleteSessionRequest,
 } from '@generatorai/shared';
+import { serializeHostCallbacks } from '@generatorai/shared';
 import type {
   IAgentHarness,
   HarnessClientState,
@@ -48,8 +51,12 @@ const HOST_CLIENT_CAPABILITIES: ProviderCapabilities = {
   maxParallelTools: 8,
   planMode: true,
   mcpServers: true,
-  skillDirectories: true,
-  fullToolGating: true,
+  // The host proxies a MultiHarness; the composer decides per provider from
+  // `PROVIDER_CAPABILITY_LEVELS`, so these are the proxy's own claims.
+  approvalGating: 'per_call',
+  hostTools: 'full',
+  structuredOutput: 'tool',
+  skills: 'directories',
   sessionPersistence: true,
   budgetTracking: true,
   // The host proxies provider turns over IPC and owns no computer-use driver
@@ -65,10 +72,12 @@ const HOST_CLIENT_CAPABILITIES: ProviderCapabilities = {
  */
 interface HostSession {
   /**
-   * The spawn params exactly as sent to the host. Held so a restarted host —
-   * which boots with empty maps — can be handed the same session back.
+   * The spawn params as the CALLER passed them (functions included). Held so
+   * a restarted host — which boots with empty maps — can be handed the same
+   * session back; they are re-serialised, with fresh callback ids, on every
+   * spawn.
    */
-  params: Record<string, unknown>;
+  params: CreateConversationParams;
   /**
    * Last `seq` seen for this session. A jump means the host's bounded queue
    * dropped frames.
@@ -79,6 +88,19 @@ interface HostSession {
    * handlers for the current turn. Reset when `session_ended` is consumed.
    */
   terminalDelivered: boolean;
+  /** The `provider:<id>` flow permit the turn in flight holds (P07 WP-7.2). */
+  releasePermit?: () => void;
+  /** Withdraws a turn still queued for its permit (`abortConversation`, ECON-R6). */
+  permitWait?: AbortController;
+  /** Bumped whenever the turn's permit is released at a turn boundary (a yielded permit taken back after one is let go). */
+  permitEpoch?: number;
+}
+
+/** A flow key as a permit gate (the AdmissionController's `flowGate`). */
+export interface HostTurnGate {
+  tryAcquire(): (() => void) | undefined;
+  /** Rejects when `signal` aborts before a permit is free. */
+  acquire(signal?: AbortSignal): Promise<() => void>;
 }
 
 export class AgentHostClient implements IAgentHarness {
@@ -97,8 +119,20 @@ export class AgentHostClient implements IAgentHarness {
   private readonly sessions = new Map<string, HostSession>();
   private readonly conversationWarnings = new Map<string, ConversationWarning[]>();
   private readonly conversationMessages = new Map<string, ConversationMessage[]>();
+  /**
+   * RV-26 — sessionId → callbackId → the gateway-side function a host stub
+   * calls: host tool handlers, the permission / question / plan-review gates
+   * and the hook bridge. Functions cannot cross IPC; `spawnSession` swaps
+   * each for a marker and the host calls back with `callback_invoke`.
+   */
+  private readonly callbacks = new Map<string, Map<string, (...args: unknown[]) => unknown>>();
+  private callbackSeq = 0;
   /** Frames the host reported dropping, for health reporting. */
   private droppedEventCount = 0;
+  /** The gateway's flow gate of a provider (P07 WP-7.2): every turn over IPC is admitted here. */
+  private gateFor: ((provider: string) => HostTurnGate | undefined) | undefined;
+  /** The provider a model routes to (the gateway's model catalog), for a session with no harness type. */
+  private providerForModel: ((model: string) => Promise<string | null | undefined>) | undefined;
 
   constructor(
     private readonly supervisor: HostSupervisor,
@@ -185,7 +219,14 @@ export class AgentHostClient implements IAgentHarness {
    * SESSION_NOT_FOUND permanently.
    */
   private async spawnSession(sessionId: string, params: CreateConversationParams): Promise<void> {
-    const serialized = params as unknown as Record<string, unknown>;
+    // A re-spawn (host restart) re-registers every callback under fresh ids.
+    const registry = new Map<string, (...args: unknown[]) => unknown>();
+    this.callbacks.set(sessionId, registry);
+    const serialized = serializeHostCallbacks(params, (fn) => {
+      const id = `cb-${++this.callbackSeq}`;
+      registry.set(id, fn);
+      return id;
+    }) as Record<string, unknown>;
 
     this.conversationHandlers.set(sessionId, this.conversationHandlers.get(sessionId) ?? new Set());
     if (!this.conversationWarnings.has(sessionId)) this.conversationWarnings.set(sessionId, []);
@@ -208,11 +249,13 @@ export class AgentHostClient implements IAgentHarness {
     }
 
     // Liveness is committed only on a confirmed spawn.
-    this.sessions.set(sessionId, { params: serialized, lastSeq: 0, terminalDelivered: false });
+    this.sessions.set(sessionId, { params, lastSeq: 0, terminalDelivered: false });
   }
 
   private cleanupSessionMaps(sessionId: string): void {
+    this.releaseTurnPermit(sessionId);
     this.sessions.delete(sessionId);
+    this.callbacks.delete(sessionId);
     this.conversationHandlers.delete(sessionId);
     this.conversationWarnings.delete(sessionId);
     this.conversationMessages.delete(sessionId);
@@ -270,23 +313,115 @@ export class AgentHostClient implements IAgentHarness {
     throw new Error(`AgentHostClient.listAgents: unexpected response ${resp.type}`);
   }
 
+  /**
+   * P07 WP-7.2, RV-26 — the agent host enforces the gateway's flow keys:
+   * every turn takes its provider's flow permit HERE (unless the caller
+   * already holds it: a workflow stage), is sent `admitted`, and gives the
+   * permit back at the turn's terminal event.
+   */
+  useTurnGates(gateFor: (provider: string) => HostTurnGate | undefined, providerForModel?: (model: string) => Promise<string | null | undefined>): void {
+    this.gateFor = gateFor;
+    this.providerForModel = providerForModel;
+  }
+
+  /**
+   * The provider that runs (or would run) a conversation: an explicit
+   * harness type, else the one its model routes to. `undefined` when it
+   * cannot be told (the host then runs its default provider).
+   */
+  async resolveProvider(params: { conversationId?: string; harnessType?: string; model?: string }): Promise<string | undefined> {
+    const spawned = params.conversationId ? this.sessions.get(params.conversationId)?.params : undefined;
+    const harnessType = params.harnessType ?? spawned?.harnessType;
+    if (harnessType) return String(harnessType);
+    const model = params.model ?? spawned?.model;
+    if (model && this.providerForModel) return (await this.providerForModel(model).catch(() => undefined)) ?? undefined;
+    return undefined;
+  }
+
+  private releaseTurnPermit(conversationId: string): void {
+    const session = this.sessions.get(conversationId);
+    if (session) session.permitEpoch = (session.permitEpoch ?? 0) + 1;
+    const release = session?.releasePermit;
+    if (!session || !release) return;
+    delete session.releasePermit;
+    release();
+  }
+
+  /**
+   * ECON-R7 — the turn in flight gives its permit back while one of its
+   * tools blocks on other work; the returned function takes one again. A
+   * turn that ended meanwhile takes none (its permit would be held idle).
+   */
+  yieldTurnPermit(conversationId: string): (() => Promise<void>) | undefined {
+    const session = this.sessions.get(conversationId);
+    const release = session?.releasePermit;
+    if (!session || !release) return undefined;
+    delete session.releasePermit;
+    release();
+    const epoch = session.permitEpoch ?? 0;
+    return async () => {
+      if (this.sessions.get(conversationId) !== session || (session.permitEpoch ?? 0) !== epoch || session.releasePermit) return;
+      const provider = (await this.resolveProvider({ conversationId })) ?? 'claude-agent';
+      const gate = this.gateFor?.(provider);
+      if (!gate) return;
+      const wait = new AbortController();
+      session.permitWait = wait;
+      try {
+        const permit = gate.tryAcquire() ?? (await gate.acquire(wait.signal));
+        if (this.sessions.get(conversationId) !== session || (session.permitEpoch ?? 0) !== epoch || session.releasePermit) permit();
+        else session.releasePermit = permit;
+      } catch {
+        /* withdrawn: the turn was stopped */
+      } finally {
+        if (session.permitWait === wait) delete session.permitWait;
+      }
+    };
+  }
+
   // ── IHarnessMessaging ─────────────────────────────────────────────────────
 
   async sendPrompt(
     conversationId: string,
     prompt: string,
     attachments?: AttachmentRef[],
-    _options?: SendPromptOptions,
+    options?: SendPromptOptions,
   ): Promise<void> {
+    const session = this.sessions.get(conversationId);
+    // The turn's own provider (a session routed by model is not claude-agent's).
+    const provider = options?.admitted ? undefined : ((await this.resolveProvider({ conversationId })) ?? 'claude-agent');
+    const gate = provider ? this.gateFor?.(provider) : undefined;
+    if (session && gate && !session.releasePermit) {
+      const wait = new AbortController();
+      session.permitWait = wait;
+      try {
+        session.releasePermit = gate.tryAcquire() ?? (await gate.acquire(wait.signal));
+      } catch (err) {
+        if (!wait.signal.aborted) throw err;
+        // Stopped while it waited for a slot: the turn never starts, and ends as cancelled.
+        this.deliver(conversationId, { kind: 'harness.cancelled', data: { reason: 'user_abort' }, timestamp: new Date().toISOString() } as AgentEvent);
+        return;
+      } finally {
+        if (session.permitWait === wait) delete session.permitWait;
+      }
+    }
     const turnReq: Omit<SendTurnRequest, 'reqId'> = {
       type: 'send_turn',
       sessionId: conversationId,
       prompt,
       // AttachmentRef uses `path` as the stable identifier; the host resolves files by path
       attachments: attachments?.map((a) => ({ type: 'file', id: a.path })),
+      options: {
+        ...(options?.agentMode ? { agentMode: options.agentMode } : {}),
+        ...(options?.permissionMode ? { permissionMode: options.permissionMode } : {}),
+        ...(options?.admitted || gate ? { admitted: true } : {}),
+      },
     };
-    const resp = await this.supervisor.send(turnReq);
+    const resp = await this.supervisor.send(turnReq).catch((err: unknown) => {
+      this.releaseTurnPermit(conversationId);
+      throw err;
+    });
     if (resp.type === 'error') {
+      this.releaseTurnPermit(conversationId);
       throw new Error(`AgentHostClient.sendPrompt failed: ${resp.message}`);
     }
   }
@@ -393,6 +528,8 @@ export class AgentHostClient implements IAgentHarness {
   }
 
   async abortConversation(conversationId: string): Promise<void> {
+    // A turn still queued for its permit is withdrawn (it never reaches the host).
+    this.sessions.get(conversationId)?.permitWait?.abort();
     const abortReq: Omit<AbortSessionRequest, 'reqId'> = { type: 'abort_session', sessionId: conversationId };
     await this.supervisor.send(abortReq).catch((err: unknown) => {
       this.logger.warn(`[AgentHostClient] abortConversation error: ${String(err)}`);
@@ -416,9 +553,13 @@ export class AgentHostClient implements IAgentHarness {
   // ── Called by HostSupervisor when events arrive from the host process ─────
 
   /** Wire this up: pass as `onHostEvent` to HostSupervisor. */
-  handleHostEvent(msg: AgentEventNotification | SessionEndedNotification): void {
+  handleHostEvent(msg: AgentEventNotification | SessionEndedNotification | CallbackInvokeNotification): void {
     if (msg.type === 'agent_event') {
       this.handleAgentEvent(msg);
+      return;
+    }
+    if (msg.type === 'callback_invoke') {
+      void this.handleCallbackInvoke(msg);
       return;
     }
     if (msg.type === 'session_ended') {
@@ -432,6 +573,30 @@ export class AgentHostClient implements IAgentHarness {
     this.logger.warn(`[AgentHostClient] Unhandled host notification type: ${(msg as { type: string }).type}`);
   }
 
+  /**
+   * RV-26 — run the gateway-side function a host stub called and send its
+   * answer back. A gate may block for as long as a human takes to answer, so
+   * there is no deadline here; the host rejects the stub when the session is
+   * torn down.
+   */
+  private async handleCallbackInvoke(msg: CallbackInvokeNotification): Promise<void> {
+    const fn = this.callbacks.get(msg.sessionId)?.get(msg.callbackId);
+    let reply: Omit<CallbackResultRequest, 'reqId'>;
+    if (!fn) {
+      reply = { type: 'callback_result', callId: msg.callId, ok: false, error: `Unknown callback ${msg.callbackId} for session ${msg.sessionId}` };
+    } else {
+      try {
+        const value = await fn(...msg.args);
+        reply = { type: 'callback_result', callId: msg.callId, ok: true, ...(value !== undefined ? { value } : {}) };
+      } catch (err: unknown) {
+        reply = { type: 'callback_result', callId: msg.callId, ok: false, error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+    await this.supervisor.send(reply).catch((err: unknown) => {
+      this.logger.warn(`[AgentHostClient] callback_result for ${msg.callId} could not be delivered: ${String(err)}`);
+    });
+  }
+
   private handleAgentEvent(msg: AgentEventNotification): void {
     const session = this.sessions.get(msg.sessionId);
     if (session) {
@@ -439,6 +604,7 @@ export class AgentHostClient implements IAgentHarness {
       const kind = (msg.event as { kind?: string }).kind ?? '';
       if (kind === 'harness.idle' || kind === 'harness.error' || kind === 'harness.cancelled') {
         session.terminalDelivered = true;
+        this.releaseTurnPermit(msg.sessionId);
       }
     }
     this.deliver(msg.sessionId, msg.event);
@@ -464,6 +630,7 @@ export class AgentHostClient implements IAgentHarness {
       this.deliver(msg.sessionId, this.synthesiseTerminalEvent(msg));
     }
     if (session) session.terminalDelivered = false;
+    this.releaseTurnPermit(msg.sessionId);
   }
 
   private synthesiseTerminalEvent(msg: SessionEndedNotification): AgentEvent {
@@ -556,7 +723,7 @@ export class AgentHostClient implements IAgentHarness {
       // drop it first so `spawnSession` commits a fresh one on success.
       this.sessions.delete(sessionId);
       try {
-        await this.spawnSession(sessionId, session.params as unknown as CreateConversationParams);
+        await this.spawnSession(sessionId, session.params);
       } catch (err: unknown) {
         failed++;
         this.logger.error(`[AgentHostClient] Failed to re-attach session ${sessionId}: ${String(err)}`);

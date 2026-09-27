@@ -9,6 +9,11 @@
 //
 // Live through the same `run` stream scope as the run screen — its
 // invalidations cover this screen's keys, which sit under `queryKeys.run`.
+//
+// A stage is a compact chat (P03b): the chat's composer sits under the
+// transcript (send, attach, Stop), and a tool permission, question or plan
+// inside the stage's turn pins the chat's card above it. A message to a
+// completed stage amends its output; its stream stays open while it does.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useMemo, useState } from 'react';
@@ -23,6 +28,10 @@ import { useAdminApi } from '../../../../src/api/useAdminApi';
 import { useRunMutations, type StageAction } from '../../../../src/api/useRunControl';
 import { useRunStream } from '../../../../src/stream/useRunStream';
 import { ApprovalCard } from '../../../../src/components/runs/ApprovalCard';
+import { LoopDecisionCard } from '../../../../src/components/runs/LoopDecisionCard';
+import { isParkedLoop, type RunStage } from '../../../../src/components/runs/loopModel';
+import { StageComposer } from '../../../../src/components/runs/StageComposer';
+import { stageGateOf } from '../../../../src/components/runs/stageGate';
 import { formatDuration, relativeTime, runElapsed } from '../../../../src/components/runs/formatTime';
 import { StatusGlyph } from '../../../../src/components/runs/StatusGlyph';
 import { stageSubtitle } from '../../../../src/components/runs/StageTimeline';
@@ -52,7 +61,6 @@ type Tab = 'transcript' | 'output' | 'files';
 const ACTION_LABEL: Record<StageAction, string> = {
   retry: 'Retry stage',
   resume: 'Resume stage',
-  wake: 'Wake now',
   cancel: 'Cancel stage',
 };
 
@@ -71,8 +79,12 @@ export default function StageScreen(): React.ReactElement {
   const { colors } = useTheme();
   const toast = useToast();
   const runControl = useFeature('runControl');
+  // Retrying a stage of a FINISHED run forks a new run, which needs only runStart.
+  const runStart = useFeature('runStart');
   const [tab, setTab] = useState<Tab>('transcript');
   const [confirmCancel, setConfirmCancel] = useState(false);
+  // A message to a completed stage amends it: stream it until the amendment lands.
+  const [amendingSince, setAmendingSince] = useState<string | null>(null);
 
   const { connected } = useRunStream(runId, focused);
   const { stageAction, approve } = useRunMutations(runId);
@@ -94,12 +106,6 @@ export default function StageScreen(): React.ReactElement {
     refetchInterval: focused && live ? (connected ? 15_000 : 5_000) : false,
   });
 
-  const interrupts = useQuery({
-    queryKey: queryKeys.runInterrupts(runId),
-    queryFn: () => api.runs.pendingInterrupts(runId),
-    enabled: Boolean(stage && awaitsApproval(stage.status)),
-  });
-
   const pull = usePullRefresh(() => Promise.all([run.refetch(), transcript.refetch()]));
 
   React.useLayoutEffect(() => {
@@ -107,7 +113,10 @@ export default function StageScreen(): React.ReactElement {
   }, [navigation, stage?.name]);
 
   // Nothing past the prompt is saved while the stage runs; stream it instead.
-  const liveState = useStageLive(runId, stageRunId, live);
+  const amending = amendingSince !== null && String(stage?.amendedAt ?? '') === amendingSince;
+  const liveState = useStageLive(runId, stageRunId, live || amending);
+  const streaming =
+    (live || amending) && (liveState?.status === 'pending' || liveState?.status === 'streaming' || liveState?.status === 'thinking');
   const items = useMemo(() => {
     const saved = transcriptItems(transcript.data, live);
     if (!liveState?.blocks.length) return saved;
@@ -133,7 +142,8 @@ export default function StageScreen(): React.ReactElement {
   const runStatus = run.data.status;
   const workspaceId = run.data.workspaceId;
   const controls = stageControlsFor(stage.status, runStatus);
-  const available = (['retry', 'resume', 'wake', 'cancel'] as const).filter((a) => controls[a]);
+  const available = (['retry', 'resume', 'cancel'] as const).filter((a) => controls[a]);
+  const stageGate = isTerminal(runStatus) ? runStart : runControl;
   const elapsed = runElapsed(stage, isActive(stage.status) ? null : stage.completedAt);
   const files = (stage.artifactManifest ?? []).filter((f) => !/^unnamed\.[A-Za-z0-9]+$/.test(f.path));
   const outputText = stage.outputText?.trim();
@@ -154,7 +164,7 @@ export default function StageScreen(): React.ReactElement {
           <StatusGlyph status={stage.status} />
           <View className="flex-1 gap-0.5">
             <Text className="text-lg font-semibold leading-snug text-foreground">
-              {stage.name ?? stage.stageDefinitionId}
+              {stage.name ?? stage.stageKey}
             </Text>
             <Text className="text-sm text-muted-foreground">
               {stageSubtitle(stage)}
@@ -169,7 +179,7 @@ export default function StageScreen(): React.ReactElement {
           </View>
         ) : null}
         {available.length > 0 ? (
-          runControl.available ? (
+          stageGate.available ? (
             <View className="flex-row flex-wrap gap-2">
               {available.map((action) => (
                 <Button
@@ -189,16 +199,22 @@ export default function StageScreen(): React.ReactElement {
               <Text className="flex-1 text-sm text-muted-foreground">
                 Retrying or resuming stages needs workflow permission on this device.
               </Text>
-              <Button label="Request access" variant="secondary" size="sm" onPress={runControl.requestAccess} />
+              <Button label="Request access" variant="secondary" size="sm" onPress={stageGate.requestAccess} />
             </View>
           )
         ) : null}
       </Card>
 
-      {awaitsApproval(stage.status) ? (
+      {isParkedLoop(stage as RunStage) ? (
+        <LoopDecisionCard
+          runId={runId}
+          stage={stage as RunStage}
+          canControl={runControl.available}
+          onRequestAccess={runControl.requestAccess}
+        />
+      ) : awaitsApproval(stage.status) && stageGateOf(stage.interruptData).kind === 'review' ? (
         <ApprovalCard
           stage={stage}
-          interruptData={interrupts.data?.find((i) => i.id === stage.id)?.interruptData}
           busy={approve.isPending}
           onDecide={(outcome: ApprovalOutcome, feedback?: string) =>
             approve.mutate({ stageRunId, outcome, ...(feedback ? { feedback } : {}) })
@@ -347,6 +363,7 @@ export default function StageScreen(): React.ReactElement {
 
   return (
     <TimelineActionsContext.Provider value={actions}>
+      <View className="flex-1 bg-background">
       <FlatList<ListItem>
         className="flex-1 bg-background"
         data={data}
@@ -372,6 +389,19 @@ export default function StageScreen(): React.ReactElement {
           )
         }
       />
+      <StageComposer
+        runId={runId}
+        stage={stage}
+        workspaceId={workspaceId ?? null}
+        streaming={streaming}
+        canControl={runControl.available}
+        busy={approve.isPending}
+        onDecide={(outcome: ApprovalOutcome, feedback?: string) =>
+          approve.mutate({ stageRunId, outcome, ...(feedback ? { feedback } : {}) })
+        }
+        onAmending={() => setAmendingSince(String(stage.amendedAt ?? ''))}
+      />
+      </View>
 
       <ActionSheet
         visible={confirmCancel}

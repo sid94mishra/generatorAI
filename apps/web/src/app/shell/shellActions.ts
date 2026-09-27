@@ -9,6 +9,7 @@ import { useMemo } from 'react';
 import { useNavigate } from 'react-router';
 import { useShellStore } from '@/stores/shellStore.js';
 import { useSettingsUiStore } from '@/stores/settingsUiStore.js';
+import { useNewChatStore } from '@/stores/newChatStore.js';
 
 export interface ShellActions {
   openPalette: () => void;
@@ -24,8 +25,8 @@ export function useShellActions(): ShellActions {
   return useMemo(
     () => ({
       openPalette: () => useShellStore.getState().setCommandPaletteOpen(true),
-      // The new-chat dialog opens from the Chats list until it becomes a global overlay (P5).
-      newChat: () => void navigate('/chats?new=1'),
+      // R-1: the sidebar/rail icon opens the 640 dialog directly (04 §0).
+      newChat: () => useNewChatStore.getState().open(),
       openSettings: () => useSettingsUiStore.getState().openSettings(),
       toggleSidebar: () => useShellStore.getState().toggleSidebar(),
       back: () => void navigate(-1),

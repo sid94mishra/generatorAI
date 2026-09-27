@@ -115,33 +115,10 @@ export const DEFAULT_AGENT_MODE: AgentMode = 'auto';
 
 export const AGENT_MODES: readonly AgentMode[] = ['auto', 'plan'] as const;
 
-/**
- * Legacy value accepted at every boundary.
- *
- * `interactive` was the v1 name for what is now `auto`. Persisted rows are
- * migrated (v22), but API clients, workflow definitions exported before the
- * rename, and in-flight requests may still send it.
- */
-const LEGACY_MODE_ALIASES: Readonly<Record<string, AgentMode>> = {
-  interactive: 'auto',
-};
-
 export function isAgentMode(value: unknown): value is AgentMode {
   return value === 'auto' || value === 'plan';
 }
 
-/**
- * Coerces any inbound value to a valid mode, resolving legacy aliases.
- * Returns `undefined` for unrecognised input so callers can fall back to
- * their own default rather than being handed a silent wrong answer.
- */
-export function coerceAgentMode(value: unknown): AgentMode | undefined {
-  if (isAgentMode(value)) return value;
-  if (typeof value === 'string' && value in LEGACY_MODE_ALIASES) {
-    return LEGACY_MODE_ALIASES[value];
-  }
-  return undefined;
-}
 
 /** The behavioural contract for a mode. Unknown input falls back to the default. */
 export function agentModeDescriptor(mode: AgentMode | undefined): AgentModeDescriptor {

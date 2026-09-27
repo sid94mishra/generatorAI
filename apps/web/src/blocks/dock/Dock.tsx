@@ -1,8 +1,8 @@
 // ────────────────────────────────────────────────────────────────
 // Dock — the chat / run page's right dock (D-27): S-08 DockFrame + C-19
 // DockTabStrip driven by `useDockState` and the page's `DockRegistry`.
-// Replaces `components/layout/RightPane.tsx` for the chat page; the legacy
-// workflow run page keeps RightPane until PW (04 §2.1 note).
+// Replaced `components/layout/RightPane.tsx` (the chat page in P4-06, the
+// workflow run page in PW-c, which deleted it).
 //
 // Keeps the historical `right-pane*` testids and accessible names (09 §7.2):
 // `right-pane`, `right-pane-tab-<type>`, `right-pane-add-tab`,

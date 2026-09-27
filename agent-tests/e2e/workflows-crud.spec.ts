@@ -24,7 +24,7 @@ test.describe('Workflows page (CRUD over seeded data)', () => {
     await expect(page.getByText(unique, { exact: false }).first()).toBeVisible();
   });
 
-  test('open a seeded workflow detail and see its DAG', async ({ page, gotoApp, seed }) => {
+  test('open a seeded workflow detail and see its stages', async ({ page, gotoApp, seed }) => {
     const unique = `E2E Detail WF ${Date.now()}`;
     const defId = await seed.workflow({
       name: unique,
@@ -37,19 +37,21 @@ test.describe('Workflows page (CRUD over seeded data)', () => {
 
     await gotoApp(`/workflows/${defId}`);
     await expect(page.getByRole('heading', { name: unique })).toBeVisible({ timeout: 10_000 });
-    // React Flow canvas renders.
-    await expect(page.getByTestId('rf__wrapper')).toBeVisible({ timeout: 10_000 });
-    // Both stage names appear on the canvas.
-    await expect(page.getByText('First', { exact: true }).first()).toBeVisible();
-    await expect(page.getByText('Second', { exact: true }).first()).toBeVisible();
+    // The Stages card lists the working graph (it replaced the read-only DAG canvas).
+    const stages = page.getByTestId('workflow-stages');
+    await expect(stages).toBeVisible({ timeout: 10_000 });
+    await expect(stages.getByText('First', { exact: true })).toBeVisible();
+    await expect(stages.getByText('Second', { exact: true })).toBeVisible();
   });
 
   test('create-from-template button list is present', async ({ page, gotoApp }) => {
     await gotoApp('/workflows');
-    // The page exposes the primary creation affordances.
-    await expect(page.getByRole('button', { name: 'New Workflow', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Template', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Upload JSON', exact: true })).toBeVisible();
+    // The page exposes the primary creation affordances (PW-a names: "New workflow",
+    // "Import JSON"; the sample document moved into the header's More menu).
+    await expect(page.getByRole('button', { name: 'New workflow', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: 'Import JSON', exact: true })).toBeVisible();
+    await page.getByRole('button', { name: 'More workflow actions' }).click();
+    await expect(page.getByRole('menuitem', { name: 'Download sample JSON' })).toBeVisible();
   });
 
   test('deleting a seeded workflow via API removes it from the list', async ({ page, gotoApp, seed }) => {

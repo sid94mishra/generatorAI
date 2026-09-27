@@ -8,7 +8,7 @@
 
 import React from 'react';
 import { ActivityIndicator, View } from 'react-native';
-import { Ban, Check, Circle, Hand, Moon, Pause, X } from 'lucide-react-native';
+import { Ban, Check, Circle, Hand, Pause, X } from 'lucide-react-native';
 
 import { statusLabel } from './statusStyle';
 import { toneOf } from './tone';
@@ -40,7 +40,10 @@ export function StatusGlyph({
   switch (status) {
     case 'running':
     case 'starting':
-    case 'queued':
+    case 'ready':
+    case 'validating':
+    case 'retry_wait':
+    case 'finalizing':
     case 'cancelling':
       glyph = <ActivityIndicator size="small" color={color} />;
       break;
@@ -51,13 +54,11 @@ export function StatusGlyph({
       glyph = <X size={icon} color={color} />;
       break;
     case 'paused':
+    case 'waiting':
       glyph = <Pause size={icon} color={color} />;
       break;
     case 'awaiting_input':
       glyph = <Hand size={icon} color={color} />;
-      break;
-    case 'sleeping':
-      glyph = <Moon size={icon} color={color} />;
       break;
     case 'cancelled':
     case 'skipped':

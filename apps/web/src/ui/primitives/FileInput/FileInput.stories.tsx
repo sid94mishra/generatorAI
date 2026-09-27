@@ -23,3 +23,15 @@ export const Default: Story = {
     await expect(canvasElement.querySelector('input[type="file"]')).not.toBeNull();
   },
 };
+
+/** `directory`: the native picker selects a folder (the input carries `webkitdirectory`). */
+export const Directory: Story = {
+  render: () => (
+    <FileInput directory onFilesSelected={() => {}}>
+      {(open) => <Button onClick={open}>Upload folder</Button>}
+    </FileInput>
+  ),
+  play: async ({ canvasElement }) => {
+    await expect(canvasElement.querySelector('input[type="file"]')?.hasAttribute('webkitdirectory')).toBe(true);
+  },
+};

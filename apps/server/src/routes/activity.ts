@@ -19,10 +19,11 @@ import type {
   Automation,
   RecentActivityItem,
   RecentActivityPage,
-  WorkflowDefinition,
   WorkflowRun,
 } from '@generatorai/shared';
+import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
 import type { Container } from '../composition-root.js';
+import { listAllDefinitionSummaries } from './definitionSummaries.js';
 
 const TERMINAL_RUN_STATUSES = new Set(['completed', 'failed', 'cancelled']);
 const TERMINAL_EXECUTION_STATUSES = new Set(['completed', 'partial', 'failed', 'cancelled']);
@@ -93,9 +94,9 @@ export function createActivityRoutes(container: Container): Router {
       }
 
       // ── Workflow runs: joined through the definition ──
-      const definitions: WorkflowDefinition[] = projectId
-        ? await workflowDefinitionService.listDefinitions(projectId)
-        : await workflowDefinitionService.listDefinitions();
+      const definitions: WorkflowDefinitionSummary[] = await listAllDefinitionSummaries(workflowDefinitionService, {
+        projectId,
+      });
       const runsByDefinition = await Promise.all(
         definitions.map(async (d) => ({ definition: d, runs: await workflowRunRepo.getByDefinitionId(d.id) })),
       );

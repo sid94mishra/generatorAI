@@ -42,9 +42,9 @@ export {
 } from './facades/index.js';
 
 export type {
-  CreateWorkflowInput,
+  CreateWorkflowOptions,
+  GraphSource,
   RunOptions,
-  OrchestrateOptions,
   StreamOptions,
   CreateChatOptions,
   RunScriptOptions,
@@ -58,24 +58,33 @@ export type {
   HookContext,
   HookResult,
   HookHandler,
-  InterruptOptions,
-  InterruptResolution,
+  ApprovalVerdictInput,
+  PendingDecision,
   CreateWorkspaceInput,
   WorkspaceFilters,
 } from './facades/index.js';
 
-// ── Builders (re-export from shared) ──
-export { WorkflowBuilder, StageBuilder } from '@generatorai/shared';
+// ── Workflow documents: builders, validation, canonical import/export ──
+export { workflow, WorkflowBuilder, StageBuilder, WorkflowBuildError } from '@generatorai/workflow-spec/builders';
+export { validateWorkflow, exportGraph, importGraph, parseGraph } from '@generatorai/workflow-spec';
+export type {
+  WorkflowGraph,
+  WorkflowGraphInput,
+  StageSpec,
+  EdgeSpec,
+  WorkflowSpec,
+  ValidationIssue,
+  ValidationResult,
+  WorkflowDefinitionRecord,
+  WorkflowDefinitionSummary,
+  WorkflowDefinitionVersionSummary,
+} from '@generatorai/workflow-spec';
 
 // ── Types (selective re-export from shared) ──
 export type {
   AgentEvent,
   AgentEventKind,
   PersistedEvent,
-  WorkflowDefinition,
-  WorkflowDefinitionWithStages,
-  StageDefinition,
-  StageEdge,
   WorkflowRun,
   StageRun,
   Chat,
@@ -100,12 +109,13 @@ export {
   HarnessConnectionError,
 } from '@generatorai/shared';
 
-// ── State Machines (stable, pure — re-export from core) ──
+// ── Run and instance state tables (stable, pure data) ──
 export {
-  WorkflowRunStateMachine,
-  StageRunStateMachine,
-  SessionStateMachine,
-} from '@generatorai/core';
+  STAGE_RUN_TRANSITIONS,
+  WORKFLOW_RUN_TRANSITIONS,
+  type RunCommand,
+  type ForkRunRequest,
+} from '@generatorai/workflow-spec';
 
 // ── Harness extension point (bring-your-own-harness) ──
 // `IAgentHarness` is part of the STABLE surface: an integrator can implement it
@@ -129,7 +139,7 @@ export type {
 // contract (see API-STABILITY.md). Power users who accept that can import it
 // explicitly:
 //
-//   import { WorkflowOrchestrator } from '@generatorai/sdk/internal';
+//   import { WorkflowInvocationService } from '@generatorai/sdk/internal';
 //
 // Prefer the facades (`ai.workflows`, `ai.chat`, …) — they are the stable API.
 // ────────────────────────────────────────────────────────────────

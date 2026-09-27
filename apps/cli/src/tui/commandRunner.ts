@@ -7,9 +7,11 @@
 // the result and the errors are shown.
 // ────────────────────────────────────────────────────────────────
 
+import type { InvocationPlan } from '@generatorai/workflow-spec';
 import {
   CliError,
   commandPath,
+  describeInvocationPlan,
   formFieldsForSpec,
   formValuesToInput,
   shellOnlyHint,
@@ -40,6 +42,7 @@ export interface CommandRunner {
    * This is how every authoring surface in the TUI invokes a command that
    * needs more than one value — there is exactly one form implementation,
    * and it is generated from the same spec the binary and the docs use.
+   * `run.start` plans first and starts only after a y on the plan.
    */
   runWithForm(
     id: string,
@@ -61,6 +64,7 @@ export function createCommandRunner(options: CommandRunnerOptions): CommandRunne
     spec: CommandSpec,
     args: Record<string, unknown>,
     flags: Record<string, unknown>,
+    options: { announce?: boolean } = {},
   ): Promise<unknown> {
     let context: CliContext | null = null;
     try {
@@ -68,8 +72,10 @@ export function createCommandRunner(options: CommandRunnerOptions): CommandRunne
       context = await makeContext();
       const result = await spec.handler(context, validated);
 
-      for (const warning of result.warnings ?? []) actions.toast(warning, 'warning');
-      if (result.message) actions.toast(result.message, 'success');
+      if (options.announce !== false) {
+        for (const warning of result.warnings ?? []) actions.toast(warning, 'warning');
+        if (result.message) actions.toast(result.message, 'success');
+      }
       return result.data;
     } catch (error) {
       const cliError = toCliError(error);
@@ -87,6 +93,36 @@ export function createCommandRunner(options: CommandRunnerOptions): CommandRunne
     } finally {
       await context?.dispose();
     }
+  }
+
+  /**
+   * `run start` from the TUI: the same flags go to `run plan` first, and the
+   * plan (stages by layer, skips, codebases, post-processing, permission
+   * mode, warnings) is shown for a y/n before the run is invoked. A refused
+   * plan is reported like any other command failure and starts nothing.
+   */
+  async function startRunAfterPlan(
+    runner: CommandRunner,
+    args: Record<string, unknown>,
+    formFlags: Record<string, unknown>,
+  ): Promise<unknown> {
+    const planSpec = registry.get('run.plan');
+    if (!planSpec) return runner.run('run.start', args, formFlags);
+    const flags = { ...formFlags, client: 'tui' };
+    const plan = (await execute(planSpec, args, flags, { announce: false })) as InvocationPlan | undefined;
+    if (!plan) return undefined;
+    return new Promise((resolve) => {
+      actions.showOverlay({
+        kind: 'confirm',
+        title: `Start ${plan.workflowName}?`,
+        message: describeInvocationPlan(plan, { maxStages: 12 }).join('\n'),
+        danger: false,
+        onAnswer: (confirmed) => {
+          if (!confirmed) return resolve(undefined);
+          void runner.run('run.start', args, flags).then(resolve);
+        },
+      });
+    });
   }
 
   return {
@@ -134,7 +170,8 @@ export function createCommandRunner(options: CommandRunnerOptions): CommandRunne
           fields,
           onSubmit: (values) => {
             const { args, flags } = formValuesToInput(fields, values);
-            void this.run(id, args, flags).then(resolve);
+            const started = id === 'run.start' ? startRunAfterPlan(this, args, flags) : this.run(id, args, flags);
+            void started.then(resolve);
           },
           // A dismissed form resolves `undefined`, the same value a declined
           // confirm and a reported failure already resolve to — so every

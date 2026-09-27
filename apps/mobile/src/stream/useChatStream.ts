@@ -40,9 +40,11 @@ import { useEffect, useRef } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import {
   StreamEventRouter,
+  foldWorkflowRunEvent,
   queryKeys,
   type MuxStreamEvent,
   type StreamEffect,
+  type WorkflowRunCardView,
 } from '@generatorai/client-core';
 import { MOBILE_CAPABILITIES } from '@generatorai/shared';
 
@@ -185,6 +187,19 @@ export function useChatStream({
       // resources are a closed set that has no source-control member.
       if (effects.some((e) => e.op === 'upsertScmResult')) {
         void queryClient.invalidateQueries({ queryKey: scmKeys.chatResults(chatId) });
+      }
+
+      // A run this chat started moved (P06 WP-6.2): patch its card now, then
+      // refetch the list — the pending decisions are the server's to say.
+      // Only a list someone loaded is patched: seeding an empty one would
+      // read as fresh and hold the first fetch back.
+      for (const effect of effects) {
+        if (effect.op !== 'workflowRunCard') continue;
+        const key = queryKeys.chatWorkflowRuns(effect.chatId);
+        queryClient.setQueryData<{ runs: WorkflowRunCardView[] }>(key, (old) =>
+          old ? { runs: foldWorkflowRunEvent(old.runs, effect.event) } : old,
+        );
+        void queryClient.invalidateQueries({ queryKey: key });
       }
 
       const resources = invalidateRef.current;

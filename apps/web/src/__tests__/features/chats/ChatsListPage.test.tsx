@@ -42,7 +42,6 @@ vi.mock('@tanstack/react-virtual', () => ({
     measureElement: () => {},
   }),
 }));
-vi.mock('@/components/chat/CreateChatDialog.js', () => ({ CreateChatDialog: () => null }));
 
 import { PlatformContext } from '@/providers/PlatformProvider.js';
 import { ChatsListPage } from '@/features/chats/ChatsListPage.js';

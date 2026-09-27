@@ -89,7 +89,7 @@ describe('needsInputs / workflowIdsOf', () => {
 
   it('falls back to the legacy single workflow id', () => {
     expect(workflowIdsOf({ workflowIds: ['a', 'b'] })).toEqual(['a', 'b']);
-    expect(workflowIdsOf({ workflowIds: [], workflowDefinitionId: 'w' })).toEqual(['w']);
+    expect(workflowIdsOf({ workflowIds: [] })).toEqual([]);
     expect(workflowIdsOf({})).toEqual([]);
   });
 });

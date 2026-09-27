@@ -85,6 +85,8 @@ export interface ComposerProps {
   onBeforeSend?: () => Promise<void>;
   /** The host's send (the chat page merges its captures); without it the composer posts to the session. */
   customSendFn?: (args: { prompt: string; attachments: File[]; mode?: AgentMode }) => Promise<void>;
+  /** Start/clear the optimistic turn on `sessionId`'s stream (default true; a workflow stage passes false). */
+  manageStream?: boolean;
   selectedModel?: string;
   onModelChange?: (model: string) => void;
   reasoningEffort?: string;
@@ -172,6 +174,7 @@ export function Composer({
   variant = 'chat',
   onBeforeSend,
   customSendFn,
+  manageStream = true,
   selectedModel,
   onModelChange,
   reasoningEffort,
@@ -246,6 +249,7 @@ export function Composer({
     onBuiltinCommand,
     turnLive: isStreaming && !!onStop,
     stopState,
+    manageStream,
   });
   const dictation = useDictation({ textareaRef, text, setText: draft.setText });
   const { handleKeyDown, handleTextChange, handlePaste, handleClick } = useComposerKeymap({

@@ -29,12 +29,26 @@ export const Default: Story = {
   },
 };
 
-/** default and invalid (Field wraps the error line). */
+/** default, invalid (Field wraps the error line) and read-only (a generated code on display). */
 export const Matrix: Story = {
   render: () => (
     <div className="flex flex-col gap-4">
       <PairingCodeInput value="4H7K2M9PXQ3T" onValueChange={() => {}} />
       <PairingCodeInput value="4H7K" onValueChange={() => {}} invalid />
+      <PairingCodeInput value="4H7K2M9PXQ3T" onValueChange={() => {}} readOnly />
     </div>
   ),
+};
+
+/** Read-only: the code shows in every cell and typing does not change it. */
+export const ReadOnly: Story = {
+  render: () => <PairingCodeInput value="4H7K2M9PXQ3T" onValueChange={() => {}} readOnly />,
+  play: async ({ canvasElement }) => {
+    const canvas = within(canvasElement);
+    const inputs = canvas.getAllByRole('textbox');
+    await expect(inputs[0]).toHaveValue('4');
+    await userEvent.type(inputs[0]!, 'Z');
+    await expect(inputs[0]).toHaveValue('4');
+    await expect(inputs[11]).toHaveValue('T');
+  },
 };

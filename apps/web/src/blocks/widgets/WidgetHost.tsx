@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // WidgetHost — the dock's Widget tab body (F-dock-08), on the chat page and
-// the legacy workflow run page. Three modes, picked by props:
+// the workflow run page. Three modes, picked by props:
 //   • `instanceId` — exactly that widget, full height: a tab bound to one
 //     widget, so N widgets live in N tabs instead of fighting over one.
 //   • `onOpenWidget` — a launcher listing the session's widgets, for an

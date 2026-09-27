@@ -19,3 +19,4 @@ It also records every merge of `desktop_redesign` into this branch.
 | Date | desktop_redesign sha | Conflicts | Notes |
 |---|---|---|---|
 | 2026-09-26 | `6045856` | — | branch point |
+| 2026-09-27 | `744f3a02` | none | M0 phase-start merge; native emitter retained (MD-97). Receives Workflow Overhaul, D-81/D-82, P5/P6 and web-only P7-01. No mobile additions lost. Validation recorded in M0 notes. |

@@ -189,126 +189,147 @@ Contract: `AgentOverridesSchema` in `packages/shared/src/config/AgentSchemas.ts`
 
 ## Import a multi-stage brownfield workflow
 
-Import JSON through Workflows (the import-json API accepts this shape). Select the actual project and codebases before running: requiresCodebase does not create them. The stage-level plan gate waits for review. If the provider also exposes a separate plan decision, avoid starting implementation there: the next stage owns implementation. A failed verification selects the failure edge; success does not run the failure-only stage.
+Import the document through Workflows → Import (POST /api/workflow-definitions/import). Imports become drafts: start a test run, then publish. Select the actual project and codebases before running: requiresCodebase does not create them. The plan stage waits for review. A failed verification selects the failure edge; success does not run the failure-only stage.
 
-Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefinitionSchemas.ts`.
+Contract: `WorkflowGraphSchema` in `packages/workflow-spec/src/schemas/graph.ts`.
 
 ```json
 {
-  "name": "Priority filter — reviewed delivery",
-  "sessionMode": "per-stage",
-  "harnessConfig": {
-    "harnessType": "codex",
-    "reasoningEffort": "high",
-    "permissionMode": "default"
-  },
-  "variables": [
-    {
-      "name": "feature",
-      "type": "text",
-      "label": "Requested feature",
-      "required": true,
-      "defaultValue": "Add a priority filter without breaking saved URLs."
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Priority filter — reviewed delivery",
+    "session": {
+      "harnessType": "codex",
+      "reasoningEffort": "high",
+      "permissionMode": "default"
+    },
+    "variables": [
+      {
+        "name": "feature",
+        "type": "text",
+        "label": "Requested feature",
+        "required": true,
+        "defaultValue": "Add a priority filter without breaking saved URLs."
+      }
+    ],
+    "tags": [
+      "reviewed-change"
+    ],
+    "lifecycle": {
+      "requiresCodebase": true,
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false
+      }
     }
-  ],
-  "tags": [
-    "reviewed-change"
-  ],
-  "orchestratorConfig": {
-    "createWorktrees": true,
-    "requiresCodebase": true,
-    "autoCommit": false,
-    "autoPush": false,
-    "autoCreatePR": false
   },
   "stages": [
     {
+      "kind": "agent",
+      "key": "plan",
       "name": "Inspect and plan",
-      "order": 0,
       "prompts": [
         {
           "label": "Task",
-          "text": "Inspect the codebase for {{feature}}. Write a plan with compatibility risks and acceptance tests. Do not implement yet.",
-          "source": "inline",
-          "waitForCompletion": true
+          "text": "Inspect the codebase for {{feature}}. Write a plan with compatibility risks and acceptance tests. Do not implement yet."
         }
       ],
-      "approvalRequired": true,
-      "agentMode": "plan",
-      "timeoutMs": 300000,
-      "contextFilter": "none"
+      "approval": {},
+      "session": {
+        "defaultAgentMode": "plan"
+      },
+      "timeouts": {
+        "attemptMs": 300000
+      },
+      "context": {
+        "mode": "none"
+      }
     },
     {
+      "kind": "agent",
+      "key": "implement",
       "name": "Implement",
-      "order": 1,
       "prompts": [
         {
           "label": "Task",
-          "text": "Implement the approved plan for {{feature}}. Preserve current behavior and keep changes scoped.",
-          "source": "inline",
-          "waitForCompletion": true
+          "text": "Implement the approved plan for {{feature}}. Preserve current behavior and keep changes scoped."
         }
       ],
-      "agentMode": "auto",
-      "contextFilter": "full",
-      "timeoutMs": 600000,
-      "retryPolicy": {
-        "maxRetries": 1,
-        "backoffMs": 1000,
+      "session": {
+        "defaultAgentMode": "auto"
+      },
+      "context": {
+        "mode": "output"
+      },
+      "timeouts": {
+        "attemptMs": 600000
+      },
+      "retry": {
+        "maxAttempts": 2,
+        "initialDelayMs": 1000,
         "backoffMultiplier": 2
       }
     },
     {
+      "kind": "agent",
+      "key": "verify",
       "name": "Verify",
-      "order": 2,
       "prompts": [
         {
           "label": "Task",
-          "text": "Run the relevant tests. Inspect the diff. Report commands, results, and unresolved defects. Do not commit or push.",
-          "source": "inline",
-          "waitForCompletion": true
+          "text": "Run the relevant tests. Inspect the diff. Report commands, results, and unresolved defects. Do not commit or push."
         }
       ],
-      "contextFilter": "summary-only",
-      "timeoutMs": 600000,
-      "resultValidation": [
-        {
-          "type": "min_length",
-          "value": 80,
-          "message": "Provide a substantive verification report."
-        }
-      ]
+      "context": {
+        "mode": "summary"
+      },
+      "timeouts": {
+        "attemptMs": 600000
+      },
+      "output": {
+        "rules": [
+          {
+            "type": "min_length",
+            "value": 80,
+            "message": "Provide a substantive verification report."
+          }
+        ]
+      }
     },
     {
+      "kind": "agent",
+      "key": "triage",
       "name": "Failure triage",
-      "order": 3,
       "prompts": [
         {
           "label": "Task",
-          "text": "Explain the failed verification, identify the likely cause, and propose the smallest follow-up. Do not hide failures.",
-          "source": "inline",
-          "waitForCompletion": true
+          "text": "Explain the failed verification, identify the likely cause, and propose the smallest follow-up. Do not hide failures."
         }
       ],
-      "contextFilter": "full",
-      "timeoutMs": 300000
+      "context": {
+        "mode": "output"
+      },
+      "timeouts": {
+        "attemptMs": 300000
+      }
     }
   ],
   "edges": [
     {
-      "fromStageIndex": 0,
-      "toStageIndex": 1,
-      "edgeType": "on_success"
+      "from": "plan",
+      "to": "implement",
+      "on": "success"
     },
     {
-      "fromStageIndex": 1,
-      "toStageIndex": 2,
-      "edgeType": "on_success"
+      "from": "implement",
+      "to": "verify",
+      "on": "success"
     },
     {
-      "fromStageIndex": 2,
-      "toStageIndex": 3,
-      "edgeType": "on_failure"
+      "from": "verify",
+      "to": "triage",
+      "on": "failure"
     }
   ]
 }
@@ -318,50 +339,41 @@ Contract: `ImportWorkflowJsonSchema` in `packages/shared/src/config/WorkflowDefi
 
 <ExampleDownload file="review-workflow.json" />
 
-## Configure an individual workflow run
+## Override one stage for a single run
 
-Use a run profile with the actual saved workflowDefinitionId. Definition import JSON, stored definition objects, and run profiles are distinct contracts.
+Stage overrides in a run request address stages by key. Use the key shown in the builder for the saved definition.
 
-Contract: `RunProfileSchema` in `packages/shared/src/config/WorkflowDefinitionSchemas.ts`.
+Contract: `InvocationStageOverrideSchema` in `packages/workflow-spec/src/schemas/invocation.ts`.
 
 ```json
 {
-  "version": 1,
-  "name": "Priority filter trial",
-  "workflowDefinitionId": "11111111-1111-4111-8111-111111111111",
+  "stageKey": "verify",
   "variables": {
-    "feature": "Add a priority filter without breaking saved URLs."
-  },
-  "permissionMode": "default",
-  "sessionMode": "per-stage",
-  "stageOverrides": [
-    {
-      "stageName": "Verify",
-      "timeoutMs": 900000,
-      "contextFilter": "full"
-    }
-  ]
+    "strict": true
+  }
 }
 ```
 
-**Verify:** The run should show the resolved variable values and Verify timeout. Existing definition defaults remain where no override was supplied.
+**Verify:** The run should show the resolved variable values for Verify. Existing definition defaults remain where no override was supplied.
 
 <ExampleDownload file="workflow-run-profile.json" />
 
 ## Request changes at a workflow gate
 
-POST /api/workflow-runs/:runId/stages/:stageId/approve at a waiting review gate. outcome rejected terminates that stage; the legacy approved:false means changes_requested, not rejected.
+POST /api/workflow-runs/:id/commands with the id of the instance waiting for review. outcome rejected fails that stage; changes_requested sends the feedback to the stage as a revision, which is validated again before the next review.
 
-Contract: `StageReviewDecisionSchema` in `packages/shared/src/config/ChatSchemas.ts`.
+Contract: `RunCommandSchema` in `packages/workflow-spec/src/schemas/commands.ts`.
 
 ```json
 {
+  "command": "approve",
+  "instanceId": "9b2d7c1e-5f4a-5c3b-8e21-0d6f4a7b3c10",
   "outcome": "changes_requested",
-  "followUpPrompt": "Add a regression test for the legacy bookmarked URL before continuing."
+  "feedback": "Add a regression test for the bookmarked URL before continuing."
 }
 ```
 
-**Verify:** Confirm the stage resumes with the requested follow-up and presents its next review state.
+**Verify:** Confirm the stage runs its revision and presents its next review state.
 
 <ExampleDownload file="request-stage-changes.json" />
 
@@ -375,10 +387,10 @@ Contract: `CreateAutomationSchema` in `packages/shared/src/config/AutomationSche
 {
   "name": "Review queued fixes",
   "triggerType": "manual",
+  "permissionMode": "acceptEdits",
   "workflowIds": [
     "11111111-1111-4111-8111-111111111111"
   ],
-  "inputMode": "single",
   "maxConcurrency": 1,
   "onError": "stop",
   "dataSchema": {
@@ -437,6 +449,7 @@ Contract: `CreateAutomationSchema` in `packages/shared/src/config/AutomationSche
 {
   "name": "Weekday repository review",
   "triggerType": "schedule",
+  "permissionMode": "acceptEdits",
   "cronExpression": "0 9 * * MON-FRI",
   "timezone": "Asia/Kolkata",
   "missedRunPolicy": "run_once",
@@ -444,7 +457,6 @@ Contract: `CreateAutomationSchema` in `packages/shared/src/config/AutomationSche
   "workflowIds": [
     "11111111-1111-4111-8111-111111111111"
   ],
-  "inputMode": "single",
   "variables": {
     "feature": "Inspect dependency updates and report actionable changes."
   },
@@ -498,33 +510,6 @@ Contract: `PreviewIterationsBodySchema` in `packages/shared/src/config/Automatio
 **Verify:** Expect two groups, web and mobile, with two and one rows respectively.
 
 <ExampleDownload file="group-dataset.json" />
-
-## Read automation input from HTTP
-
-Use Test data source in the automation form with your actual permitted endpoint. The URL is illustrative and is not contacted by documentation validation. Add secrets through the host configuration path, not public example files.
-
-Contract: `TestDataSourceSchema` in `packages/shared/src/config/AutomationSchemas.ts`.
-
-```json
-{
-  "type": "http",
-  "url": "https://api.example.com/issues",
-  "method": "GET",
-  "resultPath": "items",
-  "timeout": 10000,
-  "schema": {
-    "requiredFields": [
-      "issueId",
-      "feature"
-    ],
-    "maxItems": 100
-  }
-}
-```
-
-**Verify:** Inspect the extracted rows, required-field errors, timeout behavior, and host network restrictions.
-
-<ExampleDownload file="http-data-source.json" />
 
 ## Enable a bounded workspace browser
 
@@ -689,7 +674,7 @@ Contract: `CliConfigSchema` in `packages/cli-core/src/config/schema.ts`.
 
 Place this in a stage hooks array. It checks that the host can launch Node before the stage prompt. Host command allowlists and hook policy still apply. Workflow-level hooks use a separate schema and phase set.
 
-Contract: `HookDefinitionSchema` in `packages/shared/src/config/WorkflowTemplate.ts`.
+Contract: `HookDefinitionSchema` in `packages/workflow-spec/src/schemas/common.ts`.
 
 ```json
 {
@@ -716,34 +701,33 @@ Contract: `HookDefinitionSchema` in `packages/shared/src/config/WorkflowTemplate
 
 <ExampleDownload file="stage-hook.json" />
 
-## Configure an executable workflow profile
+## Save run inputs as a profile
 
-Use with a trusted loaded workflow script. Unlike a definition run profile, this script profile does not identify a workflowDefinitionId. The loader associates it with its script.
+One profile shape for CLI profile files (run start --profile <file>) and the profiles a workflow script exports (profile on a script invocation). Stage overrides are by stage key; upload paths are local to the client that reads the profile.
 
-Contract: `ScriptRunProfileSchema` in `packages/shared/src/config/WorkflowScriptSchema.ts`.
+Contract: `RunProfileSchema` in `packages/workflow-spec/src/schemas/invocation.ts`.
 
 ```json
 {
-  "version": 1,
   "name": "review-trial",
   "variables": {
     "objective": "Inspect priority-filter compatibility"
   },
-  "permissionMode": "default",
-  "sessionMode": "per-stage",
+  "overrides": {
+    "permissionMode": "default"
+  },
   "stageOverrides": [
     {
-      "stageIndex": 0,
-      "timeoutMs": 300000,
-      "contextFilter": "none"
+      "stageKey": "plan",
+      "skip": true
     }
   ]
 }
 ```
 
-**Verify:** Inspect the compiled graph and selected profile before running; check the resolved variables and stage timeout.
+**Verify:** Run plan with the profile first; check the resolved variables, skipped stages and permission mode before starting.
 
-<ExampleDownload file="script-profile.json" />
+<ExampleDownload file="run-profile.json" />
 
 ## Create an instance of an installed widget
 

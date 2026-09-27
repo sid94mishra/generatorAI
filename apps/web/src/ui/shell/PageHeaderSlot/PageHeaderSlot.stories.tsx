@@ -3,9 +3,9 @@ import type { Meta, StoryObj } from '@storybook/react-vite';
 import { expect, waitFor } from 'storybook/test';
 import { IconButton } from '../../primitives/IconButton/IconButton.js';
 import { PageHeader } from '../../patterns/PageHeader/PageHeader.js';
-import { LegacyHeaderSlot, PageHeaderSlot } from './PageHeaderSlot.js';
+import { PageHeaderSlot } from './PageHeaderSlot.js';
 
-/** The main card's first row: a page's own header, or the legacy Header (D-21). */
+/** The main card's first row: a page's own header. */
 const meta = {
   component: PageHeaderSlot,
   tags: ['vrt-themes'],
@@ -19,18 +19,6 @@ export const Default: Story = {
   args: { children: <PageHeader title="Projects" actions={<IconButton icon="more" label="More" />} /> },
   play: async ({ canvasElement }) => {
     await expect(canvasElement.querySelector('[data-slot="page-header-slot"][data-drag-region="mac"]')).not.toBeNull();
-  },
-};
-
-/** The legacy branch: the old Header inside `legacy-header` (a stand-in here). */
-export const Legacy: Story = {
-  render: () => (
-    <LegacyHeaderSlot>
-      <header className="flex h-bar items-center border-b border-line-soft px-3 text-ui font-medium">Home</header>
-    </LegacyHeaderSlot>
-  ),
-  play: async ({ canvas }) => {
-    await expect(canvas.getByTestId('legacy-header')).toBeVisible();
   },
 };
 

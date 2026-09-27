@@ -694,3 +694,8 @@ The values below are the `02-design-system.md` tokens (class names and numbers).
 ### MD-96 No Widget tab on mobile — Owner-confirm
 - Desktop's dock Widget tab and its pane-level "+" menu are not built on mobile in this pass. Extra terminals and browser pages come from each tab's own "+" (MD-23).
 - **Source:** `10-design-feedback.md` MDF-68 (it asked for an MD at M6 start).
+
+### MD-97 Evaluate the P7 merge gate against native token removal — Final
+- At M0 resume, desktop `744f3a02` includes P7-01 (web legacy component removal), but P7-02 (legacy tokens) has not started. The native emitter and mobile generated tokens are unchanged; the generator retains its native target. Merge this compatible desktop state now to receive the Workflow Overhaul and current shared contracts.
+- The M3-05 gate in `07-phases.md` §2 applies to the native token-removal risk named in R-4: do not merge a desktop change removing `themeVars` or its generator before mobile stops consuming it. Recheck at every phase-start merge.
+- **Evidence:** diff from the mobile branch base to `744f3a02` for `packages/design-tokens/src/emit/native.ts` and `apps/mobile/src/theme/tokens.generated.ts` is empty; `bin/generate.ts` only adds desktop static-page targets. Desktop README lists P7-02 as next. This clarifies the gate using its stated risk, without changing shared code.

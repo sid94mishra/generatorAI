@@ -225,6 +225,16 @@ describe('W34 — ProviderRuntimeBinding persistence (B1)', () => {
 // ────────────────────────────────────────────────────────────────
 
 describe('W34 — migration 44 back-fill (B2)', () => {
+  beforeEach(() => {
+    // Replaying an old migration needs the schema it was written against:
+    // v55 reshapes tables that migrations before it touch, so this database
+    // stops at v54.
+    sqliteHandle(db).close();
+    db = createDB(join(dir, 'v54.db'));
+    migrateDB(db, { targetVersion: 54 });
+    repo = new SqliteConversationInstanceOwnershipRepository(db);
+  });
+
   /** Rewind the schema to its pre-44 shape with a legacy row already in it. */
   function rewindToPre44(): void {
     const sqlite = sqliteHandle(db);
@@ -253,7 +263,7 @@ describe('W34 — migration 44 back-fill (B2)', () => {
   it('back-fills a pre-existing legacy row at the LOWEST trust level, not `explicit`', () => {
     rewindToPre44();
 
-    migrateDB(db); // migration 44 replays against the existing row
+    migrateDB(db, { targetVersion: 54 }); // migration 44 replays against the existing row
 
     const row = sqliteHandle(db)
       .prepare(`SELECT binding_origin, provider FROM conversation_instance_ownership WHERE conversation_id = ?`)
@@ -281,7 +291,7 @@ describe('W34 — migration 44 back-fill (B2)', () => {
     // skip 44 and this rewind would silently test nothing.
     sqlite.prepare(`DELETE FROM _schema_versions WHERE version >= 44`).run();
 
-    expect(() => migrateDB(db)).not.toThrow(); // duplicate-column tolerance
+    expect(() => migrateDB(db, { targetVersion: 54 })).not.toThrow(); // duplicate-column tolerance
 
     const bindings = await repo.loadBindings();
     expect(bindings).toEqual([{ ...FULL_BINDING }]);

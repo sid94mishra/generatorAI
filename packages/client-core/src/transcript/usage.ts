@@ -59,10 +59,10 @@ export function cacheMissReason(
  * token billed (cache included). Null when the turn reports no cost.
  */
 export function estimateMissCost(usage: UsageInfo, missTokens: number): number | null {
-  if (!usage.cost || missTokens <= 0) return null;
+  if (!usage.costUsd || missTokens <= 0) return null;
   const billedTokens = promptTokensOf(usage) + usage.outputTokens;
   if (billedTokens <= 0) return null;
-  return (usage.cost / billedTokens) * missTokens;
+  return (usage.costUsd / billedTokens) * missTokens;
 }
 
 /** Duration text for step rows and turn summaries ("850ms", "4.2s", "2m 44s"); null under 50 ms. */

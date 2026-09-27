@@ -1,0 +1,1054 @@
+{
+  "$comment": "Workflow overhaul no-legacy guard (README §7 step 6, R-1). `banned`: identifiers each phase removed, APPENDED in the same commit that deletes them; a regex `pattern` matched per line against packages/** and apps/** source (tests, dist, node_modules excluded), optional `paths` prefixes; any hit fails. The scan also covers agent-tests/** (its specs included) and scripts/**; `.github/docs/**` is checked only against entries marked `\"docs\": true` (deleted routes a reader could still call). `comments`: `@deprecated` / `legacy` / `backward compat` / `fallback for old` inside comments of the workflow-module files matched by `paths` (regex sources). Report-only while `phase` < `failFromPhase` (null = not scheduled), but the count may never exceed `baseline`. Each phase bumps `phase` and lowers `baseline`; the phase that clears the module sets `failFromPhase` to itself.",
+  "banned": [
+    {
+      "phase": "07",
+      "pattern": "GENERATORAI_MAX_CONCURRENT_AGENT_TURNS",
+      "paths": [
+        "apps/server/",
+        "apps/agent-host/",
+        "apps/desktop/",
+        "packages/"
+      ],
+      "reason": "WP-7.2: the hidden claude-agent turn cap is the provider:claude-agent flow key (Settings → Workflow engine)"
+    },
+    {
+      "phase": "07",
+      "pattern": "\\b(admitFlow|DEFAULT_FLOW_LIMITS)\\b",
+      "paths": [
+        "apps/",
+        "packages/"
+      ],
+      "reason": "WP-7.2: one flow gate; admitFlows takes every key of a launch at once, defaultFlowLimits() sizes them"
+    },
+    {
+      "phase": "07",
+      "pattern": "'(claude_agent|copilot)\\.sendPrompt(AndWait)?'",
+      "reason": "WP-7.4: provider turns are `chat <model>` spans (GenAiTurnSpans), GenAI conventions"
+    },
+    {
+      "phase": "07",
+      "pattern": "data\\[['\"]cost['\"]\\]",
+      "paths": [
+        "packages/core/src/services/engine/"
+      ],
+      "reason": "WP-7.3: the engine reads provider-reported dollars from costUsd only (no pricing table; Copilot's cost is not USD)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bStyledSelect\\b",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-1.1: re-export shim deleted; use Select from components/ui"
+    },
+    {
+      "phase": "01",
+      "pattern": "['\"]\\.\\.?/ToggleSwitch\\.js['\"]",
+      "paths": [
+        "apps/web/src/components/workflow/"
+      ],
+      "reason": "WP-1.1: workflow ToggleSwitch shim deleted; import from components/ui"
+    },
+    {
+      "phase": "01",
+      "pattern": "redesign/deriveTimeline",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-1.1: re-export shim deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(timelineEvents|awaitingInputStages|addTimelineEvent|setAwaitingInput|clearAwaitingInput|RunTimelineEvent|AwaitingInputInfo)\\b",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-1.1: write-only workflowRunStore state deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "'(runTimeline|stageTimeline|stageAwaitingInput)'",
+      "reason": "WP-1.1: stream ops whose only consumer was write-only store state"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(connectAutomationExecution|disconnectAutomationExecution)\\b",
+      "reason": "WP-1.1: dead duplicate of useAutomationExecutionStream"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(useValidateWorkflowDefinition|useImportFromTemplate|useDeleteWorkflowRun|usePauseStageRun|useResumeStageRun|useCancelStageRun|useWorkflowTemplate|useOrchestratorContext|useRunDiff|useWorkflowFiles|useUploadWorkflowFiles|useDeleteWorkflowFile|useUpdateAutomation)\\b",
+      "reason": "WP-1.1: zero-caller hooks deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "WorkflowRunPageV2",
+      "reason": "WP-1.1: renamed WorkflowRunPage"
+    },
+    {
+      "phase": "01",
+      "pattern": "searchParams\\.get\\('legacy'\\)",
+      "reason": "WP-1.1: no-op ?legacy=1 effect deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "aria-label=\"Stage actions\"",
+      "reason": "WP-1.1: dead Stage actions button deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(getOrchestratorContext|activeContexts)\\b|orchestrator/runs/\\$\\{[^}]+\\}/context|'/runs/:id/context'|orchestrator\\.context",
+      "reason": "WP-1.1: in-memory orchestrator context view deleted",
+      "docs": true
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(resultValidator|setupResultValidation|stageValidationResults|getEventStageRunId)\\b",
+      "paths": [
+        "packages/core/src/services/WorkflowOrchestrator.ts"
+      ],
+      "reason": "WP-1.1 / W-62: orchestrator validation reporting deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "stageValidationResults",
+      "paths": [
+        "packages/shared/src/"
+      ],
+      "reason": "WP-1.1 / W-62"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(IDAGScheduler|ISessionAllocator|IServiceInterfaces)\\b",
+      "reason": "WP-1.1: single-implementer ports deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(getRootStages|getReadyStages|getSkippableStages|isDAGComplete|scheduleNext)\\b",
+      "paths": [
+        "packages/core/",
+        "packages/shared/",
+        "packages/sdk/",
+        "packages/workflow-testkit/",
+        "apps/"
+      ],
+      "reason": "WP-1.1: DAGScheduler views/aliases deleted; reconcileRun is the one entry point"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(resolveStageConfig|ResolvedStageConfig|ResolvedWorkflowConfig|SessionWorkflowOverrides)\\b",
+      "reason": "WP-1.1: ConfigResolver.resolve/resolveStageConfig deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(heartbeatStaleMultiplier|maxStageTimeoutMs)\\b|AppConfig(Schema)?\\.workflow\\b",
+      "reason": "WP-1.1: AppConfig.workflow knobs deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "startPolling\\(runId, ",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.1: startPolling(runId)"
+    },
+    {
+      "phase": "01",
+      "pattern": "string \\| ImportFromTemplateOptions",
+      "reason": "WP-1.1: importFromTemplate takes an options object"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(totalRuns|completedRuns|failedRuns)\\?:",
+      "paths": [
+        "packages/client-core/src/api/client.ts"
+      ],
+      "reason": "WP-1.1: deprecated AutomationExecutionSummary fields deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "workflowDefinitionId\\?:|a\\.workflowDefinitionId",
+      "paths": [
+        "apps/mobile/src/components/work/automationModel.ts"
+      ],
+      "reason": "WP-1.1: automations carry workflowIds only"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bSESSION_MODES\\b|session-mode",
+      "paths": [
+        "packages/cli-core/",
+        "apps/cli/"
+      ],
+      "reason": "WP-1.1 / W-57: CLI --session-mode deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "workflow-upload-template",
+      "reason": "WP-1.1: orphan template deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "const HOOK_PHASES: Array",
+      "paths": [
+        "apps/server/src/routes/hooks.ts"
+      ],
+      "reason": "WP-1.1: hook-phase catalogue is derived from the schema enum"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(WebhookService|SessionService|SessionStateMachine|WorkflowStateMachine|IWorkflowRepository|IWebhookRepository|DrizzleWorkflowRepository|DrizzleWebhookRepository|verifyGitHubSignature|verifyWebhookToken|SessionWithWorkflows|CreateSessionParams|WebhookRegistration|WebhookDelivery|resolveGlobalHooks|registerClientLifecycleHooks|ConfigResolver|createWebhookRoutes|SessionTransition|WorkflowTransition|WebhookConfig)\\b",
+      "reason": "WP-1.2: v1 session/webhook stack deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "/api/webhooks|system-workflows|/orchestrator/from-template|getOrchestratorTemplates?\\b|platform\\.createFromTemplate|async createFromTemplate|orchestrator\\.(templates|template|fromTemplate)\\b",
+      "reason": "WP-1.2: legacy webhook routes, orchestrator template list/import routes deleted",
+      "docs": true
+    },
+    {
+      "phase": "01",
+      "pattern": "'/sessions/:id/hooks'|sessions/\\$\\{\\w+\\}/hooks`",
+      "reason": "WP-1.2: GET /hooks/sessions/:id/hooks deleted",
+      "docs": true
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(sessionHooks|SessionHooks)\\b|webhooks\\.(list|create|remove)\\(|'webhook\\.(list|create|delete)'|'hook\\.list'",
+      "paths": [
+        "packages/client-core/",
+        "packages/cli-core/",
+        "apps/cli/",
+        "apps/web/"
+      ],
+      "reason": "WP-1.2: clients of the deleted routes"
+    },
+    {
+      "phase": "01",
+      "pattern": "WEBHOOKS_ENABLED|githubSecret",
+      "reason": "WP-1.2: AppConfig.webhooks deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "maxConcurrentSessions",
+      "paths": [
+        "packages/sdk/src/",
+        "packages/core/src/bootstrap/",
+        "packages/workflow-testkit/"
+      ],
+      "reason": "WP-1.2: only fed the deleted SessionService"
+    },
+    {
+      "phase": "01",
+      "pattern": "api/sessions/\\$\\{\\w+\\}/(start|pause|resume|cancel)|api/workflows/\\$\\{|\\b(getWorkflows|pauseWorkflow|resumeWorkflow|pauseSession|resumeSession|startSession|useSessions|useCreateSession|usePauseWorkflow|useResumeWorkflow)\\b",
+      "paths": [
+        "apps/web/src/platform/",
+        "apps/web/src/hooks/queries.ts",
+        "packages/shared/src/types/IPlatformClient.ts"
+      ],
+      "reason": "WP-1.2: IPlatformClient v1 session/workflow methods and hooks deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "(workflowRunService|stageExecutionService)\\.setWorkspaceManager|\\bsetAdmissionController\\b",
+      "reason": "WP-1.3: workspace manager and admission controller are required constructor deps"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bcancelledExecutions\\b|legacy in-memory iteration loop",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.3: AutomationService in-memory iteration loop / cancel Set deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "this\\.waiters\\b|in-memory-only",
+      "paths": [
+        "packages/core/src/services/HitlService.ts"
+      ],
+      "reason": "WP-1.3: HitlService in-memory waiter fallback deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "sourceControlService|gitManager\\.(commitAndPush|createPullRequest)",
+      "paths": [
+        "packages/core/src/services/WorkflowPreprocessor.ts"
+      ],
+      "reason": "WP-1.3: preprocessor GitManager commit/PR fallback deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "legacy auto-approve",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.3: SES legacy auto-approve deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "'runs', run(Id|\\.id), '(uploads|workspace|artifacts)'",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.3: legacy {artifactsDir}/runs/{id}/... directory fallback deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bSDK-9\\b|sandboxCleaner:",
+      "paths": [
+        "packages/sdk/src/",
+        "apps/server/src/"
+      ],
+      "reason": "WP-1.3: the SDK wires the sandbox like the server; createCoreServices takes `sandbox`"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(gitRepositories|GitRepositoryConfig|cloneRepositories|WorkflowRunProfileSchema|WorkflowRunProfile|SystemWorkflowTemplate|SystemStageTemplate|defaultGitConfig)\\b",
+      "paths": [
+        "packages/core/src/services/Workflow",
+        "packages/core/src/services/Stage",
+        "packages/shared/src/types/WorkflowOrchestrator.ts",
+        "packages/shared/src/config/Workflow",
+        "packages/shared/src/types/index.ts",
+        "apps/web/src/stores/workflowBuilderStore.ts",
+        "apps/web/src/pages/Workflow",
+        "apps/web/src/components/workflow/"
+      ],
+      "reason": "WP-1.4: gitRepositories + legacy clone path deleted; codebaseAliases + clone_repo from run inputs"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bcreateWorktrees\\b",
+      "reason": "WP-1.4: createWorktrees deleted (never read); useWorktree is the switch"
+    },
+    {
+      "phase": "01",
+      "pattern": "stage(Def)?\\.agentName|input\\.agentName|this\\._agentName|config\\.agentName|agent\\(agentName",
+      "reason": "WP-1.4: stage agentName, StageBuilder.agent() and the resolver name-slug path deleted; agentRef"
+    },
+    {
+      "phase": "01",
+      "pattern": "agentName",
+      "paths": [
+        "packages/shared/src/types/StageDefinition.ts",
+        "packages/shared/src/config/WorkflowTemplate.ts",
+        "packages/shared/src/builders/StageBuilder.ts",
+        "packages/core/src/services/AgentResolver.ts",
+        "packages/core/src/domain/dag/",
+        "packages/db/src/repositories/StageDefinitionRepository.ts",
+        "packages/sdk/src/facades/ScriptFacade.ts",
+        "apps/web/src/components/workflow/StageNode.tsx",
+        "apps/web/src/stores/workflowBuilderStore.ts"
+      ],
+      "reason": "WP-1.4: stage agentName deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(LEGACY_MODE_ALIASES|coerceAgentMode)\\b",
+      "reason": "WP-1.4: the `interactive` agent-mode alias is gone; AgentMode is `auto` | `plan`",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/db/src/repositories/",
+        "packages/sdk/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "apps/"
+      ]
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(promptType|PromptTypeSchema|PromptType)\\b|promptFile\\(path|source: 'file' as const",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/client-core/",
+        "apps/web/src/components/workflow/",
+        "apps/web/src/stores/workflowBuilderStore.ts",
+        "apps/server/",
+        "apps/mobile/"
+      ],
+      "reason": "WP-1.4: promptType, prompts[].source/filePath and StageBuilder.promptFile() deleted; prompts are inline text"
+    },
+    {
+      "phase": "01",
+      "pattern": "source: 'inline'",
+      "paths": [
+        "packages/",
+        "apps/"
+      ],
+      "reason": "WP-1.4: prompts[].source deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bPromptFilePicker\\b|attachments: z\\.array\\(z\\.string\\(\\)\\)",
+      "paths": [
+        "packages/shared/src/config/",
+        "apps/web/"
+      ],
+      "reason": "WP-1.4: prompts[].attachments and the builder Files tab deleted (stage attachments arrive in P03b, run uploads in P04)"
+    },
+    {
+      "phase": "01",
+      "pattern": "attachments\\?: string\\[\\]",
+      "paths": [
+        "packages/shared/src/types/StageDefinition.ts"
+      ],
+      "reason": "WP-1.4: prompts[].attachments deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "stage(Def)?\\.variables|config\\.variables|stageInput\\.variables|this\\._variables = vars|'workflow\\.stage\\.variables'|parseVariablePairs|clearVars|VariableEditor",
+      "paths": [
+        "packages/shared/src/builders/StageBuilder.ts",
+        "packages/core/src/",
+        "packages/sdk/src/",
+        "packages/cli-core/src/commands/workflow.ts",
+        "apps/server/src/routes/workflowScripts.ts",
+        "apps/web/src/components/workflow/StagePropertiesPanel.tsx",
+        "apps/web/src/pages/WorkflowBuilderPage.tsx"
+      ],
+      "reason": "WP-1.4: stage-level variables and their editor deleted (never merged at run time); definition variables"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(StageTemplateSchema|StageTemplate|stageTemplateId|loadStageTemplates|registerStageTemplate|getStageTemplate|getAllStageTemplates|hasStageTemplate)\\b",
+      "reason": "WP-1.4: stage templates deleted (never loaded)"
+    },
+    {
+      "phase": "01",
+      "pattern": "templateId",
+      "paths": [
+        "packages/shared/src/types/StageDefinition.ts",
+        "packages/db/src/repositories/StageDefinitionRepository.ts",
+        "apps/web/src/components/workflow/",
+        "apps/web/src/pages/WorkflowBuilderPage.tsx"
+      ],
+      "reason": "WP-1.4: stage templateId + template select deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(iterationConfig|IterationConfig|IterationConfigSchema|IterationConfigOutputSchema)\\b",
+      "reason": "WP-1.4: stage iterationConfig deleted (never executed); loop/subworkflow kinds arrive in P05",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/db/src/repositories/",
+        "packages/cli-core/",
+        "packages/client-core/",
+        "apps/server/",
+        "apps/web/",
+        "apps/mobile/"
+      ]
+    },
+    {
+      "phase": "01",
+      "pattern": "iterationIndex",
+      "paths": [
+        "apps/server/src/routes/workflowRunOrder.ts"
+      ],
+      "reason": "WP-1.4: stage-run iteration index / parent link deleted (never set) (P05: the v2 instance field iterationIndex of a loop body instance is a new shape, so the ban keeps only the run-order route)"
+    },
+    {
+      "phase": "01",
+      "pattern": "parentStageRunId",
+      "paths": [
+        "packages/db/src/repositories/StageRunRepository.ts",
+        "apps/server/src/routes/workflowRunOrder.ts"
+      ],
+      "reason": "WP-1.4: stage-run iteration index / parent link deleted (never set) (P04: a RUN's parentStageRunId is its lineage, v57 column parent_stage_run_id)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(selectedArtifacts|defaultAgentRef|SkillReference|AgentReference|AgentDefinitionSchema|SkillReferenceOutputSchema|AgentReferenceOutputSchema)\\b|customAgent\\(agent",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/db/src/repositories/",
+        "packages/cli-core/",
+        "packages/client-core/",
+        "apps/server/",
+        "apps/web/src/stores/workflowBuilderStore.ts",
+        "apps/web/src/components/workflow/",
+        "apps/web/src/pages/Workflow",
+        "apps/mobile/"
+      ],
+      "reason": "WP-1.4: selectedArtifacts, defaultAgentRef and definition-level skills/agents deleted (PD-11); agent binds via harnessConfig.agentRef / stage agentRef"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bsetScope\\b|EntityScope",
+      "paths": [
+        "apps/web/src/stores/workflowBuilderStore.ts"
+      ],
+      "reason": "WP-1.4: workflow-definition scope deleted; projectId IS NULL means global"
+    },
+    {
+      "phase": "01",
+      "pattern": "masterSessionId|master_\\$\\{",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/db/src/repositories/",
+        "apps/"
+      ],
+      "reason": "WP-1.4: masterSessionId deleted (no event was ever emitted to it)"
+    },
+    {
+      "phase": "01",
+      "pattern": "filter\\(\\(s\\) => s\\.enabled\\)|enabled: true,\\s*$",
+      "paths": [
+        "packages/core/src/services/WorkflowPreprocessor.ts",
+        "packages/core/src/services/WorkflowOrchestrator.ts"
+      ],
+      "reason": "WP-1.4: PostProcessingStep.enabled deleted; every declared step runs"
+    },
+    {
+      "phase": "01",
+      "pattern": "askOnEachTool|askOnce|mapScriptPermissionMode",
+      "paths": [
+        "packages/shared/",
+        "packages/core/",
+        "packages/sdk/",
+        "packages/cli-core/",
+        "apps/server/",
+        "apps/web/",
+        "apps/mobile/src/",
+        "apps/mobile/app/"
+      ],
+      "reason": "WP-1.4: script permission vocabulary deleted; WorkflowRunPermissionMode"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bresolutionOutcome\\b|body\\.approved\\b|resolution\\.approved\\b|approved: input\\.outcome",
+      "reason": "WP-1.4: HITL boolean approved deleted; the verdict is an explicit outcome"
+    },
+    {
+      "phase": "01",
+      "pattern": "approved\\??: boolean",
+      "paths": [
+        "packages/core/src/services/HitlService.ts",
+        "packages/sdk/src/facades/HitlFacade.ts",
+        "packages/workflow-testkit/src/types.ts",
+        "packages/shared/src/types/IPlatformClient.ts"
+      ],
+      "reason": "WP-1.4: HITL boolean approved deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "hashLegacyWebhookTokens|automations\\.webhookToken\\b|webhookToken: null",
+      "paths": [
+        "packages/db/src/repositories/",
+        "packages/core/",
+        "apps/server/"
+      ],
+      "reason": "WP-1.4: plaintext automations.webhook_token path deleted; webhook_token_hash only (column dropped in v55)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(AutomationInputMode|DataSourceConfig|DataSourceResolver|dataSourceResolver|TestDataSourceSchema|DataSourceTestResult|testDataSource|resolveIterationVariables|buildIterationLabel|loopVariable|loopItems|batchColumnMapping|batchColumns|dataSourceConfig)\\b|test-data-source|data-source-scripts",
+      "paths": [
+        "packages/shared/src/",
+        "packages/core/src/",
+        "packages/sdk/src/",
+        "packages/client-core/src/",
+        "packages/cli-core/src/",
+        "packages/db/src/repositories/",
+        "apps/server/src/",
+        "apps/web/src/",
+        "apps/mobile/src/",
+        "apps/cli/src/"
+      ],
+      "reason": "WP-1.4 / PD-8: automation legacy input modes and dynamic data sources deleted; dataSchema + IterationPlanner"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\binputMode\\b|\\bbatchData\\b",
+      "paths": [
+        "packages/shared/src/types/Automation.ts",
+        "packages/shared/src/config/AutomationSchemas.ts",
+        "packages/core/src/services/AutomationService.ts",
+        "packages/db/src/repositories/AutomationRepository.ts",
+        "packages/cli-core/src/commands/automation.ts",
+        "apps/web/src/pages/",
+        "apps/mobile/src/components/work/",
+        "apps/cli/src/tui/panes.tsx"
+      ],
+      "reason": "WP-1.4 / PD-8: automation inputMode / batchData deleted"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(DurableSleepService|durableSleepService|DurableSleepConfig|findSleepersReadyToWake|wakeStageRun|useWakeStageRun|sleepRemainingMs)\\b|stage_run\\.(sleeping|woken)|'sys:(sleep|wake)'|/stages/\\$\\{\\w+\\}/wake|'/:runId/stages/:stageId/wake'",
+      "reason": "WP-1.4 / PD-7: durable sleep deleted; wait {type: timer} arrives in P05"
+    },
+    {
+      "phase": "01",
+      "pattern": "'sleeping'|\\b(wakeAt|sleptSince)\\b|durableSleep:",
+      "paths": [
+        "packages/shared/src/",
+        "packages/core/src/",
+        "packages/sdk/src/",
+        "packages/client-core/src/",
+        "packages/cli-core/src/",
+        "packages/db/src/repositories/",
+        "apps/server/src/",
+        "apps/web/src/",
+        "apps/mobile/src/",
+        "apps/mobile/app/",
+        "apps/cli/src/"
+      ],
+      "reason": "WP-1.4 / PD-7: the sleeping stage status and wake_at are gone (columns dropped in v55)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bwaitForCompletion\\b",
+      "reason": "WP-1.4: every prompt turn is awaited; the fire-and-forget branch and the Wait checkbox are gone"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(RunLogger|RunLoggerDispatcher|RUN_LOG_FILENAME|closeRunLogger|runLoggers)\\b|StreamLogger|stream-log",
+      "reason": "WP-1.4: the per-run JSONL logger is deleted; run history comes from stream replay"
+    },
+    {
+      "phase": "01",
+      "pattern": "stageOverrides\\??:[^\\n]*\\b(agentName|timeoutMs|contextFilter)\\b",
+      "reason": "WP-1.4: the unused stage-override fields agentName/timeoutMs/contextFilter are deleted; P04 adds real stage overrides"
+    },
+    {
+      "phase": "01",
+      "pattern": "stages/:stageId/interrupt|/stages/\\$\\{stageId\\}/interrupt|stages/s1/interrupt",
+      "reason": "WP-1.4: the test-only interrupt route is deleted; the testkit `interrupt` command replaces it",
+      "docs": true
+    },
+    {
+      "phase": "01",
+      "pattern": "harnessType\\s*\\?\\?\\s*'copilot'|harnessType: 'copilot',",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts",
+        "packages/core/src/services/ChatManagementService.ts",
+        "packages/core/src/services/PlanService.ts"
+      ],
+      "reason": "WP-1.4: plan records carry the resolved harness (IAgentHarness.conversationHarness), never a guessed copilot"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(ConditionEvaluator|evaluateCondition|ConditionContext|evaluateSimpleCondition)\\b",
+      "reason": "WP-1.5: the v1 condition grammar and the preprocessor grammar are replaced by Expression v2 (@generatorai/workflow-spec conditionHolds / evaluateSource)"
+    },
+    {
+      "phase": "01",
+      "pattern": "new RegExp\\(rule\\.value",
+      "paths": [
+        "packages/core/src/"
+      ],
+      "reason": "WP-1.5 / RV-21: regex rules run on the linear-time engine (compileSafeRegex)"
+    },
+    {
+      "phase": "01",
+      "pattern": "HOOK_PHASE_INFO",
+      "paths": [
+        "packages/shared/"
+      ],
+      "reason": "WP-1.5: the hook-phase catalogue lives in @generatorai/workflow-spec (HOOK_PHASE_INFO, STAGE_HOOK_PHASES, WORKFLOW_HOOK_PHASES)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(stageDefinitionId|definitionSnapshot)\\b",
+      "reason": "WP-1.6: stage runs carry stageKey; runs pin definitionVersionId (the snapshot column is gone; the v1 dead lease_owner was dropped, and v57 brings back lease_owner as the v2 executor lease)"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bwithTransaction\\b|\\bTransactionTimeoutError\\b",
+      "reason": "WP-1.6: the async transaction helper is deleted; writes that must be atomic are synchronous better-sqlite3 transactions"
+    },
+    {
+      "phase": "01",
+      "pattern": "\\bimportFromJSON\\b|import-json|ImportWorkflowJson|exportAsTemplate",
+      "reason": "WP-1.7: one canonical import/export (POST /workflow-definitions/import, GET /:id/export)",
+      "docs": true
+    },
+    {
+      "phase": "01",
+      "pattern": "\\b(DAGValidator|resolveStageHooks|WorkflowDefinitionWithStages|IWorkflowDefinitionRepository|IStageDefinitionRepository|IStageEdgeRepository|DrizzleWorkflowDefinitionRepository|DrizzleStageDefinitionRepository|DrizzleStageEdgeRepository|CreateStageParams|CreateEdgeParams|CreateWorkflowDefinitionParams|StageEdgeType|getDefinitionWithStages)\\b",
+      "reason": "WP-1.7: definitions are one v2 document behind IWorkflowDefinitionStore; the per-row definition/stage/edge repositories and types are gone"
+    },
+    {
+      "phase": "01",
+      "pattern": "repo_path_target",
+      "reason": "WP-1.7: codebase paths are run.codebases.<alias>.path (RV-16)"
+    },
+    {
+      "phase": "01",
+      "pattern": "'on_success'|'on_failure'|'on_completion'",
+      "paths": [
+        "apps/",
+        "packages/core/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/",
+        "packages/shared/",
+        "packages/workflow-spec/"
+      ],
+      "reason": "WP-1.7: edge `on` is success | failure | completion | always"
+    },
+    {
+      "phase": "01",
+      "pattern": "prefix: '/webhooks'",
+      "paths": [
+        "packages/auth/"
+      ],
+      "reason": "P01 review R7: the v1 /webhooks routes are deleted; a public policy entry for them fails open"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bDEFAULT_WORKFLOW_RUN_PERMISSION_MODE\\b",
+      "reason": "WP-2.7: no bypass default; the permission source resolves run → stage → workflow → trigger → posture"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\b(resolveStageAgent|resolveStageTurnOptions|NON_CONVERSATION_SESSION_FIELDS)\\b",
+      "reason": "WP-2.8: the stage session is built by the SessionComposer (R-1)"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\b(setAgentServices|setBrowserService)\\b",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts",
+        "packages/core/src/bootstrap/",
+        "apps/server/src/"
+      ],
+      "reason": "WP-2.8: SES takes the composer; the agent and browser services are composer deps"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bbuildPermissionHandler\\b",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts"
+      ],
+      "reason": "WP-2.6/2.8: stage gates are the StageGatePort installed by the composer"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bapplyPlanModeConfig\\b",
+      "reason": "WP-2.6: applyModeConfig in session/modeConfig.ts"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bsessionSpecToHarnessConfig\\b|definitions/sessionSpec",
+      "reason": "WP-2.8: definitions/sessionSpec.ts deleted; resolverLayer lives in session/agentProjection.ts"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\bfullToolGating\\b|skillDirectories:\\s*(true|false)",
+      "paths": [
+        "packages/core/src/",
+        "packages/agent-harness-providers/src/",
+        "apps/server/src/"
+      ],
+      "reason": "RV-6/RV-9: boolean capabilities replaced by approvalGating/hostTools/structuredOutput/skills levels"
+    },
+    {
+      "phase": "02",
+      "pattern": "process\\.cwd\\(\\)",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts"
+      ],
+      "reason": "B-5: a stage's directory is its run workspace's; no server-cwd fallback"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\b(turnThinkingText|turnToolCalls|turnSystemMessages|assistantPersisted)\\b",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts",
+        "packages/core/src/services/ChatManagementService.ts"
+      ],
+      "reason": "WP-2.9: turns are recorded by session/TurnRecorder.ts"
+    },
+    {
+      "phase": "02",
+      "pattern": "\\binstructionsForMode\\b",
+      "paths": [
+        "packages/core/src/services/StageExecutionService.ts"
+      ],
+      "reason": "WP-2.8: plan-mode text reaches a stage through the composed planModeInstructions / preparePrompt"
+    },
+    {
+      "phase": "02",
+      "pattern": "components/workflow/(SkillSelector|McpServerSelector|AgentBindingSection)",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-2.11: moved to components/session and take a session"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(DAGScheduler|StageExecutionService|SessionAllocator|StartupRecoveryService|ResultValidator|StageRunStateMachine|WorkflowRunStateMachine)\\b",
+      "reason": "WP-3.7: the v1 engine is deleted; the RunSupervisor (actor, decide(), StageExecutor, recovery) is the engine"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(DEFAULT_RETRY_POLICY|retryInSession|retryStageAfterValidation|processedStageRuns|sendStageFollowUp|markFollowUpPending|redriveRun|setHeartbeatPolicy|setDefaultStageTimeoutMs|setHeartbeatIntervalMs|STAGE_OUTPUT_ARTIFACT)\\b",
+      "reason": "WP-3.7: v1 retry, follow-up, reconciler and heartbeat paths are deleted (retries are attempts, recovery is the supervisor's)"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(pauseRun|resumeRun|cancelRun|retryRun|pauseStageRun|resumeStageRun|retryStageRun|cancelStageRun|listPendingInterrupts)\\b",
+      "reason": "WP-3.7: operator actions are run commands (POST /workflow-runs/:id/commands); a re-run is forkRun"
+    },
+    {
+      "phase": "03",
+      "pattern": "pending-interrupts|/stages/[^'\"`]*/(pause|resume|retry|cancel|approve)\\b",
+      "reason": "WP-3.7: the per-action run routes are deleted; pending approvals are the awaiting_input instances of GET /workflow-runs/:id (scoped to source: the generated JSON Schema has $ref paths like /stages/items/anyOf/0/properties/retry)",
+      "paths": [
+        "apps/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/",
+        "packages/core/src/",
+        "packages/shared/src/",
+        "packages/mcp-server/"
+      ]
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(ISessionAllocationRepository|DrizzleSessionAllocationRepository|WorkflowSessionMode)\\b",
+      "reason": "WP-3.7: sessions are run_sessions keyed by the engine; no run-level session mode"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\bmaxConcurrentStages\\b|MAX_CONCURRENT_STAGES",
+      "paths": [
+        "packages/core/src/",
+        "apps/server/src/"
+      ],
+      "reason": "WP-3.5/3.7: the admission controller is the one concurrency gate (W-66); no stage Semaphore"
+    },
+    {
+      "phase": "03",
+      "pattern": "workflow_run\\.retried|stage_run\\.(queued|step_started|step_completed)\\b",
+      "reason": "WP-3.7: v1 event kinds; a fork emits workflow_run.forked"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\b(EngineGated|ENGINE_SUPPORTS_V2|ENGINE_UPGRADE_HINT)\\b",
+      "paths": [
+        "apps/web/"
+      ],
+      "reason": "WP-3.7: ENGINE_LEVEL is v2; every v2 builder control is enabled"
+    },
+    {
+      "phase": "03",
+      "pattern": "\\bhitl(Service)?\\.(interrupt|resume|cancelWaiter|setRedriveRun)\\(",
+      "reason": "WP-3.7: stage gates park the executor frame; HitlService answers instances with run commands"
+    },
+    {
+      "phase": "03b",
+      "pattern": "\\b(followUpPrompt|STAGE_NOT_AWAITING_REVIEW)\\b|HITL panel",
+      "reason": "WP-3b.1 (PD-9): no approve-with-follow-up; a stage takes messages through the stage conversation API"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\b(startOrchestratedRun|WorkflowOrchestrator|WorkflowPreprocessor|useStartOrchestratedRun|OrchestratedRunParams|OrchestratorContext|OrchestratorSandbox|reArmPendingPostProcessing|setupCompletionCleanup|handleRunTerminal|scanAndWireUploads|copyWorkflowUploadsToRun|getWorkflowUploadsDir)\\b",
+      "reason": "WP-4.1: the run orchestrator is deleted; the engine's lifecycle phases (starting/finalizing) own workspace, mounts, uploads, preprocessing, sandbox and post-processing"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\b(setupProjectWorktrees|createRunWorktrees|setWorktrees|failSetup)\\b",
+      "reason": "WP-4.1: runs mount their codebases through MountService; a setup failure is a failed prepare phase"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\b(encodeStageOverrides|needsOrchestratedStart|uploadRunFiles|useUploadRunFiles|stripExecutionContext|waitForRunCompletion|TRIGGER_PERMISSION_MODE_KEY|ScriptRunProfile|ScriptRunProfileSchema|CreateWorkflowRunParams|RunUploadResult)\\b",
+      "reason": "WP-4.2/4.3/4.4: one invocation request, one upload writer, waitFor on finalized, one run profile schema"
+    },
+    {
+      "phase": "04",
+      "pattern": "__(stageOverrides|workingDirectory|artifactsDirectory|workspaceId|skillDirectories|customAgents|promptDirectories|projectId|triggeredBy|workflowRunId|triggerPermissionMode|postProcessingIntent|sandboxName|sandboxCliUrl|sandboxEnabled|iteration_index|iteration_total)\\b",
+      "reason": "WP-4.1 design decision 3 (W-06): engine values are typed run columns (system_vars, stage_overrides, trigger, workspace_id), never variables"
+    },
+    {
+      "phase": "04",
+      "pattern": "orchestrator/runs|orchestrator/workflows/|\\borchestrator\\.(startRun|uploadRunFiles|runWorkspace|runWorkspaceContent|runDiff|workflowFiles|cancel)\\b",
+      "reason": "WP-4.3: the /orchestrator routes are deleted; a run starts through /workflow-invocations and its workspace is /workflow-runs/:id/workspace*",
+      "docs": true
+    },
+    {
+      "phase": "04",
+      "pattern": "\\bruns\\.(create|start|retry|fork)\\(|\\bscripts\\.run\\(",
+      "reason": "WP-4.3: client-core run starts are workflows.invoke (a fork is an invocation target)"
+    },
+    {
+      "phase": "04",
+      "pattern": "workflow-runs/\\$\\{[^}]+\\}/(start|fork|retry)|'/workflow-runs/:id/(start|fork|retry)'|workflow-scripts/\\$\\{[^}]+\\}/run|'/workflow-scripts/:id/run'|['\"`]/api/workflow-runs['\"`], json",
+      "reason": "WP-4.3: the run-start routes are deleted (POST /workflow-runs, /:id/start, /:id/fork, /workflow-scripts/:id/run)",
+      "docs": true
+    },
+    {
+      "phase": "04",
+      "pattern": "workflow_run\\.(orchestration_(started|completed|failed)|worktree_creating|worktree_created|preprocessing_started|preprocessing_completed|postprocessing_started|postprocessing_completed|stage_validation)\\b",
+      "reason": "WP-4.1: replaced by workflow_run.phase_started/phase_completed/phase_failed and workflow_run.finalized"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\borchestratorConfig\\b",
+      "paths": [
+        "apps/web/",
+        "apps/mobile/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/shared/",
+        "packages/db/src/repositories/"
+      ],
+      "reason": "WP-4.6: the definition-level orchestrator config is gone (lifecycle in the spec)"
+    },
+    {
+      "phase": "05",
+      "pattern": "\\bllm_validation\\b",
+      "paths": [
+        "apps/",
+        "packages/core/src/",
+        "packages/workflow-spec/src/",
+        "packages/shared/src/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/"
+      ],
+      "reason": "WP-5A.6 (W-47): the judge rule (output.rules type judge) replaces llm_validation; only migration v55 names it"
+    },
+    {
+      "phase": "05",
+      "pattern": "\\b(pauseWhen|failWhen|onBudget|maxIterationsOverride)\\b",
+      "paths": [
+        "apps/",
+        "packages/core/src/",
+        "packages/workflow-spec/src/",
+        "packages/shared/src/",
+        "packages/client-core/",
+        "packages/cli-core/"
+      ],
+      "reason": "WP-5A.1/5A.3 (P5-13): a loop has one open exits[] list (complete, fail, pause, exhaust) and loop_state.effectiveMax; the fixed exit slots and override names of the draft are not a shape"
+    },
+    {
+      "phase": "05",
+      "pattern": "\\bFUTURE_KINDS\\b|is not available yet; the kinds are",
+      "paths": [
+        "apps/",
+        "packages/core/src/",
+        "packages/workflow-spec/src/",
+        "packages/shared/src/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/"
+      ],
+      "reason": "WP-5B.1-5B.3: map, subworkflow and wait are stage kinds; the validator's future-kind placeholder is gone"
+    },
+    {
+      "phase": "05",
+      "pattern": "\\b(budgetShare|results_and_failures|child_run_settled)\\b|\\bitemLabel\\??\\s*:",
+      "paths": [
+        "apps/",
+        "packages/core/src/",
+        "packages/workflow-spec/src/",
+        "packages/shared/src/",
+        "packages/client-core/",
+        "packages/cli-core/",
+        "packages/sdk/"
+      ],
+      "reason": "WP-5B.1/5B.2: the G5 draft shapes of map (itemLabel, output enum) and sub-workflow (budgetShare, child_run_settled) are not shapes: map.output.select, the stage budget, the child_settled message. itemLabel is banned as a field only (the mobile run view's itemLabel() helper is not the draft shape)"
+    },
+    {
+      "phase": "06",
+      "pattern": "\\bHUMAN_PRINCIPALS\\b",
+      "paths": [
+        "apps/server/"
+      ],
+      "reason": "P06 WP-6.5: who publishes is isPersonRequest (a paired device is a person unless it is an MCP device); the principal-type set is gone"
+    },
+    {
+      "phase": "06",
+      "pattern": "\\b(dry_run_workflow|author_workflow)\\b",
+      "paths": [
+        "apps/",
+        "packages/"
+      ],
+      "reason": "P06: the G4 draft names; the tools are plan_workflow and create_workflow_draft, and there are no MCP prompts (no slash commands)"
+    },
+    {
+      "phase": "06",
+      "pattern": "\\b(ListPromptsRequestSchema|GetPromptRequestSchema)\\b",
+      "paths": [
+        "packages/mcp-server/"
+      ],
+      "reason": "P06 WP-6.8: the MCP server has tools and resources only; an MCP prompt is a slash command in Claude Code"
+    },
+    {
+      "phase": "06",
+      "pattern": "import-json",
+      "paths": [
+        "apps/server/src/",
+        "packages/cli-core/",
+        "packages/client-core/",
+        "packages/mcp-server/"
+      ],
+      "reason": "P06: definitions import through /workflow-definitions/import (drafts); there is no import-json route or command"
+    },
+    {
+      "phase": "07",
+      "pattern": "GENERATORAI_((INTERACTIVE|ORDINARY|BULK)_CONCURRENCY|ADMISSION_QUEUE_WAIT_MS)",
+      "reason": "P07 final review ECON-R9: the admission lanes are deleted; concurrency limits are the flow keys of Settings → Workflow engine (the server logs these variables as ignored)"
+    },
+    {
+      "phase": "07",
+      "pattern": "\\b(laneFor|AdmissionTimeoutError|sizeLane|AdmissionLane|LaneSnapshot|acquireSlot|acquireWithTimeout)\\b",
+      "paths": [
+        "packages/",
+        "apps/"
+      ],
+      "reason": "P07 final review ECON-R9: the admission lanes are deleted; stage launches and provider turns are admitted on flow keys only"
+    },
+    {
+      "phase": "08",
+      "pattern": "text\\('expansion'",
+      "paths": [
+        "packages/db/src/"
+      ],
+      "reason": "P08 final review MAPWAIT-R18: stage_runs.expansion is a dead column (an expansion keeps its state in container state); it is not declared in schema.ts and the next migration drops it"
+    },
+    {
+      "phase": "01",
+      "pattern": "workflow-definitions/(\\$\\{[^}]+\\}|:\\w+|<\\w+>|[\\w-]+)/(stages|edges)\\b",
+      "docs": true,
+      "reason": "WP-1.7: the nested per-stage and per-edge definition routes are deleted; a client saves the whole v2 graph (POST /workflow-definitions, PUT /:id/graph)"
+    },
+    {
+      "phase": "04",
+      "pattern": "\\bPOST\\s+(/api)?/workflow-runs(\\s|$|`)|workflow-runs/(:\\w+|<\\w+>)/(start|fork|retry)\\b|workflow-scripts/:\\w+/run\\b",
+      "docs": true,
+      "reason": "WP-4.3: the run-start routes are deleted, in their documented form too (POST /workflow-runs, /:id/start, /:id/fork, /workflow-scripts/:id/run); a run starts through POST /workflow-invocations"
+    }
+  ],
+  "comments": {
+    "phase": "07",
+    "failFromPhase": null,
+    "baseline": 0,
+    "paths": [
+      "^packages/core/src/services/(Workflow|Stage|DAG|Hitl|ResultValidator|ConditionEvaluator|SessionAllocator|StartupRecovery|Automation|IterationPlanner|DurableSleep|DataSourceResolver)[^/]*\\.ts$",
+      "^packages/core/src/services/(workflow|automation)[^/]*/",
+      "^packages/core/src/services/(engine|session|definitions)/",
+      "^packages/core/src/domain/scheduler/",
+      "^packages/workflow-spec/src/",
+      "^packages/core/src/domain/.*(Workflow|Stage|DAG)[^/]*\\.ts$",
+      "^packages/db/src/repositories/(Workflow|Stage|Automation)[^/]*\\.ts$",
+      "^packages/shared/src/.*(Workflow|Stage|Automation)[^/]*\\.ts$",
+      "^apps/server/src/routes/(workflow|automations)[^/]*\\.ts$",
+      "^apps/web/src/.*[Ww]orkflow[^/]*(/|\\.tsx?$)",
+      "^apps/cli/src/.*[Ww]orkflow[^/]*(/|\\.tsx?$)"
+    ]
+  }
+}

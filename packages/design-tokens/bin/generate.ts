@@ -16,6 +16,7 @@ import { fileURLToPath } from 'node:url';
 import { emitCss, spliceCss } from '../src/emit/css.js';
 import { emitNative } from '../src/emit/native.js';
 import { prepaintCspHash, splicePrepaint } from '../src/emit/prepaint.js';
+import { emitStaticCss } from '../src/emit/static.js';
 import { emitVocabularyCss, emitVocabularyJson } from '../src/emit/vocabulary.js';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -70,6 +71,33 @@ const targets: Target[] = [
     label: 'desktop CSP pre-paint hash',
     path: resolve(repoRoot, 'apps/desktop/src/main/session-hardening.ts'),
     render: (existing) => replacePin(existing, /("script-src 'self' ')sha256-[A-Za-z0-9+/=]+(')/),
+  },
+  // Static desktop pages (06 §7, P5-11): no script beyond error.html's own
+  // (CSP `default-src 'none'`), so they get one generated `:root` block +
+  // dark-mode media query instead of the web app's full layer stack.
+  {
+    label: 'desktop splash page tokens',
+    path: resolve(repoRoot, 'apps/desktop/resources/splash.html'),
+    render(existing) {
+      if (existing === null) throw new Error('apps/desktop/resources/splash.html not found');
+      return spliceCss(existing, emitStaticCss());
+    },
+  },
+  {
+    label: 'desktop error page tokens',
+    path: resolve(repoRoot, 'apps/desktop/resources/error.html'),
+    render(existing) {
+      if (existing === null) throw new Error('apps/desktop/resources/error.html not found');
+      return spliceCss(existing, emitStaticCss());
+    },
+  },
+  {
+    label: 'desktop prompt page tokens',
+    path: resolve(repoRoot, 'apps/desktop/resources/prompt.html'),
+    render(existing) {
+      if (existing === null) throw new Error('apps/desktop/resources/prompt.html not found');
+      return spliceCss(existing, emitStaticCss());
+    },
   },
   {
     label: 'shared class vocabulary',

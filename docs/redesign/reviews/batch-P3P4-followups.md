@@ -12,3 +12,9 @@ Fix in the batch fix pass (after the combined review).
 ## Known cross-plan / environment items
 - `apps/cli` tui-e2e "resets the cursor when a pane is replaced" depends on a server at :3100 (fails without it) — make it use an isolated server or skip without one.
 - Chat-workspace mounts do not write `worktrees` rows (G-17 `link.entity:'chat'` never appears) — reconcile the mount model with the worktrees table.
+
+## Found while merging P4-12 / P5
+- `ChangesSurface.view.characterization` "Compare against…" expects `base: turn:t1` but gets `baseline` (reported by the Home agent; fails alone) — check the CompareBar/Select merge (`blocks/changes/CompareBar.tsx` onValueChange adapter).
+- ChangesTray port: disclosure is a separate chevron; summary reads "N files changed · in this chat"; generic file icons.
+- Chat retry on Home resends the last user message without attachments; quick start is create + send (an empty chat remains if send fails).
+- Duplicate DirectoryBrowser: `blocks/directory-browser` (P5-03) vs `blocks/sources` (P5-09) — keep one.

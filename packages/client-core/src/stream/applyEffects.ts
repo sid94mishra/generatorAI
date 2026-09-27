@@ -128,15 +128,15 @@ export function applyStreamEffect(streams: StreamsRecord, effect: StreamEffect):
     case 'scheduleTranscriptCleanup':
     case 'cancelTranscriptCleanup':
     case 'runStatus':
-    case 'runTimeline':
     case 'stageStatus':
-    case 'stageTimeline':
+    case 'stageAdmission':
     case 'registerStageSession':
-    case 'stageAwaitingInput':
     case 'selectStageRun':
     case 'stageSettled':
     case 'widgetInvoke':
     case 'widgetTeardown':
+    // A chat's workflow run cards live in the host's query cache.
+    case 'workflowRunCard':
     // A rewind moves what the SERVER holds; the host refetches history, drops
     // the local turn state and offers the prompt back. Nothing here to fold.
     case 'chatRewound':
@@ -172,15 +172,14 @@ const HOST_OPS: ReadonlySet<StreamEffect['op']> = new Set<StreamEffect['op']>([
   'scheduleTranscriptCleanup',
   'cancelTranscriptCleanup',
   'runStatus',
-  'runTimeline',
   'stageStatus',
-  'stageTimeline',
+  'stageAdmission',
   'registerStageSession',
-  'stageAwaitingInput',
   'selectStageRun',
   'stageSettled',
   'widgetInvoke',
   'widgetTeardown',
+  'workflowRunCard',
   'chatRewound',
 ]);
 

@@ -14,7 +14,7 @@ import type { CliContext } from '../../context/CliContext.js';
  */
 function fakeContext(
   events: Array<{ kind: string; data: Record<string, unknown> }>,
-  runStatus: { status: string; error?: string | null } = { status: 'completed' },
+  digest: { outcome: string | null; error?: string | null } = { outcome: 'completed' },
 ): { ctx: CliContext; emitted: Array<{ level: string; message: string }> } {
   const emitted: Array<{ level: string; message: string }> = [];
   // `streamUntil` (`_shared.ts`) registers its own completion via
@@ -25,8 +25,14 @@ function fakeContext(
   const disposers: Array<() => void> = [];
   const ctx = {
     api: {
-      runs: {
-        get: vi.fn(async () => runStatus),
+      workflows: {
+        digest: vi.fn(async () => ({
+          status: digest.outcome ?? 'running',
+          finalized: true,
+          error: null,
+          postProcessing: [],
+          ...digest,
+        })),
       },
     },
     stream: {
@@ -103,8 +109,8 @@ describe('watchRun', () => {
     expect(emitted).toContainEqual({ level: 'info', message: '▶ legacy' });
   });
 
-  it('throws RESULT_FAILED when the run terminal state is failed, independent of stream events', async () => {
-    const { ctx } = fakeContext([], { status: 'failed', error: 'boom' });
+  it('throws RESULT_FAILED when the finalized run failed, independent of stream events', async () => {
+    const { ctx } = fakeContext([], { outcome: 'failed', error: 'boom' });
     await expect(watchRun(ctx, 'run_1', 'normal')).rejects.toMatchObject({
       code: 'RESULT_FAILED',
       message: 'Run failed: boom',

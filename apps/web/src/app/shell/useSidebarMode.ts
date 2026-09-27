@@ -12,10 +12,8 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useEffect } from 'react';
-import { useMatches } from 'react-router';
 import { RAIL_QUERY, useMediaQuery } from '@/hooks/useMediaQuery.js';
 import { useShellStore } from '@/stores/shellStore.js';
-import type { GaiRouteHandle } from '../routes/defineRoute.js';
 
 export interface SidebarModeState {
   mode: 'expanded' | 'rail';
@@ -33,10 +31,9 @@ export function sidebarModeFor(input: {
   return { mode: forced ? 'rail' : input.pref, forced };
 }
 
-export function useSidebarMode(): SidebarModeState {
+/** `forceRail`: the page route's handle asks for the rail (ShellRoute reads it from the page location). */
+export function useSidebarMode(forceRail: boolean): SidebarModeState {
   const narrow = useMediaQuery(RAIL_QUERY);
-  const matches = useMatches();
-  const forceRail = matches.some((m) => (m.handle as Partial<GaiRouteHandle> | undefined)?.forceRail === true);
   const pref = useShellStore((s) => s.sidebarPref);
   const setRailForced = useShellStore((s) => s.setRailForced);
   const state = sidebarModeFor({ narrow, forceRail, pref });

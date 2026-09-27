@@ -100,7 +100,7 @@ There is exactly one mode. The CLI is a client of a running GeneratorAI server o
 | F6 | `wf validate <id-with-empty-stage>` | Warning surfaced | ✅ (covered by validate test) |
 | F7 | `wf validate <id-with-cycle>` | Cycle error | ✅ (caught at import time per M15 in main catalog) |
 | F8 | `wf export <id>` | JSON to stdout | ✅ (3622 bytes for system-code-generation) |
-| F9 | `wf import <file>` | Reads + parses JSON, posts to import-json | ✅ — **gotcha**: PowerShell `Out-File -Encoding utf8` writes BOM; use `[System.IO.File]::WriteAllText` for clean JSON. Not a CLI bug. |
+| F9 | `wf import <file>` | Reads + parses JSON, posts to `/workflow-definitions/import` | ✅ — **gotcha**: PowerShell `Out-File -Encoding utf8` writes BOM; use `[System.IO.File]::WriteAllText` for clean JSON. Not a CLI bug. |
 | F10 | `wf from-template <templateId>` | Materializes system template | ✅ (4 stages, 3 edges, 6 vars persisted) |
 | F11 | `wf delete <id>` | DELETE 204 | ✅ (fails with helpful 409 if runs reference stages — by design) |
 | F12 | `wf stage add <defId> <name>` | **FIXED** in this session: now auto-increments `order` (was always 0). Three sequential adds → orders 0, 1, 2. | ✅ (after Polish 1 fix) |

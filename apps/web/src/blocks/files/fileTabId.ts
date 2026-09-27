@@ -6,7 +6,7 @@
 // keeping that in a store, the reference is encoded straight into the id.
 // Three things then come for free:
 //
-//   • dedupe   — re-opening a file yields the same id, so RightPane focuses
+//   • dedupe   — re-opening a file yields the same id, so the dock focuses
 //                the tab already showing it instead of adding a duplicate
 //   • reload   — the tab strip is persisted in localStorage, so a restored
 //                tab already knows its file; no parallel store to rehydrate

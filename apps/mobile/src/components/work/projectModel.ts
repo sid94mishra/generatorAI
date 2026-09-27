@@ -20,13 +20,12 @@ export type ProjectTone = 'neutral' | 'primary' | 'success' | 'warning' | 'dange
 
 export interface ProjectRunLike {
   workflowDefinitionId: string;
-  variables?: Record<string, unknown>;
+  projectId?: string | null;
 }
 
 /**
  * A project's runs: those of one of its workflows, or those started FOR the
- * project (which carry it as `variables.__projectId`, e.g. a global workflow
- * run against this project).
+ * project (`run.projectId`, e.g. a global workflow run against this project).
  */
 export function projectRuns<T extends ProjectRunLike>(
   runs: readonly T[],
@@ -35,7 +34,7 @@ export function projectRuns<T extends ProjectRunLike>(
 ): T[] {
   const ids = new Set(workflowIds);
   return runs.filter(
-    (run) => ids.has(run.workflowDefinitionId) || run.variables?.['__projectId'] === projectId,
+    (run) => ids.has(run.workflowDefinitionId) || run.projectId === projectId,
   );
 }
 

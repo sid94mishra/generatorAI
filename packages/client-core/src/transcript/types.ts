@@ -80,6 +80,9 @@ export interface UsageInfo {
   cacheWriteTokens?: number;
   /** Turn cost — copilot: billing multiplier; claude-agent: USD. */
   cost?: number;
+  /** The turn's cost in USD, set only by a provider that reports one. The only
+   *  source a dollar figure is rendered from (never `cost`). */
+  costUsd?: number;
   /** Harness provider that produced this usage. */
   provider?: string;
 }

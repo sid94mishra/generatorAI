@@ -38,9 +38,12 @@ export class DrizzleChatMessageRepository implements IChatMessageRepository {
       toolName: message.toolName ?? null,
       toolArgs: message.toolArgs ?? null,
       toolResult: message.toolResult ?? null,
-      workflowId: message.workflowId ?? null,
       metadata: message.metadata ?? null,
       chatId: message.chatId ?? null,
+      // Only an assistant turn can be cut short; a partial row written by an
+      // older caller that did not say so is still incomplete.
+      complete: message.complete ?? message.metadata?.partial !== true,
+      turnRole: message.turnRole ?? null,
       timestamp: message.timestamp,
     });
     return message;
@@ -154,9 +157,10 @@ export class DrizzleChatMessageRepository implements IChatMessageRepository {
       toolName: row.toolName ?? undefined,
       toolArgs: safeJsonColumn(row.toolArgs, jsonUnknown, { fallback: undefined }),
       toolResult: safeJsonColumn(row.toolResult, jsonUnknown, { fallback: undefined }),
-      workflowId: row.workflowId ?? undefined,
       metadata: safeJsonColumn(row.metadata, jsonUnknown, { fallback: undefined }) as ChatMessage['metadata'],
       chatId: row.chatId ?? undefined,
+      ...(row.role === 'assistant' ? { complete: row.complete } : {}),
+      ...(row.turnRole ? { turnRole: row.turnRole } : {}),
       timestamp: row.timestamp,
     };
   }

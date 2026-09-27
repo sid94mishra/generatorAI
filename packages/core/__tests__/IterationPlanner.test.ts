@@ -40,8 +40,8 @@ describe('planIterations', () => {
     expect(plan.iterations).toHaveLength(3);
     expect(plan.parsedRowCount).toBe(3);
     expect(plan.iterations[0]!.variables['id']).toBe('a');
-    expect(plan.iterations[0]!.variables['__iteration_index']).toBe(0);
-    expect(plan.iterations[0]!.variables['__iteration_total']).toBe(3);
+    // The iteration index travels in the run's trigger, never as a variable (W-06).
+    expect(plan.iterations[0]!.variables).not.toHaveProperty('__iteration_index');
     expect(plan.iterations[0]!.label).toBe('id=a');
   });
 
@@ -132,16 +132,12 @@ describe('planIterations', () => {
     ).toThrow(/must be one of \[high, low\]/);
   });
 
-  it('rejects reserved-key overrides silently by ignoring them', () => {
+  it('refuses engine-reserved and undeclared dataset fields (C-3)', () => {
     const naughty: AutomationDataset = {
       format: 'json_array',
-      data: JSON.stringify([
-        { id: 'a', __iteration_index: 99, __proto__: { polluted: true } },
-      ]),
+      data: JSON.stringify([{ id: 'a', __workingDirectory: 'C:/Users/me' }]),
     };
-    const plan = planIterations({ schema, mode: { kind: 'each_row' }, dataset: naughty });
-    // Reserved iteration-index is not overwritten from row.
-    expect(plan.iterations[0]!.variables['__iteration_index']).toBe(0);
+    expect(() => planIterations({ schema, mode: { kind: 'each_row' }, dataset: naughty })).toThrow(/engine-reserved/);
   });
 
   it('merges base variables under row-level values', () => {

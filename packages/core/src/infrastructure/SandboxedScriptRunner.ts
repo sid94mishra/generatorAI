@@ -21,7 +21,19 @@
 //      "run anything" are refused: `node -e/--eval/-p/--print`, `python -c`,
 //      `git -c core.sshCommand=…` (and friends), `git --upload-pack/
 //      --receive-pack`, and `npx`/`npm exec`/`pnpm dlx` of a package that is
-//      not itself allow-listed.
+//      not itself allow-listed. A confined run (a `check` stage, P05 §1.2)
+//      accepts pwsh only as `-File <script of its mount>` plus a few inert
+//      switches. Every run refuses `pwsh -EncodedCommand`. pwsh switches are
+//      matched the way pwsh matches them (any unambiguous prefix, any case,
+//      `-`/`--`/`/`), so `-Comm` or `-enc` cannot slip past.
+//
+// Windows launch (P05 P5-4). An extensionless PATH entry is a POSIX shim
+// (`…\npm\pnpm`) and never spawnable, so only PATHEXT candidates count. A
+// `.cmd`/`.bat` cannot be spawned without a shell (EINVAL on Node ≥ 18.20.2):
+// a standard npm or pnpm shim is resolved to `node <its target script>`;
+// any other batch file runs through `%ComSpec% /d /s /c` with every
+// argument escaped for cmd (the cross-spawn rules; arguments are literals).
+// A process tree that outlives its timeout is killed with `taskkill /T`.
 // ────────────────────────────────────────────────────────────────
 
 import { spawn } from 'node:child_process';
@@ -36,54 +48,12 @@ import type {
 } from '../domain/ports/IScriptRunner.js';
 import type { ILogger } from '@generatorai/shared';
 import { SecurityError, buildChildEnv } from '@generatorai/shared';
+import { DEFAULT_COMMAND_ALLOWLIST as DEFAULT_LIST, OPT_IN_COMMANDS as OPT_IN_LIST } from '@generatorai/workflow-spec';
 
-/**
- * Commands runnable without any operator opt-in. Interpreters and the
- * tooling the product's own templates/hooks rely on — nothing that can
- * fetch from the network or destroy a tree on its own.
- */
-export const DEFAULT_COMMAND_ALLOWLIST: ReadonlySet<string> = new Set([
-  'node',
-  'npm',
-  'npx',
-  'pnpm',
-  'git',
-  'python',
-  'python3',
-  'pip',
-  'pip3',
-  'pwsh',
-  'echo',
-  'gh',
-  'tsc',
-  'eslint',
-  'prettier',
-  'vitest',
-  'jest',
-  'jq',
-]);
-
-/**
- * Commands the previous allow-list shipped by default that now require an
- * explicit `scripts.extraAllowlist` entry. Listed so the refusal message can
- * tell the operator exactly which knob enables them.
- */
-export const OPT_IN_COMMANDS: ReadonlySet<string> = new Set([
-  'sh',
-  'bash',
-  'curl',
-  'wget',
-  'rm',
-  'chmod',
-  'mv',
-  'cp',
-  'find',
-  'sed',
-  'awk',
-  'tar',
-  'zip',
-  'unzip',
-]);
+// The lists live in the spec package (P05 §1.2): the validator checks a
+// `check` stage's command against the same defaults the runner enforces.
+const DEFAULT_COMMAND_ALLOWLIST: ReadonlySet<string> = new Set(DEFAULT_LIST);
+const OPT_IN_COMMANDS: ReadonlySet<string> = new Set(OPT_IN_LIST);
 
 /**
  * Patterns that should never appear anywhere on the command line (basic
@@ -123,7 +93,70 @@ const GIT_DANGEROUS_CONFIG_KEYS = [
   'ssh.variant',
 ];
 const GIT_DANGEROUS_FLAGS = ['--upload-pack', '--receive-pack', '--exec-path'];
-const PWSH_ENCODED_FLAGS = new Set(['-encodedcommand', '-ec', '-e']);
+
+/**
+ * pwsh's own command-line switches, in the order its parser tries them (first
+ * match wins). pwsh accepts any prefix of a name at least `min` characters
+ * long, plus the listed aliases, case-insensitively, after `-`, `--`, `/` or a
+ * Unicode dash. `kind` says what the switch does to the rest of the line:
+ * `value` takes the next argument, `command`/`file` end switch parsing (the
+ * rest is the code or the script's arguments), `encoded` runs base64 code.
+ */
+type PwshSwitchKind = 'switch' | 'value' | 'command' | 'file' | 'encoded';
+const PWSH_SWITCHES: ReadonlyArray<{ name: string; min: number; aliases?: readonly string[]; kind: PwshSwitchKind }> = [
+  { name: 'help', min: 1, aliases: ['?'], kind: 'switch' },
+  { name: 'login', min: 1, kind: 'switch' },
+  { name: 'noexit', min: 3, kind: 'switch' },
+  { name: 'noprofile', min: 3, kind: 'switch' },
+  { name: 'nologo', min: 3, kind: 'switch' },
+  { name: 'noninteractive', min: 4, kind: 'switch' },
+  { name: 'socketservermode', min: 2, kind: 'switch' },
+  { name: 'servermode', min: 1, kind: 'switch' },
+  { name: 'namedpipeservermode', min: 3, kind: 'switch' },
+  { name: 'sshservermode', min: 4, kind: 'switch' },
+  { name: 'noprofileloadtime', min: 17, kind: 'switch' },
+  { name: 'interactive', min: 1, kind: 'switch' },
+  { name: 'configurationfile', min: 17, kind: 'value' },
+  { name: 'configurationname', min: 6, kind: 'value' },
+  { name: 'custompipename', min: 14, kind: 'value' },
+  { name: 'command', min: 1, kind: 'command' },
+  { name: 'commandwithargs', min: 15, aliases: ['cwa'], kind: 'command' },
+  { name: 'windowstyle', min: 1, kind: 'value' },
+  { name: 'file', min: 1, kind: 'file' },
+  { name: 'outputformat', min: 1, aliases: ['of'], kind: 'value' },
+  { name: 'inputformat', min: 2, aliases: ['if'], kind: 'value' },
+  { name: 'executionpolicy', min: 2, aliases: ['ep'], kind: 'value' },
+  { name: 'encodedcommand', min: 1, aliases: ['ec'], kind: 'encoded' },
+  { name: 'encodedarguments', min: 8, aliases: ['ea'], kind: 'encoded' },
+  { name: 'settingsfile', min: 8, kind: 'value' },
+  { name: 'sta', min: 3, kind: 'switch' },
+  { name: 'mta', min: 3, kind: 'switch' },
+  { name: 'workingdirectory', min: 2, aliases: ['wd'], kind: 'value' },
+  { name: 'version', min: 1, kind: 'switch' },
+];
+/** The only switches a confined run (a check) may pass besides `-File`. */
+const PWSH_CONFINED_SWITCHES = new Set(['noprofile', 'nologo', 'noninteractive', 'executionpolicy', 'outputformat', 'inputformat', 'sta', 'mta']);
+const PWSH_DASHES = new Set(['-', '–', '—', '―']);
+
+/**
+ * Parse one pwsh argument as a switch. `null` = not a switch (a positional
+ * script path). `name` is `undefined` for a switch pwsh would not recognise.
+ */
+function pwshSwitch(arg: string): { name: string | undefined; kind: PwshSwitchKind | undefined; attached: boolean } | null {
+  const trimmed = arg.trim();
+  const first = trimmed[0];
+  if (first === undefined || (!PWSH_DASHES.has(first) && first !== '/')) return null;
+  let key = trimmed.slice(1);
+  if (PWSH_DASHES.has(first) && key[0] === first) key = key.slice(1);
+  const sep = key.search(/[:=]/);
+  const attached = sep >= 0;
+  if (attached) key = key.slice(0, sep);
+  key = key.toLowerCase();
+  const hit = key.length === 0 ? undefined : PWSH_SWITCHES.find((s) => s.aliases?.includes(key) || (key.length >= s.min && s.name.startsWith(key)));
+  // A `/…` that names no switch is a path (POSIX absolute), not a switch.
+  if (!hit && first === '/') return null;
+  return { name: hit?.name, kind: hit?.kind, attached };
+}
 
 function flagName(arg: string): string {
   const eq = arg.indexOf('=');
@@ -188,37 +221,36 @@ export class SandboxedScriptRunner implements IScriptRunner {
 
   async run(command: string, args: string[], options: ScriptRunOptions): Promise<ScriptRunResult> {
     // ── Security checks — throw before anything is spawned ──
-    const resolved = await this.resolveOrThrow(command, args);
+    const resolved = await this.resolveOrThrow(command, args, options.confineTo);
 
     const timeout = options.timeout ?? this.defaultTimeout;
     const processId = randomUUID();
     const startTime = Date.now();
+    const launch = launchPlan(resolved, args, this.lookupEnv);
 
-    let spawnCmd = resolved.binary;
-    let spawnArgs = args;
-    if (resolved.viaCmdShell) {
-      // `echo` is a cmd.exe builtin on Windows — there is no binary to
-      // resolve. Run it through the shell but with the command name fixed by
-      // us, not by the caller, and every argument passed as its own argv
-      // entry (no string interpolation).
-      spawnCmd = resolved.binary;
-      spawnArgs = ['/d', '/s', '/c', resolved.name, ...args];
-    }
-
-    this.logger.info(`[ScriptRunner] Executing: ${spawnCmd} ${spawnArgs.join(' ')} (pid=${processId})`);
+    this.logger.info(`[ScriptRunner] Executing: ${launch.command} ${launch.args.join(' ')} (pid=${processId})`);
 
     return new Promise<ScriptRunResult>((resolve) => {
-      const proc = spawn(spawnCmd, spawnArgs, {
-        cwd: options.cwd ? path.resolve(options.cwd) : undefined,
-        // Workflow scripts are model-authorable, so this child gets an
-        // allowlisted environment rather than a clone of the server's — a
-        // clone would hand a generated `.workflow.mjs` the vault key, the
-        // desktop admin token, DATABASE_URL and every provider credential.
-        env: buildChildEnv(options.env ? { extra: options.env } : {}),
-        shell: false, // Never use shell to prevent injection
-        stdio: [options.stdin !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
-        timeout,
-      });
+      let proc: ReturnType<typeof spawn>;
+      try {
+        proc = spawn(launch.command, launch.args, {
+          cwd: options.cwd ? path.resolve(options.cwd) : undefined,
+          // Workflow scripts are model-authorable, so this child gets an
+          // allowlisted environment rather than a clone of the server's — a
+          // clone would hand a generated `.workflow.mjs` the vault key, the
+          // desktop admin token, DATABASE_URL and every provider credential.
+          env: buildChildEnv(options.env || launch.env ? { extra: { ...(launch.env ?? {}), ...(options.env ?? {}) } } : {}),
+          shell: false, // Never use shell to prevent injection
+          stdio: [options.stdin !== undefined ? 'pipe' : 'ignore', 'pipe', 'pipe'],
+          windowsHide: true,
+          ...(launch.verbatim ? { windowsVerbatimArguments: true } : {}),
+        });
+      } catch (err) {
+        // A synchronous spawn failure (EINVAL, a bad cwd): the process never started.
+        const e = err as NodeJS.ErrnoException;
+        resolve({ exitCode: -1, stdout: '', stderr: e.message, durationMs: Date.now() - startTime, launchError: e.code ?? e.message });
+        return;
+      }
 
       this.activeProcesses.set(processId, proc);
 
@@ -232,11 +264,15 @@ export class SandboxedScriptRunner implements IScriptRunner {
       let stdoutBytes = 0;
       let stderrBytes = 0;
       let killed = false;
+      let timedOut = false;
 
       proc.stdout?.on('data', (chunk: Buffer) => {
         stdoutBytes += chunk.length;
         if (stdoutBytes <= this.maxOutput) {
           stdout += chunk.toString();
+        } else if (options.keepTail) {
+          // Keep the END of a long output (what a check reports), bounded.
+          stdout = (stdout + chunk.toString()).slice(-this.maxOutput);
         }
         options.streamTo?.(chunk.toString(), 'stdout');
       });
@@ -245,13 +281,16 @@ export class SandboxedScriptRunner implements IScriptRunner {
         stderrBytes += chunk.length;
         if (stderrBytes <= this.maxOutput) {
           stderr += chunk.toString();
+        } else if (options.keepTail) {
+          stderr = (stderr + chunk.toString()).slice(-this.maxOutput);
         }
         options.streamTo?.(chunk.toString(), 'stderr');
       });
 
       const timer = setTimeout(() => {
         killed = true;
-        proc.kill('SIGKILL');
+        timedOut = true;
+        killTree(proc);
         this.logger.warn(`[ScriptRunner] Process ${processId} timed out after ${timeout}ms`);
       }, timeout);
 
@@ -259,7 +298,7 @@ export class SandboxedScriptRunner implements IScriptRunner {
       if (options.abortSignal) {
         options.abortSignal.addEventListener('abort', () => {
           killed = true;
-          proc.kill('SIGKILL');
+          killTree(proc);
         }, { once: true });
       }
 
@@ -270,14 +309,15 @@ export class SandboxedScriptRunner implements IScriptRunner {
         resolve({
           exitCode: killed ? -1 : (code ?? -1),
           stdout: stdout.trimEnd(),
-          stderr: killed
+          stderr: timedOut
             ? `Process timed out after ${timeout}ms\n${stderr}`.trimEnd()
             : stderr.trimEnd(),
           durationMs: Date.now() - startTime,
+          ...(timedOut ? { timedOut: true } : {}),
         });
       });
 
-      proc.on('error', (err) => {
+      proc.on('error', (err: NodeJS.ErrnoException) => {
         clearTimeout(timer);
         this.activeProcesses.delete(processId);
         resolve({
@@ -285,6 +325,7 @@ export class SandboxedScriptRunner implements IScriptRunner {
           stdout: '',
           stderr: err.message,
           durationMs: Date.now() - startTime,
+          launchError: err.code ?? err.message,
         });
       });
     });
@@ -324,10 +365,7 @@ export class SandboxedScriptRunner implements IScriptRunner {
 
   // ── Validation ──
 
-  private async resolveOrThrow(
-    command: string,
-    args: string[],
-  ): Promise<{ name: string; binary: string; viaCmdShell: boolean }> {
+  private async resolveOrThrow(command: string, args: string[], confineTo?: string): Promise<ResolvedCommand> {
     if (typeof command !== 'string' || command.trim().length === 0) {
       throw new SecurityError('Command must be a non-empty bare executable name');
     }
@@ -363,7 +401,7 @@ export class SandboxedScriptRunner implements IScriptRunner {
     }
 
     // (d) interpreter escape hatches.
-    const escape = this.checkInterpreterEscapes(name, args);
+    const escape = this.checkInterpreterEscapes(name, args, confineTo);
     if (escape) throw new SecurityError(escape);
 
     // Resolve to an absolute binary — `spawn` gets this path, never `command`.
@@ -375,10 +413,15 @@ export class SandboxedScriptRunner implements IScriptRunner {
     if (!binary) {
       throw new SecurityError(`Command "${name}" is allow-listed but could not be found on PATH`);
     }
+    if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(binary)) {
+      const shim = await parseNodeShim(binary);
+      if (shim) return { name, binary, viaCmdShell: false, shim: { ...shim, node: (await resolveOnPath('node', this.lookupEnv)) ?? process.execPath } };
+      return { name, binary, viaCmdShell: false, batch: true };
+    }
     return { name, binary, viaCmdShell: false };
   }
 
-  private checkInterpreterEscapes(name: string, args: string[]): string | null {
+  private checkInterpreterEscapes(name: string, args: string[], confineTo?: string): string | null {
     switch (name) {
       case 'node': {
         for (const arg of args) {
@@ -434,10 +477,29 @@ export class SandboxedScriptRunner implements IScriptRunner {
         return null;
       }
       case 'pwsh': {
-        for (const arg of args) {
-          if (PWSH_ENCODED_FLAGS.has(flagName(arg))) {
-            return `"pwsh ${arg}" runs an encoded command and is not permitted`;
+        for (let i = 0; i < args.length; i++) {
+          const arg = args[i]!;
+          const sw = pwshSwitch(arg);
+          if (sw?.kind === 'encoded') return `"pwsh ${arg}" runs an encoded command and is not permitted`;
+          if (!confineTo) {
+            if (!sw || sw.kind === 'command' || sw.kind === 'file') break; // the rest is the code or the script's arguments
+            if (sw.kind === 'value' && !sw.attached) i++;
+            continue;
           }
+          // A confined run (a check) executes files of its mount only, never inline code.
+          if (sw?.kind === 'command') return `"pwsh ${arg}" runs inline code and is not permitted in a check; run a script file of the mount`;
+          let file: string | undefined;
+          if (!sw) file = arg;
+          else if (sw.kind === 'file' && !sw.attached) file = args[i + 1] ?? '';
+          else if (!sw.name || sw.attached || !PWSH_CONFINED_SWITCHES.has(sw.name)) {
+            return `"pwsh ${arg}" is not permitted in a check; use -File <script of the mount>`;
+          } else {
+            if (sw.kind === 'value') i++;
+            continue;
+          }
+          const rel = path.relative(path.resolve(confineTo), path.resolve(confineTo, file));
+          if (!file || file === '-' || rel.startsWith('..') || path.isAbsolute(rel)) return `"pwsh -File ${file}" is outside the mount`;
+          break; // the rest belongs to the script
         }
         return null;
       }
@@ -519,7 +581,9 @@ export async function resolveOnPath(name: string, env: NodeJS.ProcessEnv = proce
   const exts = isWin
     ? (env['PATHEXT'] ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).map((e) => e.toLowerCase())
     : [''];
-  const candidates = isWin ? ['', ...exts] : exts;
+  // Windows: an extensionless file is a POSIX shim (`…\npm\pnpm`) and never
+  // spawnable; only the executable PATHEXT extensions count (P5-4).
+  const candidates = isWin ? exts.filter((e) => WINDOWS_LAUNCHABLE.has(e)) : exts;
 
   for (const dir of dirs) {
     for (const ext of candidates) {
@@ -537,4 +601,90 @@ export async function resolveOnPath(name: string, env: NodeJS.ProcessEnv = proce
     }
   }
   return null;
+}
+
+const WINDOWS_LAUNCHABLE = new Set(['.com', '.exe', '.bat', '.cmd']);
+
+/** What `resolveOrThrow` found: the binary, and how it is launched on Windows. */
+interface ResolvedCommand {
+  name: string;
+  binary: string;
+  /** `echo` on Windows: the cmd builtin. */
+  viaCmdShell: boolean;
+  /** A standard npm/pnpm `.cmd` shim: run `node <script>` instead. */
+  shim?: { script: string; node: string; nodePath?: string };
+  /** Another `.cmd`/`.bat`: run through `%ComSpec% /d /s /c` with escaped arguments. */
+  batch?: boolean;
+}
+
+/**
+ * The target script of a standard npm (`cmd-shim`) or pnpm `.cmd` shim:
+ * the quoted `%dp0%`/`%~dp0` path followed by `%*`. Null for any other
+ * batch file.
+ */
+export async function parseNodeShim(file: string): Promise<{ script: string; nodePath?: string } | null> {
+  let text: string;
+  try {
+    text = await fs.readFile(file, 'utf8');
+  } catch {
+    return null;
+  }
+  if (text.length > 64 * 1024) return null;
+  const target = /"%~?dp0%?\\([^"%]+)"\s+%\*/i.exec(text);
+  if (!target) return null;
+  const rel = target[1]!;
+  if (/^node(\.exe)?$/i.test(rel)) return null;
+  const script = path.resolve(path.dirname(file), rel);
+  const nodePath = /@?SET\s+"NODE_PATH=([^"]+)"/i.exec(text)?.[1];
+  return { script, ...(nodePath && !nodePath.includes('%') ? { nodePath } : {}) };
+}
+
+// cmd.exe metacharacters (the cross-spawn rules).
+const CMD_META = /([()\][%!^"`<>&|;, *?])/g;
+
+/** One argument for `cmd /d /s /c "…"`: quoted, backslashes doubled before quotes, metacharacters caret-escaped. */
+export function escapeCmdArgument(arg: string, doubleEscape: boolean): string {
+  let a = arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\*)$/, '$1$1');
+  a = `"${a}"`;
+  a = a.replace(CMD_META, '^$1');
+  if (doubleEscape) a = a.replace(CMD_META, '^$1');
+  return a;
+}
+
+/** The spawn call for a resolved command. */
+function launchPlan(
+  r: ResolvedCommand,
+  args: string[],
+  env: NodeJS.ProcessEnv,
+): { command: string; args: string[]; verbatim?: boolean; env?: Record<string, string> } {
+  if (r.viaCmdShell) {
+    // `echo` is a cmd.exe builtin on Windows — there is no binary to
+    // resolve. Run it through the shell but with the command name fixed by
+    // us, not by the caller, and every argument passed as its own argv
+    // entry (no string interpolation).
+    return { command: r.binary, args: ['/d', '/s', '/c', r.name, ...args] };
+  }
+  if (r.shim) {
+    return { command: r.shim.node, args: [r.shim.script, ...args], ...(r.shim.nodePath ? { env: { NODE_PATH: r.shim.nodePath } } : {}) };
+  }
+  if (r.batch) {
+    const comspec = env['ComSpec'] ?? env['COMSPEC'] ?? 'C:\\Windows\\System32\\cmd.exe';
+    // A batch file re-parses its arguments once more (the cross-spawn "double escape").
+    const line = [r.binary.replace(CMD_META, '^$1'), ...args.map((a) => escapeCmdArgument(a, true))].join(' ');
+    return { command: comspec, args: ['/d', '/s', '/c', `"${line}"`], verbatim: true };
+  }
+  return { command: r.binary, args };
+}
+
+/** Kill a child and everything it started (on Windows `taskkill /T`; a shim's node has children). */
+function killTree(proc: ReturnType<typeof spawn>): void {
+  if (process.platform === 'win32' && proc.pid) {
+    try {
+      spawn('taskkill', ['/pid', String(proc.pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true }).on('error', () => proc.kill('SIGKILL'));
+      return;
+    } catch {
+      /* fall through */
+    }
+  }
+  proc.kill('SIGKILL');
 }

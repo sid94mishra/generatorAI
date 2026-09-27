@@ -7,71 +7,85 @@
 // signature change meant two parallel edits. This factory centralizes
 // that surface so changes land in one place.
 //
-// Platform-specific concerns (harness adapter construction, sandbox
-// lifecycle, HTTP streaming manager, orchestrator file-management
-// routes, composition of CLI platform clients, graceful shutdown) stay
-// in the app's own composition-root.
+// Every dependency the workflow services need is a REQUIRED input (P01
+// WP-1.3): the durable repos, the workspace manager, the admission
+// controller, the source-control flow and the engine's stores. Both roots
+// (server and SDK) pass them, so no service carries an "absent dependency"
+// fallback. Platform-specific concerns (harness adapter construction,
+// provider choice, HTTP streaming, graceful shutdown) stay in the app's
+// own composition-root.
 // ────────────────────────────────────────────────────────────────
 
-import type { ILogger, AgentEvent } from '@generatorai/shared';
+import { DEFAULT_COMMAND_ALLOWLIST } from '@generatorai/workflow-spec';
+import { randomBytes } from 'node:crypto';
+import * as path from 'node:path';
+import type { ILogger, AgentEvent, AgentOverrides, HarnessConfig } from '@generatorai/shared';
 import type {
   ISessionRepository,
   IEventRepository,
   IChatMessageRepository,
   IArtifactRepository,
-  IWebhookRepository,
   IChatRepository,
-  IWorkflowDefinitionRepository,
-  IStageDefinitionRepository,
-  IStageEdgeRepository,
+  IWorkflowDefinitionStore,
   IWorkflowRunRepository,
   IStageRunRepository,
   IAgentHarness,
   IScriptRunner,
   IHttpClient,
   ISequenceAllocator,
-  ISessionAllocationRepository,
 } from '../domain/ports/index.js';
+import type { EngineStores } from '../domain/ports/IEngineStore.js';
 import type {
   IAutomationRepository,
   IAutomationExecutionRepository,
 } from '../services/AutomationService.js';
-import type { IIdempotencyKeyRepository } from '../services/AutomationRecoveryService.js';
+import type { IIdempotencyKeyStore, IInvocationUploadRepository } from '../domain/ports/IInvocationStores.js';
+import type { IProjectCodebaseRepository } from '../domain/ports/IProjectCodebaseRepository.js';
+import { IdempotencyService } from '../services/IdempotencyService.js';
+import { WorkflowInvocationService } from '../services/workflow-invocation/WorkflowInvocationService.js';
+import { WorkflowApprovalService } from '../services/WorkflowApprovalService.js';
+import { WorkflowCallbacks } from '../services/engine/WorkflowCallbacks.js';
 
 import { EventBus } from '../events/EventBus.js';
-import { SessionService } from '../services/SessionService.js';
 import { ArtifactService } from '../services/ArtifactService.js';
-import { WebhookService } from '../services/WebhookService.js';
 import { HookExecutor } from '../services/HookExecutor.js';
+import type { WorkflowSecretResolver } from '../mcp/McpCredentialVault.js';
 import { HookInterceptor } from '../services/HookInterceptor.js';
-import { ConfigResolver } from '../services/ConfigResolver.js';
+import { SessionHookRegistry } from '../services/SessionHookRegistry.js';
 import { TemplateRegistry } from '../services/TemplateRegistry.js';
-import { StartupRecoveryService } from '../services/StartupRecoveryService.js';
-import type { ISandboxCleaner } from '../services/StartupRecoveryService.js';
 import { ErrorHandler } from '../services/ErrorHandler.js';
-import { SessionAllocator } from '../services/SessionAllocator.js';
 import { ChatManagementService } from '../services/ChatManagementService.js';
 import type { ChatManagementServiceExtensions } from '../services/ChatManagementService.js';
+import { SessionComposer } from '../services/session/SessionComposer.js';
+import { TurnContextRegistry } from '../services/session/gates.js';
+import { resolverLayer } from '../services/session/agentProjection.js';
 import { OrchestratorService, DEFAULT_ORCHESTRATOR_CONFIG } from '../services/orchestrator/OrchestratorService.js';
 import type { OrchestratorConfig } from '../services/orchestrator/OrchestratorService.js';
-import { DAGScheduler } from '../services/DAGScheduler.js';
 import { WorkflowDefinitionService } from '../services/WorkflowDefinitionService.js';
-import { StageExecutionService } from '../services/StageExecutionService.js';
-import { WorkflowRunService } from '../services/WorkflowRunService.js';
+import { RunDefinitionReader } from '../services/definitions/RunDefinitionReader.js';
+import { WorkflowRunService, type StageProviderResolver } from '../services/WorkflowRunService.js';
+import { RunSupervisor, type SupervisorTiming } from '../services/engine/RunSupervisor.js';
+import { StageConversationService } from '../services/engine/StageConversationService.js';
+import type { OutboxPublisher } from '../services/engine/OutboxDispatcher.js';
+import type { DecideRecord } from '../services/engine/RunActor.js';
 import { AutomationService } from '../services/AutomationService.js';
 import { AutomationRecoveryService } from '../services/AutomationRecoveryService.js';
-import { DataSourceResolver } from '../services/DataSourceResolver.js';
-import { HitlService } from '../services/HitlService.js';
 import { AgentInteractionService } from '../services/AgentInteractionService.js';
 import { PlanService } from '../services/PlanService.js';
 import { DurableExecutionEngine } from '../services/DurableExecutionEngine.js';
+import { LifecycleSteps, type WorkflowScmFlowPort } from '../services/engine/lifecycle/steps.js';
+import type { WorkspaceManager } from '../services/WorkspaceManager.js';
+import type { AdmissionController } from '../services/AdmissionController.js';
 import type { RegisterRepository, EntryRepository } from '@generatorai/db';
 import type { AgentService } from '../services/AgentService.js';
 import type { AgentResolver } from '../services/AgentResolver.js';
 import type { AgentStagingService } from '../services/AgentStagingService.js';
 import type { IPlanRepository, IAgentInteractionRepository } from '../domain/ports/IPlanRepository.js';
-import { Semaphore } from '../utils/Semaphore.js';
 import type { GitManager } from '../infrastructure/GitManager.js';
+import type { IChatWorkflowRunRepository } from '../domain/ports/IInvocationStores.js';
+import { WorkflowAuthoringService } from '../services/WorkflowAuthoringService.js';
+import { ChatWorkflowRunBridge } from '../services/workflow-invocation/ChatWorkflowRunBridge.js';
+import { DEFAULT_WORKFLOW_TOOL_LIMITS, WorkflowToolHost } from '../tools/workflows/WorkflowToolHost.js';
 
 /**
  * Inputs that both composition-roots already have by the time they wire
@@ -92,59 +106,94 @@ export interface CoreServicesInputs {
   eventRepo: IEventRepository;
   chatMessageRepo: IChatMessageRepository;
   artifactRepo: IArtifactRepository;
-  webhookRepo: IWebhookRepository;
 
   // DAG/run repositories
   chatEntityRepo: IChatRepository;
-  workflowDefinitionRepo: IWorkflowDefinitionRepository;
-  stageDefinitionRepo: IStageDefinitionRepository;
-  stageEdgeRepo: IStageEdgeRepository;
+  /** Workflow definitions as v2 documents (P01 WP-1.7). */
+  workflowDefinitionStore: IWorkflowDefinitionStore;
   workflowRunRepo: IWorkflowRunRepository;
   stageRunRepo: IStageRunRepository;
 
   // Automation repositories
   automationRepo: IAutomationRepository;
   automationExecutionRepo: IAutomationExecutionRepository;
-  /** Track A3 — repository backing the idempotency-key store. Optional
+  /** The idempotency-key store (automation triggers, invocations). Optional
    *  because tests that don't exercise triggers can leave it out. */
-  idempotencyKeyRepo?: IIdempotencyKeyRepository;
+  idempotencyKeyRepo?: IIdempotencyKeyStore;
+  /** Files staged before a run starts (`POST /workflow-invocations/uploads`). */
+  invocationUploadRepo?: IInvocationUploadRepository;
+  /** Project codebases: invocations check the aliases a run mounts. */
+  projectCodebaseRepo?: IProjectCodebaseRepository;
+  /** The runs chats started through their workflow tools (v60; P06). Without it chats get no run cards or nudges. */
+  chatWorkflowRunRepo?: IChatWorkflowRunRepository;
+  /** The generated `generatorai-workflow-author` skill bundle (the authoring guide, the schema hash). */
+  workflowSkillDir?: string;
+  /** PD-14 — the operator lets agents publish workflows (default off). */
+  allowAgentPublish?: boolean;
+  /** The web app origin, for invocation result links. */
+  appUrl?: string;
+  /**
+   * The key of the per-wait callback tokens (P05 §4.3). The server keeps it
+   * in its data directory so tokens survive a restart; omitted, a random key
+   * lives as long as the process.
+   */
+  callbackKey?: Buffer;
 
-  /** Optional — persistence for SessionAllocator state (Phase 1, 1.6). */
-  sessionAllocationRepo?: ISessionAllocationRepository;
+  /** The workflow engine's stores over the same database (`createEngineStores(db)`). */
+  engineStores: EngineStores;
+  /**
+   * The harness boundary of the engine (P03 WP-3.4): a provider failure
+   * becomes a `HarnessError`. Core cannot import the providers package, so
+   * the composition root passes `toHarnessError`.
+   */
+  toHarnessError: (provider: string | undefined, raw: unknown) => unknown;
+  /**
+   * Where the engine's outbox events go (G5 §5.8). Default:
+   * `eventBus.emitGlobal`, awaited. The server also publishes them to the
+   * run's stream scope, awaited.
+   */
+  publishEngineEvent?: OutboxPublisher;
+  /** A label for the engine lock row (host, pid). */
+  engineOwnerLabel?: string;
+  /** Engine timing (tests compress it). */
+  engineTiming?: Partial<SupervisorTiming>;
+  /** Every committed decision batch (the testkit's replay fixtures, G5 §7.3). */
+  engineOnDecide?: (record: DecideRecord) => void;
+  /** The workflow summary model of `llm` summaries (engine settings, read per summary; P07 WP-7.1). */
+  workflowSummaryModel?: () => string | null | undefined;
 
-  /** Optional — sandbox orphan reaper (Phase 1, 1.7 / 1.9). */
-  sandboxCleaner?: ISandboxCleaner;
+  /** Every run gets an execution workspace. */
+  workspaceManager: WorkspaceManager;
+
+  /** The flow keys every stage launch is admitted on (P07 WP-7.2). */
+  admissionController: AdmissionController;
+
+  /**
+   * Post-processing commit/push/PR runs through the source-control flow
+   * (doc §5) — the one the Changes tab and agent-native chats use.
+   */
+  scmFlow: WorkflowScmFlowPort;
 
   // Config
   config: {
     artifactsDir: string;
-    maxConcurrentSessions: number;
-    /**
-     * P1#7 — max stages executing concurrently across all runs (bounds
-     * harness subprocess fan-out). `<= 0` ⇒ unlimited. Defaults to 8.
-     */
-    maxConcurrentStages?: number;
-    webhooks: { enabled?: boolean; githubSecret?: string; webhookToken?: string };    projectRoot?: string;  };
+  };
+
+  /** W22 / W47 — durable execution engine repositories. */
+  registerRepo: RegisterRepository;
+  entryRepo: EntryRepository;
 
   /**
-   * W22 / W47 — Durable execution engine repositories. Optional so that
-   * existing test embedders that haven't migrated to v36–v38 keep working.
-   * When omitted, `DurableExecutionEngine` is unavailable and
-   * `AutomationService` falls back to its legacy in-memory iteration loop.
-   */
-  registerRepo?: RegisterRepository;
-  entryRepo?: EntryRepository;
-
-  /** Optional transactional wrapper for multi-row writes. */
-  withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>;
-
-  /**
-   * Section 8 — optional harness-agnostic extensions for ChatManagementService.
-   * When omitted, behaviour is identical to pre-Phase-6. Supply a populated
-   * `customToolRegistry` / `mcpHub` / `buildHookBridge` once a workflow or
-   * plug-in wants to exercise the custom tool / plan-mode / MCP layer.
+   * The platform services every agent session is built with — chats AND
+   * workflow stages share this object (the session composer's deps), by
+   * reference, so services wired into it after the graph is built reach both.
    */
   chatExtensions?: ChatManagementServiceExtensions;
+  /**
+   * Resolves `secretref:workflow/<name>` values of workflow hooks (the
+   * server passes its MCP credential vault). Omitted: such a hook fails.
+   */
+  workflowSecrets?: WorkflowSecretResolver;
   /**
    * PLN-01 — plan mode. Both are optional so existing embedders keep working;
    * when omitted, plan mode is simply unavailable.
@@ -171,40 +220,61 @@ export interface CoreServicesInputs {
 export interface CoreServices {
   eventBus: EventBus;
   templateRegistry: TemplateRegistry;
-  configResolver: ConfigResolver;
   hookExecutor: HookExecutor;
   hookInterceptor: HookInterceptor;
+  /**
+   * In-process hooks every agent session runs (W-54). The composition root
+   * turns it into the composer's `buildHookBridge` and feeds it extension hooks.
+   */
+  sessionHookRegistry: SessionHookRegistry;
 
   // Session/workflow services
-  sessionService: SessionService;
   artifactService: ArtifactService;
-  webhookService: WebhookService;
-  recoveryService: StartupRecoveryService;
   errorHandler: ErrorHandler;
 
   // Workflow execution services
-  sessionAllocator: SessionAllocator;
   chatManagementService: ChatManagementService;
+  /** Builds every agent session (chats and stages). */
+  sessionComposer: SessionComposer;
   orchestratorService: OrchestratorService;
-  dagScheduler: DAGScheduler;
   workflowDefinitionService: WorkflowDefinitionService;
-  stageExecutionService: StageExecutionService;
+  /** The graph of each run's pinned definition version. */
+  runDefinitionReader: RunDefinitionReader;
+  /**
+   * THE workflow engine (P03): actors, `decide()`, the executor, timers,
+   * lease reaper, outbox and recovery. The composition root calls `start()`
+   * at boot (it takes the single-engine lock and recovers) and `stop()` at
+   * shutdown.
+   */
+  engine: RunSupervisor;
   workflowRunService: WorkflowRunService;
+  /** The stage conversation API (P03b): messages, turn stops, amendments and gate answers of stage instances. */
+  stageConversationService: StageConversationService;
 
   // Automation
-  dataSourceResolver: DataSourceResolver;
   automationService: AutomationService;
   /** Track A — boot reconciler + idempotency-key sweeper. May be null
    *  when the caller didn't supply an idempotency repository. */
   automationRecoveryService: AutomationRecoveryService | null;
 
-  /** HITL — human-in-the-loop interrupt/resume primitive. */
-  hitlService: HitlService;
-  /**
-   * W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix).
-   * Present only when `registerRepo` and `entryRepo` were supplied.
-   */
-  durableExecutionEngine?: DurableExecutionEngine;
+  /** W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix). */
+  durableExecutionEngine: DurableExecutionEngine;
+  /** THE way a run starts (P04): one service behind one route and one client method. */
+  workflowInvocationService: WorkflowInvocationService;
+  /** The decisions a run waits on (its sub-workflow children's mirrored) and the one way to answer them (P05). */
+  workflowApprovalService: WorkflowApprovalService;
+  /** Per-wait callback tokens (P05 §4.3). */
+  workflowCallbacks: WorkflowCallbacks;
+  /** How agents author workflows: validate, plan, draft, publish (P06 WP-6.5). */
+  workflowAuthoringService: WorkflowAuthoringService;
+  /** The workflow tools' one implementation (P06 WP-6.1): chats, stages and the MCP tool route. */
+  workflowToolHost: WorkflowToolHost;
+  /** Runs a chat started, mirrored onto the chat (P06 WP-6.2); null without the link store. */
+  chatWorkflowRunBridge: ChatWorkflowRunBridge | null;
+  /** Claim-then-finalize idempotency keys (null without an idempotency store). */
+  idempotencyService: IdempotencyService | null;
+  /** The lifecycle's pre- and post-processing steps (commit/push/PR through the source-control flow). */
+  lifecycleSteps: LifecycleSteps;
   /** PLN-01 — present only when the plan repositories were supplied. */
   planService?: PlanService;
   agentInteractionService?: AgentInteractionService;
@@ -225,21 +295,18 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
     eventRepo,
     chatMessageRepo,
     artifactRepo,
-    webhookRepo,
     chatEntityRepo,
-    workflowDefinitionRepo,
-    stageDefinitionRepo,
-    stageEdgeRepo,
+    workflowDefinitionStore,
     workflowRunRepo,
     stageRunRepo,
     automationRepo,
     automationExecutionRepo,
     idempotencyKeyRepo,
     sequenceAllocator,
-    sessionAllocationRepo,
-    sandboxCleaner,
+    workspaceManager,
+    admissionController,
+    scmFlow,
     config,
-    withTransaction,
     registerRepo,
     entryRepo,
   } = inputs;
@@ -249,51 +316,30 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
 
   // ── Config / Templates ──
   const templateRegistry = new TemplateRegistry(logger);
-  const configResolver = new ConfigResolver(templateRegistry);
 
   // ── Hooks ──
-  const hookExecutor = new HookExecutor(scriptRunner, httpClient, eventBus);
+  const hookExecutor = new HookExecutor(scriptRunner, httpClient, eventBus, inputs.workflowSecrets);
   const hookInterceptor = new HookInterceptor(hookExecutor, eventBus);
+  const sessionHookRegistry = new SessionHookRegistry(hookExecutor);
 
   // ── Session services ──
-  const sessionService = new SessionService(
-    sessionRepo,
-    eventBus,
-    harness,
-    { maxConcurrentSessions: config.maxConcurrentSessions },
-  );
-
   const artifactService = new ArtifactService(artifactRepo, config.artifactsDir);
-
-  const webhookService = new WebhookService(
-    webhookRepo,
-    sessionService,
-    templateRegistry,
-    eventBus,
-    config.webhooks,
-  );
-
-  // Build workflow execution services first so the recovery service can depend on them.
-  // (Circular dep avoided because sessionAllocator only uses recovery
-  // indirectly via rehydrate(), not the other way around.)
 
   const errorHandler = new ErrorHandler(eventBus, logger);
 
-  // ── Workflow execution services ──
-  const sessionAllocator = new SessionAllocator(
-    sessionRepo,
-    harness,
-    eventBus,
-    sessionAllocationRepo,
-  );
-
+  // ONE session composer for chats and stages (P02). The extensions object is
+  // shared by reference: composition roots wire several services into it
+  // after the graph is built, and both owners see them.
+  const sessionExtensions: ChatManagementServiceExtensions = inputs.chatExtensions ?? {};
+  const sessionComposer = new SessionComposer(sessionExtensions, harness, new TurnContextRegistry());
   const chatManagementService = new ChatManagementService(
     chatEntityRepo,
     sessionRepo,
     chatMessageRepo,
     harness,
     eventBus,
-    inputs.chatExtensions,
+    sessionExtensions,
+    sessionComposer,
   );
 
   // PLN-01 — plan mode. Late-bound into the (by-reference) chat extensions so
@@ -351,10 +397,8 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
       },
       logger,
     );
-    if (inputs.chatExtensions) {
-      inputs.chatExtensions.planService = planService;
-      inputs.chatExtensions.agentInteractionService = agentInteractionService;
-    }
+    sessionExtensions.planService = planService;
+    sessionExtensions.agentInteractionService = agentInteractionService;
     // A pending chat gate blocks an in-memory SDK callback that did not
     // survive the restart, so it can never be honestly resumed.
     void agentInteractionService.expireOrphans().catch(() => undefined);
@@ -395,139 +439,205 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
   orchestratorService.setChatManagementService(chatManagementService);
   // Late-bind into the chat extensions object (passed by reference) so
   // createChat can inject the orchestrator tool set for orchestrator chats.
-  if (inputs.chatExtensions) {
-    inputs.chatExtensions.orchestratorService = orchestratorService;
-  }
+  sessionExtensions.orchestratorService = orchestratorService;
 
-  const dagScheduler = new DAGScheduler(
-    stageDefinitionRepo,
-    stageEdgeRepo,
-    stageRunRepo,
-    workflowRunRepo, // SCHEMA-3: enables variables.* in edge conditions
-  );
-
+  // Runs read their pinned definition version through one reader (W-13).
+  const runDefinitionReader = new RunDefinitionReader(workflowDefinitionStore);
   const workflowDefinitionService = new WorkflowDefinitionService(
-    workflowDefinitionRepo,
-    stageDefinitionRepo,
-    stageEdgeRepo,
+    workflowDefinitionStore,
     templateRegistry,
-    dagScheduler,
-    withTransaction, // P0#4 — atomic template/JSON import
-    workflowRunRepo, // Item 9 — refuse (409) / force-delete a definition with runs
+    () => scriptRunner.getAllowlist?.() ?? DEFAULT_COMMAND_ALLOWLIST,
   );
 
-  // W22 — Durable execution engine (§3.4 / P0-41 / X-23 fix).
-  // Only constructed when the caller supplied both durable storage repos
-  // (migration v36–v37). Existing embedders that haven't migrated keep
-  // receiving undefined and use the legacy in-memory iteration loop / a
-  // plain (non-durable) HITL wait — see HitlService's constructor.
-  //
-  // Constructed here (moved up from its previous spot below
-  // WorkflowRunService) so HitlService can take it as its durable
-  // Awakeable backend — HitlService is built next, immediately below.
-  const durableExecutionEngine =
-    registerRepo && entryRepo
-      ? new DurableExecutionEngine(registerRepo, entryRepo, logger)
-      : undefined;
-
-  // HITL — one service instance per process. Stateless across runs
-  // (waiters are per-stageRunId); safe to share.
-  // Created before StageExecutionService so it can be injected as the
-  // permission bridge (HITL-06).
-  const hitlService = new HitlService(stageRunRepo, eventBus, logger, durableExecutionEngine);
-
-  const stageExecutionService = new StageExecutionService(
-    stageRunRepo,
-    stageDefinitionRepo,
-    chatMessageRepo,
-    harness,
-    eventBus,
-    sessionAllocator,
-    hookExecutor,
-    undefined, // workspaceManager — late-wired via setWorkspaceManager below
-    workflowDefinitionRepo, // HOOK-2: enables hooksFile per-stage/wildcard merge
-    workflowRunRepo,        // HITL-06: read run's permissionMode per request
-    hitlService,            // HITL-06: bridge harness prompts to HITL waiter
-  );
-
-  // W22 — put the effect sandwich on the real turn path. Without this line
-  // `withEffect()` has no production caller and an interrupted stage re-runs
-  // every prompt and every tool call from scratch on the next boot. Late-wired
-  // rather than added to an already-11-argument constructor, and a no-op for
-  // embedders that supplied no durable storage.
-  if (durableExecutionEngine) {
-    stageExecutionService.setDurableEngine(durableExecutionEngine);
-  }
-
-  // P1#7 — bound concurrent stage execution (and therefore harness subprocess
-  // fan-out). Default 8; configurable, 0 = unlimited.
-  const stageSemaphore = new Semaphore(config.maxConcurrentStages ?? 8);
-
-  // PLN-01 — a plan-mode stage files its output as a real PlanDocument, so a
-  // workflow plan is the same artefact as a chat plan. Late-wired because
-  // PlanService is constructed above but StageExecutionService takes it
-  // through a setter to avoid widening an already long constructor.
-  if (planService) stageExecutionService.setPlanService(planService);
+  // W22 — Durable execution engine (automations' iteration claims and awakeables).
+  const durableExecutionEngine = new DurableExecutionEngine(registerRepo, entryRepo, logger);
 
   // AGT-01 — late-wire the agent graph exactly where the server's
   // composition-root does, so an SDK embedder that supplies the services gets
   // identical behaviour instead of a half-enabled feature.
   if (inputs.agentResolver) {
-    stageExecutionService.setAgentServices(inputs.agentResolver, inputs.agentStaging);
-    if (inputs.chatExtensions) {
-      inputs.chatExtensions.agentResolver = inputs.agentResolver;
-      if (inputs.agentStaging) inputs.chatExtensions.agentStaging = inputs.agentStaging;
-    }
+    sessionExtensions.agentResolver = inputs.agentResolver;
+    if (inputs.agentStaging) sessionExtensions.agentStaging = inputs.agentStaging;
   }
   if (inputs.agentService) orchestratorService.setAgentService(inputs.agentService);
 
-  const workflowRunService = new WorkflowRunService(
+  // ── The workflow engine (P03) ──
+  // The admission controller is its ONE concurrency gate (W-66). The PD-17
+  // start check is the run facade's, built below (late-bound through the
+  // closure).
+  let workflowRunService!: WorkflowRunService;
+  // The lifecycle's steps: preprocessing, and commit/push/PR through the flow.
+  const lifecycleSteps = new LifecycleSteps(gitManager, scriptRunner, eventBus, logger, scmFlow);
+  // Per-wait callback tokens (P05 §4.3): the executor exposes them to stage templates.
+  const workflowCallbacks = new WorkflowCallbacks(inputs.callbackKey ?? randomBytes(32), inputs.appUrl);
+  const engine = new RunSupervisor({
+    stores: inputs.engineStores,
+    runRepo: workflowRunRepo,
+    definitions: runDefinitionReader,
+    harness,
+    composer: sessionComposer,
+    sessionRepo,
+    eventBus,
+    workspaceManager,
+    admission: admissionController,
+    hookExecutor,
+    planService,
+    scriptRunner,
+    workflowSecrets: inputs.workflowSecrets,
+    toHarnessError: inputs.toHarnessError,
+    artifacts: artifactService,
+    callbacks: workflowCallbacks,
+    ...(inputs.publishEngineEvent ? { publish: inputs.publishEngineEvent } : {}),
+    permissionCheck: (run, graph) => workflowRunService.assertPermissionGating(run, graph),
+    // Mounts, project configs and the sandbox are late-wired by the composition root / SDK.
+    lifecyclePlatform: { steps: lifecycleSteps, ...(inputs.invocationUploadRepo ? { uploads: inputs.invocationUploadRepo } : {}) },
+    ...(inputs.engineOwnerLabel ? { ownerLabel: inputs.engineOwnerLabel } : {}),
+    ...(inputs.engineTiming ? { timing: inputs.engineTiming } : {}),
+    ...(inputs.engineOnDecide ? { onDecide: inputs.engineOnDecide } : {}),
+    ...(inputs.workflowSummaryModel ? { summaryModel: inputs.workflowSummaryModel } : {}),
+    logger,
+  });
+
+  workflowRunService = new WorkflowRunService(
     workflowRunRepo,
     stageRunRepo,
-    stageDefinitionRepo,
-    workflowDefinitionRepo,
+    runDefinitionReader,
+    workflowDefinitionService,
     eventBus,
-    dagScheduler,
-    stageExecutionService,
-    sessionAllocator,
-    config.artifactsDir,
+    engine,
     logger,
-    withTransaction,
-    undefined, // workspaceManager — late-wired via setWorkspaceManager
-    undefined, // worktreeService — late-wired via setWorktreeService
-    undefined, // codebaseRepo — late-wired via setWorktreeService
-    stageSemaphore,
   );
+  // A stage is a compact chat (P03b): send, stop, amend, answer its gates.
+  const stageConversationService = new StageConversationService({ engine, stageRuns: stageRunRepo, logger });
 
-  // X-25 — read side of the durable artifact channel, so a successor's
-  // context comes from the predecessor's durable result rather than a column
-  // that an interrupted stage may never have written.
-  if (durableExecutionEngine) {
-    workflowRunService.setDurableEngine(durableExecutionEngine);
-  }
+  // PD-17 — which provider a stage would run on, for the run-start and
+  // mode-change checks: the bound agent's runtime (read through the same
+  // resolver the composer uses), then routing by model (review R8). The
+  // engine admits a launch on the same provider's flow key (ECON-R3).
+  const stageProvider: StageProviderResolver = async ({ session, projectId }) => {
+    let harnessType: string | undefined = session.harnessType;
+    let model = session.model;
+    const agentResolver = sessionExtensions.agentResolver;
+    if (session.agentRef && agentResolver) {
+      const projection = await agentResolver
+        .resolve({
+          agentRef: session.agentRef,
+          ...(session.agentOverrides ? { overrides: session.agentOverrides as AgentOverrides } : {}),
+          ...(resolverLayer(session) ? { runtimeOverrides: resolverLayer(session)! } : {}),
+          ...(projectId ? { projectId } : {}),
+          harnessType: (harnessType ?? 'copilot') as HarnessConfig['harnessType'],
+          scope: 'stage',
+        })
+        .catch(() => undefined);
+      harnessType = projection?.runtime.harnessType ?? harnessType;
+      model = projection?.runtime.model ?? model;
+    }
+    if (harnessType) return harnessType;
+    return harness.resolveProvider?.({ ...(model ? { model } : {}) });
+  };
+  workflowRunService.setProviderResolver(stageProvider);
+  engine.setProviderResolver(stageProvider);
 
-  // P0-a — an approval that arrives after a restart has no live `interrupt()`
-  // frame to resume, so HitlService returns the stage to `pending` and needs
-  // this to actually relaunch it. Late-bound: WorkflowRunService is built
-  // after HitlService (via StageExecutionService).
-  hitlService.setRedriveRun((runId: string) => workflowRunService.redriveRun(runId));
+  // HITL — the operator side of parked instances: resolutions and cancels are run commands.
+
+  // ── Decisions (P05) ──
+  const workflowApprovalService = new WorkflowApprovalService({
+    runRepo: workflowRunRepo,
+    stageRuns: stageRunRepo,
+    command: (runId, command, opts) => engine.command(runId, command, opts),
+    callbacks: workflowCallbacks,
+  });
+
+  // ── The one invocation path (P04) ──
+  const idempotencyService = idempotencyKeyRepo ? new IdempotencyService(idempotencyKeyRepo, logger) : null;
+  const workflowInvocationService = new WorkflowInvocationService({
+    runs: workflowRunService,
+    runRepo: workflowRunRepo,
+    stageRuns: stageRunRepo,
+    definitions: workflowDefinitionService,
+    versions: runDefinitionReader,
+    eventBus,
+    ...(idempotencyService ? { idempotency: idempotencyService } : {}),
+    ...(inputs.invocationUploadRepo
+      ? { uploads: inputs.invocationUploadRepo, uploadsDir: path.join(config.artifactsDir, 'invocation-uploads') }
+      : {}),
+    ...(inputs.projectCodebaseRepo ? { codebases: inputs.projectCodebaseRepo } : {}),
+    models: () => harness.getModels(),
+    ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+    approvals: workflowApprovalService,
+    logger,
+  });
+  // A sub-workflow stage invokes its child through the same path (P05 §4.2).
+  engine.subworkflows.setInvocation(workflowInvocationService, workflowDefinitionService);
+
+  // ── Agents and workflows (P06) ──
+  const workflowAuthoringService = new WorkflowAuthoringService({
+    definitions: workflowDefinitionService,
+    invocation: workflowInvocationService,
+    ...(inputs.agentService ? { agents: inputs.agentService } : {}),
+    models: () => harness.getModels(),
+    ...(inputs.workflowSkillDir ? { skillDir: inputs.workflowSkillDir } : {}),
+    allowAgentPublish: () => inputs.allowAgentPublish === true,
+    ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+  });
+  const chatWorkflowRunBridge = inputs.chatWorkflowRunRepo
+    ? new ChatWorkflowRunBridge({
+        eventBus,
+        links: inputs.chatWorkflowRunRepo,
+        runs: workflowRunRepo,
+        stageRuns: stageRunRepo,
+        chats: chatEntityRepo,
+        approvals: workflowApprovalService,
+        nudge: {
+          isTurnActive: (chatId) => chatManagementService.isTurnActive(chatId),
+          sendPrompt: (chatId, prompt) => chatManagementService.sendPrompt(chatId, prompt),
+        },
+        ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+        logger,
+      })
+    : null;
+  chatWorkflowRunBridge?.start();
+  const workflowToolHost = new WorkflowToolHost({
+    invocation: workflowInvocationService,
+    definitions: workflowDefinitionService,
+    approvals: workflowApprovalService,
+    authoring: workflowAuthoringService,
+    runs: workflowRunRepo,
+    stageRuns: stageRunRepo,
+    chats: chatEntityRepo,
+    ...(inputs.chatWorkflowRunRepo ? { links: inputs.chatWorkflowRunRepo } : {}),
+    ...(chatWorkflowRunBridge ? { linker: chatWorkflowRunBridge } : {}),
+    ...(idempotencyService ? { idempotency: idempotencyService } : {}),
+    command: (runId, command, opts) => engine.command(runId, command, opts),
+    orchestratorDeadline: (chatId) => orchestratorService.episodeDeadline(chatId),
+    chatMounts: async (workspaceId) => {
+      const mounts = sessionExtensions.mountService;
+      if (!mounts) return [];
+      await mounts.refreshStatus(workspaceId).catch(() => undefined);
+      return mounts.list(workspaceId);
+    },
+    limits: {
+      maxChildRunsPerRoot: envInt('GENERATORAI_WORKFLOW_MAX_CHILD_RUNS', DEFAULT_WORKFLOW_TOOL_LIMITS.maxChildRunsPerRoot),
+      maxConcurrentPerChat: envInt('GENERATORAI_WORKFLOW_CHAT_CONCURRENCY', DEFAULT_WORKFLOW_TOOL_LIMITS.maxConcurrentPerChat),
+    },
+    ...(inputs.appUrl ? { appUrl: inputs.appUrl } : {}),
+  });
+  // Chats and stages bind the tools through the composer (by reference).
+  sessionExtensions.workflowTools = workflowToolHost;
 
   // ── Automation ──
-  const dataSourceResolver = new DataSourceResolver(scriptRunner, httpClient, logger, config.projectRoot);
   const automationService = new AutomationService(
     automationRepo,
     automationExecutionRepo,
     workflowRunService,
+    workflowInvocationService,
     workflowRunRepo,
     workflowDefinitionService,
     eventBus,
     logger,
-    config.artifactsDir,
-    dataSourceResolver,
-    withTransaction,
-    // W22: durable iteration claiming (P0-41 fix). Passed through only when
-    // both durable-storage repos are available (migration v36–v37 applied).
+    // W22: durable iteration claiming (P0-41 fix).
     durableExecutionEngine,
+    config.artifactsDir,
   );
 
   // Track A1 — boot-time reconciler + idempotency sweeper. Only wired
@@ -548,53 +658,34 @@ export function createCoreServices(inputs: CoreServicesInputs): CoreServices {
       )
     : null;
 
-  // Built last because it wires in sessionAllocator (for rehydrate) and
-  // the optional sandbox orphan reaper. Other services don't depend on it.
-  const recoveryService = new StartupRecoveryService(
-    sessionRepo,
-    harness,
-    eventBus,
-    logger,
-    workflowRunRepo,
-    stageRunRepo,
-    sessionAllocator,
-    sandboxCleaner,
-    // DUR-06 — auto-resume interrupted runs by re-driving from durable DB state.
-    (runId: string) => workflowRunService.redriveRun(runId),
-    // Skip eager tool-less rehydration of chat sessions — they lazily resume
-    // WITH tools on the next prompt (see StartupRecoveryService.rehydrateSessions).
-    chatEntityRepo,
-  );
-
-  // X-13 — record which session an interrupted stage lost, and why. Without
-  // this the discarded conversation leaves no trace at all.
-  if (durableExecutionEngine) {
-    recoveryService.setDurableEngine(durableExecutionEngine);
-  }
 
   return {
     eventBus,
     templateRegistry,
-    configResolver,
     hookExecutor,
     hookInterceptor,
-    sessionService,
+    sessionHookRegistry,
     artifactService,
-    webhookService,
-    recoveryService,
     errorHandler,
-    sessionAllocator,
     chatManagementService,
+    sessionComposer,
     orchestratorService,
-    dagScheduler,
     workflowDefinitionService,
-    stageExecutionService,
+    runDefinitionReader,
+    engine,
     workflowRunService,
-    dataSourceResolver,
+    stageConversationService,
     automationService,
     automationRecoveryService,
-    hitlService,
-    ...(durableExecutionEngine ? { durableExecutionEngine } : {}),
+    durableExecutionEngine,
+    workflowInvocationService,
+    workflowApprovalService,
+    workflowCallbacks,
+    workflowAuthoringService,
+    workflowToolHost,
+    chatWorkflowRunBridge,
+    idempotencyService,
+    lifecycleSteps,
     ...(planService ? { planService } : {}),
     ...(agentInteractionService ? { agentInteractionService } : {}),
     ...(inputs.agentService ? { agentService: inputs.agentService } : {}),

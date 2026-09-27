@@ -7,8 +7,10 @@
   },
   "include": ["src/**/*.ts"],
   "references": [
-    { "path": "../core" },
-    { "path": "../sdk" },
-    { "path": "../shared" }
+    { "path": "../client-core" },
+    { "path": "../client-runtime" },
+    { "path": "../secrets" },
+    { "path": "../shared" },
+    { "path": "../workflow-spec" }
   ]
 }

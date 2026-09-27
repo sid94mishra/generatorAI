@@ -25,12 +25,13 @@ import type {
   SearchEntityType,
   SearchResult,
   SearchResultAction,
-  WorkflowDefinition,
 } from '@generatorai/shared';
 import { SEARCH_ENTITY_TYPES } from '@generatorai/shared';
 import { STATUS_MAPS } from '@generatorai/shared';
 import type { Scope } from '@generatorai/auth';
+import type { WorkflowDefinitionSummary } from '@generatorai/workflow-spec';
 import type { Container } from '../composition-root.js';
+import { listAllDefinitionSummaries } from './definitionSummaries.js';
 
 const DEFAULT_LIMIT = 20;
 const MAX_LIMIT = 50;
@@ -181,9 +182,11 @@ export function createSearchRoutes(container: Container): Router {
       }
 
       if (types.includes('workflow')) {
-        const definitions: WorkflowDefinition[] = await workflowDefinitionService.listDefinitions();
+        const definitions: WorkflowDefinitionSummary[] = await listAllDefinitionSummaries(workflowDefinitionService, {
+          includeArchived: false,
+        });
         for (const def of definitions) {
-          const score = matchScore(lowerQ, def.name, [def.description, ...(def.tags ?? [])]);
+          const score = matchScore(lowerQ, def.name, [def.description, ...def.tags]);
           if (score === undefined) continue;
           candidates.push({
             textScore: score,

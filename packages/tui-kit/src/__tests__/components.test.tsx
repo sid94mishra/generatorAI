@@ -439,8 +439,8 @@ describe('Dag', () => {
     { id: 's3', name: 'test', status: 'pending' },
   ];
   const edges = [
-    { fromStageId: 's1', toStageId: 's2', edgeType: 'on_success' },
-    { fromStageId: 's2', toStageId: 's3', edgeType: 'on_success' },
+    { from: 's1', to: 's2', on: 'success' },
+    { from: 's2', to: 's3', on: 'success' },
   ];
 
   it('renders every stage name on a wide terminal', () => {
@@ -464,8 +464,8 @@ describe('Dag', () => {
 
   it('reports a cycle instead of spinning on it', () => {
     const cyclic = [
-      { fromStageId: 's1', toStageId: 's2', edgeType: 'always' },
-      { fromStageId: 's2', toStageId: 's1', edgeType: 'always' },
+      { from: 's1', to: 's2', on: 'always' },
+      { from: 's2', to: 's1', on: 'always' },
     ];
     const frame = plain(draw(<Dag stages={stages.slice(0, 2)} edges={cyclic} height={10} />, 80));
     expect(frame.toLowerCase()).toContain('cycle');

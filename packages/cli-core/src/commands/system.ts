@@ -32,7 +32,7 @@ export function systemCommands(version = '0.0.0-dev'): CommandSpec[] {
       output: {
         kind: 'record',
         // `fieldsOnly` because `/api/health` is a diagnostic payload, not a
-        // status line: it carries `harness`, `memory`, `admission` and `otel`
+        // status line: it carries `harness`, `memory`, `flows` and `otel`
         // as nested objects, and the default record renderer appended every
         // one of them as raw indented JSON. The question this command answers
         // is "is my server up and busy?", so it now answers exactly that.
@@ -54,12 +54,16 @@ export function systemCommands(version = '0.0.0-dev'): CommandSpec[] {
       },
       async handler(ctx) {
         const health = await ctx.api.health();
-        const lanes = (health as { admission?: Array<Record<string, unknown>> }).admission ?? [];
-        // One line rather than a JSON array: a lane matters when something is
-        // queued or parked, and that reads at a glance in this form.
-        const admissionSummary = lanes.length
-          ? lanes
-              .map((l) => `${String(l['lane'])} ${Number(l['running'] ?? 0)}/${Number(l['concurrencyLimit'] ?? 0)}`)
+        const flows = (health as { flows?: Array<Record<string, unknown>> }).flows ?? [];
+        // One line rather than a JSON array: a flow key matters when something
+        // is running or queued, and that reads at a glance in this form.
+        const admissionSummary = flows.length
+          ? flows
+              .map((f) => {
+                const queued = Number(f['queued'] ?? 0);
+                const limit = f['limit'] == null ? '∞' : String(Number(f['limit']));
+                return `${String(f['flowKey'])} ${Number(f['running'] ?? 0)}/${limit}${queued > 0 ? ` (+${queued} queued)` : ''}`;
+              })
               .join('  ')
           : undefined;
         const running = (health as { runningChatIds?: string[] }).runningChatIds ?? [];

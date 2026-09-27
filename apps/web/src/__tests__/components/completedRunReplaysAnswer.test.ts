@@ -20,7 +20,7 @@
 
 import { describe, expect, it } from 'vitest';
 
-import { deriveRunView, type DeriveRunViewInput } from '@/components/workflow/redesign/deriveRunView.js';
+import { deriveRunView, type DeriveRunViewInput } from '@/features/workflows/run/model/deriveRunView.js';
 
 const PERSISTED = 'The persisted answer that was written when the stage finished.';
 const STREAMED = 'The answer as it arrived over SSE.';
@@ -28,7 +28,7 @@ const STREAMED = 'The answer as it arrived over SSE.';
 function stageRun(overrides: Record<string, unknown> = {}) {
   return {
     id: 'sr-1',
-    stageDefinitionId: 'sd-1',
+    stageKey: 'only_stage',
     name: 'Only Stage',
     status: 'completed',
     totalSteps: 1,
@@ -45,7 +45,7 @@ function input(overrides: Partial<DeriveRunViewInput> = {}): DeriveRunViewInput 
       status: 'completed',
       stageRuns: [stageRun()],
     },
-    stageDefs: [{ id: 'sd-1', name: 'Only Stage', order: 0 }],
+    stageDefs: [{ kind: 'agent', key: 'only_stage', name: 'Only Stage', prompts: [] }],
     edges: [],
     elapsedMs: 0,
     // The reload case: the stream store is empty.

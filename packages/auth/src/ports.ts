@@ -11,7 +11,8 @@ import type { Scope } from './scopes.js';
 
 // ── Devices ──────────────────────────────────────────────────────
 
-export type DevicePlatform = 'web' | 'desktop' | 'cli' | 'mobile' | 'other';
+/** `mcp`: an MCP server in remote mode, paired as a device (PD-22). */
+export type DevicePlatform = 'web' | 'desktop' | 'cli' | 'mobile' | 'mcp' | 'other';
 export type DeviceConnectionMode = 'loopback' | 'lan' | 'ssh' | 'relay' | 'auto';
 
 export interface DeviceRecord {

@@ -25,6 +25,7 @@ import {
   BellIcon,
   BookOpenIcon,
   BotIcon,
+  BracesIcon,
   BrainIcon,
   CalendarClockIcon,
   CalendarIcon,
@@ -124,6 +125,11 @@ import {
   ZapIcon,
   ZoomInIcon,
   ZoomOutIcon,
+  GroupIcon,
+  HourglassIcon,
+  RepeatIcon,
+  UngroupIcon,
+  WandSparklesIcon,
 } from 'lucide-react';
 
 export const ICON_REGISTRY = {
@@ -244,6 +250,13 @@ export const ICON_REGISTRY = {
   image: ImageIcon,
   'expand-all': ChevronsUpDownIcon,
   'collapse-all': ChevronsDownUpIcon,
+  repeat: RepeatIcon,
+  hourglass: HourglassIcon,
+  layout: LayoutGridIcon,
+  group: GroupIcon,
+  ungroup: UngroupIcon,
+  braces: BracesIcon,
+  wand: WandSparklesIcon,
 } as const satisfies Record<IconConcept, LucideIcon>;
 
 /** The lucide component for a concept (for APIs that take a component, e.g. a nav item). */

@@ -241,11 +241,6 @@ async function startServer(): Promise<void> {
     process.env['GENERATORAI_EXTENSIONS_DIR'] ?? process.env['EXTENSIONS_DIR'] ?? '~/.generatorai/extensions',
   );
 
-  // Compute the monorepo project root (three levels up from apps/server/src/)
-  const __filename_idx = fileURLToPath(import.meta.url);
-  const __dirname_idx = dirname(__filename_idx);
-  const projectRoot = resolve(__dirname_idx, '..', '..', '..');
-
   // Ensure directories exist (mkdirSync is safe with { recursive: true })
   for (const dir of [workspacesDir, artifactsDir, extensionsDir]) {
     mkdirSync(dir, { recursive: true });
@@ -257,7 +252,7 @@ async function startServer(): Promise<void> {
   // W20 / X-18 — server.lock: identity file written on startup and removed on
   // clean shutdown. If a lock from a previous process (different PID) exists we
   // log a warning — the previous server may not have exited cleanly (e.g. SIGKILL).
-  // We do NOT refuse to start; StartupRecoveryService handles in-flight state.
+  // We do NOT refuse to start; the workflow engine's recovery handles in-flight runs.
   const lockPath = resolve(dbDataDir, 'server.lock');
   const instanceId = randomUUID();
   const lockPort = parseInt(process.env['PORT'] ?? '3100', 10);
@@ -270,7 +265,7 @@ async function startServer(): Promise<void> {
       if (prev.pid && prev.pid !== process.pid) {
         console.warn(
           `[Server] server.lock (pid=${prev.pid}, id=${prev.instanceId ?? '?'}) found from a prior instance — ` +
-          'it may not have exited cleanly. Proceeding; StartupRecoveryService will reconcile in-flight state.',
+          'it may not have exited cleanly. Proceeding; the workflow engine will recover in-flight runs.',
         );
       }
     }
@@ -287,7 +282,6 @@ async function startServer(): Promise<void> {
     artifactsDir,
     templatesDir,
     extensionsDir,
-    projectRoot,
     // Bounded: this feeds a concurrency cap, and `NaN` from a typo makes
     // every `>=` check against it false — removing the bound silently.
     maxConcurrentSessions: readBoundedInt('MAX_CONCURRENT_SESSIONS', {
@@ -322,11 +316,6 @@ async function startServer(): Promise<void> {
       heartbeatIntervalMs: parseInt(process.env['SSE_HEARTBEAT_MS'] ?? '15000', 10),
       maxReplayEvents: parseInt(process.env['SSE_MAX_REPLAY'] ?? '10000', 10),
       bufferCleanupDelayMs: parseInt(process.env['SSE_BUFFER_CLEANUP_DELAY_MS'] ?? '300000', 10),
-    },
-    webhooks: {
-      enabled: process.env['WEBHOOKS_ENABLED'] === 'true',
-      githubSecret: process.env['GITHUB_WEBHOOK_SECRET'],
-      webhookToken: process.env['WEBHOOK_TOKEN'],
     },
     security: {
       corsOrigins: process.env['CORS_ORIGINS']
@@ -393,6 +382,9 @@ async function startServer(): Promise<void> {
         .split(',')
         .map((s) => s.trim())
         .filter(Boolean),
+    },
+    workflows: {
+      allowAgentPublish: process.env['GENERATORAI_ALLOW_AGENT_PUBLISH'] === 'true',
     },
     otel: {
       enabled: process.env['OTEL_ENABLED'] === 'true',

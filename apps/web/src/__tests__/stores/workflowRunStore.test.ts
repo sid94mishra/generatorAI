@@ -1,6 +1,6 @@
 // ────────────────────────────────────────────────────────────────
 // workflowRunStore tests — Run monitoring state management
-// Status updates, stage tracking, timeline events, duration timer
+// Status updates, stage tracking, focus
 // ────────────────────────────────────────────────────────────────
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
@@ -18,12 +18,13 @@ function makeStageRun(overrides: Partial<StageRun> = {}): StageRun {
   return {
     id: `sr-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
     workflowRunId: 'run-1',
-    stageDefinitionId: 'sd-1',
+    stageKey: 'stage_1',
     name: 'Stage 1',
     status: 'pending',
-    currentStep: 0,
-    totalSteps: 1,
-    retryCount: 0,
+    instancePath: 'stage_1',
+    kind: 'agent',
+    currentAttempt: 0,
+    version: 0,
     createdAt: new Date(),
     ...overrides,
   } as StageRun;
@@ -33,9 +34,9 @@ function makeRun(overrides: Partial<WorkflowRunWithStages> = {}): WorkflowRunWit
   return {
     id: 'run-1',
     workflowDefinitionId: 'def-1',
+    definitionVersionId: 'ver-1',
     name: 'Test Run',
     status: 'created',
-    sessionMode: 'auto',
     variables: {},
     createdAt: new Date(),
     updatedAt: new Date(),
@@ -82,17 +83,6 @@ describe('workflowRunStore', () => {
       expect(state.selectedStageRunId).toBeTruthy();
     });
 
-    it('computes elapsed time', () => {
-      const now = new Date();
-      const run = makeRun({
-        status: 'running',
-        startedAt: new Date(now.getTime() - 5000),
-      });
-      useWorkflowRunStore.getState().setRun(run);
-
-      const state = useWorkflowRunStore.getState();
-      expect(state.elapsedMs).toBeGreaterThanOrEqual(4500);
-    });
   });
 
   // ══════════════════════════════════════════
@@ -107,8 +97,6 @@ describe('workflowRunStore', () => {
       expect(state.run).toBeNull();
       expect(state.stageSessionMap).toEqual({});
       expect(state.selectedStageRunId).toBeNull();
-      expect(state.timelineEvents).toEqual([]);
-      expect(state.elapsedMs).toBe(0);
     });
   });
 
@@ -195,13 +183,6 @@ describe('workflowRunStore', () => {
       expect(stage!.error).toBe('OOM');
     });
 
-    it('updates currentStep', () => {
-      useWorkflowRunStore.getState().setRun(makeRun());
-      useWorkflowRunStore.getState().updateStageRunStatus('sr-1', 'running', { currentStep: 2 });
-
-      const stage = useWorkflowRunStore.getState().run!.stageRuns.find((s) => s.id === 'sr-1');
-      expect(stage!.currentStep).toBe(2);
-    });
   });
 
   // ══════════════════════════════════════════
@@ -210,11 +191,11 @@ describe('workflowRunStore', () => {
   describe('updateStageRun', () => {
     it('applies partial updates to a stage run', () => {
       useWorkflowRunStore.getState().setRun(makeRun());
-      useWorkflowRunStore.getState().updateStageRun('sr-1', { name: 'Renamed', retryCount: 2 });
+      useWorkflowRunStore.getState().updateStageRun('sr-1', { name: 'Renamed', currentAttempt: 2 });
 
       const stage = useWorkflowRunStore.getState().run!.stageRuns.find((s) => s.id === 'sr-1');
       expect(stage!.name).toBe('Renamed');
-      expect(stage!.retryCount).toBe(2);
+      expect(stage!.currentAttempt).toBe(2);
     });
 
     it('updates sessionId in stageSessionMap', () => {
@@ -291,11 +272,11 @@ describe('workflowRunStore', () => {
       expect(useWorkflowRunStore.getState().selectedStageRunId).toBe('sr-b');
     });
 
-    it('falls back to first queued when none running', () => {
+    it('falls back to first ready when none running', () => {
       const run = makeRun({
         stageRuns: [
           makeStageRun({ id: 'sr-a', name: 'A', status: 'completed' }),
-          makeStageRun({ id: 'sr-b', name: 'B', status: 'queued' }),
+          makeStageRun({ id: 'sr-b', name: 'B', status: 'ready' }),
         ],
       });
       useWorkflowRunStore.setState({ selectedStageRunId: null });
@@ -319,50 +300,6 @@ describe('workflowRunStore', () => {
   });
 
   // ══════════════════════════════════════════
-  // Timeline events
-  // ══════════════════════════════════════════
-  describe('addTimelineEvent', () => {
-    it('appends timeline events with generated id', () => {
-      useWorkflowRunStore.getState().setRun(makeRun());
-      useWorkflowRunStore.getState().addTimelineEvent({
-        timestamp: new Date(),
-        type: 'run',
-        runId: 'run-1',
-        status: 'running',
-        message: 'Run started',
-      });
-
-      const events = useWorkflowRunStore.getState().timelineEvents;
-      expect(events).toHaveLength(1);
-      expect(events[0]!.id).toBeTruthy();
-      expect(events[0]!.message).toBe('Run started');
-      expect(events[0]!.type).toBe('run');
-    });
-
-    it('accumulates multiple events', () => {
-      useWorkflowRunStore.getState().setRun(makeRun());
-      useWorkflowRunStore.getState().addTimelineEvent({
-        timestamp: new Date(),
-        type: 'run',
-        runId: 'run-1',
-        status: 'running',
-        message: 'Event 1',
-      });
-      useWorkflowRunStore.getState().addTimelineEvent({
-        timestamp: new Date(),
-        type: 'stage',
-        runId: 'run-1',
-        stageRunId: 'sr-1',
-        stageName: 'Build',
-        status: 'running',
-        message: 'Event 2',
-      });
-
-      expect(useWorkflowRunStore.getState().timelineEvents).toHaveLength(2);
-    });
-  });
-
-  // ══════════════════════════════════════════
   // Loading / Error state
   // ══════════════════════════════════════════
   describe('setLoading / setError', () => {
@@ -381,54 +318,6 @@ describe('workflowRunStore', () => {
       const state = useWorkflowRunStore.getState();
       expect(state.error).toBe('Something broke');
       expect(state.isLoading).toBe(false);
-    });
-  });
-
-  // ══════════════════════════════════════════
-  // Duration timer
-  // ══════════════════════════════════════════
-  describe('startDurationTimer / stopDurationTimer', () => {
-    it('starts and updates elapsed', () => {
-      const run = makeRun({
-        status: 'running',
-        startedAt: new Date(Date.now() - 10_000),
-      });
-      useWorkflowRunStore.getState().setRun(run);
-
-      // Timer should have started since status is 'running'
-      const ref = useWorkflowRunStore.getState().durationTimerRef;
-      expect(ref).toBeTruthy();
-
-      // Advance and check elapsed increases
-      vi.advanceTimersByTime(2000);
-      expect(useWorkflowRunStore.getState().elapsedMs).toBeGreaterThan(10_000);
-    });
-
-    it('stops timer on terminal status', () => {
-      const run = makeRun({
-        status: 'running',
-        startedAt: new Date(Date.now() - 5000),
-      });
-      useWorkflowRunStore.getState().setRun(run);
-
-      // Running — timer should be active
-      expect(useWorkflowRunStore.getState().durationTimerRef).toBeTruthy();
-
-      // Complete the run
-      useWorkflowRunStore.getState().updateRunStatus('completed');
-
-      expect(useWorkflowRunStore.getState().durationTimerRef).toBeNull();
-    });
-
-    it('does not start timer on terminal status', () => {
-      const run = makeRun({
-        status: 'completed',
-        startedAt: new Date(Date.now() - 30_000),
-        completedAt: new Date(Date.now() - 1000),
-      });
-      useWorkflowRunStore.getState().setRun(run);
-
-      expect(useWorkflowRunStore.getState().durationTimerRef).toBeNull();
     });
   });
 });

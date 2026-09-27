@@ -27,11 +27,13 @@ export interface ModelPickerProps {
   align?: 'start' | 'end';
   /** Accessible name of the trigger. Default "Select model". */
   ariaLabel?: string;
+  /** Trigger text when nothing is selected. Default "Select a model…". */
+  placeholder?: string;
   disabled?: boolean;
 }
 
 /** Provider + model picker bound to the live provider catalog. */
-export function ModelPicker({ value, onChange, variant = 'chip', side, align, ariaLabel, disabled }: ModelPickerProps) {
+export function ModelPicker({ value, onChange, variant = 'chip', side, align, ariaLabel, placeholder, disabled }: ModelPickerProps) {
   const providers = useHarnessProviders();
   const refresh = useRefreshHarnessProviders();
   const openSettings = useSettingsUiStore((s) => s.openSettings);
@@ -50,6 +52,7 @@ export function ModelPicker({ value, onChange, variant = 'chip', side, align, ar
       side={side}
       align={align}
       ariaLabel={ariaLabel}
+      placeholder={placeholder}
       disabled={disabled}
     />
   );

@@ -11,6 +11,8 @@ import {
   ERROR_STATUS_MAP,
   DAGValidationError,
   SessionAllocationError,
+  WorkflowValidationError,
+  RevisionConflictError,
 } from '@generatorai/shared';
 
 /**
@@ -40,6 +42,8 @@ export function redactWebhookPath(path: string): string {
  *
  * v2 error handling:
  * - DAGValidationError → 422 (Unprocessable Entity)
+ * - WorkflowValidationError → 422 with `error.issues` (each points at a field)
+ * - RevisionConflictError → 409 with `error.current` (the record the save lost to)
  * - SessionAllocationError → 503 (Service Unavailable)
  */
 export function createErrorMiddleware(logger: ILogger) {
@@ -48,8 +52,10 @@ export function createErrorMiddleware(logger: ILogger) {
 
     // v2: Override status codes for specific error types
     let status: number;
-    if (normalized instanceof DAGValidationError) {
+    if (normalized instanceof DAGValidationError || normalized instanceof WorkflowValidationError) {
       status = 422;
+    } else if (normalized instanceof RevisionConflictError) {
+      status = 409;
     } else if (normalized instanceof SessionAllocationError) {
       status = 503;
     } else if ('httpStatus' in normalized && typeof normalized.httpStatus === 'number') {
@@ -94,6 +100,14 @@ export function createErrorMiddleware(logger: ILogger) {
         requestId: req.requestId,
       },
     };
+
+    // Structured payloads a client acts on: validation issues and the
+    // current record of a revision conflict.
+    if (normalized instanceof WorkflowValidationError) {
+      (response['error'] as Record<string, unknown>)['issues'] = normalized.issues;
+    } else if (normalized instanceof RevisionConflictError) {
+      (response['error'] as Record<string, unknown>)['current'] = normalized.current;
+    }
 
     if (isDev && normalized.stack) {
       (response['error'] as Record<string, unknown>)['stack'] = normalized.stack;

@@ -211,8 +211,10 @@ export class WorkspacedCopilotPool implements IAgentHarness {
       reasoningEfforts: [],
       planMode: true,
       mcpServers: false,
-      skillDirectories: false,
-      fullToolGating: true,
+      approvalGating: 'per_call',
+      hostTools: 'full',
+      structuredOutput: 'tool',
+      skills: 'directories',
       sessionPersistence: true,
       budgetTracking: false,
     };

@@ -14,6 +14,7 @@ import {
   FileUp,
   Globe,
   Mic,
+  Pause,
   Play,
   TerminalSquare,
   Workflow,
@@ -37,7 +38,8 @@ const ROWS: Array<{
   { feature: 'browser', title: 'Browser preview', Icon: Globe },
   { feature: 'voice', title: 'Voice input', Icon: Mic },
   { feature: 'fileUpload', title: 'File attachments', Icon: FileUp },
-  { feature: 'runControl', title: 'Run controls', Icon: Play },
+  { feature: 'runStart', title: 'Starting runs', Icon: Play },
+  { feature: 'runControl', title: 'Pausing and cancelling runs', Icon: Pause },
   { feature: 'workflowEdit', title: 'Workflow editing', Icon: Workflow },
 ];
 

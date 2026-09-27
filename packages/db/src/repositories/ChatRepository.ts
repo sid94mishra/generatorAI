@@ -28,7 +28,7 @@ import {
   NotFoundError,
   StorageError,
   DEFAULT_AGENT_MODE,
-  coerceAgentMode,
+  isAgentMode,
 } from '@generatorai/shared';
 
 function isCanceller(value: string | null): value is BackgroundTaskCancelledBy {
@@ -92,6 +92,7 @@ export class DrizzleChatRepository implements IChatRepository {
         agentOverrides: chat.agentOverrides ?? null,
         agentSnapshot: chat.agentSnapshot ?? null,
         lastActivityAt: chat.createdAt,
+        createdByPrincipal: chat.createdByPrincipal ?? null,
         createdAt: chat.createdAt,
         updatedAt: chat.updatedAt,
       });
@@ -429,13 +430,16 @@ export class DrizzleChatRepository implements IChatRepository {
       forkedAtTurnId: row.forkedAtTurnId ?? undefined,
       conversationSeed: row.conversationSeed ?? undefined,
       backgroundTask,
-      defaultAgentMode: coerceAgentMode(row.defaultAgentMode) ?? DEFAULT_AGENT_MODE,
+      defaultAgentMode: isAgentMode(row.defaultAgentMode) ? row.defaultAgentMode : DEFAULT_AGENT_MODE,
       permissionMode: (row.permissionMode as Chat['permissionMode']) ?? 'bypassPermissions',
       agentRef: row.agentRef ?? undefined,
       agentId: row.agentId ?? undefined,
       agentVersion: row.agentVersion ?? undefined,
       agentOverrides: safeJsonColumn(row.agentOverrides, jsonRecord, { fallback: undefined }) as Chat['agentOverrides'],
       agentSnapshot: safeJsonColumn(row.agentSnapshot, jsonRecord, { fallback: undefined }) as Chat['agentSnapshot'],
+      ...(row.createdByPrincipal
+        ? { createdByPrincipal: safeJsonColumn(row.createdByPrincipal, jsonRecord, { fallback: undefined }) as Chat['createdByPrincipal'] }
+        : {}),
       createdAt: row.createdAt,
       updatedAt: row.updatedAt,
     };

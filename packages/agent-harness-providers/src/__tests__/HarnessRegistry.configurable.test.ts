@@ -19,13 +19,13 @@ vi.mock('../HarnessFactory.js', () => ({
 
 const FULL_CAPS: ProviderCapabilities = {
   vision: true, reasoning: true, reasoningEfforts: [], planMode: true,
-  mcpServers: true, skillDirectories: true, fullToolGating: true,
+  mcpServers: true, approvalGating: 'per_call', hostTools: 'full', structuredOutput: 'native', skills: 'plugin',
   sessionPersistence: true, budgetTracking: true, computerUse: true,
 };
 
 function stubFor(type: HarnessType): IAgentHarness {
   const caps: ProviderCapabilities = type === 'codex'
-    ? { ...FULL_CAPS, skillDirectories: true, mcpServers: true, fullToolGating: false }
+    ? { ...FULL_CAPS, skills: 'directories', mcpServers: true, approvalGating: 'exec_and_patch', hostTools: 'start_only' }
     : FULL_CAPS;
   return {
     initialize: async () => { /* nothing to start */ },
@@ -83,7 +83,7 @@ describe('HarnessRegistry — capability-drop logging (W48)', () => {
     const call = warn.mock.calls.find(([msg]) => typeof msg === 'string' && msg.includes("'codex' is configured but its adapter drops"));
     expect(call).toBeDefined();
     const message = call![0] as string;
-    // fullToolGating: false on the stub → permissions drop must be named.
+    // approvalGating 'exec_and_patch' on the stub → the permissions drop must be named.
     expect(message).toContain('permissions');
     // Not modelled by ProviderCapabilities at all — must still be named.
     expect(message).toContain('hooks');

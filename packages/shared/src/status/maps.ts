@@ -10,7 +10,6 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { StageRunStatus } from '../types/WorkflowRun.js';
-import type { WorkflowStatus } from '../types/WorkflowStateMachine.js';
 import type { AutomationExecutionStatus, AutomationRunItemStatus } from '../types/Automation.js';
 import type { BackgroundTaskStatus, ChatStatus } from '../types/Chat.js';
 import type { ChatTurnStatus } from '../types/ChatList.js';
@@ -44,35 +43,36 @@ export const STATUS_MAPS = {
     pending: m('queued'),
     starting: m('running', 'Starting'),
     running: m('running'),
+    // v2 engine: nothing launchable or in flight, something awaits input, a timer or an operator.
+    waiting: m('waiting'),
     paused: m('paused'),
+    // v2 engine: the outcome is fixed; compensation, onExit and post-processing run.
+    finalizing: m('running', 'Finalizing'),
     cancelling: m('running', 'Cancelling'),
     completed: m('succeeded'),
     failed: m('failed'),
     cancelled: m('skipped', 'Cancelled'),
   } satisfies Record<RunStatus, StatusMapping | null>,
 
+  /** The v2 engine's instance states (Workflow Overhaul, G5 §5.9). */
   stageRun: {
     pending: m('queued'),
-    queued: m('queued'),
+    // admitted, waiting for a concurrency slot
+    ready: m('queued', 'Ready'),
+    starting: m('running', 'Starting'),
     running: m('running'),
-    paused: m('paused'),
-    completed: m('succeeded'),
-    failed: m('failed'),
-    cancelled: m('skipped', 'Cancelled'),
-    skipped: m('skipped'),
-    sleeping: m('waiting'),
+    // the attempt's output is being checked
+    validating: m('running', 'Validating'),
     awaiting_input: m('needs_you'),
-  } satisfies Record<StageRunStatus, StatusMapping | null>,
-
-  legacyWorkflow: {
-    pending: m('queued'),
-    queued: m('queued'),
-    running: m('running'),
+    // a wait stage (timer or event)
+    waiting: m('waiting'),
+    retry_wait: m('waiting', 'Retrying'),
     paused: m('paused'),
     completed: m('succeeded'),
     failed: m('failed'),
+    skipped: m('skipped'),
     cancelled: m('skipped', 'Cancelled'),
-  } satisfies Record<WorkflowStatus, StatusMapping | null>,
+  } satisfies Record<StageRunStatus, StatusMapping | null>,
 
   automationExecution: {
     pending: m('queued'),

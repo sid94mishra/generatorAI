@@ -156,6 +156,14 @@ const UI_CONCEPTS = {
   /** Expand / collapse every section of a list (the Changes dock's files). */
   'expand-all': { lucide: 'chevrons-up-down' },
   'collapse-all': { lucide: 'chevrons-down-up' },
+  /** Workflow builder (PW-b): stage kinds, canvas tools, quick fixes. */
+  repeat: { lucide: 'repeat' },
+  hourglass: { lucide: 'hourglass' },
+  layout: { lucide: 'layout-grid' },
+  group: { lucide: 'group' },
+  ungroup: { lucide: 'ungroup' },
+  braces: { lucide: 'braces' },
+  wand: { lucide: 'wand-sparkles' },
 } as const satisfies Record<string, IconConceptDef>;
 
 export const ICON_CONCEPTS = {

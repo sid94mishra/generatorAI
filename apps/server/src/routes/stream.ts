@@ -17,9 +17,8 @@
 // the loss is announced in a `gap` frame; items are queued and never dropped,
 // and a consumer that cannot drain even those is disconnected with a reason.
 //
-// STR-04 web sseManager rewrite is done; legacy per-scope routes
-// (`/api/workflow-runs/:id/stream` etc.) still exist for backward compat
-// but the web SPA now uses this unified endpoint exclusively.
+// This is the only streaming route: the per-scope routes
+// (`/api/workflow-runs/:id/stream` etc.) are gone, and every client uses it.
 // ──────────────────────────────────────────────────────────
 
 import { Router, type Request, type Response } from 'express';

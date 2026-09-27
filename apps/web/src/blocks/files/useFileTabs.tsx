@@ -6,19 +6,15 @@
 // focuses its tab, restored tabs know their file, closing one leaves nothing
 // to clean up. The previewed file per Files tab titles it "Files · name".
 //
-// Two ways to host them:
-//   • the kit dock (`blocks/dock`): register `FilesDockPanel` / `FileDockPanel`
-//     as `Component`s under a `<FilesDockProvider value={fileTabs.dockContext}>`
-//     — the panels read everything from the context, so a page re-render
-//     reaches no panel whose props did not change;
-//   • the legacy RightPane (workflow run page until P4-12): `filesTab` /
-//     `fileTab`, closure-rendered defs in its shape.
+// Hosting: register `FilesDockPanel` / `FileDockPanel` as `Component`s of the
+// kit dock (`blocks/dock`) under a `<FilesDockProvider value={fileTabs.dockContext}>`
+// — the panels read everything from the context, so a page re-render reaches
+// no panel whose props did not change (the chat and the run page).
 // ────────────────────────────────────────────────────────────────
 
 import { createContext, lazy, memo, Suspense, useCallback, useContext, useMemo, useState, type ReactNode } from 'react';
 import type { DockPanelProps } from '@/blocks/dock/dockRegistry.js';
 import { useActivated } from '@/blocks/dock/useActivated.js';
-import { Icon } from '@/ui/icons/Icon.js';
 import { EmptyState } from '@/ui/primitives/EmptyState/EmptyState.js';
 import { Spinner } from '@/ui/primitives/Spinner/Spinner.js';
 import { fileTabId, fileTabLabel, parseFileTabId, type FileTabRef } from './fileTabId.js';
@@ -96,19 +92,6 @@ function FileTabBody({
   );
 }
 
-/** A closure-rendered tab def in the legacy RightPane's shape. */
-export interface LegacyDockTabSpec {
-  label: string;
-  description?: string;
-  icon: ReactNode;
-  allowMultiple?: boolean;
-  maxInstances?: number;
-  getTabLabel?: (ctx: { id: string; index: number }) => string;
-  disabled?: boolean;
-  disabledReason?: string;
-  render: (ctx: DockPanelProps) => ReactNode;
-}
-
 export interface UseFileTabsOptions {
   workspaceId: string | undefined;
   /** The host's "focus this dock tab" request. */
@@ -116,8 +99,6 @@ export interface UseFileTabsOptions {
   /** Opens a collapsed dock first, so the gesture always shows the file. */
   openPane?: () => void;
   sources?: ReactNode;
-  /** Shown in the "+" menu when there is no workspace yet. */
-  disabledReason?: string;
 }
 
 export interface UseFileTabsResult {
@@ -131,20 +112,13 @@ export interface UseFileTabsResult {
   fileTabLabel: (tab: { id: string }) => string;
   /** The value for `<FilesDockProvider>`. */
   dockContext: FilesDockContextValue;
-  /** Legacy RightPane defs (workflow run page). */
-  filesTab: LegacyDockTabSpec;
-  fileTab: LegacyDockTabSpec;
 }
-
-/** Cap on concurrent file-viewer tabs (D-27; `DOCK_TAB_CAPS.file`). */
-const FILE_TAB_CAP = 8;
 
 export function useFileTabs({
   workspaceId,
   requestFocus,
   openPane,
   sources,
-  disabledReason = 'No workspace for this chat',
 }: UseFileTabsOptions): UseFileTabsResult {
   const [previewByTab, setPreviewByTab] = useState<Record<string, FileTabRef | null>>({});
 
@@ -188,39 +162,5 @@ export function useFileTabs({
     [workspaceId, openFile, setPreview, sources],
   );
 
-  const filesTab = useMemo<LegacyDockTabSpec>(
-    () => ({
-      label: 'Files',
-      description: 'Browse every file in the workspace',
-      icon: <Icon concept="files" size={14} />,
-      allowMultiple: false,
-      disabled: !workspaceId,
-      disabledReason,
-      getTabLabel: filesTabLabel,
-      render: (ctx) => (
-        <FilesDockProvider value={dockContext}>
-          <FilesDockPanel {...ctx} />
-        </FilesDockProvider>
-      ),
-    }),
-    [workspaceId, disabledReason, filesTabLabel, dockContext],
-  );
-
-  const fileTab = useMemo<LegacyDockTabSpec>(
-    () => ({
-      label: 'File',
-      icon: <Icon concept="file" size={14} />,
-      allowMultiple: true,
-      maxInstances: FILE_TAB_CAP,
-      getTabLabel: fileLabel,
-      render: (ctx) => (
-        <FilesDockProvider value={dockContext}>
-          <FileDockPanel {...ctx} />
-        </FilesDockProvider>
-      ),
-    }),
-    [fileLabel, dockContext],
-  );
-
-  return { openFile, forgetTab, filesTabLabel, fileTabLabel: fileLabel, dockContext, filesTab, fileTab };
+  return { openFile, forgetTab, filesTabLabel, fileTabLabel: fileLabel, dockContext };
 }

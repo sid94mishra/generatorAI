@@ -6,28 +6,10 @@ import { z } from 'zod';
 import { HARNESS_PROVIDER_IDS, REASONING_EFFORTS } from '../types/ProviderConfig.js';
 import { BrowserConfigSchema } from './BrowserConfigSchema.js';
 import { McpServerConfigSchema, AgentOverridesSchema } from './AgentSchemas.js';
-import { AGENT_MODES, coerceAgentMode, type AgentMode } from '../types/AgentMode.js';
+import { AGENT_MODES, type AgentMode } from '../types/AgentMode.js';
 
-/**
- * Agent mode, accepting the pre-rename `interactive` alias.
- *
- * Exported workflow definitions and older API clients still send
- * `'interactive'`; `coerceAgentMode` folds it onto `'auto'` so a single
- * boundary handles both without leaking the legacy value into the domain.
- */
-export const AgentModeSchema = z
-  .string()
-  .transform((v, ctx) => {
-    const mode = coerceAgentMode(v);
-    if (!mode) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: `Invalid agent mode. Allowed: ${AGENT_MODES.join(', ')}`,
-      });
-      return z.NEVER;
-    }
-    return mode;
-  }) as unknown as z.ZodType<AgentMode>;
+/** Agent mode: `auto` or `plan`. */
+export const AgentModeSchema = z.enum(AGENT_MODES as [AgentMode, ...AgentMode[]]);
 
 /** Agent harness configuration — provider-agnostic settings for LLM sessions */
 const AgentHarnessConfigSchema = z.object({
@@ -262,24 +244,6 @@ export const UpdateChatSchema = z.object({
   orchestratorMode: z.boolean().optional(),
   /** Agent-native source control for this chat (validated in the route). */
   sourceControl: ChatSourceControlInputSchema,
-});
-
-/**
- * POST /api/workflow-runs/:runId/stages/:stageId/approve
- *
- * `outcome` is the modern tri-state verdict. The legacy boolean `approved` is
- * still accepted so existing clients keep working: `true` → approved,
- * `false` → changes_requested (never `rejected`, which must be explicit
- * because it terminates the run).
- */
-export const StageReviewDecisionSchema = z.object({
-  outcome: z.enum(['approved', 'changes_requested', 'rejected']).optional(),
-  approved: z.boolean().optional(),
-  /** Free-text change request sent to the agent as a follow-up prompt. */
-  followUpPrompt: z.string().max(50_000).optional(),
-  /** Why the stage was rejected — surfaced on the failed stage. */
-  reason: z.string().max(10_000).optional(),
-  value: z.unknown().optional(),
 });
 
 /** Zod schema for sending a chat prompt */

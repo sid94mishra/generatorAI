@@ -216,12 +216,11 @@ export function ContextUsageDetails({
             {resolved.apiUsage?.cacheRead ? (
               <Row label="Cache read" value={resolved.apiUsage.cacheRead.toLocaleString()} hint="Reused from prompt cache" />
             ) : null}
-            {usage?.cost != null && usage.cost > 0 ? (
-              usage.provider === 'copilot' ? (
-                <Row label="Cost multiplier" value={`${formatMultiplier(usage.cost)}×`} hint="Premium-request billing weight (not USD)" />
-              ) : (
-                <Row label="Cost" value={`$${usage.cost.toFixed(4)}`} hint="Reported cost in USD" />
-              )
+            {/* Dollars only from `costUsd`; Copilot's `cost` is a premium-request multiplier. */}
+            {usage?.costUsd != null && usage.costUsd > 0 ? (
+              <Row label="Cost" value={`$${usage.costUsd.toFixed(4)}`} hint="Reported cost in USD" />
+            ) : usage?.cost != null && usage.cost > 0 && usage.provider === 'copilot' ? (
+              <Row label="Cost multiplier" value={`${formatMultiplier(usage.cost)}×`} hint="Premium-request billing weight (not USD)" />
             ) : null}
             {usage?.durationMs != null && usage.durationMs > 0 ? (
               <Row label="Duration" value={`${(usage.durationMs / 1000).toFixed(1)}s`} />

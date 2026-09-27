@@ -30,5 +30,11 @@ export { DelegationGroup, delegationTasks, delegationSummary, type DelegatedTask
 export { BackgroundStepTail, type BackgroundStepTailProps } from './BackgroundStepTail/BackgroundStepTail.js';
 export { UsageChip, cacheScopeKey, noteCacheReport, hasReportedCache, _resetCacheReportLedger, type UsageChipProps } from './UsageChip/UsageChip.js';
 export { TurnBody, type TurnBodyProps } from './TurnBody/TurnBody.js';
+export {
+  registerSegmentCard,
+  segmentCardRenderer,
+  type SegmentCardType,
+  type SegmentCardRenderer,
+} from './TurnBody/segmentCards.js';
 export { TranscriptTurn, StoppedNote, type TranscriptTurnProps } from './TranscriptTurn/TranscriptTurn.js';
 export { TranscriptView, VIRTUALIZE_MIN_TURNS, type TranscriptViewProps } from './TranscriptView/TranscriptView.js';

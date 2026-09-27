@@ -208,7 +208,7 @@ export function useAttentionAction() {
           await platform.cancelChat(entityId);
           return;
         }
-        if (entity === 'workflow_run') return platform.cancelRun(entityId);
+        if (entity === 'workflow_run') return platform.runCommand(entityId, { command: 'cancel' });
         throw new Error('This item cannot be stopped from here.');
       }
       if (!ask) throw new Error('Nothing is waiting on this item.');
@@ -223,9 +223,9 @@ export function useAttentionAction() {
         return platform.decideChatPlan(entityId, planId, { approved: true });
       }
       if (action === 'approve' && entity === 'workflow_run' && ask.kind === 'stage_approval') {
-        const result = await platform.resumeStage(entityId, ask.id, { approved: true, outcome: 'approved' });
-        if (!result.ok) throw new Error(result.reason ?? 'This stage is no longer waiting for approval.');
-        return;
+        // Engine v2: an approval gate is resolved by the run's `approve` command
+        // on the waiting instance; a refused command (409) rejects with the reason.
+        return platform.runCommand(entityId, { command: 'approve', instanceId: ask.id, outcome: 'approved' });
       }
       throw new Error('This request has to be answered where it was asked.');
     },

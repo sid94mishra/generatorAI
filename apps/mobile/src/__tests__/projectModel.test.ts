@@ -17,8 +17,8 @@ import {
 describe('projectRuns', () => {
   const runs = [
     { id: 'a', workflowDefinitionId: 'wf-1', status: 'running' },
-    { id: 'b', workflowDefinitionId: 'wf-other', status: 'failed', variables: { __projectId: 'p1' } },
-    { id: 'c', workflowDefinitionId: 'wf-other', status: 'completed', variables: { __projectId: 'p2' } },
+    { id: 'b', workflowDefinitionId: 'wf-other', status: 'failed', projectId: 'p1' },
+    { id: 'c', workflowDefinitionId: 'wf-other', status: 'completed', projectId: 'p2' },
     { id: 'd', workflowDefinitionId: 'wf-2', status: 'paused' },
     { id: 'e', workflowDefinitionId: 'wf-3', status: 'completed', variables: {} },
   ];

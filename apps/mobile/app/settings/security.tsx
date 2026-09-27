@@ -19,13 +19,17 @@ import {
   ChevronDown,
   Clock,
   Eye,
+  Globe,
   KeyRound,
+  Laptop,
+  Plug,
   QrCode as QrCodeIcon,
   RefreshCcw,
   ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
   Smartphone,
+  SquareTerminal,
   Trash2,
 } from 'lucide-react-native';
 
@@ -48,7 +52,11 @@ import { checkFeature, grantableFeatures, type MobileFeature } from '../../src/a
 import { ActionSheet, ConfirmSheet } from '../../src/components/ui/ActionSheet';
 import { EditScopesSheet } from '../../src/components/devices/EditScopesSheet';
 import { PairDeviceSheet } from '../../src/components/devices/PairDeviceSheet';
-import { rotateDeviceRequest, setDeviceScopesRequest } from '../../src/components/devices/deviceAdmin';
+import {
+  platformLabel,
+  rotateDeviceRequest,
+  setDeviceScopesRequest,
+} from '../../src/components/devices/deviceAdmin';
 import { Button } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { Card, Divider, SectionHeader } from '../../src/components/ui/primitives';
@@ -64,7 +72,9 @@ const FEATURE_LABELS: Record<MobileFeature, string> = {
   browser: "Control the agent's browser",
   voice: 'Dictate messages',
   fileUpload: 'Attach and write files',
-  runControl: 'Start, pause and cancel runs',
+  runStart: 'Start runs',
+  scriptRun: 'Run workflow scripts',
+  runControl: 'Pause and cancel runs',
   workflowEdit: 'Edit workflows',
   projectEdit: 'Link codebases',
   codebaseLinkLocal: 'Link a local folder',
@@ -72,6 +82,22 @@ const FEATURE_LABELS: Record<MobileFeature, string> = {
   computer: 'Watch and approve computer use',
   deviceAdmin: 'Manage other devices',
 };
+
+/** The mark for a device's platform in the device and request lists. */
+function platformIcon(platform: string | null | undefined): typeof Smartphone {
+  switch (platform) {
+    case 'web':
+      return Globe;
+    case 'desktop':
+      return Laptop;
+    case 'cli':
+      return SquareTerminal;
+    case 'mcp':
+      return Plug;
+    default:
+      return Smartphone;
+  }
+}
 
 interface DeviceRecord {
   deviceId: string;
@@ -605,13 +631,13 @@ export default function SecurityScreen(): React.ReactElement {
                 key={request.requestId}
                 title={request.deviceName ?? 'Unnamed device'}
                 subtitle={[
-                  request.platform,
+                  platformLabel(request.platform),
                   `wants: ${request.scopes.map(describeScope).join('; ')}`,
                   request.reason ? `“${request.reason}”` : null,
                 ]
                   .filter(Boolean)
                   .join(' — ')}
-                icon={<Smartphone size={18} color={colors.warning} />}
+                icon={React.createElement(platformIcon(request.platform), { size: 18, color: colors.warning })}
                 trailing={
                   <View className="flex-row gap-2">
                     <Button
@@ -659,7 +685,7 @@ export default function SecurityScreen(): React.ReactElement {
                   key={device.deviceId}
                   title={isThis ? `${device.deviceName} (this device)` : device.deviceName}
                   subtitle={[
-                    device.platform,
+                    platformLabel(device.platform),
                     device.revokedAt ? 'revoked' : access,
                     device.lastUsedAt
                       ? `last used ${new Date(device.lastUsedAt).toLocaleDateString()}`
@@ -667,7 +693,10 @@ export default function SecurityScreen(): React.ReactElement {
                   ]
                     .filter(Boolean)
                     .join(' — ')}
-                  icon={<Smartphone size={18} color={colors['muted-foreground']} />}
+                  icon={React.createElement(platformIcon(device.platform), {
+                    size: 18,
+                    color: colors['muted-foreground'],
+                  })}
                   trailing={busy === device.deviceId ? <Spinner /> : undefined}
                   disabled={Boolean(device.revokedAt)}
                   {...(!device.revokedAt

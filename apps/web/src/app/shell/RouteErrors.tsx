@@ -3,12 +3,13 @@
 // placeholders components/NotFoundPage.tsx and RouteErrorFallback.tsx).
 //
 //   NotFoundPage     the `*` route, inside the main card (sidebar kept)
-//   RouteErrorPage   errorElement of the page routes, inside the main card
+//   PageRoutesBoundary  around the page routes, inside the main card
 //   ShellErrorPage   errorElement of the shell itself, the full window
 // The real error message is shown verbatim (plain mono text until the C-23
 // CodeBlock lands in P4); actions are Reload and Go home.
 // ────────────────────────────────────────────────────────────────
 
+import { Component, type ErrorInfo, type ReactNode } from 'react';
 import { Link, isRouteErrorResponse, useRouteError } from 'react-router';
 import { Button } from '@/ui/primitives/Button/Button.js';
 import { Gate } from '@/ui/templates/Gate/Gate.js';
@@ -36,8 +37,7 @@ function errorText(error: unknown): string {
   return typeof error === 'string' ? error : 'Unknown error';
 }
 
-function ErrorGate({ placement }: { placement: 'card' | 'window' }) {
-  const error = useRouteError();
+function ErrorGate({ placement, error }: { placement: 'card' | 'window'; error: unknown }) {
   return (
     <Gate
       placement={placement}
@@ -59,12 +59,41 @@ function ErrorGate({ placement }: { placement: 'card' | 'window' }) {
   );
 }
 
-/** A page route failed: the sidebar stays, the card shows the error. */
-export function RouteErrorPage() {
-  return <ErrorGate placement="card" />;
+interface PageRoutesBoundaryProps {
+  /** A new page (pathname) clears a caught error. */
+  resetKey: string;
+  children: ReactNode;
+}
+
+/**
+ * A page route failed: the sidebar stays, the card shows the error. The pages
+ * are descendant routes (`useRoutes`), which get no `errorElement`, so this is
+ * a plain error boundary.
+ */
+export class PageRoutesBoundary extends Component<PageRoutesBoundaryProps, { error: unknown; resetKey: string }> {
+  constructor(props: PageRoutesBoundaryProps) {
+    super(props);
+    this.state = { error: undefined, resetKey: props.resetKey };
+  }
+
+  static getDerivedStateFromError(error: unknown) {
+    return { error };
+  }
+
+  static getDerivedStateFromProps(props: PageRoutesBoundaryProps, state: { error: unknown; resetKey: string }) {
+    return props.resetKey === state.resetKey ? null : { error: undefined, resetKey: props.resetKey };
+  }
+
+  componentDidCatch(error: unknown, info: ErrorInfo) {
+    console.error('Page failed to render', error, info.componentStack);
+  }
+
+  render() {
+    return this.state.error === undefined ? this.props.children : <ErrorGate placement="card" error={this.state.error} />;
+  }
 }
 
 /** The shell itself failed: the whole window shows the error. */
 export function ShellErrorPage() {
-  return <ErrorGate placement="window" />;
+  return <ErrorGate placement="window" error={useRouteError()} />;
 }

@@ -13,7 +13,8 @@ An automation stores when to run, which workflows to execute, and how to turn in
 4. Select global or project scope and add workflows in their intended sequence.
 5. Choose an input mode or enable the schema-driven dataset configuration.
 6. Set variables, concurrency, and error behavior where applicable; preview input data before saving.
-7. Open the detail page and use **Run Now** for a controlled initial execution.
+7. Choose the **permission mode** its runs start with (default: accept edits, ask for the rest). An automation cannot be saved without one. Full access (`bypassPermissions`) on a webhook trigger requires the `admin:settings` scope.
+8. Open the detail page and use **Run Now** for a controlled initial execution.
 
 An automation must be enabled for the detail page's Run Now action. **Disable** prevents eligible future triggers; cancelling an already running execution is a separate control in execution history.
 

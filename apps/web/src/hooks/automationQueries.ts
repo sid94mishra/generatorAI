@@ -139,21 +139,6 @@ export function useCreateAutomation() {
   });
 }
 
-/** Update an automation */
-export function useUpdateAutomation() {
-  const platform = usePlatform() as HttpPlatformClient;
-  const queryClient = useQueryClient();
-
-  return useMutation({
-    mutationFn: (args: { id: string; params: UpdateAutomationParams }) =>
-      platform.updateAutomation(args.id, args.params),
-    onSuccess: (_data, args) => {
-      queryClient.invalidateQueries({ queryKey: automationKeys.all });
-      queryClient.invalidateQueries({ queryKey: automationKeys.detail(args.id) });
-    },
-  });
-}
-
 /** Delete an automation */
 export function useDeleteAutomation() {
   const platform = usePlatform() as HttpPlatformClient;
@@ -238,6 +223,28 @@ export function useCancelAutomationExecution() {
       queryClient.invalidateQueries({ queryKey: automationKeys.detail(args.automationId) });
       queryClient.invalidateQueries({ queryKey: automationKeys.executions(args.automationId) });
       queryClient.invalidateQueries({ queryKey: automationKeys.execution(args.automationId, args.executionId) });
+    },
+  });
+}
+
+/**
+ * PARITY-9 — mint a fresh one-time webhook token + HMAC signing secret. The
+ * server never returns either value again after this response; the caller
+ * shows them exactly once (`WebhookCredentialsDialog`). Wrapped as a hook
+ * (rather than the page reaching for `usePlatform()` directly) so
+ * `features/automations` stays on the D-04 data boundary.
+ */
+export function useRotateWebhookToken() {
+  const platform = usePlatform() as HttpPlatformClient;
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    // The declared return type understates the response (`signingSecret` is
+    // real but untyped, same as the pre-port call site) — see PARITY-9.
+    mutationFn: (automationId: string) =>
+      platform.rotateWebhookToken(automationId) as Promise<{ token: string; signingSecret?: string }>,
+    onSuccess: (_data, automationId) => {
+      queryClient.invalidateQueries({ queryKey: automationKeys.detail(automationId) });
     },
   });
 }

@@ -1,0 +1,23 @@
+{
+  "id": "issue-triage-fix-review-loop",
+  "title": "Create the issue-triage fix/review loop",
+  "prompt": "Make me a GeneratorAI workflow for bug issues: it takes an issue URL, triages it (summary, the files involved, a plan), then fixes and reviews in a loop until the reviewer approves, at most 5 rounds and about 10 dollars, and then opens a pull request, but only after I approve the result. Submit it for me to review.",
+  "channels": ["generatorai-chat", "mcp", "cli"],
+  "expected": {
+    "stageKinds": ["agent", "loop"],
+    "shape": [
+      "a triage agent stage with output.format json and a schema holding at least a summary and a plan",
+      "a loop stage with maxIterations <= 5 and a budget (maxTurns, and maxCostUsd or maxTokens)",
+      "fix and review agent stages whose parentKey is the loop key; review is read-only (permissionMode plan) with a JSON verdict",
+      "a complete exit rule reading the review verdict, and preferably an exhaust rule on no progress",
+      "a person approves before the pull request: approval on the last stage with postProcessing.autoCreatePR, or an approval wait gated by outcome == 'approved' before a PR stage"
+    ]
+  },
+  "pass": [
+    "validation passes within 3 validate calls (validate_workflow, generatorai workflow lint or scripts/validate.mjs)",
+    "plan_workflow (or generatorai workflow plan) is called and its result summarised to the user BEFORE the draft is created",
+    "the draft is created with create_workflow_draft or generatorai workflow import; the agent does not publish or run it",
+    "no forbidden fields: no __, repo_path_ or repo_branch_ variables, no old field names (copilotConfig, harnessConfig, condition, retryPolicy, approvalRequired, orchestratorConfig), no bypassPermissions, no literal secrets, no check stages or hooks the user did not ask for",
+    "the summary to the user names each stage, the permission modes, the loop limits and budget, and that the run opens a PR after approval"
+  ]
+}

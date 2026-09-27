@@ -109,43 +109,6 @@ export class WorktreeService {
   }
 
   /**
-   * Create worktrees for all selected repos in a run.
-   * @param targetDir When provided, worktrees are placed at `{targetDir}/{alias}` (workspace source/).
-   */
-  async createRunWorktrees(
-    projectId: string,
-    runId: string,
-    selectedAliases: string[],
-    runType: WorktreeRunType = 'workflow',
-    targetDir?: string,
-  ): Promise<WorktreeInfo[]> {
-    const results: WorktreeInfo[] = [];
-
-    for (const aliasOrId of selectedAliases) {
-      // Try by alias first, then by ID (chat frontend sends IDs, workflows send aliases)
-      let codebase = await this.codebaseRepo.getByAlias(projectId, aliasOrId);
-      if (!codebase) {
-        try {
-          codebase = await this.codebaseRepo.getById(aliasOrId);
-          // Verify it belongs to the same project
-          if (codebase && codebase.projectId !== projectId) {
-            codebase = undefined;
-          }
-        } catch {
-          // getById may throw if not found
-        }
-      }
-      if (!codebase) {
-        throw new Error(`Codebase "${aliasOrId}" not found in project ${projectId}`);
-      }
-      const worktree = await this.createWorktree(codebase.id, runId, { runType, targetDir });
-      results.push(worktree);
-    }
-
-    return results;
-  }
-
-  /**
    * Remove a specific worktree: unregister it from the parent clone, delete
    * the directory, then drop the row.
    *

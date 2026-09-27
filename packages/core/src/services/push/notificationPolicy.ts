@@ -228,6 +228,22 @@ export function planNotification(event: NotifiableEvent): NotificationPlan | nul
     };
   }
 
+  // A run paused because its budget ran out: it waits for someone to raise
+  // the budget or stop it (P07 WP-7.3).
+  if (kind === 'workflow_run.budget_exhausted') {
+    const runId = str(data, 'workflowRunId');
+    if (!runId) return null;
+    return {
+      category: 'approval',
+      title: 'Workflow run out of budget',
+      body: clip(`${str(data, 'name') ?? 'A run'} paused: its budget is spent. Raise it or stop the run.`),
+      route: `/runs/${runId}`,
+      requiredScope: 'read:workflows',
+      threadId: `run:${runId}`,
+      interruption: 'active',
+    };
+  }
+
   // ── Failures ──────────────────────────────────────────────────
   if (kind === 'workflow_run.failed') {
     const runId = str(data, 'workflowRunId');

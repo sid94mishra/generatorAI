@@ -1,9 +1,9 @@
 // ────────────────────────────────────────────────────────────────
 // AutomationService — Manages automation lifecycle, execution,
-//   cron scheduling, webhook handling, and loop/batch processing
+//   cron scheduling, webhook handling, and dataset iterations
 // ────────────────────────────────────────────────────────────────
 
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import * as path from 'node:path';
 import { mkdir } from 'node:fs/promises';
 import type {
@@ -18,17 +18,11 @@ import type {
   UpdateAutomationParams,
   AutomationWithExecutions,
   AutomationExecutionWithRuns,
-  DataSourceConfig,
-  DataSourceTestResult,
-  ParsedBatchData,
   ILogger,
 } from '@generatorai/shared';
 import { hashWebhookToken } from '@generatorai/shared/node';
 import {
   generateId,
-  parseBatchData,
-  resolveIterationVariables,
-  buildIterationLabel,
   ValidationError,
   SECRET_MASK,
   isSensitiveKey,
@@ -36,8 +30,8 @@ import {
   countCronRunsBetween,
 } from '@generatorai/shared';
 import type { WorkflowRunService } from './WorkflowRunService.js';
+import type { WorkflowInvocationService } from './workflow-invocation/WorkflowInvocationService.js';
 import type { WorkflowDefinitionService } from './WorkflowDefinitionService.js';
-import type { DataSourceResolver } from './DataSourceResolver.js';
 import type { EventBus } from '../events/EventBus.js';
 import type { IWorkflowRunRepository } from '../domain/ports/IWorkflowRunRepository.js';
 import { planIterations } from './IterationPlanner.js';
@@ -66,31 +60,11 @@ export interface ResolvedWebhook {
 export function toPublicAutomation(automation: Automation): Automation {
   const redacted: Automation = { ...automation };
 
-  // The raw token exists only in the create/rotate response. A stored one is
-  // legacy data the migration has not yet hashed away.
+  // The raw token exists only in the create/rotate response, and only the
+  // create/rotate route hands it out — every other projection masks it.
   if (redacted.webhookToken) redacted.webhookToken = SECRET_MASK;
 
-  const config = redacted.dataSourceConfig as Record<string, unknown> | undefined;
-  if (config) {
-    redacted.dataSourceConfig = redactSecretBag(config) as unknown as typeof redacted.dataSourceConfig;
-  }
-
   return redacted;
-}
-
-/** Mask credential-shaped entries in a data-source config, at any depth. */
-function redactSecretBag(value: Record<string, unknown>): Record<string, unknown> {
-  const out: Record<string, unknown> = {};
-  for (const [key, entry] of Object.entries(value)) {
-    if (entry && typeof entry === 'object' && !Array.isArray(entry)) {
-      out[key] = redactSecretBag(entry as Record<string, unknown>);
-    } else if (isSensitiveKey(key) && entry !== undefined && entry !== null && entry !== '') {
-      out[key] = SECRET_MASK;
-    } else {
-      out[key] = entry;
-    }
-  }
-  return out;
 }
 
 /** Interface for automation repository */
@@ -132,6 +106,8 @@ export interface IAutomationRepository {
 /** Interface for automation execution repository */
 export interface IAutomationExecutionRepository {
   createExecution(execution: AutomationExecution): Promise<AutomationExecution>;
+  /** Insert the execution and advance its automation's `lastRunAt` in ONE synchronous transaction. */
+  openExecution(execution: AutomationExecution, lastRunAt: Date): Promise<void>;
   getExecutionById(id: string): Promise<AutomationExecution>;
   getExecutionsByAutomationId(automationId: string): Promise<AutomationExecution[]>;
   updateExecution(id: string, updates: Partial<AutomationExecution>): Promise<AutomationExecution>;
@@ -169,42 +145,38 @@ export class AutomationService {
    *  cover claim → dispatch → recompute-and-release, short enough that a
    *  crashed owner's lease expires before the next replica's tick. */
   private readonly leaseMs: number;
-  /** Tracks execution IDs that have been cancelled so background loops can bail out */
-  private cancelledExecutions = new Set<string>();
   /**
    * Phase 2, 2.9 — AbortController per in-flight execution. `cancelExecution`
-   * calls `.abort()` so downstream awaits (data-source HTTP fetches, sleeps,
-   * anything that accepts an AbortSignal) can exit immediately instead of
-   * waiting for the next boundary check on `cancelledExecutions`.
-   * The legacy Set is kept for sites that don't take a signal yet.
+   * calls `.abort()`; downstream awaits that take the signal exit at once,
+   * and the iteration loop checks `isCancelled` at every boundary.
    */
   private executionAborts = new Map<string, AbortController>();
+  /**
+   * P07 WP-7.2 — the trigger debounce (Settings → Workflow engine; 0 = off)
+   * and the last webhook/schedule trigger per automation: an identical
+   * trigger within the window (a redelivered webhook, a double cron fire)
+   * gets the execution the first one started instead of a second one.
+   */
+  private triggerDebounceMs: () => number = () => 0;
+  private readonly lastTrigger = new Map<string, { at: number; key: string; execution: AutomationExecution }>();
 
   constructor(
     private automationRepo: IAutomationRepository,
     private executionRepo: IAutomationExecutionRepository,
     private workflowRunService: WorkflowRunService,
+    /** THE way a run starts (P04): every iteration's run is an invocation with an automation trigger. */
+    private invocation: Pick<WorkflowInvocationService, 'invoke' | 'waitFor'>,
     private workflowRunRepo: IWorkflowRunRepository,
     private workflowDefinitionService: WorkflowDefinitionService,
     private eventBus: EventBus,
     private logger: ILogger,
+    /**
+     * W22 — iteration slots are written to the `entries` table up front and
+     * claimed atomically, so a 1000-row batch that dies at row 40 resumes at
+     * row 41 on restart (P0-41 fix).
+     */
+    private durableEngine: DurableExecutionEngine,
     private artifactsDir?: string,
-    private dataSourceResolver?: DataSourceResolver,
-    /**
-     * Optional transactional wrapper. When supplied, the initial burst of
-     * writes that open an execution (createExecution + update automation's
-     * lastRunAt) is atomic so a mid-sequence failure doesn't leave the
-     * automation's `lastRunAt` advanced with no corresponding execution row
-     * (or vice-versa).
-     */
-    private withTransaction?: <T>(fn: () => Promise<T>) => Promise<T>,
-    /**
-     * W22 — durable execution engine. When supplied, iteration slots are
-     * written to the `entries` table up front and claimed atomically, so a
-     * 1000-row batch that dies at row 40 resumes at row 41 on restart
-     * (P0-41 fix). When absent, the legacy in-memory iteration loop runs.
-     */
-    private durableEngine?: DurableExecutionEngine,
     /**
      * Item 38 — due-row poller tuning. Optional so existing embedders (and
      * the composition-root call site, which constructs this positionally)
@@ -259,14 +231,6 @@ export class AutomationService {
       // lookup is `getByWebhookTokenHash`.
       ...(params.triggerType === 'webhook' ? this.mintWebhookToken() : {}),
       workflowIds: params.workflowIds,
-      inputMode: params.inputMode,
-      loopVariable: params.loopVariable,
-      loopItems: params.loopItems ?? [],
-      batchDataFormat: params.batchDataFormat,
-      batchData: params.batchData,
-      batchColumns: params.batchColumns,
-      batchColumnMapping: params.batchColumnMapping,
-      dataSourceConfig: params.dataSourceConfig,
       variables: params.variables ?? {},
       maxConcurrency: params.maxConcurrency ?? 1,
       onError: params.onError ?? 'continue',
@@ -277,6 +241,7 @@ export class AutomationService {
       iterationMode: params.iterationMode,
       defaultDataset: params.defaultDataset,
       retryPolicy: params.retryPolicy,
+      permissionMode: params.permissionMode,
       createdAt: now,
       updatedAt: now,
     };
@@ -410,17 +375,6 @@ export class AutomationService {
     return final;
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // Data Source Testing (E1)
-  // ═══════════════════════════════════════════════════════════════
-
-  /** Test a data source configuration — returns preview without creating an execution */
-  async testDataSource(config: DataSourceConfig): Promise<DataSourceTestResult> {
-    if (!this.dataSourceResolver) {
-      throw new Error('Data source resolver is not configured');
-    }
-    return this.dataSourceResolver.testDataSource(config);
-  }
 
   // ═══════════════════════════════════════════════════════════════
   // Trigger & Execution
@@ -459,7 +413,7 @@ export class AutomationService {
       await this.automationRepo.update(id, { defaultDataset: opts.dataset });
     }
 
-    return this.executeAutomation(automation, 'manual', undefined, undefined, dataset);
+    return this.executeAutomation(automation, 'manual', undefined, dataset);
   }
 
   /**
@@ -467,8 +421,8 @@ export class AutomationService {
    *
    * When the automation has a `dataSchema`, the raw HTTP body is
    * treated as the dataset (content-type drives the format hint but
-   * the schema-declared format wins). Otherwise the legacy behaviour
-   * applies: top-level payload keys become extra variables.
+   * the schema-declared format wins). Otherwise the workflows run once
+   * with the base variables; the payload is recorded on the execution.
    */
   async triggerWebhook(
     token: string,
@@ -480,6 +434,12 @@ export class AutomationService {
       throw new Error('Invalid or disabled webhook');
     }
 
+    // The debounce key is a hash of the FULL payload and its content type, so two
+    // deliveries that differ only past the recorded 5000-char prefix both run.
+    const serialized = JSON.stringify(payload) ?? '';
+    const triggerKey = createHash('sha256').update(`${contentType ?? ''}
+${serialized}`).digest('hex');
+
     // Schema-driven pipeline: the entire payload becomes the dataset.
     if (automation.dataSchema) {
       const dataset = this.webhookPayloadToDataset(
@@ -490,36 +450,13 @@ export class AutomationService {
       return this.executeAutomation(
         automation,
         'webhook',
-        JSON.stringify(payload).slice(0, 5000),
-        undefined,
+        serialized.slice(0, 5000),
         dataset,
+        triggerKey,
       );
     }
 
-    // Legacy webhook handling — extract variables from payload object.
-    // Use null-prototype object to prevent prototype pollution.
-    let extraVariables: Record<string, unknown> = Object.create(null) as Record<string, unknown>;
-    if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
-      for (const [key, value] of Object.entries(payload as Record<string, unknown>)) {
-        if (
-          Object.prototype.hasOwnProperty.call(payload, key) &&
-          !key.startsWith('__') &&
-          key !== '__proto__' &&
-          key !== 'constructor' &&
-          key !== 'prototype' &&
-          /^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key)
-        ) {
-          extraVariables[key] = value;
-        }
-      }
-    }
-
-    return this.executeAutomation(
-      automation,
-      'webhook',
-      JSON.stringify(payload).slice(0, 5000),
-      extraVariables,
-    );
+    return this.executeAutomation(automation, 'webhook', serialized.slice(0, 5000), undefined, triggerKey);
   }
 
   /**
@@ -561,12 +498,39 @@ export class AutomationService {
     return { format: 'json_array', data };
   }
 
+  /** Late wiring (the server's engine settings): the webhook and cron trigger debounce, read per trigger. */
+  setTriggerDebounce(ms: () => number): void {
+    this.triggerDebounceMs = ms;
+  }
+
   /** Core execution logic — creates execution, runs workflows sequentially for each iteration */
   private async executeAutomation(
     automation: Automation,
     triggeredBy: AutomationTriggerType,
     webhookPayload?: string,
-    extraVariables?: Record<string, unknown>,
+    dataset?: AutomationDataset,
+    /** The debounce identity of a webhook delivery (sha256 of the full payload + content type). */
+    triggerKey?: string,
+  ): Promise<AutomationExecution> {
+    if (triggeredBy === 'webhook' || triggeredBy === 'schedule') {
+      const windowMs = this.triggerDebounceMs();
+      const key = `${triggeredBy}:${triggerKey ?? ''}`;
+      const last = this.lastTrigger.get(automation.id);
+      if (windowMs > 0 && last && last.key === key && Date.now() - last.at < windowMs) {
+        this.logger.info(`[AutomationService] ${triggeredBy} trigger of ${automation.id} debounced onto execution ${last.execution.id} (${windowMs} ms window)`);
+        return last.execution;
+      }
+      const execution = await this.startExecution(automation, triggeredBy, webhookPayload, dataset);
+      this.lastTrigger.set(automation.id, { at: Date.now(), key, execution });
+      return execution;
+    }
+    return this.startExecution(automation, triggeredBy, webhookPayload, dataset);
+  }
+
+  private async startExecution(
+    automation: Automation,
+    triggeredBy: AutomationTriggerType,
+    webhookPayload?: string,
     dataset?: AutomationDataset,
   ): Promise<AutomationExecution> {
     // For schedule triggers, fall back to the persisted default dataset
@@ -590,7 +554,7 @@ export class AutomationService {
           schema: automation.dataSchema,
           mode: automation.iterationMode,
           dataset,
-          baseVariables: { ...automation.variables, ...(extraVariables ?? {}) },
+          baseVariables: { ...automation.variables },
         });
       } catch (err) {
         // Surface planning errors before we open the execution row so
@@ -614,9 +578,8 @@ export class AutomationService {
       totalIterations: 0, // Updated after resolution
       completedIterations: 0,
       failedIterations: 0,
-      // Only snapshot for the schema-driven pipeline (dataset is
-      // meaningful there); legacy execs already record inline data on
-      // the automation.
+      // Only snapshot for the schema-driven pipeline (a dataset is
+      // meaningful there).
       datasetSnapshot: automation.dataSchema && dataset ? {
         format: dataset.format,
         data: dataset.data,
@@ -628,49 +591,11 @@ export class AutomationService {
     // Atomically: create the execution row + advance the automation's
     // lastRunAt. A failure between the two writes would previously leave
     // the automation looking "freshly run" with no execution row.
-    const openExecution = async (): Promise<void> => {
-      await this.executionRepo.createExecution(execution);
-      await this.automationRepo.update(automation.id, { lastRunAt: new Date() });
-    };
-    if (this.withTransaction) {
-      await this.withTransaction(openExecution);
-    } else {
-      await openExecution();
-    }
+    await this.executionRepo.openExecution(execution, new Date());
 
-    // Resolve iteration count based on input mode.
-    let iterationCount: number;
-    let resolvedDataSource: ParsedBatchData | null = null;
-
-    if (plannedIterations) {
-      // Schema-driven — planner already produced the iteration list.
-      iterationCount = plannedIterations.iterations.length;
-    } else {
-      try {
-        // Legacy paths (dynamic data source, batch, loop, single).
-        if (automation.dataSourceConfig && automation.dataSourceConfig.type !== 'static' && this.dataSourceResolver) {
-          resolvedDataSource = await this.dataSourceResolver.resolve(automation);
-          iterationCount = resolvedDataSource?.rowCount ?? 1;
-        } else if (automation.inputMode === 'batch' && automation.batchData && automation.batchDataFormat) {
-          const parsed = parseBatchData(automation.batchDataFormat, automation.batchData);
-          iterationCount = parsed.rowCount;
-        } else if (automation.inputMode === 'loop' && automation.loopItems?.length) {
-          iterationCount = automation.loopItems.length;
-        } else {
-          iterationCount = 1;
-        }
-      } catch (err) {
-        // Data source resolution failed — mark execution as failed
-        const errMessage = err instanceof Error ? err.message : String(err);
-        this.logger.error(`[AutomationService] Data source resolution failed for execution ${execution.id}: ${errMessage}`);
-        await this.executionRepo.updateExecution(execution.id, {
-          status: 'failed',
-          completedAt: new Date(),
-          error: `Data source resolution failed: ${errMessage}`,
-        });
-        return execution;
-      }
-    }
+    // Schema-driven — the planner already produced the iteration list;
+    // without a schema the workflows run once.
+    const iterationCount = plannedIterations ? plannedIterations.iterations.length : 1;
 
     // totalRuns = (number of iterations) * (number of workflows per iteration)
     const totalRuns = iterationCount * automation.workflowIds.length;
@@ -682,7 +607,7 @@ export class AutomationService {
     execution.totalIterations = totalRuns;
 
     // Start execution in background
-    this.runExecution(automation, execution, extraVariables, resolvedDataSource, plannedIterations).catch((err) => {
+    this.runExecution(automation, execution, plannedIterations).catch((err) => {
       this.logger.error(`[AutomationService] Execution ${execution.id} failed: ${err instanceof Error ? err.message : String(err)}`);
     });
 
@@ -693,8 +618,6 @@ export class AutomationService {
   private async runExecution(
     automation: Automation,
     execution: AutomationExecution,
-    extraVariables?: Record<string, unknown>,
-    resolvedDataSource?: ParsedBatchData | null,
     plannedIterations?: ReturnType<typeof planIterations> | null,
   ): Promise<void> {
     await this.executionRepo.updateExecution(execution.id, {
@@ -711,90 +634,27 @@ export class AutomationService {
     });
 
     await this.driveIterations(automation, execution, { completed: 0, failed: 0 }, () =>
-      this.buildIterationList(automation, extraVariables, resolvedDataSource, plannedIterations),
+      this.buildIterationList(automation, plannedIterations),
     );
   }
 
   /**
-   * Expand the automation's input configuration into the concrete iteration
-   * list. Pure — every branch is a function of the arguments, which is why it
+   * The concrete iteration list: the planner's rows for a schema-driven
+   * automation, otherwise one iteration with the base variables. Pure, so it
    * can be handed to `driveIterations` as a thunk and evaluated inside its
-   * error handling (a malformed batch payload must fail the execution, not
-   * escape as an unhandled rejection).
+   * error handling.
    */
   private buildIterationList(
     automation: Automation,
-    extraVariables?: Record<string, unknown>,
-    resolvedDataSource?: ParsedBatchData | null,
     plannedIterations?: ReturnType<typeof planIterations> | null,
   ): { variables: Record<string, unknown>; label: string }[] {
-    // Build iteration list based on input mode
-    let iterations: { variables: Record<string, unknown>; label: string }[];
-
-      if (plannedIterations) {
-        // Track C: schema-driven pipeline. IterationPlanner already
-        // validated + coerced + merged base variables + reserved keys.
-        iterations = plannedIterations.iterations;
-      } else if (resolvedDataSource && resolvedDataSource.rowCount > 0) {
-        // Legacy E1: Dynamic data source — use resolved data as iteration items
-        const totalIter = resolvedDataSource.rows.length;
-
-        iterations = resolvedDataSource.rows.map((row, idx) => ({
-          variables: resolveIterationVariables(
-            row,
-            automation.batchColumnMapping,
-            { ...automation.variables, ...(extraVariables ?? {}) },
-            idx,
-            totalIter,
-          ),
-          label: buildIterationLabel(row, idx),
-        }));
-      } else if (automation.inputMode === 'batch' && automation.batchData && automation.batchDataFormat) {
-        // Legacy batch mode: parse structured data, map columns to variables
-        const parsed = parseBatchData(automation.batchDataFormat, automation.batchData);
-        const totalIter = parsed.rows.length;
-
-        iterations = parsed.rows.map((row, idx) => ({
-          variables: resolveIterationVariables(
-            row,
-            automation.batchColumnMapping,
-            { ...automation.variables, ...(extraVariables ?? {}) },
-            idx,
-            totalIter,
-          ),
-          label: buildIterationLabel(row, idx),
-        }));
-      } else if (automation.inputMode === 'loop' && automation.loopItems?.length) {
-        // Legacy loop mode: single variable injection
-        iterations = automation.loopItems.map((item, idx) => {
-          const vars: Record<string, unknown> = {
-            ...automation.variables,
-            ...(extraVariables ?? {}),
-            __iteration_index: idx,
-            __iteration_total: automation.loopItems!.length,
-          };
-          if (automation.loopVariable && item !== null) {
-            vars[automation.loopVariable] = item;
-          }
-          return {
-            variables: vars,
-            label: `${automation.loopVariable ?? 'item'}=${String(item).slice(0, 80)}`,
-          };
-        });
-      } else {
-        // Single mode: one iteration with base variables
-        iterations = [{
-          variables: {
-            ...automation.variables,
-            ...(extraVariables ?? {}),
-            __iteration_index: 0,
-            __iteration_total: 1,
-          },
-          label: 'Single run',
-        }];
-      }
-
-    return iterations;
+    if (plannedIterations) {
+      // IterationPlanner already validated + coerced + merged base
+      // variables + reserved keys.
+      return plannedIterations.iterations;
+    }
+    // The iteration index travels in the run's trigger, never as a variable (W-06).
+    return [{ variables: { ...automation.variables }, label: 'Single run' }];
   }
 
   /**
@@ -820,6 +680,10 @@ export class AutomationService {
     // checks before starting a second loop over the same slots.
     const abortController = new AbortController();
     this.executionAborts.set(execution.id, abortController);
+    // A cancel that landed before this loop registered its controller is
+    // on the execution row; honour it.
+    const persisted = await this.executionRepo.getExecutionById(execution.id).catch(() => undefined);
+    if (persisted?.status === 'cancelled') abortController.abort();
 
     let completedCount = seed.completed;
     let failedCount = seed.failed;
@@ -830,11 +694,10 @@ export class AutomationService {
       const maxConcurrency = Math.max(1, automation.maxConcurrency);
 
       // ── W22 — Durable iteration claiming (P0-41 fix) ──────────
-      // When the durable engine is available, write all iteration slots up
-      // front so a restart can claim and resume any still-pending rows
-      // without losing work. On a resume `iterations` is empty and every slot
-      // already exists, so this is a no-op.
-      if (this.durableEngine && iterations.length > 0) {
+      // Write all iteration slots up front so a restart can claim and resume
+      // any still-pending rows without losing work. On a resume `iterations`
+      // is empty and every slot already exists, so this is a no-op.
+      if (iterations.length > 0) {
         const slots = iterations.map((iter, idx) => ({
           index: idx,
           variables: iter.variables,
@@ -849,45 +712,35 @@ export class AutomationService {
       }
       // ──────────────────────────────────────────────────────────
 
-      // In batch/loop mode, maxConcurrency controls how many iterations run in parallel.
+      // maxConcurrency controls how many iterations run in parallel.
       // Within each iteration, workflows still run sequentially (they share context).
-      for (let batchStart = 0; ; batchStart += maxConcurrency) {
+      for (;;) {
         // Check if this execution has been cancelled before starting a new batch
-        if (this.cancelledExecutions.has(execution.id)) {
+        if (this.isCancelled(execution.id)) {
           this.logger.info(`[AutomationService] Execution ${execution.id} cancelled — stopping iteration loop`);
-          this.cancelledExecutions.delete(execution.id);
           return; // Exit early — cancelExecution already set terminal status
         }
 
-        // W22: when the durable engine is active, use atomic claim instead of
-        // slicing the in-memory array. This prevents duplicate iteration on
-        // restart (the claim is idempotent — already-claimed rows return null).
-        let iterBatch: IterationWorkItem[];
-        if (this.durableEngine) {
-          iterBatch = [];
-          for (let i = 0; i < maxConcurrency; i++) {
-            const claimed = this.durableEngine.claimNextIteration(execution.id);
-            if (!claimed) break;
-            // △ `claimed.index` — NOT a recomputed loop counter. The claim
-            // returns whichever slot is lowest-pending, which after a resume
-            // (or any concurrent claimer) is not `batchStart + offset`:
-            // deriving it from the loop counter labelled recovered rows with
-            // the wrong `iterationIndex`, so the execution-run rows no longer
-            // matched the data the iteration actually ran on.
-            iterBatch.push({
-              index: claimed.index,
-              variables: claimed.variables,
-              label: claimed.label,
-              slotId: claimed.id,
-            });
-          }
-          if (iterBatch.length === 0) break; // No more pending iterations.
-        } else {
-          if (batchStart >= iterations.length) break;
-          iterBatch = iterations
-            .slice(batchStart, batchStart + maxConcurrency)
-            .map((iter, offset) => ({ index: batchStart + offset, ...iter }));
+        // W22: atomic claim — idempotent, so a restart never runs an
+        // iteration twice (already-claimed rows return null).
+        const iterBatch: IterationWorkItem[] = [];
+        for (let i = 0; i < maxConcurrency; i++) {
+          const claimed = this.durableEngine.claimNextIteration(execution.id);
+          if (!claimed) break;
+          // △ `claimed.index` — NOT a recomputed loop counter. The claim
+          // returns whichever slot is lowest-pending, which after a resume
+          // (or any concurrent claimer) is not a loop-counter offset:
+          // deriving it from the loop counter labelled recovered rows with
+          // the wrong `iterationIndex`, so the execution-run rows no longer
+          // matched the data the iteration actually ran on.
+          iterBatch.push({
+            index: claimed.index,
+            variables: claimed.variables,
+            label: claimed.label,
+            slotId: claimed.id,
+          });
         }
+        if (iterBatch.length === 0) break; // No more pending iterations.
 
         const iterResults = await Promise.allSettled(
           iterBatch.map(async (iter) => {
@@ -900,13 +753,14 @@ export class AutomationService {
               // Run all workflows sequentially within this iteration
               for (const workflowDefId of automation.workflowIds) {
                 // Check cancellation before each workflow run within an iteration
-                if (this.cancelledExecutions.has(execution.id)) {
+                if (this.isCancelled(execution.id)) {
                   slotError = 'execution cancelled';
                   return;
                 }
 
                 try {
                   const success = await this.runSingleWorkflow(
+                    automation.id,
                     execution.id,
                     workflowDefId,
                     iterationVariables,
@@ -915,6 +769,7 @@ export class AutomationService {
                     automation.projectId,
                     automation.retryPolicy,
                     execution.triggeredBy,
+                    automation.permissionMode,
                   );
                   if (success) {
                     completedCount++;
@@ -936,7 +791,7 @@ export class AutomationService {
                 }
               }
             } finally {
-              if (iter.slotId && this.durableEngine) {
+              if (iter.slotId) {
                 this.durableEngine.completeIteration(
                   iter.slotId,
                   slotError ? 'failed' : 'completed',
@@ -978,10 +833,7 @@ export class AutomationService {
       }
 
       // Execution complete — but skip if already cancelled by cancelExecution
-      if (this.cancelledExecutions.has(execution.id)) {
-        this.cancelledExecutions.delete(execution.id);
-        return;
-      }
+      if (this.isCancelled(execution.id)) return;
 
       // Item 28 — three-way outcome. The previous `else → completed` branch
       // reported a batch with 999 failures and 1 success as `completed`,
@@ -1022,10 +874,7 @@ export class AutomationService {
 
     } catch (err) {
       // Skip overwriting if execution was cancelled
-      if (this.cancelledExecutions.has(execution.id)) {
-        this.cancelledExecutions.delete(execution.id);
-        return;
-      }
+      if (this.isCancelled(execution.id)) return;
 
       await this.executionRepo.updateExecution(execution.id, {
         status: 'failed',
@@ -1064,7 +913,7 @@ export class AutomationService {
    * left to claim, which is the reconciler's signal to finalise as before.
    *
    * `activeIterationIndexes` are iterations whose workflow run is still live
-   * (StartupRecoveryService re-drives those); their leases are left alone so
+   * (the workflow engine's recovery drives those); their leases are left alone so
    * the work is not started twice. Everything else is handed back immediately
    * — a process that has restarted cannot still be running them.
    *
@@ -1077,7 +926,6 @@ export class AutomationService {
     opts: { activeIterationIndexes?: number[] } = {},
   ): Promise<{ resumed: boolean; reclaimed: number[]; remaining: number; completion: Promise<void> }> {
     const idle = { reclaimed: [] as number[], remaining: 0, completion: Promise.resolve() };
-    if (!this.durableEngine) return { resumed: false, ...idle };
     // Already being driven in this process — a second loop over the same slots
     // would claim nothing but would double-write the terminal status.
     if (this.executionAborts.has(executionId)) return { resumed: false, ...idle };
@@ -1134,6 +982,7 @@ export class AutomationService {
    *     doesn't leak in.
    */
   private async runSingleWorkflow(
+    automationId: string,
     executionId: string,
     workflowDefId: string,
     variables: Record<string, unknown>,
@@ -1150,6 +999,8 @@ export class AutomationService {
      * mechanism behind it at all.
      */
     triggeredBy: AutomationTriggerType,
+    /** PD-18 — the automation's declared mode: the run's trigger layer. */
+    permissionMode: Automation['permissionMode'],
   ): Promise<boolean> {
     const maxAttempts = Math.max(1, retryPolicy?.maxAttempts ?? 1);
     const retryOn = new Set(retryPolicy?.retryOn ?? []);
@@ -1163,17 +1014,24 @@ export class AutomationService {
 
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       // Fresh workflow-run per attempt so retries don't inherit stage-run
-      // state from the previous failed attempt.
-      const run = await this.workflowRunService.createRun({
-        workflowDefinitionId: workflowDefId,
-        // X-21 — `__triggeredBy` is how the trigger reaches the run. The
-        // shared `CreateWorkflowRunParams` has no field for it, and the
-        // `__`-prefixed internal-variable convention is the established
-        // channel for exactly this (`__workingDirectory`, `__workspaceId`,
-        // `__projectId`, `__validationFeedback` all travel the same way).
-        variables: { ...variables, __triggeredBy: triggeredBy },
-        ...(projectId ? { projectId } : {}),
-      });
+      // state from the previous failed attempt. One invocation per attempt:
+      // the automation trigger (X-21) and the declared mode (PD-18, the
+      // run's ceiling) are trusted context, the key derived from them makes
+      // a re-driven attempt answer the run it already started.
+      const invoked = await this.invocation.invoke(
+        {
+          target: { kind: 'definition', workflowDefinitionId: workflowDefId },
+          variables,
+          ...(projectId ? { projectId } : {}),
+        },
+        {
+          principal: { kind: 'system', id: `automation:${automationId}`, scopes: [] },
+          trigger: { kind: 'automation', automationId, executionId, via: triggeredBy, iterationIndex },
+          callerPermissionCeiling: permissionMode,
+          attempt,
+        },
+      );
+      const run = { id: invoked.runId };
 
       // Snapshot per attempt. We keep the most recent execRun id so
       // cancellation / final-status updates land on the right row. The
@@ -1195,10 +1053,13 @@ export class AutomationService {
       lastExecRunId = execRun.id;
 
       try {
-        await this.workflowRunService.startRun(run.id);
-        await this.waitForRunCompletion(run.id, 7_200_000);
-
-        const finalRun = await this.workflowRunRepo.getById(run.id);
+        // W-63: wait for `finalized` (after post-processing), subscribed before the read.
+        const finalRun = await this.invocation.waitFor(run.id, {
+          timeoutMs: 7_200_000,
+          ...(this.executionAborts.get(executionId) ? { signal: this.executionAborts.get(executionId)!.signal } : {}),
+        });
+        if (finalRun.waited === 'timeout') throw new Error(`Workflow run ${run.id} timed out after 7200000ms`);
+        if (finalRun.waited === 'aborted') throw new Error(`Workflow run ${run.id} wait was cancelled`);
         if (finalRun.status === 'completed') {
           await this.executionRepo.updateExecutionRun(execRun.id, {
             status: 'completed',
@@ -1234,7 +1095,7 @@ export class AutomationService {
         backoff = Math.min(backoff * backoffMultiplier, maxBackoff);
       } catch (err) {
         // Cancellation short-circuits everything.
-        if (this.cancelledExecutions.has(executionId)) {
+        if (this.isCancelled(executionId)) {
           await this.executionRepo.updateExecutionRun(execRun.id, {
             status: 'cancelled',
             attemptCount: attempt,
@@ -1291,6 +1152,11 @@ export class AutomationService {
     return 'workflow_failed';
   }
 
+  /** True once `cancelExecution` aborted this execution's in-flight drive. */
+  private isCancelled(executionId: string): boolean {
+    return this.executionAborts.get(executionId)?.signal.aborted === true;
+  }
+
   /**
    * Sleep for `ms` but bail out early if the execution is cancelled.
    */
@@ -1298,7 +1164,7 @@ export class AutomationService {
     const step = 250;
     let waited = 0;
     while (waited < ms) {
-      if (this.cancelledExecutions.has(executionId)) return;
+      if (this.isCancelled(executionId)) return;
       const chunk = Math.min(step, ms - waited);
       await new Promise((r) => setTimeout(r, chunk));
       waited += chunk;
@@ -1318,58 +1184,6 @@ export class AutomationService {
       data: { executionId, iterationIndex, attempt, maxAttempts },
     }).catch(() => {
       /* observability is best-effort */
-    });
-  }
-
-  /**
-   * Wait for a workflow run to reach a terminal state using EventBus
-   * subscription (zero-polling). Falls back to a single DB check on
-   * subscribe in case the run already completed before we subscribed.
-   */
-  private async waitForRunCompletion(runId: string, timeoutMs = 600_000): Promise<void> {
-    const terminalStatuses = new Set(['completed', 'failed', 'cancelled']);
-
-    // Fast path: run may already be terminal (e.g. instant failure)
-    const current = await this.workflowRunRepo.getById(runId);
-    if (terminalStatuses.has(current.status)) return;
-
-    return new Promise<void>((resolve, reject) => {
-      let settled = false;
-
-      const timer = setTimeout(() => {
-        if (settled) return;
-        settled = true;
-        unsubscribe();
-        reject(new Error(`Workflow run ${runId} timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-
-      // Subscribe to global events for terminal workflow_run events
-      const unsubscribe = this.eventBus.subscribeGlobal((event) => {
-        if (settled) return;
-
-        const isTerminal =
-          event.kind === 'workflow_run.completed' ||
-          event.kind === 'workflow_run.failed' ||
-          event.kind === 'workflow_run.cancelled';
-        if (!isTerminal) return;
-
-        // Check if this event is for our run
-        const eventRunId =
-          event.data && typeof event.data === 'object' && 'workflowRunId' in event.data
-            ? (event.data as { workflowRunId?: string }).workflowRunId
-            : undefined;
-
-        if (eventRunId === runId) {
-          settled = true;
-          clearTimeout(timer);
-          unsubscribe();
-          resolve();
-        }
-      });
-
-      // Cancellation propagates via `executionAborts`: `runSingleWorkflow`
-      // throws when the enclosing execution is cancelled, which unwinds
-      // through this promise's catch handler. Nothing to do here.
     });
   }
 
@@ -1579,10 +1393,9 @@ export class AutomationService {
       throw new Error(`Cannot cancel execution in ${execution.status} state`);
     }
 
-    // Signal the background runExecution loop to stop creating new iterations.
-    // AbortController unblocks awaiters that opted into the signal;
-    // `cancelledExecutions` remains as a legacy boundary-poll fallback.
-    this.cancelledExecutions.add(executionId);
+    // Signal the background loop to stop creating new iterations and unblock
+    // awaiters that took the signal. A loop not yet registered reads the
+    // cancelled status off the row when it starts.
     this.executionAborts.get(executionId)?.abort();
 
     // Cancel all pending/running workflow runs in this execution
@@ -1590,7 +1403,7 @@ export class AutomationService {
     for (const run of runs) {
       if (run.status === 'running' || run.status === 'pending') {
         try {
-          await this.workflowRunService.cancelRun(run.workflowRunId);
+          if (run.workflowRunId) await this.workflowRunService.command(run.workflowRunId, { command: 'cancel' });
         } catch {
           // Run may already be in terminal state
         }

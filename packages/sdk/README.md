@@ -10,8 +10,9 @@
 >   (SQLite via `better-sqlite3`), `createAllRepositories`, `createCoreServices`
 >   and a harness provider — a second, independent wiring of the same engine
 >   `apps/server/src/composition-root.ts` wires. The two can and will drift.
-> - **It cannot be installed outside the monorepo.** All four runtime
+> - **It cannot be installed outside the monorepo.** All its runtime
 >   dependencies (`@generatorai/shared`, `@generatorai/core`, `@generatorai/db`,
+>   `@generatorai/workflow-spec`, `@generatorai/secrets`,
 >   `@generatorai/agent-harness-providers`) are `private: true` workspace
 >   packages whose `main` points at raw TypeScript (`./src/index.ts`), so
 >   `pnpm add @generatorai/sdk` from another project has never worked.
@@ -32,24 +33,22 @@ private dependencies), and SQLite via `better-sqlite3` on the host.
 ## Quick Start (in-repo)
 
 ```typescript
-import { createGeneratorAI } from '@generatorai/sdk';
+import { createGeneratorAI, workflow } from '@generatorai/sdk';
 
 const ai = await createGeneratorAI({
   harness: 'copilot',           // HarnessType — same word as the server's HARNESS_TYPE
   database: './my-app.db',      // SQLite file path
 });
 
-// Create a workflow
-const definition = await ai.workflows.create({
-  name: 'Code Review',
-  stages: [
-    { localId: 'analyze',  name: 'Analyze Code',    prompt: 'Analyze the following code for bugs...' },
-    { localId: 'report',   name: 'Write Report',    prompt: 'Write a structured review report...' },
-  ],
-  edges: [
-    { fromStageLocalId: 'analyze', toStageLocalId: 'report', edgeType: 'on_success' },
-  ],
-});
+// Create a workflow (a v2 WorkflowGraph, built with the fluent builder).
+// Published by default so it can run; pass { publish: false } for a draft.
+const definition = await ai.workflows.create(
+  workflow('Code Review')
+    .variable('code', { type: 'string', label: 'Code', required: true })
+    .stage('analyze', (s) => s.name('Analyze Code').prompt('Analyze this code for bugs: {{code}}'))
+    .stage('report', (s) => s.name('Write Report').prompt('Write a structured review report.').contextFrom(['analyze'], 'output'))
+    .edge('analyze', 'report'),
+);
 
 // Run it
 const run = await ai.workflows.run(definition.id, {
@@ -80,13 +79,20 @@ const ai = await createGeneratorAI({
   artifactsDir: './artifacts',        // Output directory (default: ./artifacts)
   scriptsDir: './workflows',          // Workflow scripts directory
   templatesDir: './templates',        // Workflow/stage templates + system artifacts
-  projectRoot: process.cwd(),         // Project root for git operations
-  maxConcurrentSessions: 10,          // Concurrent AI sessions (default: 10)
   maxConcurrentStages: 8,             // Concurrent stage executions across runs (default: 8)
   logger: { level: 'info' },          // Pino log level or false to disable
   providerOptions: { ... },           // Harness-specific config
+  sandbox: { enabled: false },        // Run stages in a sandbox (Docker, or host with preferDocker: false)
 });
 ```
+
+The SDK wires the same workflow services as the server: durable HITL waits and
+automation iterations, an execution workspace per run under
+`<artifactsDir>/workspaces`, the admission controller, and commit/push/PR
+post-processing through the source-control flow. Source-control accounts live in
+`<artifactsDir>/source-control.json` (tokens in the encrypted secret store beside
+it); `GENERATORAI_GITHUB_TOKEN` / `GITHUB_TOKEN` / `GH_TOKEN` seeds an account
+when none exists.
 
 `harness` was called `provider` before the server's `CopilotConfig → HarnessConfig`
 rename; the field was renamed here so an SDK example and a server `.env` use the
@@ -97,17 +103,35 @@ same word for the same thing.
 ### Workflows — `ai.workflows.*`
 
 ```typescript
-// Create a workflow definition (with stages + edges)
-const def = await ai.workflows.create({ name, stages, edges, ... });
+// Create a definition from a WorkflowGraph or a builder (validated; an invalid
+// graph throws with the validator's issues). Published unless { publish: false }.
+const def = await ai.workflows.create(workflow('Name').stage('a', (s) => s.prompt('…')));
+const draft = await ai.workflows.create(graph, { publish: false });
 
-// List definitions
+// Replace the whole graph (RevisionConflictError on a stale revision), then publish
+const saved = await ai.workflows.save(def.id, graph, def.revision);
+await ai.workflows.publish(def.id);
+
+// Validate a document without storing it → { valid, issues, graph? }
+const result = ai.workflows.validate(graph);
+
+// List definitions (WorkflowDefinitionSummary[], first page)
 const defs = await ai.workflows.list();
 
-// Get definition with stages
+// Get a definition record (its whole graph in `.graph`)
 const full = await ai.workflows.get(definitionId);
 
-// Start a run
+// Create and start a run (a draft runs only with testRun: true)
 const run = await ai.workflows.run(definitionId, { variables });
+const test = await ai.workflows.run(draftId, { variables, testRun: true });
+
+// Create a run without starting it, or start a lifecycle-aware run
+// (codebases, worktrees, pre/post-processing; stage overrides by key)
+const staged = await ai.workflows.createRun(definitionId, { variables });
+const { workflowRunId } = await ai.workflows.orchestrate(definitionId, {
+  variables,
+  stageOverrides: [{ stageKey: 'report', skip: true }],
+});
 
 // Stream events (AsyncGenerator — completes on terminal state)
 for await (const event of ai.workflows.stream(runId)) { ... }
@@ -212,29 +236,39 @@ const script = ai.scripts.get(scriptId);
 
 // Reload from disk
 await ai.scripts.reload();
+
+// Materialize a script as a published definition, or materialize and run it
+const def = await ai.scripts.materialize(scriptId);
+const run = await ai.scripts.run(scriptId, { profileName: 'quick', variables });
 ```
+
+A script's default export is a `workflow()` builder from
+`@generatorai/workflow-spec/builders` (see `templates/scripts/*.workflow.mjs`).
+`ai.scripts.run` applies only a profile's `variables`. Note: the SDK creates its
+`WorkflowScriptLoader` without the `enabled` opt-in, and the loader defaults to
+disabled, so today the SDK loads no scripts (`list()` returns `[]`).
 
 ### Builders
 
-Use the fluent builder API to construct workflows programmatically:
+`workflow`, `WorkflowBuilder` and `StageBuilder` are re-exported from
+`@generatorai/workflow-spec/builders`. The builder emits a v2 `WorkflowGraph`;
+stages are identified by `key`, and edges connect keys:
 
 ```typescript
-import { WorkflowBuilder, StageBuilder } from '@generatorai/sdk';
+import { workflow, validateWorkflow, exportGraph, importGraph } from '@generatorai/sdk';
 
-const workflow = new WorkflowBuilder('Code Pipeline')
-  .addStage(
-    new StageBuilder('analyze')
-      .prompt('Analyze the code for quality issues...')
-      .build()
-  )
-  .addStage(
-    new StageBuilder('fix')
-      .prompt('Fix the issues found...')
-      .dependsOn('analyze', 'on_success')
-      .build()
-  )
-  .build();
+const graph = workflow('Code Pipeline')
+  .stage('analyze', (s) => s.prompt('Analyze the code for quality issues...'))
+  .stage('fix', (s) => s.prompt('Fix the issues found...').retry({ maxAttempts: 3 }))
+  .edge('analyze', 'fix')                  // on: 'success' by default
+  .build();                                // validates; throws WorkflowBuildError on errors
+
+const { valid, issues } = validateWorkflow(graph); // issue = { code, severity, path, stageKey?, message, hint? }
+const text = exportGraph(graph);           // canonical JSON text
+const imported = importGraph(text);        // → { valid, issues, graph? }
 ```
+
+`ai.workflows.create()` accepts either the builder itself or the built graph.
 
 ### Bring Your Own Harness
 
@@ -284,7 +318,8 @@ import { WorkflowRunStateMachine, StageRunStateMachine } from '@generatorai/sdk'
 @generatorai/sdk (facade — a SECOND composition root, not an HTTP client)
     ├── @generatorai/core (domain services, DAG scheduler, event bus)
     ├── @generatorai/db (SQLite + Drizzle ORM)
-    ├── @generatorai/shared (types, errors, config, builders)
+    ├── @generatorai/workflow-spec (WorkflowGraph schema, validator, builders)
+    ├── @generatorai/shared (types, errors, config)
     └── @generatorai/agent-harness-providers (Copilot SDK, Claude Agent SDK, …)
 ```
 

@@ -1,0 +1,15 @@
+{
+  "name": "review-trial",
+  "variables": {
+    "objective": "Inspect priority-filter compatibility"
+  },
+  "overrides": {
+    "permissionMode": "default"
+  },
+  "stageOverrides": [
+    {
+      "stageKey": "plan",
+      "skip": true
+    }
+  ]
+}

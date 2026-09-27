@@ -23,6 +23,10 @@
 // — including the first — inherits as its name; cells 2-12 also get their
 // own "Character N of 12" `aria-label` layered on top. Wrap this in your own
 // outer `Field` too, for the error line; `invalid` here only styles the cells.
+// `readOnly` shows a code this device generated (Settings › Security › Pair a
+// new device) in the same 3×4 cells: selectable and focusable, not editable,
+// drawn without the sunken input fill, in compact 32×32 cells (`title` step)
+// so a whole code fits a settings column.
 // ────────────────────────────────────────────────────────────────
 
 import { Fragment } from 'react';
@@ -37,11 +41,13 @@ export interface PairingCodeInputProps {
   onValueChange: (value: string) => void;
   invalid?: boolean;
   disabled?: boolean;
+  /** Display a generated code: focusable and selectable, not editable. */
+  readOnly?: boolean;
   className?: string;
 }
 
 /** The 12-character pairing code group, 3 groups of 4. */
-export function PairingCodeInput({ value, onValueChange, invalid = false, disabled, className }: PairingCodeInputProps) {
+export function PairingCodeInput({ value, onValueChange, invalid = false, disabled, readOnly = false, className }: PairingCodeInputProps) {
   return (
     <BaseField.Root className="contents">
       <BaseField.Label className="sr-only">Pairing code</BaseField.Label>
@@ -52,6 +58,7 @@ export function PairingCodeInput({ value, onValueChange, invalid = false, disabl
         validationType="alphanumeric"
         normalizeValue={normalizePairingCode}
         disabled={disabled}
+        readOnly={readOnly}
         className={cn('flex items-center gap-2', className)}
       >
         {Array.from({ length: PAIRING_CODE_LENGTH }, (_, index) => (
@@ -59,8 +66,9 @@ export function PairingCodeInput({ value, onValueChange, invalid = false, disabl
             <OTPField.Input
               aria-label={index === 0 ? undefined : `Character ${index + 1} of ${PAIRING_CODE_LENGTH}`}
               className={cn(
-                'h-footer w-12 rounded-control border bg-sunken text-center font-mono text-heading font-medium text-fg transition-control outline-none',
-                invalid ? 'border-err' : 'border-line-strong',
+                'rounded-control border text-center font-mono font-medium text-fg transition-control outline-none',
+                readOnly ? 'h-control-lg w-8 border-line bg-transparent text-title' : 'h-footer w-12 bg-sunken text-heading',
+                invalid ? 'border-err' : !readOnly && 'border-line-strong',
                 fieldFocus,
               )}
             />

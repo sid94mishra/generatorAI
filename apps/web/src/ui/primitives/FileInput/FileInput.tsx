@@ -6,13 +6,15 @@
 // fallback button; any future file-picker button can reuse it directly.
 // ────────────────────────────────────────────────────────────────
 
-import { useRef, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { cn } from '../../lib/cn.js';
 
 export interface FileInputProps {
   accept?: string;
   multiple?: boolean;
   disabled?: boolean;
+  /** Pick a whole folder (every file under it, with `webkitRelativePath`). */
+  directory?: boolean;
   onFilesSelected: (files: FileList) => void;
   /** Renders the visible trigger; call `open()` from its click handler. */
   children: (open: () => void) => ReactNode;
@@ -20,8 +22,12 @@ export interface FileInputProps {
 }
 
 /** A hidden file input plus a render-prop trigger that opens the native picker. */
-export function FileInput({ accept, multiple = true, disabled, onFilesSelected, children, className }: FileInputProps) {
+export function FileInput({ accept, multiple = true, disabled, directory = false, onFilesSelected, children, className }: FileInputProps) {
   const ref = useRef<HTMLInputElement>(null);
+  // `webkitdirectory` is not a typed React prop; set the attribute directly.
+  useEffect(() => {
+    ref.current?.toggleAttribute('webkitdirectory', directory);
+  }, [directory]);
   return (
     <>
       {children(() => ref.current?.click())}

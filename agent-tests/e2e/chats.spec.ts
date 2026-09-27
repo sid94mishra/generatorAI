@@ -107,16 +107,39 @@ test.describe('Chats list', () => {
   });
 });
 
-test.describe('Create chat dialog', () => {
-  test('Create button is gated on a name, then creates and navigates', async ({ page, gotoApp, tracker }) => {
+// P5-09 (redesign): the legacy `CreateChatDialog` (gated on the "Chat Name"
+// field, "Create Chat" button) is replaced by `NewChatDialog` — gated on the
+// "Task" field instead (the name is now derived from the task when left
+// blank), primary action "Start chat" (04-screen-map.md NewChat row, R-1).
+test.describe('New chat dialog', () => {
+  test('Start chat is gated on the task, then creates and navigates', async ({ page, gotoApp, tracker }) => {
     await gotoApp('/chats');
-    await page.getByRole('button', { name: /New chat/i }).first().click();
+    await page.getByRole('button', { name: 'New chat', exact: true }).first().click();
 
-    const create = page.getByRole('button', { name: /Create Chat/i });
-    await expect(create).toBeDisabled();
+    const start = page.getByRole('button', { name: /Start chat/i });
+    await expect(start).toBeDisabled();
 
     const name = `W2 Dialog ${Date.now()}`;
-    await page.getByRole('textbox', { name: /Chat Name/i }).fill(name);
+    await page.getByRole('textbox', { name: 'Task' }).fill(`Fix ${name}`);
+    await expect(start).toBeEnabled();
+    await start.click();
+
+    await expect(page).toHaveURL(/\/chats\/[0-9a-f-]{36}/, { timeout: 15_000 });
+    const id = page.url().split('/chats/')[1];
+    if (id) tracker.track('chat', id);
+  });
+});
+
+test.describe('ChatCreatePage (/chats/new)', () => {
+  test('Create chat is gated on the task, then creates and navigates', async ({ page, gotoApp, tracker }) => {
+    await gotoApp('/chats/new');
+    await expect(page.getByRole('heading', { name: 'New chat' })).toBeVisible();
+
+    const create = page.getByRole('button', { name: /Create chat/i });
+    await expect(create).toBeDisabled();
+
+    const name = `W2 Page ${Date.now()}`;
+    await page.getByRole('textbox', { name: 'What should the agent do?' }).fill(`Fix ${name}`);
     await expect(create).toBeEnabled();
     await create.click();
 

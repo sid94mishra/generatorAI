@@ -3,7 +3,8 @@
 //
 // A chip on the run screen opens this picker. Tightening applies at once;
 // loosening (fewer prompts — e.g. to auto-approve) asks first, because it
-// lets running agents act without anyone looking.
+// lets running agents act without anyone looking. The option list itself
+// (`PermissionModeOptions`) is also the start-run sheet's picker.
 // ────────────────────────────────────────────────────────────────
 
 import React, { useState } from 'react';
@@ -52,6 +53,29 @@ export function PermissionModeChip({
   );
 }
 
+/** The modes, strictest first, as sheet rows. `current: null` = none chosen yet. */
+export function PermissionModeOptions({
+  current,
+  onChoose,
+}: {
+  current: RunPermissionMode | null;
+  onChoose: (mode: RunPermissionMode) => void;
+}): React.ReactElement {
+  return (
+    <>
+      {RUN_PERMISSION_MODES.map((mode) => (
+        <SheetRow
+          key={mode}
+          title={RUN_PERMISSION_MODE_LABEL[mode]}
+          subtitle={RUN_PERMISSION_MODE_DETAIL[mode]}
+          selected={mode === current}
+          onPress={() => onChoose(mode)}
+        />
+      ))}
+    </>
+  );
+}
+
 export function PermissionModeSheet({
   visible,
   onClose,
@@ -85,15 +109,7 @@ export function PermissionModeSheet({
           <Text className="px-4 pb-2 text-sm text-muted-foreground">
             How this run's agents ask before using tools. Takes effect on their next tool call.
           </Text>
-          {RUN_PERMISSION_MODES.map((mode) => (
-            <SheetRow
-              key={mode}
-              title={RUN_PERMISSION_MODE_LABEL[mode]}
-              subtitle={RUN_PERMISSION_MODE_DETAIL[mode]}
-              selected={mode === current}
-              onPress={() => choose(mode)}
-            />
-          ))}
+          <PermissionModeOptions current={current} onChoose={choose} />
         </View>
       </Sheet>
       <ConfirmSheet

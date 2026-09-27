@@ -47,7 +47,7 @@ export interface RecordPlanResult {
  * Builds the `record_plan` tool.
  *
  * @param record Persists the plan and returns its identity. Supplied by
- *   ChatManagementService / StageExecutionService so this module stays free of
+ *   ChatManagementService / StageGatePort so this module stays free of
  *   service dependencies.
  */
 export function createRecordPlanTool(

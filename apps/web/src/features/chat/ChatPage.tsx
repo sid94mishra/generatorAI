@@ -4,7 +4,7 @@
 //
 //   header   ChatHeader (F-chat-01): breadcrumb, status, fork provenance,
 //            branch chip, More (Open in editor, Rename, Copy transcript, Fork,
-//            Archive), dock toggle — the route has `legacyHeader: false`
+//            Archive), dock toggle
 //   main     the archived banner + ChatTranscript (F-chat-02, TranscriptView)
 //   bottom   the composer block with the live-activity line and ChangesTray
 //   dock     blocks/dock Dock (DockFrame owns the split, the <1200px sheet,

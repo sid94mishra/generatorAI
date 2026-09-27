@@ -24,6 +24,8 @@ import { StepList } from '../StepRow/StepList.js';
 import { ThoughtPill } from '../ThoughtPill/ThoughtPill.js';
 import { UsageChip } from '../UsageChip/UsageChip.js';
 import { useTranscriptActions } from '../transcriptContext.js';
+import { UserMessage } from '../UserMessage/UserMessage.js';
+import { segmentCardRenderer } from './segmentCards.js';
 
 export interface TurnBodyProps {
   /** Ordered segments (`deriveSegments(blocks)`). The primary input. */
@@ -139,6 +141,25 @@ function TurnBodyImpl({
                 {ctx.renderScmResult(seg.scmResult)}
               </div>
             ) : null;
+          case 'operator':
+            // A message an operator sent into a workflow stage (the stage conversation).
+            return <UserMessage key={seg.id} content={seg.text} />;
+          case 'workflow_run': {
+            const render = segmentCardRenderer('workflow_run');
+            return render ? (
+              <div key={seg.id} className="min-w-0" data-gai-block="workflow-run">
+                {render(seg, ctx)}
+              </div>
+            ) : null;
+          }
+          case 'workflow_draft': {
+            const render = segmentCardRenderer('workflow_draft');
+            return render ? (
+              <div key={seg.id} className="min-w-0" data-gai-block="workflow-draft">
+                {render(seg, ctx)}
+              </div>
+            ) : null;
+          }
         }
       })}
 

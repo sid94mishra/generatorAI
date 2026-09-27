@@ -1,0 +1,64 @@
+{
+  "tag": "SMOKE-loop",
+  "description": "live agent smoke: one agent stage, then a generic loop that runs its check body exactly twice and accepts the last iteration",
+  "timeoutMs": 300000,
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "e2e-smoke-loop"
+    },
+    "stages": [
+      {
+        "key": "hello",
+        "name": "hello",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "hello",
+            "text": "Reply with exactly one word: HELLO"
+          }
+        ]
+      },
+      {
+        "key": "twice",
+        "name": "twice",
+        "kind": "loop",
+        "loop": {
+          "maxIterations": 2,
+          "exits": [
+            {
+              "when": "not stages.tick.output.passed",
+              "action": "fail",
+              "reason": "check_failed"
+            }
+          ],
+          "onLimit": {
+            "mode": "accept_last"
+          }
+        },
+        "budget": {
+          "maxTurns": 10
+        }
+      },
+      {
+        "key": "tick",
+        "name": "tick",
+        "parentKey": "twice",
+        "kind": "check",
+        "check": {
+          "command": "node",
+          "args": [
+            "--version"
+          ],
+          "timeoutMs": 60000
+        }
+      }
+    ],
+    "edges": [
+      {
+        "from": "hello",
+        "to": "twice"
+      }
+    ]
+  }
+}

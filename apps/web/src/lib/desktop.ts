@@ -200,6 +200,16 @@ export const desktopUpdates = {
   },
 };
 
+/** The embedded server the desktop shell owns (a browser tab cannot restart its server). */
+export const desktopServer = {
+  canRestart: (): boolean => isDesktop && typeof bridge()?.restartServer === 'function',
+  restart: async (): Promise<void> => {
+    const api = bridge()?.restartServer;
+    if (!api) throw new Error('Only the desktop app can restart its server.');
+    await api();
+  },
+};
+
 export const desktopWindow = {
   /** Zoom/restore, for the native double-click-the-title-bar gesture. */
   toggleMaximize: () => void bridge()?.window?.toggleMaximize().catch(() => undefined),

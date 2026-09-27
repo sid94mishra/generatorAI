@@ -195,6 +195,8 @@ function buildUsagePayload(
     inputTokens,
     outputTokens,
     cost,
+    // The SDK's `total_cost_usd`: a dollar figure the provider reports (P07 WP-7.3).
+    ...(typeof cost === 'number' && Number.isFinite(cost) ? { costUsd: cost } : {}),
     durationMs,
     provider: 'claude-agent' as const,
     ...(cacheReadTokens != null ? { cacheReadTokens } : {}),

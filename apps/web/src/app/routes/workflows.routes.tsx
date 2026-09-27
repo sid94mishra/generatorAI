@@ -1,35 +1,41 @@
-// docs/redesign/07-phases.md §P1-S3. Workflow-owned pages (D-35); this
-// module only wraps them with `legacyHeader: true` until PW ports them
-// (docs/redesign/04-screen-map.md §0); the builder routes force the rail
-// (06 §2.5). Logged in docs/redesign/COORDINATION.md
-// as a whole-repo mechanical change (07-phases.md §Running in parallel).
+// docs/redesign/07-phases.md §P1-S3. The Workflows list, the definition page
+// and New workflow are on the kit (PW-a: `features/workflows`, own PageHeader);
+// the builder (PW-b, `features/workflows/builder`) and the run page (PW-c) are
+// on the kit too; the builder route forces the rail (06 §2.5).
 import type { RouteObject } from 'react-router';
 import { defineRoute } from './defineRoute.js';
 
 export const workflowsRoutes: RouteObject[] = [
   defineRoute(
     'workflows',
-    () => import('@/pages/WorkflowListPage.js').then((m) => ({ default: m.WorkflowListPage })),
-    { legacyHeader: true, nav: 'workflows', title: 'Workflows' },
+    () => import('@/features/workflows/list/WorkflowsListPage.js').then((m) => ({ default: m.WorkflowsListPage })),
+    { nav: 'workflows', title: 'Workflows' },
   ),
   defineRoute(
     'workflows/new',
-    () => import('@/pages/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })),
-    { legacyHeader: true, forceRail: true, nav: 'workflows', title: 'Workflow Builder' },
+    () => import('@/features/workflows/create/WorkflowNewPage.js').then((m) => ({ default: m.WorkflowNewPage })),
+    { nav: 'workflows', title: 'New workflow' },
   ),
   defineRoute(
     'workflows/:id',
-    () => import('@/pages/WorkflowDefinitionPage.js').then((m) => ({ default: m.WorkflowDefinitionPage })),
-    { legacyHeader: true, nav: 'workflows', title: 'Workflow' },
+    () => import('@/features/workflows/detail/WorkflowDetailPage.js').then((m) => ({ default: m.WorkflowDetailPage })),
+    { nav: 'workflows', title: 'Workflow' },
   ),
   defineRoute(
     'workflows/:id/edit',
-    () => import('@/pages/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })),
-    { legacyHeader: true, forceRail: true, nav: 'workflows', title: 'Workflow Builder' },
+    () => import('@/features/workflows/builder/WorkflowBuilderPage.js').then((m) => ({ default: m.WorkflowBuilderPage })),
+    { forceRail: true, nav: 'workflows', title: 'Workflow Builder' },
   ),
   defineRoute(
     'workflows/:id/runs/:runId',
-    () => import('@/pages/WorkflowRunPageV2.js').then((m) => ({ default: m.WorkflowRunPageV2 })),
-    { legacyHeader: true, nav: 'workflows', title: 'Workflow Run' },
+    // PW-c: the run workspace on T-04 renders its own RunHeader and the kit
+    // dock. A stage transcript draws the workflow cards too (D-35 segment-card
+    // registry).
+    () =>
+      Promise.all([
+        import('@/app/registries/workflowTranscriptCards.js'),
+        import('@/features/workflows/run/WorkflowRunPage.js'),
+      ]).then(([, m]) => ({ default: m.WorkflowRunPage })),
+    { nav: 'workflows', title: 'Workflow Run' },
   ),
 ];

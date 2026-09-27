@@ -119,6 +119,10 @@ export class HarnessProxy implements IAgentHarness {
   hasLiveConversation(conversationId: string): boolean {
     return this._adapter.hasLiveConversation(conversationId);
   }
+  conversationHarness(conversationId: string): HarnessType | undefined {
+    return this._adapter.conversationHarness?.(conversationId);
+  }
+
   getProviderSessionId(conversationId: string): string | undefined {
     return this._adapter.getProviderSessionId?.(conversationId);
   }

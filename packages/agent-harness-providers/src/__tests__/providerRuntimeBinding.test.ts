@@ -52,8 +52,10 @@ const NO_CAPABILITIES = {
   reasoningEfforts: [],
   planMode: false,
   mcpServers: false,
-  skillDirectories: false,
-  fullToolGating: false,
+  approvalGating: 'none',
+  hostTools: 'none',
+  structuredOutput: 'none',
+  skills: 'none',
   sessionPersistence: false,
   budgetTracking: false,
 } as const;

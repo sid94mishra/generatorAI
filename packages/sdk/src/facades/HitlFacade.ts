@@ -1,60 +1,40 @@
 // ────────────────────────────────────────────────────────────────
 // HitlFacade — ai.hitl.*
 //
-// Human-in-the-loop operations: interrupt stages to request human
-// input, resume with approval/rejection.
+// The operator side of the decisions a run waits on: a stage's human gates
+// (completion review, tool permission, question, plan review), parked
+// loops and approval/event waits — the run's sub-workflow children's
+// included. Everything goes through `WorkflowApprovalService`, the one way
+// the commands route, the run page and the workflow tools answer them:
+// an approval wait's form is validated, and an answer reaches the child
+// run that owns the instance.
 // ────────────────────────────────────────────────────────────────
 
-import type { CoreServices, HitlService } from '@generatorai/core';
+import { RunCommandRefusedError, type ApprovalVerdictInput, type CoreServices, type PendingDecision, type WorkflowApprovalService } from '@generatorai/core';
 
-export interface InterruptOptions {
-  /** Prompt to display to the human reviewer */
-  prompt?: string;
-}
-
-export interface InterruptResolution {
-  approved: boolean;
-  value?: unknown;
-  reason?: string;
-}
+export type { ApprovalVerdictInput, PendingDecision };
 
 export class HitlFacade {
-  private hitlService: HitlService;
+  private approvals: WorkflowApprovalService;
 
-  constructor(private services: CoreServices) {
-    this.hitlService = services.hitlService;
+  constructor(services: CoreServices) {
+    this.approvals = services.workflowApprovalService;
   }
 
-  /**
-   * Interrupt a running stage and wait for human input.
-   *
-   * The stage enters `awaiting_input` status. Call `resume()` to continue.
-   * Returns a promise that resolves when the human responds.
-   */
-  async interrupt(
-    stageRunId: string,
-    workflowRunId: string,
-    data: unknown,
-    options?: InterruptOptions,
-  ): Promise<InterruptResolution> {
-    return this.hitlService.interrupt(stageRunId, workflowRunId, data, options);
+  /** The decisions the run waits on (its sub-workflow children's included); `interruptData` is the request. */
+  pending(workflowRunId: string): Promise<PendingDecision[]> {
+    return this.approvals.listPending(workflowRunId);
   }
 
-  /**
-   * Resume a stage that is awaiting human input.
-   */
-  async resume(
-    stageRunId: string,
-    workflowRunId: string,
-    resolution: InterruptResolution,
-  ): Promise<{ ok: boolean; reason?: string }> {
-    return this.hitlService.resume(stageRunId, workflowRunId, resolution);
+  /** Answer a pending decision. Throws when the engine refuses (not awaiting input, stale version, …). */
+  async resolve(workflowRunId: string, instanceId: string, verdict: ApprovalVerdictInput): Promise<void> {
+    const r = await this.approvals.respond(workflowRunId, instanceId, verdict);
+    if (!r.ok) throw new RunCommandRefusedError(r);
   }
 
-  /**
-   * Cancel a pending interrupt (rejects the waiting promise).
-   */
-  cancelWaiter(stageRunId: string, reason: string): void {
-    this.hitlService.cancelWaiter(stageRunId, reason);
+  /** Cancel a pending instance (its waiter is released by the engine). */
+  async cancel(workflowRunId: string, instanceId: string): Promise<void> {
+    const r = await this.approvals.cancel(workflowRunId, instanceId);
+    if (!r.ok) throw new RunCommandRefusedError(r);
   }
 }

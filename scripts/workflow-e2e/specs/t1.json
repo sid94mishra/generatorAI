@@ -1,0 +1,147 @@
+{
+  "tag": "T1",
+  "description": "fan-out/fan-in: start -> B1..B5 -> join -> final (F T1)",
+  "timeoutMs": 900000,
+  "graph": {
+    "formatVersion": 2,
+    "workflow": {
+      "name": "e2e-t1-fanout"
+    },
+    "stages": [
+      {
+        "key": "start",
+        "name": "start",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "start",
+            "text": "Write one line containing the token START."
+          }
+        ]
+      },
+      {
+        "key": "b1",
+        "name": "B1",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B1",
+            "text": "Write one line containing the token B1."
+          }
+        ]
+      },
+      {
+        "key": "b2",
+        "name": "B2",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B2",
+            "text": "Write one line containing the token B2."
+          }
+        ]
+      },
+      {
+        "key": "b3",
+        "name": "B3",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B3",
+            "text": "Write one line containing the token B3."
+          }
+        ]
+      },
+      {
+        "key": "b4",
+        "name": "B4",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B4",
+            "text": "Write one line containing the token B4."
+          }
+        ]
+      },
+      {
+        "key": "b5",
+        "name": "B5",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "B5",
+            "text": "Write one line containing the token B5."
+          }
+        ]
+      },
+      {
+        "key": "join",
+        "name": "join",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "join",
+            "text": "Write one line containing the token JOIN."
+          }
+        ]
+      },
+      {
+        "key": "final",
+        "name": "final",
+        "kind": "agent",
+        "prompts": [
+          {
+            "label": "final",
+            "text": "Write one line containing the token FINAL."
+          }
+        ]
+      }
+    ],
+    "edges": [
+      {
+        "from": "start",
+        "to": "b1"
+      },
+      {
+        "from": "start",
+        "to": "b2"
+      },
+      {
+        "from": "start",
+        "to": "b3"
+      },
+      {
+        "from": "start",
+        "to": "b4"
+      },
+      {
+        "from": "start",
+        "to": "b5"
+      },
+      {
+        "from": "b1",
+        "to": "join"
+      },
+      {
+        "from": "b2",
+        "to": "join"
+      },
+      {
+        "from": "b3",
+        "to": "join"
+      },
+      {
+        "from": "b4",
+        "to": "join"
+      },
+      {
+        "from": "b5",
+        "to": "join"
+      },
+      {
+        "from": "join",
+        "to": "final"
+      }
+    ]
+  }
+}

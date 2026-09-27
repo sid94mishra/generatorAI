@@ -126,6 +126,8 @@ describe('MultiHarness — an established binding survives a model-name inferenc
       harnessType: 'claude-agent',
     } as CreateConversationParams);
     expect(harness.ownerOf('chat-1')).toBe('claude-agent');
+    // The port-level answer plan records read (WP-1.4).
+    expect(harness.conversationHarness('chat-1')).toBe('claude-agent');
 
     // First prompt. `buildConversationConfig` replays the chat's stored model,
     // which for a web-created chat is the composer default 'auto', and carries

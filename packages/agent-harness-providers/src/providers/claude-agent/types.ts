@@ -182,6 +182,8 @@ export interface StoredConversationConfig {
   agents?: Record<string, unknown>;
   /** Explicit skill allow-list by name. Claude's only way to turn skills on. */
   skills?: string[];
+  /** Local plugin roots (`Options.plugins`) — where the session's skills live. */
+  plugins?: Array<{ type: 'local'; path: string }>;
   /** Name of the agent to run on the main thread (replaces the base system prompt). */
   agent?: string;
   hooks?: unknown;
@@ -201,7 +203,7 @@ export interface StoredConversationConfig {
   lastUsedAt?: number;
   /**
    * HITL-06 (Claude parity): Domain permission callback provided by the
-   * caller (usually `StageExecutionService.buildPermissionHandler`). Bridged
+   * caller (the session composer's gates, `applyModeConfig`). Bridged
    * to the Claude SDK's `canUseTool` in `buildQueryOptions`. When absent,
    * the SDK's own `permissionMode` decides.
    */

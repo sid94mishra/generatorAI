@@ -52,7 +52,7 @@ import {
   DrizzleChatRepository,
   DrizzleProjectRepository,
   DrizzleStageRunRepository,
-  DrizzleWorkflowDefinitionRepository,
+  SqliteWorkflowDefinitionStore,
   DrizzleWorkflowRunRepository,
   type AppDatabase,
 } from '@generatorai/db';
@@ -137,7 +137,7 @@ beforeEach(async () => {
     },
     runs: new DrizzleWorkflowRunRepository(db),
     stageRuns: new DrizzleStageRunRepository(db),
-    definitions: new DrizzleWorkflowDefinitionRepository(db),
+    definitions: new SqliteWorkflowDefinitionStore(db),
     automations: new DrizzleAutomationRepository(db),
     executions: new DrizzleAutomationExecutionRepository(db),
     seqBase: 1,

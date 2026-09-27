@@ -13,7 +13,7 @@ import {
 } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { ApiError } from '@/platform/apiFetch.js';
-import { toast } from '@/components/Toast.js';
+import { toast } from '@/ui/primitives/Toast/Toast.js';
 import { globalSingleton } from '../lib/globalSingleton.js';
 
 /**
@@ -116,9 +116,7 @@ function onMutationError(
   mutation: Mutation<unknown, unknown, unknown, unknown>,
 ): void {
   if (!shouldReportMutation(mutation)) return;
-  toast({
-    variant: 'error',
-    title: readMeta(mutation.options.meta).errorTitle ?? 'Action failed',
+  toast.error(readMeta(mutation.options.meta).errorTitle ?? 'Action failed', {
     description: describeRequestError(error),
   });
 }
@@ -142,9 +140,7 @@ function createQueryErrorReporter() {
       if (query.state.data === undefined) return;
       if (reported.has(query.queryHash)) return;
       reported.add(query.queryHash);
-      toast({
-        variant: 'warning',
-        title: readMeta(query.meta).errorTitle ?? "Couldn't refresh",
+      toast.error(readMeta(query.meta).errorTitle ?? "Couldn't refresh", {
         description: `${describeRequestError(error)} Showing the last data received.`,
       });
     },

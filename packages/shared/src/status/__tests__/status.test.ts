@@ -7,7 +7,6 @@ import type { SessionStatus } from '../../types/Session.js';
 import type { CheckConclusion, DeviceLoginStatus, ScmFlowResult, ScmFlowStep } from '../../types/SourceControl.js';
 import type { WidgetInstanceStatus } from '../../types/Widget.js';
 import type { StageRunStatus } from '../../types/WorkflowRun.js';
-import type { WorkflowStatus } from '../../types/WorkflowStateMachine.js';
 import type { BrowserSessionStatus } from '../../types/Workspace.js';
 import {
   CHANGE_KIND,
@@ -38,9 +37,8 @@ type Every<U extends string> = Record<U, true>;
 const every = <U extends string>(r: Every<U>): string[] => Object.keys(r).sort();
 
 const UNION_VALUES: Record<StatusDomain, string[]> = {
-  workflowRun: every<RunStatus>({ created: true, pending: true, starting: true, running: true, paused: true, cancelling: true, completed: true, failed: true, cancelled: true }),
-  stageRun: every<StageRunStatus>({ pending: true, queued: true, running: true, paused: true, completed: true, failed: true, cancelled: true, skipped: true, sleeping: true, awaiting_input: true }),
-  legacyWorkflow: every<WorkflowStatus>({ pending: true, queued: true, running: true, paused: true, completed: true, failed: true, cancelled: true }),
+  workflowRun: every<RunStatus>({ created: true, pending: true, starting: true, running: true, waiting: true, paused: true, finalizing: true, cancelling: true, completed: true, failed: true, cancelled: true }),
+  stageRun: every<StageRunStatus>({ pending: true, ready: true, starting: true, running: true, validating: true, awaiting_input: true, waiting: true, retry_wait: true, paused: true, completed: true, failed: true, skipped: true, cancelled: true }),
   automationExecution: every<AutomationExecutionStatus>({ pending: true, running: true, completed: true, partial: true, failed: true, cancelled: true }),
   automationRunItem: every<AutomationRunItemStatus>({ pending: true, running: true, completed: true, failed: true, cancelled: true }),
   backgroundTask: every<BackgroundTaskStatus>({ spawned: true, running: true, needs_review: true, completed: true, failed: true, cancelled: true }),
@@ -68,9 +66,8 @@ const UNION_VALUES: Record<StatusDomain, string[]> = {
  * `value → state` or `value → state "Label"`, or `value → null`.
  */
 const TABLE: Record<StatusDomain, string> = {
-  workflowRun: 'created → queued; pending → queued; starting → running "Starting"; running → running; paused → paused; cancelling → running "Cancelling"; completed → succeeded; failed → failed; cancelled → skipped "Cancelled"',
-  stageRun: 'pending → queued; queued → queued; running → running; paused → paused; completed → succeeded; failed → failed; cancelled → skipped "Cancelled"; skipped → skipped; sleeping → waiting; awaiting_input → needs_you',
-  legacyWorkflow: 'pending → queued; queued → queued; running → running; paused → paused; completed → succeeded; failed → failed; cancelled → skipped "Cancelled"',
+  workflowRun: 'created → queued; pending → queued; starting → running "Starting"; running → running; waiting → waiting; paused → paused; finalizing → running "Finalizing"; cancelling → running "Cancelling"; completed → succeeded; failed → failed; cancelled → skipped "Cancelled"',
+  stageRun: 'pending → queued; ready → queued "Ready"; starting → running "Starting"; running → running; validating → running "Validating"; awaiting_input → needs_you; waiting → waiting; retry_wait → waiting "Retrying"; paused → paused; completed → succeeded; failed → failed; skipped → skipped; cancelled → skipped "Cancelled"',
   automationExecution: 'pending → queued; running → running; completed → succeeded; partial → failed "Partly failed"; failed → failed; cancelled → skipped "Cancelled"',
   automationRunItem: 'pending → queued; running → running; completed → succeeded; failed → failed; cancelled → skipped "Cancelled"',
   backgroundTask: 'spawned → queued "Starting"; running → running; needs_review → needs_you "Needs review"; completed → succeeded "Done"; failed → failed; cancelled → skipped "Cancelled"',

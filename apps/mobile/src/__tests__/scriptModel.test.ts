@@ -6,7 +6,6 @@ import {
   parseScriptProfiles,
   parseScriptRows,
   profileSummary,
-  scriptRunIdOf,
   scriptSubtitle,
 } from '../components/work/scriptModel';
 
@@ -27,19 +26,27 @@ describe('script rows', () => {
 });
 
 describe('script detail', () => {
-  it('reads the nested shape the server returns', () => {
+  it('reads metadata and the WorkflowGraph the server returns', () => {
     const detail = parseScriptDetail(
       {
         metadata: { id: 's1', name: 'Nightly', stageCount: 0 },
-        definition: { variables: [{ name: 'repo' }] },
-        stages: [{ localId: 'plan', config: { name: 'Plan', description: 'Think' } }, { localId: 'build', config: {} }],
+        graph: {
+          formatVersion: 2,
+          workflow: { name: 'Nightly', description: 'Every night', variables: [{ name: 'repo' }] },
+          stages: [
+            { kind: 'agent', key: 'plan', name: 'Plan', description: 'Think' },
+            { kind: 'agent', key: 'build', name: '' },
+          ],
+          edges: [{ from: 'plan', to: 'build', on: 'success' }],
+        },
       },
       's1',
     );
     expect(detail?.stageCount).toBe(2);
+    expect(detail?.description).toBe('Every night');
     expect(detail?.stages).toEqual([
-      { id: 'plan', name: 'Plan', description: 'Think' },
-      { id: 'build', name: 'build', description: null },
+      { key: 'plan', name: 'Plan', description: 'Think' },
+      { key: 'build', name: 'build', description: null },
     ]);
     expect(detail?.variables).toEqual([{ name: 'repo' }]);
     expect(parseScriptDetail(null, 's1')).toBeNull();
@@ -48,14 +55,14 @@ describe('script detail', () => {
 
 describe('profiles', () => {
   const profiles = parseScriptProfiles([
-    { name: 'fast', variables: { depth: 1 }, stageOverrides: [{ stageName: 'a', skip: true }], permissionMode: 'askOnce' },
+    { name: 'fast', variables: { depth: 1 }, stageOverrides: [{ stageKey: 'a', skip: true }], overrides: { permissionMode: 'acceptEdits' } },
     { name: 'plain' },
     { description: 'nameless' },
   ]);
 
   it('parses and summarises', () => {
     expect(profiles.map((p) => p.name)).toEqual(['fast', 'plain']);
-    expect(profileSummary(profiles[0]!)).toBe('Pre-fills 1 input · skips 1 stage · permissions: askOnce');
+    expect(profileSummary(profiles[0]!)).toBe('Pre-fills 1 input · skips 1 stage · permissions: acceptEdits');
     expect(profileSummary(profiles[1]!)).toBeNull();
   });
 
@@ -63,13 +70,5 @@ describe('profiles', () => {
     const vars = [{ name: 'depth', defaultValue: 5 }, { name: 'repo' }];
     expect(applyProfileDefaults(vars, profiles[0]!)).toEqual([{ name: 'depth', defaultValue: 1 }, { name: 'repo' }]);
     expect(applyProfileDefaults(vars, null)).toBe(vars);
-  });
-});
-
-describe('scriptRunIdOf', () => {
-  it('reads runId from the 202 body', () => {
-    expect(scriptRunIdOf({ definitionId: 'd', runId: 'r1', status: 'running' })).toBe('r1');
-    expect(scriptRunIdOf({ id: 'r2' })).toBe('r2');
-    expect(scriptRunIdOf({})).toBeNull();
   });
 });

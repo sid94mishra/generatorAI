@@ -8,7 +8,7 @@ export const homeRoutes: RouteObject[] = [
     undefined,
     () => import('@/features/home/HomePage.js').then((m) => ({ default: m.HomePage })),
     // Renders its own PageHeader (L-01).
-    { legacyHeader: false, nav: 'home', title: 'Home' },
+    { nav: 'home', title: 'Home' },
     true,
   ),
 ];

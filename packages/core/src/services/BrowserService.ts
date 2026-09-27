@@ -519,8 +519,8 @@ export class BrowserService {
   }
 
   /**
-   * Idempotent re-attach hook invoked by ChatManagementService /
-   * StageExecutionService on every new user prompt. Restores agent
+   * Idempotent re-attach hook invoked by the session composer on every new
+   * prompt (chats and stages). Restores agent
    * access to a browser the user detached between turns — matches the
    * "next prompt reattaches" semantics discussed in Session 78.
    * No-op when the session doesn't exist yet.

@@ -24,17 +24,17 @@ const WEB_RESTRICTED_IMPORT_PATHS = [
   {
     name: 'lucide-react',
     importNames: ['Loader2'],
-    message: 'Use <Spinner> from @/components/ui instead of raw Loader2.',
+    message: 'Use <Spinner> from @/ui/primitives instead of raw Loader2.',
   },
 ];
 const WEB_RESTRICTED_SYNTAX = [
   {
     selector: "JSXOpeningElement[name.name='button']",
-    message: 'Use <Button> from @/components/ui instead of a raw <button>.',
+    message: 'Use <Button> / <IconButton> from @/ui/primitives instead of a raw <button>.',
   },
   {
     selector: "JSXOpeningElement[name.name='select']",
-    message: 'Use <Select> from @/components/ui instead of a raw <select>.',
+    message: 'Use <Select> from @/ui/primitives instead of a raw <select>.',
   },
 ];
 
@@ -43,10 +43,9 @@ const WEB_NEW_CODE = 'apps/web/src/{ui,blocks,features,app}/**/*.{ts,tsx}';
 const WEB_TEST_FILES = ['apps/web/src/**/__tests__/**', 'apps/web/src/**/*.test.{ts,tsx}'];
 const WEB_STORIES = '**/*.stories.tsx';
 
-// The same raw-element / confirm rules for the redesign folders, pointing at the
-// new kit: `ui/` may not import @/components/*, so the legacy messages above
-// would steer a session the wrong way (P0 review R12). Loader2 needs no entry
-// here: every lucide import outside ui/icons is already banned (LUCIDE below).
+// The same raw-element / confirm rules for the redesign folders, as errors.
+// Loader2 needs no entry here: every lucide import outside ui/icons is already
+// banned (LUCIDE below).
 const NEW_CODE_RESTRICTED_SYNTAX = [
   {
     selector: "JSXOpeningElement[name.name='button']",
@@ -69,7 +68,7 @@ const UI_LAYER = [
     message: 'ui/ is presentational: pass data and callbacks in as props.',
   },
   {
-    group: ['@/stores/*', '@/platform/*', '@/hooks/*', '@/features/*', '@/blocks/*', '@/components/*', '@/pages/*'],
+    group: ['@/stores/*', '@/platform/*', '@/hooks/*', '@/features/*', '@/blocks/*'],
     message: 'ui/ may import only ui/ (D-04).',
   },
 ];
@@ -195,17 +194,17 @@ export default [
     },
   },
   {
-    // Design-system enforcement for the LEGACY web code (see apps/web/DESIGN_SYSTEM.md).
-    // `warn` during the migration phases (the ratchet holds the counts). The
-    // primitives themselves are exempt; stories may use raw elements (D-45).
+    // Design-system enforcement for the .tsx outside the redesign folders (the
+    // entry, providers, hooks). `warn` (the ratchet holds the counts); stories
+    // may use raw elements (D-45).
     files: ['apps/web/src/**/*.tsx'],
-    ignores: ['apps/web/src/components/ui/**', WEB_NEW_CODE, WEB_STORIES, ...WEB_TEST_FILES],
+    ignores: [WEB_NEW_CODE, WEB_STORIES, ...WEB_TEST_FILES],
     rules: {
       'no-restricted-syntax': ['warn', ...WEB_RESTRICTED_SYNTAX],
       'no-restricted-imports': ['warn', { paths: WEB_RESTRICTED_IMPORT_PATHS }],
       'no-restricted-globals': [
         'warn',
-        { name: 'confirm', message: 'Use <ConfirmDialog> from @/components/ui.' },
+        { name: 'confirm', message: 'Use useConfirm() / <AlertDialog> from @/ui/primitives (P-32).' },
       ],
     },
   },
@@ -289,7 +288,6 @@ export default [
         { type: 'app', pattern: 'apps/web/src/app', partialMatch: false },
         { type: 'platform', pattern: 'apps/web/src/platform', partialMatch: false },
         { type: 'data', pattern: 'apps/web/src/{stores,hooks,lib,utils,providers,types,audio}', partialMatch: false },
-        { type: 'legacy', pattern: 'apps/web/src/{components,pages}', partialMatch: false },
         // Stylesheets (globals.css), imported for their side effect by the entry.
         { type: 'styles', pattern: 'apps/web/src/styles', partialMatch: false },
         // The loose files at the top of src (App, main, router). v7 has no
@@ -313,43 +311,26 @@ export default [
               from: { element: { type: 'features' } },
               allow: { to: { element: { type: 'features', captured: { domain: '{{ from.element.captured.domain }}' } } } },
             },
-            // Migration scaffolding; removed in P5-09. ChatsList's "New chat"
-            // button keeps opening the legacy dialog until the new create-chat
-            // page/dialog lands (07-phases.md P3-07, 04-screen-map.md §2.1 note).
-            {
-              from: { element: { type: 'features' } },
-              allow: { to: { element: { type: 'legacy' }, file: { path: ['apps/web/src/components/chat/CreateChatDialog.tsx'] } } },
-            },
-            { from: { element: { type: 'app' } }, allow: toTypes('ui', 'blocks', 'features', 'data', 'platform', 'legacy') },
+            { from: { element: { type: 'app' } }, allow: toTypes('ui', 'blocks', 'features', 'data', 'platform') },
             { from: { element: { type: 'data' } }, allow: toTypes('data', 'platform') },
-            // Migration scaffolding; removed in P7. The only data → legacy edge
-            // left (hooks/queries.ts, providers/QueryProvider.tsx → the legacy
-            // Toast), allowed to that target file only so no new edge can
-            // appear. It goes when those callers move to the kit toast. (The
-            // composer builtins moved to packages/client-core in P4-08.)
+            // The kit's pure helpers in ui/lib are shared with the data layer:
+            // ThemeProvider (providers/) writes the appearance through
+            // applyAppearance (D-25, 09 §3.3). And the imperative kit toast:
+            // the global mutation/query error handlers (providers/QueryProvider)
+            // and a few hooks/queries.ts `onError`s report through `toast.error`
+            // (D-30). Those two targets only; the rest of ui/ stays out of data.
             {
               from: { element: { type: 'data' } },
               allow: {
                 to: {
-                  element: { type: 'legacy' },
-                  file: { path: ['apps/web/src/components/Toast.tsx'] },
+                  element: { type: 'ui' },
+                  file: { path: ['apps/web/src/ui/lib/*.ts', 'apps/web/src/ui/primitives/Toast/Toast.tsx'] },
                 },
               },
             },
-            // The kit's pure helpers in ui/lib (applyAppearance, cn) are shared
-            // with the data layer: ThemeProvider (providers/) writes the
-            // appearance through applyAppearance (D-25, 09 §3.3), and the
-            // legacy lib/utils `cn` re-exports ui/lib/cn. Only ui/lib; never
-            // components.
-            {
-              from: { element: { type: 'data' } },
-              allow: { to: { element: { type: 'ui' }, file: { path: ['apps/web/src/ui/lib/*.ts'] } } },
-            },
             { from: { element: { type: 'platform' } }, allow: toTypes('platform', 'data') },
-            // Migration scaffolding; deleted in P7.
-            { from: { element: { type: 'legacy' } }, allow: toTypes('legacy', 'ui', 'blocks', 'data', 'platform') },
             // `root` too: each loose file is its own element, and main.tsx imports App.tsx.
-            { from: { element: { type: 'root' } }, allow: toTypes('root', 'app', 'ui', 'data', 'platform', 'legacy', 'styles') },
+            { from: { element: { type: 'root' } }, allow: toTypes('root', 'app', 'ui', 'data', 'platform', 'styles') },
           ],
         },
       ],
@@ -361,15 +342,15 @@ export default [
     },
   },
   // (c) no-restricted-imports per layer. The file sets are DISJOINT, so no
-  // block replaces another's rule; each legacy block repeats
+  // block replaces another's rule; the first block repeats
   // WEB_RESTRICTED_IMPORT_PATHS because it replaces the design-system block's
   // rule above (the new folders are outside that block).
   {
-    // Legacy code (everything outside the redesign folders and components/ui):
-    // `warn` until P7, ratcheted by check-design-system.mjs (lucideDirectImport,
+    // Everything outside the redesign folders (entry, data layer, platform):
+    // `warn`, ratcheted by check-design-system.mjs (lucideDirectImport,
     // rawHeadlessImport).
     files: ['apps/web/src/**/*.{ts,tsx}'],
-    ignores: [WEB_NEW_CODE, 'apps/web/src/components/ui/**', ...WEB_TEST_FILES],
+    ignores: [WEB_NEW_CODE, ...WEB_TEST_FILES],
     rules: {
       'no-restricted-imports': ['warn', { paths: [...WEB_RESTRICTED_IMPORT_PATHS, LUCIDE], patterns: [HEADLESS] }],
     },
@@ -389,16 +370,6 @@ export default [
     ignores: WEB_TEST_FILES,
     rules: {
       'no-restricted-imports': ['error', { paths: [LUCIDE], patterns: [HEADLESS, ...FEATURES_DATA] }],
-    },
-  },
-  {
-    // The legacy components/ui primitives wrap Radix by design and own the
-    // Spinner, so they were never under the Loader2 path or a headless ban;
-    // they are held to the D-17 lucide rule only (deleted in P7).
-    files: ['apps/web/src/components/ui/**/*.{ts,tsx}'],
-    ignores: WEB_TEST_FILES,
-    rules: {
-      'no-restricted-imports': ['warn', { paths: [LUCIDE] }],
     },
   },
   {

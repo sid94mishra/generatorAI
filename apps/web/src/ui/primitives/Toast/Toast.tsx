@@ -9,8 +9,8 @@
 // bottom-right, 16px from the edges, on the toast layer (D-41).
 // The toaster region carries `data-gai-overlay="toast"` and each toast keeps
 // sonner's own `data-sonner-toast`, which the native browser view also
-// matches (D-19, `GAI_OVERLAY_SELECTOR`). The kit toaster has its own id, so
-// it never renders toasts fired at the legacy one (and vice versa).
+// matches (D-19, `GAI_OVERLAY_SELECTOR`). The toaster has its own id, so
+// only `toast.*` from here reaches it.
 // ────────────────────────────────────────────────────────────────
 
 import type { CSSProperties, ReactNode } from 'react';

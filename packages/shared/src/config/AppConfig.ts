@@ -56,21 +56,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  // WS-D1 — workflow stage liveness. `stageTimeoutMs` is the default stage
-  // timeout when a stage definition sets none (the documented 300 s);
-  // `maxStageTimeoutMs` caps any explicit value. The heartbeat is written by
-  // the executor every `heartbeatIntervalMs` while a stage is queued/running
-  // and the run reconciler fails a stage whose last beat is older than
-  // `heartbeatIntervalMs * heartbeatStaleMultiplier`.
-  workflow: z
-    .object({
-      stageTimeoutMs: z.number().int().min(1_000).max(24 * 60 * 60 * 1000).default(300_000),
-      maxStageTimeoutMs: z.number().int().min(1_000).max(7 * 24 * 60 * 60 * 1000).default(4 * 60 * 60 * 1000),
-      heartbeatIntervalMs: z.number().int().min(1_000).max(10 * 60 * 1000).default(10_000),
-      heartbeatStaleMultiplier: z.number().min(2).max(100).default(3),
-    })
-    .default({}),
-
   // PRV-01 — harness selector. Default stays `'copilot'` so every
   // existing deployment continues to use the Copilot SDK. Flip to
   // `'claude-agent'` to route through the Claude Agent SDK bridge.
@@ -215,15 +200,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  webhooks: z
-    .object({
-      enabled: z.boolean().default(false),
-      githubSecret: z.string().optional(),
-      webhookToken: z.string().optional(),
-      rateLimitPerMinute: z.number().int().min(1).default(60),
-    })
-    .default({}),
-
   sandbox: z
     .object({
       /** Enable sandbox execution mode */
@@ -265,19 +241,15 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  // DUR-05 — durable step.sleep sweeper. Active whenever at least one
-  // stage row is `sleeping`; runs a small poll against the indexed
-  // `wake_at` column. Defaults are deliberately modest — bump
-  // `sweepIntervalMs` in production once sleep semantics are exercised
-  // more aggressively.
-  durableSleep: z
+  // P06 — agents and workflows.
+  workflows: z
     .object({
-      /** How often (ms) the sweeper polls for wake-ready rows. */
-      sweepIntervalMs: z.number().int().min(100).default(5_000),
-      /** Cap per sweep to keep SQLite write windows bounded. */
-      maxWakesPerSweep: z.number().int().min(1).max(10_000).default(100),
-      /** Disable the sweeper entirely. */
-      enabled: z.boolean().default(true),
+      /**
+       * PD-14 — agents (chats, stages, MCP clients, service accounts) may
+       * publish the workflows they author. Off: an agent submits a draft and
+       * a person publishes it. Env: `GENERATORAI_ALLOW_AGENT_PUBLISH=true`.
+       */
+      allowAgentPublish: z.boolean().default(false),
     })
     .default({}),
 
@@ -472,8 +444,6 @@ export const AppConfigSchema = z.object({
     })
     .default({}),
 
-  /** Project root directory — used as default CWD for data source scripts */
-  projectRoot: z.string().optional(),
 });
 
 export type AppConfig = z.infer<typeof AppConfigSchema>;

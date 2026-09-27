@@ -41,10 +41,12 @@
 // rebuilt it from scratch.
 //
 // Workflow engine files are read-only for the redesign (07-phases §Running in
-// parallel), so stage asks are read through `IStageRunRepository.getByRunId`
-// rather than a new `HitlService.listAllPending()`: a stage can only await
-// input inside a non-terminal run, and those runs are listed anyway. Empty
-// run history (the overhaul's v55 drop) simply yields no run items.
+// parallel), so stage asks are read through `IStageRunRepository.getByRunId`:
+// a v2 instance parked on a gate is `awaiting_input` with the ask in
+// `interruptData`, inside a non-terminal run, and those runs are listed
+// anyway. The definition's name comes from its working graph
+// (`IWorkflowDefinitionStore.getGraph`); the run carries its own project.
+// Empty run history (the overhaul's v55/v57 purge) simply yields no run items.
 // ────────────────────────────────────────────────────────────────
 
 import {
@@ -67,7 +69,6 @@ import {
   type Project,
   type StageRun,
   type StatusMapping,
-  type WorkflowDefinition,
   type WorkflowRun,
   type WorkflowRunStatus,
 } from '@generatorai/shared';
@@ -113,7 +114,10 @@ export interface AttentionServiceDeps {
     getByStatus(statuses: WorkflowRunStatus[]): Promise<WorkflowRun[]>;
   };
   stageRuns: { getByRunId(workflowRunId: string): Promise<StageRun[]> };
-  definitions: { getById(id: string): Promise<WorkflowDefinition> };
+  /** The definition store: only the working graph's name and project are read. */
+  definitions: {
+    getGraph(id: string): Promise<{ graph: { workflow: { name: string; projectId?: string | null | undefined } } }>;
+  };
   automations: {
     getAll(): Promise<Automation[]>;
     getById(id: string): Promise<Automation>;
@@ -138,9 +142,13 @@ export interface AttentionServiceDeps {
 
 // ── Pure helpers ──────────────────────────────────────────────────
 
-/** Runs in these statuses are live (Running or, when paused, Needs you). */
-const LIVE_RUN_STATUSES: readonly WorkflowRunStatus[] = ['running', 'starting', 'cancelling', 'paused'];
-const STOPPABLE_RUN_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['running', 'starting', 'paused']);
+/** Runs in these statuses are live (Running or, when paused, Needs you). Engine v2 states. */
+const LIVE_RUN_STATUSES: readonly WorkflowRunStatus[] = ['starting', 'running', 'waiting', 'paused', 'finalizing', 'cancelling'];
+const STOPPABLE_RUN_STATUSES: ReadonlySet<WorkflowRunStatus> = new Set(['starting', 'running', 'waiting', 'paused']);
+/** Instances whose attempt is live: the Running item's progress label. */
+const ACTIVE_STAGE_STATUSES: ReadonlySet<StageRun['status']> = new Set(['starting', 'running', 'validating']);
+/** Instances that are live but idle on a timer, an event or a retry backoff. */
+const WAITING_STAGE_STATUSES: ReadonlySet<StageRun['status']> = new Set(['waiting', 'retry_wait']);
 const LIVE_EXECUTION_STATUS_LIST: readonly AutomationExecution['status'][] = ['pending', 'running'];
 const LIVE_EXECUTION_STATUSES: ReadonlySet<AutomationExecution['status']> = new Set(LIVE_EXECUTION_STATUS_LIST);
 const TERMINAL_STAGE_STATUSES: ReadonlySet<StageRun['status']> = new Set([
@@ -812,11 +820,17 @@ export class AttentionService {
     }
     if (!run || !LIVE_RUN_STATUSES.includes(run.status)) return [];
 
-    const [stages, definition] = await Promise.all([
+    const [instances, definition] = await Promise.all([
       stageRuns.getByRunId(runId).catch(() => [] as StageRun[]),
-      definitions.getById(run.workflowDefinitionId).catch(() => null),
+      definitions.getGraph(run.workflowDefinitionId).then((d) => d.graph.workflow).catch(() => null),
     ]);
-    const project = await this.projectRef(definition?.projectId);
+    const project = await this.projectRef(run.projectId ?? definition?.projectId ?? undefined);
+    // "Stage N of M" counts the run's own stages, in the order they were
+    // created: the body instances of a loop or map (`scopeId`) are iterations
+    // inside one stage, and the repository returns rows unordered.
+    const stages = instances
+      .filter((s) => !s.scopeId)
+      .sort((a, b) => a.createdAt.getTime() - b.createdAt.getTime() || a.instancePath.localeCompare(b.instancePath));
     const of = stages.length;
     const done = stages.filter((s) => TERMINAL_STAGE_STATUSES.has(s.status)).length;
     const step = of > 0 ? Math.min(done + 1, of) : undefined;
@@ -831,13 +845,15 @@ export class AttentionService {
     };
 
     const drafts: Draft[] = [];
-    for (const stage of stages) {
+    // A gate can sit on any instance, a loop or map body stage included.
+    for (const stage of instances) {
       if (stage.status !== 'awaiting_input') continue;
       const data = record(stage.interruptData) ?? {};
       const gate = str(data['kind']);
       const isApproval = gate === 'stage_completion_review' || gate === 'tool_permission' || data['approval'] === true;
       const reason = str(data['reason']) ?? str(data['prompt']) ?? str(record(data['request'])?.['description']);
-      const position = of > 0 ? `Stage ${stages.indexOf(stage) + 1} of ${of}` : undefined;
+      const index = stages.indexOf(stage);
+      const position = of > 0 && index >= 0 ? `Stage ${index + 1} of ${of}` : undefined;
       const detail = [position, reason].filter((part): part is string => !!part).join(' · ');
       const actions: AttentionAction[] = isApproval ? ['approve', 'reject', 'open'] : ['answer', 'open'];
       drafts.push({
@@ -871,9 +887,9 @@ export class AttentionService {
     }
 
     if (drafts.length === 0) {
-      const live = stages.filter((s) => !TERMINAL_STAGE_STATUSES.has(s.status));
-      const sleeping = live.length > 0 && live.every((s) => s.status === 'sleeping');
-      const active = stages.filter((s) => s.status === 'running');
+      const live = instances.filter((s) => !TERMINAL_STAGE_STATUSES.has(s.status));
+      const sleeping = live.length > 0 && live.every((s) => WAITING_STAGE_STATUSES.has(s.status));
+      const active = instances.filter((s) => ACTIVE_STAGE_STATUSES.has(s.status));
       const label = active.length > 0
         ? clip(active.map((s) => s.name).join(', '), LABEL_MAX)
         : undefined;
@@ -884,7 +900,7 @@ export class AttentionService {
         ...base,
         key: `workflow_run:${runId}`,
         state: sleeping
-          ? stateOf(STATUS_MAPS.stageRun.sleeping, 'waiting')
+          ? stateOf(STATUS_MAPS.stageRun.waiting, 'waiting')
           : stateOf(STATUS_MAPS.workflowRun[run.status], 'running'),
         since: iso(run.startedAt ?? run.createdAt),
         ...(progress ? { progress } : {}),

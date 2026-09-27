@@ -13,7 +13,6 @@ import {
   Z_NAMES,
 } from '@generatorai/design-tokens';
 import { cn } from '../cn';
-import { cn as legacyCn } from '@/lib/utils';
 
 describe('cn — the 09 §2.5 pairs', () => {
   it.each([
@@ -92,9 +91,5 @@ describe('cn — generated from the vocabulary', () => {
         expect(cn(`text-${color}`, `text-${step}`)).toBe(`text-${color} text-${step}`);
       }
     }
-  });
-
-  it('the legacy lib/utils cn is the same function', () => {
-    expect(legacyCn).toBe(cn);
   });
 });

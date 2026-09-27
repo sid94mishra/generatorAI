@@ -5,7 +5,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useMemo } from 'react';
-import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { COMPUTER_USE_SKILL_ID } from '@generatorai/shared';
 import { usePlatform } from '../providers/PlatformProvider.js';
 import { useSystemArtifacts, useAvailableArtifacts } from './projectQueries.js';
@@ -38,6 +38,17 @@ export function useComputerUseSettings() {
     queryKey: ['computer-use-settings'],
     queryFn: () => platform.getComputerUseSettings(),
     staleTime: 30_000,
+  });
+}
+
+/** Settings → Computer use: flips the server-side enablement/synthetic-input flags. */
+export function useSetComputerUseEnabled() {
+  const platform = usePlatform();
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ enabled, allowSynthetic }: { enabled: boolean; allowSynthetic?: boolean }) =>
+      platform.setComputerUseEnabled(enabled, allowSynthetic),
+    onSuccess: (next) => queryClient.setQueryData(['computer-use-settings'], next),
   });
 }
 

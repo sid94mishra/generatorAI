@@ -1,0 +1,127 @@
+{
+  "formatVersion": 2,
+  "workflow": {
+    "name": "Release with a security review",
+    "description": "Build, run the published Security review workflow on the artifact as a sub-workflow, release on a pass.",
+    "session": {},
+    "variables": [
+      {
+        "name": "version",
+        "type": "string",
+        "label": "Version",
+        "required": true
+      }
+    ],
+    "hooks": [],
+    "lifecycle": {
+      "codebaseAliases": [],
+      "useWorktree": true,
+      "requiresCodebase": false,
+      "sandbox": "required",
+      "preprocessingSteps": [],
+      "postProcessing": {
+        "autoCommit": false,
+        "autoPush": false,
+        "autoCreatePR": false,
+        "steps": []
+      }
+    },
+    "tags": [
+      "subworkflow"
+    ]
+  },
+  "stages": [
+    {
+      "key": "build",
+      "name": "Build",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "build",
+          "text": "Build release {{variables.version}} and report the path of the built artifact."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "json",
+        "schema": {
+          "type": "object",
+          "required": [
+            "artifactPath"
+          ],
+          "properties": {
+            "artifactPath": {
+              "type": "string"
+            }
+          }
+        },
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    },
+    {
+      "key": "security",
+      "name": "Security review",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "subworkflow",
+      "subworkflow": {
+        "workflowRef": {
+          "name": "Security review"
+        },
+        "version": "pin_at_run_start",
+        "inputs": {
+          "target": "stages.build.output.artifactPath"
+        },
+        "workspace": "isolated"
+      }
+    },
+    {
+      "key": "release",
+      "name": "Release",
+      "join": {
+        "mode": "all"
+      },
+      "kind": "agent",
+      "prompts": [
+        {
+          "label": "release",
+          "text": "Publish release {{variables.version}}; the security review passed."
+        }
+      ],
+      "sessionReuse": "fresh",
+      "context": {
+        "mode": "summary"
+      },
+      "output": {
+        "format": "text",
+        "extraction": "auto",
+        "rules": [],
+        "summary": "auto"
+      },
+      "hooks": []
+    }
+  ],
+  "edges": [
+    {
+      "from": "build",
+      "to": "security",
+      "on": "success"
+    },
+    {
+      "from": "security",
+      "to": "release",
+      "on": "success",
+      "when": "stages.security.output.verdict == 'pass'"
+    }
+  ]
+}

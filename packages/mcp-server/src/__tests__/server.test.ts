@@ -1,15 +1,28 @@
 import { describe, expect, it, vi } from 'vitest';
-import { CustomToolRegistry } from '@generatorai/core';
+import type { WorkflowToolAdvert } from '@generatorai/workflow-spec';
 import { GeneratorAiMcpServer, type AiFacade, type AiChatSummary } from '../server.js';
 
-// The old `McpServerScaffold.start()` was a single log line — the package
-// had `@modelcontextprotocol/sdk` in node_modules and a name promising a
-// real server, but no transport and nothing that dispatched a tool call.
-// This exercises the real dispatch path (`callTool`) without needing a live
-// stdio transport or a real `@generatorai/sdk` `GeneratorAI` instance —
-// `AiFacade` is a narrow structural interface a fake can satisfy directly.
+// This exercises the real dispatch path (`callTool`, `listTools`,
+// `listResources`, `readResource`) without a live stdio transport or a
+// running server — `AiFacade` is the narrow slice of the remote API (P04
+// remote mode) a fake can satisfy directly.
 
-function fakeAi(overrides: Partial<AiFacade> = {}): AiFacade {
+const ADVERTS: WorkflowToolAdvert[] = [
+  {
+    name: 'list_workflows',
+    description: 'List workflows',
+    parametersSchema: { type: 'object', properties: { query: { type: 'string' } } },
+    readOnly: true,
+  },
+  {
+    name: 'run_workflow',
+    description: 'Run a workflow',
+    parametersSchema: { type: 'object', properties: { workflowId: { type: 'string' }, reason: { type: 'string' } }, required: ['workflowId', 'reason'] },
+    readOnly: false,
+  },
+];
+
+function fakeAi(): AiFacade {
   const chats: AiChatSummary[] = [{ id: 'c1', name: 'Existing chat', status: 'active' }];
   return {
     chat: {
@@ -17,20 +30,33 @@ function fakeAi(overrides: Partial<AiFacade> = {}): AiFacade {
       create: vi.fn(async (opts) => ({ id: 'new-chat-id', ...opts })),
       send: vi.fn(async () => undefined),
     },
-    workflows: {
-      run: vi.fn(async (definitionId) => ({ id: 'run-1', status: 'running', definitionId })),
+    workflowTools: {
+      list: vi.fn(async () => ADVERTS),
+      call: vi.fn(async (name: string) => (name === 'run_workflow' ? { runId: 'run-1', status: 'starting' } : { workflows: [] })),
     },
-    ...overrides,
-  } as AiFacade;
+    skill: {
+      index: vi.fn(async () => ({ name: 'generatorai-workflow-author', schemaHash: 'h1', files: ['SKILL.md', 'schema/workflow.schema.json', 'scripts/validate.mjs'] })),
+      file: vi.fn(async (path: string) => `contents of ${path}`),
+    },
+  };
 }
 
 describe('GeneratorAiMcpServer', () => {
-  it('advertises the three built-in tools', () => {
+  it('advertises the chat tools and every server workflow tool under the generatorai_ prefix', async () => {
     const server = new GeneratorAiMcpServer({ ai: fakeAi() });
-    const names = server.listTools().map((t) => t.name);
-    expect(names).toEqual(
-      expect.arrayContaining(['generatorai_list_chats', 'generatorai_send_prompt', 'generatorai_run_workflow']),
-    );
+    const tools = await server.listTools();
+    expect(tools.map((t) => t.name)).toEqual([
+      'generatorai_list_chats',
+      'generatorai_send_prompt',
+      'generatorai_list_workflows',
+      'generatorai_run_workflow',
+    ]);
+    const run = tools.find((t) => t.name === 'generatorai_run_workflow')!;
+    expect(run.annotations).toEqual({ readOnlyHint: false });
+    expect((run.inputSchema['properties'] as Record<string, unknown>)['idempotencyKey']).toBeDefined();
+    const list = tools.find((t) => t.name === 'generatorai_list_workflows')!;
+    expect(list.annotations).toEqual({ readOnlyHint: true });
+    expect((list.inputSchema['properties'] as Record<string, unknown>)['idempotencyKey']).toBeUndefined();
   });
 
   it('generatorai_list_chats forwards to ai.chat.list', async () => {
@@ -64,33 +90,34 @@ describe('GeneratorAiMcpServer', () => {
     await expect(server.callTool('generatorai_send_prompt', {})).rejects.toThrow('"message" is required');
   });
 
-  it('generatorai_run_workflow forwards to ai.workflows.run', async () => {
+  it('a workflow tool is called on the server, with the idempotencyKey lifted out of the arguments', async () => {
     const ai = fakeAi();
     const server = new GeneratorAiMcpServer({ ai });
     const result = await server.callTool('generatorai_run_workflow', {
-      definitionId: 'def-1',
-      variables: { foo: 'bar' },
+      workflowId: 'def-1',
+      reason: 'test',
+      idempotencyKey: 'k1',
     });
-    expect(ai.workflows.run).toHaveBeenCalledWith('def-1', { variables: { foo: 'bar' }, projectId: undefined });
-    expect(result).toMatchObject({ id: 'run-1', status: 'running' });
+    expect(ai.workflowTools.call).toHaveBeenCalledWith('run_workflow', { workflowId: 'def-1', reason: 'test' }, { idempotencyKey: 'k1' });
+    expect(result).toMatchObject({ runId: 'run-1', status: 'starting' });
   });
 
-  it('an unknown tool with no registry throws', async () => {
+  it('serves the skill bundle as resources', async () => {
+    const ai = fakeAi();
+    const server = new GeneratorAiMcpServer({ ai });
+    expect(await server.listResources()).toEqual([
+      { uri: 'generatorai://workflow-author/SKILL.md', name: 'SKILL.md', mimeType: 'text/markdown' },
+      { uri: 'generatorai://workflow-author/schema/workflow.schema.json', name: 'schema/workflow.schema.json', mimeType: 'application/json' },
+      { uri: 'generatorai://workflow-author/scripts/validate.mjs', name: 'scripts/validate.mjs', mimeType: 'text/javascript' },
+    ]);
+    expect(await server.readResource('generatorai://workflow-author/SKILL.md')).toBe('contents of SKILL.md');
+    expect(ai.skill.file).toHaveBeenCalledWith('SKILL.md');
+    await expect(server.readResource('file:///etc/passwd')).rejects.toThrow('Unknown resource');
+  });
+
+  it('an unknown tool throws', async () => {
     const server = new GeneratorAiMcpServer({ ai: fakeAi() });
     await expect(server.callTool('not_a_real_tool', {})).rejects.toThrow('Unknown tool');
-  });
-
-  it('dispatches a registered custom tool (TOL-05) alongside the built-ins', async () => {
-    const registry = new CustomToolRegistry();
-    registry.register({
-      name: 'echo',
-      description: 'Echoes its input',
-      parametersSchema: { type: 'object', properties: { text: { type: 'string' } } },
-      handler: async (args) => ({ echoed: args }),
-    });
-    const server = new GeneratorAiMcpServer({ ai: fakeAi(), registry });
-    expect(server.listTools().map((t) => t.name)).toContain('echo');
-    const result = await server.callTool('echo', { text: 'hi' });
-    expect(result).toEqual({ echoed: { text: 'hi' } });
+    await expect(server.callTool('generatorai_not_a_tool', {})).rejects.toThrow('Unknown tool');
   });
 });

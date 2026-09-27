@@ -79,7 +79,12 @@ if (!page) {
   record('remote mode was logged', /Remote mode/i.test(mainLog));
 
   const probe = await page.evaluate(async () => {
-    const out = { body: document.body.innerText.slice(0, 120) };
+    const out = {
+      body: document.body.innerText.slice(0, 120),
+      // P5-11: the pairing screen is `features/pairing/PairingGate`, marked
+      // `data-testid="pairing-gate"` on its Gate root.
+      hasPairingGate: Boolean(document.querySelector('[data-testid="pairing-gate"]')),
+    };
     try {
       const r = await fetch('/api/auth/server-info');
       out.serverInfoStatus = r.status;
@@ -94,7 +99,7 @@ if (!page) {
   record('renderer reached the remote server', probe.serverInfoStatus === 200, `serverName=${probe.serverName}`);
   record(
     'shows the pairing screen (cannot auto-pair a server it does not own)',
-    /Pair this device/i.test(probe.body),
+    probe.hasPairingGate,
     probe.body.replace(/\n/g, ' ').slice(0, 80),
   );
   record(

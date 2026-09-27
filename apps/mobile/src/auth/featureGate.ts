@@ -20,6 +20,8 @@ export type MobileFeature =
   | 'computer'
   | 'voice'
   | 'fileUpload'
+  | 'runStart'
+  | 'scriptRun'
   | 'runControl'
   | 'workflowEdit'
   | 'projectEdit'
@@ -75,13 +77,28 @@ export const FEATURE_REQUIREMENTS: Record<MobileFeature, FeatureRequirement> = {
     reason: 'Uploading files needs file-write permission, which is not granted by default.',
     grantable: true,
   },
+  runStart: {
+    // `POST /workflow-invocations` (a new run, or a fork of a finished one)
+    // is a run-time act: `exec:agent` + `read:workflows`, which a default
+    // paired phone holds (packages/auth/src/routePolicy.ts, PD-6).
+    scopes: ['exec:agent', 'read:workflows'],
+    reason: 'Starting runs needs permission to run agents on this device.',
+    grantable: true,
+  },
+  scriptRun: {
+    // A script target materializes a definition, so the invocation service
+    // also demands `write:workflows` for it.
+    scopes: ['write:workflows', 'exec:agent'],
+    reason: 'Running a script creates a workflow from it, which needs workflow-edit permission.',
+    grantable: true,
+  },
   runControl: {
     // The route policy for `/workflow-runs` and `/automations` writes is
     // `write:workflows` AND `exec:agent` (packages/auth/src/routePolicy.ts).
     // Gating on the first alone rendered buttons that could still 403.
     scopes: ['write:workflows', 'exec:agent'],
     reason:
-      'Starting, pausing and cancelling runs needs workflow-edit permission. Approving a blocked stage does not — you can still do that here.',
+      'Pausing and cancelling runs needs workflow-edit permission. Approving a blocked stage does not — you can still do that here.',
     grantable: true,
   },
   workflowEdit: {
