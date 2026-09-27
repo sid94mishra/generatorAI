@@ -2,7 +2,7 @@
 
 ## Status
 
-M0-01 complete. M0-02 and M0-03 in progress: the named iOS simulator is booted; Android API 36 is installed and the named emulator is starting; the simulator-only iOS baseline build is compiling. Neither native launch nor M1 acceptance is claimed yet. M0-04 complete: the existing paste-ready list was linked to the owner in the task.
+M0-01, M0-02 and M0-04 complete. M0-03 in progress: both named phones passed their boot checks; the simulator-only iOS baseline build is compiling. Neither native launch nor M1 acceptance is claimed yet. M0-04 complete: the existing paste-ready list was linked to the owner in the task.
 
 All work uses /Users/sidmishra/Desktop/Projects/mobile_redesign on mobile_redesign (initially clean). The initial task directory was the desktop checkout; no edits were made there.
 
@@ -49,8 +49,12 @@ Owner resolved the previous Xcode-selection and JDK blockers:
 | Android tools | adb package 37.0.1, emulator 37.1.11 |
 | Android image | android-36/google_apis/arm64-v8a installed successfully |
 | Android API 37 | SDK repository reports platforms;android-37 unavailable; permitted API 36 fallback used; API 37-specific checks pending |
-| Android AVDs | gai-phone (pixel_9), gai-tablet (pixel_tablet) created |
-| Maestro / agent-device | verification tooling still pending M1 |
+| Android AVDs | gai-phone (pixel_9), gai-tablet (pixel_tablet) created; gai-phone reports sys.boot_completed=1 through adb |
+| Maestro | 2.10.0 installed from the official release; version command passed; no shell profiles changed |
+| Gradle | 9.3.1 runs with Zulu JDK 17 |
+| agent-device | pinned repo dependency lands in M1-03 |
+
+Both required phone boot checks pass. On this 8 GB host, Android boots reliably with only one emulator running, 2048 MB RAM, two cores and host graphics. Compile with two jobs; run native platform walkthroughs sequentially.
 
 Environment paths are task-local; no shell profiles changed. No password or sudo operation performed.
 
@@ -68,6 +72,6 @@ Designer handoff: [10-design-feedback.md §3](../10-design-feedback.md#3-send-to
 
 ## Next
 
-Finish both phone boot checks, native builds and pairing-screen launches. Record results and close M0, then start M1-01. Keep the API 37 limitation explicit. Native baseline screenshots and characterization belong to M1-04.
+Finish both native builds and pairing-screen launches. Record results and close M0, then start M1-01. Keep the API 37 limitation explicit. Native baseline screenshots and characterization belong to M1-04.
 
 Documentation-only Done-loop: typecheck/lint already passed; related TS/token tests do not apply. Bootstrap skips: design ratchet until M1-05, Jest until M1-06, fingerprint until M1-02, device walkthrough tooling until M1-02/M1-03, Maestro until M1-04.

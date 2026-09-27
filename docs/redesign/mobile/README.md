@@ -74,7 +74,7 @@ Update this in every task commit (task ID, date).
 
 | Phase | Status | Notes |
 |---|---|---|
-| M0 Kickoff & environment | in progress (2026-09-27) | M0-01 complete: all 262 mobile images inspected, public version matches; desktop foundation review and merge complete. M0-04 designer handoff complete; M0-02 named devices created; M0-03 native build/launch in progress. See `reviews/M0-notes.md`. |
+| M0 Kickoff & environment | in progress (2026-09-27) | M0-01 complete: all 262 mobile images inspected, public version matches; desktop foundation review and merge complete. M0-04 designer handoff complete; M0-02 complete: both phones boot, Maestro/Gradle verified; M0-03 native build/launch in progress. See `reviews/M0-notes.md`. |
 | M1 Safety net & tooling (SDK 57) | not started | |
 | M2 Shared-logic adoption (SDK 57) | not started | |
 | M3 Platform upgrade & foundations (SDK 58+) | not started | waits for SDK 58 stable (see 07 §1 fallback) |
@@ -94,4 +94,4 @@ Update this in every task commit (task ID, date).
 
 ## Resume point
 
-2026-09-27: M0-01 complete; continue M0-02/M0-03. Worktree mobile_redesign, desktop merge d68687de at 744f3a02 (MD-97). Public mobile artifact matches the snapshot; all mobile boards and six desktop parity boards inspected in both modes. Owner Xcode/JDK setup is resolved. Named simulators and API 36 AVDs created (API 37 unavailable). gai-iphone boot verified; Android boot remains unverified. Both are stopped during compilation to fit this 8 GB host. Expo's old CLI misidentified the simulator; direct simulator-only xcodebuild is running with its log in apps/mobile/.expo/m0-ios-build.log. Sandbox 3197/5197 was verified with a fresh temp DB, then stopped for build memory; restart before pairing. Finish both native pairing-screen launches, record M0 acceptance, then M1-01. See reviews/M0-notes.md for evidence and designer handoff. No M1 changes yet.
+2026-09-27: M0-01 complete; M0-02/M0-04 complete; continue M0-03. Worktree mobile_redesign, desktop merge d68687de at 744f3a02 (MD-97). Public mobile artifact matches the snapshot; all mobile boards and six desktop parity boards inspected in both modes. Owner Xcode/JDK setup is resolved. Named simulators and API 36 AVDs created (API 37 unavailable). Both phones passed boot checks (Android sys.boot_completed=1); keep only one emulator active on this 8 GB host. Expo's old CLI misidentified the simulator; direct simulator-only xcodebuild is running with its log in apps/mobile/.expo/m0-ios-build.log. Sandbox 3197/5197 was verified with a fresh temp DB, then stopped for build memory; restart before pairing. Finish both native pairing-screen launches, record M0 acceptance, then M1-01. See reviews/M0-notes.md for evidence and designer handoff. No M1 changes yet.
