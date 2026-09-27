@@ -2,7 +2,7 @@
 
 ## Status
 
-M0-01 complete. M0-02 and M0-03 in progress: the named iOS simulator is booted; Android API 36 is installed and the named emulator is starting; the simulator-only iOS baseline build is compiling. Neither native launch nor M1 acceptance is claimed yet. M0-04 designer handoff is the existing paste-ready list linked below.
+M0-01 complete. M0-02 and M0-03 in progress: the named iOS simulator is booted; Android API 36 is installed and the named emulator is starting; the simulator-only iOS baseline build is compiling. Neither native launch nor M1 acceptance is claimed yet. M0-04 complete: the existing paste-ready list was linked to the owner in the task.
 
 All work uses /Users/sidmishra/Desktop/Projects/mobile_redesign on mobile_redesign (initially clean). The initial task directory was the desktop checkout; no edits were made there.
 
@@ -13,6 +13,7 @@ All work uses /Users/sidmishra/Desktop/Projects/mobile_redesign on mobile_redesi
 - All 131 mobile boards rendered in both modes: 262 PNGs, zero failures. Inspected every image through 44 contact sheets, both platform halves; inspected MFoundations and MComponents individually. Full-resolution inspection and CSS measurements continue per implementation task.
 - Inspected both modes of desktop Home, ChatNarrow, Pairing, Components, Foundations and DockTerminal (12 renders).
 - Public mobile artifact opens in the browser. Embedded artifact version 1790412505-d42b matches the committed VERSION. Earlier private-link question is resolved.
+- Workflow plan artifact also opens in the browser: v1.2, embedded version 1790247569-0106. Its architecture agrees with the merged definition/invocation/engine contracts.
 - Public desktop artifact version 1790435159-f2ec differs from committed desktop snapshot 1790308891-7d99. Non-blocking owner follow-up: refresh that parity snapshot if desired. Mobile snapshot remains authoritative; no snapshot was rewritten.
 - Mobile typecheck passed. Lint passed with two existing warnings: scope-request.tsx unused SectionHeader; secureItemStore.web.ts console statement.
 
@@ -55,9 +56,9 @@ Environment paths are task-local; no shell profiles changed. No password or sudo
 
 ## Native launch and sandbox (M0-03)
 
-Sandbox started with scripts/redesign/sandbox.mjs from this worktree, API 3197 / web 5197, fresh temporary database and Faux provider. No real database/server used.
+Sandbox started and the desktop walkthrough completed with scripts/redesign/sandbox.mjs from this worktree, API 3197 / web 5197, fresh temporary database and Faux provider. No real database/server used. It was stopped after the walkthrough to free RAM for native builds; restart it before device pairing.
 
-The first expo run:ios --device gai-iphone generated the CNG project and installed 121 pods, but Expo CLI 57.0.11 treated the simulator as a physical device and requested signing. xcodebuild -showdestinations correctly identifies it as an iOS simulator. A direct xcodebuild with iphonesimulator SDK, named simulator destination and CODE_SIGNING_ALLOWED=NO is compiling; its local log is apps/mobile/.expo/m0-ios-build.log. No signing-account action is needed for this workaround. Pairing and baseline screenshots remain M1-04.
+The first expo run:ios --device gai-iphone generated the CNG project and installed 121 pods, but Expo CLI 57.0.11 treated the simulator as a physical device and requested signing. xcodebuild -showdestinations correctly identifies it as an iOS simulator. A direct xcodebuild with iphonesimulator SDK, named simulator destination and CODE_SIGNING_ALLOWED=NO is compiling with two jobs and index-store generation disabled; its local log is apps/mobile/.expo/m0-ios-build.log. The initial unrestricted build was interrupted deliberately after heavy memory pressure on this 8 GB Mac; both emulators were stopped and verification will run sequentially. Android CNG prebuild also passed. No signing-account action is needed for this workaround. Pairing and baseline screenshots remain M1-04.
 
 ## Owner-confirm defaults and designer handoff (M0-04)
 
