@@ -74,7 +74,7 @@ Update this in every task commit (task ID, date).
 
 | Phase | Status | Notes |
 |---|---|---|
-| M0 Kickoff & environment | not started | |
+| M0 Kickoff & environment | blocked on owner machine setup (2026-09-27) | M0-01 in progress: dependencies installed, 262 mobile PNGs rendered; M0-02 preflight found Xcode selection and JDK blockers. No task acceptance claimed. See `reviews/M0-notes.md`. |
 | M1 Safety net & tooling (SDK 57) | not started | |
 | M2 Shared-logic adoption (SDK 57) | not started | |
 | M3 Platform upgrade & foundations (SDK 58+) | not started | waits for SDK 58 stable (see 07 §1 fallback) |
@@ -94,4 +94,4 @@ Update this in every task commit (task ID, date).
 
 ## Resume point
 
-2026-09-26: the plan was written, and the worktree was created from `desktop_redesign` @ `6045856`. Next: M0-01.
+2026-09-27: paused under playbook §8 (owner machine action). Worktree `/Users/sidmishra/Desktop/Projects/mobile_redesign`, branch `mobile_redesign`; dependency install, mobile typecheck and lint completed. All 131 mobile boards rendered in dark/light, plus six desktop reference boards, but visual inspection is still pending. Owner must select the installed Xcode and install JDK 17 (commands in `reviews/M0-notes.md`). Resume M0-01: finish supporting-document reading and inspect every board; evaluate the phase-start merge against the P7/M3-05 gate (desktop is now at P7-01). Then finish M0-02 setup and M0-03 native builds/launch + sandbox. M1 has not started.
