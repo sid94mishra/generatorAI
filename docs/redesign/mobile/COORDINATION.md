@@ -20,6 +20,8 @@ It also records every merge of `desktop_redesign` into this branch.
 
 ## Merges of `desktop_redesign`
 
+M1-03 tooling addition (2026-09-27): root `package.json` and `pnpm-lock.yaml` add exact devDependency `agent-device@0.21.15`. Its ESM CLI resolves and reports 0.21.15; frozen install passes. Existing importer resolutions and shared dependency snapshots are preserved. Added before completing M1-02 so the pairing command uses the pinned driver.
+
 | Date | desktop_redesign sha | Conflicts | Notes |
 |---|---|---|---|
 | 2026-09-26 | `6045856` | — | branch point |
