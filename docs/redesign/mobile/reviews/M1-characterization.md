@@ -40,3 +40,18 @@ Host pressure during these failures: 8 GiB RAM, 5.9 GiB swap used, 4.1 GiB disk 
 M1-04 is incomplete. Restore machine headroom (at least 20 GiB free, per M0 setup), restart macOS, then start the isolated sandbox and Metro and re-pair if the sandbox identity changed. Run only gai-iphone first and verify a responsive app, raw native snapshot and screenshot before capturing the six iOS baselines. The Android Stream fixture was consumed during capture; characterization must use fresh fixtures. No M1-04 product selectors, dev routes or Maestro journeys have been added yet, and no legacy journey scripts have been deleted.
 
 At handoff both test phones are stopped, no iOS simulator is booted, the sandbox was stopped through sandbox-pair, and this task's Metro was terminated. Ports 3197, 5197 and 8081 have no listeners. Source changes in this checkpoint are documentation only; `git diff --check` passes. Full Done-loop/characterization acceptance remains pending, not skipped as a pass.
+
+## Owner-requested cleanup and retry (2026-09-27, later session)
+
+The read-only storage scan found Downloads at 154 GiB (largely personal media), developer caches including Gradle at 9.1 GiB and CocoaPods at 2 GiB, and CoreSimulator at 13 GiB. Personal files, simulator data, SDKs, installed dependencies, native products and evidence were preserved. With no active build/install process or open files under the selected cache directories, removed regenerable Gradle caches, CocoaPods download caches, npm's content cache and Homebrew downloads: **11.91 GiB allocated**, recorded in `.expo/cleanup-resume-report.json`. Free disk rose from 8.7 to about 20 GiB. The next native dependency build will regenerate/download these caches.
+
+Restarted the isolated sandbox and Metro with only gai-iphone booted. Bootstatus completed in 15 s. The public artifact could not be retrieved through the web tool in this session; snapshot `1790412505-d42b` remains authoritative and untouched.
+
+Recovery results:
+
+- Sandbox-pair's iOS retry failed at runner preparation after its 300 s limit (`.expo/m1-resume-pair-ios.log`, diagnostic `mujsmh92-59d56f78`). No fresh pairing was completed.
+- Independently ran the previously passing native launch flow through Maestro. Its runner started, but Apple's `simctl openurl` failed with POSIX error 60; the screenshot shows GeneratorAI's splash. Report: `.expo/m1-resume-maestro-ios.xml`, one failed flow. Detailed log: `~/.maestro/tests/2026-09-27_180226/maestro.log`.
+- Shut down gai-iphone and restarted the existing user's CoreSimulatorService without erasing data. The initial launchctl command could not resolve its GUI service domain; verified the existing service PID and terminated that process normally instead. The service relaunched, and the phone booted in 6 s.
+- The second independent Maestro attempt then failed to connect within its configured 180 s driver-startup limit (`.expo/m1-resume-maestro-ios-service.log`). A short native process sample (`.expo/m1-resume-maestro-runner-sample.txt`) places the runner in XCTest UI-automation/accessibility initialization and dynamic-library loading before the test begins. It does not establish an app-code deadlock or prove a single underlying cause.
+
+Disk recovery alone and the simulator-service restart did not resolve the native blocker. A full macOS restart is the next owner action; the recorded uptime was over five days. M1-04 remains incomplete under playbook §8. Test simulator, sandbox and Metro were stopped again; source changes in this retry are evidence/progress notes only. Installed native apps and existing Android baselines remain available for the next attempt.
