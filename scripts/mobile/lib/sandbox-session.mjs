@@ -84,6 +84,9 @@ export class SandboxSession {
     await fs.writeFile(fixture, JSON.stringify(mergedFixture(JSON.parse(web), JSON.parse(mobile))), { mode: 0o600 });
     const child = spawn(process.execPath, [path.join(ROOT, 'scripts/redesign/sandbox.mjs'), `--port=${this.port}`], {
       cwd: ROOT, env: { ...process.env, GENERATORAI_ADVERTISED_URLS: `http://10.0.2.2:${this.port}`,
+        GENERATORAI_SANDBOX_CORS_ORIGINS: `http://10.0.2.2:${this.port}`,
+        // Native terminal fixtures must not run personal shell startup scripts.
+        ...(process.platform === 'win32' ? {} : { SHELL: '/bin/sh' }),
         GENERATORAI_SANDBOX_FAUX_SCRIPT: fixture }, stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
     });
     this.child = child;

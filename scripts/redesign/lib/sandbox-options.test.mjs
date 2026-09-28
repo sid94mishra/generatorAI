@@ -1,6 +1,18 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { sandboxOptions } from './sandbox-options.mjs';
+import { sandboxOptions, sandboxCorsOrigins } from './sandbox-options.mjs';
+
+test('native sandbox origin is opt-in and preserves the web origin', () => {
+  assert.equal(sandboxCorsOrigins(5197, {}), 'http://localhost:5197');
+  assert.equal(sandboxCorsOrigins(5197, { GENERATORAI_SANDBOX_CORS_ORIGINS: 'http://10.0.2.2:3197,http://localhost:5197' }),
+    'http://localhost:5197,http://10.0.2.2:3197');
+});
+
+test('sandbox origin override rejects wildcards, paths and credentials', () => {
+  for (const origin of ['*', 'http://localhost:3197/path', 'http://user:pass@localhost:3197', 'file:///tmp']) {
+    assert.throws(() => sandboxCorsOrigins(5197, { GENERATORAI_SANDBOX_CORS_ORIGINS: origin }));
+  }
+});
 
 test('default sandbox ports stay unchanged', () => {
   assert.deepEqual(sandboxOptions([], {}), { serverPort: 3197, widgetPort: 3198, webPort: 5197 });

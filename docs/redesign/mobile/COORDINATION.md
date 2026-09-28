@@ -29,6 +29,8 @@ It also records every merge of `desktop_redesign` into this branch.
 
 ## Merges of `desktop_redesign`
 
+2026-09-28 — M1-04: `scripts/redesign/sandbox.mjs`, `lib/sandbox-options.mjs` and its test add an opt-in `GENERATORAI_SANDBOX_CORS_ORIGINS` list. The default web origin is retained; malformed origins are rejected. `scripts/mobile/lib/sandbox-session.mjs` supplies only the Android emulator origin and selects `/bin/sh` on POSIX to avoid personal shell startup prompts (Windows keeps the existing profile-free host). Thirteen sandbox/tooling tests pass. Native Android now attaches its terminal WebSocket; the remaining blank renderer/input defect is under characterization. Production server authorization is unchanged.
+
 | Date | desktop_redesign sha | Conflicts | Notes |
 |---|---|---|---|
 | 2026-09-26 | `6045856` | — | branch point |

@@ -41,7 +41,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { setTimeout as delay } from 'node:timers/promises';
 import { nodeBinArgs, pnpmCommand } from './lib/spawn-node-bin.mjs';
-import { sandboxOptions } from './lib/sandbox-options.mjs';
+import { sandboxOptions, sandboxCorsOrigins } from './lib/sandbox-options.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -54,6 +54,7 @@ const SEED_SCRIPT = path.join(ROOT, 'agent-tests', 'vrt', 'seed.ts');
 // Not `gai-`/`genai-` — those prefixes are what scripts/sweep-temp-workspaces.mjs deletes.
 const PREFIX = 'generatorai-sandbox-';
 const { serverPort: SERVER_PORT, webPort: WEB_PORT } = sandboxOptions();
+const CORS_ORIGINS = sandboxCorsOrigins(WEB_PORT);
 const SHUTDOWN_BUDGET_MS = 5_000;
 const START_TIMEOUT_MS = 60_000;
 
@@ -187,7 +188,7 @@ const serverEnv = {
   GENERATORAI_BIND_HOST: '127.0.0.1',
   GENERATORAI_ALLOW_UNAUTHENTICATED_LOOPBACK: '1',
   NODE_ENV: 'test',
-  CORS_ORIGINS: `http://localhost:${WEB_PORT}`,
+  CORS_ORIGINS,
   ...(realHarness
     ? {}
     : {
