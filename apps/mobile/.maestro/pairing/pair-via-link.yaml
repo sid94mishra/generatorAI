@@ -17,9 +17,18 @@ tags: [characterization, smoke, pairing]
 - scrollUntilVisible:
     element: {text: Name}
     direction: DOWN
-- tapOn: Name
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - tapOn: Name
+- runFlow:
+    when: {platform: iOS}
+    commands:
+      # iOS exposes both the label and its field as Name; select the field.
+      - tapOn: {text: Name, index: 1}
 - eraseText
 - inputText: ${DEVICE_NAME}
+- assertVisible: ${DEVICE_NAME}
 - hideKeyboard
 - scrollUntilVisible:
     element: {id: pairing-confirm}
