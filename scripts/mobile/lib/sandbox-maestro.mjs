@@ -27,7 +27,24 @@ export async function flowMetadata(file) {
   if (!config?.appId) return null; // runFlow fragments are not top-level flows.
   const fresh = config.env?.FRESH_CHAT == null ? [] : String(config.env.FRESH_CHAT).split(',').map(key => key.trim());
   for (const key of fresh) if (!(key in CHAT_NAMES)) throw new Error(`Unknown FRESH_CHAT '${key}' in ${file}`);
-  return { fresh, pending: config.env?.PENDING_GATE === true || config.env?.PENDING_GATE === 'true', tags: config.tags ?? [], name: config.name ?? path.basename(file).replace(/\.ya?ml$/, '') };
+  const scopes = config.env?.DEVICE_SCOPES == null ? [] : String(config.env.DEVICE_SCOPES).split(',').map(scope => scope.trim());
+  for (const scope of scopes) if (!['write:files', 'write:workspaces', 'exec:terminal'].includes(scope)) {
+    throw new Error(`Unsupported characterization scope '${scope}' in ${file}`);
+  }
+  return { fresh, scopes, pending: config.env?.PENDING_GATE === true || config.env?.PENDING_GATE === 'true', tags: config.tags ?? [], name: config.name ?? path.basename(file).replace(/\.ya?ml$/, '') };
+}
+
+/** Grant only the scenario's capabilities to the verified sandbox device. */
+export async function withFlowScopes(session, target, scopes, runFlow) {
+  if (!scopes.length) return runFlow();
+  const paired = session.state.paired?.find(device => targetId(device) === targetId(target));
+  if (!paired) throw new Error('Scoped flow requires a verified sandbox pairing');
+  const device = (await session.api('/auth/devices')).devices.find(device => device.deviceId === paired.deviceId && !device.revokedAt);
+  if (!device) throw new Error('The paired sandbox device is missing or revoked');
+  const route = `/auth/devices/${encodeURIComponent(device.deviceId)}/scopes`;
+  await session.api(route, { scopes: [...new Set([...device.scopes, ...scopes])] }, 'PUT');
+  try { return await runFlow(); }
+  finally { await session.api(route, { scopes: device.scopes }, 'PUT'); }
 }
 
 export function combineJunitReports(reports) {
@@ -94,6 +111,23 @@ async function pendingGate(session) {
     await delay(300);
   }
   throw new Error('The fresh gate fixture did not produce an attention interaction');
+}
+
+async function verifyAllowedGate(session, chatId, interactionId) {
+  const deadline = Date.now() + 15000;
+  let afterSeq = 0;
+  while (Date.now() < deadline) {
+    const replay = await session.api(`/stream/replay?scope=chat&id=${encodeURIComponent(chatId)}&afterSeq=${afterSeq}&limit=500`);
+    const resolution = replay.rows.find(row => row.kind === 'chat.permission.resolved' && row.payload?.interactionId === interactionId);
+    if (resolution) {
+      if (resolution.payload.behavior !== 'allow') throw new Error('Notification resolved the gate with a decision other than allow');
+      console.log('Notification approval verified through sandbox stream replay');
+      return;
+    }
+    afterSeq = replay.nextAfterSeq;
+    await delay(300);
+  }
+  throw new Error('Sandbox API did not confirm the notification Allow action');
 }
 
 export async function runMaestro(session, target, args, { verify } = {}) {
@@ -173,23 +207,35 @@ export async function runMaestro(session, target, args, { verify } = {}) {
           else if (commandArgs[index].startsWith('--output=')) commandArgs[index] = `--output=${flowReport}`;
         }
       }
-      const argv = ['--device', id, ...commandArgs, ...Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`])];
       // Invoke the pinned distribution's Java entry directly on Windows. A .bat/cmd
       // wrapper would re-expand percent-encoded Metro URLs and parse grant arguments.
       const windows = process.platform === 'win32';
       const executable = windows ? (process.env.JAVA_HOME ? path.join(process.env.JAVA_HOME, 'bin/java.exe') : 'java.exe') : maestro;
-      const spawnArgs = windows ? ['--enable-native-access=ALL-UNNAMED', '-classpath',
-        path.join(path.dirname(path.dirname(maestro)), 'lib', '*'), 'maestro.cli.AppKt', ...argv] : argv;
       const started = Date.now();
-      const code = await new Promise((resolve, reject) => {
+      const invoke = (commands) => new Promise((resolve, reject) => {
+        const argv = ['--device', id, ...commands, ...Object.entries(env).flatMap(([key, value]) => ['-e', `${key}=${value}`])];
+        const spawnArgs = windows ? ['--enable-native-access=ALL-UNNAMED', '-classpath',
+          path.join(path.dirname(path.dirname(maestro)), 'lib', '*'), 'maestro.cli.AppKt', ...argv] : argv;
         const child = spawn(executable, spawnArgs, { cwd: ROOT, stdio: 'inherit', env: { ...process.env, MAESTRO_CLI_NO_ANALYTICS: '1', MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000' } });
         child.once('error', reject); child.once('exit', (code, signal) => resolve(signal ? 1 : code));
       });
+      if (metadata.pending && target.platform === 'ios') {
+        const setup = path.join(ROOT, 'apps/mobile/.maestro/_subflows/notification-setup.yaml');
+        if (await invoke(['test', setup, '--config', runtimeConfig]) !== 0) throw new Error('Native notification consent setup failed');
+        const template = await fs.readFile(path.join(ROOT, 'apps/mobile/e2e/push/approval.json'), 'utf8');
+        const payload = template.replaceAll('${CHAT_GATE_ID}', env.CHAT_GATE_ID).replaceAll('${INTERACTION_ID}', env.INTERACTION_ID);
+        JSON.parse(payload);
+        const payloadFile = path.join(runtimeDir, 'approval.json');
+        await fs.writeFile(payloadFile, payload, { mode: 0o600 });
+        await run('xcrun', ['simctl', 'push', id, APP_ID, payloadFile]);
+      }
+      const code = await withFlowScopes(session, target, metadata.scopes, () => invoke(commandArgs));
       if (junit && flowReport) {
         try { reports.push(await fs.readFile(path.resolve(ROOT, flowReport), 'utf8')); }
         catch (error) { if (code === 0 || error.code !== 'ENOENT') throw error; }
       }
       if (code !== 0) throw new Error(`Maestro failed for ${path.relative(ROOT, file)} (${code})`);
+      if (metadata.pending && target.platform === 'android') await verifyAllowedGate(session, env.CHAT_GATE_ID, env.INTERACTION_ID);
       if (pairing) await recordPairing(session, target, devicesBefore, started);
       count++;
     }

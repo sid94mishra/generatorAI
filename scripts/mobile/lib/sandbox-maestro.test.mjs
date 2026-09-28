@@ -3,19 +3,37 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { flowMetadata, discoverFlows, combineJunitReports } from './sandbox-maestro.mjs';
+import { flowMetadata, discoverFlows, combineJunitReports, withFlowScopes } from './sandbox-maestro.mjs';
 
 test('reads Maestro flow headers and excludes shared command fragments', async () => {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), 'generatorai-mobile-flow-test-'));
   try {
     const file = path.join(dir, 'flow.yaml');
     await fs.writeFile(file, 'appId: ${APP_ID}\ntags: [smoke, pairing]\nenv:\n  FRESH_CHAT: gate,stream\n  PENDING_GATE: true\n---\n- launchApp\n');
-    assert.deepEqual(await flowMetadata(file), { fresh: ['gate', 'stream'], pending: true, tags: ['smoke', 'pairing'], name: 'flow' });
+    assert.deepEqual(await flowMetadata(file), { fresh: ['gate', 'stream'], scopes: [], pending: true, tags: ['smoke', 'pairing'], name: 'flow' });
     await fs.writeFile(file, '- tapOn: Continue\n');
     assert.equal(await flowMetadata(file), null);
     await fs.writeFile(file, 'appId: ${APP_ID}\nenv: {FRESH_CHAT: invented}\n---\n- launchApp\n');
     await assert.rejects(flowMetadata(file), /Unknown FRESH_CHAT/);
+    await fs.writeFile(file, 'appId: app\nenv: {DEVICE_SCOPES: "admin:settings"}\n---\n- launchApp\n');
+    await assert.rejects(flowMetadata(file), /Unsupported characterization scope/);
   } finally { await fs.rm(dir, { recursive: true, force: true }); }
+});
+
+test('scenario scopes are restored after a failed native run, on the paired device only', async () => {
+  const calls = [];
+  const session = {
+    state: { paired: [{ serial: 'emulator-test', deviceId: 'paired-device' }] },
+    api: async (route, body, method) => {
+      calls.push({ route, body, method });
+      if (!body) return { devices: [{ deviceId: 'other', scopes: ['admin:settings'] }, { deviceId: 'paired-device', scopes: ['read:chats'] }] };
+    },
+  };
+  await assert.rejects(withFlowScopes(session, { platform: 'android', serial: 'emulator-test' }, ['exec:terminal'], async () => { throw new Error('Native failure'); }), /Native failure/);
+  assert.deepEqual(calls.slice(1), [
+    { route: '/auth/devices/paired-device/scopes', body: { scopes: ['read:chats', 'exec:terminal'] }, method: 'PUT' },
+    { route: '/auth/devices/paired-device/scopes', body: { scopes: ['read:chats'] }, method: 'PUT' },
+  ]);
 });
 
 test('suite discovery respects globs, omits subflows, applies order and runs pairing last', async () => {

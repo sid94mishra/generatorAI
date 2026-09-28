@@ -23,6 +23,8 @@ It also records every merge of `desktop_redesign` into this branch.
 
 | 2026-09-28 | M1-04 | `scripts/mobile/lib/sandbox-devices.mjs` | mobile tooling recovery | Recognize the native scanner screen and follow the visible stale-server recovery action before fresh sandbox consent (MD-102). Six existing tooling tests pass; native pairing verified on both platforms. |
 
+| 2026-09-28 | M1-04 | `scripts/mobile/lib/sandbox-maestro.mjs`, its Node test | mobile-only runner extension | Scenario-only device scopes with finally restoration; iOS native notification setup/APNs injection and Android approval verification through stream replay. Seven tooling tests pass; these new native branches remain unverified while M1-04 is blocked on legacy app defects. |
+
 ## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |
