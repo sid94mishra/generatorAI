@@ -1,0 +1,17 @@
+{
+  "aps": {
+    "alert": { "title": "Mobile approval check", "body": "Run pnpm test" },
+    "sound": "default",
+    "category": "approval",
+    "thread-id": "chat:${CHAT_GATE_ID}"
+  },
+  "body": {
+    "route": "/chats/${CHAT_GATE_ID}/gate/${INTERACTION_ID}",
+    "category": "approval",
+    "threadId": "chat:${CHAT_GATE_ID}",
+    "chatId": "${CHAT_GATE_ID}",
+    "interactionId": "${INTERACTION_ID}",
+    "kind": "permission",
+    "actions": ["approve", "deny"]
+  }
+}

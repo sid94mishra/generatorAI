@@ -1,0 +1,25 @@
+appId: ${APP_ID}
+name: chat · two-phase stop
+tags: [characterization, full]
+env: {FRESH_CHAT: stop}
+# Android 2026-09-28: normal stop returns to idle; force-reset branch skipped.
+# iOS branch pending native characterization.
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_STOP_ID}
+- extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
+- tapOn: {id: composer-input}
+- inputText: Start the long job
+- tapOn: {id: composer-send}
+- extendedWaitUntil: {visible: {id: composer-stop, enabled: true}, timeout: 30000}
+- tapOn: {id: composer-stop}
+- extendedWaitUntil:
+    visible: "Dictate a message|Force reset"
+    timeout: 20000
+- runFlow:
+    when: {visible: {id: composer-force-reset}}
+    commands:
+      - tapOn: {id: composer-force-reset}
+- extendedWaitUntil: {visible: "Dictate a message", timeout: 10000}
+- assertNotVisible: {id: composer-stop}
+- assertNotVisible: {id: composer-force-reset}

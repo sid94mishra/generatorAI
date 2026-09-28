@@ -963,6 +963,7 @@ export function TerminalView({
         <View className="flex-1" style={{ backgroundColor: colors.background }}>
           {webMounted && html ? (
             <WebView
+              testID="terminal-view"
               ref={webRef}
               // Local string only: the WebView is a renderer, not a browser.
               source={{ html }}
@@ -1016,6 +1017,7 @@ export function TerminalView({
             return (
               <Touchable
                 key={key.label}
+                testID={key.label === 'esc' ? 'terminal-key-esc' : undefined}
                 accessibilityLabel={key.a11y}
                 accessibilityState={armed ? { selected: true } : undefined}
                 haptic="select"

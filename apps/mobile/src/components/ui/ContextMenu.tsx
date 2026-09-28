@@ -104,6 +104,7 @@ export function useContextMenu(): ContextMenuApi {
 }
 
 export interface ContextMenuProps {
+  testID?: string;
   items: ContextMenuItem[];
   title?: string;
   message?: string;
@@ -123,6 +124,7 @@ export interface ContextMenuProps {
 }
 
 export function ContextMenu({
+  testID,
   items,
   title,
   message,
@@ -164,6 +166,7 @@ export function ContextMenu({
   return (
     <>
       <AnimatedPressable
+        testID={testID}
         accessibilityRole={a11yRole}
         {...(accessibilityLabel ? { accessibilityLabel } : {})}
         // A long-press is not performable with a screen reader; the menu is

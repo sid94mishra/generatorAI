@@ -33,6 +33,7 @@ export function ListRow({
   toggle,
   accessibilityLabel,
   accessibilityHint,
+  testID,
 }: {
   title: string;
   subtitle?: string | null;
@@ -51,6 +52,7 @@ export function ListRow({
   toggle?: { value: boolean; onValueChange: (next: boolean) => void };
   accessibilityLabel?: string;
   accessibilityHint?: string;
+  testID?: string;
 }): React.ReactElement {
   const { colors } = useTheme();
   const showChevron = chevron ?? (Boolean(onPress) && !toggle);
@@ -122,11 +124,12 @@ export function ListRow({
   );
 
   if (!onPress && !toggle && !onLongPress) {
-    return <View className={selected ? 'bg-accent' : undefined}>{body}</View>;
+    return <View testID={testID} className={selected ? 'bg-accent' : undefined}>{body}</View>;
   }
 
   return (
     <Touchable
+      testID={testID}
       a11yRole={toggle ? 'switch' : 'button'}
       accessibilityLabel={accessibilityLabel ?? title}
       accessibilityHint={accessibilityHint ?? (subtitle && !toggle ? subtitle : undefined)}

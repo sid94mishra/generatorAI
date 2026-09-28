@@ -682,6 +682,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
           >
             <TextInput
               ref={inputRef}
+              testID="composer-input"
               accessibilityLabel="Message"
               accessibilityHint={props.onOpenHistory ? 'Swipe up for recent prompts' : undefined}
               multiline
@@ -1031,6 +1032,7 @@ function SendButton({
 
   return (
     <Touchable
+      testID={streaming ? (stopState?.forceAvailable ? 'composer-force-reset' : 'composer-stop') : 'composer-send'}
       accessibilityLabel={streaming ? (stopState?.label ?? 'Stop') : sending ? 'Sending' : 'Send'}
       accessibilityHint={!streaming && onSendWithPlan ? 'Long-press to send in plan mode' : undefined}
       disabled={!active}

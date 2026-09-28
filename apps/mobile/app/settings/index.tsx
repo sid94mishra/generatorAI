@@ -66,6 +66,7 @@ export default function SettingsScreen(): React.ReactElement {
       <SectionHeader title="App" />
       <ListGroup>
         <ListRow
+          testID="settings-appearance"
           title="Appearance"
           subtitle="Theme and accent colour"
           icon={<Palette size={18} color={colors['muted-foreground']} />}

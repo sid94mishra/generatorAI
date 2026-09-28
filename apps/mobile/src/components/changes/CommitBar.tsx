@@ -249,6 +249,7 @@ export function CommitBar({
           <View className="flex-row items-center gap-2">
             <Button
               grow
+              testID="changes-commit"
               label={fileCount > 0 ? `Commit ${fileCount} ${fileCount === 1 ? 'file' : 'files'}` : 'Commit'}
               icon={<GitCommitHorizontal size={16} color={colors['primary-foreground']} />}
               onPress={() => setFlowOpen(true)}

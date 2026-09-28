@@ -1,0 +1,10 @@
+appId: ${APP_ID}
+---
+- runFlow: launch.yaml
+- openLink: generatorai:///notify?case=setup
+- runFlow:
+    when: {visible: Allow}
+    commands:
+      - tapOn: Allow
+- extendedWaitUntil: {visible: Notifications ready, timeout: 30000}
+- pressKey: Home

@@ -1227,6 +1227,7 @@ export default function ChatScreen(): React.ReactElement {
         ) : (
           <View className="flex-1">
             <LegendList
+              testID="transcript-list"
               ref={listRef}
               data={listRows}
               keyExtractor={(row) => row.id}

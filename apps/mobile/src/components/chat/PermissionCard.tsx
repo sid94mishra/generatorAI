@@ -64,6 +64,7 @@ export function PermissionCard({
 
   return (
     <Animated.View
+      testID="gate-card"
       entering={entering}
       className="mx-3 mt-2 gap-3 rounded-3xl border border-warning bg-card p-3.5"
     >
@@ -152,6 +153,7 @@ export function PermissionCard({
               onPress={() => setDenying(false)}
             />
             <Button
+              testID="gate-deny"
               label={reason.trim() ? 'Deny with reason' : 'Deny'}
               variant="danger"
               size="lg"
@@ -165,6 +167,7 @@ export function PermissionCard({
       ) : (
         <View className="flex-row gap-2">
           <Button
+            testID="gate-deny"
             label="Deny"
             variant="danger"
             size="lg"
@@ -173,6 +176,7 @@ export function PermissionCard({
             onPress={() => setDenying(true)}
           />
           <Button
+            testID="gate-allow"
             label="Allow"
             variant="primary"
             size="lg"

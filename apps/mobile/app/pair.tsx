@@ -377,6 +377,7 @@ export default function PairScreen(): React.ReactElement {
               actually compare, character by character. */}
           <Text
             selectable
+            testID="pairing-fingerprint"
             accessibilityLabel={`Fingerprint ${consent?.fingerprint ?? ''}`}
             className="font-mono text-lg tracking-widest text-foreground"
           >
@@ -460,6 +461,7 @@ export default function PairScreen(): React.ReactElement {
       ) : null}
 
       <Button
+        testID="pairing-confirm"
         label={failure?.retryable ? 'Try again' : 'Pair this device'}
         size="lg"
         full

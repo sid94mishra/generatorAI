@@ -1,0 +1,20 @@
+appId: ${APP_ID}
+name: terminal · open and type
+tags: [characterization, full]
+env: {FRESH_CHAT: stream, DEVICE_SCOPES: "exec:terminal"}
+# MD-103: New terminal has no allowed M1 testID.
+# xterm text exposure is checked during native verification (08 §5.5).
+---
+- runFlow: ../_subflows/launch.yaml
+- openLink: generatorai:///chats/${CHAT_STREAM_ID}
+- extendedWaitUntil: {visible: {id: workbench-button}, timeout: 30000}
+- tapOn: {id: workbench-button}
+- tapOn: {id: workbench-tool-terminal}
+- extendedWaitUntil: {visible: New terminal, timeout: 30000}
+- tapOn: New terminal
+- extendedWaitUntil: {visible: {id: terminal-view}, timeout: 30000}
+- tapOn: {id: terminal-view}
+- inputText: echo gai-characterization-ok
+- pressKey: Enter
+- extendedWaitUntil: {visible: ".*gai-characterization-ok.*", timeout: 15000}
+- tapOn: {id: terminal-key-esc}

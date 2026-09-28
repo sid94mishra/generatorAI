@@ -62,6 +62,7 @@ export function Button({
   haptic = 'commit',
   accessibilityLabel,
   accessibilityHint,
+  testID,
 }: {
   label: string;
   onPress?: () => void;
@@ -81,6 +82,7 @@ export function Button({
   haptic?: HapticIntent;
   accessibilityLabel?: string;
   accessibilityHint?: string;
+  testID?: string;
 }): React.ReactElement {
   const { colors } = useTheme();
   const spinnerColor =
@@ -92,6 +94,7 @@ export function Button({
 
   return (
     <Touchable
+      testID={testID}
       accessibilityLabel={accessibilityLabel ?? label}
       {...(accessibilityHint ? { accessibilityHint } : {})}
       // `busy` is what tells a screen reader that the pending action was

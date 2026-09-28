@@ -141,6 +141,7 @@ export function ScmFlowSheet({
             onChangeText={(message) => setForm((prev) => ({ ...prev, message }))}
             multiline
             style={{ minHeight: 72, textAlignVertical: 'top' }}
+            testID="commit-message"
             accessibilityLabel="Commit message"
           />
         </View>
@@ -218,6 +219,7 @@ export function ScmFlowSheet({
         <StepList steps={steps} busy={busy} result={result} />
 
         <Button
+          testID="commit-submit"
           label={runLabel(form)}
           full
           size="lg"
