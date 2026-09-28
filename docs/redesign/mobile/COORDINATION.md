@@ -27,9 +27,9 @@ It also records every merge of `desktop_redesign` into this branch.
 
 | 2026-09-28 | M1-04 | `scripts/mobile/lib/sandbox-seed.mjs`, `sandbox-maestro.mjs` | mobile-only fixture reliability | Rotate the fixture project at its actual codebase cap (MD-105); retain all old fixtures. `EXPECT_COMMIT` verifies exact dummy-repo history automatically. Android keep/undo/commit passed and original device scopes were restored; seven tooling tests pass. |
 
-## Merges of `desktop_redesign`
+| 2026-09-28 | M1-04 | `scripts/redesign/sandbox.mjs`, `lib/sandbox-options.mjs` and test; `scripts/mobile/lib/sandbox-session.mjs` | additive sandbox option | Explicit emulator CORS origin preserves the web default and production authorization; clean POSIX fixture shell, existing profile-free Windows host. Thirteen tooling tests pass. Android terminal attaches; rendering/input still pending. |
 
-2026-09-28 — M1-04: `scripts/redesign/sandbox.mjs`, `lib/sandbox-options.mjs` and its test add an opt-in `GENERATORAI_SANDBOX_CORS_ORIGINS` list. The default web origin is retained; malformed origins are rejected. `scripts/mobile/lib/sandbox-session.mjs` supplies only the Android emulator origin and selects `/bin/sh` on POSIX to avoid personal shell startup prompts (Windows keeps the existing profile-free host). Thirteen sandbox/tooling tests pass. Native Android now attaches its terminal WebSocket; the remaining blank renderer/input defect is under characterization. Production server authorization is unchanged.
+## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |
 |---|---|---|---|

@@ -10,15 +10,15 @@ env: {FRESH_CHAT: gate, PENDING_GATE: true}
     commands:
       - runFlow: ../_subflows/launch.yaml
       - openLink: generatorai:///notify?case=approval&chat=${CHAT_GATE_ID}&interaction=${INTERACTION_ID}
-      - runFlow:
-          when: {visible: Allow}
-          commands:
-            - tapOn: Allow
+      # sandbox-pair grants notification permission. Do not tap a generic Allow
+      # here: it can already be the notification action in a heads-up banner.
       - extendedWaitUntil: {visible: Notification scheduled, timeout: 30000}
       - pressKey: Home
-      - swipe: {start: "50%, 1%", end: "50%, 80%"}
+      - waitForAnimationToEnd
+      - swipe: {start: "50%, 0%", end: "50%, 80%", duration: 800}
       - extendedWaitUntil: {visible: Allow, timeout: 15000}
       - tapOn: Allow
+      - pressKey: Home
 - runFlow:
     when: {platform: iOS}
     commands:

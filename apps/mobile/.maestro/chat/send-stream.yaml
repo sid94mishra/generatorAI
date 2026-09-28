@@ -9,6 +9,12 @@ env: {FRESH_CHAT: stream}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
 - tapOn: {id: composer-input}
 - inputText: Show the mobile markdown streaming fixture
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- waitForAnimationToEnd
+- extendedWaitUntil: {visible: {id: composer-send}, timeout: 10000}
 - tapOn: {id: composer-send}
 - extendedWaitUntil: {visible: ".*The stream is complete.*", timeout: 60000}
 - assertVisible: ".*Mobile streaming check.*"

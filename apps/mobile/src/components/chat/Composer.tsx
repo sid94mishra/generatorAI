@@ -613,7 +613,7 @@ export function Composer(props: ComposerProps): React.ReactElement {
 
       {props.boundAgent ? <BoundAgentChip agent={props.boundAgent} /> : null}
       {props.workspacePrep ? <WorkspacePrepBar prep={props.workspacePrep} /> : null}
-      {props.gate ? <GateBanner gate={{ ...props.gate, hasDraft: hasContent }} /> : null}
+      {props.gate && draft.trim().length > 0 ? <GateBanner gate={{ ...props.gate, hasDraft: hasContent }} /> : null}
 
       <AttachmentChips items={attachments} onRemove={onRemoveAttachment} />
 

@@ -8,10 +8,31 @@ env: {FRESH_CHAT: gate}
 - extendedWaitUntil: {visible: {id: composer-input}, timeout: 30000}
 - tapOn: {id: composer-input}
 - inputText: Please run the tests
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- waitForAnimationToEnd
+- extendedWaitUntil: {visible: {id: composer-send}, timeout: 10000}
 - tapOn: {id: composer-send}
 - extendedWaitUntil: {visible: {id: gate-card}, timeout: 30000}
 - assertVisible: ".*Run pnpm test.*"
 - assertVisible: {id: composer-input, enabled: true}
+- tapOn: {id: composer-input}
+- inputText: Pending approval draft
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- waitForAnimationToEnd
+- assertVisible: Pending approval draft
+- tapOn: {id: composer-input}
+- eraseText
+- runFlow:
+    when: {platform: Android}
+    commands:
+      - hideKeyboard
+- waitForAnimationToEnd
 - tapOn: {id: gate-allow}
 - extendedWaitUntil: {visible: ".*Thanks — running it now.*", timeout: 30000}
 - extendedWaitUntil: {visible: "Dictate a message", timeout: 30000}

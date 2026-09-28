@@ -1037,10 +1037,9 @@ export default function ChatScreen(): React.ReactElement {
 
   const gate = useMemo(
     () =>
-      // The pinned gate card already says the agent is waiting. The banner's
-      // job is its "cancel and send" action, which only means something once
-      // the user has started typing a different instruction.
-      blocked && !archived && composer.draft.trim().length > 0
+      // Keep the gate present even with an empty draft: the composer uses
+      // it to allow typing. The composer reveals the banner after typing.
+      blocked && !archived
         ? {
             label: blockingPermission
               ? 'Waiting for your permission decision'
@@ -1051,7 +1050,7 @@ export default function ChatScreen(): React.ReactElement {
             onCancelAndSend: () => void cancelGateAndSend(),
           }
         : null,
-    [blocked, archived, blockingPermission, blockingQuestion, gateBusy, cancelGateAndSend, composer.draft],
+    [blocked, archived, blockingPermission, blockingQuestion, gateBusy, cancelGateAndSend],
   );
 
   // The chat DTO's bound agent and mount readiness, when the server sends them.

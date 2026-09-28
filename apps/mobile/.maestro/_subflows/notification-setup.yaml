@@ -5,6 +5,8 @@ appId: ${APP_ID}
 - runFlow:
     when: {visible: Allow}
     commands:
-      - tapOn: Allow
+      # Maestro may accept this native prompt between the condition and tap.
+      # Notifications ready below still requires an actual granted permission.
+      - tapOn: {text: Allow, optional: true}
 - extendedWaitUntil: {visible: Notifications ready, timeout: 30000}
 - pressKey: Home

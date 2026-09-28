@@ -124,9 +124,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
   // status-bar text and the Android nav bar stay on the OS default and are
   // unreadable against our background half the time.
   //
-  // `null` restores "follow the OS", which is exactly what mode='system'
-  // means. The RN types omit it, so the cast is narrowing reality back to
-  // what the platform actually accepts.
+  // React Native's "unspecified" restores follow-system on both platforms.
   //
   // Feature-detected because `setColorScheme` is iOS/Android-only: there is no
   // native chrome to tint under react-native-web, and calling it there throws
@@ -135,9 +133,7 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
   // on web.
   useEffect(() => {
     if (typeof RNAppearance.setColorScheme !== 'function') return;
-    RNAppearance.setColorScheme(
-      (mode === 'system' ? null : mode) as Parameters<typeof RNAppearance.setColorScheme>[0],
-    );
+    RNAppearance.setColorScheme(mode === 'system' ? 'unspecified' : mode);
   }, [mode]);
 
   // The generated module is `as const`, so indexing it with a runtime string

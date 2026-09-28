@@ -1,12 +1,20 @@
 appId: ${APP_ID}
 ---
-- launchApp:
-    stopApp: true
+- launchApp: {stopApp: true}
 - runFlow:
     when:
       true: ${BUILD == 'dev'}
     commands:
-      - openLink: exp+generatorai://expo-development-client/?url=${METRO_URL}&disableFab=1&disableOnboarding=1&disableAutoLaunch=1
+      - runFlow:
+          when: {platform: Android}
+          commands:
+            - openLink: exp+generatorai://expo-development-client/?url=${METRO_URL}&disableFab=1&disableOnboarding=1&disableAutoLaunch=1
+      # sandbox-pair established this recent server. Opening a second URL
+      # while Expo auto-loads can tear down its native AppContext on iOS.
+      - runFlow:
+          when: {platform: iOS, visible: Development Build}
+          commands:
+            - tapOn: ".*http://127.0.0.1:8081.*"
 # Expo may restore the preceding product link across a native relaunch.
 - extendedWaitUntil:
     visible: "Menu.*|Back"

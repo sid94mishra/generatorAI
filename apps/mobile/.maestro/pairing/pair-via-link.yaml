@@ -6,6 +6,7 @@ tags: [characterization, smoke, pairing]
 - runFlow:
     when: {true: "${BUILD == 'dev'}"}
     commands:
+      - extendedWaitUntil: {visible: Development Build, timeout: 30000}
       - openLink: exp+generatorai://expo-development-client/?url=${METRO_URL}&disableFab=1&disableOnboarding=1&disableAutoLaunch=1
 - extendedWaitUntil: {visible: "Scan the pairing code", timeout: 60000}
 - openLink: ${PAIR_URL}
