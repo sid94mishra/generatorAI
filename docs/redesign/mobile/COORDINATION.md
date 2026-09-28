@@ -25,6 +25,8 @@ It also records every merge of `desktop_redesign` into this branch.
 
 | 2026-09-28 | M1-04 | `scripts/mobile/lib/sandbox-maestro.mjs`, its Node test | mobile-only runner extension | Scenario-only device scopes with finally restoration; iOS native notification setup/APNs injection and Android approval verification through stream replay. Seven tooling tests pass; these new native branches remain unverified while M1-04 is blocked on legacy app defects. |
 
+| 2026-09-28 | M1-04 | `scripts/mobile/lib/sandbox-seed.mjs`, `sandbox-maestro.mjs` | mobile-only fixture reliability | Rotate the fixture project at its actual codebase cap (MD-105); retain all old fixtures. `EXPECT_COMMIT` verifies exact dummy-repo history automatically. Android keep/undo/commit passed and original device scopes were restored; seven tooling tests pass. |
+
 ## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |

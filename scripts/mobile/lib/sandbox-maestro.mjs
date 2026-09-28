@@ -31,7 +31,8 @@ export async function flowMetadata(file) {
   for (const scope of scopes) if (!['write:files', 'write:workspaces', 'exec:terminal'].includes(scope)) {
     throw new Error(`Unsupported characterization scope '${scope}' in ${file}`);
   }
-  return { fresh, scopes, pending: config.env?.PENDING_GATE === true || config.env?.PENDING_GATE === 'true', tags: config.tags ?? [], name: config.name ?? path.basename(file).replace(/\.ya?ml$/, '') };
+  return { fresh, scopes, pending: config.env?.PENDING_GATE === true || config.env?.PENDING_GATE === 'true', tags: config.tags ?? [], name: config.name ?? path.basename(file).replace(/\.ya?ml$/, ''),
+    ...(config.env?.EXPECT_COMMIT ? { expectedCommit: String(config.env.EXPECT_COMMIT) } : {}) };
 }
 
 /** Grant only the scenario's capabilities to the verified sandbox device. */
@@ -235,6 +236,11 @@ export async function runMaestro(session, target, args, { verify } = {}) {
         catch (error) { if (code === 0 || error.code !== 'ENOENT') throw error; }
       }
       if (code !== 0) throw new Error(`Maestro failed for ${path.relative(ROOT, file)} (${code})`);
+      if (metadata.expectedCommit) {
+        const subject = await run('git', ['-C', assertDummyRepo(session.state.dummyRepo), 'log', '-1', '--format=%s']);
+        if (subject !== metadata.expectedCommit) throw new Error('Dummy repository did not receive the expected characterization commit');
+        console.log('Characterization commit verified in the dummy repository');
+      }
       if (metadata.pending && target.platform === 'android') await verifyAllowedGate(session, env.CHAT_GATE_ID, env.INTERACTION_ID);
       if (pairing) await recordPairing(session, target, devicesBefore, started);
       count++;
@@ -246,7 +252,7 @@ export async function runMaestro(session, target, args, { verify } = {}) {
   if (!count) throw new Error('No Maestro flows matched the supplied path and tags');
   if (verify === 'commit') {
     const subject = await run('git', ['-C', assertDummyRepo(session.state.dummyRepo), 'log', '-1', '--format=%s']);
-    if (subject !== 'mobile characterization commit') throw new Error('Dummy repository did not receive the expected characterization commit');
+    if (subject !== 'Mobile characterization commit') throw new Error('Dummy repository did not receive the expected characterization commit');
   }
   console.log(`Maestro: ${count} flow(s) passed on ${target.platform}`);
 }

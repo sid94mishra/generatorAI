@@ -40,6 +40,14 @@ export async function seedSandbox(session, fresh = []) {
       catch (error) { if (error.status !== 404) throw error; }
     }
     if (saved?.name === name && !fresh.includes(key)) { await waitForWorkspace(session, saved, key); continue; }
+    // Retain old conversations/repos for diagnosis without exhausting the
+    // project's real codebase limit during repeated fresh native flows.
+    const codebases = await session.api(`/projects/${project.id}/codebases`);
+    if (codebases.length >= (project.settings?.maxCodebases ?? 10)) {
+      project = await session.api('/projects', { name: 'Mobile sandbox repo', description: 'Throwaway native verification fixture' });
+      session.state.projectId = project.id;
+      await session.save();
+    }
     // Independent source directories prevent shared shadow-store registration and
     // one characterization flow's edits from leaking into another (MD-98).
     const result = await execute(process.execPath, [path.join(ROOT, 'scripts/redesign/make-dummy-repo.mjs')], {
