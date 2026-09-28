@@ -130,6 +130,14 @@ async function waitForApp(target) {
     } catch { /* The first Metro bundle can temporarily leave no readable native tree. */ }
     const nodes = snapshot?.nodes ?? [];
     const labels = nodes.map(node => node.label ?? node.value ?? '');
+    // Restarting the isolated sandbox rotates its identity. A previously paired
+    // app then shows ConnectionError, not the unpaired screen. Follow its visible
+    // recovery action; the fresh grant still requires normal consent below.
+    const pairAgain = nodes.find(node => node.label === 'Pair with a different host' && (/Button$/.test(node.type ?? '') || node.clickable));
+    if (pairAgain?.ref && labels.some(label => label === 'Can’t reach your server' || label === 'Sign-in needs refreshing')) {
+      await agent(target, ['press', `@${pairAgain.ref}`, '--settle']);
+      continue;
+    }
     // Expo's first-run tutorial covers the app after the initial bundle. Match
     // its explanatory copy so a product consent button is never auto-dismissed.
     if (labels.some(label => label.includes('This is the developer menu.')) && labels.includes('Continue')) {
@@ -140,7 +148,7 @@ async function waitForApp(target) {
       await pressExpoControl(target, nodes, 'Close');
       continue;
     }
-    if (nodes.some(node => node.identifier === 'menu-button' || node.label === 'Pair this phone' || node.label === 'Fingerprint' || node.label === 'Pair this device')) return;
+    if (nodes.some(node => node.identifier === 'menu-button' || node.label === 'Pair this phone' || node.label === 'Scan the pairing code' || node.label === 'Fingerprint' || node.label === 'Pair this device')) return;
     if (nodes.some(node => node.label === 'Unlock to continue')) throw new Error('The installed app is locked; unlock it before native verification');
     await confirmAppLink(target, snapshot);
     await delay(500);

@@ -4,16 +4,16 @@ In progress on 2026-09-27, starting from M1-03 commit `2f8bfb18`. SDK 57.0.25 / 
 
 ## Baselines
 
-Local, gitignored captures are under `docs/redesign/shots/mobile/baseline/<screen>/<platform>-phone-instrument-dark-default.png`. Screens: Home, Chats, chat, Changes, Terminal and Settings. All six Android captures are saved and visually checked; matching iOS captures are pending. Home also has an additional `-drawer.png` capture. Chat shows the completed sandbox markdown stream; Changes shows its genuine empty state; Terminal shows the default scope gate. The corresponding committed mobile boards were inspected again in dark and light on both sides before this task.
+Local, gitignored captures are under `docs/redesign/shots/mobile/baseline/<screen>/<platform>-phone-instrument-dark-default.png`. Screens: Home, Chats, chat, Changes, Terminal and Settings. All six Android captures and all six matching iOS captures are saved and visually checked (iOS completed 2026-09-28 before any product selectors were added). Home also has an additional `-drawer.png` capture. Chat shows the completed sandbox markdown stream; Changes shows its genuine empty state; Terminal shows the default scope gate. The corresponding committed mobile boards were inspected again in dark and light on both sides before this task.
 
 | Screen | Android file under `baseline/` | iOS |
 |---|---|---|
-| Home | `home/android-phone-instrument-dark-default.png` | pending |
-| Chats | `chats/android-phone-instrument-dark-default.png` | pending |
-| Chat | `chat/android-phone-instrument-dark-default.png` | pending |
-| Changes | `changes/android-phone-instrument-dark-default.png` | pending |
-| Terminal | `terminal/android-phone-instrument-dark-default.png` | pending |
-| Settings | `settings/android-phone-instrument-dark-default.png` | pending |
+| Home | `home/android-phone-instrument-dark-default.png` | captured 2026-09-28 |
+| Chats | `chats/android-phone-instrument-dark-default.png` | captured 2026-09-28 |
+| Chat | `chat/android-phone-instrument-dark-default.png` | captured 2026-09-28 |
+| Changes | `changes/android-phone-instrument-dark-default.png` | captured 2026-09-28 |
+| Terminal | `terminal/android-phone-instrument-dark-default.png` | captured 2026-09-28 |
+| Settings | `settings/android-phone-instrument-dark-default.png` | captured 2026-09-28 |
 
 ## Findings before selectors or flows
 
@@ -65,3 +65,11 @@ Restarted the isolated sandbox, Metro and gai-iphone. Bootstatus completed in 11
 The native driver remained blocked during preparation. Its Xcode diagnostic connected to the simulator's testmanagerd socket and initiated the control session without subsequent progress during observation. Host one-minute load rose from 257 to 299 (8 GiB RAM, approximately 4.9 GiB swap used, 17 GiB free disk, over five days uptime). Cancelled this attempt before its configured timeout because the machine was severely overloaded; do not count it as a new completed timeout or a passing driver check. The exact root cause remains unproven. Full macOS restart remains the next owner recovery action under playbook §8.
 
 Evidence: `.expo/m1-cache-retry-{sandbox,metro,pair}.log`, `.expo/m1-cache-retry-app-sample.txt`, `.expo/m1-cache-retry-{launch,deeplink,ready}.png`; runner diagnostics under `~/.agent-device/apple-runner/derived/ios-simulator/cache-7e30ec40a34f9fac/Logs/Test/Test-AgentDeviceRunner-2026.09.27_21-53-03-+0530.xcresult/`. Stopped this task's sandbox, Metro, pairing process and simulator; verified no booted simulator or listeners on 3197/5197/8081. No product-code changes, new baselines or completed phases are claimed. After restart, re-pair with the fresh sandbox before baseline capture.
+
+## Recovery completed after macOS restart (2026-09-28)
+
+Confirmed the owner restarted macOS (three minutes uptime, 29 GiB free). iOS bootstatus completed in eight seconds; cold XCTest initialization eventually reached its listener. Authorization succeeded in the Xcode diagnostics despite `DevToolsSecurity -status` reporting disabled, so no system security setting was changed. An independent early Expo link timed out, but Metro later bundled and the app became responsive. Native snapshots exposed a separate reproducible helper bug: it waited indefinitely at the old server's connection error, then at the scanner title, neither recognized by `waitForApp`. Fixed only mobile tooling (MD-102), and fresh consent completed on both platforms.
+
+Captured and visually inspected Home, Chats, completed real Faux stream, Changes (empty), Terminal (default scope gate) and Settings on iOS. Files are listed in the baseline table above. iOS keyboard dismissal has no dismiss key here, so the chat was left and reopened through its existing navigation before its capture. Raw refs were used where the pinned driver's processed selector heuristic reported the empty Toolbar overlay (MD-100).
+
+Android's first cold startup showed “System UI isn't responding”; the native `alert get`/`alert dismiss` API closed that emulator system dialog, then the helper paired successfully. No device data or app storage was erased. Evidence: `.expo/m1-post-reboot-pair-final.log`, `.expo/m1-post-reboot-android-pair-retry.log`, `.expo/m1-android-anr-{alert,dismiss}.json`, and `.expo/m1-baseline-ios-*.json`. Six existing sandbox tooling tests pass. The twelve screen baselines are complete; full characterization flows remain pending. Selectors/dev routes are being implemented after baseline capture, and mobile typecheck passes. No legacy journey script has been deleted yet.

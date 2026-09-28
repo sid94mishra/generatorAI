@@ -21,6 +21,8 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-09-27 | M1-03 | root `package.json`, `pnpm-lock.yaml` | additive devDependency | Exact `agent-device@0.21.15` pin (ef96a9cc), bootstrapped for M1-02 pairing. CLI and frozen install pass; all existing importer resolutions preserved. |
 | 2026-09-27 | M1-02 | `scripts/mobile/doctor.mjs`, `fingerprint.mjs`, `sandbox-pair.mjs`, `lib/*.mjs` | new mobile-only tooling | Native environment checks, SDK fingerprints, guarded sandbox/fixture lifecycle, consent automation and per-flow Maestro seeding/report aggregation. |
 
+| 2026-09-28 | M1-04 | `scripts/mobile/lib/sandbox-devices.mjs` | mobile tooling recovery | Recognize the native scanner screen and follow the visible stale-server recovery action before fresh sandbox consent (MD-102). Six existing tooling tests pass; native pairing verified on both platforms. |
+
 ## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |
