@@ -25,6 +25,7 @@
 import { useEffect } from 'react';
 import { usePathname } from 'expo-router';
 
+import { useAuth } from '../auth/AuthProvider';
 import { PREF_KEYS, prefs } from '../storage/prefs';
 import { isRestorableRoute, resolveLastRoute } from './lastRouteRules';
 
@@ -35,15 +36,15 @@ export {
   resolveLastRoute,
 } from './lastRouteRules';
 
-export function recordLastRoute(pathname: string, now: number = Date.now()): void {
+export function recordLastRoute(pathname: string, serverId: string, now: number = Date.now()): void {
   if (!isRestorableRoute(pathname)) return;
-  prefs.setString(PREF_KEYS.lastRoute, pathname);
-  prefs.setNumber(PREF_KEYS.lastRouteAt, now);
+  prefs.setString(`srv.${serverId}.${PREF_KEYS.lastRoute}`, pathname);
+  prefs.setNumber(`srv.${serverId}.${PREF_KEYS.lastRouteAt}`, now);
 }
 
-export function clearLastRoute(): void {
-  prefs.delete(PREF_KEYS.lastRoute);
-  prefs.delete(PREF_KEYS.lastRouteAt);
+export function clearLastRoute(serverId: string): void {
+  prefs.delete(`srv.${serverId}.${PREF_KEYS.lastRoute}`);
+  prefs.delete(`srv.${serverId}.${PREF_KEYS.lastRouteAt}`);
 }
 
 /**
@@ -52,17 +53,19 @@ export function clearLastRoute(): void {
  * Clears on every call, including the stale case: a record older than the
  * TTL is dead and must not linger for a later (fresher-looking) read.
  */
-export function consumeLastRoute(now: number = Date.now()): string | null {
-  const route = prefs.getString(PREF_KEYS.lastRoute);
-  const savedAt = prefs.getNumber(PREF_KEYS.lastRouteAt, 0);
-  clearLastRoute();
+export function consumeLastRoute(serverId: string | null, now: number = Date.now()): string | null {
+  if (!serverId) return null;
+  const route = prefs.getString(`srv.${serverId}.${PREF_KEYS.lastRoute}`);
+  const savedAt = prefs.getNumber(`srv.${serverId}.${PREF_KEYS.lastRouteAt}`, 0);
+  clearLastRoute(serverId);
   return resolveLastRoute({ route, savedAt: savedAt || undefined }, now);
 }
 
 /** Records the current pathname as it changes. Mount once under the router. */
 export function useLastRoute(): void {
   const pathname = usePathname();
+  const { serverId } = useAuth();
   useEffect(() => {
-    recordLastRoute(pathname);
-  }, [pathname]);
+    if (serverId) recordLastRoute(pathname, serverId);
+  }, [pathname, serverId]);
 }

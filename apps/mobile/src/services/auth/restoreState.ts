@@ -27,11 +27,14 @@ export type RestorePhase = 'restoring' | 'locked' | 'settled';
 
 export type RestoreEvent =
   | { type: 'retry' }
+  | { type: 'server-switch' }
   | { type: 'storage-unavailable' }
   | { type: 'settled' };
 
 export function nextRestorePhase(phase: RestorePhase, event: RestoreEvent): RestorePhase {
   switch (event.type) {
+    case 'server-switch':
+      return 'restoring';
     case 'retry':
       // Only a locked restore is retried; a settled one never restarts on
       // its own (that would re-run pairing checks on every foreground).

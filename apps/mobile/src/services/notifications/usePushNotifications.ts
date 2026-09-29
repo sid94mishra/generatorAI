@@ -152,7 +152,7 @@ export function usePushNotifications(): void {
       intent: Extract<NotificationIntent, { type: 'decide' }>,
       notificationId: string,
     ): Promise<void> => {
-      const signedFetch = getAuthenticatedFetch();
+      const signedFetch = getAuthenticatedFetch(intent.serverId);
       if (!signedFetch) {
         open(intent.route);
         return;

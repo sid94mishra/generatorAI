@@ -76,8 +76,8 @@ export function _streamStoreInternals(): { protectedKeys: string[]; recency: Map
   return { protectedKeys: [...protectedKeys], recency: new Map(recency) };
 }
 
-/** Test-only: forget every key. */
-export function _resetStreamStoreForTests(): void {
+/** Clear the active server's transient stream state when its scope changes. */
+export function resetStreamStore(): void {
   recency.clear();
   protectedKeys.clear();
   tick = 0;

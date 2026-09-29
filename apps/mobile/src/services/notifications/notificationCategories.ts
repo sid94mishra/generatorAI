@@ -67,6 +67,7 @@ export type NotificationIntent =
   /** Resolve a tool-permission gate in place. `route` is the fallback screen. */
   | {
       type: 'decide';
+      serverId?: string;
       chatId: string;
       interactionId: string;
       behavior: 'allow' | 'deny';
@@ -78,6 +79,7 @@ export type NotificationIntent =
   | { type: 'ignore'; reason: 'no-route' | 'unsafe-route' };
 
 interface PushData {
+  serverId?: unknown;
   route?: unknown;
   category?: unknown;
   chatId?: unknown;
@@ -145,7 +147,9 @@ export function intentFromResponse(
     return openOrIgnore();
   }
 
-  return { type: 'decide', chatId, interactionId, behavior, route };
+  const serverId = safeId(payload.serverId);
+  if (payload.serverId !== undefined && !serverId) return openOrIgnore();
+  return { type: 'decide', chatId, interactionId, behavior, route, ...(serverId ? { serverId } : {}) };
 }
 
 export type DecisionOutcome =

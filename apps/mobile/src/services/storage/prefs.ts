@@ -33,6 +33,9 @@ export const prefs = {
   setNumber(key: string, value: number): void {
     storage.set(key, value);
   },
+  deletePrefix(prefix: string): void {
+    for (const key of storage.getAllKeys()) if (key.startsWith(prefix)) storage.remove(key);
+  },
   delete(key: string): void {
     storage.remove(key);
   },

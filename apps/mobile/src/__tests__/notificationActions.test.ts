@@ -55,6 +55,9 @@ describe('approval category', () => {
 });
 
 describe('intentFromResponse — permission prompt', () => {
+  it('never falls back to an active-server decision for an invalid explicit identity', () => {
+    expect(intentFromResponse('approve', { ...permissionData, serverId: '../other' }, TAP).type).not.toBe('decide');
+  });
   it('maps Allow to an allow decision without opening the UI', () => {
     expect(intentFromResponse('approve', permissionData, TAP)).toEqual({
       type: 'decide',

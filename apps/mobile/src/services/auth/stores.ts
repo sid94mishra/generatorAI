@@ -24,6 +24,7 @@
 // they do not know about is a lie.
 // ────────────────────────────────────────────────────────────────
 
+import { serverStorageKeys } from './serverStorageKeys';
 import * as SecureStore from './secureItemStore';
 import {
   deviceKeyFromCryptoKeyPair,
@@ -53,9 +54,6 @@ export type KeyBacking =
   | 'software'
   | 'web-preview';
 
-const DEVICE_KEY_ALIAS = 'generatorai.device-key';
-const SOFTWARE_KEY_ITEM = 'generatorai.device-key.software';
-const SESSION_ITEM = 'generatorai.session';
 
 /** The weakest backing available on this platform, used when no hardware key exists. */
 const FALLBACK_BACKING: KeyBacking = SecureStore.IS_OS_PROTECTED ? 'software' : 'web-preview';
@@ -79,6 +77,8 @@ function subtle(): SubtleCrypto {
  * `backing` is only meaningful after `load()` or `create()` has run.
  */
 export class MobileDeviceKeyStore implements DeviceKeyStore {
+  private readonly keys: ReturnType<typeof serverStorageKeys>;
+  constructor(serverId: string) { this.keys = serverStorageKeys(serverId); }
   private backingKind: KeyBacking = FALLBACK_BACKING;
 
   get backing(): KeyBacking {
@@ -99,7 +99,7 @@ export class MobileDeviceKeyStore implements DeviceKeyStore {
   async create(): Promise<DeviceKey> {
     if (await NativeDeviceKey.isSupported()) {
       try {
-        const handle = await NativeDeviceKey.generate(DEVICE_KEY_ALIAS);
+        const handle = await NativeDeviceKey.generate(this.keys.device);
         this.backingKind = handle.backing;
         return this.wrapNative(handle);
       } catch {
@@ -115,8 +115,8 @@ export class MobileDeviceKeyStore implements DeviceKeyStore {
     // Clear BOTH paths. A device that fell back to software after previously
     // holding a hardware key would otherwise leave the old key behind.
     await Promise.allSettled([
-      NativeDeviceKey.remove(DEVICE_KEY_ALIAS),
-      SecureStore.deleteItemAsync(SOFTWARE_KEY_ITEM, KEYCHAIN_OPTIONS),
+      NativeDeviceKey.remove(this.keys.device),
+      SecureStore.deleteItemAsync(this.keys.software, KEYCHAIN_OPTIONS),
     ]);
     this.backingKind = FALLBACK_BACKING;
   }
@@ -126,7 +126,7 @@ export class MobileDeviceKeyStore implements DeviceKeyStore {
   private async loadNative(): Promise<DeviceKey | null> {
     if (!(await NativeDeviceKey.isSupported())) return null;
     try {
-      const handle = await NativeDeviceKey.load(DEVICE_KEY_ALIAS);
+      const handle = await NativeDeviceKey.load(this.keys.device);
       if (!handle) return null;
       this.backingKind = handle.backing;
       return this.wrapNative(handle);
@@ -145,14 +145,14 @@ export class MobileDeviceKeyStore implements DeviceKeyStore {
       thumbprint: await jwkThumbprint(publicJwk),
       // Signing happens inside the secure element; the private key never
       // crosses the JS bridge.
-      sign: (data: Uint8Array) => NativeDeviceKey.sign(DEVICE_KEY_ALIAS, data),
+      sign: (data: Uint8Array) => NativeDeviceKey.sign(this.keys.device, data),
     };
   }
 
   // ── Software fallback ─────────────────────────────────────────
 
   private async loadSoftware(): Promise<DeviceKey | null> {
-    const raw = await SecureStore.getItemAsync(SOFTWARE_KEY_ITEM, KEYCHAIN_OPTIONS);
+    const raw = await SecureStore.getItemAsync(this.keys.software, KEYCHAIN_OPTIONS);
     if (!raw) return null;
     try {
       const jwk = JSON.parse(raw) as JsonWebKey;
@@ -195,7 +195,7 @@ export class MobileDeviceKeyStore implements DeviceKeyStore {
     // keystore, never a file we manage.
     const pair = await generateDeviceKeyPair(true);
     const jwk = (await subtle().exportKey('jwk', pair.privateKey)) as JsonWebKey;
-    await SecureStore.setItemAsync(SOFTWARE_KEY_ITEM, JSON.stringify(jwk), KEYCHAIN_OPTIONS);
+    await SecureStore.setItemAsync(this.keys.software, JSON.stringify(jwk), KEYCHAIN_OPTIONS);
     this.backingKind = FALLBACK_BACKING;
     return deviceKeyFromCryptoKeyPair(pair);
   }
@@ -209,14 +209,16 @@ export class MobileDeviceKeyStore implements DeviceKeyStore {
  * plaintext on disk.
  */
 export class MobileSessionStore implements SessionStore {
+  private readonly keys: ReturnType<typeof serverStorageKeys>;
+  constructor(private readonly serverId: string) { this.keys = serverStorageKeys(serverId); }
   async load(): Promise<StoredSession | null> {
-    const raw = await SecureStore.getItemAsync(SESSION_ITEM, KEYCHAIN_OPTIONS);
+    const raw = await SecureStore.getItemAsync(this.keys.session, KEYCHAIN_OPTIONS);
     if (!raw) return null;
     try {
       const parsed = JSON.parse(raw) as StoredSession;
       // Reject a partial record rather than letting the runtime fail later
       // with a confusing error deep inside a refresh.
-      if (!parsed.deviceId || !parsed.resumeSecret || !parsed.endpoint || !parsed.serverId) {
+      if (!parsed.deviceId || !parsed.resumeSecret || !parsed.endpoint || parsed.serverId !== this.serverId) {
         return null;
       }
       return parsed;
@@ -226,10 +228,18 @@ export class MobileSessionStore implements SessionStore {
   }
 
   async save(session: StoredSession): Promise<void> {
-    await SecureStore.setItemAsync(SESSION_ITEM, JSON.stringify(session), KEYCHAIN_OPTIONS);
+    if (session.serverId !== this.serverId) throw new Error('Session belongs to a different server');
+    await SecureStore.setItemAsync(this.keys.session, JSON.stringify(session), KEYCHAIN_OPTIONS);
   }
 
   async clear(): Promise<void> {
-    await SecureStore.deleteItemAsync(SESSION_ITEM, KEYCHAIN_OPTIONS);
+    await SecureStore.deleteItemAsync(this.keys.session, KEYCHAIN_OPTIONS);
   }
+}
+
+/** Pre-release reset: delete the old singleton credentials; never silently migrate a device key. */
+export async function clearLegacyCredentials(): Promise<void> {
+  await SecureStore.deleteItemAsync('generatorai.session', KEYCHAIN_OPTIONS);
+  await SecureStore.deleteItemAsync('generatorai.device-key.software', KEYCHAIN_OPTIONS);
+  if (await NativeDeviceKey.isSupported()) await NativeDeviceKey.remove('generatorai.device-key');
 }

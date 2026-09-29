@@ -20,36 +20,28 @@ import {
 } from './promptHistory';
 import type { PromptHistoryEntry } from './types';
 
-export const DRAFT_KEY_PREFIX = 'composer.draft.';
-
-export function draftKey(chatId: string): string {
-  return `${DRAFT_KEY_PREFIX}${chatId}`;
-}
-
-const storage: HistoryStorage = {
-  getString: (key) => prefs.getString(key),
-  setString: (key, value) => prefs.setString(key, value),
-};
-
-export function readDraft(chatId: string): string {
-  return prefs.getString(draftKey(chatId)) ?? '';
-}
-
-export function writeDraft(chatId: string, text: string): void {
-  if (text.length === 0) prefs.delete(draftKey(chatId));
-  else prefs.setString(draftKey(chatId), text);
-}
-
-export function clearDraft(chatId: string): void {
-  prefs.delete(draftKey(chatId));
-}
-
-export function readLocalHistory(): PromptHistoryEntry[] {
-  return readHistoryRing(storage, HISTORY_KEY);
-}
-
-export function recordSentPrompt(entry: PromptHistoryEntry): PromptHistoryEntry[] {
-  const next = pushHistoryRing(readLocalHistory(), entry);
-  writeHistoryRing(storage, next, HISTORY_KEY);
-  return next;
+/** Captures the issuing server so delayed draft writes cannot follow a switch. */
+export function createDraftStore(serverId: string | null) {
+  const prefix = serverId ? `srv.${serverId}.` : null;
+  const draftKey = (chatId: string) => `${prefix}composer.draft.${chatId}`;
+  const storage: HistoryStorage = {
+    getString: (key) => prefix ? prefs.getString(`${prefix}${key}`) : undefined,
+    setString: (key, value) => { if (prefix) prefs.setString(`${prefix}${key}`, value); },
+  };
+  const readLocalHistory = (): PromptHistoryEntry[] => readHistoryRing(storage, HISTORY_KEY);
+  return {
+    readDraft: (chatId: string) => prefix ? prefs.getString(draftKey(chatId)) ?? '' : '',
+    writeDraft(chatId: string, text: string) {
+      if (!prefix) return;
+      if (text.length === 0) prefs.delete(draftKey(chatId));
+      else prefs.setString(draftKey(chatId), text);
+    },
+    clearDraft(chatId: string) { if (prefix) prefs.delete(draftKey(chatId)); },
+    readLocalHistory,
+    recordSentPrompt(entry: PromptHistoryEntry): PromptHistoryEntry[] {
+      const next = pushHistoryRing(readLocalHistory(), entry);
+      writeHistoryRing(storage, next, HISTORY_KEY);
+      return next;
+    },
+  };
 }

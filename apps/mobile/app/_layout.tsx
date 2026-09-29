@@ -24,6 +24,7 @@ import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
+import { ServerScope } from '../src/services/auth/ServerScope';
 import { ServerQueryProvider } from '../src/services/api/ServerQueryProvider';
 import { ChevronLeft } from 'lucide-react-native';
 
@@ -106,7 +107,7 @@ function ThemedShell({ children }: { children: React.ReactNode }): React.ReactEl
 const PUBLIC_ROUTES = new Set(['/pair', '/revoked']);
 
 function AuthLifecycle({ children }: { children: React.ReactNode }): React.ReactElement {
-  const { state, initializing, storageLocked } = useAuth();
+  const { state, serverId, initializing, storageLocked } = useAuth();
   const pathname = usePathname();
 
   // Mounted once for the whole session, above every screen, so a token
@@ -132,7 +133,7 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
     // A locked restore has not resolved anything yet: wait for the retry.
     if (initializing || storageLocked || restoredRef.current) return;
     restoredRef.current = true;
-    const target = consumeLastRoute();
+    const target = consumeLastRoute(serverId);
     if (!target) return;
     if (state.status !== 'authenticated') return;
     if (pathname !== '/' && pathname !== '/(tabs)') return;
@@ -140,7 +141,7 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
     // restored screen as the only history entry, so back closed the app.
     router.replace('/(tabs)');
     setTimeout(() => router.push(target as Parameters<typeof router.push>[0]), 0);
-  }, [initializing, storageLocked, state.status, pathname]);
+  }, [initializing, storageLocked, state.status, serverId, pathname]);
 
   return <>{children}</>;
 }
@@ -493,6 +494,7 @@ export default function RootLayout(): React.ReactElement {
           <PreferencesProvider>
             <ThemedShell>
               <AuthProvider>
+                <ServerScope>
                 <ServerQueryProvider>
                   {/* Owns the app's ONE shared stream connection. Above
                       AuthGate so the connection survives a route change and
@@ -531,6 +533,7 @@ export default function RootLayout(): React.ReactElement {
                     </ToastProvider>
                   </MuxStreamProvider>
                 </ServerQueryProvider>
+                </ServerScope>
               </AuthProvider>
             </ThemedShell>
           </PreferencesProvider>

@@ -35,7 +35,7 @@ import { readPushToTalk } from '../../../services/voice/pushToTalk';
 import { applyMenuSelection, detectMenu } from '../composerMenu';
 import { pickAttachments } from './attachmentPickers';
 import { attachmentKindFor, validateAttachment } from './attachmentPolicy';
-import { clearDraft, readDraft, readLocalHistory, recordSentPrompt, writeDraft } from './draftStore';
+import { createDraftStore } from './draftStore';
 import {
   caretLine,
   historyForSheet,
@@ -145,7 +145,8 @@ function serverHistoryFrom(messages: readonly ChatMessage[] | undefined): Prompt
 export function useComposerController(opts: UseComposerControllerOptions): ComposerController {
   const { chatId, scopes, workspaceId, projectId, onSend, disabled = false, onOpenPane, onCaptured } = opts;
   const api = useApi();
-  const { fetch: authedFetch } = useAuth();
+  const { fetch: authedFetch, serverId } = useAuth();
+  const { clearDraft, readDraft, readLocalHistory, recordSentPrompt, writeDraft } = useMemo(() => createDraftStore(serverId), [serverId]);
   const toast = useToast();
 
   const upload = checkFeature('fileUpload', scopes);
@@ -171,7 +172,7 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
     const restored = readDraft(chatId);
     dispatchComposer({ type: 'draft/changed', draft: { text: restored } });
     draftRef.current = restored;
-  }, [chatId]);
+  }, [chatId, readDraft]);
 
   const setDraft = useCallback(
     (text: string) => {
@@ -180,7 +181,7 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
       if (persistTimer.current) clearTimeout(persistTimer.current);
       persistTimer.current = setTimeout(() => writeDraft(chatId, text), 250);
     },
-    [chatId],
+    [chatId, writeDraft],
   );
   useEffect(
     () => () => {
@@ -189,7 +190,7 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
         writeDraft(chatId, draftRef.current);
       }
     },
-    [chatId],
+    [chatId, writeDraft],
   );
 
   const setCaret = useCallback((next: number) => {
@@ -650,7 +651,7 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
         setSending(false);
       }
     },
-    [activeCommand, disabled, chatId, onSend, setDraft, setCaret, toast, machine],
+    [clearDraft, recordSentPrompt, activeCommand, disabled, chatId, onSend, setDraft, setCaret, toast, machine],
   );
 
   const onSendPress = useCallback(() => {

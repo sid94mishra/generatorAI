@@ -30,6 +30,8 @@ import {
   AuthenticatedClientRuntime,
   type AuthState,
   type PairingConsent,
+  type ServerConnection,
+  probeServer,
 } from '@generatorai/client-runtime';
 import {
   EndpointSupervisor,
@@ -37,8 +39,9 @@ import {
   type TransportStatus,
 } from '@generatorai/client-transport';
 
-import { MobileDeviceKeyStore, MobileSessionStore, type KeyBacking } from './stores';
-import { registerAuthenticatedFetch } from './backgroundFetch';
+import { MobileDeviceKeyStore, MobileSessionStore, clearLegacyCredentials, type KeyBacking } from './stores';
+import { serverRegistry } from './serverRegistry';
+import { registerAuthenticatedFetch, setBackgroundActiveServer, clearAuthenticatedFetches } from './backgroundFetch';
 import { resetStepUp } from './stepUp';
 import {
   isStorageUnavailableError,
@@ -55,6 +58,9 @@ import { PREF_KEYS, prefs } from '../storage/prefs';
 export interface AuthContextValue {
   state: AuthState;
   serverId: string | null;
+  servers: ServerConnection[];
+  switchServer(id: string): Promise<void>;
+  probeServer(id: string): ReturnType<typeof probeServer>;
   /**
    * True until the stored session has been read and validated.
    *
@@ -96,7 +102,7 @@ export interface AuthContextValue {
   streamUrl(scope: string, id: string | null): Promise<string>;
   socketUrl(path: string, scope: string, id: string | null): Promise<string>;
   completePairing(consent: PairingConsent, deviceName: string): Promise<void>;
-  unpair(): Promise<void>;
+  unpair(serverId?: string): Promise<void>;
   reconnect(): Promise<void>;
   /**
    * Re-mint the access token so scopes granted elsewhere take effect.
@@ -133,7 +139,10 @@ async function verifyHostIdentity(endpoint: string, signal?: AbortSignal): Promi
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }): React.ReactElement {
-  const [serverId, setServerId] = useState<string | null>(null);
+  const [serverId, setServerId] = useState<string | null>(() => serverRegistry.read().activeServerId);
+  const activeServerRef = useRef(serverId);
+  const pairingRef = useRef(false);
+  const [servers, setServers] = useState(() => serverRegistry.read().connections);
   const [state, setState] = useState<AuthState>({ status: 'unpaired' });
   // Starts `restoring`; `initializing` and `storageLocked` are views of it.
   // See `AuthContextValue.initializing` and `restoreState.ts`.
@@ -151,8 +160,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const [transport, setTransport] = useState<TransportStatus>({ state: 'idle' });
   const [keyBacking, setKeyBacking] = useState<KeyBacking>('software');
 
-  const keyStore = useRef(new MobileDeviceKeyStore()).current;
-  const sessionStore = useRef(new MobileSessionStore()).current;
+  const keyStore = useMemo(() => serverId ? new MobileDeviceKeyStore(serverId) : null, [serverId]);
+  const sessionStore = useMemo(() => serverId ? new MobileSessionStore(serverId) : null, [serverId]);
+  const runtimes = useRef(new Map<string, { runtime: AuthenticatedClientRuntime; supervisor: EndpointSupervisor; keyStore: MobileDeviceKeyStore; state: AuthState }>());
   const supervisorRef = useRef<EndpointSupervisor | null>(null);
   const runtimeRef = useRef<AuthenticatedClientRuntime | null>(null);
 
@@ -176,22 +186,51 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           localOnly: prefs.getBoolean(PREF_KEYS.localOnly),
         }),
         verifyHost: verifyHostIdentity,
-        onStatusChange: setTransport,
+        onStatusChange: (next) => { if (activeServerRef.current === pinnedServerId) setTransport(next); },
       });
-      supervisorRef.current = supervisor;
       return supervisor;
     },
     [],
   );
 
+  const getRuntime = useCallback((id: string, endpoint: string, endpoints?: readonly string[]) => {
+    const existing = runtimes.current.get(id);
+    if (existing) return existing;
+    const keys = new MobileDeviceKeyStore(id);
+    const sessions = new MobileSessionStore(id);
+    const supervisor = buildSupervisor(endpoint, id, endpoints);
+    let latest: AuthState = { status: 'unpaired' };
+    const runtime = new AuthenticatedClientRuntime({
+      endpoint, keyStore: keys, sessionStore: sessions,
+      fetchImpl: async (input, init) => {
+        const adapter = await supervisor.connect(3, init?.signal ?? undefined);
+        return adapter.fetch(String(input), init as RequestInit);
+      },
+      onStateChange: (next) => {
+        latest = next;
+        if (activeServerRef.current === id && runtimes.current.get(id)?.runtime === runtime) setState(next);
+      },
+    });
+    const entry = { runtime, supervisor, keyStore: keys, get state() { return latest; } };
+    runtimes.current.set(id, entry);
+    registerAuthenticatedFetch(id, (path, init) => entry.runtime.fetch(path, init));
+    return entry;
+  }, [buildSupervisor]);
+
   useEffect(() => {
     let cancelled = false;
+    if (pairingRef.current) return;
 
     void (async () => {
       // Which way the attempt ended; applied in `finally` so every path —
       // including a throw nobody anticipated — leaves the spinner.
       let outcome: RestoreEvent = { type: 'settled' };
       try {
+        if (!prefs.getBoolean('auth.multi-server-reset')) {
+          await clearLegacyCredentials();
+          prefs.setBoolean('auth.multi-server-reset', true);
+        }
+        if (!sessionStore || !keyStore || !serverId) { setState({ status: 'unpaired' }); return; }
         let session: Awaited<ReturnType<MobileSessionStore['load']>>;
         try {
           session = await sessionStore.load();
@@ -210,28 +249,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           return;
         }
 
-        setServerId(session.serverId);
-        const supervisor = buildSupervisor(session.endpoint, session.serverId, session.endpoints);
-
-        const runtime = new AuthenticatedClientRuntime({
-          endpoint: session.endpoint,
-          keyStore,
-          sessionStore,
-          // Every request goes through the selected transport. Connecting
-          // lazily here means a cold start does not block on the network
-          // until something actually needs data.
-          fetchImpl: async (input, init) => {
-            const adapter = await supervisor.connect(3, init?.signal ?? undefined);
-            return adapter.fetch(String(input), init as RequestInit);
-          },
-          onStateChange: (next) => {
-            if (!cancelled) setState(next);
-          },
-        });
+        const entry = getRuntime(session.serverId, session.endpoint, session.endpoints);
+        const runtime = entry.runtime;
         runtimeRef.current = runtime;
+        supervisorRef.current = entry.supervisor;
+        setBackgroundActiveServer(serverId);
 
         try {
-          let next = await runtime.initialize();
+          let next = entry.state.status === 'authenticated' ? entry.state : await runtime.initialize();
           // A cold start races the network: the radio is still waking, or the
           // JS thread is busy enough that the 4 s identity probe times out.
           // One quiet retry turns that common first-launch "Can't reach your
@@ -243,13 +268,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           }
           if (!cancelled) {
             setState(next);
-            setKeyBacking(keyStore.backing);
+            setKeyBacking(entry.keyStore.backing);
           }
         } catch (err) {
           if (cancelled) return;
           // The device key (or the session, re-read inside the runtime) sits
           // in the same protected storage and fails the same way when locked.
           if (isStorageUnavailableError(err)) {
+            runtimes.current.delete(serverId);
+            registerAuthenticatedFetch(serverId, null);
+            await entry.supervisor.disconnect();
             outcome = { type: 'storage-unavailable' };
             return;
           }
@@ -261,6 +289,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           }
           setState({ status: 'error', message: err instanceof Error ? err.message : String(err) });
         }
+      } catch (error) {
+        if (!cancelled) {
+          if (isStorageUnavailableError(error)) outcome = { type: 'storage-unavailable' };
+          else setState({ status: 'error', message: error instanceof Error ? error.message : String(error) });
+        }
       } finally {
         // Must run on every path, including the early `!session` return and
         // any throw — otherwise the app is stuck on the spinner forever.
@@ -271,7 +304,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     return () => {
       cancelled = true;
     };
-  }, [buildSupervisor, keyStore, sessionStore, dispatchRestore, restoreAttempt]);
+  }, [getRuntime, keyStore, sessionStore, serverId, dispatchRestore, restoreAttempt]);
 
   const retryRestore = useCallback(() => {
     if (restorePhaseRef.current !== 'locked') return;
@@ -288,55 +321,89 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     return () => sub.remove();
   }, [retryRestore]);
 
-  const completePairing = useCallback(
-    async (consent: PairingConsent, deviceName: string) => {
-      setState({ status: 'pairing' });
-      setServerId(consent.serverId);
-
-      const endpoints = consent.endpoints.map((endpoint) => endpoint.origin);
-      const supervisor = buildSupervisor(consent.endpoint, consent.serverId, endpoints);
-      const runtime = new AuthenticatedClientRuntime({
-        endpoint: consent.endpoint,
-        keyStore,
-        sessionStore,
-        fetchImpl: async (input, init) => {
-          const adapter = await supervisor.connect(3, init?.signal ?? undefined);
-          return adapter.fetch(String(input), init as RequestInit);
-        },
-        onStateChange: setState,
-      });
-      runtimeRef.current = runtime;
-
-      await runtime.completePairing({
-        pairingToken: consent.pairingGrant,
-        deviceName,
-        platform: 'mobile',
-        serverId: consent.serverId,
-        endpoint: consent.endpoint,
-        endpoints,
-      });
-
-      setKeyBacking(keyStore.backing);
-    },
-    [buildSupervisor, keyStore, sessionStore],
-  );
-
-  const unpair = useCallback(async () => {
-    if (serverId) await clearServerQueryCache(serverId);
-    await runtimeRef.current?.forget();
-    await supervisorRef.current?.disconnect();
-    // Clear the key too: leaving it behind would let a later pairing reuse a
-    // keypair the server has already revoked.
-    await keyStore.clear();
-    // A biometric step-up granted to the old pairing must not carry over to
-    // the next one.
+  const switchServer = useCallback(async (id: string) => {
+    if (pairingRef.current) throw new Error('Finish pairing before switching servers');
+    serverRegistry.select(id);
     resetStepUp();
-    supervisorRef.current = null;
+    activeServerRef.current = id;
+    setBackgroundActiveServer(id);
     runtimeRef.current = null;
+    supervisorRef.current = null;
     setState({ status: 'unpaired' });
     setTransport({ state: 'idle' });
-    setServerId(null);
-  }, [keyStore, serverId]);
+    dispatchRestore({ type: 'server-switch' });
+    setServerId(id);
+    setRestoreAttempt((n) => n + 1);
+    const server = serverRegistry.read().connections.find((item) => item.serverId === id)!;
+    const entry = getRuntime(id, server.endpoint, server.endpoints);
+    await entry.runtime.initialize();
+  }, [dispatchRestore, getRuntime]);
+
+  const completePairing = useCallback(async (consent: PairingConsent, deviceName: string) => {
+    const previousId = activeServerRef.current;
+    pairingRef.current = true;
+    activeServerRef.current = consent.serverId;
+    setState({ status: 'pairing' });
+    setServerId(consent.serverId);
+    const endpoints = consent.endpoints.map((endpoint) => endpoint.origin);
+    const entry = getRuntime(consent.serverId, consent.endpoint, endpoints);
+    runtimeRef.current = entry.runtime;
+    supervisorRef.current = entry.supervisor;
+    try {
+      await entry.runtime.completePairing({ pairingToken: consent.pairingGrant, deviceName, platform: 'mobile', serverId: consent.serverId, endpoint: consent.endpoint, endpoints });
+      serverRegistry.add({ serverId: consent.serverId, label: consent.serverName, endpoint: consent.endpoint, endpoints, kind: 'remote', managed: false, lastConnectedAt: Date.now() });
+      setServers(serverRegistry.read().connections);
+      setBackgroundActiveServer(consent.serverId);
+      resetStepUp();
+      setKeyBacking(entry.keyStore.backing);
+    } catch (error) {
+      activeServerRef.current = previousId;
+      setServerId(previousId);
+      const previous = previousId ? runtimes.current.get(previousId) : undefined;
+      runtimeRef.current = previous?.runtime ?? null;
+      supervisorRef.current = previous?.supervisor ?? null;
+      setState(previous?.state ?? { status: 'unpaired' });
+      setBackgroundActiveServer(previousId);
+      throw error;
+    } finally {
+      pairingRef.current = false;
+      dispatchRestore({ type: 'settled' });
+    }
+  }, [getRuntime, dispatchRestore]);
+
+  const unpair = useCallback(async (selectedId?: string) => {
+    if (pairingRef.current) throw new Error('Finish pairing before removing a server');
+    const id = selectedId ?? activeServerRef.current;
+    if (!id) return;
+    const entry = runtimes.current.get(id);
+    await entry?.runtime.forget();
+    await entry?.supervisor.disconnect();
+    await (entry?.keyStore ?? new MobileDeviceKeyStore(id)).clear();
+    await new MobileSessionStore(id).clear();
+    await clearServerQueryCache(id);
+    prefs.deletePrefix(`srv.${id}.`);
+    registerAuthenticatedFetch(id, null);
+    runtimes.current.delete(id);
+    serverRegistry.remove(id);
+    const catalog = serverRegistry.read();
+    setServers(catalog.connections);
+    if (id !== activeServerRef.current) return;
+    if (catalog.activeServerId) dispatchRestore({ type: 'server-switch' });
+    resetStepUp();
+    runtimeRef.current = null;
+    supervisorRef.current = null;
+    activeServerRef.current = catalog.activeServerId;
+    setBackgroundActiveServer(catalog.activeServerId);
+    setState({ status: 'unpaired' });
+    setTransport({ state: 'idle' });
+    setServerId(catalog.activeServerId);
+  }, [dispatchRestore]);
+
+  const probePairedServer = useCallback((id: string) => {
+    const server = serverRegistry.read().connections.find((item) => item.serverId === id);
+    if (!server) return Promise.reject(new Error('Server is not paired'));
+    return probeServer(server.endpoint, { expectedServerId: id, timeoutMs: 4000 });
+  }, []);
 
   const reconnect = useCallback(async () => {
     await supervisorRef.current?.invalidate('manual reconnect');
@@ -360,26 +427,29 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   // identities stable across transport/credential status updates: consumers
   // such as TerminalView must not tear down a live socket on every update.
   const authenticatedFetch = useCallback<AuthContextValue['fetch']>((path, init) => {
-    const runtime = runtimeRef.current;
+    const runtime = serverId ? runtimes.current.get(serverId)?.runtime : undefined;
     if (!runtime) throw new Error('Not paired');
     assertServerWriteAllowed(path, init?.method);
     return runtime.fetch(path, init);
-  }, []);
+  }, [serverId]);
   const streamUrl = useCallback<AuthContextValue['streamUrl']>((scope, id) => {
-    const runtime = runtimeRef.current;
+    const runtime = serverId ? runtimes.current.get(serverId)?.runtime : undefined;
     if (!runtime) throw new Error('Not paired');
     return runtime.buildStreamUrl(scope, id);
-  }, []);
+  }, [serverId]);
   const socketUrl = useCallback<AuthContextValue['socketUrl']>((path, scope, id) => {
-    const runtime = runtimeRef.current;
+    const runtime = serverId ? runtimes.current.get(serverId)?.runtime : undefined;
     if (!runtime) throw new Error('Not paired');
     return runtime.buildSocketUrl(path, scope, id);
-  }, []);
+  }, [serverId]);
 
   const value = useMemo<AuthContextValue>(
     () => ({
       state,
       serverId,
+      servers,
+      switchServer,
+      probeServer: probePairedServer,
       initializing,
       storageLocked,
       retryRestore,
@@ -399,6 +469,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     [
       state,
       serverId,
+      servers,
+      switchServer,
+      probePairedServer,
       initializing,
       storageLocked,
       retryRestore,
@@ -414,14 +487,27 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     ],
   );
 
-  // ── Non-React access to the signed fetch (notifications/backgroundFetch) ──
-  // Lock-screen Allow/Deny actions POST a decision while no screen is
-  // mounted; they reach the runtime through this module-level accessor.
   useEffect(() => {
-    registerAuthenticatedFetch(value.fetch);
-    return () => registerAuthenticatedFetch(null);
-  }, [value.fetch]);
-  // ── end non-React access ──────────────────────────────────────────────
+    for (const server of servers) {
+      registerAuthenticatedFetch(server.serverId, async (path, init) => {
+        const entry = getRuntime(server.serverId, server.endpoint, server.endpoints);
+        if (entry.state.status !== 'authenticated') await entry.runtime.initialize();
+        return entry.runtime.fetch(path, init);
+      });
+    }
+  }, [servers, getRuntime]);
+
+  useEffect(() => {
+    const entries = runtimes.current;
+    return () => {
+      for (const [id, entry] of entries) {
+        registerAuthenticatedFetch(id, null);
+        void entry.supervisor.disconnect();
+      }
+      entries.clear();
+      clearAuthenticatedFetches();
+    };
+  }, []);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
