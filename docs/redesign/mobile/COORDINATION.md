@@ -46,3 +46,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-09-29 | `744f3a02` | none | M2 phase-start merge already up to date. Frozen pnpm install passes. Native emitter remains present; no mobile additions lost. |
 
 | 2026-09-29 | M2-02 | `packages/client-core/src/transcript/stepStatus.ts`, transcript export, contract test | additive | Maps transcript step waiting to shared needs_you (a human gate), not timer waiting; existing callers unchanged. |
+
+| 2026-09-29 | M2-04 | `packages/client-core/src/api/scm.ts`, client property/exports, SCM contract tests | additive | Shared SCM/readiness/PR/device-login methods and query keys, preserving request bodies and 204/error handling. Core typecheck, 751 tests, lint (existing warnings only) pass. |

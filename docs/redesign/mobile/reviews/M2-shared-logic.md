@@ -45,3 +45,9 @@
 - Native stop hook now drives composerReducer with backend observations, stop presses and clock ticks; shared selectors supply its view. No local timeout policy. Cancel-and-send keeps its existing server-authoritative retry path.
 - Typecheck and lint/design ratchet pass. Catalog related tests: 13 pass. Full logic run: 1,116 passed / one dynamic-import timeout under native simulator load; the affected toolPresentation file reruns 21/21 green with one worker and unchanged timeout/assertions. Single combined green run remains pending for final/batch acceptance.
 - iOS client successfully built, installed, fingerprint recorded, launched. Driver's first dev-server press hit its accessibility watchdog; a fresh snapshot/retry succeeded. Product/Storybook walkthroughs continue. MV-14 holds native composer and full-suite acceptance, including the pre-existing Force reset fixture gap.
+
+## M2-04 packet and SCM contract checkpoint
+
+- MPaneChanges dark/light viewed, both platforms. MD-12/14 and existing server source-control contracts; no presentation changes.
+- Add shared typed methods/query keys, remove mobile endpoint twins, retain the authenticated transport. Native request helpers and remaining projects/review/capture endpoints follow.
+- First shared addition: `createApiClient().scm`, including the server-held GitHub device-code login. Ten migrated contracts plus device-login contract pass; full client-core 36 files / 751 tests pass, typecheck and lint pass (existing warnings). Mobile adoption and zero-path acceptance are not yet complete.

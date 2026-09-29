@@ -1,3 +1,4 @@
+import { createScmMethods } from './scm.js';
 // ────────────────────────────────────────────────────────────────
 // Typed API client.
 //
@@ -1030,6 +1031,7 @@ export const queryKeys = {
 
 export function createApiClient(fetchImpl: ApiFetch) {
   return {
+    scm: createScmMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
     health: () => request<HealthSnapshot>(fetchImpl, '/api/health'),
 
     /**
