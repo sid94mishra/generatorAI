@@ -23,6 +23,7 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ChatMessage } from '@generatorai/shared';
+import type { TranscriptMessageInput } from './messageInput.js';
 import type { StreamBlock } from '../stream/types.js';
 import { parseInlineToolCalls } from '../stream/parseInlineToolCalls.js';
 
@@ -32,7 +33,9 @@ interface OrderedBlock {
   make: (blockId: number) => StreamBlock;
 }
 
-export function chatMessageToBlocks(message: ChatMessage): StreamBlock[] {
+export function chatMessageToBlocks(message: ChatMessage): StreamBlock[];
+export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBlock[];
+export function chatMessageToBlocks(message: TranscriptMessageInput): StreamBlock[] {
   const blocks: StreamBlock[] = [];
   let nextId = 0;
 

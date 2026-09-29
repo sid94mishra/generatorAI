@@ -8,3 +8,5 @@ export * from './liveCounters.js';
 export * from './chatMessageToBlocks.js';
 export * from './usage.js';
 export * from './turns.js';
+export * from './messageInput.js';
+export * from './wireMessage.js';

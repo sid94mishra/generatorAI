@@ -33,6 +33,8 @@ It also records every merge of `desktop_redesign` into this branch.
 
 | 2026-09-29 | M1-06 | `pnpm-lock.yaml` | mobile dev tooling and peer graph | Jest/RNTL, Storybook 10.6 and LiteUI; no other app manifests changed. Native control peers require rebuilds. |
 
+| 2026-09-29 | M2-01 | `packages/client-core/src/transcript/{messageInput,wireMessage}.ts`, transcript exports, additive `chatMessageToBlocks` and generic `buildTranscriptTurns` overloads, tests | additive API adapter (MD-110) | Consume content/metadata without fabricated domain fields; preserve loose historical metadata and reuse the existing replay/grouping bodies. Existing desktop overload/runtime behavior unchanged. |
+
 ## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |

@@ -12,25 +12,26 @@
 // ────────────────────────────────────────────────────────────────
 
 import type { ChatMessage } from '@generatorai/shared';
+import type { TranscriptTurnMessage } from './messageInput.js';
 import type { StreamBlock } from '../stream/types.js';
 import { chatMessageToBlocks } from './chatMessageToBlocks.js';
 import { deriveSegments, deriveTimeline } from './deriveTimeline.js';
 import type { TimelineStep } from './types.js';
 
 /** A persisted row of the transcript, or the live turn's parts. */
-export type TranscriptEntry =
-  | { kind: 'user'; key: string; message: ChatMessage }
-  | { kind: 'agent'; key: string; message: ChatMessage }
-  | { kind: 'system'; key: string; message: ChatMessage }
+export type TranscriptEntry<M extends TranscriptTurnMessage = ChatMessage> =
+  | { kind: 'user'; key: string; message: M }
+  | { kind: 'agent'; key: string; message: M }
+  | { kind: 'system'; key: string; message: M }
   /** The optimistic bubble of the turn being streamed (not persisted yet). */
   | { kind: 'pending_user'; key: string; content: string }
   /** The live stream of the current turn (its blocks live in the stream store). */
   | { kind: 'live'; key: string };
 
-export interface TranscriptTurn {
+export interface TranscriptTurn<M extends TranscriptTurnMessage = ChatMessage> {
   /** Stable React / virtualizer key: the first entry's key. */
   key: string;
-  entries: TranscriptEntry[];
+  entries: TranscriptEntry<M>[];
   /** True for the turn holding the live stream. */
   live: boolean;
 }
@@ -51,10 +52,12 @@ export interface BuildTurnsOptions {
  * joins; without one (widgets or a settled commit card that outlive the turn),
  * the live stream joins the last turn.
  */
-export function buildTranscriptTurns(messages: readonly ChatMessage[], opts: BuildTurnsOptions = {}): TranscriptTurn[] {
-  const turns: TranscriptTurn[] = [];
-  let current: TranscriptTurn | null = null;
-  const open = (entry: TranscriptEntry) => {
+export function buildTranscriptTurns(messages: readonly ChatMessage[], opts?: BuildTurnsOptions): TranscriptTurn[];
+export function buildTranscriptTurns<M extends TranscriptTurnMessage>(messages: readonly M[], opts?: BuildTurnsOptions): TranscriptTurn<M>[];
+export function buildTranscriptTurns<M extends TranscriptTurnMessage>(messages: readonly M[], opts: BuildTurnsOptions = {}): TranscriptTurn<M>[] {
+  const turns: TranscriptTurn<M>[] = [];
+  let current: TranscriptTurn<M> | null = null;
+  const open = (entry: TranscriptEntry<M>) => {
     current = { key: entry.key, entries: [entry], live: false };
     turns.push(current);
   };
@@ -64,11 +67,11 @@ export function buildTranscriptTurns(messages: readonly ChatMessage[], opts: Bui
       open({ kind: 'user', key: message.id, message });
       continue;
     }
-    const entry: TranscriptEntry =
+    const entry: TranscriptEntry<M> =
       message.role === 'system'
         ? { kind: 'system', key: message.id, message }
         : { kind: 'agent', key: message.id, message };
-    if (current) (current as TranscriptTurn).entries.push(entry);
+    if (current) (current as TranscriptTurn<M>).entries.push(entry);
     else open(entry);
   }
   const pendingText = opts.pendingUserText;
@@ -76,7 +79,7 @@ export function buildTranscriptTurns(messages: readonly ChatMessage[], opts: Bui
     open({ kind: 'pending_user', key: 'pending-user', content: pendingText });
   }
   if (opts.live) {
-    const liveEntry: TranscriptEntry = { kind: 'live', key: 'live-turn' };
+    const liveEntry: TranscriptEntry<M> = { kind: 'live', key: 'live-turn' };
     const last = turns[turns.length - 1];
     if (last) {
       last.entries.push(liveEntry);
@@ -89,7 +92,7 @@ export function buildTranscriptTurns(messages: readonly ChatMessage[], opts: Bui
 }
 
 /** User rows need text or attachments; agent rows need renderable content; system notes always show. */
-function isShown(message: ChatMessage): boolean {
+function isShown(message: TranscriptTurnMessage): boolean {
   if (message.role === 'system') return true;
   if (message.role === 'user') return Boolean(message.content?.trim() || message.attachments?.length);
   return hasRenderableContent(message);
@@ -118,7 +121,9 @@ export function messageBlocks(message: ChatMessage): StreamBlock[] {
 }
 
 /** Does this persisted assistant message have anything to show? (thinking/tools/cards/partial count, not only prose) */
-export function hasRenderableContent(message: ChatMessage): boolean {
+export function hasRenderableContent(message: ChatMessage): boolean;
+export function hasRenderableContent(message: TranscriptTurnMessage): boolean;
+export function hasRenderableContent(message: TranscriptTurnMessage): boolean {
   if (message.role === 'tool') return true;
   if (message.content?.trim()) return true;
   const meta = message.metadata;
