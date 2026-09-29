@@ -14,10 +14,11 @@
     "build:production": "eas build --profile production --platform all",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "lint": "eslint src/ app/",
+    "lint": "eslint src/ app/ --quiet && node scripts/check-design.mjs",
     "bundle:check": "node scripts/check-bundle.mjs",
     "bundle:analyze": "expo export --platform android --output-dir .expo-export --source-maps && node scripts/check-bundle.mjs",
-    "terminal:bundle": "node scripts/build-terminal-bundle.mjs"
+    "terminal:bundle": "node scripts/build-terminal-bundle.mjs",
+    "check:design": "node scripts/check-design.mjs"
   },
   "dependencies": {
     "@expo/metro-runtime": "~57.0.16",

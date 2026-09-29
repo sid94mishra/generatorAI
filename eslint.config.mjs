@@ -5,6 +5,7 @@ import reactHooks from 'eslint-plugin-react-hooks';
 import prettierConfig from 'eslint-config-prettier';
 import betterTailwind from 'eslint-plugin-better-tailwindcss';
 import boundaries from 'eslint-plugin-boundaries';
+import mobileConfig from './apps/mobile/scripts/eslint-config.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -598,5 +599,6 @@ export default [
       ],
     },
   },
+  ...mobileConfig,
   prettierConfig,
 ];

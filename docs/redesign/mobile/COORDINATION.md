@@ -29,6 +29,8 @@ It also records every merge of `desktop_redesign` into this branch.
 
 | 2026-09-28 | M1-04 | `scripts/redesign/sandbox.mjs`, `lib/sandbox-options.mjs` and test; `scripts/mobile/lib/sandbox-session.mjs` | additive sandbox option | Explicit emulator CORS origin preserves the web default and production authorization; clean POSIX fixture shell, existing profile-free Windows host. Thirteen tooling tests pass. Android terminal attaches; rendering/input still pending. |
 
+| 2026-09-29 | M1-05 | root `eslint.config.mjs` | additive mobile-only config import | Mobile boundary/design/hook checks; no web/desktop config changes. Implementation lives under apps/mobile/scripts. |
+
 ## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |
