@@ -135,3 +135,7 @@ Fresh iOS pairing passed its UI assertions, but the helper correctly rejected th
 Stable local failure captures: `docs/redesign/shots/mobile/characterization/android-terminal-blank.png`, `ios-terminal-entry-failed.png`, and `ios-notification-open-failed.png`. These are native evidence, not redesigned baselines.
 
 Fresh iOS pairing now passes including host verification (`.expo/m1-ios-pairing.xml`): the requested name is visibly entered and the server records the new `gai-iphone` device. Deleted replaced `pair.mjs`. Current individual native results: Android 7/8; iOS 6/8. Open checks are terminal on both platforms and iOS notification opening. `net2.mjs` remains until that notification replacement is verified. The complete combined suite has not passed, no batch review has begun, and M1-04 is still incomplete. Under playbook §8, stop at these failing exit criteria and the pending request to allow minimal additional M1 product repairs. M1-05…09 and M2…M10 remain unstarted. Verified repairs are committed in `82b50e58`; sandbox setup is in `3416574a`.
+
+## 2026-09-29 owner-directed continuation
+
+MD-107 supersedes the preceding stop/approval request. Remaining native failures are tracked as MV-01…05 in `PENDING.md`; assertions remain intact. Proceeding to M1-05 does not claim M1-04 acceptance or a green suite.
