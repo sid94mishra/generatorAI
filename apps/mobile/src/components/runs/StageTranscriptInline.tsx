@@ -31,7 +31,7 @@ import { useToast } from '../ui/Toast';
 import { useTheme } from '../../theme/ThemeProvider';
 import { isActive } from './statusStyle';
 import { transcriptItems, withLiveRows } from './stageTranscript';
-import { deriveTimeline } from '../chat/timeline/deriveTimeline';
+import { compactTimeline } from '../chat/timeline/compactTimeline';
 import { useStageLive } from '../../services/stream/useStageLive';
 
 /** Rows shown inline; the rest are behind "Open stage". */
@@ -69,7 +69,7 @@ export function StageTranscriptInline({
   const items = useMemo(() => {
     const saved = transcriptItems(transcript.data, live);
     if (!liveState?.blocks.length) return saved;
-    return withLiveRows(saved, deriveTimeline(liveState.blocks, { active: true, idPrefix: `live-${stage.id}:` }));
+    return withLiveRows(saved, compactTimeline(liveState.blocks, { active: true, idPrefix: `live-${stage.id}:` }));
   }, [transcript.data, live, liveState?.blocks, stage.id]);
   const tail = items.slice(-INLINE_TRANSCRIPT_ROWS);
   const hidden = items.length - tail.length;

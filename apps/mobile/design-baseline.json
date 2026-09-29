@@ -130,7 +130,7 @@
       "mobile-design/design/platformOs": 3,
       "mobile-design/design/rawTextImport": 1,
       "mobile-design/design/lucideDirectImport": 1,
-      "boundaries/dependencies/diagnostic": 48,
+      "boundaries/dependencies/diagnostic": 47,
       "react-hooks/refs/diagnostic": 10,
       "react-hooks/set-state-in-effect/diagnostic": 1,
       "react-hooks/preserve-manual-memoization/diagnostic": 4,

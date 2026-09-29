@@ -118,8 +118,8 @@ import { describeSessionTransport } from '../../src/components/chat/sessionTrans
 import { TimelineRowView } from '../../src/components/chat/timeline/TimelineRow';
 import { UserMessageRow } from '../../src/components/chat/timeline/UserMessageRow';
 import { TimelineActionsContext, type TimelineActions } from '../../src/components/chat/timeline/TimelineActions';
-import { deriveTimeline, type ScreenshotRef, type TimelineRow } from '../../src/components/chat/timeline/deriveTimeline';
-import { chatMessageToBlocks, messageWasStopped } from '../../src/components/chat/timeline/chatMessageToBlocks';
+import { compactTimeline, type ScreenshotRef, type TimelineRow } from '../../src/components/chat/timeline/compactTimeline';
+import { wireChatMessageToBlocks as chatMessageToBlocks, messageWasStopped, buildTranscriptTurns, transcriptMessageInput, messageAttachments } from '@generatorai/client-core';
 import {
   liveScmTurnIds,
   mergeScmRows,
@@ -196,7 +196,7 @@ function rowsOf(message: ChatMessage, prompt: ChatMessage | null): TimelineRow[]
   let rows = historyRows.get(message);
   if (!rows) {
     const durationMs = elapsedMs(prompt, message);
-    rows = deriveTimeline(blocksOf(message), {
+    rows = compactTimeline(blocksOf(message), {
       active: false,
       idPrefix: `${message.id}:`,
       stopped: messageWasStopped(message),
@@ -759,25 +759,36 @@ export default function ChatScreen(): React.ReactElement {
     const liveTurnId = view.serverTurnId;
     const turnUserMessage = view.turnUserMessage?.trim();
 
-    let prompt: ChatMessage | null = null;
-    for (const message of history) {
-      if (message.role === 'user') prompt = message;
-      if (liveTurnId && message.metadata?.turnId === liveTurnId) continue;
-      if (
-        !liveTurnId &&
-        turnUserMessage &&
-        message.role === 'user' &&
-        message.content.trim() === turnUserMessage
-      ) {
-        continue;
-      }
-      if (message.role === 'user') {
-        historyOut.push({ kind: 'user', id: message.id, message });
-        continue;
-      }
-      const turnId = message.metadata?.turnId;
-      for (const row of rowsOf(message, prompt)) {
-        historyOut.push({ kind: 'row', id: row.id, row, ...(turnId ? { turnId } : {}) });
+    const turns = buildTranscriptTurns(history.map((message) => ({
+      id: message.id,
+      role: message.role,
+      ...transcriptMessageInput(message),
+      attachments: messageAttachments(message),
+      source: message,
+    })));
+    for (const turn of turns) {
+      const user = turn.entries.find((entry) => entry.kind === 'user');
+      const prompt = user?.kind === 'user' ? user.message.source : null;
+      for (const entry of turn.entries) {
+        if (entry.kind === 'live' || entry.kind === 'pending_user') continue;
+        const message = entry.message.source;
+        if (liveTurnId && message.metadata?.turnId === liveTurnId) continue;
+        if (
+          !liveTurnId &&
+          turnUserMessage &&
+          message.role === 'user' &&
+          message.content.trim() === turnUserMessage
+        ) {
+          continue;
+        }
+        if (message.role === 'user') {
+          historyOut.push({ kind: 'user', id: message.id, message });
+          continue;
+        }
+        const turnId = message.metadata?.turnId;
+        for (const row of rowsOf(message, prompt)) {
+          historyOut.push({ kind: 'row', id: row.id, row, ...(turnId ? { turnId } : {}) });
+        }
       }
     }
 
@@ -811,7 +822,7 @@ export default function ChatScreen(): React.ReactElement {
       });
     }
 
-    const liveRows = deriveTimeline(live?.blocks, {
+    const liveRows = compactTimeline(live?.blocks, {
       active: view.isLive,
       idPrefix: 'live:',
       hooks: view.hooks,

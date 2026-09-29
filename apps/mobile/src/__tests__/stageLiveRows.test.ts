@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { ChatMessage } from '@generatorai/client-core';
 
 import { withLiveRows, type TranscriptItem } from '../components/runs/stageTranscript';
-import type { TimelineRow } from '../components/chat/timeline/deriveTimeline';
+import type { TimelineRow } from '../components/chat/timeline/compactTimeline';
 
 const user = (id: string): TranscriptItem => ({
   kind: 'user',

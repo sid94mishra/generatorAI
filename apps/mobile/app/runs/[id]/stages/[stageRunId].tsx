@@ -38,7 +38,7 @@ import { stageSubtitle } from '../../../../src/components/runs/StageTimeline';
 import { awaitsApproval, pollIntervalFor, stageControlsFor } from '../../../../src/components/runs/runModel';
 import { isActive, isTerminal } from '../../../../src/components/runs/statusStyle';
 import { transcriptItems, withLiveRows, type TranscriptItem } from '../../../../src/components/runs/stageTranscript';
-import { deriveTimeline } from '../../../../src/components/chat/timeline/deriveTimeline';
+import { compactTimeline } from '../../../../src/components/chat/timeline/compactTimeline';
 import { useStageLive } from '../../../../src/services/stream/useStageLive';
 import { useFeature } from '../../../../src/components/runs/useFeature';
 import { usePullRefresh } from '../../../../src/components/runs/usePullRefresh';
@@ -120,7 +120,7 @@ export default function StageScreen(): React.ReactElement {
   const items = useMemo(() => {
     const saved = transcriptItems(transcript.data, live);
     if (!liveState?.blocks.length) return saved;
-    return withLiveRows(saved, deriveTimeline(liveState.blocks, { active: true, idPrefix: `live-${stageRunId}:` }));
+    return withLiveRows(saved, compactTimeline(liveState.blocks, { active: true, idPrefix: `live-${stageRunId}:` }));
   }, [transcript.data, live, liveState?.blocks, stageRunId]);
   const actions = useMemo(
     () => ({ workspaceId: run.data?.workspaceId ?? null, streamKey: null, toast: (message: string) => toast({ message }) }),

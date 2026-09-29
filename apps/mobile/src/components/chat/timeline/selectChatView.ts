@@ -12,9 +12,9 @@
 // Pure, so the "what counts as structural" rule is unit-testable.
 // ────────────────────────────────────────────────────────────────
 
-import { DEFAULT_STREAM, type StreamBlock, type StreamState } from '@generatorai/client-core';
+import { DEFAULT_STREAM, computeLiveCounters, type StreamBlock, type StreamState } from '@generatorai/client-core';
 
-import { awaitsUserDecision, blocksSignature } from './deriveTimeline';
+import { awaitsUserDecision, blocksSignature } from './compactTimeline';
 
 export type LastBlockKind = 'none' | 'thinking-live' | 'tool-running' | 'text' | 'other';
 
@@ -37,6 +37,10 @@ export interface ChatStreamView {
   gateBlock: Extract<StreamBlock, { type: 'permission' | 'question' }> | null;
   gate: 'permission' | 'question' | 'plan' | null;
   isLive: boolean;
+  /** Shared counters stay primitive so text chunks do not repaint the screen. */
+  runningTools: number;
+  runningSubagents: number;
+  pendingWorkers: number;
 }
 
 export function selectChatView(stream: StreamState | undefined): ChatStreamView {
@@ -66,7 +70,11 @@ export function selectChatView(stream: StreamState | undefined): ChatStreamView 
       }
     }
   }
+  const counters = computeLiveCounters(blocks);
   return {
+    runningTools: counters.tools,
+    runningSubagents: counters.subagents,
+    pendingWorkers: counters.pending,
     status: s.status,
     typing: s.typing,
     turnId: s.turnId,

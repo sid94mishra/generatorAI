@@ -17,7 +17,7 @@ import type { StreamUsage } from '@generatorai/client-core';
 
 import { Touchable } from '../ui/Touchable';
 import { formatDuration } from './toolPresentation';
-import { cacheMissHint, compactTokens as compact } from './timeline/deriveTimeline';
+import { cacheMissHint, compactTokens as compact } from './timeline/compactTimeline';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useChatMotion } from './chatMotion';
 

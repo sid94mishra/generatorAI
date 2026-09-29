@@ -18,6 +18,9 @@ Owner-authorized continuation: MD-107 (2026-09-29). These items remain required 
 
 | MV-10 | pending | M1-09 service migration native smoke on both platforms; 1,111 pure tests and six Jest tests pass. | Run paired chat/approval/theme flows after MV-07 native rebuilds; then M2 regression checks. |
 
+| MV-11 | pending | M2-01 native transcript/turn regression walkthrough and paired Maestro flows. Shared model and compact adapter implemented; rebuild still running. | Paired chat/approval/stop flows after the native clients finish; preserve M1 failures separately. |
+| MV-12 | pending | Existing design-tokens density assertion fails for fixed-height `meter`: 533/534 tests pass; generated-token check passes. No token source was changed in M2. | Reconcile the fixed-height token/test expectation during M3-03; retain desktop values. |
+
 ## 2026-09-29 continuation triage
 
 Rechecked native host code: the legacy Sheet uses an animated RN Modal; WorkbenchSheet retains heavy panes in parked absolute-fill views. The Android software-modal/GPU hypothesis and iOS animation/lifecycle hypothesis are not proven fixes. Earlier targeted repair attempts restored sandbox terminal attachment but not usable rendering, and three notification-opening retries failed. Preserve these findings for the planned host replacements instead of marking the characterization green. Sandbox and Metro are healthy; 21 GiB free. Continue M1-05.

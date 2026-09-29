@@ -1,10 +1,9 @@
 // ────────────────────────────────────────────────────────────────
-// deriveTimeline — stream blocks → transcript rows.
+// compactTimeline — shared transcript steps → compact phone rows.
 //
-// The mobile port of web's `deriveTimeline` + `groupSteps`, folded into one
-// pass because a phone renders the answer text and the activity rows in ONE
-// list (there is no separate timeline column), so the output is already the
-// final row order.
+// Presentation adapter for the shared transcript. Status, nesting, images
+// and group aggregates come from client-core. Phone-only prose ordering,
+// collapsed work summaries and row identities remain here until the M6 UI.
 //
 // Rules (Appendix D of the standalone-client plan):
 //   • thinking / text blocks are rows of their own;
@@ -31,6 +30,12 @@
 
 import {
   workflowToolCard,
+  deriveTimeline as deriveSharedTimeline,
+  groupSteps,
+  MIN_GROUP,
+  type TimelineStep,
+  type StepKind,
+  type StepStatus,
   type StreamBlock,
   type StreamHookInvocation,
   type StreamUsage,
@@ -44,7 +49,10 @@ import { isShellTool, rowFromToolCall, type AgentConsoleRow } from '../../../ter
 import { asScmResultBlock, type ScmResultBlock } from './scmResultBlock';
 import { toolKind, toolLabel, toolSummary, type ToolKind } from '../toolPresentation';
 
-export type StepStatus = 'running' | 'done' | 'failed' | 'waiting' | 'pending';
+export { MIN_GROUP, toolCallFailed } from '@generatorai/client-core';
+export type { StepStatus } from '@generatorai/client-core';
+import { humanizeToolName } from '@generatorai/shared/ui-contract';
+export { humanizeToolName } from '@generatorai/shared/ui-contract';
 
 /**
  * Grouping family. `create` folds into `edit` (an agent that writes three
@@ -173,7 +181,7 @@ export interface DeriveTimelineOptions {
 export const MIN_WORK_STEPS = 2;
 
 /** Runs shorter than this render as plain rows. */
-export const MIN_GROUP = 2;
+
 
 const GROUPABLE: ReadonlySet<ToolFamily> = new Set<ToolFamily>(['read', 'search', 'edit', 'shell', 'web', 'other']);
 
@@ -182,15 +190,6 @@ const AGENT_TOOL = /^(agent|task|subagent|spawn_agent|run_agent|dispatch_agent)$
 
 export function isAgentTool(tool: string): boolean {
   return AGENT_TOOL.test(humanizeToolName(tool));
-}
-
-/** `mcp__server__tool` → `tool`. */
-export function humanizeToolName(tool: string): string {
-  if (tool.startsWith('mcp__')) {
-    const parts = tool.split('__');
-    return parts[parts.length - 1] || tool;
-  }
-  return tool;
 }
 
 export function toolFamily(tool: string): ToolFamily {
@@ -234,17 +233,6 @@ function resultObject(result: unknown): Record<string, unknown> | null {
   return null;
 }
 
-/**
- * Did a completed call fail? The provider's `is_error` flag (`block.error`)
- * is authoritative; the in-process browser tools answer with an
- * `{ ok: false, error }` envelope instead, so that shape counts too.
- */
-export function toolCallFailed(block: ToolCallBlock): boolean {
-  if (block.error) return true;
-  const env = resultObject(block.result);
-  return !!env && env['ok'] === false && typeof env['error'] === 'string';
-}
-
 /** The first line of whatever the failed call said, for the row. */
 export function toolErrorMessage(block: ToolCallBlock): string | undefined {
   const env = resultObject(block.result);
@@ -260,17 +248,6 @@ export function toolErrorMessage(block: ToolCallBlock): string | undefined {
   const line = raw.trim().split('\n').find((l) => l.trim().length > 0) ?? '';
   if (!line) return undefined;
   return line.length > 200 ? `${line.slice(0, 199)}…` : line;
-}
-
-/** A screenshot the agent took — `screenshot_page` and friends answer with the artifact path. */
-export function screenshotOf(result: unknown): ScreenshotRef | undefined {
-  const env = resultObject(result);
-  if (!env || env['ok'] === false) return undefined;
-  const p = env['artifactPath'];
-  if (typeof p !== 'string' || !/\.(png|jpe?g|webp)$/i.test(p)) return undefined;
-  if (env['artifactType'] != null && env['artifactType'] !== 'browser_screenshot') return undefined;
-  const base = p.split(/[\\/]/).pop() ?? p;
-  return { relativePath: p, label: base };
 }
 
 /** A name for an `Agent` call: its description, type, or the prompt's first line. */
@@ -335,14 +312,15 @@ function sameChildren(a: readonly ToolStep[] | undefined, b: readonly ToolStep[]
 
 function internStep(fresh: ToolStep): ToolStep {
   const cached = stepCache.get(fresh.block);
-  if (cached && cached.status === fresh.status && sameChildren(cached.step.children, fresh.children)) {
+  if (cached && cached.step.id === fresh.id && cached.status === fresh.status && sameChildren(cached.step.children, fresh.children)) {
     return cached.step;
   }
   stepCache.set(fresh.block, { status: fresh.status, step: fresh });
   return fresh;
 }
 
-function buildStep(block: ToolCallBlock, idPrefix: string, status: StepStatus): ToolStep {
+function buildStep(block: ToolCallBlock, idPrefix: string, shared: TimelineStep): ToolStep {
+  const status = shared.status;
   const family = toolFamily(block.tool);
   const shortName = humanizeToolName(block.tool);
   const fileOp = block.fileOp;
@@ -362,10 +340,7 @@ function buildStep(block: ToolCallBlock, idPrefix: string, status: StepStatus): 
   if (fileOp) step.fileOp = fileOp;
   if (family === 'shell') step.shell = rowFromToolCall(block);
   if (family === 'agent') step.agentName = agentNameOf(block.args);
-  if (block.status === 'complete') {
-    const image = screenshotOf(block.result);
-    if (image) step.image = image;
-  }
+  if (shared.image) step.image = shared.image;
   if (status === 'failed') {
     const message = toolErrorMessage(block);
     if (message) step.errorMessage = message;
@@ -388,12 +363,28 @@ const LABELS: Record<ToolFamily, { many: (n: number) => string; live: string }> 
   other: { many: (n) => plural(n, 'tool call'), live: 'Calling tools' },
 };
 
+/** Shared aggregation also defines status priority for the compact phone row. */
 export function groupStatus(steps: readonly ToolStep[]): StepStatus {
-  if (steps.some((s) => s.status === 'running')) return 'running';
-  if (steps.some((s) => s.status === 'waiting')) return 'waiting';
-  if (steps.some((s) => s.status === 'pending')) return 'pending';
-  if (steps.some((s) => s.status === 'failed')) return 'failed';
-  return 'done';
+  if (steps.length === 0) return 'done';
+  const [entry] = groupSteps(steps.map((step) => ({
+    id: step.id, kind: 'tool', verb: step.label, target: step.target, status: step.status,
+  })));
+  return entry?.type === 'group' ? entry.status : entry?.step.status ?? 'done';
+}
+
+const FAMILY_STEP_KIND: Record<ToolFamily, StepKind> = {
+  read: 'read', search: 'search', edit: 'edit', delete: 'tool',
+  shell: 'run', web: 'browser', agent: 'subagent', other: 'tool',
+};
+
+function sharedGroup(steps: readonly ToolStep[]) {
+  const [entry] = groupSteps(steps.map((step) => ({
+    id: step.id, kind: FAMILY_STEP_KIND[step.family], verb: step.label,
+    target: step.target, status: step.status, ...(step.fileOp ? { fileOp: step.fileOp } : {}),
+  })));
+  // Called only for a run of at least MIN_GROUP groupable steps of one family.
+  if (!entry || entry.type !== 'group') throw new Error('Expected a grouped mobile activity run');
+  return entry;
 }
 
 function countTargets(steps: readonly ToolStep[]): number {
@@ -425,8 +416,7 @@ function basename(target: string): string {
 
 function buildGroup(steps: ToolStep[], idPrefix: string): StepGroup {
   const family = steps[0]!.family;
-  const status = groupStatus(steps);
-  const failed = steps.filter((s) => s.status === 'failed').length;
+  const { status, failed, fileOps } = sharedGroup(steps);
   const labels = LABELS[family];
   const distinct = family === 'read' || family === 'edit' ? countTargets(steps) || steps.length : steps.length;
   // A run of one MCP tool is named after that tool ("navigate_page ×3").
@@ -440,19 +430,6 @@ function buildGroup(steps: ToolStep[], idPrefix: string): StepGroup {
       : sameVerb
         ? `${sameVerb} ×${steps.length}`
         : labels.many(distinct);
-  let fileOps: StepGroup['fileOps'];
-  if (family === 'edit') {
-    const files = new Set<string>();
-    let additions = 0;
-    let deletions = 0;
-    for (const s of steps) {
-      if (!s.fileOp) continue;
-      files.add(s.fileOp.filePath);
-      additions += s.fileOp.additions;
-      deletions += s.fileOp.deletions;
-    }
-    if (files.size > 0) fileOps = { files: files.size, additions, deletions };
-  }
   return {
     id: `${idPrefix}group-${steps[0]!.id}`,
     family,
@@ -467,7 +444,7 @@ function buildGroup(steps: ToolStep[], idPrefix: string): StepGroup {
 
 // ── Derivation ───────────────────────────────────────────────────
 
-export function deriveTimeline(
+export function compactTimeline(
   blocks: readonly StreamBlock[] | undefined,
   opts: DeriveTimelineOptions = { active: false },
 ): TimelineRow[] {
@@ -489,11 +466,32 @@ export function deriveTimeline(
     run = [];
   };
 
-  const stepByCallId = new Map<string, ToolStep>();
-  /** Fresh (un-interned) steps that still need their children settled. */
-  const pendingParents: ToolStep[] = [];
-
   const list = blocks ?? [];
+  const sharedByCallId = new Map<string, TimelineStep>();
+  const nestedCallIds = new Set<string>();
+  const blocksByCallId = new Map(list.filter((b): b is ToolCallBlock => b.type === 'tool_call').map((b) => [b.callId, b]));
+  const collectSharedSteps = (steps: readonly TimelineStep[], nested = false): void => {
+    for (const step of steps) {
+      if (step.callId) {
+        sharedByCallId.set(step.callId, step);
+        if (nested) nestedCallIds.add(step.callId);
+      }
+      if (step.children) collectSharedSteps(step.children, true);
+    }
+  };
+  collectSharedSteps(deriveSharedTimeline([...list], { active: opts.active, awaitingDecision: awaiting }));
+  // Compact rows retain only tool children; shared note/worker rows join in M6.
+  const compactStep = (shared: TimelineStep): ToolStep | undefined => {
+    const block = shared.callId ? blocksByCallId.get(shared.callId) : undefined;
+    if (!block) return undefined;
+    const step = buildStep(block, prefix, shared);
+    const children = shared.children?.flatMap((child) => {
+      const row = compactStep(child);
+      return row ? [row] : [];
+    });
+    if (children?.length) step.children = children;
+    return step;
+  };
   const lastIndex = list.length - 1;
 
   for (let i = 0; i < list.length; i += 1) {
@@ -521,26 +519,12 @@ export function deriveTimeline(
         break;
       }
       case 'tool_call': {
-        const status: StepStatus =
-          b.status === 'complete'
-            ? toolCallFailed(b)
-              ? 'failed'
-              : 'done'
-            : awaiting
-              ? 'waiting'
-              : opts.active
-                ? 'running'
-                : 'pending';
-        const step = buildStep(b, prefix, status);
-        stepByCallId.set(b.callId, step);
-        const parent = b.parentCallId ? stepByCallId.get(b.parentCallId) : undefined;
-        if (parent) {
-          (parent.children ??= []).push(step);
-          break;
-        }
+        if (nestedCallIds.has(b.callId)) break;
+        const shared = sharedByCallId.get(b.callId);
+        const step = shared ? compactStep(shared) : undefined;
+        if (!step) break;
         if (step.family === 'agent') {
           flushRun();
-          pendingParents.push(step);
           rows.push({ kind: 'tool', id: step.id, step });
           break;
         }

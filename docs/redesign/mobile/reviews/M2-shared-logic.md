@@ -7,3 +7,18 @@
 - Read MD-03/12/14/25, 07 M2-01, shared transcript types/derivation/grouping/turns/counters and mobile twins. MDF resolutions remain binding at presentation time.
 - Existing mobile deriveTimeline is a combined prose/activity read model (931 lines); shared deriveTimeline is a step model (891 lines) and deriveSegments/turns carry prose ordering. Mobile has distinct compact group summaries and error previews. Preserve these presentation choices through an adapter while removing duplicate shared decisions; do not replace calls blindly or discard the 1,111-test safety net.
 - M1 native acceptance and spikes remain explicitly pending in PENDING.md. No M2-01 completion claimed yet.
+
+## M2-01 implementation (2026-09-29)
+
+- Shared wire adapter / projected-message overloads committed separately at c4130e5f, logged in COORDINATION. Core typecheck/lint and 34 files / 739 tests pass.
+- Deleted the mobile persisted-message parser. Chat and workflow-stage replay now use shared chronological block construction. Shared turn grouping handles history; shared live counters enter the primitive chat selector.
+- Retired `deriveTimeline.ts` and its name. `compactTimeline.ts` is a presentation adapter: shared status, nesting, images and group totals; local phone row order, short targets/error previews, collapsible work summaries and stable row identities. No layout or selector rename. M6 replaces the legacy presentation tree.
+- Related mobile logic: five files / 73 tests pass, including nested live counters and cache prefix isolation. Token generation passes. Design-token tests: 533 pass, one pre-existing fixed-meter density assertion fails (MV-12); token sources unchanged.
+- Native walkthrough/Maestro acceptance remains MV-11 while the M1-06 iOS rebuild runs; Android rebuild follows sequentially. This is implementation progress, not a completed phase or green batch.
+
+## M2-02 packet
+
+- Boards: MFoundations dark/light inspected again (both platform columns); MComponents status-badge reference. MD-25/64, MDF status rules; shared eight-state map overrides board wording.
+- Route/data: existing run/stage, background task, plan/review, automation and SCM status renderers. No new endpoints or fake state.
+- Replace local domain-status tone maps with shared `resolveStatus`/`STATUS_STATE_DEFS`; keep only a legacy token-name presentation bridge until M3/M4. Worktree metadata is neutral per MD-25. The MP-07 native badge kit belongs to M4-03.
+- Preserve action/polling predicates; those are behavior rather than visual tone maps. Update tests where old tone assertions conflict with MD-25. Native coverage remains explicitly pending if rebuilds are unavailable.

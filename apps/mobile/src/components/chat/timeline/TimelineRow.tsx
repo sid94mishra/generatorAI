@@ -1,5 +1,5 @@
 // ────────────────────────────────────────────────────────────────
-// TimelineRow — one transcript row, for every kind `deriveTimeline` emits.
+// TimelineRow — one transcript row, for every kind `compactTimeline` emits.
 //
 // Perf contract (plan §7.2):
 //   • `TimelineRowView` is memoised with `rowsEqual`: a settled row's props
@@ -82,7 +82,7 @@ import {
   formatWorkDuration,
   workLabel,
   workTitle,
-} from './deriveTimeline';
+} from './compactTimeline';
 import { READ_ALOUD_ENABLED } from '../featureFlags';
 
 /** 4 KB per value — a multi-megabyte result must not lock the UI thread. */

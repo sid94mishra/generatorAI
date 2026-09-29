@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { StreamBlock } from '@generatorai/client-core';
 import type { RepoReadiness, ScmFlowResult } from '@generatorai/shared';
 
-import { blocksSignature, deriveTimeline, rowsEqual } from '../deriveTimeline';
+import { blocksSignature, compactTimeline, rowsEqual } from '../compactTimeline';
 import { asScmResultBlock, type ScmResultBlock } from '../scmResultBlock';
 import { blockedReason, describeFlowResult, summarizeFlow } from '../../../scm/scmModel';
 
@@ -78,7 +78,7 @@ describe('the transcript', () => {
   const text: StreamBlock = { type: 'text', blockId: 1, content: 'Done.', isComplete: true } as StreamBlock;
 
   it('emits a row of its own, after the answer', () => {
-    const rows = deriveTimeline([text, block() as unknown as StreamBlock], { active: false });
+    const rows = compactTimeline([text, block() as unknown as StreamBlock], { active: false });
     expect(rows.map((r) => r.kind)).toEqual(['text', 'scm_result']);
     expect(rows[1]!.id).toBe('scm-9');
   });
