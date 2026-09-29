@@ -15,9 +15,8 @@
 import React from 'react';
 import { Text, View } from 'react-native';
 import { router } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useHealth, useProviders } from '../../src/features/settings/queries';
 import { Accessibility, Activity, Bell, Blocks, Cpu, GitBranch, Mic, Palette, Puzzle, Server, ShieldCheck, Sparkles, TerminalSquare } from 'lucide-react-native';
-import { queryKeys } from '@generatorai/client-core';
 
 import { useApi } from '../../src/services/api/useApi';
 import { useAuth } from '../../src/services/auth/AuthProvider';
@@ -30,19 +29,11 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 
 export default function SettingsScreen(): React.ReactElement {
   const { colors } = useTheme();
-  const api = useApi();
   const { state, transport } = useAuth();
 
-  const health = useQuery({
-    queryKey: queryKeys.health(),
-    queryFn: () => api.health(),
-    refetchInterval: 15_000,
-  });
+  const health = useHealth(15000);
 
-  const providers = useQuery({
-    queryKey: queryKeys.providers(),
-    queryFn: () => api.harness.providers(),
-  });
+  const providers = useProviders();
 
   const connection = describeTransport(transport);
 

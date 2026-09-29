@@ -23,7 +23,7 @@ import type { PlanSummary } from '@generatorai/client-core';
 
 import { Button } from '../ui/Button';
 import { Touchable } from '../ui/Touchable';
-import { planCardActions, type GateAction } from './gateActions';
+import { planCardActions, type GateAction } from '../../features/chat/gateActions';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useCardEntering } from '../common/enterMotion';
 import { useChatMotion } from './chatMotion';

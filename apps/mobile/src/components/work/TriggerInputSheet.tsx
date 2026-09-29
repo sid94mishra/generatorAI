@@ -25,7 +25,7 @@ import { Field, Switch } from '../ui/Form';
 import { Sheet } from '../ui/Sheet';
 import { haptics } from '../ui/haptics';
 import { useTheme } from '../../theme/ThemeProvider';
-import { executionIdOf, makeIdempotencyKey, type AutomationView } from './automationModel';
+import { executionIdOf, makeIdempotencyKey, type AutomationView } from '../../features/automations/model';
 import {
   DATASET_FORMATS,
   DATASET_FORMAT_LABEL,

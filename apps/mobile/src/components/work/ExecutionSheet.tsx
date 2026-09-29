@@ -33,7 +33,7 @@ import {
   triggeredByLabel,
   type ExecutionRunView,
   type ExecutionView,
-} from './automationModel';
+} from '../../features/automations/model';
 
 type ExecutionDetail = ExecutionView & { runs?: ExecutionRunView[] };
 

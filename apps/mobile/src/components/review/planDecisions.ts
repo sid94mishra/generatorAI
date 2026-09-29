@@ -9,7 +9,7 @@
 // reason to know about.
 // ────────────────────────────────────────────────────────────────
 
-import { toPlanDecision, type PlanDecision } from '../chat/gateActions';
+import { toPlanDecision, type PlanDecision } from '../../features/chat/gateActions';
 
 export type PlanDecisionKind = 'approve' | 'autopilot' | 'changes' | 'discard';
 

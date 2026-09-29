@@ -20,7 +20,7 @@ import {
   type WorkflowRunSummary,
 } from '@generatorai/client-core';
 
-import { useApi } from './useApi';
+import { useApi } from '../../services/api/useApi';
 import {
   hasPendingGate,
   primaryGate,
@@ -28,8 +28,8 @@ import {
   selectGateCandidates,
   type GateInfo,
   type Operation,
-} from './activityRanking';
-import { isActive, needsAttention } from '../../components/runs/statusStyle';
+} from '../../services/api/activityRanking';
+import { isActive, needsAttention } from '../../services/api/runActivity';
 
 export {
   filterOperations,
@@ -47,7 +47,7 @@ export {
   type GateKind,
   type Operation,
   type OperationKind,
-} from './activityRanking';
+} from '../../services/api/activityRanking';
 
 export function useActivity() {
   const api = useApi();

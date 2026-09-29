@@ -19,11 +19,9 @@
 import React, { useMemo } from 'react';
 import { Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useChat, useChatInteractions } from '../../../../src/features/chat/queries';
 import { CheckCircle2 } from 'lucide-react-native';
-import { queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../../../src/services/api/useApi';
 import { gateFromPayload, type Gate } from '../../../../src/components/chat/gateFromInteraction';
 import { PermissionCard } from '../../../../src/components/chat/PermissionCard';
 import { PlanCard } from '../../../../src/components/chat/PlanCard';
@@ -37,22 +35,12 @@ import { useTheme } from '../../../../src/theme/ThemeProvider';
 
 export default function GateScreen(): React.ReactElement {
   const { id: chatId, interactionId } = useLocalSearchParams<{ id: string; interactionId: string }>();
-  const api = useApi();
   const { colors } = useTheme();
   const decide = useGateDecision();
 
-  const chat = useQuery({
-    queryKey: queryKeys.chat(chatId!),
-    queryFn: () => api.chats.get(chatId!),
-    enabled: Boolean(chatId),
-  });
+  const chat = useChat(chatId!, { enabled: Boolean(chatId) });
 
-  const interactions = useQuery({
-    queryKey: queryKeys.chatInteractions(chatId!),
-    queryFn: () => api.chats.interactions(chatId!),
-    enabled: Boolean(chatId),
-    refetchInterval: 15_000,
-  });
+  const interactions = useChatInteractions(chatId!, { enabled: Boolean(chatId), refetchInterval: 15_000 });
 
   const gate = useMemo<Gate | null>(() => {
     if (!interactions.data || !interactionId) return null;

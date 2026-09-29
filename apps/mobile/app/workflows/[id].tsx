@@ -17,7 +17,7 @@
 import React, { useMemo, useState } from 'react';
 import { Alert, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useWorkflow, useWorkflowRuns, useRemoveWorkflow } from '../../src/features/workflows/queries';
 import { GitBranch, Lock, MoreHorizontal, Play, Trash2, Webhook, Workflow as WorkflowIcon } from 'lucide-react-native';
 import { epochOr, queryKeys } from '@generatorai/client-core';
 
@@ -52,13 +52,10 @@ const RECENT_RUNS = 5;
 export default function WorkflowScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const workflowId = String(id);
-  const api = useApi();
   const navigation = useNavigation();
   const { colors } = useTheme();
   const runStart = useFeature('runStart');
   const workflowEdit = useFeature('workflowEdit');
-  const admin = useAdminApi();
-  const queryClient = useQueryClient();
   const [sheet, setSheet] = useState(false);
   const [menu, setMenu] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -66,15 +63,9 @@ export default function WorkflowScreen(): React.ReactElement {
   const [selectedStage, setSelectedStage] = useState<StageSpec | null>(null);
   const selectedAgent = selectedStage?.kind === 'agent' ? selectedStage : null;
 
-  const workflow = useQuery({
-    queryKey: [...queryKeys.workflows(), 'detail', workflowId],
-    queryFn: () => api.workflows.get(workflowId),
-  });
+  const workflow = useWorkflow(workflowId);
 
-  const runs = useQuery({
-    queryKey: queryKeys.runs(workflowId),
-    queryFn: () => api.runs.list({ definitionId: workflowId }),
-  });
+  const runs = useWorkflowRuns(workflowId);
 
   const pull = usePullRefresh(() => Promise.all([workflow.refetch(), runs.refetch()]));
 
@@ -93,15 +84,9 @@ export default function WorkflowScreen(): React.ReactElement {
     });
   }, [navigation, workflow.data?.graph.workflow.name, loaded, colors.foreground]);
 
-  const remove = useMutation({
-    // The server deletes an unused definition and archives one that runs
-    // pin (the runs are kept); the confirmation says which.
-    mutationFn: () => admin.definitions.remove(workflowId),
+  const remove = useRemoveWorkflow(workflowId, {
     onSuccess: () => {
       haptics.commit();
-      queryClient.removeQueries({ queryKey: [...queryKeys.workflows(), 'detail', workflowId] });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.workflows() });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.runs() });
       if (router.canGoBack()) router.back();
       else router.replace('/(tabs)/runs?segment=workflows' as never);
     },

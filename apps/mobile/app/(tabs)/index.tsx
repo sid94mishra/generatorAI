@@ -28,9 +28,8 @@ import {
   groupApprovals,
   type ActivityFilter,
   type Operation,
-} from '../../src/services/api/useActivity';
-import { useQuery } from '@tanstack/react-query';
-import { queryKeys } from '@generatorai/client-core';
+} from '../../src/features/home/queries';
+import { useWorkflows } from '../../src/features/workflows/queries';
 
 import { useApi } from '../../src/services/api/useApi';
 import { HealthCard } from '../../src/components/home/HealthCard';
@@ -63,7 +62,6 @@ const EMPTY_TITLE: Record<ActivityFilter, string> = {
 };
 
 export default function HomeScreen(): React.ReactElement {
-  const api = useApi();
   const { colors } = useTheme();
   const shell = useTabShell();
   const [filter, setFilter] = useState<ActivityFilter>('today');
@@ -120,11 +118,7 @@ export default function HomeScreen(): React.ReactElement {
   );
   // The dashboard's Workflows count. Same key as the Workflows list, so
   // opening that list afterwards is already warm.
-  const workflows = useQuery({
-    queryKey: queryKeys.workflows(),
-    queryFn: () => api.workflows.list(),
-    staleTime: 60_000,
-  });
+  const workflows = useWorkflows({ staleTime: 60_000 });
 
   const pull = usePullToRefresh(activity.refetch, activity.isFetching);
 

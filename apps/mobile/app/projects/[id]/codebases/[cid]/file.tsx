@@ -10,11 +10,10 @@
 import React, { useMemo } from 'react';
 import { RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useLocalSearchParams, useNavigation } from 'expo-router';
-import { useQuery } from '@tanstack/react-query';
+import { useCodebaseFile } from '../../../../../src/features/projects/queries';
 import * as Clipboard from 'expo-clipboard';
 import { Copy, FileWarning } from 'lucide-react-native';
 
-import { projectKeys } from '@generatorai/client-core';
 import { useProjectsApi } from '../../../../../src/components/projects/useProjectsApi';
 import { filePreview, normalizeRelPath } from '../../../../../src/components/projects/projectEditModel';
 import { usePullRefresh } from '../../../../../src/components/runs/usePullRefresh';
@@ -29,16 +28,11 @@ export default function CodebaseFileScreen(): React.ReactElement {
   const projectId = String(params.id);
   const codebaseId = String(params.cid);
   const path = normalizeRelPath(typeof params.path === 'string' ? params.path : '');
-  const api = useProjectsApi();
   const navigation = useNavigation();
   const toast = useToast();
   const { colors } = useTheme();
 
-  const file = useQuery({
-    queryKey: projectKeys.fileContent(projectId, codebaseId, path),
-    queryFn: () => api.fileContent(projectId, codebaseId, path),
-    enabled: path.length > 0,
-  });
+  const file = useCodebaseFile(projectId, codebaseId, path);
   const { refreshing, onRefresh } = usePullRefresh(() => file.refetch());
   const preview = useMemo(() => filePreview(file.data?.content), [file.data?.content]);
   const name = path.split('/').pop() || 'File';

@@ -12,7 +12,7 @@
 
 import React from 'react';
 import { Text } from 'react-native';
-import { useQuery } from '@tanstack/react-query';
+import { useHealth } from '../../src/features/settings/queries';
 import Constants from 'expo-constants';
 import {
   Activity,
@@ -22,7 +22,6 @@ import {
   Radio,
   Timer,
 } from 'lucide-react-native';
-import { queryKeys } from '@generatorai/client-core';
 
 import { useApi } from '../../src/services/api/useApi';
 import { useAuth } from '../../src/services/auth/AuthProvider';
@@ -36,18 +35,13 @@ import { Screen } from '../../src/components/ui/Screen';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 export default function DiagnosticsScreen(): React.ReactElement {
-  const api = useApi();
   const { colors } = useTheme();
   const { transport, keyBacking, state, reconnect } = useAuth();
 
   const connection = describeTransport(transport);
   const key = describeKeyBacking(keyBacking);
 
-  const health = useQuery({
-    queryKey: queryKeys.health(),
-    queryFn: () => api.health(),
-    refetchInterval: 10_000,
-  });
+  const health = useHealth(10000);
 
   return (
     <Screen

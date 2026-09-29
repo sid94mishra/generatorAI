@@ -16,7 +16,7 @@ import {
   triggerDescription,
   triggeredByLabel,
   workflowIdsOf,
-} from '../components/work/automationModel';
+} from '../features/automations/model';
 
 // Monday 14 Sep 2026, 10:00 local time.
 const NOW = new Date(2026, 8, 14, 10, 0, 0).getTime();

@@ -16,7 +16,7 @@
 import React, { useState } from 'react';
 import { Linking, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useMutation, useQuery } from '@tanstack/react-query';
+import { usePullRequest, usePullRequestFiles, usePullRequestComments, useReviewPullRequest } from '../../../../../../src/features/projects/queries';
 import {
   ChevronDown,
   ChevronRight,
@@ -38,7 +38,6 @@ import { ErrorState } from '../../../../../../src/components/ui/States';
 import { SkeletonList } from '../../../../../../src/components/ui/Skeleton';
 import { Touchable } from '../../../../../../src/components/ui/Touchable';
 import { useToast } from '../../../../../../src/components/ui/Toast';
-import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../../../../../../src/components/scm/useScmApi';
 import {
   checksSummaryLabel,
@@ -60,7 +59,6 @@ export default function PullRequestDetailScreen(): React.ReactElement {
   const codebaseId = String(params.cid);
   const number = Number(params.number);
   const navigation = useNavigation();
-  const scm = useScmApi();
   const toast = useToast();
   const { colors } = useTheme();
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -70,28 +68,13 @@ export default function PullRequestDetailScreen(): React.ReactElement {
     navigation.setOptions({ title: `Pull request #${number}` });
   }, [navigation, number]);
 
-  const pr = useQuery({
-    queryKey: scmKeys.pullRequest(projectId, codebaseId, number),
-    queryFn: () => scm.pullRequest(projectId, codebaseId, number),
-  });
+  const pr = usePullRequest(projectId, codebaseId, number);
 
-  const files = useQuery({
-    queryKey: scmKeys.pullRequestFiles(projectId, codebaseId, number),
-    queryFn: () => scm.pullRequestFiles(projectId, codebaseId, number),
-    enabled: pr.isSuccess,
-  });
+  const files = usePullRequestFiles(projectId, codebaseId, number, pr.isSuccess);
 
-  const comments = useQuery({
-    queryKey: scmKeys.pullRequestComments(projectId, codebaseId, number),
-    queryFn: () => scm.pullRequestComments(projectId, codebaseId, number),
-    enabled: pr.isSuccess,
-  });
+  const comments = usePullRequestComments(projectId, codebaseId, number, pr.isSuccess);
 
-  const review = useMutation({
-    mutationFn: () =>
-      scm.reviewChat(projectId, codebaseId, number, {
-        ...(instructions.trim() ? { instructions: instructions.trim() } : {}),
-      }),
+  const review = useReviewPullRequest(projectId, codebaseId, number, {
     onSuccess: (response) => {
       setReviewOpen(false);
       setInstructions('');
@@ -222,7 +205,7 @@ export default function PullRequestDetailScreen(): React.ReactElement {
             label="Start the review"
             full
             loading={review.isPending}
-            onPress={() => review.mutate()}
+            onPress={() => review.mutate(instructions)}
           />
         </View>
       </Sheet>

@@ -18,7 +18,9 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import { router, useLocalSearchParams } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useChats, useCreateChat, useSetChatStatus, useRenameChat, useRemoveChat, useRemoveChats } from '../../src/features/chats/queries';
+import { useProjects } from '../../src/features/projects/queries';
+import { useSelectableAgents } from '../../src/features/agents/queries';
 import {
   Archive,
   ArchiveRestore,
@@ -31,12 +33,11 @@ import {
   Trash2,
   X,
 } from 'lucide-react-native';
-import { epochOr, isArchived, queryKeys, type ChatListRow } from '@generatorai/client-core';
+import { epochOr, isArchived, type ChatListRow } from '@generatorai/client-core';
 
-import { useApi } from '../../src/services/api/useApi';
-import { useActivity } from '../../src/services/api/useActivity';
+import { useActivity } from '../../src/features/home/queries';
 import { useModels } from '../../src/services/api/useModels';
-import { NewChatSheet, type NewChatValues } from '../../src/components/chat/NewChatSheet';
+import { NewChatSheet } from '../../src/components/chat/NewChatSheet';
 import { RenameSheet } from '../../src/components/chat/RenameSheet';
 import { relativeTime } from '../../src/components/runs/formatTime';
 import { displayChatName, parseChatName } from '../../src/components/common/chatName';
@@ -64,8 +65,6 @@ import { useTheme } from '../../src/theme/ThemeProvider';
 type Scope = 'all' | 'active' | 'archived';
 
 export default function ChatsScreen(): React.ReactElement {
-  const api = useApi();
-  const queryClient = useQueryClient();
   const { colors } = useTheme();
   const toast = useToast();
   const params = useLocalSearchParams<{ new?: string }>();
@@ -106,21 +105,12 @@ export default function ChatsScreen(): React.ReactElement {
     router.setParams({ new: undefined });
   }, [params.new]);
 
-  const chats = useQuery({
-    queryKey: queryKeys.chats(),
-    queryFn: () => api.chats.list({ limit: 200 }),
-  });
+  const chats = useChats();
 
   const models = useModels();
-  const projects = useQuery({
-    queryKey: queryKeys.projects(),
-    queryFn: () => api.projects.list(),
-  });
+  const projects = useProjects();
   // Picker list only — authoring an agent grants capability and stays on web.
-  const agents = useQuery({
-    queryKey: ['agents', 'selectable'] as const,
-    queryFn: () => api.agents.selectable(),
-  });
+  const agents = useSelectableAgents();
 
   // Reused purely for `runningChatIds` — the chat entity itself carries no
   // "is a turn in flight" flag, and a live dot is the single most useful
@@ -135,41 +125,28 @@ export default function ChatsScreen(): React.ReactElement {
     [activity.operations],
   );
 
-  const invalidate = useCallback(
-    () => void queryClient.invalidateQueries({ queryKey: queryKeys.chats() }),
-    [queryClient],
-  );
-
-  const create = useMutation({
-    mutationFn: (values: NewChatValues) => api.chats.create(values),
+  const create = useCreateChat({
     onSuccess: (chat) => {
       setCreating(false);
-      invalidate();
       router.push(`/chats/${chat.id}`);
     },
   });
 
-  const setStatus = useMutation({
-    mutationFn: ({ id, status }: { id: string; status: string }) => api.chats.update(id, { status }),
-    onSuccess: invalidate,
+  const setStatus = useSetChatStatus({
     onError: () => toast({ message: 'Could not update that chat.', tone: 'error' }),
   });
 
-  const rename = useMutation({
-    mutationFn: ({ id, name }: { id: string; name: string }) => api.chats.update(id, { name }),
+  const rename = useRenameChat({
     onSuccess: () => {
       setRenaming(null);
-      invalidate();
       toast({ message: 'Renamed.', tone: 'success' });
     },
     onError: () => toast({ message: 'Could not rename that chat.', tone: 'error' }),
   });
 
-  const remove = useMutation({
-    mutationFn: (id: string) => api.chats.remove(id),
+  const remove = useRemoveChat({
     onSuccess: () => {
       setDeleting(null);
-      invalidate();
       toast({ message: 'Chat deleted.', tone: 'success' });
     },
     onError: () => toast({ message: 'Could not delete that chat.', tone: 'error' }),
@@ -179,13 +156,8 @@ export default function ChatsScreen(): React.ReactElement {
   // only the chats that failed stay selected, so a retry does not resend ids
   // that are already gone; when the request fails outright nothing was
   // deleted, so the selection stays as it was.
-  const removeMany = useMutation({
-    mutationFn: async (ids: string[]) => {
-      const result = await api.chats.removeMany(ids);
-      return { failedIds: result.failed.map((f) => f.id), total: ids.length };
-    },
+  const removeMany = useRemoveChats({
     onSuccess: ({ failedIds, total }) => {
-      invalidate();
       const failed = failedIds.length;
       if (failed > 0) setSelected(new Set(failedIds));
       else exitSelection();
@@ -196,7 +168,6 @@ export default function ChatsScreen(): React.ReactElement {
       );
     },
     onError: () => {
-      invalidate();
       toast({ message: 'Could not delete those chats.', tone: 'error' });
     },
   });

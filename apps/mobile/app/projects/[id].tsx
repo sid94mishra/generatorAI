@@ -1,3 +1,4 @@
+import { useWorkflowRuns } from '../../src/features/workflows/queries';
 // ────────────────────────────────────────────────────────────────
 // Project overview.
 //
@@ -20,7 +21,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useProject, useProjectChats, useProjectWorkflows, useProjectAutomations, useProjectPullRequests, useNewProjectChat } from '../../src/features/projects/queries';
 import * as Clipboard from 'expo-clipboard';
 import {
   ChevronRight,
@@ -33,7 +34,7 @@ import {
   Workflow,
   Zap,
 } from 'lucide-react-native';
-import { queryKeys, type CodebaseSummary } from '@generatorai/client-core';
+import { type CodebaseSummary } from '@generatorai/client-core';
 
 import { useApi } from '../../src/services/api/useApi';
 import { displayChatName } from '../../src/components/common/chatName';
@@ -41,7 +42,6 @@ import { relativeTime } from '../../src/components/runs/formatTime';
 import { runTitle } from '../../src/components/runs/runModel';
 import { statusLabel } from '../../src/components/runs/statusStyle';
 import { usePullRefresh } from '../../src/components/runs/usePullRefresh';
-import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../../src/components/scm/useScmApi';
 import { matchesState, prStateLabel, prStateTone } from '../../src/components/scm/prModel';
 import {
@@ -60,9 +60,8 @@ import { AddCodebaseSheet } from '../../src/components/projects/AddCodebaseSheet
 import { ProjectActions } from '../../src/components/projects/ProjectActions';
 import { ProjectArtifacts } from '../../src/components/projects/ProjectArtifacts';
 import { ProjectSettingsForm } from '../../src/components/projects/ProjectSettingsForm';
-import type { CodebaseWire, ProjectDetailWire } from '../../src/components/projects/projectEditorApi';
+import type { CodebaseWire } from '../../src/components/projects/projectEditorApi';
 import {
-  anyCloning,
   cloneEvents,
   isCloningStatus,
   statusSnapshot,
@@ -83,15 +82,11 @@ const PR_LIMIT = 3;
 type SectionKey = 'codebases' | 'chats' | 'runs';
 type DetailSegment = 'overview' | 'artifacts' | 'settings';
 
-const CLONE_POLL_MS = 3000;
 
 export default function ProjectDetailScreen(): React.ReactElement {
   const { id } = useLocalSearchParams<{ id: string }>();
   const projectId = String(id);
-  const api = useApi();
-  const scm = useScmApi();
   const navigation = useNavigation();
-  const queryClient = useQueryClient();
   const { colors } = useTheme();
   const toast = useToast();
   const projectEdit = useFeature('projectEdit');
@@ -99,14 +94,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
   const [menuOpen, setMenuOpen] = useState(false);
   const [addingCodebase, setAddingCodebase] = useState(false);
 
-  const project = useQuery({
-    queryKey: queryKeys.project(projectId),
-    // The thin client types the row narrowly; the wire carries settings,
-    // rootPath and each codebase's lastError too.
-    queryFn: () => api.projects.get(projectId) as Promise<unknown> as Promise<ProjectDetailWire>,
-    // Follow a clone to its end without the user pulling.
-    refetchInterval: (query) => (anyCloning(query.state.data?.codebases) ? CLONE_POLL_MS : false),
-  });
+  const project = useProject(projectId, true);
 
   // Toast a clone that finishes while the screen is open.
   const lastStatuses = useRef<Record<string, string | null> | null>(null);
@@ -121,27 +109,11 @@ export default function ProjectDetailScreen(): React.ReactElement {
     }
     lastStatuses.current = statusSnapshot(codebases);
   }, [project.data?.codebases, toast]);
-  const chats = useQuery({
-    queryKey: queryKeys.projectChats(projectId),
-    queryFn: () => api.chats.list({ projectId }),
-  });
-  const workflows = useQuery({
-    queryKey: queryKeys.projectWorkflows(projectId),
-    queryFn: () => api.workflows.list(projectId),
-  });
-  const automations = useQuery({
-    queryKey: queryKeys.projectAutomations(projectId),
-    queryFn: () => api.automations.list(projectId),
-  });
-  const runs = useQuery({
-    queryKey: queryKeys.runs(),
-    queryFn: () => api.runs.list(),
-  });
-  const prs = useQuery({
-    queryKey: scmKeys.projectPullRequests(projectId, 'open'),
-    queryFn: () => scm.projectPullRequests(projectId, 'open'),
-    staleTime: 30_000,
-  });
+  const chats = useProjectChats(projectId);
+  const workflows = useProjectWorkflows(projectId);
+  const automations = useProjectAutomations(projectId);
+  const runs = useWorkflowRuns(undefined, false);
+  const prs = useProjectPullRequests(projectId, 'open');
 
   const loaded = Boolean(project.data);
   React.useLayoutEffect(() => {
@@ -197,11 +169,8 @@ export default function ProjectDetailScreen(): React.ReactElement {
     if (y !== undefined) scrollRef.current?.scrollTo({ y: Math.max(0, y - 8), animated: true });
   }, []);
 
-  const newChat = useMutation({
-    mutationFn: () =>
-      api.chats.create({ name: `New chat in ${project.data?.name ?? 'project'}`, projectId }),
+  const newChat = useNewProjectChat(projectId, {
     onSuccess: (chat) => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.chats() });
       router.push(`/chats/${chat.id}`);
     },
     onError: (err) =>
@@ -316,7 +285,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
               size="sm"
               icon={<Plus size={16} color={colors.primary} />}
               loading={newChat.isPending}
-              onPress={() => newChat.mutate()}
+              onPress={() => newChat.mutate(project.data?.name ?? 'project')}
               accessibilityLabel="New chat in project"
             />
           }

@@ -16,17 +16,14 @@
 import React, { useCallback, useMemo, useState } from 'react';
 import { Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useProject, useCodebaseStatus, useCodebaseReadiness, useCodebaseBranches, useProjectPullRequests, useFetchCodebase, useUnlinkCodebase } from '../../../../src/features/projects/queries';
 import * as Clipboard from 'expo-clipboard';
 import { Folder, FolderGit2, GitBranch, GitPullRequest, HardDrive, RefreshCw, Trash2 } from 'lucide-react-native';
-import { ApiError, queryKeys } from '@generatorai/client-core';
-import type { RepoReadiness } from '@generatorai/shared';
 
 import { useApi } from '../../../../src/services/api/useApi';
 import { useAdminApi } from '../../../../src/services/api/useAdminApi';
 import { relativeTime } from '../../../../src/components/runs/formatTime';
 import { usePullRefresh } from '../../../../src/components/runs/usePullRefresh';
-import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../../../../src/components/scm/useScmApi';
 import { matchesState, prStateLabel, prStateTone } from '../../../../src/components/scm/prModel';
 import {
@@ -59,52 +56,21 @@ export default function CodebaseDetailScreen(): React.ReactElement {
   const params = useLocalSearchParams<{ id: string; cid: string }>();
   const projectId = String(params.id);
   const codebaseId = String(params.cid);
-  const api = useApi();
-  const admin = useAdminApi();
-  const scm = useScmApi();
   const navigation = useNavigation();
-  const queryClient = useQueryClient();
   const toast = useToast();
   const { colors } = useTheme();
   const [showAllBranches, setShowAllBranches] = useState(false);
   const [confirmUnlink, setConfirmUnlink] = useState(false);
-  const projectsApi = useProjectsApi();
   const projectEdit = useFeature('projectEdit');
   const canFetch = projectEdit.available;
 
-  const project = useQuery({
-    queryKey: queryKeys.project(projectId),
-    queryFn: () => api.projects.get(projectId),
-  });
+  const project = useProject(projectId);
   const codebase = project.data?.codebases.find((c) => c.id === codebaseId);
 
-  const status = useQuery({
-    queryKey: queryKeys.codebaseStatus(projectId, codebaseId),
-    queryFn: () => admin.projects.codebases.status(projectId, codebaseId),
-  });
-  const readiness = useQuery({
-    queryKey: queryKeys.codebaseReadiness(projectId, codebaseId),
-    // 400 means "no local checkout yet" — a state, not a failure.
-    queryFn: async (): Promise<RepoReadiness | null> => {
-      try {
-        return await api.projects.codebaseReadiness(projectId, codebaseId);
-      } catch (err) {
-        if (err instanceof ApiError && err.status === 400) return null;
-        throw err;
-      }
-    },
-    retry: false,
-  });
-  const branches = useQuery({
-    queryKey: queryKeys.codebaseBranches(projectId, codebaseId),
-    queryFn: () => admin.projects.codebases.branches(projectId, codebaseId),
-    retry: false,
-  });
-  const prs = useQuery({
-    queryKey: scmKeys.projectPullRequests(projectId, 'open'),
-    queryFn: () => scm.projectPullRequests(projectId, 'open'),
-    staleTime: 30_000,
-  });
+  const status = useCodebaseStatus(projectId, codebaseId);
+  const readiness = useCodebaseReadiness(projectId, codebaseId);
+  const branches = useCodebaseBranches(projectId, codebaseId);
+  const prs = useProjectPullRequests(projectId, 'open');
 
   const title = codebase?.alias ?? 'Codebase';
   React.useLayoutEffect(() => {
@@ -115,23 +81,16 @@ export default function CodebaseDetailScreen(): React.ReactElement {
     Promise.all([project.refetch(), status.refetch(), readiness.refetch(), branches.refetch(), prs.refetch()]),
   );
 
-  const fetchRemote = useMutation({
-    mutationFn: () => admin.projects.codebases.fetch(projectId, codebaseId),
+  const fetchRemote = useFetchCodebase(projectId, codebaseId, {
     onSuccess: () => {
       toast({ message: 'Fetched.', tone: 'success' });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.codebaseStatus(projectId, codebaseId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.codebaseBranches(projectId, codebaseId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.codebaseReadiness(projectId, codebaseId) });
-      void queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) });
     },
     onError: (err) =>
       toast({ message: err instanceof Error ? `Fetch failed: ${err.message}` : 'Fetch failed.', tone: 'error' }),
   });
 
-  const unlink = useMutation({
-    mutationFn: () => projectsApi.unlinkCodebase(projectId, codebaseId),
+  const unlink = useUnlinkCodebase(projectId, codebaseId, {
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: queryKeys.project(projectId) });
       toast({ message: 'Codebase removed from the project.', variant: 'success' });
       leave();
     },

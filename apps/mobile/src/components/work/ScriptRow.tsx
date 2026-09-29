@@ -12,7 +12,7 @@ import { FileCode2 } from 'lucide-react-native';
 
 import { ListItem } from '../ui/ListItem';
 import { useTheme } from '../../theme/ThemeProvider';
-import { scriptSubtitle, type ScriptRowView } from './scriptModel';
+import { scriptSubtitle, type ScriptRowView } from '../../features/scripts/model';
 
 export function scriptRoute(scriptId: string): string {
   return `/scripts/${encodeURIComponent(scriptId)}`;

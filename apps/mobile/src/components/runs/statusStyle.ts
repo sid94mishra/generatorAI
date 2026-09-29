@@ -32,32 +32,8 @@ export function statusLabel(status: AnyRunStatus): string {
   return runStatus(status)?.label ?? (status ? status.replace(/_/g, ' ').replace(/^./, c => c.toUpperCase()) : 'Unknown');
 }
 
-/**
- * Statuses that require a human before anything else happens.
- *
- * This drives the "Needs attention" grouping — the single most valuable thing
- * a phone can surface, because a blocked run costs nothing to unblock but
- * stalls everything downstream until someone notices.
- */
-export function needsAttention(status: AnyRunStatus): boolean {
-  return status === 'paused' || status === 'awaiting_input' || status === 'failed';
-}
+export { needsAttention } from '../../services/api/runActivity';
 
-/** Statuses that are still in flight. */
-export function isActive(status: AnyRunStatus): boolean {
-  return ACTIVE.has(status);
-}
+export { isActive } from '../../services/api/runActivity';
 
-const ACTIVE: ReadonlySet<string> = new Set([
-  'ready',
-  'starting',
-  'running',
-  'validating',
-  'retry_wait',
-  'finalizing',
-]);
-
-/** Statuses that will never change again without an explicit action. */
-export function isTerminal(status: AnyRunStatus): boolean {
-  return status === 'completed' || status === 'failed' || status === 'cancelled' || status === 'skipped';
-}
+export { isTerminal } from '../../services/api/runActivity';

@@ -13,7 +13,7 @@ import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { CheckCircle2 } from 'lucide-react-native';
 
-import { useActivity, groupApprovals, type Operation } from '../src/services/api/useActivity';
+import { useActivity, groupApprovals, type Operation } from '../src/features/home/queries';
 import { GATE_PROBE_LIMIT } from '../src/services/api/activityRanking';
 import { DecisionCard } from '../src/components/home/DecisionCard';
 import { chatIdOf, decisionHref } from '../src/components/home/ApprovalsQueue';

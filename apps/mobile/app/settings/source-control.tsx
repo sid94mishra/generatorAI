@@ -16,7 +16,7 @@
 
 import React, { useState } from 'react';
 import { Text, View } from 'react-native';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useSourceControlSettings, useDefaultScmAccount, useDisconnectScmAccount } from '../../src/features/settings/queries';
 import { Github, GitBranch, Info, Plus, Sparkles, Star, Trash2 } from 'lucide-react-native';
 import type { SourceControlAccount } from '@generatorai/shared';
 
@@ -27,7 +27,6 @@ import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
 import { useToast } from '../../src/components/ui/Toast';
-import { scmKeys } from '@generatorai/client-core';
 import { ConnectGitHubSheet } from '../../src/components/scm/ConnectGitHubSheet';
 import { deviceConnectAvailability } from '../../src/components/scm/deviceLogin';
 import { useFeature } from '../../src/components/runs/useFeature';
@@ -36,8 +35,6 @@ import { useScmApi } from '../../src/components/scm/useScmApi';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 export default function SourceControlScreen(): React.ReactElement {
-  const scm = useScmApi();
-  const queryClient = useQueryClient();
   const toast = useToast();
   const { colors } = useTheme();
   const [menuFor, setMenuFor] = useState<SourceControlAccount | null>(null);
@@ -45,28 +42,17 @@ export default function SourceControlScreen(): React.ReactElement {
   const [connecting, setConnecting] = useState(false);
   const projectEdit = useFeature('projectEdit');
 
-  const settings = useQuery({
-    queryKey: scmKeys.settings(),
-    queryFn: () => scm.settings(),
-  });
+  const settings = useSourceControlSettings();
 
-  const invalidate = (): void => {
-    void queryClient.invalidateQueries({ queryKey: scmKeys.settings() });
-  };
-
-  const setDefault = useMutation({
-    mutationFn: (accountId: string) => scm.setDefaultAccount(accountId),
+  const setDefault = useDefaultScmAccount({
     onSuccess: () => {
-      invalidate();
       toast({ message: 'Default account changed', variant: 'success' });
     },
     onError: (err) => toast({ message: message(err, 'Could not change the default'), variant: 'danger' }),
   });
 
-  const disconnect = useMutation({
-    mutationFn: (accountId: string) => scm.disconnectAccount(accountId),
+  const disconnect = useDisconnectScmAccount({
     onSuccess: () => {
-      invalidate();
       toast({ message: 'Account disconnected', variant: 'success' });
     },
     onError: (err) => toast({ message: message(err, 'Could not disconnect'), variant: 'danger' }),

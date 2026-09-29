@@ -33,7 +33,7 @@ import {
   type LucideIcon,
 } from 'lucide-react-native';
 
-import { useActivity, needsYouCount } from '../../services/api/useActivity';
+import { useActivity, needsYouCount } from '../../features/home/queries';
 import { useAuth } from '../../services/auth/AuthProvider';
 import { SidePanelHost } from '../../components/ui/SidePanel';
 import { Touchable } from '../../components/ui/Touchable';

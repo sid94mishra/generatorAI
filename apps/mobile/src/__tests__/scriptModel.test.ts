@@ -7,7 +7,7 @@ import {
   parseScriptRows,
   profileSummary,
   scriptSubtitle,
-} from '../components/work/scriptModel';
+} from '../features/scripts/model';
 
 describe('script rows', () => {
   it('parses metadata and drops id-less entries', () => {
