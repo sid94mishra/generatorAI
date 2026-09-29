@@ -6,7 +6,7 @@ import {
   buildSlashItems,
   rankMentionItems,
   rankSlashItems,
-} from '../slashSource';
+} from '../composerCatalog';
 
 const CU = 'system-skill-computer-use';
 

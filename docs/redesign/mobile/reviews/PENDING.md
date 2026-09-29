@@ -23,6 +23,8 @@ Owner-authorized continuation: MD-107 (2026-09-29). These items remain required 
 
 | MV-13 | pending | M2-02 replaced run/stage, automation, background-task, plan/review, SCM-step/result, CI-check, codebase-health and file-change maps; shared bridge tests pass. PR lifecycle/mergeability and transport-specific descriptions lack matching shared domain adapters; several legacy card/icon tints remain. Native status walkthrough also pending. | Finish those adapters/presentation replacements with M5 connection UI and M6/M7 SCM/transcript ports; M2-02 acceptance stays open until a source scan and native checks pass. |
 
+| MV-14 | pending | M2-03 composer native send/gate/stop on both platforms and single combined test run. Catalog tests pass; full 1,117-test run had one dynamic-import timeout, affected file reran 21/21 green unchanged. | Run native flows with rebuilt clients, then full tests without simulator/build contention. Force reset remains MV-04 until a non-acknowledging fixture is exercised. |
+
 ## 2026-09-29 continuation triage
 
 Rechecked native host code: the legacy Sheet uses an animated RN Modal; WorkbenchSheet retains heavy panes in parked absolute-fill views. The Android software-modal/GPU hypothesis and iOS animation/lifecycle hypothesis are not proven fixes. Earlier targeted repair attempts restored sandbox terminal attachment but not usable rendering, and three notification-opening retries failed. Preserve these findings for the planned host replacements instead of marking the characterization green. Sandbox and Metro are healthy; 21 GiB free. Continue M1-05.

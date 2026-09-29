@@ -16,11 +16,15 @@
 //   agents     @<agent>              — inserts the agent's ref as text
 //   files      @<path>               — attaches the file's content (web parity)
 //
-// Ranking uses the shared `fuzzyFilter`, so "sonet"-style typos still reach
-// the right command — the web's plain subsequence match is a subset of it.
+// Matching uses client-core's canonical subsequence matcher; native labels
+// and pane navigation are presentation adapters only.
 // ────────────────────────────────────────────────────────────────
 
-import { fuzzyFilter } from '../../../services/lib/fuzzyMatch';
+import {
+  BUILTIN_COMMANDS as SHARED_BUILTINS,
+  skillToCommand, computerUseSkillToCommand, promptToCommand,
+  fuzzyMatch, type SlashCommand,
+} from '@generatorai/client-core';
 import { filterPaths } from '../composerMenu';
 import type { SlashItem } from './types';
 
@@ -49,33 +53,14 @@ export interface SlashSourceInput {
   loadPromptTemplate?: (artifact: ArtifactLike) => Promise<string>;
 }
 
-/** Web's `BUILTIN_COMMANDS`, verbatim in prompt wording. */
-export const BUILTIN_COMMANDS: readonly SlashItem[] = [
-  {
-    id: 'builtin:browser',
-    name: 'browser',
-    label: '/browser',
-    description: 'Drive the integrated browser to test or verify a flow',
-    kind: 'command',
-    source: 'builtin',
-    pane: 'browser',
-    argHint: 'Describe what to open, click, or verify in the browser…',
-    format: (input) =>
-      `Use the integrated browser to complete the task below. Open the relevant page(s), interact as needed (navigate, click, type), and verify the outcome. Report what you observed, including screenshots or issues found.\n\nTask: ${input.trim()}`,
-  },
-  {
-    id: 'builtin:terminal',
-    name: 'terminal',
-    label: '/terminal',
-    description: 'Run commands in the integrated terminal and report output',
-    kind: 'command',
-    source: 'builtin',
-    pane: 'terminal',
-    argHint: 'Describe the command or task to run in the terminal…',
-    format: (input) =>
-      `Use the integrated terminal to run the command(s) needed for the task below. Show the exact command(s) you run, then report the output and the result.\n\nTask: ${input.trim()}`,
-  },
-];
+/** Shared commands with native menu labels and pane routing. */
+function nativeCommand(command: SlashCommand): SlashItem {
+  return { ...command, label: `/${command.name}` };
+}
+export const BUILTIN_COMMANDS: readonly SlashItem[] = SHARED_BUILTINS.map(command => ({
+  ...nativeCommand(command),
+  ...(command.name === 'browser' || command.name === 'terminal' ? { pane: command.name } : {}),
+}));
 
 /** Mobile pane openers (v1 behaviour, kept). Not sent to the model. */
 export const NAVIGATE_COMMANDS: readonly SlashItem[] = [
@@ -86,63 +71,17 @@ export const NAVIGATE_COMMANDS: readonly SlashItem[] = [
 ];
 
 export function skillToItem(a: ArtifactLike): SlashItem {
-  const source = a.source ?? 'system';
-  return {
-    id: `skill:${source}:${a.id}`,
-    name: a.name,
-    label: `/${a.name}`,
-    description: a.description || 'Skill',
-    kind: 'skill',
-    source,
-    argHint: `Describe the task for the "${a.name}" skill…`,
-    format: (input) => {
-      const task = input.trim();
-      return task
-        ? `Use the "${a.name}" skill for the following task.\n\n${task}`
-        : `Use the "${a.name}" skill.`;
-    },
-  };
+  return nativeCommand(skillToCommand({ ...a, source: a.source ?? 'system' }));
 }
 
-/**
- * Names the STAGED skill (`generatorai-computer-use`), not the display name:
- * a user-level skill from another vendor also calls itself `computer-use`.
- */
 export function computerUseSkillToItem(a: ArtifactLike): SlashItem {
-  return {
-    id: `skill:system:${a.id}`,
-    name: a.name,
-    label: `/${a.name}`,
-    description: a.description || 'Operate desktop applications on this machine',
-    kind: 'skill',
-    source: 'system',
-    argHint: 'Describe the desktop task — which app, and what to do…',
-    format: (input) => {
-      const task = input.trim();
-      const header =
-        'Use the generatorai-computer-use skill and the computer_* tools to drive the desktop for this task.';
-      return task ? `${header}\n\n${task}` : header;
-    },
-  };
+  return nativeCommand(computerUseSkillToCommand(a));
 }
 
 export function promptToItem(a: ArtifactLike, loadTemplate: () => Promise<string>): SlashItem {
-  const source = a.source ?? 'system';
   return {
-    id: `prompt:${source}:${a.id}`,
-    name: a.name,
-    label: `/${a.name}`,
-    description: a.description || 'Prompt',
-    kind: 'prompt',
-    source,
+    ...nativeCommand(promptToCommand({ ...a, source: a.source ?? 'system' }, loadTemplate)),
     argHint: 'Add optional details, or send to run the prompt…',
-    loadTemplate,
-    format: (input, template) => {
-      const body = (template ?? '').trim();
-      const extra = input.trim();
-      if (body && extra) return `${body}\n\n${extra}`;
-      return body || extra;
-    },
   };
 }
 
@@ -200,7 +139,7 @@ export function buildSlashItems(input: SlashSourceInput): SlashItem[] {
 export function rankSlashItems(items: readonly SlashItem[], query: string, limit = 24): SlashItem[] {
   const q = query.trim();
   if (!q) return items.slice(0, limit);
-  return fuzzyFilter(items, q, (i) => [i.name, i.description]).slice(0, limit);
+  return items.filter(i => fuzzyMatch(q, i.name) || fuzzyMatch(q, i.description ?? '')).slice(0, limit);
 }
 
 /**
@@ -215,7 +154,7 @@ export function rankMentionItems(
 ): SlashItem[] {
   const q = query.trim();
   const enabledAgents = agents.filter((a) => a.enabled !== false);
-  const agentItems = (q ? fuzzyFilter(enabledAgents, q, (a) => [a.name, a.ref]) : enabledAgents)
+  const agentItems = (q ? enabledAgents.filter(a => fuzzyMatch(q, a.name) || fuzzyMatch(q, a.ref)) : enabledAgents)
     .slice(0, 4)
     .map(agentToItem);
 

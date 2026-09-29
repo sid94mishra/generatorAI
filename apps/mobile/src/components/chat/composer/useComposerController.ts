@@ -16,10 +16,10 @@
 //   history       server messages merged with a local ring of 50
 // ────────────────────────────────────────────────────────────────
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { SharedValue } from 'react-native-reanimated';
-import type { AgentMode, ChatMessage } from '@generatorai/client-core';
+import { composerReducer, createComposerState, selectCanSend, type AgentMode, type ChatMessage } from '@generatorai/client-core';
 import { COMPUTER_USE_SKILL_ID } from '@generatorai/shared';
 
 import { useApi } from '../../../services/api/useApi';
@@ -42,7 +42,7 @@ import {
   mergePromptHistory,
   stepHistory,
 } from './promptHistory';
-import { buildSlashItems, rankMentionItems, rankSlashItems } from './slashSource';
+import { buildSlashItems, rankMentionItems, rankSlashItems } from './composerCatalog';
 import { captureToAttachment, insertCaptureIntoDraft, type CaptureInput } from './captures';
 import type { ComposerCaptureActions } from './captureContext';
 import { useCaptures } from './useCaptures';
@@ -154,7 +154,11 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
   const terminalScope = checkFeature('terminal', scopes).available;
 
   // ── Draft ──────────────────────────────────────────────────────
-  const [draft, setDraftState] = useState<string>(() => readDraft(chatId));
+  const [machine, dispatchComposer] = useReducer(composerReducer, chatId, (id) => ({
+    ...createComposerState(),
+    draft: { text: readDraft(id), hasCommand: false, attachmentCount: 0, captureCount: 0 },
+  }));
+  const draft = machine.draft.text;
   const draftRef = useRef(draft);
   draftRef.current = draft;
   const [caret, setCaretState] = useState(0);
@@ -165,14 +169,14 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
   // Switching chats swaps the draft; the old one is already persisted.
   useEffect(() => {
     const restored = readDraft(chatId);
-    setDraftState(restored);
+    dispatchComposer({ type: 'draft/changed', draft: { text: restored } });
     draftRef.current = restored;
   }, [chatId]);
 
   const setDraft = useCallback(
     (text: string) => {
       draftRef.current = text;
-      setDraftState(text);
+      dispatchComposer({ type: 'draft/changed', draft: { text } });
       if (persistTimer.current) clearTimeout(persistTimer.current);
       persistTimer.current = setTimeout(() => writeDraft(chatId, text), 250);
     },
@@ -572,7 +576,11 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
       const cmd = activeCommand;
       const rawInput = draftRef.current.trim();
       const current = attachmentsRef.current;
-      if (!rawInput && !cmd && current.length === 0) return;
+      if (!selectCanSend({
+        ...machine,
+        disabled,
+        draft: { text: rawInput, hasCommand: !!cmd, attachmentCount: current.length, captureCount: 0 },
+      })) return;
 
       sendingRef.current = true;
       setSending(true);
@@ -593,7 +601,9 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
         }
         if (!prompt.trim() && current.length === 0) return;
 
-        // Optimistic clear, exactly as web: the field empties on this frame.
+        // The shared transaction parks the draft until the request settles.
+        dispatchComposer({ type: 'draft/changed', draft: { text: rawInput, hasCommand: !!cmd, attachmentCount: current.length } });
+        dispatchComposer({ type: 'send/requested' });
         setDraft('');
         clearDraft(chatId);
         setActiveCommand(null);
@@ -616,14 +626,20 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
             attachments: current.map((a) => ({ ...a, uploading: true })),
             ...(mode ? { mode } : {}),
           });
+          dispatchComposer({ type: 'send/succeeded' });
           setAttachments([]);
         } catch (err) {
           // The draft comes back; the screen toasts the server's reason.
           const message = (err as Error)?.message || 'Upload failed';
-          if (draftRef.current.length === 0) {
+          const newerDraft = draftRef.current;
+          dispatchComposer({ type: 'send/failed' });
+          if (newerDraft.length === 0) {
             setDraft(rawInput);
             setCaret(rawInput.length);
             setPendingSelection(rawInput.length);
+          } else {
+            // Do not overwrite text typed while the request was in flight.
+            setDraft(newerDraft);
           }
           setActiveCommand(cmd);
           setAttachments(current.map((a) => ({ ...a, uploading: false, error: message })));
@@ -635,7 +651,7 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
         setSending(false);
       }
     },
-    [activeCommand, disabled, chatId, onSend, setDraft, setCaret, toast],
+    [activeCommand, disabled, chatId, onSend, setDraft, setCaret, toast, machine],
   );
 
   const onSendPress = useCallback(() => {

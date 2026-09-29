@@ -30,3 +30,18 @@
 - Mobile typecheck, lint/design ratchet and 11 related files / 135 tests pass. Assertions updated only where the old colors/copy contradict the shared decision (paused neutral, partial failed, queued automation).
 - Acceptance remains open: MV-13 records PR lifecycle/mergeability and transport-specific status descriptions without shared counterparts, remaining legacy host tints, and native status verification. Continue independent composer adoption under MD-107; do not call M2-02 fully complete.
 - iOS native rebuild succeeded; installation/launch now in progress. Android native build remains next, sequentially.
+
+## M2-03 packet
+
+- MComposerInput dark/light inspected, both phones; MD-03 and shared composer contract. Current layout/testIDs remain stable until M6-04; no new kit component.
+- Adopt shared builtin/skill/prompt factories and fuzzy matcher; keep native catalog presentation and existing pane navigation. Delete slashSource twin filename.
+- Use composerReducer and selectors for draft/send transitions and the existing native two-phase stop binding. Preserve editable gate drafts and Cancel-and-send's server-authoritative retry behavior.
+- Verification: related composer/catalog/stop tests, typecheck, lint/ratchet; native paired chat/gate/stop after client rebuild. M1 Force reset fixture gap stays MV-04 unless actually exercised.
+
+## M2-03 implementation checkpoint
+
+- Shared factories now own builtin, skill, computer-use and prompt formatting. Native catalog adds labels/pane routing; canonical fuzzyMatch selects slash/agent entries. Deleted slashSource.ts; composerCatalog.ts is the smaller presentation adapter.
+- Native controller uses composerReducer draft/send transactions and selectCanSend, while preserving attachment upload, dictation, and text entered during a failed request. Composer uses shared content/send eligibility; gates and workspace preparation block Send but do not remove the draft.
+- Native stop hook now drives composerReducer with backend observations, stop presses and clock ticks; shared selectors supply its view. No local timeout policy. Cancel-and-send keeps its existing server-authoritative retry path.
+- Typecheck and lint/design ratchet pass. Catalog related tests: 13 pass. Full logic run: 1,116 passed / one dynamic-import timeout under native simulator load; the affected toolPresentation file reruns 21/21 green with one worker and unchanged timeout/assertions. Single combined green run remains pending for final/batch acceptance.
+- iOS client successfully built, installed, fingerprint recorded, launched. Driver's first dev-server press hit its accessibility watchdog; a fresh snapshot/retry succeeded. Product/Storybook walkthroughs continue. MV-14 holds native composer and full-suite acceptance, including the pre-existing Force reset fixture gap.

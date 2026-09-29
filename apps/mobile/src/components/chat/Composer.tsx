@@ -1,3 +1,4 @@
+import { canSendComposer, hasComposerContent } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // Composer — the chat input (v2, §6.4).
 //
@@ -403,8 +404,12 @@ export function Composer(props: ComposerProps): React.ReactElement {
     void KeyboardController.dismiss();
   }, [fieldEditable]);
 
-  const hasContent = draft.trim().length > 0 || attachments.length > 0 || Boolean(props.activeCommand);
-  const canSend = hasContent && !disabled && !props.sending;
+  const content = { text: draft, attachmentCount: attachments.length, hasCommand: Boolean(props.activeCommand), captureCount: 0 };
+  const hasContent = hasComposerContent(content);
+  const canSend = canSendComposer({
+    ...content, disabled, sending: Boolean(props.sending), pendingInteraction: hasGate,
+    prepStatus: props.workspacePrep?.status,
+  });
   const showMic =
     props.voiceAvailable && !voiceLive && !isStreaming && !props.activeCommand && !hasContent && !props.sending;
   const turnInput = {
