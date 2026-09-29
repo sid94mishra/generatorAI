@@ -467,6 +467,10 @@ export function createAdminApi(fetchImpl: ApiFetch) {
         ),
 
       codebases: {
+        removeWorktree: (projectId: string, cid: string, worktreeId: string) =>
+          req<void>(`/api/projects/${encodeURIComponent(projectId)}/codebases/${encodeURIComponent(cid)}/worktrees/${encodeURIComponent(worktreeId)}`, { method: 'DELETE' }),
+        cleanupWorktrees: (projectId: string, cid: string) =>
+          req<Record<string, unknown>>(`/api/projects/${encodeURIComponent(projectId)}/codebases/${encodeURIComponent(cid)}/worktrees/cleanup`, json({})),
         list: (projectId: string) =>
           req<ProjectCodebase[]>(`/api/projects/${projectId}/codebases`),
         link: (projectId: string, body: Record<string, unknown>) =>
@@ -1065,6 +1069,8 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── system.ts / copilot.ts ──────────────────────────────────
     systemAdmin: {
+      updateMcp: (source: 'system' | 'custom', id: string, body: Record<string, unknown>) =>
+        req<void>(`/api/system/mcp-servers/${source}/${encodeURIComponent(id)}`, jsonWith('PUT', body)),
       computerUse: () => req<Record<string, unknown>>('/api/system/computer-use'),
       setComputerUse: (body: Record<string, unknown>) =>
         req<Record<string, unknown>>('/api/system/computer-use', jsonWith('PUT', body)),

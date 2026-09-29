@@ -1,3 +1,4 @@
+import { createPlanMethods, createReviewMethods, type TaskDigest, type ReviewSubmitTarget } from './reviewDetails.js';
 import { createScmMethods } from './scm.js';
 // ────────────────────────────────────────────────────────────────
 // Typed API client.
@@ -667,7 +668,15 @@ export interface ChangeRepoEntry {
   keptCount?: number;
 }
 
+export interface ChangeRevisionInfo {
+  kind: 'baseline' | 'checkpoint' | 'working' | 'ref';
+  id?: string;
+  label?: string;
+}
+
 export interface ChangeSummary {
+  base?: ChangeRevisionInfo;
+  head?: ChangeRevisionInfo;
   workspaceId: string;
   hasGit: boolean;
   repos: ChangeRepoEntry[];
@@ -743,6 +752,8 @@ export interface ReviewThread {
 // ── Projects ────────────────────────────────────────────────────
 
 export interface ProjectSummary {
+  rootPath?: string;
+  settings?: { worktreeRetention?: string; maxCodebases?: number; [key: string]: unknown };
   id: string;
   name: string;
   description?: string;
@@ -757,6 +768,7 @@ export interface ProjectSummary {
 }
 
 export interface CodebaseSummary {
+  lastError?: string;
   id: string;
   projectId: string;
   alias: string;
@@ -839,6 +851,13 @@ export interface WorkspaceFile {
 // ── Checkpoints ─────────────────────────────────────────────────
 
 export interface WorkspaceCheckpoint {
+  seq?: number;
+  turnId?: string;
+  phase?: 'before' | 'after';
+  promptExcerpt?: string;
+  additions?: number;
+  deletions?: number;
+  chatId?: string;
   id: string;
   workspaceId: string;
   repoAlias: string;
@@ -1031,6 +1050,7 @@ export const queryKeys = {
 
 export function createApiClient(fetchImpl: ApiFetch) {
   return {
+    plans: createPlanMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
     scm: createScmMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
     health: () => request<HealthSnapshot>(fetchImpl, '/api/health'),
 
@@ -1243,6 +1263,9 @@ export function createApiClient(fetchImpl: ApiFetch) {
         }),
 
       remove: (id: string) => request<void>(fetchImpl, `/api/chats/${id}`, { method: 'DELETE' }),
+
+      backgroundTaskDigest: (id: string, taskId: string) =>
+        request<TaskDigest>(fetchImpl, `/api/chats/${encodeURIComponent(id)}/background-tasks/${encodeURIComponent(taskId)}`),
 
       plans: (id: string) => request<PlanSummary[]>(fetchImpl, `/api/chats/${id}/plans`),
 
@@ -1508,6 +1531,8 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     workspaces: {
+      createCheckpoint: (id: string, label?: string) =>
+        request<{ checkpoints: WorkspaceCheckpoint[] }>(fetchImpl, `/api/workspaces/${encodeURIComponent(id)}/checkpoints`, json(label ? { label } : {})),
       list: (params?: { projectId?: string; limit?: number }) => {
         const q = new URLSearchParams();
         if (params?.projectId) q.set('projectId', params.projectId);
@@ -1645,6 +1670,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
     },
 
     review: {
+      ...createReviewMethods(<T>(path: string, init?: RequestInit) => request<T>(fetchImpl, path, init)),
       threads: (workspaceId: string, params?: { path?: string; status?: string }) => {
         const q = new URLSearchParams();
         if (params?.path) q.set('path', params.path);
@@ -1701,7 +1727,7 @@ export function createApiClient(fetchImpl: ApiFetch) {
           },
         ),
 
-      submit: (workspaceId: string, body: { threadIds: string[]; note?: string; preview?: boolean }) =>
+      submit: (workspaceId: string, body: { threadIds: string[]; target?: ReviewSubmitTarget; note?: string; preview?: boolean }) =>
         request<{ prompt: string; threadIds: string[]; reviewRound: number; delivered: boolean }>(
           fetchImpl,
           `/api/workspaces/${workspaceId}/review/submit`,

@@ -48,3 +48,5 @@ It also records every merge of `desktop_redesign` into this branch.
 | 2026-09-29 | M2-02 | `packages/client-core/src/transcript/stepStatus.ts`, transcript export, contract test | additive | Maps transcript step waiting to shared needs_you (a human gate), not timer waiting; existing callers unchanged. |
 
 | 2026-09-29 | M2-04 | `packages/client-core/src/api/scm.ts`, client property/exports, SCM contract tests | additive | Shared SCM/readiness/PR/device-login methods and query keys, preserving request bodies and 204/error handling. Core typecheck, 751 tests, lint (existing warnings only) pass. |
+
+| 2026-09-29 | M2-04 | client-core review/plan methods, optional checkpoint/change/project fields, scoped worktree/MCP admin methods, project keys | additive | Existing method behavior retained. New methods encode identifiers; review submit target is optional on the existing method. Wire contracts checked against server (comment PATCH returns thread; content timestamp optional). Core typecheck, 758 tests, lint with six existing warnings pass. |
