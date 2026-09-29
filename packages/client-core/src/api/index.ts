@@ -5,3 +5,4 @@ export * from './runStart.js';
 export { scmKeys, type ScmApi, type PullRequestListState, type ReviewChatRequest, type ReviewChatResponse } from './scm.js';
 export type { PlanDocumentInfo, PlanRevisionInfo, PlanCommentInfo, ReviewSubmitBody, ReviewSubmitTarget, TaskDigest } from './reviewDetails.js';
 export { projectKeys } from './projectKeys.js';
+export { resourcePaths, type BinaryResource, type BrowserDescriptorView, type ComputerFrameView, type ComputerActivityView } from './resources.js';

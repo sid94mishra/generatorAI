@@ -504,6 +504,8 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       },
 
       configs: {
+        content: (projectId: string, cid: string) =>
+          req<{ content: string }>(`/api/projects/${encodeURIComponent(projectId)}/configs/${encodeURIComponent(cid)}`),
         list: (projectId: string, type?: string) =>
           req<ProjectConfig[]>(`/api/projects/${projectId}/configs${qs({ type })}`),
         get: (projectId: string, cid: string) =>
@@ -892,6 +894,9 @@ export function createAdminApi(fetchImpl: ApiFetch) {
       /** What `invoke` would do: stages by layer, skips, codebases, phases, post-processing, permission mode. */
       plan: (body: InvocationRequest) => req<InvocationPlan>('/api/workflow-invocations/plan', json(body)),
       /** Stage files before invoking (TTL 1 h); send the ids in `invoke`'s `uploads`. */
+      /** Native clients supply a platform FormData with URI-backed files. */
+      uploadMultipart: (form: FormData) =>
+        req<{ uploads: Array<{ uploadId: string; category: InvocationUploadCategory; name: string }> }>('/api/workflow-invocations/uploads', { method: 'POST', body: form }),
       uploads: (files: Array<{ category: InvocationUploadCategory; name: string; data: Uint8Array; mimeType?: string }>) => {
         const form = new FormData();
         for (const f of files) {
@@ -1027,6 +1032,9 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── auth.ts (device administration) ─────────────────────────
     devices: {
+      revokeWithReason: (id: string, reason: string) =>
+        req<void>(`/api/auth/devices/${encodeURIComponent(id)}`, jsonWith('DELETE', { reason })),
+      rotate: (id: string) => req<void>(`/api/auth/devices/${encodeURIComponent(id)}/rotate`, json({})),
       // The route answers `{ devices: [...] }`, not a bare array.
       list: async () =>
         (await req<{ devices: DeviceRecord[] }>('/api/auth/devices')).devices ?? [],
@@ -1069,6 +1077,8 @@ export function createAdminApi(fetchImpl: ApiFetch) {
 
     // ── system.ts / copilot.ts ──────────────────────────────────
     systemAdmin: {
+      setAudio: (body: { sttEngine?: string; textFormatter?: string; endpointSilenceMs?: number; ttsEnabled?: boolean; ttsSpeed?: number }) =>
+        req<Record<string, unknown>>('/api/system/audio', jsonWith('PUT', body)),
       updateMcp: (source: 'system' | 'custom', id: string, body: Record<string, unknown>) =>
         req<void>(`/api/system/mcp-servers/${source}/${encodeURIComponent(id)}`, jsonWith('PUT', body)),
       computerUse: () => req<Record<string, unknown>>('/api/system/computer-use'),
