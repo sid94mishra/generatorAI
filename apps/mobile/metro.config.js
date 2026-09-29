@@ -57,6 +57,16 @@ const originalResolveRequest = config.resolver.resolveRequest;
 const SHARED_CLIENT_ENTRY = path.resolve(workspaceRoot, 'packages/shared/src/client.ts');
 
 config.resolver.resolveRequest = (context, moduleName, platform) => {
+  // Expo's HMR client requires pretty-format 29. Pinning every dependency
+  // to the workspace root accidentally gives it Jest 30's ESM bridge,
+  // whose CJS-default interop fails before React Native can start. Resolve
+  // this pure-JS dependency from its owner, using its CommonJS entry.
+  if (moduleName === 'pretty-format') {
+    return {
+      type: 'sourceFile',
+      filePath: require.resolve(moduleName, { paths: [context.originModulePath] }),
+    };
+  }
   if (moduleName === 'crypto') {
     return context.resolveRequest(context, 'react-native-quick-crypto', platform);
   }

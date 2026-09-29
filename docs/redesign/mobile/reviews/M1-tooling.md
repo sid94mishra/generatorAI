@@ -39,3 +39,5 @@ Implementation complete; native acceptance remains pending MV-07.
 The M1-06 iOS native rebuild succeeded, installed and launched; fingerprint recorded. Dev-client Metro connection then failed because Node 26 resolved localhost to IPv6 only (`lsof`: `[::1]:8081`; IPv4 curl refused). Restarted with IPv4-first resolution and added the same behavior to the mobile start script (MD-111). Native Storybook/app verification remains pending until observed.
 
 IPv4 retest passed: Metro now listens on `127.0.0.1:8081` and `/status` returns `packager-status:running`. Rebuilt simulator app had launched successfully; its connection can now be retried against the expected address.
+
+Second startup failure resolved: Expo HMR's pretty-format 29 import was pinned by the workspace resolver to Jest 30's ESM bridge, yielding `Cannot read property default of undefined` before initialization. Resolve this pure-JS dependency from the importing package and its CommonJS entry. After restart the simulator renders the sandbox Home screen (`.expo/m1-hmr-fix.png`). No native rebuild required. Chat Maestro retest running; this establishes startup recovery only.
