@@ -35,7 +35,7 @@ import {
 } from 'lucide-react-native';
 import { queryKeys, type CodebaseSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
+import { useApi } from '../../src/services/api/useApi';
 import { displayChatName } from '../../src/components/common/chatName';
 import { relativeTime } from '../../src/components/runs/formatTime';
 import { runTitle } from '../../src/components/runs/runModel';

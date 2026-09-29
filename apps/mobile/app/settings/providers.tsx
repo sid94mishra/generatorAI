@@ -15,8 +15,8 @@ import { Check, RefreshCw } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 import type { HarnessProviderStatus } from '@generatorai/shared';
 
-import { useApi } from '../../src/api/useApi';
-import { requireStepUp } from '../../src/auth/stepUp';
+import { useApi } from '../../src/services/api/useApi';
+import { requireStepUp } from '../../src/services/auth/stepUp';
 import { ProviderBrandIcon } from '../../src/components/brand/VendorIcons';
 import { Badge, SectionHeader, type Tone } from '../../src/components/ui/primitives';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';

@@ -19,7 +19,7 @@
 import { useCallback, useMemo } from 'react';
 import { describeErrorBody, type TerminalDescriptor } from '@generatorai/client-core';
 
-import { bytesToBase64, utf8Decode } from '../../../lib/base64';
+import { bytesToBase64, utf8Decode } from '../../../services/lib/base64';
 import { currentTerminalSelection, pickCaptureSession } from '../../../terminal/terminalFocus';
 import {
   captureDestination,

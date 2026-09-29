@@ -17,7 +17,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { FileUp, History, Play } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useAdminApi } from '../../api/useAdminApi';
+import { useAdminApi } from '../../services/api/useAdminApi';
 import { pickAttachments, readAttachmentBytes } from '../chat/composer/attachmentPickers';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';

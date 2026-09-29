@@ -19,7 +19,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Check, CircleSlash, MessageSquare, Pencil, Save, ScrollText, Zap } from 'lucide-react-native';
 import { queryKeys, type PlanSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../api/useApi';
+import { useApi } from '../../services/api/useApi';
 import { useTheme } from '../../theme/ThemeProvider';
 import { Markdown } from '../markdown/Markdown';
 import { Sheet } from '../ui/Sheet';

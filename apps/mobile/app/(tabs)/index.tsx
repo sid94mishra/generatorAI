@@ -28,11 +28,11 @@ import {
   groupApprovals,
   type ActivityFilter,
   type Operation,
-} from '../../src/api/useActivity';
+} from '../../src/services/api/useActivity';
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
+import { useApi } from '../../src/services/api/useApi';
 import { HealthCard } from '../../src/components/home/HealthCard';
 import { StatTiles } from '../../src/components/home/StatTiles';
 import { OperationCard } from '../../src/components/home/OperationCard';

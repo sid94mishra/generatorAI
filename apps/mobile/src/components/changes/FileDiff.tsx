@@ -36,7 +36,7 @@ import * as Clipboard from 'expo-clipboard';
 import { Copy, MessageSquarePlus } from 'lucide-react-native';
 import { queryKeys, type DiffRow, type ReviewThread } from '@generatorai/client-core';
 
-import { useApi } from '../../api/useApi';
+import { useApi } from '../../services/api/useApi';
 import { useTheme } from '../../theme/ThemeProvider';
 import { useContextMenu, type ContextMenuItem } from '../ui/ContextMenu';
 import { EmptyState, ErrorState, LoadingState } from '../ui/States';

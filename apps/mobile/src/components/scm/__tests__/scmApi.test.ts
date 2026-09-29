@@ -5,7 +5,7 @@
 
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { ApiError } from '../../../api/http';
+import { ApiError } from '../../../services/api/http';
 import { createScmApi } from '../api';
 
 interface Call {

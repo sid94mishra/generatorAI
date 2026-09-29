@@ -12,7 +12,7 @@
 
 import { useSyncExternalStore } from 'react';
 
-import { prefs } from '../../storage/prefs';
+import { prefs } from '../../services/storage/prefs';
 
 const KEY = 'generatorai.code-wrap';
 

@@ -7,8 +7,8 @@ import {
   STANDALONE_SCOPES,
   groupScopes,
   matchScopePreset,
-} from '../auth/scopePresets';
-import { isSensitiveScope } from '../auth/scopeLabels';
+} from '../services/auth/scopePresets';
+import { isSensitiveScope } from '../services/auth/scopeLabels';
 
 describe('scope presets', () => {
   it('companion mirrors the server’s DEFAULT_MOBILE_SCOPES exactly', () => {

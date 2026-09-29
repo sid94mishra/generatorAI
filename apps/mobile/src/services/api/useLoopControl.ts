@@ -15,8 +15,8 @@ import { queryKeys } from '@generatorai/client-core';
 import type { RunCommand } from '@generatorai/workflow-spec';
 
 import { useAdminApi } from './useAdminApi';
-import { haptics } from '../components/ui/haptics';
-import { loopCommandError } from '../components/runs/loopModel';
+import { haptics } from '../../components/ui/haptics';
+import { loopCommandError } from '../../components/runs/loopModel';
 
 /** The run commands a loop decision card sends. */
 export type LoopCommand = Extract<

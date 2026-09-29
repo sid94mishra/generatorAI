@@ -42,9 +42,9 @@ import { EmptyState, LoadingState } from '../ui/States';
 import { SearchField } from '../ui/Form';
 import { MAX_SCALE } from '../ui/accessibility';
 import { ProviderBrandIcon, ModelVendorIcon } from '../brand/VendorIcons';
-import { fuzzyFilter } from '../../lib/fuzzyMatch';
-import { promptLimit, reasoningEfforts } from '../../api/modelCatalogue';
-import { useProviders } from '../../api/useModels';
+import { fuzzyFilter } from '../../services/lib/fuzzyMatch';
+import { promptLimit, reasoningEfforts } from '../../services/api/modelCatalogue';
+import { useProviders } from '../../services/api/useModels';
 import { useTheme } from '../../theme/ThemeProvider';
 
 /** "264K" / "1M" — the shorthand the web picker uses. */

@@ -27,7 +27,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Archive, Bot, FolderGit2, Plus } from 'lucide-react-native';
 import { queryKeys, type AgentSummary, type ProjectSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
+import { useApi } from '../../src/services/api/useApi';
 import { duplicateNames, isDuplicateName, shortId } from '../../src/components/common/disambiguate';
 import { relativeTime } from '../../src/components/runs/formatTime';
 import { AgentCard, agentScopeLabel } from '../../src/components/work/cards';

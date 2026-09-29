@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 
-import { useAuth } from '../../auth/AuthProvider';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { checkCapability, type CapabilityCheck, type WorkbenchCapability } from './scopes';
 
 const NONE: readonly string[] = [];

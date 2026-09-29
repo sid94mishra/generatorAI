@@ -8,7 +8,7 @@ import {
   needsYouCount,
   primaryGate,
   type Operation,
-} from '../api/activityRanking';
+} from '../services/api/activityRanking';
 
 function op(partial: Partial<Operation> & Pick<Operation, 'id' | 'kind'>): Operation {
   return {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { isSafeNotificationRoute, safeRoute } from '../notifications/routeGuard';
+import { isSafeNotificationRoute, safeRoute } from '../services/notifications/routeGuard';
 
 describe('notification route guard — accepts real routes', () => {
   it.each([

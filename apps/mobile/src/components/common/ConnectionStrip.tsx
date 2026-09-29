@@ -30,9 +30,9 @@ import Animated, { useAnimatedStyle, useSharedValue, withTiming } from 'react-na
 import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RefreshCw, ShieldAlert, WifiOff } from 'lucide-react-native';
 
-import { useAuth } from '../../auth/AuthProvider';
-import { useMuxStream } from '../../stream/MuxStreamProvider';
-import { describeNotice, useStreamHealth, type NoticeTone } from '../../stream/streamHealth';
+import { useAuth } from '../../services/auth/AuthProvider';
+import { useMuxStream } from '../../services/stream/MuxStreamProvider';
+import { describeNotice, useStreamHealth, type NoticeTone } from '../../services/stream/streamHealth';
 import { Touchable } from '../ui/Touchable';
 import { WindowInsetsProvider } from '../ui/windowInsets';
 import { MAX_SCALE, announce, useReduceMotion } from '../ui/accessibility';

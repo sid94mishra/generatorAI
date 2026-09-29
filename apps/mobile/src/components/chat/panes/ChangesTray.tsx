@@ -29,7 +29,7 @@ import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { CheckCheck, ChevronRight, FileDiff, FileText, Folder, Undo2 } from 'lucide-react-native';
 import type { ChangeFileEntry, ChangeSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../../api/useApi';
+import { useApi } from '../../../services/api/useApi';
 import { useCapability } from '../../review';
 import { scmKeys } from '../../scm/api';
 import { ConfirmSheet } from '../../ui/ActionSheet';

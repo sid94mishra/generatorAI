@@ -11,7 +11,7 @@ import { useCallback, useMemo } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, type ReviewThread } from '@generatorai/client-core';
 
-import { useApi } from '../../api/useApi';
+import { useApi } from '../../services/api/useApi';
 import { useToast } from '../ui/Toast';
 import { useReviewExtras } from './api';
 import { buildReviewBatch, groupThreadsByFile, type ReviewIntent, type ReviewSubmitTarget } from './reviewBatch';

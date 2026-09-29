@@ -7,8 +7,8 @@ import { router } from 'expo-router';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../api/useApi';
-import { useRunMutations } from '../../api/useRunControl';
+import { useApi } from '../../services/api/useApi';
+import { useRunMutations } from '../../services/api/useRunControl';
 import { useFeature } from '../runs/useFeature';
 import { ConfirmSheet } from '../ui/ActionSheet';
 import { Button } from '../ui/Button';

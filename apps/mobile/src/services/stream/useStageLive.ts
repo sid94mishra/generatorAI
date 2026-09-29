@@ -17,7 +17,7 @@ import { StreamEventRouter, type MuxStreamEvent, type StreamEffect, type StreamS
 import { MOBILE_CAPABILITIES } from '@generatorai/shared';
 
 import { useApi } from '../api/useApi';
-import type { ReplayPage } from '../components/scm/scmResults';
+import type { ReplayPage } from '../../components/scm/scmResults';
 import { useMuxStream } from './MuxStreamProvider';
 import { protectStream, useStreamStore } from './streamStore';
 import { CATCH_UP_PAGE_SIZE, stageCatchUpRows } from './turnCatchUp';

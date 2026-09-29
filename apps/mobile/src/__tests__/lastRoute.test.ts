@@ -6,8 +6,8 @@ import {
   isRestorableRoute,
   isSheetRoute,
   resolveLastRoute,
-} from '../prefs/lastRouteRules';
-import { STEP_UP_WINDOW_MS, isStepUpFresh } from '../auth/stepUpRules';
+} from '../services/prefs/lastRouteRules';
+import { STEP_UP_WINDOW_MS, isStepUpFresh } from '../services/auth/stepUpRules';
 
 const NOW = 1_700_000_000_000;
 

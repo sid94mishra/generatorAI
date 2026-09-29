@@ -17,8 +17,8 @@ import { ScrollView, Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AudioLines, Check, Mic, Volume2 } from 'lucide-react-native';
 
-import { useAuth } from '../../src/auth/AuthProvider';
-import { checkFeature } from '../../src/auth/featureGate';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { checkFeature } from '../../src/services/auth/featureGate';
 import { Chip } from '../../src/components/ui/Chip';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { Card, SectionHeader } from '../../src/components/ui/primitives';

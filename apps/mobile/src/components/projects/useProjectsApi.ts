@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 
-import { useAuth } from '../../auth/AuthProvider';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { createProjectsApi, type ProjectsApi } from './api';
 
 export function useProjectsApi(): ProjectsApi {

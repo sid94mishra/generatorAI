@@ -27,7 +27,7 @@ import {
   type WorkflowSummary,
 } from '@generatorai/client-core';
 
-import { useApi } from '../src/api/useApi';
+import { useApi } from '../src/services/api/useApi';
 import { SearchResultRow } from '../src/components/search/SearchResultRow';
 import {
   RECENT_SEARCHES_KEY,
@@ -47,7 +47,7 @@ import { SkeletonList } from '../src/components/ui/Skeleton';
 import { EmptyState } from '../src/components/ui/States';
 import { Touchable } from '../src/components/ui/Touchable';
 import { chatRoute, runRoute } from '../src/navigation/routes';
-import { prefs } from '../src/storage/prefs';
+import { prefs } from '../src/services/storage/prefs';
 import { useTheme } from '../src/theme/ThemeProvider';
 
 /** Warm caches are used as-is for this long before a background refetch. */

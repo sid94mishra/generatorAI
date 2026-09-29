@@ -23,10 +23,10 @@ import { useQuery } from '@tanstack/react-query';
 import { FileText, MessageSquare } from 'lucide-react-native';
 import { queryKeys, type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../../../src/api/useApi';
-import { useAdminApi } from '../../../../src/api/useAdminApi';
-import { useRunMutations, type StageAction } from '../../../../src/api/useRunControl';
-import { useRunStream } from '../../../../src/stream/useRunStream';
+import { useApi } from '../../../../src/services/api/useApi';
+import { useAdminApi } from '../../../../src/services/api/useAdminApi';
+import { useRunMutations, type StageAction } from '../../../../src/services/api/useRunControl';
+import { useRunStream } from '../../../../src/services/stream/useRunStream';
 import { ApprovalCard } from '../../../../src/components/runs/ApprovalCard';
 import { LoopDecisionCard } from '../../../../src/components/runs/LoopDecisionCard';
 import { isParkedLoop, type RunStage } from '../../../../src/components/runs/loopModel';
@@ -39,7 +39,7 @@ import { awaitsApproval, pollIntervalFor, stageControlsFor } from '../../../../s
 import { isActive, isTerminal } from '../../../../src/components/runs/statusStyle';
 import { transcriptItems, withLiveRows, type TranscriptItem } from '../../../../src/components/runs/stageTranscript';
 import { deriveTimeline } from '../../../../src/components/chat/timeline/deriveTimeline';
-import { useStageLive } from '../../../../src/stream/useStageLive';
+import { useStageLive } from '../../../../src/services/stream/useStageLive';
 import { useFeature } from '../../../../src/components/runs/useFeature';
 import { usePullRefresh } from '../../../../src/components/runs/usePullRefresh';
 import { TimelineActionsContext } from '../../../../src/components/chat/timeline/TimelineActions';

@@ -20,9 +20,9 @@ import {
   Workflow,
 } from 'lucide-react-native';
 
-import { useAuth } from '../../src/auth/AuthProvider';
-import { checkFeature, type MobileFeature } from '../../src/auth/featureGate';
-import { describeScope } from '../../src/auth/scopeLabels';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { checkFeature, type MobileFeature } from '../../src/services/auth/featureGate';
+import { describeScope } from '../../src/services/auth/scopeLabels';
 import { Button } from '../../src/components/ui/Button';
 import { Badge, Card, SectionHeader } from '../../src/components/ui/primitives';
 import { SCOPE_REQUEST_ROUTE } from '../../src/navigation/routes';

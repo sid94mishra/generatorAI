@@ -16,7 +16,7 @@ import Animated from 'react-native-reanimated';
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useAdminApi } from '../../api/useAdminApi';
+import { useAdminApi } from '../../services/api/useAdminApi';
 import { haptics } from '../ui/haptics';
 import { Button } from '../ui/Button';
 import { Field } from '../ui/Form';

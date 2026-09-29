@@ -7,9 +7,9 @@ import { useMemo } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../api/useApi';
-import { useAuth } from '../../auth/AuthProvider';
-import { checkFeature } from '../../auth/featureGate';
+import { useApi } from '../../services/api/useApi';
+import { useAuth } from '../../services/auth/AuthProvider';
+import { checkFeature } from '../../services/auth/featureGate';
 import { useCapability } from '../review/useScopes';
 import { scmKeys } from '../scm/api';
 import { useScmApi } from '../scm/useScmApi';

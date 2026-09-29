@@ -28,8 +28,8 @@ import {
   usePreferences,
   type LockGraceSeconds,
   type MotionPreference,
-} from '../../src/prefs/preferences';
-import { readPushToTalk, writePushToTalk } from '../../src/voice/pushToTalk';
+} from '../../src/services/prefs/preferences';
+import { readPushToTalk, writePushToTalk } from '../../src/services/voice/pushToTalk';
 
 const MOTION_SEGMENTS: ReadonlyArray<{ value: MotionPreference; label: string }> = [
   { value: 'system', label: 'System' },

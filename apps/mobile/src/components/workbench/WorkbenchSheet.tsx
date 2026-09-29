@@ -28,7 +28,7 @@ import { Sheet } from '../ui/Sheet';
 import { Chip } from '../ui/Chip';
 import { IconButton } from '../ui/Button';
 import { EmptyState } from '../ui/States';
-import { checkFeature } from '../../auth/featureGate';
+import { checkFeature } from '../../services/auth/featureGate';
 import { useTheme } from '../../theme/ThemeProvider';
 import { FilesSection } from '../chat/workbench/FilesSection';
 import { ChangesSection } from '../chat/workbench/ChangesSection';

@@ -47,12 +47,12 @@ import { Markdown } from '../../markdown/Markdown';
 import { CodeBlock } from '../../markdown/CodeBlock';
 import { HIGHLIGHT_MAX_BYTES, HIGHLIGHT_MAX_LINES } from '../../markdown/highlight';
 import { setCodeWrap, useCodeWrap } from '../../markdown/codeWrapStore';
-import { useApi } from '../../../api/useApi';
+import { useApi } from '../../../services/api/useApi';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { Toolbar, formatBytes, languageForPath, splitPath } from '../../changes';
 import { crumbsFor, isMarkdownPath, levelEntries, parentPrefix, prefixOf, searchEntries, type TreeEntry } from './fileTree';
 import { readRecentFiles, recordRecentFile, visibleRecentFiles, type RecentFile, type StringStorage } from './recentFiles';
-import { prefs } from '../../../storage/prefs';
+import { prefs } from '../../../services/storage/prefs';
 
 const recentStorage: StringStorage = {
   getString: (key) => prefs.getString(key),

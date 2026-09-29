@@ -6,7 +6,7 @@
 
 import { useMemo } from 'react';
 
-import { useAuth } from '../../auth/AuthProvider';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { createScmApi, type ScmApi } from './api';
 
 export function useScmApi(): ScmApi {

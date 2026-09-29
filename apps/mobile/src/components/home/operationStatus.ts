@@ -5,7 +5,7 @@
 // without rendering a row.
 // ────────────────────────────────────────────────────────────────
 
-import type { Operation } from '../../api/activityRanking';
+import type { Operation } from '../../services/api/activityRanking';
 import { statusLabel } from '../runs/statusStyle';
 
 export type OperationState = 'running' | 'waiting' | 'completed' | 'failed' | 'cancelled' | 'idle';

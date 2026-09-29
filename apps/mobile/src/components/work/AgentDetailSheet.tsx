@@ -35,15 +35,15 @@ import { Badge } from '../ui/primitives';
 import { Button } from '../ui/Button';
 import { Field, SearchField } from '../ui/Form';
 import { useToast } from '../ui/Toast';
-import { useAdminApi } from '../../api/useAdminApi';
-import type { useModels } from '../../api/useModels';
-import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../auth/featureGate';
+import { useAdminApi } from '../../services/api/useAdminApi';
+import type { useModels } from '../../services/api/useModels';
+import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../services/auth/featureGate';
 import { useFeature } from '../runs/useFeature';
 import { ListGroup, ListRow } from '../ui/ListRow';
 import { Skeleton } from '../ui/Skeleton';
 import { Touchable } from '../ui/Touchable';
-import { useApi } from '../../api/useApi';
-import { useAuth } from '../../auth/AuthProvider';
+import { useApi } from '../../services/api/useApi';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { useTheme } from '../../theme/ThemeProvider';
 import {
   agentDraftFrom,

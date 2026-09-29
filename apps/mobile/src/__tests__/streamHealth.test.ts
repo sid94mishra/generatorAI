@@ -5,7 +5,7 @@ import {
   describeNotice,
   requiredScopeFromReason,
   useStreamHealth,
-} from '../stream/streamHealth';
+} from '../services/stream/streamHealth';
 
 describe('requiredScopeFromReason', () => {
   it('extracts the scope the server asked for, colon and all', () => {

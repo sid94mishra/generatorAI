@@ -29,7 +29,7 @@ import {
   type GateInfo,
   type Operation,
 } from './activityRanking';
-import { isActive, needsAttention } from '../components/runs/statusStyle';
+import { isActive, needsAttention } from '../../components/runs/statusStyle';
 
 export {
   filterOperations,

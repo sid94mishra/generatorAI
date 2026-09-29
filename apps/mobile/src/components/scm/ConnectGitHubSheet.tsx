@@ -21,8 +21,8 @@ import * as WebBrowser from 'expo-web-browser';
 import { CheckCircle2, Copy, ExternalLink, Github, XCircle } from 'lucide-react-native';
 import type { DeviceLoginStart } from '@generatorai/shared';
 
-import { ApiError } from '../../api/http';
-import { useAuth } from '../../auth/AuthProvider';
+import { ApiError } from '../../services/api/http';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { useTheme } from '../../theme/ThemeProvider';
 import { Button } from '../ui/Button';
 import { Sheet } from '../ui/Sheet';

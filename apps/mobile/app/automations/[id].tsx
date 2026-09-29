@@ -19,8 +19,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Clock, Play, Webhook, Workflow } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useAdminApi } from '../../src/api/useAdminApi';
-import { useApi } from '../../src/api/useApi';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
+import { useApi } from '../../src/services/api/useApi';
 import { sectionRows } from '../../src/components/common/groupByDay';
 import { relativeTime } from '../../src/components/runs/formatTime';
 import { useFeature } from '../../src/components/runs/useFeature';

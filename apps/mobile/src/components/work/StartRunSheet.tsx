@@ -37,12 +37,12 @@ import {
 } from '@generatorai/client-core';
 import type { InvocationRequest, WorkflowGraph } from '@generatorai/workflow-spec';
 
-import { useApi } from '../../api/useApi';
-import { useAdminApi } from '../../api/useAdminApi';
-import { useIdempotencyKey } from '../../api/useIdempotencyKey';
-import { findModel, reasoningEfforts, useModelGroups, useModels } from '../../api/useModels';
-import { stageRunUploads, type RunUpload, type StagedUpload } from '../../api/stageRunUploads';
-import { useAuth } from '../../auth/AuthProvider';
+import { useApi } from '../../services/api/useApi';
+import { useAdminApi } from '../../services/api/useAdminApi';
+import { useIdempotencyKey } from '../../services/api/useIdempotencyKey';
+import { findModel, reasoningEfforts, useModelGroups, useModels } from '../../services/api/useModels';
+import { stageRunUploads, type RunUpload, type StagedUpload } from '../../services/api/stageRunUploads';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { Sheet, SheetRow, SheetSection } from '../ui/Sheet';
 import { Button } from '../ui/Button';
 import { Chip } from '../ui/Chip';

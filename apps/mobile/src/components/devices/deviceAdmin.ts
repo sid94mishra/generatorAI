@@ -16,7 +16,7 @@
 // of letting the save fail with a 403.
 // ────────────────────────────────────────────────────────────────
 
-import { SCOPE_PRESETS, type ScopePreset } from '../../auth/scopePresets';
+import { SCOPE_PRESETS, type ScopePreset } from '../../services/auth/scopePresets';
 
 /**
  * Every scope the server knows, in the server's order. Mirrors `SCOPES` in

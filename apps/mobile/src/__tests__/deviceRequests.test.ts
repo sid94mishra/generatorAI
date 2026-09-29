@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { revokeDeviceRequest } from '../auth/deviceRequests';
+import { revokeDeviceRequest } from '../services/auth/deviceRequests';
 
 describe('revokeDeviceRequest', () => {
   it('targets the server’s canonical DELETE /api/auth/devices/:id route', () => {

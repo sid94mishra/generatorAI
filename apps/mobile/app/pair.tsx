@@ -29,14 +29,14 @@ import { Camera, KeyRound, Link2, QrCode, Server, ShieldAlert, ShieldCheck } fro
 import { PairingCodeError, parsePairingCode, type PairingConsent } from '@generatorai/client-runtime';
 import { isPairingCode } from '@generatorai/shared';
 
-import { useAuth } from '../src/auth/AuthProvider';
+import { useAuth } from '../src/services/auth/AuthProvider';
 import {
   classifyPairingFailure,
   shouldAutoRetryPairing,
   type PairingFailure,
-} from '../src/auth/pairingFailure';
-import { describeScope, isSensitiveScope } from '../src/auth/scopeLabels';
-import { groupScopes, matchScopePreset } from '../src/auth/scopePresets';
+} from '../src/services/auth/pairingFailure';
+import { describeScope, isSensitiveScope } from '../src/services/auth/scopeLabels';
+import { groupScopes, matchScopePreset } from '../src/services/auth/scopePresets';
 import { Button } from '../src/components/ui/Button';
 import { Field } from '../src/components/ui/Form';
 import { ListGroup, ListRow } from '../src/components/ui/ListRow';

@@ -24,9 +24,9 @@ import {
 } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { describeKeyBacking, describeTransport } from '../../src/auth/describeTransport';
+import { useApi } from '../../src/services/api/useApi';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { describeKeyBacking, describeTransport } from '../../src/services/auth/describeTransport';
 import { formatDuration } from '../../src/components/runs/formatTime';
 import { Badge, SectionHeader } from '../../src/components/ui/primitives';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';

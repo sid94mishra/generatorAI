@@ -17,7 +17,7 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../../../src/api/useApi';
+import { useApi } from '../../../../src/services/api/useApi';
 import { Markdown } from '../../../../src/components/markdown/Markdown';
 import { useGateDecision } from '../../../../src/components/home/useGateDecision';
 import { RouteSheet } from '../../../../src/navigation/RouteSheet';

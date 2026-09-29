@@ -60,7 +60,7 @@ import { ContextMenu, useContextMenu, type ContextMenuItem } from '../../ui/Cont
 import { Spinner } from '../../ui/States';
 import { useToast } from '../../ui/Toast';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { useStreamStore } from '../../../stream/streamStore';
+import { useStreamStore } from '../../../services/stream/streamStore';
 import { UsageFooter } from '../UsageFooter';
 import { formatDuration, type ToolKind } from '../toolPresentation';
 import { InlineDiff } from './InlineDiff';

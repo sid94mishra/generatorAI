@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { ALL_SCOPES } from '@generatorai/auth';
 
-import { SCOPE_PRESETS } from '../../../auth/scopePresets';
-import { isSensitiveScope } from '../../../auth/scopeLabels';
+import { SCOPE_PRESETS } from '../../../services/auth/scopePresets';
+import { isSensitiveScope } from '../../../services/auth/scopeLabels';
 import {
   ALL_KNOWN_SCOPES,
   applyPreset,

@@ -16,7 +16,7 @@ import {
   protectStream,
   trimStream,
   useStreamStore,
-} from '../stream/streamStore';
+} from '../services/stream/streamStore';
 
 const token = (key: string, text = 'x'): StreamEffect => ({ op: 'appendToken', key, text });
 const toolCall = (key: string, callId: string): StreamEffect => ({

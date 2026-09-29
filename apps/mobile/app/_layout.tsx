@@ -14,7 +14,7 @@ import '../src/theme/global.css';
 // Installs `global.crypto` before anything imports the auth runtime, which is
 // written against WebCrypto. Must be the first side effect. Platform-resolved:
 // native installs the JSI/OpenSSL implementation, web asserts the built-in one.
-import { installCrypto } from '../src/crypto/installCrypto';
+import { installCrypto } from '../src/services/crypto/installCrypto';
 
 import React, { useEffect, useRef, useState } from 'react';
 import { BackHandler, Platform, Text, View } from 'react-native';
@@ -31,14 +31,14 @@ import { IconButton } from '../src/components/ui/Button';
 import { goBack } from '../src/components/ui/Screen';
 
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
-import { PreferencesProvider } from '../src/prefs/preferences';
-import { consumeLastRoute, useLastRoute } from '../src/prefs/lastRoute';
-import { AuthProvider, useAuth } from '../src/auth/AuthProvider';
-import { AppLockGate } from '../src/auth/AppLock';
+import { PreferencesProvider } from '../src/services/prefs/preferences';
+import { consumeLastRoute, useLastRoute } from '../src/services/prefs/lastRoute';
+import { AuthProvider, useAuth } from '../src/services/auth/AuthProvider';
+import { AppLockGate } from '../src/services/auth/AppLock';
 import { Spinner, ToastProvider, ContextMenuProvider, Button, ErrorState } from '../src/components/ui';
-import { usePushNotifications } from '../src/notifications/usePushNotifications';
-import { MuxStreamProvider } from '../src/stream/MuxStreamProvider';
-import { useGlobalStream } from '../src/stream/useGlobalStream';
+import { usePushNotifications } from '../src/services/notifications/usePushNotifications';
+import { MuxStreamProvider } from '../src/services/stream/MuxStreamProvider';
+import { useGlobalStream } from '../src/services/stream/useGlobalStream';
 import { ConnectionStripHost } from '../src/components/common/ConnectionStrip';
 import { StackHeader, type StackHeaderProps } from '../src/navigation/StackHeader';
 import { backFallbackFor } from '../src/navigation/backFallback';

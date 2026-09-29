@@ -41,7 +41,7 @@ import { EmptyState, ErrorState } from '../../ui/States';
 import { SkeletonList } from '../../ui/Skeleton';
 import { useToast } from '../../ui/Toast';
 import { haptics } from '../../ui/haptics';
-import { useApi } from '../../../api/useApi';
+import { useApi } from '../../../services/api/useApi';
 import { useTheme } from '../../../theme/ThemeProvider';
 import {
   ChangesList,

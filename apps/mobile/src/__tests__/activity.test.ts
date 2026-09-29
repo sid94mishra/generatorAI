@@ -9,7 +9,7 @@ import {
   rankOperations,
   selectGateCandidates,
   type Operation,
-} from '../api/activityRanking';
+} from '../services/api/activityRanking';
 import { crumbsFor, levelEntries } from '../components/chat/workbench/fileTree';
 
 function op(partial: Partial<Operation> & Pick<Operation, 'id' | 'updatedAt'>): Operation {

@@ -12,7 +12,7 @@
 
 import type { TransportStatus } from '@generatorai/client-transport';
 
-import type { ConnectionState } from '../../stream/streamHealth';
+import type { ConnectionState } from '../../services/stream/streamHealth';
 
 export interface TransportBadge {
   label: 'LAN' | 'Tunnel' | 'Offline' | 'Reconnecting' | 'Connecting';

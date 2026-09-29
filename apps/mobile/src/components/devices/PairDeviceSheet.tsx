@@ -18,9 +18,9 @@ import { Share, Text, View } from 'react-native';
 import * as Clipboard from 'expo-clipboard';
 import { Copy, Share2 } from 'lucide-react-native';
 
-import { useAuth } from '../../auth/AuthProvider';
-import { SCOPE_PRESETS, type ScopePresetId } from '../../auth/scopePresets';
-import { requireStepUp } from '../../auth/stepUp';
+import { useAuth } from '../../services/auth/AuthProvider';
+import { SCOPE_PRESETS, type ScopePresetId } from '../../services/auth/scopePresets';
+import { requireStepUp } from '../../services/auth/stepUp';
 import { Button, IconButton } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Field } from '../ui/Form';

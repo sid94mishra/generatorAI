@@ -19,8 +19,8 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Boxes, Server, Sparkles } from 'lucide-react-native';
 import type { SystemArtifact } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
-import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../src/auth/featureGate';
+import { useApi } from '../../src/services/api/useApi';
+import { GRANT_FROM_TRUSTED_DEVICE, canRequestFeature } from '../../src/services/auth/featureGate';
 import { messageOf } from '../../src/components/projects/ProjectActions';
 import {
   globalMcpToggle,

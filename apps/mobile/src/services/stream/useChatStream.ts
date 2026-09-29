@@ -48,7 +48,7 @@ import {
 } from '@generatorai/client-core';
 import { MOBILE_CAPABILITIES } from '@generatorai/shared';
 
-import { scmKeys } from '../components/scm/api';
+import { scmKeys } from '../../components/scm/api';
 import { useStreamStore } from './streamStore';
 import { useMuxStream } from './MuxStreamProvider';
 import { connectionFromDisconnect, useStreamHealth } from './streamHealth';

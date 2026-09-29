@@ -18,9 +18,9 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { FileCode2, Lock, Play } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useAdminApi } from '../../src/api/useAdminApi';
-import { useApi } from '../../src/api/useApi';
-import { useIdempotencyKey } from '../../src/api/useIdempotencyKey';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
+import { useApi } from '../../src/services/api/useApi';
+import { useIdempotencyKey } from '../../src/services/api/useIdempotencyKey';
 import { useFeature } from '../../src/components/runs/useFeature';
 import { usePullRefresh } from '../../src/components/runs/usePullRefresh';
 import { STICKY_BAR_SPACE, StickyActionBar } from '../../src/components/work/StickyActionBar';

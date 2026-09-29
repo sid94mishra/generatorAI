@@ -2,9 +2,9 @@ import React from 'react';
 import { Button } from 'react-native';
 import { render, screen, userEvent } from '@testing-library/react-native';
 import { ThemeProvider, useTheme } from '../../theme/ThemeProvider';
-import { prefs } from '../../storage/prefs';
+import { prefs } from '../../services/storage/prefs';
 
-jest.mock('../../storage/prefs', () => ({ prefs: { getString: jest.fn(), setString: jest.fn() } }));
+jest.mock('../../services/storage/prefs', () => ({ prefs: { getString: jest.fn(), setString: jest.fn() } }));
 function PreviewControl(): React.ReactElement {
   const theme = useTheme();
   return <Button accessibilityLabel={`${theme.themeId}/${theme.mode}/${theme.accent}`} title="Change preview" onPress={() => theme.setMode('light')} />;

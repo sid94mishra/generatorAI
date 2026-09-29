@@ -9,7 +9,7 @@ import {
   isFeatureAvailable,
   isScopeRequestable,
   type MobileFeature,
-} from '../auth/featureGate';
+} from '../services/auth/featureGate';
 
 const MOBILE = DEFAULT_MOBILE_SCOPES;
 const ALL_FEATURES = Object.keys(FEATURE_REQUIREMENTS) as MobileFeature[];

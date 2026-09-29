@@ -9,7 +9,7 @@ import {
   intentFromResponse,
   submitDecision,
   type NotificationIntent,
-} from '../notifications/notificationCategories';
+} from '../services/notifications/notificationCategories';
 
 // The value Expo hands back for a plain tap (Notifications.DEFAULT_ACTION_IDENTIFIER).
 const TAP = 'expo.modules.notifications.actions.DEFAULT';

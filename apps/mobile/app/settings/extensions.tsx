@@ -13,10 +13,10 @@ import { Text } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Blocks } from 'lucide-react-native';
 
-import { useAdminApi } from '../../src/api/useAdminApi';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { checkFeature } from '../../src/auth/featureGate';
-import { requireStepUp } from '../../src/auth/stepUp';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { checkFeature } from '../../src/services/auth/featureGate';
+import { requireStepUp } from '../../src/services/auth/stepUp';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { Badge, Card } from '../../src/components/ui/primitives';
 import { Screen } from '../../src/components/ui/Screen';

@@ -17,8 +17,8 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { Fingerprint } from 'lucide-react-native';
 
-import { Button } from '../components/ui/Button';
-import { useTheme } from '../theme/ThemeProvider';
+import { Button } from '../../components/ui/Button';
+import { useTheme } from '../../theme/ThemeProvider';
 import { hasFreshStepUp, requireStepUp } from './stepUp';
 
 type Phase = 'checking' | 'confirmed' | 'declined';

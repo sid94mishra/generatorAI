@@ -70,22 +70,22 @@ import {
   type StreamUsage,
 } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
+import { useApi } from '../../src/services/api/useApi';
 import {
   useCopyTranscriptMarkdown,
   useForkChat,
   useRewindChat,
-} from '../../src/api/useChatBranching';
-import { findModel, promptLimit, useModels } from '../../src/api/useModels';
-import { useChatStream } from '../../src/stream/useChatStream';
-import { restoredPromptFrom, type ChatRewoundEffect } from '../../src/stream/rewindEffects';
-import { useTwoPhaseStop } from '../../src/stream/useTwoPhaseStop';
-import { protectStream, useStreamStore } from '../../src/stream/streamStore';
-import { useTurnCatchUp } from '../../src/stream/useTurnCatchUp';
-import { useStreamHealth } from '../../src/stream/streamHealth';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { checkFeature } from '../../src/auth/featureGate';
-import { useTextToSpeech } from '../../src/voice/useTextToSpeech';
+} from '../../src/services/api/useChatBranching';
+import { findModel, promptLimit, useModels } from '../../src/services/api/useModels';
+import { useChatStream } from '../../src/services/stream/useChatStream';
+import { restoredPromptFrom, type ChatRewoundEffect } from '../../src/services/stream/rewindEffects';
+import { useTwoPhaseStop } from '../../src/services/stream/useTwoPhaseStop';
+import { protectStream, useStreamStore } from '../../src/services/stream/streamStore';
+import { useTurnCatchUp } from '../../src/services/stream/useTurnCatchUp';
+import { useStreamHealth } from '../../src/services/stream/streamHealth';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { checkFeature } from '../../src/services/auth/featureGate';
+import { useTextToSpeech } from '../../src/services/voice/useTextToSpeech';
 import { Composer, type ComposerPane } from '../../src/components/chat/Composer';
 import { READ_ALOUD_ENABLED } from '../../src/components/chat/featureFlags';
 import {
@@ -93,10 +93,10 @@ import {
   type ComposerController,
 } from '../../src/components/chat/composer/useComposerController';
 import { readAllAttachmentBytes } from '../../src/components/chat/composer/attachmentPickers';
-import { sendChatPrompt } from '../../src/api/sendChatPrompt';
+import { sendChatPrompt } from '../../src/services/api/sendChatPrompt';
 import type { ComposerSendPayload, WorkspacePrepState } from '../../src/components/chat/composer/types';
 import type { BoundAgentProps } from '../../src/components/chat/composer/ComposerBanners';
-import { bytesToBase64 } from '../../src/lib/base64';
+import { bytesToBase64 } from '../../src/services/lib/base64';
 import { PermissionCard } from '../../src/components/chat/PermissionCard';
 import { PlanCard } from '../../src/components/chat/PlanCard';
 import { QuestionCard } from '../../src/components/chat/QuestionCard';

@@ -36,7 +36,7 @@ export async function checkDesign(args = process.argv.slice(2)) {
   const baselinePath = resolve(mobileDir, 'design-baseline.json');
   if (!existsSync(baselinePath)) throw new Error('Missing committed design baseline; do not silently initialize one.');
   const baseline = JSON.parse(readFileSync(baselinePath, 'utf8'));
-  const eslint = new ESLint({ cwd: fileURLToPath(new URL('../../../', import.meta.url)) });
+  const eslint = new ESLint({ cwd: fileURLToPath(new URL('../../..', import.meta.url)) });
   const results = await eslint.lintFiles([resolve(mobileDir, 'src'), resolve(mobileDir, 'app')]);
   const files = countsFor(results);
   const errors = results.flatMap((r) => r.messages.filter((m) => m.severity === 2).map((m) => `${relative(mobileDir, r.filePath)}:${m.line}: ${m.message}`));
@@ -44,7 +44,7 @@ export async function checkDesign(args = process.argv.slice(2)) {
   if (!failures.length && args.includes('--update')) {
     // Check rises BEFORE writing. Newly clean legacy routes become hard zero.
     const legacyRoutes = baseline.legacyRoutes.filter((p) => files[p]);
-    writeFileSync(baselinePath, JSON.stringify({ legacyRoutes, files }, null, 2) + '\n');
+    writeFileSync(baselinePath, JSON.stringify({ ...baseline, legacyRoutes, migratedServices: baseline.migratedServices?.filter((p) => files[p]), files }, null, 2) + '\n');
   }
   if (failures.length) {
     console.error(failures.join('\n'));

@@ -113,7 +113,7 @@ import type {
   VoiceUiState,
 } from './composer/types';
 import { SCOPE_REQUEST_ROUTE } from '../../navigation/routes';
-import { findModel, promptLimit } from '../../api/useModels';
+import { findModel, promptLimit } from '../../services/api/useModels';
 import { useTheme } from '../../theme/ThemeProvider';
 
 export type { StopState } from './composer/types';

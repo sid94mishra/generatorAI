@@ -25,7 +25,7 @@ import type { AgentMode, ModelInfo } from '@generatorai/client-core';
 import { Sheet, SheetRow, SheetSection } from '../ui/Sheet';
 import { ProgressBar, usageTone } from '../ui/ProgressRing';
 import { Badge } from '../ui/primitives';
-import { promptLimit } from '../../api/useModels';
+import { promptLimit } from '../../services/api/useModels';
 import { formatTokens } from './ModelSheet';
 import {
   MODE_OPTIONS,

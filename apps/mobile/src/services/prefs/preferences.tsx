@@ -24,7 +24,7 @@
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
 
 import { prefs, PREF_KEYS } from '../storage/prefs';
-import { setHapticsEnabled } from '../components/ui/haptics';
+import { setHapticsEnabled } from '../../components/ui/haptics';
 
 /** `system` follows Reduce Motion; the other two override it either way. */
 export type MotionPreference = 'system' | 'reduced' | 'full';

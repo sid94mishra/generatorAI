@@ -23,7 +23,7 @@ import { useQuery } from '@tanstack/react-query';
 import { CheckCircle2 } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../../../src/api/useApi';
+import { useApi } from '../../../../src/services/api/useApi';
 import { gateFromPayload, type Gate } from '../../../../src/components/chat/gateFromInteraction';
 import { PermissionCard } from '../../../../src/components/chat/PermissionCard';
 import { PlanCard } from '../../../../src/components/chat/PlanCard';

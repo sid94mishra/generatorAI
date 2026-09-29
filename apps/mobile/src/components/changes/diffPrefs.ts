@@ -11,7 +11,7 @@
 
 import { useSyncExternalStore } from 'react';
 
-import { prefs } from '../../storage/prefs';
+import { prefs } from '../../services/storage/prefs';
 import { DEFAULT_DIFF_FONT, clampFont } from './diffModel';
 
 export type DiffLayout = 'auto' | 'unified' | 'split';

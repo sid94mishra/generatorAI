@@ -14,7 +14,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LayoutTemplate } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useAdminApi } from '../../api/useAdminApi';
+import { useAdminApi } from '../../services/api/useAdminApi';
 import { SearchField } from '../ui/Form';
 import { Sheet, SheetRow } from '../ui/Sheet';
 import { SkeletonList } from '../ui/Skeleton';

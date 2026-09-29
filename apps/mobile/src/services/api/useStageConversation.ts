@@ -16,8 +16,8 @@ import { useAuth } from '../auth/AuthProvider';
 import { useApi } from './useApi';
 import type { ChatUpload } from './sendChatPrompt';
 import { sendStageMessage } from './sendStageMessage';
-import { haptics } from '../components/ui/haptics';
-import { useToast } from '../components/ui/Toast';
+import { haptics } from '../../components/ui/haptics';
+import { useToast } from '../../components/ui/Toast';
 
 function errorText(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

@@ -14,7 +14,7 @@
 
 import React from 'react';
 
-import { StepUpGate } from '../../../auth/StepUpGate';
+import { StepUpGate } from '../../../services/auth/StepUpGate';
 import { TerminalTabs } from '../../../terminal/TerminalTabs';
 
 export function TerminalSection({

@@ -6,7 +6,7 @@
 
 import type { AgentMode, ModelInfo } from '@generatorai/client-core';
 
-import { reasoningEfforts } from '../../../api/modelCatalogue';
+import { reasoningEfforts } from '../../../services/api/modelCatalogue';
 
 export interface OptionModel<T extends string> {
   value: T;

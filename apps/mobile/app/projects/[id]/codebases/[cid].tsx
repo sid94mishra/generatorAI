@@ -22,9 +22,9 @@ import { Folder, FolderGit2, GitBranch, GitPullRequest, HardDrive, RefreshCw, Tr
 import { ApiError, queryKeys, request } from '@generatorai/client-core';
 import type { RepoReadiness } from '@generatorai/shared';
 
-import { useApi } from '../../../../src/api/useApi';
-import { useAdminApi } from '../../../../src/api/useAdminApi';
-import { useAuth } from '../../../../src/auth/AuthProvider';
+import { useApi } from '../../../../src/services/api/useApi';
+import { useAdminApi } from '../../../../src/services/api/useAdminApi';
+import { useAuth } from '../../../../src/services/auth/AuthProvider';
 import { relativeTime } from '../../../../src/components/runs/formatTime';
 import { usePullRefresh } from '../../../../src/components/runs/usePullRefresh';
 import { scmKeys } from '../../../../src/components/scm/api';

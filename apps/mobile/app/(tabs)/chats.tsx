@@ -33,9 +33,9 @@ import {
 } from 'lucide-react-native';
 import { epochOr, isArchived, queryKeys, type ChatListRow } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
-import { useActivity } from '../../src/api/useActivity';
-import { useModels } from '../../src/api/useModels';
+import { useApi } from '../../src/services/api/useApi';
+import { useActivity } from '../../src/services/api/useActivity';
+import { useModels } from '../../src/services/api/useModels';
 import { NewChatSheet, type NewChatValues } from '../../src/components/chat/NewChatSheet';
 import { RenameSheet } from '../../src/components/chat/RenameSheet';
 import { relativeTime } from '../../src/components/runs/formatTime';

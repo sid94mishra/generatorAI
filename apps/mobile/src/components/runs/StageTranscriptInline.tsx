@@ -21,7 +21,7 @@ import { useQuery } from '@tanstack/react-query';
 import { ArrowUpRight } from 'lucide-react-native';
 import { queryKeys, type StageRunSummary } from '@generatorai/client-core';
 
-import { useAdminApi } from '../../api/useAdminApi';
+import { useAdminApi } from '../../services/api/useAdminApi';
 import { TimelineRowView } from '../chat/timeline/TimelineRow';
 import { UserMessageRow } from '../chat/timeline/UserMessageRow';
 import { TimelineActionsContext } from '../chat/timeline/TimelineActions';
@@ -32,7 +32,7 @@ import { useTheme } from '../../theme/ThemeProvider';
 import { isActive } from './statusStyle';
 import { transcriptItems, withLiveRows } from './stageTranscript';
 import { deriveTimeline } from '../chat/timeline/deriveTimeline';
-import { useStageLive } from '../../stream/useStageLive';
+import { useStageLive } from '../../services/stream/useStageLive';
 
 /** Rows shown inline; the rest are behind "Open stage". */
 export const INLINE_TRANSCRIPT_ROWS = 8;

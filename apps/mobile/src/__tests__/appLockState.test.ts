@@ -10,7 +10,7 @@ import {
   shouldPromptAuth,
   shouldShowPrivacyOverlay,
   type AppLockState,
-} from '../auth/appLockState';
+} from '../services/auth/appLockState';
 
 const T0 = 1_000_000;
 

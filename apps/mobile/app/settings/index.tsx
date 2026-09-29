@@ -19,9 +19,9 @@ import { useQuery } from '@tanstack/react-query';
 import { Accessibility, Activity, Bell, Blocks, Cpu, GitBranch, Mic, Palette, Puzzle, Server, ShieldCheck, Sparkles, TerminalSquare } from 'lucide-react-native';
 import { queryKeys } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { describeTransport } from '../../src/auth/describeTransport';
+import { useApi } from '../../src/services/api/useApi';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { describeTransport } from '../../src/services/auth/describeTransport';
 import { Badge, type Tone } from '../../src/components/ui/primitives';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
 import { SectionHeader } from '../../src/components/ui/primitives';

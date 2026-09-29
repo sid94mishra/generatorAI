@@ -17,7 +17,7 @@ import { Text, View } from 'react-native';
 import { router } from 'expo-router';
 import { ChevronRight } from 'lucide-react-native';
 
-import type { Operation } from '../../api/activityRanking';
+import type { Operation } from '../../services/api/activityRanking';
 import { APPROVALS_ROUTE, gateRoute, planRoute } from '../../navigation/routes';
 import { DecisionCard } from './DecisionCard';
 import { useGateDecision } from './useGateDecision';

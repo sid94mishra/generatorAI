@@ -54,9 +54,9 @@ import { useComposerCapture } from '../composer/captureContext';
 import { EmptyState, ErrorState, LoadingState, Spinner } from '../../ui/States';
 import { Field } from '../../ui/Form';
 import { useToast } from '../../ui/Toast';
-import { useAuth } from '../../../auth/AuthProvider';
-import { StepUpGate } from '../../../auth/StepUpGate';
-import { bytesToBase64 } from '../../../lib/base64';
+import { useAuth } from '../../../services/auth/AuthProvider';
+import { StepUpGate } from '../../../services/auth/StepUpGate';
+import { bytesToBase64 } from '../../../services/lib/base64';
 import { useTheme } from '../../../theme/ThemeProvider';
 
 /** Mirrors the server's `ActionBodySchema` union so a bad shape cannot compile. */

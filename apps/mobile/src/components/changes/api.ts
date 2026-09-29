@@ -15,13 +15,13 @@
 import { useMemo } from 'react';
 import type { ChangeSummary, WorkspaceCheckpoint } from '@generatorai/client-core';
 
-import { useAuth } from '../../auth/AuthProvider';
-import { json, requestJson, type AuthedFetch } from '../../api/http';
+import { useAuth } from '../../services/auth/AuthProvider';
+import { json, requestJson, type AuthedFetch } from '../../services/api/http';
 
 // The primitives now live in `src/api/http.ts` so endpoints that must not
 // pull in the auth provider (and the tests that exercise them) can use them.
 // Re-exported here because this module has been their import site since v1.
-export { ApiError, json, requestJson, type AuthedFetch } from '../../api/http';
+export { ApiError, json, requestJson, type AuthedFetch } from '../../services/api/http';
 
 /** The v2 summary carries which revisions it compared — the review anchors need their ids. */
 export interface ChangeRevisionInfo {

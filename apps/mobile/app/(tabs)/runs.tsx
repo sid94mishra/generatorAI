@@ -28,8 +28,8 @@ import {
   type WorkflowSummary,
 } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
-import { useAdminApi } from '../../src/api/useAdminApi';
+import { useApi } from '../../src/services/api/useApi';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
 import { useFeature } from '../../src/components/runs/useFeature';
 import { ScriptRow } from '../../src/components/work/ScriptRow';
 import { parseScriptRows, type ScriptRowView } from '../../src/components/work/scriptModel';
@@ -54,7 +54,7 @@ import { MenuButton } from '../../src/navigation/shell/MenuButton';
 import { useShellStore } from '../../src/navigation/shell/shellStore';
 import { useTabShell } from '../../src/navigation/tabShell';
 import { useScrollToTop, scrollerToTop } from '../../src/navigation/scrollToTop';
-import { prefs } from '../../src/storage/prefs';
+import { prefs } from '../../src/services/storage/prefs';
 import { useTheme } from '../../src/theme/ThemeProvider';
 
 type Row =

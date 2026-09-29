@@ -17,7 +17,7 @@ import type {
   SourceControlProviderInfo,
 } from '@generatorai/shared';
 
-import { json, requestJson, type AuthedFetch } from '../../api/http';
+import { json, requestJson, type AuthedFetch } from '../../services/api/http';
 
 export interface DeviceLoginApi {
   /** `POST /api/source-control/accounts/device/start` `{ provider: 'github', host? }`. */

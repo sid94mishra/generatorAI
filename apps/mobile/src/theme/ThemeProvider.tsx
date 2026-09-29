@@ -41,7 +41,7 @@ import {
 } from '@generatorai/design-tokens';
 
 import { themeVars, terminalThemes } from './tokens.generated';
-import { prefs } from '../storage/prefs';
+import { prefs } from '../services/storage/prefs';
 
 interface ThemeContextValue {
   mode: ThemeMode;

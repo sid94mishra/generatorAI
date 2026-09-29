@@ -10,7 +10,7 @@
 // the settings surface; the composer's keys are the composer's business.
 // ────────────────────────────────────────────────────────────────
 
-import { prefs } from '../../../storage/prefs';
+import { prefs } from '../../../services/storage/prefs';
 import {
   HISTORY_KEY,
   pushHistoryRing,

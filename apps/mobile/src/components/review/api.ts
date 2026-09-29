@@ -12,7 +12,7 @@
 import { useMemo } from 'react';
 import type { ReviewComment, ReviewThread } from '@generatorai/client-core';
 
-import { useAuth } from '../../auth/AuthProvider';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { json, requestJson, type AuthedFetch } from '../changes/api';
 import type { ReviewSubmitBody } from './reviewBatch';
 

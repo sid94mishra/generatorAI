@@ -28,10 +28,10 @@ import { EmptyState, ErrorState, LoadingState } from '../../ui/States';
 import { Badge, SectionHeader } from '../../ui/primitives';
 import { useToast } from '../../ui/Toast';
 import { haptics } from '../../ui/haptics';
-import { useAuth } from '../../../auth/AuthProvider';
-import { StepUpGate } from '../../../auth/StepUpGate';
-import { requireStepUp } from '../../../auth/stepUp';
-import { bytesToBase64 } from '../../../lib/base64';
+import { useAuth } from '../../../services/auth/AuthProvider';
+import { StepUpGate } from '../../../services/auth/StepUpGate';
+import { requireStepUp } from '../../../services/auth/stepUp';
+import { bytesToBase64 } from '../../../services/lib/base64';
 import { useTheme } from '../../../theme/ThemeProvider';
 import { relativeTime } from '../../runs/formatTime';
 import {

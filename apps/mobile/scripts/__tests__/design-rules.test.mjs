@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import { ESLint } from 'eslint';
 import { fileURLToPath } from 'node:url';
 import { compareCounts } from '../check-design.mjs';
-const root = fileURLToPath(new URL('../../../../', import.meta.url));
+const root = fileURLToPath(new URL('../../../..', import.meta.url));
 const eslint = new ESLint({ cwd: root });
 async function messages(source, file = 'src/ui/primitives/LintProbe.tsx') {
   const [result] = await eslint.lintText(source, { filePath: `${root}apps/mobile/${file}` });
@@ -25,7 +25,7 @@ test('shared vocabulary is accepted before M3 native emission', async () => {
   assert.equal(result.filter((m) => m.ruleId === 'mobile-design/design' && m.messageId !== 'storiesPresent').length, 0);
 });
 test('ui cannot reach legacy data or router hooks; platform imports are confined', async () => {
-  const result = await messages(`import {useAuth} from '../../auth/AuthProvider'; import {useRouter} from 'expo-router'; import {Platform as Device} from 'react-native'; export const value = [useAuth,useRouter,Device];`);
+  const result = await messages(`import {Button as useAuth} from '../../components/ui/Button'; import {useRouter} from 'expo-router'; import {Platform as Device} from 'react-native'; export const value = [useAuth,useRouter,Device];`);
   for (const id of ['boundaries/dependencies', 'routerPresentation', 'platformOs']) assert.ok(has(result, id), id);
 });
 test('router adapter admits presentational imports only', async () => {

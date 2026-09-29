@@ -8,7 +8,7 @@
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
 import type { ScmFlowResult } from '@generatorai/shared';
 
-import { useApi } from '../../api/useApi';
+import { useApi } from '../../services/api/useApi';
 import { scmKeys } from './api';
 import { foldScmResults, type ReplayPage } from './scmResults';
 

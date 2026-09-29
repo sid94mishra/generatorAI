@@ -31,7 +31,7 @@ import type {
   WorkspaceReadinessResponse,
 } from '@generatorai/shared';
 
-import { json, requestJson, type AuthedFetch } from '../../api/http';
+import { json, requestJson, type AuthedFetch } from '../../services/api/http';
 
 /** `state` filter on the project pull-request list. */
 export type PullRequestListState = 'open' | 'closed' | 'all';

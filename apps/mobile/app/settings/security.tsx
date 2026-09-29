@@ -42,13 +42,13 @@ import {
   useMyScopeRequests,
   usePendingScopeRequests,
   type DeviceScopeRequest,
-} from '../../src/api/scopeRequests';
-import { useAuth } from '../../src/auth/AuthProvider';
-import { revokeDeviceRequest } from '../../src/auth/deviceRequests';
-import { requireStepUp } from '../../src/auth/stepUp';
-import { describeScope, isSensitiveScope } from '../../src/auth/scopeLabels';
-import { matchScopePreset } from '../../src/auth/scopePresets';
-import { checkFeature, grantableFeatures, type MobileFeature } from '../../src/auth/featureGate';
+} from '../../src/services/api/scopeRequests';
+import { useAuth } from '../../src/services/auth/AuthProvider';
+import { revokeDeviceRequest } from '../../src/services/auth/deviceRequests';
+import { requireStepUp } from '../../src/services/auth/stepUp';
+import { describeScope, isSensitiveScope } from '../../src/services/auth/scopeLabels';
+import { matchScopePreset } from '../../src/services/auth/scopePresets';
+import { checkFeature, grantableFeatures, type MobileFeature } from '../../src/services/auth/featureGate';
 import { ActionSheet, ConfirmSheet } from '../../src/components/ui/ActionSheet';
 import { EditScopesSheet } from '../../src/components/devices/EditScopesSheet';
 import { PairDeviceSheet } from '../../src/components/devices/PairDeviceSheet';

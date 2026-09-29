@@ -14,7 +14,7 @@ import { Text, View } from 'react-native';
 import Animated from 'react-native-reanimated';
 import { CircleHelp, ClipboardList, MessagesSquare, ShieldAlert, Workflow } from 'lucide-react-native';
 
-import type { Operation } from '../../api/activityRanking';
+import type { Operation } from '../../services/api/activityRanking';
 import { displayChatName } from '../common/chatName';
 import { runTitle } from '../runs/runModel';
 import { relativeTime } from '../runs/formatTime';

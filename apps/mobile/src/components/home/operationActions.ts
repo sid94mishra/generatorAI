@@ -2,7 +2,7 @@
 // rule: Stop a running chat turn, Cancel a running run, Retry a failed run.
 // Pure, so the rule is tested without a renderer.
 
-import type { Operation } from '../../api/activityRanking';
+import type { Operation } from '../../services/api/activityRanking';
 
 export type OperationActionKind = 'stop-chat' | 'cancel-run' | 'retry-run';
 

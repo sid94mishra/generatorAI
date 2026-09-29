@@ -17,10 +17,10 @@ import { useQuery } from '@tanstack/react-query';
 import { ChevronLeft, Lock, MoreHorizontal, Trash2, Workflow as WorkflowIcon } from 'lucide-react-native';
 import { queryKeys, type ApprovalOutcome, type StageRunSummary } from '@generatorai/client-core';
 
-import { useApi } from '../../src/api/useApi';
-import { useAdminApi } from '../../src/api/useAdminApi';
-import { useRunMutations, useRunPermissionMode, type RunAction } from '../../src/api/useRunControl';
-import { useRunStream } from '../../src/stream/useRunStream';
+import { useApi } from '../../src/services/api/useApi';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
+import { useRunMutations, useRunPermissionMode, type RunAction } from '../../src/services/api/useRunControl';
+import { useRunStream } from '../../src/services/stream/useRunStream';
 import { StageGateCard } from '../../src/components/runs/StageGateCard';
 import { LoopDecisionCard } from '../../src/components/runs/LoopDecisionCard';
 import { CheckOutput } from '../../src/components/runs/CheckOutput';

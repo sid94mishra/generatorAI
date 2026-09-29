@@ -50,10 +50,10 @@ import { Field, Switch } from '../ui/Form';
 import { SegmentedControl } from '../ui/SegmentedControl';
 import { Spinner } from '../ui/States';
 import { Touchable } from '../ui/Touchable';
-import { useApi } from '../../api/useApi';
-import { useAuth } from '../../auth/AuthProvider';
-import { checkFeature } from '../../auth/featureGate';
-import { useModelGroups } from '../../api/useModels';
+import { useApi } from '../../services/api/useApi';
+import { useAuth } from '../../services/auth/AuthProvider';
+import { checkFeature } from '../../services/auth/featureGate';
+import { useModelGroups } from '../../services/api/useModels';
 import { useTheme } from '../../theme/ThemeProvider';
 import { PERMISSION_MODES } from './composer/turnOptions';
 import {

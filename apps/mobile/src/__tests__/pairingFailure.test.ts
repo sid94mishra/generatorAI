@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { LOCAL_NETWORK_HINT, classifyPairingFailure, shouldAutoRetryPairing } from '../auth/pairingFailure';
+import { LOCAL_NETWORK_HINT, classifyPairingFailure, shouldAutoRetryPairing } from '../services/auth/pairingFailure';
 
 describe('classifyPairingFailure', () => {
   it('treats transport failures as retryable with the local-network hint', () => {

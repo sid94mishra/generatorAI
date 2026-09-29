@@ -28,10 +28,10 @@ import { AppState, Platform, Text, View, type AppStateStatus } from 'react-nativ
 import * as LocalAuthentication from 'expo-local-authentication';
 import { Lock, ScanFace } from 'lucide-react-native';
 
-import { BrandMark } from '../components/brand/BrandMark';
-import { Button } from '../components/ui/Button';
-import { useToast } from '../components/ui/Toast';
-import { useTheme } from '../theme/ThemeProvider';
+import { BrandMark } from '../../components/brand/BrandMark';
+import { Button } from '../../components/ui/Button';
+import { useToast } from '../../components/ui/Toast';
+import { useTheme } from '../../theme/ThemeProvider';
 import { readLockPreferences, usePreferences } from '../prefs/preferences';
 import {
   appLockReducer,

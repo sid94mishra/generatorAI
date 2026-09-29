@@ -20,7 +20,7 @@
 // the right command — the web's plain subsequence match is a subset of it.
 // ────────────────────────────────────────────────────────────────
 
-import { fuzzyFilter } from '../../../lib/fuzzyMatch';
+import { fuzzyFilter } from '../../../services/lib/fuzzyMatch';
 import { filterPaths } from '../composerMenu';
 import type { SlashItem } from './types';
 

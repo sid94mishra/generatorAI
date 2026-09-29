@@ -24,3 +24,12 @@ Implementation complete; native acceptance remains pending MV-07.
 - Legacy `components/ui/gallery.tsx` and its barrel export deleted. The bootstrap NativeButton is story-only, not the production M4 Button.
 - Fingerprint requires rebuild: transitive on-device controls add datetimepicker/slider and pnpm changes native peer paths. iOS prebuild and pods succeed; native build started in `.expo/m1-06-ios-build.log`. Both native story walkthroughs and the dedicated flow remain pending; no device pass is claimed. Android follows iOS sequentially.
 - Existing SDK peer mismatch: Storybook's UI advertises safe-area-context 5.8.0; SDK 57 retains its matched 5.7.0. Verify native behavior and revisit with M3, rather than upgrading the SDK's native peer silently.
+
+## M1-09 — stable service-layer move (2026-09-29)
+
+75 source files moved under `src/services/{api,auth,transport,stream,notifications,native,storage,voice,crypto,prefs,lib}`; 154 import consumers updated by TypeScript syntax traversal. Imports, re-exports, dynamic imports and test mocks keep their same targets. Old directories are removed, not bridged with compatibility barrels. UI-bearing legacy auth wrappers remain mechanically intact for their planned replacement. MD-109 records the finite migrated-file lint debt.
+
+- Typecheck passes. All **107 Vitest files / 1,111 tests pass**, including moved transport/auth/stream/storage/voice tests; all **six Jest tests** pass across both platform projects.
+- Initial unrestricted Vitest concurrency on the 8 GB host caused two 5-second timeouts while native compilation ran. Limiting the runner to two workers fixed both; no timeout threshold or assertion changed.
+- Lint integration tests and strict design audit run again after migration; logs `.expo/m1-09-*.log`. Existing allowances follow their moved file; only the 17 newly exposed, unchanged legacy boundary edges were added (11 files).
+- Both native app walkthroughs / characterization smoke still pending while M1-06 rebuilds complete (MV-07/MV-10). Pure test passes do not establish native acceptance.

@@ -25,8 +25,8 @@ import { Button } from '../components/ui/Button';
 import { EmptyState } from '../components/ui/States';
 import { useToast } from '../components/ui/Toast';
 import { MAX_SCALE } from '../components/ui/accessibility';
-import { useAuth } from '../auth/AuthProvider';
-import { checkFeature } from '../auth/featureGate';
+import { useAuth } from '../services/auth/AuthProvider';
+import { checkFeature } from '../services/auth/featureGate';
 import { useTheme } from '../theme/ThemeProvider';
 import { agentConsoleRows, type AgentConsoleRow } from './agentConsoleRows';
 

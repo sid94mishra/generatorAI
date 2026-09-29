@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Redirect, useLocalSearchParams } from 'expo-router';
 import * as Notifications from 'expo-notifications';
-import { ensureAndroidChannels, ensureNotificationCategories } from '../notifications/push';
-import { APPROVAL_CATEGORY_ID, APPROVAL_CHANNEL_ID } from '../notifications/notificationCategories';
+import { ensureAndroidChannels, ensureNotificationCategories } from '../services/notifications/push';
+import { APPROVAL_CATEGORY_ID, APPROVAL_CHANNEL_ID } from '../services/notifications/notificationCategories';
 import { Screen } from '../components/ui/Screen';
 import { ListRow } from '../components/ui/ListRow';
 

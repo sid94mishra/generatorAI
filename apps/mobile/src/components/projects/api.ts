@@ -11,7 +11,7 @@
 
 import type { McpServerEntry, ProjectConfig, WorktreeInfo } from '@generatorai/shared';
 
-import { json, requestJson, type AuthedFetch } from '../../api/http';
+import { json, requestJson, type AuthedFetch } from '../../services/api/http';
 import type { GitCodebaseBody, ProjectUpdateBody } from './projectEditModel';
 
 const enc = encodeURIComponent;

@@ -26,12 +26,12 @@ import type { InvocationRequest } from '@generatorai/workflow-spec';
 
 import { useAdminApi } from './useAdminApi';
 import { useApi } from './useApi';
-import { haptics } from '../components/ui/haptics';
-import { isTerminal } from '../components/runs/statusStyle';
+import { haptics } from '../../components/ui/haptics';
+import { isTerminal } from '../../components/runs/statusStyle';
 import {
   permissionModeOf,
   type RunPermissionMode,
-} from '../components/runs/permissionMode';
+} from '../../components/runs/permissionMode';
 
 /** Cache key for a run's permission mode — under the run so run invalidation refreshes it. */
 export const runPermissionModeKey = (runId: string) => [...queryKeys.run(runId), 'permission-mode'] as const;
