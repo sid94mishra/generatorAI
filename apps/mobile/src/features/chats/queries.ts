@@ -15,7 +15,7 @@ export function useChats(scope: 'all' | 'active' | 'archived', search: string) {
   const attention = useAttention();
   const query = { ...(scope === 'all' ? {} : { status: scope }), q: search.trim(), limit: 50 };
   const result = useInfiniteQuery({
-    queryKey: [...queryKeys.chats(), chatListKey(query)],
+    queryKey: [...queryKeys.chats(), chatListKey(query)], meta: { persist: true },
     initialPageParam: undefined as string | undefined,
     queryFn: ({ pageParam }) => api.chats.list({ ...query, ...(pageParam ? { cursor: pageParam } : {}) }),
     getNextPageParam: (page) => page.nextCursor ?? undefined,

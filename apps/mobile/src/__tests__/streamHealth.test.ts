@@ -74,8 +74,8 @@ describe('describeNotice', () => {
     expect(notice?.message).toContain('ask an admin');
   });
 
-  it('never offers a retry for an outage', () => {
-    expect(describeNotice('offline', 0, [])?.retry).toBe(false);
+  it('offers manual recovery after an outage', () => {
+    expect(describeNotice('offline', 0, [])?.retry).toBe(true);
   });
 });
 

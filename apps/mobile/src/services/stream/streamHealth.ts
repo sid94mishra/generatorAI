@@ -126,7 +126,7 @@ export function describeNotice(
   rejected: readonly RejectedScope[],
 ): ConnectionNotice | null {
   if (connection === 'offline') {
-    return { kind: 'offline', tone: 'danger', message: 'Offline — live updates paused', retry: false };
+    return { kind: 'offline', tone: 'danger', message: 'Offline — live updates paused', retry: true };
   }
   if (connection === 'reconnecting') {
     return {

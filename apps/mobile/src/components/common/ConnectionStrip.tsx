@@ -31,6 +31,7 @@ import { SafeAreaInsetsContext, useSafeAreaInsets } from 'react-native-safe-area
 import { RefreshCw, ShieldAlert, WifiOff } from 'lucide-react-native';
 
 import { useAuth } from '../../services/auth/AuthProvider';
+import { resumeApp } from '../../services/stream/lifecycle';
 import { useMuxStream } from '../../services/stream/MuxStreamProvider';
 import { describeNotice, useStreamHealth, type NoticeTone } from '../../services/stream/streamHealth';
 import { Touchable } from '../ui/Touchable';
@@ -99,6 +100,7 @@ export function ConnectionStrip(): React.ReactElement | null {
       // invisible until it is re-minted. Then forget the rejection so the
       // dropped scope is asked for again (`useGlobalStream` re-subscribes on
       // the generation bump).
+      if (connection === 'offline') { resumeApp(); return; }
       await refreshPermissions();
       stream?.resetRejections();
       clearRejected();
@@ -107,7 +109,7 @@ export function ConnectionStrip(): React.ReactElement | null {
     } finally {
       setBusy(false);
     }
-  }, [busy, refreshPermissions, stream, clearRejected]);
+  }, [busy, connection, refreshPermissions, stream, clearRejected]);
 
   if (!shown) return null;
 

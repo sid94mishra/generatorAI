@@ -11,7 +11,7 @@ type ToggleContext = { previous: AutomationView | undefined };
 
 export function useAutomations() {
   const api = useApi();
-  return useQuery({ queryKey: queryKeys.automations(), queryFn: () => api.automations.list() });
+  return useQuery({ queryKey: queryKeys.automations(), meta: { persist: true }, queryFn: () => api.automations.list() });
 }
 
 export function useAutomation(id: string) {

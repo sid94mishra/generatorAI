@@ -7,7 +7,7 @@ import { isActive, pollIntervalFor } from '../../services/api/runActivity';
 
 export function useWorkflows(options: { enabled?: boolean; staleTime?: number } = {}) {
   const api = useApi();
-  return useQuery({ queryKey: queryKeys.workflows(), queryFn: () => api.workflows.list(), ...options });
+  return useQuery({ queryKey: queryKeys.workflows(), meta: { persist: true }, queryFn: () => api.workflows.list(), ...options });
 }
 
 export function useWorkflow(id: string) {

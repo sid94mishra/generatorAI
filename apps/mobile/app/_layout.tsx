@@ -24,7 +24,7 @@ import * as SystemUI from 'expo-system-ui';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { KeyboardProvider } from 'react-native-keyboard-controller';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { ServerQueryProvider } from '../src/services/api/ServerQueryProvider';
 import { ChevronLeft } from 'lucide-react-native';
 
 import { IconButton } from '../src/components/ui/Button';
@@ -50,18 +50,6 @@ installCrypto();
 // Held until the theme has been read, so a dark-mode user never sees the
 // white flash that an async preference read would guarantee.
 void SplashScreen.preventAutoHideAsync();
-
-const queryClient = new QueryClient({
-  defaultOptions: {
-    queries: {
-      // A phone loses connectivity constantly; retrying forever just drains
-      // battery and hides the real state from the user.
-      retry: 2,
-      staleTime: 30_000,
-      refetchOnWindowFocus: true,
-    },
-  },
-});
 
 /** Applies the theme variables and keeps native chrome in step. */
 function ThemedShell({ children }: { children: React.ReactNode }): React.ReactElement {
@@ -504,8 +492,8 @@ export default function RootLayout(): React.ReactElement {
         <ThemeProvider>
           <PreferencesProvider>
             <ThemedShell>
-              <QueryClientProvider client={queryClient}>
-                <AuthProvider>
+              <AuthProvider>
+                <ServerQueryProvider>
                   {/* Owns the app's ONE shared stream connection. Above
                       AuthGate so the connection survives a route change and
                       every screen's subscription rides the same socket. */}
@@ -542,8 +530,8 @@ export default function RootLayout(): React.ReactElement {
                       </ContextMenuProvider>
                     </ToastProvider>
                   </MuxStreamProvider>
-                </AuthProvider>
-              </QueryClientProvider>
+                </ServerQueryProvider>
+              </AuthProvider>
             </ThemedShell>
           </PreferencesProvider>
         </ThemeProvider>

@@ -48,10 +48,13 @@ import {
   type RestorePhase,
 } from './restoreState';
 import { buildEndpointCandidates } from '../transport/endpointPlan';
+import { assertServerWriteAllowed } from '../api/offlinePolicy';
+import { clearServerQueryCache } from '../api/queryPersister';
 import { PREF_KEYS, prefs } from '../storage/prefs';
 
 export interface AuthContextValue {
   state: AuthState;
+  serverId: string | null;
   /**
    * True until the stored session has been read and validated.
    *
@@ -130,6 +133,7 @@ async function verifyHostIdentity(endpoint: string, signal?: AbortSignal): Promi
 }
 
 export function AuthProvider({ children }: { children: React.ReactNode }): React.ReactElement {
+  const [serverId, setServerId] = useState<string | null>(null);
   const [state, setState] = useState<AuthState>({ status: 'unpaired' });
   // Starts `restoring`; `initializing` and `storageLocked` are views of it.
   // See `AuthContextValue.initializing` and `restoreState.ts`.
@@ -206,6 +210,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
           return;
         }
 
+        setServerId(session.serverId);
         const supervisor = buildSupervisor(session.endpoint, session.serverId, session.endpoints);
 
         const runtime = new AuthenticatedClientRuntime({
@@ -286,6 +291,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const completePairing = useCallback(
     async (consent: PairingConsent, deviceName: string) => {
       setState({ status: 'pairing' });
+      setServerId(consent.serverId);
 
       const endpoints = consent.endpoints.map((endpoint) => endpoint.origin);
       const supervisor = buildSupervisor(consent.endpoint, consent.serverId, endpoints);
@@ -316,6 +322,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   );
 
   const unpair = useCallback(async () => {
+    if (serverId) await clearServerQueryCache(serverId);
     await runtimeRef.current?.forget();
     await supervisorRef.current?.disconnect();
     // Clear the key too: leaving it behind would let a later pairing reuse a
@@ -328,7 +335,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     runtimeRef.current = null;
     setState({ status: 'unpaired' });
     setTransport({ state: 'idle' });
-  }, [keyStore]);
+    setServerId(null);
+  }, [keyStore, serverId]);
 
   const reconnect = useCallback(async () => {
     await supervisorRef.current?.invalidate('manual reconnect');
@@ -354,6 +362,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const authenticatedFetch = useCallback<AuthContextValue['fetch']>((path, init) => {
     const runtime = runtimeRef.current;
     if (!runtime) throw new Error('Not paired');
+    assertServerWriteAllowed(path, init?.method);
     return runtime.fetch(path, init);
   }, []);
   const streamUrl = useCallback<AuthContextValue['streamUrl']>((scope, id) => {
@@ -370,6 +379,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
   const value = useMemo<AuthContextValue>(
     () => ({
       state,
+      serverId,
       initializing,
       storageLocked,
       retryRestore,
@@ -388,6 +398,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }): React
     }),
     [
       state,
+      serverId,
       initializing,
       storageLocked,
       retryRestore,

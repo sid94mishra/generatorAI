@@ -8,7 +8,7 @@ export const scriptKeys = { all: () => ['workflow-scripts'] as const, detail: (i
 
 export function useScripts() {
   const admin = useAdminApi();
-  return useQuery({ queryKey: scriptKeys.all(), queryFn: async () => parseScriptRows(await admin.scripts.list()), staleTime: 60_000 });
+  return useQuery({ queryKey: scriptKeys.all(), meta: { persist: true }, queryFn: async () => parseScriptRows(await admin.scripts.list()), staleTime: 60_000 });
 }
 
 export function useScript(id: string) {

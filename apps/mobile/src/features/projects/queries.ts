@@ -6,7 +6,7 @@ import { useApi } from '../../services/api/useApi';
 
 export function useProjects(options: { staleTime?: number } = {}) {
   const api = useApi();
-  return useQuery({ queryKey: [...queryKeys.projects(), 'summary'], queryFn: () => api.projects.list({ includeSummary: true }), ...options });
+  return useQuery({ queryKey: [...queryKeys.projects(), 'summary'], meta: { persist: true }, queryFn: () => api.projects.list({ includeSummary: true }), ...options });
 }
 
 import { useAdminApi } from '../../services/api/useAdminApi';

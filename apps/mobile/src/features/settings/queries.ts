@@ -175,5 +175,5 @@ export function useToggleSystemMcp(callbacks: MutationCallbacks<void, McpToggle,
 
 export function useSystemInfo() {
   const api = useApi();
-  return useQuery({ queryKey: ['system', 'info'], queryFn: () => api.system.info(), refetchInterval: 30_000 });
+  return useQuery({ queryKey: ['system', 'info'], meta: { persist: true }, queryFn: () => api.system.info(), refetchInterval: 30_000 });
 }

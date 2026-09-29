@@ -1918,6 +1918,7 @@ Versions checked 2026-09-26 (stack-styling "Recommended packages"). SDK-pinned p
 
 | Package | Version (SDK 57 → 58+) | Action | Phase | Reason |
 |---|---|---|---|---|
+| `@tanstack/react-query-persist-client`, `@tanstack/query-sync-storage-persister` | `^5.90.21` | **Add** | M2-07 | Encrypted per-server MMKV query persistence, selective lists only (06 §5.4) |
 | `uniwind` | first release after 1.12.0 containing PR #686, exact pin; until then `1.12.0` exact without platform class variants | **Add** | M3-05 | Tailwind 4 engine for RN, same Tailwind as web, theme APIs (MD-10) |
 | `tailwindcss` | `4.3.3` (devDependency, exact) | **Replace** 3.4.17 | M3-05 | same version as web and Uniwind's compiler |
 | `tailwind-merge` | `^3.7.0` | **Add** | M3-05 | `cn()` with the shared merge config |
