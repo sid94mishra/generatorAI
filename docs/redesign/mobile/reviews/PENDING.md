@@ -13,6 +13,9 @@ Owner-authorized continuation: MD-107 (2026-09-29). These items remain required 
 
 | MV-07 | pending | M1-06 Storybook route, native rebuilds and two-platform story walkthrough/flow. Six Jest tests and static checks pass; iOS rebuild started. Fonts/text-scale integration waits M3 foundations. | Finish native rebuilds and Storybook flow; include M3 font readiness before kit VRT. |
 
+| MV-08 | pending | M1-07 native markdown spike: 2,000-line fps and selection/copy not measured. Current renderer retained pending positive adoption evidence. | Complete with native harness, before M6-02. See M1-markdown-spike.md. |
+| MV-09 | pending | M1-08 Gate A unpublished (>1.12.0), Gate B twelve checks not run. SDK 58 stable and NativeWind 5 stable unavailable. | SDK 58 preview scratch spike before M3 engine adoption; recheck releases. See M1-uniwind-spike.md. |
+
 ## 2026-09-29 continuation triage
 
 Rechecked native host code: the legacy Sheet uses an animated RN Modal; WorkbenchSheet retains heavy panes in parked absolute-fill views. The Android software-modal/GPU hypothesis and iOS animation/lifecycle hypothesis are not proven fixes. Earlier targeted repair attempts restored sandbox terminal attachment but not usable rendering, and three notification-opening retries failed. Preserve these findings for the planned host replacements instead of marking the characterization green. Sandbox and Metro are healthy; 21 GiB free. Continue M1-05.
