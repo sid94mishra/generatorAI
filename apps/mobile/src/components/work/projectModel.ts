@@ -3,8 +3,6 @@ import { runStatusTone, healthTone } from '../../theme/status';
 // Project model — what the project overview and codebase screens show.
 //
 // Pure, so the rules are testable without React Native:
-//   • which runs belong to a project (the server has no project filter on
-//     `/api/workflow-runs`),
 //   • "most recent N" ordering over wire timestamps,
 //   • how a codebase location is shortened for a phone-width row,
 //   • which facts of a loosely typed status / readiness payload are worth
@@ -13,41 +11,10 @@ import { runStatusTone, healthTone } from '../../theme/status';
 
 import { epochOr, type Timestamp } from '@generatorai/client-core';
 
-import { needsAttention } from '../runs/statusStyle';
 
 export type ProjectTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
 
 // ── Runs ────────────────────────────────────────────────────────
-
-export interface ProjectRunLike {
-  workflowDefinitionId: string;
-  projectId?: string | null;
-}
-
-/**
- * A project's runs: those of one of its workflows, or those started FOR the
- * project (`run.projectId`, e.g. a global workflow run against this project).
- */
-export function projectRuns<T extends ProjectRunLike>(
-  runs: readonly T[],
-  workflowIds: Iterable<string>,
-  projectId: string,
-): T[] {
-  const ids = new Set(workflowIds);
-  return runs.filter(
-    (run) => ids.has(run.workflowDefinitionId) || run.projectId === projectId,
-  );
-}
-
-/** Runs parked on a person (paused, awaiting input, failed), newest first. */
-export function runsNeedingYou<T extends ProjectRunLike & { status: string; updatedAt?: Timestamp; createdAt?: Timestamp }>(
-  runs: readonly T[],
-): T[] {
-  return mostRecent(
-    runs.filter((run) => needsAttention(run.status)),
-    runs.length,
-  );
-}
 
 /** One status tone per run row. */
 export function runTone(status: string): ProjectTone {

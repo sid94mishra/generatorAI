@@ -1,10 +1,12 @@
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useMemo } from 'react';
+import { useQuery, useInfiniteQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys, projectKeys, scmKeys, ApiError, type ApiClient, type AdminApi, type PullRequestListState } from '@generatorai/client-core';
+import { useAttention } from '../../services/stream/AttentionProvider';
 import { useApi } from '../../services/api/useApi';
 
 export function useProjects(options: { staleTime?: number } = {}) {
   const api = useApi();
-  return useQuery({ queryKey: queryKeys.projects(), queryFn: () => api.projects.list(), ...options });
+  return useQuery({ queryKey: [...queryKeys.projects(), 'summary'], queryFn: () => api.projects.list({ includeSummary: true }), ...options });
 }
 
 import { useAdminApi } from '../../services/api/useAdminApi';
@@ -14,7 +16,7 @@ import { anyCloning } from './cloneState';
 export function useProject(id: string, followClone = false) {
   const api = useApi();
   return useQuery({
-    queryKey: queryKeys.project(id), queryFn: () => api.projects.get(id),
+    queryKey: [...queryKeys.project(id), 'summary'], queryFn: () => api.projects.get(id, { includeSummary: true }),
     refetchInterval: followClone ? (query) => anyCloning(query.state.data?.codebases) ? 3_000 : false : false,
   });
 }
@@ -132,4 +134,26 @@ export function useNewProjectChat(id: string, callbacks: MutationCallbacks<ChatR
       return callbacks.onSuccess?.(...args);
     },
   });
+}
+
+export function useProjectRuns(id: string) {
+  const api = useApi();
+  const result = useInfiniteQuery({
+    queryKey: [...queryKeys.project(id), 'runs'], initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.projects.runs(id, { limit: 50, ...(pageParam ? { cursor: pageParam } : {}) }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  });
+  const pages = result.data;
+  const data = useMemo(() => {
+    const rows = new Map<string, NonNullable<typeof pages>['pages'][number]['items'][number]>();
+    for (const page of pages?.pages ?? []) for (const run of page.items) if (!rows.has(run.id)) rows.set(run.id, run);
+    return pages ? [...rows.values()] : undefined;
+  }, [pages]);
+  return { ...result, data, total: result.data?.pages[0]?.total };
+}
+
+export function useProjectAttention(id: string) {
+  const attention = useAttention();
+  const needsYou = useMemo(() => attention.snapshot?.needsYou.filter((item) => item.project?.id === id) ?? [], [attention.snapshot, id]);
+  return { ...attention, needsYou };
 }

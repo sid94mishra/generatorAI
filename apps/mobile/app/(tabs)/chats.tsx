@@ -14,7 +14,7 @@
 // compose button deep-link straight into it instead of duplicating the flow.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { View } from 'react-native';
 import { LegendList } from '@legendapp/list/react-native';
 import { router, useLocalSearchParams } from 'expo-router';
@@ -35,7 +35,6 @@ import {
 } from 'lucide-react-native';
 import { epochOr, isArchived, type ChatListRow } from '@generatorai/client-core';
 
-import { useActivity } from '../../src/features/home/queries';
 import { useModels } from '../../src/services/api/useModels';
 import { NewChatSheet } from '../../src/components/chat/NewChatSheet';
 import { RenameSheet } from '../../src/components/chat/RenameSheet';
@@ -105,25 +104,13 @@ export default function ChatsScreen(): React.ReactElement {
     router.setParams({ new: undefined });
   }, [params.new]);
 
-  const chats = useChats();
+  const deferredQuery = useDeferredValue(query);
+  const chats = useChats(scope, deferredQuery);
 
   const models = useModels();
   const projects = useProjects();
   // Picker list only — authoring an agent grants capability and stays on web.
   const agents = useSelectableAgents();
-
-  // Reused purely for `runningChatIds` — the chat entity itself carries no
-  // "is a turn in flight" flag, and a live dot is the single most useful
-  // thing this list can show.
-  const activity = useActivity();
-  const running = useMemo(() => new Set(activity.health?.runningChatIds ?? []), [activity.health]);
-  // Which chats are BLOCKED on a person. A catalogue that cannot say
-  // "this one is waiting on you" makes you open each chat to find out, which
-  // is the one question this app exists to answer quickly.
-  const waiting = useMemo(
-    () => new Set(activity.operations.filter((op) => op.kind === 'chat' && op.blocked).map((op) => op.id)),
-    [activity.operations],
-  );
 
   const create = useCreateChat({
     onSuccess: (chat) => {
@@ -197,25 +184,7 @@ export default function ChatsScreen(): React.ReactElement {
     [setStatus, toast],
   );
 
-  const visible = useMemo(() => {
-    const list = chats.data?.items ?? [];
-    const q = query.trim().toLowerCase();
-    return (
-      list
-        .filter((chat) => scope === 'all' || (scope === 'archived' ? isArchived(chat) : !isArchived(chat)))
-        // Name AND the last line: "the chat where it said the tests pass" is
-        // how people remember a conversation.
-        .filter(
-          (chat) =>
-            !q ||
-            displayChatName(chat.name).toLowerCase().includes(q) ||
-            (chat.summary.preview?.text ?? '').toLowerCase().includes(q),
-        )
-        // `updatedAt` arrives as an ISO string; subtracting them directly is NaN
-        // and leaves the list in whatever order the server returned.
-        .sort((a, b) => epochOr(b.updatedAt) - epochOr(a.updatedAt))
-    );
-  }, [chats.data, query, scope]);
+  const visible = useMemo(() => chats.data?.items ?? [], [chats.data]);
   const selectableIds = useMemo(() => visible.map((c) => c.id), [visible]);
 
   // Today / Yesterday / This week / Older. Search results stay one flat list:
@@ -357,14 +326,16 @@ export default function ChatsScreen(): React.ReactElement {
           ListEmptyComponent={empty}
           refreshing={pull.refreshing}
           onRefresh={pull.onRefresh}
+          onEndReached={() => { if (chats.hasNextPage && !chats.isFetchingNextPage) void chats.fetchNextPage(); }}
+          onEndReachedThreshold={0.4}
           renderItem={({ item: row }: { item: SectionRow<ChatListRow> }) =>
             row.type === 'header' ? (
               <ListSectionHeader label={row.label} />
             ) : (
               <ChatRow
                 chat={row.item}
-                live={running.has(row.item.id)}
-                waiting={waiting.has(row.item.id)}
+                live={chats.rowState(row.item) === 'running'}
+                waiting={chats.rowState(row.item) === 'needs_you'}
                 archived={isArchived(row.item)}
                 selecting={selecting}
                 selected={selected.has(row.item.id)}

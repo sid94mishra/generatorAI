@@ -1,4 +1,3 @@
-import { useWorkflowRuns } from '../../src/features/workflows/queries';
 // ────────────────────────────────────────────────────────────────
 // Project overview.
 //
@@ -8,8 +7,8 @@ import { useWorkflowRuns } from '../../src/features/workflows/queries';
 // flat list that hides itself (or shows a single muted line) when empty, so
 // a small project is a short screen rather than a stack of empty cards.
 //
-// The server has no project filter on runs; `projectRuns` derives them from
-// the project's workflow ids plus runs started for it (`run.projectId`).
+// Runs are scoped and ordered by the server, including global workflows
+// that were started for this project.
 //
 // Segments: Overview (the above) · Artifacts (project skills / prompts /
 // agents / MCP servers) · Settings (name, worktree retention, limits,
@@ -21,7 +20,7 @@ import { useWorkflowRuns } from '../../src/features/workflows/queries';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { router, useLocalSearchParams, useNavigation } from 'expo-router';
-import { useProject, useProjectChats, useProjectWorkflows, useProjectAutomations, useProjectPullRequests, useNewProjectChat } from '../../src/features/projects/queries';
+import { useProject, useProjectChats, useProjectWorkflows, useProjectAutomations, useProjectPullRequests, useNewProjectChat, useProjectRuns, useProjectAttention } from '../../src/features/projects/queries';
 import * as Clipboard from 'expo-clipboard';
 import {
   ChevronRight,
@@ -49,9 +48,7 @@ import {
   codebaseStatusTone,
   isQuietCodebaseStatus,
   mostRecent,
-  projectRuns,
   runTone,
-  runsNeedingYou,
   showsFetchState,
 } from '../../src/components/work/projectModel';
 import { Button, IconButton } from '../../src/components/ui/Button';
@@ -112,7 +109,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
   const chats = useProjectChats(projectId);
   const workflows = useProjectWorkflows(projectId);
   const automations = useProjectAutomations(projectId);
-  const runs = useWorkflowRuns(undefined, false);
+  const runs = useProjectRuns(projectId);
   const prs = useProjectPullRequests(projectId, 'open');
 
   const loaded = Boolean(project.data);
@@ -146,12 +143,9 @@ export default function ProjectDetailScreen(): React.ReactElement {
     ]),
   );
 
-  const projectRunList = useMemo(
-    () => projectRuns(runs.data ?? [], (workflows.data ?? []).map((w) => w.id), projectId),
-    [runs.data, workflows.data, projectId],
-  );
-  const needsYou = useMemo(() => runsNeedingYou(projectRunList), [projectRunList]);
-  const recentRuns = useMemo(() => mostRecent(projectRunList, RECENT_LIMIT), [projectRunList]);
+  const projectRunList = useMemo(() => runs.data ?? [], [runs.data]);
+  const { needsYou } = useProjectAttention(projectId);
+  const recentRuns = useMemo(() => projectRunList.slice(0, RECENT_LIMIT), [projectRunList]);
   const recentChats = useMemo(() => mostRecent(chats.data?.items ?? [], RECENT_LIMIT), [chats.data]);
   const openPrs = useMemo(
     () => mostRecent((prs.data?.items ?? []).filter((pr) => matchesState(pr, 'open')), Number.MAX_SAFE_INTEGER),
@@ -191,9 +185,9 @@ export default function ProjectDetailScreen(): React.ReactElement {
 
   const codebases = project.data.codebases ?? [];
   const counts: Array<{ key: string; label: string; value: number | null; onPress: () => void }> = [
-    { key: 'codebases', label: 'Codebases', value: codebases.length, onPress: () => scrollTo('codebases') },
-    { key: 'chats', label: 'Chats', value: chats.data ? chats.data.total : null, onPress: () => scrollTo('chats') },
-    { key: 'runs', label: 'Runs', value: runs.data && workflows.data ? projectRunList.length : null, onPress: () => scrollTo('runs') },
+    { key: 'codebases', label: 'Codebases', value: project.data.summary?.codebases ?? codebases.length, onPress: () => scrollTo('codebases') },
+    { key: 'chats', label: 'Chats', value: project.data.summary?.activeChats ?? chats.data?.counts.active ?? null, onPress: () => scrollTo('chats') },
+    { key: 'runs', label: 'Runs', value: project.data.summary?.runs ?? runs.total ?? null, onPress: () => scrollTo('runs') },
     {
       key: 'prs',
       label: 'Open PRs',
@@ -264,11 +258,11 @@ export default function ProjectDetailScreen(): React.ReactElement {
           <ListGroup>
             {needsYou.map((run) => (
               <ListRow
-                key={run.id}
-                title={runTitle(run.name)}
-                subtitle={`${statusLabel(run.status)} · ${relativeTime(run.updatedAt)}`}
-                icon={<StatusDot tone={runTone(run.status)} label={null} />}
-                onPress={() => router.push(`/runs/${run.id}`)}
+                key={run.key}
+                title={run.title}
+                subtitle={run.ask?.summary}
+                icon={<StatusDot tone="warning" label="Needs you" />}
+                onPress={() => router.push(run.href as never)}
               />
             ))}
           </ListGroup>
@@ -315,7 +309,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
         <SectionHeader title="Runs" />
         {runs.isError ? (
           <MutedLine text="Could not load runs." />
-        ) : runs.isLoading || workflows.isLoading ? (
+        ) : runs.isLoading ? (
           <SkeletonList rows={2} />
         ) : recentRuns.length === 0 ? (
           <MutedLine text="No runs yet." />
@@ -325,7 +319,7 @@ export default function ProjectDetailScreen(): React.ReactElement {
               <ListRow
                 key={run.id}
                 title={runTitle(run.name)}
-                subtitle={`${statusLabel(run.status)} · ${relativeTime(run.updatedAt)}`}
+                subtitle={`${statusLabel(run.status)} · ${relativeTime(String(run.updatedAt))}`}
                 icon={<StatusDot tone={runTone(run.status)} label={null} />}
                 onPress={() => router.push(`/runs/${run.id}`)}
               />

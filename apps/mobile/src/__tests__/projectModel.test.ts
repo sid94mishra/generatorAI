@@ -5,37 +5,14 @@ import {
   isQuietCodebaseStatus,
   mostRecent,
   orderBranches,
-  projectRuns,
   readinessFacts,
   repoSlugFromUrl,
   runTone,
-  runsNeedingYou,
   showsFetchState,
   statusFacts,
 } from '../components/work/projectModel';
 
 describe('projectRuns', () => {
-  const runs = [
-    { id: 'a', workflowDefinitionId: 'wf-1', status: 'running' },
-    { id: 'b', workflowDefinitionId: 'wf-other', status: 'failed', projectId: 'p1' },
-    { id: 'c', workflowDefinitionId: 'wf-other', status: 'completed', projectId: 'p2' },
-    { id: 'd', workflowDefinitionId: 'wf-2', status: 'paused' },
-    { id: 'e', workflowDefinitionId: 'wf-3', status: 'completed', variables: {} },
-  ];
-
-  it('keeps runs of the project workflows and runs started for the project', () => {
-    expect(projectRuns(runs, ['wf-1', 'wf-2'], 'p1').map((r) => r.id)).toEqual(['a', 'b', 'd']);
-  });
-
-  it('returns nothing for a project with no workflows and no tagged runs', () => {
-    expect(projectRuns(runs, [], 'p9')).toEqual([]);
-  });
-
-  it('selects runs needing a person', () => {
-    const withTimes = runs.map((r, i) => ({ ...r, updatedAt: 1000 + i }));
-    expect(runsNeedingYou(withTimes).map((r) => r.id)).toEqual(['d', 'b']);
-  });
-
   it('gives each run exactly one tone', () => {
     expect(runTone('failed')).toBe('danger');
     expect(runTone('paused')).toBe('neutral');

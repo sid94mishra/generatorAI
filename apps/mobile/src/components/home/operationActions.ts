@@ -17,14 +17,14 @@ export interface OperationActionDef {
 const RETRYABLE = new Set(['failed', 'cancelled']);
 
 export function operationActionFor(op: Operation): OperationActionDef | null {
-  const id = op.id.slice(op.id.indexOf(':') + 1);
-  if (!id) return null;
+  const id = op.entityId ?? op.id.slice(op.id.indexOf(':') + 1);
+  if (!id || (op.running && op.stoppable === false)) return null;
   // A gate is answered on its own card; stopping from the feed would discard
   // the question instead of answering it.
   if (op.kind === 'chat') return op.running && !op.blocked ? { kind: 'stop-chat', label: 'Stop', confirm: false, id } : null;
   if (op.kind === 'run') {
     if (op.running) return { kind: 'cancel-run', label: 'Cancel', confirm: true, id };
-    if (RETRYABLE.has(op.status)) return { kind: 'retry-run', label: 'Retry', confirm: false, id };
+    if (op.retryable !== false && RETRYABLE.has(op.status)) return { kind: 'retry-run', label: 'Retry', confirm: false, id };
   }
   return null;
 }

@@ -71,3 +71,14 @@ M2-04 mobile native/resource adoption checkpoint: multipart uploads now use shar
 - Verified the stronger source scan: no `useQuery`, `useQueries`, `useMutation`, `queryFn:` or `mutationFn:` in app/. The root QueryClientProvider remains in shell until its planned lifecycle work.
 - Final mobile typecheck and lint/design ratchet pass (193 legacy files remain ratcheted, new layers zero). Full Vitest: 106 files / 1,099 tests pass. No new UI/blocks were created, so no new component tests required. Native acceptance remains MV-17, not passed.
 - Build contention diagnosis: ten concurrent Android C++ jobs on the 8 GB host caused ~8 GB swap. Temporarily paused only this task's Gradle subtree, completed static/test checks, then resumed it. Do not overlap further full test runs with native compilation on this host. M2-06 is next.
+
+## M2-06 — landed read models (2026-09-29)
+
+Task packet: MHome, MChats, MModelPicker, MPaneComputer dark/light boards inspected for both platforms; MD-14/25/27/84. Reuse legacy presentation during SDK 57 characterization; no new kit surface. Acceptance: consume server read models rather than derive them from loaded subsets.
+
+- One `createAttentionStore`/`useSyncExternalStore` binding drives Home, chat live state and project decisions. Removed per-chat gate probing and local urgency ranking. Distinct ask keys keep separate requests on one chat actionable; entity IDs address the correct API.
+- Chat list uses shared keys, page merge/live selectors, keyset pagination and server search. Project lists/details request summaries; project runs page directly from the project endpoint, and project decisions use the full attention snapshot.
+- Home consumes recent activity and ISO-local-week stats; the M7 port will render the designed weekly strip. Diagnostics uses system uptime. Model picker adopts ready-provider/default/model catalog; computer consent uses shared pending/option policy.
+- Removed replaced probe/rank/project-join/needs-attention derivations and their obsolete tests. Added feed/action tests and local Monday/year-boundary coverage. Server action availability controls Allow/Deny, Stop and Retry.
+- Verified: mobile typecheck, lint/design ratchet (193 legacy files, new layers zero), 108 Vitest files / 1,091 tests. `.expo/m2-06-final-*.log`; shell chain exited 0. No shared changes.
+- Android native rebuild exited 0, installed, fingerprint `562528b8a7a20dbed69bb7ac182c680c9d68181b`. Reboot recovered System UI ANR; JS starts but product screen remains blank. Native acceptance pending MV-18 (iOS MV-15). No M2 phase closure or visual redesign claim. Continue M2-07 under MD-107.

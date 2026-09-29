@@ -82,7 +82,7 @@ export function DecisionCard({
           ? colors.primary
           : colors.warning;
   const waiting = `since ${relativeTime(operation.updatedAt)}`;
-  const where = operation.kind === 'run' ? 'Run' : 'Chat';
+  const where = operation.kind === 'run' ? 'Run' : operation.kind === 'automation' ? 'Automation' : 'Chat';
   const name = operation.kind === 'chat' ? displayChatName(operation.name) : runTitle(operation.name);
 
   const decide = async (behavior: 'allow' | 'deny'): Promise<void> => {

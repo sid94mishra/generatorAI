@@ -1,5 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { queryKeys, type ApiClient } from '@generatorai/client-core';
+import { useMemo } from 'react';
+import { useAttention } from '../../services/stream/AttentionProvider';
+import { useMutation, useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
+import { queryKeys, chatListKey, mergeChatListPages, chatLiveSets, chatRowState, type ApiClient } from '@generatorai/client-core';
 import { useApi } from '../../services/api/useApi';
 import type { MutationCallbacks } from '../../services/api/queryCallbacks';
 
@@ -8,9 +10,19 @@ type CreatedChat = Awaited<ReturnType<ApiClient['chats']['create']>>;
 type UpdatedChat = Awaited<ReturnType<ApiClient['chats']['update']>>;
 type RemovedChat = Awaited<ReturnType<ApiClient['chats']['remove']>>;
 
-export function useChats() {
+export function useChats(scope: 'all' | 'active' | 'archived', search: string) {
   const api = useApi();
-  return useQuery({ queryKey: queryKeys.chats(), queryFn: () => api.chats.list({ limit: 200 }) });
+  const attention = useAttention();
+  const query = { ...(scope === 'all' ? {} : { status: scope }), q: search.trim(), limit: 50 };
+  const result = useInfiniteQuery({
+    queryKey: [...queryKeys.chats(), chatListKey(query)],
+    initialPageParam: undefined as string | undefined,
+    queryFn: ({ pageParam }) => api.chats.list({ ...query, ...(pageParam ? { cursor: pageParam } : {}) }),
+    getNextPageParam: (page) => page.nextCursor ?? undefined,
+  });
+  const data = useMemo(() => mergeChatListPages(result.data?.pages ?? []), [result.data]);
+  const live = useMemo(() => chatLiveSets(attention.snapshot), [attention.snapshot]);
+  return { ...result, data, rowState: (row: NonNullable<typeof data>['items'][number]) => chatRowState(row, live) };
 }
 export function useCreateChat(callbacks: MutationCallbacks<CreatedChat, CreateChatBody>) {
   const api = useApi();

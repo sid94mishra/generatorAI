@@ -14,25 +14,9 @@
 import type { ComputerFrameView as ComputerFrame, ComputerActivityView as ComputerActivityEntry } from '@generatorai/client-core';
 export type { ComputerFrameView as ComputerFrame, ComputerActivityView as ComputerActivityEntry } from '@generatorai/client-core';
 
-export interface PendingConsent {
-  requestId: string;
-  appIdentity: string;
-  appLabel: string;
-  action: string;
-  summary: string;
-  path: string;
-  expiresAt: number;
-}
-
-export interface ComputerGrant {
-  appIdentity: string;
-  appLabel: string;
-  decision: 'always_allow' | 'deny';
-  scope: string;
-  grantedAt: string;
-}
-
-export type ConsentDecision = 'allow_once' | 'allow_run' | 'always_allow' | 'deny';
+import { consentAnswerOptions, initialComputerDeskState, seedComputerDesk, selectPendingConsent } from '@generatorai/client-core';
+import type { ComputerPendingConsent as PendingConsent, ComputerConsentDecision as ConsentDecision } from '@generatorai/shared';
+export type { ComputerPendingConsent as PendingConsent, ComputerConsentDecision as ConsentDecision, ComputerGrant } from '@generatorai/shared';
 
 /** Synthetic input and the clipboard tier take over the real keyboard and mouse. */
 export function tookScreen(path: string | null | undefined): boolean {
@@ -41,9 +25,9 @@ export function tookScreen(path: string | null | undefined): boolean {
 
 /** The prompt to show: the oldest one that has not expired. */
 export function activeConsent(pending: readonly PendingConsent[] | undefined, now = Date.now()): PendingConsent | null {
-  const live = (pending ?? []).filter((p) => p.expiresAt > now);
-  live.sort((a, b) => a.expiresAt - b.expiresAt);
-  return live[0] ?? null;
+  if (!pending?.length) return null;
+  const state = seedComputerDesk(initialComputerDeskState(pending[0]!.workspaceId), { pending: [...pending] });
+  return selectPendingConsent(state, { now })[0] ?? null;
 }
 
 export interface ConsentOption {
@@ -60,15 +44,13 @@ export interface ConsentOption {
  * offering it would promise something it deliberately downgrades.
  */
 export function consentOptions(consent: Pick<PendingConsent, 'path'>): ConsentOption[] {
-  const out: ConsentOption[] = [
-    { decision: 'allow_once', label: 'Allow once', tone: 'primary', needsStepUp: true },
-    { decision: 'allow_run', label: 'Allow all this run', tone: 'secondary', needsStepUp: true },
-  ];
-  if (!tookScreen(consent.path)) {
-    out.push({ decision: 'always_allow', label: 'Always allow this app', tone: 'secondary', needsStepUp: true });
-  }
-  out.push({ decision: 'deny', label: 'Deny', tone: 'danger', needsStepUp: false });
-  return out;
+  const presentation: Record<ConsentDecision, Omit<ConsentOption, 'decision'>> = {
+    allow_once: { label: 'Allow once', tone: 'primary', needsStepUp: true },
+    allow_run: { label: 'Allow all this run', tone: 'secondary', needsStepUp: true },
+    always_allow: { label: 'Always allow this app', tone: 'secondary', needsStepUp: true },
+    deny: { label: 'Deny', tone: 'danger', needsStepUp: false },
+  };
+  return consentAnswerOptions(consent).map(({ decision }) => ({ decision, ...presentation[decision] }));
 }
 
 export interface ActivityRow {

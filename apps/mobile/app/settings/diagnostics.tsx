@@ -12,7 +12,7 @@
 
 import React from 'react';
 import { Text } from 'react-native';
-import { useHealth } from '../../src/features/settings/queries';
+import { useHealth, useSystemInfo } from '../../src/features/settings/queries';
 import Constants from 'expo-constants';
 import {
   Activity,
@@ -42,13 +42,14 @@ export default function DiagnosticsScreen(): React.ReactElement {
   const key = describeKeyBacking(keyBacking);
 
   const health = useHealth(10000);
+  const system = useSystemInfo();
 
   return (
     <Screen
       title="Diagnostics"
       back
-      onRefresh={() => void health.refetch()}
-      refreshing={health.isFetching}
+      onRefresh={() => { void health.refetch(); void system.refetch(); }}
+      refreshing={health.isFetching || system.isFetching}
     >
       <SectionHeader title="Server" />
       {health.isLoading ? (
@@ -91,7 +92,7 @@ export default function DiagnosticsScreen(): React.ReactElement {
           />
           <ListRow
             title="Uptime"
-            subtitle={formatDuration((health.data?.uptime ?? 0) * 1000)}
+            subtitle={system.data ? formatDuration(system.data.uptimeSec * 1000) : 'Unavailable'}
             icon={<Timer size={18} color={colors['muted-foreground']} />}
             chevron={false}
           />

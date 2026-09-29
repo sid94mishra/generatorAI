@@ -7,7 +7,7 @@
 // cases, so they are the ones that must be testable.
 // ────────────────────────────────────────────────────────────────
 
-import type { ModelInfo } from '@generatorai/client-core';
+import { modelReasoningEfforts, type ModelInfo } from '@generatorai/client-core';
 
 /** Models grouped by provider, in stable display order. */
 export interface ModelGroup {
@@ -55,11 +55,7 @@ export function groupModels(models: ModelInfo[] | undefined): ModelGroup[] {
  * the selector must not be offered at all.
  */
 export function reasoningEfforts(model: ModelInfo | undefined): string[] {
-  if (!model?.supportsReasoning) return [];
-  const raw = model.reasoningEfforts;
-  if (Array.isArray(raw)) return raw.filter((v) => typeof v === 'string' && v.length > 0);
-  if (typeof raw === 'string') return raw.trim().split(/\s+/).filter(Boolean);
-  return [];
+  return model ? modelReasoningEfforts(model) : [];
 }
 
 /**

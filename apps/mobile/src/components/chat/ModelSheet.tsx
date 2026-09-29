@@ -32,7 +32,7 @@ import {
   RefreshCw,
   Search,
 } from 'lucide-react-native';
-import type { ModelInfo } from '@generatorai/client-core';
+import { buildModelPickerCatalog, type ModelInfo } from '@generatorai/client-core';
 import type { HarnessProviderStatus } from '@generatorai/shared';
 
 import { Sheet } from '../ui/Sheet';
@@ -102,8 +102,12 @@ export function ModelSheet({
   // cached query either way, and the picker is the only thing that needs the
   // per-provider shape.
   const query$ = useProviders();
-  const providers = useMemo(() => query$.data?.providers ?? [], [query$.data]);
-  const primary = query$.data?.primary ?? 'copilot';
+  const catalog = useMemo(() => query$.data ? buildModelPickerCatalog(query$.data) : null, [query$.data]);
+  const providers = useMemo(() => catalog?.providers.map((provider) => ({
+    ...query$.data!.providers.find((source) => source.type === provider.type)!,
+    models: provider.models.map((model) => model.source),
+  })) ?? [], [catalog, query$.data]);
+  const primary = catalog?.defaultProvider ?? null;
   const loading = query$.isLoading;
   const refreshing = query$.isFetching;
   const onRefresh = (): void => void query$.refetch();

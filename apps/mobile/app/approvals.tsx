@@ -14,7 +14,6 @@ import { router } from 'expo-router';
 import { CheckCircle2 } from 'lucide-react-native';
 
 import { useActivity, groupApprovals, type Operation } from '../src/features/home/queries';
-import { GATE_PROBE_LIMIT } from '../src/services/api/activityRanking';
 import { DecisionCard } from '../src/components/home/DecisionCard';
 import { chatIdOf, decisionHref } from '../src/components/home/ApprovalsQueue';
 import { useGateDecision } from '../src/components/home/useGateDecision';
@@ -82,9 +81,7 @@ export default function ApprovalsScreen(): React.ReactElement {
       ) : total === 0 ? (
         <EmptyState
           title="Nothing is waiting on you"
-          // Only the most recent and running chats are probed for open gates
-          // (GATE_PROBE_LIMIT); say so in user terms rather than over-promise.
-          message={`Permissions, questions and plan reviews show up here. Only your ${GATE_PROBE_LIMIT} most recent chats are checked — open an older one to see if it is waiting.`}
+          message="Permissions, questions and plan reviews appear here when they need your attention."
           icon={<CheckCircle2 size={24} color={colors.success} />}
         />
       ) : (
@@ -98,7 +95,7 @@ export default function ApprovalsScreen(): React.ReactElement {
                   operation={op}
                   animate={false}
                   onOpen={() => open(op)}
-                  {...(op.gate?.kind === 'tool_permission'
+                  {...(op.gate?.kind === 'tool_permission' && op.gate.permissionAllowed !== false
                     ? { onPermission: (behavior: 'allow' | 'deny') => onPermission(op, behavior) }
                     : {})}
                 />

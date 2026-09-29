@@ -20,6 +20,7 @@ import type { MuxStreamClient } from '@generatorai/client-core';
 
 import { useAuth } from '../auth/AuthProvider';
 import { createMobileMuxClient } from './muxTransport';
+import { AttentionProvider } from './AttentionProvider';
 import { expoStreamFetch } from './expoStreamFetch';
 
 const MuxStreamContext = createContext<MuxStreamClient | null>(null);
@@ -71,5 +72,5 @@ export function MuxStreamProvider({ children }: { children: React.ReactNode }): 
     return () => client.disposeAll();
   }, [client]);
 
-  return <MuxStreamContext.Provider value={client}>{children}</MuxStreamContext.Provider>;
+  return <MuxStreamContext.Provider value={client}><AttentionProvider client={client}>{children}</AttentionProvider></MuxStreamContext.Provider>;
 }
