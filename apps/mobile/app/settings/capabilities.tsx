@@ -85,7 +85,7 @@ export default function CapabilitiesScreen(): React.ReactElement {
     mutationFn: async (vars: { server: McpEntryLike; enabled: boolean }) => {
       const call = globalMcpToggle(vars.server, vars.enabled);
       if (!call) throw new Error('This server cannot be switched from here.');
-      await projectsApi.putJson(call.path, call.body);
+      await projectsApi.updateGlobalMcp(call.source, call.id, call.body);
     },
     onMutate: async ({ server, enabled }) => {
       await queryClient.cancelQueries({ queryKey: ['system', 'mcp-servers'] });

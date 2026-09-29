@@ -13,7 +13,7 @@ import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { File, Folder } from 'lucide-react-native';
 
-import { projectKeys } from '../../../../../src/components/projects/api';
+import { projectKeys } from '@generatorai/client-core';
 import { useProjectsApi } from '../../../../../src/components/projects/useProjectsApi';
 import {
   breadcrumbs,

@@ -60,7 +60,7 @@ import { AddCodebaseSheet } from '../../src/components/projects/AddCodebaseSheet
 import { ProjectActions } from '../../src/components/projects/ProjectActions';
 import { ProjectArtifacts } from '../../src/components/projects/ProjectArtifacts';
 import { ProjectSettingsForm } from '../../src/components/projects/ProjectSettingsForm';
-import type { CodebaseWire, ProjectDetailWire } from '../../src/components/projects/api';
+import type { CodebaseWire, ProjectDetailWire } from '../../src/components/projects/projectActions';
 import {
   anyCloning,
   cloneEvents,

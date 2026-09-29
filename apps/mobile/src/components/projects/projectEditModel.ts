@@ -413,11 +413,11 @@ export function mcpToggleBody(entry: McpEntryLike, enabled: boolean): Record<str
 export function globalMcpToggle(
   entry: McpEntryLike,
   enabled: boolean,
-): { path: string; body: Record<string, unknown> } | null {
+): { source: 'system' | 'custom'; id: string; body: Record<string, unknown> } | null {
   if (!entry.id) return null;
-  const id = encodeURIComponent(entry.id);
-  if (entry.source === 'system') return { path: `/api/system/mcp-servers/system/${id}`, body: { enabled } };
-  if (entry.source === 'custom') return { path: `/api/system/mcp-servers/custom/${id}`, body: mcpToggleBody(entry, enabled) };
+  const id = entry.id;
+  if (entry.source === 'system') return { source: 'system', id, body: { enabled } };
+  if (entry.source === 'custom') return { source: 'custom', id, body: mcpToggleBody(entry, enabled) };
   return null;
 }
 

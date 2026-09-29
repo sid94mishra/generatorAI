@@ -14,7 +14,7 @@ import { useQuery } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { Copy, FileWarning } from 'lucide-react-native';
 
-import { projectKeys } from '../../../../../src/components/projects/api';
+import { projectKeys } from '@generatorai/client-core';
 import { useProjectsApi } from '../../../../../src/components/projects/useProjectsApi';
 import { filePreview, normalizeRelPath } from '../../../../../src/components/projects/projectEditModel';
 import { usePullRefresh } from '../../../../../src/components/runs/usePullRefresh';

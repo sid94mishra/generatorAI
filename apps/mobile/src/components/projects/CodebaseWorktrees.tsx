@@ -23,7 +23,7 @@ import { useToast } from '../ui/Toast';
 import { relativeTime } from '../runs/formatTime';
 import { useFeature } from '../runs/useFeature';
 import { useTheme } from '../../theme/ThemeProvider';
-import { projectKeys } from './api';
+import { projectKeys } from '@generatorai/client-core';
 import { messageOf } from './ProjectActions';
 import { useProjectsApi } from './useProjectsApi';
 import { canRemoveWorktree, cleanupSummary, worktreeStatusLabel, worktreeTone } from './projectEditModel';

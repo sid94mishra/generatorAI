@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
-import { createProjectsApi } from '../components/projects/api';
+import { createAdminApi } from '@generatorai/client-core';
+import { createProjectActions } from '../components/projects/projectActions';
 
 function recorder(status = 200, body: unknown = {}) {
   const calls: Array<{ path: string; method: string; body?: unknown }> = [];
@@ -12,7 +13,7 @@ function recorder(status = 200, body: unknown = {}) {
     });
     return status === 204 ? new Response(null, { status }) : new Response(JSON.stringify(body), { status });
   });
-  return { calls, api: createProjectsApi(fetchImpl) };
+  return { calls, api: createProjectActions(createAdminApi(fetchImpl)) };
 }
 
 describe('project authoring endpoints', () => {
@@ -42,7 +43,7 @@ describe('project authoring endpoints', () => {
       'POST /api/projects/p1/codebases/c1/worktrees/cleanup',
       'GET /api/projects/p1/codebases/c1/files',
       'GET /api/projects/p1/codebases/c1/files?path=src%2Fapp',
-      'GET /api/projects/p1/codebases/c1/files/content?path=src%2Fa%20b.ts',
+      'GET /api/projects/p1/codebases/c1/files/content?path=src%2Fa+b.ts',
     ]);
     expect(calls[3]!.body).toEqual({ alias: 'api', type: 'git-remote', url: 'https://github.com/a/api' });
   });
