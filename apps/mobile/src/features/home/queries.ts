@@ -1,6 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { useQueries, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '@generatorai/client-core';
+import { useAuth } from '../../services/auth/AuthProvider';
 import { useApi } from '../../services/api/useApi';
 import { useAttention } from '../../services/stream/AttentionProvider';
 import { useMuxStream } from '../../services/stream/MuxStreamProvider';
@@ -11,6 +12,7 @@ export { filterOperations, groupApprovals, needsYouCount, type ActivityFilter, t
 
 export function useActivity() {
   const api = useApi();
+  const { serverId } = useAuth();
   const attention = useAttention();
   const stream = useMuxStream();
   const client = useQueryClient();
@@ -26,7 +28,7 @@ export function useActivity() {
     void client.invalidateQueries({ queryKey: ['activity', 'recent'] });
     void client.invalidateQueries({ queryKey: ['stats'] });
   }, { filter: ['attention.remove'] }), [stream, client]);
-  const operations = useMemo(() => activityOperations(attention.snapshot, recent.data?.items ?? []), [attention.snapshot, recent.data]);
+  const operations = useMemo(() => activityOperations(attention.snapshot, recent.data?.items ?? [], serverId), [attention.snapshot, recent.data, serverId]);
   const results = [health, chats, automations, recent];
   return {
     operations, health: health.data, summary: summary.data, summaryError: summary.error,

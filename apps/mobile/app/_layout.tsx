@@ -33,10 +33,11 @@ import { goBack } from '../src/components/ui/Screen';
 
 import { ThemeProvider, useTheme } from '../src/theme/ThemeProvider';
 import { PreferencesProvider } from '../src/services/prefs/preferences';
+import { useLinkRouting } from '../src/services/navigation/useLinkRouting';
 import { consumeLastRoute, useLastRoute } from '../src/services/prefs/lastRoute';
 import { AuthProvider, useAuth } from '../src/services/auth/AuthProvider';
 import { AppLockGate } from '../src/services/auth/AppLock';
-import { Spinner, ToastProvider, ContextMenuProvider, Button, ErrorState } from '../src/components/ui';
+import { Spinner, ToastProvider, useToast, ContextMenuProvider, Button, ErrorState } from '../src/components/ui';
 import { usePushNotifications } from '../src/services/notifications/usePushNotifications';
 import { MuxStreamProvider } from '../src/services/stream/MuxStreamProvider';
 import { useGlobalStream } from '../src/services/stream/useGlobalStream';
@@ -114,6 +115,8 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
   // rotation or a notification tap is handled no matter which route is open.
   // The hook no-ops until the session is authenticated.
   usePushNotifications();
+  const toast = useToast();
+  const hasIncomingLink = useLinkRouting((message) => toast({ message, tone: 'error' }));
 
   // W09-a — the `global` scope, subscribed once for the app rather than once
   // per list tab. Without it the Chats / Runs / Automations lists have no live
@@ -134,14 +137,14 @@ function AuthLifecycle({ children }: { children: React.ReactNode }): React.React
     if (initializing || storageLocked || restoredRef.current) return;
     restoredRef.current = true;
     const target = consumeLastRoute(serverId);
-    if (!target) return;
+    if (!target || hasIncomingLink) return;
     if (state.status !== 'authenticated') return;
     if (pathname !== '/' && pathname !== '/(tabs)') return;
     // Pushed on top of the tabs, not swapped in for them: `replace` left the
     // restored screen as the only history entry, so back closed the app.
     router.replace('/(tabs)');
     setTimeout(() => router.push(target as Parameters<typeof router.push>[0]), 0);
-  }, [initializing, storageLocked, state.status, serverId, pathname]);
+  }, [initializing, storageLocked, state.status, serverId, pathname, hasIncomingLink]);
 
   return <>{children}</>;
 }

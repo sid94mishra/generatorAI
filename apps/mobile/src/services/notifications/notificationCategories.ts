@@ -117,7 +117,13 @@ export function intentFromResponse(
   defaultActionIdentifier: string,
 ): NotificationIntent {
   const payload = asRecord(data);
-  const route = safeRoute(payload.route);
+  const safe = safeRoute(payload.route);
+  const routeServerId = safe ? new URL(safe, 'https://local.invalid').searchParams.get('server') : null;
+  const serverId = safeId(payload.serverId ?? routeServerId);
+  if (payload.serverId !== undefined && (!serverId || !/^[A-Za-z0-9_-]+$/.test(serverId))) return { type: 'ignore', reason: 'unsafe-route' };
+  const target = safe ? new URL(safe, 'https://local.invalid') : null;
+  if (target && serverId) target.searchParams.set('server', serverId);
+  const route = target ? target.pathname + target.search : null;
 
   const openOrIgnore = (): NotificationIntent => {
     if (route) return { type: 'open', route };
@@ -147,8 +153,6 @@ export function intentFromResponse(
     return openOrIgnore();
   }
 
-  const serverId = safeId(payload.serverId);
-  if (payload.serverId !== undefined && !serverId) return openOrIgnore();
   return { type: 'decide', chatId, interactionId, behavior, route, ...(serverId ? { serverId } : {}) };
 }
 

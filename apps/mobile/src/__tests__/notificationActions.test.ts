@@ -55,6 +55,11 @@ describe('approval category', () => {
 });
 
 describe('intentFromResponse — permission prompt', () => {
+  it('pins actions and fallback navigation to the notification server', () => {
+    expect(intentFromResponse('approve', { ...permissionData, serverId: 'B' }, TAP)).toMatchObject({ type: 'decide', serverId: 'B', route: '/chats/c1/gate/i1?server=B' });
+    expect(intentFromResponse('approve', { ...permissionData, route: '/chats/c1/gate/i1?server=B' }, TAP)).toMatchObject({ type: 'decide', serverId: 'B' });
+    expect(intentFromResponse(TAP, { ...permissionData, serverId: 'B' }, TAP)).toEqual({ type: 'open', route: '/chats/c1/gate/i1?server=B' });
+  });
   it('never falls back to an active-server decision for an invalid explicit identity', () => {
     expect(intentFromResponse('approve', { ...permissionData, serverId: '../other' }, TAP).type).not.toBe('decide');
   });

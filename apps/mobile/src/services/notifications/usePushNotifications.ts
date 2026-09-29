@@ -15,7 +15,7 @@ import { useEffect, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
 import * as Notifications from 'expo-notifications';
 import Constants from 'expo-constants';
-import { router } from 'expo-router';
+import { linkQueue } from '../navigation/links';
 
 import { useAuth } from '../auth/AuthProvider';
 import { getAuthenticatedFetch } from '../auth/backgroundFetch';
@@ -47,6 +47,7 @@ export function usePushNotifications(): void {
     }
 
     let cancelled = false;
+    registeredToken.current = null;
 
     const register = async (): Promise<void> => {
       if (Platform.OS === 'web') {
@@ -136,7 +137,7 @@ export function usePushNotifications(): void {
     if (Platform.OS === 'web') return;
 
     const open = (route: string | null): void => {
-      if (route) router.push(route as never);
+      if (route) linkQueue.enqueue(route);
     };
 
     /**
