@@ -33,3 +33,9 @@ Implementation complete; native acceptance remains pending MV-07.
 - Initial unrestricted Vitest concurrency on the 8 GB host caused two 5-second timeouts while native compilation ran. Limiting the runner to two workers fixed both; no timeout threshold or assertion changed.
 - Lint integration tests and strict design audit run again after migration; logs `.expo/m1-09-*.log`. Existing allowances follow their moved file; only the 17 newly exposed, unchanged legacy boundary edges were added (11 files).
 - Both native app walkthroughs / characterization smoke still pending while M1-06 rebuilds complete (MV-07/MV-10). Pure test passes do not establish native acceptance.
+
+## 2026-09-29 native restart repair
+
+The M1-06 iOS native rebuild succeeded, installed and launched; fingerprint recorded. Dev-client Metro connection then failed because Node 26 resolved localhost to IPv6 only (`lsof`: `[::1]:8081`; IPv4 curl refused). Restarted with IPv4-first resolution and added the same behavior to the mobile start script (MD-111). Native Storybook/app verification remains pending until observed.
+
+IPv4 retest passed: Metro now listens on `127.0.0.1:8081` and `/status` returns `packager-status:running`. Rebuilt simulator app had launched successfully; its connection can now be retried against the expected address.
