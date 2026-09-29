@@ -1,3 +1,4 @@
+import { domainStatusTone, domainStatusLabel } from '../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // Automation detail — pure view logic.
 //
@@ -156,35 +157,11 @@ export function isExecutionActive(status: string | undefined | null): boolean {
 }
 
 export function executionTone(status: string | undefined | null): ExecutionTone {
-  switch (status) {
-    case 'completed':
-      return 'success';
-    case 'failed':
-      return 'danger';
-    // A batch that mostly failed must not read as a success.
-    case 'partial':
-      return 'warning';
-    case 'pending':
-    case 'running':
-      return 'info';
-    default:
-      return 'neutral';
-  }
+  return domainStatusTone('automationExecution', status);
 }
 
 export function executionStatusLabel(status: string | undefined | null): string {
-  switch (status) {
-    case 'partial':
-      return 'Partly failed';
-    case 'pending':
-      return 'Starting';
-    case undefined:
-    case null:
-    case '':
-      return 'Unknown';
-    default:
-      return status.charAt(0).toUpperCase() + status.slice(1).replace(/_/g, ' ');
-  }
+  return domainStatusLabel('automationExecution', status || null);
 }
 
 /** "3/5 done · 1 failed", or null when the server reported no counts. */

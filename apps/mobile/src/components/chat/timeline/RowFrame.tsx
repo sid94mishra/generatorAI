@@ -1,3 +1,4 @@
+import { stepStatus, statusColorToken } from '../../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // RowFrame — the frame every activity row is drawn in.
 //
@@ -258,14 +259,5 @@ export function statusColor(
   status: 'running' | 'done' | 'failed' | 'waiting' | 'pending',
   colors: Record<string, string>,
 ): string {
-  switch (status) {
-    case 'running':
-      return colors['primary']!;
-    case 'failed':
-      return colors['danger']!;
-    case 'waiting':
-      return colors['primary']!;
-    default:
-      return colors['muted-foreground']!;
-  }
+  return colors[statusColorToken(stepStatus(status))]!;
 }

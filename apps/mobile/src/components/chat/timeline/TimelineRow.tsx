@@ -114,9 +114,7 @@ const FAMILY_ICON: Record<ToolFamily, IconComponent> = {
   other: Wrench,
 };
 
-function toneFor(status: StepStatus): RowTone {
-  if (status === 'failed') return 'danger';
-  if (status === 'waiting') return 'primary';
+function toneFor(_status: StepStatus): RowTone {
   return 'default';
 }
 
@@ -508,7 +506,7 @@ export function ToolStepRow({ step, nested = false }: { step: ToolStep; nested?:
   const stepCount = isAgent ? countSteps(step.children) : 0;
   const Icon: IconComponent = isAgent ? Bot : step.family === 'other' ? KIND_ICON[step.kind] : FAMILY_ICON[step.family];
   // Colour means status: a sub-agent is tinted only while it runs.
-  const tone: RowTone = isAgent && step.status === 'running' && !nested ? 'info' : toneFor(step.status);
+  const tone: RowTone = toneFor(step.status);
   const color =
     isAgent && step.status === 'running'
       ? colors.info

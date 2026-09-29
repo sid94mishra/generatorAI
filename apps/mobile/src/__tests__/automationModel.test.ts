@@ -105,14 +105,14 @@ describe('executions', () => {
   it('maps tone so partial never reads as success', () => {
     expect(executionTone('completed')).toBe('success');
     expect(executionTone('failed')).toBe('danger');
-    expect(executionTone('partial')).toBe('warning');
+    expect(executionTone('partial')).toBe('danger');
     expect(executionTone('running')).toBe('info');
     expect(executionTone('cancelled')).toBe('neutral');
   });
 
   it('labels statuses for people', () => {
     expect(executionStatusLabel('partial')).toBe('Partly failed');
-    expect(executionStatusLabel('pending')).toBe('Starting');
+    expect(executionStatusLabel('pending')).toBe('Queued');
     expect(executionStatusLabel('cancelled')).toBe('Cancelled');
     expect(executionStatusLabel(undefined)).toBe('Unknown');
   });

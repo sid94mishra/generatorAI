@@ -22,3 +22,11 @@
 - Route/data: existing run/stage, background task, plan/review, automation and SCM status renderers. No new endpoints or fake state.
 - Replace local domain-status tone maps with shared `resolveStatus`/`STATUS_STATE_DEFS`; keep only a legacy token-name presentation bridge until M3/M4. Worktree metadata is neutral per MD-25. The MP-07 native badge kit belongs to M4-03.
 - Preserve action/polling predicates; those are behavior rather than visual tone maps. Update tests where old tone assertions conflict with MD-25. Native coverage remains explicitly pending if rebuilds are unavailable.
+
+## M2-02 checkpoint (2026-09-29)
+
+- Removed duplicated domain-tone tables from run/stage, work/project rows, automation, plan/review, background tasks, SCM steps/results, CI checks, codebase health and file-change renderers. Shared eight-state/health/change definitions drive a small legacy token-name bridge. Worktree metadata is neutral (MD-25). Normal transcript rows no longer acquire a state-tinted card frame.
+- Added the React-free transcript-step mapping separately: waiting here is a human gate, unlike a workflow timer. Shared helper typecheck and 43 related tests pass.
+- Mobile typecheck, lint/design ratchet and 11 related files / 135 tests pass. Assertions updated only where the old colors/copy contradict the shared decision (paused neutral, partial failed, queued automation).
+- Acceptance remains open: MV-13 records PR lifecycle/mergeability and transport-specific status descriptions without shared counterparts, remaining legacy host tints, and native status verification. Continue independent composer adoption under MD-107; do not call M2-02 fully complete.
+- iOS native rebuild succeeded; installation/launch now in progress. Android native build remains next, sequentially.

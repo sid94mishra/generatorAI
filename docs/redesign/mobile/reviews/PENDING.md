@@ -21,6 +21,8 @@ Owner-authorized continuation: MD-107 (2026-09-29). These items remain required 
 | MV-11 | pending | M2-01 native transcript/turn regression walkthrough and paired Maestro flows. Shared model and compact adapter implemented; rebuild still running. | Paired chat/approval/stop flows after the native clients finish; preserve M1 failures separately. |
 | MV-12 | pending | Existing design-tokens density assertion fails for fixed-height `meter`: 533/534 tests pass; generated-token check passes. No token source was changed in M2. | Reconcile the fixed-height token/test expectation during M3-03; retain desktop values. |
 
+| MV-13 | pending | M2-02 replaced run/stage, automation, background-task, plan/review, SCM-step/result, CI-check, codebase-health and file-change maps; shared bridge tests pass. PR lifecycle/mergeability and transport-specific descriptions lack matching shared domain adapters; several legacy card/icon tints remain. Native status walkthrough also pending. | Finish those adapters/presentation replacements with M5 connection UI and M6/M7 SCM/transcript ports; M2-02 acceptance stays open until a source scan and native checks pass. |
+
 ## 2026-09-29 continuation triage
 
 Rechecked native host code: the legacy Sheet uses an animated RN Modal; WorkbenchSheet retains heavy panes in parked absolute-fill views. The Android software-modal/GPU hypothesis and iOS animation/lifecycle hypothesis are not proven fixes. Earlier targeted repair attempts restored sandbox terminal attachment but not usable rendering, and three notification-opening retries failed. Preserve these findings for the planned host replacements instead of marking the characterization green. Sandbox and Metro are healthy; 21 GiB free. Continue M1-05.

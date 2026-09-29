@@ -1,3 +1,4 @@
+import { CHANGE_KIND } from '@generatorai/shared/client';
 // ────────────────────────────────────────────────────────────────
 // Change status presentation — ONE table for every Changes surface.
 //
@@ -13,33 +14,16 @@ import type { ChangeFileEntry } from '@generatorai/client-core';
 
 export type ChangeStatus = ChangeFileEntry['status'];
 
-export const STATUS_TONE: Record<ChangeStatus, string> = {
-  added: 'text-success',
-  modified: 'text-warning',
-  deleted: 'text-danger',
-  renamed: 'text-info',
-};
-
-export const STATUS_BG: Record<ChangeStatus, string> = {
-  added: 'bg-success-muted',
-  modified: 'bg-warning-muted',
-  deleted: 'bg-danger-muted',
-  renamed: 'bg-info-muted',
-};
-
-export const STATUS_LETTER: Record<ChangeStatus, string> = {
-  added: 'A',
-  modified: 'M',
-  deleted: 'D',
-  renamed: 'R',
-};
-
-export const STATUS_TITLE: Record<ChangeStatus, string> = {
-  added: 'Added',
-  modified: 'Modified',
-  deleted: 'Deleted',
-  renamed: 'Renamed',
-};
+const TONE_TEXT = { ok: 'text-success', warn: 'text-warning', err: 'text-danger', run: 'text-info' } as const;
+const TONE_BG = { ok: 'bg-success-muted', warn: 'bg-warning-muted', err: 'bg-danger-muted', run: 'bg-info-muted' } as const;
+const CHANGE_STATUSES: ChangeStatus[] = ['added', 'modified', 'deleted', 'renamed'];
+function fromChanges(value: (status: ChangeStatus) => string): Record<ChangeStatus, string> {
+  return Object.fromEntries(CHANGE_STATUSES.map(status => [status, value(status)])) as Record<ChangeStatus, string>;
+}
+export const STATUS_TONE = fromChanges(status => TONE_TEXT[CHANGE_KIND[status].tone]);
+export const STATUS_BG = fromChanges(status => TONE_BG[CHANGE_KIND[status].tone]);
+export const STATUS_LETTER = fromChanges(status => CHANGE_KIND[status].letter);
+export const STATUS_TITLE = fromChanges(status => CHANGE_KIND[status].label);
 
 /** Web's `CHECKPOINT_KIND_LABEL`, so both apps name the same snapshot alike. */
 export const CHECKPOINT_LABEL: Record<string, string> = {

@@ -1,3 +1,4 @@
+import { changeKind, changeTone, domainStatusTone } from '../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // Pull-request presentation, as data.
 //
@@ -76,19 +77,7 @@ export function checksSummaryLabel(checks: ChecksSummary | undefined): string | 
 }
 
 export function checksTone(checks: ChecksSummary | undefined): PrTone {
-  if (!checks) return 'neutral';
-  switch (checks.conclusion) {
-    case 'success':
-      return 'success';
-    case 'failure':
-      return 'danger';
-    case 'pending':
-      return 'info';
-    case 'cancelled':
-      return 'warning';
-    default:
-      return 'neutral';
-  }
+  return domainStatusTone('ciCheck', checks?.conclusion);
 }
 
 export interface MergeabilityView {
@@ -119,29 +108,11 @@ export function fileStat(file: Pick<PullRequestFile, 'additions' | 'deletions'>)
 }
 
 export function fileStatusLetter(status: PullRequestFile['status']): string {
-  switch (status) {
-    case 'added':
-      return 'A';
-    case 'removed':
-      return 'D';
-    case 'renamed':
-      return 'R';
-    default:
-      return 'M';
-  }
+  return changeKind(status)?.letter ?? 'M';
 }
 
 export function fileStatusTone(status: PullRequestFile['status']): PrTone {
-  switch (status) {
-    case 'added':
-      return 'success';
-    case 'removed':
-      return 'danger';
-    case 'renamed':
-      return 'info';
-    default:
-      return 'warning';
-  }
+  return changeTone(status);
 }
 
 export type PatchRowKind = 'hunk' | 'add' | 'del' | 'context' | 'meta';

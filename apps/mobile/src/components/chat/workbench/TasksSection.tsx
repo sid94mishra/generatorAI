@@ -1,3 +1,4 @@
+import { domainStatusTone, domainStatusLabel } from '../../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // Workbench › Tasks.
 //
@@ -35,22 +36,9 @@ import { useCapability } from '../../review';
 
 const ACTIVE = new Set(['spawned', 'running', 'reviewing', 'queued', 'needs_review']);
 
-const STATUS_LABEL: Record<string, string> = {
-  running: 'Running',
-  needs_review: 'Needs review',
-  completed: 'Completed',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-  spawned: 'Starting',
-};
 
 function tone(status: string): Tone {
-  if (status === 'completed' || status === 'done') return 'success';
-  if (status === 'failed' || status === 'error') return 'danger';
-  if (status === 'needs_review') return 'warning';
-  if (status === 'cancelled') return 'neutral';
-  if (ACTIVE.has(status)) return 'info';
-  return 'neutral';
+  return domainStatusTone('backgroundTask', status);
 }
 
 export function TasksSection({ chatId, active = true }: { chatId: string; active?: boolean }): React.ReactElement {
@@ -114,7 +102,7 @@ export function TasksSection({ chatId, active = true }: { chatId: string; active
           return (
             <View key={task.taskId} className="border-b border-border-muted">
               <Touchable
-                accessibilityLabel={`${task.taskName}, ${STATUS_LABEL[task.status] ?? task.status}`}
+                accessibilityLabel={`${task.taskName}, ${domainStatusLabel('backgroundTask', task.status)}`}
                 accessibilityState={{ expanded: isOpen }}
                 haptic="tap"
                 scale="none"
@@ -138,7 +126,7 @@ export function TasksSection({ chatId, active = true }: { chatId: string; active
                   </Text>
                 </View>
                 {running ? <Spinner /> : null}
-                <Badge label={STATUS_LABEL[task.status] ?? task.status} tone={tone(task.status)} />
+                <Badge label={domainStatusLabel('backgroundTask', task.status)} tone={tone(task.status)} />
               </Touchable>
               {isOpen ? (
                 <View className="gap-2 border-t border-border-muted px-3.5 pb-3 pt-2">

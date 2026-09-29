@@ -1,3 +1,4 @@
+import { domainStatusTone, domainStatusLabel } from '../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // PlanSheet — a plan's revisions, document, comments and decision.
 //
@@ -26,7 +27,7 @@ import { Sheet } from '../ui/Sheet';
 import { Button, IconButton } from '../ui/Button';
 import { Chip } from '../ui/Chip';
 import { Field } from '../ui/Form';
-import { Badge, type Tone } from '../ui/primitives';
+import { Badge } from '../ui/primitives';
 import { EmptyState, ErrorState, LoadingState } from '../ui/States';
 import { useToast } from '../ui/Toast';
 import { haptics } from '../ui/haptics';
@@ -40,19 +41,9 @@ import {
 } from './planDecisions';
 import { useCapability } from './useScopes';
 
-const STATUS_TONE: Record<string, Tone> = {
-  awaiting_review: 'primary',
-  approved: 'success',
-  changes_requested: 'warning',
-  rejected: 'danger',
-  expired: 'neutral',
-  superseded: 'neutral',
-  recorded: 'neutral',
-  drafting: 'info',
-};
 
 export function statusLabel(status: string): string {
-  return status.replace(/_/g, ' ').replace(/^./, (c) => c.toUpperCase());
+  return domainStatusLabel('plan', status);
 }
 
 /**
@@ -281,7 +272,7 @@ export function PlanBody({
         <View className="gap-2">
           <Text className="text-xl font-bold text-foreground">{selected.title}</Text>
           <View className="flex-row flex-wrap items-center gap-2">
-            <Badge label={statusLabel(selected.status)} tone={STATUS_TONE[selected.status] ?? 'neutral'} />
+            <Badge label={statusLabel(selected.status)} tone={domainStatusTone('plan', selected.status)} />
             {doc && doc.revisions.length > 1 ? (
               <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 6 }}>
                 {doc.revisions.map((r) => (

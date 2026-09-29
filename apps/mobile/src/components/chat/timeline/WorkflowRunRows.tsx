@@ -1,3 +1,4 @@
+import { domainStatusTone, domainStatusLabel } from '../../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // WorkflowRunRows — what a chat's workflow tools produced, as transcript
 // rows under the call (P06 WP-6.2; the web's WorkflowRunCards).
@@ -43,25 +44,9 @@ import { useApi } from '../../../services/api/useApi';
 import { RowFrame, type RowTone } from './RowFrame';
 import { useTimelineActions } from './TimelineActions';
 
-const STATUS_LABEL: Record<string, string> = {
-  created: 'Created',
-  starting: 'Starting',
-  running: 'Running',
-  paused: 'Paused',
-  waiting: 'Waiting',
-  finalizing: 'Finalizing',
-  cancelling: 'Cancelling',
-  completed: 'Completed',
-  failed: 'Failed',
-  cancelled: 'Cancelled',
-};
 
 function statusTone(status: string): Tone {
-  if (status === 'completed') return 'success';
-  if (status === 'failed') return 'danger';
-  if (status === 'paused' || status === 'waiting') return 'warning';
-  if (status === 'cancelled') return 'neutral';
-  return 'info';
+  return domainStatusTone('workflowRun', status);
 }
 
 function errorText(err: unknown): string {
@@ -116,11 +101,11 @@ export function WorkflowRunRow({ run, callId }: { run: WorkflowRunToolCard; call
       icon={<Workflow size={16} color={status === 'failed' ? colors.danger : colors.primary} />}
       title={name}
       detail={pending.length > 0 ? `${pending.length} decision${pending.length === 1 ? '' : 's'} waiting for you` : progress}
-      right={<Badge label={STATUS_LABEL[status] ?? status} tone={statusTone(status)} />}
+      right={<Badge label={domainStatusLabel('workflowRun', status)} tone={statusTone(status)} />}
       tone={tone}
       expanded={open}
       onToggle={() => setExpanded(!open)}
-      accessibilityLabel={`Workflow run ${name}, ${STATUS_LABEL[status] ?? status}`}
+      accessibilityLabel={`Workflow run ${name}, ${domainStatusLabel('workflowRun', status)}`}
     >
       <View className="gap-2 px-3 py-2.5">
         {progress && pending.length > 0 ? <Text className="text-xs text-muted-foreground">{progress}</Text> : null}

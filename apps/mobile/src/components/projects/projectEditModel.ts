@@ -251,10 +251,7 @@ export function settingsPatch(saved: ProjectSettingsDraft, draft: ProjectSetting
 
 export type WorktreeTone = 'neutral' | 'info' | 'warning' | 'success';
 
-export function worktreeTone(status: string | null | undefined): WorktreeTone {
-  if (status === 'active') return 'info';
-  if (status === 'orphaned' || status === 'cleanup-pending') return 'warning';
-  if (status === 'completed') return 'success';
+export function worktreeTone(_status: string | null | undefined): WorktreeTone {
   return 'neutral';
 }
 

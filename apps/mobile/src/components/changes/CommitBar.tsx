@@ -110,7 +110,7 @@ export function CommitBar({
     const url = outcome.url;
     toast({
       message: outcome.message,
-      variant: outcome.tone,
+      variant: outcome.tone === 'neutral' ? 'info' : outcome.tone,
       ...(url ? { action: { label: 'Open PR', onPress: () => void Linking.openURL(url) } } : {}),
     });
     if (flow.status === 'ok') setFlowOpen(false);

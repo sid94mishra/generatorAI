@@ -1,3 +1,4 @@
+import { runStatusTone, healthTone } from '../../theme/status';
 // ────────────────────────────────────────────────────────────────
 // Project model — what the project overview and codebase screens show.
 //
@@ -12,7 +13,7 @@
 
 import { epochOr, type Timestamp } from '@generatorai/client-core';
 
-import { isActive, needsAttention } from '../runs/statusStyle';
+import { needsAttention } from '../runs/statusStyle';
 
 export type ProjectTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
 
@@ -50,11 +51,7 @@ export function runsNeedingYou<T extends ProjectRunLike & { status: string; upda
 
 /** One status tone per run row. */
 export function runTone(status: string): ProjectTone {
-  if (status === 'failed') return 'danger';
-  if (needsAttention(status)) return 'warning';
-  if (isActive(status)) return 'info';
-  if (status === 'completed') return 'success';
-  return 'neutral';
+  return runStatusTone(status);
 }
 
 // ── Ordering ────────────────────────────────────────────────────
@@ -163,11 +160,7 @@ export function isQuietCodebaseStatus(status: string | undefined | null): boolea
 }
 
 export function codebaseStatusTone(status: string | undefined | null): ProjectTone {
-  if (status === 'ready' || status === 'synced') return 'success';
-  if (status === 'error' || status === 'failed') return 'danger';
-  if (status === 'stale') return 'warning';
-  if (status === 'syncing' || status === 'cloning' || status === 'pending') return 'info';
-  return 'neutral';
+  return healthTone('codebase', status);
 }
 
 // ── Defensive fact extraction ───────────────────────────────────

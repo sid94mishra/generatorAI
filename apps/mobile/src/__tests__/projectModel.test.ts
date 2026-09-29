@@ -38,7 +38,7 @@ describe('projectRuns', () => {
 
   it('gives each run exactly one tone', () => {
     expect(runTone('failed')).toBe('danger');
-    expect(runTone('paused')).toBe('warning');
+    expect(runTone('paused')).toBe('neutral');
     expect(runTone('running')).toBe('info');
     expect(runTone('completed')).toBe('success');
     expect(runTone('cancelled')).toBe('neutral');
