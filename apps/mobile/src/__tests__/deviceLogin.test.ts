@@ -1,8 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 
 import {
   countdown,
-  createDeviceLoginApi,
   deviceConnectAvailability,
   expiresAtMs,
   interpretDeviceStatus,
@@ -79,17 +78,3 @@ describe('device sign-in polling', () => {
   });
 });
 
-describe('device sign-in endpoints', () => {
-  it('starts a GitHub login and polls by id', async () => {
-    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 200 }));
-    const api = createDeviceLoginApi(fetchImpl);
-    await api.start(' ');
-    await api.poll('dl-1/x');
-    expect(fetchImpl).toHaveBeenNthCalledWith(
-      1,
-      '/api/source-control/accounts/device/start',
-      expect.objectContaining({ method: 'POST', body: JSON.stringify({ provider: 'github' }) }),
-    );
-    expect(fetchImpl).toHaveBeenNthCalledWith(2, '/api/source-control/accounts/device/dl-1%2Fx', undefined);
-  });
-});

@@ -38,7 +38,7 @@ import { ErrorState } from '../../../../../../src/components/ui/States';
 import { SkeletonList } from '../../../../../../src/components/ui/Skeleton';
 import { Touchable } from '../../../../../../src/components/ui/Touchable';
 import { useToast } from '../../../../../../src/components/ui/Toast';
-import { scmKeys } from '../../../../../../src/components/scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../../../../../../src/components/scm/useScmApi';
 import {
   checksSummaryLabel,

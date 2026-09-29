@@ -11,7 +11,7 @@ import { useApi } from '../../services/api/useApi';
 import { useAuth } from '../../services/auth/AuthProvider';
 import { checkFeature } from '../../services/auth/featureGate';
 import { useCapability } from '../review/useScopes';
-import { scmKeys } from '../scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../scm/useScmApi';
 import { useChangesSummary } from '../chat/panes/useChangesSummary';
 import { COMPUTER_SCOPE, computerFeature } from '../chat/panes/paneModel';

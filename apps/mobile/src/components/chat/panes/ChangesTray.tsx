@@ -31,7 +31,7 @@ import type { ChangeFileEntry, ChangeSummary } from '@generatorai/client-core';
 
 import { useApi } from '../../../services/api/useApi';
 import { useCapability } from '../../review';
-import { scmKeys } from '../../scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { ConfirmSheet } from '../../ui/ActionSheet';
 import { Collapsible, useChevronTurn } from '../../ui/Collapsible';
 import { IconButton } from '../../ui/Button';

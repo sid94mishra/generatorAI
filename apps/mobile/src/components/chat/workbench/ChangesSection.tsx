@@ -36,7 +36,7 @@ import { Button, IconButton } from '../../ui/Button';
 import { Chip } from '../../ui/Chip';
 import { ConfirmSheet } from '../../ui/ActionSheet';
 import { keepRef, keptLabel, splitKept, undoAllMessage } from '../../changes/keptModel';
-import { scmKeys } from '../../scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { EmptyState, ErrorState } from '../../ui/States';
 import { SkeletonList } from '../../ui/Skeleton';
 import { useToast } from '../../ui/Toast';

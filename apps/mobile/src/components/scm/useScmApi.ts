@@ -1,15 +1,5 @@
-// The source-control client, bound to the authenticated fetch.
-//
-// Separate from `api.ts` so the endpoint table itself stays free of React
-// and of the auth provider — `createScmApi` is then testable against a
-// mocked fetch in the node test environment.
+import { useApi } from '../../services/api/useApi';
 
-import { useMemo } from 'react';
-
-import { useAuth } from '../../services/auth/AuthProvider';
-import { createScmApi, type ScmApi } from './api';
-
-export function useScmApi(): ScmApi {
-  const { fetch } = useAuth();
-  return useMemo(() => createScmApi(fetch), [fetch]);
+export function useScmApi() {
+  return useApi().scm;
 }

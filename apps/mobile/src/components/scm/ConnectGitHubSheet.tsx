@@ -13,7 +13,7 @@
 // Pure rules: `deviceLogin.ts`.
 // ────────────────────────────────────────────────────────────────
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
@@ -21,8 +21,8 @@ import * as WebBrowser from 'expo-web-browser';
 import { CheckCircle2, Copy, ExternalLink, Github, XCircle } from 'lucide-react-native';
 import type { DeviceLoginStart } from '@generatorai/shared';
 
-import { ApiError } from '../../services/api/http';
-import { useAuth } from '../../services/auth/AuthProvider';
+import { ApiError } from '@generatorai/client-core';
+import { useApi } from '../../services/api/useApi';
 import { useTheme } from '../../theme/ThemeProvider';
 import { Button } from '../ui/Button';
 import { Sheet } from '../ui/Sheet';
@@ -30,11 +30,10 @@ import { Spinner } from '../ui/States';
 import { Touchable } from '../ui/Touchable';
 import { haptics } from '../ui/haptics';
 import { useToast } from '../ui/Toast';
-import { scmKeys } from './api';
+import { scmKeys } from '@generatorai/client-core';
 import {
   NOT_CONFIGURED_REASON,
   countdown,
-  createDeviceLoginApi,
   expiresAtMs,
   formatUserCode,
   interpretDeviceStatus,
@@ -51,8 +50,7 @@ export function ConnectGitHubSheet({ visible, onClose }: { visible: boolean; onC
 }
 
 function ConnectBody({ onClose }: { onClose: () => void }): React.ReactElement {
-  const { fetch } = useAuth();
-  const api = useMemo(() => createDeviceLoginApi(fetch), [fetch]);
+  const api = useApi().scm.deviceLogin;
   const queryClient = useQueryClient();
   const toast = useToast();
   const { colors } = useTheme();

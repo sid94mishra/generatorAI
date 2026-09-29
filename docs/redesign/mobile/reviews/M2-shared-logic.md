@@ -51,3 +51,5 @@
 - MPaneChanges dark/light viewed, both platforms. MD-12/14 and existing server source-control contracts; no presentation changes.
 - Add shared typed methods/query keys, remove mobile endpoint twins, retain the authenticated transport. Native request helpers and remaining projects/review/capture endpoints follow.
 - First shared addition: `createApiClient().scm`, including the server-held GitHub device-code login. Ten migrated contracts plus device-login contract pass; full client-core 36 files / 751 tests pass, typecheck and lint pass (existing warnings). Mobile adoption and zero-path acceptance are not yet complete.
+
+SCM native adoption: deleted the 180-line mobile endpoint table and its moved contract tests. All SCM screens/invalidation now use shared keys and `useApi().scm`; GitHub sign-in uses its shared device-login methods and ApiError. Typecheck, lint, design ratchet and 18 related mobile tests pass. iOS startup fixed; live flow retest continues. Remaining M2-04 API families are still in progress.

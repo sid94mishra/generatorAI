@@ -27,7 +27,7 @@ import { PlainScroll } from '../../../src/components/ui/Screen';
 import { EmptyState, ErrorState } from '../../../src/components/ui/States';
 import { SkeletonList } from '../../../src/components/ui/Skeleton';
 import { Touchable } from '../../../src/components/ui/Touchable';
-import { scmKeys, type PullRequestListState } from '../../../src/components/scm/api';
+import { scmKeys, type PullRequestListState } from '@generatorai/client-core';
 import { useScmApi } from '../../../src/components/scm/useScmApi';
 import {
   PR_STATE_SEGMENTS,

@@ -41,7 +41,7 @@ import { relativeTime } from '../../src/components/runs/formatTime';
 import { runTitle } from '../../src/components/runs/runModel';
 import { statusLabel } from '../../src/components/runs/statusStyle';
 import { usePullRefresh } from '../../src/components/runs/usePullRefresh';
-import { scmKeys } from '../../src/components/scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../../src/components/scm/useScmApi';
 import { matchesState, prStateLabel, prStateTone } from '../../src/components/scm/prModel';
 import {

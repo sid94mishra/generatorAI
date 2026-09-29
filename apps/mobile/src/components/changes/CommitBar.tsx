@@ -32,7 +32,7 @@ import { useToast } from '../ui/Toast';
 import { useCapability } from '../review/useScopes';
 import { ConflictSheet } from '../scm/ConflictSheet';
 import { ScmFlowSheet } from '../scm/ScmFlowSheet';
-import { scmKeys } from '../scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../scm/useScmApi';
 import {
   actionReason,

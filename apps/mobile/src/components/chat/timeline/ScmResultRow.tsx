@@ -29,7 +29,7 @@ import { queryKeys } from '@generatorai/client-core';
 import { Button } from '../../ui/Button';
 import { useToast } from '../../ui/Toast';
 import { useTheme } from '../../../theme/ThemeProvider';
-import { scmKeys } from '../../scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { useScmApi } from '../../scm/useScmApi';
 import {
   blockedReason,

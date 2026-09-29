@@ -27,7 +27,7 @@ import { EmptyState, ErrorState } from '../../src/components/ui/States';
 import { SkeletonList } from '../../src/components/ui/Skeleton';
 import { Screen } from '../../src/components/ui/Screen';
 import { useToast } from '../../src/components/ui/Toast';
-import { scmKeys } from '../../src/components/scm/api';
+import { scmKeys } from '@generatorai/client-core';
 import { ConnectGitHubSheet } from '../../src/components/scm/ConnectGitHubSheet';
 import { deviceConnectAvailability } from '../../src/components/scm/deviceLogin';
 import { useFeature } from '../../src/components/runs/useFeature';

@@ -17,7 +17,7 @@ import type {
   ScmPullRequestState as PullRequestState,
 } from '@generatorai/shared';
 
-import type { PullRequestListState } from './api';
+import type { PullRequestListState } from '@generatorai/client-core';
 
 export type PrTone = 'neutral' | 'primary' | 'success' | 'warning' | 'danger' | 'info';
 
