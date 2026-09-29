@@ -76,7 +76,7 @@ Update this in every task commit (task ID, date).
 |---|---|---|
 | M0 Kickoff & environment | complete (2026-09-27) | M0-01…04 complete. Both native builds display the pairing screen; iOS required normal ad-hoc simulator signing for Keychain access. Desktop foundations/designs and sandbox reviewed. API 36 fallback until API 37 is published. See `reviews/M0-notes.md`. |
 | M1 Safety net & tooling (SDK 57) | in progress; implementation progressed through M1-09; gates/checks pending (2026-09-29) | M1-01…03 and M1-05 complete; M1-06 and M1-09 implemented (six Jest and 1,111 pure tests pass); native acceptance and M1-07/08 spikes pending MV-07…10; all twelve baselines inspected. Android 7/8 and iOS 6/8 native journeys pass individually. Both authorized fixes verified on both platforms; five replaced preview scripts deleted. Terminal on both platforms and iOS notification opening remain pending under MD-107; continuation authorized. See `reviews/M1-characterization.md`. |
-| M2 Shared-logic adoption (SDK 57) | not started | |
+| M2 Shared-logic adoption (SDK 57) | in progress at M2-01 (2026-09-29) | Phase merge/install complete; transcript adoption analysis underway. |
 | M3 Platform upgrade & foundations (SDK 58+) | not started | waits for SDK 58 stable (see 07 §1 fallback) |
 | *Batch A review (M1–M3)* | — | |
 | M4 Kit | not started | |
@@ -94,4 +94,4 @@ Update this in every task commit (task ID, date).
 
 ## Resume point
 
-2026-09-29: Proceed to M2-01 while native rebuilds complete. M1-05 guardrails, M1-06 Jest/Storybook and M1-09 service move implemented. 107 Vitest files / 1,111 tests and six two-platform Jest tests pass. M1-07/08 native spikes remain pending, not passed; SDK 58 stable and the qualifying Uniwind release are unavailable. Track all deferrals in `reviews/PENDING.md` (MV-01…10), under owner-directed continuation MD-107. M1-04 remains Android 7/8 and iOS 6/8 individually. No redesigned production screen or completed batch is claimed. iOS M1-06 native rebuild in progress, Android next sequentially. Metro runs with Storybook enabled; sandbox remains active. M2 start requires the desktop merge/version check. All M2…M10 implementation remains ahead.
+2026-09-29: Proceed to M2-01 while native rebuilds complete. M1-05 guardrails, M1-06 Jest/Storybook and M1-09 service move implemented. 107 Vitest files / 1,111 tests and six two-platform Jest tests pass. M1-07/08 native spikes remain pending, not passed; SDK 58 stable and the qualifying Uniwind release are unavailable. Track all deferrals in `reviews/PENDING.md` (MV-01…10), under owner-directed continuation MD-107. M1-04 remains Android 7/8 and iOS 6/8 individually. No redesigned production screen or completed batch is claimed. iOS M1-06 native rebuild in progress, Android next sequentially. Metro runs with Storybook enabled; sandbox remains active. M2 phase merge/install complete; M2-01 transcript adoption underway. M2 acceptance and M3…M10 implementation remain ahead.
