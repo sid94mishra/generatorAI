@@ -87,4 +87,3 @@ export {
   useReducedMotionPreset,
   type MotionPresets,
 } from './motion';
-export { UiGallery, UI_GALLERY_SECTIONS, type GallerySection } from './gallery';

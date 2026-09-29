@@ -11,6 +11,8 @@ Owner-authorized continuation: MD-107 (2026-09-29). These items remain required 
 | MV-05 | pending | Full combined native suite not green (Android 7/8, iOS 6/8 individually); baseline legacy accessibility defects remain. | Every relevant screen port and batch/final acceptance. |
 | MV-06 | pending external prerequisite | SDK 58 stable and Android API 37 availability must be checked at platform upgrade; installed baseline is SDK 57 / Android API 36 fallback. | M3. Follow plan fallback, keep native SDK-dependent tasks pending when unavailable. |
 
+| MV-07 | pending | M1-06 Storybook route, native rebuilds and two-platform story walkthrough/flow. Six Jest tests and static checks pass; iOS rebuild started. Fonts/text-scale integration waits M3 foundations. | Finish native rebuilds and Storybook flow; include M3 font readiness before kit VRT. |
+
 ## 2026-09-29 continuation triage
 
 Rechecked native host code: the legacy Sheet uses an animated RN Modal; WorkbenchSheet retains heavy panes in parked absolute-fill views. The Android software-modal/GPU hypothesis and iOS animation/lifecycle hypothesis are not proven fixes. Earlier targeted repair attempts restored sandbox terminal attachment but not usable rendering, and three notification-opening retries failed. Preserve these findings for the planned host replacements instead of marking the characterization green. Sandbox and Metro are healthy; 21 GiB free. Continue M1-05.

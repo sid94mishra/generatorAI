@@ -31,6 +31,8 @@ It also records every merge of `desktop_redesign` into this branch.
 
 | 2026-09-29 | M1-05 | root `eslint.config.mjs` | additive mobile-only config import | Mobile boundary/design/hook checks; no web/desktop config changes. Implementation lives under apps/mobile/scripts. |
 
+| 2026-09-29 | M1-06 | `pnpm-lock.yaml` | mobile dev tooling and peer graph | Jest/RNTL, Storybook 10.6 and LiteUI; no other app manifests changed. Native control peers require rebuilds. |
+
 ## Merges of `desktop_redesign`
 
 | Date | desktop_redesign sha | Conflicts | Notes |

@@ -85,14 +85,21 @@ function readStoredThemeId(): string {
   return isKnownTheme(stored) ? (stored as string) : DEFAULT_THEME;
 }
 
-export function ThemeProvider({ children }: { children: React.ReactNode }): React.ReactElement {
+export function ThemeProvider({ children, initialTheme, initialMode, initialAccent, persist = true }: {
+  children: React.ReactNode;
+  initialTheme?: string;
+  initialMode?: ThemeMode;
+  initialAccent?: string;
+  /** Development previews can change appearance without overwriting app preferences. */
+  persist?: boolean;
+}): React.ReactElement {
   const systemScheme = useColorScheme();
-  const [mode, setModeState] = useState<ThemeMode>(readStoredMode);
-  const [themeId, setThemeIdState] = useState<string>(readStoredThemeId);
+  const [mode, setModeState] = useState<ThemeMode>(() => initialMode ?? readStoredMode());
+  const [themeId, setThemeIdState] = useState<string>(() => initialTheme && isKnownTheme(initialTheme) ? initialTheme : readStoredThemeId());
 
   const theme = useMemo(() => getThemeDef(themeId), [themeId]);
   const [accent, setAccentState] = useState<AccentId>(() =>
-    resolveAccentId(getThemeDef(readStoredThemeId()), prefs.getString(ACCENT_STORAGE_KEY)),
+    resolveAccentId(getThemeDef(themeId), initialAccent ?? prefs.getString(ACCENT_STORAGE_KEY)),
   );
 
   const appearance: Appearance = useMemo(() => {
@@ -102,22 +109,22 @@ export function ThemeProvider({ children }: { children: React.ReactNode }): Reac
 
   const setMode = useCallback((next: ThemeMode) => {
     setModeState(next);
-    prefs.setString(MODE_STORAGE_KEY, next);
-  }, []);
+    if (persist) prefs.setString(MODE_STORAGE_KEY, next);
+  }, [persist]);
 
   const setThemeId = useCallback((next: string) => {
     const valid = isKnownTheme(next) ? next : DEFAULT_THEME;
     setThemeIdState(valid);
-    prefs.setString(THEME_STORAGE_KEY, valid);
-  }, []);
+    if (persist) prefs.setString(THEME_STORAGE_KEY, valid);
+  }, [persist]);
 
   const setAccent = useCallback(
     (next: string) => {
       const valid = resolveAccentId(theme, next);
       setAccentState(valid);
-      prefs.setString(ACCENT_STORAGE_KEY, valid);
+      if (persist) prefs.setString(ACCENT_STORAGE_KEY, valid);
     },
-    [theme],
+    [theme, persist],
   );
 
   // Keep the native chrome in step with the JS palette. Without this the
