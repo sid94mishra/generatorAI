@@ -1,3 +1,4 @@
+import { resourcePaths } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // TerminalView — the xterm renderer plus its PTY socket.
 //
@@ -175,7 +176,7 @@ export function TerminalView({
   onSessionChange,
   onExit,
 }: TerminalViewProps): React.ReactElement {
-  const { socketUrl, fetch: authedFetch } = useAuth();
+  const { socketUrl } = useAuth();
   const api = useApi();
   const { colors, terminal: terminalTheme } = useTheme();
   const toast = useToast();
@@ -277,21 +278,14 @@ export function TerminalView({
       // must not stop the live stream from attaching. `tailBytes` bounds the
       // transfer; the renderer keeps 2,000 lines regardless.
       try {
-        const res = await authedFetch(
-          `/api/workspaces/${workspaceId}/terminals/${sid}/scrollback?tailBytes=${SCROLLBACK_REPLAY_BYTES}`,
-        );
-        if (res.ok) {
-          const buffer = await res.arrayBuffer();
-          if (buffer.byteLength > 0) {
-            post({ type: 'data', b64: bytesToBase64(new Uint8Array(buffer)) });
-          }
-        }
+        const { data } = await api.resources.terminalBytes(workspaceId, sid, SCROLLBACK_REPLAY_BYTES);
+        if (data.byteLength > 0) post({ type: 'data', b64: bytesToBase64(data) });
       } catch {
         /* history is optional */
       }
 
       const url = await socketUrl(
-        `/api/workspaces/${workspaceId}/terminals/${sid}/stream`,
+        resourcePaths.terminalStream(workspaceId, sid),
         'terminal',
         sid,
       );
@@ -390,7 +384,7 @@ export function TerminalView({
 
       socketRef.current = socket;
     },
-    [authedFetch, batcher, onExit, post, send, socketUrl, workspaceId],
+    [api, batcher, onExit, post, send, socketUrl, workspaceId],
   );
 
   /**

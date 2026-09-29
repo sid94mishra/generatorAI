@@ -19,12 +19,11 @@ import { router, useLocalSearchParams, useNavigation } from 'expo-router';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import * as Clipboard from 'expo-clipboard';
 import { Folder, FolderGit2, GitBranch, GitPullRequest, HardDrive, RefreshCw, Trash2 } from 'lucide-react-native';
-import { ApiError, queryKeys, request } from '@generatorai/client-core';
+import { ApiError, queryKeys } from '@generatorai/client-core';
 import type { RepoReadiness } from '@generatorai/shared';
 
 import { useApi } from '../../../../src/services/api/useApi';
 import { useAdminApi } from '../../../../src/services/api/useAdminApi';
-import { useAuth } from '../../../../src/services/auth/AuthProvider';
 import { relativeTime } from '../../../../src/components/runs/formatTime';
 import { usePullRefresh } from '../../../../src/components/runs/usePullRefresh';
 import { scmKeys } from '@generatorai/client-core';
@@ -63,7 +62,6 @@ export default function CodebaseDetailScreen(): React.ReactElement {
   const api = useApi();
   const admin = useAdminApi();
   const scm = useScmApi();
-  const auth = useAuth();
   const navigation = useNavigation();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -89,10 +87,7 @@ export default function CodebaseDetailScreen(): React.ReactElement {
     // 400 means "no local checkout yet" — a state, not a failure.
     queryFn: async (): Promise<RepoReadiness | null> => {
       try {
-        return await request<RepoReadiness>(
-          auth.fetch,
-          `/api/projects/${encodeURIComponent(projectId)}/codebases/${encodeURIComponent(codebaseId)}/readiness`,
-        );
+        return await api.projects.codebaseReadiness(projectId, codebaseId);
       } catch (err) {
         if (err instanceof ApiError && err.status === 400) return null;
         throw err;

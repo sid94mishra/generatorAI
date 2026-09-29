@@ -1,3 +1,4 @@
+import { resourcePaths } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // Voice input — LIVE dictation on mobile.
 //
@@ -220,7 +221,7 @@ export function useVoiceInput(options: UseVoiceInputOptions = {}): VoiceInput {
       await setAudioModeAsync(RECORDING_AUDIO_MODE);
       recordModeRef.current = true;
 
-      const url = await socketUrl('/api/stt/stream', 'stt', null);
+      const url = await socketUrl(resourcePaths.voiceStream('stt'), 'stt', null);
       const socket = new WebSocket(url);
       socket.binaryType = 'arraybuffer';
       socketRef.current = socket;

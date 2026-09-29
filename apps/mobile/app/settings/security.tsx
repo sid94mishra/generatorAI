@@ -1,3 +1,4 @@
+import { useAdminApi } from '../../src/services/api/useAdminApi';
 // ────────────────────────────────────────────────────────────────
 // Settings → Security.
 //
@@ -44,7 +45,6 @@ import {
   type DeviceScopeRequest,
 } from '../../src/services/api/scopeRequests';
 import { useAuth } from '../../src/services/auth/AuthProvider';
-import { revokeDeviceRequest } from '../../src/services/auth/deviceRequests';
 import { requireStepUp } from '../../src/services/auth/stepUp';
 import { describeScope, isSensitiveScope } from '../../src/services/auth/scopeLabels';
 import { matchScopePreset } from '../../src/services/auth/scopePresets';
@@ -54,8 +54,6 @@ import { EditScopesSheet } from '../../src/components/devices/EditScopesSheet';
 import { PairDeviceSheet } from '../../src/components/devices/PairDeviceSheet';
 import {
   platformLabel,
-  rotateDeviceRequest,
-  setDeviceScopesRequest,
 } from '../../src/components/devices/deviceAdmin';
 import { Button } from '../../src/components/ui/Button';
 import { ListGroup, ListRow } from '../../src/components/ui/ListRow';
@@ -134,7 +132,8 @@ const KEY_BACKING_LABEL: Record<string, string> = {
 };
 
 export default function SecurityScreen(): React.ReactElement {
-  const { state, transport, keyBacking, fetch: authFetch, unpair, refreshPermissions } = useAuth();
+  const { state, transport, keyBacking, unpair, refreshPermissions } = useAuth();
+  const admin = useAdminApi();
   const { colors } = useTheme();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -181,12 +180,8 @@ export default function SecurityScreen(): React.ReactElement {
   const devices = useQuery({
     queryKey: ['auth', 'devices'],
     queryFn: async (): Promise<DeviceRecord[]> => {
-      const res = await authFetch('/api/auth/devices');
-      if (!res.ok) throw new Error(`Devices request failed (${res.status})`);
-      const list = ((await res.json()) as { devices: Array<DeviceRecord & { name?: string }> }).devices;
-      // The server publishes `name`; the screen was reading `deviceName` and
-      // rendered "Revoke undefined" (Sept 7 live run).
-      return list.map((d) => ({ ...d, deviceName: d.deviceName ?? d.name ?? 'Unnamed device' }));
+      const list = await admin.devices.list();
+      return list.map((d) => ({ ...d, deviceName: d.name || 'Unnamed device', lastUsedAt: d.lastSeenAt }));
     },
     enabled: deviceAdmin.available,
   });
@@ -207,11 +202,7 @@ export default function SecurityScreen(): React.ReactElement {
 
   const posture = useQuery({
     queryKey: ['security', 'posture'],
-    queryFn: async (): Promise<Posture> => {
-      const res = await authFetch('/api/security/posture');
-      if (!res.ok) throw new Error(`Posture request failed (${res.status})`);
-      return (await res.json()) as Posture;
-    },
+    queryFn: async (): Promise<Posture> => await admin.security.posture() as unknown as Posture,
   });
 
   /**
@@ -231,9 +222,7 @@ export default function SecurityScreen(): React.ReactElement {
 
       setBusy(device.deviceId);
       try {
-        const { path, init } = revokeDeviceRequest(device.deviceId);
-        const res = await authFetch(path, init);
-        if (!res.ok) throw new Error(`Revoke failed (${res.status})`);
+        await admin.devices.revokeWithReason(device.deviceId, 'Revoked from mobile');
         await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
         toast({ message: `Revoked ${device.deviceName}.`, tone: 'success' });
       } catch (err) {
@@ -245,7 +234,7 @@ export default function SecurityScreen(): React.ReactElement {
         setBusy(null);
       }
     },
-    [authFetch, queryClient, toast],
+    [admin, queryClient, toast],
   );
 
   /**
@@ -317,9 +306,7 @@ export default function SecurityScreen(): React.ReactElement {
   const saveDeviceScopes = useCallback(
     async (device: { deviceId: string; deviceName: string }, next: string[]) => {
       try {
-        const { path, init } = setDeviceScopesRequest(device.deviceId, next);
-        const res = await authFetch(path, init);
-        if (!res.ok) throw new Error(await responseError(res, 'Update'));
+        await admin.devices.setScopes(encodeURIComponent(device.deviceId), [...new Set(next)]);
         await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
         // Editing this phone's own grant: re-mint so the app sees it now.
         if (device.deviceId === thisDeviceId) await refreshPermissions();
@@ -332,7 +319,7 @@ export default function SecurityScreen(): React.ReactElement {
         throw err;
       }
     },
-    [authFetch, queryClient, refreshPermissions, thisDeviceId, toast],
+    [admin, queryClient, refreshPermissions, thisDeviceId, toast],
   );
 
   /**
@@ -344,9 +331,7 @@ export default function SecurityScreen(): React.ReactElement {
       if (!(await requireStepUp(`Confirm signing out ${device.deviceName}`))) return;
       setBusy(device.deviceId);
       try {
-        const { path, init } = rotateDeviceRequest(device.deviceId);
-        const res = await authFetch(path, init);
-        if (!res.ok) throw new Error(await responseError(res, 'Rotate'));
+        await admin.devices.rotate(device.deviceId);
         await queryClient.invalidateQueries({ queryKey: ['auth', 'devices'] });
         toast({ message: `Rotated credentials for ${device.deviceName}.`, tone: 'success' });
       } catch (err) {
@@ -358,7 +343,7 @@ export default function SecurityScreen(): React.ReactElement {
         setBusy(null);
       }
     },
-    [authFetch, queryClient, toast],
+    [admin, queryClient, toast],
   );
 
   /**
@@ -852,17 +837,6 @@ function Field({
 }
 
 /** The server's error sentence, or a status line when the body is not JSON. */
-async function responseError(res: Response, action: string): Promise<string> {
-  try {
-    const body = (await res.json()) as { error?: { message?: string } | string };
-    if (typeof body.error === 'string') return body.error;
-    if (body.error?.message) return body.error.message;
-  } catch {
-    // Non-JSON body.
-  }
-  return `${action} failed (${res.status})`;
-}
-
 /** Same grouping the pairing screen and the server use, so they can be compared. */
 function formatFingerprint(hostId: string): string {
   return (hostId.slice(0, 16).match(/.{1,4}/g) ?? []).join('-').toUpperCase();

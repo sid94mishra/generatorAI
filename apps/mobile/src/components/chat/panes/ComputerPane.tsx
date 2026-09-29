@@ -21,14 +21,15 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Image, RefreshControl, ScrollView, Text, View } from 'react-native';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { AlertTriangle, Ban, Hand, Keyboard, Monitor, ShieldQuestion } from 'lucide-react-native';
-import { describeErrorBody } from '@generatorai/client-core';
+import { ApiError } from '@generatorai/client-core';
 
 import { Button } from '../../ui/Button';
 import { EmptyState, ErrorState, LoadingState } from '../../ui/States';
 import { Badge, SectionHeader } from '../../ui/primitives';
 import { useToast } from '../../ui/Toast';
 import { haptics } from '../../ui/haptics';
-import { useAuth } from '../../../services/auth/AuthProvider';
+import { useApi } from '../../../services/api/useApi';
+import { useAdminApi } from '../../../services/api/useAdminApi';
 import { StepUpGate } from '../../../services/auth/StepUpGate';
 import { requireStepUp } from '../../../services/auth/stepUp';
 import { bytesToBase64 } from '../../../services/lib/base64';
@@ -40,8 +41,6 @@ import {
   consentOptions,
   secondsLeft,
   tookScreen,
-  type ComputerActivityEntry,
-  type ComputerFrame,
   type ComputerGrant,
   type ConsentDecision,
   type PendingConsent,
@@ -68,54 +67,32 @@ export function ComputerPane({
   );
 }
 
-async function errorMessage(res: Response, fallback: string): Promise<string> {
-  try {
-    const text = await res.text();
-    try {
-      return describeErrorBody(JSON.parse(text)) ?? fallback;
-    } catch {
-      return text || fallback;
-    }
-  } catch {
-    return fallback;
-  }
-}
-
 function ComputerPanel({ workspaceId, active }: { workspaceId: string; active: boolean }): React.ReactElement {
-  const { fetch: authFetch } = useAuth();
+  const api = useApi();
+  const admin = useAdminApi();
   const { colors } = useTheme();
   const toast = useToast();
   const queryClient = useQueryClient();
-  const base = `/api/workspaces/${encodeURIComponent(workspaceId)}/computer`;
   const interval = active ? POLL_MS : false;
-
-  const getJson = useCallback(
-    async <T,>(path: string): Promise<T> => {
-      const res = await authFetch(`${base}${path}`);
-      if (!res.ok) throw new Error(await errorMessage(res, `Request failed (${res.status})`));
-      return (await res.json()) as T;
-    },
-    [authFetch, base],
-  );
 
   const consent = useQuery({
     queryKey: computerConsentKey(workspaceId),
-    queryFn: () => getJson<{ pending?: PendingConsent[] }>('/consent'),
+    queryFn: () => admin.computer.consent(encodeURIComponent(workspaceId)),
     refetchInterval: interval,
   });
   const frames = useQuery({
     queryKey: ['workspaces', workspaceId, 'computer', 'frames'],
-    queryFn: () => getJson<{ enabled?: boolean; frames?: ComputerFrame[] }>('/frames'),
+    queryFn: () => api.resources.computerFrames(workspaceId),
     refetchInterval: interval,
   });
   const activity = useQuery({
     queryKey: ['workspaces', workspaceId, 'computer', 'activity'],
-    queryFn: () => getJson<{ entries?: ComputerActivityEntry[] }>('/activity'),
+    queryFn: () => api.resources.computerActivity(workspaceId),
     refetchInterval: active ? POLL_MS * 2 : false,
   });
   const grants = useQuery({
     queryKey: ['workspaces', workspaceId, 'computer', 'grants'],
-    queryFn: () => getJson<{ grants?: ComputerGrant[] }>('/grants'),
+    queryFn: async () => ({ grants: await admin.computer.grants(encodeURIComponent(workspaceId)) }),
   });
 
   const latest = frames.data?.frames?.[0] ?? null;
@@ -127,11 +104,9 @@ function ComputerPanel({ workspaceId, active }: { workspaceId: string; active: b
     enabled: Boolean(latest),
     staleTime: Infinity,
     queryFn: async () => {
-      const res = await authFetch(`${base}/frames/${encodeURIComponent(latest!.id)}`);
-      if (!res.ok) throw new Error(await errorMessage(res, 'Frame unavailable'));
-      const mime = res.headers.get('content-type')?.split(';')[0] ?? 'image/png';
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      return `data:${mime};base64,${bytesToBase64(bytes)}`;
+      const { data, contentType } = await api.resources.computerFrame(workspaceId, latest!.id);
+      const mime = contentType === 'application/octet-stream' ? 'image/png' : contentType;
+      return `data:${mime};base64,${bytesToBase64(data)}`;
     },
   });
 
@@ -152,13 +127,12 @@ function ComputerPanel({ workspaceId, active }: { workspaceId: string; active: b
         const ok = await requireStepUp(`Confirm allowing ${target.action} in ${target.appLabel}`);
         if (!ok) return { skipped: true as const };
       }
-      const res = await authFetch(`${base}/consent`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ requestId: target.requestId, appIdentity: target.appIdentity, decision }),
-      });
-      if (res.status === 409) return { gone: true as const };
-      if (!res.ok) throw new Error(await errorMessage(res, 'Could not answer'));
+      try {
+        await admin.computer.setConsent(encodeURIComponent(workspaceId), { requestId: target.requestId, appIdentity: target.appIdentity, decision });
+      } catch (error) {
+        if (error instanceof ApiError && error.status === 409) return { gone: true as const };
+        throw error;
+      }
       return { ok: true as const, decision };
     },
     onSuccess: (out) => {
@@ -175,8 +149,7 @@ function ComputerPanel({ workspaceId, active }: { workspaceId: string; active: b
 
   const revoke = useMutation({
     mutationFn: async (grant: ComputerGrant) => {
-      const res = await authFetch(`${base}/grants/${encodeURIComponent(grant.appIdentity)}`, { method: 'DELETE' });
-      if (!res.ok) throw new Error(await errorMessage(res, 'Could not revoke'));
+      await admin.computer.revokeGrant(encodeURIComponent(workspaceId), grant.appIdentity);
       return grant;
     },
     onSuccess: (grant) => {

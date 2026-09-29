@@ -22,7 +22,7 @@ import { useToast } from '../ui/Toast';
 import { relativeTime } from '../runs/formatTime';
 import { useFeature } from '../runs/useFeature';
 import { useTheme } from '../../theme/ThemeProvider';
-import type { ProjectDetailWire } from './projectActions';
+import type { ProjectDetailWire } from './projectEditorApi';
 import { ProjectActions, messageOf } from './ProjectActions';
 import { useProjectsApi } from './useProjectsApi';
 import {

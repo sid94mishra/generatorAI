@@ -1,3 +1,4 @@
+import { resourcePaths } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // Chat screen — the core loop.
 //
@@ -206,12 +207,6 @@ function rowsOf(message: ChatMessage, prompt: ChatMessage | null): TimelineRow[]
     historyRows.set(message, rows);
   }
   return rows;
-}
-
-/** Mirrors web's `browserArtifactUrl` — where a browser screenshot is served from. */
-function browserArtifactPath(workspaceId: string, relativePath: string): string {
-  const clean = relativePath.replace(/\\/g, '/').replace(/^\/+/, '');
-  return `/api/workspaces/${encodeURIComponent(workspaceId)}/browser/files/${clean.split('/').map(encodeURIComponent).join('/')}`;
 }
 
 /** The transcript as plain text, for the share sheet. */
@@ -481,12 +476,7 @@ export default function ChatScreen(): React.ReactElement {
   // Worktrees and branch checkouts finish after the chat exists; while they
   // do, the composer shows the prep bar and offers a retry on failure.
   const prepareWorkspace = useMutation({
-    mutationFn: async () => {
-      const res = await auth.fetch(`/api/chats/${encodeURIComponent(chatId!)}/workspace/prepare`, {
-        method: 'POST',
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    },
+    mutationFn: () => api.chats.prepareWorkspace(chatId!),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: queryKeys.chat(chatId!) });
     },
@@ -860,7 +850,7 @@ export default function ChatScreen(): React.ReactElement {
     async (image: ScreenshotRef) => {
       if (!workspaceId) return;
       try {
-        const response = await auth.fetch(browserArtifactPath(workspaceId, image.relativePath));
+        const response = await auth.fetch(resourcePaths.browserFile(workspaceId, image.relativePath));
         if (!response.ok) throw new Error(`HTTP ${response.status}`);
         const buffer = await response.arrayBuffer();
         const ext = image.label.split('.').pop()?.toLowerCase() ?? 'png';

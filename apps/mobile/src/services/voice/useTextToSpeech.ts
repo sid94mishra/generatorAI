@@ -1,3 +1,4 @@
+import { resourcePaths } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // Voice output — read a message aloud, and speak a turn as it is written.
 //
@@ -156,7 +157,7 @@ export function useTextToSpeech(): TextToSpeech {
       try {
         await enterPlaybackMode();
         if (isCancelled()) return null;
-        const url = await socketUrl('/api/tts/stream', 'tts', null);
+        const url = await socketUrl(resourcePaths.voiceStream('tts'), 'tts', null);
         if (isCancelled()) return null;
         await streamSentences(url, frame, isCancelled, socketRef, filesRef, () => {
           // First sentence is queued — start playing while the rest are

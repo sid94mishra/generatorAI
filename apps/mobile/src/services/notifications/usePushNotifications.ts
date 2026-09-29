@@ -1,3 +1,4 @@
+import { ApiError, createApiClient } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // usePushNotifications — registration + tap routing.
 //
@@ -71,28 +72,22 @@ export function usePushNotifications(): void {
       if (registeredToken.current === registration.token) return;
 
       try {
-        const response = await authFetch('/api/auth/push-token', {
-          method: 'PUT',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify(registration),
-        });
+        await createApiClient(authFetch).auth.registerPush(registration);
         if (cancelled) return;
-        // 501 means the server has push disabled. That is a deployment
-        // choice, not an error — stop trying rather than retrying forever.
-        if (response.status === 501) {
-          registeredToken.current = registration.token;
-          setStatus({ kind: 'server-disabled' });
-          return;
+        registeredToken.current = registration.token;
+        setStatus({ kind: 'registered' });
+      } catch (error) {
+        if (cancelled) return;
+        if (error instanceof ApiError) {
+          if (error.status === 501) {
+            registeredToken.current = registration.token;
+            setStatus({ kind: 'server-disabled' });
+          } else {
+            setStatus({ kind: 'rejected', httpStatus: error.status });
+          }
+        } else {
+          setStatus({ kind: 'offline' });
         }
-        if (response.ok) {
-          registeredToken.current = registration.token;
-          setStatus({ kind: 'registered' });
-          return;
-        }
-        setStatus({ kind: 'rejected', httpStatus: response.status });
-      } catch {
-        // Offline. The next foreground retries.
-        setStatus({ kind: 'offline' });
       }
     };
 
@@ -124,11 +119,7 @@ export function usePushNotifications(): void {
   useEffect(() => {
     if (!authenticated || Platform.OS === 'web') return;
     const mute = shouldMuteOnServer(readNotifyPrefs((k) => prefs.getString(k)));
-    void authFetch('/api/auth/push-token/mute', {
-      method: 'PUT',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mutedUntil: mute ? Date.now() + SERVER_MUTE_HORIZON_MS : null }),
-    }).catch(() => {
+    void createApiClient(authFetch).auth.mutePush(mute ? Date.now() + SERVER_MUTE_HORIZON_MS : null).catch(() => {
       // Offline. The foreground filter still applies; re-synced next change.
     });
   }, [authenticated, authFetch, preferencesVersion]);

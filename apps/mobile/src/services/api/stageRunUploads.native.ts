@@ -1,6 +1,6 @@
-import { ApiError, describeErrorBody } from '@generatorai/client-core';
+import { createAdminApi } from '@generatorai/client-core';
 import { File, Paths } from 'expo-file-system';
-import type { AuthedFetch } from './http';
+import type { ApiFetch as AuthedFetch } from '@generatorai/client-core';
 import type { RunUpload, StagedUpload } from './stageRunUploads';
 
 /** RN multipart accepts file URIs, but its Blob constructor rejects raw bytes (see sendChatPrompt.native). */
@@ -19,11 +19,7 @@ export async function stageRunUploads(fetch: AuthedFetch, files: RunUpload[]): P
         bytes: () => file.bytes(),
       } as unknown as Blob);
     }
-    const path = '/api/workflow-invocations/uploads';
-    const response = await fetch(path, { method: 'POST', body: form });
-    const body: unknown = await response.json().catch(() => null);
-    if (!response.ok) throw new ApiError(response.status, path, describeErrorBody(body) ?? `HTTP ${response.status}`, body);
-    return (body as { uploads: StagedUpload[] }).uploads;
+    return (await createAdminApi(fetch).workflows.uploadMultipart(form)).uploads;
   } finally {
     for (const file of temporary) {
       try { if (file.exists) file.delete(); } catch { /* Do not hide an upload result on cleanup failure. */ }

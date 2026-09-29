@@ -17,8 +17,9 @@
 // ────────────────────────────────────────────────────────────────
 
 import { useCallback, useMemo } from 'react';
-import { describeErrorBody, type TerminalDescriptor } from '@generatorai/client-core';
+import { ApiError, createApiClient, createAdminApi } from '@generatorai/client-core';
 
+import { shortError } from '../../../services/lib/shortError';
 import { bytesToBase64, utf8Decode } from '../../../services/lib/base64';
 import { currentTerminalSelection, pickCaptureSession } from '../../../terminal/terminalFocus';
 import {
@@ -29,7 +30,6 @@ import {
   pageCaptureName,
   plainTextFromPty,
   terminalCaptureName,
-  terminalScrollbackPath,
   type CaptureInput,
   type TerminalCaptureLines,
 } from './captures';
@@ -52,26 +52,10 @@ export interface UseCapturesOptions {
   onCaptured?: (() => void) | undefined;
 }
 
-/** Throws with a one-line, human message from an error response. */
-async function failure(res: Response, fallback: string): Promise<Error> {
-  let text = '';
-  try {
-    text = await res.text();
-  } catch {
-    /* body already gone */
-  }
-  let described: string | null = null;
-  try {
-    described = describeErrorBody(JSON.parse(text));
-  } catch {
-    described = text || null;
-  }
-  const line = (described ?? `${fallback} (${res.status})`).split(/\r?\n/)[0]!.trim();
-  return new Error(line.length > 160 ? `${line.slice(0, 157)}…` : line);
-}
-
 export function useCaptures(opts: UseCapturesOptions): ComposerCaptureActions {
   const { workspaceId, authedFetch, uploadAvailable, uploadReason, attach, insertText, setBusy, toast, onCaptured } = opts;
+  const api = useMemo(() => createApiClient(authedFetch), [authedFetch]);
+  const admin = useMemo(() => createAdminApi(authedFetch), [authedFetch]);
 
   const deliver = useCallback(
     (input: CaptureInput) => {
@@ -101,7 +85,7 @@ export function useCaptures(opts: UseCapturesOptions): ComposerCaptureActions {
       try {
         await work();
       } catch (err) {
-        toast({ message: err instanceof Error && err.message ? err.message : fallback, variant: 'danger' });
+        toast({ message: shortError(err, fallback), variant: 'danger' });
       } finally {
         setBusy(false);
       }
@@ -115,10 +99,8 @@ export function useCaptures(opts: UseCapturesOptions): ComposerCaptureActions {
         if (!workspaceId) throw new Error('This chat has no workspace yet.');
         let sid = sessionId ?? null;
         if (!sid) {
-          const res = await authedFetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/terminals`);
-          if (!res.ok) throw await failure(res, 'Could not list terminals');
-          const body = (await res.json()) as { terminals?: TerminalDescriptor[] };
-          const alive = (body.terminals ?? []).filter((d) => d.exitCode === null).map((d) => d.id);
+          const terminals = await admin.terminals.list(encodeURIComponent(workspaceId));
+          const alive = terminals.filter((d) => d.exitCode === null).map((d) => d.id);
           sid = pickCaptureSession(workspaceId, alive);
         }
         if (!sid) {
@@ -126,18 +108,14 @@ export function useCaptures(opts: UseCapturesOptions): ComposerCaptureActions {
           return;
         }
         let text: string;
-        const res = await authedFetch(terminalScrollbackPath(workspaceId, sid, lines));
-        if (res.status === 409) {
-          // The host keeps no VT model: take raw bytes and de-escape them.
-          const raw = await authedFetch(
-            `/api/workspaces/${encodeURIComponent(workspaceId)}/terminals/${encodeURIComponent(sid)}/scrollback?tailBytes=${lines * 400}`,
-          );
-          if (!raw.ok) throw await failure(raw, 'Could not read the terminal');
-          text = plainTextFromPty(utf8Decode(new Uint8Array(await raw.arrayBuffer())), lines).join('\n');
-        } else {
-          if (!res.ok) throw await failure(res, 'Could not read the terminal');
-          const body = (await res.json()) as { lines?: string[] };
+        try {
+          const body = await api.resources.terminalLines(workspaceId, sid, lines);
           text = formatTerminalLines(body.lines ?? []);
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 409) throw error;
+          // Hosts without a VT model expose their raw scrollback instead.
+          const raw = await api.resources.terminalBytes(workspaceId, sid, lines * 400);
+          text = plainTextFromPty(utf8Decode(raw.data), lines).join('\n');
         }
         if (!text) {
           toast({ message: 'The terminal has no output yet.', variant: 'info' });
@@ -152,7 +130,7 @@ export function useCaptures(opts: UseCapturesOptions): ComposerCaptureActions {
           label: `Terminal output (last ${lines} lines)`,
         });
       }, 'Could not capture the terminal'),
-    [run, workspaceId, authedFetch, toast, deliver],
+    [run, workspaceId, api, admin, toast, deliver],
   );
 
   const captureTerminalSelection = useCallback(
@@ -174,11 +152,7 @@ export function useCaptures(opts: UseCapturesOptions): ComposerCaptureActions {
     [workspaceId, toast, deliver],
   );
 
-  const readDescriptor = useCallback(async () => {
-    const res = await authedFetch(`/api/workspaces/${encodeURIComponent(workspaceId!)}/browser/descriptor`);
-    if (!res.ok) throw await failure(res, 'Could not reach the browser');
-    return (await res.json()) as { ready?: boolean; currentUrl?: string | null; viewport?: { width: number; height: number } };
-  }, [authedFetch, workspaceId]);
+  const readDescriptor = useCallback(() => api.resources.browserDescriptor(workspaceId!), [api, workspaceId]);
 
   const captureBrowserScreenshot = useCallback(
     () =>
@@ -197,13 +171,7 @@ export function useCaptures(opts: UseCapturesOptions): ComposerCaptureActions {
           toast({ message: 'The browser is not running. Start it from the Browser pane.', variant: 'info' });
           return;
         }
-        const res = await authedFetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/browser/capture`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ clip: fullFrameClip(descriptor.viewport) }),
-        });
-        if (!res.ok) throw await failure(res, 'Could not capture the page');
-        const bytes = new Uint8Array(await res.arrayBuffer());
+        const { data: bytes } = await api.resources.browserCapture(workspaceId, fullFrameClip(descriptor.viewport));
         deliver({
           source: 'browser',
           kind: 'image',
@@ -213,22 +181,21 @@ export function useCaptures(opts: UseCapturesOptions): ComposerCaptureActions {
           label: 'Browser screenshot',
         });
       }, 'Could not capture the page'),
-    [run, workspaceId, uploadAvailable, uploadReason, deliver, readDescriptor, toast, authedFetch],
+    [run, workspaceId, uploadAvailable, uploadReason, deliver, readDescriptor, toast, api],
   );
 
   const captureBrowserPageText = useCallback(
     () =>
       run(async () => {
         if (!workspaceId) throw new Error('This chat has no workspace yet.');
-        const res = await authedFetch(`/api/workspaces/${encodeURIComponent(workspaceId)}/browser/read-page`, {
-          method: 'POST',
-        });
-        if (res.status === 409) {
+        let page;
+        try {
+          page = await admin.browser.readPage(encodeURIComponent(workspaceId));
+        } catch (error) {
+          if (!(error instanceof ApiError) || error.status !== 409) throw error;
           toast({ message: 'The browser is not running. Start it from the Browser pane.', variant: 'info' });
           return;
         }
-        if (!res.ok) throw await failure(res, 'Could not read the page');
-        const page = (await res.json()) as { url?: string; title?: string; snapshot?: string };
         deliver({
           source: 'browser',
           kind: 'text',
@@ -238,7 +205,7 @@ export function useCaptures(opts: UseCapturesOptions): ComposerCaptureActions {
           label: `Page text${page.title ? ` — ${page.title.trim()}` : ''}`,
         });
       }, 'Could not read the page'),
-    [run, workspaceId, authedFetch, toast, deliver],
+    [run, workspaceId, admin, toast, deliver],
   );
 
   return useMemo(

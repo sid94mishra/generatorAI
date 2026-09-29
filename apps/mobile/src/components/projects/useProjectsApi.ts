@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { useAdminApi } from '../../services/api/useAdminApi';
-import { createProjectActions } from './projectActions';
+import { createProjectActions } from './projectEditorApi';
 
 export function useProjectsApi() {
   const admin = useAdminApi();

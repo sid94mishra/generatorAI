@@ -1,3 +1,5 @@
+import { useApi } from '../../src/services/api/useApi';
+import { useAdminApi } from '../../src/services/api/useAdminApi';
 // ────────────────────────────────────────────────────────────────
 // Settings ▸ Audio — the phone form of the desktop Audio section.
 //
@@ -47,6 +49,8 @@ type AudioPatch = Partial<Pick<AudioSettings, 'sttEngine' | 'textFormatter' | 'e
 
 export default function AudioSettingsScreen(): React.ReactElement {
   const auth = useAuth();
+  const api = useApi();
+  const admin = useAdminApi();
   const { colors } = useTheme();
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -56,9 +60,7 @@ export default function AudioSettingsScreen(): React.ReactElement {
   const audio = useQuery({
     queryKey: AUDIO_KEY,
     queryFn: async () => {
-      const res = await auth.fetch('/api/system/audio');
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const parsed = parseAudioSettings(await res.json());
+      const parsed = parseAudioSettings(await api.system.audio());
       if (!parsed) throw new Error('Unexpected response');
       return parsed;
     },
@@ -66,13 +68,7 @@ export default function AudioSettingsScreen(): React.ReactElement {
 
   const save = useMutation({
     mutationFn: async (patch: AudioPatch) => {
-      const res = await auth.fetch('/api/system/audio', {
-        method: 'PUT',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(patch),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      return parseAudioSettings(await res.json());
+      return parseAudioSettings(await admin.systemAdmin.setAudio(patch));
     },
     // Optimistic: a settings row that lags its own tap feels broken.
     onMutate: async (patch) => {

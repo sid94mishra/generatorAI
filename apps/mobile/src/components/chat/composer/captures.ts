@@ -73,12 +73,6 @@ export function terminalCaptureName(kind: 'output' | 'selection', now = Date.now
   return `terminal-${kind}-${now}.txt`;
 }
 
-/** `/api/workspaces/:id/terminals/:sid/scrollback?format=text&tailLines=N` */
-export function terminalScrollbackPath(workspaceId: string, sessionId: string, tailLines: number): string {
-  const n = Math.max(1, Math.min(5_000, Math.floor(tailLines)));
-  return `/api/workspaces/${encodeURIComponent(workspaceId)}/terminals/${encodeURIComponent(sessionId)}/scrollback?format=text&tailLines=${n}`;
-}
-
 /**
  * The clip for a whole-viewport `POST /browser/capture`. The route only
  * takes a region (web's drag-to-capture); the full frame is the region

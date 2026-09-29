@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 
 import { createAdminApi } from '@generatorai/client-core';
-import { createProjectActions } from '../components/projects/projectActions';
+import { createProjectActions } from '../components/projects/projectEditorApi';
 
 function recorder(status = 200, body: unknown = {}) {
   const calls: Array<{ path: string; method: string; body?: unknown }> = [];

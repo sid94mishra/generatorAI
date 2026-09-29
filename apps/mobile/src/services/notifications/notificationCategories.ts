@@ -1,3 +1,4 @@
+import { ApiError, createApiClient } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // notificationCategories — lock-screen actions for approval pushes.
 //
@@ -147,21 +148,6 @@ export function intentFromResponse(
   return { type: 'decide', chatId, interactionId, behavior, route };
 }
 
-/** The request that resolves a permission gate. Reuses the chat route. */
-export function decisionRequest(intent: Extract<NotificationIntent, { type: 'decide' }>): {
-  path: string;
-  init: RequestInit;
-} {
-  return {
-    path: `/api/chats/${encodeURIComponent(intent.chatId)}/interactions/${encodeURIComponent(intent.interactionId)}/permission`,
-    init: {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ behavior: intent.behavior }),
-    },
-  };
-}
-
 export type DecisionOutcome =
   /** The gate is resolved (by this tap, or already — 409 — by another client). */
   | 'settled'
@@ -196,11 +182,10 @@ export async function submitDecision(
   intent: Extract<NotificationIntent, { type: 'decide' }>,
   fetchImpl: (path: string, init?: RequestInit) => Promise<Response>,
 ): Promise<DecisionOutcome> {
-  const { path, init } = decisionRequest(intent);
   try {
-    const response = await fetchImpl(path, init);
-    return decisionOutcome(response.status);
-  } catch {
-    return 'failed';
+    await createApiClient(fetchImpl).chats.respondPermission(encodeURIComponent(intent.chatId), encodeURIComponent(intent.interactionId), { behavior: intent.behavior });
+    return 'settled';
+  } catch (error) {
+    return error instanceof ApiError ? decisionOutcome(error.status) : 'failed';
   }
 }

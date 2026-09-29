@@ -40,7 +40,7 @@ import {
   Trash2,
   Wand2,
 } from 'lucide-react-native';
-import type { AgentMode, AgentSummary, ModelInfo, ProjectSummary } from '@generatorai/client-core';
+import { ApiError, type AgentMode, type AgentSummary, type ModelInfo, type ProjectSummary } from '@generatorai/client-core';
 import type { ChatSourceControlOptions } from '@generatorai/shared';
 
 import { Sheet, SheetRow, SheetSection } from '../ui/Sheet';
@@ -51,7 +51,7 @@ import { SegmentedControl } from '../ui/SegmentedControl';
 import { Spinner } from '../ui/States';
 import { Touchable } from '../ui/Touchable';
 import { useApi } from '../../services/api/useApi';
-import { useAuth } from '../../services/auth/AuthProvider';
+import { useAdminApi } from '../../services/api/useAdminApi';
 import { checkFeature } from '../../services/auth/featureGate';
 import { useModelGroups } from '../../services/api/useModels';
 import { useTheme } from '../../theme/ThemeProvider';
@@ -166,7 +166,7 @@ export function NewChatSheet({
 }): React.ReactElement {
   const { colors } = useTheme();
   const api = useApi();
-  const { fetch: authedFetch } = useAuth();
+  const admin = useAdminApi();
   const [page, setPage] = useState<Page>('main');
 
   const [name, setName] = useState('');
@@ -241,17 +241,12 @@ export function NewChatSheet({
     let cancelled = false;
     const timer = setTimeout(() => {
       setPreviewBusy(true);
-      void authedFetch('/api/agents/resolve-preview', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          scope: 'chat',
-          ...(agentRef ? { agentRef } : {}),
-          ...(projectId ? { projectId } : {}),
-          overrides: JSON.parse(overridesKey) as AgentOverrides,
-        }),
-      })
-        .then(async (res) => (res.ok ? ((await res.json()) as Projection) : undefined))
+      void admin.agents.resolvePreview({
+        scope: 'chat',
+        ...(agentRef ? { agentRef } : {}),
+        ...(projectId ? { projectId } : {}),
+        overrides: JSON.parse(overridesKey) as AgentOverrides,
+      }).then((result) => result as Projection)
         .then((p) => {
           if (!cancelled) setProjection(p);
         })
@@ -266,7 +261,7 @@ export function NewChatSheet({
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [visible, agentRef, overridesKey, projectId, authedFetch]);
+  }, [visible, agentRef, overridesKey, projectId, admin]);
 
   const reset = (): void => {
     setPage('main');
@@ -502,9 +497,10 @@ export function NewChatSheet({
           otherAliases={drafts.filter((d) => d.id !== editing.id).map((d) => d.alias)}
           projectId={projectId}
           fetchBranches={async (cid) => {
-            const res = await authedFetch(`/api/projects/${projectId}/codebases/${cid}/branches`);
-            if (!res.ok) return [];
-            const body = (await res.json()) as unknown;
+            const body: unknown = await admin.projects.codebases.branches(encodeURIComponent(projectId!), encodeURIComponent(cid)).catch((error: unknown) => {
+              if (error instanceof ApiError) return [];
+              throw error;
+            });
             const list = Array.isArray(body) ? body : ((body as { branches?: unknown[] })?.branches ?? []);
             return list
               .map((b) => (typeof b === 'string' ? b : ((b as { name?: string })?.name ?? '')))

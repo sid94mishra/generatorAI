@@ -1,5 +1,5 @@
 import { createApiClient, type StageMessageResult } from '@generatorai/client-core';
-import type { AuthedFetch } from './http';
+import type { ApiFetch as AuthedFetch } from '@generatorai/client-core';
 import type { ChatPrompt, ChatUpload } from './sendChatPrompt';
 
 /**

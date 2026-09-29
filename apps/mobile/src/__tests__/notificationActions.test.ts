@@ -5,7 +5,6 @@ import {
   APPROVAL_CATEGORY_ID,
   APPROVAL_CHANNEL_ID,
   decisionOutcome,
-  decisionRequest,
   intentFromResponse,
   submitDecision,
   type NotificationIntent,
@@ -146,26 +145,6 @@ describe('intentFromResponse — robustness', () => {
   });
 });
 
-describe('decisionRequest', () => {
-  const decide: Extract<NotificationIntent, { type: 'decide' }> = {
-    type: 'decide',
-    chatId: 'c1',
-    interactionId: 'i1',
-    behavior: 'allow',
-    route: '/chats/c1/gate/i1',
-  };
-
-  it('targets the existing chat permission route with the server’s body shape', () => {
-    // POST /api/chats/:id/interactions/:interactionId/permission with
-    // { behavior } — the same request the in-app gate card sends.
-    const { path, init } = decisionRequest(decide);
-    expect(path).toBe('/api/chats/c1/interactions/i1/permission');
-    expect(init.method).toBe('POST');
-    expect(JSON.parse(String(init.body))).toEqual({ behavior: 'allow' });
-    expect((init.headers as Record<string, string>)['content-type']).toBe('application/json');
-  });
-});
-
 describe('decisionOutcome', () => {
   it('counts an accepted decision as settled', () => {
     expect(decisionOutcome(202)).toBe('settled');
@@ -196,7 +175,7 @@ describe('submitDecision', () => {
   };
 
   it('posts through the signed fetch and reports the outcome', async () => {
-    const fetchImpl = vi.fn(async () => new Response(null, { status: 202 }));
+    const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ ok: true }), { status: 202 }));
     await expect(submitDecision(decide, fetchImpl)).resolves.toBe('settled');
     expect(fetchImpl).toHaveBeenCalledWith(
       '/api/chats/c1/interactions/i1/permission',

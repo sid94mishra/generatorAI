@@ -1,5 +1,5 @@
 import { createApiClient, type AgentMode } from '@generatorai/client-core';
-import type { AuthedFetch } from './http';
+import type { ApiFetch as AuthedFetch } from '@generatorai/client-core';
 
 export interface ChatUpload { name: string; data: Uint8Array; mimeType?: string }
 export interface ChatPrompt { message: string; mode?: AgentMode | undefined }

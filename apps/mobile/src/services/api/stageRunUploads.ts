@@ -1,5 +1,5 @@
 import { createAdminApi, type InvocationUploadCategory } from '@generatorai/client-core';
-import type { AuthedFetch } from './http';
+import type { ApiFetch as AuthedFetch } from '@generatorai/client-core';
 
 /** One file a run start stages before invoking. */
 export interface RunUpload { category: InvocationUploadCategory; name: string; data: Uint8Array; mimeType?: string }

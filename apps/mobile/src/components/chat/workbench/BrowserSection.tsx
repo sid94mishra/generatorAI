@@ -1,3 +1,4 @@
+import type { BrowserDescriptorView as Descriptor } from '@generatorai/client-core';
 // ────────────────────────────────────────────────────────────────
 // Workbench › Browser.
 //
@@ -45,7 +46,6 @@ import {
   Share2,
   Square,
 } from 'lucide-react-native';
-import { describeErrorBody } from '@generatorai/client-core';
 
 import { IconButton } from '../../ui/Button';
 import { ActionSheet, type MenuAction } from '../../ui/ActionSheet';
@@ -54,8 +54,10 @@ import { useComposerCapture } from '../composer/captureContext';
 import { EmptyState, ErrorState, LoadingState, Spinner } from '../../ui/States';
 import { Field } from '../../ui/Form';
 import { useToast } from '../../ui/Toast';
-import { useAuth } from '../../../services/auth/AuthProvider';
+import { useApi } from '../../../services/api/useApi';
+import { useAdminApi } from '../../../services/api/useAdminApi';
 import { StepUpGate } from '../../../services/auth/StepUpGate';
+import { shortError } from '../../../services/lib/shortError';
 import { bytesToBase64 } from '../../../services/lib/base64';
 import { useTheme } from '../../../theme/ThemeProvider';
 
@@ -66,17 +68,6 @@ type BrowserAction =
   | { kind: 'back' }
   | { kind: 'forward' };
 
-interface Descriptor {
-  status: string;
-  mode?: string;
-  currentUrl?: string | null;
-  ready?: boolean;
-  canGoBack?: boolean;
-  canGoForward?: boolean;
-  viewport?: { width: number; height: number };
-  /** "Share with agent" — false once detached. Absent on older servers → shared. */
-  attachedToChat?: boolean;
-}
 
 /** How often a frame is refreshed while the section is on screen. */
 const FRAME_INTERVAL_MS = 2_000;
@@ -107,7 +98,8 @@ export function BrowserSection({
 
 function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBusy: boolean }): React.ReactElement {
   const insets = useSafeAreaInsets();
-  const { fetch: authFetch } = useAuth();
+  const api = useApi();
+  const admin = useAdminApi();
   const { colors } = useTheme();
   const queryClient = useQueryClient();
   const toast = useToast();
@@ -122,11 +114,7 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
 
   const descriptor = useQuery<Descriptor>({
     queryKey: key,
-    queryFn: async () => {
-      const response = await authFetch(`/api/workspaces/${workspaceId}/browser/descriptor`);
-      if (!response.ok) throw new Error(String(response.status));
-      return (await response.json()) as Descriptor;
-    },
+    queryFn: () => api.resources.browserDescriptor(workspaceId),
     refetchInterval: 5_000,
   });
 
@@ -143,32 +131,13 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
   }, [url, dirty]);
 
   const post = useCallback(
-    async (path: string, body?: unknown) => {
-      const response = await authFetch(`/api/workspaces/${workspaceId}/browser/${path}`, {
-        method: 'POST',
-        ...(body ? { headers: { 'content-type': 'application/json' } } : {}),
-        ...(body ? { body: JSON.stringify(body) } : {}),
-      });
-      if (!response.ok) {
-        // The raw body is a JSON envelope whose `message` can be several
-        // hundred characters of stack-adjacent detail. Toasting it verbatim
-        // put `{"error":{...,"requestId":"..."}}` in front of the user; this
-        // is the same rendering every other call in the app gets.
-        const raw = await response.text();
-        let described: string | null = null;
-        try {
-          described = describeErrorBody(JSON.parse(raw));
-        } catch {
-          described = raw;
-        }
-        const message = (described ?? `${response.status} ${response.statusText}`)
-          .split(/\r?\n/)[0]!
-          .trim();
-        throw new Error(message.length > 160 ? `${message.slice(0, 157)}…` : message);
-      }
-      return response;
+    async (action: 'start' | 'stop' | 'actions', body?: Record<string, unknown>): Promise<unknown> => {
+      const id = encodeURIComponent(workspaceId);
+      if (action === 'start') return admin.browser.start(id);
+      if (action === 'stop') return admin.browser.stop(id);
+      return admin.browser.actions(id, body ?? {});
     },
-    [authFetch, workspaceId],
+    [admin, workspaceId],
   );
 
   const invalidate = (): void => void queryClient.invalidateQueries({ queryKey: key });
@@ -195,7 +164,7 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
       invalidate();
     },
     onError: (err) =>
-      toast({ message: err instanceof Error ? err.message : 'Browser failed', tone: 'error' }),
+      toast({ message: shortError(err, 'Browser failed'), tone: 'error' }),
   });
 
   // The body is a Zod discriminated union on `kind` (see routes/browser.ts).
@@ -209,14 +178,17 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
       void pullFrame();
     },
     onError: (err) =>
-      toast({ message: err instanceof Error ? err.message : 'Navigation failed', tone: 'error' }),
+      toast({ message: shortError(err, 'Navigation failed'), tone: 'error' }),
   });
 
   const attachedToChat = descriptor.data?.attachedToChat !== false;
   const share = useMutation({
     mutationFn: async (next: boolean) => {
-      const response = await post(next ? 'attach' : 'detach');
-      return (await response.json()) as { attachedToChat?: boolean };
+      if (!next) {
+        await admin.browser.detach(encodeURIComponent(workspaceId));
+        return { attachedToChat: false };
+      }
+      return await admin.browser.attach(encodeURIComponent(workspaceId)) as { attachedToChat?: boolean };
     },
     onSuccess: (out) => {
       queryClient.setQueryData<Descriptor>(key, (prev) =>
@@ -225,7 +197,7 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
       invalidate();
     },
     onError: (err) =>
-      toast({ message: err instanceof Error ? err.message : 'Could not change sharing', tone: 'error' }),
+      toast({ message: shortError(err, 'Could not change sharing'), tone: 'error' }),
   });
 
   const sendActions: MenuAction[] = capture
@@ -260,18 +232,14 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
     if (inFlight.current) return;
     inFlight.current = true;
     try {
-      const response = await authFetch(
-        `/api/workspaces/${workspaceId}/browser/screencast.jpg?quality=45&k=${Date.now()}`,
-      );
-      if (!response.ok) return;
-      const buffer = await response.arrayBuffer();
-      setFrame(`data:image/jpeg;base64,${bytesToBase64(new Uint8Array(buffer))}`);
+      const { data } = await api.resources.browserScreencast(workspaceId, 45, Date.now());
+      setFrame(`data:image/jpeg;base64,${bytesToBase64(data)}`);
     } catch {
       /* a dropped frame is not worth surfacing; the next poll retries */
     } finally {
       inFlight.current = false;
     }
-  }, [authFetch, workspaceId]);
+  }, [api, workspaceId]);
 
   useEffect(() => {
     if (!live) return undefined;
@@ -378,7 +346,7 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
       {live && (act.isError || startStop.isError) ? (
         <View accessibilityRole="alert" className="border-b border-border-muted bg-card px-3 py-2">
           <Text className="text-sm text-danger">
-            {(act.error ?? startStop.error)?.message ?? 'Browser action failed. Check the address and try again.'}
+            {shortError(act.error ?? startStop.error, 'Browser action failed. Check the address and try again.')}
           </Text>
         </View>
       ) : null}
@@ -402,7 +370,7 @@ function BrowserPanel({ workspaceId, agentBusy }: { workspaceId: string; agentBu
       ) : startStop.isError ? (
         <ErrorState
           title="Could not start the browser"
-          message={startStop.error instanceof Error ? startStop.error.message : 'Check the host browser setup and try again.'}
+          message={shortError(startStop.error, 'Check the host browser setup and try again.')}
           onRetry={() => startStop.mutate('start')}
         />
       ) : (

@@ -11,23 +11,8 @@
 //   DELETE /computer/grants/:appIdentity
 // ────────────────────────────────────────────────────────────────
 
-export interface ComputerFrame {
-  id: string;
-  createdAt: string;
-  width?: number;
-  height?: number;
-}
-
-export interface ComputerActivityEntry {
-  action: string;
-  appLabel: string;
-  target: string | null;
-  path: string | null;
-  verified?: boolean;
-  refusalCode: string | null;
-  artifactId: string | null;
-  createdAt: string;
-}
+import type { ComputerFrameView as ComputerFrame, ComputerActivityView as ComputerActivityEntry } from '@generatorai/client-core';
+export type { ComputerFrameView as ComputerFrame, ComputerActivityView as ComputerActivityEntry } from '@generatorai/client-core';
 
 export interface PendingConsent {
   requestId: string;

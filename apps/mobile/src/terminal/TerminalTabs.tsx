@@ -23,7 +23,7 @@ import { IconButton } from '../components/ui/Button';
 import { EmptyState, ErrorState, LoadingState } from '../components/ui/States';
 import { useToast } from '../components/ui/Toast';
 import { haptics } from '../components/ui/haptics';
-import { useAuth } from '../services/auth/AuthProvider';
+import { useAdminApi } from '../services/api/useAdminApi';
 import { useApi } from '../services/api/useApi';
 import { useTheme } from '../theme/ThemeProvider';
 import { KeyboardSticky } from '../components/ui/KeyboardSticky';
@@ -53,7 +53,7 @@ export function TerminalTabs({
 }): React.ReactElement {
   const api = useApi();
   const insets = useSafeAreaInsets();
-  const { fetch: authedFetch } = useAuth();
+  const admin = useAdminApi();
   const { colors } = useTheme();
   const toast = useToast();
 
@@ -109,10 +109,8 @@ export function TerminalTabs({
   const load = useCallback(async () => {
     setError(null);
     try {
-      const res = await authedFetch(`/api/workspaces/${workspaceId}/terminals`);
-      if (!res.ok) throw new Error(`Could not list terminals (${res.status}).`);
-      const body = (await res.json()) as { terminals?: TerminalDescriptor[] };
-      const alive = (body.terminals ?? [])
+      const terminals = await admin.terminals.list(encodeURIComponent(workspaceId));
+      const alive = terminals
         .filter((d) => d.exitCode === null)
         .slice(0, MAX_TERMINAL_TABS)
         .map<Tab>((d) => ({ key: nextKey(), sessionId: d.id }));
@@ -129,7 +127,7 @@ export function TerminalTabs({
       setTabs(null);
       setError(err instanceof Error ? err.message : String(err));
     }
-  }, [authedFetch, createTab, nextKey, workspaceId]);
+  }, [admin, createTab, nextKey, workspaceId]);
 
   useEffect(() => {
     void load();

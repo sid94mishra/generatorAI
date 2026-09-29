@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import type { SharedValue } from 'react-native-reanimated';
-import { composerReducer, createComposerState, selectCanSend, type AgentMode, type ChatMessage } from '@generatorai/client-core';
+import { ApiError, composerReducer, createComposerState, selectCanSend, type AgentMode, type ChatMessage } from '@generatorai/client-core';
 import { COMPUTER_USE_SKILL_ID } from '@generatorai/shared';
 
 import { useApi } from '../../../services/api/useApi';
@@ -379,11 +379,10 @@ export function useComposerController(opts: UseComposerControllerOptions): Compo
   });
   const computerUse = useQuery({
     queryKey: ['computer-use-settings'],
-    queryFn: async () => {
-      const res = await authedFetch('/api/system/computer-use');
-      if (!res.ok) return { enabled: false, skillId: COMPUTER_USE_SKILL_ID };
-      return (await res.json()) as { enabled: boolean; skillId?: string };
-    },
+    queryFn: () => api.system.computerUse().catch((error: unknown) => {
+      if (error instanceof ApiError) return { enabled: false, skillId: COMPUTER_USE_SKILL_ID };
+      throw error;
+    }),
     enabled: slashWanted,
     staleTime: 30_000,
   });

@@ -15,7 +15,7 @@ export function createProjectActions(admin: AdminApi) {
     linkGit: (id: string, body: GitCodebaseBody) => projects.codebases.link(enc(id), { ...body }),
     unlinkCodebase: (id: string, cid: string) => projects.codebases.unlink(enc(id), enc(cid)),
     configs: (id: string) => projects.configs.list(enc(id)),
-    configContent: (id: string, cid: string) => projects.configs.get(enc(id), enc(cid)),
+    configContent: (id: string, cid: string) => projects.configs.content(id, cid),
     removeConfig: (id: string, cid: string) => projects.configs.remove(enc(id), enc(cid)),
     mcpServers: (id: string) => projects.mcp.list(enc(id)),
     updateMcpServer: (id: string, mid: string, body: Record<string, unknown>) => projects.mcp.update(enc(id), enc(mid), body),
