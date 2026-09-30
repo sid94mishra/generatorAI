@@ -82,18 +82,18 @@
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #55555d;
   --syntax-keyword: #7152e0;
-  --syntax-string: #16804c;
+  --syntax-string: #167e4b;
   --syntax-number: #c2410c;
-  --syntax-function: #1d6ae5;
+  --syntax-function: #1d68e1;
   --syntax-type: #935f00;
   --syntax-variable: #18181b;
   --syntax-constant: #c2410c;
   --syntax-operator: #0e7490;
   --syntax-punctuation: #55555d;
   --syntax-tag: #d1242f;
-  --syntax-attribute: #0f7f7a;
+  --syntax-attribute: #0f7b76;
   --syntax-deleted: #d1242f;
-  --syntax-inserted: #16804c;
+  --syntax-inserted: #167e4b;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -589,9 +589,9 @@
   --syntax-constant: #d19a66;
   --syntax-operator: #71ccd8;
   --syntax-punctuation: #a2aab8;
-  --syntax-tag: #e06c75;
+  --syntax-tag: #e07078;
   --syntax-attribute: #56b6c2;
-  --syntax-deleted: #e06c75;
+  --syntax-deleted: #e07078;
   --syntax-inserted: #98c379;
 
   /* File-type icon palette (mirrors @pierre/trees) */
@@ -626,7 +626,7 @@
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5f626d;
   --syntax-keyword: #9127a0;
-  --syntax-string: #3f8c3e;
+  --syntax-string: #3d7a3f;
   --syntax-number: #a04f00;
   --syntax-function: #3568d4;
   --syntax-type: #8a6300;
@@ -634,10 +634,10 @@
   --syntax-constant: #a04f00;
   --syntax-operator: #0d6d90;
   --syntax-punctuation: #5f626d;
-  --syntax-tag: #ca3a2e;
-  --syntax-attribute: #0e7c8c;
-  --syntax-deleted: #ca3a2e;
-  --syntax-inserted: #3f8c3e;
+  --syntax-tag: #c73a2e;
+  --syntax-attribute: #117888;
+  --syntax-deleted: #c73a2e;
+  --syntax-inserted: #3d7a3f;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -719,7 +719,7 @@
   --syntax-string: #14710a;
   --syntax-number: #a34d14;
   --syntax-function: #1d5cc4;
-  --syntax-type: #846e15;
+  --syntax-type: #836d15;
   --syntax-variable: #1f1f1f;
   --syntax-constant: #a34d14;
   --syntax-operator: #036a96;
@@ -805,19 +805,19 @@
 
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #4c5372;
-  --syntax-keyword: #7847bd;
-  --syntax-string: #587539;
-  --syntax-number: #b15c00;
-  --syntax-function: #2563c8;
-  --syntax-type: #8f5e15;
+  --syntax-keyword: #7046b1;
+  --syntax-string: #4d6343;
+  --syntax-number: #85501f;
+  --syntax-function: #285bb0;
+  --syntax-type: #7b5624;
   --syntax-variable: #343b58;
-  --syntax-constant: #b15c00;
-  --syntax-operator: #007197;
+  --syntax-constant: #85501f;
+  --syntax-operator: #0c6488;
   --syntax-punctuation: #4c5372;
-  --syntax-tag: #c64343;
-  --syntax-attribute: #0f7a66;
-  --syntax-deleted: #c64343;
-  --syntax-inserted: #587539;
+  --syntax-tag: #99414a;
+  --syntax-attribute: #196862;
+  --syntax-deleted: #99414a;
+  --syntax-inserted: #4d6343;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -895,19 +895,19 @@
 
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5c5f77;
-  --syntax-keyword: #8839ef;
-  --syntax-string: #3c9528;
-  --syntax-number: #dc5608;
-  --syntax-function: #1e66f5;
-  --syntax-type: #b37115;
+  --syntax-keyword: #8739ec;
+  --syntax-string: #447447;
+  --syntax-number: #a2532f;
+  --syntax-function: #2761d9;
+  --syntax-type: #876239;
   --syntax-variable: #4c4f69;
-  --syntax-constant: #dc5608;
-  --syntax-operator: #17798d;
+  --syntax-constant: #a2532f;
+  --syntax-operator: #1f7287;
   --syntax-punctuation: #5c5f77;
-  --syntax-tag: #d20f39;
-  --syntax-attribute: #179299;
-  --syntax-deleted: #d20f39;
-  --syntax-inserted: #3c9528;
+  --syntax-tag: #cf103a;
+  --syntax-attribute: #317181;
+  --syntax-deleted: #cf103a;
+  --syntax-inserted: #447447;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -986,18 +986,18 @@
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5f646a;
   --syntax-keyword: #7a4fc0;
-  --syntax-string: #4d8a24;
-  --syntax-number: #c05d10;
+  --syntax-string: #4a7b2b;
+  --syntax-number: #ac5918;
   --syntax-function: #1f6fb8;
-  --syntax-type: #a86e00;
+  --syntax-type: #95660c;
   --syntax-variable: #3d4245;
-  --syntax-constant: #c05d10;
+  --syntax-constant: #ac5918;
   --syntax-operator: #16708f;
   --syntax-punctuation: #5f646a;
-  --syntax-tag: #d33a3a;
-  --syntax-attribute: #0e7f6d;
-  --syntax-deleted: #d33a3a;
-  --syntax-inserted: #4d8a24;
+  --syntax-tag: #ca3a3b;
+  --syntax-attribute: #0f7d6c;
+  --syntax-deleted: #ca3a3b;
+  --syntax-inserted: #4a7b2b;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -1079,14 +1079,14 @@
   --syntax-string: #0a7a5c;
   --syntax-number: #a8551a;
   --syntax-function: #3b64c4;
-  --syntax-type: #8a6a00;
+  --syntax-type: #896902;
   --syntax-variable: #403f53;
   --syntax-constant: #a8551a;
   --syntax-operator: #0b6b8f;
   --syntax-punctuation: #5c5b70;
-  --syntax-tag: #c93b39;
-  --syntax-attribute: #0c7a80;
-  --syntax-deleted: #c93b39;
+  --syntax-tag: #c63b3a;
+  --syntax-attribute: #0d7980;
+  --syntax-deleted: #c63b3a;
   --syntax-inserted: #0a7a5c;
 
   /* File-type icon palette (mirrors @pierre/trees) */
@@ -1165,19 +1165,19 @@
 
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #655f7a;
-  --syntax-keyword: #907aa9;
-  --syntax-string: #4f7d5e;
-  --syntax-number: #c1662d;
+  --syntax-keyword: #7a6993;
+  --syntax-string: #4e795e;
+  --syntax-number: #a55e39;
   --syntax-function: #286983;
-  --syntax-type: #a8701c;
+  --syntax-type: #956729;
   --syntax-variable: #464261;
-  --syntax-constant: #c1662d;
-  --syntax-operator: #3f7f8c;
+  --syntax-constant: #a55e39;
+  --syntax-operator: #407887;
   --syntax-punctuation: #655f7a;
-  --syntax-tag: #b4637a;
-  --syntax-attribute: #56949f;
-  --syntax-deleted: #b4637a;
-  --syntax-inserted: #4f7d5e;
+  --syntax-tag: #9e5c75;
+  --syntax-attribute: #507587;
+  --syntax-deleted: #9e5c75;
+  --syntax-inserted: #4e795e;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -1212,16 +1212,16 @@
   --syntax-comment: #aeb8c8;
   --syntax-keyword: #c8a2c8;
   --syntax-string: #a3be8c;
-  --syntax-number: #d08770;
+  --syntax-number: #d18a74;
   --syntax-function: #81a1c1;
   --syntax-type: #ebcb8b;
   --syntax-variable: #eceff4;
-  --syntax-constant: #d08770;
+  --syntax-constant: #d18a74;
   --syntax-operator: #88c0d0;
   --syntax-punctuation: #aeb8c8;
-  --syntax-tag: #cf7783;
+  --syntax-tag: #d38792;
   --syntax-attribute: #8fbcbb;
-  --syntax-deleted: #cf7783;
+  --syntax-deleted: #d38792;
   --syntax-inserted: #a3be8c;
 
   /* File-type icon palette (mirrors @pierre/trees) */
@@ -1257,11 +1257,11 @@
   --syntax-comment: #4c566a;
   --syntax-keyword: #6f4b78;
   --syntax-string: #4a6b3c;
-  --syntax-number: #a35434;
+  --syntax-number: #a15334;
   --syntax-function: #3b5f87;
-  --syntax-type: #8a6516;
+  --syntax-type: #866318;
   --syntax-variable: #2e3440;
-  --syntax-constant: #a35434;
+  --syntax-constant: #a15334;
   --syntax-operator: #2f6d84;
   --syntax-punctuation: #4c566a;
   --syntax-tag: #a4262f;
@@ -1346,18 +1346,18 @@
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #5c6a72;
   --syntax-keyword: #a84a8c;
-  --syntax-string: #4f8033;
-  --syntax-number: #c25f18;
+  --syntax-string: #4e7c35;
+  --syntax-number: #a95c23;
   --syntax-function: #2c6f9b;
-  --syntax-type: #a8730a;
+  --syntax-type: #8f6a1c;
   --syntax-variable: #414d54;
-  --syntax-constant: #c25f18;
+  --syntax-constant: #a95c23;
   --syntax-operator: #1f7189;
   --syntax-punctuation: #5c6a72;
-  --syntax-tag: #d13c39;
-  --syntax-attribute: #237f5f;
-  --syntax-deleted: #d13c39;
-  --syntax-inserted: #4f8033;
+  --syntax-tag: #ca3d3a;
+  --syntax-attribute: #247e5f;
+  --syntax-deleted: #ca3d3a;
+  --syntax-inserted: #4e7c35;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -1399,9 +1399,9 @@
   --syntax-constant: #fe8019;
   --syntax-operator: #8dc3b8;
   --syntax-punctuation: #bdae93;
-  --syntax-tag: #fb4934;
+  --syntax-tag: #fa553e;
   --syntax-attribute: #8ec07c;
-  --syntax-deleted: #fb4934;
+  --syntax-deleted: #fa553e;
   --syntax-inserted: #b8bb26;
 
   /* File-type icon palette (mirrors @pierre/trees) */
@@ -1436,18 +1436,18 @@
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #665c54;
   --syntax-keyword: #8f3f71;
-  --syntax-string: #4f7a20;
+  --syntax-string: #4d7322;
   --syntax-number: #af3a03;
   --syntax-function: #076678;
-  --syntax-type: #b57614;
+  --syntax-type: #8b6020;
   --syntax-variable: #3c3836;
   --syntax-constant: #af3a03;
-  --syntax-operator: #2c7a86;
+  --syntax-operator: #2e717c;
   --syntax-punctuation: #665c54;
   --syntax-tag: #9d0006;
-  --syntax-attribute: #427b58;
+  --syntax-attribute: #417354;
   --syntax-deleted: #9d0006;
-  --syntax-inserted: #4f7a20;
+  --syntax-inserted: #4d7322;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -1480,18 +1480,18 @@
 
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #93a1a1;
-  --syntax-keyword: #8b90d8;
+  --syntax-keyword: #8e93d8;
   --syntax-string: #6fae3d;
-  --syntax-number: #d9581f;
-  --syntax-function: #268bd2;
-  --syntax-type: #b58900;
+  --syntax-number: #df7f50;
+  --syntax-function: #54a0d3;
+  --syntax-type: #bb9315;
   --syntax-variable: #eee8d5;
-  --syntax-constant: #d9581f;
+  --syntax-constant: #df7f50;
   --syntax-operator: #3fc4b9;
   --syntax-punctuation: #93a1a1;
-  --syntax-tag: #e3453f;
-  --syntax-attribute: #2aa198;
-  --syntax-deleted: #e3453f;
+  --syntax-tag: #e6786e;
+  --syntax-attribute: #3ea89e;
+  --syntax-deleted: #e6786e;
   --syntax-inserted: #6fae3d;
 
   /* File-type icon palette (mirrors @pierre/trees) */
@@ -1527,15 +1527,15 @@
   --syntax-comment: #4a6068;
   --syntax-keyword: #5a5fb0;
   --syntax-string: #48731d;
-  --syntax-number: #bb4410;
+  --syntax-number: #b44312;
   --syntax-function: #1f6d99;
   --syntax-type: #816309;
   --syntax-variable: #073642;
-  --syntax-constant: #bb4410;
+  --syntax-constant: #b44312;
   --syntax-operator: #1b6f7d;
   --syntax-punctuation: #4a6068;
   --syntax-tag: #c0272b;
-  --syntax-attribute: #1f7f78;
+  --syntax-attribute: #1b7470;
   --syntax-deleted: #c0272b;
   --syntax-inserted: #48731d;
 
@@ -1573,15 +1573,15 @@
   --syntax-keyword: #8b7ec8;
   --syntax-string: #879a39;
   --syntax-number: #da702c;
-  --syntax-function: #4385be;
+  --syntax-function: #4988be;
   --syntax-type: #d0a215;
   --syntax-variable: #cecdc3;
   --syntax-constant: #da702c;
   --syntax-operator: #5abdac;
   --syntax-punctuation: #9f9d96;
-  --syntax-tag: #d14d41;
+  --syntax-tag: #d16055;
   --syntax-attribute: #3aa99f;
-  --syntax-deleted: #d14d41;
+  --syntax-deleted: #d16055;
   --syntax-inserted: #879a39;
 
   /* File-type icon palette (mirrors @pierre/trees) */
@@ -1616,18 +1616,18 @@
   /* Syntax (Shiki theme of ui/patterns/CodeBlock) */
   --syntax-comment: #575653;
   --syntax-keyword: #5e409d;
-  --syntax-string: #66800b;
-  --syntax-number: #bc5215;
+  --syntax-string: #5e760b;
+  --syntax-number: #b34f15;
   --syntax-function: #205ea6;
-  --syntax-type: #ad8301;
+  --syntax-type: #896804;
   --syntax-variable: #100f0f;
-  --syntax-constant: #bc5215;
+  --syntax-constant: #b34f15;
   --syntax-operator: #1c6c66;
   --syntax-punctuation: #575653;
   --syntax-tag: #af3029;
-  --syntax-attribute: #24837b;
+  --syntax-attribute: #227971;
   --syntax-deleted: #af3029;
-  --syntax-inserted: #66800b;
+  --syntax-inserted: #5e760b;
 
   /* File-type icon palette (mirrors @pierre/trees) */
   --file-icon-gray: #84848a;
@@ -1707,16 +1707,16 @@
   --syntax-comment: #454545;
   --syntax-keyword: #5a1f9e;
   --syntax-string: #0a5c33;
-  --syntax-number: #8a3d00;
+  --syntax-number: #873c00;
   --syntax-function: #0f3fa8;
-  --syntax-type: #6b4e00;
+  --syntax-type: #6a4d00;
   --syntax-variable: #000000;
-  --syntax-constant: #8a3d00;
+  --syntax-constant: #873c00;
   --syntax-operator: #00506b;
   --syntax-punctuation: #454545;
-  --syntax-tag: #a80710;
-  --syntax-attribute: #005f57;
-  --syntax-deleted: #a80710;
+  --syntax-tag: #a60710;
+  --syntax-attribute: #005c54;
+  --syntax-deleted: #a60710;
   --syntax-inserted: #0a5c33;
 
   /* File-type icon palette (mirrors @pierre/trees) */

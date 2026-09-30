@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { resolveDesignTokens } from '../design.js';
 
 import {
   contrastRatio,
@@ -403,15 +404,17 @@ describe('derived surfaces', () => {
     }
   });
 
-  it('gives every theme syntax colours that read on its code surface', () => {
-    for (const { theme, appearance, label, tokens } of MATRIX) {
+  it('gives every theme syntax colours that read as body text on every code surface', () => {
+    for (const { theme, appearance, label } of MATRIX) {
       const syntax = resolveSyntaxTokens(theme, appearance);
+      const d = resolveDesignTokens(theme, appearance, theme.defaultAccent);
       for (const [role, colour] of Object.entries(syntax)) {
-        const ratio = contrastRatio(colour, tokens.card);
-        expect(
-          ratio,
-          `${label}: syntax.${role} ${colour} on card = ${ratio.toFixed(2)}:1`,
-        ).toBeGreaterThanOrEqual(3);
+        for (const [name, back] of Object.entries({ ground: d.ground, surface: d.surface, sunken: d.sunken })) {
+          const ratio = contrastRatio(colour, back);
+          expect(ratio, `${label}: syntax.${role} ${colour} on ${name} = ${ratio.toFixed(2)}:1`).toBeGreaterThanOrEqual(
+            theme.textContrast ?? 4.5,
+          );
+        }
       }
     }
   });

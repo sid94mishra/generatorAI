@@ -217,6 +217,8 @@ describe('Compare against', () => {
       checkpoint('solo', { label: 'Lone' }),
     ];
     await renderReady();
+    // A full pointer sequence: Base UI Select commits on the pointer, not on a bare synthetic click.
+    const user = userEvent.setup();
 
     for (const [name, base] of [
       [/^Turn one/, 'turn:t1'],
@@ -224,9 +226,7 @@ describe('Compare against', () => {
       ['Branch base (main)', 'ref:c0ffee'],
     ] as const) {
       await openCompare();
-      await act(async () => {
-        fireEvent.click(screen.getByRole('option', { name }));
-      });
+      await user.click(screen.getByRole('option', { name }));
       expect(useWorkspaceChangeSummaryMock).toHaveBeenLastCalledWith('ws-1', {
         base,
         head: 'working',

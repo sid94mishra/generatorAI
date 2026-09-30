@@ -30,7 +30,7 @@
 // hand-authored values byte-for-byte.
 // ────────────────────────────────────────────────────────────────
 
-import { ensureContrast, mix, parseHex, relativeLuminance, toHex, withAlpha } from '../color.js';
+import { ensureContrast, ensureContrastAll, mix, parseHex, relativeLuminance, toHex, withAlpha } from '../color.js';
 
 export type Appearance = 'dark' | 'light';
 
@@ -535,11 +535,19 @@ export function resolveTerminalPalette(
  * The role→hue mapping is the near-universal convention shared by One Dark,
  * Tokyo Night, Catppuccin and Primer, so every theme lands recognisably close
  * to its upstream editor colouring without shipping a second palette.
+ *
+ * Code is body-size text, so each role is clamped to the theme's text contrast
+ * (4.5:1, AAA themes more) on every surface code renders on — page, card and
+ * the sunken code block — moving toward the foreground only where a hue falls
+ * short (Solarized light's orange on its sunken base was 4.34:1).
  */
 export function resolveSyntaxTokens(theme: ThemeDef, appearance: Appearance): SyntaxTokens {
   const s = theme[appearance];
   const h = s.hues;
-  return {
+  const codeSurfaces = [s.background, s.card, s.sunken ?? (relativeLuminance(parseHex(s.card)) < relativeLuminance(parseHex(s.background)) ? s.card : s.background)];
+  const minText = theme.textContrast ?? 4.5;
+  const read = (colour: string): string => toHex(ensureContrastAll(colour, codeSurfaces, minText, s.foreground));
+  const roles: SyntaxTokens = {
     comment: s.mutedForeground,
     keyword: h.purple,
     string: h.green,
@@ -555,6 +563,7 @@ export function resolveSyntaxTokens(theme: ThemeDef, appearance: Appearance): Sy
     deleted: h.red,
     inserted: h.green,
   };
+  return Object.fromEntries(Object.entries(roles).map(([role, colour]) => [role, read(colour)])) as unknown as SyntaxTokens;
 }
 
 /** Categorical chart ramp — six hues, maximally separated in hue order. */

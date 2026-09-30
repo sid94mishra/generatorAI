@@ -65,7 +65,7 @@ import { StageEdge } from './StageEdge.js';
 import { StageNode } from './StageNode.js';
 import { useCanvasKeys } from './useCanvasKeys.js';
 import { useStageTemplates } from './stageTemplates.js';
-import { useTheme } from '@/providers/ThemeProvider.js';
+import { useDocumentAppearance } from '@/blocks/diff/useDocumentAppearance.js';
 
 // The type names the store gives its nodes and edges.
 const nodeTypes = { stageNode: StageNode, loopNode: GroupNode } as NodeTypes;
@@ -115,8 +115,9 @@ export function BuilderCanvas({ onAddStage, onAddedTemplate, nodeTags = NO_TAGS,
   });
 
   const flow = useReactFlow();
-  // React Flow defaults to `light`, which puts the legacy `.light` token class on its wrapper.
-  const { resolvedTheme } = useTheme();
+  // React Flow defaults to `light`, which puts a `.light` class (the light token
+  // scope) on its wrapper; follow the document's resolved appearance instead.
+  const appearance = useDocumentAppearance();
 
   // ── Kind palette (controlled or internal) ──
   const [ownPaletteOpen, setOwnPaletteOpen] = useState(false);
@@ -271,7 +272,7 @@ export function BuilderCanvas({ onAddStage, onAddedTemplate, nodeTags = NO_TAGS,
           nodeTypes={nodeTypes}
           edgeTypes={edgeTypes}
           defaultEdgeOptions={defaultEdgeOptions}
-          colorMode={resolvedTheme}
+          colorMode={appearance}
           fitView
           fitViewOptions={FIT_OPTIONS}
           minZoom={MIN_ZOOM}

@@ -437,12 +437,12 @@ describe('NativeBrowserView — 100 ms visibility loop (NativeBrowserView.tsx:21
     expect(screen.getByText(BADGE)).toBeInTheDocument();
   });
 
-  it('a legacy Radix layer (role="dialog") over the view still hides it (legacy half of the selector, removed in P7-01)', async () => {
+  it('an untagged role="dialog" no longer hides it: every floating layer carries data-gai-overlay (P7-01)', async () => {
     render(view());
     await advance(100);
     addLayer({ role: 'dialog' }, { left: 400, top: 200, width: 800, height: 500 });
     await advance(100);
-    expect(bridge.api.setVisible).toHaveBeenLastCalledWith('tab-1', false);
+    expect(bridge.api.setVisible).toHaveBeenLastCalledWith('tab-1', true);
   });
 
   it('hides the view on unmount', async () => {
