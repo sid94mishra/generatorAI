@@ -96,12 +96,6 @@ describe('isObscured (D-19)', () => {
     expect(isObscured(container, deps)).toBe(true);
   });
 
-  it('7. a legacy Radix popper wrapper overlapping obscures it (deleted in P7)', () => {
-    const { deps, add } = setup();
-    const container = add(document.body, {}, VIEW);
-    add(document.body, { 'data-radix-popper-content-wrapper': '' }, { left: 1000, top: 120, width: 200, height: 240 });
-    expect(isObscured(container, deps)).toBe(true);
-  });
 
   it('the container itself and its own children never obscure it', () => {
     const { deps, add } = setup();
@@ -110,8 +104,8 @@ describe('isObscured (D-19)', () => {
     expect(isObscured(container, deps)).toBe(false);
   });
 
-  it('the default selector covers the design overlays, toasts and the legacy layers', () => {
-    for (const part of ['[data-gai-overlay]', '[data-sonner-toast]', '[data-radix-popper-content-wrapper]', '[role="menu"]']) {
+  it('the default selector covers the design overlays and toasts', () => {
+    for (const part of ['[data-gai-overlay]', '[data-sonner-toast]']) {
       expect(OCCLUSION_SELECTOR).toContain(part);
     }
   });

@@ -31,10 +31,3 @@ export const overlayProps = (kind: OverlayKind) => ({ 'data-gai-overlay': kind }
  */
 export const GAI_OVERLAY_SELECTOR = '[data-gai-overlay], [data-sonner-toast]';
 
-/**
- * Floating layers of the legacy Radix `components/ui` layer and hand-rolled
- * modals, which do not carry `data-gai-overlay`. Removed in Phase 7 together
- * with components/ui (P7-01).
- */
-export const LEGACY_OVERLAY_SELECTOR =
-  '[data-radix-popper-content-wrapper], [role="dialog"], [role="menu"], [role="listbox"], [data-modal-open="true"]';

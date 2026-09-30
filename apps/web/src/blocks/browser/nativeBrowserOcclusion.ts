@@ -7,7 +7,7 @@
 // with the DOM access injected so it is unit-testable.
 // ────────────────────────────────────────────────────────────────
 
-import { GAI_OVERLAY_SELECTOR, LEGACY_OVERLAY_SELECTOR } from '@/ui/lib/overlay.js';
+import { GAI_OVERLAY_SELECTOR } from '@/ui/lib/overlay.js';
 
 export interface OcclusionDeps {
   /** `document.querySelectorAll`, as an array. */
@@ -17,8 +17,8 @@ export interface OcclusionDeps {
   isCssHidden: (el: Element) => boolean;
 }
 
-/** Overlays plus the legacy Radix layers (the legacy half goes in P7). */
-export const OCCLUSION_SELECTOR = `${GAI_OVERLAY_SELECTOR}, ${LEGACY_OVERLAY_SELECTOR}`;
+/** Every floating layer carries `data-gai-overlay` (toasts: `data-sonner-toast`). */
+export const OCCLUSION_SELECTOR = GAI_OVERLAY_SELECTOR;
 
 /** Overlays smaller than this (px) on either axis are ignored. */
 const MIN_OVERLAY_EDGE = 4;
