@@ -140,6 +140,9 @@ export function SplitPane({
   collapsedRef.current = collapsed;
   const onCollapsedChangeRef = useRef(onCollapsedChange);
   onCollapsedChangeRef.current = onCollapsedChange;
+  // A side pane at 0 stays mounted (its state survives) but is `invisible`: out
+  // of the tab order and the accessibility tree, like a closed disclosure.
+  const [sideShut, setSideShut] = useState(collapsed);
 
   useLayoutEffect(() => {
     if (!sidePanel) return;
@@ -149,6 +152,7 @@ export function SplitPane({
   }, [collapsed, sidePanel]);
 
   const onSideResize = (size: PanelSize, _id: string | number | undefined, prev: PanelSize | undefined) => {
+    setSideShut(size.asPercentage === 0);
     if (size.asPercentage > 0) {
       openSize.current = `${size.asPercentage}%`;
       return;
@@ -209,10 +213,11 @@ export function SplitPane({
         collapsible
         collapsedSize={0}
         onResize={onSideResize}
-        tabIndex={sideFocusable ? 0 : undefined}
+        tabIndex={sideFocusable && !sideShut ? 0 : undefined}
         className={cn(
           'flex min-h-0 min-w-0 flex-col overflow-hidden',
           sideFocusable && cn('-outline-offset-2', focusRing),
+          sideShut && 'invisible',
           sideClassName,
         )}
       >

@@ -140,7 +140,8 @@ export const FencedCode: Story = {
   play: async ({ canvas, canvasElement }) => {
     await expect(canvas.getByText('src/greet.ts')).toBeInTheDocument();
     await expect(canvas.getAllByRole('button', { name: 'Copy' })).toHaveLength(4);
-    await waitFor(() => expect(canvasElement.innerHTML).toContain('--syntax-'), { timeout: 10_000 });
+    // Shiki loads its grammar on first use; under three parallel appearance projects that can take >10 s.
+    await waitFor(() => expect(canvasElement.innerHTML).toContain('--syntax-'), { timeout: 30_000 });
   },
 };
 
@@ -185,7 +186,7 @@ function LiveStream() {
 export const Streaming: Story = {
   render: () => <LiveStream />,
   play: async ({ canvasElement }) => {
-    await waitFor(() => expect(canvasElement.textContent).toContain('second line'), { timeout: 15_000 });
+    await waitFor(() => expect(canvasElement.textContent).toContain('second line'), { timeout: 30_000 });
     await waitFor(() => expect(canvasElement.querySelector('span[aria-hidden="true"].bg-fg')).toBeNull());
   },
 };

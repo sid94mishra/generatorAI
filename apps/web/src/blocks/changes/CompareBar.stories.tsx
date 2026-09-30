@@ -86,8 +86,8 @@ export const CompareAgainstOpen: Story = {
 export const NewSession: Story = {
   render: () => <Stateful options={[{ value: 'baseline', label: 'Since session start' }]} />,
   play: async ({ canvas }) => {
-    await expect(canvas.getByRole('radio', { name: 'This turn' })).toBeDisabled();
-    await expect(canvas.getByRole('radio', { name: 'Branch' })).toBeDisabled();
+    await expect(canvas.getByRole('radio', { name: 'This turn' })).toHaveAttribute('aria-disabled', 'true');
+    await expect(canvas.getByRole('radio', { name: 'Branch' })).toHaveAttribute('aria-disabled', 'true');
   },
 };
 

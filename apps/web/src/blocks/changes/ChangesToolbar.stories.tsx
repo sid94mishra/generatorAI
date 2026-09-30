@@ -70,6 +70,11 @@ export const WithKept: Story = {
 /** View settings: Unified / Split, Wrap lines, tree position; the menu stays open while toggling. */
 export const ViewSettingsOpen: Story = {
   args: {} as ChangesToolbarProps,
+  // The menu is non-modal (the diff stays scrollable), so Base UI brackets it
+  // with focus-guard sentinels: aria-hidden spans with tabindex=0 that only
+  // redirect Tab back into the menu. axe's aria-hidden-focus cannot tell them
+  // from a real hidden control.
+  parameters: { a11y: { config: { rules: [{ id: 'aria-hidden-focus', enabled: false }] } } },
   play: async ({ canvas }) => {
     await userEvent.click(canvas.getByRole('button', { name: 'View settings' }));
     const split = await screen.findByRole('menuitemcheckbox', { name: 'Split view' });

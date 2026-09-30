@@ -11,6 +11,7 @@ import { BlockingBar } from './parts/BlockingBar.js';
 import { ComposerMenu } from './parts/ComposerMenu.js';
 import { ComposerSkeleton } from './parts/ComposerSkeleton.js';
 import { ContextGauge, ContextUsageDetails } from './parts/ContextGauge.js';
+import { PopoverRoot } from '@/ui/primitives/Popover/Popover.js';
 import { DictationControl } from './parts/DictationControl.js';
 import { SendStopButton } from './parts/SendStopButton.js';
 import { SourcesChipView } from './parts/SourcesChip.js';
@@ -188,9 +189,12 @@ export const GaugePopover: Story = {
   render: () => (
     <div className="flex flex-col gap-4">
       <ContextGauge model={{ id: 'claude-sonnet-5', promptTokenLimit: 200_000 }} />
-      <div className="w-72 rounded-card border border-line bg-overlay p-3">
-        <ContextUsageDetails resolved={usage} model={{ id: 'claude-sonnet-5', promptTokenLimit: 200_000, maxOutputTokens: 64_000 }} usage={null} />
-      </div>
+      {/* The details are the popover's body; its title needs the Popover root's context. */}
+      <PopoverRoot>
+        <div className="w-72 rounded-card border border-line bg-overlay p-3">
+          <ContextUsageDetails resolved={usage} model={{ id: 'claude-sonnet-5', promptTokenLimit: 200_000, maxOutputTokens: 64_000 }} usage={null} />
+        </div>
+      </PopoverRoot>
     </div>
   ),
 };

@@ -119,9 +119,14 @@ export function ToolbarOption({
         </span>
         <span className="flex min-w-0 flex-1 flex-col">
           <span className="text-ui">{children}</span>
-          {description != null ? <span className="text-small whitespace-normal text-fg-3">{description}</span> : null}
+          {/* On the selected row fg-3 misses AA against bg-selected, so secondary text steps up to fg-2. */}
+          {description != null ? (
+            <span className={cn('text-small whitespace-normal', selected ? 'text-fg-2' : 'text-fg-3')}>{description}</span>
+          ) : null}
         </span>
-        {trailing != null ? <span className="shrink-0 self-center font-mono text-micro text-fg-3">{trailing}</span> : null}
+        {trailing != null ? (
+          <span className={cn('shrink-0 self-center font-mono text-micro', selected ? 'text-fg-2' : 'text-fg-3')}>{trailing}</span>
+        ) : null}
       </span>
     </Button>
   );

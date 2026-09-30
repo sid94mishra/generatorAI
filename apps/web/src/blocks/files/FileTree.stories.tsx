@@ -27,6 +27,12 @@ const meta = {
     onActivate: fn(),
     filterPlaceholder: 'Filter changed files…',
   },
+  // @pierre/trees renders its git-lane tree with an internal input
+  // (`aria-controls`) inside the `role="tree"` element (in its own DOM tree);
+  // the markup is the library's and cannot be restructured from here.
+  // Tracked for upstream; axe's aria-required-children is off for this
+  // component only.
+  parameters: { a11y: { config: { rules: [{ id: 'aria-required-children', enabled: false }] } } },
   decorators: [
     (Story) => (
       <div className="w-56 border border-line-soft bg-surface" style={TREE_BOX}>

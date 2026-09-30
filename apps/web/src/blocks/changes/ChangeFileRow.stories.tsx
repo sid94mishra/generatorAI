@@ -72,7 +72,8 @@ export const Statuses: Story = {
     </div>
   ),
   play: async ({ canvas }) => {
-    await expect(canvas.getByText('A')).toHaveClass('text-ok');
+    // Two rows are added (a test file and a binary): every A carries the ok tone.
+    for (const added of canvas.getAllByText('A')) await expect(added).toHaveClass('text-ok');
     await expect(canvas.getByText('D')).toHaveClass('text-err');
     await expect(canvas.getByText('R')).toHaveClass('text-run');
     await expect(canvas.getByRole('button', { name: 'Expand assets/logo.png' })).toBeDisabled();

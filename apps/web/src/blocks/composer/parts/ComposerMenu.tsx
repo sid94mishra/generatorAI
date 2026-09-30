@@ -101,7 +101,14 @@ export function ComposerMenu({ open, kind, items, activeIndex, onSelect, onHover
                 <span className="flex min-w-0 flex-1 items-baseline gap-2">
                   <span className={cn('shrink-0', item.monoTitle ? 'font-mono text-small' : 'text-ui')}>{item.title}</span>
                   {item.subtitle ? (
-                    <span className={cn('min-w-0 flex-1 truncate text-fg-3', kind === 'mention' ? 'font-mono text-micro' : 'text-small')}>
+                    // Secondary text on the highlighted row steps up to fg-2: fg-3 misses AA on bg-selected.
+                    <span
+                      className={cn(
+                        'min-w-0 flex-1 truncate',
+                        i === activeIndex ? 'text-fg-2' : 'text-fg-3',
+                        kind === 'mention' ? 'font-mono text-micro' : 'text-small',
+                      )}
+                    >
                       {item.subtitle}
                     </span>
                   ) : null}
@@ -109,7 +116,8 @@ export function ComposerMenu({ open, kind, items, activeIndex, onSelect, onHover
                 {item.badge ? (
                   <span
                     className={cn(
-                      'shrink-0 text-micro text-fg-3',
+                      'shrink-0 text-micro',
+                      i === activeIndex ? 'text-fg-2' : 'text-fg-3',
                       kind === 'mention' && 'rounded-badge bg-sunken px-1.5 font-mono',
                     )}
                   >
