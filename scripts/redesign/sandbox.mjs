@@ -9,6 +9,8 @@
 //   node scripts/redesign/sandbox.mjs --clean          → remove old sandbox temp dirs, then exit
 //   node scripts/redesign/sandbox.mjs --help           → resolve and print the commands, start nothing
 //   node scripts/redesign/sandbox.mjs --dry-run         → same as --help (alias)
+//   node scripts/redesign/sandbox.mjs --port=3297 --web-port=5297
+//                                                      → other ports (a second checkout's sandbox)
 //
 // What it does, in order:
 //   1. Bundles the server if apps/server/dist-bundle is missing.
@@ -51,8 +53,18 @@ const SEED_SCRIPT = path.join(ROOT, 'agent-tests', 'vrt', 'seed.ts');
 
 // Not `gai-`/`genai-` — those prefixes are what scripts/sweep-temp-workspaces.mjs deletes.
 const PREFIX = 'generatorai-sandbox-';
-const SERVER_PORT = 3197;
-const WEB_PORT = 5197;
+/** `--name=<n>` → n, else the default. Lets a second checkout run its own sandbox. */
+function portArg(name, fallback) {
+  const raw = process.argv.find((a) => a.startsWith(`--${name}=`))?.slice(name.length + 3);
+  const port = raw === undefined ? fallback : Number(raw);
+  if (!Number.isInteger(port) || port < 1024 || port > 65535) {
+    console.error(`[sandbox] --${name} must be a port between 1024 and 65535 (got ${raw})`);
+    process.exit(2);
+  }
+  return port;
+}
+const SERVER_PORT = portArg('port', 3197);
+const WEB_PORT = portArg('web-port', 5197);
 const SHUTDOWN_BUDGET_MS = 5_000;
 const START_TIMEOUT_MS = 60_000;
 
