@@ -10,8 +10,9 @@ test.describe('Projects list', () => {
   test('renders header, search, scope and the New project action', async ({ page, gotoApp }) => {
     await gotoApp('/projects');
     await expect(page.getByRole('heading', { name: 'Projects', exact: true, level: 1 })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'New project', exact: true })).toBeVisible();
-    await expect(page.getByRole('textbox', { name: 'Search projects' })).toBeVisible();
+    // The header action; an empty list's empty state repeats it.
+    await expect(page.getByRole('button', { name: 'New project', exact: true }).first()).toBeVisible();
+    await expect(page.getByRole('searchbox', { name: 'Search projects' })).toBeVisible();
     await expect(page.getByRole('tab', { name: /^Active/ })).toHaveAttribute('aria-selected', 'true');
   });
 
@@ -91,7 +92,7 @@ test.describe('Project detail', () => {
       segment: 'customization',
       assert: async (page) => {
         await expect(page.getByRole('tablist', { name: 'Customization kind' }).getByRole('tab', { name: /^Skills/ })).toBeVisible();
-        await expect(page.getByRole('textbox', { name: 'Filter skills' })).toBeVisible();
+        await expect(page.getByRole('searchbox', { name: 'Filter skills' })).toBeVisible();
       },
     },
     {
@@ -115,7 +116,8 @@ test.describe('Project detail', () => {
       const t = tablist.getByRole('tab', { name: new RegExp(`^${tab}`) });
       await t.click();
       await expect(t).toHaveAttribute('aria-selected', 'true');
-      await expect(page).toHaveURL(new RegExp(`/projects/${id}/${segment}$`));
+      // Codebases is the default tab: already selected at /projects/:id, so its click does not navigate.
+      await expect(page).toHaveURL(new RegExp(`/projects/${id}${segment === 'codebases' ? '(/codebases)?' : `/${segment}`}$`));
       await assert(page);
     }
 

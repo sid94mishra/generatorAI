@@ -300,6 +300,7 @@ export function AgentEditorPage() {
         <PageHeader
           breadcrumb={
             <Breadcrumb
+              currentIsHeading
               items={[
                 { label: 'Agents', render: <Link to="/agents" /> },
                 { label: isNew ? 'New agent' : values.name || 'Agent' },

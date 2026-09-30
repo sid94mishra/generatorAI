@@ -44,3 +44,11 @@ export const LongText: Story = {
     </div>
   ),
 };
+
+/** A breadcrumb-only page header: the current item is the page's h1, same look. */
+export const CurrentIsHeading: Story = {
+  args: { currentIsHeading: true, items: [{ label: 'Chats', href: '#c' }, { label: 'New chat' }] },
+  play: async ({ canvas }) => {
+    await expect(canvas.getByRole('heading', { level: 1, name: 'New chat' })).toHaveAttribute('aria-current', 'page');
+  },
+};

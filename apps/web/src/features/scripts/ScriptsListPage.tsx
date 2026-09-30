@@ -49,6 +49,7 @@ export function ScriptsListPage() {
       <MasterDetail
         list={
           <ListPane
+            headingLevel={1}
             title="Scripts"
             count={scripts?.length}
             action={<IconButton icon="refresh" label="Reload scripts" onClick={() => reloadScripts.mutate()} disabled={reloadScripts.isPending} />}

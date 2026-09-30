@@ -185,7 +185,7 @@ export function CreateAutomationPage() {
       <Wizard
         header={
           <PageHeader
-            breadcrumb={<Breadcrumb items={[{ label: 'Automations', render: <RouterLink to="/automations" /> }, { label: 'New automation' }]} />}
+            breadcrumb={<Breadcrumb currentIsHeading items={[{ label: 'Automations', render: <RouterLink to="/automations" /> }, { label: 'New automation' }]} />}
             actions={
               <Button variant="ghost" onClick={() => navigate('/automations')}>
                 Cancel

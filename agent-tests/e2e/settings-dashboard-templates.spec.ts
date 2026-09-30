@@ -63,14 +63,17 @@ test.describe('Settings', () => {
     await openSection(page, 'Appearance');
     await expect(page.getByRole('heading', { name: 'Appearance', exact: true, level: 2 })).toBeVisible();
 
-    // ── Mode ──
+    // ── Mode ── (Dark is the default, and a radio already selected fires no change: Light first.)
+    await page.getByRole('radio', { name: 'Light', exact: true }).click();
+    await expect(page.locator('html')).not.toHaveClass(/dark/);
+    expect(await page.evaluate(() => localStorage.getItem('generatorai-theme'))).toBe('light');
+
     await page.getByRole('radio', { name: 'Dark', exact: true }).click();
     await expect(page.locator('html')).toHaveClass(/dark/);
     expect(await page.evaluate(() => localStorage.getItem('generatorai-theme'))).toBe('dark');
 
     await page.getByRole('radio', { name: 'Light', exact: true }).click();
     await expect(page.locator('html')).not.toHaveClass(/dark/);
-    expect(await page.evaluate(() => localStorage.getItem('generatorai-theme'))).toBe('light');
 
     // ── Theme ──
     // Asserted on a resolved CSS variable, not on the attribute alone: the
@@ -82,7 +85,7 @@ test.describe('Settings', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'catppuccin');
     expect(
       await page.evaluate(() =>
-        getComputedStyle(document.documentElement).getPropertyValue('--background').trim(),
+        getComputedStyle(document.documentElement).getPropertyValue('--gai-surface').trim(),
       ),
     ).toBe('#eff1f5'); // Latte base — i.e. the LIGHT variant of the theme we picked
 
@@ -91,9 +94,9 @@ test.describe('Settings', () => {
     await expect(page.locator('html')).toHaveAttribute('data-accent', 'green');
     expect(
       await page.evaluate(() =>
-        getComputedStyle(document.documentElement).getPropertyValue('--primary').trim(),
+        getComputedStyle(document.documentElement).getPropertyValue('--gai-accent').trim(),
       ),
-    ).toBe('#3c9528'); // Catppuccin's green, not GitHub's
+    ).toBe('#368624'); // Catppuccin's green, not GitHub's
 
     // Survives a reload, and without a flash of the default theme.
     await page.reload();
@@ -162,15 +165,16 @@ test.describe('Settings', () => {
             const cs = getComputedStyle(root);
             const g = (n: string) => cs.getPropertyValue(n).trim();
             const id = `${theme}/${mode}/${accent}`;
-            if (!g('--background')) failures.push(`${id} produced no tokens`);
-            const body = ratio(g('--foreground'), g('--background'));
-            const muted = ratio(g('--muted-foreground'), g('--card'));
-            const button = ratio(g('--primary-foreground'), g('--primary-emphasis'));
-            const link = ratio(g('--primary'), g('--background'));
+            if (!g('--gai-ground')) failures.push(`${id} produced no tokens`);
+            const body = ratio(g('--gai-fg'), g('--gai-ground'));
+            const muted = ratio(g('--gai-fg-2'), g('--gai-surface'));
+            const button = ratio(g('--gai-on-accent'), g('--gai-accent'));
+            // The accent is a fill (links use fg); what must stand off the page is the focus ring (D-12).
+            const focus = ratio(g('--gai-focus'), g('--gai-ground'));
             if (body < 4.5) failures.push(`${id} body ${body.toFixed(2)}`);
             if (muted < 4.5) failures.push(`${id} muted ${muted.toFixed(2)}`);
             if (button < 4.5) failures.push(`${id} button ${button.toFixed(2)}`);
-            if (link < 3) failures.push(`${id} link ${link.toFixed(2)}`);
+            if (focus < 3) failures.push(`${id} focus ${focus.toFixed(2)}`);
           }
         }
       }

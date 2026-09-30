@@ -46,7 +46,7 @@ test.describe('Run lifecycle + streaming render', () => {
     // opens the dock's Inspector tab (tabs: Output / Files / Tools / Hooks /
     // Events / History).
     await page.getByRole('button', { name: /^First, / }).click();
-    await expect(page.getByText('Stage prompt', { exact: true })).toBeVisible({ timeout: 10_000 });
+    await expect(page.getByText('Stage prompt', { exact: true }).first()).toBeVisible({ timeout: 10_000 });
     await expect(page.getByText('Reply with the word DONE.', { exact: true }).first()).toBeVisible();
 
     await page.getByRole('button', { name: 'Details', exact: true }).first().click();

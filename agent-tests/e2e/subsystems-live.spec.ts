@@ -24,13 +24,13 @@ import { apiRequest, API_BASE } from '../helpers/api';
 // ── Gateway & architecture ──────────────────────────────────────
 
 test.describe('Gateway', () => {
-  test('health reports harness, db and the W18 admission lanes', async () => {
+  test('health reports harness, db and the scheduler flow slots', async () => {
     const res = await apiRequest<{
       status: string;
       db: boolean;
       harness: { type: string; healthy: boolean };
       memory: { rss: number };
-      admission: Array<{ lane: string; running: number; queued: number; parked: number; concurrencyLimit: number }>;
+      flows: Array<{ flowKey: string; running: number; queued: number; limit: number }>;
       configCorrections: Array<{ name: string; action: string }>;
     }>('GET', '/health');
 
@@ -40,15 +40,15 @@ test.describe('Gateway', () => {
     expect(res.data.harness.type).toBeTruthy();
     expect(res.data.memory.rss).toBeGreaterThan(0);
 
-    // W18 acceptance: "health endpoint shows cap/running/waiting".
-    const lanes = res.data.admission;
-    expect(lanes.map((l) => l.lane).sort()).toEqual(['bulk', 'interactive', 'ordinary']);
-    for (const lane of lanes) {
-      expect(lane.concurrencyLimit).toBeGreaterThan(0);
-      expect(Number.isFinite(lane.concurrencyLimit)).toBe(true);
-      expect(lane.running).toBeGreaterThanOrEqual(0);
-      expect(lane.queued).toBeGreaterThanOrEqual(0);
-      expect(lane.parked).toBeGreaterThanOrEqual(0);
+    // Health shows each scheduler flow key's cap / running / queued (the
+    // Workflow Overhaul's flow slots replaced the W18 admission lanes).
+    const flows = res.data.flows;
+    expect(flows.map((f) => f.flowKey)).toContain('global');
+    for (const flow of flows) {
+      expect(flow.limit).toBeGreaterThan(0);
+      expect(Number.isFinite(flow.limit)).toBe(true);
+      expect(flow.running).toBeGreaterThanOrEqual(0);
+      expect(flow.queued).toBeGreaterThanOrEqual(0);
     }
 
     // A correctly configured process clamps nothing. A non-empty list here
@@ -461,16 +461,18 @@ test.describe('Workflows', () => {
     // how P0-41-class bugs present.
     expect(['created', 'starting', 'running']).toContain(run.data.status);
 
-    const stages = await apiRequest<Array<{ status: string }>>(
-      'GET',
-      `/workflow-runs/${runId}/stages`,
-    );
-    if (stages.ok && Array.isArray(stages.data)) {
-      expect(stages.data.length).toBeGreaterThan(0);
-      for (const s of stages.data) {
-        expect(['pending', 'ready', 'starting', 'running']).toContain(s.status);
-      }
-    }
+    // The scheduler materialises stage instances asynchronously after the
+    // invoke, and the Faux harness can finish a one-prompt stage quickly, so
+    // poll for the instance and accept any status it has reached by then.
+    await expect
+      .poll(
+        async () => {
+          const stages = await apiRequest<Array<{ status: string }>>('GET', `/workflow-runs/${runId}/stages`);
+          return stages.ok && Array.isArray(stages.data) ? stages.data.length : 0;
+        },
+        { timeout: 15_000 },
+      )
+      .toBeGreaterThan(0);
   });
 });
 

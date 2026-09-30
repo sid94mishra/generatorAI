@@ -26,17 +26,20 @@ export interface ListPaneProps {
   children?: ReactNode;
   /** A neutral Callout pinned to the bottom, e.g. "Scripts run in the codebase's shell". */
   footer?: ReactNode;
+  /** The title's heading level: 1 when the list pane's title is the page's title (Scripts). */
+  headingLevel?: 1 | 2;
   className?: string;
   'data-testid'?: string;
 }
 
 /** The master list half of a master-detail screen: header, search, scrolling rows, footer note. */
-export function ListPane({ title, count, action, search, children, footer, className, 'data-testid': testId }: ListPaneProps) {
+export function ListPane({ title, count, action, search, children, footer, headingLevel = 2, className, 'data-testid': testId }: ListPaneProps) {
+  const Heading = headingLevel === 1 ? 'h1' : 'h2';
   return (
     <aside className={cn('flex h-full w-80 shrink-0 flex-col border-r border-line-soft', className)} data-testid={testId}>
       <div className="flex flex-col gap-2.5 pt-4 pr-3 pb-2.5 pl-4">
         <div className="flex min-h-6 items-center gap-2">
-          <h2 className="min-w-0 flex-1 truncate text-heading text-fg">{title}</h2>
+          <Heading className="min-w-0 flex-1 truncate text-heading text-fg">{title}</Heading>
           {count != null ? <Count align="end">{count}</Count> : null}
           {action != null ? <div className="shrink-0">{action}</div> : null}
         </div>

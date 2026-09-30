@@ -30,7 +30,8 @@ test.describe('Automations list', () => {
     // Exact + level: on an empty DB the list's empty state adds an h3
     // "No automations yet", which a substring match also hits.
     await expect(page.getByRole('heading', { name: 'Automations', exact: true, level: 1 })).toBeVisible();
-    await expect(page.getByRole('button', { name: 'New automation', exact: true })).toBeVisible();
+    // The header action; an empty list's empty state repeats it.
+    await expect(page.getByRole('button', { name: 'New automation', exact: true }).first()).toBeVisible();
   });
 
   test('seeded automation appears in the list', async ({ page, gotoApp, seed }) => {

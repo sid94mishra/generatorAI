@@ -132,7 +132,7 @@ test.describe('Workflow Builder — save & load', () => {
     await expect(page.locator('.react-flow__edge')).toHaveCount(1);
     await expect(page.getByText('On success', { exact: true }).first()).toBeVisible();
     // Sanity: the definition really has one edge server-side.
-    const def = await apiRequest<{ edges: unknown[] }>('GET', `/workflow-definitions/${defId}`);
-    expect(Array.isArray(def.data.edges) ? def.data.edges.length : 0).toBe(1);
+    const def = await apiRequest<{ graph: { edges: unknown[] } }>('GET', `/workflow-definitions/${defId}`);
+    expect(def.data.graph.edges).toHaveLength(1);
   });
 });

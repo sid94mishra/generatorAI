@@ -24,10 +24,16 @@ export interface BreadcrumbItem {
 export interface BreadcrumbProps extends Omit<ComponentProps<'nav'>, 'children'> {
   /** Ancestors first; the last item is the current page. */
   items: readonly BreadcrumbItem[];
+  /**
+   * Render the current item as the page's h1 (same look). For pages whose
+   * header is only a breadcrumb — a form page, an editor — so the page still
+   * has one level-1 heading.
+   */
+  currentIsHeading?: boolean;
 }
 
 /** Where the page sits: ancestors as links, the current page last. */
-export function Breadcrumb({ items, className, ...rest }: BreadcrumbProps) {
+export function Breadcrumb({ items, currentIsHeading = false, className, ...rest }: BreadcrumbProps) {
   const last = items.length - 1;
   return (
     <nav aria-label="Breadcrumb" className={cn('min-w-0', className)} {...rest}>
@@ -37,9 +43,15 @@ export function Breadcrumb({ items, className, ...rest }: BreadcrumbProps) {
           return (
             <li key={i} className={cn('flex min-w-0 items-center gap-1.5', !current && 'shrink-0')}>
               {current ? (
-                <span aria-current="page" className={cn('truncate font-semibold text-fg', item.mono && 'font-mono text-small')}>
-                  {item.label}
-                </span>
+                currentIsHeading ? (
+                  <h1 aria-current="page" className={cn('truncate text-ui font-semibold text-fg', item.mono && 'font-mono text-small')}>
+                    {item.label}
+                  </h1>
+                ) : (
+                  <span aria-current="page" className={cn('truncate font-semibold text-fg', item.mono && 'font-mono text-small')}>
+                    {item.label}
+                  </span>
+                )
               ) : (
                 <>
                   <Link

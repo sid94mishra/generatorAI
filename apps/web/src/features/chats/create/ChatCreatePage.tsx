@@ -648,7 +648,7 @@ export function ChatCreatePage() {
         header={
           <PageHeader
             breadcrumb={
-              <Breadcrumb items={[{ label: 'Chats', render: <RouterLink to="/chats" /> }, { label: 'New chat' }]} />
+              <Breadcrumb currentIsHeading items={[{ label: 'Chats', render: <RouterLink to="/chats" /> }, { label: 'New chat' }]} />
             }
             meta={<span className="font-mono text-small text-fg-3">/chats/new</span>}
           />
