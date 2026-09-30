@@ -47,15 +47,26 @@ The top-level product modules exclude the separate `agent-tests` workspace and t
 
 Guide: [Web page components](/clients/web.md).
 
-- `apps/web/src/pages/AutomationDetailPage.tsx`
-- `apps/web/src/pages/AutomationsPage.tsx`
-- `apps/web/src/pages/CreateAutomationPage.tsx`
-- `apps/web/src/pages/ScriptDetailPage.tsx`
-- `apps/web/src/pages/ScriptsListPage.tsx`
-- `apps/web/src/pages/WorkflowBuilderPage.tsx`
-- `apps/web/src/pages/WorkflowDefinitionPage.tsx`
-- `apps/web/src/pages/WorkflowListPage.tsx`
-- `apps/web/src/pages/WorkflowRunPage.tsx`
+- `apps/web/src/features/agents/AgentEditorPage.tsx`
+- `apps/web/src/features/agents/AgentsListPage.tsx`
+- `apps/web/src/features/automations/AutomationDetailPage.tsx`
+- `apps/web/src/features/automations/AutomationsListPage.tsx`
+- `apps/web/src/features/automations/CreateAutomationPage.tsx`
+- `apps/web/src/features/chat/ChatPage.tsx`
+- `apps/web/src/features/chats/ChatsListPage.tsx`
+- `apps/web/src/features/chats/create/ChatCreatePage.tsx`
+- `apps/web/src/features/home/HomePage.tsx`
+- `apps/web/src/features/projects/CodebaseDetailPage.tsx`
+- `apps/web/src/features/projects/CreateProjectPage.tsx`
+- `apps/web/src/features/projects/ProjectDetailPage.tsx`
+- `apps/web/src/features/projects/ProjectsListPage.tsx`
+- `apps/web/src/features/projects/PullRequestPage.tsx`
+- `apps/web/src/features/scripts/ScriptsListPage.tsx`
+- `apps/web/src/features/workflows/builder/WorkflowBuilderPage.tsx`
+- `apps/web/src/features/workflows/create/WorkflowNewPage.tsx`
+- `apps/web/src/features/workflows/detail/WorkflowDetailPage.tsx`
+- `apps/web/src/features/workflows/list/WorkflowsListPage.tsx`
+- `apps/web/src/features/workflows/run/WorkflowRunPage.tsx`
 
 ## Mobile route files
 
@@ -108,18 +119,29 @@ Guide: [Mobile route files](/clients/mobile.md).
 
 Guide: [Desktop/web settings components](/clients/settings.md).
 
-- `apps/web/src/components/settings/sections/Agents.tsx`
-- `apps/web/src/components/settings/sections/Audio.tsx`
-- `apps/web/src/components/settings/sections/BrowserTerminal.tsx`
-- `apps/web/src/components/settings/sections/Catalogs.tsx`
-- `apps/web/src/components/settings/sections/ComputerUse.tsx`
-- `apps/web/src/components/settings/sections/Diagnostics.tsx`
-- `apps/web/src/components/settings/sections/Extensions.tsx`
-- `apps/web/src/components/settings/sections/General.tsx`
-- `apps/web/src/components/settings/sections/Providers.tsx`
-- `apps/web/src/components/settings/sections/SourceControl.tsx`
-- `apps/web/src/components/settings/sections/WorkflowEngine.tsx`
-- `apps/web/src/components/settings/sections/WorkspaceRetention.tsx`
+- `apps/web/src/features/settings/agents/AgentsSection.tsx`
+- `apps/web/src/features/settings/appearance/AppearanceSection.tsx`
+- `apps/web/src/features/settings/CatalogRow.tsx`
+- `apps/web/src/features/settings/general/GeneralSection.tsx`
+- `apps/web/src/features/settings/mcp/McpSection.tsx`
+- `apps/web/src/features/settings/providers/ProvidersSection.tsx`
+- `apps/web/src/features/settings/sections/AudioSection.tsx`
+- `apps/web/src/features/settings/sections/BrowserTerminalSection.tsx`
+- `apps/web/src/features/settings/sections/ComputerUseSection.tsx`
+- `apps/web/src/features/settings/sections/DiagnosticsSection.tsx`
+- `apps/web/src/features/settings/sections/ExtensionsSection.tsx`
+- `apps/web/src/features/settings/sections/StorageSection.tsx`
+- `apps/web/src/features/settings/sections/WorkflowEngineSection.tsx`
+- `apps/web/src/features/settings/security/DevicesGroups.tsx`
+- `apps/web/src/features/settings/security/PairDeviceGroup.tsx`
+- `apps/web/src/features/settings/security/SecuritySection.tsx`
+- `apps/web/src/features/settings/security/ServerPosture.tsx`
+- `apps/web/src/features/settings/security/ServersGroup.tsx`
+- `apps/web/src/features/settings/SettingsModal.tsx`
+- `apps/web/src/features/settings/SettingsNav.tsx`
+- `apps/web/src/features/settings/skills/SkillsSection.tsx`
+- `apps/web/src/features/settings/source-control/SourceControlSection.tsx`
+- `apps/web/src/features/settings/templates/TemplatesSection.tsx`
 
 ## Shared configuration contracts
 
@@ -140,8 +162,31 @@ Guide: [Shared configuration contracts](/reference/configuration.md).
 
 ## Count definitions
 
-Web page component files are not unique URLs: several components handle both creation and editing. Mobile route-tree files include layouts and redirects, not just rendered screens. The 13 settings component files implement 15 registry sections: `Catalogs.tsx` contains Skills, MCP, and Templates.
+Web page component files are not unique URLs: several components handle both creation and editing. Mobile route-tree files include layouts and redirects, not just rendered screens. Settings sections are listed from the shared `SETTINGS_NAV` contract; what each renders is registered in `apps/web/src/app/registries/settingsSections.tsx`.
 
 ## Maintenance boundary
 
 This index detects source structure, not semantic completeness. A new control within an existing page still needs an authored guide update and a human review. The docs cover the working tree including uncommitted product changes present at authoring time. Regenerate after application changes; review the diff before publishing.
+
+## Settings registry
+
+All 16 sections from `SETTINGS_NAV` (`packages/shared/src/ui-contract/settings.ts`):
+
+| Section | URL |
+| --- | --- |
+| General | `/settings/general` |
+| Appearance | `/settings/appearance` |
+| Model providers | `/settings/providers` |
+| Agents | `/settings/agents` |
+| Skills | `/settings/skills` |
+| MCP servers | `/settings/mcp` |
+| Templates | `/settings/templates` |
+| Source control | `/settings/source-control` |
+| Browser & terminal | `/settings/browser-terminal` |
+| Computer use | `/settings/computer-use` |
+| Audio | `/settings/audio` |
+| Extensions | `/settings/extensions` |
+| Security & devices | `/settings/security` |
+| Storage | `/settings/storage` |
+| Workflow engine | `/settings/workflow-engine` |
+| Diagnostics | `/settings/diagnostics` |

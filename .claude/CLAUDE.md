@@ -79,7 +79,7 @@ Then: old files deleted, README progress table updated.
   opens the developer's real DB) plus GENERATORAI_BIND_HOST=127.0.0.1; check the startup log's dbPath before any test.
 - Git/SCM features: test against a throwaway dummy repo (node scripts/redesign/make-dummy-repo.mjs), never this checkout.
 - No backward compatibility (pre-release, one developer): replace shapes and delete old code in the same task; no shims,
-  aliases or migrations beyond D-02's scaffolding (legacy tokens, LegacyHeader, legacy components/ui).
+  aliases or migrations (D-02's scaffolding — legacy tokens, LegacyHeader, legacy components/ui — was removed in P7).
 - When the plan is silent but the answer can be derived from the plan or code: decide, add a D-xx to 01-decisions.md.
 - Stay resumable: state lives in README progress, docs/redesign/reviews/, COORDINATION.md, HANDOFF.md.
 - Subagents: always set the model explicitly — Sonnet for small/medium tasks, Opus for complex ones, Fable only when

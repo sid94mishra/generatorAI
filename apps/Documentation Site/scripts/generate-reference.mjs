@@ -7,7 +7,7 @@ const repo = path.resolve(site, '../..');
 const rel = p => path.relative(repo, p).replaceAll(path.sep, '/');
 const read = p => fs.readFileSync(path.join(repo, p), 'utf8');
 const write = (p,s) => { const dest=path.join(site,'docs',p); fs.mkdirSync(path.dirname(dest),{recursive:true}); fs.writeFileSync(dest,s); };
-const scan = dir => fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name)).flatMap(e => ['node_modules','dist','dist-bundle','dist-electron','build','.expo','.git','.turbo','coverage','release','Documentation Site'].includes(e.name) || e.name.startsWith('.') ? [] : e.isDirectory()?scan(path.join(dir,e.name)):[path.join(dir,e.name)]);
+const scan = dir => fs.readdirSync(dir,{withFileTypes:true}).sort((a,b)=>a.name.localeCompare(b.name)).flatMap(e => ['node_modules','dist','dist-bundle','dist-electron','build','.expo','.git','.turbo','coverage','release','storybook-static','playwright-report','test-results','Documentation Site'].includes(e.name) || e.name.startsWith('.') ? [] : e.isDirectory()?scan(path.join(dir,e.name)):[path.join(dir,e.name)]);
 const sources = ['apps','packages'].flatMap(d=>scan(path.join(repo,d))).filter(p=>/\.(tsx?|mjs|jsx?)$/.test(p)&&!/(?:__tests__|__fixtures__|e2e|\/tests\/|\.test\.|\.spec\.|\.config\.|\.d\.ts$)/.test(p));
 const ast = p => ts.createSourceFile(p,read(p),ts.ScriptTarget.Latest,true,p.endsWith('tsx')?ts.ScriptKind.TSX:ts.ScriptKind.TS);
 const walk = (node,visit) => {visit(node); ts.forEachChild(node,n=>walk(n,visit));};

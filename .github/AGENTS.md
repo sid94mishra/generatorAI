@@ -266,7 +266,7 @@ Common change patterns and the bare-minimum checklist:
 1. `packages/workflow-spec/src/schemas/` — extend the Zod schema (with `.describe()`); if the current engine cannot run it yet, add it to the engine gate in `validate/capability.ts`.
 2. `pnpm generate:workflow-spec` — regenerates the JSON Schema and `docs/workflow-overhaul/generated/FIELDS.md`.
 3. `packages/core/src/services/ResultValidator.ts` / `StageExecutionService.ts` — implement (read it from the stage the run's pinned version holds). No DB change: the stage JSON lives in `stage_definitions.spec`.
-4. `apps/web/src/components/workflow/StagePropertiesPanel.tsx` — surface it.
+4. `apps/web/src/features/workflows/builder/inspector/` — surface it (agent stages: `agent/tabs/`; other kinds: `kinds/`).
 5. `packages/cli-core/src/commands/workflow.ts` — add a flag if it makes sense from CLI.
 6. Add unit + testkit coverage.
 
@@ -274,7 +274,7 @@ Common change patterns and the bare-minimum checklist:
 1. `packages/workflow-spec/src/schemas/common.ts` — extend `STAGE_HOOK_PHASES` or `WORKFLOW_HOOK_PHASES` (and the phase catalogue); `packages/shared/src/types/HookDefinition.ts` re-exports the types.
 2. `packages/core/src/services/HookInterceptor.ts` (or `WorkflowRunService` / `StageExecutionService`) — find the right call site and invoke `hookExecutor.executePhase(phase, ctx)`.
 3. `apps/server/src/routes/hooks.ts` — confirm it surfaces in `GET /api/hooks/phases`.
-4. `apps/web/src/components/workflow/settings/HooksTab.tsx` (or `StagePropertiesPanel`) — add to the dropdown.
+4. `apps/web/src/features/workflows/builder/settings/HooksTab.tsx` (workflow hooks) or the agent stage's Hooks tab under `builder/inspector/agent/tabs/` — add to the dropdown.
 
 **Add a new SSE event kind**:
 1. `packages/shared/src/types/AgentEvent.ts` — extend `AgentEventKind` and create a typed payload variant.
@@ -283,7 +283,7 @@ Common change patterns and the bare-minimum checklist:
 4. `apps/web/src/stores/sseManager.ts` `processEvent()` — handle the new kind if it should drive UI state.
 5. `apps/cli/src/streaming/EventRenderer.ts` `handleEvent()` — handle if it should render in `run watch`.
 
-**Change web or desktop UI** (anything under `apps/web/src` or `apps/desktop`): the UI is being rebuilt by the plan in [docs/redesign/](../docs/redesign/README.md). Read its README and `01-decisions.md` (binding) first, follow the rules in `.claude/CLAUDE.md` (layers, design vocabulary, selector preservation, the Done loop in `09-verification.md` §6), and build new UI in `apps/web/src/{ui,blocks,features,app}` — not in the legacy `components/` and `pages/` folders.
+**Change web or desktop UI** (anything under `apps/web/src` or `apps/desktop`): build from the kit — read [apps/web/DESIGN_SYSTEM.md](../apps/web/DESIGN_SYSTEM.md) (layers, tokens, rules, kit index) and `docs/redesign/01-decisions.md` (binding), and follow `.claude/CLAUDE.md` (selector preservation, the Done loop in `docs/redesign/09-verification.md` §6). UI lives in `apps/web/src/{ui,blocks,features,app}`; the legacy `components/` and `pages/` folders are gone, and the design lint rules and ratchet are errors at zero.
 
 **Add a new harness provider** — see the full checklist in [docs/packages.md](./docs/packages.md#adding-a-new-provider).
 
@@ -336,7 +336,7 @@ When designing a new feature: start in `shared/types`, sketch the port, write th
 | **StreamBroker** | Persistent SSE broker backed by `stream_cursors` + `stream_sequences`. |
 | **Skill / Custom Agent / MCP server** | Per-stage configurable "tool surfaces" — see [docs/feature-skills-agents-mcp.md](./docs/feature-skills-agents-mcp.md). |
 | **ConfigResolver** | Service that deep-merges WorkflowDefinition → StageDefinition → runtime overrides into a final resolved config. |
-| **RightPane** | The unified tabbed dock on the right side of Chat / Workflow Run pages. Hosts `Changes`, `Inspector`, `Browser`, `Terminal` tabs. See [apps/web/src/components/layout/RightPane.tsx](../apps/web/src/components/layout/RightPane.tsx). |
+| **Dock** | The tabbed panel on the right of the Chat and Workflow Run pages (Changes, Files, Terminal, Browser, Tasks, Plan, Computer, Inspector …), registered per surface. See [apps/web/src/blocks/dock/](../apps/web/src/blocks/dock/). Its elements keep the historical `right-pane*` test ids. |
 | **BrowserSession** | Chromium instance attached to a workspace. `IBrowserBridge` port; two hosts: `ServerPlaywrightHost` + `ElectronBridgeAdapter`. Descriptor persisted on `execution_workspaces.browser*` columns. |
 | **TerminalSession** | Server-side PTY attached to a workspace. `ITerminalHost` port; three hosts: `NodePtyHost` / `SandboxPtyHost` (Phase 2) / `FallbackChildProcessHost`. **Ephemeral** — no DB rows. |
 

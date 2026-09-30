@@ -195,15 +195,15 @@ export default [
   },
   {
     // Design-system enforcement for the .tsx outside the redesign folders (the
-    // entry, providers, hooks). `warn` (the ratchet holds the counts); stories
-    // may use raw elements (D-45).
+    // entry, providers). `error` since P7-03 (the ratchet is at 0); stories may
+    // use raw elements (D-45).
     files: ['apps/web/src/**/*.tsx'],
     ignores: [WEB_NEW_CODE, WEB_STORIES, ...WEB_TEST_FILES],
     rules: {
-      'no-restricted-syntax': ['warn', ...WEB_RESTRICTED_SYNTAX],
-      'no-restricted-imports': ['warn', { paths: WEB_RESTRICTED_IMPORT_PATHS }],
+      'no-restricted-syntax': ['error', ...WEB_RESTRICTED_SYNTAX],
+      'no-restricted-imports': ['error', { paths: WEB_RESTRICTED_IMPORT_PATHS }],
       'no-restricted-globals': [
-        'warn',
+        'error',
         { name: 'confirm', message: 'Use useConfirm() / <AlertDialog> from @/ui/primitives (P-32).' },
       ],
     },
@@ -245,7 +245,7 @@ export default [
       'better-tailwindcss/no-conflicting-classes': 'error',
       'better-tailwindcss/no-duplicate-classes': 'error',
       'better-tailwindcss/no-deprecated-classes': 'error',
-      'better-tailwindcss/no-unnecessary-whitespace': 'warn',
+      'better-tailwindcss/no-unnecessary-whitespace': 'error',
       'better-tailwindcss/no-restricted-classes': ['error', { restrict: NEW_CODE_RESTRICTED_CLASSES }],
     },
   },
@@ -347,12 +347,11 @@ export default [
   // rule above (the new folders are outside that block).
   {
     // Everything outside the redesign folders (entry, data layer, platform):
-    // `warn`, ratcheted by check-design-system.mjs (lucideDirectImport,
-    // rawHeadlessImport).
+    // `error` since P7-03 (lucideDirectImport, rawHeadlessImport are at 0).
     files: ['apps/web/src/**/*.{ts,tsx}'],
     ignores: [WEB_NEW_CODE, ...WEB_TEST_FILES],
     rules: {
-      'no-restricted-imports': ['warn', { paths: [...WEB_RESTRICTED_IMPORT_PATHS, LUCIDE], patterns: [HEADLESS] }],
+      'no-restricted-imports': ['error', { paths: [...WEB_RESTRICTED_IMPORT_PATHS, LUCIDE], patterns: [HEADLESS] }],
     },
   },
   {

@@ -42,7 +42,7 @@ Provider authentication, operating-system permissions, and account entitlements 
 
 ## Source evidence
 
-`apps/web/src/components/settings/sectionRegistry.tsx`, `apps/web/src/components/settings/sections`, `apps/web/src/stores/settingsUiStore.ts`, and `apps/web/src/lib/appPreferences.ts`.
+`packages/shared/src/ui-contract/settings.ts` (`SETTINGS_NAV`), `apps/web/src/app/registries/settingsSections.tsx`, `apps/web/src/features/settings`, `apps/web/src/stores/settingsUiStore.ts`, and `apps/web/src/lib/appPreferences.ts`.
 
 ## Configuration and worked examples
 

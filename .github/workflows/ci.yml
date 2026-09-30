@@ -113,6 +113,11 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: pnpm --filter @generatorai/web check:design --strict
 
+      # The kit index in apps/web/DESIGN_SYSTEM.md is generated from src/ (P7-03).
+      - name: Check the design-system kit index
+        if: matrix.os == 'ubuntu-latest'
+        run: pnpm --filter @generatorai/web docs:design-index --check
+
       - run: pnpm turbo typecheck
 
       - run: pnpm turbo test
