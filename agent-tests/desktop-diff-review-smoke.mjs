@@ -9,10 +9,12 @@
 import { _electron as electron } from '@playwright/test';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { DESKTOP_DIR } from './helpers/desktop-profile.mjs';
 import os from 'node:os';
 import fs from 'node:fs';
 
-const DESKTOP = path.resolve(process.cwd(), '..', 'apps', 'desktop');
+// From this file, not the cwd: the smoke runs from the repo root or agent-tests/.
+const DESKTOP = DESKTOP_DIR;
 const requireFromDesktop = createRequire(path.join(DESKTOP, 'package.json'));
 const ELECTRON = requireFromDesktop('electron');
 

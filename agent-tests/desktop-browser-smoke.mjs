@@ -22,15 +22,17 @@
 // via the same `/api/workspaces/:id/browser/descriptor` route the SPA
 // itself polls, proving the full main→server handshake worked end to end).
 //
-// Run: `cd agent-tests && node desktop-browser-smoke.mjs`
+// Run: `node agent-tests/desktop-browser-smoke.mjs` (from the repo root or agent-tests/)
 
 import { _electron as electron } from 'playwright';
 import path from 'node:path';
 import os from 'node:os';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { DESKTOP_DIR } from './helpers/desktop-profile.mjs';
 
-const DESKTOP = path.resolve(process.cwd(), '..', 'apps', 'desktop');
+// From this file, not the cwd: the smoke runs from the repo root or agent-tests/.
+const DESKTOP = DESKTOP_DIR;
 const requireFromDesktop = createRequire(path.join(DESKTOP, 'package.json'));
 requireFromDesktop.resolve('electron'); // sanity: electron must be resolvable from apps/desktop
 

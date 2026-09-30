@@ -1,23 +1,12 @@
 // Terminal desktop smoke — validates the Integrated Terminal tab works
-// inside the Electron shell, mirroring the pattern of
-// `right-pane-desktop-smoke.mjs`.
+// inside the Electron shell, mirroring `right-pane-desktop-smoke.mjs`.
 //
-// Run manually:
-//   cd agent-tests
-//   node terminal-desktop-smoke.mjs
-//
-// Prereqs:
-//   • Vite dev server on :5173  (pnpm --filter @generatorai/web dev)
-//   • API server on :3100       (pnpm --filter @generatorai/server dev)
+// Run from the repo root after `pnpm --filter @generatorai/desktop build`:
+//   node agent-tests/terminal-desktop-smoke.mjs
 
-import { chromium } from 'playwright';
-import { spawn } from 'node:child_process';
-import path from 'node:path';
-import { createRequire } from 'node:module';
+import { _electron as electron } from 'playwright';
+import { DESKTOP_DIR as DESKTOP, isolatedProfile } from './helpers/desktop-profile.mjs';
 
-const DESKTOP = path.resolve(process.cwd(), '..', 'apps', 'desktop');
-const requireFromDesktop = createRequire(path.join(DESKTOP, 'package.json'));
-const ELECTRON = requireFromDesktop('electron');
 
 const results = [];
 const record = (name, ok, info = '') => {
@@ -26,53 +15,46 @@ const record = (name, ok, info = '') => {
 };
 const log = (...a) => console.log('[terminal-desktop]', ...a);
 
-const DEBUG_PORT = 9226;
-
-const child = spawn(ELECTRON, [`.`, `--remote-debugging-port=${DEBUG_PORT}`], {
-  cwd: DESKTOP,
+// Launch through Playwright's Electron driver with a throwaway profile and the
+// built renderer on the embedded server (standalone): no dev server, no
+// developer profile, no :3100/:5173 (09 §6.5, agent-tests/helpers/desktop-profile.mjs).
+const profile = isolatedProfile('gai-terminal-smoke-');
+process.on('exit', profile.cleanup);
+const app = await electron.launch({
+  args: [DESKTOP, profile.arg],
+  // Faux harness: the chat/run this smoke creates never reaches a real provider.
   env: {
     ...process.env,
-    DESKTOP_DEV_SERVER_URL: 'http://localhost:5173',
+    GENERATORAI_DESKTOP_MODE: 'standalone',
+    NODE_ENV: 'production',
     GENERATORAI_LOG_LEVEL: 'info',
+    GENERATORAI_TEST_FAUX_HARNESS: 'true',
   },
+  timeout: 120_000,
 });
-
-let stdoutBuf = '';
-child.stdout?.on('data', (b) => { stdoutBuf += b.toString(); });
-child.stderr?.on('data', (b) => { stdoutBuf += b.toString(); });
+profile.attach(app);
 
 async function finish(code = 0) {
-  try { child.kill(); } catch { /* ignore */ }
+  try { await Promise.race([app.close(), new Promise((r) => setTimeout(r, 10_000))]); } catch { /* ignore */ }
+  profile.cleanup();
   const failed = results.filter((r) => !r.ok);
   console.log('\n=== summary ===');
   for (const r of results) console.log(`${r.ok ? '✅' : '❌'} ${r.name}${r.info ? ' — ' + r.info : ''}`);
   process.exit(failed.length > 0 ? 1 : code);
 }
-
-// Attach over CDP.
-const deadline = Date.now() + 30_000;
-let browser = null;
-while (Date.now() < deadline && !browser) {
-  try {
-    browser = await chromium.connectOverCDP(`http://127.0.0.1:${DEBUG_PORT}`);
-  } catch { /* not ready */ }
-  if (!browser) await new Promise((r) => setTimeout(r, 400));
-}
-if (!browser) {
-  record('electron attach', false, 'timeout waiting for CDP');
-  await finish(1);
-}
 record('electron attach', true);
 
-const contexts = browser.contexts();
-const context = contexts[0] ?? await browser.newContext();
 let page = null;
-for (let i = 0; i < 60 && !page; i++) {
-  page = context.pages().find((p) => p.url().startsWith('http')) ?? null;
+for (let i = 0; i < 120 && !page; i++) {
+  // The window opens on the splash (file://) and then loads the embedded server's SPA.
+  page = app.windows().find((p) => /^https?:/.test(p.url())) ?? null;
   if (!page) await new Promise((r) => setTimeout(r, 500));
 }
 if (!page) { record('renderer found', false); await finish(1); }
 record('renderer found', true, page.url());
+// The SPA pairs with the embedded server before its first API call; wait for
+// the app frame so the smoke's own fetches go out paired.
+await page.getByTestId('app-frame').waitFor({ timeout: 60_000 });
 
 // Reset the right-pane state so we always start fresh.
 await page.evaluate(() => {
@@ -102,10 +84,25 @@ async function findFirst(listPath) {
   }, listPath);
 }
 
+
+/** POST from the page (paired by the SPA); returns the parsed body or throws. */
+async function apiPost(pathname, body) {
+  return page.evaluate(async ({ p, b }) => {
+    const res = await fetch(p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+    if (!res.ok) throw new Error(`${p} → ${res.status}`);
+    return res.status === 204 ? null : res.json();
+  }, { p: pathname, b: body });
+}
+
+/** A fresh profile has no data: create a chat (it gets its workspace on creation). */
+async function createChat(name) {
+  const data = await apiPost('/api/chats', { name });
+  return data.chat ?? data;
+}
+
 // ── Flow: chat page → open right pane → add Terminal tab → verify ──
 try {
-  const chat = await findFirst('/api/chats?limit=1');
-  if (!chat) throw new Error('no chat available; create one first');
+  const chat = (await findFirst('/api/chats?limit=1')) ?? (await createChat(`terminal-smoke ${Date.now()}`));
   if (!chat.workspaceId) throw new Error(`chat ${chat.id} has no workspaceId — send one message first`);
   const workspaceId = chat.workspaceId;
   log(`chat=${chat.id} workspace=${workspaceId}`);
@@ -146,7 +143,8 @@ try {
   record('header renders host badge', hasHostBadge, badgeText?.slice(0, 120));
 
   // Close the tab — should kill the server session.
-  await page.click('button[aria-label="Close Terminal tab"]');
+  // Terminal is pinned in the chat dock; "+" adds a second, closable instance ("Terminal 2").
+  await page.click('button[aria-label^="Close Terminal"]');
   await page.waitForTimeout(1500);
 
   const listAfter = await page.evaluate(async (wsid) => {
