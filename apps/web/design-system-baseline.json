@@ -1,7 +1,5 @@
 {
-  "counts": {
-    "defaultShadow": 1
-  },
+  "counts": {},
   "locked": [
     "hardcodedPaletteClass",
     "handRolledOverlay",
@@ -13,6 +11,7 @@
     "defaultTextSize",
     "whiteBlackClass",
     "defaultRadius",
+    "defaultShadow",
     "arbitraryValue",
     "varInClassString",
     "legacyColorVar",
@@ -20,6 +19,8 @@
     "hexOrRgbInTs",
     "lucideDirectImport",
     "rawHeadlessImport",
-    "unstyledVariant"
+    "unstyledVariant",
+    "literalInlineStyle",
+    "radixOverlaySelector"
   ]
 }

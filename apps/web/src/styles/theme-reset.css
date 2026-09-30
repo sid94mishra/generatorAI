@@ -1,0 +1,11 @@
+/* Tailwind default namespaces reset (D-07, P7-02). Imported after `tailwindcss`
+   and before the design vocabulary, so only design names exist for colour,
+   type size, radius and shadow: `bg-blue-500`, `text-sm`, `rounded-lg`,
+   `shadow-md` no longer build. Static utilities (`bg-transparent`,
+   `text-current`, `rounded-full`, `shadow-none`) are unaffected. */
+@theme {
+  --color-*: initial;
+  --text-*: initial;
+  --radius-*: initial;
+  --shadow-*: initial;
+}

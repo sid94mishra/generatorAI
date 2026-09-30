@@ -198,7 +198,7 @@ for (const [href, bytes] of [...fontFiles].sort((a, b) => b[1] - a[1])) {
   console.log(`  ${fmt(bytes).padStart(10)}  ${href}`);
 }
 console.log(`[check-bundle-size] fonts total: ${fmt(fontBytes)} in ${fontFiles.size} file(s)  (budget ${fmt(FONT_BUDGET_BYTES)})`);
-console.log(`[check-bundle-size] initial CSS gzip: ${fmt(initialCssGzip)}  (report only; shrinks when P7 drops the legacy token layer)`);
+console.log(`[check-bundle-size] initial CSS gzip: ${fmt(initialCssGzip)}  (report only)`);
 if (fontBytes > FONT_BUDGET_BYTES) {
   fontViolations.push(`fonts exceed budget by ${fmt(fontBytes - FONT_BUDGET_BYTES)}`);
 }

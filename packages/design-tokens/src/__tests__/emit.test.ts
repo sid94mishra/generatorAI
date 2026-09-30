@@ -94,13 +94,7 @@ describe('web CSS emitter', () => {
     // A token that exists in TS but never reaches CSS fails silently: the
     // component just renders the inherited colour.
     for (const name of [
-      '--background',
-      '--foreground',
-      '--primary-emphasis',
-      '--muted-foreground',
-      '--success',
-      '--danger',
-      '--sidebar-accent',
+      '--canvas-bg',
       '--canvas-dot',
       '--chart-1',
       '--chart-6',
@@ -108,7 +102,6 @@ describe('web CSS emitter', () => {
       '--syntax-comment',
       '--font-sans',
       '--font-mono',
-      '--radius',
       '--gai-ground',
       '--gai-fg-3',
     ]) {
@@ -116,20 +109,15 @@ describe('web CSS emitter', () => {
     }
   });
 
-  it('bridges every colour token into a Tailwind utility', () => {
-    // Layer 2 is what makes `bg-card` real; a token missing here is usable
-    // only through an arbitrary value, which is what we are migrating away from.
-    for (const name of ['background', 'card', 'muted-foreground', 'success-muted', 'chart-3']) {
-      expect(css, `--color-${name} not bridged`).toContain(`--color-${name}: var(--${name});`);
+  it('no longer emits the legacy layer (P7-02)', () => {
+    // Unprefixed shadcn-style colours, `--radius*`, the legacy `@theme` bridge
+    // and the `--color-*` compat aliases are gone; design utilities come from
+    // css/vocabulary.css only.
+    for (const name of ['--background:', '--foreground:', '--primary:', '--muted-foreground:', '--sidebar-accent:', '--radius:', '--radius-lg:']) {
+      expect(css, `${name} still emitted`).not.toContain(`  ${name}`);
     }
-  });
-
-  it('renames the legacy bridges that collide with the design vocabulary (02 §3)', () => {
-    // The selection tint is `accent-tint`; `accent`, `surface`, `raised` and
-    // `overlay` belong to the design layer, so the legacy layer must not claim them.
-    expect(css).toContain('--color-accent-tint: var(--accent);');
-    for (const name of ['accent', 'accent-foreground', 'surface', 'surface-hover', 'raised', 'overlay']) {
-      expect(css, `--color-${name} still bridged to the legacy value`).not.toContain(`--color-${name}: var(--${name});`);
+    for (const name of [...LEGACY_COLOR_NAMES, ...SHARED_COLOR_NAMES, ...COLOR_NAMES]) {
+      expect(css, `--color-${name} still emitted`).not.toContain(`--color-${name}:`);
     }
   });
 
@@ -143,18 +131,17 @@ describe('web CSS emitter', () => {
     expect(css).not.toContain('.hljs');
   });
 
-  it('gives every theme its own type stack and radius scale', () => {
+  it('gives every theme its own type stack', () => {
     for (const theme of THEMES) {
       const block = css.slice(at(`[data-theme="${theme.id}"]`));
       expect(block, `${theme.id} fonts`).toContain('--font-sans:');
-      expect(block, `${theme.id} radius`).toContain('--radius:');
     }
   });
 });
 
 describe('design layer (L1b)', () => {
   const start = css.indexOf(DESIGN_LAYER_HEADER);
-  const end = css.indexOf('Layer 2 — Tailwind utility bridge');
+  const end = css.indexOf('Layer 2 — font families');
   const l1b = css.slice(start, end);
   const inL1b = (selector: string): number => l1b.indexOf(`\n${selector} {`);
   const block = (selector: string): string => {
@@ -162,8 +149,8 @@ describe('design layer (L1b)', () => {
     return i === -1 ? '' : l1b.slice(i, l1b.indexOf('}', i));
   };
 
-  it('is its own section after Layer 1 and before the bridge', () => {
-    expect(start).toBeGreaterThan(css.indexOf('/* ── Accent axis'));
+  it('is its own section after Layer 1 and before Layer 2', () => {
+    expect(start).toBeGreaterThan(css.indexOf('/* ── Named themes'));
     expect(end).toBeGreaterThan(start);
   });
 
@@ -202,16 +189,16 @@ describe('design layer (L1b)', () => {
     expect(l1b.match(/^(?:\.light)?\[data-accent=/gm)).toBeNull();
   });
 
-  it('emits legacy ink accent blocks for all 17 themes whose default is not ink', () => {
+  it('emits ink accent blocks for all 17 themes whose default is not ink', () => {
     const others = THEMES.filter((t) => t.defaultAccent !== 'ink');
     expect(others).toHaveLength(17);
     for (const theme of others) expect(at(`[data-theme="${theme.id}"][data-accent="ink"]`), theme.id).toBeGreaterThan(-1);
   });
 
-  it('bridges only legacy names in Layer 2; the shared tokens move to vocabulary.css', () => {
+  it('maps only the font families in Layer 2; colours live in vocabulary.css', () => {
     const bridge = css.slice(css.indexOf('@theme inline {'), css.indexOf('}', css.indexOf('@theme inline {')));
-    for (const name of LEGACY_COLOR_NAMES) expect(bridge).toContain(`--color-${name}: var(--`);
-    for (const name of [...SHARED_COLOR_NAMES, ...COLOR_NAMES]) expect(bridge).not.toContain(`--color-${name}:`);
+    expect(bridge).toContain('--font-sans: var(--font-sans);');
+    expect(bridge).not.toContain('--color-');
   });
 
   it('safelists the required design utilities for the CSS-emission check', () => {

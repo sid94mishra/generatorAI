@@ -212,19 +212,14 @@ const RULES = {
   literalInlineStyle: {
     // CLAUDE.md "inline style except for computed geometry": a style object with
     // a literal string or number value is not computed. `style={{ width }}`,
-    // `style={{ height: rowHeight }}` and template literals pass. Hard-zero in
-    // the new folders; the legacy count is informational until a later phase.
+    // `style={{ height: rowHeight }}` and template literals pass.
     patterns: [/style=\{\{[^}]*?:\s*(?:['"]|-?\d)/g],
     description: 'Inline style with a literal value — use design utilities; inline style is for computed geometry only.',
     files: /\.tsx$/,
-    scope: 'new',
   },
   radixOverlaySelector: {
-    // Count-only until P4 (D-19 replaces the Radix couplings with data-gai-overlay).
     patterns: [/data-radix-popper-content-wrapper|--radix-/g],
     description: 'Radix overlay coupling — use data-gai-overlay (D-19).',
-    scope: 'new',
-    exempt: [/^src\/ui\/lib\/overlay\.ts$/],
   },
 };
 

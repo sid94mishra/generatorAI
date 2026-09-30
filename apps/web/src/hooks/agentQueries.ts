@@ -57,7 +57,7 @@ export function useAgents(filter?: AgentListFilterUi) {
   });
 }
 
-/** Picker list — project agents shadow global, global shadows system. */
+/** Picker list — project agents override global, global overrides system. */
 export function useSelectableAgents(projectId?: string, enabled = true) {
   const platform = usePlatform();
   return useQuery({

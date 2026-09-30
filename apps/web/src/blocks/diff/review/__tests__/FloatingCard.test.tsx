@@ -78,12 +78,9 @@ describe('FloatingCard', () => {
     await act(async () => {
       await new Promise((r) => setTimeout(r, 0));
     });
-    // The migrated Popover-based dismissal defers pointerdown-outside
-    // handling to the following `click` event (DismissableLayer is given
-    // `deferPointerDownOutside: true` for Popover.Content — see
-    // @radix-ui/react-dismissable-layer), so it can tell a genuine outside
-    // click apart from the start of a text-selection drag that ends back
-    // inside the popover. A bare `pointerDown` (what the old hand-rolled
+    // The kit Popover's outside-press dismissal reacts to the `click` that
+    // follows pointerdown, so it can tell a genuine outside click apart from
+    // the start of a text-selection drag that ends back inside the popover. A bare `pointerDown` (what the old hand-rolled
     // catcher reacted to) is therefore no longer enough to observe
     // dismissal; firing the `click` that always follows it in a real
     // pointer interaction is required, matching real user input.

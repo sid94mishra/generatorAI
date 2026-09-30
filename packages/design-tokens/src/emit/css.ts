@@ -5,11 +5,16 @@
 // The generator splices this between marker comments so the hand-written base
 // styles below the markers stay hand-written.
 //
-//   Layer 1  raw semantic values, per theme × appearance × accent (legacy)
-//   Layer 1b `--gai-*` design values, same ladder (02 §10.1)
-//   Layer 2  `@theme inline` — makes the legacy values Tailwind utilities
-//            (the design utilities live in css/vocabulary.css)
-//   Layer 3  `--color-*` compat aliases for legacy arbitrary values
+//   Layer 1  shared raw values that are neither legacy nor design-named and
+//            survive P7 (02 §2.3 "Kept tokens"): fonts, canvas, chart ramp,
+//            syntax, file-type icons — per theme × appearance
+//   Layer 1b `--gai-*` design values, per theme × appearance × accent (02 §10.1)
+//   Layer 1c `--gai-*` scales: density, font size, motion
+//   Layer 2  `@theme inline` for the font families (the design utilities live
+//            in css/vocabulary.css)
+//
+// The legacy layer (unprefixed shadcn-style colours, `--radius*`, the legacy
+// `@theme` bridge and the `--color-*` compat aliases) was removed in P7-02.
 //
 // ── The specificity ladder ───────────────────────────────────────
 //
@@ -28,19 +33,10 @@
 // which is why the emission order in `emitCss()` is not cosmetic. Reordering
 // those sections silently gives light-mode users dark-mode accents.
 //
-// ── Two deliberate simplifications ───────────────────────────────
-//
-// 1. Accent tints are DERIVED for every accent, including the default. The
-//    original hand-written blue literals were `#1f6feb22` / `#0969da15`;
-//    deriving them gives `#1f6feb21` / `#0969da14` — a one-step (1/255) alpha
-//    change on two tokens, below the 8-bit rounding of the percentage those
-//    literals were meant to express. Uniform derivation is worth more than
-//    bug-for-bug fidelity to two typos.
-//
-// 2. File-icon colours are emitted per appearance instead of via
-//    `light-dark()`. Both forms resolve identically on <html> today, but
-//    concrete values also survive a shadow root that declares its own
-//    `color-scheme` — which is exactly where these tokens are consumed.
+// File-icon colours are emitted per appearance instead of via `light-dark()`.
+// Both forms resolve identically on <html> today, but concrete values also
+// survive a shadow root that declares its own `color-scheme` — which is exactly
+// where these tokens are consumed.
 // ────────────────────────────────────────────────────────────────
 
 import {
@@ -56,24 +52,17 @@ import {
   typeSizes,
 } from '../design.js';
 import { FONT_SIZES, DEFAULT_FONT_SIZE } from '../registry.js';
-import {
-  LEGACY_BRIDGE_SOURCE,
-  LEGACY_COLOR_NAMES,
-  REQUIRED_UTILITIES,
-  SHARED_COLOR_NAMES,
-} from '../vocabulary.js';
+import { REQUIRED_UTILITIES } from '../vocabulary.js';
 import {
   ACCENT_IDS,
   DEFAULT_THEME,
   FILE_ICON_COLORS,
   THEMES,
-  resolveAccentTokens,
   resolveAppearanceTokens,
   resolveChartRamp,
   resolveSyntaxTokens,
   type AccentId,
   type Appearance,
-  type AppearanceTokens,
   type ThemeDef,
 } from '../index.js';
 
@@ -84,50 +73,6 @@ const px = (n: number): string => `${n / 16}rem`;
 
 const defaultTheme = (): ThemeDef =>
   THEMES.find((t) => t.id === DEFAULT_THEME) ?? (THEMES[0] as ThemeDef);
-
-/** CSS custom-property name for each appearance token, in emission order. */
-const APPEARANCE_VARS: Array<[keyof AppearanceTokens, string]> = [
-  ['background', '--background'],
-  ['foreground', '--foreground'],
-  ['card', '--card'],
-  ['cardForeground', '--card-foreground'],
-  ['popover', '--popover'],
-  ['popoverForeground', '--popover-foreground'],
-  ['raised', '--raised'],
-  ['overlay', '--overlay'],
-  ['subtle', '--subtle'],
-  ['emphasis', '--emphasis'],
-  ['surface', '--surface'],
-  ['surfaceHover', '--surface-hover'],
-  ['primaryForeground', '--primary-foreground'],
-  ['secondary', '--secondary'],
-  ['secondaryForeground', '--secondary-foreground'],
-  ['muted', '--muted'],
-  ['mutedForeground', '--muted-foreground'],
-  ['accentForeground', '--accent-foreground'],
-  ['destructive', '--destructive'],
-  ['destructiveForeground', '--destructive-foreground'],
-  ['border', '--border'],
-  ['borderMuted', '--border-muted'],
-  ['input', '--input'],
-  ['success', '--success'],
-  ['successMuted', '--success-muted'],
-  ['warning', '--warning'],
-  ['warningMuted', '--warning-muted'],
-  ['info', '--info'],
-  ['infoMuted', '--info-muted'],
-  ['danger', '--danger'],
-  ['dangerMuted', '--danger-muted'],
-  ['done', '--done'],
-  ['sidebar', '--sidebar'],
-  ['sidebarForeground', '--sidebar-foreground'],
-  ['sidebarBorder', '--sidebar-border'],
-  ['canvasBg', '--canvas-bg'],
-  ['canvasDot', '--canvas-dot'],
-];
-
-const varName = (key: keyof AppearanceTokens): string =>
-  APPEARANCE_VARS.find(([k]) => k === key)?.[1] ?? `--${key}`;
 
 const SYNTAX_ROLES = [
   'comment',
@@ -146,58 +91,18 @@ const SYNTAX_ROLES = [
   'inserted',
 ] as const;
 
-/** Raw variable behind a legacy bridge name. */
-const bridgeSource = (name: (typeof LEGACY_COLOR_NAMES)[number]): string =>
-  LEGACY_BRIDGE_SOURCE[name] ?? name;
-
 /**
- * The colour half of a theme × appearance: everything except fonts and radii,
- * which are appearance-independent and emitted once per theme.
+ * The shared colours of a theme × appearance (02 §2.3 "Kept tokens"): the
+ * React Flow canvas, the categorical chart ramp, the Shiki syntax theme and
+ * the file-type icon palette. Accent-independent.
  */
-function appearanceBlock(theme: ThemeDef, appearance: Appearance, selector: string): string {
+function sharedAppearanceBlock(theme: ThemeDef, appearance: Appearance, selector: string): string {
   const t = resolveAppearanceTokens(theme, appearance);
-  const a = resolveAccentTokens(theme, theme.defaultAccent, appearance);
   const chart = resolveChartRamp(theme, appearance);
   const syntax = resolveSyntaxTokens(theme, appearance);
-  const lines: string[] = [`${selector} {`, `  color-scheme: ${appearance};`, ''];
+  const lines: string[] = [`${selector} {`];
 
-  lines.push('  /* Surfaces */');
-  for (const key of ['background', 'foreground', 'card', 'cardForeground', 'popover', 'popoverForeground', 'raised', 'overlay', 'subtle', 'emphasis', 'surface', 'surfaceHover'] as const) {
-    lines.push(`  ${varName(key)}: ${t[key]};`);
-  }
-
-  lines.push('', `  /* Interactive — accent axis, default '${theme.defaultAccent}' */`);
-  lines.push(`  --primary: ${a.primary};`);
-  lines.push(`  --primary-emphasis: ${a.primaryEmphasis};`);
-  lines.push(`  --primary-foreground: ${a.onAccent};`);
-  lines.push(`  --secondary: ${t.secondary};`);
-  lines.push(`  --secondary-foreground: ${t.secondaryForeground};`);
-  lines.push(`  --muted: ${t.muted};`);
-  lines.push(`  --muted-foreground: ${t.mutedForeground};`);
-  lines.push(`  --accent: ${a.accent};`);
-  lines.push(`  --accent-foreground: ${t.accentForeground};`);
-  lines.push(`  --destructive: ${t.destructive};`);
-  lines.push(`  --destructive-foreground: ${t.destructiveForeground};`);
-
-  lines.push('', '  /* Borders */');
-  lines.push(`  --border: ${t.border};`);
-  lines.push(`  --border-muted: ${t.borderMuted};`);
-  lines.push(`  --input: ${t.input};`);
-  lines.push(`  --ring: ${a.ring};`);
-
-  lines.push('', '  /* Status — semantic, never accent-controlled */');
-  for (const key of ['success', 'successMuted', 'warning', 'warningMuted', 'info', 'infoMuted', 'danger', 'dangerMuted', 'done'] as const) {
-    lines.push(`  ${varName(key)}: ${t[key]};`);
-  }
-
-  lines.push('', '  /* Sidebar */');
-  lines.push(`  --sidebar: ${t.sidebar};`);
-  lines.push(`  --sidebar-foreground: ${t.sidebarForeground};`);
-  lines.push(`  --sidebar-border: ${t.sidebarBorder};`);
-  lines.push(`  --sidebar-accent: ${a.sidebarAccent};`);
-  lines.push(`  --sidebar-accent-foreground: ${a.sidebarAccentForeground};`);
-
-  lines.push('', '  /* Canvas (React Flow) */');
+  lines.push('  /* Canvas (React Flow) */');
   lines.push(`  --canvas-bg: ${t.canvasBg};`);
   lines.push(`  --canvas-dot: ${t.canvasDot};`);
 
@@ -218,62 +123,14 @@ function appearanceBlock(theme: ThemeDef, appearance: Appearance, selector: stri
   return lines.join('\n');
 }
 
-/**
- * Fonts and radii — the parts of a theme that do not change between light and
- * dark. Emitted once per theme so the light/dark blocks stay purely chromatic.
- */
-function themeChromeBlock(theme: ThemeDef, selector: string): string {
-  return [
-    `${selector} {`,
-    `  --font-sans: ${theme.fonts.sans};`,
-    `  --font-mono: ${theme.fonts.mono};`,
-    `  --radius: ${px(theme.radius.DEFAULT)};`,
-    `  --radius-lg: ${px(theme.radius.lg)};`,
-    `  --radius-xl: ${px(theme.radius.xl)};`,
-    '}',
-  ].join('\n');
+/** A theme's font families — appearance-independent, emitted once per theme. */
+function themeFontBlock(theme: ThemeDef, selector: string): string {
+  return [`${selector} {`, `  --font-sans: ${theme.fonts.sans};`, `  --font-mono: ${theme.fonts.mono};`, '}'].join('\n');
 }
 
-function accentBlock(theme: ThemeDef, accentId: AccentId, appearance: Appearance): string {
-  const base = `[data-theme="${theme.id}"][data-accent="${accentId}"]`;
-  const selector = appearance === 'dark' ? base : `.light${base}`;
-  const a = resolveAccentTokens(theme, accentId, appearance);
-  return [
-    `${selector} {`,
-    `  --primary: ${a.primary};`,
-    `  --primary-emphasis: ${a.primaryEmphasis};`,
-    `  --primary-foreground: ${a.onAccent};`,
-    `  --ring: ${a.ring};`,
-    `  --accent: ${a.accent};`,
-    `  --sidebar-accent: ${a.sidebarAccent};`,
-    `  --sidebar-accent-foreground: ${a.sidebarAccentForeground};`,
-    '}',
-  ].join('\n');
-}
-
-function themeInlineBlock(): string {
-  const lines = ['@theme inline {'];
-  for (const name of LEGACY_COLOR_NAMES) {
-    lines.push(`  --color-${name}: var(--${bridgeSource(name)});`);
-  }
-  lines.push('  --font-sans: var(--font-sans);');
-  lines.push('  --font-mono: var(--font-mono);');
-  lines.push('}');
-  return lines.join('\n');
-}
-
-function compatAliasBlock(): string {
-  const lines = [':root {'];
-  for (const name of LEGACY_COLOR_NAMES) {
-    lines.push(`  --color-${name}: var(--${bridgeSource(name)});`);
-  }
-  // The shared tokens' utilities live in vocabulary.css; these aliases keep the
-  // hand-written `var(--color-canvas-bg)` rules (React Flow) resolving.
-  for (const name of SHARED_COLOR_NAMES) {
-    lines.push(`  --color-${name}: var(--${name});`);
-  }
-  lines.push('}');
-  return lines.join('\n');
+/** Tailwind's `font-sans` / `font-mono` follow the active theme's families. */
+function fontThemeBlock(): string {
+  return ['@theme inline {', '  --font-sans: var(--font-sans);', '  --font-mono: var(--font-mono);', '}'].join('\n');
 }
 
 const designVar = (key: keyof ReturnType<typeof resolveDesignTokens>): string =>
@@ -310,17 +167,16 @@ function designAccentBlock(theme: ThemeDef, accentId: AccentId, appearance: Appe
 export const DESIGN_LAYER_HEADER = '/* ── Layer 1b — design values (--gai-*) ── */';
 
 /**
- * Layer 1b: the design layer, with the same specificity ladder as Layer 1 in a
- * section of its own so P7 can delete Layer 1 wholesale. Unlike Layer 1, the
- * default theme also gets explicit `[data-theme]` blocks, so an attribute on
+ * Layer 1b: the design layer, on the specificity ladder above. Unlike Layer 1,
+ * the default theme also gets explicit `[data-theme]` blocks, so an attribute on
  * any element (a Storybook decorator) fully describes its theme.
  */
 function designLayer(base: ThemeDef): string[] {
   const sections: string[] = [
     [
       DESIGN_LAYER_HEADER,
-      '/* Design-named colours (02 §2). Legacy pages never read these; ported',
-      '   pages reach them through the utilities in css/vocabulary.css. */',
+      '/* Design-named colours (02 §2), reached through the utilities in',
+      '   css/vocabulary.css. */',
     ].join('\n'),
     designAppearanceBlock(base, 'dark', ':root'),
     designAppearanceBlock(base, 'light', '.light'),
@@ -413,58 +269,28 @@ export function emitCss(): string {
   sections.push(
     [
       '/* ══════════════════════════════════════════════════════════════',
-      '   Layer 1 — raw semantic values.',
-      '   Components never read these directly; they use the Tailwind',
-      '   utilities produced by Layer 2.',
-      '',
-      '   Emission ORDER is load-bearing: rows of equal specificity are',
-      '   resolved by source order. See the header comment in emit/css.ts.',
+      '   Layer 1 — shared raw values (fonts, canvas, chart, syntax,',
+      '   file icons). Emission ORDER is load-bearing: rows of equal',
+      '   specificity are resolved by source order (emit/css.ts header).',
       '   ══════════════════════════════════════════════════════════════ */',
     ].join('\n'),
   );
 
   // 1. Default theme, both appearances — the state before any attribute is set.
-  sections.push(themeChromeBlock(base, ':root'));
-  sections.push(appearanceBlock(base, 'dark', ':root'));
-  sections.push(appearanceBlock(base, 'light', '.light'));
+  sections.push(themeFontBlock(base, ':root'));
+  sections.push(sharedAppearanceBlock(base, 'dark', ':root'));
+  sections.push(sharedAppearanceBlock(base, 'light', '.light'));
 
-  // 2. Per-theme chrome (fonts + radii), including the default so that an
-  //    explicit `data-theme` always fully describes the theme.
-  sections.push('/* ── Per-theme type + radius ── */');
-  for (const theme of THEMES) {
-    sections.push(themeChromeBlock(theme, `[data-theme="${theme.id}"]`));
-  }
-
-  // 3. Non-default themes: dark first, then light (which must win on .light).
-  sections.push(
-    [
-      '/* ── Named themes ──',
-      '   Dark block first so the light override lands after it with a',
-      '   higher specificity (.light[data-theme] beats [data-theme]). */',
-    ].join('\n'),
-  );
+  // 2. Per-theme fonts, including the default so that an explicit `data-theme`
+  //    always fully describes the theme; then non-default themes, dark first,
+  //    then light (which must win on .light).
+  sections.push('/* ── Per-theme fonts ── */');
+  for (const theme of THEMES) sections.push(themeFontBlock(theme, `[data-theme="${theme.id}"]`));
+  sections.push('/* ── Named themes: dark block first, then the (0,2,0) light override ── */');
   for (const theme of THEMES) {
     if (theme.id === base.id) continue;
-    sections.push(appearanceBlock(theme, 'dark', `[data-theme="${theme.id}"]`));
-    sections.push(appearanceBlock(theme, 'light', `.light[data-theme="${theme.id}"]`));
-  }
-
-  // 4. Accents, scoped to their theme so a Catppuccin user never gets a
-  //    GitHub accent. Emitted last: the light rows outrank every theme block.
-  sections.push(
-    [
-      '/* ── Accent axis (orthogonal to theme and appearance) ──',
-      '   Each accent overrides ONLY interactive tokens. Surfaces, text and',
-      '   status colours are untouched: "danger" must look like danger no',
-      "   matter what the user's accent preference is. */",
-    ].join('\n'),
-  );
-  for (const theme of THEMES) {
-    for (const accentId of ACCENT_IDS) {
-      if (accentId === theme.defaultAccent) continue; // already inlined above
-      sections.push(accentBlock(theme, accentId, 'dark'));
-      sections.push(accentBlock(theme, accentId, 'light'));
-    }
+    sections.push(sharedAppearanceBlock(theme, 'dark', `[data-theme="${theme.id}"]`));
+    sections.push(sharedAppearanceBlock(theme, 'light', `.light[data-theme="${theme.id}"]`));
   }
 
   sections.push(...designLayer(base));
@@ -473,31 +299,14 @@ export function emitCss(): string {
   sections.push(
     [
       '/* ══════════════════════════════════════════════════════════════',
-      '   Layer 2 — Tailwind utility bridge. Makes `bg-background`,',
-      '   `text-muted-foreground`, `bg-success-muted`, `ring-ring`… real',
-      '   utilities that follow the active theme + accent.',
+      '   Layer 2 — font families. Design utilities are mapped in',
+      '   css/vocabulary.css (imported at the top of globals.css); the',
+      '   required ones are always built (09 §2.4).',
       '   ══════════════════════════════════════════════════════════════ */',
     ].join('\n'),
   );
-  sections.push(themeInlineBlock());
-  sections.push(
-    [
-      '/* Design utilities are mapped in css/vocabulary.css (imported at the top of',
-      '   globals.css). The required ones are always built (09 §2.4). */',
-      requiredUtilitiesSafelist(),
-    ].join('\n'),
-  );
-
-  sections.push(
-    [
-      '/* ══════════════════════════════════════════════════════════════',
-      '   Layer 3 — compat aliases. Keeps every pre-existing',
-      '   `var(--color-*)` arbitrary value resolving, dynamically, so',
-      '   theme/accent switches still apply. New code should use Layer 2.',
-      '   ══════════════════════════════════════════════════════════════ */',
-    ].join('\n'),
-  );
-  sections.push(compatAliasBlock());
+  sections.push(fontThemeBlock());
+  sections.push(requiredUtilitiesSafelist());
 
   return sections.join('\n\n');
 }
