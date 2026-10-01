@@ -34,8 +34,22 @@ import { DESKTOP_DIR, REPO_ROOT, isolatedProfile } from './helpers/desktop-profi
 
 const TAG = '[dock-browser-smoke]';
 const SHOTS = path.join(REPO_ROOT, 'agent-tests', 'test-results', 'desktop-dock-browser-smoke');
-const MOD = process.platform === 'darwin' ? 'Meta' : 'Control';
-const TEST_URL = 'data:text/html,<title>dock smoke</title><h1 style="font:48px sans-serif">dock smoke page</h1>';
+// The native browser only loads http(s) (NativeBrowserHost.navigate), so the
+// test page is a loopback URL on the embedded server, resolved once the SPA is up.
+let TEST_URL = '';
+/** IPC_EVENT.command (apps/desktop/src/shared/ipc.ts): main → renderer, payload = registry id. */
+const COMMAND_CHANNEL = 'desktop:command';
+
+/**
+ * Run a registry command the way the native menu does. On desktop Mod+K and
+ * Mod+/ are menu accelerators, which synthetic (CDP) key events never reach.
+ */
+async function sendCommand(command) {
+  await app.evaluate(({ BrowserWindow }, arg) => {
+    const win = BrowserWindow.getAllWindows().find((w) => /^https?:/.test(w.webContents.getURL()));
+    win?.webContents.send(arg.channel, arg.command);
+  }, { channel: COMMAND_CHANNEL, command });
+}
 
 const results = [];
 const record = (name, ok, info = '') => {
@@ -65,6 +79,7 @@ async function finish() {
 }
 
 async function shot(name) {
+  await fs.mkdir(SHOTS, { recursive: true }).catch(() => {});
   await page.screenshot({ path: path.join(SHOTS, `${name}.png`) }).catch(() => {});
 }
 
@@ -89,7 +104,7 @@ async function browserView(expectVisible, timeoutMs = 4000) {
   let last = null;
   while (Date.now() < deadline) {
     const views = await nativeViews();
-    last = views.find((v) => v.url.startsWith('data:')) ?? views[0] ?? null;
+    last = views.find((v) => TEST_URL && v.url === TEST_URL) ?? views[0] ?? null;
     if (last && (expectVisible === undefined || last.visible === expectVisible)) return last;
     await sleep(150);
   }
@@ -218,6 +233,7 @@ try {
     });
   }, workspaceId);
   await page.waitForSelector('[aria-label="Native browser view"]', { timeout: 20_000 });
+  TEST_URL = new URL('/api/health', page.url()).href;
   const url = page.locator('[data-testid="browser-url"]');
   await url.fill(TEST_URL);
   await url.press('Enter');
@@ -244,7 +260,7 @@ await overlayHides(
 // 3. The palette (Mod+K) hides it; closing shows it.
 await overlayHides(
   'command palette',
-  () => page.keyboard.press(`${MOD}+k`),
+  () => sendCommand('palette.toggle'),
   () => page.keyboard.press('Escape'),
 );
 
@@ -252,14 +268,23 @@ await overlayHides(
 await overlayHides(
   'toast',
   // A sonner toast is matched through [data-sonner-toast] (06 §4.1); place one where sonner does.
-  () =>
-    page.evaluate(() => {
+  async () => {
+    // Over the view's lower-right corner (its bounds as main reports them, in CSS px).
+    const v = (await browserView(true))?.bounds;
+    const at = v ? { left: v.x + v.width - 376, top: v.y + v.height - 80 } : { left: 0, top: 0 };
+    await page.evaluate((pos) => {
       const t = document.createElement('li');
+      // A mounted, visible sonner toast: sonner's CSS keeps an unmounted one at opacity 0,
+      // which the occlusion check rightly ignores.
       t.setAttribute('data-sonner-toast', '');
+      t.setAttribute('data-mounted', 'true');
+      t.setAttribute('data-visible', 'true');
+      t.setAttribute('data-front', 'true');
       t.id = 'smoke-toast';
-      Object.assign(t.style, { position: 'fixed', right: '16px', bottom: '16px', width: '360px', height: '64px' });
+      Object.assign(t.style, { position: 'fixed', left: `${pos.left}px`, top: `${pos.top}px`, width: '360px', height: '64px', listStyle: 'none', opacity: '1' });
       document.body.append(t);
-    }),
+    }, at);
+  },
   () => page.evaluate(() => document.getElementById('smoke-toast')?.remove()),
 );
 await overlayHides(
@@ -273,8 +298,7 @@ await overlayHides(
 await overlayHides(
   'shortcuts sheet (?)',
   async () => {
-    await page.locator('body').click({ position: { x: 5, y: 5 } }).catch(() => {});
-    await page.keyboard.press('Shift+/');
+    await sendCommand('shortcuts.show');
   },
   () => page.keyboard.press('Escape'),
 );
