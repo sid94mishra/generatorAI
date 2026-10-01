@@ -66,11 +66,14 @@ export function createCspMiddleware(widgetOrigin?: string) {
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password) {
       throw new Error('Widget origin must be an HTTP(S) origin without credentials');
     }
-    const origins = new Set([url.origin]);
+    const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+    // CSP host-source has no IPv6 literal form: browsers reject `http://[::1]:…`
+    // (a console error on every page) and ignore it, so it is never emitted.
+    const origins = new Set(url.hostname === '[::1]' ? [] : [url.origin]);
     // WidgetFrame aligns the loopback spelling with its embedding page.
-    // Preserve the isolated port while supporting localhost and IPv6 hosts.
-    if (['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname)) {
-      for (const hostname of ['127.0.0.1', 'localhost', '[::1]']) {
+    // Preserve the isolated port for both expressible loopback spellings.
+    if (loopback) {
+      for (const hostname of ['127.0.0.1', 'localhost']) {
         const alias = new URL(url.origin);
         alias.hostname = hostname;
         origins.add(alias.origin);
