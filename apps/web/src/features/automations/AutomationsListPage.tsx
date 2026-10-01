@@ -32,6 +32,7 @@ import { FilterBar } from '@/ui/patterns/FilterBar/FilterBar.js';
 import { MenuButton } from '@/ui/patterns/MenuButton/MenuButton.js';
 import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
 import { PageTitle } from '@/ui/patterns/PageTitle/PageTitle.js';
+import { PERMISSION_LABELS } from '@/blocks/workflow/index.js';
 import { ListPage } from '@/ui/templates/ListPage/ListPage.js';
 
 const ALL_EXECUTION_STATUSES: AutomationExecutionStatus[] = ['pending', 'running', 'completed', 'partial', 'failed', 'cancelled'];
@@ -127,6 +128,28 @@ export function AutomationsListPage() {
       header: 'Workflows',
       width: 120,
       cell: (row) => `${row.workflowIds.length} workflow${row.workflowIds.length === 1 ? '' : 's'}`,
+    },
+    {
+      id: 'dataset',
+      header: 'Dataset',
+      width: 110,
+      // A schema means one run per row (or group); without one each trigger runs the workflows once.
+      cell: (row) =>
+        row.dataSchema ? (
+          row.defaultDataset?.parsedRowCount != null ? (
+            `${row.defaultDataset.parsedRowCount} rows`
+          ) : (
+            'Per trigger'
+          )
+        ) : (
+          <span className="text-fg-3">One run</span>
+        ),
+    },
+    {
+      id: 'permission',
+      header: 'Permission',
+      width: 120,
+      cell: (row) => PERMISSION_LABELS[row.permissionMode as keyof typeof PERMISSION_LABELS] ?? row.permissionMode,
     },
     {
       id: 'lastExecution',

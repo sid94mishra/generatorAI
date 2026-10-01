@@ -40,7 +40,9 @@ export function ListPage({ header, title, stats, filters, content, footer, overl
         {title}
         {stats}
         {filters}
-        <div className="flex min-h-0 flex-1 flex-col overflow-auto">{content}</div>
+        {/* With a footer note the content takes its own height (shrinking and scrolling when long), so the note
+            sits under the rows rather than at the bottom of the page. */}
+        <div className={cn('flex min-h-0 flex-col overflow-auto', footer == null && 'flex-1')}>{content}</div>
         {footer != null ? <div className="shrink-0 text-small text-fg-3">{footer}</div> : null}
       </div>
       {overlay}

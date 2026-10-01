@@ -10,6 +10,7 @@ import {
   atCap,
   capNoticeText,
   closeDockTab,
+  defaultTabId,
   focusDockTab,
   focusHitsCap,
   readDockState,
@@ -96,6 +97,8 @@ export function useDockState({
 
   const registryRef = useRef(registry);
   registryRef.current = registry;
+  const defaultTabTypeRef = useRef(defaultTabType);
+  defaultTabTypeRef.current = defaultTabType;
   const onTabCloseRef = useRef(onTabClose);
   onTabCloseRef.current = onTabClose;
 
@@ -134,7 +137,14 @@ export function useDockState({
     lastToken.current = focusRequest.token;
     const reg = registryRef.current;
     const def = reg[focusRequest.type];
-    if (!def) return;
+    if (!def) {
+      // A link to a tab this surface does not offer (Tasks without background
+      // work, Computer without consent) lands on the default tab, not on
+      // whichever tab happened to be open last.
+      const fallback = defaultTabId(defaultTabTypeRef.current);
+      update((prev) => (prev.tabs.some((t) => t.id === fallback) ? { ...prev, active: fallback } : prev));
+      return;
+    }
     if (def.maxInstances !== undefined && focusHitsCap(stateRef.current, focusRequest, reg)) {
       announceCap(def.label, def.maxInstances);
     }

@@ -14,7 +14,8 @@ export const workflowsRoutes: RouteObject[] = [
   defineRoute(
     'workflows/new',
     () => import('@/features/workflows/create/WorkflowNewPage.js').then((m) => ({ default: m.WorkflowNewPage })),
-    { nav: 'workflows', title: 'New workflow' },
+    // The board draws New workflow on the rail, like the builder it leads to.
+    { forceRail: true, nav: 'workflows', title: 'New workflow' },
   ),
   defineRoute(
     'workflows/:id',

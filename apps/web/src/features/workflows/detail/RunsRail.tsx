@@ -58,7 +58,7 @@ export function RunsRail({ definitionId, versionLabels }: { definitionId: string
     const { runs: r } = stats.data;
     if (r.successRate !== undefined) tiles.push({ value: formatPercent(r.successRate), label: 'Succeeded' });
     if (r.medianDurationMs !== undefined) tiles.push({ value: formatDuration(r.medianDurationMs), label: 'Median run' });
-    if (tiles.length > 0) tiles.push({ value: r.total, label: 'Runs · 30 days' });
+    if (tiles.length > 0) tiles.push({ value: r.total, label: '30-day runs' });
   }
 
   const change = (next: RunFilters) => {

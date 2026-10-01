@@ -23,9 +23,11 @@ function StatusCell({ row }: { row: ChatRowModel }) {
   return <span className="font-mono text-micro text-fg-3">—</span>;
 }
 
-/** The Changes column: "±" mono, or a dash until G-02's stats are computed (D-36). */
+/** The Changes column: "±" mono; a dash until G-02's stats are computed (D-36) or when nothing changed. */
 function ChangesCell({ row }: { row: ChatRowModel }) {
-  if (!row.changes) return <span className="font-mono text-micro text-fg-3">—</span>;
+  if (!row.changes || (row.changes.additions === 0 && row.changes.deletions === 0)) {
+    return <span className="font-mono text-micro text-fg-3">—</span>;
+  }
   return (
     <span className="font-mono text-micro">
       <span className="text-ok">+{row.changes.additions}</span>{' '}

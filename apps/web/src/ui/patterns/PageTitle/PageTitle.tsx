@@ -31,11 +31,18 @@ export function PageTitle({ title, count, description, meta, actions, variant = 
           <h1 className="truncate text-heading text-fg">{title}</h1>
           {description != null ? <p className="text-ui text-fg-2">{description}</p> : null}
           {meta && meta.length > 0 ? (
-            <p className="flex min-w-0 flex-wrap items-center gap-1.5 font-mono text-micro text-fg-3">
+            // One line: a long part (a root path) truncates instead of pushing the rest onto a second line.
+            <p className="flex min-w-0 items-center gap-1.5 font-mono text-micro text-fg-3">
               {meta.map((part, i) => (
                 <Fragment key={i}>
-                  {i > 0 ? <span aria-hidden>·</span> : null}
-                  <span>{part}</span>
+                  {i > 0 ? (
+                    <span aria-hidden className="shrink-0">
+                      ·
+                    </span>
+                  ) : null}
+                  <span className={i === 0 ? 'min-w-0 truncate' : 'shrink-0'} title={typeof part === 'string' ? part : undefined}>
+                    {part}
+                  </span>
                 </Fragment>
               ))}
             </p>

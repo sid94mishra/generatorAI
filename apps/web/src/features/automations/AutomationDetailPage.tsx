@@ -361,7 +361,10 @@ export function AutomationDetailPage() {
             <Card>
               <Card.Header title="Trigger" />
               <Card.Body>
-                <AutomationTriggerBadge triggerType={automation.triggerType} label={automation.triggerType === 'schedule' ? automation.cronExpression : undefined} />
+                {/* A row of its own: the card body is a column that would stretch the badge. */}
+                <div className="flex">
+                  <AutomationTriggerBadge triggerType={automation.triggerType} label={automation.triggerType === 'schedule' ? automation.cronExpression : undefined} />
+                </div>
                 {automation.triggerType === 'webhook' ? (
                   <div className="flex flex-col gap-2">
                     <p className="text-small text-fg-3">

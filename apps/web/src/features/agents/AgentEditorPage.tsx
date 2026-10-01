@@ -58,7 +58,9 @@ import { ActionBar } from '@/ui/patterns/ActionBar/ActionBar.js';
 import { Breadcrumb } from '@/ui/patterns/Breadcrumb/Breadcrumb.js';
 import { FormSection } from '@/ui/patterns/FormSection/FormSection.js';
 import { PageHeader } from '@/ui/patterns/PageHeader/PageHeader.js';
+import { PageTitle } from '@/ui/patterns/PageTitle/PageTitle.js';
 import { FormWithAside } from '@/ui/templates/FormWithAside/FormWithAside.js';
+import { AgentUsedBy } from './AgentUsedBy.js';
 import { cn } from '@/ui/lib/cn.js';
 import {
   agentFormToParams,
@@ -300,7 +302,7 @@ export function AgentEditorPage() {
         <PageHeader
           breadcrumb={
             <Breadcrumb
-              currentIsHeading
+              currentIsHeading={isNew}
               items={[
                 { label: 'Agents', render: <Link to="/agents" /> },
                 { label: isNew ? 'New agent' : values.name || 'Agent' },
@@ -326,6 +328,17 @@ export function AgentEditorPage() {
       }
       form={
         <>
+          {existing && !isNew ? (
+            <PageTitle
+              variant="detail"
+              title={values.name || existing.name}
+              meta={[
+                `${existing.scope}:${existing.slug}`,
+                `v${existing.version}`,
+                `updated ${new Date(existing.updatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}`,
+              ]}
+            />
+          ) : null}
           {showErrors ? (
             <Callout tone="err" data-testid="agent-form-errors">
               <ul className="flex flex-col gap-0.5">
@@ -759,18 +772,28 @@ export function AgentEditorPage() {
         </>
       }
       aside={
-        <EffectiveCapabilities
-          projection={projectionResult}
-          isLoading={preview.isPending && !projectionResult}
-          error={preview.error as Error | null}
-          dirty={isDirty}
-          baseCounts={{ skills: values.skillIds.length, mcpServers: values.mcpServerIds.length }}
-          data-testid="effective-capabilities"
-        />
+        <div className="flex flex-col gap-4">
+          <EffectiveCapabilities
+            projection={projectionResult}
+            isLoading={preview.isPending && !projectionResult}
+            error={preview.error as Error | null}
+            dirty={isDirty}
+            baseCounts={{ skills: values.skillIds.length, mcpServers: values.mcpServerIds.length }}
+            data-testid="effective-capabilities"
+          />
+          {existing && !isNew ? <AgentUsedBy agentId={existing.id} /> : null}
+        </div>
       }
       actions={
         <ActionBar
           hint={isDirty ? 'Unsaved changes' : undefined}
+          secondary={
+            isDirty && !readOnly ? (
+              <Button variant="ghost" onClick={() => form.reset()} data-testid="agent-discard-button">
+                Discard
+              </Button>
+            ) : undefined
+          }
           primary={
             <Button
               variant="primary"

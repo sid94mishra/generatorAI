@@ -4,5 +4,6 @@ export { KeyChip, RUN_TRIGGERS, TriggerChip, VersionChip, type KeyChipProps, typ
 export { RunDialog, type RunDialogProps } from './RunDialog/RunDialog.js';
 export { RunPlanPreview, type RunPlanPreviewProps } from './RunDialog/RunPlanPreview.js';
 export type { InvocationTarget } from './RunDialog/runDialogModel.js';
+export { PERMISSION_LABELS } from './RunDialog/runDialogModel.js';
 export { describeWorkflowApiError, formatWorkflowApiIssue, type WorkflowApiError, type WorkflowApiIssue } from './apiErrors.js';
 export { IterationsTable, type IterationsColumn, type IterationsTableProps } from './IterationsTable/IterationsTable.js';

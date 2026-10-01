@@ -28,7 +28,7 @@ export const MINIMAP_MIN_NODES = 6;
 export const MIN_ZOOM = 0.2;
 export const MAX_ZOOM = 1.5;
 /** fitView options shared by the initial fit, Auto-layout and the zoom bar. */
-export const FIT_OPTIONS = { padding: 0.18, maxZoom: 1.3 } as const;
+export const FIT_OPTIONS = { padding: 0.18, maxZoom: 1 } as const;
 
 /** React Flow's library variables, bound to design variables. */
 export const XY_THEME = {

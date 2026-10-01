@@ -143,6 +143,9 @@ export function ProjectDetailPage() {
                 <Button icon="chats" onClick={() => openNewChat({ projectId: id })}>
                   New chat
                 </Button>
+                <Button icon="play" onClick={() => navigate('/workflows')}>
+                  Run workflow
+                </Button>
                 <MenuButton
                   label="More project actions"
                   iconOnly
