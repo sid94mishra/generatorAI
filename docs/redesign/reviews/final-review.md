@@ -58,3 +58,9 @@ Severity: **M** fix now (visible defect or plan gap), **S** fix now (small polis
   the default tab.
 - README progress rows brought up to date.
 Verified by re-capturing the affected screens against their boards (`shots/review/compare-*`).
+
+## End-to-end verification after the fix pass (macOS, 2026-10-01)
+
+e2e 84 passed / 4 skipped (isolated Faux server), Storybook 1731/1731 across the three appearance projects with axe,
+web unit 1558/1558. Desktop smokes ran green before the fix pass (chrome, right-pane, browser, terminal, dock-browser;
+diff-review 9/10, finding #19). Windows/Linux and VRT remain CI/owner items.
