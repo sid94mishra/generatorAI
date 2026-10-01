@@ -5,7 +5,12 @@
 //   node agent-tests/terminal-desktop-smoke.mjs
 
 import { _electron as electron } from 'playwright';
-import { DESKTOP_DIR as DESKTOP, isolatedProfile } from './helpers/desktop-profile.mjs';
+import fs from 'node:fs';
+import path from 'node:path';
+import { DESKTOP_DIR as DESKTOP, REPO_ROOT, isolatedProfile } from './helpers/desktop-profile.mjs';
+
+const SHOTS = path.join(REPO_ROOT, 'agent-tests', 'test-results', 'terminal-desktop-smoke');
+fs.mkdirSync(SHOTS, { recursive: true });
 
 
 const results = [];
@@ -141,6 +146,8 @@ try {
   const badgeText = await page.textContent('[data-testid="terminal-header"]').catch(() => '');
   const hasHostBadge = /(pty|fallback|sandbox)/.test(badgeText ?? '');
   record('header renders host badge', hasHostBadge, badgeText?.slice(0, 120));
+  // Inspect this: the xterm grid must fill the panel at the app's 12px size.
+  await page.locator('[data-testid="terminal-container"]').screenshot({ path: path.join(SHOTS, 'terminal-panel.png') }).catch(() => {});
 
   // Close the tab — should kill the server session.
   // Terminal is pinned in the chat dock; "+" adds a second, closable instance ("Terminal 2").
